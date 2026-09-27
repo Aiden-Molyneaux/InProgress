@@ -22,8 +22,10 @@ the sandbox detour on the way (detours become log notes on the step they interru
 
 ### Success criteria
 
-1. In a tracked session, a plan Claude lays out appears in the window within ~3 s, and step
-   status changes (done / active / needs you) show up live without Aiden touching the app.
+1. In a tracked session, a plan Claude lays out appears in the window within ~30 s of being
+   stated (the background scribe's spin-up dominates) and within ~3 s of the scribe's write
+   reaching the server; step status changes (done / active / needs you) show up live without
+   Aiden touching the app.
 2. A resource produced in chat (e.g. a test suite) can be found later from the tree node where it
    was produced, including when it only ever existed in chat.
 3. Each active Claude session shows as a badge on the node it is working on, with a live state
@@ -97,7 +99,8 @@ Scripts: `build` (server/mcp/hooks/cli via tsup → `dist/`, web via Vite → `w
 - Files in the data dir: `inprogress.db`, `token` (32 random bytes hex, created on first server
   start), `server.log`, `hooks.log`, `server.pid`, `backups/`.
 - Port: `4317` (override with env `INPROGRESS_PORT`).
-- Stack: Node 20 (installed: v20.19.6; `node:sqlite` is unavailable, so better-sqlite3),
+- Stack: Node 20 (installed: v20.19.6; `node:sqlite` is unavailable, so better-sqlite3 pinned
+  to `^11`, the line already working on this laptop; 13.x requires Node 22),
   TypeScript, Fastify, better-sqlite3, zod, `@modelcontextprotocol/sdk`, React 18,
   `@xyflow/react`, `marked` + `dompurify`, Vite, vitest, Playwright.
 
@@ -127,13 +130,18 @@ CHECK: at least one of `content`, `path`, `url` is set.
 
 **log_entries** — `id` · `node_id` (cascade) · `text` (≤ 2k) · `session_id` · `created_at`.
 
-**sessions** — `id` TEXT PK (Claude `session_id`) · `project_id` (nullable; set by binding match or
-enrollment; sticky once set) · `title` · `title_source` (`transcript` | `scribe` | `fallback`) ·
-`cwd` · `branch` · `transcript_path` · `state` (`working` | `idle` | `permission` | `ended`) ·
-`focus_node_id` (SET NULL on node delete) · `subagents` INTEGER (running count, scribe excluded,
-floor 0) · `prompts_since_update` INTEGER · `started_at` · `last_seen_at` · `ended_at`.
-Title precedence: a transcript title always replaces a scribe title; a scribe title never
-replaces a transcript title. Only sessions with a `project_id` appear in the UI.
+**sessions** — `id` TEXT PK (Claude `session_id`) · `project_id` (set by a binding match at
+start or by enrollment; enrollment may repoint it) · `title` · `cwd` · `branch` ·
+`transcript_path` · `state` (`working` | `idle` | `permission` | `ended`) · `focus_node_id`
+(SET NULL on node delete) · `prompts_since_update` INTEGER · `started_at` · `last_seen_at` ·
+`ended_at`. **Only tracked sessions are stored**: hook events for a session with no row and no
+binding match write nothing. Title: the hook's `session_title` (SessionStart) or the transcript
+`custom-title`, whichever is available; `enroll` sets a title only when none exists.
+
+**session_subagents** — `session_id` (cascade) · `agent_id` · `agent_type` · `started_at` ·
+PK(`session_id`, `agent_id`). Inserted on SubagentStart, deleted on SubagentStop by `agent_id`,
+cleared when the session ends or goes stale. Events with an empty `agent_type` and the scribe
+itself are ignored. The running count is the row count, so it cannot drift.
 
 **events** — `id` INTEGER PK (monotonic) · `ts` · `project_id` · `actor` (e.g.
 `scribe:<sessionId>`, `hook:prompt`, `system`) · `type` (e.g. `node.created`, `node.updated`,
@@ -154,7 +162,7 @@ updates). Append-only. Drives SSE and history.
   computes REAL positions (midpoint insert) and renormalizes a parent's children when a gap
   falls below 1e-6.
 - **Stale sessions**: any non-ended session with `last_seen_at` older than 12 h is marked `ended`
-  lazily on read.
+  lazily on read, and its `session_subagents` rows are cleared.
 - Any write by actor `scribe:<sessionId>` resets that session's `prompts_since_update` to 0.
 
 ### 4.3 Binding resolution
@@ -164,7 +172,8 @@ Paths are normalized before storage and comparison: backslashes → `/`, Git-Bas
 A binding matches when the session `cwd` equals the binding path or is under it (`path + '/'`
 prefix) **and**, if the binding has a `branch_pattern`, the current branch matches it.
 Among matches: longest path wins; on equal length, a binding with a branch pattern beats one
-without. The resolved project is assigned at session start only if the session has none yet.
+without. The resolved project is assigned at session start only if the session has none yet;
+`enroll` can repoint a session that was auto-bound to the wrong project.
 
 ## 5. Server (Fastify)
 
@@ -178,7 +187,9 @@ without. The resolved project is assigned at session start only if the session h
   event is broadcast over SSE.
 - **Single instance**: on start, if the port answers `/api/health` with the InProgress
   signature, exit 0 quietly; if something else holds the port, exit 1 with a clear message.
-  Writes `server.pid`.
+  On `EADDRINUSE` (two sessions starting at once) re-probe health before deciding. Writes
+  `server.pid`. `claude:install` stops a running server so the next hook starts the new build;
+  `doctor` warns when the running server's version differs from the built one.
 - **Backups**: on each start, back up the DB with better-sqlite3's backup API into
   `backups/inprogress-YYYYMMDD-HHmmss.db`, keeping the newest 7.
 - `server.log` is truncated on start when above 5 MB.
@@ -193,6 +204,7 @@ Reads:
 - `GET /api/projects/:ref/outline?full=0|1` → compact text outline (format in 7.3)
 - `GET /api/nodes/:id` → node, children summary, resources (metadata), last 20 log entries
 - `GET /api/resources/:id` → resource including content
+- `GET /api/bindings` → all bindings (the scribe needs ids for `unbind_folder`)
 - `GET /api/search?project=&q=` → matching nodes and resources (case-insensitive substring over
   title/body/outcome/content), max 20
 - `GET /api/events/stream?since=<eventId>` → SSE; replays events after `since`, then live;
@@ -211,15 +223,16 @@ Writes (token):
   `PATCH /api/resources/:id` · `DELETE /api/resources/:id`
 - `POST /api/nodes/:id/log` `{ text, sessionId? }`
 - `POST /api/sessions/:id/hook` `{ event, source?, cwd?, branch?, transcriptPath?, title?,
-  agentType?, notificationType?, mentionsInProgress? }` → `{ tracked, context? }` (hook
+  agentId?, agentType?, mentionsInProgress?, asksStatus? }` → `{ tracked, context? }` (hook
   semantics in 6.1)
 - `POST /api/sessions/:id/enroll` `{ project, title? }` → `{ briefing }`
 - `POST /api/sessions/:id/focus` `{ nodeId | null }`
-- `POST /api/sessions/:id/title` `{ title }` (sets `title_source = scribe` unless a transcript
-  title exists)
 - `POST /api/admin/shutdown`
-- `POST /api/ui/open` `{ path }` (UI token) → opens an existing absolute path with VS Code
-  (`code`) if on PATH, else the OS default handler
+- `POST /api/ui/open` `{ resourceId }` (UI token) → opens that resource's stored `path` in VS Code
+  (`code`) if on PATH, else reveals it in Explorer (`explorer /select,<path>`). It never runs a
+  file through the OS default handler, so a poisoned path cannot execute anything.
+
+`ProjectSnapshot` also carries `lastEvent` (the project's newest event) for the activity strip.
 
 Validation: zod at every route; errors return `{ error, hint? }` with a specific message
 (e.g. `#99 is not in project ingame; closest title match: #57 "Play app signing"`).
@@ -245,39 +258,49 @@ Other sessions here: "QA drill" (idle, on #70)
 ```
 
 "Where things stand" = the ancestor chains of all active and needs-you nodes, plus up to two
-upcoming todo siblings at each level on those chains. Recent resources: newest 5.
+upcoming todo siblings at each level on those chains, capped at 25 lines (then
+`+n more active items`). Recent resources: newest 5.
+
+The briefing also carries the update rules, because it is re-injected after compaction while a
+skill body is not: the five checkpoints from 6.4, the one-dispatch-per-turn rule, the brief
+template (about 8 lines), the chat-only-resource rule, and "the scribe's completion notice needs
+no reply beyond your one line". The skill is then needed only for opt-in and adoption.
 
 ## 6. Claude integration
 
 ### 6.1 Hooks
 
-Registered in `~/.claude/settings.json` by `claude:install`, each as
-`node "C:/personal/InProgress/dist/hooks/<name>.js"`. Every hook: reads the stdin JSON, never
-writes to stderr, always exits 0, logs failures to `hooks.log`, and aborts its HTTP calls after
-1.5 s (session-start: 3 s total including a server spawn). Only session-start and prompt-submit
-ever print to stdout (`{"hookSpecificOutput":{"hookEventName":…,"additionalContext":…}}`).
+Registered in `~/.claude/settings.json` by `claude:install` in **exec form** (no shell, so no Git
+Bash spawn per hook): `{"type":"command","command":"node","args":["C:/personal/InProgress/dist/hooks/hook.js","<hook-name>"]}`.
+Every hook: reads the stdin JSON, never writes to stderr, always exits 0, logs failures to
+`hooks.log`, and aborts its HTTP call after 500 ms (session-start: 3 s total including a server
+spawn). Only session-start and prompt-submit ever print to stdout
+(`{"hookSpecificOutput":{"hookEventName":…,"additionalContext":…}}`).
 
 Shared hook helpers:
 - **Branch**: found by walking up from `cwd` to `.git` (directory, or a file with `gitdir:` for
   worktrees) and reading `HEAD`; detached HEAD yields no branch. No `git` process spawn.
-- **Title**: read the last 256 KB of `transcript_path`, take the last line containing
-  `"type":"custom-title"`, parse it, use `customTitle` (the Claude desktop sidebar name).
-  If none is found, send no title (server keeps the existing one; the display fallback is
-  `Session <first 6 of id>`). This depends on an undocumented format and must degrade silently.
+- **Title**: SessionStart's documented `session_title` field first. Otherwise read the last
+  256 KB of `transcript_path`, take the last line containing `"type":"custom-title"`, parse it,
+  use `customTitle` (the Claude desktop sidebar name). If none is found, send no title (server
+  keeps the existing one; the display fallback is `Session <first 6 of id>`). The transcript
+  format is undocumented and must degrade silently.
+- **Prompt text**: `<pasted_content …>…</pasted_content>` blocks are stripped before any matching,
+  so pasting a document that mentions InProgress triggers nothing.
 
 | Event | Action |
 |---|---|
-| `SessionStart` | Ensure the server is up (health check 300 ms; else spawn `node dist/server/main.js` detached, hidden, output to `server.log`; poll health every 100 ms up to 2 s). Post `start` with `source`, `cwd`, `branch`, `transcriptPath`, `title`. Server upserts the session (state `idle`), resolves a binding if the session has no project, and returns the briefing when tracked; the hook prints it as `additionalContext`. Untracked: print nothing. |
-| `UserPromptSubmit` | Post `prompt` with `title` and `mentionsInProgress` (`/\binprogress\b/i` on the prompt). Server: state → `working`; if tracked, increment `prompts_since_update` and return a one-line status when it is ≥ 4 and divisible by 4 (e.g. `[InProgress] InGame · focus #57 Play app signing · 2 need you · last scribe update 8 prompts ago`). If untracked and the prompt mentions InProgress, return `[InProgress] This session is not tracked yet. Session id: <id>. Use the inprogress skill to opt in.` |
+| `SessionStart` | Ensure the server is up (health check 300 ms; else spawn `node dist/server/main.js` detached, hidden, output to `server.log`; poll health every 100 ms up to 2 s). Post `start` with `source`, `cwd`, `branch`, `transcriptPath`, `title`. If the session has no row, the server resolves a binding; no match means nothing is stored and nothing printed. For a tracked session it sets state `idle` only when `source` is `startup`, `resume` or `clear` (a `compact` start happens mid-turn and leaves the state alone), and returns the briefing, which the hook prints as `additionalContext`. |
+| `UserPromptSubmit` | Post `prompt` with `title`, `mentionsInProgress` (`/\binprogress\b/i`) and `asksStatus` (`/\b(where are we\|what'?s next\|status\|progress so far)\b/i`), both on the prompt with pasted blocks stripped. Tracked: state → `working`, `prompts_since_update += 1`; if `asksStatus`, return the briefing's "Where things stand" and "Needs you" lines; else if `prompts_since_update ≥ 2`, return a one-line status, e.g. `[InProgress] InGame · focus #57 Play app signing · 2 need you · last scribe update 3 prompts ago. If a checkpoint happened, brief the inprogress-scribe; otherwise ignore this line.` Untracked and the prompt mentions InProgress: return `[InProgress] This session is not tracked yet. Session id: <id>. Use the inprogress skill to opt in.` |
 | `Stop` | Post `stop` with `title` → state `idle`. |
-| `Notification` (matcher `permission_prompt`) | → state `permission`. |
-| `SubagentStart` / `SubagentStop` | ± running subagent count, unless `agent_type` is `inprogress-scribe`. |
-| `PostToolUse` (matcher `*`, `"async": true`) | If the session's state is `permission`, set it to `working`. Installed only if the installed Claude Code supports async command hooks (verify during implementation). Otherwise, `permission` clears on the next hook event. |
-| `SessionEnd` | → state `ended`, `subagents = 0`. |
+| `Notification` (matcher `permission_prompt`, fires after ~6 s of waiting) | → state `permission`. It clears on the next `prompt`, `stop` or subagent event. |
+| `SubagentStart` / `SubagentStop` (matcher `^(?!inprogress-scribe$).*`, so no process spawns for the scribe) | Insert / delete the `session_subagents` row by `agent_id`; ignore empty `agent_type`. |
+| `SessionEnd` | → state `ended`; subagent rows cleared. |
 
-Unknown sessions posting any event other than `start` are upserted with what is known.
+There is no per-tool-call hook: a process spawn on every tool call in every subagent costs more
+than a slightly late "needs permission" badge is worth.
 The `event` values posted to `/api/sessions/:id/hook` are exactly: `start`, `prompt`, `stop`,
-`permission`, `tool`, `subagent-start`, `subagent-stop`, `end`.
+`permission`, `subagent-start`, `subagent-stop`, `end`.
 
 ### 6.2 MCP server (`inprogress`, stdio) — scribe-only tools
 
@@ -306,17 +329,18 @@ naming the ids touched. Errors return `isError` with the server's specific messa
 | `add_log(node, text, session?)` | timeline note (detours, context) |
 | `enroll_session(session, project, title?)` | opt a session in; returns the briefing |
 | `set_focus(session, node)` | which node this session is on (`null` to clear) |
-| `set_session_title(session, title)` | fallback title when the transcript has none |
 
 ### 6.3 Scribe agent (`~/.claude/agents/inprogress-scribe.md`)
 
-Frontmatter: `name: inprogress-scribe`, `model: sonnet`, `background: true`,
-`tools: Read, Glob, Grep, mcp__inprogress`, `mcpServers` with an inline stdio server
-`inprogress` → `node C:/personal/InProgress/dist/mcp/main.js`, `color: orange`, and a
-`description` saying it records progress in the InProgress tree when the inprogress skill asks.
-Verify during implementation that the inline server and the `mcp__inprogress` pattern work for
-a user-level agent; fallback: user-scope MCP registration plus a skill rule that the main session
-never calls those tools itself.
+Frontmatter: `name: inprogress-scribe`, `model: sonnet`, `effort: low`, `maxTurns: 15`,
+`background: true`, `tools: mcp__inprogress` (no file tools: the MCP server snapshots files
+itself), `mcpServers` with an inline stdio server `inprogress` →
+`node C:/personal/InProgress/dist/mcp/main.js`, `color: orange`, and a `description` saying it
+records progress in the InProgress tree when a briefing or the inprogress skill asks. The docs
+confirm inline servers in `~/.claude/agents/` load without trust checks and stay invisible to
+the parent session. The installer creates `~/.claude/agents/` if missing, and a newly created
+agents directory is only picked up by sessions started afterwards, so install tells Aiden to
+restart open sessions.
 
 System prompt rules:
 1. Start with `get_outline` for the project (or `search`) to resolve every reference in the brief
@@ -350,26 +374,27 @@ prompt-submit hook reports an untracked session that mentions InProgress. Conten
   5. an open question appears (a `question` node) or gets answered (`done` + `outcome`).
 - **Granularity**: nodes are plan-level steps with outcomes, never individual actions
   ("edit file", "run grep"). Detours are `add_log` entries on the step they interrupted.
-- **Resources**: prefer `path` (+ `snapshot_file: true` for text files); content that only
-  exists in chat is pasted into the brief so it gets saved.
+- **Resources**: always hand the scribe a `path` + `snapshot_file: true`, never pasted content,
+  so nothing is typed out twice by two models. Content that only exists in chat is first written
+  by the main session to `~/.inprogress/resources/<project-slug>/<yyyy-mm-dd>-<kebab-title>.md`
+  (outside the project repo, so work repos stay clean; the installer adds an allow rule for it).
 - **Brief template**:
   ```
   Session: <session id> · Project: <slug>
   Changes:
   - #57 → done; outcome "Play app signing configured"
   - add under #55 after #57: "Run signing tests" (task, assignee me); body: …
-  - resource on the new "Run signing tests" node: test-suite "Signing test suite" (content below)
+  - resource on the new "Run signing tests" node: test-suite "Signing test suite",
+    path C:/Users/…/.inprogress/resources/ingame/2026-09-27-signing-test-suite.md, snapshot_file
   - log on #55: "Detour: sandbox network wedge, fixed by restarting VMware NAT"
   - focus → the new "Run signing tests" node
-  Content:
-  <<<
-  …resource content…
-  >>>
   ```
 - **Chat footprint**: after dispatching, one line in chat, e.g.
-  `↳ InProgress: #57 done, test suite attached to #58`. Do not wait for the scribe.
-- **Status questions** ("where are we?"): answer from the briefing when it is fresh; otherwise
-  dispatch the scribe to report the outline and relay its summary.
+  `↳ InProgress: #57 done, test suite attached to #58`. Do not wait for the scribe, and its
+  completion notice needs no reply beyond that one line.
+- **Status questions** ("where are we?"): the prompt hook injects the current "Where things
+  stand" lines when a prompt asks for status, so answer from those. For the full tree, run
+  `inprogress outline <slug>` (read-only CLI). Never dispatch the scribe just to read.
 - **Adopting an existing project**: brief the scribe with the purpose, the current plan with real
   statuses, a one-line summary per finished phase (each becomes a `done` phase node, e.g.
   "M1–M6 build"), and paths of key existing docs to attach with `snapshot_file`. No history backfill.
@@ -383,12 +408,15 @@ prompt-submit hook reports an untracked session that mentions InProgress. Conten
 2. Render `claude/agents/inprogress-scribe.md` → `~/.claude/agents/`, and
    `claude/skills/inprogress/` → `~/.claude/skills/inprogress/`, substituting `{{REPO}}` with the
    absolute repo path (forward slashes).
-3. Merge hook entries into `settings.json` for the events in 6.1 (session-start timeout 10 s,
-   others 5 s). Entries are identified by a command containing `/InProgress/dist/hooks/`, so
-   re-running install replaces rather than duplicates them.
-4. Add `mcp__inprogress` to `permissions.allow` (the background scribe must never stall on a
-   prompt).
-5. Print what changed and suggest `inprogress doctor`.
+3. Merge exec-form hook entries into `settings.json` for the events in 6.1 (session-start
+   timeout 10 s, others 5 s). Entries are identified by an `args[0]` ending in
+   `/dist/hooks/hook.js`, so re-running install replaces rather than duplicates them. Unknown
+   keys and other tools' hooks are preserved.
+4. Add to `permissions.allow`: `mcp__inprogress` (the background scribe must never stall on a
+   prompt) and `Edit(~/.inprogress/resources/**)` (chat-only resources are written there).
+5. Stop a running InProgress server so the next hook starts the freshly built one.
+6. Print what changed and suggest `inprogress doctor`. If `~/.claude/agents/` did not exist
+   before, say plainly that already-open Claude sessions must be restarted to see the scribe.
 
 `npm run claude:uninstall` removes exactly those hook entries, the allow rule, the agent file,
 and the skill directory, after the same backup step. The data dir is left alone.
@@ -400,9 +428,12 @@ and the skill directory, after the same backup step. The data dir is left alone.
 - `open`: start if needed, then launch `msedge --app=http://127.0.0.1:4317 --window-size=520,1000`;
   fall back to the default browser.
 - `status`: health, projects with needs-you counts, live sessions.
-- `doctor`: checks with ✓/✗ and a fix hint each: server health, token readable, DB integrity
-  (`PRAGMA quick_check`), hooks present in settings, agent and skill files present, allow rule
-  present, the MCP server starts and answers `list_projects`, Edge found.
+- `outline <project> [--full]`: print the text outline (read-only, no token), for status
+  questions from a Claude session and for Aiden in a terminal.
+- `doctor`: checks with ✓/✗ and a fix hint each: server health and version match, token
+  readable, DB integrity (`PRAGMA quick_check`), hooks present in settings, agent file present
+  with valid frontmatter (name, model, tools, mcpServers), skill present, allow rules present,
+  the MCP server starts and answers `list_projects`, Edge found (a warning, not a failure).
 
 ## 7. Web UI
 
@@ -444,7 +475,8 @@ node that session is focused on.
 - **Auto-fold**: a `done` or `dropped` node with children renders as one summary node
   (`<title> · n done`, n = done descendants). Under any parent, after the last `done`/`active`
   child (or from the first child if there is none), only the next two `todo`/`blocked` children
-  show; the rest collapse into a synthetic `+n more` node, but only when that hides at least two.
+  show; the rest collapse into synthetic `+n more` nodes, one per contiguous hidden run (a pinned
+  node inside the run splits it), but only when the hidden total is at least two.
 - **Never folded**: ancestors of active nodes, needs-you nodes, and session focus nodes.
 - **Manual override**: clicking a chevron or `+n more` toggles fold. Overrides persist in
   `localStorage` per node id and beat auto rules.
@@ -470,8 +502,9 @@ node that session is focused on.
   `#58 Run signing tests`), status / kind / assignee, parent link, body (markdown), outcome,
   resources, and the log (newest last, relative times, session titles).
 - Clicking a resource opens a full-window viewer: rendered markdown (`marked` + `dompurify`),
-  **Copy** (raw content), **Open file** (when `path` is set; `POST /api/ui/open`), and **Open link**
-  (when `url` is set).
+  **Copy** (raw content), **Open file** (when `path` is set; `POST /api/ui/open` with the resource
+  id: VS Code, else reveal in Explorer), **Copy path**, and **Open link** (when `url` is set).
+  A 401 from `ui/open` means the server restarted with a new UI token, so the page reloads.
 
 ### 7.6 Live data
 
@@ -492,7 +525,8 @@ with `since`.
   protection; FK cascades as specified; the event log records every change; DB backed up on start
   (7 kept).
 - **Security**: loopback-only listener, Host-header check, bearer token for writes, per-process UI
-  token for `ui/open`, `ui/open` only for existing absolute paths.
+  token for `ui/open`, which opens only a stored resource path and only in VS Code or Explorer's
+  reveal, never through the OS default handler.
 - **Undocumented inputs** (transcript titles, hook payload fields not in the docs) are read
   defensively with fallbacks, never trusted to exist.
 
@@ -511,8 +545,8 @@ with `since`.
   the resource viewer renders markdown.
 - **Live check before handover**: `claude:install` + `doctor` all green, then a real Claude session
   (the desktop app, or `claude -p` if the CLI is available) in a bound scratch folder: the
-  briefing is injected, a three-step plan lands in the window within ~3 s, a step completes, and the
-  session badge moves between working and idle.
+  briefing is injected, a three-step plan lands in the window within ~30 s of being stated, a
+  step completes, and the session badge moves between working and idle.
 - **First real use**: adopt InGame from its docs (`docs/planning/road-to-market.md` and key
   planning docs), then have Aiden correct anything stale.
 
