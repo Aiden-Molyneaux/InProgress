@@ -6,3 +6,8 @@ test-results/
 playwright-report/
 .superpowers/
 *.log
+.dev-home/
+.e2e-home/
+.test-home/
+.test-claude/
+.live-check/
