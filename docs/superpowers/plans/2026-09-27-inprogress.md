@@ -18,7 +18,7 @@
 - Tests never touch the real `~/.inprogress` or `~/.claude`: always use temp dirs via the env overrides above.
 - Every mutation runs inside `write()` (Task 3), which records an `events` row in the same transaction. Never call `write()` inside another `write()`.
 - Limits: node title ≤ 200 chars, body ≤ 20,000, outcome ≤ 2,000, log text ≤ 2,000, resource content ≤ 1,000,000, `snapshot_file` ≤ 200 KB, project name ≤ 120, playbook ≤ 10,000.
-- Hooks run in exec form (`command: "node"`, `args: [<repo>/dist/hooks/hook.js, <hook-name>]`), always exit 0, never write to stderr, and abort their HTTP call after 500 ms (session-start: 3 s including a server spawn).
+- Hooks run in exec form (`command: <absolute node.exe path recorded at install>`, `args: [<repo>/dist/hooks/hook.js, <hook-name>]`), always exit 0, never write to stderr, and abort their HTTP call after 500 ms (session-start: 3 s including a server spawn).
 - Only tracked sessions are stored. Untracked sessions leave no rows.
 - The UI never mutates data. Its only POST is `/api/ui/open` (UI token, resource id).
 - Commit after every task. Every commit message ends with a blank line and `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
@@ -237,6 +237,7 @@ Expected: FAIL, cannot resolve `../../src/lib/paths` and `../../src/lib/glob`.
 /**
  * Normalize a filesystem path for storage and comparison: forward slashes,
  * Git Bash `/c/x` converted to `C:/x`, upper-case drive letter, no trailing slash.
+ * Windows-first: a POSIX path whose first segment is one letter (`/x/data`) is read as a drive.
  */
 export function normalizePath(input: string): string {
   let p = input.trim().replace(/\\/g, '/');
@@ -509,10 +510,13 @@ export function readTranscriptTitle(file: string, maxBytes = 256 * 1024): string
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 
+/** Data dir. A relative INPROGRESS_HOME is made absolute so child processes with another cwd agree. */
 export function homeDir(): string {
-  return process.env.INPROGRESS_HOME ?? join(homedir(), '.inprogress');
+  const configured = process.env.INPROGRESS_HOME;
+  if (!configured) return join(homedir(), '.inprogress');
+  return isAbsolute(configured) ? configured : resolve(configured);
 }
 
 export function port(): number {
@@ -1322,8 +1326,15 @@ export function updateProject(ctx: Ctx, actor: string, ref: string | number, pat
     if (patch.name !== undefined || patch.description !== undefined) {
       ctx.db.prepare('UPDATE nodes SET title = ?, body = ?, updated_at = ? WHERE id = ?').run(next.name, next.description, ts, before.rootNodeId);
     }
-    const changed = Object.keys(patch).filter((k) => patch[k as keyof UpdateProjectInput] !== undefined);
-    record({ projectId: before.id, type: 'project.updated', entity: 'project', entityId: before.id, data: { changed } });
+    const changes: Record<string, { from: unknown; to: unknown }> = {};
+    for (const key of ['name', 'description', 'playbook', 'status'] as const) {
+      if (patch[key] !== undefined && before[key] !== next[key]) changes[key] = { from: before[key], to: next[key] };
+    }
+    record({ projectId: before.id, type: 'project.updated', entity: 'project', entityId: before.id, data: { changes } });
+    if (changes.name || changes.description) {
+      const rootChanges = { ...(changes.name ? { title: changes.name } : {}), ...(changes.description ? { body: changes.description } : {}) };
+      record({ projectId: before.id, type: 'node.updated', entity: 'node', entityId: before.rootNodeId, data: { changes: rootChanges } });
+    }
     return getProjectById(ctx, before.id)!;
   });
 }
@@ -2070,7 +2081,7 @@ export function lastProjectEvent(ctx: Ctx, projectId: number): EventRow | null {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run test/server/resources.test.ts`
-Expected: PASS (7 tests).
+Expected: PASS (6 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -2410,7 +2421,7 @@ export function renderOutline(index: TreeIndex, sessions: SessionLike[], opts: O
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run test/core/tree.test.ts`
-Expected: PASS (8 tests).
+Expected: PASS (7 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -2582,7 +2593,8 @@ describe('snapshots', () => {
     const { ctx, project } = setup();
     handleHookEvent(ctx, 's1', start());
     const snap = getProjectSnapshot(ctx, project.slug);
-    expect(snap.nodes).toHaveLength(11);
+    expect(snap.nodes).toHaveLength(12);
+    expect(snap.nodes.some((n) => n.parentId === null)).toBe(true);
     expect(snap.sessions.map((s) => s.id)).toEqual(['s1']);
     expect(snap.lastEvent?.type).toBe('session.updated');
     expect(snap.lastEventId).toBe(snap.lastEvent?.id);
@@ -2620,7 +2632,7 @@ Expected: FAIL, cannot resolve the new modules.
 
 ```ts
 import { STALE_SESSION_MS, type Session, type SessionState, type SubagentInfo } from '../../core/types';
-import type { Ctx } from '../db/tx';
+import { write, type Ctx } from '../db/tx';
 
 interface SessionRow {
   id: string;
@@ -2670,14 +2682,25 @@ export function saveSession(ctx: Ctx, s: Session): void {
     .run(s.projectId, s.title, s.cwd, s.branch, s.transcriptPath, s.state, s.focusNodeId, s.promptsSinceUpdate, s.lastSeenAt, s.endedAt, s.id);
 }
 
+/**
+ * Mark sessions not seen for 12 hours as ended, recording an event for each so the UI drops
+ * their badges. Opens its own write(): never call this (or listProjectSessions /
+ * getProjectSnapshot, which call it) from inside another write().
+ */
 export function expireStaleSessions(ctx: Ctx): void {
-  const now = ctx.now();
-  const cutoff = new Date(Date.parse(now) - STALE_SESSION_MS).toISOString();
-  const stale = ctx.db.prepare("SELECT id FROM sessions WHERE state != 'ended' AND last_seen_at < ?").all(cutoff) as { id: string }[];
-  for (const { id } of stale) {
-    ctx.db.prepare("UPDATE sessions SET state = 'ended', ended_at = ? WHERE id = ?").run(now, id);
-    clearSubagents(ctx, id);
-  }
+  const cutoff = new Date(Date.parse(ctx.now()) - STALE_SESSION_MS).toISOString();
+  const stale = ctx.db
+    .prepare("SELECT id, project_id FROM sessions WHERE state != 'ended' AND last_seen_at < ?")
+    .all(cutoff) as { id: string; project_id: number | null }[];
+  if (!stale.length) return;
+  write(ctx, 'system', (record) => {
+    const now = ctx.now();
+    for (const { id, project_id } of stale) {
+      ctx.db.prepare("UPDATE sessions SET state = 'ended', ended_at = ? WHERE id = ?").run(now, id);
+      clearSubagents(ctx, id);
+      record({ projectId: project_id, type: 'session.updated', entity: 'session', entityId: id, data: { changed: ['state'], state: 'ended' } });
+    }
+  });
 }
 
 export function listProjectSessions(ctx: Ctx, projectId: number): Session[] {
@@ -2819,7 +2842,10 @@ function needsYouLine(snapshot: ProjectSnapshot): string | undefined {
 
 export function renderBriefing(snapshot: ProjectSnapshot, sessionId: string): string {
   const { project, resources, sessions } = snapshot;
-  const lines = [`[InProgress] This session is tracked in project "${project.name}" (slug ${project.slug}). Session id: ${sessionId}.`];
+  const lines = [
+    `[InProgress] This session is tracked in project "${project.name}" (slug ${project.slug}). Session id: ${sessionId}.`,
+    'All InProgress edits go through the inprogress-scribe agent in the background; follow the inprogress skill.',
+  ];
   const playbook = project.playbook.trim();
   if (playbook) {
     const pl = playbook.split('\n');
@@ -3239,23 +3265,35 @@ export const openBody = z.object({ resourceId: z.number().int().positive() }).st
 
 ```ts
 import { spawn, spawnSync } from 'node:child_process';
-import { dirname, resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 
-function onPath(cmd: string): boolean {
-  const r = spawnSync(process.platform === 'win32' ? 'where' : 'which', [cmd], { stdio: 'ignore', windowsHide: true });
-  return r.status === 0;
+/**
+ * VS Code's real executable. On Windows `code` is a .cmd shim, and running it through cmd.exe
+ * would let characters like & | % in a stored path execute commands, so we find Code.exe instead.
+ */
+export function findVsCode(): string | undefined {
+  if (process.platform !== 'win32') {
+    return spawnSync('which', ['code'], { stdio: 'ignore' }).status === 0 ? 'code' : undefined;
+  }
+  const where = spawnSync('where', ['code'], { encoding: 'utf8', windowsHide: true });
+  const shims = where.status === 0 ? where.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean) : [];
+  const candidates = shims.map((shim) => join(dirname(dirname(shim)), 'Code.exe'));
+  if (process.env.LOCALAPPDATA) candidates.push(join(process.env.LOCALAPPDATA, 'Programs', 'Microsoft VS Code', 'Code.exe'));
+  if (process.env.ProgramFiles) candidates.push(join(process.env.ProgramFiles, 'Microsoft VS Code', 'Code.exe'));
+  return candidates.find((p) => existsSync(p));
 }
 
 /**
- * Open a file in VS Code, or reveal it in the file manager.
- * Never hands the file to the OS default handler, so nothing gets executed.
+ * Open a file in VS Code, or reveal it in the file manager. No shell is involved and the file
+ * never goes to the OS default handler, so nothing gets executed.
  */
 export async function openInEditorOrReveal(path: string): Promise<void> {
   const target = resolve(path);
   const detached = { detached: true, stdio: 'ignore' as const, windowsHide: true };
-  if (onPath('code')) {
-    const child = process.platform === 'win32' ? spawn('cmd', ['/d', '/s', '/c', 'code', target], detached) : spawn('code', [target], detached);
-    child.unref();
+  const code = findVsCode();
+  if (code) {
+    spawn(code, [target], detached).unref();
     return;
   }
   if (process.platform === 'win32') spawn('explorer.exe', [`/select,${target}`], detached).unref();
@@ -3295,7 +3333,8 @@ const ALLOWED_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);
 export const actorOf = (req: FastifyRequest): string => String(req.headers['x-inprogress-actor'] ?? 'system').slice(0, 120);
 
 export function buildApp(opts: AppOptions): FastifyInstance {
-  const app = Fastify({ logger: opts.logger ?? false, bodyLimit: 2 * 1024 * 1024, forceCloseConnections: true });
+  // 8 MiB: a 1,000,000-character resource grows past 2 MiB once JSON-escaped and UTF-8 encoded.
+  const app = Fastify({ logger: opts.logger ?? false, bodyLimit: 8 * 1024 * 1024, forceCloseConnections: true });
 
   app.addHook('onRequest', async (req, reply) => {
     const host = (req.headers.host ?? '').toLowerCase().replace(/:\d+$/, '');
@@ -3305,12 +3344,13 @@ export function buildApp(opts: AppOptions): FastifyInstance {
     }
   });
 
-  app.setErrorHandler((err, _req, reply) => {
+  // Fastify 5 types the handler's error as unknown unless told otherwise.
+  app.setErrorHandler<Error & { statusCode?: number }>((err, _req, reply) => {
     if (err instanceof ApiError) return reply.code(err.status).send({ error: err.message, hint: err.hint });
     if (err instanceof ZodError) {
       return reply.code(400).send({ error: 'Invalid request', hint: err.issues.map((i) => `${i.path.join('.') || 'body'}: ${i.message}`).join('; ') });
     }
-    const status = (err as { statusCode?: number }).statusCode;
+    const status = err.statusCode;
     if (status && status >= 400 && status < 500) return reply.code(status).send({ error: err.message });
     app.log.error(err);
     return reply.code(500).send({ error: err.message || 'Internal error' });
@@ -3735,7 +3775,6 @@ async function main(): Promise<void> {
   truncateIfLarge(logFile, 5 * 1024 * 1024);
   const token = ensureToken(home);
   const db = openDb(join(home, 'inprogress.db'));
-  await backupDb(db, join(home, 'backups'), 7).catch(() => undefined);
   const ctx = createCtx(db);
   let closing = false;
   const app = buildApp({
@@ -3766,6 +3805,8 @@ async function main(): Promise<void> {
     return;
   }
   writeFileSync(join(home, 'server.pid'), String(process.pid));
+  // Back up only once we own the port, so two racing starts never write the same backup file.
+  await backupDb(db, join(home, 'backups'), 7).catch(() => undefined);
   process.on('SIGINT', () => void shutdown());
   process.on('SIGTERM', () => void shutdown());
 }
@@ -4628,7 +4669,9 @@ async function main(): Promise<void> {
     appendLog(logFile, `unknown hook "${String(name)}"`);
     return;
   }
+  // Total budget: session-start 3 s (up to 2 s spawning the server + 1 s for the POST), others 500 ms.
   const budget = name === 'session-start' ? 3000 : 500;
+  const postTimeout = name === 'session-start' ? 1000 : 500;
   const work = (async () => {
     const raw = await readStdin(1000);
     const input = JSON.parse(raw || '{}') as HookStdin;
@@ -4636,13 +4679,13 @@ async function main(): Promise<void> {
     const context = await runHandler(name, input, {
       ensureServer: () => ensureServer({ baseUrl: url, waitMs: 2000 }),
       // Read the token lazily: the first server start creates it.
-      post: (path, body) => createClient({ baseUrl: url, token: readToken(), timeoutMs: budget }).post(path, body),
+      post: (path, body) => createClient({ baseUrl: url, token: readToken(), timeoutMs: postTimeout }).post(path, body),
     });
     const eventName = CONTEXT_EVENT_NAME[name];
     if (context && eventName) await writeStdout(JSON.stringify({ hookSpecificOutput: { hookEventName: eventName, additionalContext: context } }));
   })();
   work.catch((err) => appendLog(logFile, `${name}: ${(err as Error).message}`));
-  await Promise.race([work.catch(() => undefined), new Promise((r) => setTimeout(r, budget + 1000))]);
+  await Promise.race([work.catch(() => undefined), new Promise((r) => setTimeout(r, budget + 250))]);
 }
 
 main()
@@ -4696,7 +4739,7 @@ tools: mcp__inprogress
 mcpServers:
   - inprogress:
       type: stdio
-      command: node
+      command: "{{NODE}}"
       args: ["{{REPO}}/dist/mcp/main.js"]
 ---
 
@@ -4829,12 +4872,13 @@ describe('install', () => {
     for (const def of HOOK_DEFS) {
       const group = s.hooks[def.event].at(-1);
       expect(group.matcher).toBe(def.matcher);
-      expect(group.hooks[0]).toEqual({ type: 'command', command: 'node', args: [`${repo}/dist/hooks/hook.js`, def.name], timeout: def.timeout });
+      expect(group.hooks[0]).toEqual({ type: 'command', command: process.execPath.replace(/\\/g, '/'), args: [`${repo}/dist/hooks/hook.js`, def.name], timeout: def.timeout });
     }
     expect(existsSync(join(dir, 'settings.json.inprogress-backup-20260927-120000'))).toBe(true);
     const agent = readFileSync(join(dir, 'agents', 'inprogress-scribe.md'), 'utf8');
     expect(agent).toContain(`args: ["${repo}/dist/mcp/main.js"]`);
     expect(agent).not.toContain('{{REPO}}');
+    expect(agent).toContain(`command: "${process.execPath.replace(/\\/g, '/')}"`);
     expect(readFileSync(join(dir, 'skills', 'inprogress', 'SKILL.md'), 'utf8')).toContain(`${repo}/dist/cli/main.js`);
   });
 
@@ -4880,7 +4924,7 @@ Expected: FAIL, cannot resolve `../../src/cli/claude-config`.
 ```ts
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { HookName } from '../hooks/handlers';
 
@@ -4911,7 +4955,9 @@ type HookGroup = { matcher?: string; hooks?: HookEntry[] };
 type Settings = Record<string, any>;
 
 export function claudeDir(): string {
-  return process.env.INPROGRESS_CLAUDE_DIR ?? join(homedir(), '.claude');
+  const configured = process.env.INPROGRESS_CLAUDE_DIR;
+  if (!configured) return join(homedir(), '.claude');
+  return isAbsolute(configured) ? configured : resolve(configured);
 }
 
 /** Repo root from the bundled CLI at dist/cli/main.js. */
@@ -4919,8 +4965,16 @@ export function repoRoot(): string {
   return resolve(fileURLToPath(new URL('../..', import.meta.url))).replace(/\\/g, '/');
 }
 
+/**
+ * The Node binary running the installer, as an absolute forward-slash path. Hooks and the scribe's
+ * MCP server use it instead of relying on `node` being on the PATH the Claude desktop app inherits.
+ */
+export function nodeBinary(): string {
+  return process.execPath.replace(/\\/g, '/');
+}
+
 export function hookEntry(repo: string, name: HookName, timeout: number): HookEntry {
-  return { type: 'command', command: 'node', args: [`${repo}${HOOK_SCRIPT_SUFFIX}`, name], timeout };
+  return { type: 'command', command: nodeBinary(), args: [`${repo}${HOOK_SCRIPT_SUFFIX}`, name], timeout };
 }
 
 export function isInProgressHook(entry: HookEntry): boolean {
@@ -4964,7 +5018,7 @@ export function removeAllowRules(settings: Settings): Settings {
   return settings;
 }
 
-export const renderTemplate = (text: string, repo: string): string => text.replaceAll('{{REPO}}', repo);
+export const renderTemplate = (text: string, repo: string): string => text.replaceAll('{{REPO}}', repo).replaceAll('{{NODE}}', nodeBinary());
 
 function readSettings(file: string): Settings {
   return existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as Settings) : {};
@@ -5250,7 +5304,20 @@ export async function runChecks(o: DoctorOptions): Promise<Check[]> {
   const missingHooks = HOOK_DEFS.filter(
     (d) => !(settings?.hooks?.[d.event] ?? []).some((g: { hooks?: { args?: string[]; command?: string }[] }) => (g.hooks ?? []).some((h) => isInProgressHook(h))),
   ).map((d) => d.event);
-  checks.push({ name: 'Hooks', ok: missingHooks.length === 0, detail: missingHooks.length ? `missing: ${missingHooks.join(', ')}: run npm run claude:install` : 'all installed' });
+  const ourHooks = (Object.values(settings?.hooks ?? {}) as { hooks?: { command?: string; args?: string[] }[] }[][])
+    .flat()
+    .flatMap((g) => g.hooks ?? [])
+    .filter((h) => isInProgressHook(h));
+  const badBinary = ourHooks.find((h) => h.command && /[\\/]/.test(h.command) && !existsSync(h.command))?.command;
+  checks.push({
+    name: 'Hooks',
+    ok: missingHooks.length === 0 && !badBinary,
+    detail: missingHooks.length
+      ? `missing: ${missingHooks.join(', ')}: run npm run claude:install`
+      : badBinary
+        ? `node binary ${badBinary} no longer exists: rerun npm run claude:install`
+        : 'all installed',
+  });
   checks.push(agentCheck(join(o.claudeDir, 'agents', 'inprogress-scribe.md')));
   const skill = join(o.claudeDir, 'skills', 'inprogress', 'SKILL.md');
   checks.push({ name: 'Skill', ok: existsSync(skill), detail: skill });
@@ -5286,10 +5353,18 @@ import { openAppWindow } from './open';
 
 const USAGE = 'Usage: inprogress <start | stop | open | status | outline <project> [--full] | doctor | claude-install | claude-uninstall>';
 
+/** Ask the server to shut down and wait until it has actually stopped answering (up to 3 s). */
 async function stopServer(url: string, out: (l: string) => void): Promise<void> {
   if (!(await isServerUp(url))) return;
   await createClient({ baseUrl: url, token: readToken() }).post('/api/admin/shutdown', {});
-  out('Stopped the running InProgress server.');
+  for (let i = 0; i < 30; i++) {
+    if (!(await isServerUp(url, 200))) {
+      out('Stopped the running InProgress server.');
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  out('Asked InProgress to stop, but it is still answering after 3 s.');
 }
 
 export async function runCli(args: string[], out: (line: string) => void = console.log): Promise<number> {
@@ -5381,6 +5456,7 @@ Expected: PASS (7 tests across the two files).
 ```ts
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
+import { createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -5390,14 +5466,28 @@ import { createClient } from '../../src/lib/client';
 import { isServerUp } from '../../src/lib/ensure-server';
 import { readToken } from '../../src/lib/home';
 
-const PORT = 4398;
-const base = `http://127.0.0.1:${PORT}`;
 const home = mkdtempSync(join(tmpdir(), 'ip-smoke-'));
 const claude = mkdtempSync(join(tmpdir(), 'ip-smoke-claude-'));
-const env = { ...process.env, INPROGRESS_HOME: home, INPROGRESS_PORT: String(PORT), INPROGRESS_CLAUDE_DIR: claude };
+let base = '';
+let env: NodeJS.ProcessEnv = {};
 let server: ChildProcess;
 
+/** A port nothing is listening on, so a stale server from an earlier run can never answer. */
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const probe = createServer();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const { port } = probe.address() as AddressInfo;
+      probe.close(() => resolve(port));
+    });
+  });
+}
+
 beforeAll(async () => {
+  const port = await freePort();
+  base = `http://127.0.0.1:${port}`;
+  env = { ...process.env, INPROGRESS_HOME: home, INPROGRESS_PORT: String(port), INPROGRESS_CLAUDE_DIR: claude };
   server = spawn(process.execPath, ['dist/server/main.js'], { env, stdio: 'ignore' });
   for (let i = 0; i < 80 && !(await isServerUp(base)); i++) await new Promise((r) => setTimeout(r, 100));
   expect(await isServerUp(base)).toBe(true);
@@ -6152,7 +6242,6 @@ export function useInProgress(): InProgressState {
   useEffect(() => {
     let projectTimer = 0;
     let snapshotTimer = 0;
-    let wasDown = false;
     const refreshSnapshot = () => {
       window.clearTimeout(snapshotTimer);
       snapshotTimer = window.setTimeout(() => slugRef.current && void loadSnapshot(slugRef.current), 150);
@@ -6172,9 +6261,8 @@ export function useInProgress(): InProgressState {
       },
       (status) => {
         setConnection(status);
-        if (status === 'reconnecting') wasDown = true;
-        else if (wasDown) {
-          wasDown = false;
+        // Refresh on every (re)connect: covers events that landed before the stream opened.
+        if (status === 'open') {
           refreshProjects();
           refreshSnapshot();
         }
@@ -6854,6 +6942,8 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
         sourceHandle: 'out',
         targetHandle: 'in',
         type: 'step',
+        // The source handle sits 12 px in and children indent 28 px: an offset of 16 keeps the rail straight.
+        pathOptions: { offset: 16 },
         selectable: false,
         focusable: false,
         style: { stroke: 'var(--edge)', strokeWidth: 1.2 },
@@ -6879,7 +6969,16 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
     [camera, index],
   );
 
-  const onMove = useCallback((_: unknown, vp: Viewport) => setCrumb(breadcrumbFor(layout, index, vp)), [layout, index]);
+  const { onFollowChange } = props;
+  // onMove fires only when the viewport actually changes: a user pan or zoom carries an event,
+  // programmatic camera moves carry null. (onMoveStart would also fire on plain clicks.)
+  const onMove = useCallback(
+    (event: MouseEvent | TouchEvent | null, vp: Viewport) => {
+      if (event) onFollowChange(false);
+      setCrumb(breadcrumbFor(layout, index, vp));
+    },
+    [layout, index, onFollowChange],
+  );
 
   return (
     <div className="ip-canvas">
@@ -6892,10 +6991,6 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
         onNodeClick={(_, n) => {
           if (n.type === 'ipNode') props.onSelectNode((n.data as NodeCardData).node.id);
         }}
-        onMoveStart={(event) => {
-          // A non-null event means Aiden panned or zoomed; programmatic moves pass null.
-          if (event) props.onFollowChange(false);
-        }}
         onMove={onMove}
         minZoom={0.15}
         maxZoom={2}
@@ -6904,7 +6999,6 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
         nodesConnectable={false}
         elementsSelectable={false}
         proOptions={{ hideAttribution: true }}
-        onlyRenderVisibleElements
       >
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
         <MiniMap position="bottom-right" pannable zoomable nodeColor={minimapColor} />
@@ -6923,15 +7017,24 @@ import { useCallback, useEffect, useState } from 'react';
 import type { FoldOverrides } from '../../src/core/tree';
 import { loadJson, save } from './storage';
 
+const stored = (projectId: number | undefined): FoldOverrides =>
+  projectId === undefined ? {} : loadJson<FoldOverrides>(`ip.folds.${projectId}`, {});
+
+/**
+ * Per-project manual fold state, persisted in localStorage. Loaded synchronously so the first
+ * layout already honours it. Folding a node also re-collapses its "+n more" tail, which makes
+ * "+n more" a toggle: fold and unfold the parent to hide the tail again.
+ */
 export function useFoldOverrides(projectId: number | undefined): [FoldOverrides, (key: string, value: 'open' | 'closed') => void] {
-  const [overrides, setOverrides] = useState<FoldOverrides>({});
+  const [overrides, setOverrides] = useState<FoldOverrides>(() => stored(projectId));
   useEffect(() => {
-    setOverrides(projectId === undefined ? {} : loadJson<FoldOverrides>(`ip.folds.${projectId}`, {}));
+    setOverrides(stored(projectId));
   }, [projectId]);
   const set = useCallback(
     (key: string, value: 'open' | 'closed') => {
       setOverrides((cur) => {
-        const next = { ...cur, [key]: value };
+        const next: FoldOverrides = { ...cur, [key]: value };
+        if (key.startsWith('n:') && value === 'closed') delete next[`more:${key.slice(2)}`];
         if (projectId !== undefined) save(`ip.folds.${projectId}`, JSON.stringify(next));
         return next;
       });
@@ -7097,7 +7200,7 @@ export function App() {
 - [ ] **Step 11: Type-check, build, and look at it**
 
 Run: `npx tsc -p web/tsconfig.json && npm run build`
-Expected: no errors. Then run `npm run dev`, seed a project with a nested plan through the API (token from `.dev-home/token`), open http://localhost:5183, and check in the browser: rows stack downward with elbow connectors, finished branches fold, `+n more` expands on click, the Follow toggle turns off when you drag and back on with F, N cycles needs-you items. Stop the dev loop afterwards.
+Expected: no errors. Then run `npm run dev`, seed a project with a nested plan through the API (token from `.dev-home/token`), open http://localhost:5183, and check in the browser (in the Vite dev page the UI token is empty, so "Open file" answers 401 and reloads; test that button against the built UI at http://127.0.0.1:4318 instead): rows stack downward with elbow connectors, finished branches fold, `+n more` expands on click, the Follow toggle turns off when you drag and back on with F, N cycles needs-you items. Stop the dev loop afterwards.
 
 - [ ] **Step 12: Commit**
 
@@ -7670,7 +7773,8 @@ test('clicking a node opens its details and copies a reference', async ({ page }
   const details = page.getByRole('complementary');
   await expect(details).toContainText(`#${id} Run signing tests`);
   await details.getByRole('button', { name: `Copy #${id}` }).click();
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(`#${id} Run signing tests`);
+  // String form: the root tsconfig has no DOM lib, so `navigator` must not appear in test code.
+  expect(await page.evaluate<string>('navigator.clipboard.readText()')).toBe(`#${id} Run signing tests`);
 });
 
 test('a resource chip opens the rendered resource', async ({ page }) => {
@@ -7737,6 +7841,11 @@ sleep 45
 node dist/cli/main.js outline live-check
 ```
 Expected: the outline shows three steps under the root with step 1 done and a session badge line for the print-mode session. If print mode exits before the background scribe finishes (nothing but the root appears), note it and use Step 6 as the live check instead.
+
+- [ ] **Step 5b: Check the server outlives the hook that started it**
+
+Stop the server (`node dist/cli/main.js stop`), start a fresh Claude session in any bound folder (the live-check folder, or ask Aiden to), let its SessionStart hook start the server, end that session, then run `node dist/cli/main.js status`.
+Expected: still running. If it is not, Claude Code is killing the hook's process tree with the server in it. Then start the server from outside Claude instead: run `node dist/cli/main.js start` from a normal terminal, add a Startup-folder shortcut to `node "<repo>/dist/cli/main.js" start` (ask Aiden before creating it), and tell Aiden why.
 
 - [ ] **Step 6: Hand over the first real use**
 
