@@ -1,0 +1,8 @@
+node_modules/
+dist/
+web/dist/
+coverage/
+test-results/
+playwright-report/
+.superpowers/
+*.log
