@@ -2,7 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync,
 import { homedir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { HookName } from '../hooks/handlers';
+import { HOOK_NAMES, type HookName } from '../hooks/handlers';
 
 export const ALLOW_RULES = ['mcp__inprogress', 'Edit(~/.inprogress/resources/**)'];
 export const HOOK_SCRIPT_SUFFIX = '/dist/hooks/hook.js';
@@ -53,8 +53,14 @@ export function hookEntry(repo: string, name: HookName, timeout: number): HookEn
   return { type: 'command', command: nodeBinary(), args: [`${repo}${HOOK_SCRIPT_SUFFIX}`, name], timeout };
 }
 
+/**
+ * Only an exec-form entry running `<...>/dist/hooks/hook.js <InProgress hook name>` is ours. Shell-form
+ * commands and other tools' exec-form hooks, even with the same script layout, are left alone.
+ */
 export function isInProgressHook(entry: HookEntry): boolean {
-  return (entry.args?.[0] ?? '').replace(/\\/g, '/').endsWith(HOOK_SCRIPT_SUFFIX) || (entry.command ?? '').includes(HOOK_SCRIPT_SUFFIX);
+  if (!Array.isArray(entry.args)) return false;
+  const [script, name] = entry.args;
+  return typeof script === 'string' && script.replace(/\\/g, '/').endsWith(HOOK_SCRIPT_SUFFIX) && (HOOK_NAMES as readonly string[]).includes(name);
 }
 
 export function stripInProgressHooks(settings: Settings): Settings {
@@ -100,6 +106,15 @@ function readSettings(file: string): Settings {
   return existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as Settings) : {};
 }
 
+function countInProgressHooks(settings: Settings): number {
+  return Object.values((settings.hooks ?? {}) as Record<string, HookGroup[]>)
+    .flat()
+    .flatMap((g) => g.hooks ?? [])
+    .filter(isInProgressHook).length;
+}
+
+const hookEntries = (n: number): string => `InProgress hook ${n === 1 ? 'entry' : 'entries'}`;
+
 function backup(file: string, stamp: string): string | undefined {
   if (!existsSync(file)) return undefined;
   const target = `${file}.inprogress-backup-${stamp}`;
@@ -114,8 +129,11 @@ export function install(o: { repo: string; claudeDir: string; stamp: string }): 
   const settingsFile = join(o.claudeDir, 'settings.json');
   const saved = backup(settingsFile, o.stamp);
   if (saved) log.push(`Backed up settings to ${saved}`);
-  const settings = addAllowRules(addInProgressHooks(readSettings(settingsFile), repo));
+  const current = readSettings(settingsFile);
+  const replaced = countInProgressHooks(current);
+  const settings = addAllowRules(addInProgressHooks(current, repo));
   writeFileSync(settingsFile, `${JSON.stringify(settings, null, 2)}\n`);
+  if (replaced > 0) log.push(`Replaced ${replaced} existing ${hookEntries(replaced)}`);
   log.push(`Hooks: ${HOOK_DEFS.map((d) => d.event).join(', ')}`, `Allow rules: ${ALLOW_RULES.join(', ')}`);
 
   const agentsDir = join(o.claudeDir, 'agents');
@@ -142,9 +160,11 @@ export function uninstall(o: { claudeDir: string; stamp: string }): string[] {
   const saved = backup(settingsFile, o.stamp);
   if (saved) log.push(`Backed up settings to ${saved}`);
   if (existsSync(settingsFile)) {
-    const settings = removeAllowRules(stripInProgressHooks(readSettings(settingsFile)));
+    const current = readSettings(settingsFile);
+    const removed = countInProgressHooks(current);
+    const settings = removeAllowRules(stripInProgressHooks(current));
     writeFileSync(settingsFile, `${JSON.stringify(settings, null, 2)}\n`);
-    log.push('Removed InProgress hooks and allow rules');
+    log.push(`Removed ${removed} ${hookEntries(removed)} and the allow rules`);
   }
   rmSync(join(o.claudeDir, 'agents', 'inprogress-scribe.md'), { force: true });
   rmSync(join(o.claudeDir, 'skills', 'inprogress'), { recursive: true, force: true });
