@@ -10,18 +10,22 @@ import { openAppWindow } from './open';
 
 const USAGE = 'Usage: inprogress <start | stop | open | status | outline <project> [--full] | doctor | claude-install | claude-uninstall>';
 
-/** Ask the server to shut down and wait until it has actually stopped answering (up to 3 s). */
-async function stopServer(url: string, out: (l: string) => void): Promise<void> {
-  if (!(await isServerUp(url))) return;
+/**
+ * Ask the server to shut down and wait until it has actually stopped answering (up to 3 s).
+ * False when it is still answering; throws when the shutdown request itself fails.
+ */
+async function stopServer(url: string, out: (l: string) => void): Promise<boolean> {
+  if (!(await isServerUp(url))) return true;
   await createClient({ baseUrl: url, token: readToken() }).post('/api/admin/shutdown', {});
   for (let i = 0; i < 30; i++) {
     if (!(await isServerUp(url, 200))) {
       out('Stopped the running InProgress server.');
-      return;
+      return true;
     }
     await new Promise((r) => setTimeout(r, 100));
   }
   out('Asked InProgress to stop, but it is still answering after 3 s.');
+  return false;
 }
 
 export async function runCli(args: string[], out: (line: string) => void = console.log): Promise<number> {
@@ -34,9 +38,11 @@ export async function runCli(args: string[], out: (line: string) => void = conso
       return up ? 0 : 1;
     }
     case 'stop':
-      if (!(await isServerUp(url))) out('InProgress is not running.');
-      else await stopServer(url, out);
-      return 0;
+      if (!(await isServerUp(url))) {
+        out('InProgress is not running.');
+        return 0;
+      }
+      return (await stopServer(url, out)) ? 0 : 1;
     case 'open': {
       if (!(await ensureServer({ baseUrl: url, waitMs: 5000 }))) {
         out(`InProgress did not start. See ${join(homeDir(), 'server.log')}`);
@@ -70,9 +76,13 @@ export async function runCli(args: string[], out: (line: string) => void = conso
       return 0;
     }
     case 'doctor':
+      // Start the server first, as `open` does, so doctor passes straight after claude-install stopped it.
+      // If it cannot start, the Server check reports that.
+      if (!(await isServerUp(url)) && (await ensureServer({ baseUrl: url, waitMs: 5000 }))) out(`Started InProgress at ${url} for these checks.`);
       return doctor({ baseUrl: url, home: homeDir(), claudeDir: claudeDir(), repo: repoRoot() }, out);
     case 'claude-install': {
-      await stopServer(url, out).catch(() => undefined);
+      // A failed stop (say a 401 from a token mismatch) is reported, and the install goes ahead.
+      await stopServer(url, out).catch((err) => out(`Could not stop the running InProgress server: ${err instanceof Error ? err.message : String(err)}`));
       const { log } = install({ repo: repoRoot(), claudeDir: claudeDir(), stamp: timestamp() });
       log.forEach((l) => out(l));
       out('Next: run `inprogress doctor`, then start a new Claude session.');

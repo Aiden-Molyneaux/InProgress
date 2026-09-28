@@ -14,7 +14,7 @@ const home = mkdtempSync(join(tmpdir(), 'ip-smoke-'));
 const claude = mkdtempSync(join(tmpdir(), 'ip-smoke-claude-'));
 let base = '';
 let env: NodeJS.ProcessEnv = {};
-let server: ChildProcess;
+let server: ChildProcess | undefined;
 
 /** A port nothing is listening on, so a stale server from an earlier run can never answer. */
 function freePort(): Promise<number> {
@@ -36,12 +36,25 @@ beforeAll(async () => {
   for (let i = 0; i < 80 && !(await isServerUp(base)); i++) await new Promise((r) => setTimeout(r, 100));
   expect(await isServerUp(base)).toBe(true);
 });
-afterAll(() => {
-  // Stop from a fresh process. This one can still hold keep-alive sockets to the first server, which claude-install
-  // reset while spawnSync blocked the event loop: a shutdown POST sent on one fails with ECONNRESET and would leave
-  // the server that `start` spawned running.
-  spawnSync(process.execPath, ['dist/cli/main.js', 'stop'], { env });
-  server.kill();
+afterAll(async () => {
+  // No port means env is still empty, and `stop` would target port 4317 with the real ~/.inprogress token.
+  if (!base) return;
+  // Stop from a fresh process, once a second for up to 5 s. This one can still hold keep-alive sockets to the first
+  // server, which claude-install reset while spawnSync blocked the event loop, and a request sent on one fails with
+  // ECONNRESET. The pause before each probe lets the loop drop those sockets, so a probe cannot miss a live server.
+  const deadline = Date.now() + 5000;
+  let lastStop = 0;
+  let up = true;
+  while (up && Date.now() < deadline) {
+    if (Date.now() - lastStop >= 1000) {
+      spawnSync(process.execPath, ['dist/cli/main.js', 'stop'], { env });
+      lastStop = Date.now();
+    }
+    await new Promise((r) => setTimeout(r, 200));
+    up = await isServerUp(base, 200);
+  }
+  server?.kill();
+  if (up) throw new Error(`An InProgress server still answers at ${base} (data dir ${home}): stop it by hand.`);
 });
 
 describe('built artifacts', () => {
@@ -64,6 +77,15 @@ describe('built artifacts', () => {
     expect(r.stderr).toBe('');
   });
 
+  it('CLI prints the client hint under an error', () => {
+    const r = spawnSync(process.execPath, ['dist/cli/main.js', 'outline', 'smoke'], { env: { ...env, INPROGRESS_PORT: '1' }, encoding: 'utf8' });
+    expect(r.status).toBe(1);
+    expect(r.stderr.split(/\r?\n/).slice(0, 2)).toEqual([
+      expect.stringContaining('InProgress server unreachable at http://127.0.0.1:1'),
+      'Run `inprogress start`, or `inprogress doctor` to diagnose.',
+    ]);
+  });
+
   it('MCP server answers over stdio', async () => {
     const client = new Client({ name: 'smoke', version: '1' });
     await client.connect(new StdioClientTransport({ command: process.execPath, args: ['dist/mcp/main.js'], env: env as Record<string, string> }));
@@ -73,10 +95,12 @@ describe('built artifacts', () => {
   });
 
   it('CLI installs into a temp Claude dir and doctor passes', () => {
-    expect(spawnSync(process.execPath, ['dist/cli/main.js', 'claude-install'], { env, encoding: 'utf8' }).status).toBe(0);
-    // claude-install stopped the server; start it again for doctor.
-    expect(spawnSync(process.execPath, ['dist/cli/main.js', 'start'], { env, encoding: 'utf8' }).status).toBe(0);
+    const inst = spawnSync(process.execPath, ['dist/cli/main.js', 'claude-install'], { env, encoding: 'utf8' });
+    expect(inst.stdout).toContain('Stopped the running InProgress server.');
+    expect(inst.status).toBe(0);
+    // claude-install stopped the server; doctor starts it again before its checks.
     const doc = spawnSync(process.execPath, ['dist/cli/main.js', 'doctor'], { env, encoding: 'utf8' });
+    expect(doc.stdout).toContain(`Started InProgress at ${base}`);
     expect(doc.stdout).not.toContain('✗');
     expect(doc.status).toBe(0);
   });

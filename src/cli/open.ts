@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -15,7 +15,10 @@ export function edgeArgs(url: string): string[] {
 export function openAppWindow(url: string): void {
   const edge = findEdge();
   const detached = { detached: true, stdio: 'ignore' as const };
-  if (edge) spawn(edge, edgeArgs(url), detached).unref();
-  else if (process.platform === 'win32') spawn('explorer.exe', [url], detached).unref();
-  else spawn(process.platform === 'darwin' ? 'open' : 'xdg-open', [url], detached).unref();
+  let child: ChildProcess;
+  if (edge) child = spawn(edge, edgeArgs(url), detached);
+  else if (process.platform === 'win32') child = spawn('explorer.exe', [url], detached);
+  else child = spawn(process.platform === 'darwin' ? 'open' : 'xdg-open', [url], detached);
+  // A launch that fails (a missing binary) must not surface as an unhandled 'error' event.
+  child.on('error', () => undefined).unref();
 }
