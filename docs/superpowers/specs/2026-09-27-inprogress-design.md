@@ -475,8 +475,10 @@ node that session is focused on.
 - **Auto-fold**: a `done` or `dropped` node with children renders as one summary node
   (`<title> · n done`, n = done descendants). Under any parent, after the last `done`/`active`
   child (or from the first child if there is none), only the next two `todo`/`blocked` children
-  show; the rest collapse into synthetic `+n more` nodes, one per contiguous hidden run (a pinned
-  node inside the run splits it), but only when the hidden total is at least two.
+  show. Pinned children always show and never take one of those two slots; `dropped` children
+  show only until both slots are filled. Everything after that collapses into synthetic
+  `+n more` nodes, one per contiguous hidden run (a visible node inside the run splits it), but
+  only when the hidden total is at least two.
 - **Never folded**: ancestors of active nodes, needs-you nodes, and session focus nodes.
 - **Manual override**: clicking a chevron or `+n more` toggles fold. Overrides persist in
   `localStorage` per node id and beat auto rules.
