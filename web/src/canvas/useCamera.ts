@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useReactFlow } from '@xyflow/react';
-import { NODE_H, eventTarget, findFrontier, needsYouOrder, type LayoutNodeItem, type LayoutResult } from '../../../src/core/layout';
-import type { TreeIndex } from '../../../src/core/tree';
+import { NODE_H, eventTarget, findFrontier, type LayoutNodeItem, type LayoutResult } from '../../../src/core/layout';
+import { dfsOrder, isNeedsYou, type TreeIndex } from '../../../src/core/tree';
 import type { EventRow, ProjectSnapshot } from '../../../src/core/types';
 
 interface CameraArgs {
@@ -66,19 +66,19 @@ export function useCamera({ layout, snapshot, index, lastEvent, follow }: Camera
 
   // Follow Claude's changes: at most one move per 1.5 s (latest target wins), retrying
   // briefly because the snapshot that contains a brand-new node arrives ~150 ms after its event.
-  // Only a new event moves the camera: turning Follow back on must not replay one that arrived while it was off.
+  // Only a new event with a target replaces the pending move: one without a target (a session state
+  // change, say) leaves it running, and turning Follow back on never replays an event that arrived while it was off.
   useEffect(() => {
-    if (!followRef.current || !lastEvent) return;
-    const target = eventTarget(lastEvent);
-    if (target === undefined) return;
+    const target = lastEvent ? eventTarget(lastEvent) : undefined;
+    if (target === undefined || !followRef.current) return;
     let attempts = 0;
     const attempt = () => {
+      if (!followRef.current) return;
       if (centerOn(target) || ++attempts >= 4) return;
       timer.current = window.setTimeout(attempt, 300);
     };
     window.clearTimeout(timer.current);
     timer.current = window.setTimeout(attempt, Math.max(350, FOLLOW_INTERVAL_MS - (Date.now() - lastMove.current)));
-    return () => window.clearTimeout(timer.current);
   }, [lastEvent, centerOn]);
 
   // Turning Follow off cancels a follow move that is still waiting.
@@ -86,14 +86,23 @@ export function useCamera({ layout, snapshot, index, lastEvent, follow }: Camera
     if (!follow) window.clearTimeout(timer.current);
   }, [follow]);
 
+  // So does unmounting: the canvas remounts for every project.
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+
+  /**
+   * Centres the next needs-you node in outline order and returns the row it landed on. A node inside a
+   * manually folded branch lands on its nearest visible ancestor, so N and the pill never do nothing.
+   */
   const nextNeedsYou = useCallback((): number | undefined => {
-    const ids = needsYouOrder(layoutRef.current);
+    const index = indexRef.current;
+    const ids = [...dfsOrder(index).keys()].filter((id) => isNeedsYou(index.byId.get(id)!));
     if (!ids.length) return undefined;
     cursor.current = (cursor.current + 1) % ids.length;
     const id = ids[cursor.current];
+    const anchor = itemFor(id)?.nodeId;
     centerOn(id);
-    return id;
-  }, [centerOn]);
+    return anchor;
+  }, [centerOn, itemFor]);
 
   return useMemo(() => ({ centerOn, centerOnFrontier, nextNeedsYou }), [centerOn, centerOnFrontier, nextNeedsYou]);
 }

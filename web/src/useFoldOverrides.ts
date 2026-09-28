@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import type { FoldOverrides } from '../../src/core/tree';
 import { loadJson, save } from './storage';
 
@@ -6,25 +6,23 @@ const stored = (projectId: number | undefined): FoldOverrides =>
   projectId === undefined ? {} : loadJson<FoldOverrides>(`ip.folds.${projectId}`, {});
 
 /**
- * Per-project manual fold state, persisted in localStorage. Loaded synchronously so the first
- * layout already honours it. Folding a node also re-collapses its "+n more" tail, which makes
- * "+n more" a toggle: fold and unfold the parent to hide the tail again.
+ * Per-project manual fold state, persisted in localStorage. The stored folds are read during the render in
+ * which the project changes, not in an effect, so each project's first layout already honours them. (App
+ * calls this before the first snapshot has loaded, so a lazy initial state alone would never see the
+ * project.) Folding a node also re-collapses its "+n more" tail, which makes "+n more" a toggle: fold and
+ * unfold the parent to hide the tail again.
  */
 export function useFoldOverrides(projectId: number | undefined): [FoldOverrides, (key: string, value: 'open' | 'closed') => void] {
-  const [overrides, setOverrides] = useState<FoldOverrides>(() => stored(projectId));
-  useEffect(() => {
-    setOverrides(stored(projectId));
-  }, [projectId]);
-  const set = useCallback(
-    (key: string, value: 'open' | 'closed') => {
-      setOverrides((cur) => {
-        const next: FoldOverrides = { ...cur, [key]: value };
-        if (key.startsWith('n:') && value === 'closed') delete next[`more:${key.slice(2)}`];
-        if (projectId !== undefined) save(`ip.folds.${projectId}`, JSON.stringify(next));
-        return next;
-      });
-    },
-    [projectId],
-  );
-  return [overrides, set];
+  const [state, setState] = useState(() => ({ projectId, overrides: stored(projectId) }));
+  // React re-runs this render with the new state before rendering any children.
+  if (state.projectId !== projectId) setState({ projectId, overrides: stored(projectId) });
+  const set = useCallback((key: string, value: 'open' | 'closed') => {
+    setState((cur) => {
+      const next: FoldOverrides = { ...cur.overrides, [key]: value };
+      if (key.startsWith('n:') && value === 'closed') delete next[`more:${key.slice(2)}`];
+      if (cur.projectId !== undefined) save(`ip.folds.${cur.projectId}`, JSON.stringify(next));
+      return { projectId: cur.projectId, overrides: next };
+    });
+  }, []);
+  return [state.overrides, set];
 }
