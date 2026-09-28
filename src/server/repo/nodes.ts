@@ -58,6 +58,8 @@ function siblings(ctx: Ctx, parentId: number, excludeId?: number): { id: number;
 const range = (n: number) => Array.from({ length: n }, (_, i) => i);
 
 export function insertPositions(sibs: { id: number; position: number }[], after: After, count: number): number[] {
+  const idx = sibs.findIndex((s) => s.id === after);
+  if (typeof after === 'number' && idx < 0) throw badRequest(`#${after} is not a child of this parent`, 'after must be a sibling #id, "start", or "end".');
   if (sibs.length === 0) return range(count).map((i) => i + 1);
   if (after === 'end') {
     const last = sibs[sibs.length - 1].position;
@@ -67,8 +69,6 @@ export function insertPositions(sibs: { id: number; position: number }[], after:
     const first = sibs[0].position;
     return range(count).map((i) => first - (count - i));
   }
-  const idx = sibs.findIndex((s) => s.id === after);
-  if (idx < 0) throw badRequest(`#${after} is not a child of this parent`, 'after must be a sibling #id, "start", or "end".');
   const lo = sibs[idx].position;
   const hi = sibs[idx + 1]?.position;
   if (hi === undefined) return range(count).map((i) => lo + i + 1);
@@ -153,6 +153,7 @@ export function moveNode(ctx: Ctx, actor: string, id: number, input: { parentId:
     for (let cur: TreeNode | undefined = parent; cur; cur = cur.parentId === null ? undefined : findNode(ctx, cur.parentId)) {
       if (cur.id === id) throw badRequest(`Cannot move #${id} under its own descendant #${parent.id}`);
     }
+    if (input.after === id) throw badRequest(`Cannot place #${id} after itself`);
     const [position] = insertPositions(siblings(ctx, parent.id, id), input.after ?? 'end', 1);
     ctx.db.prepare('UPDATE nodes SET parent_id = ?, position = ?, updated_at = ? WHERE id = ?').run(parent.id, position, ctx.now(), id);
     renormalize(ctx, parent.id);

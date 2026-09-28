@@ -19,6 +19,7 @@ describe('insertPositions', () => {
   });
   it('rejects an after id that is not a sibling', () => {
     expect(() => insertPositions(sibs, 9, 1)).toThrow('#9 is not a child of this parent');
+    expect(() => insertPositions([], 9, 1)).toThrow('#9 is not a child of this parent');
   });
 });
 
@@ -44,6 +45,16 @@ describe('nodes', () => {
     const kids = listNodes(ctx, a.projectId).filter((n) => n.parentId === root).sort((x, y) => x.position - y.position);
     expect(kids.map((n) => n.title)).toEqual(['A', 'A2', 'B']);
     expect(b.title).toBe('B');
+  });
+
+  it('renumbers siblings once repeated inserts squeeze the gap below 1e-6', () => {
+    const { ctx, root } = setup();
+    const [a, b] = addNodes(ctx, 't', { parentId: root, nodes: [{ title: 'A' }, { title: 'B' }] });
+    for (let i = 0; i < 25; i++) addNodes(ctx, 't', { parentId: root, after: a.id, nodes: [{ title: `x${i}` }] });
+    const kids = listNodes(ctx, a.projectId).filter((n) => n.parentId === root).sort((x, y) => x.position - y.position);
+    expect(kids.map((n) => n.title)).toEqual(['A', ...Array.from({ length: 25 }, (_, i) => `x${24 - i}`), 'B']);
+    // Each insert halves the gap after A; the 20th leaves 2^-20 < 1e-6, which renumbers the 22 siblings 1..22.
+    expect(requireNode(ctx, b.id).position).toBe(22);
   });
 
   it('updates fields, maintains completed_at, and records the diff', () => {
@@ -74,6 +85,12 @@ describe('nodes', () => {
     expect(() => moveNode(ctx, 't', root, { parentId: a.id })).toThrow('cannot be moved');
     const other = createProject(ctx, 't', { name: 'Other' });
     expect(() => moveNode(ctx, 't', a.id, { parentId: other.rootNodeId })).toThrow('different project');
+  });
+
+  it('refuses to place a node after itself', () => {
+    const { ctx, root } = setup();
+    const [a] = addNodes(ctx, 't', { parentId: root, nodes: [{ title: 'A' }, { title: 'B' }] });
+    expect(() => moveNode(ctx, 't', a.id, { parentId: root, after: a.id })).toThrow(`Cannot place #${a.id} after itself`);
   });
 
   it('deletes leaves, requires cascade for subtrees, protects the root', () => {
