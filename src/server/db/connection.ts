@@ -19,7 +19,11 @@ export function schemaVersion(db: DB): number {
 
 export function migrate(db: DB): void {
   db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
-  for (let v = schemaVersion(db); v < MIGRATIONS.length; v++) {
+  const version = schemaVersion(db);
+  if (version > MIGRATIONS.length) {
+    throw new Error(`InProgress database schema v${version} is newer than this build (v${MIGRATIONS.length}); update InProgress`);
+  }
+  for (let v = version; v < MIGRATIONS.length; v++) {
     db.transaction(() => {
       db.exec(MIGRATIONS[v]);
       db.prepare(

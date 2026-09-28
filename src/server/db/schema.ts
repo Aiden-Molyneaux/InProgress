@@ -13,7 +13,7 @@ export const MIGRATIONS: string[] = [
     updated_at TEXT NOT NULL
   );
   CREATE TABLE bindings (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     path TEXT NOT NULL,
     branch_pattern TEXT NOT NULL DEFAULT '',
@@ -21,7 +21,7 @@ export const MIGRATIONS: string[] = [
   );
   CREATE UNIQUE INDEX bindings_unique ON bindings (lower(path), branch_pattern);
   CREATE TABLE nodes (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     parent_id INTEGER REFERENCES nodes(id) ON DELETE CASCADE,
     position REAL NOT NULL,
@@ -38,7 +38,7 @@ export const MIGRATIONS: string[] = [
   CREATE INDEX nodes_project ON nodes (project_id);
   CREATE INDEX nodes_parent ON nodes (parent_id, position);
   CREATE TABLE resources (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     node_id INTEGER NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
     kind TEXT NOT NULL CHECK (kind IN ('doc','test-suite','runbook','roadmap','diagram','link','other')),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { schemaVersion } from '../../src/server/db/connection';
+import { migrate, schemaVersion } from '../../src/server/db/connection';
 import { write } from '../../src/server/db/tx';
 import type { EventRow } from '../../src/core/types';
 import { makeCtx } from '../helpers';
@@ -11,6 +11,22 @@ describe('database', () => {
     const tables = (ctx.db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]).map((r) => r.name);
     expect(tables).toEqual(expect.arrayContaining(['projects', 'bindings', 'nodes', 'resources', 'log_entries', 'sessions', 'session_subagents', 'events', 'meta']));
     expect(ctx.db.pragma('foreign_keys', { simple: true })).toBe(1);
+  });
+
+  it('never reuses the id of a deleted node', () => {
+    const { db } = makeCtx();
+    const projectId = db.prepare("INSERT INTO projects (slug, name, created_at, updated_at) VALUES ('p', 'P', 'x', 'x')").run().lastInsertRowid;
+    const insertNode = db.prepare("INSERT INTO nodes (project_id, position, kind, title, created_at, updated_at) VALUES (?, 1, 'task', 't', 'x', 'x')");
+    insertNode.run(projectId);
+    const deleted = Number(insertNode.run(projectId).lastInsertRowid);
+    db.prepare('DELETE FROM nodes WHERE id = ?').run(deleted);
+    expect(Number(insertNode.run(projectId).lastInsertRowid)).toBeGreaterThan(deleted);
+  });
+
+  it('refuses to migrate a database created by a newer build', () => {
+    const { db } = makeCtx();
+    db.prepare("UPDATE meta SET value = '99' WHERE key = 'schema_version'").run();
+    expect(() => migrate(db)).toThrow('InProgress database schema v99 is newer than this build (v1); update InProgress');
   });
 
   it('records events inside the transaction and emits them after commit', () => {
