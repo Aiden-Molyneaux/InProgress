@@ -8,13 +8,14 @@ export function ResourceViewer({ resourceId, onClose }: { resourceId: number; on
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef(0);
-  const closeButton = useRef<HTMLButtonElement>(null);
+  const body = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     api.resource(resourceId).then(setResource).catch((e: Error) => setError(e.message));
   }, [resourceId]);
+  // Focus the scrollable body, so Home/End and the arrow keys scroll it as soon as the viewer opens.
   useEffect(() => {
-    closeButton.current?.focus();
+    body.current?.focus();
     return () => window.clearTimeout(toastTimer.current);
   }, []);
 
@@ -42,9 +43,9 @@ export function ResourceViewer({ resourceId, onClose }: { resourceId: number; on
         {resource?.path && <button className="ip-btn" onClick={() => void open(resource.id)}>Open file</button>}
         {resource?.path && <button className="ip-btn" onClick={() => void copy(resource.path!, 'Path copied')}>Copy path</button>}
         {resource?.url && <button className="ip-btn" onClick={() => window.open(resource.url!, '_blank', 'noopener')}>Open link</button>}
-        <button ref={closeButton} className="ip-btn" onClick={onClose} aria-label="Close">×</button>
+        <button className="ip-btn" onClick={onClose} aria-label="Close">×</button>
       </header>
-      <div className="ip-viewer-body">
+      <div ref={body} className="ip-viewer-body" tabIndex={-1}>
         {error ? (
           <p className="muted">{error}</p>
         ) : !resource ? (
