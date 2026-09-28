@@ -28,6 +28,23 @@ describe('describeEvent', () => {
     expect(actorLabel(ev('node.created', '1', {}, 'hook:prompt'), snapshot)).toBe('Claude');
     expect(actorLabel(ev('node.created', '1', {}, 'system'), snapshot)).toBe('system');
   });
+
+  it('falls back to ids and the event type when the snapshot has no match', () => {
+    expect(describeEvent(ev('widget.spun', '7', {}), snapshot)).toBe('widget.spun');
+    expect(describeEvent(ev('node.updated', '99', { changes: { status: { from: 'todo', to: 'done' } } }), snapshot)).toBe('#99 → done');
+    expect(describeEvent(ev('node.created', '58', { ids: [58], parentId: 55 }), null)).toBe('added #58');
+    expect(describeEvent(ev('session.updated', 's1', { changed: ['state'], state: 'idle' }), null)).toBe('a session is idle');
+  });
+
+  it('labels a scribe without a known session as plain scribe', () => {
+    expect(actorLabel(ev('node.created', '1', {}, 'scribe'), snapshot)).toBe('scribe');
+    expect(actorLabel(ev('node.created', '1', {}), null)).toBe('scribe');
+  });
+
+  it('says when a session ended', () => {
+    expect(describeEvent(ev('session.updated', 's1', { changed: ['state'], state: 'ended' }), snapshot)).toBe('InGame launch status ended');
+    expect(describeEvent(ev('session.updated', 'gone', { changed: ['state'], state: 'ended' }), snapshot)).toBe('a session ended');
+  });
 });
 
 describe('relativeTime', () => {

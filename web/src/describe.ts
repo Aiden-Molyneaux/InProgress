@@ -1,6 +1,6 @@
 import { sessionDisplayTitle, type EventRow, type ProjectSnapshot } from '../../src/core/types';
 
-const STATE_WORDS: Record<string, string> = { working: 'working', idle: 'idle', permission: 'waiting for a permission', ended: 'ended' };
+const STATE_WORDS: Record<string, string> = { working: 'working', idle: 'idle', permission: 'waiting for a permission' };
 
 function nodeLabel(id: number | undefined, snapshot: ProjectSnapshot | null): string {
   if (id === undefined) return 'a step';
@@ -38,6 +38,7 @@ export function describeEvent(e: EventRow, snapshot: ProjectSnapshot | null): st
     case 'session.updated': {
       const who = sessionLabel(e.entityId, snapshot);
       if (d.changed?.includes('focusNodeId')) return d.focusNodeId ? `${who} is on ${nodeLabel(d.focusNodeId, snapshot)}` : `${who} cleared its focus`;
+      if (d.state === 'ended') return `${who} ended`;
       return `${who} is ${STATE_WORDS[d.state ?? ''] ?? d.state ?? 'updated'}`;
     }
     case 'project.created':

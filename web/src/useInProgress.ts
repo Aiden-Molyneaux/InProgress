@@ -30,6 +30,8 @@ export function useInProgress(): InProgressState {
   slugRef.current = slug;
   const projectIdRef = useRef<number | null>(null);
   projectIdRef.current = snapshot?.project.id ?? null;
+  /** Numbers snapshot requests: only the newest may land, so a slow older response never overwrites newer data. */
+  const snapshotSeq = useRef(0);
 
   const loadProjects = useCallback(async () => {
     const list = await api.projects().catch(() => null);
@@ -39,12 +41,21 @@ export function useInProgress(): InProgressState {
     setSlug((cur) => (cur && list.some((p) => p.slug === cur) ? cur : (list.find((p) => p.status === 'active') ?? list[0])?.slug ?? null));
   }, []);
 
-  const loadSnapshot = useCallback(async (s: string) => {
-    const snap = await api.project(s).catch(() => null);
-    if (slugRef.current !== s) return;
-    setSnapshot(snap);
-    if (snap) setLastEvent((cur) => (cur && cur.projectId === snap.project.id && cur.id >= (snap.lastEvent?.id ?? 0) ? cur : snap.lastEvent));
-  }, []);
+  const loadSnapshot = useCallback(
+    async (s: string) => {
+      const seq = ++snapshotSeq.current;
+      const snap = await api.project(s).catch(() => null);
+      if (seq !== snapshotSeq.current || slugRef.current !== s) return;
+      if (!snap) {
+        // Keep what is on screen. Re-checking the slug moves an unknown one (a stale #/p/ link) to a real project.
+        void loadProjects();
+        return;
+      }
+      setSnapshot(snap);
+      setLastEvent((cur) => (cur && cur.projectId === snap.project.id && cur.id >= (snap.lastEvent?.id ?? 0) ? cur : snap.lastEvent));
+    },
+    [loadProjects],
+  );
 
   useEffect(() => {
     void loadProjects();
@@ -55,6 +66,10 @@ export function useInProgress(): InProgressState {
     save('ip.project', slug);
     if (window.location.hash !== `#/p/${slug}`) window.history.replaceState(null, '', `#/p/${slug}`);
     setSnapshot(null);
+    // A live event belongs to the project it came from: the next project's canvas must not follow it.
+    // Clearing the ref now, not at the next render, stops an old project's event slipping in before that render.
+    projectIdRef.current = null;
+    setLiveEvent(null);
     void loadSnapshot(slug);
   }, [slug, loadSnapshot]);
 
@@ -84,6 +99,9 @@ export function useInProgress(): InProgressState {
         if (e.projectId !== null && e.projectId === projectIdRef.current) {
           setLastEvent(e);
           setLiveEvent(e);
+          refreshSnapshot();
+        } else if (projectIdRef.current === null) {
+          // No snapshot yet (a switch in flight): the pending response may predate this event.
           refreshSnapshot();
         }
       },
