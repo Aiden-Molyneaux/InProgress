@@ -189,7 +189,8 @@ without. The resolved project is assigned at session start only if the session h
   signature, exit 0 quietly; if something else holds the port, exit 1 with a clear message.
   On `EADDRINUSE` (two sessions starting at once) re-probe health before deciding. Writes
   `server.pid`. `claude:install` stops a running server so the next hook starts the new build;
-  `doctor` warns when the running server's version differs from the built one.
+  `doctor` fails its server check (✗, with the `inprogress stop` hint) when the running
+  server's version differs from the built one.
 - **Backups**: on each start, back up the DB with better-sqlite3's backup API into
   `backups/inprogress-YYYYMMDD-HHmmss.db`, keeping the newest 7.
 - `server.log` is truncated on start when above 5 MB.
@@ -431,7 +432,9 @@ and the skill directory, after the same backup step. The data dir is left alone.
 - `status`: health, projects with needs-you counts, live sessions.
 - `outline <project> [--full]`: print the text outline (read-only, no token), for status
   questions from a Claude session and for Aiden in a terminal.
-- `doctor`: checks with ✓/✗ and a fix hint each: server health and version match, token
+- `doctor`: starts the server first if it is not running (as `open` does, and saying so), so it
+  passes straight after `claude-install`; then checks with ✓/✗ and a fix hint on every
+  failure: server health and version match, token
   readable, DB integrity (`PRAGMA quick_check`), hooks present in settings, agent file present
   with valid frontmatter (name, model, tools, mcpServers), skill present, allow rules present,
   the MCP server starts and answers `list_projects`, Edge found (a warning, not a failure).
