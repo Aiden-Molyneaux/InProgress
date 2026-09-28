@@ -42,6 +42,14 @@ describe('resources', () => {
     const r = addResource(ctx, 't', { nodeId: step.id, kind: 'link', title: 'Docs', url: 'https://example.com' });
     expect(() => updateResource(ctx, 't', r.id, { nodeId: p2.rootNodeId })).toThrow('different project');
   });
+
+  it('lists only the resources attached to the given node', () => {
+    const { ctx, step, other } = setup();
+    const onStep = addResource(ctx, 't', { nodeId: step.id, kind: 'doc', title: 'On step', content: 'a' });
+    const onOther = addResource(ctx, 't', { nodeId: other.id, kind: 'doc', title: 'On other', content: 'b' });
+    expect(listNodeResources(ctx, step.id).map((x) => x.id)).toEqual([onStep.id]);
+    expect(listNodeResources(ctx, other.id).map((x) => x.id)).toEqual([onOther.id]);
+  });
 });
 
 describe('logs', () => {
@@ -64,7 +72,19 @@ describe('search', () => {
     expect(res.nodes.map((n) => n.title)).toEqual(['Run signing tests']);
     expect(res.resources.map((r) => r.title)).toEqual(['Keystore runbook']);
     expect(search(ctx, project.id, '100%').resources).toHaveLength(1);
+    expect(search(ctx, project.id, 'Use%key').resources).toHaveLength(0);
     expect(search(ctx, project.id, '_').nodes).toHaveLength(0);
+  });
+
+  it('returns at most 20 results in total, nodes first', () => {
+    const { ctx, project, step } = setup();
+    addNodes(ctx, 't', { parentId: project.rootNodeId, nodes: Array.from({ length: 15 }, (_, i) => ({ title: `Cap node ${i}` })) });
+    for (let i = 0; i < 10; i++) addResource(ctx, 't', { nodeId: step.id, kind: 'doc', title: `Cap resource ${i}`, content: 'x' });
+    const mixed = search(ctx, project.id, 'cap');
+    expect({ nodes: mixed.nodes.length, resources: mixed.resources.length }).toEqual({ nodes: 15, resources: 5 });
+    addNodes(ctx, 't', { parentId: project.rootNodeId, nodes: Array.from({ length: 10 }, (_, i) => ({ title: `More cap node ${i}` })) });
+    const nodesOnly = search(ctx, project.id, 'cap');
+    expect({ nodes: nodesOnly.nodes.length, resources: nodesOnly.resources.length }).toEqual({ nodes: 20, resources: 0 });
   });
 });
 
