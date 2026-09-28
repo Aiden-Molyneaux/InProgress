@@ -22,6 +22,10 @@ describe('detectBranch', () => {
     const root = repo('3f2a9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b\n');
     expect(detectBranch(root, root)).toBeUndefined();
   });
+  it('treats the reftable HEAD stub as no branch', () => {
+    const root = repo('ref: refs/heads/.invalid\n');
+    expect(detectBranch(root, root)).toBeUndefined();
+  });
   it('follows a worktree .git file', () => {
     const main = repo('ref: refs/heads/main\n');
     const wtGit = join(main, '.git', 'worktrees', 'wt1');

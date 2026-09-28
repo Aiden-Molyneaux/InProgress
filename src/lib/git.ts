@@ -21,7 +21,7 @@ export function detectBranch(cwd: string, ceiling?: string): string | undefined 
         }
         const head = readFileSync(join(gitDir, 'HEAD'), 'utf8').trim();
         const ref = /^ref:\s*refs\/heads\/(.+)$/.exec(head);
-        return ref ? ref[1] : undefined;
+        return ref && ref[1] !== '.invalid' ? ref[1] : undefined;
       }
       if (stop && dir === stop) return undefined;
       const parent = dirname(dir);

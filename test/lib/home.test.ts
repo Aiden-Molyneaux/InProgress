@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -28,6 +28,13 @@ describe('home', () => {
     const t = ensureToken(home);
     expect(t).toMatch(/^[0-9a-f]{64}$/);
     expect(ensureToken(home)).toBe(t);
+    expect(readFileSync(join(home, 'token'), 'utf8').trim()).toBe(t);
+  });
+  it('replaces an empty token file left by a crashed writer', () => {
+    const home = mkdtempSync(join(tmpdir(), 'ip-home-'));
+    writeFileSync(join(home, 'token'), '');
+    const t = ensureToken(home);
+    expect(t).toMatch(/^[0-9a-f]{64}$/);
     expect(readFileSync(join(home, 'token'), 'utf8').trim()).toBe(t);
   });
 });

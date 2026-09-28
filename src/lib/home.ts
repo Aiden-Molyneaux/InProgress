@@ -36,6 +36,19 @@ export function ensureToken(home: string = homeDir()): string {
   const existing = readToken(home);
   if (existing) return existing;
   const token = randomBytes(32).toString('hex');
+  try {
+    writeFileSync(tokenPath(home), `${token}\n`, { mode: 0o600, flag: 'wx' });
+    return token;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+  }
+  // Another process created the file first: use its token once it has been written.
+  for (let i = 0; i < 20; i++) {
+    const other = readToken(home);
+    if (other) return other;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+  }
+  // Still empty after ~200 ms (a crash mid-write): replace it.
   writeFileSync(tokenPath(home), `${token}\n`, { mode: 0o600 });
   return token;
 }
