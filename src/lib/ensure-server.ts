@@ -29,7 +29,10 @@ export async function ensureServer(o: { baseUrl: string; entry?: string; waitMs?
   mkdirSync(home, { recursive: true });
   const out = openSync(join(home, 'server.log'), 'a');
   try {
-    const child = spawn(process.execPath, [o.entry ?? serverEntry()], { detached: true, stdio: ['ignore', out, out], windowsHide: true, env: process.env });
+    // Run from the data dir: Windows locks a process's cwd, and a long-lived server must not pin the
+    // caller's project folder (no rename, delete or worktree removal until it stops). The absolute
+    // home keeps a relative INPROGRESS_HOME pointing at the same directory from the new cwd.
+    const child = spawn(process.execPath, [o.entry ?? serverEntry()], { detached: true, cwd: home, stdio: ['ignore', out, out], windowsHide: true, env: { ...process.env, INPROGRESS_HOME: home } });
     child.on('error', () => undefined);
     child.unref();
   } finally {

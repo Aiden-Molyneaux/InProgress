@@ -1,7 +1,11 @@
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ApiClientError, createClient } from '../../src/lib/client';
 import { ensureServer, isServerUp } from '../../src/lib/ensure-server';
+import { homeDir } from '../../src/lib/home';
 import { buildApp } from '../../src/server/app';
 import { makeCtx } from '../helpers';
 
@@ -50,5 +54,26 @@ describe('ensureServer', () => {
     const started = Date.now();
     expect(await ensureServer({ baseUrl: 'http://127.0.0.1:1', entry: 'does-not-exist.js', waitMs: 400 })).toBe(false);
     expect(Date.now() - started).toBeLessThan(3000);
+  });
+
+  it('spawns the server in its data dir with an absolute INPROGRESS_HOME', async () => {
+    // Windows locks a process's cwd, so a server left running in the caller's folder would pin it.
+    // A stand-in entry records where it ran (written then renamed, so it is never read half-written).
+    const dir = mkdtempSync(join(tmpdir(), 'ip-entry-'));
+    const entry = join(dir, 'probe.cjs');
+    const seen = join(dir, 'seen.json');
+    writeFileSync(
+      entry,
+      "const fs = require('node:fs');\n" +
+        "fs.writeFileSync(__dirname + '/seen.tmp', JSON.stringify({ cwd: process.cwd(), home: process.env.INPROGRESS_HOME }));\n" +
+        "fs.renameSync(__dirname + '/seen.tmp', __dirname + '/seen.json');\n",
+    );
+    try {
+      expect(await ensureServer({ baseUrl: 'http://127.0.0.1:1', entry, waitMs: 200 })).toBe(false);
+      for (let i = 0; i < 50 && !existsSync(seen); i++) await new Promise((r) => setTimeout(r, 100));
+      expect(JSON.parse(readFileSync(seen, 'utf8'))).toEqual({ cwd: homeDir(), home: homeDir() });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
