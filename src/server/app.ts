@@ -23,9 +23,11 @@ export type Guard = (req: FastifyRequest, reply: FastifyReply) => Promise<unknow
 
 const ALLOWED_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);
 
-export const actorOf = (req: FastifyRequest): string => String(req.headers['x-inprogress-actor'] ?? 'system').slice(0, 120);
+export const actorOf = (req: FastifyRequest): string => String(req.headers['x-inprogress-actor'] || 'system').slice(0, 120);
 
 export function buildApp(opts: AppOptions): FastifyInstance {
+  // An empty token or UI token would accept requests that send an empty one.
+  if (!opts.token || !opts.uiToken) throw new Error('buildApp needs a non-empty token and uiToken');
   // 8 MiB: a 1,000,000-character resource grows past 2 MiB once JSON-escaped and UTF-8 encoded.
   const app = Fastify({ logger: opts.logger ?? false, bodyLimit: 8 * 1024 * 1024, forceCloseConnections: true });
 

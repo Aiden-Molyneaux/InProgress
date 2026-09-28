@@ -41,7 +41,7 @@ export const resourceBody = z
     title,
     content: z.string().max(1_000_000).nullish(),
     path: z.string().max(1_000).nullish(),
-    url: z.string().url().max(2_000).nullish(),
+    url: z.string().url().max(2_000).refine((u) => /^https?:\/\//i.test(u), 'url must start with http:// or https://').nullish(),
     sessionId: z.string().max(100).nullish(),
   })
   .strict();

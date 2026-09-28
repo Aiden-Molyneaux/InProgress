@@ -1,6 +1,7 @@
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, vi } from 'vitest';
 import { buildApp, type AppOptions } from '../../src/server/app';
 import { makeCtx } from '../helpers';
@@ -12,6 +13,12 @@ function setup(extra: Partial<AppOptions> = {}) {
   const ctx = makeCtx();
   const app = buildApp({ ctx, token: TOKEN, uiToken: 'ui-token', version: 'test', ...extra });
   return { ctx, app };
+}
+
+/** Store a resource with this path on the node, then ask the UI route to open it. */
+async function openStoredPath(app: FastifyInstance, nodeId: number, path: string) {
+  const resource = (await app.inject({ method: 'POST', url: '/api/resources', headers: auth, payload: { nodeId, kind: 'doc', title: 'Doc', path } })).json();
+  return app.inject({ method: 'POST', url: '/api/ui/open', headers: { 'x-ip-ui-token': 'ui-token' }, payload: { resourceId: resource.id } });
 }
 
 describe('guards', () => {
@@ -32,6 +39,31 @@ describe('guards', () => {
     const missing = await app.inject({ url: '/api/projects/nope' });
     expect(missing.statusCode).toBe(404);
     expect(missing.json()).toMatchObject({ error: 'Project "nope" not found' });
+  });
+
+  it('refuses to build without both tokens', () => {
+    expect(() => setup({ token: '' })).toThrow('needs a non-empty token and uiToken');
+    expect(() => setup({ uiToken: '' })).toThrow('needs a non-empty token and uiToken');
+  });
+
+  it('records an empty actor header as system', async () => {
+    const { ctx, app } = setup();
+    await app.inject({ method: 'POST', url: '/api/projects', headers: { ...auth, 'x-inprogress-actor': '' }, payload: { name: 'P' } });
+    expect(ctx.db.prepare('SELECT DISTINCT actor FROM events').all()).toEqual([{ actor: 'system' }]);
+  });
+
+  it('accepts only http(s) resource urls', async () => {
+    const { app } = setup();
+    const p = (await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'P' } })).json();
+    const addLink = (link: string) =>
+      app.inject({ method: 'POST', url: '/api/resources', headers: auth, payload: { nodeId: p.rootNodeId, kind: 'link', title: 'Link', url: link } });
+    const bad = await addLink('javascript:alert(1)');
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json().hint).toContain('url must start with http:// or https://');
+    const good = await addLink('https://example.com/docs');
+    expect(good.statusCode).toBe(201);
+    const patched = await app.inject({ method: 'PATCH', url: `/api/resources/${good.json().id}`, headers: auth, payload: { url: 'javascript:alert(1)' } });
+    expect(patched.statusCode).toBe(400);
   });
 });
 
@@ -105,12 +137,51 @@ describe('ui routes', () => {
     expect(none.statusCode).toBe(400);
   });
 
+  it('refuses UNC and device paths before touching them', async () => {
+    const opened: string[] = [];
+    const { app } = setup({ openPath: async (p) => { opened.push(p); } });
+    const p = (await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'P' } })).json();
+    const file = join(mkdtempSync(join(tmpdir(), 'ip-open-')), 'suite.md');
+    writeFileSync(file, '# x');
+    // The \\?\ form names a real file, so only the local-path check can refuse it.
+    for (const path of [`\\\\?\\${file}`, '\\\\.\\C:\\suite.md', '\\\\127.0.0.1\\share\\suite.md', '//127.0.0.1/share/suite.md']) {
+      const res = await openStoredPath(app, p.rootNodeId, path);
+      expect(res.statusCode, path).toBe(400);
+      expect(res.json().error).toBe(`Not a local absolute path: ${path}`);
+    }
+    expect(opened).toEqual([]);
+  });
+
+  it('refuses a folder path', async () => {
+    const opened: string[] = [];
+    const { app } = setup({ openPath: async (p) => { opened.push(p); } });
+    const p = (await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'P' } })).json();
+    const dir = mkdtempSync(join(tmpdir(), 'ip-open-'));
+    const res = await openStoredPath(app, p.rootNodeId, dir);
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe(`Not a file: ${dir}`);
+    expect(opened).toEqual([]);
+  });
+
   it('reports an unbuilt UI, and injects the UI token into a built one', async () => {
     expect((await setup().app.inject({ url: '/' })).statusCode).toBe(503);
     const webDir = mkdtempSync(join(tmpdir(), 'ip-web-'));
     writeFileSync(join(webDir, 'index.html'), '<html><head><meta name="ip-ui-token" content="" /></head><body></body></html>');
     const res = await setup({ webDir }).app.inject({ url: '/' });
     expect(res.body).toContain('<meta name="ip-ui-token" content="ui-token">');
+  });
+
+  it('injects the UI token literally', async () => {
+    const webDir = mkdtempSync(join(tmpdir(), 'ip-web-'));
+    writeFileSync(join(webDir, 'index.html'), '<html><head><meta name="ip-ui-token" content="" /></head><body></body></html>');
+    const res = await setup({ webDir, uiToken: 'a$&b' }).app.inject({ url: '/' });
+    expect(res.body).toContain('<meta name="ip-ui-token" content="a$&b">');
+  });
+
+  it('refuses a built index.html without the token meta tag', () => {
+    const webDir = mkdtempSync(join(tmpdir(), 'ip-web-'));
+    writeFileSync(join(webDir, 'index.html'), '<html><head></head><body></body></html>');
+    expect(() => setup({ webDir })).toThrow('index.html has no ip-ui-token meta tag');
   });
 
   it('shuts down on request', async () => {

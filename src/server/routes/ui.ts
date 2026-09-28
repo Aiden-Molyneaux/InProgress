@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { isAbsolute, join } from 'node:path';
 import fastifyStatic from '@fastify/static';
 import type { FastifyInstance } from 'fastify';
 import type { AppOptions, Guard } from '../app';
@@ -9,6 +9,16 @@ import { requireResource } from '../repo/resources';
 import { openBody } from '../schemas';
 
 const TOKEN_META = /<meta name="ip-ui-token" content="[^"]*"\s*\/?>/;
+
+/**
+ * A path on a local disk. UNC and device paths (\\host\share, //host/share, \\?\, \\.\) are refused
+ * before anything touches them: Windows would open an SMB session with the user's credentials,
+ * and a slow or unreachable host would stall the server.
+ */
+function isLocalAbsolutePath(path: string): boolean {
+  if (path.startsWith('\\\\') || path.startsWith('//')) return false;
+  return process.platform === 'win32' ? /^[A-Za-z]:[\\/]/.test(path) : isAbsolute(path);
+}
 
 export function registerUi(app: FastifyInstance, opts: AppOptions, requireToken: Guard): void {
   app.post('/api/admin/shutdown', { preHandler: requireToken }, async () => {
@@ -24,7 +34,9 @@ export function registerUi(app: FastifyInstance, opts: AppOptions, requireToken:
     const { resourceId } = openBody.parse(req.body);
     const resource = requireResource(opts.ctx, resourceId);
     if (!resource.path) throw badRequest(`r${resourceId} has no file path`);
+    if (!isLocalAbsolutePath(resource.path)) throw badRequest(`Not a local absolute path: ${resource.path}`);
     if (!existsSync(resource.path)) throw badRequest(`File not found: ${resource.path}`);
+    if (!statSync(resource.path).isFile()) throw badRequest(`Not a file: ${resource.path}`);
     await (opts.openPath ?? openInEditorOrReveal)(resource.path);
     return { ok: true };
   });
@@ -34,7 +46,10 @@ export function registerUi(app: FastifyInstance, opts: AppOptions, requireToken:
     app.get('/', async (_req, reply) => reply.code(503).type('text/plain; charset=utf-8').send('InProgress UI is not built. Run: npm run build'));
     return;
   }
-  const html = readFileSync(join(webDir, 'index.html'), 'utf8').replace(TOKEN_META, `<meta name="ip-ui-token" content="${opts.uiToken}">`);
+  const index = readFileSync(join(webDir, 'index.html'), 'utf8');
+  if (!TOKEN_META.test(index)) throw new Error('index.html has no ip-ui-token meta tag');
+  // A function replacer inserts the token as is; a string replacer would expand $& and the like.
+  const html = index.replace(TOKEN_META, () => `<meta name="ip-ui-token" content="${opts.uiToken}">`);
   app.get('/', async (_req, reply) => reply.type('text/html; charset=utf-8').header('cache-control', 'no-store').send(html));
   if (existsSync(join(webDir, 'assets'))) app.register(fastifyStatic, { root: join(webDir, 'assets'), prefix: '/assets/' });
 }
