@@ -409,9 +409,10 @@ prompt-submit hook reports an untracked session that mentions InProgress. Conten
    `claude/skills/inprogress/` → `~/.claude/skills/inprogress/`, substituting `{{REPO}}` with the
    absolute repo path (forward slashes).
 3. Merge exec-form hook entries into `settings.json` for the events in 6.1 (session-start
-   timeout 10 s, others 5 s). Entries are identified by an `args[0]` ending in
-   `/dist/hooks/hook.js`, so re-running install replaces rather than duplicates them. Unknown
-   keys and other tools' hooks are preserved.
+   timeout 10 s, others 5 s). Entries are identified by an exec-form `args[0]` ending in
+   `/dist/hooks/hook.js` together with an `args[1]` naming one of the seven hooks, so re-running
+   install replaces rather than duplicates them. Unknown keys and other tools' hooks, including
+   another tool's own `dist/hooks/hook.js`, are preserved.
 4. Add to `permissions.allow`: `mcp__inprogress` (the background scribe must never stall on a
    prompt) and `Edit(~/.inprogress/resources/**)` (chat-only resources are written there).
 5. Stop a running InProgress server so the next hook starts the freshly built one.
