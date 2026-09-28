@@ -116,11 +116,15 @@ export function computeVisible(index: TreeIndex, sessions: SessionLike[], opts: 
     list.forEach((k, i) => {
       if (k.status === 'done' || k.status === 'active') last = i;
     });
-    // Past the frontier, hide unpinned dropped children and every unpinned todo/blocked child after the first two.
-    const tail = list.slice(last + 1).filter((k) => !pinned.has(k.id));
-    const candidates = tail.filter((k) => k.status === 'todo' || k.status === 'blocked');
-    const dropped = tail.filter((k) => k.status === 'dropped');
-    const hidden = new Set([...candidates.slice(2), ...dropped].map((k) => k.id));
+    // Walk the tail past the frontier. Pinned children show. Until two unpinned todo/blocked children
+    // have shown, those and any dropped ones show too; every unpinned child after that hides.
+    const hidden = new Set<number>();
+    let shown = 0;
+    for (const k of list.slice(last + 1)) {
+      if (pinned.has(k.id)) continue;
+      if (shown >= 2) hidden.add(k.id);
+      else if (k.status === 'todo' || k.status === 'blocked') shown++;
+    }
     if (hidden.size < 2) return [];
     const runs: number[][] = [];
     let current: number[] = [];

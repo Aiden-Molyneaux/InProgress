@@ -125,7 +125,7 @@ describe('computeVisible', () => {
     expect(items.map(label)).toEqual(['P', 'a', 'b', 'c']);
   });
 
-  it('hides unpinned dropped children after the frontier along with the far todo tail', () => {
+  it('hides dropped children past the visible slots along with the far todo tail', () => {
     nextId = 1;
     const p = n(null, 'P', { status: 'active' });
     const frontier = n(p.id, 'frontier', { status: 'active' });
@@ -135,6 +135,23 @@ describe('computeVisible', () => {
     const items = computeVisible(buildIndex([p, frontier, t1, t2, t3, dropped, t4]), []);
     expect(items.map(label)).toEqual(['P', 'frontier', 't1', 't2', '+3 more']);
     expect(items[4]).toMatchObject({ type: 'more', parentId: p.id, hiddenIds: [t3.id, dropped.id, t4.id] });
+  });
+
+  it('keeps dropped children visible until both todo slots are filled', () => {
+    nextId = 1;
+    const p = n(null, 'P', { status: 'active' });
+    const children = [n(p.id, 'frontier', { status: 'active' }), n(p.id, 'dropped', { status: 'dropped' }), n(p.id, 't1'), n(p.id, 't2'), n(p.id, 't3')];
+    expect(computeVisible(buildIndex([p, ...children]), []).map(label)).toEqual(['P', 'frontier', 'dropped', 't1', 't2', 't3']);
+  });
+
+  it('hides only what follows the second visible todo', () => {
+    nextId = 1;
+    const p = n(null, 'P', { status: 'active' });
+    const children = [n(p.id, 'frontier', { status: 'active' }), n(p.id, 'dropped', { status: 'dropped' }), n(p.id, 't1'), n(p.id, 't2')];
+    const [t3, t4] = [n(p.id, 't3'), n(p.id, 't4')];
+    const items = computeVisible(buildIndex([p, ...children, t3, t4]), []);
+    expect(items.map(label)).toEqual(['P', 'frontier', 'dropped', 't1', 't2', '+2 more']);
+    expect(items[5]).toMatchObject({ type: 'more', parentId: p.id, hiddenIds: [t3.id, t4.id] });
   });
 
   it('never spends one of the two visible slots on a pinned child', () => {
