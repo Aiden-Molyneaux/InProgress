@@ -4,6 +4,8 @@ import { Canvas, type CanvasHandle } from './canvas/Canvas';
 import { ActivityStrip } from './chrome/ActivityStrip';
 import { SessionRow } from './chrome/SessionRow';
 import { TopBar } from './chrome/TopBar';
+import { Details } from './panels/Details';
+import { ResourceViewer } from './panels/ResourceViewer';
 import { useFoldOverrides } from './useFoldOverrides';
 import { useInProgress } from './useInProgress';
 import { useKeyboard } from './useKeyboard';
@@ -13,6 +15,7 @@ export function App() {
   const { snapshot, projects } = state;
   const [follow, setFollow] = useState(true);
   const [selectedNode, setSelectedNode] = useState<number | null>(null);
+  const [viewerResource, setViewerResource] = useState<number | null>(null);
   const [overrides, setOverride] = useFoldOverrides(snapshot?.project.id);
   const canvas = useRef<CanvasHandle>(null);
   const needsYou = useMemo(() => (snapshot ? snapshot.nodes.filter(isNeedsYou).length : 0), [snapshot]);
@@ -20,7 +23,10 @@ export function App() {
   useEffect(() => {
     document.title = `${needsYou ? `(${needsYou}) ` : ''}InProgress${snapshot ? ` — ${snapshot.project.name}` : ''}`;
   }, [needsYou, snapshot]);
-  useEffect(() => setSelectedNode(null), [snapshot?.project.id]);
+  useEffect(() => {
+    setSelectedNode(null);
+    setViewerResource(null);
+  }, [snapshot?.project.id]);
 
   const followOn = useCallback(() => {
     setFollow(true);
@@ -32,7 +38,7 @@ export function App() {
     onNext: () => canvas.current?.nextNeedsYou(),
     onHome: () => canvas.current?.goRoot(),
     onEnd: () => canvas.current?.goFrontier(),
-    onEscape: () => setSelectedNode(null),
+    onEscape: () => (viewerResource !== null ? setViewerResource(null) : setSelectedNode(null)),
   });
 
   if (!state.loaded) return <div className="ip-empty">Loading…</div>;
@@ -64,13 +70,26 @@ export function App() {
             onToggleFold={setOverride}
             selectedNode={selectedNode}
             onSelectNode={setSelectedNode}
-            onOpenResource={() => undefined}
+            onOpenResource={setViewerResource}
           />
         ) : (
           <div className="ip-empty">Loading project…</div>
         )}
+        {snapshot && selectedNode !== null && (
+          <Details
+            nodeId={selectedNode}
+            snapshot={snapshot}
+            onClose={() => setSelectedNode(null)}
+            onSelectNode={(id) => {
+              setSelectedNode(id);
+              canvas.current?.focusNode(id);
+            }}
+            onOpenResource={setViewerResource}
+          />
+        )}
       </main>
       {snapshot && <ActivityStrip event={state.lastEvent} snapshot={snapshot} />}
+      {viewerResource !== null && <ResourceViewer resourceId={viewerResource} onClose={() => setViewerResource(null)} />}
     </div>
   );
 }
