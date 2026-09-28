@@ -86,7 +86,7 @@ export function createProject(ctx: Ctx, actor: string, input: CreateProjectInput
   const name = input.name.trim();
   if (!name) throw badRequest('Project name is empty');
   return write(ctx, actor, (record) => {
-    const base = slugify(input.slug ?? name);
+    const base = slugify(input.slug?.trim() || name);
     let slug = base;
     for (let n = 2; ctx.db.prepare('SELECT 1 FROM projects WHERE slug = ?').get(slug); n++) slug = `${base}-${n}`;
     const ts = ctx.now();
@@ -150,7 +150,7 @@ export function listProjectSummaries(ctx: Ctx): ProjectSummary[] {
         (SELECT COUNT(*) FROM nodes n WHERE n.project_id = p.id AND n.assignee = 'me' AND n.status IN ('todo','active','blocked')) AS needs_you,
         (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.state != 'ended' AND s.last_seen_at >= ?) AS active_sessions,
         (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.state = 'working' AND s.last_seen_at >= ?) AS working_sessions,
-        (SELECT MAX(ts) FROM events e WHERE e.project_id = p.id) AS last_event_at
+        (SELECT ts FROM events e WHERE e.project_id = p.id ORDER BY e.id DESC LIMIT 1) AS last_event_at
        FROM projects p`,
     )
     .all(liveSince, liveSince) as (ProjectRow & { needs_you: number; active_sessions: number; working_sessions: number; last_event_at: string | null })[];
@@ -164,9 +164,12 @@ export function addBinding(ctx: Ctx, actor: string, ref: string | number, rawPat
     const project = resolveProject(ctx, ref);
     const path = normalizePath(rawPath);
     if (!path) throw badRequest('Binding path is empty');
+    const hint = 'Use the full folder path, e.g. C:/personal/InGame.';
+    if (!/^[A-Za-z]:\//.test(path) && !path.startsWith('/')) throw badRequest(`Binding path must be absolute: ${path}`, hint);
+    if (path.split('/').some((s) => s === '.' || s === '..')) throw badRequest(`Binding path must not contain . or .. segments: ${path}`, hint);
     const pattern = branchPattern?.trim() ?? '';
     const existing = ctx.db
-      .prepare('SELECT * FROM bindings WHERE lower(path) = lower(?) AND branch_pattern = ?')
+      .prepare('SELECT * FROM bindings WHERE lower(path) = lower(?) AND lower(branch_pattern) = lower(?)')
       .get(path, pattern) as BindingRow | undefined;
     if (existing) {
       if (existing.project_id === project.id) return toBinding(existing);
@@ -200,7 +203,7 @@ export function listBindings(ctx: Ctx): Binding[] {
 
 export function resolveBinding(ctx: Ctx, cwd: string, branch?: string | null): Project | undefined {
   const rows = ctx.db
-    .prepare("SELECT b.* FROM bindings b JOIN projects p ON p.id = b.project_id WHERE p.status = 'active'")
+    .prepare("SELECT b.* FROM bindings b JOIN projects p ON p.id = b.project_id WHERE p.status = 'active' ORDER BY b.id")
     .all() as BindingRow[];
   let best: BindingRow | undefined;
   for (const row of rows) {

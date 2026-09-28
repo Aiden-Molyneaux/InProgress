@@ -23,6 +23,12 @@ describe('projects', () => {
     expect(types).toEqual(['project.created', 'node.created', 'project.created', 'node.created']);
   });
 
+  it('falls back to the name when the given slug is blank', () => {
+    const ctx = makeCtx();
+    expect(createProject(ctx, 'test', { name: 'InGame', slug: '' }).slug).toBe('ingame');
+    expect(createProject(ctx, 'test', { name: 'InGame', slug: '  ' }).slug).toBe('ingame-2');
+  });
+
   it('resolves by id, slug, or name and explains misses', () => {
     const ctx = makeCtx();
     const p = createProject(ctx, 'test', { name: 'InGame' });
@@ -58,6 +64,30 @@ describe('projects', () => {
     expect(() => removeBinding(ctx, 'test', 9999)).toThrow('Binding 9999 not found');
   });
 
+  it('refuses relative binding paths and dot segments', () => {
+    const ctx = makeCtx();
+    const p = createProject(ctx, 'test', { name: 'P' });
+    expect(() => addBinding(ctx, 'test', p.slug, 'repo')).toThrow('Binding path must be absolute: repo');
+    expect(() => addBinding(ctx, 'test', p.slug, './x')).toThrow('Binding path must be absolute: ./x');
+    expect(() => addBinding(ctx, 'test', p.slug, 'C:/a/../b')).toThrow('Binding path must not contain . or .. segments: C:/a/../b');
+    try { addBinding(ctx, 'test', p.slug, 'repo'); } catch (e) { expect(e).toMatchObject({ status: 400, hint: 'Use the full folder path, e.g. C:/personal/InGame.' }); }
+    expect(listBindings(ctx)).toEqual([]);
+    expect(addBinding(ctx, 'test', p.slug, 'C:/personal/InGame').path).toBe('C:/personal/InGame');
+    expect(addBinding(ctx, 'test', p.slug, '\\\\server\\share\\repo').path).toBe('//server/share/repo');
+    expect(addBinding(ctx, 'test', p.slug, '/home/me/repo').path).toBe('/home/me/repo');
+    expect(addBinding(ctx, 'test', p.slug, 'C:/work/.config').path).toBe('C:/work/.config');
+  });
+
+  it('treats branch patterns that differ only in case as the same binding', () => {
+    const ctx = makeCtx();
+    const a = createProject(ctx, 'test', { name: 'A' });
+    const b = createProject(ctx, 'test', { name: 'B' });
+    const first = addBinding(ctx, 'test', a.slug, 'C:/work/repo', '*VCAD-978*');
+    expect(addBinding(ctx, 'test', a.slug, 'C:/work/repo', '*vcad-978*').id).toBe(first.id);
+    expect(() => addBinding(ctx, 'test', b.slug, 'C:/work/repo', '*vcad-978*')).toThrow('already bound to project a');
+    expect(listBindings(ctx)).toHaveLength(1);
+  });
+
   it('resolves the longest matching binding, preferring a branch match, skipping archived projects', () => {
     const ctx = makeCtx();
     const repo = createProject(ctx, 'test', { name: 'Repo' });
@@ -72,6 +102,17 @@ describe('projects', () => {
     expect(resolveBinding(ctx, 'C:/elsewhere', 'main')).toBeUndefined();
     updateProject(ctx, 'test', 'ticket', { status: 'archived' });
     expect(resolveBinding(ctx, 'C:/work/repo/src', 'feature/VCAD-978-x')?.slug).toBe('repo');
+  });
+
+  it('breaks a tie between matching branch patterns on one path by binding order', () => {
+    const ctx = makeCtx();
+    const other = createProject(ctx, 'test', { name: 'Other' });
+    const first = createProject(ctx, 'test', { name: 'First' });
+    addBinding(ctx, 'test', first.slug, 'C:/work/repo', '*VCAD*');
+    addBinding(ctx, 'test', other.slug, 'C:/work/repo', '*VCAD-978*');
+    // With statistics SQLite scans projects first, so rows arrive in project order unless the query orders them.
+    ctx.db.exec('ANALYZE');
+    expect(resolveBinding(ctx, 'C:/work/repo/src', 'feature/VCAD-978-x')?.slug).toBe('first');
   });
 
   it('summarizes needs-you counts and live sessions', () => {
