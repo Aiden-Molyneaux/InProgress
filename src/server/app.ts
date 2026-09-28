@@ -5,6 +5,7 @@ import type { Ctx } from './db/tx';
 import { ApiError } from './errors';
 import { registerReadRoutes } from './routes/read';
 import { registerSessionRoutes } from './routes/sessions';
+import { registerSse } from './routes/sse';
 import { registerUi } from './routes/ui';
 import { registerWriteRoutes } from './routes/write';
 
@@ -63,6 +64,7 @@ export function buildApp(opts: AppOptions): FastifyInstance {
   registerReadRoutes(app, opts.ctx, opts.version);
   registerWriteRoutes(app, opts.ctx, requireToken);
   registerSessionRoutes(app, opts.ctx, requireToken);
+  registerSse(app, opts.ctx);
   registerUi(app, opts, requireToken);
   return app;
 }
