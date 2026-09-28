@@ -31,11 +31,13 @@ export type RecordEvent = (event: EventInput) => void;
 
 /**
  * Run `fn` in one transaction. Events passed to `record` are inserted in the same
- * transaction and emitted on `ctx.bus` only after commit. A write by
+ * transaction and delivered to the `ctx.bus` 'event' listeners only after commit;
+ * a listener that throws affects neither the write nor the other listeners. A write by
  * `scribe:<sessionId>` resets that session's stale-update counter.
- * Never call write() inside another write().
+ * Never call write() inside another write(): it throws.
  */
 export function write<T>(ctx: Ctx, actor: string, fn: (record: RecordEvent) => T): T {
+  if (ctx.db.inTransaction) throw new Error('write() called inside another write(): events would be emitted before the outer commit');
   const pending: EventRow[] = [];
   const insert = ctx.db.prepare(
     'INSERT INTO events (ts, project_id, actor, type, entity, entity_id, data) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -53,6 +55,16 @@ export function write<T>(ctx: Ctx, actor: string, fn: (record: RecordEvent) => T
     return result;
   });
   const result = run();
-  for (const event of pending) ctx.bus.emit('event', event);
+  // Call each listener ourselves: emit() stops at the first listener that throws.
+  // rawListeners() keeps once() wrappers, so once-listeners still remove themselves.
+  for (const event of pending) {
+    for (const listener of ctx.bus.rawListeners('event')) {
+      try {
+        listener.call(ctx.bus, event);
+      } catch {
+        /* a listener failure must not undo or truncate a committed write */
+      }
+    }
+  }
   return result;
 }
