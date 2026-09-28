@@ -49,7 +49,10 @@ async function main(): Promise<void> {
     if (context && eventName) await writeStdout(JSON.stringify({ hookSpecificOutput: { hookEventName: eventName, additionalContext: context } }));
   })();
   work.catch((err) => appendLog(logFile, `${name}: ${(err as Error).message}`));
-  await Promise.race([work.catch(() => undefined), new Promise((r) => setTimeout(r, budget + 250))]);
+  // We exit as soon as the limit passes, so the work's own error line never gets written: log the timeout instead.
+  const limit = budget + 250;
+  const timedOut = await Promise.race([work.then(() => false, () => false), new Promise<boolean>((r) => setTimeout(() => r(true), limit))]);
+  if (timedOut) appendLog(logFile, `${name}: timed out after ${limit} ms`);
 }
 
 main()

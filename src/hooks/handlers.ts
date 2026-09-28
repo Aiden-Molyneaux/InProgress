@@ -37,6 +37,9 @@ export interface HookDeps {
   ensureServer: () => Promise<boolean>;
 }
 
+/** Mirrors the `title` max in the server's hookBody zod schema: a longer title gets the whole hook POST rejected. */
+const TITLE_MAX = 300;
+
 const MENTIONS = /\binprogress\b/i;
 const ASKS_STATUS = /\b(where are we|where were we|what'?s next|what'?s left|status update|project status|progress so far)\b/i;
 
@@ -56,7 +59,7 @@ export function buildHookBody(name: HookName, input: HookStdin): Record<string, 
   }
   if (name === 'session-start' || name === 'prompt-submit' || name === 'stop') {
     const title = (typeof input.session_title === 'string' && input.session_title.trim()) || (input.transcript_path ? readTranscriptTitle(input.transcript_path) : undefined);
-    if (title) body.title = title;
+    if (title) body.title = title.slice(0, TITLE_MAX);
   }
   if (name === 'prompt-submit') {
     const prompt = stripPasted(typeof input.prompt === 'string' ? input.prompt : '');

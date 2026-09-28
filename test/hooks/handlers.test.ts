@@ -86,4 +86,11 @@ describe('runHandler', () => {
     await run('session-start', { session_id: 'h5', cwd: bound, source: 'startup' });
     expect(await run('stop', { session_id: 'h5' })).toBeUndefined();
   });
+
+  it('clips a long title to the server limit so the session is still tracked', async () => {
+    const long = 'x'.repeat(400);
+    expect(await run('session-start', { session_id: 'h6', cwd: bound, source: 'startup', session_title: long })).toContain('tracked in project "HookDemo"');
+    expect(buildHookBody('session-start', { session_id: 'h6', cwd: bound, session_title: long }).title).toBe('x'.repeat(300));
+    expect(findSession(ctx, 'h6')?.title).toHaveLength(300);
+  });
 });
