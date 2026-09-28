@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { TreeNode } from '../../src/core/types';
 import { ancestors, buildIndex, computeVisible, countDone, isNeedsYou, pinnedIds, progress, renderOutline } from '../../src/core/tree';
+import type { VisibleItem } from '../../src/core/tree';
 
 let nextId = 1;
 function n(parentId: number | null, title: string, extra: Partial<TreeNode> = {}): TreeNode {
@@ -28,6 +29,8 @@ function sample() {
   const nodes = [root, m, m1, m2, road, s1, s2, a1, a2, a3, s3, s4, s5, s6, s7];
   return { nodes, root, m, road, s1, s2, a1, a2, a3, s3, s4, s5, s6, s7 };
 }
+
+const label = (i: VisibleItem): string => (i.type === 'node' ? i.node.title : `+${i.hiddenIds.length} more`);
 
 describe('derived stats', () => {
   it('computes needs-you, progress, done counts and ancestors', () => {
@@ -87,6 +90,58 @@ describe('computeVisible', () => {
     const closed = computeVisible(index, [], { overrides: { [`n:${t.s2.id}`]: 'closed' } });
     expect(closed.find((i) => i.type === 'node' && i.node.id === t.s2.id)).toMatchObject({ folded: true });
     expect(computeVisible(index, [], { noFold: true }).filter((i) => i.type === 'node')).toHaveLength(15);
+  });
+
+  it('keeps a done branch open while it holds a needs-you node', () => {
+    const t = sample();
+    const signOff = n(t.m.id, 'Sign off M6', { assignee: 'me' });
+    const items = computeVisible(buildIndex([...t.nodes, signOff]), []);
+    expect(items.find((i) => i.type === 'node' && i.node.id === t.m.id)).toMatchObject({ folded: false });
+    expect(items.slice(1, 5).map(label)).toEqual(['M1-M6 build', 'M1', 'M2', 'Sign off M6']);
+  });
+
+  it('never hides a tail node that has active work under it', () => {
+    const t = sample();
+    const checklist = n(t.s7.id, 'Launch checklist', { status: 'active' });
+    const items = computeVisible(buildIndex([...t.nodes, checklist]), []);
+    expect(items.slice(-4).map(label)).toEqual(['4 Build to GitHub', '+2 more', '7 Launch', 'Launch checklist']);
+    expect(items.filter((i) => i.type === 'more')).toMatchObject([{ hiddenIds: [t.s5.id, t.s6.id] }]);
+  });
+
+  it('keeps a live session focus open and folds it once the session ends', () => {
+    const t = sample();
+    const index = buildIndex(t.nodes);
+    const mWhen = (state: 'idle' | 'ended') =>
+      computeVisible(index, [{ focusNodeId: t.m.id, state }]).find((i) => i.type === 'node' && i.node.id === t.m.id);
+    expect(mWhen('idle')).toMatchObject({ folded: false });
+    expect(mWhen('ended')).toMatchObject({ folded: true });
+  });
+
+  it('orders siblings by position, not id', () => {
+    nextId = 1;
+    const p = n(null, 'P', { status: 'active' });
+    const inIdOrder = [n(p.id, 'c', { position: 3 }), n(p.id, 'b', { position: 2 }), n(p.id, 'a', { position: 1 })];
+    const items = computeVisible(buildIndex([p, ...inIdOrder]), []);
+    expect(items.map(label)).toEqual(['P', 'a', 'b', 'c']);
+  });
+
+  it('hides unpinned dropped children after the frontier along with the far todo tail', () => {
+    nextId = 1;
+    const p = n(null, 'P', { status: 'active' });
+    const frontier = n(p.id, 'frontier', { status: 'active' });
+    const [t1, t2, t3] = [n(p.id, 't1'), n(p.id, 't2'), n(p.id, 't3')];
+    const dropped = n(p.id, 'dropped', { status: 'dropped' });
+    const t4 = n(p.id, 't4');
+    const items = computeVisible(buildIndex([p, frontier, t1, t2, t3, dropped, t4]), []);
+    expect(items.map(label)).toEqual(['P', 'frontier', 't1', 't2', '+3 more']);
+    expect(items[4]).toMatchObject({ type: 'more', parentId: p.id, hiddenIds: [t3.id, dropped.id, t4.id] });
+  });
+
+  it('never spends one of the two visible slots on a pinned child', () => {
+    nextId = 1;
+    const p = n(null, 'P', { status: 'active' });
+    const children = [n(p.id, 'frontier', { status: 'active' }), n(p.id, 'Y', { assignee: 'me' }), n(p.id, 't1'), n(p.id, 't2'), n(p.id, 't3')];
+    expect(computeVisible(buildIndex([p, ...children]), []).map(label)).toEqual(['P', 'frontier', 'Y', 't1', 't2', 't3']);
   });
 });
 
