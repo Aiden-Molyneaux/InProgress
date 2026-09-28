@@ -48,7 +48,8 @@ async function main(): Promise<void> {
     const eventName = CONTEXT_EVENT_NAME[name];
     if (context && eventName) await writeStdout(JSON.stringify({ hookSpecificOutput: { hookEventName: eventName, additionalContext: context } }));
   })();
-  work.catch((err) => appendLog(logFile, `${name}: ${(err as Error).message}`));
+  // ApiClientError carries the server's hint; for a validation 400 it names the failing field.
+  work.catch((err: Error & { hint?: string }) => appendLog(logFile, `${name}: ${err.message}${err.hint ? ` (${err.hint})` : ''}`));
   // We exit as soon as the limit passes, so the work's own error line never gets written: log the timeout instead.
   const limit = budget + 250;
   const timedOut = await Promise.race([work.then(() => false, () => false), new Promise<boolean>((r) => setTimeout(() => r(true), limit))]);

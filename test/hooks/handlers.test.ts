@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { buildHookBody, runHandler, stripPasted, type HookName } from '../../src/hooks/handlers';
+import { buildHookBody, HOOK_NAMES, runHandler, stripPasted, type HookName } from '../../src/hooks/handlers';
 import { createClient } from '../../src/lib/client';
 import { buildApp } from '../../src/server/app';
 import { addNodes } from '../../src/server/repo/nodes';
@@ -39,11 +39,28 @@ describe('buildHookBody', () => {
     expect(buildHookBody('prompt-submit', { session_id: 's', prompt: "What's next?" })).toMatchObject({ asksStatus: true, mentionsInProgress: false });
   });
 
+  it.each<[string, boolean]>([
+    ['where are we?', true],
+    ['What’s next?', true],
+    ["what's the status?", true],
+    ['status?', true],
+    ['status check please', true],
+    ['run git status', false],
+    ['the HTTP status code is 500', false],
+    ['update the status field', false],
+  ])('treats %j as a status question: %s', (prompt, asks) => {
+    expect(buildHookBody('prompt-submit', { session_id: 's', prompt }).asksStatus).toBe(asks);
+  });
+
   it('prefers session_title and falls back to the transcript title', () => {
     const file = join(mkdtempSync(join(tmpdir(), 'ip-hook-')), 't.jsonl');
     writeFileSync(file, `${JSON.stringify({ type: 'custom-title', customTitle: 'From transcript' })}\n`);
     expect(buildHookBody('session-start', { session_id: 's', cwd: bound, session_title: 'From hook', transcript_path: file }).title).toBe('From hook');
     expect(buildHookBody('stop', { session_id: 's', transcript_path: file }).title).toBe('From transcript');
+  });
+
+  it('omits an empty source so the server treats the start as a startup', () => {
+    expect(buildHookBody('session-start', { session_id: 's', source: '' })).not.toHaveProperty('source');
   });
 });
 
@@ -82,9 +99,11 @@ describe('runHandler', () => {
     expect(posted).toBe(false);
   });
 
-  it('never returns context for events that cannot inject it', async () => {
-    await run('session-start', { session_id: 'h5', cwd: bound, source: 'startup' });
-    expect(await run('stop', { session_id: 'h5' })).toBeUndefined();
+  it('returns context only for events that can inject it', async () => {
+    const stub: Parameters<typeof runHandler>[2] = { post: async () => ({ tracked: true, context: 'x' }), ensureServer: async () => true };
+    const got: Record<string, string | undefined> = {};
+    for (const name of HOOK_NAMES) got[name] = await runHandler(name, { session_id: 's' }, stub);
+    expect(got).toStrictEqual({ 'session-start': 'x', 'prompt-submit': 'x', stop: undefined, notification: undefined, 'subagent-start': undefined, 'subagent-stop': undefined, 'session-end': undefined });
   });
 
   it('clips a long title to the server limit so the session is still tracked', async () => {

@@ -41,7 +41,7 @@ export interface HookDeps {
 const TITLE_MAX = 300;
 
 const MENTIONS = /\binprogress\b/i;
-const ASKS_STATUS = /\b(where are we|where were we|what'?s next|what'?s left|status update|project status|progress so far)\b/i;
+const ASKS_STATUS = /\b(where are we|where were we|what['’]?s next|what['’]?s left|what['’]?s the status|status update|status check|project status|progress so far)\b|^\s*status\s*\??\s*$/i;
 
 export function stripPasted(prompt: string): string {
   return prompt.replace(/<pasted_content\b[^>]*>[\s\S]*?<\/pasted_content>/gi, '');
