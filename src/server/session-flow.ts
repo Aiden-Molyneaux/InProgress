@@ -27,6 +27,9 @@ export interface HookEventResult {
 
 const VISIBLE = ['projectId', 'title', 'state', 'focusNodeId'] as const;
 
+/** SessionStart sources that reset the state to idle. 'compact' (mid-turn) and unknown sources leave it alone. */
+const RESET_SOURCES = new Set(['startup', 'resume', 'clear']);
+
 function insertSession(ctx: Ctx, id: string, projectId: number, state: Session['state']): void {
   const now = ctx.now();
   ctx.db.prepare('INSERT INTO sessions (id, project_id, state, started_at, last_seen_at) VALUES (?, ?, ?, ?, ?)').run(id, projectId, state, now, now);
@@ -52,10 +55,8 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
     if (input.title?.trim()) next.title = input.title.trim();
     switch (input.event) {
       case 'start':
-        if (input.source !== 'compact') {
-          next.state = 'idle';
-          next.endedAt = null;
-        }
+        // A missing source counts as 'startup'.
+        if (RESET_SOURCES.has(input.source ?? 'startup')) next.state = 'idle';
         break;
       case 'prompt':
         next.state = 'working';
@@ -81,6 +82,8 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
         clearSubagents(ctx, sessionId);
         break;
     }
+    // Only an ended session has an end time; this also covers one revived after expiry.
+    if (next.state !== 'ended') next.endedAt = null;
     saveSession(ctx, next);
     const after = findSession(ctx, sessionId)!;
     const changed: string[] = VISIBLE.filter((k) => before![k] !== after[k]);
@@ -111,7 +114,13 @@ export function enrollSession(ctx: Ctx, actor: string, sessionId: string, projec
     const before = findSession(ctx, sessionId)!;
     const next: Session = { ...before, projectId: project.id, lastSeenAt: ctx.now() };
     if (title?.trim() && !before.title) next.title = title.trim();
+    // A focus node belongs to the old project, so a repoint clears it.
+    if (before.projectId !== project.id) next.focusNodeId = null;
     saveSession(ctx, next);
+    // Tell the old project's viewers too, so they drop this session's badge.
+    if (before.projectId !== null && before.projectId !== project.id) {
+      record({ projectId: before.projectId, type: 'session.updated', entity: 'session', entityId: sessionId, data: { changed: ['projectId'], state: next.state } });
+    }
     record({ projectId: project.id, type: 'session.updated', entity: 'session', entityId: sessionId, data: { changed: ['projectId'], state: next.state } });
   });
   // Re-read after commit: write() resets prompts_since_update for scribe actors after fn() runs.
@@ -122,16 +131,15 @@ export function enrollSession(ctx: Ctx, actor: string, sessionId: string, projec
 export function setFocus(ctx: Ctx, actor: string, sessionId: string, nodeId: number | null): Session {
   write(ctx, actor, (record) => {
     const existing = findSession(ctx, sessionId);
-    let projectId = existing?.projectId ?? null;
+    if (!existing) throw badRequest(`Session ${sessionId} is not tracked`, 'Use enroll_session first.');
+    let projectId = existing.projectId;
     if (nodeId !== null) {
       const node = requireNode(ctx, nodeId);
       if (projectId === null) projectId = node.projectId;
       else if (node.projectId !== projectId) throw badRequest(`#${nodeId} is not in this session's project`, 'Use enroll_session to move the session to another project first.');
     }
     if (projectId === null) throw badRequest(`Session ${sessionId} is not tracked`, 'Use enroll_session first.');
-    if (!existing) insertSession(ctx, sessionId, projectId, 'working');
-    const current = findSession(ctx, sessionId)!;
-    saveSession(ctx, { ...current, projectId, focusNodeId: nodeId, lastSeenAt: ctx.now() });
+    saveSession(ctx, { ...existing, projectId, focusNodeId: nodeId, lastSeenAt: ctx.now() });
     record({ projectId, type: 'session.updated', entity: 'session', entityId: sessionId, data: { changed: ['focusNodeId'], focusNodeId: nodeId } });
   });
   return findSession(ctx, sessionId)!;

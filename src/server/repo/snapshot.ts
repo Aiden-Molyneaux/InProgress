@@ -7,6 +7,11 @@ import { resolveProject } from './projects';
 import { listNodeResources, listResourceMeta } from './resources';
 import { listProjectSessions } from './sessions';
 
+/**
+ * Everything the UI and briefing need for one project. Reads sessions through
+ * listProjectSessions, which may write (stale-session expiry): never call this from inside
+ * another write().
+ */
 export function getProjectSnapshot(ctx: Ctx, ref: string | number): ProjectSnapshot {
   const project = resolveProject(ctx, ref);
   return {

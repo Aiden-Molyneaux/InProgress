@@ -70,6 +70,10 @@ export function expireStaleSessions(ctx: Ctx): void {
   });
 }
 
+/**
+ * Non-ended sessions of a project, newest first. Expires stale sessions first, which opens its
+ * own write(): never call this from inside another write().
+ */
 export function listProjectSessions(ctx: Ctx, projectId: number): Session[] {
   expireStaleSessions(ctx);
   return (ctx.db.prepare("SELECT * FROM sessions WHERE project_id = ? AND state != 'ended' ORDER BY last_seen_at DESC").all(projectId) as SessionRow[])

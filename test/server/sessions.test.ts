@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { listEventsSince, maxEventId } from '../../src/server/repo/events';
 import { addNodes } from '../../src/server/repo/nodes';
 import { addBinding, createProject, updateProject } from '../../src/server/repo/projects';
 import { addResource } from '../../src/server/repo/resources';
@@ -57,6 +58,7 @@ describe('handleHookEvent', () => {
     expect(text).toContain('tracked in project "InGame" (slug ingame). Session id: s1.');
     expect(text).toContain('Planning docs live in docs/planning.');
     expect(text).toContain('inprogress-scribe');
+    expect(text).toContain('At most one brief per turn');
     expect(text).toContain(`#${a2.id} Play app signing — active`);
     expect(text).toContain(`#${a3.id} Run signing tests — NEEDS YOU`);
     expect(text).toMatch(/Next: #\d+ 3 RevenueCat · #\d+ 4 Build to GitHub \(\+3 more\)/);
@@ -95,6 +97,17 @@ describe('handleHookEvent', () => {
     expect(findSession(ctx, 's1')?.state).toBe('working');
   });
 
+  it('resets to idle only on a startup, resume or clear start; a missing source counts as startup', () => {
+    const { ctx } = setup();
+    handleHookEvent(ctx, 's1', start());
+    const cases = [['startup', 'idle'], ['resume', 'idle'], ['clear', 'idle'], [undefined, 'idle'], ['compact', 'working'], ['mystery', 'working']] as const;
+    for (const [source, state] of cases) {
+      handleHookEvent(ctx, 's1', { event: 'prompt' });
+      handleHookEvent(ctx, 's1', { event: 'start', source, cwd: 'C:/personal/InGame' });
+      expect(findSession(ctx, 's1')?.state, `source ${source}`).toBe(state);
+    }
+  });
+
   it('tracks subagents by agent id, ignoring the scribe and empty types', () => {
     const { ctx } = setup();
     handleHookEvent(ctx, 's1', start());
@@ -122,6 +135,18 @@ describe('enrollSession and setFocus', () => {
     expect(() => enrollSession(ctx, 'scribe:e2', 'e2', other.slug)).toThrow('archived');
   });
 
+  it('clears focus and tells the old project when enroll repoints a session', () => {
+    const { ctx, project, a2 } = setup();
+    const other = createProject(ctx, 'test', { name: 'Other' });
+    handleHookEvent(ctx, 's1', start());
+    setFocus(ctx, 'scribe:s1', 's1', a2.id);
+    expect(enrollSession(ctx, 'scribe:s1', 's1', project.slug).session.focusNodeId).toBe(a2.id);
+    const mark = maxEventId(ctx);
+    expect(enrollSession(ctx, 'scribe:s1', 's1', other.slug).session).toMatchObject({ projectId: other.id, focusNodeId: null });
+    expect(listEventsSince(ctx, mark).filter((e) => e.projectId === project.id))
+      .toMatchObject([{ type: 'session.updated', entityId: 's1', data: { changed: ['projectId'], state: 'idle' } }]);
+  });
+
   it('sets focus within the session project and resets the stale counter', () => {
     const { ctx, a2 } = setup();
     handleHookEvent(ctx, 's1', start());
@@ -131,6 +156,8 @@ describe('enrollSession and setFocus', () => {
     const other = createProject(ctx, 'test', { name: 'Other' });
     expect(() => setFocus(ctx, 'scribe:s1', 's1', other.rootNodeId)).toThrow("not in this session's project");
     expect(() => setFocus(ctx, 'scribe:x', 'untracked', null)).toThrow('not tracked');
+    expect(() => setFocus(ctx, 'scribe:x', 'untracked', a2.id)).toThrow('not tracked');
+    expect(findSession(ctx, 'untracked')).toBeUndefined();
   });
 });
 
@@ -156,6 +183,20 @@ describe('snapshots', () => {
     now += 13 * 60 * 60 * 1000;
     expect(listProjectSessions(ctx, p.id)).toEqual([]);
     expect(findSession(ctx, 's1')?.state).toBe('ended');
+  });
+
+  it('revives an expired session on its next prompt without a stale end time', () => {
+    const db = openDb(':memory:');
+    let now = Date.parse('2026-09-27T00:00:00Z');
+    const ctx = createCtx(db, () => new Date(now).toISOString());
+    const p = createProject(ctx, 'test', { name: 'P' });
+    addBinding(ctx, 'test', p.slug, 'C:/p');
+    handleHookEvent(ctx, 's1', start('C:/p'));
+    now += 13 * 60 * 60 * 1000;
+    listProjectSessions(ctx, p.id);
+    expect(findSession(ctx, 's1')?.endedAt).not.toBeNull();
+    handleHookEvent(ctx, 's1', { event: 'prompt' });
+    expect(findSession(ctx, 's1')).toMatchObject({ state: 'working', endedAt: null });
   });
 
   it('builds node details with parent, children, resources and log', () => {
