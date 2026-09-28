@@ -88,4 +88,12 @@ describe('scribe MCP tools', () => {
     expect(big.isError).toBe(true);
     expect(big.text).toContain('snapshot limit is 200 KB');
   });
+
+  it('keeps the created project when create_project cannot bind the folder', async () => {
+    const res = await call('create_project', { name: 'Unbound', description: 'No folder yet', bind_path: 'relative/path', session: 's2' });
+    expect(res.isError).toBe(false);
+    expect(res.text).toContain('Created project unbound');
+    expect(res.text).toContain('Binding failed: Binding path must be absolute: relative/path. Use bind_folder to retry.');
+    expect((await call('list_projects')).text.match(/ — Unbound \(active\)/g)).toHaveLength(1);
+  });
 });

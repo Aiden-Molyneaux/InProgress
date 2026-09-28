@@ -77,8 +77,13 @@ export function createMcpServer(client: Client): McpServer {
       const p = await client.post<Project>('/api/projects', { name: a.name, description: a.description, playbook: a.playbook, slug: a.slug }, { actor: actor(a.session) });
       const lines = [`Created project ${p.slug} "${p.name}" (root #${p.rootNodeId}).`];
       if (a.bind_path) {
-        const b = await client.post<Binding>(`/api/projects/${enc(p.slug)}/bindings`, { path: a.bind_path, branchPattern: a.branch_pattern ?? null }, { actor: actor(a.session) });
-        lines.push(`Bound ${b.path}${b.branchPattern ? ` [branch ${b.branchPattern}]` : ''} (binding ${b.id}).`);
+        // The project exists by now: report a rejected binding without failing, so a retry cannot duplicate the project.
+        try {
+          const b = await client.post<Binding>(`/api/projects/${enc(p.slug)}/bindings`, { path: a.bind_path, branchPattern: a.branch_pattern ?? null }, { actor: actor(a.session) });
+          lines.push(`Bound ${b.path}${b.branchPattern ? ` [branch ${b.branchPattern}]` : ''} (binding ${b.id}).`);
+        } catch (err) {
+          lines.push(`Binding failed: ${err instanceof Error ? err.message : String(err)}. Use bind_folder to retry.`);
+        }
       }
       return lines.join('\n');
     });
