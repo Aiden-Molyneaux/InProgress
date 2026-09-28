@@ -1,10 +1,11 @@
 import { useEffect, useRef } from 'react';
 
+/** A key without a handler is left to the browser, so Home/End can scroll whatever has focus. */
 export interface KeyHandlers {
-  onFollow: () => void;
-  onNext: () => void;
-  onHome: () => void;
-  onEnd: () => void;
+  onFollow?: () => void;
+  onNext?: () => void;
+  onHome?: () => void;
+  onEnd?: () => void;
   onEscape: () => void;
 }
 
@@ -17,7 +18,7 @@ export function useKeyboard(handlers: KeyHandlers): void {
       const target = e.target as HTMLElement | null;
       if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
       const h = ref.current;
-      const map: Record<string, () => void> = { f: h.onFollow, F: h.onFollow, n: h.onNext, N: h.onNext, Home: h.onHome, End: h.onEnd, Escape: h.onEscape };
+      const map: Record<string, (() => void) | undefined> = { f: h.onFollow, F: h.onFollow, n: h.onNext, N: h.onNext, Home: h.onHome, End: h.onEnd, Escape: h.onEscape };
       const fn = map[e.key];
       if (!fn) return;
       e.preventDefault();

@@ -33,13 +33,18 @@ export function App() {
     canvas.current?.goFrontier();
   }, []);
 
-  useKeyboard({
-    onFollow: () => (follow ? setFollow(false) : followOn()),
-    onNext: () => canvas.current?.nextNeedsYou(),
-    onHome: () => canvas.current?.goRoot(),
-    onEnd: () => canvas.current?.goFrontier(),
-    onEscape: () => (viewerResource !== null ? setViewerResource(null) : setSelectedNode(null)),
-  });
+  // The viewer covers the canvas, so while it is open only Escape is ours: F/N/Home/End go to the browser.
+  useKeyboard(
+    viewerResource !== null
+      ? { onEscape: () => setViewerResource(null) }
+      : {
+          onFollow: () => (follow ? setFollow(false) : followOn()),
+          onNext: () => canvas.current?.nextNeedsYou(),
+          onHome: () => canvas.current?.goRoot(),
+          onEnd: () => canvas.current?.goFrontier(),
+          onEscape: () => setSelectedNode(null),
+        },
+  );
 
   if (!state.loaded) return <div className="ip-empty">Loading…</div>;
   return (
@@ -77,6 +82,7 @@ export function App() {
         )}
         {snapshot && selectedNode !== null && (
           <Details
+            key={selectedNode}
             nodeId={selectedNode}
             snapshot={snapshot}
             onClose={() => setSelectedNode(null)}
@@ -89,7 +95,7 @@ export function App() {
         )}
       </main>
       {snapshot && <ActivityStrip event={state.lastEvent} snapshot={snapshot} />}
-      {viewerResource !== null && <ResourceViewer resourceId={viewerResource} onClose={() => setViewerResource(null)} />}
+      {viewerResource !== null && <ResourceViewer key={viewerResource} resourceId={viewerResource} onClose={() => setViewerResource(null)} />}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { isNeedsYou } from '../../../src/core/tree';
 import type { NodeDetail, ProjectSnapshot } from '../../../src/core/types';
 import { api } from '../api';
@@ -18,6 +18,8 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
   const [detail, setDetail] = useState<NodeDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const copiedTimer = useRef(0);
+  useEffect(() => () => window.clearTimeout(copiedTimer.current), []);
 
   // Refetch whenever the snapshot changes, so the panel follows Claude's edits.
   useEffect(() => {
@@ -35,21 +37,14 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
     };
   }, [nodeId, snapshot]);
 
-  if (error) {
+  if (error || !detail) {
     return (
       <aside className="ip-details" aria-label="Node details">
         <header>
           <b>#{nodeId}</b>
           <button className="ip-btn" onClick={onClose} aria-label="Close">×</button>
         </header>
-        <p className="muted">{error}</p>
-      </aside>
-    );
-  }
-  if (!detail) {
-    return (
-      <aside className="ip-details" aria-label="Node details">
-        <p className="muted">Loading…</p>
+        <p className="muted">{error || 'Loading…'}</p>
       </aside>
     );
   }
@@ -58,7 +53,8 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
   const copy = async () => {
     await navigator.clipboard.writeText(`#${node.id} ${node.title}`);
     setCopied(true);
-    window.setTimeout(() => setCopied(false), 1200);
+    window.clearTimeout(copiedTimer.current);
+    copiedTimer.current = window.setTimeout(() => setCopied(false), 1200);
   };
 
   return (
