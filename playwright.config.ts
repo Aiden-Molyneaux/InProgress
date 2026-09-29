@@ -5,6 +5,8 @@ const PORT = 4399;
 export default defineConfig({
   testDir: 'test/e2e',
   timeout: 30_000,
+  // A flaky test should fail the run, not pass on a second try.
+  retries: 0,
   workers: 1,
   fullyParallel: false,
   use: {
