@@ -56,9 +56,11 @@ export function createMcpServer(client: Client, o: McpOptions = {}): McpServer {
       try {
         return ok(await run(args));
       } catch (err) {
-        // Status 0: nothing answered. InProgress may have stopped since this process started (`inprogress stop`, a
-        // reinstall, a crash), so start it once and retry once. Any other error, or a second failure, goes back as is.
-        if (!(err instanceof ApiClientError && err.status === 0) || !o.ensureServer) return fail(err);
+        // Nothing was listening: InProgress may have stopped since this process started (`inprogress stop`, a
+        // reinstall, a crash), so start it once and retry once. Only a refused connection is retried: after a
+        // timeout the server may already have applied a write, and a retry would repeat it. Any other error, or
+        // a second failure, goes back as is.
+        if (!(err instanceof ApiClientError && err.status === 0 && err.code === 'ECONNREFUSED') || !o.ensureServer) return fail(err);
         if (!(await o.ensureServer().catch(() => false))) return fail(err);
         try {
           return ok(await run(args));

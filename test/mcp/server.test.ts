@@ -1,5 +1,5 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer, type AddressInfo } from 'node:net';
+import { createServer, type AddressInfo, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -174,6 +174,27 @@ describe('scribe MCP self-heal', () => {
       expect(res.isError).toBe(true);
       expect(res.text).toMatch(new RegExp(`^InProgress server unreachable at http://127\\.0\\.0\\.1:${port}\\b.*\\. Run \`inprogress start\`, or \`inprogress doctor\` to diagnose\\.$`));
       expect(ensures).toBe(1);
+    }
+  });
+
+  it('never retries after a timeout, which may follow a write the server already applied', async () => {
+    const sockets = new Set<Socket>();
+    const silent = createServer((s) => sockets.add(s));
+    await new Promise<void>((resolve) => silent.listen(0, '127.0.0.1', resolve));
+    const port = (silent.address() as AddressInfo).port;
+    let ensures = 0;
+    const ensureServer = async () => {
+      ensures++;
+      return true;
+    };
+    const hung = await connect(createMcpServer(createClient({ baseUrl: `http://127.0.0.1:${port}`, token: 'tok', timeoutMs: 200 }), { ensureServer }));
+    try {
+      const res = await callOn(hung, 'create_project', { name: 'Once', description: 'Must not be sent twice' });
+      expect(res.isError).toBe(true);
+      expect(ensures).toBe(0);
+    } finally {
+      for (const s of sockets) s.destroy();
+      await new Promise((resolve) => silent.close(resolve));
     }
   });
 

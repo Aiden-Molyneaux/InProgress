@@ -3,6 +3,8 @@ export class ApiClientError extends Error {
     readonly status: number,
     message: string,
     readonly hint?: string,
+    /** For status 0: why nothing answered, e.g. `ECONNREFUSED` (nothing listening) or `TIMEOUT`. */
+    readonly code?: string,
   ) {
     super(message);
     this.name = 'ApiClientError';
@@ -37,7 +39,9 @@ export function createClient(opts: ClientOptions) {
         signal: AbortSignal.timeout(co.timeoutMs ?? opts.timeoutMs ?? 5000),
       });
     } catch (err) {
-      throw new ApiClientError(0, `InProgress server unreachable at ${opts.baseUrl} (${(err as Error).message})`, HINT);
+      // A timeout may fire after the server has already carried out the request; ECONNREFUSED means it never arrived.
+      const code = (err as Error).name === 'TimeoutError' ? 'TIMEOUT' : (err as { cause?: { code?: string } }).cause?.code;
+      throw new ApiClientError(0, `InProgress server unreachable at ${opts.baseUrl} (${(err as Error).message})`, HINT, code);
     }
     // Past this point the server has answered, so these failures keep its status (never 0, "unreachable"):
     // the request may have been carried out, and a caller must not take it for one that never arrived.
