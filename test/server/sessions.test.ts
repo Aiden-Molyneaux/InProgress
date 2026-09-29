@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { homeDir } from '../../src/lib/home';
+import { updateRules } from '../../src/server/briefing';
 import { listEventsSince, maxEventId } from '../../src/server/repo/events';
 import { addNodes } from '../../src/server/repo/nodes';
 import { addBinding, createProject, updateProject } from '../../src/server/repo/projects';
@@ -67,6 +69,14 @@ describe('handleHookEvent', () => {
     expect(findSession(ctx, 's1')).toMatchObject({ title: 'InGame launch status', state: 'idle', cwd: 'C:\\personal\\InGame\\docs' });
   });
 
+  it('names the resources folder by its absolute path, which the Write tool needs', () => {
+    const { ctx } = setup();
+    const text = handleHookEvent(ctx, 's1', start()).context!;
+    expect(text).toContain(`Content that only exists in chat is first written to ${homeDir().replace(/\\/g, '/')}/resources/<slug>/<yyyy-mm-dd>-<kebab-title>.md.`);
+    expect(text).not.toContain('~/');
+    expect(updateRules('C:\\Users\\me\\.inprogress').join('\n')).toContain(' C:/Users/me/.inprogress/resources/<slug>/<yyyy-mm-dd>-<kebab-title>.md.');
+  });
+
   it('tracks prompt, stop and permission states and nudges when stale', () => {
     const { ctx } = setup();
     handleHookEvent(ctx, 's1', start());
@@ -120,6 +130,59 @@ describe('handleHookEvent', () => {
     handleHookEvent(ctx, 's1', { event: 'subagent-start', agentId: 'a4', agentType: 'general-purpose' });
     handleHookEvent(ctx, 's1', { event: 'end' });
     expect(findSession(ctx, 's1')).toMatchObject({ state: 'ended', subagents: [] });
+  });
+});
+
+describe('first prompt of a session the server has not seen (a missed start)', () => {
+  const prompt = (cwd: string, extra = {}) => ({ event: 'prompt' as const, cwd, ...extra });
+
+  it('tracks it when its folder is bound, and briefs it in that prompt', () => {
+    const { ctx, project, a3 } = setup();
+    const r = handleHookEvent(ctx, 'p1', prompt('C:\\personal\\InGame\\src', { branch: 'main', title: 'Missed start', mentionsInProgress: false, asksStatus: false }));
+    expect(r.tracked).toBe(true);
+    expect(r.context).toContain('[InProgress] This session is tracked in project "InGame" (slug ingame). Session id: p1.');
+    expect(r.context).toContain('Where things stand:');
+    expect(r.context).toContain(`Needs you (1): #${a3.id} Run signing tests`);
+    expect(findSession(ctx, 'p1')).toMatchObject({ projectId: project.id, state: 'working', promptsSinceUpdate: 1, cwd: 'C:\\personal\\InGame\\src', branch: 'main', title: 'Missed start' });
+    // From then on it is an ordinary tracked session: no second briefing, the usual nudge.
+    expect(handleHookEvent(ctx, 'p1', prompt('C:\\personal\\InGame\\src')).context).toMatch(/^\[InProgress\] InGame · no focus set · 1 need you · last scribe update 2 prompts ago/);
+  });
+
+  it('briefs it even when that prompt asks for status (the briefing has the frontier)', () => {
+    const { ctx } = setup();
+    const r = handleHookEvent(ctx, 'p2', prompt('C:/personal/InGame', { asksStatus: true }));
+    expect(r.context).toContain('This session is tracked in project "InGame"');
+    expect(r.context).toContain('Where things stand:');
+  });
+
+  it('resolves the binding exactly like a start, branch patterns included', () => {
+    const { ctx } = setup();
+    const ticket = createProject(ctx, 'test', { name: 'Ticket' });
+    addBinding(ctx, 'test', ticket.slug, 'C:/personal/InGame', '*VCAD-978*');
+    expect(handleHookEvent(ctx, 'p3', prompt('C:/personal/InGame', { branch: 'feature/VCAD-978-x' })).context).toContain('(slug ticket)');
+    expect(handleHookEvent(ctx, 'p4', prompt('C:/personal/InGame', { branch: null })).context).toContain('(slug ingame)');
+  });
+
+  it('records the new session for the UI', () => {
+    const { ctx } = setup();
+    const mark = maxEventId(ctx);
+    handleHookEvent(ctx, 'p5', prompt('C:/personal/InGame'));
+    expect(listEventsSince(ctx, mark)).toMatchObject([{ type: 'session.updated', actor: 'hook:prompt', entityId: 'p5', data: { changed: ['created', 'state'], state: 'working' } }]);
+  });
+
+  it('stays untracked outside bound folders, as before', () => {
+    const { ctx } = setup();
+    expect(handleHookEvent(ctx, 'u1', prompt('C:/elsewhere', { branch: null }))).toEqual({ tracked: false });
+    expect(handleHookEvent(ctx, 'u1', prompt('C:/elsewhere', { mentionsInProgress: true })).context).toContain('This session is not tracked yet. Session id: u1.');
+    expect(findSession(ctx, 'u1')).toBeUndefined();
+  });
+
+  it('still needs a start or a prompt: other events never begin tracking', () => {
+    const { ctx } = setup();
+    for (const event of ['stop', 'permission', 'subagent-start', 'subagent-stop', 'end'] as const) {
+      expect(handleHookEvent(ctx, 'o1', { event, cwd: 'C:/personal/InGame' }), event).toEqual({ tracked: false });
+    }
+    expect(findSession(ctx, 'o1')).toBeUndefined();
   });
 });
 

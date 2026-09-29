@@ -1,17 +1,25 @@
 import { ancestors, buildIndex, dfsOrder, isNeedsYou, kids, progress, type TreeIndex } from '../core/tree';
 import { sessionDisplayTitle, type ProjectSnapshot, type Session, type TreeNode } from '../core/types';
+import { homeDir } from '../lib/home';
 
 const MAX_FRONTIER_LINES = 25;
 
-export const UPDATE_RULES = [
-  'Keeping InProgress current (the tree beside Claude that Aiden watches):',
-  '- Never edit it yourself. Brief the inprogress-scribe agent (Agent tool, subagent_type "inprogress-scribe"); it runs in the background. At most one brief per turn, batching every change.',
-  '- Brief at these checkpoints: a plan is made or changed (backtracking = mark steps dropped or move them); a step starts, finishes, or is blocked; something worth finding again is produced (test suite, runbook, walkthrough, roadmap, diagram, handoff); something is handed to Aiden (assignee me) or he reports doing it; an open question appears or is answered.',
-  '- Steps are plan-level with outcomes, never single actions. Detours go in the log of the step they interrupted.',
-  '- Resources: pass a file path with snapshot_file. Content that only exists in chat is first written to ~/.inprogress/resources/<slug>/<yyyy-mm-dd>-<kebab-title>.md.',
-  '- Brief format: "Session: <id> · Project: <slug>", then one "- " line per change, e.g. "#57 → done; outcome ...", "add under #55: \\"Run signing tests\\" (assignee me)", "resource on #58: test-suite \\"Signing suite\\", path ..., snapshot_file", "log on #55: ...", "focus → #58".',
-  '- After dispatching, write one line in chat ("↳ InProgress: #57 done, suite attached to #58"). The scribe\'s completion notice needs no reply beyond that line.',
-];
+/**
+ * The update rules the briefing carries. The resources folder is spelled out in full from the data dir
+ * `home` (forward slashes, as the installed skill has it): the Write tool needs an absolute path.
+ */
+export function updateRules(home: string = homeDir()): string[] {
+  const resources = `${home.replace(/\\/g, '/')}/resources`;
+  return [
+    'Keeping InProgress current (the tree beside Claude that Aiden watches):',
+    '- Never edit it yourself. Brief the inprogress-scribe agent (Agent tool, subagent_type "inprogress-scribe"); it runs in the background. At most one brief per turn, batching every change.',
+    '- Brief at these checkpoints: a plan is made or changed (backtracking = mark steps dropped or move them); a step starts, finishes, or is blocked; something worth finding again is produced (test suite, runbook, walkthrough, roadmap, diagram, handoff); something is handed to Aiden (assignee me) or he reports doing it; an open question appears or is answered.',
+    '- Steps are plan-level with outcomes, never single actions. Detours go in the log of the step they interrupted.',
+    `- Resources: pass a file path with snapshot_file. Content that only exists in chat is first written to ${resources}/<slug>/<yyyy-mm-dd>-<kebab-title>.md.`,
+    '- Brief format: "Session: <id> · Project: <slug>", then one "- " line per change, e.g. "#57 → done; outcome ...", "add under #55: \\"Run signing tests\\" (assignee me)", "resource on #58: test-suite \\"Signing suite\\", path ..., snapshot_file", "log on #55: ...", "focus → #58".',
+    '- After dispatching, write one line in chat ("↳ InProgress: #57 done, suite attached to #58"). The scribe\'s completion notice needs no reply beyond that line.',
+  ];
+}
 
 function statusText(n: TreeNode): string {
   if (!isNeedsYou(n)) return n.status;
@@ -89,7 +97,7 @@ export function renderBriefing(snapshot: ProjectSnapshot, sessionId: string): st
     lines.push('Playbook:', ...pl.slice(0, 15).map((l) => `  ${l}`));
     if (pl.length > 15) lines.push(`  … (${pl.length - 15} more lines)`);
   }
-  lines.push(...UPDATE_RULES);
+  lines.push(...updateRules());
   lines.push('Where things stand:', ...frontierLines(snapshot, sessionId).map((l) => `  ${l}`));
   const needs = needsYouLine(snapshot);
   if (needs) lines.push(needs);

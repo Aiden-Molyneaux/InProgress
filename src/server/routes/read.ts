@@ -16,9 +16,12 @@ export function registerReadRoutes(app: FastifyInstance, ctx: Ctx, version: stri
     const full = ['1', 'true'].includes(String((req.query as { full?: string }).full));
     const resourcesByNode = new Map<number, number[]>();
     for (const r of snap.resources) resourcesByNode.set(r.nodeId, [...(resourcesByNode.get(r.nodeId) ?? []), r.id]);
-    const header = `Project ${snap.project.name} (slug ${snap.project.slug}${snap.project.status === 'archived' ? ', archived' : ''})`;
+    const header = [`Project ${snap.project.name} (slug ${snap.project.slug}${snap.project.status === 'archived' ? ', archived' : ''})`];
+    // The scribe starts with get_outline, so this is where it reads the project's own instructions.
+    const playbook = snap.project.playbook.trim();
+    if (playbook) header.push('Playbook:', ...playbook.split(/\r?\n/).map((l) => `  ${l}`));
     const body = renderOutline(buildIndex(snap.nodes), snap.sessions, { full, resourcesByNode });
-    return reply.type('text/plain; charset=utf-8').send(`${header}\n${body}`);
+    return reply.type('text/plain; charset=utf-8').send(`${header.join('\n')}\n${body}`);
   });
   app.get('/api/nodes/:id', async (req) => getNodeDetail(ctx, idParam.parse(req.params).id));
   app.get('/api/resources/:id', async (req) => requireResource(ctx, idParam.parse(req.params).id));
