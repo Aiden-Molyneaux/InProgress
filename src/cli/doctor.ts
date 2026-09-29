@@ -5,7 +5,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import Database from 'better-sqlite3';
 import { readToken } from '../lib/home';
 import { VERSION } from '../lib/version';
-import { ALLOW_RULES, HOOK_DEFS, isInProgressHook } from './claude-config';
+import { ALLOW_RULES, HOOK_DEFS, isInProgressHook, settingsShapeError } from './claude-config';
 import { findEdge } from './open';
 
 export interface Check {
@@ -26,18 +26,25 @@ export interface DoctorOptions {
 type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 type HookGroup = { hooks?: { command?: string; args?: string[] }[] };
 
-/** A JSON file's contents: no value when the file does not exist, `error` when it cannot be read or parsed. */
+/**
+ * settings.json's contents, read as install reads them (a leading BOM is ignored, an empty file is {}): no value when
+ * the file does not exist, `error` when it cannot be read, parsed, or used.
+ */
 function readJson(file: string): { value?: Json; error?: string } {
   if (!existsSync(file)) return {};
+  let value: unknown;
   try {
-    return { value: JSON.parse(readFileSync(file, 'utf8')) };
+    const text = readFileSync(file, 'utf8').replace(/^\uFEFF/, '');
+    value = text.trim() ? JSON.parse(text) : {};
   } catch (err) {
-    return { error: (err as Error).message };
+    return { error: `settings.json is not valid JSON: ${(err as Error).message}` };
   }
+  const problem = settingsShapeError(value);
+  return problem ? { error: `settings.json: ${problem}` } : { value: value as Json };
 }
 
 const invalidSettings = (file: string, error: string): string =>
-  `settings.json is not valid JSON: ${error}: fix ${file} by hand, or restore its newest settings.json.inprogress-backup-<stamp> copy`;
+  `${error}: fix ${file} by hand, or restore its newest settings.json.inprogress-backup-<stamp> copy`;
 
 async function serverCheck(baseUrl: string): Promise<Check> {
   try {
@@ -65,13 +72,16 @@ function restoreHint(file: string): string {
 
 function dbCheck(file: string): Check {
   if (!existsSync(file)) return { name: 'Database', ok: false, detail: `${file} is missing: start the server once` };
+  let db: Database.Database | undefined;
   try {
-    const db = new Database(file, { readonly: true, fileMustExist: true });
+    db = new Database(file, { readonly: true, fileMustExist: true });
     const result = db.pragma('quick_check', { simple: true });
-    db.close();
     return { name: 'Database', ok: result === 'ok', detail: result === 'ok' ? 'integrity ok' : `${String(result)}: ${restoreHint(file)}` };
   } catch (err) {
     return { name: 'Database', ok: false, detail: `${(err as Error).message}: ${restoreHint(file)}` };
+  } finally {
+    // A damaged file fails at the pragma, after the open: close it either way, or Windows keeps the file locked.
+    db?.close();
   }
 }
 
@@ -118,7 +128,8 @@ function hooksCheck(file: string, settings: { value?: Json; error?: string }): C
 }
 
 export async function runChecks(o: DoctorOptions): Promise<Check[]> {
-  const checks: Check[] = [await serverCheck(o.baseUrl)];
+  const server = await serverCheck(o.baseUrl);
+  const checks: Check[] = [server];
   const token = readToken(o.home);
   checks.push({ name: 'Token', ok: !!token, detail: token ? 'readable' : `missing at ${join(o.home, 'token')}: start the server once` });
   checks.push(dbCheck(join(o.home, 'inprogress.db')));
@@ -140,7 +151,10 @@ export async function runChecks(o: DoctorOptions): Promise<Check[]> {
           detail: missingRules.length ? `missing: ${missingRules.join(', ')}: run npm run claude:install` : ALLOW_RULES.join(', '),
         },
   );
-  if (!o.skipMcp) checks.push(await mcpCheck(join(o.repo, 'dist', 'mcp', 'main.js')));
+  if (!o.skipMcp) {
+    // Without a working server the MCP server cannot answer either: it would take seconds to fail and blame the build.
+    checks.push(server.ok ? await mcpCheck(join(o.repo, 'dist', 'mcp', 'main.js')) : { name: 'MCP server', ok: false, warnOnly: true, detail: 'skipped: server check failed' });
+  }
   const edge = findEdge();
   checks.push({ name: 'Edge', ok: !!edge, detail: edge ?? 'not found: `inprogress open` will use the default browser', warnOnly: true });
   return checks;

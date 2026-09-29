@@ -13,19 +13,21 @@ const SNAPSHOT_LIMIT = 200 * 1024;
 
 type ToolResult = { content: { type: 'text'; text: string }[]; isError?: boolean };
 const ok = (text: string): ToolResult => ({ content: [{ type: 'text', text }] });
-const fail = (err: unknown): ToolResult => {
-  const text = err instanceof ApiClientError ? (err.hint ? `${err.message}. ${err.hint}` : err.message) : err instanceof Error ? err.message : String(err);
-  return { isError: true, content: [{ type: 'text', text }] };
-};
+/** An error as the scribe sees it: the server's specific message, then its hint on what to do next. */
+const errorText = (err: unknown): string =>
+  err instanceof ApiClientError ? (err.hint ? `${err.message}. ${err.hint}` : err.message) : err instanceof Error ? err.message : String(err);
+const fail = (err: unknown): ToolResult => ({ isError: true, content: [{ type: 'text', text: errorText(err) }] });
+const sentence = (text: string) => (/[.!?]$/.test(text) ? text : `${text}.`);
 const actor = (session?: string) => (session ? `scribe:${session}` : 'scribe');
 const enc = encodeURIComponent;
 
+const assignee = z.enum(ASSIGNEES).describe('Who does this step: "me" = the user (Aiden), "claude" = Claude');
 const nodeInputSchema: z.ZodType<NodeInput> = z.lazy(() =>
   z.object({
     title: z.string().min(1).max(200),
     kind: z.enum(NODE_KINDS).optional(),
     status: z.enum(NODE_STATUSES).optional(),
-    assignee: z.enum(ASSIGNEES).optional(),
+    assignee: assignee.optional(),
     body: z.string().optional(),
     outcome: z.string().optional(),
     children: z.array(nodeInputSchema).optional(),
@@ -34,8 +36,19 @@ const nodeInputSchema: z.ZodType<NodeInput> = z.lazy(() =>
 const after = z.union([z.number().int().positive(), z.enum(['start', 'end'])]).optional().describe('Insert after this sibling #id, or "start" / "end" (default end)');
 const session = z.string().optional().describe('The Claude session id from the brief. Always pass it on writes.');
 const id = z.number().int().positive();
+const resourceId = id.describe('Resource id: the number after "r" (r12 → 12)');
+const project = z.string().describe('Project slug, name or id');
+const folder = (what: string) => z.string().describe(`Absolute path of the ${what}, e.g. C:/personal/InGame`);
 
-export function createMcpServer(client: Client): McpServer {
+export interface McpOptions {
+  /**
+   * Starts InProgress when a call finds it unreachable (main.ts passes the real ensureServer). The failing call is
+   * retried once afterwards. Without it, an unreachable server is reported as is.
+   */
+  ensureServer?: () => Promise<boolean>;
+}
+
+export function createMcpServer(client: Client, o: McpOptions = {}): McpServer {
   const server = new McpServer({ name: 'inprogress', version: VERSION });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tool = (name: string, description: string, shape: z.ZodRawShape, run: (args: any) => Promise<string>) => {
@@ -43,7 +56,15 @@ export function createMcpServer(client: Client): McpServer {
       try {
         return ok(await run(args));
       } catch (err) {
-        return fail(err);
+        // Status 0: nothing answered. InProgress may have stopped since this process started (`inprogress stop`, a
+        // reinstall, a crash), so start it once and retry once. Any other error, or a second failure, goes back as is.
+        if (!(err instanceof ApiClientError && err.status === 0) || !o.ensureServer) return fail(err);
+        if (!(await o.ensureServer().catch(() => false))) return fail(err);
+        try {
+          return ok(await run(args));
+        } catch (retryErr) {
+          return fail(retryErr);
+        }
       }
     });
   };
@@ -59,20 +80,20 @@ export function createMcpServer(client: Client): McpServer {
       .join('\n');
   });
 
-  tool('get_outline', 'Outline of a project tree with #ids, statuses, assignees and resource ids. Finished branches are folded unless full is true.', { project: z.string().describe('slug, name or id'), full: z.boolean().optional() },
+  tool('get_outline', 'Outline of a project tree with #ids, statuses, assignees and resource ids. Finished branches are folded unless full is true.', { project, full: z.boolean().optional() },
     async (a: { project: string; full?: boolean }) => client.text(`/api/projects/${enc(a.project)}/outline${a.full ? '?full=1' : ''}`));
 
   tool('get_node', 'One node with its parent, children, resources and recent log.', { id },
     async (a: { id: number }) => formatNodeDetail(await client.get<NodeDetail>(`/api/nodes/${a.id}`)));
 
-  tool('get_resource', 'A resource including its saved content.', { id },
+  tool('get_resource', 'A resource including its saved content.', { id: resourceId },
     async (a: { id: number }) => formatResource(await client.get<Resource>(`/api/resources/${a.id}`)));
 
-  tool('search', 'Find nodes and resources in a project by text.', { project: z.string(), query: z.string().min(1) },
+  tool('search', 'Find nodes and resources in a project by text.', { project, query: z.string().min(1) },
     async (a: { project: string; query: string }) => formatSearch(await client.get<SearchResult>(`/api/search?project=${enc(a.project)}&q=${enc(a.query)}`)));
 
   tool('create_project', 'Create a project with its root node, optionally binding a folder (and git branch glob) so sessions there are tracked automatically.',
-    { name: z.string().min(1), description: z.string(), playbook: z.string().optional(), slug: z.string().optional(), bind_path: z.string().optional(), branch_pattern: z.string().optional(), session },
+    { name: z.string().min(1), description: z.string(), playbook: z.string().optional(), slug: z.string().optional(), bind_path: folder('folder to bind').optional(), branch_pattern: z.string().optional(), session },
     async (a: { name: string; description: string; playbook?: string; slug?: string; bind_path?: string; branch_pattern?: string; session?: string }) => {
       const p = await client.post<Project>('/api/projects', { name: a.name, description: a.description, playbook: a.playbook, slug: a.slug }, { actor: actor(a.session) });
       const lines = [`Created project ${p.slug} "${p.name}" (root #${p.rootNodeId}).`];
@@ -82,20 +103,20 @@ export function createMcpServer(client: Client): McpServer {
           const b = await client.post<Binding>(`/api/projects/${enc(p.slug)}/bindings`, { path: a.bind_path, branchPattern: a.branch_pattern ?? null }, { actor: actor(a.session) });
           lines.push(`Bound ${b.path}${b.branchPattern ? ` [branch ${b.branchPattern}]` : ''} (binding ${b.id}).`);
         } catch (err) {
-          lines.push(`Binding failed: ${err instanceof Error ? err.message : String(err)}. Use bind_folder to retry.`);
+          lines.push(`Binding failed: ${sentence(errorText(err))} Use bind_folder to retry.`);
         }
       }
       return lines.join('\n');
     });
 
   tool('update_project', 'Rename a project, change its description or playbook, or archive / unarchive it.',
-    { project: z.string(), name: z.string().optional(), description: z.string().optional(), playbook: z.string().optional(), status: z.enum(['active', 'archived']).optional(), session },
+    { project, name: z.string().optional(), description: z.string().optional(), playbook: z.string().optional(), status: z.enum(['active', 'archived']).optional(), session },
     async ({ project, session: s, ...patch }: { project: string; session?: string; name?: string; description?: string; playbook?: string; status?: 'active' | 'archived' }) => {
       const p = await client.patch<Project>(`/api/projects/${enc(project)}`, patch, { actor: actor(s) });
       return `Updated project ${p.slug} (${p.status}).`;
     });
 
-  tool('bind_folder', 'Bind a folder, optionally with a git branch glob like *VCAD-978*, so sessions started there are tracked.', { project: z.string(), path: z.string(), branch_pattern: z.string().optional(), session },
+  tool('bind_folder', 'Bind a folder, optionally with a git branch glob like *VCAD-978*, so sessions started there are tracked.', { project, path: folder('folder to bind'), branch_pattern: z.string().optional(), session },
     async (a: { project: string; path: string; branch_pattern?: string; session?: string }) => {
       const b = await client.post<Binding>(`/api/projects/${enc(a.project)}/bindings`, { path: a.path, branchPattern: a.branch_pattern ?? null }, { actor: actor(a.session) });
       return `Binding ${b.id}: ${b.path}${b.branchPattern ? ` [branch ${b.branchPattern}]` : ''} → ${a.project}.`;
@@ -113,7 +134,7 @@ export function createMcpServer(client: Client): McpServer {
       formatCreated(await client.post<TreeNode[]>('/api/nodes', { parentId: a.parent, after: a.after, nodes: a.nodes }, { actor: actor(a.session) })));
 
   tool('update_node', "Change a node's title, kind, status, assignee, body or outcome. Set outcome when something finishes.",
-    { id, title: z.string().optional(), kind: z.enum(NODE_KINDS).optional(), status: z.enum(NODE_STATUSES).optional(), assignee: z.enum(ASSIGNEES).optional(), body: z.string().optional(), outcome: z.string().optional(), session },
+    { id, title: z.string().optional(), kind: z.enum(NODE_KINDS).optional(), status: z.enum(NODE_STATUSES).optional(), assignee: assignee.optional(), body: z.string().optional(), outcome: z.string().optional(), session },
     async ({ id: nodeId, session: s, ...patch }: { id: number; session?: string } & Record<string, unknown>) => {
       const n = await client.patch<TreeNode>(`/api/nodes/${nodeId}`, patch, { actor: actor(s) });
       return `#${n.id} ${n.title} — ${n.status}${n.assignee === 'me' ? ' (you)' : ''}.`;
@@ -132,7 +153,7 @@ export function createMcpServer(client: Client): McpServer {
     });
 
   tool('add_resource', 'Attach a resource to the node where it was produced. Give a path (with snapshot_file=true for text files up to 200 KB), a url, or content.',
-    { node: id, kind: z.enum(RESOURCE_KINDS), title: z.string().min(1), content: z.string().optional(), path: z.string().optional(), url: z.string().optional(), snapshot_file: z.boolean().optional(), session },
+    { node: id, kind: z.enum(RESOURCE_KINDS), title: z.string().min(1), content: z.string().optional(), path: z.string().optional().describe('Absolute path of the file; with snapshot_file its text is read and saved'), url: z.string().optional(), snapshot_file: z.boolean().optional(), session },
     async (a: { node: number; kind: string; title: string; content?: string; path?: string; url?: string; snapshot_file?: boolean; session?: string }) => {
       let content = a.content;
       if (a.snapshot_file) {
@@ -145,14 +166,14 @@ export function createMcpServer(client: Client): McpServer {
       return `r${r.id} "${r.title}" (${r.kind}) attached to #${r.nodeId}${r.contentLength ? ` · ${r.contentLength} chars saved` : ''}.`;
     });
 
-  tool('update_resource', 'Edit a resource or move it to another node in the same project.',
-    { id, node: id.optional(), kind: z.enum(RESOURCE_KINDS).optional(), title: z.string().optional(), content: z.string().optional(), path: z.string().optional(), url: z.string().optional(), session },
+  tool('update_resource', 'Edit a resource or move it to another node in the same project. Changing path does not re-read the file: to refresh a snapshot, add a new resource with snapshot_file and delete this one.',
+    { id: resourceId, node: id.optional(), kind: z.enum(RESOURCE_KINDS).optional(), title: z.string().optional(), content: z.string().optional(), path: z.string().optional().describe('Absolute path of the file (the saved content stays as it is)'), url: z.string().optional(), session },
     async ({ id: rid, node, session: s, ...patch }: { id: number; node?: number; session?: string } & Record<string, unknown>) => {
       const r = await client.patch<Resource>(`/api/resources/${rid}`, { ...patch, nodeId: node }, { actor: actor(s) });
       return `r${r.id} "${r.title}" on #${r.nodeId}.`;
     });
 
-  tool('delete_resource', 'Delete a resource.', { id, session }, async (a: { id: number; session?: string }) => {
+  tool('delete_resource', 'Delete a resource.', { id: resourceId, session }, async (a: { id: number; session?: string }) => {
     await client.del(`/api/resources/${a.id}`, { actor: actor(a.session) });
     return `Deleted r${a.id}.`;
   });
@@ -163,7 +184,7 @@ export function createMcpServer(client: Client): McpServer {
       return `Logged on #${l.nodeId}.`;
     });
 
-  tool('enroll_session', 'Track a Claude session in a project (also repoints a session bound to the wrong project). Returns the project briefing.', { session: z.string().min(1), project: z.string(), title: z.string().optional() },
+  tool('enroll_session', 'Track a Claude session in a project (also repoints a session bound to the wrong project). Returns the project briefing.', { session: z.string().min(1), project, title: z.string().optional() },
     async (a: { session: string; project: string; title?: string }) => {
       const r = await client.post<{ briefing: string }>(`/api/sessions/${enc(a.session)}/enroll`, { project: a.project, title: a.title }, { actor: actor(a.session) });
       return r.briefing;

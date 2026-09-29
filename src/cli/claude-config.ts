@@ -1,12 +1,17 @@
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { constants, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { HOOK_NAMES, type HookName } from '../hooks/handlers';
+import { homeDir } from '../lib/home';
 
 export const ALLOW_RULES = ['mcp__inprogress', 'Edit(~/.inprogress/resources/**)'];
 export const HOOK_SCRIPT_SUFFIX = '/dist/hooks/hook.js';
 const NOT_SCRIBE = '^(?!inprogress-scribe$).*';
+/** What the hooks and the scribe's MCP server run: install refuses without them. */
+const BUILT_ENTRIES = ['dist/hooks/hook.js', 'dist/mcp/main.js'];
+const BACKUP_PREFIX = 'settings.json.inprogress-backup-';
+const BACKUPS_KEPT = 5;
 
 export interface HookDef {
   event: string;
@@ -30,8 +35,9 @@ type HookGroup = { matcher?: string; hooks?: HookEntry[] };
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Settings = Record<string, any>;
 
+/** Claude's config dir: INPROGRESS_CLAUDE_DIR (tests), else Claude Code's own CLAUDE_CONFIG_DIR, else ~/.claude. */
 export function claudeDir(): string {
-  const configured = process.env.INPROGRESS_CLAUDE_DIR;
+  const configured = process.env.INPROGRESS_CLAUDE_DIR || process.env.CLAUDE_CONFIG_DIR;
   if (!configured) return join(homedir(), '.claude');
   return isAbsolute(configured) ? configured : resolve(configured);
 }
@@ -42,11 +48,12 @@ export function repoRoot(): string {
 }
 
 /**
- * The Node binary running the installer, as an absolute forward-slash path. Hooks and the scribe's
- * MCP server use it instead of relying on `node` being on the PATH the Claude desktop app inherits.
+ * The Node binary running the installer, as an absolute forward-slash path. Hooks and the scribe's MCP server use it
+ * instead of relying on `node` being on the PATH the Claude desktop app inherits. The real path, not a symlink such as
+ * nvm4w's, so switching Node versions cannot silently change the runtime under the hooks, the scribe and the server.
  */
-export function nodeBinary(): string {
-  return process.execPath.replace(/\\/g, '/');
+export function nodeBinary(execPath: string = process.execPath): string {
+  return realpathSync(execPath).replace(/\\/g, '/');
 }
 
 export function hookEntry(repo: string, name: HookName, timeout: number): HookEntry {
@@ -94,16 +101,66 @@ export function addAllowRules(settings: Settings): Settings {
   return settings;
 }
 
+/** Removes our allow rules. An allow list (and then a permissions object) that this leaves empty goes too. */
 export function removeAllowRules(settings: Settings): Settings {
-  const allow = settings.permissions?.allow;
-  if (Array.isArray(allow)) settings.permissions.allow = allow.filter((r: string) => !ALLOW_RULES.includes(r));
+  const permissions = settings.permissions;
+  if (!Array.isArray(permissions?.allow)) return settings;
+  const kept = permissions.allow.filter((r: string) => !ALLOW_RULES.includes(r));
+  if (kept.length === permissions.allow.length) return settings;
+  if (kept.length) permissions.allow = kept;
+  else {
+    delete permissions.allow;
+    if (Object.keys(permissions).length === 0) delete settings.permissions;
+  }
   return settings;
 }
 
-export const renderTemplate = (text: string, repo: string): string => text.replaceAll('{{REPO}}', repo).replaceAll('{{NODE}}', nodeBinary());
+/** Fills a kit template. Replacer functions keep `$&`-style sequences in a path literal; every path gets forward slashes. */
+export function renderTemplate(text: string, repo: string): string {
+  const values: Record<string, string> = { REPO: repo, NODE: nodeBinary(), RESOURCES: `${homeDir()}/resources` };
+  return text.replace(/\{\{(REPO|NODE|RESOURCES)\}\}/g, (_match, key: string) => values[key].replace(/\\/g, '/'));
+}
 
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** The first value in settings.json that install or uninstall would trip over, named by its key. */
+export function settingsShapeError(settings: unknown): string | undefined {
+  if (!isObject(settings)) return 'the top level is not a JSON object';
+  const { hooks, permissions } = settings;
+  if (hooks !== undefined) {
+    if (!isObject(hooks)) return '"hooks" is not an object';
+    for (const [event, groups] of Object.entries(hooks)) {
+      if (!Array.isArray(groups)) return `"hooks.${event}" is not an array`;
+      for (const [i, group] of groups.entries()) {
+        const key = `hooks.${event}[${i}]`;
+        if (!isObject(group)) return `"${key}" is not an object`;
+        if (group.hooks === undefined) continue;
+        if (!Array.isArray(group.hooks)) return `"${key}.hooks" is not an array`;
+        if (!group.hooks.every(isObject)) return `"${key}.hooks" holds an entry that is not an object`;
+      }
+    }
+  }
+  if (permissions !== undefined) {
+    if (!isObject(permissions)) return '"permissions" is not an object';
+    if (permissions.allow !== undefined && !Array.isArray(permissions.allow)) return '"permissions.allow" is not an array';
+  }
+  return undefined;
+}
+
+/** Throws, naming the file, before anything is written. A leading BOM is ignored and an empty file reads as {}. */
 function readSettings(file: string): Settings {
-  return existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as Settings) : {};
+  if (!existsSync(file)) return {};
+  const text = readFileSync(file, 'utf8').replace(/^\uFEFF/, '');
+  if (!text.trim()) return {};
+  let settings: unknown;
+  try {
+    settings = JSON.parse(text);
+  } catch (err) {
+    throw new Error(`settings.json at ${file} is not valid JSON (${(err as Error).message}); nothing was changed`);
+  }
+  const problem = settingsShapeError(settings);
+  if (problem) throw new Error(`settings.json at ${file}: ${problem}; nothing was changed`);
+  return settings as Settings;
 }
 
 function countInProgressHooks(settings: Settings): number {
@@ -113,41 +170,77 @@ function countInProgressHooks(settings: Settings): number {
     .filter(isInProgressHook).length;
 }
 
-const hookEntries = (n: number): string => `InProgress hook ${n === 1 ? 'entry' : 'entries'}`;
+const hookEntryLabel = (n: number): string => `InProgress hook ${n === 1 ? 'entry' : 'entries'}`;
 
-function backup(file: string, stamp: string): string | undefined {
-  if (!existsSync(file)) return undefined;
-  const target = `${file}.inprogress-backup-${stamp}`;
-  copyFileSync(file, target);
-  return target;
+/** Newest last: stamps sort by time, and a numeric suffix (`-2` before `-10`) by number. */
+const byStamp = new Intl.Collator('en', { numeric: true }).compare;
+
+/**
+ * Copies settings.json aside without ever replacing an earlier backup (a clash gets `-1`, `-2`, ...), then keeps the
+ * new backup and the newest four before it.
+ */
+function backup(file: string, stamp: string, log: string[]): void {
+  if (!existsSync(file)) return;
+  const base = `${file}.inprogress-backup-${stamp}`;
+  let target = base;
+  for (let n = 1; ; n++) {
+    try {
+      copyFileSync(file, target, constants.COPYFILE_EXCL);
+      break;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST' || n > 100) throw err;
+      target = `${base}-${n}`;
+    }
+  }
+  log.push(`Backed up settings to ${target}`);
+  const dir = dirname(file);
+  const older = readdirSync(dir, { withFileTypes: true })
+    .filter((d) => d.isFile() && d.name.startsWith(BACKUP_PREFIX) && d.name !== basename(target))
+    .map((d) => d.name)
+    .sort(byStamp);
+  let pruned = 0;
+  for (const name of older.slice(0, Math.max(0, older.length - (BACKUPS_KEPT - 1)))) {
+    try {
+      rmSync(join(dir, name));
+      pruned++;
+    } catch {
+      // A backup we cannot delete stays; it never blocks the install.
+    }
+  }
+  if (pruned) log.push(`Removed ${pruned} older settings ${pruned === 1 ? 'backup' : 'backups'} (keeping the newest ${BACKUPS_KEPT})`);
 }
 
 export function install(o: { repo: string; claudeDir: string; stamp: string }): { log: string[]; agentsDirCreated: boolean } {
   const repo = o.repo.replace(/\\/g, '/');
-  const log: string[] = [];
-  mkdirSync(o.claudeDir, { recursive: true });
+  // Everything is checked, read and rendered first, so a refusal or a broken template leaves the Claude dir untouched.
+  const unbuilt = BUILT_ENTRIES.find((entry) => !existsSync(join(repo, entry)));
+  if (unbuilt) throw new Error(`Build InProgress first: npm run build (${repo}/${unbuilt} is missing)`);
   const settingsFile = join(o.claudeDir, 'settings.json');
-  const saved = backup(settingsFile, o.stamp);
-  if (saved) log.push(`Backed up settings to ${saved}`);
   const current = readSettings(settingsFile);
+  const agent = renderTemplate(readFileSync(join(repo, 'claude', 'agents', 'inprogress-scribe.md'), 'utf8'), repo);
+  const skillSrc = join(repo, 'claude', 'skills', 'inprogress');
+  const skill = readdirSync(skillSrc).map((f) => [f, renderTemplate(readFileSync(join(skillSrc, f), 'utf8'), repo)] as const);
   const replaced = countInProgressHooks(current);
   const settings = addAllowRules(addInProgressHooks(current, repo));
+
+  const log = [`Claude directory: ${o.claudeDir}`, `Node binary: ${nodeBinary()}`];
+  mkdirSync(o.claudeDir, { recursive: true });
+  backup(settingsFile, o.stamp, log);
   writeFileSync(settingsFile, `${JSON.stringify(settings, null, 2)}\n`);
-  if (replaced > 0) log.push(`Replaced ${replaced} existing ${hookEntries(replaced)}`);
+  if (replaced > 0) log.push(`Replaced ${replaced} existing ${hookEntryLabel(replaced)}`);
   log.push(`Hooks: ${HOOK_DEFS.map((d) => d.event).join(', ')}`, `Allow rules: ${ALLOW_RULES.join(', ')}`);
 
   const agentsDir = join(o.claudeDir, 'agents');
   const agentsDirCreated = !existsSync(agentsDir);
   mkdirSync(agentsDir, { recursive: true });
   const agentFile = join(agentsDir, 'inprogress-scribe.md');
-  writeFileSync(agentFile, renderTemplate(readFileSync(join(repo, 'claude', 'agents', 'inprogress-scribe.md'), 'utf8'), repo));
+  writeFileSync(agentFile, agent);
   log.push(`Agent: ${agentFile}`);
 
-  const skillSrc = join(repo, 'claude', 'skills', 'inprogress');
   const skillDst = join(o.claudeDir, 'skills', 'inprogress');
   rmSync(skillDst, { recursive: true, force: true });
   mkdirSync(skillDst, { recursive: true });
-  for (const f of readdirSync(skillSrc)) writeFileSync(join(skillDst, f), renderTemplate(readFileSync(join(skillSrc, f), 'utf8'), repo));
+  for (const [f, text] of skill) writeFileSync(join(skillDst, f), text);
   log.push(`Skill: ${skillDst}`);
 
   if (agentsDirCreated) log.push('The agents folder is new: restart any open Claude sessions so they can see the scribe.');
@@ -155,16 +248,16 @@ export function install(o: { repo: string; claudeDir: string; stamp: string }): 
 }
 
 export function uninstall(o: { claudeDir: string; stamp: string }): string[] {
-  const log: string[] = [];
+  const log = [`Claude directory: ${o.claudeDir}`];
   const settingsFile = join(o.claudeDir, 'settings.json');
-  const saved = backup(settingsFile, o.stamp);
-  if (saved) log.push(`Backed up settings to ${saved}`);
   if (existsSync(settingsFile)) {
+    // Read and checked before the backup, so a refused settings.json leaves the agent and skill in place too.
     const current = readSettings(settingsFile);
     const removed = countInProgressHooks(current);
     const settings = removeAllowRules(stripInProgressHooks(current));
+    backup(settingsFile, o.stamp, log);
     writeFileSync(settingsFile, `${JSON.stringify(settings, null, 2)}\n`);
-    log.push(`Removed ${removed} ${hookEntries(removed)} and the allow rules`);
+    log.push(`Removed ${removed} ${hookEntryLabel(removed)} and the allow rules`);
   }
   rmSync(join(o.claudeDir, 'agents', 'inprogress-scribe.md'), { force: true });
   rmSync(join(o.claudeDir, 'skills', 'inprogress'), { recursive: true, force: true });

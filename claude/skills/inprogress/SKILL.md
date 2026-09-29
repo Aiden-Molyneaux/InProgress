@@ -14,7 +14,7 @@ A tracked session has a context block starting `[InProgress] This session is tra
 - Brief the scribe with the Agent tool (`subagent_type: "inprogress-scribe"`, description "InProgress update"). It runs in the background: never wait for it or poll it. At most one brief per turn, with every change batched.
 - Checkpoints: a plan is made or changed (backtracking marks steps `dropped` or moves them); a step starts, finishes or is blocked; something worth finding again is produced; something is handed to Aiden (`assignee: me`) or he reports doing it; an open question appears (`kind: question`) or is answered (`done`, answer in `outcome`).
 - Steps are plan-level with outcomes, never single actions. Detours go in the log of the step they interrupted.
-- Resources always go to the scribe as a file path plus `snapshot_file`. Content that only exists in chat (for example a test suite written in a reply) is first written with the Write tool to `~/.inprogress/resources/<project-slug>/<yyyy-mm-dd>-<kebab-title>.md`.
+- Resources always go to the scribe as a file path plus `snapshot_file`. Content that only exists in chat (for example a test suite written in a reply) is first written with the Write tool to `{{RESOURCES}}/<project-slug>/<yyyy-mm-dd>-<kebab-title>.md`.
 - After dispatching, write one line in chat, e.g. `↳ InProgress: #57 done, test suite attached to #58`. The scribe's completion notice needs no reply beyond that line.
 
 Brief template:
@@ -24,7 +24,7 @@ Session: <session id> · Project: <slug>
 Changes:
 - #57 → done; outcome "Play app signing configured"
 - add under #55 after #57: "Run signing tests" (task, assignee me); body: run on a device build, report failures
-- resource on the new "Run signing tests" node: test-suite "Signing test suite", path C:/Users/<you>/.inprogress/resources/ingame/2026-09-27-signing-test-suite.md, snapshot_file
+- resource on the new "Run signing tests" node: test-suite "Signing test suite", path {{RESOURCES}}/ingame/2026-09-27-signing-test-suite.md, snapshot_file
 - log on #55: "Detour: sandbox network wedge, fixed by restarting VMware NAT"
 - focus → the new "Run signing tests" node
 ```
@@ -32,7 +32,7 @@ Changes:
 ## Opting in (session not tracked)
 
 1. The session id comes from the `[InProgress] This session is not tracked yet. Session id: …` line. If it is missing, ask Aiden to mention "InProgress" in his next message so the hook supplies it.
-2. Decide the project. If it is unclear, run `node "{{REPO}}/dist/cli/main.js" status` to see existing projects, and ask Aiden.
+2. Decide the project. If it is unclear, run `"{{NODE}}" "{{REPO}}/dist/cli/main.js" status` to see existing projects (from PowerShell, start the command with `& `), and ask Aiden.
 3. Brief the scribe to enroll the session (creating the project first if new: name, one-paragraph purpose, optional playbook) and, if Aiden agrees, bind the current folder. For ticket work in a shared repo, bind with a branch pattern like `*VCAD-978*`.
 4. Write the one-line chat note.
 
@@ -49,7 +49,7 @@ Do not reconstruct history beyond that.
 
 ## Status questions
 
-When a tracked prompt asks where things stand, the prompt hook injects a live `[InProgress] Where things stand …` block: answer from it. For the whole tree, run `node "{{REPO}}/dist/cli/main.js" outline <slug>` (read-only). Never dispatch the scribe just to read.
+When a tracked prompt asks where things stand, the prompt hook injects a live `[InProgress] Where things stand …` block: answer from it. For the whole tree, run `"{{NODE}}" "{{REPO}}/dist/cli/main.js" outline <slug>` (read-only). Never dispatch the scribe just to read.
 
 ## Stale nudges
 

@@ -3,7 +3,10 @@ import { createClient } from '../lib/client';
 import { ensureServer } from '../lib/ensure-server';
 import { baseUrl, homeDir, readToken } from '../lib/home';
 import { appendLog } from '../lib/log';
-import { CONTEXT_EVENT_NAME, HOOK_NAMES, runHandler, type HookName, type HookStdin } from './handlers';
+import { CONTEXT_EVENT_NAME, HOOK_NAMES, hookErrorLine, parseHookInput, runHandler, type HookName } from './handlers';
+
+// Claude may stop reading before the briefing is written (say after a timeout): an EPIPE must not reach stderr.
+process.stdout.on('error', () => undefined);
 
 function readStdin(timeoutMs: number): Promise<string> {
   return new Promise((resolve) => {
@@ -37,8 +40,7 @@ async function main(): Promise<void> {
   const budget = name === 'session-start' ? 3000 : 500;
   const postTimeout = name === 'session-start' ? 1000 : 500;
   const work = (async () => {
-    const raw = await readStdin(1000);
-    const input = JSON.parse(raw || '{}') as HookStdin;
+    const input = parseHookInput(await readStdin(1000));
     const url = baseUrl();
     const context = await runHandler(name, input, {
       ensureServer: () => ensureServer({ baseUrl: url, waitMs: 2000 }),
@@ -48,8 +50,7 @@ async function main(): Promise<void> {
     const eventName = CONTEXT_EVENT_NAME[name];
     if (context && eventName) await writeStdout(JSON.stringify({ hookSpecificOutput: { hookEventName: eventName, additionalContext: context } }));
   })();
-  // ApiClientError carries the server's hint; for a validation 400 it names the failing field.
-  work.catch((err: Error & { hint?: string }) => appendLog(logFile, `${name}: ${err.message}${err.hint ? ` (${err.hint})` : ''}`));
+  work.catch((err: unknown) => appendLog(logFile, hookErrorLine(name, err)));
   // We exit as soon as the limit passes, so the work's own error line never gets written: log the timeout instead.
   const limit = budget + 250;
   const timedOut = await Promise.race([work.then(() => false, () => false), new Promise<boolean>((r) => setTimeout(() => r(true), limit))]);

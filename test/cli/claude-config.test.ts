@@ -1,17 +1,59 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { ALLOW_RULES, HOOK_DEFS, hookEntry, install, isInProgressHook, uninstall } from '../../src/cli/claude-config';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { afterAll, describe, expect, it } from 'vitest';
+import { ALLOW_RULES, claudeDir, HOOK_DEFS, hookEntry, install, isInProgressHook, nodeBinary, renderTemplate, uninstall } from '../../src/cli/claude-config';
+import { homeDir } from '../../src/lib/home';
 
-const repo = process.cwd().replace(/\\/g, '/');
+const temps: string[] = [];
+function tempDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  temps.push(dir);
+  return dir;
+}
+afterAll(() => {
+  for (const dir of temps) rmSync(dir, { recursive: true, force: true });
+});
 
-function claudeDirWithSettings(settings: object | undefined) {
-  const dir = mkdtempSync(join(tmpdir(), 'ip-claude-'));
-  if (settings) writeFileSync(join(dir, 'settings.json'), JSON.stringify(settings, null, 2));
+/** A stand-in repo: the real claude/ templates plus empty built entries, so these tests never depend on a build. */
+function fixtureRepo(): string {
+  const dir = tempDir('ip-repo-');
+  cpSync(join(process.cwd(), 'claude'), join(dir, 'claude'), { recursive: true });
+  for (const entry of ['dist/hooks/hook.js', 'dist/mcp/main.js']) {
+    mkdirSync(dirname(join(dir, entry)), { recursive: true });
+    writeFileSync(join(dir, entry), '');
+  }
+  return dir.replace(/\\/g, '/');
+}
+const repo = fixtureRepo();
+
+function claudeDirWithSettings(settings: object | string | undefined) {
+  const dir = tempDir('ip-claude-');
+  if (settings !== undefined) writeFileSync(join(dir, 'settings.json'), typeof settings === 'string' ? settings : JSON.stringify(settings, null, 2));
   return dir;
 }
 const readSettings = (dir: string) => JSON.parse(readFileSync(join(dir, 'settings.json'), 'utf8'));
+const backups = (dir: string) => readdirSync(dir).filter((f) => f.startsWith('settings.json.inprogress-backup-')).sort();
+const slashed = (p: string) => p.replace(/\\/g, '/');
+
+/** Every file and folder under `dir` with its contents, to prove a refused install or uninstall wrote nothing. */
+function snapshot(dir: string): Record<string, string> {
+  const files: Record<string, string> = {};
+  for (const rel of readdirSync(dir, { recursive: true }) as string[]) {
+    const full = join(dir, rel);
+    files[slashed(rel)] = statSync(full).isDirectory() ? '<dir>' : readFileSync(full, 'utf8');
+  }
+  return files;
+}
+
+function thrownBy(fn: () => unknown): string {
+  try {
+    fn();
+  } catch (err) {
+    return (err as Error).message;
+  }
+  throw new Error('expected a throw');
+}
 
 const existing = {
   model: 'opus',
@@ -46,6 +88,47 @@ describe('isInProgressHook', () => {
   });
 });
 
+describe('nodeBinary', () => {
+  it('resolves the running Node through symlinks, with forward slashes', () => {
+    expect(nodeBinary()).toBe(slashed(realpathSync(process.execPath)));
+    // nvm4w reaches the active Node through a linked folder: the real path pins the version that was installed.
+    const real = tempDir('ip-node-real-');
+    writeFileSync(join(real, 'node.exe'), '');
+    const link = join(tempDir('ip-node-link-'), 'nodejs');
+    symlinkSync(real, link, 'junction');
+    expect(nodeBinary(join(link, 'node.exe'))).toBe(slashed(join(realpathSync(real), 'node.exe')));
+  });
+});
+
+describe('claudeDir', () => {
+  it('prefers INPROGRESS_CLAUDE_DIR, then CLAUDE_CONFIG_DIR, then ~/.claude', () => {
+    const saved = { INPROGRESS_CLAUDE_DIR: process.env.INPROGRESS_CLAUDE_DIR, CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR };
+    try {
+      process.env.INPROGRESS_CLAUDE_DIR = 'C:/tmp/ip-claude';
+      process.env.CLAUDE_CONFIG_DIR = 'C:/tmp/claude-config';
+      expect(claudeDir()).toBe('C:/tmp/ip-claude');
+      delete process.env.INPROGRESS_CLAUDE_DIR;
+      expect(claudeDir()).toBe('C:/tmp/claude-config');
+      process.env.CLAUDE_CONFIG_DIR = 'relative-claude';
+      expect(claudeDir()).toBe(resolve('relative-claude'));
+      delete process.env.CLAUDE_CONFIG_DIR;
+      expect(claudeDir()).toBe(join(homedir(), '.claude'));
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+});
+
+describe('renderTemplate', () => {
+  it('fills every placeholder with a forward-slash path and never expands $ patterns', () => {
+    const text = 'node {{NODE}} · repo {{REPO}} · resources {{RESOURCES}}/ingame';
+    expect(renderTemplate(text, "C:\\odd$&\\repo$'")).toBe(`node ${nodeBinary()} · repo C:/odd$&/repo$' · resources ${slashed(homeDir())}/resources/ingame`);
+  });
+});
+
 describe('install', () => {
   it('merges exec-form hooks and allow rules while preserving everything else', () => {
     const dir = claudeDirWithSettings(existing);
@@ -61,32 +144,51 @@ describe('install', () => {
     for (const def of HOOK_DEFS) {
       const group = s.hooks[def.event].at(-1);
       expect(group.matcher).toBe(def.matcher);
-      expect(group.hooks[0]).toEqual({ type: 'command', command: process.execPath.replace(/\\/g, '/'), args: [`${repo}/dist/hooks/hook.js`, def.name], timeout: def.timeout });
+      expect(group.hooks[0]).toEqual({ type: 'command', command: nodeBinary(), args: [`${repo}/dist/hooks/hook.js`, def.name], timeout: def.timeout });
     }
     expect(existsSync(join(dir, 'settings.json.inprogress-backup-20260927-120000'))).toBe(true);
     const agent = readFileSync(join(dir, 'agents', 'inprogress-scribe.md'), 'utf8');
     expect(agent).toContain(`args: ["${repo}/dist/mcp/main.js"]`);
-    expect(agent).not.toContain('{{REPO}}');
-    expect(agent).toContain(`command: "${process.execPath.replace(/\\/g, '/')}"`);
-    expect(readFileSync(join(dir, 'skills', 'inprogress', 'SKILL.md'), 'utf8')).toContain(`${repo}/dist/cli/main.js`);
+    expect(agent).toContain(`command: "${nodeBinary()}"`);
+    expect(agent).not.toMatch(/\{\{\w+\}\}/);
+    const skill = readFileSync(join(dir, 'skills', 'inprogress', 'SKILL.md'), 'utf8');
+    expect(skill).toContain(`"${nodeBinary()}" "${repo}/dist/cli/main.js" status`);
+    expect(skill).not.toMatch(/`node "/);
+    expect(skill).toContain(`${slashed(homeDir())}/resources/<project-slug>/`);
+    expect(skill).not.toContain('~/.inprogress/resources');
+    expect(skill).not.toMatch(/\{\{\w+\}\}/);
   });
 
-  it('is idempotent and reports an existing agents dir', () => {
+  it('begins its log with the target Claude directory and the node binary it wrote', () => {
+    const dir = claudeDirWithSettings(existing);
+    const { log } = install({ repo, claudeDir: dir, stamp: 's' });
+    expect(log.slice(0, 2)).toEqual([`Claude directory: ${dir}`, `Node binary: ${nodeBinary()}`]);
+  });
+
+  it('is idempotent across every hook event and allow rule', () => {
     const dir = claudeDirWithSettings(existing);
     mkdirSync(join(dir, 'agents'));
     install({ repo, claudeDir: dir, stamp: 'a' });
+    const once = readSettings(dir);
     const second = install({ repo, claudeDir: dir, stamp: 'b' });
     expect(second.agentsDirCreated).toBe(false);
-    const s = readSettings(dir);
-    expect(s.hooks.SessionStart).toHaveLength(1);
-    expect(s.hooks.Stop).toHaveLength(2);
-    expect(s.permissions.allow.filter((r: string) => r === 'mcp__inprogress')).toHaveLength(1);
+    expect(readSettings(dir)).toEqual(once);
+    expect(once).toEqual(withInstall(existing));
+    for (const d of HOOK_DEFS) {
+      const ours = once.hooks[d.event].flatMap((g: { hooks: object[] }) => g.hooks).filter(isInProgressHook);
+      expect(ours, d.event).toHaveLength(1);
+    }
+    for (const rule of ALLOW_RULES) expect(once.permissions.allow.filter((r: string) => r === rule), rule).toHaveLength(1);
   });
 
-  it('works without an existing settings file', () => {
-    const dir = claudeDirWithSettings(undefined);
-    install({ repo, claudeDir: dir, stamp: 'c' });
-    expect(Object.keys(readSettings(dir).hooks)).toHaveLength(HOOK_DEFS.length);
+  it('works without a settings file or Claude directory, and makes no backup', () => {
+    const dir = join(tempDir('ip-claude-'), 'fresh');
+    const { log } = install({ repo, claudeDir: dir, stamp: 'c' });
+    const s = readSettings(dir);
+    expect(Object.keys(s.hooks).sort()).toEqual(HOOK_DEFS.map((d) => d.event).sort());
+    expect(s.permissions.allow).toEqual(ALLOW_RULES);
+    expect(backups(dir)).toEqual([]);
+    expect(log.join('\n')).not.toContain('Backed up');
   });
 
   it("keeps other tools' hooks, even ones with the same script layout", () => {
@@ -98,13 +200,103 @@ describe('install', () => {
     expect(readSettings(dir)).toEqual(withInstall(withForeign));
     expect(second.log.join('\n')).toContain(`Replaced ${HOOK_DEFS.length} existing InProgress hook entries`);
   });
+
+  it('keeps a foreign entry that shares a group with an InProgress entry', () => {
+    const dir = claudeDirWithSettings({ hooks: { Stop: [{ hooks: [foreignExec, hookEntry(repo, 'stop', 5)] }] } });
+    const { log } = install({ repo, claudeDir: dir, stamp: 'm' });
+    expect(readSettings(dir).hooks.Stop).toEqual([{ hooks: [foreignExec] }, { hooks: [hookEntry(repo, 'stop', 5)] }]);
+    expect(log).toContain('Replaced 1 existing InProgress hook entry');
+    uninstall({ claudeDir: dir, stamp: 'n' });
+    expect(readSettings(dir)).toEqual({ hooks: { Stop: [{ hooks: [foreignExec] }] } });
+  });
+
+  it('reads a settings.json that starts with a UTF-8 BOM', () => {
+    const dir = claudeDirWithSettings(`\uFEFF${JSON.stringify(existing, null, 2)}`);
+    install({ repo, claudeDir: dir, stamp: 'bom' });
+    expect(readSettings(dir)).toEqual(withInstall(existing));
+  });
+
+  it('treats an empty or whitespace-only settings.json as {}', () => {
+    for (const text of ['', ' \r\n\t']) {
+      const dir = claudeDirWithSettings(text);
+      install({ repo, claudeDir: dir, stamp: 'empty' });
+      expect(readSettings(dir).permissions.allow).toEqual(ALLOW_RULES);
+    }
+  });
+
+  it.each([
+    ['malformed JSON', '{ "hooks": ', /is not valid JSON \(.+\); nothing was changed$/],
+    ['a top level that is not an object', '[1, 2]', /: the top level is not a JSON object; nothing was changed$/],
+    ['a hook event that is not an array', JSON.stringify({ hooks: { Stop: { hooks: [] } } }), /: "hooks\.Stop" is not an array; nothing was changed$/],
+    ['a hook group without a hooks array', JSON.stringify({ hooks: { Stop: [{ hooks: 'x' }] } }), /: "hooks\.Stop\[0\]\.hooks" is not an array; nothing was changed$/],
+    ['an allow list that is not an array', JSON.stringify({ permissions: { allow: 'mcp__inprogress' } }), /: "permissions\.allow" is not an array; nothing was changed$/],
+  ])('refuses %s before writing anything', (_label, text, error) => {
+    const dir = claudeDirWithSettings(text);
+    // An earlier install's files, which uninstall would otherwise delete.
+    mkdirSync(join(dir, 'agents'));
+    writeFileSync(join(dir, 'agents', 'inprogress-scribe.md'), 'agent');
+    mkdirSync(join(dir, 'skills', 'inprogress'), { recursive: true });
+    writeFileSync(join(dir, 'skills', 'inprogress', 'SKILL.md'), 'skill');
+    const before = snapshot(dir);
+    for (const run of [() => install({ repo, claudeDir: dir, stamp: 'bad' }), () => uninstall({ claudeDir: dir, stamp: 'bad' })]) {
+      const message = thrownBy(run);
+      expect(message.startsWith(`settings.json at ${join(dir, 'settings.json')}`)).toBe(true);
+      expect(message).toMatch(error);
+    }
+    expect(snapshot(dir)).toEqual(before);
+  });
+
+  it('refuses to install from an unbuilt repo before writing anything', () => {
+    for (const entry of ['dist/hooks/hook.js', 'dist/mcp/main.js']) {
+      const unbuilt = fixtureRepo();
+      rmSync(join(unbuilt, entry));
+      const dir = claudeDirWithSettings(existing);
+      const before = snapshot(dir);
+      expect(thrownBy(() => install({ repo: unbuilt, claudeDir: dir, stamp: 'nb' }))).toContain('Build InProgress first: npm run build');
+      expect(snapshot(dir)).toEqual(before);
+    }
+  });
+
+  it('renders the templates before writing anything', () => {
+    const broken = fixtureRepo();
+    rmSync(join(broken, 'claude', 'skills'), { recursive: true });
+    const dir = claudeDirWithSettings(existing);
+    const before = snapshot(dir);
+    expect(thrownBy(() => install({ repo: broken, claudeDir: dir, stamp: 't' }))).toMatch(/ENOENT/);
+    expect(snapshot(dir)).toEqual(before);
+  });
+
+  it('never overwrites an earlier backup with the same stamp', () => {
+    const dir = claudeDirWithSettings(existing);
+    const first = join(dir, 'settings.json.inprogress-backup-20260927-120000');
+    writeFileSync(first, 'earlier backup');
+    const { log } = install({ repo, claudeDir: dir, stamp: '20260927-120000' });
+    expect(readFileSync(first, 'utf8')).toBe('earlier backup');
+    expect(JSON.parse(readFileSync(`${first}-1`, 'utf8'))).toEqual(existing);
+    expect(log).toContain(`Backed up settings to ${first}-1`);
+    install({ repo, claudeDir: dir, stamp: '20260927-120000' });
+    expect(existsSync(`${first}-2`)).toBe(true);
+  });
+
+  it('keeps only the newest five settings backups', () => {
+    const dir = claudeDirWithSettings(existing);
+    const older = ['20260920-090000', '20260921-090000', '20260922-090000', '20260922-090000-1', '20260923-090000', '20260924-090000-2', '20260924-090000-10'];
+    for (const stamp of older) writeFileSync(join(dir, `settings.json.inprogress-backup-${stamp}`), stamp);
+    writeFileSync(join(dir, 'settings.json.unrelated'), 'keep me');
+    const { log } = install({ repo, claudeDir: dir, stamp: '20260925-090000' });
+    const kept = ['20260922-090000-1', '20260923-090000', '20260924-090000-2', '20260924-090000-10', '20260925-090000'];
+    expect(backups(dir)).toEqual(kept.map((s) => `settings.json.inprogress-backup-${s}`).sort());
+    expect(readFileSync(join(dir, 'settings.json.unrelated'), 'utf8')).toBe('keep me');
+    expect(log).toContain('Removed 3 older settings backups (keeping the newest 5)');
+  });
 });
 
 describe('uninstall', () => {
   it('removes exactly what install added', () => {
     const dir = claudeDirWithSettings(existing);
     install({ repo, claudeDir: dir, stamp: 'd' });
-    uninstall({ claudeDir: dir, stamp: 'e' });
+    const log = uninstall({ claudeDir: dir, stamp: 'e' });
+    expect(log[0]).toBe(`Claude directory: ${dir}`);
     const s = readSettings(dir);
     expect(s).toEqual(existing);
     expect(existsSync(join(dir, 'agents', 'inprogress-scribe.md'))).toBe(false);
@@ -117,5 +309,20 @@ describe('uninstall', () => {
     const log = uninstall({ claudeDir: dir, stamp: 'i' });
     expect(readSettings(dir)).toEqual(withForeign);
     expect(log.join('\n')).toContain(`Removed ${HOOK_DEFS.length} InProgress hook entries`);
+  });
+
+  it('leaves settings without permissions or hooks as they were, and drops what it emptied', () => {
+    const plain = { model: 'opus' };
+    const dir = claudeDirWithSettings(plain);
+    uninstall({ claudeDir: dir, stamp: 'u1' });
+    expect(readSettings(dir)).toEqual(plain);
+    install({ repo, claudeDir: dir, stamp: 'u2' });
+    uninstall({ claudeDir: dir, stamp: 'u3' });
+    expect(readSettings(dir)).toEqual(plain);
+    // An allow list InProgress never touched stays, even when empty.
+    const untouched = { permissions: { allow: [], ask: ['Bash(rm:*)'] } };
+    const other = claudeDirWithSettings(untouched);
+    uninstall({ claudeDir: other, stamp: 'u4' });
+    expect(readSettings(other)).toEqual(untouched);
   });
 });

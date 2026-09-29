@@ -23,7 +23,9 @@ beforeAll(async () => {
   process.env.INPROGRESS_HOME = home;
 });
 afterAll(async () => {
-  process.env.INPROGRESS_HOME = configuredHome;
+  // Assigning undefined would store the string "undefined".
+  if (configuredHome === undefined) delete process.env.INPROGRESS_HOME;
+  else process.env.INPROGRESS_HOME = configuredHome;
   rmSync(home, { recursive: true, force: true });
   await close();
 });
