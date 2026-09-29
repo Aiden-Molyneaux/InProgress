@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import { NODE_H, eventTarget, findFrontier, type LayoutNodeItem, type LayoutResult } from '../../../src/core/layout';
 import { dfsOrder, isNeedsYou, type TreeIndex } from '../../../src/core/tree';
 import type { EventRow, ProjectSnapshot } from '../../../src/core/types';
+import { createFollowThrottle } from './followThrottle';
 
 interface CameraArgs {
   layout: LayoutResult;
@@ -14,7 +15,6 @@ interface CameraArgs {
 
 /** Horizontal offset so the card, not its left edge, sits in the middle of the view. */
 const CARD_CENTER_X = 140;
-const FOLLOW_INTERVAL_MS = 1500;
 
 export function useCamera({ layout, snapshot, index, lastEvent, follow }: CameraArgs) {
   const rf = useReactFlow();
@@ -27,7 +27,6 @@ export function useCamera({ layout, snapshot, index, lastEvent, follow }: Camera
   const followRef = useRef(follow);
   followRef.current = follow;
   const lastMove = useRef(0);
-  const timer = useRef(0);
   const cursor = useRef(-1);
 
   /** The node's row, or its nearest visible ancestor's when it is folded away. */
@@ -64,30 +63,27 @@ export function useCamera({ layout, snapshot, index, lastEvent, follow }: Camera
     [rf, itemFor],
   );
 
-  // Follow Claude's changes: at most one move per 1.5 s (latest target wins), retrying
-  // briefly because the snapshot that contains a brand-new node arrives ~150 ms after its event.
-  // Only a new event with a target replaces the pending move: one without a target (a session state
-  // change, say) leaves it running, and turning Follow back on never replays an event that arrived while it was off.
+  // Follow Claude's changes: at most one move per 1.5 s, to the newest target, retrying briefly because the
+  // snapshot that contains a brand-new node arrives ~150 ms after its event (see followThrottle). An event without
+  // a target (a session state change, say) leaves a waiting move alone, and turning Follow back on never replays
+  // an event that arrived while it was off.
+  const centerOnRef = useRef(centerOn);
+  centerOnRef.current = centerOn;
+  const [follower] = useState(() =>
+    createFollowThrottle({ move: (target) => !followRef.current || centerOnRef.current(target), lastMove: () => lastMove.current }),
+  );
   useEffect(() => {
     const target = lastEvent ? eventTarget(lastEvent) : undefined;
-    if (target === undefined || !followRef.current) return;
-    let attempts = 0;
-    const attempt = () => {
-      if (!followRef.current) return;
-      if (centerOn(target) || ++attempts >= 4) return;
-      timer.current = window.setTimeout(attempt, 300);
-    };
-    window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(attempt, Math.max(350, FOLLOW_INTERVAL_MS - (Date.now() - lastMove.current)));
-  }, [lastEvent, centerOn]);
+    if (target !== undefined && followRef.current) follower.push(target);
+  }, [lastEvent, follower]);
 
   // Turning Follow off cancels a follow move that is still waiting.
   useEffect(() => {
-    if (!follow) window.clearTimeout(timer.current);
-  }, [follow]);
+    if (!follow) follower.cancel();
+  }, [follow, follower]);
 
   // So does unmounting: the canvas remounts for every project.
-  useEffect(() => () => window.clearTimeout(timer.current), []);
+  useEffect(() => () => follower.cancel(), [follower]);
 
   /**
    * Centres the next needs-you node in outline order and returns the row it landed on. A node inside a
