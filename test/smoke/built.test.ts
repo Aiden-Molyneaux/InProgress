@@ -118,6 +118,22 @@ describe('built artifacts', () => {
     await client.close();
   });
 
+  it('MCP server starts InProgress again when a call finds it stopped', async () => {
+    const client = new Client({ name: 'smoke', version: '1' });
+    await client.connect(new StdioClientTransport({ command: process.execPath, args: ['dist/mcp/main.js'], env: env as Record<string, string> }));
+    try {
+      const stop = spawnSync(process.execPath, ['dist/cli/main.js', 'stop'], { env, encoding: 'utf8' });
+      expect(stop.stdout).toContain('Stopped the running InProgress server.');
+      const res = (await client.callTool({ name: 'list_projects', arguments: {} })) as { content: { text: string }[]; isError?: boolean };
+      expect(res.isError).toBeFalsy();
+      expect(res.content[0].text).toContain('smoke');
+    } finally {
+      await client.close();
+      // The tests below expect a running server, even if this one failed.
+      spawnSync(process.execPath, ['dist/cli/main.js', 'start'], { env });
+    }
+  });
+
   it('CLI installs into a temp Claude dir, then a session-start hook restarts the server it stopped', async () => {
     const inst = spawnSync(process.execPath, ['dist/cli/main.js', 'claude-install'], { env, encoding: 'utf8' });
     expect(inst.stdout).toContain('Stopped the running InProgress server.');

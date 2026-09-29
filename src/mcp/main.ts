@@ -9,8 +9,14 @@ import { createMcpServer } from './server';
 async function main(): Promise<void> {
   const url = baseUrl();
   // stdout belongs to the MCP protocol: never print here.
-  await ensureServer({ baseUrl: url, waitMs: 3000 }).catch((err) => appendLog(join(homeDir(), 'hooks.log'), `mcp ensureServer: ${String(err)}`));
-  const server = createMcpServer(createFreshClient(url));
+  const start = () =>
+    ensureServer({ baseUrl: url, waitMs: 3000 }).catch((err) => {
+      appendLog(join(homeDir(), 'hooks.log'), `mcp ensureServer: ${String(err)}`);
+      return false;
+    });
+  await start();
+  // A call that later finds the server gone starts it again once and retries (createMcpServer).
+  const server = createMcpServer(createFreshClient(url), { ensureServer: start });
   await server.connect(new StdioServerTransport());
 }
 
