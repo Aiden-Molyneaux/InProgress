@@ -1,4 +1,4 @@
-import type { EventRow, NodeDetail, ProjectSnapshot, ProjectSummary, Resource } from '../../src/core/types';
+import type { NodeDetail, ProjectSnapshot, ProjectSummary, Resource } from '../../src/core/types';
 
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(path);
@@ -35,31 +35,3 @@ export const api = {
     return body.hint ? `${message}. ${body.hint}` : message;
   },
 };
-
-/** Live events. Reconnects after errors and replays what was missed via ?since. */
-export function subscribe(onEvent: (e: EventRow) => void, onStatus: (s: 'open' | 'reconnecting') => void): () => void {
-  let source: EventSource | null = null;
-  let closed = false;
-  let lastId: number | undefined;
-  let timer = 0;
-  const connect = () => {
-    source = new EventSource(lastId === undefined ? '/api/events/stream' : `/api/events/stream?since=${lastId}`);
-    source.onopen = () => onStatus('open');
-    source.onmessage = (m) => {
-      const e = JSON.parse(m.data as string) as EventRow;
-      lastId = e.id;
-      onEvent(e);
-    };
-    source.onerror = () => {
-      onStatus('reconnecting');
-      source?.close();
-      if (!closed) timer = window.setTimeout(connect, 1500);
-    };
-  };
-  connect();
-  return () => {
-    closed = true;
-    window.clearTimeout(timer);
-    source?.close();
-  };
-}

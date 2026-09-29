@@ -1,9 +1,27 @@
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { expect, test, type APIRequestContext } from '@playwright/test';
+import { test as base, expect, type APIRequestContext, type Page } from '@playwright/test';
 
-const headers = () => ({ authorization: `Bearer ${readFileSync('.e2e-home/token', 'utf8').trim()}`, 'x-inprogress-actor': 'scribe:e2e-session' });
-const ids: Record<string, number> = {};
-let api: APIRequestContext;
+interface Seeded {
+  slug: string;
+  root: number;
+  /** Node ids by title. */
+  ids: Record<string, number>;
+  /** The project's Claude session, which is also the actor of every write made for it. */
+  session: string;
+}
+
+const headers = (session: string) => ({
+  authorization: `Bearer ${readFileSync('.e2e-home/token', 'utf8').trim()}`,
+  'x-inprogress-actor': `scribe:${session}`,
+});
+
+/** A write the test depends on. A failed one fails here, not later as a confusing UI assertion. */
+async function write<T = unknown>(api: APIRequestContext, session: string, method: 'post' | 'patch', path: string, data: unknown): Promise<T> {
+  const res = await api[method](path, { headers: headers(session), data });
+  expect(res.ok(), `${method.toUpperCase()} ${path} answered ${res.status()}: ${await res.text()}`).toBe(true);
+  return (await res.json()) as T;
+}
 
 // Everything here is something the viewer's sanitiser must neutralise.
 const UNSAFE_MARKDOWN = [
@@ -13,58 +31,89 @@ const UNSAFE_MARKDOWN = [
   '<style>.ip-app{display:none}</style>',
   '<div class="ip-viewer" style="position:fixed">x</div>',
   '[Signing docs](https://example.com/signing)',
+  '<textarea>typed</textarea> <select><option>pick</option></select> <button>press</button>',
+  '<input value="text"> <input type="checkbox">',
+  '- [ ] Task item',
 ].join('\n\n');
 
-test.beforeAll(async ({ playwright }) => {
-  api = await playwright.request.newContext({ baseURL: 'http://127.0.0.1:4399' });
-  const project = await (await api.post('/api/projects', { headers: headers(), data: { name: 'E2E Demo', description: 'Seeded by Playwright' } })).json();
+/** A project of its own: every test that changes data seeds one, so tests pass alone, in any order and repeated. */
+async function seed(api: APIRequestContext, name = 'E2E Demo'): Promise<Seeded> {
+  const session = `e2e-${randomUUID()}`;
+  const post = <T = unknown>(path: string, data: unknown) => write<T>(api, session, 'post', path, data);
+  const project = await post<{ slug: string; rootNodeId: number }>('/api/projects', { name, description: 'Seeded by Playwright' });
   const milestones = Array.from({ length: 25 }, (_, i) => ({ title: `Milestone ${i + 1}`, status: 'done' as const }));
-  const created = await (
-    await api.post('/api/nodes', {
-      headers: headers(),
-      data: {
-        parentId: project.rootNodeId,
-        nodes: [
-          { title: 'Milestones', kind: 'phase', status: 'active', children: milestones },
-          {
-            title: 'Road to market', kind: 'phase', status: 'active',
-            children: [
-              { title: '1 iOS certificate', status: 'done' },
-              { title: '2 Android signing', status: 'active', children: [
-                { title: 'Upload keystore', status: 'done' },
-                { title: 'Play app signing', status: 'active' },
-                { title: 'Run signing tests', assignee: 'me' },
-              ] },
-              { title: '3 RevenueCat' }, { title: '4 Build to GitHub' }, { title: '5 Store listing' }, { title: '6 Beta' }, { title: '7 Launch' },
-            ],
-          },
+  const created = await post<{ id: number; title: string }[]>('/api/nodes', {
+    parentId: project.rootNodeId,
+    nodes: [
+      { title: 'Milestones', kind: 'phase', status: 'active', children: milestones },
+      {
+        title: 'Road to market', kind: 'phase', status: 'active',
+        children: [
+          { title: '1 iOS certificate', status: 'done' },
+          { title: '2 Android signing', status: 'active', children: [
+            { title: 'Upload keystore', status: 'done' },
+            { title: 'Play app signing', status: 'active' },
+            { title: 'Run signing tests', assignee: 'me' },
+          ] },
+          { title: '3 RevenueCat' }, { title: '4 Build to GitHub' }, { title: '5 Store listing' }, { title: '6 Beta' }, { title: '7 Launch' },
         ],
       },
-    })
-  ).json();
-  for (const n of created as { id: number; title: string }[]) ids[n.title] = n.id;
-  await api.post('/api/resources', { headers: headers(), data: { nodeId: ids['Run signing tests'], kind: 'test-suite', title: 'Signing test suite', content: '# Signing tests\n\n- [ ] Upload key accepted' } });
-  await api.post('/api/resources', { headers: headers(), data: { nodeId: ids['Upload keystore'], kind: 'doc', title: 'Unsafe Markdown', content: UNSAFE_MARKDOWN } });
-  await api.post('/api/sessions/e2e-session/enroll', { headers: headers(), data: { project: project.slug, title: 'E2E session' } });
-  await api.post('/api/sessions/e2e-session/focus', { headers: headers(), data: { nodeId: ids['Play app signing'] } });
-  await api.post('/api/sessions/e2e-session/hook', { headers: headers(), data: { event: 'prompt' } });
+    ],
+  });
+  const ids = Object.fromEntries(created.map((n) => [n.title, n.id]));
+  await post('/api/resources', { nodeId: ids['Run signing tests'], kind: 'test-suite', title: 'Signing test suite', content: '# Signing tests\n\n- [ ] Upload key accepted' });
+  await post('/api/resources', { nodeId: ids['Upload keystore'], kind: 'doc', title: 'Unsafe Markdown', content: UNSAFE_MARKDOWN });
+  await post(`/api/sessions/${session}/enroll`, { project: project.slug, title: 'E2E session' });
+  await post(`/api/sessions/${session}/focus`, { nodeId: ids['Play app signing'] });
+  await post(`/api/sessions/${session}/hook`, { event: 'prompt' });
+  return { slug: project.slug, root: project.rootNodeId, ids, session };
+}
+
+interface TestFixtures {
+  /** Console errors and uncaught exceptions fail the test. A test that causes one on purpose allows its pattern. */
+  consoleErrors: { allow: (pattern: RegExp) => void };
+  /** A project of this test's own, for tests that change data. */
+  fresh: Seeded;
+}
+
+interface WorkerFixtures {
+  api: APIRequestContext;
+  /** A project that tests only read. */
+  demo: Seeded;
+}
+
+const test = base.extend<TestFixtures, WorkerFixtures>({
+  api: [
+    async ({ playwright }, use) => {
+      const api = await playwright.request.newContext({ baseURL: 'http://127.0.0.1:4399' });
+      await use(api);
+      await api.dispose();
+    },
+    { scope: 'worker' },
+  ],
+  demo: [async ({ api }, use) => use(await seed(api)), { scope: 'worker' }],
+  fresh: async ({ api }, use) => use(await seed(api)),
+  // Context-level, so nothing is lost to a page's message buffer and popups are covered too. Warnings become annotations.
+  consoleErrors: [
+    async ({ context }, use, testInfo) => {
+      const errors: string[] = [];
+      const allowed: RegExp[] = [];
+      context.on('console', (m) => {
+        if (m.type() === 'warning') testInfo.annotations.push({ type: 'console warning', description: m.text() });
+        if (m.type() === 'error') errors.push(m.text());
+      });
+      context.on('weberror', (e) => errors.push(`Uncaught: ${e.error().message}`));
+      await use({ allow: (pattern) => allowed.push(pattern) });
+      expect(errors.filter((text) => !allowed.some((p) => p.test(text)))).toEqual([]);
+    },
+    { auto: true },
+  ],
 });
 
-test.afterAll(async () => {
-  await api.dispose();
-});
+const open = (page: Page, project: Seeded) => page.goto(`/#/p/${project.slug}`);
 
-// Every test must end with no console error and no uncaught exception. Warnings are kept as annotations.
-test.afterEach(async ({ page }, testInfo) => {
-  const messages = await page.consoleMessages({ filter: 'all' });
-  for (const m of messages) if (m.type() === 'warning') testInfo.annotations.push({ type: 'console warning', description: m.text() });
-  const errors = messages.filter((m) => m.type() === 'error').map((m) => m.text());
-  for (const e of await page.pageErrors({ filter: 'all' })) errors.push(`Uncaught: ${e.message}`);
-  expect(errors).toEqual([]);
-});
-
-test('opens on the current work with folding, needs-you and the session badge', async ({ page }) => {
-  await page.goto('/');
+test('opens on the current work with folding, needs-you and the session badge', async ({ page, demo }) => {
+  await open(page, demo);
   // React Flow's warning #004 (a canvas with no width or height) is only logged by development builds: check the size.
   await expect(page.locator('.react-flow__renderer')).toBeVisible();
   await expect(page.locator('.ip-node', { hasText: 'Play app signing' })).toBeInViewport();
@@ -76,40 +125,196 @@ test('opens on the current work with folding, needs-you and the session badge', 
   await expect(page).toHaveTitle('(1) InProgress — E2E Demo');
 });
 
-test('shows live changes and follows them', async ({ page }) => {
-  await page.goto('/');
+test('shows live changes and follows them', async ({ page, api, fresh }) => {
+  await open(page, fresh);
   await expect(page.locator('.ip-node', { hasText: 'Play app signing' })).toBeVisible();
-  await api.patch(`/api/nodes/${ids['Play app signing']}`, { headers: headers(), data: { status: 'done', outcome: 'Configured' } });
+  await write(api, fresh.session, 'patch', `/api/nodes/${fresh.ids['Play app signing']}`, { status: 'done', outcome: 'Configured' });
   await expect(page.locator('.ip-node.st-done', { hasText: 'Play app signing' })).toBeVisible({ timeout: 5000 });
   // Let the follow move for that status change finish before moving the camera ourselves.
   await page.waitForTimeout(1600);
   await page.keyboard.press('Home');
   await expect(page.locator('.ip-node.root')).toBeInViewport();
-  await api.post('/api/nodes', { headers: headers(), data: { parentId: ids['Road to market'], nodes: [{ title: 'Launch checklist', status: 'active' }] } });
+  await write(api, fresh.session, 'post', '/api/nodes', { parentId: fresh.ids['Road to market'], nodes: [{ title: 'Launch checklist', status: 'active' }] });
   await expect(page.locator('.ip-node', { hasText: 'Launch checklist' })).toBeInViewport({ timeout: 6000 });
   await expect(page.locator('.ip-activity')).toContainText('Launch checklist');
 });
 
-test('the needs-you pill jumps to and highlights the item', async ({ page }) => {
-  await page.goto('/');
+test('the needs-you pill jumps to and highlights the item', async ({ page, demo }) => {
+  await open(page, demo);
+  const item = page.locator('.ip-node', { hasText: 'Run signing tests' });
+  await expect(page.locator('.ip-node', { hasText: 'Play app signing' })).toBeInViewport();
   await page.keyboard.press('Home');
+  await expect(page.locator('.ip-node.root')).toBeInViewport();
+  await expect(item).not.toBeInViewport();
   await page.getByRole('button', { name: /need you/ }).click();
-  await expect(page.locator('.ip-node.flash', { hasText: 'Run signing tests' })).toBeInViewport();
+  await expect(item).toHaveClass(/\bflash\b/);
+  await expect(item).toBeInViewport();
 });
 
-test('clicking a node opens its details and copies a reference', async ({ page }) => {
-  await page.goto('/');
-  const id = ids['Run signing tests'];
+test('clicking a node opens its details and copies a reference', async ({ page, demo }) => {
+  await open(page, demo);
+  const id = demo.ids['Run signing tests'];
   await page.locator('.ip-node', { hasText: 'Run signing tests' }).click();
   const details = page.getByRole('complementary');
   await expect(details).toContainText(`#${id} Run signing tests`);
   await details.getByRole('button', { name: `Copy #${id}` }).click();
+  // The clipboard write has finished once the button says so.
+  await expect(details.getByRole('button', { name: 'Copied' })).toBeVisible();
   // String form: the root tsconfig has no DOM lib, so `navigator` must not appear in test code.
   expect(await page.evaluate<string>('navigator.clipboard.readText()')).toBe(`#${id} Run signing tests`);
 });
 
-test('a resource chip opens the rendered resource', async ({ page }) => {
-  await page.goto('/');
+test('Details keeps the last good detail when a refresh fails', async ({ page, api, fresh, consoleErrors }) => {
+  consoleErrors.allow(/status of 500/);
+  await open(page, fresh);
+  const id = fresh.ids['Run signing tests'];
+  await page.locator('.ip-node', { hasText: 'Run signing tests' }).click();
+  const details = page.getByRole('complementary');
+  await expect(details).toContainText(`#${id} Run signing tests`);
+  await page.route(`**/api/nodes/${id}`, (route) => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'Database is busy' }) }));
+  // Any change to the project makes Details refetch.
+  await write(api, fresh.session, 'patch', `/api/nodes/${fresh.ids['Play app signing']}`, { outcome: 'Configured' });
+  await expect(details).toContainText("Couldn't refresh: Database is busy");
+  await expect(details).toContainText(`#${id} Run signing tests`);
+  await expect(details.getByRole('button', { name: `Copy #${id}` })).toBeVisible();
+});
+
+test('a long project name is cut short and the top bar stays on one line', async ({ page, api }) => {
+  const project = await seed(api, 'A project name long enough to fill a narrow window several times over, and then some');
+  await open(page, project);
+  await expect(page).toHaveTitle(/A project name long enough/);
+  for (const button of [page.locator('.ip-proj'), page.getByRole('button', { name: /need you/ }), page.getByRole('button', { name: /Follow/ })]) {
+    await expect(button).toBeInViewport({ ratio: 1 });
+  }
+  expect((await page.locator('.ip-topbar').boundingBox())!.height, 'one line of controls').toBeLessThan(50);
+  expect(await page.evaluate<boolean>(`(() => { const n = document.querySelector('.ip-proj-name'); return n.scrollWidth > n.clientWidth; })()`)).toBe(true);
+});
+
+test('dark mode reaches the canvas controls; reduced motion stops the pulse and flash', async ({ page, demo }) => {
+  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+  await open(page, demo);
+  await expect(page.locator('.react-flow')).toHaveClass(/\bdark\b/);
+  await expect(page.locator('.ip-chip-s .ip-pulse')).toHaveCSS('animation-name', 'none');
+  await expect(page.locator('.ip-node.working .ip-marker.m-active').first()).toHaveCSS('animation-name', 'none');
+  // Amber ink on an amber tint, like the needs-you pill.
+  await expect(page.locator('.ip-node .ip-you')).toHaveCSS('color', 'rgb(255, 179, 64)');
+  await page.keyboard.press('n');
+  const flashed = page.locator('.ip-node.flash', { hasText: 'Run signing tests' });
+  await expect(flashed).toHaveCSS('animation-name', 'none');
+  await expect(flashed).not.toHaveCSS('box-shadow', 'none');
+  // Section labels in Details are readable on the dark panel.
+  await flashed.click();
+  await expect(page.getByRole('complementary').locator('.ip-label').first()).toHaveCSS('color', 'rgb(161, 161, 166)');
+});
+
+test('the keyboard reaches and opens cards, shows a "+n more" run and toggles Follow', async ({ page, demo }) => {
+  await open(page, demo);
+  const details = page.getByRole('complementary');
+  const play = page.locator('.ip-node', { hasText: 'Play app signing' });
+  await expect(play).toBeInViewport();
+  await page.keyboard.press('Home');
+  await expect(play).not.toBeInViewport();
+  // Keyboard focus on a card outside the view brings it in.
+  await play.focus();
+  await expect(play).toBeInViewport();
+  // Tab from the card above proves the card is in the tab order, not just focusable.
+  await page.keyboard.press('Tab');
+  await expect(page.locator('.ip-node', { hasText: 'Run signing tests' })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(details).toContainText(`#${demo.ids['Run signing tests']} Run signing tests`);
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Space');
+  await expect(details).toContainText(`#${demo.ids['Play app signing']} Play app signing`);
+  const more = page.getByRole('button', { name: 'Show 3 more' });
+  await more.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.ip-node', { hasText: '7 Launch' })).toBeVisible();
+  await expect(page.locator('.ip-more')).toHaveCount(0);
+  const follow = page.getByRole('button', { name: /Follow/ });
+  await expect(follow).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('f');
+  await expect(follow).toHaveAttribute('aria-pressed', 'false');
+});
+
+test('a wheel tick or a minimap drag turns Follow off, a minimap click does not', async ({ page, demo }) => {
+  await open(page, demo);
+  const follow = page.getByRole('button', { name: /Follow/ });
+  await expect(page.locator('.ip-node', { hasText: 'Play app signing' })).toBeInViewport();
+  const minimap = page.locator('.react-flow__minimap');
+  await minimap.click();
+  await minimap.click({ button: 'right' });
+  await expect(follow).toHaveAttribute('aria-pressed', 'true');
+  const map = (await minimap.boundingBox())!;
+  await page.mouse.move(map.x + map.width / 2, map.y + map.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(map.x + map.width / 2 + 5, map.y + map.height / 2 + 15);
+  await page.mouse.up();
+  await expect(follow).toHaveAttribute('aria-pressed', 'false');
+  await follow.click();
+  await expect(follow).toHaveAttribute('aria-pressed', 'true');
+  const pane = (await page.locator('.react-flow__pane').boundingBox())!;
+  await page.mouse.move(pane.x + pane.width / 2, pane.y + 60);
+  await page.mouse.wheel(0, 60);
+  await expect(follow).toHaveAttribute('aria-pressed', 'false');
+});
+
+// Records whether the flash on "Run signing tests" is ever cleared from now on.
+const WATCH_FLASH = `(() => {
+  const el = [...document.querySelectorAll('.ip-node')].find((n) => n.textContent.includes('Run signing tests'));
+  window.__flashCleared = false;
+  new MutationObserver(() => { if (!el.classList.contains('flash')) window.__flashCleared = true; }).observe(el, { attributes: true, attributeFilter: ['class'] });
+})()`;
+
+test('pressing N again on the same item flashes it again', async ({ page, demo }) => {
+  await open(page, demo);
+  const item = page.locator('.ip-node', { hasText: 'Run signing tests' });
+  await expect(item).toBeVisible();
+  await page.keyboard.press('n');
+  await expect(item).toHaveClass(/\bflash\b/);
+  await page.evaluate(WATCH_FLASH);
+  await page.keyboard.press('n');
+  // Well inside the 1.5 s the first flash lasts, so only a restart can clear it this soon.
+  await expect.poll(() => page.evaluate<boolean>('window.__flashCleared'), { timeout: 1000 }).toBe(true);
+  await expect(item).toHaveClass(/\bflash\b/);
+});
+
+test('with Details open on a narrow window, the camera centres above the sheet', async ({ page, demo }) => {
+  await open(page, demo);
+  await page.locator('.ip-node', { hasText: 'Upload keystore' }).click();
+  const sheet = page.getByRole('complementary');
+  await expect(sheet).toContainText('Upload keystore');
+  const item = page.locator('.ip-node', { hasText: 'Run signing tests' });
+  await page.keyboard.press('n');
+  await expect(async () => {
+    const card = (await item.boundingBox())!;
+    const top = (await sheet.boundingBox())!.y;
+    expect(card.y + card.height).toBeLessThanOrEqual(top);
+  }).toPass({ timeout: 3000 });
+});
+
+test('the resource viewer is modal and hands focus back when it closes', async ({ page, demo }) => {
+  await open(page, demo);
+  const chip = page.locator('.ip-chip', { hasText: 'Signing test suite' });
+  await chip.focus();
+  await page.keyboard.press('Enter');
+  const viewer = page.getByRole('dialog');
+  const body = viewer.locator('.ip-viewer-body');
+  await expect(viewer.locator('h1')).toHaveText('Signing tests');
+  await expect(body).toBeFocused();
+  await expect(page.locator('.ip-app')).toHaveJSProperty('inert', true);
+  // Once focus has left the body, Tab reaches it again.
+  await page.keyboard.press('Shift+Tab');
+  await expect(viewer.getByRole('button', { name: 'Close' })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(body).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(viewer).toBeHidden();
+  await expect(page.locator('.ip-app')).toHaveJSProperty('inert', false);
+  await expect(chip).toBeFocused();
+});
+
+test('a resource chip opens the rendered resource', async ({ page, demo }) => {
+  await open(page, demo);
   await page.locator('.ip-chip', { hasText: 'Signing test suite' }).click();
   const viewer = page.getByRole('dialog');
   await expect(viewer.locator('h1')).toHaveText('Signing tests');
@@ -117,10 +322,19 @@ test('a resource chip opens the rendered resource', async ({ page }) => {
   await expect(viewer).toBeHidden();
 });
 
-test('the resource viewer neutralises unsafe Markdown', async ({ page }) => {
+// Records every title the page shows from now on, so a payload that ran and was overwritten later still fails.
+const RECORD_TITLES = `(() => {
+  window.__titles = [document.title];
+  new MutationObserver(() => window.__titles.push(document.title)).observe(document.head, { subtree: true, childList: true, characterData: true });
+})()`;
+
+test('the resource viewer neutralises unsafe Markdown', async ({ page, demo }) => {
   // The sample's <img src=x> would 404 and log a console error. An empty 204 still fails to load, so an onerror would fire.
   await page.route('**/x', (route) => route.fulfill({ status: 204 }));
-  await page.goto('/');
+  await open(page, demo);
+  await expect(page).toHaveTitle('(1) InProgress — E2E Demo');
+  await page.evaluate(RECORD_TITLES);
+  const image = page.waitForEvent('requestfinished', (r) => r.url().endsWith('/x'));
   await page.locator('.ip-chip', { hasText: 'Unsafe Markdown' }).click();
   // A CSS locator finds the rendered Markdown even if a leaked <style> has hidden the app.
   await expect(page.locator('[role="dialog"] h1')).toHaveText('Unsafe Markdown');
@@ -136,4 +350,67 @@ test('the resource viewer neutralises unsafe Markdown', async ({ page }) => {
   await expect(docs).toHaveAttribute('href', 'https://example.com/signing');
   await expect(docs).toHaveAttribute('target', '_blank');
   await expect(viewer.locator('a[target="_blank"]:not([rel="noopener noreferrer"])')).toHaveCount(0);
+  // No control that could take focus and keep Escape from closing the viewer. Task-list checkboxes stay, disabled.
+  await expect(viewer.locator('.ip-md :is(textarea, select, button, input:not([type="checkbox"]))')).toHaveCount(0);
+  await expect(viewer.locator('.ip-md input[type="checkbox"]')).toHaveCount(2);
+  await expect(viewer.locator('.ip-md input:not([disabled])')).toHaveCount(0);
+  // The image has failed to load by now; a short pause lets a queued error event, and any onerror, run.
+  await image;
+  await expect(viewer.locator('img')).toHaveJSProperty('complete', true);
+  await page.evaluate('new Promise((resolve) => setTimeout(resolve, 100))');
+  expect(await page.evaluate<string[]>('window.__titles')).not.toContain('XSS');
+});
+
+test('says so when the server is unreachable at first paint, then recovers', async ({ page, demo, consoleErrors }) => {
+  consoleErrors.allow(/ERR_CONNECTION_REFUSED/);
+  await page.route('**/api/**', (route) => route.abort('connectionrefused'));
+  await open(page, demo);
+  await expect(page.getByText("Can't reach the InProgress server, retrying…")).toBeVisible();
+  await page.unroute('**/api/**');
+  await expect(page.locator('.ip-node.root')).toBeVisible({ timeout: 10_000 });
+});
+
+test('the first stream starts at the snapshot, and a batch still follows its targeted event', async ({ page, api, fresh }) => {
+  // Hold the stream back, so these writes land after the snapshot was read but before the stream opens.
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  const streams: string[] = [];
+  await page.route('**/api/events/stream**', async (route) => {
+    streams.push(route.request().url());
+    await held;
+    await route.continue();
+  });
+  await open(page, fresh);
+  await expect(page.locator('.ip-node', { hasText: 'Play app signing' })).toBeInViewport();
+  await write(api, fresh.session, 'post', '/api/nodes', { parentId: fresh.root, after: 'start', nodes: [{ title: 'Hotfix', status: 'active' }] });
+  // Untargeted and right behind it: the two replay in one chunk, and React renders them as one batch.
+  await write(api, fresh.session, 'post', `/api/sessions/${fresh.session}/hook`, { event: 'stop' });
+  release();
+  await expect(page.locator('.ip-node', { hasText: 'Hotfix' })).toBeInViewport({ timeout: 6000 });
+  expect(streams[0]).toMatch(/\/api\/events\/stream\?since=\d+$/);
+});
+
+test('keeps the view current under a steady stream of events', async ({ page, api, fresh }) => {
+  await open(page, fresh);
+  await expect(page.locator('.ip-node', { hasText: 'Play app signing' })).toBeInViewport();
+  // Snapshots now take longer than the gap between events, so a newer request is always in flight when one lands.
+  await page.route(`**/api/projects/${fresh.slug}`, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    await route.continue();
+  });
+  const node = fresh.ids['Play app signing'];
+  await write(api, fresh.session, 'patch', `/api/nodes/${node}`, { title: 'Play app signing, renamed' });
+  let steady = true;
+  const events = (async () => {
+    for (let i = 1; steady && i <= 20; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      await write(api, fresh.session, 'post', `/api/nodes/${node}/log`, { text: `Step ${i}` });
+    }
+  })();
+  try {
+    await expect(page.locator('.ip-node', { hasText: 'Play app signing, renamed' })).toBeVisible({ timeout: 2500 });
+  } finally {
+    steady = false;
+    await events;
+  }
 });

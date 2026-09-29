@@ -13,7 +13,8 @@ export function ResourceViewer({ resourceId, onClose }: { resourceId: number; on
   useEffect(() => {
     api.resource(resourceId).then(setResource).catch((e: Error) => setError(e.message));
   }, [resourceId]);
-  // Focus the scrollable body, so Home/End and the arrow keys scroll it as soon as the viewer opens.
+  // Focus the scrollable body, so Home/End and the arrow keys scroll it as soon as the viewer opens. Its tabIndex
+  // of 0 lets Tab reach it again after focus moves to the buttons.
   useEffect(() => {
     body.current?.focus();
     return () => window.clearTimeout(toastTimer.current);
@@ -34,6 +35,8 @@ export function ResourceViewer({ resourceId, onClose }: { resourceId: number; on
     if (result === 'reload') window.location.reload();
     else flash(result === 'opened' ? 'Opened' : result);
   };
+  // Only web links open. The server accepts nothing else, and this keeps any other scheme away from window.open.
+  const link = resource?.url && /^https?:/i.test(resource.url) ? resource.url : null;
 
   return (
     <div className="ip-viewer" role="dialog" aria-modal="true" aria-label="Resource">
@@ -42,10 +45,10 @@ export function ResourceViewer({ resourceId, onClose }: { resourceId: number; on
         {resource?.content && <button className="ip-btn" onClick={() => void copy(resource.content!, 'Copied')}>Copy</button>}
         {resource?.path && <button className="ip-btn" onClick={() => void open(resource.id)}>Open file</button>}
         {resource?.path && <button className="ip-btn" onClick={() => void copy(resource.path!, 'Path copied')}>Copy path</button>}
-        {resource?.url && <button className="ip-btn" onClick={() => window.open(resource.url!, '_blank', 'noopener')}>Open link</button>}
+        {link && <button className="ip-btn" onClick={() => window.open(link, '_blank', 'noopener')}>Open link</button>}
         <button className="ip-btn" onClick={onClose} aria-label="Close">×</button>
       </header>
-      <div ref={body} className="ip-viewer-body" tabIndex={-1}>
+      <div ref={body} className="ip-viewer-body" tabIndex={0}>
         {error ? (
           <p className="muted">{error}</p>
         ) : !resource ? (

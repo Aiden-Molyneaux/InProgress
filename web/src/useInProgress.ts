@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { eventTarget } from '../../src/core/layout';
 import type { EventRow, ProjectSnapshot, ProjectSummary } from '../../src/core/types';
-import { api, subscribe } from './api';
+import { api } from './api';
 import { load, save } from './storage';
+import { subscribe } from './stream';
 
 const hashSlug = () => /^#\/p\/([^/]+)$/.exec(window.location.hash)?.[1] ?? null;
 
@@ -11,7 +13,7 @@ export interface InProgressState {
   snapshot: ProjectSnapshot | null;
   /** Newest event for the activity strip, including the one loaded with the snapshot. */
   lastEvent: EventRow | null;
-  /** Only events that arrived live over SSE: the camera follows these, never the loaded one. */
+  /** Only events that arrived live over SSE and have a camera target: the camera follows these, never the loaded one. */
   liveEvent: EventRow | null;
   connection: 'open' | 'reconnecting';
   loaded: boolean;
@@ -30,31 +32,51 @@ export function useInProgress(): InProgressState {
   slugRef.current = slug;
   const projectIdRef = useRef<number | null>(null);
   projectIdRef.current = snapshot?.project.id ?? null;
-  /** Numbers snapshot requests: only the newest may land, so a slow older response never overwrites newer data. */
+  /** Numbers snapshot requests. A response lands when it is newer than the last one applied, so a slow older one never overwrites newer data. */
   const snapshotSeq = useRef(0);
+  const appliedSeq = useRef(0);
+  /**
+   * Where the event stream starts, set once by the first load that settles: the first snapshot's lastEventId
+   * (spec §7.6), or nothing when there is no snapshot to start from (no projects, or no server yet).
+   */
+  const [stream, setStream] = useState<{ since?: number } | null>(null);
+  const startStream = useCallback((since?: number) => setStream((cur) => cur ?? { since }), []);
 
   const loadProjects = useCallback(async () => {
     const list = await api.projects().catch(() => null);
-    if (!list) return;
+    if (!list) {
+      // Open the stream anyway: its reconnect loop shows that the server is unreachable and retries.
+      startStream();
+      return;
+    }
     setProjects(list);
     setLoaded(true);
+    if (!list.length) startStream();
     setSlug((cur) => (cur && list.some((p) => p.slug === cur) ? cur : (list.find((p) => p.status === 'active') ?? list[0])?.slug ?? null));
-  }, []);
+  }, [startStream]);
 
   const loadSnapshot = useCallback(
     async (s: string) => {
       const seq = ++snapshotSeq.current;
       const snap = await api.project(s).catch(() => null);
-      if (seq !== snapshotSeq.current || slugRef.current !== s) return;
+      if (slugRef.current !== s) return;
       if (!snap) {
-        // Keep what is on screen. Re-checking the slug moves an unknown one (a stale #/p/ link) to a real project.
-        void loadProjects();
+        // Only the newest request's failure counts. Keep what is on screen. Re-checking the slug moves an unknown
+        // one (a stale #/p/ link) to a real project.
+        if (seq === snapshotSeq.current) {
+          startStream();
+          void loadProjects();
+        }
         return;
       }
+      // Under sustained events a newer request is nearly always in flight: waiting for the newest to land would starve the view.
+      if (seq <= appliedSeq.current) return;
+      appliedSeq.current = seq;
+      startStream(snap.lastEventId);
       setSnapshot(snap);
       setLastEvent((cur) => (cur && cur.projectId === snap.project.id && cur.id >= (snap.lastEvent?.id ?? 0) ? cur : snap.lastEvent));
     },
-    [loadProjects],
+    [loadProjects, startStream],
   );
 
   useEffect(() => {
@@ -83,6 +105,7 @@ export function useInProgress(): InProgressState {
   }, []);
 
   useEffect(() => {
+    if (!stream) return;
     let projectTimer = 0;
     let snapshotTimer = 0;
     const refreshSnapshot = () => {
@@ -94,11 +117,14 @@ export function useInProgress(): InProgressState {
       projectTimer = window.setTimeout(() => void loadProjects(), 400);
     };
     const unsubscribe = subscribe(
+      stream.since,
       (e) => {
         refreshProjects();
         if (e.projectId !== null && e.projectId === projectIdRef.current) {
           setLastEvent(e);
-          setLiveEvent(e);
+          // React can render several events as one batch. Skipping untargeted ones here means one batched after
+          // a targeted event can't take the camera's move away.
+          if (eventTarget(e) !== undefined) setLiveEvent(e);
           refreshSnapshot();
         } else if (projectIdRef.current === null) {
           // No snapshot yet (a switch in flight): the pending response may predate this event.
@@ -119,7 +145,7 @@ export function useInProgress(): InProgressState {
       window.clearTimeout(projectTimer);
       window.clearTimeout(snapshotTimer);
     };
-  }, [loadProjects, loadSnapshot]);
+  }, [stream, loadProjects, loadSnapshot]);
 
   return { projects, slug, snapshot, lastEvent, liveEvent, connection, loaded, selectProject: setSlug };
 }

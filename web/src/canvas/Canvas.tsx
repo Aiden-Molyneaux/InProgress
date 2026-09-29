@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { Background, BackgroundVariant, Controls, MiniMap, ReactFlow, useReactFlow, type Edge, type Node, type NodeChange, type Viewport } from '@xyflow/react';
 import { layoutOutline, type LayoutItem } from '../../../src/core/layout';
 import { buildIndex, type FoldOverrides } from '../../../src/core/tree';
@@ -41,7 +41,7 @@ function minimapColor(n: Node): string {
 }
 
 export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(props, ref) {
-  const { snapshot, overrides, onToggleFold, onOpenResource, selectedNode } = props;
+  const { snapshot, overrides, onToggleFold, onOpenResource, onSelectNode, selectedNode } = props;
   const rf = useReactFlow();
   const layout = useMemo(
     () => layoutOutline({ nodes: snapshot.nodes, resources: snapshot.resources, sessions: snapshot.sessions, overrides }),
@@ -50,9 +50,11 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
   const index = useMemo(() => buildIndex(snapshot.nodes), [snapshot.nodes]);
   const [flash, setFlash] = useState<number | null>(null);
   const [crumb, setCrumb] = useState<string[]>([]);
-  const camera = useCamera({ layout, snapshot, index, lastEvent: props.lastEvent, follow: props.follow });
+  const camera = useCamera({ layout, snapshot, index, lastEvent: props.lastEvent, follow: props.follow, detailsOpen: selectedNode !== null });
   const flashTimer = useRef(0);
+  const flashFrame = useRef(0);
   const initFrame = useRef(0);
+  const minimapHeld = useRef(false);
 
   // React Flow 12.12's minimap sizes each node from the node objects passed in, not from its own
   // measurements. Keep the sizes it reports and pass them back, or the minimap draws no nodes.
@@ -87,13 +89,14 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
         resources: item.resourceIds.map((id) => resourcesById.get(id)).filter((r): r is NonNullable<typeof r> => !!r),
         flash: flash === item.nodeId,
         selected: selectedNode === item.nodeId,
+        onSelect: onSelectNode,
         onToggleFold,
         onOpenResource,
       };
       return { id: item.id, type: 'ipNode', position, measured, data, draggable: false, selectable: false };
     };
     return layout.items.map(toNode).filter((n): n is Node => n !== null);
-  }, [layout, index, snapshot.resources, snapshot.sessions, flash, selectedNode, onToggleFold, onOpenResource, sizes]);
+  }, [layout, index, snapshot.resources, snapshot.sessions, flash, selectedNode, onSelectNode, onToggleFold, onOpenResource, sizes]);
 
   const edges = useMemo<Edge[]>(
     () =>
@@ -120,7 +123,10 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
       nextNeedsYou: () => {
         const id = camera.nextNeedsYou();
         if (id === undefined) return;
-        setFlash(id);
+        // Clear, then set on the next frame: a press that lands on the row already flashing restarts its flash.
+        setFlash(null);
+        cancelAnimationFrame(flashFrame.current);
+        flashFrame.current = requestAnimationFrame(() => setFlash(id));
         window.clearTimeout(flashTimer.current);
         flashTimer.current = window.setTimeout(() => setFlash((f) => (f === id ? null : f)), 1500);
       },
@@ -144,12 +150,23 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
   // A fold, an unfold or an insert moves the rows under a camera that stays put.
   useEffect(() => updateCrumb(rf.getViewport()), [rf, updateCrumb]);
 
-  const { onFollowChange, onSelectNode } = props;
+  const { onFollowChange } = props;
   // onMove fires only when the viewport actually changes: a user pan or zoom carries an event,
   // programmatic camera moves carry null. (onMoveStart would also fire on plain clicks.)
   const onMove = useCallback(
     (event: MouseEvent | TouchEvent | null, vp: Viewport) => {
       if (event) onFollowChange(false);
+      updateCrumb(vp);
+    },
+    [onFollowChange, updateCrumb],
+  );
+
+  // A wheel pan reports its first tick only to onMoveStart (onMove starts at the second), so a single tick is caught
+  // here. Other move starts include plain clicks on the pane, which keep Follow on.
+  const onMoveStart = useCallback(
+    (event: MouseEvent | TouchEvent | null, vp: Viewport) => {
+      if (event?.type !== 'wheel') return;
+      onFollowChange(false);
       updateCrumb(vp);
     },
     [onFollowChange, updateCrumb],
@@ -165,6 +182,26 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
     [onSelectNode],
   );
 
+  // The cards and their buttons are the tab stops (nodesFocusable is off), so React Flow no longer pans to a node that
+  // takes keyboard focus. Do it here: anything focused by keyboard outside the view comes to the middle.
+  const onFocus = useCallback(
+    (e: ReactFocusEvent<HTMLDivElement>) => {
+      const el = e.target as HTMLElement;
+      const flow = el.closest<HTMLElement>('.react-flow');
+      if (!flow || !el.closest('.react-flow__node') || !el.matches(':focus-visible')) return;
+      // By now the browser has scrolled the wrapper to show the element, and React Flow undoes that scroll a frame
+      // later: measure where the element sits without it.
+      const r = el.getBoundingClientRect();
+      const top = r.top + flow.scrollTop;
+      const left = r.left + flow.scrollLeft;
+      const view = flow.getBoundingClientRect();
+      if (top >= view.top && top + r.height <= view.bottom && left >= view.left && left + r.width <= view.right) return;
+      const p = rf.screenToFlowPosition({ x: left + r.width / 2, y: top + r.height / 2 });
+      camera.centerOnPoint(p.x, p.y);
+    },
+    [rf, camera],
+  );
+
   const onInit = useCallback(() => {
     initFrame.current = requestAnimationFrame(() => camera.centerOnFrontier(0, 1));
   }, [camera]);
@@ -172,13 +209,14 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
   useEffect(
     () => () => {
       cancelAnimationFrame(initFrame.current);
+      cancelAnimationFrame(flashFrame.current);
       window.clearTimeout(flashTimer.current);
     },
     [],
   );
 
   return (
-    <div className="ip-canvas">
+    <div className="ip-canvas" onFocus={onFocus}>
       {crumb.length > 0 && <div className="ip-crumb">{crumb.join(' › ')}</div>}
       <ReactFlow
         nodes={nodes}
@@ -187,19 +225,37 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
         onNodesChange={onNodesChange}
         onInit={onInit}
         onNodeClick={onNodeClick}
+        onMoveStart={onMoveStart}
         onMove={onMove}
         minZoom={0.15}
         maxZoom={2}
         panOnScroll
         nodesDraggable={false}
         nodesConnectable={false}
+        nodesFocusable={false}
         elementsSelectable={false}
+        colorMode="system"
         proOptions={{ hideAttribution: true }}
       >
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
         {/* display: contents leaves the panel positioned by React Flow. Capture-phase handlers, because the
-            minimap's d3 handlers stop wheel and mousedown events from bubbling. */}
-        <div style={{ display: 'contents' }} onPointerDownCapture={manualMove} onWheelCapture={manualMove}>
+            minimap's d3 handlers stop wheel and mousedown events from bubbling. A press only arms: the first move
+            with the button held is a drag and turns Follow off, while a plain click or a right-click leaves it on. */}
+        <div
+          style={{ display: 'contents' }}
+          onPointerDownCapture={(e) => {
+            minimapHeld.current = e.button === 0;
+          }}
+          onPointerMoveCapture={(e) => {
+            if (!minimapHeld.current || !(e.buttons & 1)) return;
+            minimapHeld.current = false;
+            manualMove();
+          }}
+          onPointerUpCapture={() => {
+            minimapHeld.current = false;
+          }}
+          onWheelCapture={manualMove}
+        >
           <MiniMap position="bottom-right" pannable zoomable nodeColor={minimapColor} />
         </div>
         <Controls position="bottom-left" showInteractive={false} onZoomIn={manualMove} onZoomOut={manualMove} onFitView={manualMove} />
