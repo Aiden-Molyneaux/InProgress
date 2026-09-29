@@ -18,24 +18,28 @@ export function registerSse(app: FastifyInstance, ctx: Ctx): void {
       'x-accel-buffering': 'no',
     });
     // A dropped client reconnects with ?since and gets what it missed from the event log.
+    const write = (chunk: string) => {
+      if (!res.destroyed) res.write(chunk);
+    };
+    // Live writes only: the catch-up below is written in one synchronous burst, so its bytes always sit in the
+    // buffer for a moment and would get a healthy client dropped. A client that stops reading is caught here.
     const push = (chunk: string) => {
-      if (res.destroyed) return;
-      res.write(chunk);
+      write(chunk);
       if (res.writableLength > MAX_BUFFERED_BYTES) res.destroy();
     };
-    push(': connected\n\n');
-    const send = (e: EventRow) => push(`id: ${e.id}\ndata: ${JSON.stringify(e)}\n\n`);
+    const frame = (e: EventRow) => `id: ${e.id}\ndata: ${JSON.stringify(e)}\n\n`;
+    write(': connected\n\n');
     // Everything below runs synchronously, so no event can slip between the replay query and the subscription.
     let last = maxEventId(ctx);
     if (since !== undefined && /^\d+$/.test(since)) {
       const rows = listEventsSince(ctx, Number(since), 5000);
-      rows.forEach(send);
+      for (const e of rows) write(frame(e));
       last = rows.length ? rows[rows.length - 1].id : Math.min(last, Number(since));
     }
     const onEvent = (e: EventRow) => {
       if (e.id > last) {
         last = e.id;
-        send(e);
+        push(frame(e));
       }
     };
     ctx.bus.on('event', onEvent);

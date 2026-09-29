@@ -36,6 +36,17 @@ describe('client', () => {
     await expect(createClient({ baseUrl: base }).post('/api/projects', { name: 'x' })).rejects.toMatchObject({ status: 401 });
   });
 
+  it('records why nothing answered: a refused connection, or a timeout that may follow an applied write', async () => {
+    let closedPort = 0;
+    await withRawServer(() => undefined, async (url) => {
+      closedPort = Number(new URL(url).port);
+      const timedOut = (await createClient({ baseUrl: url, timeoutMs: 200 }).post('/api/projects', { name: 'x' }).catch((e) => e)) as ApiClientError;
+      expect(timedOut).toMatchObject({ status: 0, code: 'TIMEOUT' });
+    });
+    const refused = (await createClient({ baseUrl: `http://127.0.0.1:${closedPort}`, timeoutMs: 2000 }).get('/api/health').catch((e) => e)) as ApiClientError;
+    expect(refused).toMatchObject({ status: 0, code: 'ECONNREFUSED' });
+  });
+
   it('reports an unreachable server clearly', async () => {
     const err = (await createClient({ baseUrl: 'http://127.0.0.1:1', timeoutMs: 300 }).get('/api/health').catch((e) => e)) as ApiClientError;
     expect(err).toBeInstanceOf(ApiClientError);

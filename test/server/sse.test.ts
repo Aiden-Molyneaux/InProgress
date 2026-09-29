@@ -132,3 +132,40 @@ describe('SSE stream', () => {
     }
   });
 });
+
+describe('SSE catch-up', () => {
+  it('replays a large backlog to a reading client without dropping it', async () => {
+    const { ctx, base } = await listen();
+    const big = 'x'.repeat(256 * 1024);
+    const insert = ctx.db.prepare('INSERT INTO events (ts, project_id, actor, type, entity, entity_id, data) VALUES (?, NULL, ?, ?, ?, ?, ?)');
+    const since = maxEventId(ctx);
+    for (let i = 0; i < 8; i++) insert.run('t', 'test', 'demo', 'demo', String(i), JSON.stringify(big));
+    const ac = new AbortController();
+    const res = await fetch(`${base}/api/events/stream?since=${since}`, { signal: ac.signal });
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let seen = 0;
+    const readEvents = async (target: number) => {
+      while (seen < target) {
+        const { value, done } = await reader.read();
+        if (done) return false;
+        buffer += decoder.decode(value, { stream: true });
+        let idx: number;
+        while ((idx = buffer.indexOf('\n\n')) >= 0) {
+          if (buffer.slice(0, idx).includes('data: ')) seen++;
+          buffer = buffer.slice(idx + 2);
+        }
+      }
+      return true;
+    };
+    try {
+      expect(await readEvents(8)).toBe(true);
+      // Still subscribed after the catch-up: a live event arrives too.
+      ctx.bus.emit('event', { id: maxEventId(ctx) + 1, ts: 't', projectId: null, actor: 'test', type: 'demo', entity: 'demo', entityId: 'live', data: {} } satisfies EventRow);
+      expect(await readEvents(9)).toBe(true);
+    } finally {
+      ac.abort();
+    }
+  });
+});

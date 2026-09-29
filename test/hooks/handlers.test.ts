@@ -102,6 +102,15 @@ describe('buildHookBody', () => {
     expect(buildHookBody('stop', { session_id: 's', cwd })).not.toHaveProperty('cwd');
   });
 
+  it('leaves out a folder or branch longer than the server accepts, so the prompt still posts', () => {
+    const long = `C:/${'x'.repeat(1_000)}`;
+    expect(buildHookBody('prompt-submit', { session_id: 's', cwd: long, prompt: 'hi' })).not.toHaveProperty('cwd');
+    const repo = tempDir('ip-hook-git-');
+    mkdirSync(join(repo, '.git'));
+    writeFileSync(join(repo, '.git', 'HEAD'), `ref: refs/heads/${'b'.repeat(301)}\n`);
+    expect(buildHookBody('prompt-submit', { session_id: 's', cwd: repo, prompt: 'hi' })).toMatchObject({ cwd: repo, branch: null });
+  });
+
   it('prefers session_title and falls back to the transcript title', () => {
     const file = join(tempDir('ip-hook-'), 't.jsonl');
     writeFileSync(file, `${JSON.stringify({ type: 'custom-title', customTitle: 'From transcript' })}\n`);

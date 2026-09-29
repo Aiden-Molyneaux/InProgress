@@ -39,6 +39,9 @@ export interface HookDeps {
 
 /** Mirrors the `title` max in the server's hookBody zod schema: a longer title gets the whole hook POST rejected. */
 const TITLE_MAX = 300;
+/** Mirror the server's hookBody limits for cwd and branch (src/server/schemas.ts). */
+const CWD_MAX = 1_000;
+const BRANCH_MAX = 300;
 
 const MENTIONS = /\binprogress\b/i;
 // A lone "status" may end in one "?"; the optional group keeps a long whitespace run linear, not quadratic.
@@ -64,10 +67,12 @@ export function buildHookBody(name: HookName, input: HookStdin): Record<string, 
   const body: Record<string, unknown> = { event: EVENT_FOR[name] };
   if (input.transcript_path) body.transcriptPath = input.transcript_path;
   if (name === 'session-start' && input.source) body.source = input.source;
-  // Prompts carry the folder too, so the server can still pick up a session whose start it missed.
-  if ((name === 'session-start' || name === 'prompt-submit') && input.cwd) {
+  // Prompts carry the folder too, so the server can still pick up a session whose start it missed. Values past the
+  // server's limits are left out rather than clipped (a clipped path names another folder), so the post still lands.
+  if ((name === 'session-start' || name === 'prompt-submit') && input.cwd && input.cwd.length <= CWD_MAX) {
     body.cwd = input.cwd;
-    body.branch = detectBranch(input.cwd) ?? null;
+    const branch = detectBranch(input.cwd);
+    body.branch = branch && branch.length <= BRANCH_MAX ? branch : null;
   }
   if (name === 'session-start' || name === 'prompt-submit' || name === 'stop') {
     const title = (typeof input.session_title === 'string' && input.session_title.trim()) || (input.transcript_path ? readTranscriptTitle(input.transcript_path) : undefined);
