@@ -1,10 +1,20 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
-import { describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import { buildApp, type AppOptions } from '../../src/server/app';
 import { makeCtx } from '../helpers';
+
+const tempDirs: string[] = [];
+function tempDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+}
+afterAll(() => {
+  for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
+});
 
 const TOKEN = 'test-token';
 const auth = { authorization: `Bearer ${TOKEN}`, 'x-inprogress-actor': 'scribe:s1' };
@@ -197,7 +207,7 @@ describe('ui routes', () => {
     const opened: string[] = [];
     const { app } = setup({ openPath: async (p) => { opened.push(p); } });
     const p = (await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'P' } })).json();
-    const file = join(mkdtempSync(join(tmpdir(), 'ip-open-')), 'suite.md');
+    const file = join(tempDir('ip-open-'), 'suite.md');
     writeFileSync(file, '# x');
     const withPath = (await app.inject({ method: 'POST', url: '/api/resources', headers: auth, payload: { nodeId: p.rootNodeId, kind: 'doc', title: 'Doc', path: file } })).json();
     const noPath = (await app.inject({ method: 'POST', url: '/api/resources', headers: auth, payload: { nodeId: p.rootNodeId, kind: 'doc', title: 'Inline', content: 'x' } })).json();
@@ -213,7 +223,7 @@ describe('ui routes', () => {
     const opened: string[] = [];
     const { app } = setup({ openPath: async (p) => { opened.push(p); } });
     const p = (await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'P' } })).json();
-    const file = join(mkdtempSync(join(tmpdir(), 'ip-open-')), 'suite.md');
+    const file = join(tempDir('ip-open-'), 'suite.md');
     writeFileSync(file, '# x');
     // The \\?\ form names a real file, so only the local-path check can refuse it.
     for (const path of [`\\\\?\\${file}`, '\\\\.\\C:\\suite.md', '\\\\127.0.0.1\\share\\suite.md', '//127.0.0.1/share/suite.md']) {
@@ -228,7 +238,7 @@ describe('ui routes', () => {
     const opened: string[] = [];
     const { app } = setup({ openPath: async (p) => { opened.push(p); } });
     const p = (await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'P' } })).json();
-    const file = join(mkdtempSync(join(tmpdir(), 'ip-open-')), 'suite.md');
+    const file = join(tempDir('ip-open-'), 'suite.md');
     writeFileSync(file, '# x');
     const resource = (await app.inject({ method: 'POST', url: '/api/resources', headers: auth, payload: { nodeId: p.rootNodeId, kind: 'doc', title: 'Doc', path: file } })).json();
     for (const token of ['ui-tokeN', 'ui-token-longer', '']) {
@@ -243,7 +253,7 @@ describe('ui routes', () => {
     const opened: string[] = [];
     const { app } = setup({ openPath: async (p) => { opened.push(p); } });
     const p = (await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'P' } })).json();
-    const dir = mkdtempSync(join(tmpdir(), 'ip-open-'));
+    const dir = tempDir('ip-open-');
     const missing = join(dir, 'gone.md');
     const res = await openStoredPath(app, p.rootNodeId, missing);
     expect(res.statusCode).toBe(400);
@@ -260,7 +270,7 @@ describe('ui routes', () => {
     const opened: string[] = [];
     const { app } = setup({ openPath: async (p) => { opened.push(p); } });
     const p = (await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'P' } })).json();
-    const dir = mkdtempSync(join(tmpdir(), 'ip-open-'));
+    const dir = tempDir('ip-open-');
     const res = await openStoredPath(app, p.rootNodeId, dir);
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe(`Not a file: ${dir}`);
@@ -269,14 +279,14 @@ describe('ui routes', () => {
 
   it('reports an unbuilt UI, and injects the UI token into a built one', async () => {
     expect((await setup().app.inject({ url: '/' })).statusCode).toBe(503);
-    const webDir = mkdtempSync(join(tmpdir(), 'ip-web-'));
+    const webDir = tempDir('ip-web-');
     writeFileSync(join(webDir, 'index.html'), '<html><head><meta name="ip-ui-token" content="" /></head><body></body></html>');
     const res = await setup({ webDir }).app.inject({ url: '/' });
     expect(res.body).toContain('<meta name="ip-ui-token" content="ui-token">');
   });
 
   it('serves the UI under a Content-Security-Policy', async () => {
-    const webDir = mkdtempSync(join(tmpdir(), 'ip-web-'));
+    const webDir = tempDir('ip-web-');
     writeFileSync(join(webDir, 'index.html'), '<html><head><meta name="ip-ui-token" content="" /></head><body></body></html>');
     const res = await setup({ webDir }).app.inject({ url: '/' });
     expect(res.statusCode).toBe(200);
@@ -286,14 +296,14 @@ describe('ui routes', () => {
   });
 
   it('injects the UI token literally', async () => {
-    const webDir = mkdtempSync(join(tmpdir(), 'ip-web-'));
+    const webDir = tempDir('ip-web-');
     writeFileSync(join(webDir, 'index.html'), '<html><head><meta name="ip-ui-token" content="" /></head><body></body></html>');
     const res = await setup({ webDir, uiToken: 'a$&b' }).app.inject({ url: '/' });
     expect(res.body).toContain('<meta name="ip-ui-token" content="a$&b">');
   });
 
   it('refuses a built index.html without the token meta tag', () => {
-    const webDir = mkdtempSync(join(tmpdir(), 'ip-web-'));
+    const webDir = tempDir('ip-web-');
     writeFileSync(join(webDir, 'index.html'), '<html><head></head><body></body></html>');
     expect(() => setup({ webDir })).toThrow('index.html has no ip-ui-token meta tag');
   });

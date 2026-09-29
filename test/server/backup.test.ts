@@ -2,24 +2,43 @@ import { closeSync, existsSync, mkdtempSync, openSync, readdirSync, rmSync, stat
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { backupDb, timestamp, truncateIfLarge } from '../../src/server/backup';
 import { openDb } from '../../src/server/db/connection';
 
+const dirs: string[] = [];
+function tempDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  dirs.push(dir);
+  return dir;
+}
+// Every database is closed by its test first: Windows can't delete an open file.
+afterEach(() => {
+  while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true });
+});
+
 describe('backups', () => {
   it('writes a restorable copy and keeps only the newest N', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ip-bak-'));
+    const dir = tempDir('ip-bak-');
     const db = openDb(join(dir, 'live.db'));
-    db.prepare("INSERT INTO meta (key, value) VALUES ('marker', 'yes')").run();
-    for (let i = 1; i <= 4; i++) await backupDb(db, join(dir, 'backups'), 3, `20260927-00000${i}`);
-    const files = readdirSync(join(dir, 'backups')).sort();
-    expect(files).toEqual(['inprogress-20260927-000002.db', 'inprogress-20260927-000003.db', 'inprogress-20260927-000004.db']);
-    const copy = openDb(join(dir, 'backups', files[2]));
-    expect(copy.prepare("SELECT value FROM meta WHERE key = 'marker'").get()).toEqual({ value: 'yes' });
+    try {
+      db.prepare("INSERT INTO meta (key, value) VALUES ('marker', 'yes')").run();
+      for (let i = 1; i <= 4; i++) await backupDb(db, join(dir, 'backups'), 3, `20260927-00000${i}`);
+      const files = readdirSync(join(dir, 'backups')).sort();
+      expect(files).toEqual(['inprogress-20260927-000002.db', 'inprogress-20260927-000003.db', 'inprogress-20260927-000004.db']);
+      const copy = openDb(join(dir, 'backups', files[2]));
+      try {
+        expect(copy.prepare("SELECT value FROM meta WHERE key = 'marker'").get()).toEqual({ value: 'yes' });
+      } finally {
+        copy.close();
+      }
+    } finally {
+      db.close();
+    }
   });
 
   it('skips the backup of a damaged database, so the good backups survive', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ip-bak-'));
+    const dir = tempDir('ip-bak-');
     const file = join(dir, 'live.db');
     const backups = join(dir, 'backups');
     let db = new Database(file);
@@ -42,13 +61,12 @@ describe('backups', () => {
       expect(readdirSync(backups)).toEqual(['inprogress-20260927-000001.db']);
     } finally {
       db.close();
-      rmSync(dir, { recursive: true, force: true });
     }
   });
 
   it('formats timestamps and truncates large logs', () => {
     expect(timestamp(new Date(2026, 8, 27, 7, 5, 9))).toBe('20260927-070509');
-    const file = join(mkdtempSync(join(tmpdir(), 'ip-log-')), 'server.log');
+    const file = join(tempDir('ip-log-'), 'server.log');
     writeFileSync(file, 'x'.repeat(100));
     truncateIfLarge(file, 50);
     expect(statSync(file).size).toBe(0);
