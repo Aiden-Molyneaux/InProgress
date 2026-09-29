@@ -31,6 +31,9 @@ const UNSAFE_MARKDOWN = [
   '<style>.ip-app{display:none}</style>',
   '<div class="ip-viewer" style="position:fixed">x</div>',
   '[Signing docs](https://example.com/signing)',
+  '<textarea>typed</textarea> <select><option>pick</option></select> <button>press</button>',
+  '<input value="text"> <input type="checkbox">',
+  '- [ ] Task item',
 ].join('\n\n');
 
 /** A project of its own: every test that changes data seeds one, so tests pass alone, in any order and repeated. */
@@ -246,6 +249,27 @@ test('with Details open on a narrow window, the camera centres above the sheet',
   }).toPass({ timeout: 3000 });
 });
 
+test('the resource viewer is modal and hands focus back when it closes', async ({ page, demo }) => {
+  await open(page, demo);
+  const chip = page.locator('.ip-chip', { hasText: 'Signing test suite' });
+  await chip.focus();
+  await page.keyboard.press('Enter');
+  const viewer = page.getByRole('dialog');
+  const body = viewer.locator('.ip-viewer-body');
+  await expect(viewer.locator('h1')).toHaveText('Signing tests');
+  await expect(body).toBeFocused();
+  await expect(page.locator('.ip-app')).toHaveJSProperty('inert', true);
+  // Once focus has left the body, Tab reaches it again.
+  await page.keyboard.press('Shift+Tab');
+  await expect(viewer.getByRole('button', { name: 'Close' })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(body).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(viewer).toBeHidden();
+  await expect(page.locator('.ip-app')).toHaveJSProperty('inert', false);
+  await expect(chip).toBeFocused();
+});
+
 test('a resource chip opens the rendered resource', async ({ page, demo }) => {
   await open(page, demo);
   await page.locator('.ip-chip', { hasText: 'Signing test suite' }).click();
@@ -283,6 +307,10 @@ test('the resource viewer neutralises unsafe Markdown', async ({ page, demo }) =
   await expect(docs).toHaveAttribute('href', 'https://example.com/signing');
   await expect(docs).toHaveAttribute('target', '_blank');
   await expect(viewer.locator('a[target="_blank"]:not([rel="noopener noreferrer"])')).toHaveCount(0);
+  // No control that could take focus and keep Escape from closing the viewer. Task-list checkboxes stay, disabled.
+  await expect(viewer.locator('.ip-md :is(textarea, select, button, input:not([type="checkbox"]))')).toHaveCount(0);
+  await expect(viewer.locator('.ip-md input[type="checkbox"]')).toHaveCount(2);
+  await expect(viewer.locator('.ip-md input:not([disabled])')).toHaveCount(0);
   // The image has failed to load by now; a short pause lets a queued error event, and any onerror, run.
   await image;
   await expect(viewer.locator('img')).toHaveJSProperty('complete', true);
