@@ -35,3 +35,17 @@ export function lastProjectEvent(ctx: Ctx, projectId: number): EventRow | null {
   const row = ctx.db.prepare('SELECT * FROM events WHERE project_id = ? ORDER BY id DESC LIMIT 1').get(projectId) as EventDbRow | undefined;
   return row ? toEvent(row) : null;
 }
+
+export const EVENTS_RETENTION_DAYS = 30;
+
+/**
+ * Delete events older than `days`, except each project's newest event (the activity strip and the
+ * project switcher's last-activity order read it). Ids are AUTOINCREMENT, so pruning never lets a
+ * later event reuse an id an SSE client has already seen. Returns how many were deleted.
+ */
+export function pruneEvents(ctx: Ctx, days = EVENTS_RETENTION_DAYS): number {
+  const cutoff = new Date(Date.parse(ctx.now()) - days * 24 * 60 * 60 * 1000).toISOString();
+  return ctx.db
+    .prepare('DELETE FROM events WHERE ts < ? AND id NOT IN (SELECT MAX(id) FROM events WHERE project_id IS NOT NULL GROUP BY project_id)')
+    .run(cutoff).changes;
+}

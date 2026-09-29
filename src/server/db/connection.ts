@@ -19,16 +19,21 @@ export function schemaVersion(db: DB): number {
 
 export function migrate(db: DB): void {
   db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
-  const version = schemaVersion(db);
-  if (version > MIGRATIONS.length) {
-    throw new Error(`InProgress database schema v${version} is newer than this build (v${MIGRATIONS.length}); update InProgress`);
-  }
-  for (let v = version; v < MIGRATIONS.length; v++) {
-    db.transaction(() => {
-      db.exec(MIGRATIONS[v]);
-      db.prepare(
-        "INSERT INTO meta (key, value) VALUES ('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-      ).run(String(v + 1));
-    })();
+  // One migration per BEGIN IMMEDIATE transaction, reading the version under the write lock: when two
+  // first-ever starts race, the later one finds the earlier one's work done instead of applying it twice.
+  const step = db.transaction((): boolean => {
+    const version = schemaVersion(db);
+    if (version > MIGRATIONS.length) {
+      throw new Error(`InProgress database schema v${version} is newer than this build (v${MIGRATIONS.length}); update InProgress`);
+    }
+    if (version === MIGRATIONS.length) return false;
+    db.exec(MIGRATIONS[version]);
+    db.prepare(
+      "INSERT INTO meta (key, value) VALUES ('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    ).run(String(version + 1));
+    return true;
+  });
+  while (step.immediate()) {
+    // each pass applies the next migration
   }
 }

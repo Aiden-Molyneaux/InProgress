@@ -88,6 +88,48 @@ describe('search', () => {
   });
 });
 
+describe('scoping', () => {
+  it('searches only the given project', () => {
+    const { ctx, project, step } = setup();
+    const elsewhere = createProject(ctx, 't', { name: 'Elsewhere' });
+    const [far] = addNodes(ctx, 't', { parentId: elsewhere.rootNodeId, nodes: [{ title: 'Run signing tests there' }] });
+    addResource(ctx, 't', { nodeId: far.id, kind: 'doc', title: 'Signing notes there', content: 'x' });
+    expect(search(ctx, project.id, 'signing')).toEqual({ nodes: [expect.objectContaining({ id: step.id })], resources: [] });
+    const there = search(ctx, elsewhere.id, 'signing');
+    expect(there.nodes.map((n) => n.id)).toEqual([far.id]);
+    expect(there.resources.map((r) => r.title)).toEqual(['Signing notes there']);
+  });
+
+  it('matches node bodies and outcomes, and resource content', () => {
+    const { ctx, project } = setup();
+    const [inBody, inOutcome] = addNodes(ctx, 't', {
+      parentId: project.rootNodeId,
+      nodes: [{ title: 'Plain title', body: 'Mentions the keystore' }, { title: 'Another title', status: 'done', outcome: 'Keystore uploaded' }],
+    });
+    const byContent = addResource(ctx, 't', { nodeId: inBody.id, kind: 'doc', title: 'Untitled', content: 'Where the KEYSTORE lives' });
+    const found = search(ctx, project.id, 'keystore');
+    expect(found.nodes.map((n) => n.id).sort((a, b) => a - b)).toEqual([inBody.id, inOutcome.id]);
+    expect(found.resources.map((r) => r.id)).toEqual([byContent.id]);
+  });
+
+  it('lists resource metadata for one project only', () => {
+    const { ctx, project, step } = setup();
+    const elsewhere = createProject(ctx, 't', { name: 'Elsewhere' });
+    const mine = addResource(ctx, 't', { nodeId: step.id, kind: 'doc', title: 'Mine', content: 'a' });
+    const theirs = addResource(ctx, 't', { nodeId: elsewhere.rootNodeId, kind: 'doc', title: 'Theirs', content: 'b' });
+    expect(listResourceMeta(ctx, project.id).map((r) => r.id)).toEqual([mine.id]);
+    expect(listResourceMeta(ctx, elsewhere.id).map((r) => r.id)).toEqual([theirs.id]);
+  });
+
+  it('lists log entries for one node only', () => {
+    const { ctx, step, other } = setup();
+    addLog(ctx, 't', step.id, 'On step');
+    addLog(ctx, 't', other.id, 'On other');
+    expect(listLogs(ctx, step.id).map((l) => l.text)).toEqual(['On step']);
+    expect(listLogs(ctx, other.id).map((l) => l.text)).toEqual(['On other']);
+  });
+});
+
 describe('events', () => {
   it('lists events after an id and finds the newest per project', () => {
     const { ctx, project } = setup();
