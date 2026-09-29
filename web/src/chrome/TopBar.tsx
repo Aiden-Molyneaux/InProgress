@@ -74,7 +74,7 @@ export function TopBar({ projects, current, onSelect, needsYou, onNeedsYou, foll
           ● {needsYou} need you
         </button>
       )}
-      <button className={`ip-follow${follow ? ' on' : ''}`} onClick={onFollow} title="Follow Claude's changes (F)">
+      <button className={`ip-follow${follow ? ' on' : ''}`} onClick={onFollow} aria-pressed={follow} title="Follow Claude's changes (F)">
         ⌖ Follow
       </button>
     </header>

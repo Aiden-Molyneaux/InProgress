@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { Background, BackgroundVariant, Controls, MiniMap, ReactFlow, useReactFlow, type Edge, type Node, type NodeChange, type Viewport } from '@xyflow/react';
 import { layoutOutline, type LayoutItem } from '../../../src/core/layout';
 import { buildIndex, type FoldOverrides } from '../../../src/core/tree';
@@ -41,7 +41,7 @@ function minimapColor(n: Node): string {
 }
 
 export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(props, ref) {
-  const { snapshot, overrides, onToggleFold, onOpenResource, selectedNode } = props;
+  const { snapshot, overrides, onToggleFold, onOpenResource, onSelectNode, selectedNode } = props;
   const rf = useReactFlow();
   const layout = useMemo(
     () => layoutOutline({ nodes: snapshot.nodes, resources: snapshot.resources, sessions: snapshot.sessions, overrides }),
@@ -87,13 +87,14 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
         resources: item.resourceIds.map((id) => resourcesById.get(id)).filter((r): r is NonNullable<typeof r> => !!r),
         flash: flash === item.nodeId,
         selected: selectedNode === item.nodeId,
+        onSelect: onSelectNode,
         onToggleFold,
         onOpenResource,
       };
       return { id: item.id, type: 'ipNode', position, measured, data, draggable: false, selectable: false };
     };
     return layout.items.map(toNode).filter((n): n is Node => n !== null);
-  }, [layout, index, snapshot.resources, snapshot.sessions, flash, selectedNode, onToggleFold, onOpenResource, sizes]);
+  }, [layout, index, snapshot.resources, snapshot.sessions, flash, selectedNode, onSelectNode, onToggleFold, onOpenResource, sizes]);
 
   const edges = useMemo<Edge[]>(
     () =>
@@ -144,7 +145,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
   // A fold, an unfold or an insert moves the rows under a camera that stays put.
   useEffect(() => updateCrumb(rf.getViewport()), [rf, updateCrumb]);
 
-  const { onFollowChange, onSelectNode } = props;
+  const { onFollowChange } = props;
   // onMove fires only when the viewport actually changes: a user pan or zoom carries an event,
   // programmatic camera moves carry null. (onMoveStart would also fire on plain clicks.)
   const onMove = useCallback(
@@ -165,6 +166,26 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
     [onSelectNode],
   );
 
+  // The cards and their buttons are the tab stops (nodesFocusable is off), so React Flow no longer pans to a node that
+  // takes keyboard focus. Do it here: anything focused by keyboard outside the view comes to the middle.
+  const onFocus = useCallback(
+    (e: ReactFocusEvent<HTMLDivElement>) => {
+      const el = e.target as HTMLElement;
+      const flow = el.closest<HTMLElement>('.react-flow');
+      if (!flow || !el.closest('.react-flow__node') || !el.matches(':focus-visible')) return;
+      // By now the browser has scrolled the wrapper to show the element, and React Flow undoes that scroll a frame
+      // later: measure where the element sits without it.
+      const r = el.getBoundingClientRect();
+      const top = r.top + flow.scrollTop;
+      const left = r.left + flow.scrollLeft;
+      const view = flow.getBoundingClientRect();
+      if (top >= view.top && top + r.height <= view.bottom && left >= view.left && left + r.width <= view.right) return;
+      const p = rf.screenToFlowPosition({ x: left + r.width / 2, y: top + r.height / 2 });
+      camera.centerOnPoint(p.x, p.y);
+    },
+    [rf, camera],
+  );
+
   const onInit = useCallback(() => {
     initFrame.current = requestAnimationFrame(() => camera.centerOnFrontier(0, 1));
   }, [camera]);
@@ -178,7 +199,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
   );
 
   return (
-    <div className="ip-canvas">
+    <div className="ip-canvas" onFocus={onFocus}>
       {crumb.length > 0 && <div className="ip-crumb">{crumb.join(' › ')}</div>}
       <ReactFlow
         nodes={nodes}
@@ -193,6 +214,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
         panOnScroll
         nodesDraggable={false}
         nodesConnectable={false}
+        nodesFocusable={false}
         elementsSelectable={false}
         proOptions={{ hideAttribution: true }}
       >

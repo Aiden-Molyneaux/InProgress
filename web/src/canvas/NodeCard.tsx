@@ -12,6 +12,8 @@ export interface NodeCardData extends Record<string, unknown> {
   resources: ResourceMeta[];
   flash: boolean;
   selected: boolean;
+  /** Opens Details, as a click on the card does. */
+  onSelect: (id: number) => void;
   onToggleFold: (key: string, value: 'open' | 'closed') => void;
   onOpenResource: (id: number) => void;
 }
@@ -24,7 +26,19 @@ export function NodeCard({ data }: NodeProps<Node<NodeCardData, 'ipNode'>>) {
   return (
     <div className="ip-row">
       <Handle type="target" position={Position.Left} id="in" className="ip-handle" />
-      <div className={classes} title={`#${node.id}`}>
+      {/* React Flow's own Enter/Space handling needs selectable nodes, so the card is the tab stop and handles them.
+          Keys aimed at the fold chevron inside are the chevron's. */}
+      <div
+        className={classes}
+        title={`#${node.id}`}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return;
+          e.preventDefault();
+          data.onSelect(node.id);
+        }}
+      >
         <span className={`ip-marker m-${node.status}${node.kind === 'question' ? ' q' : ''}`}>{node.kind === 'question' ? '?' : ''}</span>
         <span className="ip-title">
           {node.title}

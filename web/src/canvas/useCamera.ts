@@ -51,6 +51,15 @@ export function useCamera({ layout, snapshot, index, lastEvent, follow }: Camera
     [rf, itemFor],
   );
 
+  /** Brings a flow point to the middle at once, for keyboard focus that lands outside the view. */
+  const centerOnPoint = useCallback(
+    (x: number, y: number) => {
+      void rf.setCenter(x, y, { zoom: rf.getZoom(), duration: 0 });
+      lastMove.current = Date.now();
+    },
+    [rf],
+  );
+
   const centerOnFrontier = useCallback(
     (duration = 400, zoom?: number) => {
       const s = snapRef.current;
@@ -100,5 +109,5 @@ export function useCamera({ layout, snapshot, index, lastEvent, follow }: Camera
     return anchor;
   }, [centerOn, itemFor]);
 
-  return useMemo(() => ({ centerOn, centerOnFrontier, nextNeedsYou }), [centerOn, centerOnFrontier, nextNeedsYou]);
+  return useMemo(() => ({ centerOn, centerOnPoint, centerOnFrontier, nextNeedsYou }), [centerOn, centerOnPoint, centerOnFrontier, nextNeedsYou]);
 }

@@ -161,6 +161,35 @@ test('clicking a node opens its details and copies a reference', async ({ page, 
   expect(await page.evaluate<string>('navigator.clipboard.readText()')).toBe(`#${id} Run signing tests`);
 });
 
+test('the keyboard reaches and opens cards, shows a "+n more" run and toggles Follow', async ({ page, demo }) => {
+  await open(page, demo);
+  const details = page.getByRole('complementary');
+  const play = page.locator('.ip-node', { hasText: 'Play app signing' });
+  await expect(play).toBeInViewport();
+  await page.keyboard.press('Home');
+  await expect(play).not.toBeInViewport();
+  // Keyboard focus on a card outside the view brings it in.
+  await play.focus();
+  await expect(play).toBeInViewport();
+  // Tab from the card above proves the card is in the tab order, not just focusable.
+  await page.keyboard.press('Tab');
+  await expect(page.locator('.ip-node', { hasText: 'Run signing tests' })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(details).toContainText(`#${demo.ids['Run signing tests']} Run signing tests`);
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Space');
+  await expect(details).toContainText(`#${demo.ids['Play app signing']} Play app signing`);
+  const more = page.getByRole('button', { name: 'Show 3 more' });
+  await more.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.ip-node', { hasText: '7 Launch' })).toBeVisible();
+  await expect(page.locator('.ip-more')).toHaveCount(0);
+  const follow = page.getByRole('button', { name: /Follow/ });
+  await expect(follow).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('f');
+  await expect(follow).toHaveAttribute('aria-pressed', 'false');
+});
+
 test('a resource chip opens the rendered resource', async ({ page, demo }) => {
   await open(page, demo);
   await page.locator('.ip-chip', { hasText: 'Signing test suite' }).click();
