@@ -1,28 +1,38 @@
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import type { AddressInfo } from 'node:net';
+import { createServer as createNetServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { install } from '../../src/cli/claude-config';
+import { install, nodeBinary } from '../../src/cli/claude-config';
 import { runCli } from '../../src/cli/commands';
 import { runChecks, type Check } from '../../src/cli/doctor';
 import { edgeArgs } from '../../src/cli/open';
 import { ensureToken } from '../../src/lib/home';
 import { VERSION } from '../../src/lib/version';
 import { buildApp } from '../../src/server/app';
-import { openDb } from '../../src/server/db/connection';
+import { openDb, type DB } from '../../src/server/db/connection';
 import { createCtx } from '../../src/server/db/tx';
 import { createProject } from '../../src/server/repo/projects';
 
 let base = '';
 let home = '';
+let db: DB;
 let close: () => Promise<unknown>;
+const savedEnv = { INPROGRESS_PORT: process.env.INPROGRESS_PORT, INPROGRESS_HOME: process.env.INPROGRESS_HOME };
+const temps: string[] = [];
+
+function tempDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  temps.push(dir);
+  return dir;
+}
 
 beforeAll(async () => {
-  home = mkdtempSync(join(tmpdir(), 'ip-cli-'));
+  home = tempDir('ip-cli-');
   const token = ensureToken(home);
-  const ctx = createCtx(openDb(join(home, 'inprogress.db')));
+  db = openDb(join(home, 'inprogress.db'));
+  const ctx = createCtx(db);
   createProject(ctx, 'test', { name: 'CLI Demo' });
   const app = buildApp({ ctx, token, uiToken: 'u', version: VERSION });
   await app.listen({ port: 0, host: '127.0.0.1' });
@@ -32,22 +42,44 @@ beforeAll(async () => {
   process.env.INPROGRESS_HOME = home;
   close = () => app.close();
 });
-afterAll(() => close());
+afterAll(async () => {
+  await close();
+  db.close();
+  for (const [key, value] of Object.entries(savedEnv)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  for (const dir of temps) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+});
 
 function capture() {
   const lines: string[] = [];
   return { lines, out: (l: string) => lines.push(l) };
 }
 
+/** A port nothing listens on. */
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const probe = createNetServer();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const { port } = probe.address() as AddressInfo;
+      probe.close(() => resolve(port));
+    });
+  });
+}
+
 /**
- * A stand-in repo: the real claude/ templates plus an empty dist/hooks/hook.js. Doctor checks that each hook's
- * script exists, and unit tests must not depend on a build.
+ * A stand-in repo: the real claude/ templates plus empty built entries. Install refuses without them, doctor checks
+ * that each hook's script exists, and unit tests must not depend on a build.
  */
 function fixtureRepo(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'ip-repo-'));
+  const dir = tempDir('ip-repo-');
   cpSync(join(process.cwd(), 'claude'), join(dir, 'claude'), { recursive: true });
-  mkdirSync(join(dir, 'dist', 'hooks'), { recursive: true });
-  writeFileSync(join(dir, 'dist', 'hooks', 'hook.js'), '');
+  for (const entry of ['dist/hooks/hook.js', 'dist/mcp/main.js']) {
+    mkdirSync(dirname(join(dir, entry)), { recursive: true });
+    writeFileSync(join(dir, entry), '');
+  }
   return dir.replace(/\\/g, '/');
 }
 
@@ -76,22 +108,38 @@ describe('runCli', () => {
   });
 
   it('claude-install reports a failed stop, then installs anyway', async () => {
-    const claude = mkdtempSync(join(tmpdir(), 'ip-cli-claude-'));
-    const otherHome = mkdtempSync(join(tmpdir(), 'ip-cli-home-'));
+    const claude = tempDir('ip-cli-claude-');
+    const otherHome = tempDir('ip-cli-home-');
     ensureToken(otherHome); // not the server's token, so the shutdown request gets a 401
     const savedClaude = process.env.INPROGRESS_CLAUDE_DIR;
     process.env.INPROGRESS_HOME = otherHome;
     process.env.INPROGRESS_CLAUDE_DIR = claude;
     try {
       const s = capture();
-      expect(await runCli(['claude-install'], s.out)).toBe(0);
-      expect(s.lines[0]).toBe('Could not stop the running InProgress server: Missing or invalid InProgress token');
+      expect(await runCli(['claude-install'], s.out, { repo: fixtureRepo() })).toBe(0);
+      expect(s.lines.slice(0, 3)).toEqual([
+        'Could not stop the running InProgress server: Missing or invalid InProgress token',
+        `Claude directory: ${claude}`,
+        `Node binary: ${nodeBinary()}`,
+      ]);
       expect(s.lines.at(-1)).toBe('Next: run `inprogress doctor`, then start a new Claude session.');
-      expect(existsSync(join(claude, 'settings.json'))).toBe(true);
+      expect(JSON.parse(readFileSync(join(claude, 'settings.json'), 'utf8')).hooks.SessionStart).toHaveLength(1);
     } finally {
       process.env.INPROGRESS_HOME = home;
       if (savedClaude === undefined) delete process.env.INPROGRESS_CLAUDE_DIR;
       else process.env.INPROGRESS_CLAUDE_DIR = savedClaude;
+    }
+  });
+
+  it('doctor says where to look when it cannot start the server', async () => {
+    process.env.INPROGRESS_PORT = String(await freePort());
+    try {
+      const s = capture();
+      expect(await runCli(['doctor'], s.out, { repo: fixtureRepo(), ensureServer: async () => false })).toBe(1);
+      expect(s.lines[0]).toBe(`InProgress did not start. See ${join(home, 'server.log')}`);
+      expect(s.lines).toContain('! MCP server: skipped: server check failed');
+    } finally {
+      process.env.INPROGRESS_PORT = new URL(base).port;
     }
   });
 });
@@ -99,7 +147,7 @@ describe('runCli', () => {
 /** A temp Claude dir with InProgress installed from a stand-in repo. */
 function installedClaudeDir() {
   const repo = fixtureRepo();
-  const claude = mkdtempSync(join(tmpdir(), 'ip-doc-'));
+  const claude = tempDir('ip-doc-');
   install({ repo, claudeDir: claude, stamp: 'x' });
   return { repo, claude, settingsFile: join(claude, 'settings.json') };
 }
@@ -116,7 +164,7 @@ const named = (checks: Check[], name: string) => checks.find((c) => c.name === n
 
 describe('doctor checks', () => {
   it('passes after install and reports what is missing before it', async () => {
-    const claude = mkdtempSync(join(tmpdir(), 'ip-doc-'));
+    const claude = tempDir('ip-doc-');
     const repo = fixtureRepo();
     const before = await runChecks({ baseUrl: base, home, claudeDir: claude, repo, skipMcp: true });
     expect(before.find((c) => c.name === 'Server')).toMatchObject({ ok: true });
@@ -128,19 +176,16 @@ describe('doctor checks', () => {
     expect(failing).toEqual([]);
   });
 
-  it('names a fix for every failure', async () => {
-    // Another program on the port, a damaged database without a token, a half-written agent, no settings or skill,
-    // and an MCP entry that exits at once.
+  it('names a fix for every failure, and skips the MCP check when the server check fails', async () => {
+    // Another program on the port, a damaged database without a token, a half-written agent, no settings or skill.
     const other = createServer((_req, res) => res.end('<!doctype html><title>Some other app</title>'));
     await new Promise<void>((r) => other.listen(0, '127.0.0.1', r));
-    const brokenHome = mkdtempSync(join(tmpdir(), 'ip-doc-home-'));
+    const brokenHome = tempDir('ip-doc-home-');
     writeFileSync(join(brokenHome, 'inprogress.db'), 'not a database');
-    const claude = mkdtempSync(join(tmpdir(), 'ip-doc-'));
+    const claude = tempDir('ip-doc-');
     mkdirSync(join(claude, 'agents'));
     writeFileSync(join(claude, 'agents', 'inprogress-scribe.md'), '---\nname: inprogress-scribe\n---\n');
-    const repo = mkdtempSync(join(tmpdir(), 'ip-doc-repo-'));
-    mkdirSync(join(repo, 'dist', 'mcp'), { recursive: true });
-    writeFileSync(join(repo, 'dist', 'mcp', 'main.js'), 'process.exit(3);\n');
+    const repo = fixtureRepo();
     try {
       const url = `http://127.0.0.1:${(other.address() as AddressInfo).port}`;
       const checks = await runChecks({ baseUrl: url, home: brokenHome, claudeDir: claude, repo });
@@ -153,11 +198,21 @@ describe('doctor checks', () => {
         'Scribe agent': expect.stringContaining('npm run claude:install'),
         Skill: expect.stringContaining('run npm run claude:install'),
         'Allow rules': expect.stringContaining('run npm run claude:install'),
-        'MCP server': expect.stringContaining('run npm run build'),
       });
+      expect(named(checks, 'MCP server')).toEqual({ name: 'MCP server', ok: false, warnOnly: true, detail: 'skipped: server check failed' });
+      // The damaged database's handle is closed again, so its folder can be deleted.
+      expect(() => rmSync(brokenHome, { recursive: true })).not.toThrow();
     } finally {
       other.close();
     }
+  });
+
+  it('fails the MCP check with a fix when its entry cannot answer', async () => {
+    const { repo, claude } = installedClaudeDir();
+    writeFileSync(join(repo, 'dist', 'mcp', 'main.js'), 'process.exit(3);\n');
+    const checks = await runChecks({ baseUrl: base, home, claudeDir: claude, repo });
+    expect(named(checks, 'Server')).toMatchObject({ ok: true });
+    expect(named(checks, 'MCP server')).toMatchObject({ ok: false, detail: expect.stringContaining('run npm run build') });
   });
 
   it("fails Hooks when a hook's node binary is gone", async () => {
@@ -187,5 +242,21 @@ describe('doctor checks', () => {
     for (const name of ['Hooks', 'Allow rules']) {
       expect(named(checks, name)).toMatchObject({ ok: false, detail: expect.stringMatching(/^settings\.json is not valid JSON: .+: fix /) });
     }
+  });
+
+  it('names a malformed settings.json value instead of crashing', async () => {
+    const { repo, claude, settingsFile } = installedClaudeDir();
+    writeFileSync(settingsFile, JSON.stringify({ hooks: { Stop: { hooks: [] } } }));
+    const checks = await checksFor(repo, claude);
+    for (const name of ['Hooks', 'Allow rules']) {
+      expect(named(checks, name)).toMatchObject({ ok: false, detail: expect.stringMatching(/^settings\.json: "hooks\.Stop" is not an array: fix /) });
+    }
+  });
+
+  it('reads a settings.json that starts with a UTF-8 BOM', async () => {
+    const { repo, claude, settingsFile } = installedClaudeDir();
+    writeFileSync(settingsFile, `\uFEFF${readFileSync(settingsFile, 'utf8')}`);
+    const checks = await checksFor(repo, claude);
+    for (const name of ['Hooks', 'Allow rules']) expect(named(checks, name), name).toMatchObject({ ok: true });
   });
 });
