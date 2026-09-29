@@ -1,4 +1,5 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer, type RequestListener } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -40,6 +41,51 @@ describe('client', () => {
     expect(err).toBeInstanceOf(ApiClientError);
     expect(err.status).toBe(0);
     expect(err.message).toContain('unreachable');
+  });
+});
+
+/** A plain HTTP server standing in for a misbehaving InProgress server. */
+async function withRawServer(handler: RequestListener, run: (url: string) => Promise<void>): Promise<void> {
+  const server = createServer(handler);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    await run(`http://127.0.0.1:${(server.address() as AddressInfo).port}`);
+  } finally {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+const HINT = 'Run `inprogress start`, or `inprogress doctor` to diagnose.';
+
+describe('client failures past the headers', () => {
+  it('wraps a response body that breaks off in ApiClientError', async () => {
+    await withRawServer(
+      (_req, res) => {
+        res.writeHead(200, { 'content-type': 'application/json', 'content-length': '100' });
+        res.write('{"slug":');
+        setTimeout(() => res.destroy(), 20);
+      },
+      async (url) => {
+        const err = await createClient({ baseUrl: url }).get('/api/projects').catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(ApiClientError);
+        expect(err).toMatchObject({ status: 200, hint: HINT });
+        expect((err as ApiClientError).message).toMatch(new RegExp(`^InProgress server at ${url} broke off its answer to GET /api/projects \\(.+\\)$`));
+      },
+    );
+  });
+
+  it('wraps a success response that is not JSON in ApiClientError', async () => {
+    await withRawServer(
+      (_req, res) => res.writeHead(200, { 'content-type': 'text/html' }).end('<html>a proxy page</html>'),
+      async (url) => {
+        const err = await createClient({ baseUrl: url }).post('/api/projects', { name: 'x' }).catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(ApiClientError);
+        expect(err).toMatchObject({ status: 200, hint: HINT, message: `InProgress server at ${url} answered POST /api/projects with something that is not JSON` });
+        // Text reads have nothing to parse.
+        expect(await createClient({ baseUrl: url }).text('/api/projects/x/outline')).toBe('<html>a proxy page</html>');
+      },
+    );
   });
 });
 
