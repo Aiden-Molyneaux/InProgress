@@ -34,7 +34,7 @@ function readJson(file: string): { value?: Json; error?: string } {
   if (!existsSync(file)) return {};
   let value: unknown;
   try {
-    const text = readFileSync(file, 'utf8').replace(/^﻿/, '');
+    const text = readFileSync(file, 'utf8').replace(/^\uFEFF/, '');
     value = text.trim() ? JSON.parse(text) : {};
   } catch (err) {
     return { error: `settings.json is not valid JSON: ${(err as Error).message}` };

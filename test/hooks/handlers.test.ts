@@ -1,10 +1,10 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { buildHookBody, HOOK_NAMES, runHandler, stripPasted, type HookName } from '../../src/hooks/handlers';
-import { createClient } from '../../src/lib/client';
+import { buildHookBody, HOOK_NAMES, hookErrorLine, parseHookInput, runHandler, stripPasted, type HookName } from '../../src/hooks/handlers';
+import { ApiClientError, createClient } from '../../src/lib/client';
 import { buildApp } from '../../src/server/app';
 import { addNodes } from '../../src/server/repo/nodes';
 import { addBinding, createProject } from '../../src/server/repo/projects';
@@ -16,6 +16,12 @@ let ctx: Ctx;
 let close: () => Promise<unknown>;
 let deps: Parameters<typeof runHandler>[2];
 const bound = 'C:/personal/HookDemo';
+const temps: string[] = [];
+function tempDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  temps.push(dir);
+  return dir;
+}
 
 beforeAll(async () => {
   ctx = makeCtx();
@@ -28,9 +34,30 @@ beforeAll(async () => {
   deps = { post: (path, body) => client.post(path, body), ensureServer: async () => true };
   close = () => app.close();
 });
-afterAll(() => close());
+afterAll(async () => {
+  await close();
+  for (const dir of temps) rmSync(dir, { recursive: true, force: true });
+});
 
 const run = (name: HookName, input: Record<string, unknown>) => runHandler(name, input, deps);
+
+describe('parseHookInput', () => {
+  it('ignores a UTF-8 BOM (PowerShell pipes add one) and reads empty input as {}', () => {
+    expect(parseHookInput('\uFEFF{"session_id":"s1","cwd":"C:/x"}\r\n')).toEqual({ session_id: 's1', cwd: 'C:/x' });
+    expect(parseHookInput('')).toEqual({});
+    expect(parseHookInput(' \r\n')).toEqual({});
+  });
+});
+
+describe('hookErrorLine', () => {
+  it('appends a string hint and never throws on odd errors', () => {
+    expect(hookErrorLine('stop', new ApiClientError(400, 'Invalid body', 'title: too long'))).toBe('stop: Invalid body (title: too long)');
+    // A foreign server's 4xx can carry any JSON as its hint; one with no prototype cannot even become a string.
+    expect(hookErrorLine('stop', new ApiClientError(418, 'HTTP 418', Object.create(null) as string))).toBe('stop: HTTP 418');
+    expect(hookErrorLine('stop', 'plain text')).toBe('stop: plain text');
+    expect(hookErrorLine('stop', null)).toBe('stop: null');
+  });
+});
 
 describe('buildHookBody', () => {
   it('strips pasted blocks before matching', () => {
@@ -44,16 +71,39 @@ describe('buildHookBody', () => {
     ['What’s next?', true],
     ["what's the status?", true],
     ['status?', true],
+    ['status', true],
+    ['  Status ?  ', true],
     ['status check please', true],
     ['run git status', false],
     ['the HTTP status code is 500', false],
     ['update the status field', false],
+    ['status??', false],
   ])('treats %j as a status question: %s', (prompt, asks) => {
     expect(buildHookBody('prompt-submit', { session_id: 's', prompt }).asksStatus).toBe(asks);
   });
 
+  it('checks a long whitespace run in linear time', () => {
+    const prompt = `status${' '.repeat(50_000)}x`;
+    const started = performance.now();
+    expect(buildHookBody('prompt-submit', { session_id: 's', prompt }).asksStatus).toBe(false);
+    expect(performance.now() - started).toBeLessThan(200);
+  });
+
+  it('sends cwd and branch with prompts, as session-start does, so a missed start can self-heal', () => {
+    const repo = tempDir('ip-hook-git-');
+    mkdirSync(join(repo, '.git'));
+    writeFileSync(join(repo, '.git', 'HEAD'), 'ref: refs/heads/feature/VCAD-978\n');
+    const cwd = join(repo, 'src');
+    expect(buildHookBody('prompt-submit', { session_id: 's', cwd, prompt: 'hi' })).toMatchObject({ event: 'prompt', cwd, branch: 'feature/VCAD-978' });
+    const outside = tempDir('ip-hook-plain-');
+    const pick = ({ cwd: c, branch }: Record<string, unknown>) => ({ cwd: c, branch });
+    expect(pick(buildHookBody('prompt-submit', { session_id: 's', cwd: outside, prompt: 'hi' }))).toEqual(pick(buildHookBody('session-start', { session_id: 's', cwd: outside })));
+    expect(buildHookBody('prompt-submit', { session_id: 's', prompt: 'hi' })).not.toHaveProperty('cwd');
+    expect(buildHookBody('stop', { session_id: 's', cwd })).not.toHaveProperty('cwd');
+  });
+
   it('prefers session_title and falls back to the transcript title', () => {
-    const file = join(mkdtempSync(join(tmpdir(), 'ip-hook-')), 't.jsonl');
+    const file = join(tempDir('ip-hook-'), 't.jsonl');
     writeFileSync(file, `${JSON.stringify({ type: 'custom-title', customTitle: 'From transcript' })}\n`);
     expect(buildHookBody('session-start', { session_id: 's', cwd: bound, session_title: 'From hook', transcript_path: file }).title).toBe('From hook');
     expect(buildHookBody('stop', { session_id: 's', transcript_path: file }).title).toBe('From transcript');

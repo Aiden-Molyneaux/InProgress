@@ -150,7 +150,7 @@ export function settingsShapeError(settings: unknown): string | undefined {
 /** Throws, naming the file, before anything is written. A leading BOM is ignored and an empty file reads as {}. */
 function readSettings(file: string): Settings {
   if (!existsSync(file)) return {};
-  const text = readFileSync(file, 'utf8').replace(/^﻿/, '');
+  const text = readFileSync(file, 'utf8').replace(/^\uFEFF/, '');
   if (!text.trim()) return {};
   let settings: unknown;
   try {

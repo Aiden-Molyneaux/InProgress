@@ -41,7 +41,20 @@ export interface HookDeps {
 const TITLE_MAX = 300;
 
 const MENTIONS = /\binprogress\b/i;
-const ASKS_STATUS = /\b(where are we|where were we|what['’]?s next|what['’]?s left|what['’]?s the status|status update|status check|project status|progress so far)\b|^\s*status\s*\??\s*$/i;
+// A lone "status" may end in one "?"; the optional group keeps a long whitespace run linear, not quadratic.
+const ASKS_STATUS = /\b(where are we|where were we|what['’]?s next|what['’]?s left|what['’]?s the status|status update|status check|project status|progress so far)\b|^\s*status(?:\s*\?)?\s*$/i;
+
+/** The hook's stdin JSON. A leading BOM (PowerShell pipes add one) is dropped, and empty input reads as {}. */
+export function parseHookInput(raw: string): HookStdin {
+  const text = raw.replace(/^\uFEFF/, '').trim();
+  return text ? (JSON.parse(text) as HookStdin) : {};
+}
+
+/** The hooks.log line for a failure. An ApiClientError's hint names the fix, e.g. the failing field of a 400. */
+export function hookErrorLine(name: HookName, err: unknown): string {
+  const hint = (err as { hint?: unknown } | null | undefined)?.hint;
+  return `${name}: ${err instanceof Error ? err.message : String(err)}${typeof hint === 'string' ? ` (${hint})` : ''}`;
+}
 
 export function stripPasted(prompt: string): string {
   return prompt.replace(/<pasted_content\b[^>]*>[\s\S]*?<\/pasted_content>/gi, '');
@@ -50,12 +63,11 @@ export function stripPasted(prompt: string): string {
 export function buildHookBody(name: HookName, input: HookStdin): Record<string, unknown> {
   const body: Record<string, unknown> = { event: EVENT_FOR[name] };
   if (input.transcript_path) body.transcriptPath = input.transcript_path;
-  if (name === 'session-start') {
-    if (input.source) body.source = input.source;
-    if (input.cwd) {
-      body.cwd = input.cwd;
-      body.branch = detectBranch(input.cwd) ?? null;
-    }
+  if (name === 'session-start' && input.source) body.source = input.source;
+  // Prompts carry the folder too, so the server can still pick up a session whose start it missed.
+  if ((name === 'session-start' || name === 'prompt-submit') && input.cwd) {
+    body.cwd = input.cwd;
+    body.branch = detectBranch(input.cwd) ?? null;
   }
   if (name === 'session-start' || name === 'prompt-submit' || name === 'stop') {
     const title = (typeof input.session_title === 'string' && input.session_title.trim()) || (input.transcript_path ? readTranscriptTitle(input.transcript_path) : undefined);

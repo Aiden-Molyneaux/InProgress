@@ -1,20 +1,26 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { nodeBinary } from '../../src/cli/claude-config';
 import { createClient } from '../../src/lib/client';
 import { isServerUp } from '../../src/lib/ensure-server';
 import { readToken } from '../../src/lib/home';
 
 const home = mkdtempSync(join(tmpdir(), 'ip-smoke-'));
 const claude = mkdtempSync(join(tmpdir(), 'ip-smoke-claude-'));
+/** A folder bound to the Smoke project by the first test. */
+const bound = mkdtempSync(join(tmpdir(), 'ip-smoke-bound-'));
 let base = '';
 let env: NodeJS.ProcessEnv = {};
 let server: ChildProcess | undefined;
+
+const sessionStart = (sessionId: string) => JSON.stringify({ session_id: sessionId, cwd: bound, source: 'startup' });
+const briefing = (stdout: string) => (JSON.parse(stdout) as { hookSpecificOutput: { hookEventName: string; additionalContext: string } }).hookSpecificOutput;
 
 /** A port nothing is listening on, so a stale server from an earlier run can never answer. */
 function freePort(): Promise<number> {
@@ -55,19 +61,37 @@ afterAll(async () => {
   }
   server?.kill();
   if (up) throw new Error(`An InProgress server still answers at ${base} (data dir ${home}): stop it by hand.`);
+  for (const dir of [home, claude, bound]) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 });
 
 describe('built artifacts', () => {
   it('session-start hook prints a briefing for a bound folder', async () => {
     const client = createClient({ baseUrl: base, token: readToken(home) });
     const p = await client.post<{ slug: string }>('/api/projects', { name: 'Smoke' });
-    const dir = mkdtempSync(join(tmpdir(), 'ip-smoke-bound-'));
-    await client.post(`/api/projects/${p.slug}/bindings`, { path: dir });
-    const r = spawnSync(process.execPath, ['dist/hooks/hook.js', 'session-start'], { input: JSON.stringify({ session_id: 'smoke-1', cwd: dir, source: 'startup' }), env, encoding: 'utf8' });
+    await client.post(`/api/projects/${p.slug}/bindings`, { path: bound });
+    const r = spawnSync(process.execPath, ['dist/hooks/hook.js', 'session-start'], { input: sessionStart('smoke-1'), env, encoding: 'utf8' });
     expect(r.status).toBe(0);
-    const out = JSON.parse(r.stdout) as { hookSpecificOutput: { hookEventName: string; additionalContext: string } };
-    expect(out.hookSpecificOutput.hookEventName).toBe('SessionStart');
-    expect(out.hookSpecificOutput.additionalContext).toContain('tracked in project "Smoke"');
+    expect(briefing(r.stdout).hookEventName).toBe('SessionStart');
+    expect(briefing(r.stdout).additionalContext).toContain('tracked in project "Smoke"');
+  });
+
+  it('hooks read stdin that starts with a UTF-8 BOM', () => {
+    // PowerShell adds one when it pipes text to a program.
+    const r = spawnSync(process.execPath, ['dist/hooks/hook.js', 'session-start'], { input: `\uFEFF${sessionStart('smoke-bom')}\r\n`, env, encoding: 'utf8' });
+    expect(r.stderr).toBe('');
+    expect(r.status).toBe(0);
+    expect(briefing(r.stdout).additionalContext).toContain('Session id: smoke-bom');
+  });
+
+  it('a hook whose reader has gone away exits 0 without stderr', async () => {
+    const child = spawn(process.execPath, ['dist/hooks/hook.js', 'session-start'], { env, stdio: 'pipe' });
+    child.stdout.destroy(); // Claude stopped reading before the briefing is written: the write fails with EPIPE.
+    let stderr = '';
+    child.stderr.setEncoding('utf8').on('data', (d: string) => (stderr += d));
+    child.stdin.end(sessionStart('smoke-epipe'));
+    const code = await new Promise<number | null>((r) => child.on('close', r));
+    expect(stderr).toBe('');
+    expect(code).toBe(0);
   });
 
   it('hooks exit 0 silently when the server is unreachable', () => {
@@ -94,11 +118,24 @@ describe('built artifacts', () => {
     await client.close();
   });
 
-  it('CLI installs into a temp Claude dir and doctor passes', () => {
+  it('CLI installs into a temp Claude dir, then a session-start hook restarts the server it stopped', async () => {
     const inst = spawnSync(process.execPath, ['dist/cli/main.js', 'claude-install'], { env, encoding: 'utf8' });
     expect(inst.stdout).toContain('Stopped the running InProgress server.');
+    expect(inst.stdout).toContain(`Claude directory: ${claude}\nNode binary: ${nodeBinary()}\n`);
     expect(inst.status).toBe(0);
-    // claude-install stopped the server; doctor starts it again before its checks.
+    // Let this process drop its keep-alive sockets to the stopped server before probing (see afterAll).
+    await new Promise((r) => setTimeout(r, 200));
+    expect(await isServerUp(base, 500)).toBe(false);
+    // The next session in a bound folder starts the server itself, as after a real install.
+    const r = spawnSync(process.execPath, ['dist/hooks/hook.js', 'session-start'], { input: sessionStart('smoke-2'), env, encoding: 'utf8' });
+    expect(r.stderr).toBe('');
+    expect(r.status).toBe(0);
+    expect(briefing(r.stdout).additionalContext).toContain('tracked in project "Smoke"');
+  });
+
+  it('doctor starts a stopped server and passes', () => {
+    const stop = spawnSync(process.execPath, ['dist/cli/main.js', 'stop'], { env, encoding: 'utf8' });
+    expect(stop.stdout).toContain('Stopped the running InProgress server.');
     const doc = spawnSync(process.execPath, ['dist/cli/main.js', 'doctor'], { env, encoding: 'utf8' });
     expect(doc.stdout).toContain(`Started InProgress at ${base}`);
     expect(doc.stdout).not.toContain('✗');
