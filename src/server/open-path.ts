@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 /**
  * Windows looks a bare program name up in the working directory before PATH, and where.exe searches
@@ -17,15 +17,20 @@ let vsCode: { path: string | undefined } | undefined;
  * so we find Code.exe instead.
  */
 export function findVsCode(): string | undefined {
+  // VS Code may have been uninstalled or moved since the lookup: look again rather than fail silently.
+  if (vsCode?.path && isAbsolute(vsCode.path) && !existsSync(vsCode.path)) vsCode = undefined;
   vsCode ??= { path: lookUpVsCode() };
   return vsCode.path;
 }
 
+/** The lookup blocks the event loop, so a hung lookup gives up after 3 s. */
+const LOOKUP_TIMEOUT_MS = 3000;
+
 function lookUpVsCode(): string | undefined {
   if (process.platform !== 'win32') {
-    return spawnSync('which', ['code'], { stdio: 'ignore' }).status === 0 ? 'code' : undefined;
+    return spawnSync('which', ['code'], { stdio: 'ignore', timeout: LOOKUP_TIMEOUT_MS }).status === 0 ? 'code' : undefined;
   }
-  const where = spawnSync(join(systemRoot(), 'System32', 'where.exe'), ['code'], { cwd: systemRoot(), encoding: 'utf8', windowsHide: true });
+  const where = spawnSync(join(systemRoot(), 'System32', 'where.exe'), ['code'], { cwd: systemRoot(), encoding: 'utf8', windowsHide: true, timeout: LOOKUP_TIMEOUT_MS });
   const shims = where.status === 0 ? where.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean) : [];
   const candidates = shims.map((shim) => join(dirname(dirname(shim)), 'Code.exe'));
   if (process.env.LOCALAPPDATA) candidates.push(join(process.env.LOCALAPPDATA, 'Programs', 'Microsoft VS Code', 'Code.exe'));
@@ -34,8 +39,8 @@ function lookUpVsCode(): string | undefined {
 }
 
 /** Start a program detached. The error listener keeps a failed spawn (a missing program, say) from crashing the server. */
-function launch(file: string, args: string[]): void {
-  spawn(file, args, { detached: true, stdio: 'ignore', windowsHide: true }).on('error', () => undefined).unref();
+function launch(file: string, args: string[], onError?: () => void): void {
+  spawn(file, args, { detached: true, stdio: 'ignore', windowsHide: true }).on('error', () => onError?.()).unref();
 }
 
 /**
@@ -46,7 +51,10 @@ export async function openInEditorOrReveal(path: string): Promise<void> {
   const target = resolve(path);
   const code = findVsCode();
   if (code) {
-    launch(code, [target]);
+    // A Code.exe that will not start is forgotten, so the next open looks it up again.
+    launch(code, [target], () => {
+      if (vsCode?.path === code) vsCode = undefined;
+    });
     return;
   }
   if (process.platform === 'win32') launch(join(systemRoot(), 'explorer.exe'), [`/select,${target}`]);
