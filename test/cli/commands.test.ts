@@ -96,6 +96,26 @@ describe('runCli', () => {
     expect(await runCli(['nonsense'], capture().out)).toBe(1);
   });
 
+  it('gives a slow first health check a second before calling the server down', async () => {
+    // A fresh CLI process's first request is slow on a busy machine; 300 ms once turned a running server into "not running".
+    const slow = createServer((req, res) => {
+      const reply = () => res.setHeader('content-type', 'application/json').end(req.url === '/api/health' ? '{"app":"inprogress"}' : '[]');
+      if (req.url === '/api/health') setTimeout(reply, 500);
+      else reply();
+    });
+    await new Promise<void>((r) => slow.listen(0, '127.0.0.1', r));
+    const port = (slow.address() as AddressInfo).port;
+    process.env.INPROGRESS_PORT = String(port);
+    try {
+      const s = capture();
+      expect(await runCli(['status'], s.out)).toBe(0);
+      expect(s.lines).toEqual([`InProgress at http://127.0.0.1:${port}`, '  no projects yet']);
+    } finally {
+      process.env.INPROGRESS_PORT = new URL(base).port;
+      slow.close();
+    }
+  });
+
   it('builds the Edge app-window arguments', () => {
     expect(edgeArgs('http://127.0.0.1:4317')).toEqual(['--app=http://127.0.0.1:4317', '--window-size=520,1000']);
   });

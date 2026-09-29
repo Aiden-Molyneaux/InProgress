@@ -9,13 +9,18 @@ import { doctor } from './doctor';
 import { openAppWindow } from './open';
 
 const USAGE = 'Usage: inprogress <start | stop | open | status | outline <project> [--full] | doctor | claude-install | claude-uninstall>';
+/**
+ * The first health check of a CLI run. A fresh process's first request is slow on a busy machine (fetch sets up its
+ * HTTP parser), and 300 ms has called a running server down. Nothing listening still fails at once.
+ */
+const FIRST_PROBE_MS = 1000;
 
 /**
  * Ask the server to shut down and wait until it has actually stopped answering (up to 3 s).
  * False when it is still answering; throws when the shutdown request itself fails.
  */
 async function stopServer(url: string, out: (l: string) => void): Promise<boolean> {
-  if (!(await isServerUp(url))) return true;
+  if (!(await isServerUp(url, FIRST_PROBE_MS))) return true;
   await createClient({ baseUrl: url, token: readToken() }).post('/api/admin/shutdown', {});
   for (let i = 0; i < 30; i++) {
     if (!(await isServerUp(url, 200))) {
@@ -47,7 +52,7 @@ export async function runCli(args: string[], out: (line: string) => void = conso
       return up ? 0 : 1;
     }
     case 'stop':
-      if (!(await isServerUp(url))) {
+      if (!(await isServerUp(url, FIRST_PROBE_MS))) {
         out('InProgress is not running.');
         return 0;
       }
@@ -62,7 +67,7 @@ export async function runCli(args: string[], out: (line: string) => void = conso
       return 0;
     }
     case 'status': {
-      if (!(await isServerUp(url))) {
+      if (!(await isServerUp(url, FIRST_PROBE_MS))) {
         out('InProgress is not running.');
         return 1;
       }
@@ -87,7 +92,7 @@ export async function runCli(args: string[], out: (line: string) => void = conso
     case 'doctor':
       // Start the server first, as `open` does, so doctor passes straight after claude-install stopped it.
       // If it cannot start, say where to look; the Server check then fails too.
-      if (!(await isServerUp(url))) out((await ensure({ baseUrl: url, waitMs: 5000 })) ? `Started InProgress at ${url} for these checks.` : notStarted());
+      if (!(await isServerUp(url, FIRST_PROBE_MS))) out((await ensure({ baseUrl: url, waitMs: 5000 })) ? `Started InProgress at ${url} for these checks.` : notStarted());
       return doctor({ baseUrl: url, home: homeDir(), claudeDir: claudeDir(), repo: o.repo ?? repoRoot() }, out);
     case 'claude-install': {
       // A failed stop (say a 401 from a token mismatch) is reported, and the install goes ahead.
