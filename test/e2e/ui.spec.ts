@@ -190,6 +190,62 @@ test('the keyboard reaches and opens cards, shows a "+n more" run and toggles Fo
   await expect(follow).toHaveAttribute('aria-pressed', 'false');
 });
 
+test('a wheel tick or a minimap drag turns Follow off, a minimap click does not', async ({ page, demo }) => {
+  await open(page, demo);
+  const follow = page.getByRole('button', { name: /Follow/ });
+  await expect(page.locator('.ip-node', { hasText: 'Play app signing' })).toBeInViewport();
+  const minimap = page.locator('.react-flow__minimap');
+  await minimap.click();
+  await minimap.click({ button: 'right' });
+  await expect(follow).toHaveAttribute('aria-pressed', 'true');
+  const map = (await minimap.boundingBox())!;
+  await page.mouse.move(map.x + map.width / 2, map.y + map.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(map.x + map.width / 2 + 5, map.y + map.height / 2 + 15);
+  await page.mouse.up();
+  await expect(follow).toHaveAttribute('aria-pressed', 'false');
+  await follow.click();
+  await expect(follow).toHaveAttribute('aria-pressed', 'true');
+  const pane = (await page.locator('.react-flow__pane').boundingBox())!;
+  await page.mouse.move(pane.x + pane.width / 2, pane.y + 60);
+  await page.mouse.wheel(0, 60);
+  await expect(follow).toHaveAttribute('aria-pressed', 'false');
+});
+
+// Records whether the flash on "Run signing tests" is ever cleared from now on.
+const WATCH_FLASH = `(() => {
+  const el = [...document.querySelectorAll('.ip-node')].find((n) => n.textContent.includes('Run signing tests'));
+  window.__flashCleared = false;
+  new MutationObserver(() => { if (!el.classList.contains('flash')) window.__flashCleared = true; }).observe(el, { attributes: true, attributeFilter: ['class'] });
+})()`;
+
+test('pressing N again on the same item flashes it again', async ({ page, demo }) => {
+  await open(page, demo);
+  const item = page.locator('.ip-node', { hasText: 'Run signing tests' });
+  await expect(item).toBeVisible();
+  await page.keyboard.press('n');
+  await expect(item).toHaveClass(/\bflash\b/);
+  await page.evaluate(WATCH_FLASH);
+  await page.keyboard.press('n');
+  // Well inside the 1.5 s the first flash lasts, so only a restart can clear it this soon.
+  await expect.poll(() => page.evaluate<boolean>('window.__flashCleared'), { timeout: 1000 }).toBe(true);
+  await expect(item).toHaveClass(/\bflash\b/);
+});
+
+test('with Details open on a narrow window, the camera centres above the sheet', async ({ page, demo }) => {
+  await open(page, demo);
+  await page.locator('.ip-node', { hasText: 'Upload keystore' }).click();
+  const sheet = page.getByRole('complementary');
+  await expect(sheet).toContainText('Upload keystore');
+  const item = page.locator('.ip-node', { hasText: 'Run signing tests' });
+  await page.keyboard.press('n');
+  await expect(async () => {
+    const card = (await item.boundingBox())!;
+    const top = (await sheet.boundingBox())!.y;
+    expect(card.y + card.height).toBeLessThanOrEqual(top);
+  }).toPass({ timeout: 3000 });
+});
+
 test('a resource chip opens the rendered resource', async ({ page, demo }) => {
   await open(page, demo);
   await page.locator('.ip-chip', { hasText: 'Signing test suite' }).click();
