@@ -73,24 +73,26 @@ the sandbox detour on the way (detours become log notes on the step they interru
 package.json            single package; scripts below
 tsconfig.json
 src/
-  shared/               types, zod schemas, constants (paths, port), HTTP client, path + glob utils
-  server/               Fastify app: db/ (schema, migrations, repo functions), routes/, sse, briefing, static
-  mcp/                  stdio MCP server exposing scribe tools (uses shared HTTP client)
-  hooks/                one entry per hook event; tiny, dependency-light
-  cli/                  `inprogress` admin CLI
+  core/                 types, tree and fold rules, outline-flow layout (shared by server and web)
+  lib/                  paths, glob, git, home/token, HTTP client, ensure-server, log
+  server/               Fastify app: db/ (schema, migrations, tx), repo/, routes/, sse, briefing, backup
+  mcp/                  stdio MCP server exposing scribe tools (uses the lib HTTP client)
+  hooks/                one entry for all hook events; tiny, dependency-light
+  cli/                  `inprogress` admin CLI, including claude-install / claude-uninstall
 web/                    Vite + React + @xyflow/react app (built into web/dist, served by server)
 claude/
-  agents/inprogress-scribe.md      template ({{REPO}} placeholder)
-  skills/inprogress/SKILL.md       template ({{REPO}} placeholder)
+  agents/inprogress-scribe.md      template ({{REPO}}, {{NODE}} placeholders)
+  skills/inprogress/SKILL.md       template ({{REPO}}, {{NODE}}, {{RESOURCES}} placeholders)
 scripts/
-  claude-install.mjs, claude-uninstall.mjs
+  dev.mjs               dev loop: builds into .dev-home/dist (never dist/), Vite on 5183
 test/                   vitest unit + integration; test/e2e/ Playwright
 docs/superpowers/specs/ this spec
 ```
 
 Scripts: `build` (server/mcp/hooks/cli via tsup → `dist/`, web via Vite → `web/dist/`),
 `dev` (server watch + Vite dev proxying `/api`), `test` (vitest), `test:e2e` (Playwright),
-`claude:install`, `claude:uninstall`. `bin: { "inprogress": "dist/cli/main.js" }`.
+`claude:install`, `claude:uninstall` (the CLI's `claude-install` / `claude-uninstall`
+subcommands). `bin: { "inprogress": "dist/cli/main.js" }`.
 
 ### 3.2 Runtime paths and config
 
@@ -143,11 +145,12 @@ PK(`session_id`, `agent_id`). Inserted on SubagentStart, deleted on SubagentStop
 cleared when the session ends or goes stale. Events with an empty `agent_type` and the scribe
 itself are ignored. The running count is the row count, so it cannot drift.
 
-**events** — `id` INTEGER PK (monotonic) · `ts` · `project_id` · `actor` (e.g.
+**events** — `id` INTEGER PK AUTOINCREMENT (monotonic and never reused: it is the SSE cursor) · `ts` · `project_id` · `actor` (e.g.
 `scribe:<sessionId>`, `hook:prompt`, `system`) · `type` (e.g. `node.created`, `node.updated`,
 `node.moved`, `node.deleted`, `resource.created`, `log.created`, `session.updated`,
 `project.updated`) · `entity` · `entity_id` · `data` (JSON: the changed fields, before/after for
-updates). Append-only. Drives SSE and history.
+updates). Append-only, except that server start prunes events older than 30 days while keeping
+each project's newest event. Drives SSE and history.
 
 ### 4.2 Derived rules
 
@@ -177,8 +180,13 @@ without. The resolved project is assigned at session start only if the session h
 
 ## 5. Server (Fastify)
 
-- Listens on `127.0.0.1` only. Rejects requests whose `Host` header is not
-  `127.0.0.1:<port>` or `localhost:<port>` (DNS-rebinding guard). Sends no CORS headers.
+- Listens on `127.0.0.1` only. Rejects requests whose `Host` name is not `127.0.0.1`,
+  `localhost` or `[::1]`, on any port (DNS-rebinding guard: rebinding changes the name, not the
+  port). Sends no CORS headers.
+- `/` is served with a Content-Security-Policy (`default-src 'self'; img-src 'self' data:;
+  style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none';
+  form-action 'none'`): a backstop for the Markdown sanitiser that also blocks framing. Remote
+  images in resources do not load.
 - **Auth**: all mutating routes require `Authorization: Bearer <token file contents>` and
   record `X-InProgress-Actor` (default `system`). Reads need no token.
 - **UI token**: a random per-process token is injected into the served `index.html`
@@ -192,8 +200,10 @@ without. The resolved project is assigned at session start only if the session h
   `doctor` fails its server check (✗, with the `inprogress stop` hint) when the running
   server's version differs from the built one.
 - **Backups**: on each start, back up the DB with better-sqlite3's backup API into
-  `backups/inprogress-YYYYMMDD-HHmmss.db`, keeping the newest 7.
-- `server.log` is truncated on start when above 5 MB.
+  `backups/inprogress-YYYYMMDD-HHmmss.db`, keeping the newest 7. The backup is skipped (with a
+  log line) when `PRAGMA quick_check` fails, so a damaged DB never displaces good backups.
+- `server.log` is truncated on start when above 5 MB. Request logging is off: the log holds
+  startup lines and errors. `hooks.log` rolls over to `hooks.log.1` past 1 MiB.
 
 ### 5.1 Routes
 
@@ -292,7 +302,7 @@ Shared hook helpers:
 | Event | Action |
 |---|---|
 | `SessionStart` | Ensure the server is up (health check 300 ms; else spawn `node dist/server/main.js` detached, hidden, output to `server.log`; poll health every 100 ms up to 2 s). Post `start` with `source`, `cwd`, `branch`, `transcriptPath`, `title`. If the session has no row, the server resolves a binding; no match means nothing is stored and nothing printed. For a tracked session it sets state `idle` only when `source` is `startup`, `resume` or `clear` (a `compact` start happens mid-turn and leaves the state alone), and returns the briefing, which the hook prints as `additionalContext`. |
-| `UserPromptSubmit` | Post `prompt` with `title`, `mentionsInProgress` (`/\binprogress\b/i`) and `asksStatus` (status questions such as "where are we", "what's next", "what's left", "what's the status", "status update", "status check", "project status", "progress so far", or a bare "status?", with straight or curly apostrophes; deliberately not bare "status" anywhere in a prompt, which would fire on "git status"), both on the prompt with pasted blocks stripped. Tracked: state → `working`, `prompts_since_update += 1`; if `asksStatus`, return the briefing's "Where things stand" and "Needs you" lines; else if `prompts_since_update ≥ 2`, return a one-line status, e.g. `[InProgress] InGame · focus #57 Play app signing · 2 need you · last scribe update 3 prompts ago. If a checkpoint happened, brief the inprogress-scribe; otherwise ignore this line.` Untracked and the prompt mentions InProgress: return `[InProgress] This session is not tracked yet. Session id: <id>. Use the inprogress skill to opt in.` |
+| `UserPromptSubmit` | Post `prompt` with `title`, `cwd`, `branch`, `mentionsInProgress` (`/\binprogress\b/i`) and `asksStatus` (status questions such as "where are we", "where were we", "what's next", "what's left", "what's the status", "status update", "status check", "project status", "progress so far", or a bare "status?", with straight or curly apostrophes; deliberately not bare "status" anywhere in a prompt, which would fire on "git status"), both on the prompt with pasted blocks stripped. Tracked: state → `working`, `prompts_since_update += 1`; if `asksStatus`, return the briefing's "Where things stand" and "Needs you" lines; else if `prompts_since_update ≥ 2`, return a one-line status, e.g. `[InProgress] InGame · focus #57 Play app signing · 2 need you · last scribe update 3 prompts ago. If a checkpoint happened, brief the inprogress-scribe; otherwise ignore this line.` Untracked and the prompt mentions InProgress: return `[InProgress] This session is not tracked yet. Session id: <id>. Use the inprogress skill to opt in.` A session with no row (its SessionStart hook missed its window) is resolved against the bindings from `cwd` and `branch` exactly as on start; a match tracks it and the prompt's context carries the session-start briefing. |
 | `Stop` | Post `stop` with `title` → state `idle`. |
 | `Notification` (matcher `permission_prompt`, fires after ~6 s of waiting) | → state `permission`. It clears on the next `prompt`, `stop` or subagent event. |
 | `SubagentStart` / `SubagentStop` (matcher `^(?!inprogress-scribe$).*`, so no process spawns for the scribe) | Insert / delete the `session_subagents` row by `agent_id`; ignore empty `agent_type`. |
@@ -307,7 +317,8 @@ The `event` values posted to `/api/sessions/:id/hook` are exactly: `start`, `pro
 
 Defined inline in the scribe agent's frontmatter, so the main session never sees these tools.
 It talks to the server over HTTP with the token (reading `token` from the data dir) and starts
-the server if it is down (same logic as session-start). Every write tool takes an optional
+the server if it is down (same logic as session-start): at launch, and again when a call finds
+the server unreachable, in which case that call is retried once. Every write tool takes an optional
 `session` (Claude session id) used as actor `scribe:<session>`. Results are short plain text
 naming the ids touched. Errors return `isError` with the server's specific message.
 
@@ -362,7 +373,8 @@ prompt-submit hook reports an untracked session that mentions InProgress. Conten
 
 - **Tracked or not**: tracked if the session-start briefing (or an `enroll` result) is in
   context. The briefing carries the session id; for untracked sessions the prompt hook supplies it.
-- **Opt-in**: ask which project (offer existing ones via a scribe `list_projects` call if unclear),
+- **Opt-in**: ask which project (offer existing ones from `"{{NODE}}" "{{REPO}}/dist/cli/main.js"
+  status` if unclear; the `inprogress` bin may not be on PATH, and reading never needs the scribe),
   then brief the scribe to `enroll_session` (creating the project if needed) and, if Aiden agrees,
   `bind_folder` with the cwd (and a branch pattern for ticket work, e.g. `*VCAD-978*`).
 - **Checkpoints**, when the main session dispatches the scribe (at most once per turn, all changes
@@ -377,8 +389,10 @@ prompt-submit hook reports an untracked session that mentions InProgress. Conten
   ("edit file", "run grep"). Detours are `add_log` entries on the step they interrupted.
 - **Resources**: always hand the scribe a `path` + `snapshot_file: true`, never pasted content,
   so nothing is typed out twice by two models. Content that only exists in chat is first written
-  by the main session to `~/.inprogress/resources/<project-slug>/<yyyy-mm-dd>-<kebab-title>.md`
+  by the main session to `<data dir>/resources/<project-slug>/<yyyy-mm-dd>-<kebab-title>.md`
   (outside the project repo, so work repos stay clean; the installer adds an allow rule for it).
+  The skill (`{{RESOURCES}}`, rendered at install) and the briefing's rules name this directory
+  as an absolute path, because the Write tool needs one.
 - **Brief template**:
   ```
   Session: <session id> · Project: <slug>
@@ -395,7 +409,8 @@ prompt-submit hook reports an untracked session that mentions InProgress. Conten
   completion notice needs no reply beyond that one line.
 - **Status questions** ("where are we?"): the prompt hook injects the current "Where things
   stand" lines when a prompt asks for status, so answer from those. For the full tree, run
-  `inprogress outline <slug>` (read-only CLI). Never dispatch the scribe just to read.
+  `"{{NODE}}" "{{REPO}}/dist/cli/main.js" outline <slug>` (the read-only `inprogress outline`
+  CLI by absolute path). Never dispatch the scribe just to read.
 - **Adopting an existing project**: brief the scribe with the purpose, the current plan with real
   statuses, a one-line summary per finished phase (each becomes a `done` phase node, e.g.
   "M1–M6 build"), and paths of key existing docs to attach with `snapshot_file`. No history backfill.
@@ -487,7 +502,8 @@ node that session is focused on.
 - **Manual override**: clicking a chevron or `+n more` toggles fold. Overrides persist in
   `localStorage` per node id and beat auto rules.
 - Text outline for the API and briefing uses the same fold rules, rendered as indented lines
-  `#id title — status [NEEDS YOU] [r12, r13]`.
+  `#id title — status [r12, r13]`, where a needs-you node shows `NEEDS YOU` in place of its
+  status (as in the 5.2 example).
 
 ### 7.4 Camera
 
@@ -496,7 +512,8 @@ node that session is focused on.
 - **Follow on** (default): after each relevant event, re-layout and animate (`setCenter`, 400 ms)
   to the event's node (a resource or log event uses its node). Throttled to one move per 1.5 s
   (the latest target wins).
-- A manual pan or zoom turns Follow off; `⌖` turns it back on and recentres.
+- A manual pan or zoom (canvas drag or wheel, minimap drag or wheel, the zoom controls) turns
+  Follow off; a plain click does not. `⌖` turns it back on and recentres.
 - **Needs-you pill** / `N` key: centre on the next needs-you node in DFS order and briefly
   highlight it. `F` toggles Follow, `Home` goes to the root, `End` to the frontier, `Esc` closes
   sheets.
@@ -532,7 +549,9 @@ with `since`.
   (7 kept).
 - **Security**: loopback-only listener, Host-header check, bearer token for writes, per-process UI
   token for `ui/open`, which opens only a stored resource path and only in VS Code or Explorer's
-  reveal, never through the OS default handler.
+  reveal, never through the OS default handler. Resource Markdown is sanitised (no scripts,
+  styles, classes, forms or form controls other than disabled task-list checkboxes; links open
+  in a new tab with `noopener noreferrer`), and the CSP on `/` backs that up.
 - **Undocumented inputs** (transcript titles, hook payload fields not in the docs) are read
   defensively with fallbacks, never trusted to exist.
 
