@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BADGE_ROW, INDENT, ROW, eventTarget, findFrontier, layoutOutline, needsYouOrder } from '../../src/core/layout';
+import { BADGE_ROW, INDENT, ROW, eventTarget, findFrontier, layoutOutline } from '../../src/core/layout';
 import type { EventRow, ResourceMeta, Session, TreeNode } from '../../src/core/types';
 
 let nextId = 1;
@@ -65,6 +65,40 @@ describe('layoutOutline', () => {
     expect(l.items.find((i) => i.kind === 'badge')).toMatchObject({ id: 'bs1', nodeId: t.a.id, x: 2 * INDENT, y: 2 * ROW });
     expect(l.nodeItems.get(t.a.id)?.working).toBe(true);
   });
+
+  it('gives no badge to a session without a focus or focused on a node that is gone', () => {
+    const t = sample();
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [session('s1', null, 'working'), session('s2', 999, 'working')] });
+    expect(l.items.filter((i) => i.kind === 'badge')).toEqual([]);
+    expect([...l.nodeItems.values()].filter((i) => i.working)).toEqual([]);
+    expect(l.height).toBe(layoutOutline({ nodes: t.nodes, resources: [], sessions: [] }).height);
+  });
+
+  it('stacks the badges of sessions sharing an anchor, one BADGE_ROW each', () => {
+    const t = sample();
+    const both = layoutOutline({ nodes: t.nodes, resources: [], sessions: [session('s1', t.a1.id, 'working'), session('s2', t.a1.id, 'idle')] });
+    const badges = both.items.filter((i) => i.kind === 'badge');
+    expect(badges.map((b) => [b.id, b.nodeId, b.x, b.y])).toEqual([['bs1', t.a1.id, 3 * INDENT, 3 * ROW], ['bs2', t.a1.id, 3 * INDENT, 3 * ROW + BADGE_ROW]]);
+    expect(both.nodeItems.get(t.a2.id)?.y).toBe(3 * ROW + 2 * BADGE_ROW);
+    expect(both.height).toBe(7 * ROW + 2 * BADGE_ROW);
+    // A fold that hides one session's focus stacks it on the anchor with the session already there.
+    const folded = layoutOutline({ nodes: t.nodes, resources: [], sessions: [session('s1', t.a1.id, 'working'), session('s2', t.a.id, 'idle')], overrides: { ['n:' + t.a.id]: 'closed' } });
+    expect(folded.items.filter((i) => i.kind === 'badge').map((b) => [b.id, b.nodeId, b.y])).toEqual([['bs1', t.a.id, 2 * ROW], ['bs2', t.a.id, 2 * ROW + BADGE_ROW]]);
+  });
+
+  it('draws one uniquely named edge into every visible row but the root', () => {
+    const t = sample();
+    // A pinned needs-you child in the hidden tail splits it into two "+n more" runs.
+    const f = n(t.root.id, 'F', { assignee: 'me' });
+    const g = n(t.root.id, 'G');
+    const h = n(t.root.id, 'H');
+    const l = layoutOutline({ nodes: [...t.nodes, f, g, h], resources: [], sessions: [session('s1', t.a1.id, 'working')] });
+    expect(l.items.filter((i) => i.kind === 'more').map((i) => i.id)).toEqual([`more${t.root.id}-0`, `more${t.root.id}-1`]);
+    const ids = l.edges.map((e) => e.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    const rows = l.items.filter((i) => i.kind !== 'badge' && i.id !== `n${t.root.id}`).map((i) => i.id);
+    expect(l.edges.map((e) => e.target)).toEqual(rows);
+  });
 });
 
 describe('camera helpers', () => {
@@ -77,19 +111,16 @@ describe('camera helpers', () => {
     expect(findFrontier(idle, [], layoutOutline({ nodes: idle, resources: [], sessions: [] }))).toBe(t.c.id);
   });
 
-  it('orders needs-you nodes top to bottom', () => {
-    const t = sample();
-    const nodes = t.nodes.map((x) => (x.id === t.b.id ? { ...x, assignee: 'me' as const } : x));
-    expect(needsYouOrder(layoutOutline({ nodes, resources: [], sessions: [] }))).toEqual([t.a2.id, t.b.id]);
-  });
-
   it('maps events to the node the camera should visit', () => {
     const ev = (type: string, entityId: string, data: unknown): EventRow => ({ id: 1, ts: 't', projectId: 1, actor: 'x', type, entity: 'x', entityId, data });
     expect(eventTarget(ev('node.created', '5', { ids: [5, 6, 7] }))).toBe(7);
     expect(eventTarget(ev('node.updated', '4', {}))).toBe(4);
+    expect(eventTarget(ev('node.moved', '6', { fromParentId: 1, toParentId: 2 }))).toBe(6);
     expect(eventTarget(ev('resource.created', '9', { nodeId: 3 }))).toBe(3);
+    expect(eventTarget(ev('resource.updated', '9', { nodeId: 4, fromNodeId: 3 }))).toBe(4);
     expect(eventTarget(ev('log.created', '2', { nodeId: 8 }))).toBe(8);
     expect(eventTarget(ev('session.updated', 's1', { changed: ['focusNodeId'], focusNodeId: 11 }))).toBe(11);
+    expect(eventTarget(ev('session.updated', 's1', { changed: ['focusNodeId'], focusNodeId: null }))).toBeUndefined();
     expect(eventTarget(ev('session.updated', 's1', { changed: ['state'], state: 'working' }))).toBeUndefined();
     expect(eventTarget(ev('node.deleted', '4', { ids: [4] }))).toBeUndefined();
   });

@@ -16,6 +16,14 @@ describe('normalizePath', () => {
   it('leaves posix paths alone apart from the trailing slash', () => {
     expect(normalizePath('/home/aiden/')).toBe('/home/aiden');
   });
+  it('collapses repeated separators but keeps the leading // of a UNC path', () => {
+    expect(normalizePath('C:\\\\personal\\\\InGame')).toBe('C:/personal/InGame');
+    expect(normalizePath('C://x//y//')).toBe('C:/x/y');
+    expect(normalizePath('C:\\\\')).toBe('C:/');
+    expect(normalizePath('/c//personal')).toBe('C:/personal');
+    expect(normalizePath('\\\\server\\share\\\\repo')).toBe('//server/share/repo');
+    expect(normalizePath('///server//share')).toBe('//server/share');
+  });
 });
 
 describe('isUnder', () => {
@@ -25,5 +33,9 @@ describe('isUnder', () => {
   });
   it('does not match sibling folders sharing a prefix', () => {
     expect(isUnder('C:/personal/InGameX', 'C:/personal/InGame')).toBe(false);
+  });
+  it('matches a cwd written with doubled separators', () => {
+    expect(isUnder('C:\\\\personal\\\\InGame\\\\docs', 'C:/personal/InGame')).toBe(true);
+    expect(isUnder('C:/personal/InGame/docs', 'C://personal//InGame')).toBe(true);
   });
 });

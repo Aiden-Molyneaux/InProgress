@@ -20,6 +20,8 @@ export interface CallOptions {
   timeoutMs?: number;
 }
 
+const HINT = 'Run `inprogress start`, or `inprogress doctor` to diagnose.';
+
 export function createClient(opts: ClientOptions) {
   async function call(method: string, path: string, body: unknown, co: CallOptions, as: 'json' | 'text'): Promise<unknown> {
     const headers: Record<string, string> = {};
@@ -35,9 +37,16 @@ export function createClient(opts: ClientOptions) {
         signal: AbortSignal.timeout(co.timeoutMs ?? opts.timeoutMs ?? 5000),
       });
     } catch (err) {
-      throw new ApiClientError(0, `InProgress server unreachable at ${opts.baseUrl} (${(err as Error).message})`, 'Run `inprogress start`, or `inprogress doctor` to diagnose.');
+      throw new ApiClientError(0, `InProgress server unreachable at ${opts.baseUrl} (${(err as Error).message})`, HINT);
     }
-    const text = await res.text();
+    // Past this point the server has answered, so these failures keep its status (never 0, "unreachable"):
+    // the request may have been carried out, and a caller must not take it for one that never arrived.
+    let text: string;
+    try {
+      text = await res.text();
+    } catch (err) {
+      throw new ApiClientError(res.status, `InProgress server at ${opts.baseUrl} broke off its answer to ${method} ${path} (${(err as Error).message})`, HINT);
+    }
     if (!res.ok) {
       let payload: { error?: string; hint?: string } = {};
       try {
@@ -48,7 +57,12 @@ export function createClient(opts: ClientOptions) {
       throw new ApiClientError(res.status, payload.error ?? `HTTP ${res.status}`, payload.hint);
     }
     if (as === 'text') return text;
-    return text ? (JSON.parse(text) as unknown) : undefined;
+    if (!text) return undefined;
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      throw new ApiClientError(res.status, `InProgress server at ${opts.baseUrl} answered ${method} ${path} with something that is not JSON`, HINT);
+    }
   }
   return {
     get: <T>(path: string, co: CallOptions = {}) => call('GET', path, undefined, co, 'json') as Promise<T>,

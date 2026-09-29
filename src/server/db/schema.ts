@@ -84,7 +84,7 @@ export const MIGRATIONS: string[] = [
     PRIMARY KEY (session_id, agent_id)
   );
   CREATE TABLE events (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts TEXT NOT NULL,
     project_id INTEGER,
     actor TEXT NOT NULL,

@@ -1,5 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
-import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest, type FastifyServerOptions } from 'fastify';
+import Fastify, { LogController, type FastifyInstance, type FastifyReply, type FastifyRequest, type FastifyServerOptions } from 'fastify';
 import { ZodError } from 'zod';
 import type { Ctx } from './db/tx';
 import { ApiError } from './errors';
@@ -26,11 +26,24 @@ const ALLOWED_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);
 
 export const actorOf = (req: FastifyRequest): string => String(req.headers['x-inprogress-actor'] || 'system').slice(0, 120);
 
+/** Compare a presented token with the expected one in constant time. timingSafeEqual throws on unequal lengths, so check those first. */
+export function tokenMatches(presented: unknown, expected: string): boolean {
+  const got = Buffer.from(typeof presented === 'string' ? presented : '');
+  const want = Buffer.from(expected);
+  return got.length === want.length && timingSafeEqual(got, want);
+}
+
 export function buildApp(opts: AppOptions): FastifyInstance {
   // An empty token or UI token would accept requests that send an empty one.
   if (!opts.token || !opts.uiToken) throw new Error('buildApp needs a non-empty token and uiToken');
-  // 8 MiB: a 1,000,000-character resource grows past 2 MiB once JSON-escaped and UTF-8 encoded.
-  const app = Fastify({ logger: opts.logger ?? false, bodyLimit: 8 * 1024 * 1024, forceCloseConnections: true });
+  const app = Fastify({
+    logger: opts.logger ?? false,
+    // Keep server.log for errors: no line per request. (The top-level disableRequestLogging option is deprecated in Fastify 5.)
+    logController: new LogController({ disableRequestLogging: true }),
+    // 8 MiB: a 1,000,000-character resource grows past 2 MiB once JSON-escaped and UTF-8 encoded.
+    bodyLimit: 8 * 1024 * 1024,
+    forceCloseConnections: true,
+  });
 
   app.addHook('onRequest', async (req, reply) => {
     const host = (req.headers.host ?? '').toLowerCase().replace(/:\d+$/, '');
@@ -52,10 +65,8 @@ export function buildApp(opts: AppOptions): FastifyInstance {
     return reply.code(500).send({ error: err.message || 'Internal error' });
   });
 
-  const expected = Buffer.from(`Bearer ${opts.token}`);
   const requireToken: Guard = async (req, reply) => {
-    const got = Buffer.from(req.headers.authorization ?? '');
-    if (got.length !== expected.length || !timingSafeEqual(got, expected)) {
+    if (!tokenMatches(req.headers.authorization, `Bearer ${opts.token}`)) {
       reply.code(401).send({ error: 'Missing or invalid InProgress token' });
       return reply;
     }

@@ -36,11 +36,13 @@ function insertSession(ctx: Ctx, id: string, projectId: number, state: Session['
 }
 
 export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInput): HookEventResult {
+  let created = false;
   const session = write(ctx, `hook:${input.event}`, (record): Session | undefined => {
     let before = findSession(ctx, sessionId);
-    let created = false;
     if (!before) {
-      if (input.event !== 'start' || !input.cwd) return undefined;
+      // A start begins tracking, and so does a first prompt when the start was missed (the server
+      // was down then, say): both resolve the binding the same way.
+      if ((input.event !== 'start' && input.event !== 'prompt') || !input.cwd) return undefined;
       const project = resolveBinding(ctx, input.cwd, input.branch ?? null);
       if (!project) return undefined;
       insertSession(ctx, sessionId, project.id, 'idle');
@@ -98,7 +100,8 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
   if (!session || !project || project.status !== 'active') {
     return input.event === 'prompt' && input.mentionsInProgress ? { tracked: false, context: untrackedHint(sessionId) } : { tracked: false };
   }
-  if (input.event === 'start') return { tracked: true, context: renderBriefing(getProjectSnapshot(ctx, project.id), sessionId) };
+  // A session that has just begun tracking gets the full briefing, whichever event brought it in.
+  if (input.event === 'start' || created) return { tracked: true, context: renderBriefing(getProjectSnapshot(ctx, project.id), sessionId) };
   if (input.event === 'prompt') {
     if (input.asksStatus) return { tracked: true, context: renderStatusAnswer(getProjectSnapshot(ctx, project.id), sessionId) };
     if (session.promptsSinceUpdate >= 2) return { tracked: true, context: renderStatusLine(getProjectSnapshot(ctx, project.id), session) };

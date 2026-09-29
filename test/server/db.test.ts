@@ -1,7 +1,13 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
-import { migrate, schemaVersion } from '../../src/server/db/connection';
+import { migrate, openDb, schemaVersion } from '../../src/server/db/connection';
+import { MIGRATIONS } from '../../src/server/db/schema';
 import { write } from '../../src/server/db/tx';
 import type { EventRow } from '../../src/core/types';
+import { maxEventId } from '../../src/server/repo/events';
 import { makeCtx } from '../helpers';
 
 describe('database', () => {
@@ -21,6 +27,41 @@ describe('database', () => {
     const deleted = Number(insertNode.run(projectId).lastInsertRowid);
     db.prepare('DELETE FROM nodes WHERE id = ?').run(deleted);
     expect(Number(insertNode.run(projectId).lastInsertRowid)).toBeGreaterThan(deleted);
+  });
+
+  it('never reuses the id of a deleted event, so an SSE cursor only moves forward', () => {
+    const ctx = makeCtx();
+    const recordOne = () => write(ctx, 'test', (record) => record({ projectId: null, type: 'demo', entity: 'demo', entityId: 1 }));
+    recordOne();
+    recordOne();
+    const newest = maxEventId(ctx);
+    ctx.db.prepare('DELETE FROM events WHERE id = ?').run(newest);
+    recordOne();
+    expect(maxEventId(ctx)).toBeGreaterThan(newest);
+  });
+
+  it('finds the work done when another first start migrates the same file first', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ip-migrate-'));
+    const file = join(dir, 'inprogress.db');
+    const late = new Database(file);
+    try {
+      // The other process migrates after this connection has looked at the fresh file, before it writes.
+      const transaction = late.transaction.bind(late);
+      let raced = false;
+      late.transaction = ((fn: () => unknown) => {
+        if (!raced) {
+          raced = true;
+          openDb(file).close();
+        }
+        return transaction(fn);
+      }) as typeof late.transaction;
+      expect(() => migrate(late)).not.toThrow();
+      expect(raced).toBe(true);
+      expect(schemaVersion(late)).toBe(MIGRATIONS.length);
+    } finally {
+      late.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('refuses to migrate a database created by a newer build', () => {

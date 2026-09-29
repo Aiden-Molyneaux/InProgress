@@ -1,10 +1,20 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
-import { describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import { buildApp, type AppOptions } from '../../src/server/app';
 import { makeCtx } from '../helpers';
+
+const tempDirs: string[] = [];
+function tempDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+}
+afterAll(() => {
+  for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
+});
 
 const TOKEN = 'test-token';
 const auth = { authorization: `Bearer ${TOKEN}`, 'x-inprogress-actor': 'scribe:s1' };
@@ -28,6 +38,36 @@ describe('guards', () => {
     expect(ok.json()).toMatchObject({ ok: true, app: 'inprogress', version: 'test' });
     const bad = await app.inject({ url: '/api/health', headers: { host: 'evil.example:4317' } });
     expect(bad.statusCode).toBe(403);
+  });
+
+  it('accepts loopback names on any port and refuses look-alike hosts', async () => {
+    const { app } = setup();
+    for (const host of ['localhost:1234', 'localhost', 'LOCALHOST:4317', '127.0.0.1:65535', '[::1]', '[::1]:4399']) {
+      expect((await app.inject({ url: '/api/health', headers: { host } })).statusCode, host).toBe(200);
+    }
+    for (const host of ['evil.com', 'evil.com:4317', '127.0.0.1.evil.com', '127.0.0.1.evil.com:4317', 'localhost.evil.com']) {
+      const res = await app.inject({ url: '/api/health', headers: { host } });
+      expect(res.statusCode, host).toBe(403);
+      expect(res.json()).toEqual({ error: 'Forbidden host' });
+    }
+  });
+
+  it('refuses a wrong bearer token of the right length', async () => {
+    const { app } = setup();
+    const res = await app.inject({ method: 'POST', url: '/api/projects', headers: { authorization: `Bearer ${'x'.repeat(TOKEN.length)}` }, payload: { name: 'X' } });
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toEqual({ error: 'Missing or invalid InProgress token' });
+  });
+
+  it('answers an oversized body with 413 and malformed JSON with 400, in the usual error shape', async () => {
+    const { app } = setup();
+    const json = { ...auth, 'content-type': 'application/json' };
+    const big = await app.inject({ method: 'POST', url: '/api/projects', headers: json, payload: `{"name":"${'x'.repeat(8 * 1024 * 1024)}"}` });
+    expect(big.statusCode).toBe(413);
+    expect(big.json()).toEqual({ error: 'Request body is too large' });
+    const broken = await app.inject({ method: 'POST', url: '/api/projects', headers: json, payload: '{"name":' });
+    expect(broken.statusCode).toBe(400);
+    expect(broken.json()).toEqual({ error: expect.stringContaining('not valid JSON') });
   });
 
   it('requires the token for writes and explains validation and lookup errors', async () => {
@@ -64,6 +104,21 @@ describe('guards', () => {
     expect(good.statusCode).toBe(201);
     const patched = await app.inject({ method: 'PATCH', url: `/api/resources/${good.json().id}`, headers: auth, payload: { url: 'javascript:alert(1)' } });
     expect(patched.statusCode).toBe(400);
+  });
+});
+
+describe('logging', () => {
+  it('logs server errors but not every request', async () => {
+    const lines: string[] = [];
+    const { app } = setup({ logger: { level: 'info', stream: { write: (line: string) => void lines.push(line) } } });
+    app.get('/api/test-boom', async () => {
+      throw new Error('boom');
+    });
+    expect((await app.inject({ url: '/api/health' })).statusCode).toBe(200);
+    expect((await app.inject({ url: '/api/nowhere' })).statusCode).toBe(404);
+    expect((await app.inject({ url: '/api/test-boom' })).statusCode).toBe(500);
+    expect(lines.filter((l) => /incoming request|request completed|request errored|not found/.test(l))).toEqual([]);
+    expect(lines.filter((l) => JSON.parse(l).msg === 'boom')).toHaveLength(1);
   });
 });
 
@@ -118,6 +173,33 @@ describe('session routes', () => {
     const bad = await app.inject({ method: 'POST', url: '/api/sessions/s1/hook', headers: auth, payload: { event: 'nonsense' } });
     expect(bad.statusCode).toBe(400);
   });
+
+  it('accepts cwd and branch on a prompt and tracks an unseen session in a bound folder', async () => {
+    const { app } = setup();
+    await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'InGame' } });
+    await app.inject({ method: 'POST', url: '/api/projects/ingame/bindings', headers: auth, payload: { path: 'C:/personal/InGame' } });
+    const body = { event: 'prompt', cwd: 'C:\\personal\\InGame', branch: null, title: 'Late', transcriptPath: 'C:/t.jsonl', mentionsInProgress: false, asksStatus: false };
+    const res = await app.inject({ method: 'POST', url: '/api/sessions/p1/hook', headers: auth, payload: body });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ tracked: true, context: expect.stringContaining('tracked in project "InGame" (slug ingame). Session id: p1.') });
+    const elsewhere = await app.inject({ method: 'POST', url: '/api/sessions/p2/hook', headers: auth, payload: { ...body, cwd: 'C:/elsewhere', branch: 'main' } });
+    expect(elsewhere.json()).toEqual({ tracked: false });
+  });
+});
+
+describe('outline', () => {
+  it('heads the outline with the project playbook when there is one', async () => {
+    const { app } = setup();
+    await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'InGame', playbook: 'Planning docs live in docs/planning.\r\nTickets are VCAD-###.\n' } });
+    const lines = (await app.inject({ url: '/api/projects/ingame/outline' })).body.split('\n');
+    expect(lines.slice(0, 3)).toEqual(['Project InGame (slug ingame)', 'Playbook:', '  Planning docs live in docs/planning.']);
+    expect(lines[3]).toBe('  Tickets are VCAD-###.');
+    expect(lines[4]).toMatch(/^#\d+ InGame — active$/);
+    await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'Plain', playbook: '  \n' } });
+    const plain = (await app.inject({ url: '/api/projects/plain/outline' })).body;
+    expect(plain).not.toContain('Playbook:');
+    expect(plain.split('\n')[1]).toMatch(/^#\d+ Plain — active$/);
+  });
 });
 
 describe('ui routes', () => {
@@ -125,7 +207,7 @@ describe('ui routes', () => {
     const opened: string[] = [];
     const { app } = setup({ openPath: async (p) => { opened.push(p); } });
     const p = (await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'P' } })).json();
-    const file = join(mkdtempSync(join(tmpdir(), 'ip-open-')), 'suite.md');
+    const file = join(tempDir('ip-open-'), 'suite.md');
     writeFileSync(file, '# x');
     const withPath = (await app.inject({ method: 'POST', url: '/api/resources', headers: auth, payload: { nodeId: p.rootNodeId, kind: 'doc', title: 'Doc', path: file } })).json();
     const noPath = (await app.inject({ method: 'POST', url: '/api/resources', headers: auth, payload: { nodeId: p.rootNodeId, kind: 'doc', title: 'Inline', content: 'x' } })).json();
@@ -141,7 +223,7 @@ describe('ui routes', () => {
     const opened: string[] = [];
     const { app } = setup({ openPath: async (p) => { opened.push(p); } });
     const p = (await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'P' } })).json();
-    const file = join(mkdtempSync(join(tmpdir(), 'ip-open-')), 'suite.md');
+    const file = join(tempDir('ip-open-'), 'suite.md');
     writeFileSync(file, '# x');
     // The \\?\ form names a real file, so only the local-path check can refuse it.
     for (const path of [`\\\\?\\${file}`, '\\\\.\\C:\\suite.md', '\\\\127.0.0.1\\share\\suite.md', '//127.0.0.1/share/suite.md']) {
@@ -152,11 +234,43 @@ describe('ui routes', () => {
     expect(opened).toEqual([]);
   });
 
+  it('refuses a UI token of the right length that does not match', async () => {
+    const opened: string[] = [];
+    const { app } = setup({ openPath: async (p) => { opened.push(p); } });
+    const p = (await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'P' } })).json();
+    const file = join(tempDir('ip-open-'), 'suite.md');
+    writeFileSync(file, '# x');
+    const resource = (await app.inject({ method: 'POST', url: '/api/resources', headers: auth, payload: { nodeId: p.rootNodeId, kind: 'doc', title: 'Doc', path: file } })).json();
+    for (const token of ['ui-tokeN', 'ui-token-longer', '']) {
+      const res = await app.inject({ method: 'POST', url: '/api/ui/open', headers: { 'x-ip-ui-token': token }, payload: { resourceId: resource.id } });
+      expect(res.statusCode, token).toBe(401);
+      expect(res.json()).toEqual({ error: 'Missing or invalid UI token' });
+    }
+    expect(opened).toEqual([]);
+  });
+
+  it('reports a missing file', async () => {
+    const opened: string[] = [];
+    const { app } = setup({ openPath: async (p) => { opened.push(p); } });
+    const p = (await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'P' } })).json();
+    const dir = tempDir('ip-open-');
+    const missing = join(dir, 'gone.md');
+    const res = await openStoredPath(app, p.rootNodeId, missing);
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: `File not found: ${missing}` });
+    // A path that runs through a file (ENOTDIR on POSIX) is just as missing.
+    const file = join(dir, 'real.md');
+    writeFileSync(file, 'x');
+    const nested = await openStoredPath(app, p.rootNodeId, join(file, 'child.md'));
+    expect(nested.json()).toEqual({ error: `File not found: ${join(file, 'child.md')}` });
+    expect(opened).toEqual([]);
+  });
+
   it('refuses a folder path', async () => {
     const opened: string[] = [];
     const { app } = setup({ openPath: async (p) => { opened.push(p); } });
     const p = (await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'P' } })).json();
-    const dir = mkdtempSync(join(tmpdir(), 'ip-open-'));
+    const dir = tempDir('ip-open-');
     const res = await openStoredPath(app, p.rootNodeId, dir);
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe(`Not a file: ${dir}`);
@@ -165,21 +279,31 @@ describe('ui routes', () => {
 
   it('reports an unbuilt UI, and injects the UI token into a built one', async () => {
     expect((await setup().app.inject({ url: '/' })).statusCode).toBe(503);
-    const webDir = mkdtempSync(join(tmpdir(), 'ip-web-'));
+    const webDir = tempDir('ip-web-');
     writeFileSync(join(webDir, 'index.html'), '<html><head><meta name="ip-ui-token" content="" /></head><body></body></html>');
     const res = await setup({ webDir }).app.inject({ url: '/' });
     expect(res.body).toContain('<meta name="ip-ui-token" content="ui-token">');
   });
 
+  it('serves the UI under a Content-Security-Policy', async () => {
+    const webDir = tempDir('ip-web-');
+    writeFileSync(join(webDir, 'index.html'), '<html><head><meta name="ip-ui-token" content="" /></head><body></body></html>');
+    const res = await setup({ webDir }).app.inject({ url: '/' });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-security-policy']).toBe(
+      "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+    );
+  });
+
   it('injects the UI token literally', async () => {
-    const webDir = mkdtempSync(join(tmpdir(), 'ip-web-'));
+    const webDir = tempDir('ip-web-');
     writeFileSync(join(webDir, 'index.html'), '<html><head><meta name="ip-ui-token" content="" /></head><body></body></html>');
     const res = await setup({ webDir, uiToken: 'a$&b' }).app.inject({ url: '/' });
     expect(res.body).toContain('<meta name="ip-ui-token" content="a$&b">');
   });
 
   it('refuses a built index.html without the token meta tag', () => {
-    const webDir = mkdtempSync(join(tmpdir(), 'ip-web-'));
+    const webDir = tempDir('ip-web-');
     writeFileSync(join(webDir, 'index.html'), '<html><head></head><body></body></html>');
     expect(() => setup({ webDir })).toThrow('index.html has no ip-ui-token meta tag');
   });

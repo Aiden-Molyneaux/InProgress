@@ -8,6 +8,8 @@ import { buildApp } from './app';
 import { backupDb, truncateIfLarge } from './backup';
 import { openDb } from './db/connection';
 import { createCtx } from './db/tx';
+import { EVENTS_RETENTION_DAYS, pruneEvents } from './repo/events';
+import { reportStartupFailure } from './startup';
 
 type Probe = 'inprogress' | 'other' | 'free';
 
@@ -66,11 +68,25 @@ async function main(): Promise<void> {
     process.exitCode = 1;
     return;
   }
-  writeFileSync(join(home, 'server.pid'), String(process.pid));
+  // The server is up. Nothing below may throw: main's .catch would find this very server answering and exit.
+  try {
+    writeFileSync(join(home, 'server.pid'), String(process.pid));
+  } catch (err) {
+    app.log.error(`Could not write server.pid: ${(err as Error).message}`);
+  }
   // Back up only once we own the port, so two racing starts never write the same backup file.
-  await backupDb(db, join(home, 'backups'), 7).catch(() => undefined);
+  await backupDb(db, join(home, 'backups'), 7).catch((err: Error) => app.log.error(err.message));
+  try {
+    app.log.info(`Pruned ${pruneEvents(ctx)} events older than ${EVENTS_RETENTION_DAYS} days`);
+  } catch (err) {
+    app.log.error(`Could not prune old events: ${(err as Error).message}`);
+  }
+  // A hidden, detached server on Windows never receives these signals; POST /api/admin/shutdown is the clean way to stop it.
   process.on('SIGINT', () => void shutdown());
   process.on('SIGTERM', () => void shutdown());
 }
 
-void main();
+main().catch(async (err: unknown) => {
+  const anotherServerAnswers = async () => (await probe(baseUrl(configuredPort()))) === 'inprogress';
+  process.exit(await reportStartupFailure(err, join(homeDir(), 'server.log'), anotherServerAnswers).catch(() => 1));
+});

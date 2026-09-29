@@ -71,7 +71,7 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
 
   const resourcesByNode = new Map<number, number[]>();
   for (const r of [...input.resources].sort((a, b) => a.id - b.id)) resourcesByNode.set(r.nodeId, [...(resourcesByNode.get(r.nodeId) ?? []), r.id]);
-  // A manual fold can hide a live session's focus: badge its nearest visible ancestor, so a fold never hides who is working.
+  // A manual fold can hide a live session's focus: badge its nearest visible ancestor, so a fold never hides a live session's badge.
   const visibleIds = new Set(visible.flatMap((v) => (v.type === 'node' ? [v.node.id] : [])));
   const badgesByNode = new Map<number, Session[]>();
   for (const s of live) {
@@ -139,10 +139,6 @@ export function findFrontier(nodes: TreeNode[], sessions: Session[], layout: Lay
   if (active.length) return active[0].id;
   const rows = layout.items.filter((i): i is LayoutNodeItem => i.kind === 'node');
   return rows.length ? rows[rows.length - 1].nodeId : undefined;
-}
-
-export function needsYouOrder(layout: LayoutResult): number[] {
-  return layout.items.filter((i): i is LayoutNodeItem => i.kind === 'node' && i.needsYou).map((i) => i.nodeId);
 }
 
 export function eventTarget(e: EventRow): number | undefined {
