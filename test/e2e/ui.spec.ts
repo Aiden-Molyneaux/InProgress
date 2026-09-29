@@ -4,6 +4,7 @@ import { test as base, expect, type APIRequestContext, type Page } from '@playwr
 
 interface Seeded {
   slug: string;
+  root: number;
   /** Node ids by title. */
   ids: Record<string, number>;
   /** The project's Claude session, which is also the actor of every write made for it. */
@@ -62,7 +63,7 @@ async function seed(api: APIRequestContext): Promise<Seeded> {
   await post(`/api/sessions/${session}/enroll`, { project: project.slug, title: 'E2E session' });
   await post(`/api/sessions/${session}/focus`, { nodeId: ids['Play app signing'] });
   await post(`/api/sessions/${session}/hook`, { event: 'prompt' });
-  return { slug: project.slug, ids, session };
+  return { slug: project.slug, root: project.rootNodeId, ids, session };
 }
 
 interface TestFixtures {
@@ -202,4 +203,58 @@ test('the resource viewer neutralises unsafe Markdown', async ({ page, demo }) =
   await expect(viewer.locator('img')).toHaveJSProperty('complete', true);
   await page.evaluate('new Promise((resolve) => setTimeout(resolve, 100))');
   expect(await page.evaluate<string[]>('window.__titles')).not.toContain('XSS');
+});
+
+test('says so when the server is unreachable at first paint, then recovers', async ({ page, demo, consoleErrors }) => {
+  consoleErrors.allow(/ERR_CONNECTION_REFUSED/);
+  await page.route('**/api/**', (route) => route.abort('connectionrefused'));
+  await open(page, demo);
+  await expect(page.getByText("Can't reach the InProgress server, retrying…")).toBeVisible();
+  await page.unroute('**/api/**');
+  await expect(page.locator('.ip-node.root')).toBeVisible({ timeout: 10_000 });
+});
+
+test('the first stream starts at the snapshot, and a batch still follows its targeted event', async ({ page, api, fresh }) => {
+  // Hold the stream back, so these writes land after the snapshot was read but before the stream opens.
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  const streams: string[] = [];
+  await page.route('**/api/events/stream**', async (route) => {
+    streams.push(route.request().url());
+    await held;
+    await route.continue();
+  });
+  await open(page, fresh);
+  await expect(page.locator('.ip-node', { hasText: 'Play app signing' })).toBeInViewport();
+  await write(api, fresh.session, 'post', '/api/nodes', { parentId: fresh.root, after: 'start', nodes: [{ title: 'Hotfix', status: 'active' }] });
+  // Untargeted and right behind it: the two replay in one chunk, and React renders them as one batch.
+  await write(api, fresh.session, 'post', `/api/sessions/${fresh.session}/hook`, { event: 'stop' });
+  release();
+  await expect(page.locator('.ip-node', { hasText: 'Hotfix' })).toBeInViewport({ timeout: 6000 });
+  expect(streams[0]).toMatch(/\/api\/events\/stream\?since=\d+$/);
+});
+
+test('keeps the view current under a steady stream of events', async ({ page, api, fresh }) => {
+  await open(page, fresh);
+  await expect(page.locator('.ip-node', { hasText: 'Play app signing' })).toBeInViewport();
+  // Snapshots now take longer than the gap between events, so a newer request is always in flight when one lands.
+  await page.route(`**/api/projects/${fresh.slug}`, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    await route.continue();
+  });
+  const node = fresh.ids['Play app signing'];
+  await write(api, fresh.session, 'patch', `/api/nodes/${node}`, { title: 'Play app signing, renamed' });
+  let steady = true;
+  const events = (async () => {
+    for (let i = 1; steady && i <= 20; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      await write(api, fresh.session, 'post', `/api/nodes/${node}/log`, { text: `Step ${i}` });
+    }
+  })();
+  try {
+    await expect(page.locator('.ip-node', { hasText: 'Play app signing, renamed' })).toBeVisible({ timeout: 2500 });
+  } finally {
+    steady = false;
+    await events;
+  }
 });

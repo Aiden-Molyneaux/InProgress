@@ -46,7 +46,8 @@ export function App() {
         },
   );
 
-  if (!state.loaded) return <div className="ip-empty">Loading…</div>;
+  // Before anything has loaded, a failing stream means the server is unreachable: say so instead of "Loading…".
+  if (!state.loaded) return <div className="ip-empty">{state.connection === 'reconnecting' ? "Can't reach the InProgress server, retrying…" : 'Loading…'}</div>;
   return (
     <div className="ip-app">
       <TopBar
