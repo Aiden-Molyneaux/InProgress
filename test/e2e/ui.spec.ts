@@ -37,10 +37,10 @@ const UNSAFE_MARKDOWN = [
 ].join('\n\n');
 
 /** A project of its own: every test that changes data seeds one, so tests pass alone, in any order and repeated. */
-async function seed(api: APIRequestContext): Promise<Seeded> {
+async function seed(api: APIRequestContext, name = 'E2E Demo'): Promise<Seeded> {
   const session = `e2e-${randomUUID()}`;
   const post = <T = unknown>(path: string, data: unknown) => write<T>(api, session, 'post', path, data);
-  const project = await post<{ slug: string; rootNodeId: number }>('/api/projects', { name: 'E2E Demo', description: 'Seeded by Playwright' });
+  const project = await post<{ slug: string; rootNodeId: number }>('/api/projects', { name, description: 'Seeded by Playwright' });
   const milestones = Array.from({ length: 25 }, (_, i) => ({ title: `Milestone ${i + 1}`, status: 'done' as const }));
   const created = await post<{ id: number; title: string }[]>('/api/nodes', {
     parentId: project.rootNodeId,
@@ -162,6 +162,49 @@ test('clicking a node opens its details and copies a reference', async ({ page, 
   await expect(details.getByRole('button', { name: 'Copied' })).toBeVisible();
   // String form: the root tsconfig has no DOM lib, so `navigator` must not appear in test code.
   expect(await page.evaluate<string>('navigator.clipboard.readText()')).toBe(`#${id} Run signing tests`);
+});
+
+test('Details keeps the last good detail when a refresh fails', async ({ page, api, fresh, consoleErrors }) => {
+  consoleErrors.allow(/status of 500/);
+  await open(page, fresh);
+  const id = fresh.ids['Run signing tests'];
+  await page.locator('.ip-node', { hasText: 'Run signing tests' }).click();
+  const details = page.getByRole('complementary');
+  await expect(details).toContainText(`#${id} Run signing tests`);
+  await page.route(`**/api/nodes/${id}`, (route) => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'Database is busy' }) }));
+  // Any change to the project makes Details refetch.
+  await write(api, fresh.session, 'patch', `/api/nodes/${fresh.ids['Play app signing']}`, { outcome: 'Configured' });
+  await expect(details).toContainText("Couldn't refresh: Database is busy");
+  await expect(details).toContainText(`#${id} Run signing tests`);
+  await expect(details.getByRole('button', { name: `Copy #${id}` })).toBeVisible();
+});
+
+test('a long project name is cut short and the top bar stays on one line', async ({ page, api }) => {
+  const project = await seed(api, 'A project name long enough to fill a narrow window several times over, and then some');
+  await open(page, project);
+  await expect(page).toHaveTitle(/A project name long enough/);
+  for (const button of [page.locator('.ip-proj'), page.getByRole('button', { name: /need you/ }), page.getByRole('button', { name: /Follow/ })]) {
+    await expect(button).toBeInViewport({ ratio: 1 });
+  }
+  expect((await page.locator('.ip-topbar').boundingBox())!.height, 'one line of controls').toBeLessThan(50);
+  expect(await page.evaluate<boolean>(`(() => { const n = document.querySelector('.ip-proj-name'); return n.scrollWidth > n.clientWidth; })()`)).toBe(true);
+});
+
+test('dark mode reaches the canvas controls; reduced motion stops the pulse and flash', async ({ page, demo }) => {
+  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+  await open(page, demo);
+  await expect(page.locator('.react-flow')).toHaveClass(/\bdark\b/);
+  await expect(page.locator('.ip-chip-s .ip-pulse')).toHaveCSS('animation-name', 'none');
+  await expect(page.locator('.ip-node.working .ip-marker.m-active').first()).toHaveCSS('animation-name', 'none');
+  // Amber ink on an amber tint, like the needs-you pill.
+  await expect(page.locator('.ip-node .ip-you')).toHaveCSS('color', 'rgb(255, 179, 64)');
+  await page.keyboard.press('n');
+  const flashed = page.locator('.ip-node.flash', { hasText: 'Run signing tests' });
+  await expect(flashed).toHaveCSS('animation-name', 'none');
+  await expect(flashed).not.toHaveCSS('box-shadow', 'none');
+  // Section labels in Details are readable on the dark panel.
+  await flashed.click();
+  await expect(page.getByRole('complementary').locator('.ip-label').first()).toHaveCSS('color', 'rgb(161, 161, 166)');
 });
 
 test('the keyboard reaches and opens cards, shows a "+n more" run and toggles Follow', async ({ page, demo }) => {

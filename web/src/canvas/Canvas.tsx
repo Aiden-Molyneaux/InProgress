@@ -234,6 +234,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
         nodesConnectable={false}
         nodesFocusable={false}
         elementsSelectable={false}
+        colorMode="system"
         proOptions={{ hideAttribution: true }}
       >
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />

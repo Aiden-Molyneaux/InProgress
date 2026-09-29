@@ -47,8 +47,8 @@ export function TopBar({ projects, current, onSelect, needsYou, onNeedsYou, foll
   return (
     <header className="ip-topbar">
       <div className="ip-switcher" ref={ref}>
-        <button className="ip-proj" onClick={() => setOpen((o) => !o)} aria-haspopup="listbox" aria-expanded={open}>
-          {open ? '▴' : '▾'} {current?.name ?? 'Projects'}
+        <button className="ip-proj" onClick={() => setOpen((o) => !o)} aria-haspopup="listbox" aria-expanded={open} title={current?.name}>
+          {open ? '▴' : '▾'} <span className="ip-proj-name">{current?.name ?? 'Projects'}</span>
           {othersWorking && <span className="ip-dot clay" title="Another project has a working session" />}
         </button>
         {open && (

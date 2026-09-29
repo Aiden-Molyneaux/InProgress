@@ -21,7 +21,7 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
   const copiedTimer = useRef(0);
   useEffect(() => () => window.clearTimeout(copiedTimer.current), []);
 
-  // Refetch whenever the snapshot changes, so the panel follows Claude's edits.
+  // Refetch whenever the snapshot changes, so the panel follows Claude's edits. A failed refetch keeps the last good detail.
   useEffect(() => {
     let alive = true;
     api
@@ -37,7 +37,7 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
     };
   }, [nodeId, snapshot]);
 
-  if (error || !detail) {
+  if (!detail) {
     return (
       <aside className="ip-details" aria-label="Node details">
         <header>
@@ -126,6 +126,7 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
       <p className="muted" style={{ marginTop: 12 }}>
         Updated {relativeTime(node.updatedAt)} · {snapshot.project.name}
       </p>
+      {error && <p className="muted">Couldn't refresh: {error}</p>}
     </aside>
   );
 }
