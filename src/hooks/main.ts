@@ -3,6 +3,7 @@ import { createClient } from '../lib/client';
 import { ensureServer } from '../lib/ensure-server';
 import { baseUrl, homeDir, readToken } from '../lib/home';
 import { appendLog } from '../lib/log';
+import { hookBudget } from './budget';
 import { CONTEXT_EVENT_NAME, HOOK_NAMES, hookErrorLine, parseHookInput, runHandler, type HookName } from './handlers';
 
 // Claude may stop reading before the briefing is written (say after a timeout): an EPIPE must not reach stderr.
@@ -36,23 +37,22 @@ async function main(): Promise<void> {
     appendLog(logFile, `unknown hook "${String(name)}"`);
     return;
   }
-  // Total budget: session-start 3 s (up to 2 s spawning the server + 1 s for the POST), others 500 ms.
-  const budget = name === 'session-start' ? 3000 : 500;
-  const postTimeout = name === 'session-start' ? 1000 : 500;
+  // session-start: up to 5 s for a server it had to start + 2 s for the POST; every other hook: one 500 ms POST.
+  const budget = hookBudget(name);
   const work = (async () => {
     const input = parseHookInput(await readStdin(1000));
     const url = baseUrl();
     const context = await runHandler(name, input, {
-      ensureServer: () => ensureServer({ baseUrl: url, waitMs: 2000 }),
+      ensureServer: () => ensureServer({ baseUrl: url, waitMs: budget.serverWaitMs }),
       // Read the token lazily: the first server start creates it.
-      post: (path, body) => createClient({ baseUrl: url, token: readToken(), timeoutMs: postTimeout }).post(path, body),
+      post: (path, body) => createClient({ baseUrl: url, token: readToken(), timeoutMs: budget.postTimeoutMs }).post(path, body),
     });
     const eventName = CONTEXT_EVENT_NAME[name];
     if (context && eventName) await writeStdout(JSON.stringify({ hookSpecificOutput: { hookEventName: eventName, additionalContext: context } }));
   })();
   work.catch((err: unknown) => appendLog(logFile, hookErrorLine(name, err)));
   // We exit as soon as the limit passes, so the work's own error line never gets written: log the timeout instead.
-  const limit = budget + 250;
+  const limit = budget.limitMs;
   const timedOut = await Promise.race([work.then(() => false, () => false), new Promise<boolean>((r) => setTimeout(() => r(true), limit))]);
   if (timedOut) appendLog(logFile, `${name}: timed out after ${limit} ms`);
 }

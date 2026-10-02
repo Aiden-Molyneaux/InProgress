@@ -6,8 +6,9 @@ import { dirname, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { install, nodeBinary } from '../../src/cli/claude-config';
 import { runCli } from '../../src/cli/commands';
-import { runChecks, type Check } from '../../src/cli/doctor';
+import { doctor, runChecks, type Check } from '../../src/cli/doctor';
 import { edgeArgs } from '../../src/cli/open';
+import { isServerUp } from '../../src/lib/ensure-server';
 import { ensureToken } from '../../src/lib/home';
 import { VERSION } from '../../src/lib/version';
 import { buildApp } from '../../src/server/app';
@@ -69,6 +70,35 @@ function freePort(): Promise<number> {
   });
 }
 
+/** A stand-in InProgress server that counts shutdown requests and stops answering after one, as the real one does. */
+async function stoppableServer(): Promise<{ port: number; url: string; shutdowns: () => number; close: () => Promise<void> }> {
+  let shutdowns = 0;
+  const server = createServer((req, res) => {
+    req.resume();
+    res.setHeader('content-type', 'application/json');
+    if (req.method === 'POST' && req.url === '/api/admin/shutdown') {
+      shutdowns++;
+      res.end('{"ok":true}', () => {
+        server.close();
+        server.closeAllConnections();
+      });
+      return;
+    }
+    res.end(req.url === '/api/health' ? '{"app":"inprogress"}' : '{}');
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const port = (server.address() as AddressInfo).port;
+  return {
+    port,
+    url: `http://127.0.0.1:${port}`,
+    shutdowns: () => shutdowns,
+    close: async () => {
+      server.closeAllConnections();
+      await new Promise((r) => server.close(r));
+    },
+  };
+}
+
 /**
  * A stand-in repo: the real claude/ templates plus empty built entries. Install refuses without them, doctor checks
  * that each hook's script exists, and unit tests must not depend on a build.
@@ -127,7 +157,7 @@ describe('runCli', () => {
     expect(s.lines).toEqual(['Asked InProgress to stop, but it is still answering after 3 s.']);
   });
 
-  it('claude-install reports a failed stop, then installs anyway', async () => {
+  it('claude-install installs, then reports a failed stop', async () => {
     const claude = tempDir('ip-cli-claude-');
     const otherHome = tempDir('ip-cli-home-');
     ensureToken(otherHome); // not the server's token, so the shutdown request gets a 401
@@ -137,17 +167,63 @@ describe('runCli', () => {
     try {
       const s = capture();
       expect(await runCli(['claude-install'], s.out, { repo: fixtureRepo() })).toBe(0);
-      expect(s.lines.slice(0, 3)).toEqual([
+      expect(s.lines.slice(0, 2)).toEqual([`Claude directory: ${claude}`, `Node binary: ${nodeBinary()}`]);
+      expect(s.lines.slice(-2)).toEqual([
         'Could not stop the running InProgress server: Missing or invalid InProgress token',
-        `Claude directory: ${claude}`,
-        `Node binary: ${nodeBinary()}`,
+        'Next: run `inprogress doctor`, then start a new Claude session.',
       ]);
-      expect(s.lines.at(-1)).toBe('Next: run `inprogress doctor`, then start a new Claude session.');
       expect(JSON.parse(readFileSync(join(claude, 'settings.json'), 'utf8')).hooks.SessionStart).toHaveLength(1);
     } finally {
       process.env.INPROGRESS_HOME = home;
       if (savedClaude === undefined) delete process.env.INPROGRESS_CLAUDE_DIR;
       else process.env.INPROGRESS_CLAUDE_DIR = savedClaude;
+    }
+  });
+
+  it.each<[string, (repo: string, claude: string) => void, string]>([
+    ['the repo is not built', (repo) => rmSync(join(repo, 'dist', 'hooks', 'hook.js')), 'Build InProgress first: npm run deploy'],
+    ['settings.json is not valid JSON', (_repo, claude) => writeFileSync(join(claude, 'settings.json'), '{ "hooks": '), 'is not valid JSON'],
+  ])('claude-install leaves the running server alone when it refuses because %s', async (_label, breakIt, refusal) => {
+    const server = await stoppableServer();
+    const claude = tempDir('ip-cli-claude-');
+    const repo = fixtureRepo();
+    breakIt(repo, claude);
+    const savedClaude = process.env.INPROGRESS_CLAUDE_DIR;
+    process.env.INPROGRESS_PORT = String(server.port);
+    process.env.INPROGRESS_CLAUDE_DIR = claude;
+    try {
+      const s = capture();
+      await expect(runCli(['claude-install'], s.out, { repo })).rejects.toThrow(refusal);
+      expect(server.shutdowns()).toBe(0);
+      expect(s.lines).toEqual([]);
+      expect(await isServerUp(server.url)).toBe(true);
+    } finally {
+      process.env.INPROGRESS_PORT = new URL(base).port;
+      if (savedClaude === undefined) delete process.env.INPROGRESS_CLAUDE_DIR;
+      else process.env.INPROGRESS_CLAUDE_DIR = savedClaude;
+      await server.close();
+    }
+  });
+
+  it('claude-install stops the running server once the install has succeeded', async () => {
+    const server = await stoppableServer();
+    const claude = tempDir('ip-cli-claude-');
+    const savedClaude = process.env.INPROGRESS_CLAUDE_DIR;
+    process.env.INPROGRESS_PORT = String(server.port);
+    process.env.INPROGRESS_CLAUDE_DIR = claude;
+    try {
+      const s = capture();
+      expect(await runCli(['claude-install'], s.out, { repo: fixtureRepo() })).toBe(0);
+      expect(server.shutdowns()).toBe(1);
+      // The new kit is written before the old server goes, so the next hook starts the new build.
+      expect(s.lines[0]).toBe(`Claude directory: ${claude}`);
+      expect(s.lines).toContain(`Skill: ${join(claude, 'skills', 'inprogress')}`);
+      expect(s.lines.slice(-2)).toEqual(['Stopped the running InProgress server.', 'Next: run `inprogress doctor`, then start a new Claude session.']);
+    } finally {
+      process.env.INPROGRESS_PORT = new URL(base).port;
+      if (savedClaude === undefined) delete process.env.INPROGRESS_CLAUDE_DIR;
+      else process.env.INPROGRESS_CLAUDE_DIR = savedClaude;
+      await server.close();
     }
   });
 
@@ -176,6 +252,13 @@ function installedClaudeDir() {
 function editSessionStartHook(settingsFile: string, edit: (hook: { command: string; args: string[] }) => void): void {
   const settings = JSON.parse(readFileSync(settingsFile, 'utf8'));
   edit(settings.hooks.SessionStart[0].hooks[0]);
+  writeFileSync(settingsFile, JSON.stringify(settings, null, 2));
+}
+
+/** Rewrite every hook entry in place (installedClaudeDir's settings hold only InProgress's). */
+function editEveryHook(settingsFile: string, edit: (hook: { command: string; args: string[] }) => void): void {
+  const settings = JSON.parse(readFileSync(settingsFile, 'utf8'));
+  for (const groups of Object.values(settings.hooks) as { hooks: { command: string; args: string[] }[] }[][]) for (const g of groups) g.hooks.forEach(edit);
   writeFileSync(settingsFile, JSON.stringify(settings, null, 2));
 }
 
@@ -212,6 +295,8 @@ describe('doctor checks', () => {
     const after = await runChecks({ baseUrl: base, home, claudeDir: claude, repo, skipMcp: true });
     const failing = after.filter((c) => !c.ok && !c.warnOnly).map((c) => `${c.name}: ${c.detail}`);
     expect(failing).toEqual([]);
+    // Installed by the Node running these checks, so not even a warning.
+    expect(named(after, 'Hooks')).toEqual({ name: 'Hooks', ok: true, detail: 'all installed' });
   });
 
   it('names a fix for every failure, and skips the MCP check when the server check fails', async () => {
@@ -271,6 +356,25 @@ describe('doctor checks', () => {
       ok: false,
       detail: 'hook script C:/moved/InProgress/dist/hooks/hook.js no longer exists: run npm run deploy, or rerun npm run claude:install if the repo moved',
     });
+  });
+
+  it("warns, without failing, when the hooks run another Node than this shell's", async () => {
+    const { repo, claude, settingsFile } = installedClaudeDir();
+    // After an nvm switch the hooks keep the Node that ran install, which still exists.
+    const pinned = join(tempDir('ip-node-'), 'node.exe').replace(/\\/g, '/');
+    writeFileSync(pinned, '');
+    editEveryHook(settingsFile, (h) => (h.command = pinned));
+    const detail = `hooks run ${pinned}; this shell's node is ${nodeBinary()}: after an nvm switch, rerun npm run claude:install`;
+    expect(named(await checksFor(repo, claude), 'Hooks')).toEqual({ name: 'Hooks', ok: false, warnOnly: true, detail });
+    const s = capture();
+    expect(await doctor({ baseUrl: base, home, claudeDir: claude, repo, skipMcp: true }, s.out)).toBe(0);
+    expect(s.lines).toContain(`! Hooks: ${detail}`);
+  });
+
+  it.runIf(process.platform === 'win32')("compares the hooks' Node with this shell's regardless of case and slash direction", async () => {
+    const { repo, claude, settingsFile } = installedClaudeDir();
+    editEveryHook(settingsFile, (h) => (h.command = nodeBinary().toUpperCase().replace(/\//g, '\\')));
+    expect(named(await checksFor(repo, claude), 'Hooks')).toEqual({ name: 'Hooks', ok: true, detail: 'all installed' });
   });
 
   it('reports an unparseable settings.json instead of missing hooks', async () => {

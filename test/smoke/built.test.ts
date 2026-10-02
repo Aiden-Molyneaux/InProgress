@@ -142,6 +142,8 @@ describe('built artifacts', () => {
     const inst = spawnSync(process.execPath, [bin('cli/main.js'), 'claude-install'], { env, encoding: 'utf8' });
     expect(inst.stdout).toContain('Stopped the running InProgress server.');
     expect(inst.stdout).toContain(`Claude directory: ${claude}\nNode binary: ${nodeBinary()}\n`);
+    // The server is stopped only once the new kit is written.
+    expect(inst.stdout.indexOf('Stopped the running InProgress server.')).toBeGreaterThan(inst.stdout.indexOf('Skill: '));
     expect(inst.status).toBe(0);
     // Let this process drop its keep-alive sockets to the stopped server before probing (see afterAll).
     await new Promise((r) => setTimeout(r, 200));

@@ -95,10 +95,12 @@ export async function runCli(args: string[], out: (line: string) => void = conso
       if (!(await isServerUp(url, FIRST_PROBE_MS))) out((await ensure({ baseUrl: url, waitMs: 5000 })) ? `Started InProgress at ${url} for these checks.` : notStarted());
       return doctor({ baseUrl: url, home: homeDir(), claudeDir: claudeDir(), repo: o.repo ?? repoRoot() }, out);
     case 'claude-install': {
-      // A failed stop (say a 401 from a token mismatch) is reported, and the install goes ahead.
-      await stopServer(url, out).catch((err) => out(`Could not stop the running InProgress server: ${err instanceof Error ? err.message : String(err)}`));
+      // Install first: a refused install (no build, a settings.json it cannot use) throws here and leaves the server running.
       const { log } = install({ repo: o.repo ?? repoRoot(), claudeDir: claudeDir(), stamp: timestamp() });
       log.forEach((l) => out(l));
+      // Then stop the running server, so the next hook starts the new build. A failed stop (say a 401 from a token
+      // mismatch) is reported; the install stands.
+      await stopServer(url, out).catch((err) => out(`Could not stop the running InProgress server: ${err instanceof Error ? err.message : String(err)}`));
       out('Next: run `inprogress doctor`, then start a new Claude session.');
       return 0;
     }
