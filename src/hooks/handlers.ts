@@ -1,5 +1,8 @@
+import { join } from 'node:path';
 import type { HookEvent } from '../core/types';
 import { detectBranch } from '../lib/git';
+import { homeDir } from '../lib/home';
+import { appendLog } from '../lib/log';
 import { readTranscriptTitle } from '../lib/transcript';
 
 export const HOOK_NAMES = ['session-start', 'prompt-submit', 'stop', 'notification', 'subagent-start', 'subagent-stop', 'session-end'] as const;
@@ -44,8 +47,14 @@ const CWD_MAX = 1_000;
 const BRANCH_MAX = 300;
 
 const MENTIONS = /\binprogress\b/i;
-/** How Claude Code delivers background-task results (task notifications, subagent hand-backs) as a turn. */
-const NOTICE = /^\s*(?:<task-notification\b|Another Claude session sent a message:|\[SYSTEM NOTIFICATION\b)/;
+/**
+ * How Claude Code delivers background-task results (task notifications, subagent hand-backs) as a turn. The wording
+ * the hook sees can differ from the transcript's, so every known opening counts; runHandler logs any other prompt
+ * that opens like markup, to catch a new format.
+ */
+const NOTICE =
+  /^\s*(?:<task-notification\b|<agent-message\b|<system-reminder\b|Another Claude session sent a message\b|\[SYSTEM NOTIFICATION\b|\[Subagent hand-back\])/;
+const MARKUP_OPENING = /^\s*[<[]/;
 // A lone "status" may end in one "?"; the optional group keeps a long whitespace run linear, not quadratic.
 const ASKS_STATUS = /\b(where are we|where were we|what['’]?s next|what['’]?s left|what['’]?s the status|status update|status check|project status|progress so far)\b|^\s*status(?:\s*\?)?\s*$/i;
 
@@ -100,6 +109,11 @@ export function buildHookBody(name: HookName, input: HookStdin): Record<string, 
 export async function runHandler(name: HookName, input: HookStdin, deps: HookDeps): Promise<string | undefined> {
   if (!input.session_id) return undefined;
   if (name === 'session-start') await deps.ensureServer();
-  const result = await deps.post(`/api/sessions/${encodeURIComponent(input.session_id)}/hook`, buildHookBody(name, input));
+  const body = buildHookBody(name, input);
+  if (name === 'prompt-submit' && !body.notice && typeof input.prompt === 'string' && MARKUP_OPENING.test(input.prompt)) {
+    // Not a recognised notice but shaped like one: record its opening so a new notice format can be added.
+    appendLog(join(homeDir(), 'hooks.log'), `prompt-submit: counted a prompt that opens like markup: ${JSON.stringify(input.prompt.slice(0, 80))}`);
+  }
+  const result = await deps.post(`/api/sessions/${encodeURIComponent(input.session_id)}/hook`, body);
   return CONTEXT_EVENT_NAME[name] ? result.context : undefined;
 }

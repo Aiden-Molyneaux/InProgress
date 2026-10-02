@@ -1,10 +1,11 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildHookBody, HOOK_NAMES, hookErrorLine, parseHookInput, runHandler, stripPasted, type HookName } from '../../src/hooks/handlers';
 import { ApiClientError, createClient } from '../../src/lib/client';
+import { homeDir } from '../../src/lib/home';
 import { buildApp } from '../../src/server/app';
 import { addNodes } from '../../src/server/repo/nodes';
 import { addBinding, createProject } from '../../src/server/repo/projects';
@@ -92,6 +93,9 @@ describe('buildHookBody', () => {
   it('marks background-task notices, which reach UserPromptSubmit like typed prompts', () => {
     const notices = [
       'Another Claude session sent a message:\n<agent-message from="a1">done</agent-message>',
+      '<agent-message from="a1">\n[Subagent hand-back] The text below is the final report\n</agent-message>',
+      '[Subagent hand-back] The text below is the final report of a subagent',
+      '<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>…</task-notification>\n</system-reminder>',
       '<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n</task-notification>',
       '  [SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event.',
     ];
@@ -184,5 +188,20 @@ describe('runHandler', () => {
     expect(await run('session-start', { session_id: 'h6', cwd: bound, source: 'startup', session_title: long })).toContain('tracked in project "HookDemo"');
     expect(buildHookBody('session-start', { session_id: 'h6', cwd: bound, session_title: long }).title).toBe('x'.repeat(300));
     expect(findSession(ctx, 'h6')?.title).toHaveLength(300);
+  });
+});
+
+describe('runHandler notice diagnostics', () => {
+  it('logs the opening of a counted prompt that looks like markup, and nothing for notices or typed prompts', async () => {
+    const log = join(homeDir(), 'hooks.log');
+    mkdirSync(homeDir(), { recursive: true });
+    rmSync(log, { force: true });
+    const deps = { ensureServer: async () => true, post: async () => ({ tracked: true }) };
+    await runHandler('prompt-submit', { session_id: 's', prompt: '<new-notice-format id="x">done</new-notice-format>' }, deps);
+    await runHandler('prompt-submit', { session_id: 's', prompt: '<task-notification>done</task-notification>' }, deps);
+    await runHandler('prompt-submit', { session_id: 's', prompt: 'where are we?' }, deps);
+    const lines = (existsSync(log) ? readFileSync(log, 'utf8') : '').trim().split('\n').filter(Boolean);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('prompt-submit: counted a prompt that opens like markup: "<new-notice-format id=\\"x\\">');
   });
 });

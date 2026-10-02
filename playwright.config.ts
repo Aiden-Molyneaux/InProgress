@@ -1,6 +1,7 @@
 import { defineConfig } from '@playwright/test';
 
-const PORT = 4399;
+// INPROGRESS_E2E_PORT lets two checkouts run the suite at once (a deploy and a worktree, say).
+const PORT = Number(process.env.INPROGRESS_E2E_PORT) || 4399;
 
 export default defineConfig({
   testDir: 'test/e2e',

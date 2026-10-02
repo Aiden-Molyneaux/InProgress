@@ -85,7 +85,7 @@ interface WorkerFixtures {
 const test = base.extend<TestFixtures, WorkerFixtures>({
   api: [
     async ({ playwright }, use) => {
-      const api = await playwright.request.newContext({ baseURL: 'http://127.0.0.1:4399' });
+      const api = await playwright.request.newContext({ baseURL: `http://127.0.0.1:${Number(process.env.INPROGRESS_E2E_PORT) || 4399}` });
       await use(api);
       await api.dispose();
     },
