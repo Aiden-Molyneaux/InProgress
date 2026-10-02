@@ -86,6 +86,23 @@ describe('isInProgressHook', () => {
     expect(isInProgressHook(foreignShell)).toBe(false);
     expect(isInProgressHook(foreignExec)).toBe(false);
   });
+
+  it('knows the tool hooks', () => {
+    expect(isInProgressHook(hookEntry(repo, 'pre-tool', 5))).toBe(true);
+    expect(isInProgressHook(hookEntry(repo, 'post-tool', 5))).toBe(true);
+  });
+});
+
+describe('HOOK_DEFS', () => {
+  it('hooks the Agent tool before it runs, and the Agent and task tools after', () => {
+    expect(HOOK_DEFS.filter((d) => d.event === 'PreToolUse' || d.event === 'PostToolUse')).toEqual([
+      { event: 'PreToolUse', name: 'pre-tool', matcher: '^(Agent|Task)$', timeout: 5 },
+      { event: 'PostToolUse', name: 'post-tool', matcher: '^(Agent|Task|TaskCreate|TaskUpdate)$', timeout: 5 },
+    ]);
+    const matches = (event: string, tool: string) => new RegExp(HOOK_DEFS.find((d) => d.event === event)!.matcher!).test(tool);
+    expect(['Agent', 'Task', 'TaskCreate', 'Bash'].map((t) => matches('PreToolUse', t))).toEqual([true, true, false, false]);
+    expect(['Agent', 'Task', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet', 'AgentX'].map((t) => matches('PostToolUse', t))).toEqual([true, true, true, true, false, false, false]);
+  });
 });
 
 describe('nodeBinary', () => {
@@ -157,6 +174,23 @@ describe('install', () => {
     expect(skill).toContain(`${slashed(homeDir())}/resources/<project-slug>/`);
     expect(skill).not.toContain('~/.inprogress/resources');
     expect(skill).not.toMatch(/\{\{\w+\}\}/);
+  });
+
+  it('writes the live-work rules into the skill and the scribe', () => {
+    const dir = claudeDirWithSettings(existing);
+    install({ repo, claudeDir: dir, stamp: 'lw' });
+    const skill = readFileSync(join(dir, 'skills', 'inprogress', 'SKILL.md'), 'utf8');
+    // Subagent descriptions and task subjects carry the step's #id; the task tools for multi-step work.
+    expect(skill).toContain('`#44 Build project tabs`');
+    expect(skill).toMatch(/task tools \(`TaskCreate`, `TaskUpdate`\) for multi-step work/);
+    expect(skill).toMatch(/subject with `#id` when it belongs to a step other than your focus/);
+    // The queue, new requests, and the fallback without task tools.
+    expect(skill).toContain('`queue: #a, #b, #c`');
+    expect(skill).toMatch(/new request with a deliverable .* becomes a step right away/);
+    expect(skill).toContain('tasks on #57:');
+    const agent = readFileSync(join(dir, 'agents', 'inprogress-scribe.md'), 'utf8');
+    expect(agent).toMatch(/`set_queue`/);
+    expect(agent).toMatch(/`set_tasks`/);
   });
 
   it('begins its log with the target Claude directory and the node binary it wrote', () => {

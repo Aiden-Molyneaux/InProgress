@@ -1,4 +1,14 @@
-import type { NodeDetail, Resource, SearchResult, TreeNode } from '../core/types';
+import type { NodeDetail, Project, Resource, SearchResult, TreeNode, WorkItem } from '../core/types';
+
+const MARK: Record<WorkItem['status'], string> = { in_progress: '◐', pending: '○', completed: '✓' };
+
+export function formatQueue(p: Project): string {
+  return p.queue.length ? `Up next in ${p.slug}: ${p.queue.map((id) => `#${id}`).join(' → ')}.` : `Cleared the queue of ${p.slug}.`;
+}
+
+export function formatTasks(nodeId: number, items: WorkItem[]): string {
+  return items.length ? `Working tasks on #${nodeId}: ${items.map((i) => `${MARK[i.status]} ${i.subject}`).join(' · ')}.` : `Cleared the working tasks on #${nodeId}.`;
+}
 
 export function formatCreated(nodes: TreeNode[]): string {
   return nodes

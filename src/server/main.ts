@@ -9,6 +9,8 @@ import { backupDb, truncateIfLarge } from './backup';
 import { openDb } from './db/connection';
 import { createCtx } from './db/tx';
 import { EVENTS_RETENTION_DAYS, pruneEvents } from './repo/events';
+import { pruneSubagents } from './repo/subagents';
+import { pruneWorkItems } from './repo/work';
 import { reportStartupFailure } from './startup';
 
 type Probe = 'inprogress' | 'other' | 'free';
@@ -81,6 +83,13 @@ async function main(): Promise<void> {
     app.log.info(`Pruned ${pruneEvents(ctx)} events older than ${EVENTS_RETENTION_DAYS} days`);
   } catch (err) {
     app.log.error(`Could not prune old events: ${(err as Error).message}`);
+  }
+  try {
+    const { dispatches, subagents } = pruneSubagents(ctx);
+    const tasks = pruneWorkItems(ctx);
+    app.log.info(`Pruned ${dispatches} unpaired dispatches, ${subagents} ended subagents and ${tasks} working tasks of sessions ended over a week ago`);
+  } catch (err) {
+    app.log.error(`Could not prune live work: ${(err as Error).message}`);
   }
   // A hidden, detached server on Windows never receives these signals; POST /api/admin/shutdown is the clean way to stop it.
   process.on('SIGINT', () => void shutdown());

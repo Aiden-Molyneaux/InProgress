@@ -2,12 +2,12 @@ import { readFileSync, statSync } from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import {
-  ASSIGNEES, NODE_KINDS, NODE_STATUSES, RESOURCE_KINDS,
-  type Binding, type LogEntry, type NodeDetail, type NodeInput, type Project, type ProjectSummary, type Resource, type SearchResult, type TreeNode,
+  ASSIGNEES, NODE_KINDS, NODE_STATUSES, RESOURCE_KINDS, WORK_STATUSES,
+  type Binding, type LogEntry, type NodeDetail, type NodeInput, type Project, type ProjectSummary, type Resource, type SearchResult, type TreeNode, type WorkItem,
 } from '../core/types';
 import { ApiClientError, type Client } from '../lib/client';
 import { VERSION } from '../lib/version';
-import { formatCreated, formatNodeDetail, formatResource, formatSearch } from './format';
+import { formatCreated, formatNodeDetail, formatQueue, formatResource, formatSearch, formatTasks } from './format';
 
 const SNAPSHOT_LIMIT = 200 * 1024;
 
@@ -82,7 +82,7 @@ export function createMcpServer(client: Client, o: McpOptions = {}): McpServer {
       .join('\n');
   });
 
-  tool('get_outline', 'Outline of a project tree with #ids, statuses, assignees and resource ids. Finished branches are folded unless full is true.', { project, full: z.boolean().optional() },
+  tool('get_outline', 'Outline of a project tree with #ids, statuses, assignees and resource ids, and the queue as "Up next: #a → #b". Finished branches are folded unless full is true.', { project, full: z.boolean().optional() },
     async (a: { project: string; full?: boolean }) => client.text(`/api/projects/${enc(a.project)}/outline${a.full ? '?full=1' : ''}`));
 
   tool('get_node', 'One node with its parent, children, resources and recent log.', { id },
@@ -197,6 +197,20 @@ export function createMcpServer(client: Client, o: McpOptions = {}): McpServer {
       await client.post(`/api/sessions/${enc(a.session)}/focus`, { nodeId: a.node }, { actor: actor(a.session) });
       return a.node === null ? 'Focus cleared.' : `Focus → #${a.node}.`;
     });
+
+  tool('set_queue', 'Set the order Claude plans to work in: #ids of steps in this project, next first. Replaces the whole queue; an empty list clears it. Done and dropped steps leave the queue on their own.',
+    { project, nodes: z.array(id).max(200).describe('Step #ids in the planned order, next first'), session },
+    async (a: { project: string; nodes: number[]; session?: string }) =>
+      formatQueue(await client.post<Project>(`/api/projects/${enc(a.project)}/queue`, { nodes: a.nodes }, { actor: actor(a.session) })));
+
+  tool('set_tasks', "Replace a session's working tasks on one node, in order, where Claude Code's task tools are absent (a brief's \"tasks on #57: ...\"). An empty list clears them.",
+    {
+      session: z.string().min(1),
+      node: id,
+      tasks: z.array(z.object({ subject: z.string().min(1).max(300), status: z.enum(WORK_STATUSES).describe('pending, in_progress or completed') })).max(50),
+    },
+    async (a: { session: string; node: number; tasks: { subject: string; status: string }[] }) =>
+      formatTasks(a.node, await client.post<WorkItem[]>(`/api/sessions/${enc(a.session)}/tasks`, { nodeId: a.node, tasks: a.tasks }, { actor: actor(a.session) })));
 
   return server;
 }

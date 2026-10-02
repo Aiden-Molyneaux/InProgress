@@ -13,10 +13,52 @@ import { makeCtx } from '../helpers';
 describe('database', () => {
   it('migrates to the latest schema with foreign keys on', () => {
     const ctx = makeCtx();
-    expect(schemaVersion(ctx.db)).toBe(1);
+    expect(schemaVersion(ctx.db)).toBe(2);
     const tables = (ctx.db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]).map((r) => r.name);
-    expect(tables).toEqual(expect.arrayContaining(['projects', 'bindings', 'nodes', 'resources', 'log_entries', 'sessions', 'session_subagents', 'events', 'meta']));
+    expect(tables).toEqual(expect.arrayContaining([
+      'projects', 'bindings', 'nodes', 'resources', 'log_entries', 'sessions', 'session_subagents', 'events', 'meta', 'work_items', 'subagent_dispatches',
+    ]));
     expect(ctx.db.pragma('foreign_keys', { simple: true })).toBe(1);
+  });
+
+  it('migrates a database at v1 with data to v2 and keeps every row', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ip-migrate-v1-'));
+    const file = join(dir, 'inprogress.db');
+    // The database Aiden has today: migration 1 only, with a project, a plan, a session and a running subagent.
+    const v1 = new Database(file);
+    v1.exec('CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+    v1.exec(MIGRATIONS[0]);
+    v1.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '1')").run();
+    v1.prepare("INSERT INTO projects (id, slug, name, root_node_id, created_at, updated_at) VALUES (1, 'ingame', 'InGame', 1, 't', 't')").run();
+    v1.prepare("INSERT INTO nodes (id, project_id, parent_id, position, kind, title, status, created_at, updated_at) VALUES (1, 1, NULL, 1, 'goal', 'InGame', 'active', 't', 't')").run();
+    v1.prepare("INSERT INTO nodes (id, project_id, parent_id, position, kind, title, status, created_at, updated_at) VALUES (2, 1, 1, 1, 'task', 'Play app signing', 'active', 't', 't')").run();
+    v1.prepare("INSERT INTO sessions (id, project_id, state, focus_node_id, started_at, last_seen_at) VALUES ('s1', 1, 'working', 2, 't', 't')").run();
+    v1.prepare("INSERT INTO session_subagents (session_id, agent_id, agent_type, started_at) VALUES ('s1', 'a1', 'Explore', 't')").run();
+    v1.prepare("INSERT INTO events (ts, project_id, actor, type, entity, entity_id, data) VALUES ('t', 1, 'system', 'project.created', 'project', '1', '{}')").run();
+    v1.close();
+    const db = openDb(file);
+    try {
+      expect(schemaVersion(db)).toBe(2);
+      expect(db.prepare('SELECT id, slug, queue FROM projects').all()).toEqual([{ id: 1, slug: 'ingame', queue: '[]' }]);
+      expect(db.prepare('SELECT id, title FROM nodes ORDER BY id').all()).toEqual([{ id: 1, title: 'InGame' }, { id: 2, title: 'Play app signing' }]);
+      expect(db.prepare('SELECT id, focus_node_id FROM sessions').all()).toEqual([{ id: 's1', focus_node_id: 2 }]);
+      expect(db.prepare('SELECT * FROM session_subagents').all()).toEqual([
+        { session_id: 's1', agent_id: 'a1', agent_type: 'Explore', started_at: 't', description: null, model: null, node_id: null, tool_use_id: null, ended_at: null },
+      ]);
+      expect((db.prepare('SELECT COUNT(*) AS c FROM events').get() as { c: number }).c).toBe(1);
+      // The new tables take rows, and their foreign keys follow the node: work items go with it, a subagent forgets it.
+      db.prepare("INSERT INTO work_items (project_id, node_id, session_id, agent_id, task_key, subject, status, blocks, position, created_at, updated_at) VALUES (1, 2, 's1', '', '1', 'Write it', 'pending', '[]', 1, 't', 't')").run();
+      db.prepare("INSERT INTO subagent_dispatches (session_id, tool_use_id, agent_type, description, model, node_id, created_at) VALUES ('s1', 'toolu_1', 'Explore', 'Look around', 'sonnet', 2, 't')").run();
+      db.prepare("UPDATE session_subagents SET node_id = 2 WHERE agent_id = 'a1'").run();
+      db.prepare('DELETE FROM nodes WHERE id = 2').run();
+      expect((db.prepare('SELECT COUNT(*) AS c FROM work_items').get() as { c: number }).c).toBe(0);
+      expect(db.prepare('SELECT node_id FROM session_subagents').all()).toEqual([{ node_id: null }]);
+      expect(db.prepare('SELECT node_id FROM subagent_dispatches').all()).toEqual([{ node_id: null }]);
+      expect(() => db.prepare("INSERT INTO work_items (project_id, node_id, session_id, agent_id, task_key, subject, status, blocks, position, created_at, updated_at) VALUES (1, 1, 's1', '', '1', 'x', 'deleted', '[]', 1, 't', 't')").run()).toThrow(/CHECK/);
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('never reuses the id of a deleted node', () => {
@@ -67,6 +109,8 @@ describe('database', () => {
   it('refuses to migrate a database created by a newer build', () => {
     const { db } = makeCtx();
     db.prepare("UPDATE meta SET value = '99' WHERE key = 'schema_version'").run();
+    // A newer build that did not declare this one able to read its schema.
+    db.prepare("DELETE FROM meta WHERE key = 'min_reader_version'").run();
     expect(() => migrate(db)).toThrow(`InProgress database schema v99 is newer than this build (v${MIGRATIONS.length}); update InProgress`);
   });
 
@@ -80,6 +124,11 @@ describe('database', () => {
     expect(schemaVersion(db)).toBe(99);
     setMeta('min_reader_version', String(MIGRATIONS.length + 1));
     expect(() => migrate(db)).toThrow(/is newer than this build/);
+  });
+
+  it('marks migration 2 readable by v1 builds, since it only adds tables and columns', () => {
+    const { db } = makeCtx();
+    expect(db.prepare("SELECT value FROM meta WHERE key = 'min_reader_version'").pluck().get()).toBe('1');
   });
 
   it('records events inside the transaction and emits them after commit', () => {

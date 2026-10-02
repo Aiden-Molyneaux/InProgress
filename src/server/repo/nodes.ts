@@ -46,6 +46,14 @@ export function requireNode(ctx: Ctx, id: number): TreeNode {
   return node;
 }
 
+/** The node a leading `#id` names (`#57 Write the guide`), when that node is in the project. */
+export function leadingNode(ctx: Ctx, text: string | undefined, projectId: number | null): number | undefined {
+  const m = /^\s*#(\d+)\b/.exec(text ?? '');
+  if (!m || projectId === null) return undefined;
+  const node = findNode(ctx, Number(m[1]));
+  return node?.projectId === projectId ? node.id : undefined;
+}
+
 export function listNodes(ctx: Ctx, projectId: number): TreeNode[] {
   return (ctx.db.prepare('SELECT * FROM nodes WHERE project_id = ? ORDER BY parent_id, position, id').all(projectId) as NodeRow[]).map(toNode);
 }
