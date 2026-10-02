@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { test as base, expect, type APIRequestContext, type Page } from '@playwright/test';
+import { test as base, expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 
 interface Seeded {
   slug: string;
@@ -17,7 +17,7 @@ const headers = (session: string) => ({
 });
 
 /** A write the test depends on. A failed one fails here, not later as a confusing UI assertion. */
-async function write<T = unknown>(api: APIRequestContext, session: string, method: 'post' | 'patch', path: string, data: unknown): Promise<T> {
+async function write<T = unknown>(api: APIRequestContext, session: string, method: 'post' | 'patch' | 'delete', path: string, data?: unknown): Promise<T> {
   const res = await api[method](path, { headers: headers(session), data });
   expect(res.ok(), `${method.toUpperCase()} ${path} answered ${res.status()}: ${await res.text()}`).toBe(true);
   return (await res.json()) as T;
@@ -112,6 +112,38 @@ const test = base.extend<TestFixtures, WorkerFixtures>({
 
 const open = (page: Page, project: Seeded) => page.goto(`/#/p/${project.slug}`);
 
+/** Records every transform the canvas viewport takes from now on, so a test can tell whether the camera moved. */
+const RECORD_MOVES = `(() => {
+  const viewport = document.querySelector('.react-flow__viewport');
+  window.__moves = [];
+  new MutationObserver(() => window.__moves.push(viewport.style.transform)).observe(viewport, { attributes: true, attributeFilter: ['style'] });
+})()`;
+const recordedMoves = (page: Page) => page.evaluate<string[]>('window.__moves');
+/** Longer than the camera's 400 ms glide. */
+const GLIDE_MS = 600;
+
+/**
+ * Where a card sits against the top edge of the narrow Details sheet, 40 % of the way down the canvas, whether or not
+ * the sheet is open yet: wholly above it, under it, or not wholly inside the canvas.
+ */
+async function sheetSide(page: Page, card: Locator): Promise<'above' | 'under' | 'outside'> {
+  const canvas = (await page.locator('.react-flow').boundingBox())!;
+  const box = (await card.boundingBox())!;
+  if (box.y < canvas.y || box.y + box.height > canvas.y + canvas.height) return 'outside';
+  return box.y + box.height <= canvas.y + canvas.height * 0.4 ? 'above' : 'under';
+}
+
+/** Passes once the card's middle sits a quarter of the way down the canvas, clear of the open Details sheet. */
+async function expectLifted(page: Page, card: Locator): Promise<void> {
+  await expect(async () => {
+    const canvas = (await page.locator('.react-flow').boundingBox())!;
+    const sheet = (await page.getByRole('complementary').boundingBox())!;
+    const box = (await card.boundingBox())!;
+    expect(box.y + box.height).toBeLessThanOrEqual(sheet.y);
+    expect(Math.abs(box.y + box.height / 2 - (canvas.y + canvas.height / 4))).toBeLessThanOrEqual(3);
+  }).toPass({ timeout: 3000 });
+}
+
 test('opens on the current work with folding, needs-you and the session badge', async ({ page, demo }) => {
   await open(page, demo);
   // React Flow's warning #004 (a canvas with no width or height) is only logged by development builds: check the size.
@@ -179,6 +211,21 @@ test('Details keeps the last good detail when a refresh fails', async ({ page, a
   await expect(details.getByRole('button', { name: `Copy #${id}` })).toBeVisible();
 });
 
+test('Details closes when its node is deleted, and stays open when another node goes', async ({ page, api, fresh }) => {
+  await open(page, fresh);
+  const details = page.getByRole('complementary');
+  const id = fresh.ids['3 RevenueCat'];
+  await page.locator('.ip-node', { hasText: '3 RevenueCat' }).click();
+  await expect(details).toContainText(`#${id} 3 RevenueCat`);
+  await write(api, fresh.session, 'delete', `/api/nodes/${fresh.ids['7 Launch']}`);
+  // "+3 more" turning into "+2 more" shows that the snapshot without 7 Launch has landed.
+  await expect(page.locator('.ip-more', { hasText: '+2 more' })).toBeVisible();
+  await expect(details).toContainText(`#${id} 3 RevenueCat`);
+  await write(api, fresh.session, 'delete', `/api/nodes/${id}`);
+  await expect(details).toBeHidden();
+  await expect(page.getByText("Couldn't refresh")).toHaveCount(0);
+});
+
 test('a long project name is cut short and the top bar stays on one line', async ({ page, api }) => {
   const project = await seed(api, 'A project name long enough to fill a narrow window several times over, and then some');
   await open(page, project);
@@ -207,6 +254,22 @@ test('dark mode reaches the canvas controls; reduced motion stops the pulse and 
   await expect(page.getByRole('complementary').locator('.ip-label').first()).toHaveCSS('color', 'rgb(161, 161, 166)');
 });
 
+test('reduced motion makes camera moves instant', async ({ page, demo }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await open(page, demo);
+  const play = page.locator('.ip-node', { hasText: 'Play app signing' });
+  await expect(play).toBeInViewport();
+  const moves = { Home: () => page.keyboard.press('Home'), End: () => page.keyboard.press('End'), 'lift above the sheet': () => play.click() };
+  for (const [name, move] of Object.entries(moves)) {
+    await page.evaluate(RECORD_MOVES);
+    await move();
+    await page.waitForTimeout(GLIDE_MS);
+    // One jump. A glide would pass through a new transform every frame.
+    expect(new Set(await recordedMoves(page)).size, name).toBe(1);
+  }
+  await expectLifted(page, play);
+});
+
 test('the keyboard reaches and opens cards, shows a "+n more" run and toggles Follow', async ({ page, demo }) => {
   await open(page, demo);
   const details = page.getByRole('complementary');
@@ -230,10 +293,20 @@ test('the keyboard reaches and opens cards, shows a "+n more" run and toggles Fo
   await page.keyboard.press('Enter');
   await expect(page.locator('.ip-node', { hasText: '7 Launch' })).toBeVisible();
   await expect(page.locator('.ip-more')).toHaveCount(0);
+  await expect(page.locator('.ip-node', { hasText: '5 Store listing' })).toBeFocused();
   const follow = page.getByRole('button', { name: /Follow/ });
   await expect(follow).toHaveAttribute('aria-pressed', 'true');
   await page.keyboard.press('f');
   await expect(follow).toHaveAttribute('aria-pressed', 'false');
+});
+
+test('Space on "+n more" hands focus to the first card it shows, and Tab carries on from there', async ({ page, demo }) => {
+  await open(page, demo);
+  await page.getByRole('button', { name: 'Show 3 more' }).focus();
+  await page.keyboard.press('Space');
+  await expect(page.locator('.ip-node', { hasText: '5 Store listing' })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.locator('.ip-node', { hasText: '6 Beta' })).toBeFocused();
 });
 
 test('a wheel tick or a minimap drag turns Follow off, a minimap click does not', async ({ page, demo }) => {
@@ -255,6 +328,19 @@ test('a wheel tick or a minimap drag turns Follow off, a minimap click does not'
   const pane = (await page.locator('.react-flow__pane').boundingBox())!;
   await page.mouse.move(pane.x + pane.width / 2, pane.y + 60);
   await page.mouse.wheel(0, 60);
+  await expect(follow).toHaveAttribute('aria-pressed', 'false');
+});
+
+test('a minimap drag whose first move lands outside the minimap turns Follow off', async ({ page, demo }) => {
+  await open(page, demo);
+  const follow = page.getByRole('button', { name: /Follow/ });
+  await expect(page.locator('.ip-node', { hasText: 'Play app signing' })).toBeInViewport();
+  const map = (await page.locator('.react-flow__minimap').boundingBox())!;
+  await page.mouse.move(map.x + map.width / 2, map.y + map.height / 2);
+  await page.mouse.down();
+  // One fast move, straight out over the canvas.
+  await page.mouse.move(map.x - 100, map.y - 100);
+  await page.mouse.up();
   await expect(follow).toHaveAttribute('aria-pressed', 'false');
 });
 
@@ -290,6 +376,112 @@ test('with Details open on a narrow window, the camera centres above the sheet',
     const top = (await sheet.boundingBox())!.y;
     expect(card.y + card.height).toBeLessThanOrEqual(top);
   }).toPass({ timeout: 3000 });
+});
+
+test('on a narrow window, clicking a card the sheet would cover lifts it above the sheet and keeps Follow on', async ({ page, demo }) => {
+  await open(page, demo);
+  const card = page.locator('.ip-node', { hasText: 'Upload keystore' });
+  await expect(card).toBeInViewport();
+  expect(await sheetSide(page, card)).toBe('under');
+  await card.click();
+  await expect(page.getByRole('complementary')).toContainText('Upload keystore');
+  await expectLifted(page, card);
+  await expect(page.getByRole('button', { name: /Follow/ })).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('on a narrow window, Enter on a card the sheet would cover lifts it too', async ({ page, demo }) => {
+  await open(page, demo);
+  const card = page.locator('.ip-node', { hasText: 'Upload keystore' });
+  await expect(card).toBeInViewport();
+  expect(await sheetSide(page, card)).toBe('under');
+  await card.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('complementary')).toContainText('Upload keystore');
+  await expectLifted(page, card);
+});
+
+test('on a wide window, where Details is a side panel, opening it leaves the camera still', async ({ page, demo }) => {
+  await page.setViewportSize({ width: 1000, height: 900 });
+  await open(page, demo);
+  const card = page.locator('.ip-node', { hasText: 'Upload keystore' });
+  await expect(card).toBeInViewport();
+  expect(await sheetSide(page, card)).toBe('under');
+  await page.evaluate(RECORD_MOVES);
+  await card.click();
+  await expect(page.getByRole('complementary')).toContainText('Upload keystore');
+  await page.waitForTimeout(GLIDE_MS);
+  expect(await recordedMoves(page)).toEqual([]);
+});
+
+test('on a narrow window, opening Details on a card clear of the sheet leaves the camera still', async ({ page, demo }) => {
+  await open(page, demo);
+  const card = page.locator('.ip-node', { hasText: 'Milestone 25' });
+  await expect(card).toBeInViewport();
+  expect(await sheetSide(page, card)).toBe('above');
+  await page.evaluate(RECORD_MOVES);
+  await card.click();
+  await expect(page.getByRole('complementary')).toContainText('Milestone 25');
+  await page.waitForTimeout(GLIDE_MS);
+  expect(await recordedMoves(page)).toEqual([]);
+});
+
+test("on a narrow window, Details' parent link moves the camera only for a row the sheet or the edge hides", async ({ page, demo }) => {
+  await open(page, demo);
+  const sheet = page.getByRole('complementary');
+  // Milestones sits far above Milestone 25, out of view: the link brings it above the sheet.
+  await page.locator('.ip-node', { hasText: 'Milestone 25' }).click();
+  await sheet.getByRole('button', { name: /Milestones/ }).click();
+  await expect(sheet).toContainText(`#${demo.ids['Milestones']} Milestones`);
+  await expectLifted(page, page.locator('.ip-node', { hasText: 'Milestones' }));
+  // Run signing tests a quarter of the way down puts its parent, 2 Android signing, in view above the sheet.
+  const run = page.locator('.ip-node', { hasText: 'Run signing tests' });
+  await page.keyboard.press('n');
+  await expectLifted(page, run);
+  await run.click();
+  await expect(sheet).toContainText(`#${demo.ids['Run signing tests']} Run signing tests`);
+  const parent = page.locator('.ip-node', { hasText: '2 Android signing' });
+  expect(await sheetSide(page, parent)).toBe('above');
+  await page.evaluate(RECORD_MOVES);
+  await sheet.getByRole('button', { name: /2 Android signing/ }).click();
+  await expect(sheet).toContainText(`#${demo.ids['2 Android signing']} 2 Android signing`);
+  await page.waitForTimeout(GLIDE_MS);
+  expect(await recordedMoves(page)).toEqual([]);
+});
+
+test('on a narrow window with Details open, a session chip moves the camera only for a row the sheet or the edge hides', async ({ page, demo }) => {
+  await open(page, demo);
+  const play = page.locator('.ip-node', { hasText: 'Play app signing' });
+  const chip = page.getByRole('button', { name: /E2E session/ });
+  await page.locator('.ip-node', { hasText: 'Milestone 25' }).click();
+  await expect(page.getByRole('complementary')).toContainText('Milestone 25');
+  await page.keyboard.press('Home');
+  await expect(play).not.toBeInViewport();
+  await chip.click();
+  await expectLifted(page, play);
+  // With Run signing tests a quarter of the way down, the session's row is in view above the sheet.
+  await page.keyboard.press('n');
+  await expectLifted(page, page.locator('.ip-node', { hasText: 'Run signing tests' }));
+  expect(await sheetSide(page, play)).toBe('above');
+  await page.evaluate(RECORD_MOVES);
+  await chip.click();
+  await page.waitForTimeout(GLIDE_MS);
+  expect(await recordedMoves(page)).toEqual([]);
+});
+
+test('on a narrow window with Details open, keyboard focus on a card under the sheet brings it above the sheet', async ({ page, demo }) => {
+  await open(page, demo);
+  const sheet = page.getByRole('complementary');
+  const clear = page.locator('.ip-node', { hasText: 'Milestone 25' });
+  const covered = page.locator('.ip-node', { hasText: 'Upload keystore' });
+  await expect(clear).toBeInViewport();
+  // Details opens from the keyboard on a card clear of the sheet, so the camera stays where it is.
+  await clear.focus();
+  await page.keyboard.press('Enter');
+  await expect(sheet).toContainText('Milestone 25');
+  expect(await sheetSide(page, covered)).toBe('under');
+  // Focus that follows a key press shows a focus ring, as Tab's does.
+  await covered.focus();
+  await expectLifted(page, covered);
 });
 
 test('the resource viewer is modal and hands focus back when it closes', async ({ page, demo }) => {
