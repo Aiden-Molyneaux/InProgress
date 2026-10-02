@@ -59,6 +59,8 @@ export const hookBody = z
     agentType: z.string().max(200).optional(),
     mentionsInProgress: z.boolean().optional(),
     asksStatus: z.boolean().optional(),
+    /** A prompt event that is really a background-task notice: the session works, but nothing was typed. */
+    notice: z.boolean().optional(),
   })
   .strict();
 export const enrollBody = z.object({ project: z.union([z.string().min(1), z.number().int().positive()]), title: z.string().max(300).optional() }).strict();

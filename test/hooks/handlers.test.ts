@@ -89,6 +89,20 @@ describe('buildHookBody', () => {
     expect(performance.now() - started).toBeLessThan(200);
   });
 
+  it('marks background-task notices, which reach UserPromptSubmit like typed prompts', () => {
+    const notices = [
+      'Another Claude session sent a message:\n<agent-message from="a1">done</agent-message>',
+      '<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n</task-notification>',
+      '  [SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event.',
+    ];
+    for (const prompt of notices) {
+      expect(buildHookBody('prompt-submit', { session_id: 's', prompt }), prompt).toMatchObject({ notice: true, mentionsInProgress: false, asksStatus: false });
+    }
+    for (const prompt of ['where are we?', 'Explain this <task-notification> tag in InProgress']) {
+      expect(buildHookBody('prompt-submit', { session_id: 's', prompt }), prompt).not.toHaveProperty('notice');
+    }
+  });
+
   it('sends cwd and branch with prompts, as session-start does, so a missed start can self-heal', () => {
     const repo = tempDir('ip-hook-git-');
     mkdirSync(join(repo, '.git'));

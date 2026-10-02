@@ -18,6 +18,7 @@ export interface HookEventInput {
   agentType?: string;
   mentionsInProgress?: boolean;
   asksStatus?: boolean;
+  notice?: boolean;
 }
 
 export interface HookEventResult {
@@ -62,7 +63,8 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
         break;
       case 'prompt':
         next.state = 'working';
-        next.promptsSinceUpdate += 1;
+        // A background-task notice (the scribe finishing, say) is not a prompt Aiden typed: no stale count.
+        if (!input.notice) next.promptsSinceUpdate += 1;
         break;
       case 'stop':
         next.state = 'idle';
@@ -102,7 +104,7 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
   }
   // A session that has just begun tracking gets the full briefing, whichever event brought it in.
   if (input.event === 'start' || created) return { tracked: true, context: renderBriefing(getProjectSnapshot(ctx, project.id), sessionId) };
-  if (input.event === 'prompt') {
+  if (input.event === 'prompt' && !input.notice) {
     if (input.asksStatus) return { tracked: true, context: renderStatusAnswer(getProjectSnapshot(ctx, project.id), sessionId) };
     if (session.promptsSinceUpdate >= 2) return { tracked: true, context: renderStatusLine(getProjectSnapshot(ctx, project.id), session) };
   }

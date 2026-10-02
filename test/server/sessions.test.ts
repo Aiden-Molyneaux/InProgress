@@ -90,6 +90,18 @@ describe('handleHookEvent', () => {
     expect(findSession(ctx, 's1')?.state).toBe('idle');
   });
 
+  it('does not count a background-task notice as a prompt, nor nudge on one', () => {
+    const { ctx } = setup();
+    handleHookEvent(ctx, 's1', start());
+    handleHookEvent(ctx, 's1', { event: 'prompt' });
+    handleHookEvent(ctx, 's1', { event: 'stop' });
+    // The scribe finishing comes back as a notice: the session works on it, but no prompt was typed.
+    expect(handleHookEvent(ctx, 's1', { event: 'prompt', notice: true }).context).toBeUndefined();
+    expect(findSession(ctx, 's1')).toMatchObject({ state: 'working', promptsSinceUpdate: 1 });
+    expect(handleHookEvent(ctx, 's1', { event: 'prompt' }).context).toMatch(/last scribe update 2 prompts ago/);
+    expect(handleHookEvent(ctx, 's1', { event: 'prompt', notice: true }).context).toBeUndefined();
+  });
+
   it('answers status questions with the current frontier', () => {
     const { ctx, a3 } = setup();
     handleHookEvent(ctx, 's1', start());

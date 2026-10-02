@@ -44,6 +44,8 @@ const CWD_MAX = 1_000;
 const BRANCH_MAX = 300;
 
 const MENTIONS = /\binprogress\b/i;
+/** How Claude Code delivers background-task results (task notifications, subagent hand-backs) as a turn. */
+const NOTICE = /^\s*(?:<task-notification\b|Another Claude session sent a message:|\[SYSTEM NOTIFICATION\b)/;
 // A lone "status" may end in one "?"; the optional group keeps a long whitespace run linear, not quadratic.
 const ASKS_STATUS = /\b(where are we|where were we|what['’]?s next|what['’]?s left|what['’]?s the status|status update|status check|project status|progress so far)\b|^\s*status(?:\s*\?)?\s*$/i;
 
@@ -79,7 +81,12 @@ export function buildHookBody(name: HookName, input: HookStdin): Record<string, 
     if (title) body.title = title.slice(0, TITLE_MAX);
   }
   if (name === 'prompt-submit') {
-    const prompt = stripPasted(typeof input.prompt === 'string' ? input.prompt : '');
+    const raw = typeof input.prompt === 'string' ? input.prompt : '';
+    // A background agent finishing reaches UserPromptSubmit like a typed prompt; flagged only when true, so a
+    // normal prompt's body stays exactly what an older server accepts.
+    const notice = NOTICE.test(raw);
+    if (notice) body.notice = true;
+    const prompt = notice ? '' : stripPasted(raw);
     body.mentionsInProgress = MENTIONS.test(prompt);
     body.asksStatus = ASKS_STATUS.test(prompt);
   }
