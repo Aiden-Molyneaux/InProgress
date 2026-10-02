@@ -11,16 +11,16 @@
     "node": ">=20.19"
   },
   "scripts": {
-    "build": "npm run build:node && npm run build:web",
-    "build:node": "tsup",
-    "build:web": "vite build --config web/vite.config.ts",
+    "build": "node scripts/build-to.mjs .build",
     "dev": "node scripts/dev.mjs",
     "typecheck": "tsc -p tsconfig.json && tsc -p web/tsconfig.json",
     "test": "vitest run",
-    "test:smoke": "npm run build:node && vitest run --config vitest.smoke.config.ts",
-    "test:e2e": "npm run build && playwright test",
+    "test:smoke": "node scripts/build-to.mjs .build --node-only && vitest run --config vitest.smoke.config.ts",
+    "test:e2e": "node scripts/build-to.mjs .build && playwright test",
     "claude:install": "node dist/cli/main.js claude-install",
-    "claude:uninstall": "node dist/cli/main.js claude-uninstall"
+    "claude:uninstall": "node dist/cli/main.js claude-uninstall",
+    "deploy": "node scripts/deploy.mjs",
+    "rollback": "node scripts/deploy.mjs --rollback"
   },
   "dependencies": {
     "@fastify/static": "^10.1.5",

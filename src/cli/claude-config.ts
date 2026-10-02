@@ -210,16 +210,49 @@ function backup(file: string, stamp: string, log: string[]): void {
   if (pruned) log.push(`Removed ${pruned} older settings ${pruned === 1 ? 'backup' : 'backups'} (keeping the newest ${BACKUPS_KEPT})`);
 }
 
+/** The agent file and the skill folder exactly as install writes them for this repo. */
+function renderKit(repo: string): { agent: string; skill: (readonly [string, string])[] } {
+  const agent = renderTemplate(readFileSync(join(repo, 'claude', 'agents', 'inprogress-scribe.md'), 'utf8'), repo);
+  const skillSrc = join(repo, 'claude', 'skills', 'inprogress');
+  const skill = readdirSync(skillSrc).map((f) => [f, renderTemplate(readFileSync(join(skillSrc, f), 'utf8'), repo)] as const);
+  return { agent, skill };
+}
+
+const readText = (file: string): string | undefined => (existsSync(file) ? readFileSync(file, 'utf8') : undefined);
+
+/** JSON with object keys sorted at every level; arrays keep their order. */
+const canonical = (value: unknown): string =>
+  JSON.stringify(value, (_key, v: unknown) => (isObject(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]])) : v));
+
+/**
+ * Whether InProgress is installed in a Claude dir, and which parts differ from what `install` would write for this
+ * repo now (so a deploy re-runs install only when the kit really changed). Throws on an unreadable settings.json.
+ */
+export function kitStatus(o: { repo: string; claudeDir: string }): { installed: boolean; differs: ('settings' | 'agent' | 'skill')[] } {
+  const repo = o.repo.replace(/\\/g, '/');
+  const current = readSettings(join(o.claudeDir, 'settings.json'));
+  const { agent, skill } = renderKit(repo);
+  const agentFile = join(o.claudeDir, 'agents', 'inprogress-scribe.md');
+  const skillDir = join(o.claudeDir, 'skills', 'inprogress');
+  const installed = countInProgressHooks(current) > 0 || existsSync(agentFile);
+  const differs: ('settings' | 'agent' | 'skill')[] = [];
+  // The merge helpers edit in place, so they get a copy; key order is not a difference (a re-merge appends keys).
+  if (canonical(addAllowRules(addInProgressHooks(structuredClone(current), repo))) !== canonical(current)) differs.push('settings');
+  if (readText(agentFile) !== agent) differs.push('agent');
+  const installedSkill = existsSync(skillDir) ? readdirSync(skillDir).sort() : [];
+  const skillSame = installedSkill.join('\n') === skill.map(([f]) => f).sort().join('\n') && skill.every(([f, text]) => readText(join(skillDir, f)) === text);
+  if (!skillSame) differs.push('skill');
+  return { installed, differs };
+}
+
 export function install(o: { repo: string; claudeDir: string; stamp: string }): { log: string[]; agentsDirCreated: boolean } {
   const repo = o.repo.replace(/\\/g, '/');
   // Everything is checked, read and rendered first, so a refusal or a broken template leaves the Claude dir untouched.
   const unbuilt = BUILT_ENTRIES.find((entry) => !existsSync(join(repo, entry)));
-  if (unbuilt) throw new Error(`Build InProgress first: npm run build (${repo}/${unbuilt} is missing)`);
+  if (unbuilt) throw new Error(`Build InProgress first: npm run deploy (${repo}/${unbuilt} is missing)`);
   const settingsFile = join(o.claudeDir, 'settings.json');
   const current = readSettings(settingsFile);
-  const agent = renderTemplate(readFileSync(join(repo, 'claude', 'agents', 'inprogress-scribe.md'), 'utf8'), repo);
-  const skillSrc = join(repo, 'claude', 'skills', 'inprogress');
-  const skill = readdirSync(skillSrc).map((f) => [f, renderTemplate(readFileSync(join(skillSrc, f), 'utf8'), repo)] as const);
+  const { agent, skill } = renderKit(repo);
   const replaced = countInProgressHooks(current);
   const settings = addAllowRules(addInProgressHooks(current, repo));
 

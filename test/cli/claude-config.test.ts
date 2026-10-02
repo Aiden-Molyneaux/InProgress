@@ -2,7 +2,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, 
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { ALLOW_RULES, claudeDir, HOOK_DEFS, hookEntry, install, isInProgressHook, nodeBinary, renderTemplate, uninstall } from '../../src/cli/claude-config';
+import { ALLOW_RULES, claudeDir, HOOK_DEFS, hookEntry, install, isInProgressHook, kitStatus, nodeBinary, renderTemplate, uninstall } from '../../src/cli/claude-config';
 import { homeDir } from '../../src/lib/home';
 
 const temps: string[] = [];
@@ -252,7 +252,7 @@ describe('install', () => {
       rmSync(join(unbuilt, entry));
       const dir = claudeDirWithSettings(existing);
       const before = snapshot(dir);
-      expect(thrownBy(() => install({ repo: unbuilt, claudeDir: dir, stamp: 'nb' }))).toContain('Build InProgress first: npm run build');
+      expect(thrownBy(() => install({ repo: unbuilt, claudeDir: dir, stamp: 'nb' }))).toContain('Build InProgress first: npm run deploy');
       expect(snapshot(dir)).toEqual(before);
     }
   });
@@ -324,5 +324,22 @@ describe('uninstall', () => {
     const other = claudeDirWithSettings(untouched);
     uninstall({ claudeDir: other, stamp: 'u4' });
     expect(readSettings(other)).toEqual(untouched);
+  });
+});
+
+describe('kitStatus', () => {
+  it('tells not installed, in sync, and which parts differ from what install would write', () => {
+    const dir = claudeDirWithSettings({ theme: 'dark' });
+    expect(kitStatus({ repo, claudeDir: dir })).toEqual({ installed: false, differs: ['settings', 'agent', 'skill'] });
+    install({ repo, claudeDir: dir, stamp: 'k1' });
+    expect(kitStatus({ repo, claudeDir: dir })).toEqual({ installed: true, differs: [] });
+    // A newer skill template, an edited agent file and a missing allow rule are each reported.
+    const changed = fixtureRepo();
+    writeFileSync(join(changed, 'claude', 'skills', 'inprogress', 'SKILL.md'), 'new skill text');
+    writeFileSync(join(dir, 'agents', 'inprogress-scribe.md'), 'edited by hand');
+    const settings = readSettings(dir);
+    settings.permissions.allow = settings.permissions.allow.filter((r: string) => r !== 'mcp__inprogress');
+    writeFileSync(join(dir, 'settings.json'), JSON.stringify(settings, null, 2));
+    expect(kitStatus({ repo: changed, claudeDir: dir })).toEqual({ installed: true, differs: ['settings', 'agent', 'skill'] });
   });
 });

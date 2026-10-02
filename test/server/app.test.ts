@@ -40,6 +40,14 @@ describe('guards', () => {
     expect(bad.statusCode).toBe(403);
   });
 
+  it('names the running build in health, or null when it is unknown', async () => {
+    const build = { sha: 'abc1234', dirty: false, builtAt: '2026-10-02T12:00:00.000Z' };
+    const known = buildApp({ ctx: makeCtx(), token: 'tok', uiToken: 'u', version: 'test', build });
+    expect((await known.inject({ url: '/api/health' })).json()).toMatchObject({ build });
+    const unknown = buildApp({ ctx: makeCtx(), token: 'tok', uiToken: 'u', version: 'test' });
+    expect((await unknown.inject({ url: '/api/health' })).json()).toMatchObject({ build: null });
+  });
+
   it('accepts loopback names on any port and refuses look-alike hosts', async () => {
     const { app } = setup();
     for (const host of ['localhost:1234', 'localhost', 'LOCALHOST:4317', '127.0.0.1:65535', '[::1]', '[::1]:4399']) {

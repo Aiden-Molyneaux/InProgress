@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { buildIndex, renderOutline } from '../../core/tree';
+import type { BuildInfo } from '../../lib/version';
 import type { Ctx } from '../db/tx';
 import { listBindings, listProjectSummaries, resolveProject } from '../repo/projects';
 import { requireResource } from '../repo/resources';
@@ -7,8 +8,8 @@ import { search } from '../repo/search';
 import { getNodeDetail, getProjectSnapshot } from '../repo/snapshot';
 import { idParam, searchQuery } from '../schemas';
 
-export function registerReadRoutes(app: FastifyInstance, ctx: Ctx, version: string): void {
-  app.get('/api/health', async () => ({ ok: true, app: 'inprogress', version, pid: process.pid }));
+export function registerReadRoutes(app: FastifyInstance, ctx: Ctx, version: string, build: BuildInfo | null): void {
+  app.get('/api/health', async () => ({ ok: true, app: 'inprogress', version, build, pid: process.pid }));
   app.get('/api/projects', async () => listProjectSummaries(ctx));
   app.get('/api/projects/:ref', async (req) => getProjectSnapshot(ctx, (req.params as { ref: string }).ref));
   app.get('/api/projects/:ref/outline', async (req, reply) => {

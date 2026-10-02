@@ -4,11 +4,11 @@ import { createClient } from '../lib/client';
 import { ensureServer, isServerUp } from '../lib/ensure-server';
 import { baseUrl, homeDir, readToken } from '../lib/home';
 import { timestamp } from '../server/backup';
-import { claudeDir, install, repoRoot, uninstall } from './claude-config';
+import { claudeDir, install, kitStatus, repoRoot, uninstall } from './claude-config';
 import { doctor } from './doctor';
 import { openAppWindow } from './open';
 
-const USAGE = 'Usage: inprogress <start | stop | open | status | outline <project> [--full] | doctor | claude-install | claude-uninstall>';
+const USAGE = 'Usage: inprogress <start | stop | open | status | outline <project> [--full] | doctor | claude-install | claude-uninstall | claude-check>';
 /**
  * The first health check of a CLI run. A fresh process's first request is slow on a busy machine (fetch sets up its
  * HTTP parser), and 300 ms has called a running server down. Nothing listening still fails at once.
@@ -105,6 +105,20 @@ export async function runCli(args: string[], out: (line: string) => void = conso
     case 'claude-uninstall':
       uninstall({ claudeDir: claudeDir(), stamp: timestamp() }).forEach((l) => out(l));
       return 0;
+    case 'claude-check': {
+      // For the deploy script: 0 = the installed kit matches this repo, 2 = it differs (re-run install), 3 = not installed.
+      const status = kitStatus({ repo: o.repo ?? repoRoot(), claudeDir: claudeDir() });
+      if (!status.installed) {
+        out(`InProgress is not installed in ${claudeDir()}: run npm run claude:install`);
+        return 3;
+      }
+      if (status.differs.length) {
+        out(`The installed kit differs from this build: ${status.differs.join(', ')}`);
+        return 2;
+      }
+      out('The installed kit matches this build.');
+      return 0;
+    }
     default:
       out(USAGE);
       return cmd ? 1 : 0;

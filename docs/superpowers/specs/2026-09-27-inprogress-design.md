@@ -89,10 +89,29 @@ test/                   vitest unit + integration; test/e2e/ Playwright
 docs/superpowers/specs/ this spec
 ```
 
-Scripts: `build` (server/mcp/hooks/cli via tsup → `dist/`, web via Vite → `web/dist/`),
-`dev` (server watch + Vite dev proxying `/api`), `test` (vitest), `test:e2e` (Playwright),
+Scripts: `build` (server/mcp/hooks/cli via tsup and web via Vite into `.build/`, never the live
+`dist/`), `dev` (server watch into `.dev-home/dist` + Vite dev proxying `/api`), `test` (vitest),
+`test:smoke` / `test:e2e` (against a fresh `.build/`), `deploy`, `rollback` (3.3),
 `claude:install`, `claude:uninstall` (the CLI's `claude-install` / `claude-uninstall`
 subcommands). `bin: { "inprogress": "dist/cli/main.js" }`.
+
+### 3.3 Deploying changes while InProgress is in use
+
+The installed hooks, the scribe's MCP server and the server all run from the repo's live `dist/`
+and `web/dist/`, so nothing but `npm run deploy` writes there:
+
+1. `typecheck`, `test`, then `test:smoke` and `test:e2e` against a fresh `.build/` (same layout as
+   the repo: `dist/`, `web/dist/`, a copy of `claude/`). Each build writes `dist/build.json`
+   (`sha`, `dirty`, `builtAt`).
+2. The tested trees replace the live ones by renames (the old ones move to `.deploy/prev/`); a
+   failed move puts everything back.
+3. `inprogress claude-check` compares the installed kit with what install would write now; only a
+   difference re-runs `claude-install` (with its usual backup).
+4. The server restarts on the new build and must answer `/api/health` with the new `build`, or
+   the deploy rolls back. Open UI windows reload themselves when the stream reconnects to a
+   different build; `doctor` fails its server check when the running build is not the deployed one.
+
+`npm run rollback` swaps the live and previous builds (again to roll forward) and restarts.
 
 ### 3.2 Runtime paths and config
 
@@ -419,7 +438,7 @@ prompt-submit hook reports an untracked session that mentions InProgress. Conten
 
 ### 6.5 Install and uninstall
 
-`npm run claude:install` (requires a prior `npm run build`):
+`npm run claude:install` (requires a deployed build: `npm run deploy`):
 1. Back up `~/.claude/settings.json` to `settings.json.inprogress-backup-<timestamp>`.
 2. Render `claude/agents/inprogress-scribe.md` → `~/.claude/agents/`, and
    `claude/skills/inprogress/` → `~/.claude/skills/inprogress/`, substituting `{{REPO}}` with the

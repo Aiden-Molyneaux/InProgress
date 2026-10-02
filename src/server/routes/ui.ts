@@ -58,7 +58,7 @@ export function registerUi(app: FastifyInstance, opts: AppOptions, requireToken:
 
   const webDir = opts.webDir;
   if (!webDir || !existsSync(join(webDir, 'index.html'))) {
-    app.get('/', async (_req, reply) => reply.code(503).type('text/plain; charset=utf-8').send('InProgress UI is not built. Run: npm run build'));
+    app.get('/', async (_req, reply) => reply.code(503).type('text/plain; charset=utf-8').send('InProgress UI is not built. Run: npm run deploy'));
     return;
   }
   const index = readFileSync(join(webDir, 'index.html'), 'utf8');

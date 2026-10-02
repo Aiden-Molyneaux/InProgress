@@ -183,6 +183,24 @@ const checksFor = (repo: string, claude: string) => runChecks({ baseUrl: base, h
 const named = (checks: Check[], name: string) => checks.find((c) => c.name === name);
 
 describe('doctor checks', () => {
+  it('fails the server check when the running build is not the deployed one', async () => {
+    const running = { sha: 'aaa1111', dirty: false, builtAt: '2026-10-02T12:00:00.000Z' };
+    const app = buildApp({ ctx: createCtx(openDb(':memory:')), token: 't', uiToken: 'u', version: VERSION, build: running });
+    await app.listen({ port: 0, host: '127.0.0.1' });
+    try {
+      const url = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
+      const check = async (build: typeof running | null) =>
+        named(await runChecks({ baseUrl: url, home, claudeDir: tempDir('ip-doc-'), repo: fixtureRepo(), skipMcp: true, build }), 'Server');
+      expect(await check(running)).toMatchObject({ ok: true, detail: expect.stringContaining('aaa1111') });
+      expect(await check(null)).toMatchObject({ ok: true });
+      const stale = await check({ ...running, sha: 'bbb2222' });
+      expect(stale).toMatchObject({ ok: false });
+      expect(stale?.detail).toMatch(/aaa1111.*bbb2222.*inprogress stop/s);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('passes after install and reports what is missing before it', async () => {
     const claude = tempDir('ip-doc-');
     const repo = fixtureRepo();
@@ -232,7 +250,7 @@ describe('doctor checks', () => {
     writeFileSync(join(repo, 'dist', 'mcp', 'main.js'), 'process.exit(3);\n');
     const checks = await runChecks({ baseUrl: base, home, claudeDir: claude, repo });
     expect(named(checks, 'Server')).toMatchObject({ ok: true });
-    expect(named(checks, 'MCP server')).toMatchObject({ ok: false, detail: expect.stringContaining('run npm run build') });
+    expect(named(checks, 'MCP server')).toMatchObject({ ok: false, detail: expect.stringContaining('run npm run deploy') });
   });
 
   it("fails Hooks when a hook's node binary is gone", async () => {
@@ -251,7 +269,7 @@ describe('doctor checks', () => {
     expect(named(await checksFor(repo, claude), 'Hooks')).toEqual({
       name: 'Hooks',
       ok: false,
-      detail: 'hook script C:/moved/InProgress/dist/hooks/hook.js no longer exists: run npm run build, or rerun npm run claude:install if the repo moved',
+      detail: 'hook script C:/moved/InProgress/dist/hooks/hook.js no longer exists: run npm run deploy, or rerun npm run claude:install if the repo moved',
     });
   });
 
@@ -278,5 +296,29 @@ describe('doctor checks', () => {
     writeFileSync(settingsFile, `\uFEFF${readFileSync(settingsFile, 'utf8')}`);
     const checks = await checksFor(repo, claude);
     for (const name of ['Hooks', 'Allow rules']) expect(named(checks, name), name).toMatchObject({ ok: true });
+  });
+});
+
+describe('claude-check', () => {
+  it('exits 3 when not installed, 0 when the kit matches, 2 naming what differs', async () => {
+    const saved = process.env.INPROGRESS_CLAUDE_DIR;
+    const claude = tempDir('ip-check-');
+    const repo = fixtureRepo();
+    process.env.INPROGRESS_CLAUDE_DIR = claude;
+    try {
+      const run = async () => {
+        const lines: string[] = [];
+        const code = await runCli(['claude-check'], (l) => lines.push(l), { repo });
+        return { code, text: lines.join('\n') };
+      };
+      expect(await run()).toMatchObject({ code: 3, text: expect.stringContaining('not installed') });
+      install({ repo, claudeDir: claude, stamp: 'c1' });
+      expect(await run()).toMatchObject({ code: 0, text: expect.stringContaining('matches') });
+      writeFileSync(join(claude, 'agents', 'inprogress-scribe.md'), 'edited');
+      expect(await run()).toMatchObject({ code: 2, text: expect.stringContaining('agent') });
+    } finally {
+      if (saved === undefined) delete process.env.INPROGRESS_CLAUDE_DIR;
+      else process.env.INPROGRESS_CLAUDE_DIR = saved;
+    }
   });
 });

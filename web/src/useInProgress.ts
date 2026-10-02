@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { sameBuild, type BuildInfo } from '../../src/core/build';
 import { eventTarget } from '../../src/core/layout';
 import type { EventRow, ProjectSnapshot, ProjectSummary } from '../../src/core/types';
 import { api } from './api';
@@ -41,6 +42,15 @@ export function useInProgress(): InProgressState {
    */
   const [stream, setStream] = useState<{ since?: number } | null>(null);
   const startStream = useCallback((since?: number) => setStream((cur) => cur ?? { since }), []);
+  /** The build this page loaded against (undefined until the first health check answers). */
+  const pageBuild = useRef<BuildInfo | null | undefined>(undefined);
+  /** After `npm run deploy` the stream reconnects to a server running a new build: reload so the UI matches it. */
+  const checkBuild = useCallback(async () => {
+    const health = await api.health().catch(() => null);
+    if (!health) return;
+    if (pageBuild.current === undefined) pageBuild.current = health.build;
+    else if (!sameBuild(pageBuild.current, health.build)) window.location.reload();
+  }, []);
 
   const loadProjects = useCallback(async () => {
     const list = await api.projects().catch(() => null);
@@ -137,6 +147,7 @@ export function useInProgress(): InProgressState {
         if (status === 'open') {
           refreshProjects();
           refreshSnapshot();
+          void checkBuild();
         }
       },
     );
@@ -145,7 +156,7 @@ export function useInProgress(): InProgressState {
       window.clearTimeout(projectTimer);
       window.clearTimeout(snapshotTimer);
     };
-  }, [stream, loadProjects, loadSnapshot]);
+  }, [stream, loadProjects, loadSnapshot, checkBuild]);
 
   return { projects, slug, snapshot, lastEvent, liveEvent, connection, loaded, selectProject: setSlug };
 }

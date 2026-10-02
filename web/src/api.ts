@@ -1,3 +1,4 @@
+import type { BuildInfo } from '../../src/core/build';
 import type { NodeDetail, ProjectSnapshot, ProjectSummary, Resource } from '../../src/core/types';
 
 async function getJson<T>(path: string): Promise<T> {
@@ -12,6 +13,7 @@ async function getJson<T>(path: string): Promise<T> {
 const uiToken = () => document.querySelector<HTMLMetaElement>('meta[name="ip-ui-token"]')?.content ?? '';
 
 export const api = {
+  health: () => getJson<{ build: BuildInfo | null }>('/api/health'),
   projects: () => getJson<ProjectSummary[]>('/api/projects'),
   project: (slug: string) => getJson<ProjectSnapshot>(`/api/projects/${encodeURIComponent(slug)}`),
   node: (id: number) => getJson<NodeDetail>(`/api/nodes/${id}`),

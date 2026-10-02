@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import Fastify, { LogController, type FastifyInstance, type FastifyReply, type FastifyRequest, type FastifyServerOptions } from 'fastify';
 import { ZodError } from 'zod';
+import type { BuildInfo } from '../lib/version';
 import type { Ctx } from './db/tx';
 import { ApiError } from './errors';
 import { registerReadRoutes } from './routes/read';
@@ -14,6 +15,8 @@ export interface AppOptions {
   token: string;
   uiToken: string;
   version: string;
+  /** The running build (dist/build.json); null in dev and tests. */
+  build?: BuildInfo | null;
   webDir?: string;
   logger?: FastifyServerOptions['logger'];
   onShutdown?: () => void;
@@ -72,7 +75,7 @@ export function buildApp(opts: AppOptions): FastifyInstance {
     }
   };
 
-  registerReadRoutes(app, opts.ctx, opts.version);
+  registerReadRoutes(app, opts.ctx, opts.version, opts.build ?? null);
   registerWriteRoutes(app, opts.ctx, requireToken);
   registerSessionRoutes(app, opts.ctx, requireToken);
   registerSse(app, opts.ctx);

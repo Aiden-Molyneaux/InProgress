@@ -4,7 +4,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import Database from 'better-sqlite3';
 import { readToken } from '../lib/home';
-import { VERSION } from '../lib/version';
+import { buildLabel, readBuild, sameBuild, VERSION, type BuildInfo } from '../lib/version';
 import { ALLOW_RULES, HOOK_DEFS, isInProgressHook, settingsShapeError } from './claude-config';
 import { findEdge } from './open';
 
@@ -21,6 +21,8 @@ export interface DoctorOptions {
   claudeDir: string;
   repo: string;
   skipMcp?: boolean;
+  /** The deployed build to compare the running server with; defaults to this CLI's own dist/build.json. */
+  build?: BuildInfo | null;
 }
 
 type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -46,16 +48,19 @@ function readJson(file: string): { value?: Json; error?: string } {
 const invalidSettings = (file: string, error: string): string =>
   `${error}: fix ${file} by hand, or restore its newest settings.json.inprogress-backup-<stamp> copy`;
 
-async function serverCheck(baseUrl: string): Promise<Check> {
+async function serverCheck(baseUrl: string, deployed: BuildInfo | null): Promise<Check> {
   try {
     const res = await fetch(`${baseUrl}/api/health`, { signal: AbortSignal.timeout(1000) });
     // An answer that is not JSON (another program's web page) is not InProgress either.
-    const body = (await res.json().catch(() => ({}))) as { app?: string; version?: string };
+    const body = (await res.json().catch(() => ({}))) as { app?: string; version?: string; build?: BuildInfo | null };
     if (body.app !== 'inprogress') {
       return { name: 'Server', ok: false, detail: `${baseUrl} answers but is not InProgress: another program holds the port; set INPROGRESS_PORT to pick another port` };
     }
     if (body.version !== VERSION) return { name: 'Server', ok: false, detail: `running ${body.version}, built ${VERSION}: run \`inprogress stop\`; the next session starts the new build` };
-    return { name: 'Server', ok: true, detail: `running ${body.version} at ${baseUrl}` };
+    if (!sameBuild(body.build, deployed)) {
+      return { name: 'Server', ok: false, detail: `running build ${buildLabel(body.build)}, deployed ${buildLabel(deployed)}: run \`inprogress stop\`, then \`inprogress start\`` };
+    }
+    return { name: 'Server', ok: true, detail: `running ${body.version} ${buildLabel(body.build ?? deployed)} at ${baseUrl}` };
   } catch {
     return { name: 'Server', ok: false, detail: 'not running: run `inprogress start` and check server.log' };
   }
@@ -96,8 +101,8 @@ function agentCheck(file: string): Check {
 }
 
 async function mcpCheck(entry: string): Promise<Check> {
-  if (!existsSync(entry)) return { name: 'MCP server', ok: false, detail: `${entry} is missing: run npm run build` };
-  const fix = 'run npm run build, then `inprogress doctor` again';
+  if (!existsSync(entry)) return { name: 'MCP server', ok: false, detail: `${entry} is missing: run npm run deploy` };
+  const fix = 'run npm run deploy, then `inprogress doctor` again';
   const client = new Client({ name: 'inprogress-doctor', version: VERSION });
   try {
     await client.connect(new StdioClientTransport({ command: process.execPath, args: [entry], env: { ...process.env } as Record<string, string> }));
@@ -123,12 +128,12 @@ function hooksCheck(file: string, settings: { value?: Json; error?: string }): C
   if (badBinary) return fail(`node binary ${badBinary} no longer exists: rerun npm run claude:install`);
   // A moved repo or a deleted dist/ leaves the hooks pointing at a script that is gone.
   const badScript = ours.map((h) => h.args?.[0]).find((script) => script && !existsSync(script));
-  if (badScript) return fail(`hook script ${badScript} no longer exists: run npm run build, or rerun npm run claude:install if the repo moved`);
+  if (badScript) return fail(`hook script ${badScript} no longer exists: run npm run deploy, or rerun npm run claude:install if the repo moved`);
   return { name: 'Hooks', ok: true, detail: 'all installed' };
 }
 
 export async function runChecks(o: DoctorOptions): Promise<Check[]> {
-  const server = await serverCheck(o.baseUrl);
+  const server = await serverCheck(o.baseUrl, o.build === undefined ? readBuild() : o.build);
   const checks: Check[] = [server];
   const token = readToken(o.home);
   checks.push({ name: 'Token', ok: !!token, detail: token ? 'readable' : `missing at ${join(o.home, 'token')}: start the server once` });

@@ -3,7 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { baseUrl, ensureToken, homeDir, port as configuredPort } from '../lib/home';
-import { VERSION } from '../lib/version';
+import { readBuild, VERSION } from '../lib/version';
 import { buildApp } from './app';
 import { backupDb, truncateIfLarge } from './backup';
 import { openDb } from './db/connection';
@@ -46,6 +46,7 @@ async function main(): Promise<void> {
     token,
     uiToken: randomBytes(16).toString('hex'),
     version: VERSION,
+    build: readBuild(),
     webDir: fileURLToPath(new URL('../../web/dist', import.meta.url)),
     logger: { level: 'info', file: logFile },
     onShutdown: () => void shutdown(),
