@@ -5,5 +5,5 @@ import { fileURLToPath } from 'node:url';
 const home = fileURLToPath(new URL('../../.e2e-home', import.meta.url));
 rmSync(home, { recursive: true, force: true });
 process.env.INPROGRESS_HOME = home;
-process.env.INPROGRESS_PORT = '4399';
+process.env.INPROGRESS_PORT = process.env.INPROGRESS_E2E_PORT || '4399';
 await import('../../.build/dist/server/main.js');
