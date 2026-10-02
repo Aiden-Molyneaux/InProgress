@@ -64,9 +64,26 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-follow { height: 22px; border: 1px solid var(--border); border-radius: 6px; padding: 0 7px; font-size: 12px; color: var(--muted); white-space: nowrap; flex: none; }
 .ip-follow.on { border-color: var(--accent); color: var(--accent); }
 /* Session chips on the left, wrapping; the needs-you pill and Follow at the right end. */
-.ip-sessions { display: flex; align-items: flex-start; gap: 8px; padding: 6px 10px; background: var(--panel); border-bottom: 1px solid var(--border); }
+.ip-sessions { position: relative; display: flex; align-items: flex-start; gap: 8px; padding: 6px 10px; background: var(--panel); border-bottom: 1px solid var(--border); }
 .ip-chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; min-width: 0; }
-.ip-chip-s { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 22px; border-radius: 10px; padding: 0 9px; font-size: 12px; font-weight: 600; border: 1px solid var(--clay); color: var(--clay); }
+.ip-chip-wrap { display: flex; min-width: 0; max-width: 100%; }
+.ip-chip-s { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; height: 22px; border-radius: 10px; padding: 0 9px; font-size: 12px; font-weight: 600; border: 1px solid var(--clay); color: var(--clay); }
+/* A chip's subagents, listed under the row (so the list never runs off a narrow window) while the chip is hovered or
+   focused from the keyboard. */
+.ip-chip-pop { display: none; position: absolute; top: calc(100% + 2px); left: 10px; z-index: 25; max-width: min(400px, calc(100% - 20px)); padding: 6px 10px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); font-size: 12px; }
+.ip-chip-wrap:hover .ip-chip-pop, .ip-chip-s:focus-visible + .ip-chip-pop { display: block; }
+.ip-chip-pop-head { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ip-chip-pop ul { list-style: none; margin: 4px 0 0; padding: 0; }
+.ip-chip-pop li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.7; }
+.ip-agent-dot { color: var(--agent, var(--faint)); }
+.ip-chip-pop li.ended, .ip-dagent.ended { color: var(--muted); }
+.ip-chip-pop li.ended .ip-agent-dot, .ip-dagent.ended .ip-agent-dot { color: var(--faint); }
+/* Up next: one line under the session row, cut short at the window's edge. */
+.ip-upnext { padding: 3px 10px; font-size: 12px; color: var(--muted); background: var(--panel); border-bottom: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ip-upnext-label { font-weight: 600; }
+.ip-upnext-item { color: var(--text); cursor: pointer; border-radius: 3px; }
+.ip-upnext-item:hover { color: var(--accent); }
+.ip-upnext-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .ip-chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ip-chip-s.s-working { background: var(--clay); color: #fff; }
 .ip-chip-s.s-permission { border-color: var(--red); color: var(--red); }
@@ -108,6 +125,28 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-badge { display: inline-flex; align-items: center; gap: 6px; height: 18px; padding: 0 8px; border-radius: 4px; font-size: 11px; font-weight: 600; color: #fff; background: var(--clay); white-space: nowrap; }
 .ip-badge.s-idle { background: transparent; color: var(--clay); border: 1px solid var(--clay); }
 .ip-badge.s-permission { background: transparent; color: var(--red); border: 1px solid var(--red); }
+/* Up next place on a card: ①②③. */
+.ip-queue { flex: none; color: var(--accent); font-size: 13px; font-weight: 600; line-height: 1; }
+/* A subagent's badge, in its own colour; greyed once it has ended. */
+.ip-agent { height: 18px; line-height: 18px; max-width: 360px; padding: 0 8px; border-radius: 4px; font-size: 11px; font-weight: 600; color: #fff; background: var(--agent, var(--faint)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ip-agent.ended { line-height: 16px; background: transparent; color: var(--muted); border: 1px solid var(--faint); }
+/* Working tasks: a compact checklist under their node. */
+.ip-work, .ip-work-done { display: flex; align-items: center; gap: 5px; height: 18px; max-width: 360px; padding: 0 6px; border-radius: 4px; font-size: 11px; white-space: nowrap; background: var(--bg); }
+.ip-work { color: var(--text); }
+.ip-work-mark { flex: none; width: 11px; text-align: center; color: var(--muted); }
+.w-in_progress .ip-work-mark { color: var(--accent); }
+.w-completed .ip-work-mark, .ip-work-done .ip-work-mark { color: var(--green); }
+.ip-work.w-completed .ip-work-subject { color: var(--muted); }
+.ip-work.pulse .ip-work-mark { animation: ip-pulse 1.6s ease-in-out infinite; }
+/* A subagent's task carries its badge colour. */
+.ip-work-agent { flex: none; display: inline-block; width: 3px; height: 11px; border-radius: 2px; vertical-align: -1px; }
+.ip-work-subject { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ip-work-after { flex: none; max-width: 150px; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+.ip-work-done { color: var(--muted); }
+.ip-work-done::after { content: '▸'; font-size: 10px; }
+.ip-work-done[aria-expanded='true']::after { content: '▾'; }
+.ip-work-done:hover { color: var(--text); }
+.ip-work-done:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .ip-handle { opacity: 0; width: 1px; height: 1px; min-width: 0; min-height: 0; border: 0; }
 .ip-details { position: absolute; right: 0; top: 0; bottom: 0; width: 380px; background: var(--panel); border-left: 1px solid var(--border); box-shadow: var(--shadow); padding: 12px 14px; overflow-y: auto; z-index: 10; font-size: 12px; }
 .ip-grab { display: none; width: 36px; height: 4px; border-radius: 2px; background: var(--border); margin: 0 auto 8px; }
@@ -131,6 +170,8 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-kids { list-style: none; margin: 0; padding: 0; }
 .ip-kids li button { width: 100%; text-align: left; padding: 2px 0; display: flex; gap: 6px; align-items: center; }
 .ip-log { list-style: none; margin: 0; padding: 0; color: var(--muted); font-size: 11px; line-height: 1.7; }
+.ip-wts, .ip-dagents { list-style: none; margin: 0; padding: 0; line-height: 1.7; }
+.ip-wt .ip-work-agent { margin-right: 4px; }
 .ip-outcome { margin: 8px 0; }
 .ip-md { font-size: 12.5px; line-height: 1.55; overflow-wrap: anywhere; }
 .ip-md pre { background: var(--panel-2); padding: 8px; border-radius: 6px; overflow: auto; }
@@ -143,7 +184,7 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-viewer-body:focus-visible { outline: 2px solid var(--amber); outline-offset: -2px; }
 .ip-toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 4px 12px; border-radius: 8px; font-size: 12px; z-index: 40; }
 @media (prefers-reduced-motion: reduce) {
-  .ip-pulse, .ip-tab-dot, .ip-node.working .ip-marker.m-active, .ip-node.flash { animation: none; }
+  .ip-pulse, .ip-tab-dot, .ip-node.working .ip-marker.m-active, .ip-node.flash, .ip-work.pulse .ip-work-mark { animation: none; }
   /* The flash holds a static ring instead of fading one out. */
   .ip-node.flash { box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 60%, transparent); }
 }

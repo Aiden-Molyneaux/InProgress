@@ -1,6 +1,9 @@
-import { sessionDisplayTitle, type Session } from '../../../src/core/types';
-
-const SUFFIX: Record<Session['state'], string> = { working: '', idle: ' · idle', permission: ' · needs permission', ended: ' · ended' };
+import type { CSSProperties } from 'react';
+import { agentShown } from '../../../src/core/layout';
+import type { Session } from '../../../src/core/types';
+import { agentKey } from '../agentColors';
+import { agentLine, chipLabel } from '../live';
+import { useNow } from '../useNow';
 
 interface SessionRowProps {
   sessions: Session[];
@@ -10,20 +13,55 @@ interface SessionRowProps {
   onNeedsYou: () => void;
   follow: boolean;
   onFollow: () => void;
+  /** Each subagent's colour, by agentKey. */
+  agentColors: ReadonlyMap<string, string>;
 }
 
-/** The current project's sessions, with the needs-you pill and Follow at the right end. */
-export function SessionRow({ sessions, onPick, needsYou, onNeedsYou, follow, onFollow }: SessionRowProps) {
+/**
+ * The current project's sessions, with the needs-you pill and Follow at the right end. Hovering a chip, or focusing it
+ * from the keyboard, lists its subagents under the row.
+ */
+export function SessionRow({ sessions, onPick, needsYou, onNeedsYou, follow, onFollow, agentColors }: SessionRowProps) {
+  const now = useNow(30_000);
   return (
     <div className="ip-sessions">
       <div className="ip-chips">
         {sessions.map((s) => {
-          const label = `${sessionDisplayTitle(s)}${s.subagents.length > 0 ? ` · ${s.subagents.length} subagent${s.subagents.length > 1 ? 's' : ''}` : ''}${SUFFIX[s.state]}`;
+          const label = chipLabel(s);
+          const where = s.focusNodeId ? `on #${s.focusNodeId}` : 'no focus set yet';
+          const agents = s.subagents.filter((a) => agentShown(a, now));
+          const listId = `ip-subagents-${s.id}`;
           return (
-            <button key={s.id} className={`ip-chip-s s-${s.state}`} onClick={() => onPick(s)} title={`${label} · ${s.focusNodeId ? `on #${s.focusNodeId}` : 'no focus set yet'}`}>
-              {s.state === 'working' && <span className="ip-pulse" />}
-              <span className="ip-chip-label">{label}</span>
-            </button>
+            <span key={s.id} className="ip-chip-wrap">
+              {/* With subagents the list says it all, so a native tooltip would only cover it. */}
+              <button
+                className={`ip-chip-s s-${s.state}`}
+                onClick={() => onPick(s)}
+                title={agents.length ? undefined : `${label} · ${where}`}
+                aria-describedby={agents.length ? listId : undefined}
+              >
+                {s.state === 'working' && <span className="ip-pulse" />}
+                <span className="ip-chip-label">{label}</span>
+              </button>
+              {agents.length > 0 && (
+                <div className="ip-chip-pop" id={listId} role="tooltip">
+                  <div className="ip-chip-pop-head">
+                    {label} · {where}
+                  </div>
+                  <ul>
+                    {agents.map((a) => (
+                      <li
+                        key={a.agentId}
+                        className={a.endedAt ? 'ended' : undefined}
+                        style={{ '--agent': agentColors.get(agentKey(s.id, a.agentId)) } as CSSProperties}
+                      >
+                        <span className="ip-agent-dot">◆</span> {agentLine(a, now)}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </span>
           );
         })}
       </div>

@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { isNeedsYou } from '../../src/core/tree';
 import type { ProjectSnapshot } from '../../src/core/types';
+import { useAgentColors } from './agentColors';
 import { Canvas, type CanvasHandle } from './canvas/Canvas';
 import { ActivityStrip } from './chrome/ActivityStrip';
 import { SessionRow } from './chrome/SessionRow';
 import { archivedProjects, projectTabs, stepTab } from './chrome/tabs';
 import { TopBar } from './chrome/TopBar';
+import { UpNext } from './chrome/UpNext';
 import { Details } from './panels/Details';
 import { ResourceViewer } from './panels/ResourceViewer';
 import { useFoldOverrides } from './useFoldOverrides';
@@ -35,6 +37,8 @@ export function App() {
   /** Whatever had focus when the viewer opened. It gets focus back when the viewer closes. */
   const opener = useRef<HTMLElement | null>(null);
   const needsYou = useMemo(() => (snapshot ? snapshot.nodes.filter(isNeedsYou).length : 0), [snapshot]);
+  // One colour per subagent, shared by its badge, its tasks' markers, the session chip's list and Details.
+  const agentColors = useAgentColors(snapshot);
   // The tabs follow the picked slug, not the loaded snapshot, so a tab lights up on the click and [ ] step on from it.
   const tabs = useMemo(() => projectTabs(projects, state.slug), [projects, state.slug]);
   const archived = useMemo(() => archivedProjects(projects), [projects]);
@@ -103,7 +107,9 @@ export function App() {
           onNeedsYou={() => canvas.current?.nextNeedsYou()}
           follow={follow}
           onFollow={followOn}
+          agentColors={agentColors}
         />
+        {snapshot && <UpNext queue={snapshot.project.queue} nodes={snapshot.nodes} onJump={(id) => canvas.current?.focusNode(id)} />}
         {state.connection === 'reconnecting' && <div className="ip-banner">Reconnecting to InProgress…</div>}
         <main className="ip-main">
           {projects.length === 0 ? (
@@ -121,6 +127,7 @@ export function App() {
               selectedNode={selectedNode}
               onSelectNode={setSelectedNode}
               onOpenResource={openViewer}
+              agentColors={agentColors}
             />
           ) : (
             <div className="ip-empty">Loading project…</div>
@@ -136,6 +143,7 @@ export function App() {
                 canvas.current?.focusNode(id);
               }}
               onOpenResource={openViewer}
+              agentColors={agentColors}
             />
           )}
         </main>

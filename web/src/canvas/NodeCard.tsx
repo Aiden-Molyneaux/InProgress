@@ -1,5 +1,6 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
 import type { ResourceMeta, TreeNode } from '../../../src/core/types';
+import { circled } from '../live';
 
 export interface NodeCardData extends Record<string, unknown> {
   node: TreeNode;
@@ -9,6 +10,8 @@ export interface NodeCardData extends Record<string, unknown> {
   needsYou: boolean;
   hasChildren: boolean;
   working: boolean;
+  /** Its place in the Up next queue (1 is next), or null. */
+  queuePos: number | null;
   resources: ResourceMeta[];
   flash: boolean;
   selected: boolean;
@@ -19,7 +22,7 @@ export interface NodeCardData extends Record<string, unknown> {
 }
 
 export function NodeCard({ data }: NodeProps<Node<NodeCardData, 'ipNode'>>) {
-  const { node, folded, doneCount, progress, needsYou, hasChildren, working, resources, flash, selected } = data;
+  const { node, folded, doneCount, progress, needsYou, hasChildren, working, queuePos, resources, flash, selected } = data;
   const classes = ['ip-node', `st-${node.status}`, needsYou && 'needs-you', working && 'working', flash && 'flash', selected && 'selected', node.parentId === null && 'root']
     .filter(Boolean)
     .join(' ');
@@ -44,6 +47,11 @@ export function NodeCard({ data }: NodeProps<Node<NodeCardData, 'ipNode'>>) {
           {node.title}
           {folded ? ` · ${doneCount} done` : ''}
         </span>
+        {queuePos !== null && (
+          <span className="ip-queue" title={`Up next: ${queuePos}`}>
+            {circled(queuePos)}
+          </span>
+        )}
         {needsYou && <span className="ip-you">YOU</span>}
         {node.status === 'blocked' && <span className="ip-blocked">blocked</span>}
         {progress && <span className="ip-progress">{progress.done}/{progress.total}</span>}
