@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ASSIGNEES, HOOK_EVENTS, NODE_KINDS, NODE_STATUSES, RESOURCE_KINDS, type NodeInput } from '../core/types';
+import { ASSIGNEES, HOOK_EVENTS, NODE_KINDS, NODE_STATUSES, RESOURCE_KINDS, WORK_STATUSES, type NodeInput } from '../core/types';
 
 const title = z.string().trim().min(1, 'title is empty').max(200);
 export const after = z.union([z.number().int().positive(), z.literal('start'), z.literal('end')]).optional();
@@ -61,6 +61,18 @@ export const hookBody = z
     asksStatus: z.boolean().optional(),
     /** A prompt event that is really a background-task notice: the session works, but nothing was typed. */
     notice: z.boolean().optional(),
+    // Live work (pre-tool and post-tool hooks). agent-dispatch: toolUseId, agentType (subagent_type), description,
+    // model. agent-launched: toolUseId, agentId (the launched agent), model (as the launch reported it).
+    // task-created / task-updated: agentId (the subagent whose task list it is; none for the main session), taskKey,
+    // subject, status, addBlocks, addBlockedBy. Never a prompt, and never a task's description.
+    toolUseId: z.string().min(1).max(200).optional(),
+    description: z.string().max(200).optional(),
+    model: z.string().max(100).optional(),
+    taskKey: z.string().min(1).max(100).optional(),
+    subject: z.string().max(300).optional(),
+    status: z.enum([...WORK_STATUSES, 'deleted']).optional(),
+    addBlocks: z.array(z.string().min(1).max(100)).max(100).optional(),
+    addBlockedBy: z.array(z.string().min(1).max(100)).max(100).optional(),
   })
   .strict();
 export const enrollBody = z.object({ project: z.union([z.string().min(1), z.number().int().positive()]), title: z.string().max(300).optional() }).strict();

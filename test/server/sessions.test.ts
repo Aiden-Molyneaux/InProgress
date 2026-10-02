@@ -138,7 +138,8 @@ describe('handleHookEvent', () => {
     handleHookEvent(ctx, 's1', { event: 'subagent-start', agentId: 'a3', agentType: '' });
     expect(findSession(ctx, 's1')?.subagents.map((s) => s.agentType)).toEqual(['Explore']);
     handleHookEvent(ctx, 's1', { event: 'subagent-stop', agentId: 'a1', agentType: 'Explore' });
-    expect(findSession(ctx, 's1')?.subagents).toEqual([]);
+    // Stopped, not forgotten: it shows as ended for a few minutes.
+    expect(findSession(ctx, 's1')?.subagents).toEqual([expect.objectContaining({ agentId: 'a1', endedAt: expect.any(String) })]);
     handleHookEvent(ctx, 's1', { event: 'subagent-start', agentId: 'a4', agentType: 'general-purpose' });
     handleHookEvent(ctx, 's1', { event: 'end' });
     expect(findSession(ctx, 's1')).toMatchObject({ state: 'ended', subagents: [] });

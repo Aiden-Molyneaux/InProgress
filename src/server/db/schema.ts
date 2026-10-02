@@ -95,4 +95,45 @@ export const MIGRATIONS: string[] = [
   );
   CREATE INDEX events_project ON events (project_id, id);
   `,
+  // 2: live work. Claude's working tasks (mirrored from Claude Code's task tools, or briefed through set_tasks), what
+  // each subagent is doing and where, and a per-project queue of the steps Claude plans to take next.
+  `
+  CREATE TABLE work_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    node_id INTEGER NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL DEFAULT '',
+    task_key TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','in_progress','completed')),
+    blocks TEXT NOT NULL DEFAULT '[]',
+    position INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (session_id, agent_id, task_key)
+  );
+  CREATE INDEX work_items_node ON work_items (node_id, position);
+  CREATE INDEX work_items_project ON work_items (project_id);
+  ALTER TABLE session_subagents ADD COLUMN description TEXT;
+  ALTER TABLE session_subagents ADD COLUMN model TEXT;
+  ALTER TABLE session_subagents ADD COLUMN node_id INTEGER REFERENCES nodes(id) ON DELETE SET NULL;
+  ALTER TABLE session_subagents ADD COLUMN tool_use_id TEXT;
+  ALTER TABLE session_subagents ADD COLUMN ended_at TEXT;
+  CREATE TABLE subagent_dispatches (
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    tool_use_id TEXT NOT NULL,
+    agent_type TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    model TEXT,
+    node_id INTEGER REFERENCES nodes(id) ON DELETE SET NULL,
+    -- NULL until a subagent takes this dispatch: at its SubagentStart (first in, first out), or earlier when the
+    -- launch response names the agent (a background agent's launch can arrive before its start).
+    agent_id TEXT,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (session_id, tool_use_id)
+  );
+  CREATE INDEX subagent_dispatches_fifo ON subagent_dispatches (session_id, agent_type, created_at);
+  ALTER TABLE projects ADD COLUMN queue TEXT NOT NULL DEFAULT '[]';
+  `,
 ];

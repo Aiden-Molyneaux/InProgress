@@ -1,11 +1,12 @@
-import { SCRIBE_AGENT, type HookEvent, type Session } from '../core/types';
+import { SCRIBE_AGENT, type HookEvent, type Session, type WorkStatus } from '../core/types';
 import { write, type Ctx } from './db/tx';
 import { badRequest } from './errors';
 import { renderBriefing, renderStatusAnswer, renderStatusLine, untrackedHint } from './briefing';
-import { requireNode } from './repo/nodes';
+import { findNode, requireNode } from './repo/nodes';
 import { getProjectById, resolveBinding, resolveProject } from './repo/projects';
-import { addSubagent, clearSubagents, findSession, removeSubagent, saveSession } from './repo/sessions';
+import { findSession, saveSession } from './repo/sessions';
 import { getProjectSnapshot } from './repo/snapshot';
+import { clearSubagents, launchSubagent, pruneSubagents, recordDispatch, startSubagent, stopSubagent } from './repo/subagents';
 
 export interface HookEventInput {
   event: HookEvent;
@@ -19,6 +20,14 @@ export interface HookEventInput {
   mentionsInProgress?: boolean;
   asksStatus?: boolean;
   notice?: boolean;
+  toolUseId?: string;
+  description?: string;
+  model?: string;
+  taskKey?: string;
+  subject?: string;
+  status?: WorkStatus | 'deleted';
+  addBlocks?: string[];
+  addBlockedBy?: string[];
 }
 
 export interface HookEventResult {
@@ -35,6 +44,16 @@ function insertSession(ctx: Ctx, id: string, projectId: number, state: Session['
   const now = ctx.now();
   ctx.db.prepare('INSERT INTO sessions (id, project_id, state, started_at, last_seen_at) VALUES (?, ?, ?, ?, ?)').run(id, projectId, state, now, now);
 }
+
+/** The node a leading `#id` names (`#57 Write the guide`), when that node is in the project. */
+export function leadingNode(ctx: Ctx, text: string | undefined, projectId: number | null): number | undefined {
+  const m = /^\s*#(\d+)\b/.exec(text ?? '');
+  if (!m || projectId === null) return undefined;
+  const node = findNode(ctx, Number(m[1]));
+  return node?.projectId === projectId ? node.id : undefined;
+}
+
+const clean = (text: string | undefined): string | null => text?.trim() || null;
 
 export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInput): HookEventResult {
   let created = false;
@@ -73,12 +92,27 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
         next.state = 'permission';
         break;
       case 'subagent-start':
-        if (input.agentId && input.agentType && input.agentType !== SCRIBE_AGENT) addSubagent(ctx, sessionId, input.agentId, input.agentType, now);
+        if (input.agentId && input.agentType && input.agentType !== SCRIBE_AGENT) {
+          pruneSubagents(ctx);
+          startSubagent(ctx, sessionId, input.agentId, input.agentType, now);
+        }
         if (next.state === 'permission') next.state = 'working';
         break;
       case 'subagent-stop':
-        if (input.agentId) removeSubagent(ctx, sessionId, input.agentId);
+        if (input.agentId) stopSubagent(ctx, sessionId, input.agentId, now);
         if (next.state === 'permission') next.state = 'working';
+        break;
+      case 'agent-dispatch': {
+        // Without a subagent_type the Agent tool runs a general-purpose agent, and that is the type SubagentStart reports.
+        const agentType = clean(input.agentType) ?? 'general-purpose';
+        if (input.toolUseId && agentType !== SCRIBE_AGENT) {
+          const nodeId = leadingNode(ctx, input.description, before.projectId) ?? before.focusNodeId;
+          recordDispatch(ctx, sessionId, { toolUseId: input.toolUseId, agentType, description: input.description?.trim() ?? '', model: clean(input.model), nodeId });
+        }
+        break;
+      }
+      case 'agent-launched':
+        if (input.toolUseId && input.agentId) launchSubagent(ctx, sessionId, input.toolUseId, input.agentId, clean(input.model));
         break;
       case 'end':
         next.state = 'ended';
@@ -91,7 +125,7 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
     saveSession(ctx, next);
     const after = findSession(ctx, sessionId)!;
     const changed: string[] = VISIBLE.filter((k) => before![k] !== after[k]);
-    if (before.subagents.length !== after.subagents.length) changed.push('subagents');
+    if (JSON.stringify(before.subagents) !== JSON.stringify(after.subagents)) changed.push('subagents');
     if (created || changed.length) {
       record({ projectId: after.projectId, type: 'session.updated', entity: 'session', entityId: sessionId, data: { changed: created ? ['created', ...changed] : changed, state: after.state } });
     }
