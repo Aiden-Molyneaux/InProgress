@@ -1,0 +1,979 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>InProgress Guide</title>
+<meta name="description" content="How InProgress keeps a live project tree beside Claude Code, how to work with it, and what was built beyond the first idea.">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column (66ch) with a right-hand rail for the "From your spec" asides on wide screens;
+   the rail folds under the text below 960px. The accent is InProgress's own clay; the status colours
+   (green, blue, amber, red, purple) appear only where the guide reproduces the window's own markers. */
+:root {
+  color-scheme: light;
+  --bg: #f3f3f1;
+  --panel: #ffffff;
+  --panel-2: #e9e9e5;
+  --border: #d4d3ce;
+  --fg: #1e1d1b;
+  --muted: #65645f;
+  --accent: #a84d2a;
+  --accent-soft: rgba(217, 119, 87, 0.14);
+  --clay: #d97757;
+  --green: #2fa84f;
+  --blue: #0b6fd6;
+  --amber: #e8900a;
+  --amber-ink: #8f5200;
+  --amber-soft: rgba(232, 144, 10, 0.16);
+  --red: #d93025;
+  --purple: #8e44c7;
+  --purple-soft: rgba(142, 68, 199, 0.12);
+  --code-bg: #ebeae6;
+  --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #1b1a19; --panel: #252422; --panel-2: #2f2e2b; --border: #413f3a; --fg: #ebe9e4; --muted: #a3a19a;
+    --accent: #e6926f; --accent-soft: rgba(217, 119, 87, 0.2); --clay: #d97757;
+    --green: #3fc45c; --blue: #5aa5ff; --amber: #ffb340; --amber-ink: #ffc46b; --amber-soft: rgba(255, 179, 64, 0.18);
+    --red: #ff6b61; --purple: #c38af0; --purple-soft: rgba(195, 138, 240, 0.16); --code-bg: #2a2927;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #1b1a19; --panel: #252422; --panel-2: #2f2e2b; --border: #413f3a; --fg: #ebe9e4; --muted: #a3a19a;
+  --accent: #e6926f; --accent-soft: rgba(217, 119, 87, 0.2); --clay: #d97757;
+  --green: #3fc45c; --blue: #5aa5ff; --amber: #ffb340; --amber-ink: #ffc46b; --amber-soft: rgba(255, 179, 64, 0.18);
+  --red: #ff6b61; --purple: #c38af0; --purple-soft: rgba(195, 138, 240, 0.16); --code-bg: #2a2927;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.55 var(--body); }
+.page { max-width: 1120px; margin: 0 auto; padding-inline: 20px; padding-block: 28px 72px; }
+@media (max-width: 560px) { .page { padding-inline: 16px; } body { font-size: 15.5px; } }
+a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+h1, h2, h3, h4 { text-wrap: balance; color: var(--fg); }
+h1 { font: 700 clamp(36px, 6vw, 52px)/1.02 var(--display); letter-spacing: -0.015em; margin: 8px 0 10px; }
+h2 { font: 700 clamp(23px, 3.2vw, 29px)/1.15 var(--display); margin: 60px 0 10px; padding-top: 22px; border-top: 1px solid var(--border); }
+h3 { font: 600 19.5px/1.25 var(--display); margin: 34px 0 8px; }
+h4 { font: 600 16.5px/1.3 var(--body); margin: 22px 0 6px; }
+p, li, dd { max-width: 66ch; }
+p { margin: 0 0 12px; }
+ul, ol { padding-left: 22px; margin: 0 0 12px; }
+li { margin: 0 0 5px; }
+.eyebrow { font: 600 12px/1.5 var(--body); letter-spacing: 0.09em; text-transform: uppercase; color: var(--accent); }
+.lede { font-size: 19px; line-height: 1.45; max-width: 60ch; margin: 0 0 14px; }
+.meta { color: var(--muted); font-size: 14.5px; max-width: 70ch; }
+.toc { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 22px 0 0; padding: 14px 16px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; font-size: 14.5px; }
+.toc a { white-space: nowrap; }
+code { font-family: var(--mono); font-size: 0.86em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+pre { font-family: var(--mono); font-size: 13px; line-height: 1.5; background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; overflow-x: auto; max-width: 100%; margin: 10px 0 14px; }
+pre code { background: none; padding: 0; font-size: inherit; overflow-wrap: normal; white-space: pre; }
+kbd { font-family: var(--mono); font-size: 12.5px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 5px; padding: 0 6px; background: var(--panel); white-space: nowrap; }
+.scroll { overflow-x: auto; max-width: 100%; margin: 12px 0 16px; }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; min-width: 460px; }
+th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+th { font: 600 12px/1.5 var(--body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+td { font-variant-numeric: tabular-nums; }
+.wf { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px 32px; margin-top: 10px; }
+.wf > .main { min-width: 0; }
+.wf > .rail { min-width: 0; }
+@media (min-width: 960px) {
+  .wf { grid-template-columns: minmax(0, 1fr) 290px; }
+  .wf > .rail { align-self: stretch; }
+  .rail .spec { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 16px); }
+}
+.spec { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 12px 14px 10px 16px; border-radius: 0 8px 8px 0; font-size: 14.5px; line-height: 1.5; margin: 0 0 14px; }
+.spec .eyebrow { display: block; margin-bottom: 6px; font-size: 11px; }
+.spec blockquote { margin: 0 0 8px; font-style: italic; }
+.spec p { margin: 0 0 6px; max-width: none; }
+.spec .where { font-family: var(--mono); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.trio { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 8px 16px; margin: 14px 0 18px; padding: 14px 18px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; }
+.trio dt { font: 600 11px/1.7 var(--body); letter-spacing: 0.09em; text-transform: uppercase; color: var(--accent); padding-top: 3px; }
+.trio dd { margin: 0; min-width: 0; max-width: none; }
+.trio dd p { margin: 0 0 6px; max-width: none; }
+.trio dd p:last-child { margin-bottom: 0; }
+@media (max-width: 440px) { .trio { grid-template-columns: minmax(0, 1fr); gap: 2px 0; } .trio dd { margin-bottom: 8px; } }
+.mock { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; padding: 14px; background: var(--bg); border: 1px dashed var(--border); border-radius: 10px; margin: 10px 0 14px; }
+.mock .cap { width: 100%; font-size: 13px; color: var(--muted); margin-top: 2px; }
+.ip-node { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; font: 12px/1 var(--body); white-space: nowrap; color: var(--fg); }
+.ip-node.root { font-weight: 700; }
+.ip-node.active { border: 2px solid var(--blue); }
+.ip-node.needs { border: 2px solid var(--amber); }
+.ip-node.todo { opacity: 0.75; }
+.ip-node.dropped .t { text-decoration: line-through; color: var(--muted); }
+.m { width: 8px; height: 8px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 800; color: #fff; flex: none; }
+.m.done { background: var(--green); }
+.m.active { background: var(--blue); }
+.m.todo { border: 1.5px solid var(--muted); }
+.m.blocked { background: var(--red); }
+.m.dropped { background: var(--muted); }
+.m.you { background: var(--amber); }
+.m.q { width: 12px; height: 12px; }
+.you { color: var(--amber-ink); background: var(--amber-soft); border-radius: 3px; font-size: 9px; font-weight: 700; padding: 0 4px; }
+.blk { color: var(--red); font-size: 10px; font-weight: 600; }
+.prog { color: var(--muted); font-size: 11px; }
+.chev { color: var(--muted); font-size: 11px; }
+.chip { font-size: 11px; color: var(--purple); background: var(--purple-soft); border: 1px solid var(--purple); border-radius: 4px; padding: 0 6px; white-space: nowrap; }
+.more { height: 24px; display: inline-flex; align-items: center; padding: 0 8px; border: 1px dashed var(--border); border-radius: 6px; font-size: 12px; color: var(--muted); background: var(--panel); }
+.badge { display: inline-flex; align-items: center; gap: 6px; height: 18px; padding: 0 8px; border-radius: 4px; font-size: 11px; font-weight: 600; color: #fff; background: var(--clay); white-space: nowrap; }
+.badge.idle { background: transparent; color: var(--clay); border: 1px solid var(--clay); }
+.badge.perm { background: transparent; color: var(--red); border: 1px solid var(--red); }
+.schip { display: inline-flex; align-items: center; gap: 6px; border-radius: 10px; padding: 1px 9px; font-size: 12px; font-weight: 600; border: 1px solid var(--clay); color: var(--clay); background: transparent; white-space: nowrap; }
+.schip.working { background: var(--clay); color: #fff; }
+.schip.perm { border-color: var(--red); color: var(--red); }
+.pulse { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+.pill { border: 1px solid var(--amber); color: var(--amber-ink); background: var(--amber-soft); border-radius: 10px; padding: 0 8px; font-weight: 600; font-size: 12px; white-space: nowrap; }
+.follow { border: 1px solid var(--blue); color: var(--blue); border-radius: 6px; padding: 0 7px; font-size: 12px; white-space: nowrap; }
+.crumb { font-size: 11px; color: var(--muted); background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 0 8px; white-space: nowrap; }
+.strip { font-size: 12px; color: var(--muted); background: var(--panel); border: 1px solid var(--border); padding: 4px 10px; border-radius: 6px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.extras { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 14px; margin-top: 18px; }
+.extra { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; font-size: 15px; min-width: 0; }
+.extra h3 { margin: 0 0 6px; font-size: 17.5px; }
+.extra p { margin: 0 0 8px; max-width: none; }
+.extra .where { font-family: var(--mono); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.st { display: inline-block; font: 600 11px/1.7 var(--body); letter-spacing: 0.06em; text-transform: uppercase; padding: 0 6px; border-radius: 4px; border: 1px solid var(--border); color: var(--muted); vertical-align: middle; margin-left: 4px; }
+.st.active { color: var(--blue); border-color: var(--blue); }
+.st.done { color: var(--green); border-color: var(--green); }
+.st.todo { color: var(--muted); }
+figure { margin: 20px 0 8px; }
+figure svg { width: 100%; max-width: 620px; height: auto; display: block; margin: 0 auto; font-family: var(--body); }
+.dg-box { fill: var(--panel); stroke: currentColor; stroke-width: 1; }
+.dg-wrap { fill: none; stroke: currentColor; stroke-width: 1; stroke-dasharray: 4 3; opacity: 0.7; }
+.dg-hi { stroke: var(--accent); stroke-width: 2; }
+.dg-strong { stroke-width: 1.6; }
+.dg-t { font-size: 11px; fill: currentColor; }
+.dg-h { font-size: 12.5px; font-weight: 700; fill: currentColor; }
+.dg-l { font-size: 10px; fill: currentColor; opacity: 0.85; }
+.dg-a { fill: none; stroke: currentColor; stroke-width: 1.2; }
+figcaption { font-size: 14px; color: var(--muted); max-width: 66ch; margin: 10px auto 0; }
+.note { border: 1px solid var(--border); background: var(--panel); border-radius: 8px; padding: 10px 14px; font-size: 14.5px; margin: 10px 0 14px; max-width: 70ch; }
+.note p { max-width: none; margin: 0 0 6px; }
+.note p:last-child { margin: 0; }
+.muted { color: var(--muted); }
+hr { border: 0; border-top: 1px solid var(--border); margin: 28px 0; }
+footer { margin-top: 56px; padding-top: 18px; border-top: 1px solid var(--border); font-size: 14px; color: var(--muted); }
+footer p { max-width: 80ch; }
+</style>
+</head>
+<body>
+<div class="page">
+
+<header>
+  <span class="eyebrow">Guide · live build 7927611 · 2 October 2026</span>
+  <h1>InProgress</h1>
+  <p class="lede">A local window beside Claude Code that shows each project as a live tree: what it is for, the plan as steps, which steps are done, active or waiting on you, where each resource was produced, and which Claude session is working where. Claude keeps the tree current. You read it.</p>
+  <p class="meta">Written for Aiden, who built InProgress and uses it every day, and for anyone he hands it to. Every claim here was checked against the code in <code>C:\personal\InProgress</code> at build 7927611. Where the September design spec and the code disagree, the code wins and this guide follows the code. Work that is still being built is marked as coming.</p>
+  <nav class="toc" aria-label="Contents">
+    <a href="#ideal">The ideal</a>
+    <a href="#parts">How it fits together</a>
+    <a href="#workflows">Workflows</a>
+    <a href="#install">Install</a>
+    <a href="#track">Track a project</a>
+    <a href="#adopt">Adopt mid-flight</a>
+    <a href="#session">A working session</a>
+    <a href="#status">Where are we?</a>
+    <a href="#window">Reading the window</a>
+    <a href="#projects">Several projects</a>
+    <a href="#wrong">When something looks wrong</a>
+    <a href="#iterate">Iterating on InProgress</a>
+    <a href="#beyond">Beyond the original idea</a>
+    <a href="#inflight">In flight</a>
+    <a href="#reference">Reference</a>
+  </nav>
+</header>
+
+<h2 id="ideal">The ideal</h2>
+<div class="wf">
+<div class="main">
+<p>Long projects with Claude lose their thread in the chat. A plan gets stated once and is then buried under a sandbox detour. The test suite Claude wrote five messages ago is still up there somewhere. Three sessions and their subagents are each working on something, and the only way to find out what is to read all of them. On a project that has run for three months, the state of play is split between the chat, the disk and your head, and the three do not agree.</p>
+<p>InProgress keeps one tree per project in a window beside Claude. The root says what the project is for. Under it sit phases and steps, each with a status (todo, active, done, blocked or dropped) and an owner (Claude or you). A resource such as a test suite, runbook or diagram is attached to the step where it was produced, so you find it by walking the tree instead of the scrollback. Each live Claude session appears as a chip, and as a badge on the step it is working on once the scribe has set its focus, with its state and the number of subagents it is running.</p>
+<p>The tree is a filtered view, not a transcript. It records that the signing tests need running and, later, that they ran green. It does not record the VMware wedge you fixed on the way; that goes into the step's log as a one-line note. Steps are plan-level and have outcomes. Single actions (edit a file, run grep) never become nodes.</p>
+<p>Claude owns every edit and makes them through a background scribe, so the main session spends about one line of chat per update. The window has no edit controls: you read, navigate, copy a reference like <code>#58</code>, and open files.</p>
+<p>Concretely, in the kit's own example: step <code>#58 Run signing tests</code> is assigned to you and carries an amber <span class="you">YOU</span> tag until you report it done. The test suite Claude wrote is resource <code>r12</code> on that step. The network wedge is a log line on <code>#55</code>. When you ask "where are we?", the answer names those ids, and the window is already centred on them.</p>
+</div>
+<div class="rail">
+<aside class="spec">
+  <span class="eyebrow">From your spec</span>
+  <blockquote>"a branch of the tree that cares about whether I have run those tests, but doesn't care about whether I got lost in sandbox work"</blockquote>
+  <p>Built as a step assigned to you (<code>assignee: me</code>) that stays visible and counted until it is done, plus a log entry for the detour on that step, written with <code>add_log</code>. The skill rule reads "Detours go in the log of the step they interrupted".</p>
+  <p class="where">src/core/tree.ts isNeedsYou · src/mcp/server.ts add_log · ~/.claude/skills/inprogress/SKILL.md</p>
+</aside>
+<aside class="spec">
+  <span class="eyebrow">From your spec</span>
+  <blockquote>"which of those have been actioned, which of those need action, and which of those are currently being actioned"</blockquote>
+  <p>Five statuses and an assignee per node. Done is a green dot, active a blue one, a step waiting on you gets the amber YOU tag and is never folded away.</p>
+  <p class="where">src/core/types.ts NODE_STATUSES · web/src/canvas/NodeCard.tsx</p>
+</aside>
+</div>
+</div>
+
+<h2 id="parts">How it fits together</h2>
+<p>One local server owns the database. Everything else either reports to it or reads from it. The main Claude session never touches the tree directly: it briefs a background subagent, the scribe, whose tools come from an MCP server that only the scribe can see.</p>
+<figure>
+<svg viewBox="0 0 560 700" role="img" aria-label="Data flow: hooks and the scribe's MCP server write to the InProgress server over HTTP with a bearer token; the server pushes events to the web UI over SSE; the CLI reads without a token.">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="16" y="14" width="528" height="236" rx="8" class="dg-wrap"/>
+  <text x="28" y="34" class="dg-h">Claude Code session <tspan class="dg-t" font-weight="400">(desktop Code tab or CLI)</tspan></text>
+
+  <rect x="32" y="50" width="232" height="80" rx="6" class="dg-box"/>
+  <text x="40" y="70" class="dg-h">Main session</text>
+  <text x="40" y="88" class="dg-t">reads the briefing</text>
+  <text x="40" y="102" class="dg-t">briefs the scribe once per turn</text>
+  <text x="40" y="116" class="dg-t">one chat line per update</text>
+
+  <rect x="296" y="50" width="232" height="80" rx="6" class="dg-box dg-hi"/>
+  <text x="304" y="70" class="dg-h">inprogress-scribe</text>
+  <text x="304" y="88" class="dg-t">Sonnet, runs in the background</text>
+  <text x="304" y="102" class="dg-t">the only thing that edits the tree</text>
+  <text x="304" y="116" class="dg-t">tools: mcp__inprogress only</text>
+
+  <line x1="264" y1="98" x2="292" y2="98" class="dg-a" marker-end="url(#arr)"/>
+  <text x="278" y="92" class="dg-l" text-anchor="middle">brief</text>
+
+  <rect x="32" y="156" width="232" height="80" rx="6" class="dg-box"/>
+  <text x="40" y="176" class="dg-h">Hooks</text>
+  <text x="40" y="194" class="dg-t">7 events, exec form, node scripts</text>
+  <text x="40" y="208" class="dg-t">report presence, start the server</text>
+  <text x="40" y="222" class="dg-t">inject the briefing or a status line</text>
+
+  <rect x="296" y="156" width="232" height="80" rx="6" class="dg-box"/>
+  <text x="304" y="176" class="dg-h">MCP server (stdio)</text>
+  <text x="304" y="194" class="dg-t">defined inline in the agent file</text>
+  <text x="304" y="208" class="dg-t">snapshots files for add_resource</text>
+  <text x="304" y="222" class="dg-t">restarts the server when it is down</text>
+
+  <line x1="412" y1="130" x2="412" y2="152" class="dg-a" marker-end="url(#arr)"/>
+  <text x="418" y="145" class="dg-l">tool calls</text>
+  <line x1="148" y1="156" x2="148" y2="134" class="dg-a" marker-end="url(#arr)"/>
+  <text x="154" y="149" class="dg-l">briefing, status line</text>
+
+  <rect x="96" y="308" width="368" height="104" rx="8" class="dg-box dg-strong"/>
+  <text x="108" y="330" class="dg-h">InProgress server</text>
+  <text x="108" y="348" class="dg-t">Fastify on 127.0.0.1:4317, the single writer of SQLite</text>
+  <text x="108" y="362" class="dg-t">validates every write and records an event for it</text>
+  <text x="108" y="376" class="dg-t">serves the UI, backs up the database on start</text>
+  <text x="108" y="390" class="dg-t">data dir ~/.inprogress: db, token, logs, backups</text>
+
+  <line x1="148" y1="236" x2="148" y2="304" class="dg-a" marker-end="url(#arr)"/>
+  <text x="154" y="262" class="dg-l">POST /api/sessions/:id/hook</text>
+  <text x="154" y="276" class="dg-l">bearer token, presence only</text>
+  <line x1="412" y1="236" x2="412" y2="304" class="dg-a" marker-end="url(#arr)"/>
+  <text x="418" y="262" class="dg-l">HTTP, bearer token</text>
+  <text x="418" y="276" class="dg-l">every tree write</text>
+
+  <rect x="96" y="486" width="368" height="84" rx="8" class="dg-box"/>
+  <text x="108" y="508" class="dg-h">Web UI, Edge app window 520 × 1000</text>
+  <text x="108" y="526" class="dg-t">read-only outline on React Flow</text>
+  <text x="108" y="540" class="dg-t">one action, Open file, guarded by a per-process UI token</text>
+  <text x="108" y="554" class="dg-t">reloads itself when a deploy changes the build</text>
+
+  <line x1="200" y1="412" x2="200" y2="482" class="dg-a" marker-end="url(#arr)"/>
+  <text x="206" y="440" class="dg-l">SSE event stream and GET snapshots</text>
+  <text x="206" y="454" class="dg-l">reads need no token</text>
+  <line x1="416" y1="486" x2="416" y2="416" class="dg-a" marker-end="url(#arr)"/>
+  <text x="422" y="440" class="dg-l">POST /api/ui/open</text>
+
+  <rect x="16" y="606" width="252" height="80" rx="6" class="dg-box"/>
+  <text x="28" y="626" class="dg-h">inprogress CLI</text>
+  <text x="28" y="644" class="dg-t">status and outline: reads, no token</text>
+  <text x="28" y="658" class="dg-t">start, stop, doctor, claude-install</text>
+  <text x="28" y="672" class="dg-t">open launches the window</text>
+  <polyline points="60,606 60,360 92,360" class="dg-a" marker-end="url(#arr)"/>
+  <text x="66" y="596" class="dg-l">GET, no token</text>
+</svg>
+<figcaption>Two writers reach the server, both with the bearer token from the data dir: the hooks, which only report session presence, and the scribe's MCP server, which carries every change to the tree. The UI and the CLI read without a token. The scribe box is the one place where plan, status, resource and log edits happen.</figcaption>
+</figure>
+
+<h3>What each part is allowed to do</h3>
+<div class="scroll">
+<table>
+<thead><tr><th>Part</th><th>Does</th><th>Never does</th></tr></thead>
+<tbody>
+<tr><td>Hooks<br><span class="muted"><code>dist/hooks/hook.js</code></span></td><td>Run on seven Claude Code events. Start the server if it is down. Post the session's cwd, branch and title. Print the briefing (session start) or a status line (prompt) into Claude's context. Log failures to <code>hooks.log</code>.</td><td>Write to the tree. Block Claude: every hook exits 0, prints nothing to stderr, and gives up after 3 s (session start) or 0.5 s (the rest).</td></tr>
+<tr><td>Main session</td><td>Follows the briefing and the <code>inprogress</code> skill. Writes chat-only resources to the resources folder. Briefs the scribe at most once per turn and writes one chat line.</td><td>Call the HTTP API, open the database, or use InProgress tools. It has none.</td></tr>
+<tr><td>Scribe<br><span class="muted"><code>inprogress-scribe</code></span></td><td>Resolves every reference in the brief to a real <code>#id</code> with <code>get_outline</code> or <code>search</code>, then applies the changes in as few calls as it can. Returns one line.</td><td>Guess an id or invent progress. Its only tools are the <code>inprogress</code> MCP tools; it cannot read or edit files.</td></tr>
+<tr><td>MCP server<br><span class="muted"><code>dist/mcp/main.js</code></span></td><td>Turns tool calls into HTTP calls with the token. Reads a file into a resource snapshot (text up to 200 KB). Starts the server at launch and retries once if a call finds nothing listening.</td><td>Appear in the main session: it is declared inline in the agent file, so only the scribe loads it.</td></tr>
+<tr><td>Server<br><span class="muted"><code>dist/server/main.js</code></span></td><td>Owns <code>inprogress.db</code>. Validates every request with zod. Writes each change and its event in one transaction, then broadcasts the event over SSE. Serves the UI. Backs up the database on each start.</td><td>Listen beyond 127.0.0.1, accept a foreign <code>Host</code> header, or accept a write without the token.</td></tr>
+<tr><td>Web UI</td><td>Loads a project snapshot, listens to the event stream, re-fetches on each event, follows Claude with the camera.</td><td>Edit anything. Its one action, Open file, opens a stored resource path in VS Code or reveals it in Explorer, and needs a token minted per server process.</td></tr>
+<tr><td>CLI<br><span class="muted"><code>inprogress</code></span></td><td><code>status</code> and <code>outline</code> read without a token. <code>start</code>, <code>stop</code>, <code>open</code>, <code>doctor</code> and the install commands manage the setup.</td><td>Edit the tree. There is no CLI write path on purpose.</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="workflows">Workflows</h2>
+<p>Every workflow below has the same three parties: you, typing in the Claude chat; Claude, which here means the main session plus its hooks, skill and scribe; and what you then see in the window and in chat. The exact wording of Claude's replies is Claude's own. The mechanisms underneath are fixed and are what this section describes.</p>
+
+<h3 id="install">Install once, check with doctor</h3>
+<div class="wf">
+<div class="main">
+<dl class="trio">
+<dt>You</dt>
+<dd>
+<p>In <code>C:\personal\InProgress</code>:</p>
+<pre><code>npm install
+npm run deploy          # builds, tests and makes the build live
+npm run claude:install  # first time only; later deploys re-run it when the kit changes
+node dist\cli\main.js doctor
+node dist\cli\main.js open</code></pre>
+<p>The <code>inprogress</code> bin name resolves to <code>dist\cli\main.js</code>; the installed skill always calls it by absolute path, so nothing depends on PATH.</p>
+</dd>
+<dt>Claude</dt>
+<dd>
+<p>Nothing yet. <code>claude:install</code> edits <code>~\.claude</code>: it backs up <code>settings.json</code> to <code>settings.json.inprogress-backup-&lt;stamp&gt;</code> (the newest five are kept), merges seven exec-form hook entries that run the absolute <code>node.exe</code> path recorded at install, adds two allow rules (<code>mcp__inprogress</code> and <code>Edit(~/.inprogress/resources/**)</code>), and renders the scribe agent and the skill with the repo path, node path and resources folder filled in. It stops a running server so the next hook starts the new build. If <code>~\.claude\agents</code> did not exist before, it tells you to restart open sessions, because a new agents folder is only seen by sessions started afterwards.</p>
+</dd>
+<dt>You see</dt>
+<dd>
+<p><code>doctor</code> starts the server if it is down (and says so), then prints one line per check: Server (health, version and build match the deployed <code>dist\build.json</code>), Token, Database (<code>PRAGMA quick_check</code>), Hooks (present, node binary and script exist), Scribe agent (frontmatter), Skill, Allow rules, MCP server (starts and answers <code>list_projects</code>), and Edge. Edge is a warning only; everything else must pass. <code>open</code> launches a chromeless Edge window, 520 by 1000 px, at <code>http://127.0.0.1:4317</code>, or the default browser if Edge is missing. Snap it beside Claude. An empty window says: No projects yet. In a Claude session, say "track this in InProgress".</p>
+</dd>
+</dl>
+</div>
+<div class="rail">
+<aside class="spec">
+  <span class="eyebrow">From your spec</span>
+  <blockquote>"Local web app (Recommended)"</blockquote>
+  <p>Your first choice in the brainstorm. The server is Node 20, Fastify and better-sqlite3 on this laptop; the window is Edge in app mode. Nothing leaves the machine, which is what ruled out a module inside InThink.</p>
+  <p class="where">src/server/main.ts · src/cli/open.ts · spec D1</p>
+</aside>
+<aside class="spec">
+  <span class="eyebrow">From your spec</span>
+  <blockquote>"It should know that if we're doing a project or a task that I want to use InProgress for, then it needs to be using hooks, Claude skills, etc."</blockquote>
+  <p>Those are the three things install writes: hook entries in <code>settings.json</code>, the <code>inprogress</code> skill, and the scribe agent. <code>claude:uninstall</code> removes exactly those and leaves the data dir alone.</p>
+  <p class="where">src/cli/claude-config.ts</p>
+</aside>
+</div>
+</div>
+
+<h3 id="track">Start tracking a project</h3>
+<div class="wf">
+<div class="main">
+<dl class="trio">
+<dt>You</dt>
+<dd><p>In a Claude session in the project folder: "track this in InProgress" (or "add this to InProgress"). Say which project if several exist, and whether to bind the folder.</p></dd>
+<dt>Claude</dt>
+<dd>
+<p>The prompt hook sees the word InProgress in an untracked session and injects <code>[InProgress] This session is not tracked yet. Session id: &lt;id&gt;. Use the inprogress skill to opt in.</code> Pasted <code>&lt;pasted_content&gt;</code> blocks are stripped first, so pasting a document that mentions InProgress triggers nothing.</p>
+<p>The skill then decides the project. If that is unclear it runs the read-only <code>status</code> command to list existing projects and asks you. It briefs the scribe to enrol the session, creating the project first if it is new (name, a one-paragraph purpose, an optional playbook) and binding the current folder if you agreed. For ticket work in a shared repo the binding gets a branch pattern such as <code>*VCAD-978*</code>, so only sessions on that branch belong to that project.</p>
+<p>The scribe runs <code>list_projects</code>, then <code>create_project</code> (with <code>bind_path</code> and <code>branch_pattern</code> if asked), then <code>enroll_session</code>, and replies with the first line of the briefing.</p>
+</dd>
+<dt>You see</dt>
+<dd><p>Chat: one line from Claude, in the shape <code>↳ InProgress: tracking this session in &lt;project&gt;</code>. Window: the project appears in the switcher with its root node, your session's chip appears in the session row, and the activity strip walks through <code>project created</code>, <code>folder bound: C:/personal/…</code> and <code>&lt;session title&gt; is working</code>.</p></dd>
+</dl>
+<h4>How a binding matches</h4>
+<p>Paths are normalised before storage and comparison: backslashes become slashes, the Git Bash form <code>/c/x</code> becomes <code>C:/x</code>, the drive letter is upper-cased, a trailing slash is dropped, and comparison ignores case. A session matches a binding when its working directory is the bound path or sits under it and, if the binding has a branch pattern, the current branch matches that glob (<code>*</code> any run, <code>?</code> one character, case-insensitive). Among several matches the longest path wins; on equal paths, the binding with a pattern beats the one without. The branch is read from <code>.git/HEAD</code> by walking up from the folder (worktrees included) without spawning git. Bindings of archived projects are ignored.</p>
+<p>Matching happens at session start. A session that already has a project keeps it; the scribe's <code>enroll_session</code> can repoint a session that was auto-bound to the wrong project ("this session is for X, not Y").</p>
+</div>
+<div class="rail">
+<aside class="spec">
+  <span class="eyebrow">From your spec</span>
+  <blockquote>"Bound folders + opt-in (Recommended)"</blockquote>
+  <p>Your second choice. A project can be bound to a folder, optionally with a git branch glob, so sessions started there are tracked without a word. Anywhere else, one sentence opts a session in.</p>
+  <p class="where">src/server/repo/projects.ts resolveBinding · src/lib/glob.ts · src/lib/paths.ts · spec D2</p>
+</aside>
+<aside class="spec">
+  <span class="eyebrow">From your spec</span>
+  <blockquote>"each project is going to have to work a little differently"</blockquote>
+  <p>That is the playbook: a Markdown field per project. The briefing prints its first 15 lines at the top of every tracked session, and the scribe reads it at the head of every <code>get_outline</code>. Ask Claude to "set the InProgress playbook to …" and it goes through <code>update_project</code>.</p>
+  <p class="where">projects.playbook · src/server/briefing.ts · src/server/routes/read.ts</p>
+</aside>
+</div>
+</div>
+
+<h3 id="adopt">Adopt a project mid-flight</h3>
+<div class="wf">
+<div class="main">
+<dl class="trio">
+<dt>You</dt>
+<dd><p>"Adopt InGame into InProgress. The plan is in docs/planning/road-to-market.md; M1 to M6 are done." Point Claude at the planning docs and say where you actually are.</p></dd>
+<dt>Claude</dt>
+<dd>
+<p>The skill's adoption brief gives the scribe: the purpose and a playbook if the project has conventions ("planning docs live in docs/planning; attach them as resources"); each finished phase as one <code>done</code> phase node with a one-line outcome, for example a phase named M1 to M6 build; the current plan with real statuses and which step this session is on; anything waiting on you; and the paths of the key docs to attach with <code>snapshot_file</code>. The scribe creates the project, adds the whole plan in one nested <code>add_nodes</code> call, attaches the docs, enrols the session and sets its focus.</p>
+<p>Nothing older is reconstructed. Transcript mining was rejected in the design (the format is undocumented and inference is unreliable), so history before adoption lives in the done phase nodes' outcomes and nowhere else.</p>
+</dd>
+<dt>You see</dt>
+<dd><p>Done phases render folded as one row each, for example <span class="ip-node"><span class="m done"></span><span class="t">M1 to M6 build · 6 done</span></span>, and the camera lands on the step in progress. Then correct what is stale in plain words ("#12 is actually done", "drop #15, we went another way"); each correction is a checkpoint and goes to the scribe.</p></dd>
+</dl>
+</div>
+<div class="rail">
+<aside class="spec">
+  <span class="eyebrow">From your spec</span>
+  <blockquote>"there's value even if we're just picking up from where the project currently stands"</blockquote>
+  <p>Adoption starts from today's plan and folds the past into done summary nodes. The spec's success criterion 4 is this workflow; the skill section "Adopting an existing project" is its script.</p>
+  <p class="where">~/.claude/skills/inprogress/SKILL.md · claude/agents/inprogress-scribe.md ("adopt")</p>
+</aside>
+</div>
+</div>
+
+<h3 id="session">A working session</h3>
+<div class="wf">
+<div class="main">
+<h4>The start briefing</h4>
+<dl class="trio">
+<dt>You</dt>
+<dd><p>Open a session in a bound folder, or resume one. Nothing to say.</p></dd>
+<dt>Claude</dt>
+<dd>
+<p>The SessionStart hook makes sure the server is up (it spawns <code>dist\server\main.js</code> detached and waits up to 2 s), then posts <code>start</code> with the folder, branch, transcript path and title. The server resolves the binding and, for a tracked session, returns the briefing, which the hook prints as context. A <code>resume</code> or <code>clear</code> start resets the session to idle; a <code>compact</code> start happens mid-turn and leaves the state alone but still re-injects the briefing, which is why the update rules travel in the briefing as well as in the skill.</p>
+<pre><code>[InProgress] This session is tracked in project "InGame" (slug ingame). Session id: 3fa9c1f0-….
+All InProgress edits go through the inprogress-scribe agent in the background; follow the inprogress skill.
+Playbook:
+  Planning docs live in docs/planning; attach them as resources.
+Keeping InProgress current (the tree beside Claude that Aiden watches):
+- Never edit it yourself. Brief the inprogress-scribe agent … At most one brief per turn, batching every change.
+- Brief at these checkpoints: a plan is made or changed …; a step starts, finishes, or is blocked; …
+- Steps are plan-level with outcomes, never single actions. Detours go in the log of the step they interrupted.
+- Resources: pass a file path with snapshot_file. Content that only exists in chat is first written to C:/Users/aiden.molyneaux/.inprogress/resources/&lt;slug&gt;/&lt;yyyy-mm-dd&gt;-&lt;kebab-title&gt;.md.
+- Brief format: "Session: &lt;id&gt; · Project: &lt;slug&gt;", then one "- " line per change …
+- After dispatching, write one line in chat ("↳ InProgress: #57 done, suite attached to #58"). …
+Where things stand:
+  #53 Road to market — active (2/7)
+    #55 2 Android signing — active (1/3)
+      #57 Play app signing — active  ◆ this session
+      #58 Run signing tests — NEEDS YOU
+    Next: #59 3 RevenueCat · #60 4 Build → GitHub (+3 more)
+Needs you (2): #58 Run signing tests · #61 Which RevenueCat plan? (question)
+Recent resources: r12 Signing test suite (on #58) · r11 Signing runbook (on #54)
+Other sessions here: "QA drill" (idle, on #70)</code></pre>
+<p>"Where things stand" is the ancestor chain of every active, needs-you and focused node, with up to two upcoming todo siblings at each level, capped at 25 lines. The needs-you line lists up to eight items, recent resources the newest five.</p>
+</dd>
+<dt>You see</dt>
+<dd><p>The briefing goes into Claude's context, not into the visible chat; you only notice it when Claude refers to a step by number without being told it. In the window your session's chip appears in the session row, outlined (idle) until your first prompt turns it solid.</p></dd>
+</dl>
+
+<h4>Checkpoints</h4>
+<dl class="trio">
+<dt>You</dt>
+<dd><p>Work as usual. The checkpoints are Claude's to notice, not yours to call.</p></dd>
+<dt>Claude</dt>
+<dd>
+<p>Five things trigger a brief: a plan is made or changed; a step starts, finishes or is blocked; something worth finding again is produced (a test suite, runbook, walkthrough, roadmap, diagram, handoff); something is handed to you or you report doing it; an open question appears or is answered. At most one brief per turn, with every change of that turn batched into it:</p>
+<pre><code>Session: 3fa9c1f0-… · Project: ingame
+Changes:
+- #57 → done; outcome "Play app signing configured"
+- add under #55 after #57: "Run signing tests" (task, assignee me); body: run on a device build, report failures
+- resource on the new "Run signing tests" node: test-suite "Signing test suite",
+  path C:/Users/aiden.molyneaux/.inprogress/resources/ingame/2026-09-27-signing-test-suite.md, snapshot_file
+- log on #55: "Detour: sandbox network wedge, fixed by restarting VMware NAT"
+- focus → the new "Run signing tests" node</code></pre>
+<p>The brief goes to the Agent tool with <code>subagent_type: "inprogress-scribe"</code> in the background. The main session does not wait for it. The scribe starts with <code>get_outline</code>, resolves every reference to a real id, applies the changes (one nested <code>add_nodes</code> for new steps, <code>update_node</code> with an outcome for finished ones, <code>add_resource</code>, <code>add_log</code>, <code>set_focus</code>), and returns one line such as <code>#57 done · added #58 (you) · r12 on #58 · focus #58</code>. If a reference does not resolve after one search, it reports that instead of writing.</p>
+</dd>
+<dt>You see</dt>
+<dd><p>Chat: one line, <code>↳ InProgress: #57 done, test suite attached to #58</code>. A little later the scribe's one-line report arrives as a background task notification; Claude does not reply to it. Window: within seconds of the scribe's write, <code>#57</code> turns green, <code>#58</code> appears with the YOU tag and a purple resource chip, the badge <span class="badge">◆ InGame launch status · working</span> moves under it, and the camera glides there if Follow is on. The activity strip reads <code>↳ scribe (InGame launch status) · just now · "Signing test suite" attached to #58 Run signing tests</code>. The spec's budget is about 30 s from Claude stating a plan to it appearing, with the scribe's spin-up taking most of that; the server-to-window hop is a 150 ms debounce plus the event stream.</p></dd>
+</dl>
+
+<h4>Plan changes and backtracking</h4>
+<dl class="trio">
+<dt>You</dt>
+<dd><p>"Add two steps after the signing work", "we're skipping RevenueCat", "move the GitHub build under phase 3".</p></dd>
+<dt>Claude</dt>
+<dd><p>New steps are <code>add_nodes</code> under the right parent, placed <code>after</code> a sibling or at <code>start</code> or <code>end</code>. Reordering is <code>move_node</code>, which must stay inside the project and cannot create a cycle. Backtracking marks a step <code>dropped</code> or moves it; <code>delete_node</code> is for mistakes only. Parents are never rolled up automatically: when a phase finishes, the scribe sets its status because the brief said so.</p></dd>
+<dt>You see</dt>
+<dd><p>A dropped step keeps its row with a struck-through title, <span class="ip-node dropped"><span class="m dropped"></span><span class="t">3 RevenueCat</span></span>, until the fold rules hide it, and it leaves the progress count: a parent shows <code>done / (children minus dropped)</code>, direct children only. The strip reports <code>moved #60 4 Build → GitHub</code> or <code>#59 3 RevenueCat → dropped</code>.</p></dd>
+</dl>
+
+<h4>Needs-you items</h4>
+<dl class="trio">
+<dt>You</dt>
+<dd><p>Claude hands you something ("run the signing tests on a device build and tell me what fails"). Later: "ran them, all green".</p></dd>
+<dt>Claude</dt>
+<dd><p>Anything handed to you becomes a node with <code>assignee: me</code>. Needs-you means assigned to you and not yet done (todo, active or blocked). When you report it done, the brief says <code>#58 → done; outcome "…"</code>. A question for you is a <code>question</code> node assigned to you; answering it sets <code>done</code> with the answer in <code>outcome</code>.</p></dd>
+<dt>You see</dt>
+<dd><p>An amber border and tag: <span class="ip-node needs"><span class="m you"></span><span class="t">Run signing tests</span> <span class="you">YOU</span></span>. The top bar shows <span class="pill">● 2 need you</span>, the window title becomes <code>(2) InProgress — InGame</code> so the count shows on the taskbar, and the briefing's "Needs you" line lists it. Needs-you rows are never folded away. Press <kbd>N</kbd> or click the pill to cycle through them; each one flashes amber as the camera lands on it. A question carries a question-mark marker coloured by its status, amber while it waits on you: <span class="ip-node needs"><span class="m you q">?</span><span class="t">Which RevenueCat plan?</span> <span class="you">YOU</span></span>. Once it is done, the Details panel shows the answer as the outcome. A blocked step shows a red dot and the word blocked.</p></dd>
+</dl>
+
+<h4>Resources</h4>
+<dl class="trio">
+<dt>You</dt>
+<dd><p>Ask for the artefact as usual: "write me a test suite for the signing flow". Later, click its chip in the window instead of scrolling back.</p></dd>
+<dt>Claude</dt>
+<dd><p>A resource always reaches the scribe as a file path with <code>snapshot_file</code>, never as pasted text, so nothing is typed out twice by two models. The MCP server reads the file (text up to 200 KB) into the database; larger files are attached by path only. Content that only exists in chat is first written by the main session to <code>C:\Users\aiden.molyneaux\.inprogress\resources\&lt;slug&gt;\&lt;yyyy-mm-dd&gt;-&lt;kebab-title&gt;.md</code>, outside the project repo so work repos stay clean; the allow rule from install means no permission prompt. A real one from this week is <code>resources\inthink-marathon-v3\2026-10-02-foundations-pr-30.md</code>. Kinds are doc, test-suite, runbook, roadmap, diagram, link and other; a link must be http or https. Changing a resource's path does not re-read the file: to refresh a snapshot, Claude adds a new resource and deletes the old one.</p></dd>
+<dt>You see</dt>
+<dd><p>Up to two purple chips on the row, <span class="chip">▤ Signing test suite</span>, then <span class="chip">+1</span>. Clicking one opens a full-window viewer with the rendered Markdown and the buttons Copy (raw text), Open file (VS Code, or Explorer with the file selected), Copy path, and Open link for a URL. <kbd>Esc</kbd> closes it. The Details panel lists the same resources with their kind and size.</p></dd>
+</dl>
+
+<h4>Detours</h4>
+<dl class="trio">
+<dt>You</dt>
+<dd><p>"The sandbox lost its network again." Twenty minutes later it is fixed and you are back on the step.</p></dd>
+<dt>Claude</dt>
+<dd><p>The detour never becomes a node. It becomes <code>add_log</code> on the step it interrupted: "Detour: sandbox network wedge, fixed by restarting VMware NAT". Decisions made along the way go there too.</p></dd>
+<dt>You see</dt>
+<dd><p>The strip says <code>note on #55 2 Android signing</code>. Click the row and the Details panel shows the log, newest last, with a relative time and the session's title. The tree itself is unchanged, which is the point.</p></dd>
+</dl>
+</div>
+<div class="rail">
+<aside class="spec">
+  <span class="eyebrow">From your spec</span>
+  <blockquote>"I want it to have full CRUD over the application. … it should spawn sub-agents to do that work"</blockquote>
+  <p>The scribe has create, update, move and delete for projects, nodes, resources, logs, bindings, sessions and focus, through 19 MCP tools. The main session has none of them: the MCP server is declared inside the agent's frontmatter, so its tool descriptions never enter the main context.</p>
+  <p class="where">claude/agents/inprogress-scribe.md · src/mcp/server.ts · spec D4, D6</p>
+</aside>
+<aside class="spec">
+  <span class="eyebrow">From your spec</span>
+  <blockquote>"so many little resources created throughout the process: walk documents, test suites, roadmaps, open questions … stored vertically in the Claude chat"</blockquote>
+  <p>Each one is a resource on the step that produced it, snapshotted into the database so it survives the chat, with <code>r12</code>-style ids you can quote back to Claude. Open questions are question nodes.</p>
+  <p class="where">resources table (content, path, url) · add_resource snapshot_file · web/src/panels/ResourceViewer.tsx</p>
+</aside>
+<aside class="spec">
+  <span class="eyebrow">From your spec</span>
+  <blockquote>"a little Claude indicator saying, 'This session with name blah blah blah is actively working on this task'"</blockquote>
+  <p>The session badge under a node. Hooks supply the state (working, idle, needs permission) and the subagent count; the scribe's <code>set_focus</code> supplies the node. The name is Claude Code's session title: the hook's own <code>session_title</code> field when it is present, else the transcript's newest <code>custom-title</code> line, with <code>Session 3fa9c1</code> as the fallback.</p>
+  <p class="where">src/hooks/handlers.ts · src/lib/transcript.ts · src/core/layout.ts (badges) · web/src/canvas/BadgeNode.tsx</p>
+</aside>
+<aside class="spec">
+  <span class="eyebrow">From your spec</span>
+  <blockquote>"you don't know what task they're knocking off the list without explicitly reading all the Claude chats and going into the subagents"</blockquote>
+  <p>SubagentStart and SubagentStop hooks keep a row per running subagent, so the count on a chip or badge cannot drift; the scribe itself is excluded by the hook matcher so it costs no process spawn.</p>
+  <p class="where">session_subagents table · HOOK_DEFS matcher ^(?!inprogress-scribe$).*</p>
+</aside>
+</div>
+</div>
+
+<h3 id="status">Asking "where are we?" and the stale nudge</h3>
+<div class="wf">
+<div class="main">
+<dl class="trio">
+<dt>You</dt>
+<dd><p>"Where are we?", "what's next", "what's left", "what's the status", "status update", "status check", "project status", "progress so far", or a bare "status?". The word status inside a sentence does not count, so "git status" is safe.</p></dd>
+<dt>Claude</dt>
+<dd><p>The prompt hook flags the question and the server answers it in the same hook call with a live block: <code>[InProgress] Where things stand in InGame (live):</code> followed by the same frontier lines as the briefing and the needs-you line. Claude answers from that and never dispatches the scribe to read. For the whole tree it runs the read-only outline command by absolute path:</p>
+<pre><code>&amp; "C:/Users/aiden.molyneaux/AppData/Local/nvm/v20.19.6/node.exe" "C:/personal/InProgress/dist/cli/main.js" outline ingame</code></pre>
+<p>You can run the same thing in a terminal. <code>--full</code> unfolds the done branches. Today's output for the InProgress project itself, abridged:</p>
+<pre><code>Project InProgress (slug inprogress)
+Playbook:
+  Repo C:/personal/InProgress. One branch per fix off main, merged locally after a green `npm run deploy`; …
+#26 InProgress — active (2/4) [r11]
+  #27 v1 build (phase) — done
+  #28 Deploy loop (phase) — done (4/4)
+  #33 v1 follow-ups (phase) — active (0/7) [r12]
+    #34 Lift the clicked node above the narrow Details sheet — active
+    …
+  #41 Feedback from daily use (phase) — active (0/3)
+    #44 Project tabs for quick switching — todo</code></pre>
+</dd>
+<dt>You see</dt>
+<dd><p>A plain answer in chat naming the ids. Nothing changes in the window, because reading never writes.</p></dd>
+</dl>
+<h4>The stale nudge</h4>
+<p>Each typed prompt in a tracked session adds one to a counter; any write by the scribe for that session resets it to zero. Once the counter reaches two, every prompt carries one extra line into Claude's context until the next scribe write:</p>
+<pre><code>[InProgress] InGame · focus #57 Play app signing · 2 need you · last scribe update 3 prompts ago. If a checkpoint happened, brief the inprogress-scribe; otherwise ignore this line.</code></pre>
+<p>You do not see the line. You see its effect: Claude either briefs the scribe (and writes its one chat line) or carries on. If the tree looks behind to you, "where are we?" plus a sentence about what changed is enough to get it corrected. Background-task notices that arrive as prompts (the scribe finishing, a subagent hand-back) are not counted on the live build; see <a href="#inflight">in flight</a> for the remaining formats.</p>
+</div>
+<div class="rail">
+<aside class="spec">
+  <span class="eyebrow">Beyond the spec</span>
+  <p>Status questions were not in your original message. They came out of the design walkthrough as the cheapest way to make the tree the source of truth in chat as well as in the window: the hook answers from the database, so the answer is as fresh as the last scribe write and costs no tool call.</p>
+  <p class="where">src/hooks/handlers.ts ASKS_STATUS · src/server/briefing.ts renderStatusAnswer, renderStatusLine</p>
+</aside>
+</div>
+</div>
+
+<h3 id="window">Reading the window</h3>
+<div class="wf">
+<div class="main">
+<p>From top to bottom: a top bar with the project switcher, the needs-you pill and the Follow toggle; a row of session chips; the canvas; and a one-line activity strip. The theme follows Windows. Nothing on it is editable.</p>
+
+<h4>Rows and markers</h4>
+<div class="mock">
+  <span class="ip-node root"><span class="m active"></span><span class="t">InGame</span> <span class="prog">2/7</span> <span class="chev">▾</span></span>
+  <span class="ip-node"><span class="m done"></span><span class="t">1 iOS certificate</span></span>
+  <span class="ip-node active"><span class="m active"></span><span class="t">2 Android signing</span> <span class="prog">1/3</span> <span class="chev">▾</span> </span><span class="chip">▤ Signing runbook</span>
+  <span class="ip-node needs"><span class="m you"></span><span class="t">Run signing tests</span> <span class="you">YOU</span></span>
+  <span class="ip-node todo"><span class="m todo"></span><span class="t">3 RevenueCat</span></span>
+  <span class="ip-node"><span class="m blocked"></span><span class="t">Store listing</span> <span class="blk">blocked</span></span>
+  <span class="ip-node dropped"><span class="m dropped"></span><span class="t">Beta via TestFlight</span></span>
+  <span class="ip-node"><span class="m done"></span><span class="t">M1 to M6 build · 6 done</span> <span class="chev">▸</span></span>
+  <span class="more">+3 more</span>
+  <span class="cap">The window's own row styles, reproduced here. Done is a green dot; active a blue dot with a blue border (the dot pulses while a working session is on that step or below it); todo a hollow ring, dimmed; blocked a red dot with a tag; dropped is struck through; a folded done branch reads "· n done" with a closed chevron. Hover any row for its <code>#id</code>.</span>
+</div>
+<div class="mock">
+  <span class="badge"><span class="pulse"></span>◆ InGame launch status · working · 2 subagents</span>
+  <span class="badge idle">◆ QA drill · idle</span>
+  <span class="badge perm">◆ Ticket VCAD-978 · needs permission</span>
+  <span class="cap">Session badges sit on their own row directly under the step the session is focused on. Hover one to see which subagent types are running. If a manual fold hides the focused step, the badge moves up to the nearest visible ancestor rather than disappearing.</span>
+</div>
+
+<h4>The outline flow and the fold rules</h4>
+<p>Order runs downward and depth indents to the right, 28 px per level, with a rail from each parent to its children. That keeps the tree narrow enough for a side window and puts the current work near the bottom. Folding keeps it short:</p>
+<ul>
+<li>A done or dropped node with children folds into one summary row (<code>title · n done</code>) unless something inside it is still active, waiting on you, or focused by a session.</li>
+<li>Under any parent, after the last done or active child, only the next two todo or blocked children show. Needs-you and active rows always show and do not take one of those two slots. Dropped rows show until the two slots are filled, then hide.</li>
+<li>Everything past that collapses into a <code>+n more</code> row per contiguous hidden run, and only when at least two rows are hidden.</li>
+<li>Clicking a chevron or a <code>+n more</code> overrides the rule for that node. Overrides are remembered per project in the browser; folding a parent again re-collapses its tail.</li>
+</ul>
+
+<h4>Follow and the keys</h4>
+<p>On load the camera centres on the frontier at zoom 1: the focus node of the most recently active working session, else the most recently updated active node, else the last row. With Follow on (the default), every event that names a node glides the camera to it, at most once per 1.5 s, and the first move waits a moment for the new row to be laid out. Dragging the canvas, scrolling the wheel, dragging or scrolling the minimap, or pressing a zoom button turns Follow off; a plain click does not. <span class="follow">⌖ Follow</span> turns it back on and recentres on the frontier.</p>
+<div class="scroll">
+<table>
+<thead><tr><th>Key</th><th>Does</th></tr></thead>
+<tbody>
+<tr><td><kbd>N</kbd></td><td>Centres the next needs-you row in outline order and flashes it; the pill does the same. A row hidden by a manual fold lands on its nearest visible ancestor.</td></tr>
+<tr><td><kbd>F</kbd></td><td>Toggles Follow. Turning it on recentres on the frontier.</td></tr>
+<tr><td><kbd>Home</kbd></td><td>Centres the project root.</td></tr>
+<tr><td><kbd>End</kbd></td><td>Centres the frontier.</td></tr>
+<tr><td><kbd>Esc</kbd></td><td>Closes the Details panel, or the resource viewer when it is open.</td></tr>
+<tr><td><kbd>Tab</kbd>, <kbd>Enter</kbd></td><td>Rows, chevrons and chips are tab stops; Enter or Space on a row opens its Details, and a row focused outside the view is brought to the middle.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Keys are ignored while a modifier is held or an input has focus. While the viewer is open, only <kbd>Esc</kbd> is handled, so Home and End scroll the document. Zoom runs from 0.15 to 2; the wheel pans, the bottom-left controls zoom and fit, and the bottom-right minimap colours needs-you rows amber, done green, active blue and badges clay.</p>
+
+<h4>Breadcrumb, chips and the activity strip</h4>
+<div class="mock">
+  <span class="crumb">InGame › Road to market › 2 Android signing</span>
+  <span class="schip working"><span class="pulse"></span>InGame launch status · 2 subagents</span>
+  <span class="schip">QA drill · idle</span>
+  <span class="schip perm">Ticket VCAD-978 · needs permission</span>
+  <span class="strip">↳ scribe (InGame launch status) · 2 min ago · "Signing test suite" attached to #58 Run signing tests</span>
+  <span class="cap">The breadcrumb at the top-left names the ancestors of the topmost row still on screen, so a deep tree never loses its place. Chips: solid clay with a pulsing dot is working, an outline is idle, a red outline is waiting for a permission (Claude Code raises that notification after a few seconds of waiting; the next prompt, stop or subagent event clears it). Click a chip to jump to that session's focus. Sessions drop off the row when they end or after 12 hours without a hook event.</span>
+</div>
+<p>The strip is the newest event in plain words: who (<code>scribe (session title)</code> for scribe writes, <code>Claude</code> for hook events, <code>system</code> otherwise), when, and what: added a step, added 5 steps under a parent, a step → done, moved, removed, a resource attached, a note on a step, a session is on a step, is working, is idle, is waiting for a permission, ended, a folder bound. Hover it for the exact timestamp.</p>
+
+<h4>Details and the resource viewer</h4>
+<p>Clicking a row opens Details: the id and title, <code>Copy #58</code> (which copies <code>#58 Run signing tests</code>, ready to paste into chat), the status or NEEDS YOU pill, kind, owner, a link to the parent, the body as Markdown, the outcome, the resources, the child steps, and the log. It refreshes itself whenever the tree changes, and keeps the last good view with a "Couldn't refresh" line if a fetch fails. In a window 720 px or wider it is a 380 px right-hand panel; narrower, including the 520 px app window, it is a bottom sheet over the lower 60 % with a grab bar, and camera moves land their target a quarter of the way down the view, above the sheet. The row you clicked may itself end up under the sheet for now; lifting it is <a href="#inflight">in flight</a>.</p>
+<p>The viewer is full-window and modal. Markdown is rendered by marked and cleaned by DOMPurify: no scripts, styles, forms, classes or inline styles survive, links open in a new tab with <code>noopener noreferrer</code>, and task-list checkboxes are kept but disabled. Remote images do not load, by the page's Content-Security-Policy. If Open file answers 401 the server has restarted with a new UI token, and the page reloads itself.</p>
+
+<h4>When the connection drops</h4>
+<p>A yellow banner says "Reconnecting to InProgress…" and the stream resumes from the last event id it saw, replaying anything missed. Before anything has loaded the message is "Can't reach the InProgress server, retrying…", which means the server is down. On every reconnect the page compares the server's build with the one it loaded against and reloads if they differ, which is how a deploy reaches an open window.</p>
+</div>
+<div class="rail">
+<aside class="spec">
+  <span class="eyebrow">From your spec</span>
+  <blockquote>"B, the outline flow"</blockquote>
+  <p>Your pick from the three layout mockups. Steps run down the page and sub-steps indent right, so the tree stays narrow and fits a side window. The layout is a pure, unit-tested function shared by the window and the text outline.</p>
+  <p class="where">src/core/layout.ts layoutOutline · src/core/tree.ts computeVisible · spec D3</p>
+</aside>
+<aside class="spec">
+  <span class="eyebrow">From your spec</span>
+  <blockquote>"mostly the bottom, or where things are currently at, will be where the emphasis is"</blockquote>
+  <p>The frontier is where the camera opens and where End and ⌖ return; Follow keeps it there as Claude works. Done branches fold out of the way on their own.</p>
+  <p class="where">src/core/layout.ts findFrontier · web/src/canvas/useCamera.ts · web/src/canvas/followThrottle.ts</p>
+</aside>
+<aside class="spec">
+  <span class="eyebrow">From your spec</span>
+  <blockquote>"You can zoom in and out of the different steps because eventually that tree could be huge."</blockquote>
+  <p>React Flow's canvas with zoom 0.15 to 2, a minimap, and the fold rules so a thousand-row tree still shows a screenful. Fit view and the zoom buttons sit at the bottom-left.</p>
+  <p class="where">web/src/canvas/Canvas.tsx</p>
+</aside>
+<aside class="spec">
+  <span class="eyebrow">From your spec</span>
+  <blockquote>"The application should have a minimal UI … with the main emphasized pane being a whiteboard-type component"</blockquote>
+  <p>The whole chrome is the top bar, the chip row and the strip. There are no checkboxes, no new-project button and no text fields anywhere.</p>
+  <p class="where">web/src/App.tsx · web/src/chrome/*</p>
+</aside>
+</div>
+</div>
+
+<h3 id="projects">Several projects and switching between them</h3>
+<div class="wf">
+<div class="main">
+<p>The switcher in the top bar lists active projects sorted by working sessions first, then by last activity. Each row has a dot (clay for a working session, amber when something needs you, grey otherwise) and a summary such as <code>◆ 1 working · 2 need you</code>. Archived projects sit in a sub-list under Archived (n). When another project has a working session, a clay dot appears on the switcher button itself. The selection is remembered by the browser and mirrored in the URL as <code>#/p/&lt;slug&gt;</code>, so a second window or a bookmark can open straight on a project.</p>
+<p>Each session belongs to one project at a time; several sessions on one project show as several chips and badges. The briefing's "Other sessions here" line tells each session about the others. To move a session, tell Claude ("this session is for the InThink redesign, not InProgress"); the scribe's <code>enroll_session</code> repoints it and clears its focus. Tabs for one-click switching are planned (<a href="#inflight">#44</a>); today it is the dropdown.</p>
+</div>
+<div class="rail">
+<aside class="spec">
+  <span class="eyebrow">From your spec</span>
+  <blockquote>"The UI allows you to switch between projects, etc."</blockquote>
+  <p>The dropdown, with its per-project state dots and counts, and the URL hash. The window title carries the project name too: <code>InProgress — InGame</code>, or <code>(2) InProgress — InGame</code> while two things wait on you.</p>
+  <p class="where">web/src/chrome/TopBar.tsx · web/src/useInProgress.ts</p>
+</aside>
+</div>
+</div>
+
+<h3 id="wrong">When something looks wrong</h3>
+<div class="wf">
+<div class="main">
+<p>Start with <code>inprogress doctor</code>. Then match the symptom:</p>
+<div class="scroll">
+<table>
+<thead><tr><th>Symptom</th><th>What is going on</th><th>Do</th></tr></thead>
+<tbody>
+<tr><td>Window says it cannot reach the server</td><td>The server is down. Any session start or scribe call restarts it; nothing else does until then.</td><td><code>inprogress start</code>; read <code>server.log</code> if it fails. If another program answers on 4317, set <code>INPROGRESS_PORT</code> for everything (hooks, scribe, CLI and server all read it).</td></tr>
+<tr><td>No briefing in a new session in a bound folder</td><td>The SessionStart hook missed its 3 s window, usually a cold start after a reboot. If the server never saw the session, the first prompt tracks it and injects the full briefing. If the start landed late, the session exists but is unbriefed until the stale line after two prompts.</td><td>Check <code>hooks.log</code> for a <code>session-start: … unreachable</code> line. Mention InProgress in the next prompt to get the session id, or ask "where are we?".</td></tr>
+<tr><td>The tree is behind the conversation</td><td>Claude skipped a checkpoint. The nudge appears after two prompts without a scribe write.</td><td>Say what changed. Each correction is a checkpoint.</td></tr>
+<tr><td>Claude relays a one-line scribe failure</td><td>A reference in the brief did not resolve, or a limit was hit (a snapshot over 200 KB, a URL that is not http).</td><td>Give the right id or path. The error text names the field and the fix.</td></tr>
+<tr><td><code>doctor</code>: running build X, deployed Y</td><td>The server is still on an older build than <code>dist\build.json</code>.</td><td><code>inprogress stop</code>, then <code>inprogress start</code>. A deploy does this itself.</td></tr>
+<tr><td>Database check fails</td><td><code>quick_check</code> found damage. The server refuses to back up a damaged file, so the backups are good.</td><td>Stop the server, delete <code>inprogress.db-wal</code> and <code>-shm</code>, copy the newest <code>backups\inprogress-&lt;stamp&gt;.db</code> over <code>inprogress.db</code>.</td></tr>
+<tr><td>Hooks: node binary no longer exists</td><td>Node was upgraded or moved; the hooks run the exact <code>node.exe</code> recorded at install.</td><td><code>npm run claude:install</code> again.</td></tr>
+<tr><td>A deploy left things worse</td><td>The previous build is kept whole.</td><td><code>npm run rollback</code>; run it again to roll forward.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Logs live in the data dir. <code>hooks.log</code> holds only hook failures and timeouts, one line each, and rolls over to <code>hooks.log.1</code> past 1 MiB. <code>server.log</code> holds startup lines and errors (no per-request logging) and is truncated when it passes 5 MB at a start. The hooks never write to the chat or to stderr, so a broken install shows up as silence, which is why <code>doctor</code> exists.</p>
+</div>
+<div class="rail">
+<aside class="spec">
+  <span class="eyebrow">Design rule</span>
+  <p>"Hooks never block Claude or surface errors in chat." Every hook reads stdin for at most a second, posts with a short timeout, logs on failure and exits 0. The cost is that failures are quiet; the trade was made on purpose.</p>
+  <p class="where">src/hooks/main.ts · spec §8</p>
+</aside>
+</div>
+</div>
+
+<h3 id="iterate">Iterating on InProgress itself</h3>
+<div class="wf">
+<div class="main">
+<p>The live trees <code>dist\</code> and <code>web\dist\</code> are what the installed hooks, the scribe's MCP server and the running server execute, so nothing writes there except a deploy. Development happens beside them:</p>
+<dl class="trio">
+<dt>Dev</dt>
+<dd><p><code>npm run dev</code> builds into <code>.dev-home\dist</code> on every change, runs a server from there on port 4318 with <code>.dev-home</code> as a throwaway data dir, and runs Vite on 5183 proxying <code>/api</code>. The installed kit keeps using the live build on 4317 throughout.</p></dd>
+<dt>Deploy</dt>
+<dd><p><code>npm run deploy</code> runs <code>typecheck</code>, the vitest suite, the smoke tests against a fresh node-only build in <code>.build\</code>, then the Playwright tests against a full build there. Each build writes <code>dist\build.json</code> with the short git sha, a dirty flag and the build time. The tested trees then replace the live ones by renames, with the old ones parked in <code>.deploy\prev\</code>; a failed move puts everything back. <code>claude-check</code> compares the installed kit with what install would write now and re-runs <code>claude-install</code> only on a difference. Finally the server is stopped and started on the new build, and <code>/api/health</code> must report that build or the deploy rolls back by itself.</p></dd>
+<dt>Rollback</dt>
+<dd><p><code>npm run rollback</code> swaps the live and previous trees and restarts. Running it again swaps back, so it also rolls forward.</p></dd>
+<dt>You see</dt>
+<dd><p>Open windows reload themselves when their stream reconnects to a server reporting a different build. <code>doctor</code> fails its Server check whenever the running build is not the deployed one. The live build today is <code>7927611</code>, built 2026-10-02 15:31 UTC, clean.</p></dd>
+</dl>
+<p>InProgress tracks its own development as the project <code>inprogress</code>. Its playbook: one branch per fix off main, merged locally after a green <code>npm run deploy</code>, never pushed; specs in <code>docs\superpowers\specs</code>, rulings and follow-ups in <code>docs\superpowers\rulings</code>, design notes attached as resources.</p>
+</div>
+<div class="rail">
+<aside class="spec">
+  <span class="eyebrow">From your spec</span>
+  <blockquote>"I want you to one-shot the project with input from me when you need it, but mostly at the start"</blockquote>
+  <p>The build ran as a subagent-driven plan from 27 to 29 September. Every decision the controller took on your behalf is in the rulings file, numbered, with why and what it costs if wrong; the follow-ups found in review are listed at its end and are the ones now being built.</p>
+  <p class="where">docs/superpowers/rulings/2026-09-27-inprogress-rulings.md</p>
+</aside>
+</div>
+</div>
+
+<h2 id="beyond">Beyond the original idea</h2>
+<p>Everything here was built on top of the first message, during the design walkthrough or the review rounds, and is in the live build unless it says otherwise. Each card says how to get the value out of it.</p>
+<div class="extras">
+
+<article class="extra">
+<h3>Status answers and stale nudges</h3>
+<p>A status question is answered from the database inside the prompt hook; a counter nudges Claude after two prompts without a scribe write. To use them, ask "where are we?" or "what's next" whenever you want the tree's view rather than Claude's memory, and read the one-line <code>↳ InProgress</code> notes as the audit trail of what reached the tree.</p>
+<p class="where">src/hooks/handlers.ts · src/server/session-flow.ts · src/server/briefing.ts</p>
+</article>
+
+<article class="extra">
+<h3>Bound folders with branch patterns</h3>
+<p>One repo can host several tracked projects when each is a ticket branch. For example, binding <code>C:\work\vRepos\vps-cad8-backend</code> with the pattern <code>*VCAD-1255*</code> to a VCAD-1255 project tracks sessions on that branch and leaves a session on any other branch untracked. Say "bind this folder with branch pattern *VCAD-1255*" when opting in; <code>list_projects</code> shows binding ids if one needs removing.</p>
+<p class="where">bindings table · resolveBinding · globMatch</p>
+</article>
+
+<article class="extra">
+<h3>Prompt-time self-heal</h3>
+<p>If the server was down when a session started, the first prompt carries the folder and branch again; the server resolves the binding then, tracks the session and injects the full briefing. You get the briefing one prompt late instead of never. The case where the start arrived late rather than not at all is <a href="#inflight">#35</a>.</p>
+<p class="where">src/server/session-flow.ts handleHookEvent</p>
+</article>
+
+<article class="extra">
+<h3>MCP self-heal</h3>
+<p>The scribe's MCP server starts InProgress when it launches and, if a call finds nothing listening (after <code>inprogress stop</code>, a reinstall, a crash), starts it again and retries that call once. Only a refused connection is retried, never a timeout, so a write is never applied twice. Nothing to do on your side; the scribe's brief lands even when you stopped the server an hour ago.</p>
+<p class="where">src/mcp/main.ts · src/mcp/server.ts</p>
+</article>
+
+<article class="extra">
+<h3>doctor and claude-check</h3>
+<p><code>doctor</code> checks the whole chain in one run and prints a fix hint on every failure. <code>claude-check</code> returns 0 when the installed kit matches the build, 2 when it differs and 3 when it is not installed, which is what lets a deploy reinstall only when needed. Run <code>doctor</code> after any Node upgrade, repo move or settings edit.</p>
+<p class="where">src/cli/doctor.ts · src/cli/claude-config.ts kitStatus</p>
+</article>
+
+<article class="extra">
+<h3>Backups and retention</h3>
+<p>Each server start backs up the database with SQLite's online backup into <code>backups\</code>, keeping the newest seven, and skips the backup when <code>quick_check</code> fails so a damaged file never displaces a good copy. Events older than 30 days are pruned at start, except each project's newest. Settings backups from install keep the newest five. To go back in time, restore a backup as the symptom table describes.</p>
+<p class="where">src/server/backup.ts · src/server/repo/events.ts pruneEvents</p>
+</article>
+
+<article class="extra">
+<h3>The security model</h3>
+<p>The server listens on 127.0.0.1 only and rejects any <code>Host</code> other than 127.0.0.1, localhost or [::1], which defeats DNS rebinding. Writes need the bearer token in <code>~\.inprogress\token</code> (32 random bytes, compared in constant time) and record an actor. The page is served with a CSP that blocks inline and foreign scripts, framing and remote images. Resource Markdown is sanitised. Open file uses a token minted per server process, accepts only a stored, local, absolute file path, and launches VS Code's executable directly or Explorer's reveal, never the OS default handler and never a shell. You do not have to do anything to keep this; just do not put the token anywhere else.</p>
+<p class="where">src/server/app.ts · src/server/routes/ui.ts · src/server/open-path.ts · web/src/panels/Markdown.tsx</p>
+</article>
+
+<article class="extra">
+<h3>Archive</h3>
+<p>"Archive the live-check project in InProgress" sets its status to archived through <code>update_project</code>. Its bindings stop matching, its sessions stop being tracked, and it moves to the Archived sub-list of the switcher where it can still be read. The root node cannot be deleted; archiving is how a project ends. Unarchive the same way.</p>
+<p class="where">update_project status · resolveBinding (active projects only) · TopBar</p>
+</article>
+
+<article class="extra">
+<h3>The deploy loop and build identity</h3>
+<p>Deploys are tested first, swapped in whole by renames, verified against <code>/api/health</code>, and reversible with one command. Open windows reload themselves. The sha in <code>doctor</code>'s Server line tells you which commit is live without opening git.</p>
+<p class="where">scripts/deploy.mjs · scripts/deploy-lib.mjs · scripts/build-to.mjs · src/core/build.ts</p>
+</article>
+
+<article class="extra">
+<h3>Keyboard, breadcrumb, strip, auto-reload</h3>
+<p>The window can be driven without a mouse (<kbd>N</kbd>, <kbd>F</kbd>, <kbd>Home</kbd>, <kbd>End</kbd>, <kbd>Esc</kbd>, <kbd>Tab</kbd>), the breadcrumb keeps the context of a deep tree, the strip says what just happened in words, and the page keeps itself on the current build. Keep the window at 520 px beside Claude and use <kbd>N</kbd> to step through what is waiting on you before you reply.</p>
+<p class="where">web/src/useKeyboard.ts · web/src/canvas/breadcrumb.ts · web/src/chrome/ActivityStrip.tsx · web/src/useInProgress.ts checkBuild</p>
+</article>
+
+<article class="extra">
+<h3>The scribe's one-line chat footprint</h3>
+<p>The main session never waits for the scribe, never sees its tools, and writes one line per update; the scribe reports in one line. That keeps the main context lean across a long session (the spec's success criterion 5). If you want more detail, the window and <code>outline</code> have it; do not ask the main session to narrate the tree.</p>
+<p class="where">briefing updateRules · claude/agents/inprogress-scribe.md</p>
+</article>
+
+<article class="extra">
+<h3>The outline and status CLI</h3>
+<p><code>inprogress outline &lt;project&gt; [--full]</code> prints the same folded text the briefing uses, with ids and resource ids; <code>inprogress status</code> lists projects with need-you counts and live sessions. Both read without a token, so they are safe from any terminal and are how Claude reads the whole tree without the scribe.</p>
+<p class="where">src/cli/commands.ts · GET /api/projects/:ref/outline</p>
+</article>
+
+<article class="extra">
+<h3>Session titles and permission state</h3>
+<p>Chips and badges carry the name you gave the session in the desktop sidebar, read from the transcript's newest <code>custom-title</code> line at each hook, so renaming a session renames its chip at the next prompt. A session waiting on a permission prompt turns red so you can see from the window which of three sessions needs a click.</p>
+<p class="where">src/lib/transcript.ts · Notification hook (permission_prompt)</p>
+</article>
+
+</div>
+
+<h2 id="inflight">In flight</h2>
+<p>The InProgress project's own tree, read on 2 October 2026. None of these is in the live build; treat every item as coming.</p>
+<ul>
+<li><code>#34</code> Lift the clicked node above the narrow Details sheet <span class="st active">being built</span></li>
+<li><code>#35</code> Brief a session on its first prompt after a late start <span class="st done">covered by #43</span>. The longer session-start wait in #43 makes a late start rare enough that no separate mechanism is planned.</li>
+<li><code>#36</code> doctor warns when the hooks' node binary differs after an nvm switch <span class="st active">being built</span></li>
+<li><code>#37</code> claude-install runs its checks before stopping the server <span class="st active">being built</span></li>
+<li><code>#38</code> Keyboard focus after +n more and under the narrow sheet <span class="st active">being built</span></li>
+<li><code>#39</code> Close Details when its node is deleted <span class="st active">being built</span></li>
+<li><code>#40</code> Reduced motion covers camera glides <span class="st active">being built</span></li>
+<li><code>#42</code> Stale nudge counts background-agent notifications as prompts <span class="st active">partly live</span>. Build 7927611 stops counting task notifications, "Another Claude session sent a message" and system notifications. A second fix on the <code>fix/notice-hole</code> branch adds agent messages, system reminders and subagent hand-backs; it is not deployed yet.</li>
+<li><code>#43</code> Cold start after a reboot can miss the session-start window <span class="st active">being built</span>. The 30 September line in <code>hooks.log</code> (<code>session-start: … unreachable</code>) looks like one of these.</li>
+<li><code>#44</code> Project tabs for quick switching <span class="st todo">planned</span></li>
+<li><code>#46</code> This guide <span class="st active">being published</span></li>
+<li><code>#47</code> Track mid-session asks as steps automatically <span class="st todo">planned</span>. When this guide was requested mid-session, it got no node of its own until a later brief added one. The skill and briefing rules will state that any new request with a deliverable becomes a node right away.</li>
+<li><code>#48</code> Per-subagent tracking <span class="st active">being built</span>. Each subagent gets its own badge under the step it works on. The badge shows the subagent's description, model and running time. The session chip will list the session's subagents, and Details will show which subagents are on a step. To attribute a subagent to a step, Claude starts the subagent's description with the step's id, for example <code>#44 Build project tabs</code>.</li>
+<li>Open links in your default browser <span class="st active">built, deploying next</span>. Today a link in a resource, or the viewer's Open link button, opens in Edge because the window is an Edge app window. With the fix, links go through the local server to Windows and open in your default browser.</li>
+</ul>
+<p>Smaller items from the rulings file, not yet in the tree: Details could close instead of keeping a deleted node; a minimap drag that starts outside the minimap pans without turning Follow off; uninstall does not restore an empty <code>"hooks": {}</code> container that existed before install (the settings backup has the original bytes); at 1,000+ visible rows every event rebuilds every card.</p>
+
+<h2 id="reference">Reference</h2>
+
+<h3>Commands</h3>
+<div class="scroll">
+<table>
+<thead><tr><th>Command</th><th>Does</th></tr></thead>
+<tbody>
+<tr><td><code>inprogress start</code></td><td>Starts the server detached if it is not answering; waits up to 5 s.</td></tr>
+<tr><td><code>inprogress stop</code></td><td>POST <code>/api/admin/shutdown</code>; waits up to 3 s for it to stop answering.</td></tr>
+<tr><td><code>inprogress open</code></td><td>Starts if needed, then <code>msedge --app=http://127.0.0.1:4317 --window-size=520,1000</code>, else the default browser.</td></tr>
+<tr><td><code>inprogress status</code></td><td>Projects with need-you counts and working / live session counts. No token.</td></tr>
+<tr><td><code>inprogress outline &lt;project&gt; [--full]</code></td><td>The text outline by slug, name or id. No token.</td></tr>
+<tr><td><code>inprogress doctor</code></td><td>Starts the server if down, then the nine checks. Exit 1 on any non-warning failure.</td></tr>
+<tr><td><code>inprogress claude-install</code></td><td>Stops a running server, then writes hooks, allow rules, agent and skill. Refuses without a built <code>dist\</code>.</td></tr>
+<tr><td><code>inprogress claude-uninstall</code></td><td>Removes exactly those, after the same settings backup. Leaves the data dir.</td></tr>
+<tr><td><code>inprogress claude-check</code></td><td>Exit 0 kit matches, 2 differs, 3 not installed.</td></tr>
+<tr><td><code>npm run deploy</code> / <code>rollback</code></td><td>The deploy loop described above.</td></tr>
+<tr><td><code>npm run dev</code></td><td>Watch build into <code>.dev-home\dist</code>, server on 4318, Vite on 5183.</td></tr>
+<tr><td><code>npm run build</code></td><td>Build into <code>.build\</code> only; never the live trees.</td></tr>
+<tr><td><code>npm run test</code> / <code>test:smoke</code> / <code>test:e2e</code> / <code>typecheck</code></td><td>The checks deploy runs, individually.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The <code>inprogress</code> name is <code>node C:\personal\InProgress\dist\cli\main.js</code>. From PowerShell, the installed skill starts the quoted absolute command with <code>&amp;</code>.</p>
+
+<h3>Paths and environment</h3>
+<div class="scroll">
+<table>
+<thead><tr><th>Path</th><th>Holds</th></tr></thead>
+<tbody>
+<tr><td><code>%USERPROFILE%\.inprogress\</code></td><td>The data dir (override: <code>INPROGRESS_HOME</code>). <code>inprogress.db</code> with its <code>-wal</code> and <code>-shm</code>, <code>token</code>, <code>server.log</code>, <code>hooks.log</code> (and <code>.1</code>), <code>server.pid</code>, <code>backups\</code>, <code>resources\&lt;slug&gt;\</code>.</td></tr>
+<tr><td><code>~\.claude\settings.json</code></td><td>The seven hook entries and two allow rules; backups beside it as <code>settings.json.inprogress-backup-&lt;stamp&gt;</code>.</td></tr>
+<tr><td><code>~\.claude\agents\inprogress-scribe.md</code></td><td>The scribe: model sonnet, effort low, 15 turns, background, tools <code>mcp__inprogress</code>, inline stdio MCP server.</td></tr>
+<tr><td><code>~\.claude\skills\inprogress\SKILL.md</code></td><td>The skill the main session follows.</td></tr>
+<tr><td><code>C:\personal\InProgress\dist\</code>, <code>web\dist\</code></td><td>The live build; <code>dist\build.json</code> is its identity.</td></tr>
+<tr><td><code>.build\</code>, <code>.deploy\prev\</code>, <code>.dev-home\</code></td><td>Test builds, the previous live build, the dev loop's data dir and build.</td></tr>
+<tr><td>Port 4317</td><td>Override with <code>INPROGRESS_PORT</code>. Dev uses 4318 and 5183. <code>CLAUDE_CONFIG_DIR</code> moves the Claude dir for install and doctor.</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3>Hooks</h3>
+<div class="scroll">
+<table>
+<thead><tr><th>Claude Code event</th><th>Hook</th><th>Posts</th><th>Comes back</th></tr></thead>
+<tbody>
+<tr><td>SessionStart (timeout 10 s)</td><td><code>session-start</code></td><td>Starts the server if it is down, then <code>start</code> with source, cwd, branch, transcript path, title.</td><td>The briefing, for a tracked session.</td></tr>
+<tr><td>UserPromptSubmit</td><td><code>prompt-submit</code></td><td><code>prompt</code> with cwd, branch, title, whether the prompt mentions InProgress, asks for status, or is a background notice.</td><td>A status answer, the stale line, the untracked hint, or the briefing when the session is picked up late.</td></tr>
+<tr><td>Stop</td><td><code>stop</code></td><td><code>stop</code> with title.</td><td>State idle.</td></tr>
+<tr><td>Notification, matcher <code>permission_prompt</code></td><td><code>notification</code></td><td><code>permission</code></td><td>State permission.</td></tr>
+<tr><td>SubagentStart / SubagentStop, matcher excludes the scribe</td><td><code>subagent-start</code> / <code>subagent-stop</code></td><td>agent id and type</td><td>A subagent row added or removed.</td></tr>
+<tr><td>SessionEnd</td><td><code>session-end</code></td><td><code>end</code></td><td>State ended; subagent rows cleared.</td></tr>
+</tbody>
+</table>
+</div>
+<p>All hooks except SessionStart have a 5 s timeout in settings and a 0.5 s budget inside. There is no per-tool-call hook, by design.</p>
+
+<h3>The scribe's tools</h3>
+<div class="scroll">
+<table>
+<thead><tr><th>Tool</th><th>Purpose</th></tr></thead>
+<tbody>
+<tr><td><code>list_projects</code></td><td>Slugs, names, status, need-you counts, live sessions, binding ids.</td></tr>
+<tr><td><code>get_outline(project, full?)</code></td><td>The folded text outline with ids; the playbook at its head.</td></tr>
+<tr><td><code>get_node(id)</code>, <code>get_resource(id)</code>, <code>search(project, query)</code></td><td>Read one node, one resource with content, or find nodes and resources by text (20 results).</td></tr>
+<tr><td><code>create_project(name, description, playbook?, slug?, bind_path?, branch_pattern?)</code></td><td>Project plus root, optionally bound.</td></tr>
+<tr><td><code>update_project(project, name?, description?, playbook?, status?)</code></td><td>Rename, re-describe, change the playbook, archive or unarchive.</td></tr>
+<tr><td><code>bind_folder</code>, <code>unbind_folder</code></td><td>Manage bindings.</td></tr>
+<tr><td><code>add_nodes(parent, nodes, after?)</code></td><td>One node or a nested plan. Defaults: task, todo, claude.</td></tr>
+<tr><td><code>update_node(id, …)</code>, <code>move_node(id, parent, after?)</code>, <code>delete_node(id, cascade?)</code></td><td>Status and fields, restructure, remove a mistake.</td></tr>
+<tr><td><code>add_resource(node, kind, title, content? | path? | url?, snapshot_file?)</code></td><td>Attach where it was produced; <code>snapshot_file</code> reads the path, up to 200 KB.</td></tr>
+<tr><td><code>update_resource</code>, <code>delete_resource</code></td><td>Edit or move to another node in the same project; remove.</td></tr>
+<tr><td><code>add_log(node, text)</code></td><td>A timeline note: detours, context, decisions.</td></tr>
+<tr><td><code>enroll_session(session, project, title?)</code></td><td>Track or repoint a session; returns the briefing.</td></tr>
+<tr><td><code>set_focus(session, node | null)</code></td><td>Which node the session is on; drives the badge.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Every write takes the brief's session id and is recorded as actor <code>scribe:&lt;session&gt;</code>, which is what resets the stale counter and names the session in the activity strip.</p>
+
+<h3>Vocabulary</h3>
+<div class="scroll">
+<table>
+<thead><tr><th>Field</th><th>Values</th></tr></thead>
+<tbody>
+<tr><td>Node kind</td><td><code>goal</code> (the root only), <code>phase</code>, <code>task</code>, <code>question</code></td></tr>
+<tr><td>Node status</td><td><code>todo</code>, <code>active</code>, <code>done</code> (sets <code>completed_at</code>), <code>blocked</code>, <code>dropped</code></td></tr>
+<tr><td>Assignee</td><td><code>claude</code>, <code>me</code>. Needs you = <code>me</code> and not done.</td></tr>
+<tr><td>Resource kind</td><td><code>doc</code>, <code>test-suite</code>, <code>runbook</code>, <code>roadmap</code>, <code>diagram</code>, <code>link</code>, <code>other</code></td></tr>
+<tr><td>Session state</td><td><code>working</code>, <code>idle</code>, <code>permission</code>, <code>ended</code>. Not seen for 12 h means ended.</td></tr>
+<tr><td>Project status</td><td><code>active</code>, <code>archived</code></td></tr>
+<tr><td>References</td><td><code>#58</code> is a node, <code>r12</code> a resource, both global across projects and never reused.</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3>Limits</h3>
+<div class="scroll">
+<table>
+<thead><tr><th>Thing</th><th>Limit</th></tr></thead>
+<tbody>
+<tr><td>Node title / body / outcome</td><td>200 chars / 20,000 / 2,000</td></tr>
+<tr><td>Project name / description / playbook / slug</td><td>120 / 5,000 / 10,000 (the briefing shows 15 lines) / 60</td></tr>
+<tr><td>Resource content / snapshot_file / URL / title</td><td>1,000,000 chars / 200 KB / 2,000 chars, http(s) only / 200</td></tr>
+<tr><td>Log entry</td><td>2,000 chars; Details shows the newest 20</td></tr>
+<tr><td>Nodes per <code>add_nodes</code></td><td>200 per level</td></tr>
+<tr><td>Binding path / branch pattern</td><td>500 / 200 chars; patterns longer than 200 never match</td></tr>
+<tr><td>Search</td><td>Query 200 chars, 20 results</td></tr>
+<tr><td>Briefing</td><td>Frontier 25 lines, 8 needs-you items, 5 recent resources, 15 playbook lines</td></tr>
+<tr><td>Event stream</td><td>Replays up to 5,000 missed events; heartbeat every 25 s; a client with 1 MiB unsent is dropped</td></tr>
+<tr><td>Request body</td><td>8 MiB</td></tr>
+<tr><td>Retention</td><td>7 database backups, 5 settings backups, 30 days of events (each project keeps its newest), 1 MiB per hooks.log, 5 MB server.log</td></tr>
+<tr><td>Hook budgets</td><td>Session start 3 s (2 s to spawn the server, 1 s to post); others 0.5 s; stdin 1 s</td></tr>
+<tr><td>Camera</td><td>Follow moves at most once per 1.5 s; zoom 0.15 to 2; Details becomes a sheet under 720 px</td></tr>
+</tbody>
+</table>
+</div>
+
+<footer>
+<p>Sources: the code at <code>C:\personal\InProgress</code> (src, web/src, claude, scripts) at build 7927611; the installed kit under <code>~\.claude</code>; <code>docs\superpowers\specs\2026-09-27-inprogress-design.md</code> as amended; <code>docs\superpowers\rulings\2026-09-27-inprogress-rulings.md</code>; the first messages of the session that designed InProgress on 27 September 2026; and <code>inprogress outline inprogress --full</code> on 2 October 2026. InGame appears throughout as the kit's own worked example, not as a tracked project.</p>
+</footer>
+
+</div>
+</body>
+</html>
