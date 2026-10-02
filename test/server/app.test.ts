@@ -324,3 +324,20 @@ describe('ui routes', () => {
     expect(onShutdown).toHaveBeenCalledOnce();
   });
 });
+
+describe('ui/open-url', () => {
+  it('hands an http(s) link to the default browser, and refuses other schemes and a missing UI token', async () => {
+    const opened: string[] = [];
+    const { app } = setup({ openUrl: async (u) => { opened.push(u); } });
+    const post = (url: unknown, token = 'ui-token') =>
+      app.inject({ method: 'POST', url: '/api/ui/open-url', headers: { 'x-ip-ui-token': token }, payload: { url } });
+    expect((await post('https://github.com/acme/repo/pull/7')).statusCode).toBe(200);
+    expect((await post('http://localhost:3000/x?a=1&b=2')).statusCode).toBe(200);
+    expect(opened).toEqual(['https://github.com/acme/repo/pull/7', 'http://localhost:3000/x?a=1&b=2']);
+    for (const bad of ['javascript:alert(1)', 'file:///C:/Windows/notepad.exe', 'C:/notes.md', 'not a url', '', `https://x.com/${'a'.repeat(2100)}`, 7]) {
+      expect((await post(bad)).statusCode, String(bad).slice(0, 40)).toBe(400);
+    }
+    expect((await post('https://example.com', 'wrong')).statusCode).toBe(401);
+    expect(opened).toHaveLength(2);
+  });
+});

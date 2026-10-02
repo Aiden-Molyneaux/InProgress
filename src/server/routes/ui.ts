@@ -5,9 +5,9 @@ import fastifyStatic from '@fastify/static';
 import type { FastifyInstance } from 'fastify';
 import { tokenMatches, type AppOptions, type Guard } from '../app';
 import { badRequest } from '../errors';
-import { openInEditorOrReveal } from '../open-path';
+import { openInDefaultBrowser, openInEditorOrReveal } from '../open-path';
 import { requireResource } from '../repo/resources';
-import { openBody } from '../schemas';
+import { openBody, openUrlBody } from '../schemas';
 
 const TOKEN_META = /<meta name="ip-ui-token" content="[^"]*"\s*\/?>/;
 
@@ -53,6 +53,24 @@ export function registerUi(app: FastifyInstance, opts: AppOptions, requireToken:
     }
     if (!info.isFile()) throw badRequest(`Not a file: ${resource.path}`);
     await (opts.openPath ?? openInEditorOrReveal)(resource.path);
+    return { ok: true };
+  });
+
+  // The UI runs in an Edge app window, where a plain link opens in Edge: links go through here to the default browser.
+  app.post('/api/ui/open-url', async (req, reply) => {
+    if (!tokenMatches(req.headers['x-ip-ui-token'], opts.uiToken)) {
+      reply.code(401).send({ error: 'Missing or invalid UI token' });
+      return reply;
+    }
+    const { url } = openUrlBody.parse(req.body);
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw badRequest(`Not a link: ${url}`);
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw badRequest(`Only http and https links open: ${parsed.protocol}`);
+    await (opts.openUrl ?? openInDefaultBrowser)(parsed.href);
     return { ok: true };
   });
 

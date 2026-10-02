@@ -414,3 +414,19 @@ test('keeps the view current under a steady stream of events', async ({ page, ap
     await events;
   }
 });
+
+test('links open in the default browser through the server, not in this window', async ({ page, demo }) => {
+  const opened: string[] = [];
+  await page.route('**/api/ui/open-url', async (route) => {
+    opened.push((route.request().postDataJSON() as { url: string }).url);
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
+  });
+  await page.route('**/x', (route) => route.fulfill({ status: 204 }));
+  const popups: unknown[] = [];
+  page.context().on('page', (p) => popups.push(p));
+  await open(page, demo);
+  await page.locator('.ip-chip', { hasText: 'Unsafe Markdown' }).click();
+  await page.getByRole('dialog').getByRole('link', { name: 'Signing docs' }).click();
+  await expect.poll(() => opened).toEqual(['https://example.com/signing']);
+  expect(popups).toHaveLength(0);
+});

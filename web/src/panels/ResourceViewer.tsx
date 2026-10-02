@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Resource } from '../../../src/core/types';
 import { api } from '../api';
+import { openLink } from '../links';
 import { Markdown } from './Markdown';
 
 export function ResourceViewer({ resourceId, onClose }: { resourceId: number; onClose: () => void }) {
@@ -45,7 +46,7 @@ export function ResourceViewer({ resourceId, onClose }: { resourceId: number; on
         {resource?.content && <button className="ip-btn" onClick={() => void copy(resource.content!, 'Copied')}>Copy</button>}
         {resource?.path && <button className="ip-btn" onClick={() => void open(resource.id)}>Open file</button>}
         {resource?.path && <button className="ip-btn" onClick={() => void copy(resource.path!, 'Path copied')}>Copy path</button>}
-        {link && <button className="ip-btn" onClick={() => window.open(link, '_blank', 'noopener')}>Open link</button>}
+        {link && <button className="ip-btn" onClick={() => void openLink(link)}>Open link</button>}
         <button className="ip-btn" onClick={onClose} aria-label="Close">×</button>
       </header>
       <div ref={body} className="ip-viewer-body" tabIndex={0}>
