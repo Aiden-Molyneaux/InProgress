@@ -4,6 +4,7 @@ import { NODE_H, eventTarget, findFrontier, type LayoutNodeItem, type LayoutResu
 import { dfsOrder, isNeedsYou, type TreeIndex } from '../../../src/core/tree';
 import type { EventRow, ProjectSnapshot } from '../../../src/core/types';
 import { createFollowThrottle } from './followThrottle';
+import { SHEET_QUERY, rowInView } from './sheet';
 
 interface CameraArgs {
   layout: LayoutResult;
@@ -11,19 +12,20 @@ interface CameraArgs {
   index: TreeIndex;
   lastEvent: EventRow | null;
   follow: boolean;
-  detailsOpen: boolean;
+  /** The node Details is open for, or null while Details is closed. */
+  selected: number | null;
 }
 
 /** Horizontal offset so the card, not its left edge, sits in the middle of the view. */
 const CARD_CENTER_X = 140;
-/** Where styles.css turns Details into a bottom sheet over the lower 60 % of the canvas. */
-const SHEET_QUERY = '(max-width: 719px)';
+/** Under this media feature every camera move is instant instead of a glide. */
+const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
 
-export function useCamera({ layout, snapshot, index, lastEvent, follow, detailsOpen }: CameraArgs) {
+export function useCamera({ layout, snapshot, index, lastEvent, follow, selected }: CameraArgs) {
   const rf = useReactFlow();
   const store = useStoreApi();
-  const detailsRef = useRef(detailsOpen);
-  detailsRef.current = detailsOpen;
+  const detailsRef = useRef(selected !== null);
+  detailsRef.current = selected !== null;
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
   const indexRef = useRef(index);
@@ -46,14 +48,20 @@ export function useCamera({ layout, snapshot, index, lastEvent, follow, detailsO
     return undefined;
   }, []);
 
-  /** Every camera move goes through here. With the Details sheet open, the point sits a quarter of the way down, above the sheet. */
+  /** True while Details is open as the narrow layout's bottom sheet. */
+  const sheetOpen = useCallback(() => detailsRef.current && window.matchMedia(SHEET_QUERY).matches, []);
+
+  /**
+   * Every camera move goes through here. With the Details sheet open, the point sits a quarter of the way down, above
+   * the sheet. Under reduced motion the move is instant.
+   */
   const moveTo = useCallback(
     (x: number, y: number, duration: number, zoom = rf.getZoom()) => {
-      const sheet = detailsRef.current && window.matchMedia(SHEET_QUERY).matches;
-      void rf.setCenter(x, sheet ? y + store.getState().height / 4 / zoom : y, { zoom, duration });
+      const glide = window.matchMedia(REDUCED_MOTION).matches ? 0 : duration;
+      void rf.setCenter(x, sheetOpen() ? y + store.getState().height / 4 / zoom : y, { zoom, duration: glide });
       lastMove.current = Date.now();
     },
-    [rf, store],
+    [rf, store, sheetOpen],
   );
 
   const centerOn = useCallback(
@@ -65,6 +73,24 @@ export function useCamera({ layout, snapshot, index, lastEvent, follow, detailsO
     },
     [moveTo, itemFor],
   );
+
+  /** Centres on the node only when its row is out of view, or under the open sheet. A row already in view stays put. */
+  const reveal = useCallback(
+    (nodeId: number) => {
+      const item = itemFor(nodeId);
+      if (item && !rowInView(item, rf.getViewport(), store.getState(), sheetOpen())) centerOn(nodeId);
+    },
+    [rf, store, itemFor, sheetOpen, centerOn],
+  );
+
+  /** A session chip or a link in Details. While the sheet is open it only reveals the row; otherwise it centres on it. */
+  const focusNode = useCallback((nodeId: number) => (sheetOpen() ? reveal(nodeId) : void centerOn(nodeId)), [sheetOpen, reveal, centerOn]);
+
+  // When Details opens as the bottom sheet over its own node's row, lift the row above the sheet. The move is the
+  // camera's own, so Follow stays on.
+  useEffect(() => {
+    if (selected !== null && sheetOpen()) reveal(selected);
+  }, [selected, sheetOpen, reveal]);
 
   /** Brings a flow point to the middle at once, for keyboard focus that lands outside the view. */
   const centerOnPoint = useCallback((x: number, y: number) => moveTo(x, y, 0), [moveTo]);
@@ -116,5 +142,8 @@ export function useCamera({ layout, snapshot, index, lastEvent, follow, detailsO
     return anchor;
   }, [centerOn, itemFor]);
 
-  return useMemo(() => ({ centerOn, centerOnPoint, centerOnFrontier, nextNeedsYou }), [centerOn, centerOnPoint, centerOnFrontier, nextNeedsYou]);
+  return useMemo(
+    () => ({ centerOn, centerOnPoint, centerOnFrontier, focusNode, nextNeedsYou, sheetOpen }),
+    [centerOn, centerOnPoint, centerOnFrontier, focusNode, nextNeedsYou, sheetOpen],
+  );
 }

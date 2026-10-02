@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { isNeedsYou } from '../../src/core/tree';
+import type { ProjectSnapshot } from '../../src/core/types';
 import { Canvas, type CanvasHandle } from './canvas/Canvas';
 import { ActivityStrip } from './chrome/ActivityStrip';
 import { SessionRow } from './chrome/SessionRow';
@@ -10,11 +11,21 @@ import { useFoldOverrides } from './useFoldOverrides';
 import { useInProgress } from './useInProgress';
 import { useKeyboard } from './useKeyboard';
 
+const holds = (snapshot: ProjectSnapshot, id: number) => snapshot.nodes.some((n) => n.id === id);
+
 export function App() {
   const state = useInProgress();
   const { snapshot, projects } = state;
   const [follow, setFollow] = useState(true);
   const [selectedNode, setSelectedNode] = useState<number | null>(null);
+  // A node deleted while Details shows it closes Details: the snapshot before held it, the new one doesn't. A node picked
+  // from Details' own lists can be newer than the snapshot on screen, so missing from one snapshot alone doesn't count.
+  // Cleared during render, so Details never refetches a node that is gone.
+  const [lastSnapshot, setLastSnapshot] = useState(snapshot);
+  if (snapshot !== lastSnapshot) {
+    setLastSnapshot(snapshot);
+    if (selectedNode !== null && snapshot && lastSnapshot && holds(lastSnapshot, selectedNode) && !holds(snapshot, selectedNode)) setSelectedNode(null);
+  }
   const [viewerResource, setViewerResource] = useState<number | null>(null);
   const viewerOpen = viewerResource !== null;
   const [overrides, setOverride] = useFoldOverrides(snapshot?.project.id);
