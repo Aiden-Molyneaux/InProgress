@@ -138,10 +138,12 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
   const work = [...(input.workItems ?? [])].sort((a, b) => a.position - b.position || a.id - b.id);
   const shownAgents = (s: Session) => s.subagents.filter((a) => agentShown(a, now));
   const homeOf = (s: Session, a: SubagentInfo) => agentHome(s, a, (id) => index.byId.has(id));
-  // Where Claude works shows past the fold rules, as a session's focus does: a subagent's node, and a task in progress.
+  // Where Claude works or plans to go next shows past the fold rules, as a session's focus does: a subagent's node,
+  // a task in progress, and every queued step (so an Up next entry never points into a "+n more" run).
   const pins = [
     ...live.flatMap((s) => shownAgents(s).flatMap((a) => homeOf(s, a) ?? [])),
     ...work.filter((w) => w.status === 'in_progress').map((w) => w.nodeId),
+    ...upNext(input.queue ?? [], input.nodes),
   ];
   const visible = computeVisible(index, live, { overrides: input.overrides, pins });
 

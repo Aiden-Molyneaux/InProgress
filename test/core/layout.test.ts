@@ -311,3 +311,13 @@ describe('camera helpers', () => {
     expect(eventTarget(ev('node.deleted', '4', { ids: [4] }))).toBeUndefined();
   });
 });
+
+describe('queued steps', () => {
+  it('stay in view past the fold rules, so Up next never points into a "+n more" run', () => {
+    const t = sample();
+    const before = layoutOutline({ nodes: t.nodes, resources: [], sessions: [] });
+    expect(before.nodeItems.has(t.e.id)).toBe(false);
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [], queue: [t.e.id] });
+    expect(l.nodeItems.get(t.e.id)).toMatchObject({ queuePos: 1 });
+  });
+});
