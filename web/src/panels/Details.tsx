@@ -1,8 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { agentHome, agentShown } from '../../../src/core/layout';
 import { isNeedsYou } from '../../../src/core/tree';
-import type { NodeDetail, ProjectSnapshot } from '../../../src/core/types';
+import { sessionDisplayTitle, type NodeDetail, type ProjectSnapshot } from '../../../src/core/types';
+import { agentKey } from '../agentColors';
 import { api } from '../api';
+import { TASK_MARK, agentLine, taskOwner, waitsFor, withoutOwnId } from '../live';
 import { relativeTime } from '../time';
+import { useNow } from '../useNow';
 import { resourceSummary } from './format';
 import { Markdown } from './Markdown';
 
@@ -12,9 +16,63 @@ interface DetailsProps {
   onClose: () => void;
   onSelectNode: (id: number) => void;
   onOpenResource: (id: number) => void;
+  /** Each subagent's colour, by agentKey. */
+  agentColors: ReadonlyMap<string, string>;
 }
 
-export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResource }: DetailsProps) {
+/** The node's working tasks, with who is on each, and the subagents working on it: live, from the snapshot. */
+function LiveWork({ nodeId, snapshot, agentColors }: Pick<DetailsProps, 'nodeId' | 'snapshot' | 'agentColors'>) {
+  const now = useNow(30_000);
+  const tasks = snapshot.workItems.filter((w) => w.nodeId === nodeId).sort((a, b) => a.position - b.position || a.id - b.id);
+  const inTree = new Set(snapshot.nodes.map((n) => n.id));
+  const agents = snapshot.sessions.flatMap((s) =>
+    s.subagents.filter((a) => agentShown(a, now) && agentHome(s, a, (id) => inTree.has(id)) === nodeId).map((agent) => ({ session: s, agent })),
+  );
+  return (
+    <>
+      {tasks.length > 0 && (
+        <>
+          <div className="ip-label">Working tasks</div>
+          <ul className="ip-wts">
+            {tasks.map((w) => {
+              const waits = waitsFor(w, snapshot.workItems);
+              const color = w.agentId ? agentColors.get(agentKey(w.sessionId, w.agentId)) : undefined;
+              return (
+                <li key={w.id} className={`ip-wt w-${w.status}`}>
+                  <span className="ip-work-mark">{TASK_MARK[w.status]}</span> {color && <span className="ip-work-agent" style={{ background: color }} />}
+                  {withoutOwnId(w.subject, w.nodeId)}{' '}
+                  <span className="muted">
+                    — {taskOwner(w, snapshot.sessions)}
+                    {waits.length ? ` · after ${waits.join(', ')}` : ''}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+      {agents.length > 0 && (
+        <>
+          <div className="ip-label">Subagents</div>
+          <ul className="ip-dagents">
+            {agents.map(({ session, agent }) => (
+              <li
+                key={agentKey(session.id, agent.agentId)}
+                className={`ip-dagent${agent.endedAt ? ' ended' : ''}`}
+                style={{ '--agent': agentColors.get(agentKey(session.id, agent.agentId)) } as CSSProperties}
+                title={`${agent.agentType}, for ${sessionDisplayTitle(session)}`}
+              >
+                <span className="ip-agent-dot">◆</span> {agentLine(agent, now, nodeId)}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </>
+  );
+}
+
+export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResource, agentColors }: DetailsProps) {
   const [detail, setDetail] = useState<NodeDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -95,6 +153,7 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
           ))}
         </>
       )}
+      <LiveWork nodeId={node.id} snapshot={snapshot} agentColors={agentColors} />
       {detail.children.length > 0 && (
         <>
           <div className="ip-label">Steps</div>

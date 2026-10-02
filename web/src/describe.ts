@@ -16,7 +16,7 @@ function sessionLabel(id: string, snapshot: ProjectSnapshot | null): string {
 export function describeEvent(e: EventRow, snapshot: ProjectSnapshot | null): string {
   const d = (e.data ?? {}) as {
     ids?: number[]; parentId?: number; nodeId?: number; title?: string; path?: string;
-    changes?: { status?: { to: string } }; changed?: string[]; state?: string; focusNodeId?: number | null;
+    changes?: { status?: { to: string }; queue?: unknown }; changed?: string[]; state?: string; focusNodeId?: number | null;
   };
   switch (e.type) {
     case 'node.created':
@@ -44,7 +44,9 @@ export function describeEvent(e: EventRow, snapshot: ProjectSnapshot | null): st
     case 'project.created':
       return 'project created';
     case 'project.updated':
-      return 'project updated';
+      return d.changes?.queue ? 'Up next changed' : 'project updated';
+    case 'work.updated':
+      return `tasks updated on ${nodeLabel(d.nodeId ?? Number(e.entityId), snapshot)}`;
     case 'binding.created':
       return `folder bound: ${d.path ?? ''}`;
     case 'binding.deleted':

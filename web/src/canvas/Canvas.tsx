@@ -13,18 +13,28 @@ import {
 import { Background, BackgroundVariant, Controls, MiniMap, ReactFlow, useReactFlow, type Edge, type Node, type NodeChange, type Viewport } from '@xyflow/react';
 import { layoutOutline, type LayoutItem } from '../../../src/core/layout';
 import { buildIndex, type FoldOverrides } from '../../../src/core/tree';
-import type { EventRow, ProjectSnapshot } from '../../../src/core/types';
+import type { EventRow, ProjectSnapshot, WorkStatus } from '../../../src/core/types';
+import { agentKey } from '../agentColors';
+import { taskOwner, waitsFor } from '../live';
+import { useNow } from '../useNow';
+import { AgentBadge, type AgentBadgeData } from './AgentBadge';
 import { BadgeNode } from './BadgeNode';
 import { breadcrumbFor } from './breadcrumb';
 import { MoreNode, type MoreNodeData } from './MoreNode';
 import { NodeCard, type NodeCardData } from './NodeCard';
 import { visibleHeight } from './sheet';
 import { useCamera } from './useCamera';
+import { WorkDoneRow, type WorkDoneRowData } from './WorkDoneRow';
+import { WorkRow, type WorkRowData } from './WorkRow';
 
 /** How many frames a newly shown card gets to appear before focus stops waiting for it. */
 const FOCUS_FRAMES = 30;
+/** How often time-based labels ("12 min", "done 2 min ago") and the 5-minute grey-out of ended subagents catch up. */
+const CLOCK_MS = 30_000;
+/** A subagent no longer in view, or one whose colour is unknown. */
+const NO_AGENT_COLOR = '#aeaeb2';
 
-const nodeTypes = { ipNode: NodeCard, ipMore: MoreNode, ipBadge: BadgeNode };
+const nodeTypes = { ipNode: NodeCard, ipMore: MoreNode, ipBadge: BadgeNode, ipAgent: AgentBadge, ipWork: WorkRow, ipWorkDone: WorkDoneRow };
 
 export interface CanvasHandle {
   focusNode: (id: number) => void;
@@ -43,10 +53,20 @@ export interface CanvasProps {
   selectedNode: number | null;
   onSelectNode: (id: number) => void;
   onOpenResource: (id: number) => void;
+  /** Each subagent's colour, by agentKey. */
+  agentColors: ReadonlyMap<string, string>;
 }
+
+const WORK_MINIMAP: Record<WorkStatus, string> = { pending: '#c7c7cc', in_progress: '#0a84ff', completed: '#34c759' };
 
 function minimapColor(n: Node): string {
   if (n.type === 'ipBadge') return '#d97757';
+  if (n.type === 'ipAgent') {
+    const d = n.data as AgentBadgeData;
+    return d.agent.endedAt ? NO_AGENT_COLOR : d.color;
+  }
+  if (n.type === 'ipWork') return WORK_MINIMAP[(n.data as WorkRowData).item.status];
+  if (n.type === 'ipWorkDone') return WORK_MINIMAP.completed;
   if (n.type === 'ipMore') return '#aeaeb2';
   const d = n.data as NodeCardData;
   if (d.needsYou) return '#ff9f0a';
@@ -55,12 +75,26 @@ function minimapColor(n: Node): string {
   return '#aeaeb2';
 }
 
+/** A class on each minimap shape, by the kind of row it stands for. */
+const MINIMAP_CLASS: Record<string, string> = { ipNode: 'mm-node', ipMore: 'mm-more', ipBadge: 'mm-badge', ipAgent: 'mm-agent', ipWork: 'mm-work', ipWorkDone: 'mm-work-done' };
+const minimapClass = (n: Node): string => MINIMAP_CLASS[n.type ?? ''] ?? '';
+
 export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(props, ref) {
-  const { snapshot, overrides, onToggleFold, onOpenResource, onSelectNode, selectedNode } = props;
+  const { snapshot, overrides, onToggleFold, onOpenResource, onSelectNode, selectedNode, agentColors } = props;
   const rf = useReactFlow();
+  const now = useNow(CLOCK_MS);
   const layout = useMemo(
-    () => layoutOutline({ nodes: snapshot.nodes, resources: snapshot.resources, sessions: snapshot.sessions, overrides }),
-    [snapshot, overrides],
+    () =>
+      layoutOutline({
+        nodes: snapshot.nodes,
+        resources: snapshot.resources,
+        sessions: snapshot.sessions,
+        workItems: snapshot.workItems,
+        queue: snapshot.project.queue,
+        overrides,
+        now,
+      }),
+    [snapshot, overrides, now],
   );
   const index = useMemo(() => buildIndex(snapshot.nodes), [snapshot.nodes]);
   const [flash, setFlash] = useState<number | null>(null);
@@ -108,16 +142,40 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
   const nodes = useMemo<Node[]>(() => {
     const resourcesById = new Map(snapshot.resources.map((r) => [r.id, r]));
     const sessionsById = new Map(snapshot.sessions.map((s) => [s.id, s]));
+    const workById = new Map(snapshot.workItems.map((w) => [w.id, w]));
     const toNode = (item: LayoutItem): Node | null => {
       const position = { x: item.x, y: item.y };
       const measured = sizes[item.id];
+      const fixed = { id: item.id, position, measured, draggable: false, selectable: false };
       if (item.kind === 'more') {
         const data: MoreNodeData = { count: item.hiddenIds.length, parentId: item.parentId, firstId: item.hiddenIds[0], onExpand: expandRun };
-        return { id: item.id, type: 'ipMore', position, measured, data, draggable: false, selectable: false };
+        return { ...fixed, type: 'ipMore', data };
       }
       if (item.kind === 'badge') {
         const session = sessionsById.get(item.sessionId);
-        return session ? { id: item.id, type: 'ipBadge', position, measured, data: { session }, draggable: false, selectable: false } : null;
+        return session ? { ...fixed, type: 'ipBadge', data: { session } } : null;
+      }
+      if (item.kind === 'agent') {
+        const agent = sessionsById.get(item.sessionId)?.subagents.find((a) => a.agentId === item.agentId);
+        if (!agent) return null;
+        const data: AgentBadgeData = { agent, nodeId: item.nodeId, color: agentColors.get(agentKey(item.sessionId, item.agentId)) ?? NO_AGENT_COLOR, now };
+        return { ...fixed, type: 'ipAgent', data };
+      }
+      if (item.kind === 'work') {
+        const w = workById.get(item.workId);
+        if (!w) return null;
+        const data: WorkRowData = {
+          item: w,
+          pulse: item.pulse,
+          color: w.agentId ? (agentColors.get(agentKey(w.sessionId, w.agentId)) ?? NO_AGENT_COLOR) : null,
+          owner: taskOwner(w, snapshot.sessions),
+          waits: waitsFor(w, snapshot.workItems),
+        };
+        return { ...fixed, type: 'ipWork', data };
+      }
+      if (item.kind === 'workDone') {
+        const data: WorkDoneRowData = { nodeId: item.nodeId, count: item.count, open: item.open, onToggleFold };
+        return { ...fixed, type: 'ipWorkDone', data };
       }
       const node = index.byId.get(item.nodeId)!;
       const data: NodeCardData = {
@@ -128,6 +186,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
         needsYou: item.needsYou,
         hasChildren: item.hasChildren,
         working: item.working,
+        queuePos: item.queuePos,
         resources: item.resourceIds.map((id) => resourcesById.get(id)).filter((r): r is NonNullable<typeof r> => !!r),
         flash: flash === item.nodeId,
         selected: selectedNode === item.nodeId,
@@ -135,10 +194,10 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
         onToggleFold,
         onOpenResource,
       };
-      return { id: item.id, type: 'ipNode', position, measured, data, draggable: false, selectable: false };
+      return { ...fixed, type: 'ipNode', data };
     };
     return layout.items.map(toNode).filter((n): n is Node => n !== null);
-  }, [layout, index, snapshot.resources, snapshot.sessions, flash, selectedNode, onSelectNode, onToggleFold, onOpenResource, expandRun, sizes]);
+  }, [layout, index, snapshot, agentColors, now, flash, selectedNode, onSelectNode, onToggleFold, onOpenResource, expandRun, sizes]);
 
   const edges = useMemo<Edge[]>(
     () =>
@@ -313,7 +372,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
         {/* display: contents leaves the panel positioned by React Flow. Capture-phase handlers, because the
             minimap's d3 handlers stop wheel and mousedown events from bubbling. */}
         <div style={{ display: 'contents' }} onPointerDownCapture={armMinimap} onWheelCapture={manualMove}>
-          <MiniMap position="bottom-right" pannable zoomable nodeColor={minimapColor} />
+          <MiniMap position="bottom-right" pannable zoomable nodeColor={minimapColor} nodeClassName={minimapClass} />
         </div>
         <Controls position="bottom-left" showInteractive={false} onZoomIn={manualMove} onZoomOut={manualMove} onFitView={manualMove} />
       </ReactFlow>

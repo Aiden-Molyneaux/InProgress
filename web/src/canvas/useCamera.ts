@@ -98,7 +98,7 @@ export function useCamera({ layout, snapshot, index, lastEvent, follow, selected
   const centerOnFrontier = useCallback(
     (duration = 400, zoom?: number) => {
       const s = snapRef.current;
-      const id = findFrontier(s.nodes, s.sessions, layoutRef.current);
+      const id = findFrontier(s.nodes, s.sessions, layoutRef.current, s.project.queue);
       const item = id !== undefined ? itemFor(id) : undefined;
       if (item) moveTo(item.x + CARD_CENTER_X, item.y + NODE_H / 2, duration, zoom);
     },

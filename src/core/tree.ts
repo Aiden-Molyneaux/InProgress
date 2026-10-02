@@ -62,7 +62,8 @@ export function countDone(index: TreeIndex, id: number): number {
   return count;
 }
 
-export function pinnedIds(index: TreeIndex, sessions: SessionLike[]): Set<number> {
+/** Nodes the fold rules never hide, with their ancestors: active and needs-you nodes, live sessions' focus, and `extra`. */
+export function pinnedIds(index: TreeIndex, sessions: SessionLike[], extra: Iterable<number> = []): Set<number> {
   const pinned = new Set<number>();
   const pin = (id: number) => {
     let cur = index.byId.get(id);
@@ -75,6 +76,7 @@ export function pinnedIds(index: TreeIndex, sessions: SessionLike[]): Set<number
     if (n.parentId !== null && (n.status === 'active' || isNeedsYou(n))) pin(n.id);
   }
   for (const s of sessions) if (s.state !== 'ended' && s.focusNodeId !== null) pin(s.focusNodeId);
+  for (const id of extra) pin(id);
   return pinned;
 }
 
@@ -95,13 +97,15 @@ export type VisibleItem =
 export interface VisibleOptions {
   overrides?: FoldOverrides;
   noFold?: boolean;
+  /** More nodes to keep in view, as a session's focus is. The canvas pins where subagents and tasks in progress are. */
+  pins?: Iterable<number>;
 }
 
 export function computeVisible(index: TreeIndex, sessions: SessionLike[], opts: VisibleOptions = {}): VisibleItem[] {
   const out: VisibleItem[] = [];
   if (!index.root) return out;
   const overrides = opts.overrides ?? {};
-  const pinned = pinnedIds(index, sessions);
+  const pinned = pinnedIds(index, sessions, opts.pins);
 
   const isFolded = (n: TreeNode): boolean => {
     if (opts.noFold || kids(index, n.id).length === 0) return false;
