@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { install, nodeBinary } from '../../src/cli/claude-config';
 import { runCli } from '../../src/cli/commands';
-import { runChecks, type Check } from '../../src/cli/doctor';
+import { doctor, runChecks, type Check } from '../../src/cli/doctor';
 import { edgeArgs } from '../../src/cli/open';
 import { isServerUp } from '../../src/lib/ensure-server';
 import { ensureToken } from '../../src/lib/home';
@@ -255,6 +255,13 @@ function editSessionStartHook(settingsFile: string, edit: (hook: { command: stri
   writeFileSync(settingsFile, JSON.stringify(settings, null, 2));
 }
 
+/** Rewrite every hook entry in place (installedClaudeDir's settings hold only InProgress's). */
+function editEveryHook(settingsFile: string, edit: (hook: { command: string; args: string[] }) => void): void {
+  const settings = JSON.parse(readFileSync(settingsFile, 'utf8'));
+  for (const groups of Object.values(settings.hooks) as { hooks: { command: string; args: string[] }[] }[][]) for (const g of groups) g.hooks.forEach(edit);
+  writeFileSync(settingsFile, JSON.stringify(settings, null, 2));
+}
+
 const checksFor = (repo: string, claude: string) => runChecks({ baseUrl: base, home, claudeDir: claude, repo, skipMcp: true });
 const named = (checks: Check[], name: string) => checks.find((c) => c.name === name);
 
@@ -288,6 +295,8 @@ describe('doctor checks', () => {
     const after = await runChecks({ baseUrl: base, home, claudeDir: claude, repo, skipMcp: true });
     const failing = after.filter((c) => !c.ok && !c.warnOnly).map((c) => `${c.name}: ${c.detail}`);
     expect(failing).toEqual([]);
+    // Installed by the Node running these checks, so not even a warning.
+    expect(named(after, 'Hooks')).toEqual({ name: 'Hooks', ok: true, detail: 'all installed' });
   });
 
   it('names a fix for every failure, and skips the MCP check when the server check fails', async () => {
@@ -347,6 +356,25 @@ describe('doctor checks', () => {
       ok: false,
       detail: 'hook script C:/moved/InProgress/dist/hooks/hook.js no longer exists: run npm run deploy, or rerun npm run claude:install if the repo moved',
     });
+  });
+
+  it("warns, without failing, when the hooks run another Node than this shell's", async () => {
+    const { repo, claude, settingsFile } = installedClaudeDir();
+    // After an nvm switch the hooks keep the Node that ran install, which still exists.
+    const pinned = join(tempDir('ip-node-'), 'node.exe').replace(/\\/g, '/');
+    writeFileSync(pinned, '');
+    editEveryHook(settingsFile, (h) => (h.command = pinned));
+    const detail = `hooks run ${pinned}; this shell's node is ${nodeBinary()}: after an nvm switch, rerun npm run claude:install`;
+    expect(named(await checksFor(repo, claude), 'Hooks')).toEqual({ name: 'Hooks', ok: false, warnOnly: true, detail });
+    const s = capture();
+    expect(await doctor({ baseUrl: base, home, claudeDir: claude, repo, skipMcp: true }, s.out)).toBe(0);
+    expect(s.lines).toContain(`! Hooks: ${detail}`);
+  });
+
+  it.runIf(process.platform === 'win32')("compares the hooks' Node with this shell's regardless of case and slash direction", async () => {
+    const { repo, claude, settingsFile } = installedClaudeDir();
+    editEveryHook(settingsFile, (h) => (h.command = nodeBinary().toUpperCase().replace(/\//g, '\\')));
+    expect(named(await checksFor(repo, claude), 'Hooks')).toEqual({ name: 'Hooks', ok: true, detail: 'all installed' });
   });
 
   it('reports an unparseable settings.json instead of missing hooks', async () => {

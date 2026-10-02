@@ -5,7 +5,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import Database from 'better-sqlite3';
 import { readToken } from '../lib/home';
 import { buildLabel, readBuild, sameBuild, VERSION, type BuildInfo } from '../lib/version';
-import { ALLOW_RULES, HOOK_DEFS, isInProgressHook, settingsShapeError } from './claude-config';
+import { ALLOW_RULES, HOOK_DEFS, isInProgressHook, nodeBinary, settingsShapeError } from './claude-config';
 import { findEdge } from './open';
 
 export interface Check {
@@ -114,6 +114,12 @@ async function mcpCheck(entry: string): Promise<Check> {
   }
 }
 
+/** A path for comparison: forward slashes, and on Windows no case. */
+const pathKey = (path: string): string => {
+  const slashed = path.replace(/\\/g, '/');
+  return process.platform === 'win32' ? slashed.toLowerCase() : slashed;
+};
+
 function hooksCheck(file: string, settings: { value?: Json; error?: string }): Check {
   const fail = (detail: string): Check => ({ name: 'Hooks', ok: false, detail });
   if (settings.error) return fail(invalidSettings(file, settings.error));
@@ -129,6 +135,13 @@ function hooksCheck(file: string, settings: { value?: Json; error?: string }): C
   // A moved repo or a deleted dist/ leaves the hooks pointing at a script that is gone.
   const badScript = ours.map((h) => h.args?.[0]).find((script) => script && !existsSync(script));
   if (badScript) return fail(`hook script ${badScript} no longer exists: run npm run deploy, or rerun npm run claude:install if the repo moved`);
+  // The hooks keep the Node that ran install. After an nvm switch this shell runs another one, and once the repo's
+  // native modules are rebuilt for it, a server the hooks start under the old Node cannot load better-sqlite3.
+  const node = nodeBinary();
+  const otherNode = ours.map((h) => h.command).find((command) => command && pathKey(command) !== pathKey(node));
+  if (otherNode) {
+    return { name: 'Hooks', ok: false, warnOnly: true, detail: `hooks run ${otherNode}; this shell's node is ${node}: after an nvm switch, rerun npm run claude:install` };
+  }
   return { name: 'Hooks', ok: true, detail: 'all installed' };
 }
 
