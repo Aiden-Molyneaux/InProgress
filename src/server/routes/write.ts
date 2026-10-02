@@ -3,10 +3,10 @@ import { actorOf, type Guard } from '../app';
 import type { Ctx } from '../db/tx';
 import { addLog } from '../repo/logs';
 import { addNodes, deleteNode, moveNode, updateNode } from '../repo/nodes';
-import { addBinding, createProject, removeBinding, updateProject } from '../repo/projects';
+import { addBinding, createProject, removeBinding, setQueue, updateProject } from '../repo/projects';
 import { addResource, deleteResource, updateResource } from '../repo/resources';
 import {
-  addNodesBody, bindingBody, createProjectBody, idParam, logBody, moveNodeBody,
+  addNodesBody, bindingBody, createProjectBody, idParam, logBody, moveNodeBody, queueBody,
   resourceBody, resourcePatchBody, updateNodeBody, updateProjectBody,
 } from '../schemas';
 
@@ -16,6 +16,7 @@ export function registerWriteRoutes(app: FastifyInstance, ctx: Ctx, requireToken
 
   app.post('/api/projects', guarded, async (req, reply) => reply.code(201).send(createProject(ctx, actorOf(req), createProjectBody.parse(req.body))));
   app.patch('/api/projects/:ref', guarded, async (req) => updateProject(ctx, actorOf(req), ref(req.params), updateProjectBody.parse(req.body)));
+  app.post('/api/projects/:ref/queue', guarded, async (req) => setQueue(ctx, actorOf(req), ref(req.params), queueBody.parse(req.body).nodes));
   app.post('/api/projects/:ref/bindings', guarded, async (req, reply) => {
     const body = bindingBody.parse(req.body);
     return reply.code(201).send(addBinding(ctx, actorOf(req), ref(req.params), body.path, body.branchPattern));

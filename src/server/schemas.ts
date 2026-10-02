@@ -75,6 +75,13 @@ export const hookBody = z
     addBlockedBy: z.array(z.string().min(1).max(100)).max(100).optional(),
   })
   .strict();
+export const queueBody = z.object({ nodes: z.array(z.number().int().positive()).max(200) }).strict();
+export const tasksBody = z
+  .object({
+    nodeId: z.number().int().positive(),
+    tasks: z.array(z.object({ subject: z.string().trim().min(1, 'subject is empty').max(300), status: z.enum(WORK_STATUSES) }).strict()).max(50),
+  })
+  .strict();
 export const enrollBody = z.object({ project: z.union([z.string().min(1), z.number().int().positive()]), title: z.string().max(300).optional() }).strict();
 export const focusBody = z.object({ nodeId: z.number().int().positive().nullable() }).strict();
 export const openBody = z.object({ resourceId: z.number().int().positive() }).strict();

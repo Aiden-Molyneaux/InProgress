@@ -195,6 +195,74 @@ describe('session routes', () => {
   });
 });
 
+describe('live work routes', () => {
+  async function planned() {
+    const { app } = setup();
+    const p = (await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'InGame' } })).json();
+    const nodes = (await app.inject({ method: 'POST', url: '/api/nodes', headers: auth, payload: { parentId: p.rootNodeId, nodes: [{ title: 'Tabs' }, { title: 'Guide' }, { title: 'Polish' }] } })).json();
+    await app.inject({ method: 'POST', url: '/api/sessions/s1/enroll', headers: auth, payload: { project: 'ingame' } });
+    return { app, p, ids: nodes.map((n: { id: number }) => n.id) as number[] };
+  }
+
+  it('sets the queue, which the snapshot and the outline show', async () => {
+    const { app, ids: [tabs, guide] } = await planned();
+    const res = await app.inject({ method: 'POST', url: '/api/projects/ingame/queue', headers: auth, payload: { nodes: [guide, tabs] } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ slug: 'ingame', queue: [guide, tabs] });
+    expect((await app.inject({ url: '/api/projects/ingame' })).json().project.queue).toEqual([guide, tabs]);
+    const lines = (await app.inject({ url: '/api/projects/ingame/outline' })).body.split('\n');
+    expect(lines.slice(0, 2)).toEqual(['Project InGame (slug ingame)', `Up next: #${guide} → #${tabs}`]);
+    await app.inject({ method: 'POST', url: '/api/projects/ingame/queue', headers: auth, payload: { nodes: [] } });
+    expect((await app.inject({ url: '/api/projects/ingame/outline' })).body).not.toContain('Up next');
+  });
+
+  it('refuses a queue with a node of another project, an unknown project, or no token', async () => {
+    const { app, ids } = await planned();
+    const other = (await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'Other' } })).json();
+    const bad = await app.inject({ method: 'POST', url: '/api/projects/ingame/queue', headers: auth, payload: { nodes: [ids[0], other.rootNodeId] } });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json()).toEqual({ error: `#${other.rootNodeId} is not in project ingame`, hint: 'Use get_outline to find the right #id.' });
+    expect((await app.inject({ method: 'POST', url: '/api/projects/nope/queue', headers: auth, payload: { nodes: [] } })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'POST', url: '/api/projects/ingame/queue', payload: { nodes: [] } })).statusCode).toBe(401);
+    expect((await app.inject({ method: 'POST', url: '/api/projects/ingame/queue', headers: auth, payload: { nodes: ['#1'] } })).statusCode).toBe(400);
+  });
+
+  it("replaces a session's working tasks on a node, which the snapshot shows", async () => {
+    const { app, ids: [tabs] } = await planned();
+    const tasks = [{ subject: 'Build the tab strip', status: 'in_progress' }, { subject: 'Wire the hash route', status: 'pending' }];
+    const res = await app.inject({ method: 'POST', url: '/api/sessions/s1/tasks', headers: auth, payload: { nodeId: tabs, tasks } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().map((t: { subject: string; status: string }) => [t.subject, t.status])).toEqual([['Build the tab strip', 'in_progress'], ['Wire the hash route', 'pending']]);
+    const snap = (await app.inject({ url: '/api/projects/ingame' })).json();
+    expect(snap.workItems).toEqual([
+      expect.objectContaining({ nodeId: tabs, sessionId: 's1', agentId: '', subject: 'Build the tab strip', status: 'in_progress', blocks: [] }),
+      expect.objectContaining({ nodeId: tabs, sessionId: 's1', agentId: '', subject: 'Wire the hash route', status: 'pending', blocks: [] }),
+    ]);
+    const untracked = await app.inject({ method: 'POST', url: '/api/sessions/nobody/tasks', headers: auth, payload: { nodeId: tabs, tasks } });
+    expect(untracked.statusCode).toBe(400);
+    expect(untracked.json().error).toBe('Session nobody is not tracked');
+    const badStatus = await app.inject({ method: 'POST', url: '/api/sessions/s1/tasks', headers: auth, payload: { nodeId: tabs, tasks: [{ subject: 'x', status: 'deleted' }] } });
+    expect(badStatus.statusCode).toBe(400);
+  });
+
+  it('takes the live-work fields on the hook route, and refuses unknown ones', async () => {
+    const { app } = await planned();
+    const post = (payload: object) => app.inject({ method: 'POST', url: '/api/sessions/s1/hook', headers: auth, payload });
+    for (const payload of [
+      { event: 'agent-dispatch', toolUseId: 'toolu_1', agentType: 'Explore', description: 'Map the hooks', model: 'sonnet' },
+      { event: 'subagent-start', agentId: 'a1', agentType: 'Explore' },
+      { event: 'agent-launched', toolUseId: 'toolu_1', agentId: 'a1', model: 'sonnet-5' },
+      { event: 'task-created', taskKey: '1', subject: 'Write it' },
+      { event: 'task-updated', taskKey: '1', status: 'in_progress', subject: 'Write it now', addBlocks: ['2'], addBlockedBy: [], agentId: 'a1' },
+    ]) {
+      expect((await post(payload)).json(), payload.event).toEqual({ tracked: true });
+    }
+    expect((await post({ event: 'task-created', taskKey: '2', subject: 'x', prompt: 'never sent' })).statusCode).toBe(400);
+    expect((await post({ event: 'task-updated', taskKey: '2', status: 'archived' })).statusCode).toBe(400);
+    expect((await post({ event: 'task-created', taskKey: '3', subject: 'x'.repeat(301) })).statusCode).toBe(400);
+  });
+});
+
 describe('outline', () => {
   it('heads the outline with the project playbook when there is one', async () => {
     const { app } = setup();
