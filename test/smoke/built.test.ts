@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { ProjectSnapshot, TreeNode } from '../../src/core/types';
 import { nodeBinary } from '../../src/cli/claude-config';
 import { createClient } from '../../src/lib/client';
 import { isServerUp } from '../../src/lib/ensure-server';
@@ -25,6 +26,8 @@ let server: ChildProcess | undefined;
 
 const sessionStart = (sessionId: string) => JSON.stringify({ session_id: sessionId, cwd: bound, source: 'startup' });
 const briefing = (stdout: string) => (JSON.parse(stdout) as { hookSpecificOutput: { hookEventName: string; additionalContext: string } }).hookSpecificOutput;
+/** Run the built hook with this stdin payload, as Claude Code would. */
+const runHook = (name: string, payload: object) => spawnSync(process.execPath, [bin('hooks/hook.js'), name], { input: JSON.stringify(payload), env, encoding: 'utf8' });
 
 /** A port nothing is listening on, so a stale server from an earlier run can never answer. */
 function freePort(): Promise<number> {
@@ -85,6 +88,44 @@ describe('built artifacts', () => {
     expect(r.stderr).toBe('');
     expect(r.status).toBe(0);
     expect(briefing(r.stdout).additionalContext).toContain('Session id: smoke-bom');
+  });
+
+  it('the post-tool hook mirrors a TaskCreate and a TaskUpdate, silently', async () => {
+    const client = createClient({ baseUrl: base, token: readToken(home) });
+    const { project } = await client.get<ProjectSnapshot>('/api/projects/smoke');
+    const [step] = await client.post<TreeNode[]>('/api/nodes', { parentId: project.rootNodeId, nodes: [{ title: 'Smoke the hooks', status: 'active' }] });
+    const subject = `#${step.id} Write the smoke test`;
+    const created = runHook('post-tool', {
+      session_id: 'smoke-1', hook_event_name: 'PostToolUse', tool_name: 'TaskCreate', tool_use_id: 'toolu_smoke_1',
+      tool_input: { subject, description: 'A task description stays in Claude Code' }, tool_response: { task: { id: '1', subject } },
+    });
+    expect(created).toMatchObject({ status: 0, stdout: '', stderr: '' });
+    const updated = runHook('post-tool', {
+      session_id: 'smoke-1', hook_event_name: 'PostToolUse', tool_name: 'TaskUpdate', tool_use_id: 'toolu_smoke_2',
+      tool_input: { taskId: '1', status: 'in_progress' }, tool_response: { success: true, taskId: '1', updatedFields: ['status'] },
+    });
+    expect(updated).toMatchObject({ status: 0, stdout: '', stderr: '' });
+    const { workItems } = await client.get<ProjectSnapshot>('/api/projects/smoke');
+    expect(workItems).toEqual([expect.objectContaining({ nodeId: step.id, sessionId: 'smoke-1', agentId: '', subject, status: 'in_progress' })]);
+  });
+
+  it('pre-tool, subagent-start and post-tool pair a subagent with its description and node', async () => {
+    const client = createClient({ baseUrl: base, token: readToken(home) });
+    const step = (await client.get<ProjectSnapshot>('/api/projects/smoke')).nodes.find((n) => n.title === 'Smoke the hooks')!;
+    const toolInput = { description: `#${step.id} Map the smoke run`, prompt: 'A prompt stays in Claude Code', subagent_type: 'Explore', model: 'haiku' };
+    const dispatch = runHook('pre-tool', { session_id: 'smoke-1', hook_event_name: 'PreToolUse', tool_name: 'Agent', tool_use_id: 'toolu_smoke_agent', tool_input: toolInput });
+    expect(dispatch).toMatchObject({ status: 0, stdout: '', stderr: '' });
+    const started = runHook('subagent-start', { session_id: 'smoke-1', hook_event_name: 'SubagentStart', agent_id: 'a0smoke0agent0001', agent_type: 'Explore' });
+    expect(started).toMatchObject({ status: 0, stdout: '', stderr: '' });
+    const launched = runHook('post-tool', {
+      session_id: 'smoke-1', hook_event_name: 'PostToolUse', tool_name: 'Agent', tool_use_id: 'toolu_smoke_agent', tool_input: toolInput,
+      tool_response: [{ type: 'text', text: 'Async agent launched successfully.\nagentId: a0smoke0agent0001 (internal ID - do not mention to user.)' }],
+    });
+    expect(launched).toMatchObject({ status: 0, stdout: '', stderr: '' });
+    const session = (await client.get<ProjectSnapshot>('/api/projects/smoke')).sessions.find((s) => s.id === 'smoke-1')!;
+    expect(session.subagents).toEqual([
+      { agentId: 'a0smoke0agent0001', agentType: 'Explore', startedAt: expect.any(String), description: `#${step.id} Map the smoke run`, model: 'haiku', nodeId: step.id, endedAt: null },
+    ]);
   });
 
   it('a hook whose reader has gone away exits 0 without stderr', async () => {
