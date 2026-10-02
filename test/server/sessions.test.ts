@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { homeDir } from '../../src/lib/home';
 import { updateRules } from '../../src/server/briefing';
 import { listEventsSince, maxEventId } from '../../src/server/repo/events';
-import { addNodes } from '../../src/server/repo/nodes';
-import { addBinding, createProject, updateProject } from '../../src/server/repo/projects';
+import { addNodes, updateNode } from '../../src/server/repo/nodes';
+import { addBinding, createProject, setQueue, updateProject } from '../../src/server/repo/projects';
 import { addResource } from '../../src/server/repo/resources';
 import { findSession, listProjectSessions } from '../../src/server/repo/sessions';
 import { getNodeDetail, getProjectSnapshot } from '../../src/server/repo/snapshot';
@@ -138,10 +138,70 @@ describe('handleHookEvent', () => {
     handleHookEvent(ctx, 's1', { event: 'subagent-start', agentId: 'a3', agentType: '' });
     expect(findSession(ctx, 's1')?.subagents.map((s) => s.agentType)).toEqual(['Explore']);
     handleHookEvent(ctx, 's1', { event: 'subagent-stop', agentId: 'a1', agentType: 'Explore' });
-    expect(findSession(ctx, 's1')?.subagents).toEqual([]);
+    // Stopped, not forgotten: it shows as ended for a few minutes.
+    expect(findSession(ctx, 's1')?.subagents).toEqual([expect.objectContaining({ agentId: 'a1', endedAt: expect.any(String) })]);
     handleHookEvent(ctx, 's1', { event: 'subagent-start', agentId: 'a4', agentType: 'general-purpose' });
     handleHookEvent(ctx, 's1', { event: 'end' });
     expect(findSession(ctx, 's1')).toMatchObject({ state: 'ended', subagents: [] });
+  });
+});
+
+describe('briefing: live work', () => {
+  it('names the planned order in an Up next line after where things stand, leaving out finished steps', () => {
+    const { ctx, project, a2, a3 } = setup();
+    setQueue(ctx, 'scribe:s1', project.slug, [a3.id, a2.id]);
+    const text = handleHookEvent(ctx, 's1', start()).context!;
+    expect(text).toContain(`\nUp next: #${a3.id} Run signing tests → #${a2.id} Play app signing\n`);
+    expect(text.indexOf('Where things stand:')).toBeLessThan(text.indexOf('Up next:'));
+    expect(text.indexOf('Up next:')).toBeLessThan(text.indexOf('Needs you (1)'));
+    updateNode(ctx, 'test', a3.id, { status: 'done' });
+    expect(handleHookEvent(ctx, 's1', { event: 'prompt', asksStatus: true }).context).toMatch(new RegExp(`\\nUp next: #${a2.id} Play app signing$`));
+  });
+
+  it('caps the Up next line at five steps', () => {
+    const { ctx, project, road } = setup();
+    const steps = addNodes(ctx, 'test', { parentId: road.id, nodes: Array.from({ length: 7 }, (_, i) => ({ title: `Step ${i + 1}` })) });
+    setQueue(ctx, 'scribe:s1', project.slug, steps.map((n) => n.id));
+    const line = handleHookEvent(ctx, 's1', start()).context!.split('\n').find((l) => l.startsWith('Up next:'));
+    expect(line).toBe(`Up next: ${steps.slice(0, 5).map((n) => `#${n.id} ${n.title}`).join(' → ')} (+2 more)`);
+  });
+
+  it("lists the focused step's working tasks under it: in progress first, then pending, at most 5", () => {
+    const { ctx, a2, a3 } = setup();
+    handleHookEvent(ctx, 's1', start());
+    setFocus(ctx, 'scribe:s1', 's1', a2.id);
+    for (let i = 1; i <= 7; i++) handleHookEvent(ctx, 's1', { event: 'task-created', taskKey: String(i), subject: `Task ${i}` });
+    handleHookEvent(ctx, 's1', { event: 'task-updated', taskKey: '6', status: 'in_progress' });
+    handleHookEvent(ctx, 's1', { event: 'task-updated', taskKey: '3', status: 'in_progress' });
+    handleHookEvent(ctx, 's1', { event: 'task-updated', taskKey: '2', status: 'completed' });
+    const lines = handleHookEvent(ctx, 's1', { event: 'prompt', asksStatus: true }).context!.split('\n');
+    const at = lines.findIndex((l) => l.includes(`#${a2.id} Play app signing — active  ◆ this session`));
+    expect(lines.slice(at + 1, at + 7)).toEqual([
+      '        ◐ Task 3',
+      '        ◐ Task 6',
+      '        ○ Task 1',
+      '        ○ Task 4',
+      '        ○ Task 5',
+      `      #${a3.id} Run signing tests — NEEDS YOU`,
+    ]);
+  });
+
+  it('shows no task lines without a focus, and no Up next line without a queue', () => {
+    const { ctx } = setup();
+    handleHookEvent(ctx, 's1', start());
+    handleHookEvent(ctx, 's1', { event: 'task-created', taskKey: '1', subject: 'Unfocused work' });
+    const text = handleHookEvent(ctx, 's1', start()).context!;
+    expect(text).not.toContain('Unfocused work');
+    expect(text).not.toContain('Up next');
+  });
+
+  it('carries the live-work rules: #id on subagents and tasks, the task tools, the queue, new requests', () => {
+    const rules = updateRules('C:/Users/me/.inprogress').join('\n');
+    expect(rules).toContain('"queue: #a, #b, #c"');
+    expect(rules).toContain('a new request with a deliverable arrives (it becomes a step right away)');
+    expect(rules).toContain('"#44 Build project tabs"');
+    expect(rules).toContain('TaskCreate');
+    expect(rules).toContain('tasks on #57:');
   });
 });
 

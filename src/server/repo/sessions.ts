@@ -1,5 +1,6 @@
-import { STALE_SESSION_MS, type Session, type SessionState, type SubagentInfo } from '../../core/types';
+import { STALE_SESSION_MS, type Session, type SessionState } from '../../core/types';
 import { write, type Ctx } from '../db/tx';
+import { clearSubagents, listSubagents } from './subagents';
 
 interface SessionRow {
   id: string;
@@ -16,11 +17,6 @@ interface SessionRow {
   ended_at: string | null;
 }
 
-function subagentsOf(ctx: Ctx, sessionId: string): SubagentInfo[] {
-  return (ctx.db.prepare('SELECT agent_id, agent_type, started_at FROM session_subagents WHERE session_id = ? ORDER BY started_at, agent_id').all(sessionId) as { agent_id: string; agent_type: string; started_at: string }[])
-    .map((r) => ({ agentId: r.agent_id, agentType: r.agent_type, startedAt: r.started_at }));
-}
-
 const toSession = (ctx: Ctx, r: SessionRow): Session => ({
   id: r.id,
   projectId: r.project_id,
@@ -34,7 +30,7 @@ const toSession = (ctx: Ctx, r: SessionRow): Session => ({
   startedAt: r.started_at,
   lastSeenAt: r.last_seen_at,
   endedAt: r.ended_at,
-  subagents: subagentsOf(ctx, r.id),
+  subagents: listSubagents(ctx, r.id),
 });
 
 export function findSession(ctx: Ctx, id: string): Session | undefined {
@@ -78,16 +74,4 @@ export function listProjectSessions(ctx: Ctx, projectId: number): Session[] {
   expireStaleSessions(ctx);
   return (ctx.db.prepare("SELECT * FROM sessions WHERE project_id = ? AND state != 'ended' ORDER BY last_seen_at DESC").all(projectId) as SessionRow[])
     .map((r) => toSession(ctx, r));
-}
-
-export function addSubagent(ctx: Ctx, sessionId: string, agentId: string, agentType: string, at: string): void {
-  ctx.db.prepare('INSERT OR IGNORE INTO session_subagents (session_id, agent_id, agent_type, started_at) VALUES (?, ?, ?, ?)').run(sessionId, agentId, agentType, at);
-}
-
-export function removeSubagent(ctx: Ctx, sessionId: string, agentId: string): void {
-  ctx.db.prepare('DELETE FROM session_subagents WHERE session_id = ? AND agent_id = ?').run(sessionId, agentId);
-}
-
-export function clearSubagents(ctx: Ctx, sessionId: string): void {
-  ctx.db.prepare('DELETE FROM session_subagents WHERE session_id = ?').run(sessionId);
 }

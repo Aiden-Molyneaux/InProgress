@@ -6,6 +6,7 @@ import { listNodes, requireNode } from './nodes';
 import { resolveProject } from './projects';
 import { listNodeResources, listResourceMeta } from './resources';
 import { listProjectSessions } from './sessions';
+import { listWorkItems } from './work';
 
 /**
  * Everything the UI and briefing need for one project. Reads sessions through
@@ -14,11 +15,13 @@ import { listProjectSessions } from './sessions';
  */
 export function getProjectSnapshot(ctx: Ctx, ref: string | number): ProjectSnapshot {
   const project = resolveProject(ctx, ref);
+  const sessions = listProjectSessions(ctx, project.id);
   return {
     project,
     nodes: listNodes(ctx, project.id),
     resources: listResourceMeta(ctx, project.id),
-    sessions: listProjectSessions(ctx, project.id),
+    sessions,
+    workItems: listWorkItems(ctx, project.id, sessions.map((s) => s.id)),
     lastEventId: maxEventId(ctx),
     lastEvent: lastProjectEvent(ctx, project.id),
   };

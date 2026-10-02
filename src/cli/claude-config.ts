@@ -28,6 +28,9 @@ export const HOOK_DEFS: HookDef[] = [
   { event: 'SubagentStart', name: 'subagent-start', matcher: NOT_SCRIBE, timeout: 5 },
   { event: 'SubagentStop', name: 'subagent-stop', matcher: NOT_SCRIBE, timeout: 5 },
   { event: 'SessionEnd', name: 'session-end', timeout: 5 },
+  // Live work: a subagent's dispatch before the Agent tool runs; its launch, and the task tools' changes, after.
+  { event: 'PreToolUse', name: 'pre-tool', matcher: '^(Agent|Task)$', timeout: 5 },
+  { event: 'PostToolUse', name: 'post-tool', matcher: '^(Agent|Task|TaskCreate|TaskUpdate)$', timeout: 5 },
 ];
 
 type HookEntry = { type?: string; command?: string; args?: string[]; timeout?: number };

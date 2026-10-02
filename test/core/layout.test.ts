@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { BADGE_ROW, INDENT, ROW, eventTarget, findFrontier, layoutOutline } from '../../src/core/layout';
-import type { EventRow, ResourceMeta, Session, TreeNode } from '../../src/core/types';
+import { BADGE_ROW, ENDED_AGENT_MS, INDENT, ROW, WORK_GAP, WORK_ROW, eventTarget, findFrontier, layoutOutline, type LayoutItem, type LayoutResult } from '../../src/core/layout';
+import type { EventRow, ResourceMeta, Session, SubagentInfo, TreeNode, WorkItem, WorkStatus } from '../../src/core/types';
 
 let nextId = 1;
 function n(parentId: number | null, title: string, extra: Partial<TreeNode> = {}): TreeNode {
@@ -101,6 +101,177 @@ describe('layoutOutline', () => {
   });
 });
 
+const T0 = Date.parse('2026-10-02T12:00:00Z');
+const ago = (ms: number) => new Date(T0 - ms).toISOString();
+const agent = (agentId: string, extra: Partial<SubagentInfo> = {}): SubagentInfo => ({
+  agentId, agentType: 'general-purpose', startedAt: ago(60_000), description: `Agent ${agentId}`, model: 'sonnet', nodeId: null, endedAt: null, ...extra,
+});
+let nextWork = 100;
+function work(nodeId: number, status: WorkStatus, extra: Partial<WorkItem> = {}): WorkItem {
+  const id = nextWork++;
+  return { id, nodeId, sessionId: 's1', agentId: '', subject: `Task ${id}`, status, blocks: [], position: id, updatedAt: 't', ...extra };
+}
+const withAgents = (s: Session, subagents: SubagentInfo[]): Session => ({ ...s, subagents });
+/** The layout's rows of these kinds, as [kind, id, nodeId, x, y]. */
+const rowsOf = (l: LayoutResult, ...kinds: LayoutItem['kind'][]) =>
+  l.items.filter((i) => kinds.includes(i.kind)).map((i) => [i.kind, i.id, 'nodeId' in i ? i.nodeId : null, i.x, i.y]);
+
+describe('working tasks', () => {
+  it('sit in compact rows one level under their node, in position order, with a gap after them', () => {
+    const t = sample();
+    const first = work(t.a1.id, 'in_progress', { position: 1 });
+    const second = work(t.a1.id, 'pending', { position: 2 });
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [], workItems: [second, first], now: T0 });
+    expect(rowsOf(l, 'work', 'workDone')).toEqual([
+      ['work', `w${first.id}`, t.a1.id, 3 * INDENT, 3 * ROW],
+      ['work', `w${second.id}`, t.a1.id, 3 * INDENT, 3 * ROW + WORK_ROW],
+    ]);
+    expect(l.items.find((i) => i.kind === 'work')).toMatchObject({ workId: first.id });
+    expect(l.nodeItems.get(t.a2.id)?.y).toBe(3 * ROW + 2 * WORK_ROW + WORK_GAP);
+    expect(l.height).toBe(7 * ROW + 2 * WORK_ROW + WORK_GAP);
+  });
+
+  it('come after the badges under their node', () => {
+    const t = sample();
+    const task = work(t.a1.id, 'pending');
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [session('s1', t.a1.id, 'working')], workItems: [task], now: T0 });
+    expect(rowsOf(l, 'badge', 'work')).toEqual([
+      ['badge', 'bs1', t.a1.id, 3 * INDENT, 3 * ROW],
+      ['work', `w${task.id}`, t.a1.id, 3 * INDENT, 3 * ROW + BADGE_ROW],
+    ]);
+  });
+
+  it('fold completed tasks into one "✓ n done" row first, which a work:<id> override opens', () => {
+    const t = sample();
+    const c1 = work(t.a1.id, 'completed', { position: 1 });
+    const p = work(t.a1.id, 'pending', { position: 2 });
+    const c2 = work(t.a1.id, 'completed', { position: 3 });
+    const input = { nodes: t.nodes, resources: [], sessions: [], workItems: [c1, p, c2], now: T0 };
+    const y = 3 * ROW;
+    const shut = layoutOutline(input);
+    expect(rowsOf(shut, 'work', 'workDone')).toEqual([
+      ['workDone', `wd${t.a1.id}`, t.a1.id, 3 * INDENT, y],
+      ['work', `w${p.id}`, t.a1.id, 3 * INDENT, y + WORK_ROW],
+    ]);
+    expect(shut.items.find((i) => i.kind === 'workDone')).toMatchObject({ count: 2, open: false });
+    const open = layoutOutline({ ...input, overrides: { [`work:${t.a1.id}`]: 'open' } });
+    expect(rowsOf(open, 'work', 'workDone').map(([kind, id, , , rowY]) => [kind, id, rowY])).toEqual([
+      ['workDone', `wd${t.a1.id}`, y],
+      ['work', `w${c1.id}`, y + WORK_ROW],
+      ['work', `w${p.id}`, y + 2 * WORK_ROW],
+      ['work', `w${c2.id}`, y + 3 * WORK_ROW],
+    ]);
+    expect(open.items.find((i) => i.kind === 'workDone')).toMatchObject({ count: 2, open: true });
+    // All done: the one row.
+    const allDone = layoutOutline({ ...input, workItems: [c1, c2] });
+    expect(rowsOf(allDone, 'work', 'workDone').map(([kind]) => kind)).toEqual(['workDone']);
+    expect(allDone.nodeItems.get(t.a2.id)?.y).toBe(y + WORK_ROW + WORK_GAP);
+  });
+
+  it('fold with their node, and stay hidden with it under a folded ancestor or in a "+n more" run', () => {
+    const t = sample();
+    const onA = work(t.a.id, 'pending');
+    const onA1 = work(t.a1.id, 'pending');
+    const onD = work(t.d.id, 'pending');
+    const input = { nodes: t.nodes, resources: [], sessions: [], workItems: [onA, onA1, onD], now: T0 };
+    const open = layoutOutline(input);
+    expect(rowsOf(open, 'work').map(([, id]) => id)).toEqual([`w${onA.id}`, `w${onA1.id}`]);
+    expect(open.items.find((i) => i.kind === 'more')).toMatchObject({ hiddenIds: [t.d.id, t.e.id] });
+    const folded = layoutOutline({ ...input, overrides: { ['n:' + t.a.id]: 'closed' } });
+    expect(rowsOf(folded, 'work')).toEqual([]);
+    // Root, A (folded), B, C and "+2 more".
+    expect(folded.height).toBe(5 * ROW);
+  });
+
+  it('never count in plan progress', () => {
+    const t = sample();
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [], workItems: [work(t.a.id, 'completed'), work(t.a.id, 'pending'), work(t.a2.id, 'completed')], now: T0 });
+    expect(l.nodeItems.get(t.a.id)?.progress).toEqual({ done: 0, total: 2 });
+    expect(l.nodeItems.get(t.a2.id)?.progress).toBeNull();
+  });
+
+  it('pulse while in progress and their session works, or their subagent runs', () => {
+    const t = sample();
+    const items = [
+      work(t.a1.id, 'in_progress'),
+      work(t.a1.id, 'pending'),
+      work(t.a1.id, 'in_progress', { agentId: 'x' }),
+      work(t.a1.id, 'in_progress', { agentId: 'y' }),
+      work(t.a1.id, 'in_progress', { agentId: 'gone' }),
+      work(t.a1.id, 'completed', { agentId: 'x' }),
+    ];
+    const subagents = [agent('x'), agent('y', { endedAt: ago(60_000) })];
+    const pulses = (state: Session['state']) =>
+      layoutOutline({ nodes: t.nodes, resources: [], sessions: [withAgents(session('s1', t.a1.id, state), subagents)], workItems: items, overrides: { [`work:${t.a1.id}`]: 'open' }, now: T0 })
+        .items.flatMap((i) => (i.kind === 'work' ? [i.pulse] : []));
+    expect(pulses('working')).toEqual([true, false, true, false, false, false]);
+    expect(pulses('idle')).toEqual([false, false, true, false, false, false]);
+  });
+});
+
+describe('subagent badges', () => {
+  it('give each subagent a badge under its node, after its session badge, falling back to the focus', () => {
+    const t = sample();
+    const s1 = withAgents(session('s1', t.a1.id, 'working'), [agent('x', { nodeId: t.b.id }), agent('y'), agent('z', { nodeId: 999 })]);
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [s1], now: T0 });
+    expect(rowsOf(l, 'badge', 'agent')).toEqual([
+      ['badge', 'bs1', t.a1.id, 3 * INDENT, 3 * ROW],
+      ['agent', 'as1:y', t.a1.id, 3 * INDENT, 3 * ROW + BADGE_ROW],
+      ['agent', 'as1:z', t.a1.id, 3 * INDENT, 3 * ROW + 2 * BADGE_ROW],
+      ['agent', 'as1:x', t.b.id, 2 * INDENT, 5 * ROW + 3 * BADGE_ROW],
+    ]);
+    expect(l.items.find((i) => i.id === 'as1:x')).toMatchObject({ sessionId: 's1', agentId: 'x', ended: false });
+    expect(l.nodeItems.get(t.c.id)?.y).toBe(5 * ROW + 4 * BADGE_ROW);
+  });
+
+  it('keep an ended subagent, greyed, for 5 minutes after it stopped', () => {
+    const t = sample();
+    const s1 = withAgents(session('s1', t.a1.id, 'idle'), [agent('x', { endedAt: ago(ENDED_AGENT_MS - 1000) }), agent('y', { endedAt: ago(ENDED_AGENT_MS) })]);
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [s1], now: T0 });
+    expect(l.items.filter((i) => i.kind === 'agent')).toEqual([expect.objectContaining({ id: 'as1:x', ended: true })]);
+  });
+
+  it("sit on the nearest visible ancestor when a manual fold hides their node, and need a node or their session's focus", () => {
+    const t = sample();
+    const s1 = withAgents(session('s1', null, 'working'), [agent('x', { nodeId: t.a1.id }), agent('y')]);
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [s1], overrides: { ['n:' + t.a.id]: 'closed' }, now: T0 });
+    expect(rowsOf(l, 'badge', 'agent')).toEqual([['agent', 'as1:x', t.a.id, 2 * INDENT, 2 * ROW]]);
+  });
+
+  it("leave an ended session's subagents out", () => {
+    const t = sample();
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [withAgents(session('s1', t.a1.id, 'ended'), [agent('x')])], now: T0 });
+    expect(rowsOf(l, 'badge', 'agent')).toEqual([]);
+  });
+});
+
+describe('live work and the fold rules', () => {
+  it("keep a subagent's node and a node with a task in progress in view; a pending task does not", () => {
+    const t = sample();
+    const f = n(t.root.id, 'F');
+    const g = n(t.root.id, 'G');
+    const nodes = [...t.nodes, f, g];
+    const hidden = (l: LayoutResult) => l.items.flatMap((i) => (i.kind === 'more' ? [i.hiddenIds] : []));
+    expect(hidden(layoutOutline({ nodes, resources: [], sessions: [], now: T0 }))).toEqual([[t.d.id, t.e.id, f.id, g.id]]);
+    const s1 = withAgents(session('s1', t.a1.id, 'working'), [agent('x', { nodeId: t.e.id })]);
+    const onG = work(g.id, 'in_progress');
+    const l = layoutOutline({ nodes, resources: [], sessions: [s1], workItems: [onG, work(t.d.id, 'pending')], now: T0 });
+    expect(hidden(l)).toEqual([[t.d.id], [f.id]]);
+    expect(rowsOf(l, 'agent', 'work').map(([kind, id, nodeId]) => [kind, id, nodeId])).toEqual([
+      ['agent', 'as1:x', t.e.id],
+      ['work', `w${onG.id}`, g.id],
+    ]);
+  });
+
+  it('number queued nodes in queue order', () => {
+    const t = sample();
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [], queue: [t.c.id, t.a1.id, 999, t.c.id], now: T0 });
+    expect(l.nodeItems.get(t.c.id)?.queuePos).toBe(1);
+    expect(l.nodeItems.get(t.a1.id)?.queuePos).toBe(2);
+    expect(l.nodeItems.get(t.b.id)?.queuePos).toBeNull();
+  });
+});
+
 describe('camera helpers', () => {
   it('prefers the freshest working focus, then the latest active node, then the last row', () => {
     const t = sample();
@@ -109,6 +280,19 @@ describe('camera helpers', () => {
     expect(findFrontier(t.nodes, [], l)).toBe(t.a1.id);
     const idle = t.nodes.map((x) => (x.parentId === null ? x : { ...x, status: 'todo' as const }));
     expect(findFrontier(idle, [], layoutOutline({ nodes: idle, resources: [], sessions: [] }))).toBe(t.c.id);
+  });
+
+  it('takes the head of the queue when no session works, skipping entries that are gone or finished', () => {
+    const t = sample();
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [] });
+    const idle = [session('s1', t.b.id, 'idle')];
+    expect(findFrontier(t.nodes, idle, l, [t.c.id, t.b.id])).toBe(t.c.id);
+    // A working session's focus still comes first.
+    expect(findFrontier(t.nodes, [session('s2', t.a2.id, 'working')], l, [t.c.id])).toBe(t.a2.id);
+    const finished = t.nodes.map((x) => (x.id === t.c.id ? { ...x, status: 'done' as const } : x.id === t.d.id ? { ...x, status: 'dropped' as const } : x));
+    expect(findFrontier(finished, idle, l, [999, t.c.id, t.d.id, t.e.id])).toBe(t.e.id);
+    // With nothing queued: the latest active node, as before.
+    expect(findFrontier(t.nodes, idle, l, [])).toBe(t.a1.id);
   });
 
   it('maps events to the node the camera should visit', () => {
@@ -122,6 +306,18 @@ describe('camera helpers', () => {
     expect(eventTarget(ev('session.updated', 's1', { changed: ['focusNodeId'], focusNodeId: 11 }))).toBe(11);
     expect(eventTarget(ev('session.updated', 's1', { changed: ['focusNodeId'], focusNodeId: null }))).toBeUndefined();
     expect(eventTarget(ev('session.updated', 's1', { changed: ['state'], state: 'working' }))).toBeUndefined();
+    expect(eventTarget(ev('work.updated', '57', { nodeId: 57 }))).toBe(57);
+    expect(eventTarget(ev('project.updated', '1', { changes: { queue: { from: [], to: [5] } } }))).toBeUndefined();
     expect(eventTarget(ev('node.deleted', '4', { ids: [4] }))).toBeUndefined();
+  });
+});
+
+describe('queued steps', () => {
+  it('stay in view past the fold rules, so Up next never points into a "+n more" run', () => {
+    const t = sample();
+    const before = layoutOutline({ nodes: t.nodes, resources: [], sessions: [] });
+    expect(before.nodeItems.has(t.e.id)).toBe(false);
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [], queue: [t.e.id] });
+    expect(l.nodeItems.get(t.e.id)).toMatchObject({ queuePos: 1 });
   });
 });

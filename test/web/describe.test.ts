@@ -41,6 +41,13 @@ describe('describeEvent', () => {
     expect(actorLabel(ev('node.created', '1', {}), null)).toBe('scribe');
   });
 
+  it('says where working tasks changed, and when Up next changed', () => {
+    expect(describeEvent(ev('work.updated', '58', { nodeId: 58 }, 'hook:task-updated'), snapshot)).toBe('tasks updated on #58 Run signing tests');
+    expect(describeEvent(ev('work.updated', '99', { nodeId: 99 }, 'hook:task-created'), snapshot)).toBe('tasks updated on #99');
+    expect(describeEvent(ev('project.updated', '1', { changes: { queue: { from: [58], to: [55, 58] } } }), snapshot)).toBe('Up next changed');
+    expect(describeEvent(ev('project.updated', '1', { changes: { name: { from: 'P', to: 'Q' } } }), snapshot)).toBe('project updated');
+  });
+
   it('says when a session ended', () => {
     expect(describeEvent(ev('session.updated', 's1', { changed: ['state'], state: 'ended' }), snapshot)).toBe('InGame launch status ended');
     expect(describeEvent(ev('session.updated', 'gone', { changed: ['state'], state: 'ended' }), snapshot)).toBe('a session ended');

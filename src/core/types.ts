@@ -8,8 +8,14 @@ export const RESOURCE_KINDS = ['doc', 'test-suite', 'runbook', 'roadmap', 'diagr
 export type ResourceKind = (typeof RESOURCE_KINDS)[number];
 export const SESSION_STATES = ['working', 'idle', 'permission', 'ended'] as const;
 export type SessionState = (typeof SESSION_STATES)[number];
-export const HOOK_EVENTS = ['start', 'prompt', 'stop', 'permission', 'subagent-start', 'subagent-stop', 'end'] as const;
+export const HOOK_EVENTS = [
+  'start', 'prompt', 'stop', 'permission', 'subagent-start', 'subagent-stop', 'end',
+  'agent-dispatch', 'agent-launched', 'task-created', 'task-updated',
+] as const;
 export type HookEvent = (typeof HOOK_EVENTS)[number];
+/** A working task's status, as Claude Code's task tools have it (their `deleted` removes the task instead). */
+export const WORK_STATUSES = ['pending', 'in_progress', 'completed'] as const;
+export type WorkStatus = (typeof WORK_STATUSES)[number];
 export const SCRIBE_AGENT = 'inprogress-scribe';
 export const STALE_SESSION_MS = 12 * 60 * 60 * 1000;
 
@@ -23,6 +29,8 @@ export interface Project {
   rootNodeId: number;
   createdAt: string;
   updatedAt: string;
+  /** Node ids in the order Claude plans to work on them. Done and dropped nodes are left out as it is read. */
+  queue: number[];
 }
 
 export interface ProjectSummary extends Project {
@@ -100,6 +108,30 @@ export interface SubagentInfo {
   agentId: string;
   agentType: string;
   startedAt: string;
+  /** The Agent tool call's description (at most 200 characters); null until the subagent is paired with its dispatch. */
+  description: string | null;
+  /** The model it was dispatched with, or the one its launch reported; null when neither is known. */
+  model: string | null;
+  /** The node it works on: the `#id` its description starts with, else the session's focus at dispatch. */
+  nodeId: number | null;
+  /** Set when it stopped. A snapshot keeps an ended subagent for 5 minutes. */
+  endedAt: string | null;
+}
+
+/** One of Claude's working tasks, under the node it was attributed to when it was created. */
+export interface WorkItem {
+  id: number;
+  nodeId: number;
+  sessionId: string;
+  /** The subagent whose task list it is on; '' for the main session's. */
+  agentId: string;
+  subject: string;
+  status: WorkStatus;
+  /** Ids of the work items this one blocks (each renders "after <this one>"), from the same task list. */
+  blocks: number[];
+  /** Creation order among the node's working tasks. */
+  position: number;
+  updatedAt: string;
 }
 
 export interface Session {
@@ -134,6 +166,8 @@ export interface ProjectSnapshot {
   nodes: TreeNode[];
   resources: ResourceMeta[];
   sessions: Session[];
+  /** The working tasks of `sessions` (sessions that have ended keep theirs out of view), by node, then position. */
+  workItems: WorkItem[];
   lastEventId: number;
   lastEvent: EventRow | null;
 }

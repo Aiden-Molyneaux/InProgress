@@ -892,3 +892,214 @@ test('a long session title is cut short, and the pill and Follow stay at the end
   for (const box of [pillBox, followBox]) expect(box.y - rowBox.y, 'on the first line').toBeLessThanOrEqual(8);
   await expect(follow).toBeInViewport({ ratio: 1 });
 });
+
+// Live work: Claude's working tasks, its subagents and the Up next queue, seeded the way the hooks and the scribe send them.
+
+/** Posts a hook event for the session, as Claude Code's hooks would. */
+const hook = (api: APIRequestContext, session: string, body: Record<string, unknown>) => write(api, session, 'post', `/api/sessions/${session}/hook`, body);
+
+/** A working task on the session's own list (or a subagent's), created and then moved to its status as the task tools do. */
+async function task(api: APIRequestContext, s: Seeded, key: string, subject: string, status: 'pending' | 'in_progress' | 'completed' = 'pending', agentId?: string): Promise<void> {
+  const agent = agentId ? { agentId } : {};
+  await hook(api, s.session, { event: 'task-created', taskKey: key, subject, ...agent });
+  if (status !== 'pending') await hook(api, s.session, { event: 'task-updated', taskKey: key, status, ...agent });
+}
+
+/** A subagent dispatched, started and launched, as the Agent tool's hooks report it. */
+async function subagent(api: APIRequestContext, s: Seeded, agentId: string, description: string, model: string): Promise<void> {
+  const toolUseId = `toolu-${agentId}`;
+  await hook(api, s.session, { event: 'agent-dispatch', toolUseId, agentType: 'general-purpose', description, model });
+  await hook(api, s.session, { event: 'subagent-start', agentId, agentType: 'general-purpose' });
+  await hook(api, s.session, { event: 'agent-launched', toolUseId, agentId, model });
+}
+
+const setQueue = (api: APIRequestContext, s: Seeded, nodes: number[]) => write(api, s.session, 'post', `/api/projects/${s.slug}/queue`, { nodes });
+
+const boxOf = async (l: Locator) => (await l.boundingBox())!;
+
+/** A running subagent's time: under a minute, or whole minutes. */
+const RUNNING = '(<1 min|\\d+ min)';
+
+test.describe('Live work', () => {
+  test('working tasks sit under their node as a checklist that folds with it, the done ones in a row that opens, the one in progress pulsing', async ({ page, api, fresh }) => {
+    const android = fresh.ids['2 Android signing'];
+    await task(api, fresh, '1', 'Read the signing guide', 'completed');
+    await task(api, fresh, '2', 'Upload the key', 'in_progress');
+    await task(api, fresh, '3', 'Check the release track');
+    await task(api, fresh, '4', 'Write the release notes', 'completed');
+    // A subject that starts with #id goes under that node rather than the session's focus.
+    await task(api, fresh, '5', `#${android} Rotate the upload key`);
+    await open(page, fresh);
+    const card = page.locator('.ip-node', { hasText: 'Play app signing' });
+    const next = page.locator('.ip-node', { hasText: 'Run signing tests' });
+    const done = page.locator('.ip-work-done');
+    const upload = page.locator('.ip-work', { hasText: 'Upload the key' });
+    const check = page.locator('.ip-work', { hasText: 'Check the release track' });
+    const guide = page.locator('.ip-work', { hasText: 'Read the signing guide' });
+    await expect(done).toHaveText('✓ 2 done');
+    await expect(done).toHaveAttribute('aria-expanded', 'false');
+    await expect(upload.locator('.ip-work-mark')).toHaveText('◐');
+    await expect(check.locator('.ip-work-mark')).toHaveText('○');
+    await expect(guide).toHaveCount(0);
+    // Under the card and one level in: the done row, then the open tasks in the order they were created.
+    const [cardBox, doneBox, uploadBox, checkBox, nextBox] = await Promise.all([card, done, upload, check, next].map(boxOf));
+    expect(doneBox.y).toBeGreaterThanOrEqual(cardBox.y + cardBox.height);
+    expect(uploadBox.y).toBeGreaterThan(doneBox.y);
+    expect(checkBox.y).toBeGreaterThan(uploadBox.y);
+    expect(nextBox.y).toBeGreaterThanOrEqual(checkBox.y + checkBox.height);
+    for (const box of [doneBox, uploadBox, checkBox]) expect(box.x).toBeGreaterThan(cardBox.x + 20);
+    expect(uploadBox.height, 'a compact row').toBeLessThanOrEqual(20);
+    // In progress while the session works.
+    await expect(upload.locator('.ip-work-mark')).toHaveCSS('animation-name', 'ip-pulse');
+    await done.click();
+    await expect(done).toHaveAttribute('aria-expanded', 'true');
+    await expect(guide.locator('.ip-work-mark')).toHaveText('✓');
+    await expect(page.locator('.ip-work', { hasText: 'Write the release notes' })).toBeVisible();
+    await done.click();
+    await expect(guide).toHaveCount(0);
+    // The #id task, under 2 Android signing: without the #id, which would only repeat the node.
+    const rotate = page.locator('.ip-work', { hasText: 'Rotate the upload key' });
+    const parent = page.locator('.ip-node', { hasText: '2 Android signing' });
+    const child = page.locator('.ip-node', { hasText: 'Upload keystore' });
+    await expect(rotate).not.toContainText(`#${android}`);
+    const [parentBox, rotateBox, childBox] = await Promise.all([parent, rotate, child].map(boxOf));
+    expect(rotateBox.y).toBeGreaterThanOrEqual(parentBox.y + parentBox.height);
+    expect(childBox.y).toBeGreaterThanOrEqual(rotateBox.y + rotateBox.height);
+    // Tasks fold with their node, like its children.
+    await parent.getByRole('button', { name: 'Fold' }).click();
+    await expect(child).toHaveCount(0);
+    await expect(rotate).toHaveCount(0);
+    await expect(upload).toHaveCount(0);
+    await parent.getByRole('button', { name: 'Unfold' }).click();
+    await expect(rotate).toBeVisible();
+    await expect(upload).toBeVisible();
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await expect(upload.locator('.ip-work-mark')).toHaveCSS('animation-name', 'none');
+  });
+
+  test('each subagent has a badge under its node in its own colour, shared by its tasks and its minimap shape, greyed once it ends', async ({ page, api, fresh }) => {
+    const id = fresh.ids['3 RevenueCat'];
+    await subagent(api, fresh, 'agent-1', `#${id} Wire up RevenueCat`, 'sonnet');
+    // Without an #id it works on the session's focus.
+    await subagent(api, fresh, 'agent-2', 'Review the signing config', 'haiku');
+    // A subagent's task goes under its node; the session's own carries no colour.
+    await task(api, fresh, '1', 'Compare the tiers', 'in_progress', 'agent-1');
+    await task(api, fresh, '1', 'Upload the key', 'in_progress');
+    await open(page, fresh);
+    const wire = page.locator('.ip-agent', { hasText: 'Wire up RevenueCat' });
+    const review = page.locator('.ip-agent', { hasText: 'Review the signing config' });
+    await expect(wire).toHaveText(new RegExp(`^◆ Wire up RevenueCat · sonnet · ${RUNNING}$`));
+    await expect(review).toHaveText(new RegExp(`^◆ Review the signing config · haiku · ${RUNNING}$`));
+    const [revenue, build, play, own, run, wireBox, reviewBox] = await Promise.all(
+      [
+        page.locator('.ip-node', { hasText: '3 RevenueCat' }),
+        page.locator('.ip-node', { hasText: '4 Build to GitHub' }),
+        page.locator('.ip-node', { hasText: 'Play app signing' }),
+        page.locator('.ip-badge', { hasText: 'E2E session' }),
+        page.locator('.ip-node', { hasText: 'Run signing tests' }),
+        wire,
+        review,
+      ].map(boxOf),
+    );
+    // One under 3 RevenueCat, one level in; the other under the session's own badge, on its focus.
+    expect(wireBox.y).toBeGreaterThanOrEqual(revenue.y + revenue.height);
+    expect(build.y).toBeGreaterThanOrEqual(wireBox.y + wireBox.height);
+    expect(wireBox.x).toBeGreaterThan(revenue.x + 20);
+    expect(own.y).toBeGreaterThanOrEqual(play.y + play.height);
+    expect(reviewBox.y).toBeGreaterThanOrEqual(own.y + own.height);
+    expect(run.y).toBeGreaterThanOrEqual(reviewBox.y + reviewBox.height);
+    await expect(page.locator('.ip-work', { hasText: 'Compare the tiers' }).locator('.ip-work-agent')).toBeVisible();
+    await expect(page.locator('.ip-work', { hasText: 'Upload the key' }).locator('.ip-work-agent')).toHaveCount(0);
+    // The badge, its task's marker and its minimap shape share a colour; the other subagent has another.
+    const colours = await page.evaluate<{ wire: string; marker: string; review: string; minimap: string[] }>(`(() => {
+      const badge = (text) => [...document.querySelectorAll('.ip-agent')].find((n) => n.textContent.includes(text));
+      const row = [...document.querySelectorAll('.ip-work')].find((n) => n.textContent.includes('Compare the tiers'));
+      const bg = (n) => getComputedStyle(n).backgroundColor;
+      const minimap = [...document.querySelectorAll('.react-flow__minimap-node.mm-agent')].map((n) => getComputedStyle(n).fill);
+      return { wire: bg(badge('Wire up RevenueCat')), marker: bg(row.querySelector('.ip-work-agent')), review: bg(badge('Review the signing config')), minimap };
+    })()`);
+    expect(colours.wire).not.toBe('rgba(0, 0, 0, 0)');
+    expect(colours.marker).toBe(colours.wire);
+    expect(colours.review).not.toBe(colours.wire);
+    expect([...colours.minimap].sort()).toEqual([colours.wire, colours.review].sort());
+    // Tasks in progress: the blue of an active step.
+    await expect(page.locator('.react-flow__minimap-node.mm-work').first()).toHaveCSS('fill', 'rgb(10, 132, 255)');
+    await hook(api, fresh.session, { event: 'subagent-stop', agentId: 'agent-1' });
+    await expect(wire).toHaveText('◆ Wire up RevenueCat · sonnet · done just now');
+    await expect(wire).toHaveClass(/\bended\b/);
+    await expect(wire).toHaveCSS('color', 'rgb(110, 110, 115)');
+    await expect(review).not.toHaveClass(/\bended\b/);
+  });
+
+  test('Up next: the camera opens on its head while no session works, queued steps carry ①②③, and the line jumps to a step', async ({ page, api, fresh }) => {
+    const long = 'A step title long enough to run well past the edge of a narrow window all on its own';
+    const [first] = await write<{ id: number }[]>(api, fresh.session, 'post', '/api/nodes', { parentId: fresh.root, after: 'start', nodes: [{ title: 'Queued first' }] });
+    await write(api, fresh.session, 'patch', `/api/nodes/${fresh.ids['3 RevenueCat']}`, { title: long });
+    await hook(api, fresh.session, { event: 'stop' });
+    // The newest active node, where the camera would open without a queue.
+    await write(api, fresh.session, 'patch', `/api/nodes/${fresh.ids['Play app signing']}`, { outcome: 'Keys uploaded' });
+    const order = [first.id, fresh.ids['4 Build to GitHub'], fresh.ids['3 RevenueCat']];
+    await setQueue(api, fresh, order);
+    await open(page, fresh);
+    // Wait for the camera's first move, away from where React Flow starts.
+    await expect(page.locator('.react-flow__viewport')).not.toHaveAttribute('style', /translate\(0px, 0px\)/);
+    await expect(page.locator('.ip-node', { hasText: 'Queued first' })).toBeInViewport();
+    await expect(page.locator('.ip-node', { hasText: 'Play app signing' })).not.toBeInViewport();
+    for (const [i, title] of ['Queued first', '4 Build to GitHub', long].entries()) await expect(page.locator('.ip-node', { hasText: title }).locator('.ip-queue')).toHaveText('①②③'[i]);
+    await expect(page.locator('.ip-node', { hasText: 'Play app signing' }).locator('.ip-queue')).toHaveCount(0);
+    const upNext = page.locator('.ip-upnext');
+    await expect(upNext).toHaveText(`Up next: ① #${order[0]} Queued first · ② #${order[1]} 4 Build to GitHub · ③ #${order[2]} ${long}`);
+    // One line, cut short at the window's edge.
+    expect((await boxOf(upNext)).height, 'one line').toBeLessThan(30);
+    await expect(upNext).toHaveCSS('text-overflow', 'ellipsis');
+    expect(await page.evaluate<boolean>(`(() => { const l = document.querySelector('.ip-upnext'); return l.scrollWidth > l.clientWidth; })()`), 'cut short').toBe(true);
+    const build = page.locator('.ip-node', { hasText: '4 Build to GitHub' });
+    await expect(build).not.toBeInViewport();
+    await upNext.getByRole('button', { name: /4 Build to GitHub/ }).click();
+    await expect(build).toBeInViewport();
+    // An empty queue takes the line and the numbers away.
+    await setQueue(api, fresh, []);
+    await expect(upNext).toHaveCount(0);
+    await expect(page.locator('.ip-queue')).toHaveCount(0);
+  });
+
+  test('a session chip counts only live subagents, and lists them on hover and on keyboard focus', async ({ page, api, fresh }) => {
+    await subagent(api, fresh, 'agent-1', 'Wire up RevenueCat', 'sonnet');
+    await subagent(api, fresh, 'agent-2', 'Check the paywall', 'haiku');
+    await hook(api, fresh.session, { event: 'subagent-stop', agentId: 'agent-2' });
+    await open(page, fresh);
+    const chip = page.locator('.ip-sessions').getByRole('button', { name: /E2E session/ });
+    await expect(chip).toHaveText('E2E session · 1 subagent');
+    const list = page.locator('.ip-chip-pop');
+    await expect(list).toBeHidden();
+    await chip.hover();
+    await expect(list).toBeVisible();
+    await expect(list.locator('li', { hasText: 'Wire up RevenueCat' })).toHaveText(new RegExp(`^◆ Wire up RevenueCat · sonnet · ${RUNNING}$`));
+    await expect(list.locator('li', { hasText: 'Check the paywall' })).toHaveText('◆ Check the paywall · haiku · done just now');
+    await page.locator('.ip-activity').hover();
+    await expect(list).toBeHidden();
+    // Tab onto the chip from the tab strip.
+    await page.getByRole('tab', { selected: true }).focus();
+    await expect(async () => {
+      await page.keyboard.press('Tab');
+      await expect(chip).toBeFocused({ timeout: 200 });
+    }).toPass({ timeout: 3000 });
+    await expect(list).toBeVisible();
+  });
+
+  test("Details lists the node's working tasks with who is on each, and the subagents on it", async ({ page, api, fresh }) => {
+    await subagent(api, fresh, 'agent-1', 'Draft the store notes', 'sonnet');
+    await task(api, fresh, '1', 'Upload the key', 'in_progress');
+    await task(api, fresh, '2', 'Check the release track');
+    await hook(api, fresh.session, { event: 'task-updated', taskKey: '1', addBlocks: ['2'] });
+    await task(api, fresh, '1', 'Collect the screenshots', 'pending', 'agent-1');
+    await open(page, fresh);
+    await page.locator('.ip-node', { hasText: 'Play app signing' }).click();
+    const details = page.getByRole('complementary');
+    // Anchored: the next row's "after Upload the key" names it too.
+    await expect(details.locator('.ip-wt', { hasText: /^◐ Upload the key/ })).toHaveText('◐ Upload the key — E2E session');
+    await expect(details.locator('.ip-wt', { hasText: 'Check the release track' })).toHaveText('○ Check the release track — E2E session · after Upload the key');
+    await expect(details.locator('.ip-wt', { hasText: 'Collect the screenshots' })).toHaveText('○ Collect the screenshots — Draft the store notes');
+    await expect(details.locator('.ip-dagent')).toHaveText(new RegExp(`^◆ Draft the store notes · sonnet · ${RUNNING}$`));
+  });
+});

@@ -14,6 +14,7 @@ interface ProjectRow {
   root_node_id: number;
   created_at: string;
   updated_at: string;
+  queue: string;
 }
 
 interface BindingRow {
@@ -24,7 +25,29 @@ interface BindingRow {
   created_at: string;
 }
 
-export const toProject = (r: ProjectRow): Project => ({
+/** The stored queue: node ids as set_queue last wrote them. */
+function parseQueue(json: string | undefined): number[] {
+  try {
+    const value: unknown = JSON.parse(json ?? '[]');
+    return Array.isArray(value) ? value.filter((id): id is number => Number.isInteger(id) && id > 0) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** The queue as it is read: deleted, done and dropped nodes leave it on their own. */
+function liveQueue(ctx: Ctx, projectId: number, json: string | undefined): number[] {
+  const ids = parseQueue(json);
+  if (!ids.length) return [];
+  const open = new Set(
+    (ctx.db
+      .prepare(`SELECT id FROM nodes WHERE project_id = ? AND status NOT IN ('done', 'dropped') AND id IN (${ids.map(() => '?').join(', ')})`)
+      .all(projectId, ...ids) as { id: number }[]).map((r) => r.id),
+  );
+  return ids.filter((id) => open.has(id));
+}
+
+export const toProject = (r: ProjectRow, queue: number[] = parseQueue(r.queue)): Project => ({
   id: r.id,
   slug: r.slug,
   name: r.name,
@@ -34,7 +57,10 @@ export const toProject = (r: ProjectRow): Project => ({
   rootNodeId: r.root_node_id,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
+  queue,
 });
+
+const readProject = (ctx: Ctx, r: ProjectRow): Project => toProject(r, liveQueue(ctx, r.id, r.queue));
 
 const toBinding = (r: BindingRow): Binding => ({
   id: r.id,
@@ -56,7 +82,7 @@ export function slugify(name: string): string {
 
 export function getProjectById(ctx: Ctx, id: number): Project | undefined {
   const row = ctx.db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as ProjectRow | undefined;
-  return row ? toProject(row) : undefined;
+  return row ? readProject(ctx, row) : undefined;
 }
 
 export function resolveProject(ctx: Ctx, ref: string | number): Project {
@@ -72,7 +98,7 @@ export function resolveProject(ctx: Ctx, ref: string | number): Project {
       slugs.length ? `Known projects: ${slugs.join(', ')}` : 'No projects exist yet; create one first.',
     );
   }
-  return toProject(row);
+  return readProject(ctx, row);
 }
 
 export interface CreateProjectInput {
@@ -142,6 +168,31 @@ export function updateProject(ctx: Ctx, actor: string, ref: string | number, pat
   });
 }
 
+/**
+ * Sets the order Claude plans to work in: node ids of this project, first one next (an id given twice keeps its first
+ * place; an empty list clears the queue). Done and dropped nodes stay out of it as it is read.
+ */
+export function setQueue(ctx: Ctx, actor: string, ref: string | number, nodes: number[]): Project {
+  return write(ctx, actor, (record) => {
+    const project = resolveProject(ctx, ref);
+    const ids = [...new Set(nodes)];
+    const node = ctx.db.prepare('SELECT project_id FROM nodes WHERE id = ?');
+    for (const id of ids) {
+      if ((node.get(id) as { project_id: number } | undefined)?.project_id !== project.id) {
+        throw badRequest(`#${id} is not in project ${project.slug}`, 'Use get_outline to find the right #id.');
+      }
+    }
+    const row = ctx.db.prepare('SELECT queue FROM projects WHERE id = ?').get(project.id) as { queue: string };
+    const json = JSON.stringify(ids);
+    if (json !== row.queue) {
+      ctx.db.prepare('UPDATE projects SET queue = ?, updated_at = ? WHERE id = ?').run(json, ctx.now(), project.id);
+      const after = getProjectById(ctx, project.id)!;
+      record({ projectId: project.id, type: 'project.updated', entity: 'project', entityId: project.id, data: { changes: { queue: { from: project.queue, to: after.queue } } } });
+    }
+    return getProjectById(ctx, project.id)!;
+  });
+}
+
 export function listProjectSummaries(ctx: Ctx): ProjectSummary[] {
   const liveSince = new Date(Date.parse(ctx.now()) - STALE_SESSION_MS).toISOString();
   const rows = ctx.db
@@ -155,7 +206,7 @@ export function listProjectSummaries(ctx: Ctx): ProjectSummary[] {
     )
     .all(liveSince, liveSince) as (ProjectRow & { needs_you: number; active_sessions: number; working_sessions: number; last_event_at: string | null })[];
   return rows
-    .map((r) => ({ ...toProject(r), needsYou: r.needs_you, activeSessions: r.active_sessions, workingSessions: r.working_sessions, lastEventAt: r.last_event_at }))
+    .map((r) => ({ ...readProject(ctx, r), needsYou: r.needs_you, activeSessions: r.active_sessions, workingSessions: r.working_sessions, lastEventAt: r.last_event_at }))
     .sort((a, b) => b.workingSessions - a.workingSessions || (b.lastEventAt ?? '').localeCompare(a.lastEventAt ?? ''));
 }
 

@@ -1,0 +1,208 @@
+import type { Session, WorkItem, WorkStatus } from '../../core/types';
+import { write, type Ctx } from '../db/tx';
+import { badRequest } from '../errors';
+import { findNode, leadingNode, requireNode } from './nodes';
+import { getProjectById } from './projects';
+import { findSession } from './sessions';
+import { subagentNode } from './subagents';
+
+/** How long the working tasks of an ended session are kept: a session resumed within a week finds them again. */
+export const WORK_ITEM_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+interface WorkRow {
+  id: number;
+  project_id: number;
+  node_id: number;
+  session_id: string;
+  agent_id: string;
+  task_key: string;
+  subject: string;
+  status: WorkStatus;
+  blocks: string;
+  position: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** A change to one task list entry, as the post-tool hook reports it. */
+export interface TaskChange {
+  /** The subagent whose task list it is on; '' for the main session's. */
+  agentId: string;
+  taskKey: string;
+  subject?: string;
+  status?: WorkStatus | 'deleted';
+  addBlocks?: string[];
+  addBlockedBy?: string[];
+}
+
+export interface TaskInput {
+  subject: string;
+  status: WorkStatus;
+}
+
+function parseKeys(json: string): string[] {
+  try {
+    const value: unknown = JSON.parse(json);
+    return Array.isArray(value) ? value.filter((k): k is string => typeof k === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+const findItem = (ctx: Ctx, sessionId: string, agentId: string, taskKey: string) =>
+  ctx.db.prepare('SELECT * FROM work_items WHERE session_id = ? AND agent_id = ? AND task_key = ?').get(sessionId, agentId, taskKey) as WorkRow | undefined;
+
+const nextPosition = (ctx: Ctx, nodeId: number): number =>
+  (ctx.db.prepare('SELECT COALESCE(MAX(position), 0) + 1 AS p FROM work_items WHERE node_id = ?').get(nodeId) as { p: number }).p;
+
+/**
+ * Where a new working task goes, decided once: a leading `#id` in the subject when that node is in the session's
+ * project; for a subagent's task, the subagent's node; then the session's focus; then the project root.
+ */
+function attribute(ctx: Ctx, session: Session, agentId: string, subject: string): { projectId: number; nodeId: number } | undefined {
+  const projectId = session.projectId;
+  if (projectId === null) return undefined;
+  const inProject = (id: number | null | undefined) => (id != null && findNode(ctx, id)?.projectId === projectId ? id : undefined);
+  const nodeId = leadingNode(ctx, subject, projectId)
+    ?? (agentId ? inProject(subagentNode(ctx, session.id, agentId)) : undefined)
+    ?? inProject(session.focusNodeId)
+    ?? getProjectById(ctx, projectId)?.rootNodeId;
+  return nodeId === undefined ? undefined : { projectId, nodeId };
+}
+
+function insertItem(ctx: Ctx, session: Session, agentId: string, taskKey: string, subject: string, status: WorkStatus): number | undefined {
+  const where = attribute(ctx, session, agentId, subject);
+  if (!where) return undefined;
+  const now = ctx.now();
+  ctx.db
+    .prepare('INSERT INTO work_items (project_id, node_id, session_id, agent_id, task_key, subject, status, blocks, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, \'[]\', ?, ?, ?)')
+    .run(where.projectId, where.nodeId, session.id, agentId, taskKey, subject, status, nextPosition(ctx, where.nodeId), now, now);
+  return where.nodeId;
+}
+
+/**
+ * TaskCreate: a new pending task. A create on a key the list already holds (a retried post, or a task list Claude
+ * Code started over) replaces that task, attributed afresh. Returns the nodes whose working tasks changed.
+ */
+export function taskCreated(ctx: Ctx, session: Session, agentId: string, taskKey: string, rawSubject: string): number[] {
+  const subject = rawSubject.trim();
+  if (!subject) return [];
+  const old = findItem(ctx, session.id, agentId, taskKey);
+  if (old) {
+    if (old.subject === subject && old.status === 'pending' && old.blocks === '[]') return [];
+    ctx.db.prepare('DELETE FROM work_items WHERE id = ?').run(old.id);
+  }
+  const nodeId = insertItem(ctx, session, agentId, taskKey, subject, 'pending');
+  return [...new Set([...(old ? [old.node_id] : []), ...(nodeId === undefined ? [] : [nodeId])])];
+}
+
+/**
+ * TaskUpdate: status, subject and blocks links; `deleted` removes the task. A task this list never saw (created
+ * before the hooks were installed, say) is picked up when the update names its subject, and ignored otherwise.
+ * Returns the nodes whose working tasks changed.
+ */
+export function taskUpdated(ctx: Ctx, session: Session, change: TaskChange): number[] {
+  const { agentId, taskKey } = change;
+  let item = findItem(ctx, session.id, agentId, taskKey);
+  if (change.status === 'deleted') {
+    if (!item) return [];
+    ctx.db.prepare('DELETE FROM work_items WHERE id = ?').run(item.id);
+    return [item.node_id];
+  }
+  const touched = new Set<number>();
+  const subject = change.subject?.trim();
+  if (!item) {
+    if (!subject) return [];
+    const nodeId = insertItem(ctx, session, agentId, taskKey, subject, change.status ?? 'pending');
+    if (nodeId === undefined) return [];
+    touched.add(nodeId);
+    item = findItem(ctx, session.id, agentId, taskKey)!;
+  }
+  const blocks = parseKeys(item.blocks);
+  const addTo = (list: string[], keys: string[], self: string) => {
+    for (const k of keys) if (k !== self && !list.includes(k)) list.push(k);
+  };
+  addTo(blocks, change.addBlocks ?? [], taskKey);
+  const next = { subject: subject || item.subject, status: change.status ?? item.status, blocks: JSON.stringify(blocks) };
+  if (next.subject !== item.subject || next.status !== item.status || next.blocks !== item.blocks) {
+    ctx.db.prepare('UPDATE work_items SET subject = ?, status = ?, blocks = ?, updated_at = ? WHERE id = ?').run(next.subject, next.status, next.blocks, ctx.now(), item.id);
+    touched.add(item.node_id);
+  }
+  // "Blocked by k" is "k blocks this one": the link lives on k.
+  for (const k of change.addBlockedBy ?? []) {
+    const blocker = k === taskKey ? undefined : findItem(ctx, session.id, agentId, k);
+    if (!blocker) continue;
+    const list = parseKeys(blocker.blocks);
+    if (list.includes(taskKey)) continue;
+    list.push(taskKey);
+    ctx.db.prepare('UPDATE work_items SET blocks = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(list), ctx.now(), blocker.id);
+    touched.add(blocker.node_id);
+  }
+  return [...touched];
+}
+
+function toItems(rows: WorkRow[]): WorkItem[] {
+  const idOf = new Map(rows.map((r) => [`${r.session_id}\u0000${r.agent_id}\u0000${r.task_key}`, r.id]));
+  return rows.map((r) => ({
+    id: r.id,
+    nodeId: r.node_id,
+    sessionId: r.session_id,
+    agentId: r.agent_id,
+    subject: r.subject,
+    status: r.status,
+    blocks: parseKeys(r.blocks)
+      .map((k) => idOf.get(`${r.session_id}\u0000${r.agent_id}\u0000${k}`))
+      .filter((id): id is number => id !== undefined),
+    position: r.position,
+    updatedAt: r.updated_at,
+  }));
+}
+
+/** The project's working tasks that belong to these sessions, by node, then position. */
+export function listWorkItems(ctx: Ctx, projectId: number, sessionIds: string[]): WorkItem[] {
+  if (!sessionIds.length) return [];
+  const rows = ctx.db
+    .prepare(`SELECT * FROM work_items WHERE project_id = ? AND session_id IN (${sessionIds.map(() => '?').join(', ')}) ORDER BY node_id, position, id`)
+    .all(projectId, ...sessionIds) as WorkRow[];
+  return toItems(rows);
+}
+
+const ownList = (ctx: Ctx, sessionId: string, nodeId: number): WorkRow[] =>
+  ctx.db.prepare("SELECT * FROM work_items WHERE session_id = ? AND agent_id = '' AND node_id = ? ORDER BY position, id").all(sessionId, nodeId) as WorkRow[];
+
+/**
+ * The scribe's fallback where the task tools are absent: replaces the session's own working tasks on a node with
+ * this list, in order (an empty list clears them). Its subagents' lists stay as they are.
+ */
+export function setTasks(ctx: Ctx, actor: string, sessionId: string, nodeId: number, tasks: TaskInput[]): WorkItem[] {
+  return write(ctx, actor, (record) => {
+    const session = findSession(ctx, sessionId);
+    if (!session || session.projectId === null) throw badRequest(`Session ${sessionId} is not tracked`, 'Use enroll_session first.');
+    const node = requireNode(ctx, nodeId);
+    if (node.projectId !== session.projectId) throw badRequest(`#${nodeId} is not in this session's project`, 'Use get_outline to find the right #id.');
+    const list = tasks.map((t) => ({ subject: t.subject.trim(), status: t.status }));
+    if (list.some((t) => !t.subject)) throw badRequest('A task subject is empty');
+    const before = ownList(ctx, sessionId, nodeId);
+    const same = before.length === list.length && before.every((r, i) => r.subject === list[i].subject && r.status === list[i].status);
+    if (!same) {
+      ctx.db.prepare("DELETE FROM work_items WHERE session_id = ? AND agent_id = '' AND node_id = ?").run(sessionId, nodeId);
+      const now = ctx.now();
+      const first = nextPosition(ctx, nodeId);
+      const insert = ctx.db.prepare(
+        "INSERT INTO work_items (project_id, node_id, session_id, agent_id, task_key, subject, status, blocks, position, created_at, updated_at) VALUES (?, ?, ?, '', ?, ?, ?, '[]', ?, ?, ?)",
+      );
+      // Keys of their own, so they never collide with the task tools' numeric ids.
+      list.forEach((t, i) => insert.run(node.projectId, nodeId, sessionId, `set:${nodeId}:${i + 1}`, t.subject, t.status, first + i, now, now));
+      record({ projectId: node.projectId, type: 'work.updated', entity: 'node', entityId: nodeId, data: { nodeId } });
+    }
+    return toItems(ownList(ctx, sessionId, nodeId));
+  });
+}
+
+/** Drops the working tasks of sessions that ended more than a week ago. Returns how many went. */
+export function pruneWorkItems(ctx: Ctx): number {
+  const cutoff = new Date(Date.parse(ctx.now()) - WORK_ITEM_RETENTION_MS).toISOString();
+  return ctx.db
+    .prepare("DELETE FROM work_items WHERE session_id IN (SELECT id FROM sessions WHERE state = 'ended' AND ended_at IS NOT NULL AND ended_at < ?)")
+    .run(cutoff).changes;
+}
