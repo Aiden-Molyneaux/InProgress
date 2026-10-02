@@ -86,6 +86,23 @@ describe('isInProgressHook', () => {
     expect(isInProgressHook(foreignShell)).toBe(false);
     expect(isInProgressHook(foreignExec)).toBe(false);
   });
+
+  it('knows the tool hooks', () => {
+    expect(isInProgressHook(hookEntry(repo, 'pre-tool', 5))).toBe(true);
+    expect(isInProgressHook(hookEntry(repo, 'post-tool', 5))).toBe(true);
+  });
+});
+
+describe('HOOK_DEFS', () => {
+  it('hooks the Agent tool before it runs, and the Agent and task tools after', () => {
+    expect(HOOK_DEFS.filter((d) => d.event === 'PreToolUse' || d.event === 'PostToolUse')).toEqual([
+      { event: 'PreToolUse', name: 'pre-tool', matcher: '^(Agent|Task)$', timeout: 5 },
+      { event: 'PostToolUse', name: 'post-tool', matcher: '^(Agent|Task|TaskCreate|TaskUpdate)$', timeout: 5 },
+    ]);
+    const matches = (event: string, tool: string) => new RegExp(HOOK_DEFS.find((d) => d.event === event)!.matcher!).test(tool);
+    expect(['Agent', 'Task', 'TaskCreate', 'Bash'].map((t) => matches('PreToolUse', t))).toEqual([true, true, false, false]);
+    expect(['Agent', 'Task', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet', 'AgentX'].map((t) => matches('PostToolUse', t))).toEqual([true, true, true, true, false, false, false]);
+  });
 });
 
 describe('nodeBinary', () => {

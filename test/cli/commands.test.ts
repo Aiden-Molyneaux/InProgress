@@ -338,6 +338,17 @@ describe('doctor checks', () => {
     expect(named(checks, 'MCP server')).toMatchObject({ ok: false, detail: expect.stringContaining('run npm run deploy') });
   });
 
+  it('fails Hooks for an install from before the tool hooks, until install runs again', async () => {
+    const { repo, claude, settingsFile } = installedClaudeDir();
+    const settings = JSON.parse(readFileSync(settingsFile, 'utf8'));
+    delete settings.hooks.PreToolUse;
+    delete settings.hooks.PostToolUse;
+    writeFileSync(settingsFile, JSON.stringify(settings, null, 2));
+    expect(named(await checksFor(repo, claude), 'Hooks')).toEqual({ name: 'Hooks', ok: false, detail: 'missing: PreToolUse, PostToolUse: run npm run claude:install' });
+    install({ repo, claudeDir: claude, stamp: 'again' });
+    expect(named(await checksFor(repo, claude), 'Hooks')).toEqual({ name: 'Hooks', ok: true, detail: 'all installed' });
+  });
+
   it("fails Hooks when a hook's node binary is gone", async () => {
     const { repo, claude, settingsFile } = installedClaudeDir();
     editSessionStartHook(settingsFile, (h) => (h.command = 'C:/gone/node.exe'));
