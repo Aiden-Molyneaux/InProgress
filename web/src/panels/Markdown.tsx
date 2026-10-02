@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
+import { onLinkClick } from '../links';
 
 DOMPurify.addHook('afterSanitizeAttributes', (node) => {
   if (node.tagName === 'A' || node.tagName === 'AREA') {
@@ -20,5 +21,6 @@ const SANITIZE = { USE_PROFILES: { html: true }, FORBID_TAGS: ['style', 'form', 
 
 export function Markdown({ text }: { text: string }) {
   const html = useMemo(() => DOMPurify.sanitize(marked.parse(text, { async: false }) as string, SANITIZE), [text]);
-  return <div className="ip-md" dangerouslySetInnerHTML={{ __html: html }} />;
+  // Links go to the default browser, not the browser hosting this window.
+  return <div className="ip-md" onClick={onLinkClick} dangerouslySetInnerHTML={{ __html: html }} />;
 }

@@ -44,6 +44,15 @@ function launch(file: string, args: string[], onError?: () => void): void {
 }
 
 /**
+ * Open an http(s) link in the default browser, whichever browser hosts the InProgress window. The caller has checked
+ * the scheme; no shell is involved, so the URL is one argument however many `&` it holds.
+ */
+export async function openInDefaultBrowser(url: string): Promise<void> {
+  if (process.platform === 'win32') launch(join(systemRoot(), 'explorer.exe'), [url]);
+  else launch(process.platform === 'darwin' ? 'open' : 'xdg-open', [url]);
+}
+
+/**
  * Open a file in VS Code, or reveal it in the file manager. No shell is involved and the file
  * never goes to the OS default handler, so nothing gets executed.
  */

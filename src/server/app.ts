@@ -21,6 +21,7 @@ export interface AppOptions {
   logger?: FastifyServerOptions['logger'];
   onShutdown?: () => void;
   openPath?: (path: string) => Promise<void>;
+  openUrl?: (url: string) => Promise<void>;
 }
 
 export type Guard = (req: FastifyRequest, reply: FastifyReply) => Promise<unknown>;
