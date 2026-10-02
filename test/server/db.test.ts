@@ -67,7 +67,19 @@ describe('database', () => {
   it('refuses to migrate a database created by a newer build', () => {
     const { db } = makeCtx();
     db.prepare("UPDATE meta SET value = '99' WHERE key = 'schema_version'").run();
-    expect(() => migrate(db)).toThrow('InProgress database schema v99 is newer than this build (v1); update InProgress');
+    expect(() => migrate(db)).toThrow(`InProgress database schema v99 is newer than this build (v${MIGRATIONS.length}); update InProgress`);
+  });
+
+  it('opens a newer database whose migrations say this build can still read it, so a rollback keeps working', () => {
+    const { db } = makeCtx();
+    const setMeta = (key: string, value: string) =>
+      db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);
+    setMeta('schema_version', '99');
+    setMeta('min_reader_version', String(MIGRATIONS.length));
+    expect(() => migrate(db)).not.toThrow();
+    expect(schemaVersion(db)).toBe(99);
+    setMeta('min_reader_version', String(MIGRATIONS.length + 1));
+    expect(() => migrate(db)).toThrow(/is newer than this build/);
   });
 
   it('records events inside the transaction and emits them after commit', () => {

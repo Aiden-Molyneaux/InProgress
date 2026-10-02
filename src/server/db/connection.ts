@@ -24,6 +24,10 @@ export function migrate(db: DB): void {
   const step = db.transaction((): boolean => {
     const version = schemaVersion(db);
     if (version > MIGRATIONS.length) {
+      // A migration that only adds tables and columns records the oldest build that can still read its result
+      // (meta min_reader_version), so rolling back a deploy across it leaves InProgress working.
+      const minReader = Number(db.prepare("SELECT value FROM meta WHERE key = 'min_reader_version'").pluck().get() ?? NaN);
+      if (Number.isInteger(minReader) && minReader <= MIGRATIONS.length) return false;
       throw new Error(`InProgress database schema v${version} is newer than this build (v${MIGRATIONS.length}); update InProgress`);
     }
     if (version === MIGRATIONS.length) return false;
