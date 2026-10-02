@@ -1,82 +1,166 @@
-import { useEffect, useRef, useState } from 'react';
-import type { Project, ProjectSummary } from '../../../src/core/types';
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import type { ProjectSummary } from '../../../src/core/types';
+import { projectLabel } from './tabs';
 
 interface TopBarProps {
-  projects: ProjectSummary[];
-  current: Project | null;
+  /** One per tab, in strip order (projectTabs). */
+  tabs: ProjectSummary[];
+  /** The ⋯ menu's projects (archivedProjects). */
+  archived: ProjectSummary[];
+  /** The open project's slug. */
+  current: string | null;
   onSelect: (slug: string) => void;
-  needsYou: number;
-  onNeedsYou: () => void;
-  follow: boolean;
-  onFollow: () => void;
 }
 
-function ProjectRow({ p, current, onPick }: { p: ProjectSummary; current: boolean; onPick: (slug: string) => void }) {
-  const dot = p.workingSessions > 0 ? 'clay' : p.needsYou > 0 ? 'amber' : 'grey';
-  const status = [p.workingSessions > 0 ? `◆ ${p.workingSessions} working` : p.activeSessions > 0 ? 'idle' : null, p.needsYou > 0 ? `${p.needsYou} need you` : null]
-    .filter(Boolean)
-    .join(' · ');
+/** The amber count of items waiting on Aiden, and the clay dot while a session works in the project. */
+function Badges({ p }: { p: ProjectSummary }) {
   return (
-    <button role="option" aria-selected={current} className={`ip-mi${current ? ' cur' : ''}`} onClick={() => onPick(p.slug)}>
-      <span className={`ip-dot ${dot}`} />
-      <span className="nm">{p.name}</span>
-      <span className="st">{status || 'no sessions'}</span>
-    </button>
+    <>
+      {p.needsYou > 0 && <span className="ip-tab-count">{p.needsYou}</span>}
+      {p.workingSessions > 0 && <span className="ip-tab-dot" />}
+    </>
   );
 }
 
-export function TopBar({ projects, current, onSelect, needsYou, onNeedsYou, follow, onFollow }: TopBarProps) {
-  const [open, setOpen] = useState(false);
-  const [showArchived, setShowArchived] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+/** How much of the next tab along shows past a tab scrolled into view, as a hint that the strip goes on. */
+const PEEK = 24;
+
+/**
+ * Scrolls the strip, when the current tab is not wholly in view, just far enough to show all of it and a little of its
+ * neighbour. Tab edges fall between pixels and scrollLeft takes whole ones, so the scroll rounds up: rounding down
+ * would leave a sliver of the tab cut off.
+ */
+function revealCurrent(strip: HTMLElement): void {
+  const tab = strip.querySelector('[aria-selected="true"]');
+  if (!tab) return;
+  const box = strip.getBoundingClientRect();
+  const t = tab.getBoundingClientRect();
+  const peek = Math.max(0, Math.min(PEEK, (box.width - t.width) / 2));
+  if (t.left < box.left) strip.scrollLeft -= Math.ceil(box.left - t.left + peek);
+  else if (t.right > box.right) strip.scrollLeft += Math.ceil(t.right - box.right + peek);
+}
+
+/** Pixels per wheel step for each WheelEvent.deltaMode: pixels, lines, pages. */
+const wheelStep = (e: WheelEvent, page: number) => [1, 16, page][e.deltaMode] ?? 1;
+
+function TabStrip({ tabs, current, onSelect }: Omit<TopBarProps, 'archived'>) {
+  const strip = useRef<HTMLDivElement>(null);
+  const ids = tabs.map((p) => p.id).join(',');
+  // A switch (click, key or link) brings the current tab into view, and so does a tab coming or going.
+  useLayoutEffect(() => revealCurrent(strip.current!), [current, ids]);
   useEffect(() => {
-    if (!open) return;
-    const close = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    const el = strip.current!;
+    // So does a narrower window.
+    const resize = new ResizeObserver(() => revealCurrent(el));
+    resize.observe(el);
+    // The wheel scrolls the strip sideways. A sideways swipe already does, natively, and Ctrl+wheel still zooms.
+    const wheel = (e: WheelEvent) => {
+      if (e.ctrlKey || Math.abs(e.deltaY) <= Math.abs(e.deltaX) || el.scrollWidth <= el.clientWidth) return;
+      e.preventDefault();
+      el.scrollLeft += e.deltaY * wheelStep(e, el.clientWidth);
     };
-    window.addEventListener('mousedown', close);
-    return () => window.removeEventListener('mousedown', close);
-  }, [open]);
-  const active = projects.filter((p) => p.status === 'active');
-  const archived = projects.filter((p) => p.status === 'archived');
-  const othersWorking = projects.some((p) => p.id !== current?.id && p.workingSessions > 0);
-  const pick = (slug: string) => {
-    onSelect(slug);
-    setOpen(false);
+    el.addEventListener('wheel', wheel, { passive: false });
+    return () => {
+      resize.disconnect();
+      el.removeEventListener('wheel', wheel);
+    };
+  }, []);
+  // The strip is one stop in the tab order: the current tab's, or the first tab's when none is current.
+  const stop = tabs.some((p) => p.slug === current) ? current : tabs[0].slug;
+  // Left and Right move along the strip, opening each tab they reach.
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if ((e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') || e.altKey || e.ctrlKey || e.metaKey) return;
+    const buttons = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+    const at = buttons.indexOf(e.target as HTMLButtonElement);
+    if (at < 0) return;
+    e.preventDefault();
+    const next = (at + (e.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length;
+    buttons[next].focus();
+    onSelect(tabs[next].slug);
   };
   return (
-    <header className="ip-topbar">
-      <div className="ip-switcher" ref={ref}>
-        <button className="ip-proj" onClick={() => setOpen((o) => !o)} aria-haspopup="listbox" aria-expanded={open} title={current?.name}>
-          {open ? '▴' : '▾'} <span className="ip-proj-name">{current?.name ?? 'Projects'}</span>
-          {othersWorking && <span className="ip-dot clay" title="Another project has a working session" />}
-        </button>
-        {open && (
-          <div className="ip-menu" role="listbox">
-            {active.map((p) => (
-              <ProjectRow key={p.id} p={p} current={p.id === current?.id} onPick={pick} />
-            ))}
-            {archived.length > 0 && (
-              <>
-                <div className="ip-sep" />
-                <button className="ip-mi muted" onClick={() => setShowArchived((s) => !s)}>
-                  Archived ({archived.length}) {showArchived ? '▾' : '▸'}
-                </button>
-                {showArchived && archived.map((p) => <ProjectRow key={p.id} p={p} current={p.id === current?.id} onPick={pick} />)}
-              </>
-            )}
-          </div>
-        )}
-      </div>
-      <span className="ip-spacer" />
-      {needsYou > 0 && (
-        <button className="ip-need" onClick={onNeedsYou} title="Jump to the next item waiting on you (N)">
-          ● {needsYou} need you
-        </button>
-      )}
-      <button className={`ip-follow${follow ? ' on' : ''}`} onClick={onFollow} aria-pressed={follow} title="Follow Claude's changes (F)">
-        ⌖ Follow
+    <div className="ip-tabs" role="tablist" aria-label="Projects" ref={strip} onKeyDown={onKeyDown}>
+      {tabs.map((p) => {
+        const archived = p.status === 'archived';
+        return (
+          <button
+            key={p.id}
+            role="tab"
+            aria-selected={p.slug === current}
+            tabIndex={p.slug === stop ? 0 : -1}
+            className={`ip-tab${archived ? ' archived' : ''}`}
+            title={archived ? `${p.name} (archived)` : p.name}
+            aria-label={archived ? `${projectLabel(p)}, archived` : projectLabel(p)}
+            onClick={() => onSelect(p.slug)}
+          >
+            <span className="ip-tab-name">{p.name}</span>
+            <Badges p={p} />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function ArchiveMenu({ archived, current, onSelect }: Omit<TopBarProps, 'tabs'>) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const outside = (e: MouseEvent) => {
+      if (!box.current?.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener('mousedown', outside);
+    return () => window.removeEventListener('mousedown', outside);
+  }, [open]);
+  /** Closes the menu. Focus goes back to ⋯ rather than falling to the page with the row that had it. */
+  const close = () => {
+    setOpen(false);
+    button.current?.focus();
+  };
+  // Escape closes the menu and nothing else: stopping it here keeps it from the app's own Escape, which closes Details.
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (!open || e.key !== 'Escape') return;
+    e.stopPropagation();
+    close();
+  };
+  return (
+    <div className="ip-archive" ref={box} onKeyDown={onKeyDown}>
+      <button ref={button} className="ip-archive-btn" aria-label="Archived projects" title="Archived projects" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        ⋯
       </button>
+      {open && (
+        <div className="ip-menu">
+          <div className="ip-label">Archived</div>
+          {archived.map((p) => (
+            <button
+              key={p.id}
+              className={`ip-mi${p.slug === current ? ' cur' : ''}`}
+              aria-current={p.slug === current || undefined}
+              title={p.name}
+              aria-label={projectLabel(p)}
+              onClick={() => {
+                close();
+                onSelect(p.slug);
+              }}
+            >
+              <span className="nm">{p.name}</span>
+              <Badges p={p} />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One tab per active project, then ⋯ with the archived ones. */
+export function TopBar({ tabs, archived, current, onSelect }: TopBarProps) {
+  return (
+    <header className="ip-topbar">
+      {tabs.length > 0 && <TabStrip tabs={tabs} current={current} onSelect={onSelect} />}
+      {archived.length > 0 && <ArchiveMenu archived={archived} current={current} onSelect={onSelect} />}
     </header>
   );
 }

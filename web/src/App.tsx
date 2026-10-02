@@ -4,6 +4,7 @@ import type { ProjectSnapshot } from '../../src/core/types';
 import { Canvas, type CanvasHandle } from './canvas/Canvas';
 import { ActivityStrip } from './chrome/ActivityStrip';
 import { SessionRow } from './chrome/SessionRow';
+import { archivedProjects, projectTabs, stepTab } from './chrome/tabs';
 import { TopBar } from './chrome/TopBar';
 import { Details } from './panels/Details';
 import { ResourceViewer } from './panels/ResourceViewer';
@@ -34,6 +35,13 @@ export function App() {
   /** Whatever had focus when the viewer opened. It gets focus back when the viewer closes. */
   const opener = useRef<HTMLElement | null>(null);
   const needsYou = useMemo(() => (snapshot ? snapshot.nodes.filter(isNeedsYou).length : 0), [snapshot]);
+  // The tabs follow the picked slug, not the loaded snapshot, so a tab lights up on the click and [ ] step on from it.
+  const tabs = useMemo(() => projectTabs(projects, state.slug), [projects, state.slug]);
+  const archived = useMemo(() => archivedProjects(projects), [projects]);
+  const stepProject = (step: 1 | -1) => {
+    const slug = stepTab(tabs, state.slug, step);
+    if (slug) state.selectProject(slug);
+  };
 
   const openViewer = useCallback((id: number) => {
     opener.current ??= document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -62,7 +70,7 @@ export function App() {
     canvas.current?.goFrontier();
   }, []);
 
-  // The viewer covers the canvas, so while it is open only Escape is ours: F/N/Home/End go to the browser.
+  // The viewer covers the canvas, so while it is open only Escape is ours: F/N/Home/End, [ ] and 1-9 go to the browser.
   useKeyboard(
     viewerOpen
       ? { onEscape: () => setViewerResource(null) }
@@ -71,6 +79,12 @@ export function App() {
           onNext: () => canvas.current?.nextNeedsYou(),
           onHome: () => canvas.current?.goRoot(),
           onEnd: () => canvas.current?.goFrontier(),
+          onPrevTab: () => stepProject(-1),
+          onNextTab: () => stepProject(1),
+          onTab: (n) => {
+            const tab = tabs[n - 1];
+            if (tab) state.selectProject(tab.slug);
+          },
           onEscape: () => setSelectedNode(null),
         },
   );
@@ -80,16 +94,16 @@ export function App() {
   return (
     <>
       <div className="ip-app" ref={app}>
-        <TopBar
-          projects={projects}
-          current={snapshot?.project ?? null}
-          onSelect={state.selectProject}
+        <TopBar tabs={tabs} archived={archived} current={state.slug} onSelect={state.selectProject} />
+        {/* Always there, so the canvas doesn't jump while a project loads: it holds the needs-you pill and Follow. */}
+        <SessionRow
+          sessions={snapshot?.sessions ?? []}
+          onPick={(s) => s.focusNodeId !== null && canvas.current?.focusNode(s.focusNodeId)}
           needsYou={needsYou}
           onNeedsYou={() => canvas.current?.nextNeedsYou()}
           follow={follow}
           onFollow={followOn}
         />
-        {snapshot && <SessionRow sessions={snapshot.sessions} onPick={(s) => s.focusNodeId !== null && canvas.current?.focusNode(s.focusNodeId)} />}
         {state.connection === 'reconnecting' && <div className="ip-banner">Reconnecting to InProgress…</div>}
         <main className="ip-main">
           {projects.length === 0 ? (
