@@ -2,11 +2,12 @@ import { SCRIBE_AGENT, type HookEvent, type Session, type WorkStatus } from '../
 import { write, type Ctx } from './db/tx';
 import { badRequest } from './errors';
 import { renderBriefing, renderStatusAnswer, renderStatusLine, untrackedHint } from './briefing';
-import { findNode, requireNode } from './repo/nodes';
+import { findNode, leadingNode, requireNode } from './repo/nodes';
 import { getProjectById, resolveBinding, resolveProject } from './repo/projects';
 import { findSession, saveSession } from './repo/sessions';
 import { getProjectSnapshot } from './repo/snapshot';
 import { clearSubagents, launchSubagent, pruneSubagents, recordDispatch, startSubagent, stopSubagent } from './repo/subagents';
+import { taskCreated, taskUpdated } from './repo/work';
 
 export interface HookEventInput {
   event: HookEvent;
@@ -45,14 +46,6 @@ function insertSession(ctx: Ctx, id: string, projectId: number, state: Session['
   ctx.db.prepare('INSERT INTO sessions (id, project_id, state, started_at, last_seen_at) VALUES (?, ?, ?, ?, ?)').run(id, projectId, state, now, now);
 }
 
-/** The node a leading `#id` names (`#57 Write the guide`), when that node is in the project. */
-export function leadingNode(ctx: Ctx, text: string | undefined, projectId: number | null): number | undefined {
-  const m = /^\s*#(\d+)\b/.exec(text ?? '');
-  if (!m || projectId === null) return undefined;
-  const node = findNode(ctx, Number(m[1]));
-  return node?.projectId === projectId ? node.id : undefined;
-}
-
 const clean = (text: string | undefined): string | null => text?.trim() || null;
 
 export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInput): HookEventResult {
@@ -71,6 +64,8 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
     }
     const now = ctx.now();
     const next: Session = { ...before, lastSeenAt: now };
+    /** Nodes whose working tasks this event changed: one work.updated each. */
+    const worked: number[] = [];
     if (input.cwd) next.cwd = input.cwd;
     if (input.branch !== undefined) next.branch = input.branch;
     if (input.transcriptPath) next.transcriptPath = input.transcriptPath;
@@ -114,6 +109,15 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
       case 'agent-launched':
         if (input.toolUseId && input.agentId) launchSubagent(ctx, sessionId, input.toolUseId, input.agentId, clean(input.model));
         break;
+      case 'task-created':
+        if (input.taskKey && input.subject) worked.push(...taskCreated(ctx, before, input.agentId ?? '', input.taskKey, input.subject));
+        break;
+      case 'task-updated':
+        if (input.taskKey) {
+          const { agentId = '', taskKey, subject, status, addBlocks, addBlockedBy } = input;
+          worked.push(...taskUpdated(ctx, before, { agentId, taskKey, subject, status, addBlocks, addBlockedBy }));
+        }
+        break;
       case 'end':
         next.state = 'ended';
         next.endedAt = now;
@@ -128,6 +132,10 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
     if (JSON.stringify(before.subagents) !== JSON.stringify(after.subagents)) changed.push('subagents');
     if (created || changed.length) {
       record({ projectId: after.projectId, type: 'session.updated', entity: 'session', entityId: sessionId, data: { changed: created ? ['created', ...changed] : changed, state: after.state } });
+    }
+    for (const nodeId of new Set(worked)) {
+      const node = findNode(ctx, nodeId);
+      if (node) record({ projectId: node.projectId, type: 'work.updated', entity: 'node', entityId: nodeId, data: { nodeId } });
     }
     return after;
   });
