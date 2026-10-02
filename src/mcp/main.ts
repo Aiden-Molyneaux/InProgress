@@ -10,7 +10,7 @@ async function main(): Promise<void> {
   const url = baseUrl();
   // stdout belongs to the MCP protocol: never print here.
   const start = () =>
-    ensureServer({ baseUrl: url, waitMs: 3000 }).catch((err) => {
+    ensureServer({ baseUrl: url, waitMs: 5000 }).catch((err) => {
       appendLog(join(homeDir(), 'hooks.log'), `mcp ensureServer: ${String(err)}`);
       return false;
     });
