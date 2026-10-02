@@ -477,13 +477,15 @@ and the skill directory, after the same backup step. The data dir is left alone.
 
 ### 7.1 Shell (see approved mockups, `.superpowers/brainstorm/`)
 
-- **Top bar**: project switcher (dropdown sorted by working sessions, then last activity; each
-  row shows state dot, `◆ n working`, `n need you`; archived projects in a sub-list; the
-  selection is stored in `localStorage` and the URL hash `#/p/<slug>`), a **needs-you** pill
-  (`● n need you`), and a **Follow** toggle (`⌖`).
+- **Tab strip** (replaced the dropdown on 2026-10-02, #44): one tab per active project in a fixed
+  order (oldest first), each with an amber needs-you count and a clay dot while a session works
+  there; archived projects in a `⋯` menu; scrolls sideways and keeps the current tab in view. Keys
+  `[` / `]` and `1`-`9`; `role="tablist"`. The selection is stored in `localStorage` and the URL
+  hash `#/p/<slug>`.
 - **Session row**: one chip per non-ended session in the project. Filled clay = working (pulsing
   dot), clay outline = idle, red outline = needs permission. Label: title · `n subagents` when
-  above 0. Click → camera to its focus node.
+  above 0. Click → camera to its focus node. The **needs-you** pill (`● n need you`) and the
+  **Follow** toggle (`⌖`) sit at its right end, so the row always shows.
 - **Canvas**: React Flow on a dot-grid background, with zoom controls (+ / − / fit) at bottom-left,
   a minimap at bottom-right, and a sticky breadcrumb at top-left showing the ancestor path of the
   topmost visible node.
