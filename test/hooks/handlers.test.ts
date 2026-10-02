@@ -164,6 +164,10 @@ describe('buildToolHookBody: pre-tool (Agent dispatch)', () => {
     expect(buildToolHookBody('pre-tool', { session_id: 's', tool_name: 'Bash', tool_use_id: 't', tool_input: { command: 'ls' } })).toBeUndefined();
     expect(buildToolHookBody('pre-tool', { session_id: 's', tool_name: 'Agent', tool_use_id: 't', tool_input: 'not an object' })).toBeUndefined();
   });
+
+  it('posts nothing for a Task call that does not look like an Agent call (no prompt)', () => {
+    expect(buildToolHookBody('pre-tool', { session_id: 's', tool_name: 'Task', tool_use_id: 't', tool_input: { description: 'Something else' } })).toBeUndefined();
+  });
 });
 
 describe('buildToolHookBody: post-tool', () => {

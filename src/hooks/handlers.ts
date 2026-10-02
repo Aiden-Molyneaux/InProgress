@@ -176,6 +176,8 @@ export function buildToolHookBody(name: ToolHookName, input: HookStdin): Record<
     const agentType = text(toolInput.subagent_type, ID_MAX) ?? 'general-purpose';
     if (!toolUseId || agentType === SCRIBE_AGENT) return undefined;
     if (name === 'pre-tool') {
+      // Every Agent call has a prompt: anything else under these names is not a dispatch. The prompt itself stays here.
+      if (typeof toolInput.prompt !== 'string') return undefined;
       const body: Record<string, unknown> = { event: 'agent-dispatch', toolUseId, agentType, description: text(toolInput.description, DESCRIPTION_MAX) ?? '' };
       const model = text(toolInput.model, MODEL_MAX);
       if (model) body.model = model;
