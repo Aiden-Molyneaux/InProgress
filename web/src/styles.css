@@ -38,26 +38,34 @@ body { font: 13px/1.45 system-ui, -apple-system, 'Segoe UI', sans-serif; backgro
 button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
 .muted { color: var(--muted); }
 .ip-app { display: flex; flex-direction: column; height: 100%; }
-.ip-topbar { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--panel); border-bottom: 1px solid var(--border); }
-.ip-spacer { flex: 1; }
-.ip-switcher { position: relative; min-width: 0; max-width: 480px; }
-.ip-proj { font-weight: 700; border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; display: flex; align-items: center; gap: 6px; max-width: 100%; }
-.ip-proj-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ip-menu { position: absolute; top: calc(100% + 4px); left: 0; width: 320px; max-width: calc(100vw - 20px); background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); padding: 6px; z-index: 20; }
+.ip-topbar { display: flex; align-items: stretch; min-height: 36px; padding: 0 6px 0 2px; background: var(--panel); border-bottom: 1px solid var(--border); }
+/* One tab per project. When they overflow, the strip scrolls sideways (the wheel too: see TopBar). */
+.ip-tabs { display: flex; flex: 0 1 auto; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.ip-tab { position: relative; flex: none; display: flex; align-items: center; gap: 6px; padding: 2px 10px 0; border-bottom: 2px solid transparent; color: var(--muted); font-weight: 600; white-space: nowrap; }
+.ip-tab + .ip-tab::before { content: ''; position: absolute; left: 0; top: 11px; bottom: 11px; width: 1px; background: var(--border); }
+.ip-tab:hover { color: var(--text); }
+.ip-tab[aria-selected='true'] { color: var(--text); border-bottom-color: var(--accent); }
+.ip-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 4px; }
+.ip-tab.archived .ip-tab-name { font-style: italic; }
+.ip-tab-name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+.ip-tab-count { flex: none; min-width: 16px; padding: 0 4px; border: 1px solid var(--amber); border-radius: 8px; background: color-mix(in srgb, var(--amber) 14%, transparent); color: var(--amber-ink); font-size: 10px; font-weight: 700; line-height: 14px; text-align: center; }
+.ip-tab-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--clay); animation: ip-pulse 1.6s ease-in-out infinite; }
+.ip-archive { position: relative; flex: none; margin-left: auto; display: flex; align-items: center; padding-left: 6px; }
+.ip-archive-btn { height: 24px; padding: 0 8px; border-radius: 6px; color: var(--muted); font-weight: 700; }
+.ip-archive-btn:hover, .ip-archive-btn[aria-expanded='true'] { background: var(--panel-2); color: var(--text); }
+.ip-menu { position: absolute; top: calc(100% + 4px); right: 0; width: 280px; max-width: calc(100vw - 20px); background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); padding: 6px; z-index: 20; }
 .ip-mi { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 8px; border-radius: 7px; text-align: left; }
 .ip-mi:hover, .ip-mi.cur { background: var(--panel-2); }
-.ip-mi .nm { font-weight: 600; }
-.ip-mi .st { margin-left: auto; font-size: 11px; color: var(--muted); }
-.ip-sep { height: 1px; background: var(--border); margin: 4px 6px; }
-.ip-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
-.ip-dot.clay { background: var(--clay); }
-.ip-dot.amber { background: var(--amber); }
-.ip-dot.grey { border: 1.5px solid var(--faint); }
-.ip-need { border: 1px solid var(--amber); color: var(--amber-ink); background: color-mix(in srgb, var(--amber) 14%, transparent); border-radius: 10px; padding: 0 8px; font-weight: 600; font-size: 12px; white-space: nowrap; flex: none; }
-.ip-follow { border: 1px solid var(--border); border-radius: 6px; padding: 0 7px; font-size: 12px; color: var(--muted); white-space: nowrap; flex: none; }
+.ip-mi .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.ip-menu .ip-label { margin: 2px 8px 4px; }
+.ip-need { height: 22px; border: 1px solid var(--amber); color: var(--amber-ink); background: color-mix(in srgb, var(--amber) 14%, transparent); border-radius: 10px; padding: 0 8px; font-weight: 600; font-size: 12px; white-space: nowrap; flex: none; }
+.ip-follow { height: 22px; border: 1px solid var(--border); border-radius: 6px; padding: 0 7px; font-size: 12px; color: var(--muted); white-space: nowrap; flex: none; }
 .ip-follow.on { border-color: var(--accent); color: var(--accent); }
-.ip-sessions { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 10px; background: var(--panel); border-bottom: 1px solid var(--border); }
-.ip-chip-s { display: inline-flex; align-items: center; gap: 6px; border-radius: 10px; padding: 1px 9px; font-size: 12px; font-weight: 600; border: 1px solid var(--clay); color: var(--clay); }
+/* Session chips on the left, wrapping; the needs-you pill and Follow at the right end. */
+.ip-sessions { display: flex; align-items: flex-start; gap: 8px; padding: 6px 10px; background: var(--panel); border-bottom: 1px solid var(--border); }
+.ip-chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; min-width: 0; }
+.ip-chip-s { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 22px; border-radius: 10px; padding: 0 9px; font-size: 12px; font-weight: 600; border: 1px solid var(--clay); color: var(--clay); }
+.ip-chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ip-chip-s.s-working { background: var(--clay); color: #fff; }
 .ip-chip-s.s-permission { border-color: var(--red); color: var(--red); }
 .ip-pulse { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: ip-pulse 1.6s ease-in-out infinite; }
@@ -133,7 +141,7 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-viewer-body:focus-visible { outline: 2px solid var(--amber); outline-offset: -2px; }
 .ip-toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 4px 12px; border-radius: 8px; font-size: 12px; z-index: 40; }
 @media (prefers-reduced-motion: reduce) {
-  .ip-pulse, .ip-node.working .ip-marker.m-active, .ip-node.flash { animation: none; }
+  .ip-pulse, .ip-tab-dot, .ip-node.working .ip-marker.m-active, .ip-node.flash { animation: none; }
   /* The flash holds a static ring instead of fading one out. */
   .ip-node.flash { box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 60%, transparent); }
 }
