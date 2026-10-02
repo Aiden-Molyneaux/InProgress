@@ -100,7 +100,9 @@ subcommands). `bin: { "inprogress": "dist/cli/main.js" }`.
 The installed hooks, the scribe's MCP server and the server all run from the repo's live `dist/`
 and `web/dist/`, so nothing but `npm run deploy` writes there:
 
-1. `typecheck`, `test`, then `test:smoke` and `test:e2e` against a fresh `.build/` (same layout as
+1. `typecheck` and `test` always; then, only when the change since the deployed build needs them
+   (`--full` forces both), `test:smoke` (hook, CLI, MCP, server or kit changes) and `test:e2e` (UI,
+   core or server changes) against a fresh `.build/` (same layout as
    the repo: `dist/`, `web/dist/`, a copy of `claude/`). Each build writes `dist/build.json`
    (`sha`, `dirty`, `builtAt`).
 2. The tested trees replace the live ones by renames (the old ones move to `.deploy/prev/`); a

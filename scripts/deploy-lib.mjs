@@ -59,3 +59,15 @@ export function swapWithPrev({ repo, prev, rename = renameSync }) {
   moveAll(moves, rename);
   rmSync(parked, { recursive: true, force: true });
 }
+
+// Which test suites a change needs. Typecheck and unit tests always run; these decide the slower two.
+const SMOKE_PATHS = [/^src\/(hooks|cli|mcp|server|lib)\//, /^claude\//, /^scripts\//, /^test\/smoke\//, /^(package\.json|package-lock\.json|tsup\.config\.ts|tsconfig\.json|vitest\.smoke\.config\.ts)$/];
+const E2E_PATHS = [/^web\//, /^src\/(core|server|lib)\//, /^test\/e2e\//, /^(package\.json|package-lock\.json|tsconfig\.json|playwright\.config\.ts)$/];
+
+/** `changed` is the paths changed since the deployed build, or null when that build is unknown (then run everything). */
+export function suitesFor(changed) {
+  if (changed === null) return { smoke: true, e2e: true };
+  const paths = changed.map((p) => p.replace(/\\/g, '/'));
+  const any = (patterns) => paths.some((p) => patterns.some((re) => re.test(p)));
+  return { smoke: any(SMOKE_PATHS), e2e: any(E2E_PATHS) };
+}

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, w
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { promote, swapWithPrev } from '../../scripts/deploy-lib.mjs';
+import { promote, suitesFor, swapWithPrev } from '../../scripts/deploy-lib.mjs';
 
 const temps: string[] = [];
 afterAll(() => {
@@ -72,5 +72,22 @@ describe('deploy directory moves', () => {
     };
     promote({ ...l, rename: busy });
     expect(live(l.repo)).toEqual(['new', 'new']);
+  });
+});
+
+describe('which test suites a deploy runs', () => {
+  it('runs smoke for hook, CLI, MCP, server and kit changes, and e2e for UI, core and server changes', () => {
+    expect(suitesFor(['src/hooks/handlers.ts'])).toMatchObject({ smoke: true, e2e: false });
+    expect(suitesFor(['claude/skills/inprogress/SKILL.md', 'src/cli/doctor.ts'])).toMatchObject({ smoke: true, e2e: false });
+    expect(suitesFor(['web/src/chrome/TopBar.tsx', 'web/src/styles.css'])).toMatchObject({ smoke: false, e2e: true });
+    expect(suitesFor(['src/core/layout.ts'])).toMatchObject({ smoke: false, e2e: true });
+    expect(suitesFor(['src/server/routes/read.ts'])).toMatchObject({ smoke: true, e2e: true });
+    expect(suitesFor(['package.json'])).toMatchObject({ smoke: true, e2e: true });
+    expect(suitesFor(['docs/guide/inprogress-guide.html', 'README.md'])).toMatchObject({ smoke: false, e2e: false });
+    expect(suitesFor(['src\\hooks\\main.ts'])).toMatchObject({ smoke: true });
+  });
+
+  it('runs everything when the deployed build is unknown', () => {
+    expect(suitesFor(null)).toMatchObject({ smoke: true, e2e: true });
   });
 });

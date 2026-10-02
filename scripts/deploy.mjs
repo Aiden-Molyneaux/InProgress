@@ -1,4 +1,5 @@
-// npm run deploy: test a fresh build in .build, make it live, restart the server on it.
+// npm run deploy [--full]: test a fresh build in .build (smoke and e2e only when the change needs them; --full runs
+// everything), make it live, restart the server on it.
 // npm run rollback: swap the live build with the previous one and restart.
 // The live dist/ and web/dist/ are what the installed hooks, the scribe's MCP server and the server run from; they
 // are only ever replaced whole, by renames (scripts/deploy-lib.mjs), after every check has passed.
@@ -6,7 +7,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { promote, swapWithPrev } from './deploy-lib.mjs';
+import { promote, suitesFor, swapWithPrev } from './deploy-lib.mjs';
 
 const repo = fileURLToPath(new URL('..', import.meta.url));
 const buildRoot = join(repo, '.build');
@@ -24,6 +25,17 @@ const readJson = (file) => {
   }
 };
 const label = (b) => (b ? `${b.sha}${b.dirty ? '+dirty' : ''} (${b.builtAt})` : 'unknown build');
+
+/** Paths changed (committed, staged, unstaged or untracked) since a commit, or null if git can't tell. */
+function changedSince(sha) {
+  if (!sha || sha === 'unknown') return null;
+  try {
+    const git = (args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
+    return [...git(['diff', '--name-only', sha]).split('\n'), ...git(['ls-files', '--others', '--exclude-standard']).split('\n')].filter(Boolean);
+  } catch {
+    return null;
+  }
+}
 
 async function runningBuild() {
   const port = Number(process.env.INPROGRESS_PORT) || 4317;
@@ -55,14 +67,27 @@ if (rollback) {
   process.exit(0);
 }
 
+// The slower suites run only for changes they cover (scripts/deploy-lib.mjs suitesFor); --full runs everything.
+const deployed = readJson(join(repo, 'dist', 'build.json'));
+const changed = process.argv.includes('--full') ? null : changedSince(deployed?.sha);
+const suites = suitesFor(changed);
+const since = deployed?.sha ? `since ${deployed.sha}` : '';
+
 step('Type checks');
 npm('typecheck');
 step('Unit tests');
 npm('test');
-step('Smoke tests against a fresh build in .build');
-npm('test:smoke');
-step('Browser tests against a full build in .build');
-npm('test:e2e');
+if (suites.smoke) {
+  step('Smoke tests against a fresh build in .build');
+  npm('test:smoke');
+} else console.log(`\n▸ Smoke tests skipped: no hook, CLI, MCP, server or kit changes ${since}`);
+if (suites.e2e) {
+  step('Browser tests against a full build in .build');
+  npm('test:e2e');
+} else {
+  step(`Full build in .build (browser tests skipped: no UI, core or server changes ${since})`);
+  npm('build');
+}
 
 const candidate = readJson(join(buildRoot, 'dist', 'build.json'));
 step(`Making ${label(candidate)} live`);
