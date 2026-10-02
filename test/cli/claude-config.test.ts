@@ -176,6 +176,23 @@ describe('install', () => {
     expect(skill).not.toMatch(/\{\{\w+\}\}/);
   });
 
+  it('writes the live-work rules into the skill and the scribe', () => {
+    const dir = claudeDirWithSettings(existing);
+    install({ repo, claudeDir: dir, stamp: 'lw' });
+    const skill = readFileSync(join(dir, 'skills', 'inprogress', 'SKILL.md'), 'utf8');
+    // Subagent descriptions and task subjects carry the step's #id; the task tools for multi-step work.
+    expect(skill).toContain('`#44 Build project tabs`');
+    expect(skill).toMatch(/task tools \(`TaskCreate`, `TaskUpdate`\) for multi-step work/);
+    expect(skill).toMatch(/subject with `#id` when it belongs to a step other than your focus/);
+    // The queue, new requests, and the fallback without task tools.
+    expect(skill).toContain('`queue: #a, #b, #c`');
+    expect(skill).toMatch(/new request with a deliverable .* becomes a step right away/);
+    expect(skill).toContain('tasks on #57:');
+    const agent = readFileSync(join(dir, 'agents', 'inprogress-scribe.md'), 'utf8');
+    expect(agent).toMatch(/`set_queue`/);
+    expect(agent).toMatch(/`set_tasks`/);
+  });
+
   it('begins its log with the target Claude directory and the node binary it wrote', () => {
     const dir = claudeDirWithSettings(existing);
     const { log } = install({ repo, claudeDir: dir, stamp: 's' });
