@@ -226,6 +226,29 @@ test('Details closes when its node is deleted, and stays open when another node 
   await expect(page.getByText("Couldn't refresh")).toHaveCount(0);
 });
 
+test('a labelled step shows its glyph in a neutral chip named by the word, and Details shows glyph and word', async ({ page, api, fresh }) => {
+  await open(page, fresh);
+  const card = page.locator('.ip-node', { hasText: 'Play app signing' });
+  await expect(card).toBeVisible();
+  await expect(page.locator('.ip-node .ip-type')).toHaveCount(0);
+  // The label arrives live, with the node's own update.
+  await write(api, fresh.session, 'patch', `/api/nodes/${fresh.ids['Play app signing']}`, { label: 'ui' });
+  const chip = card.getByRole('img', { name: 'ui' });
+  await expect(chip).toHaveText('⧉');
+  await expect(chip).toHaveAttribute('title', 'ui');
+  // After the title, in text ink (never a hue), and always text presentation, never an emoji.
+  await expect(card.locator('.ip-title + .ip-type')).toHaveCount(1);
+  await expect(chip).toHaveCSS('color', 'rgb(110, 110, 115)');
+  await expect(chip).toHaveCSS('font-variant-emoji', 'text');
+  await expect(page.locator('.ip-node', { hasText: 'Run signing tests' }).locator('.ip-type')).toHaveCount(0);
+  await card.click();
+  // Beside kind and status: "active task · ⧉ ui · Claude".
+  const meta = page.getByRole('complementary').locator('.ip-meta');
+  await expect(meta.locator('.ip-meta-label')).toHaveText('· ⧉ ui');
+  await expect(meta).toHaveText(/^active\s*task\s*· ⧉ ui\s*· Claude/);
+  await expect(meta.locator('.ip-glyph')).toHaveCSS('font-variant-emoji', 'text');
+});
+
 test('a long project name is cut short and the top bar stays on one line', async ({ page, api }) => {
   const name = 'A project name long enough to fill a narrow window several times over, and then some';
   const project = await seed(api, name);

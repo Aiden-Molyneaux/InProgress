@@ -1,5 +1,5 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
-import type { ResourceMeta, TreeNode } from '../../../src/core/types';
+import { LABEL_GLYPHS, type ResourceMeta, type TreeNode } from '../../../src/core/types';
 import { circled } from '../live';
 
 export interface NodeCardData extends Record<string, unknown> {
@@ -23,6 +23,8 @@ export interface NodeCardData extends Record<string, unknown> {
 
 export function NodeCard({ data }: NodeProps<Node<NodeCardData, 'ipNode'>>) {
   const { node, folded, doneCount, progress, needsYou, hasChildren, working, queuePos, resources, flash, selected } = data;
+  // The type label shows as its glyph only; the word is the chip's tooltip and accessible name.
+  const glyph = node.label ? LABEL_GLYPHS[node.label] : undefined;
   const classes = ['ip-node', `st-${node.status}`, needsYou && 'needs-you', working && 'working', flash && 'flash', selected && 'selected', node.parentId === null && 'root']
     .filter(Boolean)
     .join(' ');
@@ -47,6 +49,11 @@ export function NodeCard({ data }: NodeProps<Node<NodeCardData, 'ipNode'>>) {
           {node.title}
           {folded ? ` · ${doneCount} done` : ''}
         </span>
+        {node.label && glyph && (
+          <span className={`ip-type l-${node.label}`} role="img" title={node.label} aria-label={node.label}>
+            {glyph}
+          </span>
+        )}
         {queuePos !== null && (
           <span className="ip-queue" title={`Up next: ${queuePos}`}>
             {circled(queuePos)}
