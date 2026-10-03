@@ -69,6 +69,31 @@ describe('nodes', () => {
     expect(() => updateNode(ctx, 't', root, { kind: 'task' })).toThrow('project root');
   });
 
+  it('labels steps as they are added, nested ones too, and leaves the rest unlabelled', () => {
+    const { ctx, root } = setup();
+    const created = addNodes(ctx, 't', {
+      parentId: root,
+      nodes: [{ title: 'Live work', kind: 'phase', children: [{ title: 'Working-task rows', label: 'ui' }, { title: 'Mirror the task tools', label: 'integration' }] }, { title: 'Spike', label: null }],
+    });
+    expect(created.map((n) => [n.title, n.label])).toEqual([['Live work', null], ['Working-task rows', 'ui'], ['Mirror the task tools', 'integration'], ['Spike', null]]);
+    expect(requireNode(ctx, created[1].id).label).toBe('ui');
+    expect(requireNode(ctx, root).label).toBeNull();
+  });
+
+  it('sets, changes and clears a label, each change in node.updated', () => {
+    const { ctx, root } = setup();
+    const [n] = addNodes(ctx, 't', { parentId: root, nodes: [{ title: 'Faster cold start' }] });
+    const lastChanges = () => JSON.parse((ctx.db.prepare("SELECT data FROM events WHERE type = 'node.updated' ORDER BY id DESC LIMIT 1").get() as { data: string }).data).changes;
+    expect(updateNode(ctx, 't', n.id, { label: 'research' }).label).toBe('research');
+    expect(lastChanges()).toEqual({ label: { from: null, to: 'research' } });
+    expect(updateNode(ctx, 't', n.id, { label: 'fix', status: 'active' })).toMatchObject({ label: 'fix', status: 'active' });
+    expect(lastChanges()).toEqual({ label: { from: 'research', to: 'fix' }, status: { from: 'todo', to: 'active' } });
+    // Leaving label out keeps it; null clears it.
+    expect(updateNode(ctx, 't', n.id, { outcome: 'Halved' }).label).toBe('fix');
+    expect(updateNode(ctx, 't', n.id, { label: null }).label).toBeNull();
+    expect(lastChanges()).toEqual({ label: { from: 'fix', to: null } });
+  });
+
   it('refuses title and body edits on the root, which mirror the project', () => {
     const { ctx, root } = setup();
     expect(() => updateNode(ctx, 't', root, { title: 'X' })).toThrow('project root');

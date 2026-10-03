@@ -1,4 +1,4 @@
-import type { NodeDetail, Project, Resource, SearchResult, TreeNode, WorkItem } from '../core/types';
+import { glyphTitle, type NodeDetail, type Project, type Resource, type SearchResult, type TreeNode, type WorkItem } from '../core/types';
 
 const MARK: Record<WorkItem['status'], string> = { in_progress: '◐', pending: '○', completed: '✓' };
 
@@ -12,13 +12,13 @@ export function formatTasks(nodeId: number, items: WorkItem[]): string {
 
 export function formatCreated(nodes: TreeNode[]): string {
   return nodes
-    .map((n) => `#${n.id} ${n.title} (${n.kind}, ${n.status}${n.assignee === 'me' ? ', you' : ''}) under #${n.parentId}`)
+    .map((n) => `#${n.id} ${glyphTitle(n)} (${n.kind}, ${n.status}${n.assignee === 'me' ? ', you' : ''}) under #${n.parentId}`)
     .join('\n');
 }
 
 export function formatNodeDetail(d: NodeDetail): string {
   const n = d.node;
-  const lines = [`#${n.id} ${n.title} (${n.kind}) — ${n.status}, ${n.assignee === 'me' ? 'assigned to Aiden' : 'Claude'}`];
+  const lines = [`#${n.id} ${glyphTitle(n)} (${n.kind}${n.label ? `, ${n.label}` : ''}) — ${n.status}, ${n.assignee === 'me' ? 'assigned to Aiden' : 'Claude'}`];
   if (d.parent) lines.push(`Parent: #${d.parent.id} ${d.parent.title}`);
   if (n.body) lines.push(`Body:\n${n.body}`);
   if (n.outcome) lines.push(`Outcome: ${n.outcome}`);

@@ -1,5 +1,5 @@
 import { ancestors, buildIndex, dfsOrder, isNeedsYou, kids, progress, type TreeIndex } from '../core/tree';
-import { sessionDisplayTitle, type ProjectSnapshot, type Session, type TreeNode, type WorkItem } from '../core/types';
+import { LABEL_GLYPHS, NODE_LABELS, glyphTitle, sessionDisplayTitle, type ProjectSnapshot, type Session, type TreeNode, type WorkItem } from '../core/types';
 import { homeDir } from '../lib/home';
 
 const MAX_FRONTIER_LINES = 25;
@@ -18,6 +18,7 @@ export function updateRules(home: string = homeDir()): string[] {
     '- Never edit it yourself. Brief the inprogress-scribe agent (Agent tool, subagent_type "inprogress-scribe"); it runs in the background. At most one brief per turn, batching every change.',
     '- Brief at these checkpoints: a new request with a deliverable arrives (it becomes a step right away); a plan is made or changed (backtracking = mark steps dropped or move them); the order of work is decided or changes ("queue: #a, #b, #c"); a step starts, finishes, or is blocked; something worth finding again is produced (test suite, runbook, walkthrough, roadmap, diagram, handoff); something is handed to Aiden (assignee me) or he reports doing it; an open question appears or is answered.',
     '- Steps are plan-level with outcomes, never single actions. Detours go in the log of the step they interrupted.',
+    `- Give each new step one type label in its brief: add under #41: "Faster cold start" (task, server). Labels: ${NODE_LABELS.map((l) => `${LABEL_GLYPHS[l]} ${l}`).join(', ')}. Pick by purpose first (fix, refactor, research), else by where the work lands; relabel a step when its purpose changes.`,
     '- Working tasks sit under the steps, and Aiden watches them live. Start an Agent description with its step\'s #id ("#44 Build project tabs"). For multi-step work use the task tools (TaskCreate, TaskUpdate), and start a task\'s subject with #id when it belongs to a step other than your focus. Without the task tools, brief the list: "tasks on #57: in progress \\"Write the guide\\"; pending \\"Review it\\"".',
     `- Resources: pass a file path with snapshot_file. Content that only exists in chat is first written to ${resources}/<slug>/<yyyy-mm-dd>-<kebab-title>.md.`,
     '- Brief format: "Session: <id> · Project: <slug>", then one "- " line per change, e.g. "#57 → done; outcome ...", "add under #55: \\"Run signing tests\\" (assignee me)", "resource on #58: test-suite \\"Signing suite\\", path ..., snapshot_file", "log on #55: ...", "focus → #58".',
@@ -33,7 +34,7 @@ function statusText(n: TreeNode): string {
 function lineFor(index: TreeIndex, n: TreeNode, focusOf: Map<number, Session[]>, sessionId?: string): string {
   const prog = progress(index, n.id);
   const here = (focusOf.get(n.id) ?? []).map((s) => (s.id === sessionId ? '◆ this session' : `◆ "${sessionDisplayTitle(s)}"`));
-  return `#${n.id} ${n.title}${n.kind === 'question' ? ' (question)' : ''} — ${statusText(n)}${prog ? ` (${prog.done}/${prog.total})` : ''}${here.length ? `  ${here.join(' ')}` : ''}`;
+  return `#${n.id} ${glyphTitle(n)}${n.kind === 'question' ? ' (question)' : ''} — ${statusText(n)}${prog ? ` (${prog.done}/${prog.total})` : ''}${here.length ? `  ${here.join(' ')}` : ''}`;
 }
 
 /** The open working tasks on a node, in progress first, then pending, each in creation order. */
@@ -79,7 +80,7 @@ export function frontierLines(snapshot: ProjectSnapshot, sessionId?: string): st
     }
     const upcoming = list.slice(last + 1).filter((k) => k.status === 'todo' && !chain.has(k.id));
     if (upcoming.length) {
-      lines.push(`${'  '.repeat(depth)}Next: ${upcoming.slice(0, 2).map((k) => `#${k.id} ${k.title}`).join(' · ')}${upcoming.length > 2 ? ` (+${upcoming.length - 2} more)` : ''}`);
+      lines.push(`${'  '.repeat(depth)}Next: ${upcoming.slice(0, 2).map((k) => `#${k.id} ${glyphTitle(k)}`).join(' · ')}${upcoming.length > 2 ? ` (+${upcoming.length - 2} more)` : ''}`);
     }
   };
   walk(root, 0);
@@ -95,7 +96,7 @@ function upNextLine(snapshot: ProjectSnapshot): string | undefined {
   const byId = new Map(snapshot.nodes.map((n) => [n.id, n]));
   const queued = snapshot.project.queue.map((id) => byId.get(id)).filter((n): n is TreeNode => n !== undefined);
   if (!queued.length) return undefined;
-  const shown = queued.slice(0, MAX_UP_NEXT).map((n) => `#${n.id} ${n.title}`);
+  const shown = queued.slice(0, MAX_UP_NEXT).map((n) => `#${n.id} ${glyphTitle(n)}`);
   return `Up next: ${shown.join(' → ')}${queued.length > MAX_UP_NEXT ? ` (+${queued.length - MAX_UP_NEXT} more)` : ''}`;
 }
 
@@ -104,7 +105,7 @@ function needsYouLine(snapshot: ProjectSnapshot): string | undefined {
   const order = dfsOrder(index);
   const needs = snapshot.nodes.filter(isNeedsYou).sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
   if (!needs.length) return undefined;
-  const shown = needs.slice(0, 8).map((n) => `#${n.id} ${n.title}${n.kind === 'question' ? ' (question)' : ''}`);
+  const shown = needs.slice(0, 8).map((n) => `#${n.id} ${glyphTitle(n)}${n.kind === 'question' ? ' (question)' : ''}`);
   return `Needs you (${needs.length}): ${shown.join(' · ')}${needs.length > 8 ? ` · +${needs.length - 8} more` : ''}`;
 }
 

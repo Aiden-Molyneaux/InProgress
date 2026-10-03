@@ -1,7 +1,9 @@
 import { z } from 'zod';
-import { ASSIGNEES, HOOK_EVENTS, NODE_KINDS, NODE_STATUSES, RESOURCE_KINDS, WORK_STATUSES, type NodeInput } from '../core/types';
+import { ASSIGNEES, HOOK_EVENTS, NODE_KINDS, NODE_LABELS, NODE_STATUSES, RESOURCE_KINDS, WORK_STATUSES, unknownLabel, type NodeInput } from '../core/types';
 
 const title = z.string().trim().min(1, 'title is empty').max(200);
+/** A step's type label; null leaves it unlabelled (or clears it on a patch). */
+const label = z.enum(NODE_LABELS, { errorMap: (_issue, ctx) => ({ message: unknownLabel(ctx.data) }) }).nullable().optional();
 export const after = z.union([z.number().int().positive(), z.literal('start'), z.literal('end')]).optional();
 
 export const nodeInput: z.ZodType<NodeInput> = z.lazy(() =>
@@ -13,6 +15,7 @@ export const nodeInput: z.ZodType<NodeInput> = z.lazy(() =>
       assignee: z.enum(ASSIGNEES).optional(),
       body: z.string().max(20_000).optional(),
       outcome: z.string().max(2_000).optional(),
+      label,
       children: z.array(nodeInput).max(200).optional(),
     })
     .strict(),
@@ -31,7 +34,7 @@ export const updateProjectBody = z
 export const bindingBody = z.object({ path: z.string().trim().min(1).max(500), branchPattern: z.string().trim().max(200).nullish() }).strict();
 export const addNodesBody = z.object({ parentId: z.number().int().positive(), after, nodes: z.array(nodeInput).min(1).max(200) }).strict();
 export const updateNodeBody = z
-  .object({ title: title.optional(), kind: z.enum(NODE_KINDS).optional(), status: z.enum(NODE_STATUSES).optional(), assignee: z.enum(ASSIGNEES).optional(), body: z.string().max(20_000).optional(), outcome: z.string().max(2_000).optional() })
+  .object({ title: title.optional(), kind: z.enum(NODE_KINDS).optional(), status: z.enum(NODE_STATUSES).optional(), assignee: z.enum(ASSIGNEES).optional(), body: z.string().max(20_000).optional(), outcome: z.string().max(2_000).optional(), label })
   .strict();
 export const moveNodeBody = z.object({ parentId: z.number().int().positive(), after }).strict();
 export const resourceBody = z

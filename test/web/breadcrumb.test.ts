@@ -5,7 +5,7 @@ import type { TreeNode } from '../../src/core/types';
 import { breadcrumbFor } from '../../web/src/canvas/breadcrumb';
 
 const node = (id: number, parentId: number | null, title: string): TreeNode => ({
-  id, projectId: 1, parentId, position: id, kind: parentId === null ? 'goal' : 'task', title, body: '', status: 'active', assignee: 'claude', outcome: '', createdAt: 't', updatedAt: 't', completedAt: null,
+  id, projectId: 1, parentId, position: id, kind: parentId === null ? 'goal' : 'task', title, body: '', status: 'active', assignee: 'claude', outcome: '', label: null, createdAt: 't', updatedAt: 't', completedAt: null,
 });
 
 describe('breadcrumbFor', () => {
