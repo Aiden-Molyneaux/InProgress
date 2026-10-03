@@ -48,7 +48,8 @@ bump.
 ## MCP and briefing
 - `add_nodes` and `update_node` take `label` (`null` clears it). An unknown label is a bad request that lists the set.
 - `get_outline`, the CLI `outline` and the briefing print the glyph before the title: `#62 ⧉ UI: working-task rows`.
-- The briefing's playbook block lists the set and the picking rule once, so the scribe and Claude share it.
+- The briefing's standing update rules list the set and the picking rule once. The playbook is per-project text Aiden
+  writes, so the set stays out of it. The scribe reads the set in the `add_nodes` and `update_node` descriptions.
 
 ## UI
 - **Chip.** A small neutral chip after the title, glyph only, with the word in its tooltip and accessible name

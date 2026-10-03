@@ -193,6 +193,21 @@ describe('install', () => {
     expect(agent).toMatch(/`set_tasks`/);
   });
 
+  it('writes the type-label rules into the skill and the scribe', () => {
+    const dir = claudeDirWithSettings(existing);
+    install({ repo, claudeDir: dir, stamp: 'tl' });
+    const skill = readFileSync(join(dir, 'skills', 'inprogress', 'SKILL.md'), 'utf8');
+    // Claude picks the label as it briefs a new step, relabels when the purpose changes, and reads the gate from it.
+    expect(skill).toContain('`add under #41: "Faster cold start" (task, server)`');
+    expect(skill).toContain('⧉ `ui` · ⚙ `server` · ⛁ `data` · ⇄ `integration` · ⚒ `ops` · ¶ `docs` · ⚑ `fix` · ↻ `refactor` · ⌕ `research`');
+    expect(skill).toMatch(/[Rr]elabel .* when its purpose changes/);
+    for (const row of ['| `ui` |', '| `integration` |', '| `data` |', '| everything else |']) expect(skill, row).toContain(row);
+    const agent = readFileSync(join(dir, 'agents', 'inprogress-scribe.md'), 'utf8');
+    expect(agent).toMatch(/`label`/);
+    expect(agent).toMatch(/[Nn]ever invent a label/);
+    expect(agent).toMatch(/no label .* unlabelled/);
+  });
+
   it('begins its log with the target Claude directory and the node binary it wrote', () => {
     const dir = claudeDirWithSettings(existing);
     const { log } = install({ repo, claudeDir: dir, stamp: 's' });
