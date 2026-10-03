@@ -11,26 +11,14 @@ import { createCtx } from './db/tx';
 import { EVENTS_RETENTION_DAYS, pruneEvents } from './repo/events';
 import { pruneSubagents } from './repo/subagents';
 import { pruneWorkItems } from './repo/work';
-import { reportStartupFailure } from './startup';
-
-type Probe = 'inprogress' | 'other' | 'free';
-
-async function probe(url: string): Promise<Probe> {
-  try {
-    const res = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(800) });
-    const body = (await res.json().catch(() => null)) as { app?: string } | null;
-    return body?.app === 'inprogress' ? 'inprogress' : 'other';
-  } catch {
-    return 'free';
-  }
-}
+import { portState, reportStartupFailure } from './startup';
 
 async function main(): Promise<void> {
   const home = homeDir();
   mkdirSync(home, { recursive: true });
   const port = configuredPort();
   const url = baseUrl(port);
-  const first = await probe(url);
+  const first = await portState(url);
   if (first === 'inprogress') return;
   if (first === 'other') {
     console.error(`InProgress: port ${port} is used by another program. Set INPROGRESS_PORT to pick another port.`);
@@ -66,12 +54,14 @@ async function main(): Promise<void> {
   } catch (err) {
     db.close();
     // Two sessions starting together: whoever lost the race exits quietly if the winner is ours.
-    if ((err as NodeJS.ErrnoException).code === 'EADDRINUSE' && (await probe(url)) === 'inprogress') return;
+    if ((err as NodeJS.ErrnoException).code === 'EADDRINUSE' && (await portState(url)) === 'inprogress') return;
     console.error(`InProgress: could not listen on ${port}: ${(err as Error).message}`);
     process.exitCode = 1;
     return;
   }
   // The server is up. Nothing below may throw: main's .catch would find this very server answering and exit.
+  // From process start, so a slow start after a reboot shows up in server.log (#60).
+  app.log.info(`Ready in ${Math.round(process.uptime() * 1000)} ms`);
   try {
     writeFileSync(join(home, 'server.pid'), String(process.pid));
   } catch (err) {
@@ -97,6 +87,6 @@ async function main(): Promise<void> {
 }
 
 main().catch(async (err: unknown) => {
-  const anotherServerAnswers = async () => (await probe(baseUrl(configuredPort()))) === 'inprogress';
+  const anotherServerAnswers = async () => (await portState(baseUrl(configuredPort()))) === 'inprogress';
   process.exit(await reportStartupFailure(err, join(homeDir(), 'server.log'), anotherServerAnswers).catch(() => 1));
 });
