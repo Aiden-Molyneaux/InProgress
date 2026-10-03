@@ -1,5 +1,14 @@
 export const NODE_KINDS = ['goal', 'phase', 'task', 'question'] as const;
 export type NodeKind = (typeof NODE_KINDS)[number];
+/** A step's type label: what kind of work it is. Pick by purpose first (fix, refactor, research), else by where the work lands. */
+export const NODE_LABELS = ['ui', 'server', 'data', 'integration', 'ops', 'docs', 'fix', 'refactor', 'research'] as const;
+export type NodeLabel = (typeof NODE_LABELS)[number];
+/** Each label's glyph. Labels are glyph-first and never coloured: a hue would read as a status or an agent. */
+export const LABEL_GLYPHS: Record<NodeLabel, string> = {
+  ui: '⧉', server: '⚙', data: '⛁', integration: '⇄', ops: '⚒', docs: '¶', fix: '⚑', refactor: '↻', research: '⌕',
+};
+/** The refusal of a label outside the set, naming the set. */
+export const unknownLabel = (value: unknown): string => `Unknown label ${JSON.stringify(value)}. Use one of: ${NODE_LABELS.join(', ')}.`;
 export const NODE_STATUSES = ['todo', 'active', 'done', 'blocked', 'dropped'] as const;
 export type NodeStatus = (typeof NODE_STATUSES)[number];
 export const ASSIGNEES = ['claude', 'me'] as const;
@@ -59,6 +68,8 @@ export interface TreeNode {
   status: NodeStatus;
   assignee: Assignee;
   outcome: string;
+  /** What kind of work the step is; null when unlabelled. */
+  label: NodeLabel | null;
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
@@ -71,6 +82,8 @@ export interface NodeInput {
   assignee?: Assignee;
   body?: string;
   outcome?: string;
+  /** Omitted or null: unlabelled. */
+  label?: NodeLabel | null;
   children?: NodeInput[];
 }
 
@@ -183,6 +196,12 @@ export interface NodeDetail {
 export interface SearchResult {
   nodes: Pick<TreeNode, 'id' | 'title' | 'status' | 'kind'>[];
   resources: Pick<ResourceMeta, 'id' | 'title' | 'kind' | 'nodeId'>[];
+}
+
+/** A step's title with its label's glyph in front (`⧉ Working-task rows`), or the bare title when it has none. */
+export function glyphTitle(n: Pick<TreeNode, 'title' | 'label'>): string {
+  const glyph = n.label ? LABEL_GLYPHS[n.label] : undefined;
+  return glyph ? `${glyph} ${n.title}` : n.title;
 }
 
 export function sessionDisplayTitle(s: Pick<Session, 'id' | 'title'>): string {

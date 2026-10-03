@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { TreeNode } from '../../src/core/types';
+import { NODE_LABELS, type TreeNode } from '../../src/core/types';
 import { ancestors, buildIndex, computeVisible, countDone, isNeedsYou, pinnedIds, progress, renderOutline } from '../../src/core/tree';
 import type { VisibleItem } from '../../src/core/tree';
 
 let nextId = 1;
 function n(parentId: number | null, title: string, extra: Partial<TreeNode> = {}): TreeNode {
   const id = extra.id ?? nextId++;
-  return { id, projectId: 1, parentId, position: id, kind: parentId === null ? 'goal' : 'task', title, body: '', status: 'todo', assignee: 'claude', outcome: '', createdAt: 't', updatedAt: 't', completedAt: null, ...extra };
+  return { id, projectId: 1, parentId, position: id, kind: parentId === null ? 'goal' : 'task', title, body: '', status: 'todo', assignee: 'claude', outcome: '', label: null, createdAt: 't', updatedAt: 't', completedAt: null, ...extra };
 }
 
 function sample() {
@@ -179,5 +179,22 @@ describe('renderOutline', () => {
       `    #${t.s4.id} 4 Build to GitHub — todo`,
       `    +3 more: #${t.s5.id}, #${t.s6.id}, #${t.s7.id}`,
     ]);
+  });
+
+  it('prints a labelled step with its glyph before the title, for every label', () => {
+    nextId = 1;
+    const root = n(null, 'InProgress', { status: 'active' });
+    const phase = n(root.id, 'Live work', { kind: 'phase', status: 'active', label: 'ui' });
+    const rows = n(phase.id, 'UI: working-task rows', { status: 'active', label: 'ui' });
+    const plain = n(phase.id, 'Unlabelled step');
+    const lines = renderOutline(buildIndex([root, phase, rows, plain]), []).split('\n');
+    expect(lines).toEqual([
+      `#${root.id} InProgress — active (0/1)`,
+      `  #${phase.id} ⧉ Live work (phase) — active (0/2)`,
+      `    #${rows.id} ⧉ UI: working-task rows — active`,
+      `    #${plain.id} Unlabelled step — todo`,
+    ]);
+    const glyphs = NODE_LABELS.map((label) => renderOutline(buildIndex([n(null, 'R', { id: 1 }), n(1, 'Step', { id: 2, label })]), []).split('\n')[1]);
+    expect(glyphs).toEqual(['⧉', '⚙', '⛁', '⇄', '⚒', '¶', '⚑', '↻', '⌕'].map((g) => `  #2 ${g} Step — todo`));
   });
 });

@@ -25,11 +25,25 @@ Session: <session id> · Project: <slug>
 Changes:
 - #57 → done; outcome "Play app signing configured"
 - add under #55 after #57: "Run signing tests" (task, assignee me); body: run on a device build, report failures
+- add under #55: "Fix the upload-key check" (task, fix)
 - resource on the new "Run signing tests" node: test-suite "Signing test suite", path {{RESOURCES}}/ingame/2026-09-27-signing-test-suite.md, snapshot_file
 - log on #55: "Detour: sandbox network wedge, fixed by restarting VMware NAT"
 - focus → the new "Run signing tests" node
 - queue: the new "Run signing tests" node, #59, #60
 ```
+
+## Type labels
+
+Give each new step one label in its brief: `add under #41: "Faster cold start" (task, server)`. The set: ⧉ `ui` · ⚙ `server` · ⛁ `data` · ⇄ `integration` · ⚒ `ops` · ¶ `docs` · ⚑ `fix` · ↻ `refactor` · ⌕ `research`. Pick by purpose first (`fix`, `refactor`, `research`), else by where the work lands: `integration` is hooks, MCP, the installer, skill rules and other systems; `ops` is build, deploy, the test harness and environments. Phases, goals and Aiden's to-dos stay unlabelled unless one clearly fits. Relabel a step when its purpose changes (`#57 label → fix` when a spike turns into a fix).
+
+The label gives the step's default test gate. Deploy still decides what to run from the files that changed.
+
+| Label | Gate |
+|---|---|
+| `ui` | typecheck + unit; one e2e test per user-visible feature, run once; no failing-test-first for styling or wording |
+| `integration` | typecheck + unit + smoke; full strict gates for hooks and installer |
+| `data` | typecheck + unit; full strict gates; `min_reader_version` when the migration only adds |
+| everything else | typecheck + unit |
 
 ## Opting in (session not tracked)
 

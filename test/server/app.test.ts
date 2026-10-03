@@ -168,6 +168,42 @@ describe('project lifecycle over HTTP', () => {
   });
 });
 
+describe('type labels over HTTP', () => {
+  const SET = 'ui, server, data, integration, ops, docs, fix, refactor, research';
+
+  it('takes a label on add, nested steps too, and on patch, where null clears it', async () => {
+    const { app } = setup();
+    const p = (await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'InProgress' } })).json();
+    const added = await app.inject({
+      method: 'POST', url: '/api/nodes', headers: auth,
+      payload: { parentId: p.rootNodeId, nodes: [{ title: 'Type labels', kind: 'phase', children: [{ title: 'Migration 3', label: 'data' }, { title: 'Glyph chip', label: 'ui' }] }] },
+    });
+    expect(added.statusCode).toBe(201);
+    const [phase, migration] = added.json();
+    expect(added.json().map((n: { label: string | null }) => n.label)).toEqual([null, 'data', 'ui']);
+    const patch = (payload: Record<string, unknown>) => app.inject({ method: 'PATCH', url: `/api/nodes/${migration.id}`, headers: auth, payload });
+    expect((await patch({ label: 'fix' })).json().label).toBe('fix');
+    expect((await patch({ status: 'active' })).json().label).toBe('fix');
+    expect((await patch({ label: null })).json().label).toBeNull();
+    expect((await app.inject({ url: `/api/nodes/${phase.id}` })).json().node.label).toBeNull();
+  });
+
+  it('refuses an unknown label with a hint that lists the set', async () => {
+    const { app } = setup();
+    const p = (await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'InProgress' } })).json();
+    const nested = await app.inject({
+      method: 'POST', url: '/api/nodes', headers: auth,
+      payload: { parentId: p.rootNodeId, nodes: [{ title: 'Phase', children: [{ title: 'Step', label: 'frontend' }] }] },
+    });
+    expect(nested.statusCode).toBe(400);
+    expect(nested.json().hint).toBe(`nodes.0.children.0.label: Unknown label "frontend". Use one of: ${SET}.`);
+    const [n] = (await app.inject({ method: 'POST', url: '/api/nodes', headers: auth, payload: { parentId: p.rootNodeId, nodes: [{ title: 'Step' }] } })).json();
+    const patched = await app.inject({ method: 'PATCH', url: `/api/nodes/${n.id}`, headers: auth, payload: { label: 'UI' } });
+    expect(patched.statusCode).toBe(400);
+    expect(patched.json().hint).toBe(`label: Unknown label "UI". Use one of: ${SET}.`);
+  });
+});
+
 describe('session routes', () => {
   it('handles hook events, enrollment and focus', async () => {
     const { app } = setup();

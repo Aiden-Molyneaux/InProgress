@@ -138,4 +138,10 @@ export const MIGRATIONS: string[] = [
   -- Only additions: a v1 build can still read and write this schema, so a rollback across this migration works.
   INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
   `,
+  // 3: type labels. Each step can carry one label from a fixed set (NODE_LABELS); NULL leaves it unlabelled.
+  `
+  ALTER TABLE nodes ADD COLUMN label TEXT CHECK (label IS NULL OR label IN ('ui','server','data','integration','ops','docs','fix','refactor','research'));
+  -- Only a nullable column: v1 and v2 builds can still read and write this schema, so a rollback across it works.
+  INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+  `,
 ];

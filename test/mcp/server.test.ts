@@ -144,6 +144,44 @@ describe('scribe MCP tools', () => {
     expect((await call('list_projects')).text).toMatch(/ingame — InGame \(active\) · root #\d+ · 1 need you/);
   });
 
+  it('labels steps through add_nodes and update_node, where null clears a label, and shows the glyph', async () => {
+    const rootId = ids((await call('create_project', { name: 'Labels', description: 'Type labels', session: 'l1' })).text)[0];
+    const plan = await call('add_nodes', {
+      parent: rootId, session: 'l1',
+      nodes: [{ title: 'Type labels', kind: 'phase', children: [{ title: 'Migration 3', label: 'data' }, { title: 'Glyph chip', label: 'ui', assignee: 'me' }] }],
+    });
+    const [phase, migration, chip] = lineIds(plan.text);
+    expect(plan.text.split('\n')).toEqual([
+      `#${phase} Type labels (phase, todo) under #${rootId}`,
+      `#${migration} ⛁ Migration 3 (task, todo) under #${phase}`,
+      `#${chip} ⧉ Glyph chip (task, todo, you) under #${phase}`,
+    ]);
+    expect((await call('get_outline', { project: 'labels' })).text.split('\n')).toContain(`    #${migration} ⛁ Migration 3 — todo`);
+    expect((await call('get_node', { id: migration })).text.split('\n')[0]).toBe(`#${migration} ⛁ Migration 3 (task, data) — todo, Claude`);
+    expect(await call('update_node', { id: migration, label: 'fix', session: 'l1' })).toEqual({ text: `#${migration} ⚑ Migration 3 — todo.`, isError: false });
+    expect(await call('update_node', { id: migration, label: null, session: 'l1' })).toEqual({ text: `#${migration} Migration 3 — todo.`, isError: false });
+    expect((await call('get_node', { id: migration })).text.split('\n')[0]).toBe(`#${migration} Migration 3 (task) — todo, Claude`);
+  });
+
+  it('refuses an unknown label as a tool error that lists the set, nested steps too', async () => {
+    const SET = 'ui, server, data, integration, ops, docs, fix, refactor, research';
+    const rootId = ids((await call('create_project', { name: 'Bad labels', description: 'x' })).text)[0];
+    const nested = await call('add_nodes', { parent: rootId, nodes: [{ title: 'Phase', children: [{ title: 'Step', label: 'frontend' }] }] });
+    expect(nested.isError).toBe(true);
+    expect(nested.text).toContain(`Unknown label "frontend". Use one of: ${SET}.`);
+    const [step] = lineIds((await call('add_nodes', { parent: rootId, nodes: [{ title: 'Step' }] })).text);
+    const patched = await call('update_node', { id: step, label: 'UI' });
+    expect(patched.isError).toBe(true);
+    expect(patched.text).toContain(`Unknown label "UI". Use one of: ${SET}.`);
+  });
+
+  it('names the label set in the add_nodes and update_node descriptions', async () => {
+    const { tools } = await mcp.listTools();
+    for (const name of ['add_nodes', 'update_node']) {
+      expect(tools.find((t) => t.name === name)!.description, name).toContain('ui, server, data, integration, ops, docs, fix, refactor, research');
+    }
+  });
+
   it('returns specific errors as tool errors', async () => {
     const missing = await call('update_node', { id: 99999, status: 'done' });
     expect(missing.isError).toBe(true);

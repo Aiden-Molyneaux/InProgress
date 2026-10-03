@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { agentHome, agentShown } from '../../../src/core/layout';
 import { isNeedsYou } from '../../../src/core/tree';
-import { sessionDisplayTitle, type NodeDetail, type ProjectSnapshot } from '../../../src/core/types';
+import { LABEL_GLYPHS, sessionDisplayTitle, type NodeDetail, type ProjectSnapshot } from '../../../src/core/types';
 import { agentKey } from '../agentColors';
 import { api } from '../api';
 import { TASK_MARK, agentLine, taskOwner, waitsFor, withoutOwnId } from '../live';
@@ -126,6 +126,11 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
       <div className="ip-meta">
         {isNeedsYou(node) ? <span className="ip-pill you">NEEDS YOU</span> : <span className={`ip-pill st-${node.status}`}>{node.status}</span>}
         <span>{node.kind}</span>
+        {node.label && (
+          <span className="ip-meta-label">
+            · <span className={`ip-glyph l-${node.label}`}>{LABEL_GLYPHS[node.label]}</span> {node.label}
+          </span>
+        )}
         <span>· {node.assignee === 'me' ? 'you' : 'Claude'}</span>
         {detail.parent && (
           <span>

@@ -125,6 +125,12 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-badge { display: inline-flex; align-items: center; gap: 6px; height: 18px; padding: 0 8px; border-radius: 4px; font-size: 11px; font-weight: 600; color: #fff; background: var(--clay); white-space: nowrap; }
 .ip-badge.s-idle { background: transparent; color: var(--clay); border: 1px solid var(--clay); }
 .ip-badge.s-permission { background: transparent; color: var(--red); border: 1px solid var(--red); }
+/* A step's type label on its card: the glyph only, in text ink. A hue would read as a status or an agent. */
+.ip-type { flex: none; color: var(--muted); border: 1px solid var(--border); border-radius: 3px; padding: 0 3px; font-size: 12px; line-height: 14px; }
+/* Text presentation, so ⚙ and ⚒ never turn into emoji. */
+.ip-type, .ip-glyph { font-variant-emoji: text; }
+/* ⛁ draws faint at text size. The chip keeps its height: its line height is fixed. */
+.ip-type.l-data, .ip-glyph.l-data { font-size: 1.33em; }
 /* Up next place on a card: ①②③. */
 .ip-queue { flex: none; color: var(--accent); font-size: 13px; font-weight: 600; line-height: 1; }
 /* A subagent's badge, in its own colour; greyed once it has ended. */

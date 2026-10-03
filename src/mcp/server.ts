@@ -2,7 +2,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import {
-  ASSIGNEES, NODE_KINDS, NODE_STATUSES, RESOURCE_KINDS, WORK_STATUSES,
+  ASSIGNEES, NODE_KINDS, NODE_LABELS, NODE_STATUSES, RESOURCE_KINDS, WORK_STATUSES, glyphTitle, unknownLabel,
   type Binding, type LogEntry, type NodeDetail, type NodeInput, type Project, type ProjectSummary, type Resource, type SearchResult, type TreeNode, type WorkItem,
 } from '../core/types';
 import { ApiClientError, type Client } from '../lib/client';
@@ -22,6 +22,12 @@ const actor = (session?: string) => (session ? `scribe:${session}` : 'scribe');
 const enc = encodeURIComponent;
 
 const assignee = z.enum(ASSIGNEES).describe('Who does this step: "me" = the user (Aiden), "claude" = Claude');
+const label = z
+  .enum(NODE_LABELS, { errorMap: (_issue, ctx) => ({ message: unknownLabel(ctx.data) }) })
+  .nullable()
+  .describe('What kind of work the step is: only the label the brief gives, never an invented one. null leaves it unlabelled');
+/** The one line the node tools' descriptions spend on labels. */
+const LABELS = `Labels: ${NODE_LABELS.join(', ')}.`;
 const nodeInputSchema: z.ZodType<NodeInput> = z.lazy(() =>
   z.object({
     title: z.string().min(1).max(200),
@@ -30,6 +36,7 @@ const nodeInputSchema: z.ZodType<NodeInput> = z.lazy(() =>
     assignee: assignee.optional(),
     body: z.string().optional(),
     outcome: z.string().optional(),
+    label: label.optional(),
     children: z.array(nodeInputSchema).optional(),
   }),
 );
@@ -130,16 +137,16 @@ export function createMcpServer(client: Client, o: McpOptions = {}): McpServer {
       return `Removed binding ${a.binding_id}.`;
     });
 
-  tool('add_nodes', 'Add one node or a whole nested plan under a parent #id. Defaults: kind task, status todo, assignee claude. Use assignee "me" for anything Aiden must do.',
+  tool('add_nodes', `Add one node or a whole nested plan under a parent #id. Defaults: kind task, status todo, assignee claude, no label. Use assignee "me" for anything Aiden must do. ${LABELS}`,
     { parent: id, nodes: z.array(nodeInputSchema).min(1), after, session },
     async (a: { parent: number; nodes: NodeInput[]; after?: number | 'start' | 'end'; session?: string }) =>
       formatCreated(await client.post<TreeNode[]>('/api/nodes', { parentId: a.parent, after: a.after, nodes: a.nodes }, { actor: actor(a.session) })));
 
-  tool('update_node', "Change a node's title, kind, status, assignee, body or outcome. Set outcome when something finishes.",
-    { id, title: z.string().optional(), kind: z.enum(NODE_KINDS).optional(), status: z.enum(NODE_STATUSES).optional(), assignee: assignee.optional(), body: z.string().optional(), outcome: z.string().optional(), session },
+  tool('update_node', `Change a node's title, kind, status, assignee, body, outcome or label (null clears it). Set outcome when something finishes. ${LABELS}`,
+    { id, title: z.string().optional(), kind: z.enum(NODE_KINDS).optional(), status: z.enum(NODE_STATUSES).optional(), assignee: assignee.optional(), body: z.string().optional(), outcome: z.string().optional(), label: label.optional(), session },
     async ({ id: nodeId, session: s, ...patch }: { id: number; session?: string } & Record<string, unknown>) => {
       const n = await client.patch<TreeNode>(`/api/nodes/${nodeId}`, patch, { actor: actor(s) });
-      return `#${n.id} ${n.title} — ${n.status}${n.assignee === 'me' ? ' (you)' : ''}.`;
+      return `#${n.id} ${glyphTitle(n)} — ${n.status}${n.assignee === 'me' ? ' (you)' : ''}.`;
     });
 
   tool('move_node', 'Move a node and its subtree under a new parent, optionally after a sibling.', { id, parent: id, after, session },

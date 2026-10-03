@@ -6,14 +6,14 @@ import { describe, expect, it } from 'vitest';
 import { migrate, openDb, schemaVersion } from '../../src/server/db/connection';
 import { MIGRATIONS } from '../../src/server/db/schema';
 import { write } from '../../src/server/db/tx';
-import type { EventRow } from '../../src/core/types';
+import { NODE_LABELS, type EventRow } from '../../src/core/types';
 import { maxEventId } from '../../src/server/repo/events';
 import { makeCtx } from '../helpers';
 
 describe('database', () => {
   it('migrates to the latest schema with foreign keys on', () => {
     const ctx = makeCtx();
-    expect(schemaVersion(ctx.db)).toBe(2);
+    expect(schemaVersion(ctx.db)).toBe(3);
     const tables = (ctx.db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]).map((r) => r.name);
     expect(tables).toEqual(expect.arrayContaining([
       'projects', 'bindings', 'nodes', 'resources', 'log_entries', 'sessions', 'session_subagents', 'events', 'meta', 'work_items', 'subagent_dispatches',
@@ -21,7 +21,7 @@ describe('database', () => {
     expect(ctx.db.pragma('foreign_keys', { simple: true })).toBe(1);
   });
 
-  it('migrates a database at v1 with data to v2 and keeps every row', () => {
+  it('migrates a database at v1 with data to the latest schema and keeps every row', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ip-migrate-v1-'));
     const file = join(dir, 'inprogress.db');
     // The database Aiden has today: migration 1 only, with a project, a plan, a session and a running subagent.
@@ -38,7 +38,7 @@ describe('database', () => {
     v1.close();
     const db = openDb(file);
     try {
-      expect(schemaVersion(db)).toBe(2);
+      expect(schemaVersion(db)).toBe(MIGRATIONS.length);
       expect(db.prepare('SELECT id, slug, queue FROM projects').all()).toEqual([{ id: 1, slug: 'ingame', queue: '[]' }]);
       expect(db.prepare('SELECT id, title FROM nodes ORDER BY id').all()).toEqual([{ id: 1, title: 'InGame' }, { id: 2, title: 'Play app signing' }]);
       expect(db.prepare('SELECT id, focus_node_id FROM sessions').all()).toEqual([{ id: 's1', focus_node_id: 2 }]);
@@ -129,6 +129,71 @@ describe('database', () => {
   it('marks migration 2 readable by v1 builds, since it only adds tables and columns', () => {
     const { db } = makeCtx();
     expect(db.prepare("SELECT value FROM meta WHERE key = 'min_reader_version'").pluck().get()).toBe('1');
+  });
+
+  /** A database file as the v2 build leaves it: migrations 1 and 2, with a project and a small plan. */
+  function v2Database(): { dir: string; file: string } {
+    const dir = mkdtempSync(join(tmpdir(), 'ip-migrate-v2-'));
+    const file = join(dir, 'inprogress.db');
+    const v2 = new Database(file);
+    v2.exec('CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+    v2.exec(MIGRATIONS[0]);
+    v2.exec(MIGRATIONS[1]);
+    v2.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '2')").run();
+    v2.prepare("INSERT INTO projects (id, slug, name, root_node_id, created_at, updated_at, queue) VALUES (1, 'inprogress', 'InProgress', 1, 't', 't', '[2]')").run();
+    v2.prepare("INSERT INTO nodes (id, project_id, parent_id, position, kind, title, status, created_at, updated_at) VALUES (1, 1, NULL, 1, 'goal', 'InProgress', 'active', 't', 't')").run();
+    v2.prepare("INSERT INTO nodes (id, project_id, parent_id, position, kind, title, status, created_at, updated_at) VALUES (2, 1, 1, 1, 'phase', 'Live work', 'active', 't', 't')").run();
+    v2.prepare("INSERT INTO nodes (id, project_id, parent_id, position, kind, title, status, created_at, updated_at) VALUES (3, 1, 2, 1, 'task', 'Working-task rows', 'done', 't', 't')").run();
+    v2.close();
+    return { dir, file };
+  }
+
+  it('migrates a database at v2 with data to v3, every step unlabelled', () => {
+    const { dir, file } = v2Database();
+    const db = openDb(file);
+    try {
+      expect(schemaVersion(db)).toBe(3);
+      expect(db.prepare('SELECT id, title, status, label FROM nodes ORDER BY id').all()).toEqual([
+        { id: 1, title: 'InProgress', status: 'active', label: null },
+        { id: 2, title: 'Live work', status: 'active', label: null },
+        { id: 3, title: 'Working-task rows', status: 'done', label: null },
+      ]);
+      expect(db.prepare('SELECT queue FROM projects').pluck().get()).toBe('[2]');
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('takes only a label from the set, or none', () => {
+    const { db } = makeCtx();
+    db.prepare("INSERT INTO projects (id, slug, name, created_at, updated_at) VALUES (1, 'p', 'P', 't', 't')").run();
+    const insert = db.prepare("INSERT INTO nodes (project_id, position, kind, title, label, created_at, updated_at) VALUES (1, 1, 'task', 't', ?, 't', 't')");
+    for (const label of [...NODE_LABELS, null]) expect(() => insert.run(label), String(label)).not.toThrow();
+    for (const label of ['frontend', 'UI', '']) expect(() => insert.run(label), label).toThrow(/CHECK/);
+    expect(() => db.prepare("UPDATE nodes SET label = 'colour'").run()).toThrow(/CHECK/);
+  });
+
+  it('marks migration 3 readable by v1 builds, so a v2 build still opens a v3 database', () => {
+    const { db } = makeCtx();
+    expect(db.prepare("SELECT value FROM meta WHERE key = 'min_reader_version'").pluck().get()).toBe('1');
+    // This build as the v2 build sees the schema: two migrations.
+    const shipped = MIGRATIONS.splice(2);
+    try {
+      expect(() => migrate(db)).not.toThrow();
+      expect(schemaVersion(db)).toBe(2 + shipped.length);
+      // The v2 build's own writes, which never name the label: a new step is unlabelled, an edit keeps the label.
+      db.prepare("INSERT INTO projects (id, slug, name, created_at, updated_at) VALUES (1, 'p', 'P', 't', 't')").run();
+      const v2Insert = db.prepare('INSERT INTO nodes (project_id, parent_id, position, kind, title, body, status, assignee, outcome, created_at, updated_at, completed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)');
+      const id = Number(v2Insert.run(1, null, 1, 'task', 'From v2', '', 'todo', 'claude', '', 't', 't', null).lastInsertRowid);
+      expect(db.prepare('SELECT label FROM nodes WHERE id = ?').pluck().get(id)).toBeNull();
+      db.prepare("UPDATE nodes SET label = 'ui' WHERE id = ?").run(id);
+      db.prepare('UPDATE nodes SET title = ?, kind = ?, status = ?, assignee = ?, body = ?, outcome = ?, updated_at = ?, completed_at = ? WHERE id = ?')
+        .run('From v2, edited', 'task', 'active', 'claude', '', '', 't', null, id);
+      expect(db.prepare('SELECT label FROM nodes WHERE id = ?').pluck().get(id)).toBe('ui');
+    } finally {
+      MIGRATIONS.push(...shipped);
+    }
   });
 
   it('records events inside the transaction and emits them after commit', () => {

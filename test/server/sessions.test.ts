@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { homeDir } from '../../src/lib/home';
 import { updateRules } from '../../src/server/briefing';
 import { listEventsSince, maxEventId } from '../../src/server/repo/events';
-import { addNodes, updateNode } from '../../src/server/repo/nodes';
+import { addNodes, listNodes, updateNode } from '../../src/server/repo/nodes';
 import { addBinding, createProject, setQueue, updateProject } from '../../src/server/repo/projects';
 import { addResource } from '../../src/server/repo/resources';
 import { findSession, listProjectSessions } from '../../src/server/repo/sessions';
@@ -202,6 +202,31 @@ describe('briefing: live work', () => {
     expect(rules).toContain('"#44 Build project tabs"');
     expect(rules).toContain('TaskCreate');
     expect(rules).toContain('tasks on #57:');
+  });
+});
+
+describe('briefing: type labels', () => {
+  it('prints the glyph before the title on node lines, Next, Up next and Needs you', () => {
+    const { ctx, project, a2, a3 } = setup();
+    const [s3] = listNodes(ctx, project.id).filter((n) => n.title === '3 RevenueCat');
+    updateNode(ctx, 'test', a2.id, { label: 'ui' });
+    updateNode(ctx, 'test', a3.id, { label: 'ops' });
+    updateNode(ctx, 'test', s3.id, { label: 'integration' });
+    setQueue(ctx, 'scribe:s1', project.slug, [a3.id]);
+    const lines = handleHookEvent(ctx, 's1', start()).context!.split('\n');
+    expect(lines).toContain(`      #${a2.id} ⧉ Play app signing — active`);
+    expect(lines).toContain(`      #${a3.id} ⚒ Run signing tests — NEEDS YOU`);
+    expect(lines.find((l) => l.trim().startsWith('Next:'))?.trim()).toMatch(new RegExp(`^Next: #${s3.id} ⇄ 3 RevenueCat · #\\d+ 4 Build to GitHub`));
+    expect(lines).toContain(`Up next: #${a3.id} ⚒ Run signing tests`);
+    expect(lines).toContain(`Needs you (1): #${a3.id} ⚒ Run signing tests`);
+  });
+
+  it('lists the label set and the picking rule once in the update rules', () => {
+    const rules = updateRules('C:/Users/me/.inprogress').join('\n');
+    expect(rules).toContain('⧉ ui, ⚙ server, ⛁ data, ⇄ integration, ⚒ ops, ¶ docs, ⚑ fix, ↻ refactor, ⌕ research');
+    expect(rules.match(/⧉ ui/g)).toHaveLength(1);
+    expect(rules).toMatch(/purpose first \(fix, refactor, research\), else by where the work lands/);
+    expect(rules).toContain('(task, server)');
   });
 });
 
