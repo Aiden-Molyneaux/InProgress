@@ -1,8 +1,10 @@
 import { closeSync, existsSync, mkdtempSync, openSync, readFileSync, rmSync } from 'node:fs';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { reportStartupFailure } from '../../src/server/startup';
+import { portState, reportStartupFailure } from '../../src/server/startup';
 
 const dirs: string[] = [];
 function logFile(): string {
@@ -46,5 +48,39 @@ describe('reportStartupFailure', () => {
     }
     expect(readFileSync(log, 'utf8')).toBe('');
     expect(errors.mock.calls).toEqual([['InProgress: the server did not start: boom']]);
+  });
+});
+
+describe('portState', () => {
+  const servers: Server[] = [];
+  afterEach(async () => {
+    await Promise.all(servers.splice(0).map((s) => new Promise((r) => s.close(r))));
+  });
+  /** An HTTP server on a free port that answers every request with this JSON body; returns its base URL. */
+  async function answering(body: object): Promise<string> {
+    const server = createServer((_req, res) => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(body)));
+    servers.push(server);
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  }
+  /** A port that was free a moment ago. */
+  async function freeUrl(): Promise<string> {
+    const url = await answering({});
+    await new Promise((r) => servers.pop()!.close(r));
+    return url;
+  }
+
+  it('answers "free" for a port nothing listens on, without an HTTP request (a cold start skips loading fetch)', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    expect(await portState(await freeUrl())).toBe('free');
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('answers "inprogress" when an InProgress server holds the port', async () => {
+    expect(await portState(await answering({ app: 'inprogress' }))).toBe('inprogress');
+  });
+
+  it('answers "other" when another program holds the port', async () => {
+    expect(await portState(await answering({ app: 'something-else' }))).toBe('other');
   });
 });
