@@ -90,15 +90,46 @@ export function dfsOrder(index: TreeIndex): Map<number, number> {
   return order;
 }
 
+/** The fewest finished siblings in a row that fold into one "✓ n done" row. */
+export const DONE_RUN_MIN = 3;
+/** How long ago a step must have finished before it can fold into a "✓ n done" row. */
+export const DONE_RUN_AGE_MS = 24 * 60 * 60 * 1000;
+
 export type VisibleItem =
   | { type: 'node'; node: TreeNode; depth: number; folded: boolean; hasChildren: boolean }
-  | { type: 'more'; parentId: number; run: number; depth: number; hiddenIds: number[] };
+  /** Hidden siblings shown as one row: the far todo tail ("+n more") or a run of old finished steps ("✓ n done"). */
+  | { type: 'more'; parentId: number; run: number; depth: number; hiddenIds: number[]; variant: 'tail' | 'done' };
 
 export interface VisibleOptions {
   overrides?: FoldOverrides;
   noFold?: boolean;
   /** More nodes to keep in view, as a session's focus is. The canvas pins where subagents and tasks in progress are. */
   pins?: Iterable<number>;
+  /** Fold runs of finished siblings. The canvas passes it; the text outline never does. */
+  doneRuns?: { now: number };
+}
+
+/** Whether a step finished more than DONE_RUN_AGE_MS before `now`. A done step with no completion time counts as recent. */
+function finishedLongAgo(n: TreeNode, now: number): boolean {
+  const at = n.status === 'done' ? n.completedAt : n.status === 'dropped' ? n.updatedAt : null;
+  // An unparseable time is NaN, and a NaN age is never old.
+  return at !== null && now - Date.parse(at) > DONE_RUN_AGE_MS;
+}
+
+/** The runs of consecutive children that `hides` picks, as id lists, keeping only runs of at least `min`. */
+function runsOf(list: TreeNode[], hides: (n: TreeNode) => boolean, min: number): number[][] {
+  const runs: number[][] = [];
+  let current: number[] = [];
+  const close = () => {
+    if (current.length >= min) runs.push(current);
+    current = [];
+  };
+  for (const k of list) {
+    if (hides(k)) current.push(k.id);
+    else close();
+  }
+  close();
+  return runs;
 }
 
 export function computeVisible(index: TreeIndex, sessions: SessionLike[], opts: VisibleOptions = {}): VisibleItem[] {
@@ -114,47 +145,55 @@ export function computeVisible(index: TreeIndex, sessions: SessionLike[], opts: 
     return (n.status === 'done' || n.status === 'dropped') && !pinned.has(n.id);
   };
 
-  const hiddenRuns = (parent: TreeNode, list: TreeNode[]): number[][] => {
-    if (opts.noFold || overrides[`more:${parent.id}`] === 'open') return [];
+  /** The children the far todo tail hides, whether or not its "+n more" is open. */
+  const tailIds = (list: TreeNode[]): Set<number> => {
+    const hidden = new Set<number>();
+    if (opts.noFold) return hidden;
     let last = -1;
     list.forEach((k, i) => {
       if (k.status === 'done' || k.status === 'active') last = i;
     });
     // Walk the tail past the frontier. Pinned children show. Until two unpinned todo/blocked children
     // have shown, those and any dropped ones show too; every unpinned child after that hides.
-    const hidden = new Set<number>();
     let shown = 0;
     for (const k of list.slice(last + 1)) {
       if (pinned.has(k.id)) continue;
       if (shown >= 2) hidden.add(k.id);
       else if (k.status === 'todo' || k.status === 'blocked') shown++;
     }
-    if (hidden.size < 2) return [];
-    const runs: number[][] = [];
-    let current: number[] = [];
-    for (const k of list) {
-      if (hidden.has(k.id)) current.push(k.id);
-      else if (current.length) {
-        runs.push(current);
-        current = [];
-      }
-    }
-    if (current.length) runs.push(current);
-    return runs;
+    return hidden.size < 2 ? new Set() : hidden;
   };
 
+  const hiddenRuns = (parent: TreeNode, list: TreeNode[], tail: Set<number>): number[][] =>
+    overrides[`more:${parent.id}`] === 'open' ? [] : runsOf(list, (k) => tail.has(k.id), 1);
+
+  // Runs of DONE_RUN_MIN or more old finished children, outside the tail: steps an opened "+n more" shows never fold
+  // again. A pinned child splits a run. Only the parent's done: override opens them: a parent unfolded by its chevron
+  // still folds its old runs.
+  const doneRuns = (parent: TreeNode, list: TreeNode[], tail: Set<number>): number[][] => {
+    const when = opts.doneRuns;
+    if (!when || opts.noFold || overrides[`done:${parent.id}`] === 'open') return [];
+    return runsOf(list, (k) => !tail.has(k.id) && !pinned.has(k.id) && finishedLongAgo(k, when.now), DONE_RUN_MIN);
+  };
+
+  type Run = { hiddenIds: number[]; run: number; variant: 'tail' | 'done' };
   const visit = (n: TreeNode, depth: number) => {
     const list = kids(index, n.id);
     const folded = isFolded(n);
     out.push({ type: 'node', node: n, depth, folded, hasChildren: list.length > 0 });
     if (folded) return;
-    const runs = hiddenRuns(n, list);
-    const runOf = new Map<number, number>();
-    runs.forEach((run, i) => run.forEach((id) => runOf.set(id, i)));
+    // The tail first, then the finished runs among the other children.
+    const tail = tailIds(list);
+    const runs: Run[] = [
+      ...hiddenRuns(n, list, tail).map((hiddenIds, run) => ({ hiddenIds, run, variant: 'tail' as const })),
+      ...doneRuns(n, list, tail).map((hiddenIds, run) => ({ hiddenIds, run, variant: 'done' as const })),
+    ];
+    const runOf = new Map<number, Run>();
+    for (const r of runs) for (const id of r.hiddenIds) runOf.set(id, r);
     for (const k of list) {
-      const run = runOf.get(k.id);
-      if (run === undefined) visit(k, depth + 1);
-      else if (runs[run][0] === k.id) out.push({ type: 'more', parentId: n.id, run, depth: depth + 1, hiddenIds: runs[run] });
+      const r = runOf.get(k.id);
+      if (r === undefined) visit(k, depth + 1);
+      else if (r.hiddenIds[0] === k.id) out.push({ type: 'more', parentId: n.id, run: r.run, depth: depth + 1, hiddenIds: r.hiddenIds, variant: r.variant });
     }
   };
   visit(index.root, 0);

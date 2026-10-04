@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
 import type { FoldOverrides } from '../../src/core/tree';
+import { withFold } from './folds';
 import { loadJson, save } from './storage';
 
 const stored = (projectId: number | undefined): FoldOverrides =>
@@ -9,8 +10,7 @@ const stored = (projectId: number | undefined): FoldOverrides =>
  * Per-project manual fold state, persisted in localStorage. The stored folds are read during the render in
  * which the project changes, not in an effect, so each project's first layout already honours them. (App
  * calls this before the first snapshot has loaded, so a lazy initial state alone would never see the
- * project.) Folding a node also re-collapses its "+n more" tail, which makes "+n more" a toggle: fold and
- * unfold the parent to hide the tail again.
+ * project.) Folding a node also re-collapses its "+n more" tail and its "✓ n done" runs (withFold).
  */
 export function useFoldOverrides(projectId: number | undefined): [FoldOverrides, (key: string, value: 'open' | 'closed') => void] {
   const [state, setState] = useState(() => ({ projectId, overrides: stored(projectId) }));
@@ -18,8 +18,7 @@ export function useFoldOverrides(projectId: number | undefined): [FoldOverrides,
   if (state.projectId !== projectId) setState({ projectId, overrides: stored(projectId) });
   const set = useCallback((key: string, value: 'open' | 'closed') => {
     setState((cur) => {
-      const next: FoldOverrides = { ...cur.overrides, [key]: value };
-      if (key.startsWith('n:') && value === 'closed') delete next[`more:${key.slice(2)}`];
+      const next = withFold(cur.overrides, key, value);
       if (cur.projectId !== undefined) save(`ip.folds.${cur.projectId}`, JSON.stringify(next));
       return { projectId: cur.projectId, overrides: next };
     });

@@ -8,12 +8,11 @@ import {
   useState,
   type FocusEvent as ReactFocusEvent,
   type MouseEvent as ReactMouseEvent,
-  type PointerEvent as ReactPointerEvent,
 } from 'react';
-import { Background, BackgroundVariant, Controls, MiniMap, ReactFlow, useReactFlow, type Edge, type Node, type NodeChange, type Viewport } from '@xyflow/react';
+import { Background, BackgroundVariant, Controls, ReactFlow, useReactFlow, type Edge, type Node, type NodeChange, type Viewport } from '@xyflow/react';
 import { layoutOutline, type LayoutItem } from '../../../src/core/layout';
 import { buildIndex, type FoldOverrides } from '../../../src/core/tree';
-import type { EventRow, ProjectSnapshot, WorkStatus } from '../../../src/core/types';
+import type { EventRow, ProjectSnapshot } from '../../../src/core/types';
 import { agentKey } from '../agentColors';
 import { taskOwner, waitsFor } from '../live';
 import { useNow } from '../useNow';
@@ -57,28 +56,6 @@ export interface CanvasProps {
   agentColors: ReadonlyMap<string, string>;
 }
 
-const WORK_MINIMAP: Record<WorkStatus, string> = { pending: '#c7c7cc', in_progress: '#0a84ff', completed: '#34c759' };
-
-function minimapColor(n: Node): string {
-  if (n.type === 'ipBadge') return '#d97757';
-  if (n.type === 'ipAgent') {
-    const d = n.data as AgentBadgeData;
-    return d.agent.endedAt ? NO_AGENT_COLOR : d.color;
-  }
-  if (n.type === 'ipWork') return WORK_MINIMAP[(n.data as WorkRowData).item.status];
-  if (n.type === 'ipWorkDone') return WORK_MINIMAP.completed;
-  if (n.type === 'ipMore') return '#aeaeb2';
-  const d = n.data as NodeCardData;
-  if (d.needsYou) return '#ff9f0a';
-  if (d.node.status === 'done') return '#34c759';
-  if (d.node.status === 'active') return '#0a84ff';
-  return '#aeaeb2';
-}
-
-/** A class on each minimap shape, by the kind of row it stands for. */
-const MINIMAP_CLASS: Record<string, string> = { ipNode: 'mm-node', ipMore: 'mm-more', ipBadge: 'mm-badge', ipAgent: 'mm-agent', ipWork: 'mm-work', ipWorkDone: 'mm-work-done' };
-const minimapClass = (n: Node): string => MINIMAP_CLASS[n.type ?? ''] ?? '';
-
 export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(props, ref) {
   const { snapshot, overrides, onToggleFold, onOpenResource, onSelectNode, selectedNode, agentColors } = props;
   const rf = useReactFlow();
@@ -105,11 +82,11 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
   const flashFrame = useRef(0);
   const initFrame = useRef(0);
   const focusFrame = useRef(0);
-  /** Set while a press on the minimap is armed: removes its window listeners. */
-  const disarmMinimap = useRef<(() => void) | null>(null);
 
-  // React Flow 12.12's minimap sizes each node from the node objects passed in, not from its own
-  // measurements. Keep the sizes it reports and pass them back, or the minimap draws no nodes.
+  // React Flow 12.12 keeps a node hidden until the node object passed in carries its measured size, and the nodes below
+  // are new objects on every snapshot, flash, selection and clock tick. Keep the sizes it reports and pass them back, so
+  // cards stay measured across rebuilds: without this, every card blinks out to be measured again and a focused card
+  // can't keep focus.
   const [sizes, setSizes] = useState<Record<string, { width: number; height: number }>>({});
   const onNodesChange = useCallback((changes: NodeChange[]) => {
     const measured = changes.flatMap((c) => (c.type === 'dimensions' && c.dimensions ? [[c.id, c.dimensions] as const] : []));
@@ -117,13 +94,13 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
   }, []);
 
   /**
-   * Shows a "+n more" run. Its button goes away with it, which would drop focus to the page, so focus moves to the first
-   * card the run shows. React Flow keeps a new card hidden until it has measured it, and a hidden card can't take focus:
-   * try again each frame until it shows.
+   * Shows a "+n more" or "✓ n done" run, by its override (`more:<parentId>` or `done:<parentId>`). Its button goes away
+   * with it, which would drop focus to the page, so focus moves to the first card the run shows. React Flow keeps a new
+   * card hidden until it has measured it, and a hidden card can't take focus: try again each frame until it shows.
    */
   const expandRun = useCallback(
-    (parentId: number, firstId: number) => {
-      onToggleFold(`more:${parentId}`, 'open');
+    (foldKey: string, firstId: number) => {
+      onToggleFold(foldKey, 'open');
       let frames = 0;
       const attempt = () => {
         // Focus that something else has taken meanwhile stays there. Focus on the page, or still on the button, moves.
@@ -148,7 +125,13 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
       const measured = sizes[item.id];
       const fixed = { id: item.id, position, measured, draggable: false, selectable: false };
       if (item.kind === 'more') {
-        const data: MoreNodeData = { count: item.hiddenIds.length, parentId: item.parentId, firstId: item.hiddenIds[0], onExpand: expandRun };
+        const data: MoreNodeData = {
+          count: item.hiddenIds.length,
+          variant: item.variant,
+          foldKey: `${item.variant === 'done' ? 'done' : 'more'}:${item.parentId}`,
+          firstId: item.hiddenIds[0],
+          onExpand: expandRun,
+        };
         return { ...fixed, type: 'ipMore', data };
       }
       if (item.kind === 'badge') {
@@ -273,34 +256,8 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
     [onFollowChange, updateCrumb],
   );
 
-  // The minimap and the zoom buttons move the camera without a user event reaching onMove.
+  // The zoom buttons move the camera without a user event reaching onMove.
   const manualMove = useCallback(() => onFollowChange(false), [onFollowChange]);
-
-  // A press on the minimap only arms: the first move with the button held is a drag and turns Follow off, while a plain
-  // click or a right-click leaves it on. The minimap pans from window listeners once pressed, so a fast drag's first
-  // move can land outside it: watch for that move on window too.
-  const armMinimap = useCallback(
-    (e: ReactPointerEvent) => {
-      disarmMinimap.current?.();
-      if (e.button !== 0) return;
-      const move = (ev: PointerEvent) => {
-        disarm();
-        // A move without the button held means the press ended where its pointerup never reached the page.
-        if (ev.buttons & 1) manualMove();
-      };
-      const disarm = () => {
-        window.removeEventListener('pointermove', move, true);
-        window.removeEventListener('pointerup', disarm, true);
-        window.removeEventListener('pointercancel', disarm, true);
-        disarmMinimap.current = null;
-      };
-      window.addEventListener('pointermove', move, true);
-      window.addEventListener('pointerup', disarm, true);
-      window.addEventListener('pointercancel', disarm, true);
-      disarmMinimap.current = disarm;
-    },
-    [manualMove],
-  );
 
   const onNodeClick = useCallback(
     (_: ReactMouseEvent, n: Node) => {
@@ -341,7 +298,6 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
       cancelAnimationFrame(flashFrame.current);
       cancelAnimationFrame(focusFrame.current);
       window.clearTimeout(flashTimer.current);
-      disarmMinimap.current?.();
     },
     [],
   );
@@ -369,11 +325,6 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
         proOptions={{ hideAttribution: true }}
       >
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
-        {/* display: contents leaves the panel positioned by React Flow. Capture-phase handlers, because the
-            minimap's d3 handlers stop wheel and mousedown events from bubbling. */}
-        <div style={{ display: 'contents' }} onPointerDownCapture={armMinimap} onWheelCapture={manualMove}>
-          <MiniMap position="bottom-right" pannable zoomable nodeColor={minimapColor} nodeClassName={minimapClass} />
-        </div>
         <Controls position="bottom-left" showInteractive={false} onZoomIn={manualMove} onZoomOut={manualMove} onFitView={manualMove} />
       </ReactFlow>
     </div>

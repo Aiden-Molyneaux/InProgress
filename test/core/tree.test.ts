@@ -162,6 +162,119 @@ describe('computeVisible', () => {
   });
 });
 
+describe('computeVisible with doneRuns', () => {
+  const NOW = Date.parse('2026-10-04T12:00:00Z');
+  const HOUR = 60 * 60 * 1000;
+  const at = (hoursAgo: number) => new Date(NOW - hoursAgo * HOUR).toISOString();
+  /** A done step finished `hoursAgo` hours before NOW. */
+  const done = (parentId: number, title: string, hoursAgo = 48) => n(parentId, title, { status: 'done', completedAt: at(hoursAgo), updatedAt: at(hoursAgo) });
+  /** A dropped step last changed `hoursAgo` hours before NOW. */
+  const dropped = (parentId: number, title: string, hoursAgo = 48) => n(parentId, title, { status: 'dropped', updatedAt: at(hoursAgo) });
+  const opts = { doneRuns: { now: NOW } };
+  const show = (i: VisibleItem): string => (i.type === 'node' ? i.node.title : i.variant === 'done' ? `✓ ${i.hiddenIds.length} done` : `+${i.hiddenIds.length} more`);
+
+  it('leaves a run of two old finished steps alone', () => {
+    nextId = 1;
+    const p = n(null, 'P', { status: 'active' });
+    const nodes = [p, done(p.id, 'd1'), dropped(p.id, 'd2'), n(p.id, 'frontier', { status: 'active' })];
+    expect(computeVisible(buildIndex(nodes), [], opts).map(show)).toEqual(['P', 'd1', 'd2', 'frontier']);
+  });
+
+  it('folds a run of three old done or dropped steps, with their subtrees, into one row', () => {
+    nextId = 1;
+    const p = n(null, 'P', { status: 'active' });
+    const d1 = done(p.id, 'd1');
+    const inner = done(d1.id, 'inner');
+    const d2 = dropped(p.id, 'd2');
+    const d3 = done(p.id, 'd3', 25);
+    const items = computeVisible(buildIndex([p, d1, inner, d2, d3, n(p.id, 'frontier', { status: 'active' })]), [], opts);
+    expect(items.map(show)).toEqual(['P', '✓ 3 done', 'frontier']);
+    expect(items[1]).toEqual({ type: 'more', parentId: p.id, run: 0, depth: 1, hiddenIds: [d1.id, d2.id, d3.id], variant: 'done' });
+  });
+
+  it('splits a run at a step finished an hour ago, and counts a done step with no completion time as recent', () => {
+    nextId = 1;
+    const p = n(null, 'P', { status: 'active' });
+    const first = [done(p.id, 'a1'), done(p.id, 'a2'), done(p.id, 'a3')];
+    const recent = done(p.id, 'recent', 1);
+    const second = [dropped(p.id, 'b1'), done(p.id, 'b2'), done(p.id, 'b3')];
+    const legacy = n(p.id, 'legacy', { status: 'done', completedAt: null, updatedAt: at(48) });
+    const third = [done(p.id, 'c1'), done(p.id, 'c2')];
+    const items = computeVisible(buildIndex([p, ...first, recent, ...second, legacy, ...third]), [], opts);
+    expect(items.map(show)).toEqual(['P', '✓ 3 done', 'recent', '✓ 3 done', 'legacy', 'c1', 'c2']);
+    expect(items.filter((i) => i.type === 'more')).toMatchObject([
+      { run: 0, hiddenIds: first.map((x) => x.id) },
+      { run: 1, hiddenIds: second.map((x) => x.id) },
+    ]);
+  });
+
+  it('splits a run at a pinned step: a canvas pin, or the ancestor of a session focus', () => {
+    nextId = 1;
+    const p = n(null, 'P', { status: 'active' });
+    const kids = ['d1', 'd2', 'd3', 'd4', 'd5', 'd6', 'd7', 'd8', 'd9'].map((t) => done(p.id, t));
+    const focus = n(kids[8].id, 'reopened', { status: 'done', completedAt: at(48) });
+    const index = buildIndex([p, ...kids, focus]);
+    const items = computeVisible(index, [{ focusNodeId: focus.id, state: 'idle' }], { ...opts, pins: [kids[3].id] });
+    expect(items.map(show)).toEqual(['P', '✓ 3 done', 'd4', '✓ 4 done', 'd9', 'reopened']);
+  });
+
+  it('opens a parent\'s runs with its done: override, but not with its chevron', () => {
+    nextId = 1;
+    const p = n(null, 'P', { status: 'active' });
+    const phase = n(p.id, 'Old phase', { status: 'done', completedAt: at(48) });
+    const kids = [done(phase.id, 'd1'), done(phase.id, 'd2'), done(phase.id, 'd3')];
+    const index = buildIndex([p, phase, ...kids]);
+    // Unfolded by its chevron, a done parent still folds its old runs.
+    const chevron = computeVisible(index, [], { ...opts, overrides: { [`n:${phase.id}`]: 'open' } });
+    expect(chevron.map(show)).toEqual(['P', 'Old phase', '✓ 3 done']);
+    const opened = computeVisible(index, [], { ...opts, overrides: { [`n:${phase.id}`]: 'open', [`done:${phase.id}`]: 'open' } });
+    expect(opened.map(show)).toEqual(['P', 'Old phase', 'd1', 'd2', 'd3']);
+  });
+
+  it('leaves steps the tail hides to the tail, and folds nothing without doneRuns or with noFold', () => {
+    nextId = 1;
+    const p = n(null, 'P', { status: 'active' });
+    const nodes = [p, n(p.id, 'frontier', { status: 'active' }), n(p.id, 't1'), n(p.id, 't2'), dropped(p.id, 'x1'), dropped(p.id, 'x2'), dropped(p.id, 'x3')];
+    const items = computeVisible(buildIndex(nodes), [], opts);
+    expect(items.map(show)).toEqual(['P', 'frontier', 't1', 't2', '+3 more']);
+    expect(items[4]).toMatchObject({ type: 'more', run: 0, variant: 'tail' });
+    const finished = [p, done(p.id, 'd1'), done(p.id, 'd2'), done(p.id, 'd3')];
+    expect(computeVisible(buildIndex(finished), []).map(show)).toEqual(['P', 'd1', 'd2', 'd3']);
+    expect(computeVisible(buildIndex(finished), [], { ...opts, noFold: true }).map(show)).toEqual(['P', 'd1', 'd2', 'd3']);
+  });
+
+  it('never folds the steps an opened "+n more" shows, while old runs elsewhere under the parent still fold', () => {
+    nextId = 1;
+    const p = n(null, 'P', { status: 'active' });
+    const nodes = [
+      p, done(p.id, 'd1'), done(p.id, 'd2'), done(p.id, 'd3'),
+      n(p.id, 'frontier', { status: 'active' }), n(p.id, 't1'), n(p.id, 't2'),
+      dropped(p.id, 'x1'), dropped(p.id, 'x2'), dropped(p.id, 'x3'),
+    ];
+    const index = buildIndex(nodes);
+    expect(computeVisible(index, [], opts).map(show)).toEqual(['P', '✓ 3 done', 'frontier', 't1', 't2', '+3 more']);
+    const opened = computeVisible(index, [], { ...opts, overrides: { [`more:${p.id}`]: 'open' } });
+    expect(opened.map(show)).toEqual(['P', '✓ 3 done', 'frontier', 't1', 't2', 'x1', 'x2', 'x3']);
+  });
+
+  it('leaves the text outline unchanged: every old finished step still prints', () => {
+    nextId = 1;
+    const p = n(null, 'P', { status: 'active' });
+    const kids = [done(p.id, 'd1'), dropped(p.id, 'd2'), done(p.id, 'd3'), done(p.id, 'd4')];
+    const index = buildIndex([p, ...kids]);
+    // The canvas folds them...
+    expect(computeVisible(index, [], opts).map(show)).toEqual(['P', '✓ 4 done']);
+    // ...and the outline the CLI, MCP and briefing read never does.
+    expect(renderOutline(index, []).split('\n')).toEqual([
+      `#${p.id} P — active (3/3)`,
+      `  #${kids[0].id} d1 — done`,
+      `  #${kids[1].id} d2 — dropped`,
+      `  #${kids[2].id} d3 — done`,
+      `  #${kids[3].id} d4 — done`,
+    ]);
+  });
+});
+
 describe('renderOutline', () => {
   it('renders ids, statuses, needs-you, progress, resources and folds', () => {
     const t = sample();

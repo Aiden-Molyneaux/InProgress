@@ -99,6 +99,30 @@ describe('layoutOutline', () => {
     const rows = l.items.filter((i) => i.kind !== 'badge' && i.id !== `n${t.root.id}`).map((i) => i.id);
     expect(l.edges.map((e) => e.target)).toEqual(rows);
   });
+
+  it('folds a run of old finished steps into one "done" row and tells it from the tail', () => {
+    const t = sample();
+    const now = Date.parse('2026-10-04T12:00:00Z');
+    const old = '2026-10-02T12:00:00Z';
+    // A, B and C finished two days ago; D and E stay todo, past the frontier at C.
+    const nodes = t.nodes.map((x) =>
+      x.id === t.a.id || x.id === t.a1.id || x.id === t.b.id ? { ...x, status: 'done' as const, assignee: 'claude' as const, completedAt: old }
+      : x.id === t.a2.id ? { ...x, status: 'dropped' as const, assignee: 'claude' as const, updatedAt: old }
+      : x.id === t.c.id ? { ...x, status: 'dropped' as const, updatedAt: old }
+      : x,
+    );
+    const l = layoutOutline({ nodes, resources: [], sessions: [], now });
+    const id = `done${t.root.id}-0`;
+    expect(l.items.map((i) => i.id)).toEqual([`n${t.root.id}`, id, `n${t.d.id}`, `n${t.e.id}`]);
+    expect(l.items[1]).toEqual({ kind: 'more', id, parentId: t.root.id, run: 0, x: INDENT, y: ROW, depth: 1, hiddenIds: [t.a.id, t.b.id, t.c.id], variant: 'done' });
+    expect(l.edges).toContainEqual({ id: `e-${id}`, source: `n${t.root.id}`, target: id });
+    // Within a day of finishing, they show.
+    expect(layoutOutline({ nodes, resources: [], sessions: [], now: Date.parse(old) + 60_000 }).items.some((i) => i.kind === 'more')).toBe(false);
+    // The done: override opens the run.
+    expect(layoutOutline({ nodes, resources: [], sessions: [], now, overrides: { [`done:${t.root.id}`]: 'open' } }).nodeItems.has(t.b.id)).toBe(true);
+    // The tail keeps its id and says what it is.
+    expect(layoutOutline({ nodes: t.nodes, resources: [], sessions: [], now }).items.find((i) => i.kind === 'more')).toMatchObject({ id: `more${t.root.id}-0`, variant: 'tail' });
+  });
 });
 
 const T0 = Date.parse('2026-10-02T12:00:00Z');
