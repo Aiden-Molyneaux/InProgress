@@ -145,6 +145,26 @@ resource on the root, and the session sends no plan briefs. Aiden watches sessio
 If he misses the plan in the window, a later design reads the ledger's gate table and field lines into read-only
 steps. Sigmund and the ledger do not change either way.
 
+## Decisions after the preflight (Aiden, 2026-10-04)
+
+A check of the plan against the code raised four points this note left open. Aiden decided them in chat, and they
+amend the sections named.
+
+- **§1, the command form.** A PowerShell allow rule never matches a program called by its path, so the briefing
+  prints `node <repo>/dist/cli/main.js tasks <id> --session <session id> --done "…"`: `node` from PATH, the script path
+  unquoted with forward slashes, and the step as a bare number (an unquoted `#` starts a comment in both shells). The
+  same text runs in the Bash and the PowerShell tool, and install allows `Bash(node <cli> tasks *)` and
+  `PowerShell(node <cli> tasks *)`.
+- **§7, old needs-you items.** The "check with Aiden" line appears only in briefings at startup, resume, clear and
+  enroll, never after a compaction. A "not yet" answer goes in the step's log, so the `YOU` age keeps counting.
+- **§8, sessions that opt in mid-conversation.** The first tracked prompt after an enroll delivers the full briefing
+  once. This needs one nullable column (an additive migration, `min_reader_version` 1).
+- **§8, the rules block.** It keeps two more clauses: a task's subject starts with `#id` when the task belongs to a step
+  other than the focus, and `later: #c, #d` sets the unowned order. Questions, relabelling and backtracking stay in the
+  skill's brief template only.
+
+Controller rulings made while running the plan are in `docs/superpowers/rulings/2026-10-04-review-actions-rulings.md`.
+
 ## After this plan
 
 - The UI overhaul (#81) resumes with refreshed drafts. The scenario and the character brief are rewritten for
