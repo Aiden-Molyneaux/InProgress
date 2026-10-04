@@ -19,12 +19,14 @@ decision, why, what it costs if wrong. Review these and rework anything ruled wr
    adding. When the repo path contains a space, install leaves the task rules out and says why, because an unquoted
    path cannot hold a space and a quoted one never matches in PowerShell. Cost if wrong: a repo with spaces in its
    path gets a permission prompt.
-6. The `tasks` command never starts the server. When the server is unreachable it says InProgress starts with the next
-   prompt and to run the command again then. Bare `node` may not be the Node that better-sqlite3 was built for
-   (ruling 71 of the v1 rulings), so the server is only ever started by hooks, deploy or `start`. Cost if wrong: a
-   rare retry.
-7. Sessions enrolled through the skill learn the command from the skill: P1 writes the full command into the skill
-   with `{{REPO}}` filled in and a `<session id>` placeholder. Cost if wrong: none.
+6. The `tasks` command never starts the server. When the server is unreachable it says a brief to the scribe starts
+   it (the scribe's MCP server does), then to run the command again; after a timeout it says a rerun is safe, since the
+   list is replaced whole. Bare `node` may not be the Node that better-sqlite3 was built for (ruling 71 of the v1
+   rulings), so the server is only ever started by hooks, the scribe, deploy or `start`. Corrected after P1's review:
+   the first wording said the next prompt starts it, which the prompt hook does not. Cost if wrong: a rare retry.
+7. Sessions enrolled through the skill learn the command from the skill: P1 writes the full command into the skill,
+   its prefix rendered by the same helper as the briefing and the allow rules (`{{TASKS}}`), with a `<session id>`
+   placeholder. Cost if wrong: none.
 8. P3 owns filtering the briefing's open tasks to live sessions (`endedAt === null`), so ended sessions' tasks never
    print as live work. Cost if wrong: none.
 9. Trail rows (stale tasks and ended agents) stay neutral grey with no letter (P4), since an ended session's slot can be
@@ -75,3 +77,6 @@ decision, why, what it costs if wrong. Review these and rework anything ruled wr
     same-project re-enroll of a live session that already had its briefing. Cost if wrong: none.
 30. `listSubagents` and `listTrailAgents` share one row mapper (P3), so P4's `ordinal` and P6's `purpose` are each
     added once. Cost if wrong: none.
+31. Task subjects leave out double quotes, and the skill says so (P1, P8): Windows PowerShell 5.1 drops or splits a
+    `"` inside a quoted argument, so a subject like 'Retry "step 88"' can arrive as two arguments and send the write
+    to step 88. Single quotes still protect `$` and backticks in both shells. Cost if wrong: none.
