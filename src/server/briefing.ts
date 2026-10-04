@@ -1,25 +1,36 @@
 import { ancestors, buildIndex, dfsOrder, isNeedsYou, kids, progress, type TreeIndex } from '../core/tree';
 import { LABEL_GLYPHS, NODE_LABELS, glyphTitle, sessionDisplayTitle, type ProjectSnapshot, type Session, type TreeNode, type WorkItem } from '../core/types';
 import { homeDir } from '../lib/home';
+import { taskCommand } from '../lib/task-command';
 
 const MAX_FRONTIER_LINES = 25;
 /** Working tasks listed under the focused step: in progress first, then pending. */
 const MAX_TASK_LINES = 5;
 const MAX_UP_NEXT = 5;
 
+export interface UpdateRulesOptions {
+  /** The data dir (default: the real one). */
+  home?: string;
+  /** The briefed session, whose id the tasks command carries. */
+  sessionId: string;
+  /** The CLI the tasks command runs (default: the dist/cli/main.js beside the running server). */
+  cli?: string;
+}
+
 /**
  * The update rules the briefing carries. The resources folder is spelled out in full from the data dir
- * `home` (forward slashes, as the installed skill has it): the Write tool needs an absolute path.
+ * `home` (forward slashes, as the installed skill has it): the Write tool needs an absolute path. The tasks command
+ * is written out in full, built by the same helper as its allow rules so it runs without a permission prompt.
  */
-export function updateRules(home: string = homeDir()): string[] {
-  const resources = `${home.replace(/\\/g, '/')}/resources`;
+export function updateRules(o: UpdateRulesOptions): string[] {
+  const resources = `${(o.home ?? homeDir()).replace(/\\/g, '/')}/resources`;
   return [
     'Keeping InProgress current (the tree beside Claude that Aiden watches):',
     '- Never edit it yourself. Brief the inprogress-scribe agent (Agent tool, subagent_type "inprogress-scribe"); it runs in the background. At most one brief per turn, batching every change.',
     '- Brief at these checkpoints: a new request with a deliverable arrives (it becomes a step right away); a plan is made or changed (backtracking = mark steps dropped or move them); the order of work is decided or changes ("queue: #a, #b, #c"); a step starts, finishes, or is blocked; something worth finding again is produced (test suite, runbook, walkthrough, roadmap, diagram, handoff); something is handed to Aiden (assignee me) or he reports doing it; an open question appears or is answered.',
     '- Steps are plan-level with outcomes, never single actions. Detours go in the log of the step they interrupted.',
     `- Give each new step one type label in its brief: add under #41: "Faster cold start" (task, server). Labels: ${NODE_LABELS.map((l) => `${LABEL_GLYPHS[l]} ${l}`).join(', ')}. Pick by purpose first (fix, refactor, research), else by where the work lands; relabel a step when its purpose changes.`,
-    '- Working tasks sit under the steps, and Aiden watches them live. Start an Agent description with its step\'s #id ("#44 Build project tabs"). For multi-step work use the task tools (TaskCreate, TaskUpdate), and start a task\'s subject with #id when it belongs to a step other than your focus. Without the task tools, brief the list: "tasks on #57: in progress \\"Write the guide\\"; pending \\"Review it\\"".',
+    `- Working tasks sit under the steps, and Aiden watches them live. Start an Agent description with its step's #id ("#44 Build project tabs"). For multi-step work use the task tools (TaskCreate, TaskUpdate), and start a task's subject with #id when it belongs to a step other than your focus. Without the task tools, run this after each change; it is the one InProgress write you make yourself: \`${taskCommand(o.sessionId, { cli: o.cli })}\` (the flags repeat, in list order; none clears the list; leave out <step id> to use your focus).`,
     `- Resources: pass a file path with snapshot_file. Content that only exists in chat is first written to ${resources}/<slug>/<yyyy-mm-dd>-<kebab-title>.md.`,
     '- Brief format: "Session: <id> · Project: <slug>", then one "- " line per change, e.g. "#57 → done; outcome ...", "add under #55: \\"Run signing tests\\" (assignee me)", "resource on #58: test-suite \\"Signing suite\\", path ..., snapshot_file", "log on #55: ...", "focus → #58".',
     '- After dispatching, write one line in chat ("↳ InProgress: #57 done, suite attached to #58"). The scribe\'s completion notice needs no reply beyond that line.',
@@ -121,7 +132,7 @@ export function renderBriefing(snapshot: ProjectSnapshot, sessionId: string): st
     lines.push('Playbook:', ...pl.slice(0, 15).map((l) => `  ${l}`));
     if (pl.length > 15) lines.push(`  … (${pl.length - 15} more lines)`);
   }
-  lines.push(...updateRules());
+  lines.push(...updateRules({ sessionId }));
   lines.push('Where things stand:', ...frontierLines(snapshot, sessionId).map((l) => `  ${l}`));
   const upNext = upNextLine(snapshot);
   if (upNext) lines.push(upNext);

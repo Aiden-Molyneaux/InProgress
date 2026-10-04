@@ -36,6 +36,15 @@ describe('describeEvent', () => {
     expect(describeEvent(ev('session.updated', 's1', { changed: ['state'], state: 'idle' }), null)).toBe('a session is idle');
   });
 
+  it("reads a task write by session:<id>, the tasks command's actor, as that session's title", () => {
+    const event = ev('work.updated', '58', { nodeId: 58 }, 'session:s1');
+    expect(actorLabel(event, snapshot)).toBe('InGame launch status');
+    expect(describeEvent(event, snapshot)).toBe('tasks updated on #58 Run signing tests');
+    // An ended session is not in the snapshot: it falls back to the short id, as an untitled session reads.
+    expect(actorLabel(ev('work.updated', '58', { nodeId: 58 }, 'session:abcdef123456'), snapshot)).toBe('Session abcdef');
+    expect(actorLabel(event, null)).toBe('Session s1');
+  });
+
   it('labels a scribe without a known session as plain scribe', () => {
     expect(actorLabel(ev('node.created', '1', {}, 'scribe'), snapshot)).toBe('scribe');
     expect(actorLabel(ev('node.created', '1', {}), null)).toBe('scribe');
