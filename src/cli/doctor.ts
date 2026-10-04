@@ -5,7 +5,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import Database from 'better-sqlite3';
 import { readToken } from '../lib/home';
 import { buildLabel, readBuild, sameBuild, VERSION, type BuildInfo } from '../lib/version';
-import { ALLOW_RULES, HOOK_DEFS, isInProgressHook, nodeBinary, settingsShapeError } from './claude-config';
+import { allowRules, HOOK_DEFS, isInProgressHook, nodeBinary, settingsShapeError } from './claude-config';
 import { findEdge } from './open';
 
 export interface Check {
@@ -158,15 +158,17 @@ export async function runChecks(o: DoctorOptions): Promise<Check[]> {
   const skill = join(o.claudeDir, 'skills', 'inprogress', 'SKILL.md');
   const hasSkill = existsSync(skill);
   checks.push({ name: 'Skill', ok: hasSkill, detail: hasSkill ? skill : `${skill} is missing: run npm run claude:install` });
+  // The rules install writes for this repo, the tasks command's among them: another checkout's tasks rules never match.
+  const rules = allowRules(o.repo);
   const allow: string[] = settings.value?.permissions?.allow ?? [];
-  const missingRules = ALLOW_RULES.filter((r) => !allow.includes(r));
+  const missingRules = rules.filter((r) => !allow.includes(r));
   checks.push(
     settings.error
       ? { name: 'Allow rules', ok: false, detail: invalidSettings(settingsFile, settings.error) }
       : {
           name: 'Allow rules',
           ok: missingRules.length === 0,
-          detail: missingRules.length ? `missing: ${missingRules.join(', ')}: run npm run claude:install` : ALLOW_RULES.join(', '),
+          detail: missingRules.length ? `missing: ${missingRules.join(', ')}: run npm run claude:install` : rules.join(', '),
         },
   );
   if (!o.skipMcp) {

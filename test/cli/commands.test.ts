@@ -4,7 +4,7 @@ import { createServer as createNetServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { install, nodeBinary } from '../../src/cli/claude-config';
+import { allowRules, install, nodeBinary } from '../../src/cli/claude-config';
 import { runCli } from '../../src/cli/commands';
 import { doctor, runChecks, type Check } from '../../src/cli/doctor';
 import { edgeArgs } from '../../src/cli/open';
@@ -458,6 +458,17 @@ describe('doctor checks', () => {
     const { repo, claude, settingsFile } = installedClaudeDir();
     editEveryHook(settingsFile, (h) => (h.command = nodeBinary().toUpperCase().replace(/\//g, '\\')));
     expect(named(await checksFor(repo, claude), 'Hooks')).toEqual({ name: 'Hooks', ok: true, detail: 'all installed' });
+  });
+
+  it("checks this repo's tasks rules among the allow rules, naming a missing one", async () => {
+    const { repo, claude, settingsFile } = installedClaudeDir();
+    const powerShellRule = `PowerShell(node ${repo}/dist/cli/main.js tasks *)`;
+    expect(named(await checksFor(repo, claude), 'Allow rules')).toEqual({ name: 'Allow rules', ok: true, detail: allowRules(repo).join(', ') });
+    expect(allowRules(repo)).toContain(powerShellRule);
+    const settings = JSON.parse(readFileSync(settingsFile, 'utf8'));
+    settings.permissions.allow = settings.permissions.allow.filter((r: string) => r !== powerShellRule);
+    writeFileSync(settingsFile, JSON.stringify(settings, null, 2));
+    expect(named(await checksFor(repo, claude), 'Allow rules')).toEqual({ name: 'Allow rules', ok: false, detail: `missing: ${powerShellRule}: run npm run claude:install` });
   });
 
   it('reports an unparseable settings.json instead of missing hooks', async () => {

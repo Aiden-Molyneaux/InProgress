@@ -4,8 +4,11 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { HOOK_NAMES, type HookName } from '../hooks/handlers';
 import { homeDir } from '../lib/home';
+import { normalizePath } from '../lib/paths';
+import { isTaskAllowRule, repoCli, taskAllowRules } from '../lib/task-command';
 
-export const ALLOW_RULES = ['mcp__inprogress', 'Edit(~/.inprogress/resources/**)'];
+/** The allow rules that are the same for every repo: the scribe's tools and its resource snapshots. */
+export const STATIC_ALLOW_RULES = ['mcp__inprogress', 'Edit(~/.inprogress/resources/**)'];
 export const HOOK_SCRIPT_SUFFIX = '/dist/hooks/hook.js';
 const NOT_SCRIBE = '^(?!inprogress-scribe$).*';
 /** What the hooks and the scribe's MCP server run: install refuses without them. */
@@ -97,18 +100,37 @@ export function addInProgressHooks(settings: Settings, repo: string): Settings {
   return settings;
 }
 
-export function addAllowRules(settings: Settings): Settings {
+/**
+ * Every allow rule install writes for a repo: the static ones, then the tasks command in the Bash and the PowerShell
+ * tool, built by the same helper as the command the briefing prints. A repo path with a space gets no tasks rules.
+ */
+export function allowRules(repo: string): string[] {
+  return [...STATIC_ALLOW_RULES, ...taskAllowRules(repoCli(repo))];
+}
+
+const isTaskRule = (rule: unknown): boolean => typeof rule === 'string' && isTaskAllowRule(rule);
+
+/**
+ * Adds this repo's allow rules once each. Tasks rules for another repo path go first, as addInProgressHooks replaces
+ * old hooks: an older checkout must not leave a rule behind. Every other rule stays where it is.
+ */
+export function addAllowRules(settings: Settings, repo: string): Settings {
+  const wanted = allowRules(repo);
   settings.permissions ??= {};
   settings.permissions.allow ??= [];
-  for (const rule of ALLOW_RULES) if (!settings.permissions.allow.includes(rule)) settings.permissions.allow.push(rule);
+  settings.permissions.allow = settings.permissions.allow.filter((r: unknown) => !isTaskRule(r) || wanted.includes(r as string));
+  for (const rule of wanted) if (!settings.permissions.allow.includes(rule)) settings.permissions.allow.push(rule);
   return settings;
 }
 
-/** Removes our allow rules. An allow list (and then a permissions object) that this leaves empty goes too. */
+/**
+ * Removes our allow rules: the static ones, and the tasks rules of any repo path, found by their pattern (uninstall
+ * takes no repo). An allow list (and then a permissions object) that this leaves empty goes too.
+ */
 export function removeAllowRules(settings: Settings): Settings {
   const permissions = settings.permissions;
   if (!Array.isArray(permissions?.allow)) return settings;
-  const kept = permissions.allow.filter((r: string) => !ALLOW_RULES.includes(r));
+  const kept = permissions.allow.filter((r: unknown) => !STATIC_ALLOW_RULES.includes(r as string) && !isTaskRule(r));
   if (kept.length === permissions.allow.length) return settings;
   if (kept.length) permissions.allow = kept;
   else {
@@ -232,7 +254,7 @@ const canonical = (value: unknown): string =>
  * repo now (so a deploy re-runs install only when the kit really changed). Throws on an unreadable settings.json.
  */
 export function kitStatus(o: { repo: string; claudeDir: string }): { installed: boolean; differs: ('settings' | 'agent' | 'skill')[] } {
-  const repo = o.repo.replace(/\\/g, '/');
+  const repo = normalizePath(o.repo);
   const current = readSettings(join(o.claudeDir, 'settings.json'));
   const { agent, skill } = renderKit(repo);
   const agentFile = join(o.claudeDir, 'agents', 'inprogress-scribe.md');
@@ -240,7 +262,7 @@ export function kitStatus(o: { repo: string; claudeDir: string }): { installed: 
   const installed = countInProgressHooks(current) > 0 || existsSync(agentFile);
   const differs: ('settings' | 'agent' | 'skill')[] = [];
   // The merge helpers edit in place, so they get a copy; key order is not a difference (a re-merge appends keys).
-  if (canonical(addAllowRules(addInProgressHooks(structuredClone(current), repo))) !== canonical(current)) differs.push('settings');
+  if (canonical(addAllowRules(addInProgressHooks(structuredClone(current), repo), repo)) !== canonical(current)) differs.push('settings');
   if (readText(agentFile) !== agent) differs.push('agent');
   const installedSkill = existsSync(skillDir) ? readdirSync(skillDir).sort() : [];
   const skillSame = installedSkill.join('\n') === skill.map(([f]) => f).sort().join('\n') && skill.every(([f, text]) => readText(join(skillDir, f)) === text);
@@ -249,7 +271,9 @@ export function kitStatus(o: { repo: string; claudeDir: string }): { installed: 
 }
 
 export function install(o: { repo: string; claudeDir: string; stamp: string }): { log: string[]; agentsDirCreated: boolean } {
-  const repo = o.repo.replace(/\\/g, '/');
+  // One spelling of the repo everywhere (forward slashes, upper-case drive): the tasks rules must match, byte for byte,
+  // the command the server prints from its own path.
+  const repo = normalizePath(o.repo);
   // Everything is checked, read and rendered first, so a refusal or a broken template leaves the Claude dir untouched.
   const unbuilt = BUILT_ENTRIES.find((entry) => !existsSync(join(repo, entry)));
   if (unbuilt) throw new Error(`Build InProgress first: npm run deploy (${repo}/${unbuilt} is missing)`);
@@ -257,14 +281,17 @@ export function install(o: { repo: string; claudeDir: string; stamp: string }): 
   const current = readSettings(settingsFile);
   const { agent, skill } = renderKit(repo);
   const replaced = countInProgressHooks(current);
-  const settings = addAllowRules(addInProgressHooks(current, repo));
+  const settings = addAllowRules(addInProgressHooks(current, repo), repo);
 
   const log = [`Claude directory: ${o.claudeDir}`, `Node binary: ${nodeBinary()}`];
   mkdirSync(o.claudeDir, { recursive: true });
   backup(settingsFile, o.stamp, log);
   writeFileSync(settingsFile, `${JSON.stringify(settings, null, 2)}\n`);
   if (replaced > 0) log.push(`Replaced ${replaced} existing ${hookEntryLabel(replaced)}`);
-  log.push(`Hooks: ${HOOK_DEFS.map((d) => d.event).join(', ')}`, `Allow rules: ${ALLOW_RULES.join(', ')}`);
+  log.push(`Hooks: ${HOOK_DEFS.map((d) => d.event).join(', ')}`, `Allow rules: ${allowRules(repo).join(', ')}`);
+  if (!taskAllowRules(repoCli(repo)).length) {
+    log.push(`Left out the tasks command's allow rules: the repo path ${repo} holds a space, which an unquoted path cannot hold and a quoted one never matches in PowerShell. Sessions are asked before each tasks command; a repo path without spaces avoids that.`);
+  }
 
   const agentsDir = join(o.claudeDir, 'agents');
   const agentsDirCreated = !existsSync(agentsDir);
