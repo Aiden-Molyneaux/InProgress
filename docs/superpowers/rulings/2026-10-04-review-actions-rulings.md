@@ -42,3 +42,36 @@ decision, why, what it costs if wrong. Review these and rework anything ruled wr
 15. Restarts: open sessions restart after P1 and P8, whose changes arrive with the briefing at session start. P6
     changes only what the hook script does, and hooks run the built script afresh on every event, so P6 needs no
     restart. Cost if wrong: one extra restart request.
+16. An ended session's subagents join the trail at once (P3), not five minutes after they stop. An ended session
+    leaves the snapshot, so its greyed badges go with it, and a literal five-minute wait would show its agents
+    nowhere. Cost if wrong: none.
+17. A trail agent whose step is set but no longer in the project's tree is left out (P3); it falls back to its
+    session's focus only when it has no step. A session repointed to another project would otherwise show its old
+    project's agents in the new one. Cost if wrong: a repointed session's old agents leave both trails.
+18. `assignSlot` treats a session idle past the stale limit as not live (P4), as the note says "no other live
+    session". Cost if wrong: none.
+19. A live session whose slot is still empty (it predates migration 4) shows no letter where the text allows it
+    (`Up next (you): …`) and `?` where an owner needs a label (P5, P6). It lasts until the session's next hook event
+    fills the slot. Cost if wrong: a brief `?`.
+20. A `queue:` write from a session that has ended or gone stale stores its steps as unowned, at the head of the
+    unowned part, as `releaseQueue` would (P5). Cost if wrong: none.
+21. P5 leaves `later:` out of the current rules line; P8's block carries it, and the skill teaches it meanwhile. Cost
+    if wrong: a session briefed between P5 and P8 learns `later:` only from the skill.
+22. P5 amends the live-work note's `projects.queue` line to the owned-entry shape, pointing at §6, as P3 and P6 amend
+    their lines. Cost if wrong: none.
+23. A reader's own working tasks (P6) keep the plan's behaviour: readers leave no trail, so their tasks lose the tag
+    five minutes after the reader stops. Readers rarely create tasks. Cost if wrong: an untagged task row.
+24. The "check with Aiden" line names every needs-you item older than three days, up to eight, then `+n more` (P7).
+    Cost if wrong: none.
+25. The check line is left out only after a compaction (P7). A session first tracked by a prompt after its start was
+    missed, or a start with any other source, counts as a new session. Cost if wrong: none.
+26. The check line reads `Check with Aiden whether these are already done, then brief the answer (a "not yet" goes in
+    "log on #id: …"): #14, #45.` (P7). Cost if wrong: none.
+27. A background-task notice is not the first tracked prompt after an enroll (P8): the briefing comes with the next
+    real prompt, as the status answer and the nudge already skip notices. The skill's copy of the task command covers
+    the gap. Cost if wrong: an opted-in session waits one prompt for its rules.
+28. The skill keeps the full task command after P8 (ruling 7 stands). Cost if wrong: one line of skill text.
+29. P8's "briefing due" marker is set for a new session, a repoint, or an enroll of an ended session, not for a
+    same-project re-enroll of a live session that already had its briefing. Cost if wrong: none.
+30. `listSubagents` and `listTrailAgents` share one row mapper (P3), so P4's `ordinal` and P6's `purpose` are each
+    added once. Cost if wrong: none.

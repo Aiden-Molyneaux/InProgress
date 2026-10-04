@@ -163,6 +163,16 @@ amend the sections named.
   other than the focus, and `later: #c, #d` sets the unowned order. Questions, relabelling and backtracking stay in the
   skill's brief template only.
 
+Three more came up while the packages were being built, and Aiden decided them the same day:
+
+- **§2, a tail that opens onto old steps.** Steps revealed by opening a `+n more` tail never fold again into a
+  `✓ n done` row. Old runs elsewhere under the same parent still fold.
+- **§4, where the tag sits.** The letter or tag leads every label: `A · Review actions controller` on the session
+  chip, `a1 · P2 canvas implementer · opus · 12 min` on a subagent badge, `a1 ◐ Write the tests` on a task row.
+- **§6, the Up next strip.** `Up next` heads the strip once. Below it, one line per live session that has entries,
+  led by its letter in its hue (`A  ① #82 Trail of ended work · ② #78 Guide`), then a neutral `later` line. Each line
+  is cut short at the window's edge.
+
 Controller rulings made while running the plan are in `docs/superpowers/rulings/2026-10-04-review-actions-rulings.md`.
 
 ## After this plan
