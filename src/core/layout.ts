@@ -30,6 +30,10 @@ export interface LayoutNodeItem {
   queuePos: number | null;
 }
 
+/**
+ * Hidden siblings as one row: the far todo tail ("+n more", id `more<parentId>-<run>`) or a run of old finished steps
+ * ("✓ n done", id `done<parentId>-<run>`).
+ */
 export interface LayoutMoreItem {
   kind: 'more';
   id: string;
@@ -39,6 +43,7 @@ export interface LayoutMoreItem {
   y: number;
   depth: number;
   hiddenIds: number[];
+  variant: 'tail' | 'done';
 }
 
 export interface LayoutBadgeItem {
@@ -145,7 +150,8 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
     ...work.filter((w) => w.status === 'in_progress').map((w) => w.nodeId),
     ...upNext(input.queue ?? [], input.nodes),
   ];
-  const visible = computeVisible(index, live, { overrides: input.overrides, pins });
+  // Old finished steps fold into "✓ n done" rows on the canvas only; the text outline shows them all.
+  const visible = computeVisible(index, live, { overrides: input.overrides, pins, doneRuns: { now } });
 
   const resourcesByNode = new Map<number, number[]>();
   for (const r of [...input.resources].sort((a, b) => a.id - b.id)) resourcesByNode.set(r.nodeId, [...(resourcesByNode.get(r.nodeId) ?? []), r.id]);
@@ -193,8 +199,8 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
   for (const v of visible) {
     const x = v.depth * INDENT;
     if (v.type === 'more') {
-      const id = `more${v.parentId}-${v.run}`;
-      items.push({ kind: 'more', id, parentId: v.parentId, run: v.run, x, y, depth: v.depth, hiddenIds: v.hiddenIds });
+      const id = `${v.variant === 'done' ? 'done' : 'more'}${v.parentId}-${v.run}`;
+      items.push({ kind: 'more', id, parentId: v.parentId, run: v.run, x, y, depth: v.depth, hiddenIds: v.hiddenIds, variant: v.variant });
       edges.push({ id: `e-${id}`, source: `n${v.parentId}`, target: id });
       y += ROW;
       continue;
