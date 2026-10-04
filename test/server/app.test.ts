@@ -268,7 +268,8 @@ describe('live work routes', () => {
     const tasks = [{ subject: 'Build the tab strip', status: 'in_progress' }, { subject: 'Wire the hash route', status: 'pending' }];
     const res = await app.inject({ method: 'POST', url: '/api/sessions/s1/tasks', headers: auth, payload: { nodeId: tabs, tasks } });
     expect(res.statusCode).toBe(200);
-    expect(res.json().map((t: { subject: string; status: string }) => [t.subject, t.status])).toEqual([['Build the tab strip', 'in_progress'], ['Wire the hash route', 'pending']]);
+    expect(res.json().nodeId).toBe(tabs);
+    expect(res.json().tasks.map((t: { subject: string; status: string }) => [t.subject, t.status])).toEqual([['Build the tab strip', 'in_progress'], ['Wire the hash route', 'pending']]);
     const snap = (await app.inject({ url: '/api/projects/ingame' })).json();
     expect(snap.workItems).toEqual([
       expect.objectContaining({ nodeId: tabs, sessionId: 's1', agentId: '', subject: 'Build the tab strip', status: 'in_progress', blocks: [] }),
@@ -279,6 +280,19 @@ describe('live work routes', () => {
     expect(untracked.json().error).toBe('Session nobody is not tracked');
     const badStatus = await app.inject({ method: 'POST', url: '/api/sessions/s1/tasks', headers: auth, payload: { nodeId: tabs, tasks: [{ subject: 'x', status: 'deleted' }] } });
     expect(badStatus.statusCode).toBe(400);
+  });
+
+  it("puts the tasks on the session's focus when no step is named, and refuses with a hint when it has none", async () => {
+    const { app, ids: [, guide] } = await planned();
+    const tasks = [{ subject: 'Draft the guide', status: 'in_progress' }];
+    const post = (payload: object) => app.inject({ method: 'POST', url: '/api/sessions/s1/tasks', headers: { ...auth, 'x-inprogress-actor': 'session:s1' }, payload });
+    const unfocused = await post({ tasks });
+    expect(unfocused.statusCode).toBe(400);
+    expect(unfocused.json()).toEqual({ error: 'This session has no focus', hint: 'Name the step: tasks <id> …' });
+    await app.inject({ method: 'POST', url: '/api/sessions/s1/focus', headers: auth, payload: { nodeId: guide } });
+    const focused = await post({ tasks });
+    expect(focused.statusCode).toBe(200);
+    expect(focused.json()).toMatchObject({ nodeId: guide, tasks: [{ nodeId: guide, subject: 'Draft the guide', status: 'in_progress' }] });
   });
 
   it('takes the live-work fields on the hook route, and refuses unknown ones', async () => {

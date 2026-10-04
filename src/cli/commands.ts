@@ -7,8 +7,10 @@ import { timestamp } from '../server/backup';
 import { claudeDir, install, kitStatus, repoRoot, uninstall } from './claude-config';
 import { doctor } from './doctor';
 import { openAppWindow } from './open';
+import { runTasks } from './tasks';
 
-const USAGE = 'Usage: inprogress <start | stop | open | status | outline <project> [--full] | doctor | claude-install | claude-uninstall | claude-check>';
+const USAGE =
+  'Usage: inprogress <start | stop | open | status | outline <project> [--full] | tasks [<step id>] --session <session id> [--done|--doing|--todo "<subject>"]... | doctor | claude-install | claude-uninstall | claude-check>';
 /**
  * The first health check of a CLI run. A fresh process's first request is slow on a busy machine (fetch sets up its
  * HTTP parser), and 300 ms has called a running server down. Nothing listening still fails at once.
@@ -89,6 +91,9 @@ export async function runCli(args: string[], out: (line: string) => void = conso
       out(await createClient({ baseUrl: url }).text(`/api/projects/${encodeURIComponent(project)}/outline${full ? '?full=1' : ''}`));
       return 0;
     }
+    case 'tasks':
+      // Run by a main session itself. It never starts the server (see TASKS_UNREACHABLE_HINT).
+      return runTasks(rest, out, { baseUrl: url, token: readToken() });
     case 'doctor':
       // Start the server first, as `open` does, so doctor passes straight after claude-install stopped it.
       // If it cannot start, say where to look; the Server check then fails too.

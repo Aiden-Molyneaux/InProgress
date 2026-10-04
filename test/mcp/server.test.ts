@@ -64,12 +64,12 @@ function freePort(): Promise<number> {
 }
 
 describe('scribe MCP tools', () => {
-  it('lists exactly the specified tools', async () => {
+  it('lists exactly the specified tools, without set_tasks: a main session sets its own working tasks with the CLI', async () => {
     const { tools } = await mcp.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
       'add_log', 'add_nodes', 'add_resource', 'bind_folder', 'create_project', 'delete_node', 'delete_resource',
       'enroll_session', 'get_node', 'get_outline', 'get_resource', 'list_projects', 'move_node', 'search',
-      'set_focus', 'set_queue', 'set_tasks', 'unbind_folder', 'update_node', 'update_project', 'update_resource',
+      'set_focus', 'set_queue', 'unbind_folder', 'update_node', 'update_project', 'update_resource',
     ]);
   });
 
@@ -86,11 +86,10 @@ describe('scribe MCP tools', () => {
     expect(tool('update_resource').description).toMatch(/does not re-read the file/);
     expect(tool('set_queue').description).toMatch(/order .* plans to work in/);
     expect(tool('set_queue').description).toMatch(/Done and dropped steps leave the queue on their own/);
-    expect(tool('set_tasks').description).toMatch(/task tools are absent/);
     expect(tool('get_outline').description).toMatch(/Up next/);
   });
 
-  it('sets the queue, which get_outline prints as Up next, and the working tasks on a node', async () => {
+  it('sets the queue, which get_outline prints as Up next', async () => {
     const created = await call('create_project', { name: 'Tabs', description: 'Project tabs', session: 'q1' });
     const rootId = ids(created.text)[0];
     const [tabs, guide] = lineIds((await call('add_nodes', { parent: rootId, nodes: [{ title: 'Tab strip' }, { title: 'Guide' }], session: 'q1' })).text);
@@ -98,16 +97,12 @@ describe('scribe MCP tools', () => {
     expect(await call('set_queue', { project: 'tabs', nodes: [guide, tabs], session: 'q1' })).toEqual({ text: `Up next in tabs: #${guide} → #${tabs}.`, isError: false });
     expect((await call('get_outline', { project: 'tabs' })).text.split('\n')[1]).toBe(`Up next: #${guide} → #${tabs}`);
     expect(await call('set_queue', { project: 'tabs', nodes: [], session: 'q1' })).toEqual({ text: 'Cleared the queue of tabs.', isError: false });
-    const tasks = [{ subject: 'Build the strip', status: 'in_progress' }, { subject: 'Wire the route', status: 'pending' }, { subject: 'Sketch it', status: 'completed' }];
-    expect(await call('set_tasks', { session: 'q1', node: tabs, tasks })).toEqual({ text: `Working tasks on #${tabs}: ◐ Build the strip · ○ Wire the route · ✓ Sketch it.`, isError: false });
-    expect(await call('set_tasks', { session: 'q1', node: tabs, tasks: [] })).toEqual({ text: `Cleared the working tasks on #${tabs}.`, isError: false });
   });
 
-  it('returns the specific error when a queue or task list is refused', async () => {
+  it('returns the specific error when a queue is refused', async () => {
     const other = ids((await call('create_project', { name: 'Elsewhere', description: 'x' })).text)[0];
     await call('create_project', { name: 'Queued', description: 'x' });
     expect(await call('set_queue', { project: 'queued', nodes: [other] })).toEqual({ text: `#${other} is not in project queued. Use get_outline to find the right #id.`, isError: true });
-    expect(await call('set_tasks', { session: 'nobody', node: other, tasks: [] })).toEqual({ text: 'Session nobody is not tracked. Use enroll_session first.', isError: true });
   });
 
   it('runs a scribe workflow end to end', async () => {

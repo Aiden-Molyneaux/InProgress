@@ -14,7 +14,9 @@ import { VERSION } from '../../src/lib/version';
 import { buildApp } from '../../src/server/app';
 import { openDb, type DB } from '../../src/server/db/connection';
 import { createCtx } from '../../src/server/db/tx';
+import { addNodes } from '../../src/server/repo/nodes';
 import { createProject } from '../../src/server/repo/projects';
+import { enrollSession, setFocus } from '../../src/server/session-flow';
 
 let base = '';
 let home = '';
@@ -225,6 +227,76 @@ describe('runCli', () => {
       else process.env.INPROGRESS_CLAUDE_DIR = savedClaude;
       await server.close();
     }
+  });
+
+  it('lists the tasks command in the usage, with the step bare', async () => {
+    const s = capture();
+    expect(await runCli([], s.out)).toBe(0);
+    expect(s.lines.join('\n')).toContain('tasks [<step id>] --session <session id>');
+    expect(s.lines.join('\n')).not.toMatch(/tasks #/);
+  });
+
+  describe('tasks', () => {
+    /** A session tracked in CLI Demo with a step, and its stale-update counter at 3. */
+    function trackedSession(id: string) {
+      const ctx = createCtx(db);
+      const project = enrollSession(ctx, `scribe:${id}`, id, 'cli-demo').session.projectId!;
+      const root = db.prepare('SELECT root_node_id AS r FROM projects WHERE id = ?').get(project) as { r: number };
+      const [step] = addNodes(ctx, 'test', { parentId: root.r, nodes: [{ title: `Step for ${id}`, status: 'active' }] });
+      db.prepare('UPDATE sessions SET prompts_since_update = 3 WHERE id = ?').run(id);
+      return { ctx, step };
+    }
+
+    it("replaces the session's tasks on a step, prints the counts, and leaves the stale nudge alone", async () => {
+      const { step } = trackedSession('cli-t1');
+      const s = capture();
+      expect(await runCli(['tasks', String(step.id), '--session', 'cli-t1', '--done', 'Write tests', '--doing', 'Make them pass', '--todo', 'Smoke', '--todo', 'Deploy'], s.out)).toBe(0);
+      expect(s.lines).toEqual([`#${step.id}: 1 done · 1 in progress · 2 pending`]);
+      const rows = db.prepare("SELECT subject, status FROM work_items WHERE session_id = 'cli-t1' ORDER BY position").all();
+      expect(rows).toEqual([
+        { subject: 'Write tests', status: 'completed' },
+        { subject: 'Make them pass', status: 'in_progress' },
+        { subject: 'Smoke', status: 'pending' },
+        { subject: 'Deploy', status: 'pending' },
+      ]);
+      const event = db.prepare("SELECT actor FROM events WHERE type = 'work.updated' ORDER BY id DESC LIMIT 1").get();
+      expect(event).toEqual({ actor: 'session:cli-t1' });
+      // Only the scribe's writes mean the plan is current: the nudge keeps counting.
+      expect(db.prepare("SELECT prompts_since_update AS n FROM sessions WHERE id = 'cli-t1'").get()).toEqual({ n: 3 });
+      const cleared = capture();
+      expect(await runCli(['tasks', `#${step.id}`, '--session', 'cli-t1'], cleared.out)).toBe(0);
+      expect(cleared.lines).toEqual([`#${step.id}: no tasks`]);
+    });
+
+    it("uses the session's focus when no step is named, and passes on the no-focus refusal with its hint", async () => {
+      const { ctx, step } = trackedSession('cli-t2');
+      await expect(runCli(['tasks', '--session', 'cli-t2', '--doing', 'x'], capture().out)).rejects.toMatchObject({
+        name: 'ApiClientError', status: 400, message: 'This session has no focus', hint: 'Name the step: tasks <id> …',
+      });
+      setFocus(ctx, 'scribe:cli-t2', 'cli-t2', step.id);
+      const s = capture();
+      expect(await runCli(['tasks', '--session', 'cli-t2', '--doing', 'x'], s.out)).toBe(0);
+      expect(s.lines).toEqual([`#${step.id}: 1 in progress`]);
+    });
+
+    it('prints what is wrong and the usage for bad arguments, without calling the server', async () => {
+      const s = capture();
+      expect(await runCli(['tasks', '88', '--done', 'x'], s.out)).toBe(1);
+      expect(s.lines[0]).toMatch(/--session/);
+      expect(s.lines[1]).toMatch(/^Usage: inprogress tasks /);
+    });
+
+    it('never starts the server: an unreachable one gets a hint a session can act on', async () => {
+      process.env.INPROGRESS_PORT = String(await freePort());
+      let started = 0;
+      try {
+        const run = runCli(['tasks', '88', '--session', 'cli-t3', '--done', 'x'], capture().out, { ensureServer: async () => (started++, true) });
+        await expect(run).rejects.toMatchObject({ name: 'ApiClientError', status: 0, hint: 'InProgress starts with the next prompt: run this command again then.' });
+        expect(started).toBe(0);
+      } finally {
+        process.env.INPROGRESS_PORT = new URL(base).port;
+      }
+    });
   });
 
   it('doctor says where to look when it cannot start the server', async () => {

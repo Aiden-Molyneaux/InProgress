@@ -81,7 +81,8 @@ export const hookBody = z
 export const queueBody = z.object({ nodes: z.array(z.number().int().positive()).max(200) }).strict();
 export const tasksBody = z
   .object({
-    nodeId: z.number().int().positive(),
+    // Left out, the session's focus is used.
+    nodeId: z.number().int().positive().optional(),
     tasks: z.array(z.object({ subject: z.string().trim().min(1, 'subject is empty').max(300), status: z.enum(WORK_STATUSES) }).strict()).max(50),
   })
   .strict();

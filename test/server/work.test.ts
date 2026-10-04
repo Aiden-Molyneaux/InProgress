@@ -173,41 +173,74 @@ describe('pruneWorkItems', () => {
   });
 });
 
-describe('setTasks (the scribe, where the task tools are absent)', () => {
+describe('setTasks (the tasks command, where the task tools are absent)', () => {
   it("replaces the session's list on a node, in order, and leaves other lists alone", () => {
     const { ctx, play, tests, hook, items } = setup();
     hook(created('1', 'Mirrored elsewhere'));
     hook({ event: 'subagent-start', agentId: 'a1', agentType: 'Explore' });
     hook(created('1', `#${tests.id} A subagent's own`, 'a1'));
-    const first = setTasks(ctx, 'scribe:s1', 's1', tests.id, [{ subject: 'Run the suite', status: 'in_progress' }, { subject: 'Report failures', status: 'pending' }]);
-    expect(first.map((i) => [i.subject, i.status, i.nodeId])).toEqual([['Run the suite', 'in_progress', tests.id], ['Report failures', 'pending', tests.id]]);
-    setTasks(ctx, 'scribe:s1', 's1', tests.id, [{ subject: 'Run the suite', status: 'completed' }]);
+    const first = setTasks(ctx, 'session:s1', 's1', tests.id, [{ subject: 'Run the suite', status: 'in_progress' }, { subject: 'Report failures', status: 'pending' }]);
+    expect(first.nodeId).toBe(tests.id);
+    expect(first.tasks.map((i) => [i.subject, i.status, i.nodeId])).toEqual([['Run the suite', 'in_progress', tests.id], ['Report failures', 'pending', tests.id]]);
+    setTasks(ctx, 'session:s1', 's1', tests.id, [{ subject: 'Run the suite', status: 'completed' }]);
     expect(items().map((i) => [i.nodeId, i.agentId, i.subject, i.status])).toEqual([
       [play.id, '', 'Mirrored elsewhere', 'pending'],
       [tests.id, 'a1', `#${tests.id} A subagent's own`, 'pending'],
       [tests.id, '', 'Run the suite', 'completed'],
     ]);
-    expect(setTasks(ctx, 'scribe:s1', 's1', tests.id, [])).toEqual([]);
+    expect(setTasks(ctx, 'session:s1', 's1', tests.id, [])).toEqual({ nodeId: tests.id, tasks: [] });
     expect(subjects(items())).toEqual(['Mirrored elsewhere', `#${tests.id} A subagent's own`]);
   });
 
-  it('records work.updated for the node by the scribe, and nothing when the list is unchanged', () => {
+  it("uses the session's focus when no step is named", () => {
+    const { ctx, play, items } = setup();
+    const res = setTasks(ctx, 'session:s1', 's1', undefined, [{ subject: 'Sign the bundle', status: 'in_progress' }]);
+    expect(res.nodeId).toBe(play.id);
+    expect(res.tasks.map((i) => [i.nodeId, i.subject, i.status])).toEqual([[play.id, 'Sign the bundle', 'in_progress']]);
+    expect(items().map((i) => [i.nodeId, i.subject])).toEqual([[play.id, 'Sign the bundle']]);
+  });
+
+  it('refuses a session with no focus when no step is named, with a hint that names the step bare', () => {
+    const { ctx } = setup();
+    setFocus(ctx, 'scribe:s1', 's1', null);
+    expect(() => setTasks(ctx, 'session:s1', 's1', undefined, [])).toThrow(expect.objectContaining({ status: 400, message: 'This session has no focus', hint: 'Name the step: tasks <id> …' }));
+  });
+
+  it('records work.updated for the node by its actor, and nothing when the list is unchanged', () => {
     const { ctx, tests } = setup();
     const list = [{ subject: 'Run the suite', status: 'pending' as const }];
     let mark = maxEventId(ctx);
-    setTasks(ctx, 'scribe:s1', 's1', tests.id, list);
-    expect(listEventsSince(ctx, mark)).toMatchObject([{ type: 'work.updated', entity: 'node', entityId: String(tests.id), actor: 'scribe:s1', data: { nodeId: tests.id } }]);
+    setTasks(ctx, 'session:s1', 's1', tests.id, list);
+    expect(listEventsSince(ctx, mark)).toMatchObject([{ type: 'work.updated', entity: 'node', entityId: String(tests.id), actor: 'session:s1', data: { nodeId: tests.id } }]);
     mark = maxEventId(ctx);
-    setTasks(ctx, 'scribe:s1', 's1', tests.id, list);
+    setTasks(ctx, 'session:s1', 's1', tests.id, list);
     expect(listEventsSince(ctx, mark)).toEqual([]);
   });
 
-  it('refuses a session that is not tracked and a node outside its project', () => {
-    const { ctx, tests } = setup();
+  it('refuses a session that is not tracked, an unknown node and a node outside its project, with hints a main session can act on', () => {
+    const { ctx, project, tests } = setup();
     const other = createProject(ctx, 'test', { name: 'Other' });
-    expect(() => setTasks(ctx, 'scribe:x', 'nobody', tests.id, [])).toThrow('Session nobody is not tracked');
-    expect(() => setTasks(ctx, 'scribe:s1', 's1', other.rootNodeId, [])).toThrow(`#${other.rootNodeId} is not in this session's project`);
-    expect(() => setTasks(ctx, 'scribe:s1', 's1', 99999, [])).toThrow('Node #99999 not found');
+    const refusal = (fn: () => unknown): { message: string; hint?: string } => {
+      try {
+        fn();
+      } catch (err) {
+        return err as { message: string; hint?: string };
+      }
+      throw new Error('expected a refusal');
+    };
+    const untracked = refusal(() => setTasks(ctx, 'session:nobody', 'nobody', tests.id, []));
+    const outside = refusal(() => setTasks(ctx, 'session:s1', 's1', other.rootNodeId, []));
+    const unknown = refusal(() => setTasks(ctx, 'session:s1', 's1', 99999, []));
+    expect(untracked.message).toBe('Session nobody is not tracked');
+    expect(outside.message).toBe(`#${other.rootNodeId} is not in this session's project`);
+    expect(unknown.message).toBe('Node #99999 not found');
+    expect(untracked.hint).toMatch(/--session/);
+    expect(outside.hint).toBe(`Find the right step id with the CLI command: outline ${project.slug}`);
+    expect(unknown.hint).toBe(outside.hint);
+    // The main session has none of the scribe's tools, and a "#" would start a comment in its shell.
+    for (const hint of [untracked.hint, outside.hint, unknown.hint]) {
+      expect(hint).not.toMatch(/enroll_session|get_outline|#/);
+    }
   });
 });
 
