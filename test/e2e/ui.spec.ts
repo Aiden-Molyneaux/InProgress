@@ -344,6 +344,31 @@ test('a wheel tick turns Follow off', async ({ page, demo }) => {
   await expect(follow).toHaveAttribute('aria-pressed', 'false');
 });
 
+// Records, by id, every row React Flow hides from now on: it hides a row whose node object carries no measured size.
+const WATCH_HIDDEN = `(() => {
+  window.__hidden = [];
+  new MutationObserver((records) => {
+    for (const { target } of records) {
+      if (target.classList.contains('react-flow__node') && target.style.visibility === 'hidden') window.__hidden.push(target.dataset.id);
+    }
+  }).observe(document.querySelector('.react-flow__nodes'), { subtree: true, attributes: true, attributeFilter: ['style'] });
+})()`;
+
+test('rows stay measured when the canvas rebuilds them, so none blinks out and a focused card keeps focus', async ({ page, api, fresh }) => {
+  await page.clock.install();
+  await open(page, fresh);
+  const card = page.locator('.ip-node', { hasText: 'Play app signing' });
+  await expect(card).toBeInViewport();
+  await card.focus();
+  await page.evaluate(WATCH_HIDDEN);
+  // The 30 s clock rebuilds every row, and so does a live change.
+  await page.clock.runFor(30_000);
+  await write(api, fresh.session, 'patch', `/api/nodes/${fresh.ids['3 RevenueCat']}`, { title: '3 RevenueCat, renamed' });
+  await expect(page.locator('.ip-node', { hasText: '3 RevenueCat, renamed' })).toBeVisible();
+  expect(await page.evaluate<string[]>('window.__hidden')).toEqual([]);
+  await expect(card).toBeFocused();
+});
+
 test('at 520 px there is no minimap, old finished steps fold into "✓ n done", and a card counts its resources', async ({ page, api, fresh }) => {
   // Under a parent that is not done: a done parent would fold them away whole. Past two todo steps, the dropped ones
   // make a "+5 more" tail.
@@ -381,16 +406,19 @@ test('at 520 px there is no minimap, old finished steps fold into "✓ n done", 
   await parent.getByRole('button', { name: 'Unfold' }).click();
   await expect(oldRun).toBeVisible();
   await expect(firstOld).toHaveCount(0);
-  // From the keyboard: the tail opens onto its old dropped steps folded as "✓ 5 done", which takes focus, and Enter
-  // there shows the steps and focuses the first.
+  // From the keyboard, a done run opens as "+n more" does, focus moving to its first step.
+  await oldRun.focus();
+  await page.keyboard.press('Space');
+  await expect(firstOld).toBeFocused();
+  // The old dropped steps "+5 more" shows never fold again into a done row; Enter focuses the first.
   await page.getByRole('button', { name: 'Show 5 more' }).focus();
   await page.keyboard.press('Enter');
-  const shelved = page.getByRole('button', { name: 'Show 5 done' });
-  await expect(shelved).toBeFocused();
-  await page.keyboard.press('Enter');
   await expect(page.locator('.ip-node', { hasText: 'Shelved 1' })).toBeFocused();
+  await expect(page.locator('.ip-node', { hasText: 'Shelved 5' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Show 5 done' })).toHaveCount(0);
 
-  // One count inside the card in place of the chips beside it, naming them in its tooltip; a click opens Details.
+  // One count inside the card in place of the chips beside it, naming them in its tooltip; a click opens Details,
+  // which lists both resources and opens either.
   const card = page.locator('.ip-node', { hasText: 'Run signing tests' });
   await page.keyboard.press('n');
   await expect(card).toBeInViewport();
@@ -399,8 +427,15 @@ test('at 520 px there is no minimap, old finished steps fold into "✓ n done", 
   await expect(count).toHaveAttribute('title', /^r\d+ Signing test suite\nr\d+ Signing checklist$/);
   await expect(page.locator('.ip-chip', { hasText: 'Signing checklist' })).toBeHidden();
   await count.click();
-  await expect(page.getByRole('complementary')).toContainText(`#${fresh.ids['Run signing tests']} Run signing tests`);
+  const details = page.getByRole('complementary');
+  await expect(details).toContainText(`#${fresh.ids['Run signing tests']} Run signing tests`);
   await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(details.locator('.ip-res b')).toHaveText(['Signing test suite', 'Signing checklist']);
+  await details.locator('.ip-res', { hasText: 'Signing checklist' }).click();
+  const viewer = page.getByRole('dialog');
+  await expect(viewer.locator('h1')).toHaveText('Checklist');
+  await page.keyboard.press('Escape');
+  await expect(viewer).toBeHidden();
   // At 720 px and wider, the chips beside the card come back.
   await page.setViewportSize({ width: 720, height: 900 });
   await expect(count).toBeHidden();

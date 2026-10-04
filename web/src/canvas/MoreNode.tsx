@@ -21,7 +21,6 @@ export function MoreNode({ data }: NodeProps<Node<MoreNodeData, 'ipMore'>>) {
       <button
         className={done ? 'ip-more ip-more-done' : 'ip-more'}
         aria-label={`Show ${data.count} ${done ? 'done' : 'more'}`}
-        data-first={data.firstId}
         onClick={(e) => {
           e.stopPropagation();
           data.onExpand(data.foldKey, data.firstId);
@@ -29,6 +28,7 @@ export function MoreNode({ data }: NodeProps<Node<MoreNodeData, 'ipMore'>>) {
       >
         {done ? (
           <>
+            {/* The space keeps the text "✓ n done". The flex row collapses it, so the row's gap spaces the mark. */}
             <span className="ip-more-mark">✓</span> {data.count} done
           </>
         ) : (

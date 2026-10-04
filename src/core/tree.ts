@@ -145,27 +145,31 @@ export function computeVisible(index: TreeIndex, sessions: SessionLike[], opts: 
     return (n.status === 'done' || n.status === 'dropped') && !pinned.has(n.id);
   };
 
-  const hiddenRuns = (parent: TreeNode, list: TreeNode[]): number[][] => {
-    if (opts.noFold || overrides[`more:${parent.id}`] === 'open') return [];
+  /** The children the far todo tail hides, whether or not its "+n more" is open. */
+  const tailIds = (list: TreeNode[]): Set<number> => {
+    const hidden = new Set<number>();
+    if (opts.noFold) return hidden;
     let last = -1;
     list.forEach((k, i) => {
       if (k.status === 'done' || k.status === 'active') last = i;
     });
     // Walk the tail past the frontier. Pinned children show. Until two unpinned todo/blocked children
     // have shown, those and any dropped ones show too; every unpinned child after that hides.
-    const hidden = new Set<number>();
     let shown = 0;
     for (const k of list.slice(last + 1)) {
       if (pinned.has(k.id)) continue;
       if (shown >= 2) hidden.add(k.id);
       else if (k.status === 'todo' || k.status === 'blocked') shown++;
     }
-    if (hidden.size < 2) return [];
-    return runsOf(list, (k) => hidden.has(k.id), 1);
+    return hidden.size < 2 ? new Set() : hidden;
   };
 
-  // Runs of DONE_RUN_MIN or more old finished children, among those the tail leaves showing. A pinned child splits a
-  // run. Only the parent's done: override opens them: a parent unfolded by its chevron still folds its old runs.
+  const hiddenRuns = (parent: TreeNode, list: TreeNode[], tail: Set<number>): number[][] =>
+    overrides[`more:${parent.id}`] === 'open' ? [] : runsOf(list, (k) => tail.has(k.id), 1);
+
+  // Runs of DONE_RUN_MIN or more old finished children, outside the tail: steps an opened "+n more" shows never fold
+  // again. A pinned child splits a run. Only the parent's done: override opens them: a parent unfolded by its chevron
+  // still folds its old runs.
   const doneRuns = (parent: TreeNode, list: TreeNode[], tail: Set<number>): number[][] => {
     const when = opts.doneRuns;
     if (!when || opts.noFold || overrides[`done:${parent.id}`] === 'open') return [];
@@ -178,11 +182,11 @@ export function computeVisible(index: TreeIndex, sessions: SessionLike[], opts: 
     const folded = isFolded(n);
     out.push({ type: 'node', node: n, depth, folded, hasChildren: list.length > 0 });
     if (folded) return;
-    // The tail first, then the finished runs among the children it leaves.
-    const tail = hiddenRuns(n, list);
+    // The tail first, then the finished runs among the other children.
+    const tail = tailIds(list);
     const runs: Run[] = [
-      ...tail.map((hiddenIds, run) => ({ hiddenIds, run, variant: 'tail' as const })),
-      ...doneRuns(n, list, new Set(tail.flat())).map((hiddenIds, run) => ({ hiddenIds, run, variant: 'done' as const })),
+      ...hiddenRuns(n, list, tail).map((hiddenIds, run) => ({ hiddenIds, run, variant: 'tail' as const })),
+      ...doneRuns(n, list, tail).map((hiddenIds, run) => ({ hiddenIds, run, variant: 'done' as const })),
     ];
     const runOf = new Map<number, Run>();
     for (const r of runs) for (const id of r.hiddenIds) runOf.set(id, r);

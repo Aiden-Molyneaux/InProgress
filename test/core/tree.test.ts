@@ -243,6 +243,20 @@ describe('computeVisible with doneRuns', () => {
     expect(computeVisible(buildIndex(finished), [], { ...opts, noFold: true }).map(show)).toEqual(['P', 'd1', 'd2', 'd3']);
   });
 
+  it('never folds the steps an opened "+n more" shows, while old runs elsewhere under the parent still fold', () => {
+    nextId = 1;
+    const p = n(null, 'P', { status: 'active' });
+    const nodes = [
+      p, done(p.id, 'd1'), done(p.id, 'd2'), done(p.id, 'd3'),
+      n(p.id, 'frontier', { status: 'active' }), n(p.id, 't1'), n(p.id, 't2'),
+      dropped(p.id, 'x1'), dropped(p.id, 'x2'), dropped(p.id, 'x3'),
+    ];
+    const index = buildIndex(nodes);
+    expect(computeVisible(index, [], opts).map(show)).toEqual(['P', '✓ 3 done', 'frontier', 't1', 't2', '+3 more']);
+    const opened = computeVisible(index, [], { ...opts, overrides: { [`more:${p.id}`]: 'open' } });
+    expect(opened.map(show)).toEqual(['P', '✓ 3 done', 'frontier', 't1', 't2', 'x1', 'x2', 'x3']);
+  });
+
   it('leaves the text outline unchanged: every old finished step still prints', () => {
     nextId = 1;
     const p = n(null, 'P', { status: 'active' });

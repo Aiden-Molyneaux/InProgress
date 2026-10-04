@@ -95,9 +95,8 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
 
   /**
    * Shows a "+n more" or "✓ n done" run, by its override (`more:<parentId>` or `done:<parentId>`). Its button goes away
-   * with it, which would drop focus to the page, so focus moves to the first card the run shows, or to the "✓ n done"
-   * row when the tail's first steps fold again as old finished ones. React Flow keeps a new row hidden until it has
-   * measured it, and a hidden row can't take focus: try again each frame until it shows.
+   * with it, which would drop focus to the page, so focus moves to the first card the run shows. React Flow keeps a new
+   * card hidden until it has measured it, and a hidden card can't take focus: try again each frame until it shows.
    */
   const expandRun = useCallback(
     (foldKey: string, firstId: number) => {
@@ -107,7 +106,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
         // Focus that something else has taken meanwhile stays there. Focus on the page, or still on the button, moves.
         const active = document.activeElement;
         if (active && active !== document.body && !active.classList.contains('ip-more')) return;
-        const card = root.current?.querySelector<HTMLElement>(`.react-flow__node[data-id="n${firstId}"] .ip-node, .ip-more-done[data-first="${firstId}"]`);
+        const card = root.current?.querySelector<HTMLElement>(`.react-flow__node[data-id="n${firstId}"] .ip-node`);
         if (card && getComputedStyle(card).visibility === 'visible') card.focus();
         else if (++frames < FOCUS_FRAMES) focusFrame.current = requestAnimationFrame(attempt);
       };
