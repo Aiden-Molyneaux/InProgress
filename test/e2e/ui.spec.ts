@@ -149,8 +149,6 @@ test('opens on the current work with folding, needs-you and the session badge', 
   // React Flow's warning #004 (a canvas with no width or height) is only logged by development builds: check the size.
   await expect(page.locator('.react-flow__renderer')).toBeVisible();
   await expect(page.locator('.ip-node', { hasText: 'Play app signing' })).toBeInViewport();
-  // The minimap draws only nodes whose size it knows (Task 18's measured-size fix).
-  await expect(page.locator('.react-flow__minimap-node').first()).toBeVisible();
   await expect(page.locator('.ip-node.needs-you', { hasText: 'Run signing tests' })).toBeVisible();
   await expect(page.locator('.ip-more', { hasText: '+3 more' })).toBeVisible();
   await expect(page.locator('.ip-badge', { hasText: 'E2E session' })).toBeVisible();
@@ -335,21 +333,10 @@ test('Space on "+n more" hands focus to the first card it shows, and Tab carries
   await expect(page.locator('.ip-node', { hasText: '6 Beta' })).toBeFocused();
 });
 
-test('a wheel tick or a minimap drag turns Follow off, a minimap click does not', async ({ page, demo }) => {
+test('a wheel tick turns Follow off', async ({ page, demo }) => {
   await open(page, demo);
   const follow = page.getByRole('button', { name: /Follow/ });
   await expect(page.locator('.ip-node', { hasText: 'Play app signing' })).toBeInViewport();
-  const minimap = page.locator('.react-flow__minimap');
-  await minimap.click();
-  await minimap.click({ button: 'right' });
-  await expect(follow).toHaveAttribute('aria-pressed', 'true');
-  const map = (await minimap.boundingBox())!;
-  await page.mouse.move(map.x + map.width / 2, map.y + map.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(map.x + map.width / 2 + 5, map.y + map.height / 2 + 15);
-  await page.mouse.up();
-  await expect(follow).toHaveAttribute('aria-pressed', 'false');
-  await follow.click();
   await expect(follow).toHaveAttribute('aria-pressed', 'true');
   const pane = (await page.locator('.react-flow__pane').boundingBox())!;
   await page.mouse.move(pane.x + pane.width / 2, pane.y + 60);
@@ -357,17 +344,67 @@ test('a wheel tick or a minimap drag turns Follow off, a minimap click does not'
   await expect(follow).toHaveAttribute('aria-pressed', 'false');
 });
 
-test('a minimap drag whose first move lands outside the minimap turns Follow off', async ({ page, demo }) => {
-  await open(page, demo);
-  const follow = page.getByRole('button', { name: /Follow/ });
+test('at 520 px there is no minimap, old finished steps fold into "✓ n done", and a card counts its resources', async ({ page, api, fresh }) => {
+  // Under a parent that is not done: a done parent would fold them away whole. Past two todo steps, the dropped ones
+  // make a "+5 more" tail.
+  const children = [
+    ...[1, 2, 3, 4].map((i) => ({ title: `Old step ${i}`, status: 'done' })),
+    { title: 'Next up' }, { title: 'After that' },
+    ...[1, 2, 3, 4, 5].map((i) => ({ title: `Shelved ${i}`, status: 'dropped' })),
+  ];
+  await write(api, fresh.session, 'post', '/api/nodes', { parentId: fresh.root, nodes: [{ title: 'Finished work', kind: 'phase', status: 'active', children }] });
+  await write(api, fresh.session, 'post', '/api/resources', { nodeId: fresh.ids['Run signing tests'], kind: 'doc', title: 'Signing checklist', content: '# Checklist' });
+  // The server stamps a step's finish time when it is made: a browser clock 25 hours ahead makes every one over a day
+  // old, the seed's 25 done milestones too.
+  await page.clock.install({ time: Date.now() + 25 * 3600_000 });
+  await open(page, fresh);
   await expect(page.locator('.ip-node', { hasText: 'Play app signing' })).toBeInViewport();
-  const map = (await page.locator('.react-flow__minimap').boundingBox())!;
-  await page.mouse.move(map.x + map.width / 2, map.y + map.height / 2);
-  await page.mouse.down();
-  // One fast move, straight out over the canvas.
-  await page.mouse.move(map.x - 100, map.y - 100);
-  await page.mouse.up();
-  await expect(follow).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('.react-flow__minimap')).toHaveCount(0);
+
+  const oldRun = page.getByRole('button', { name: 'Show 4 done' });
+  const firstOld = page.locator('.ip-node', { hasText: 'Old step 1' });
+  await expect(oldRun).toHaveClass(/\bip-more-done\b/);
+  await expect(oldRun).toHaveText('✓ 4 done');
+  await expect(firstOld).toHaveCount(0);
+  // The seed's milestones fold too.
+  await expect(page.getByRole('button', { name: 'Show 25 done' })).toHaveClass(/\bip-more-done\b/);
+  await expect(page.locator('.ip-node', { hasText: /^Milestone 1$/ })).toHaveCount(0);
+  await expect(page.locator('.ip-more.ip-more-done')).toHaveCount(2);
+  // A click opens the run and hands focus to its first step.
+  await oldRun.click();
+  await expect(page.locator('.ip-node', { hasText: 'Old step 4' })).toBeVisible();
+  await expect(firstOld).toBeFocused();
+  await expect(page.locator('.ip-more.ip-more-done')).toHaveCount(1);
+  // Folding the parent and unfolding it folds the run again.
+  const parent = page.locator('.ip-node', { hasText: 'Finished work' });
+  await parent.getByRole('button', { name: 'Fold' }).click();
+  await parent.getByRole('button', { name: 'Unfold' }).click();
+  await expect(oldRun).toBeVisible();
+  await expect(firstOld).toHaveCount(0);
+  // From the keyboard: the tail opens onto its old dropped steps folded as "✓ 5 done", which takes focus, and Enter
+  // there shows the steps and focuses the first.
+  await page.getByRole('button', { name: 'Show 5 more' }).focus();
+  await page.keyboard.press('Enter');
+  const shelved = page.getByRole('button', { name: 'Show 5 done' });
+  await expect(shelved).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.ip-node', { hasText: 'Shelved 1' })).toBeFocused();
+
+  // One count inside the card in place of the chips beside it, naming them in its tooltip; a click opens Details.
+  const card = page.locator('.ip-node', { hasText: 'Run signing tests' });
+  await page.keyboard.press('n');
+  await expect(card).toBeInViewport();
+  const count = card.locator('.ip-res-count');
+  await expect(count).toHaveText('▤ 2');
+  await expect(count).toHaveAttribute('title', /^r\d+ Signing test suite\nr\d+ Signing checklist$/);
+  await expect(page.locator('.ip-chip', { hasText: 'Signing checklist' })).toBeHidden();
+  await count.click();
+  await expect(page.getByRole('complementary')).toContainText(`#${fresh.ids['Run signing tests']} Run signing tests`);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  // At 720 px and wider, the chips beside the card come back.
+  await page.setViewportSize({ width: 720, height: 900 });
+  await expect(count).toBeHidden();
+  await expect(page.locator('.ip-chip', { hasText: 'Signing checklist' })).toBeVisible();
 });
 
 // Records whether the flash on "Run signing tests" is ever cleared from now on.
@@ -510,7 +547,11 @@ test('on a narrow window with Details open, keyboard focus on a card under the s
   await expectLifted(page, covered);
 });
 
+/** A window wide enough for the resource chips beside the cards, which a narrow one swaps for a count. */
+const widen = (page: Page) => page.setViewportSize({ width: 1000, height: 900 });
+
 test('the resource viewer is modal and hands focus back when it closes', async ({ page, demo }) => {
+  await widen(page);
   await open(page, demo);
   const chip = page.locator('.ip-chip', { hasText: 'Signing test suite' });
   await chip.focus();
@@ -532,6 +573,7 @@ test('the resource viewer is modal and hands focus back when it closes', async (
 });
 
 test('a resource chip opens the rendered resource', async ({ page, demo }) => {
+  await widen(page);
   await open(page, demo);
   await page.locator('.ip-chip', { hasText: 'Signing test suite' }).click();
   const viewer = page.getByRole('dialog');
@@ -549,6 +591,7 @@ const RECORD_TITLES = `(() => {
 test('the resource viewer neutralises unsafe Markdown', async ({ page, demo }) => {
   // The sample's <img src=x> would 404 and log a console error. An empty 204 still fails to load, so an onerror would fire.
   await page.route('**/x', (route) => route.fulfill({ status: 204 }));
+  await widen(page);
   await open(page, demo);
   await expect(page).toHaveTitle('(1) InProgress — E2E Demo');
   await page.evaluate(RECORD_TITLES);
@@ -642,6 +685,7 @@ test('links open in the default browser through the server, not in this window',
   await page.route('**/x', (route) => route.fulfill({ status: 204 }));
   const popups: unknown[] = [];
   page.context().on('page', (p) => popups.push(p));
+  await widen(page);
   await open(page, demo);
   await page.locator('.ip-chip', { hasText: 'Unsafe Markdown' }).click();
   await page.getByRole('dialog').getByRole('link', { name: 'Signing docs' }).click();
@@ -783,6 +827,7 @@ test('[ and ] step through the tabs, wrapping round at the ends, and 1 to 9 jump
 test('the tab keys are ignored with a modifier, while typing and while the resource viewer is open', async ({ page, api, demo }) => {
   // Somewhere else for ] to go.
   await bare(api, unique('Tabs ignored'));
+  await widen(page);
   await open(page, demo);
   const here = new RegExp(`#/p/${demo.slug}$`);
   await expect(page.getByRole('tab', { selected: true })).toBeVisible();
@@ -1000,7 +1045,7 @@ test.describe('Live work', () => {
     await expect(upload.locator('.ip-work-mark')).toHaveCSS('animation-name', 'none');
   });
 
-  test('each subagent has a badge under its node in its own colour, shared by its tasks and its minimap shape, greyed once it ends', async ({ page, api, fresh }) => {
+  test('each subagent has a badge under its node in its own colour, shared by its tasks, greyed once it ends', async ({ page, api, fresh }) => {
     const id = fresh.ids['3 RevenueCat'];
     await subagent(api, fresh, 'agent-1', `#${id} Wire up RevenueCat`, 'sonnet');
     // Without an #id it works on the session's focus.
@@ -1033,20 +1078,16 @@ test.describe('Live work', () => {
     expect(run.y).toBeGreaterThanOrEqual(reviewBox.y + reviewBox.height);
     await expect(page.locator('.ip-work', { hasText: 'Compare the tiers' }).locator('.ip-work-agent')).toBeVisible();
     await expect(page.locator('.ip-work', { hasText: 'Upload the key' }).locator('.ip-work-agent')).toHaveCount(0);
-    // The badge, its task's marker and its minimap shape share a colour; the other subagent has another.
-    const colours = await page.evaluate<{ wire: string; marker: string; review: string; minimap: string[] }>(`(() => {
+    // The badge and its task's marker share a colour; the other subagent has another.
+    const colours = await page.evaluate<{ wire: string; marker: string; review: string }>(`(() => {
       const badge = (text) => [...document.querySelectorAll('.ip-agent')].find((n) => n.textContent.includes(text));
       const row = [...document.querySelectorAll('.ip-work')].find((n) => n.textContent.includes('Compare the tiers'));
       const bg = (n) => getComputedStyle(n).backgroundColor;
-      const minimap = [...document.querySelectorAll('.react-flow__minimap-node.mm-agent')].map((n) => getComputedStyle(n).fill);
-      return { wire: bg(badge('Wire up RevenueCat')), marker: bg(row.querySelector('.ip-work-agent')), review: bg(badge('Review the signing config')), minimap };
+      return { wire: bg(badge('Wire up RevenueCat')), marker: bg(row.querySelector('.ip-work-agent')), review: bg(badge('Review the signing config')) };
     })()`);
     expect(colours.wire).not.toBe('rgba(0, 0, 0, 0)');
     expect(colours.marker).toBe(colours.wire);
     expect(colours.review).not.toBe(colours.wire);
-    expect([...colours.minimap].sort()).toEqual([colours.wire, colours.review].sort());
-    // Tasks in progress: the blue of an active step.
-    await expect(page.locator('.react-flow__minimap-node.mm-work').first()).toHaveCSS('fill', 'rgb(10, 132, 255)');
     await hook(api, fresh.session, { event: 'subagent-stop', agentId: 'agent-1' });
     await expect(wire).toHaveText('◆ Wire up RevenueCat · sonnet · done just now');
     await expect(wire).toHaveClass(/\bended\b/);

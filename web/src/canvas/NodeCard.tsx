@@ -54,6 +54,21 @@ export function NodeCard({ data }: NodeProps<Node<NodeCardData, 'ipNode'>>) {
             {glyph}
           </span>
         )}
+        {/* In a narrow window (styles.css) the resource chips beside the card give way to this one count, which opens
+            Details, where every resource is listed. */}
+        {resources.length > 0 && (
+          <button
+            className="ip-res-count"
+            title={resources.map((r) => `r${r.id} ${r.title}`).join('\n')}
+            aria-label={`${resources.length} ${resources.length === 1 ? 'resource' : 'resources'}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              data.onSelect(node.id);
+            }}
+          >
+            ▤ {resources.length}
+          </button>
+        )}
         {queuePos !== null && (
           <span className="ip-queue" title={`Up next: ${queuePos}`}>
             {circled(queuePos)}
