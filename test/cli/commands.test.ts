@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { allowRules, install, nodeBinary } from '../../src/cli/claude-config';
 import { runCli } from '../../src/cli/commands';
+import { runTasks, TASKS_NOT_RUNNING_HINT, TASKS_TIMEOUT_HINT, TASKS_USAGE } from '../../src/cli/tasks';
 import { doctor, runChecks, type Check } from '../../src/cli/doctor';
 import { edgeArgs } from '../../src/cli/open';
 import { isServerUp } from '../../src/lib/ensure-server';
@@ -280,21 +281,43 @@ describe('runCli', () => {
     });
 
     it('prints what is wrong and the usage for bad arguments, without calling the server', async () => {
-      const s = capture();
-      expect(await runCli(['tasks', '88', '--done', 'x'], s.out)).toBe(1);
-      expect(s.lines[0]).toMatch(/--session/);
-      expect(s.lines[1]).toMatch(/^Usage: inprogress tasks /);
+      // Nothing listens on this port: a call would reject as unreachable instead of returning 1.
+      process.env.INPROGRESS_PORT = String(await freePort());
+      try {
+        const s = capture();
+        expect(await runCli(['tasks', '88', '--done', 'x'], s.out)).toBe(1);
+        expect(s.lines).toEqual(['Missing --session <session id>', TASKS_USAGE]);
+      } finally {
+        process.env.INPROGRESS_PORT = new URL(base).port;
+      }
     });
 
-    it('never starts the server: an unreachable one gets a hint a session can act on', async () => {
+    it('never starts the server: one that is not running gets a hint a session can act on', async () => {
       process.env.INPROGRESS_PORT = String(await freePort());
       let started = 0;
       try {
         const run = runCli(['tasks', '88', '--session', 'cli-t3', '--done', 'x'], capture().out, { ensureServer: async () => (started++, true) });
-        await expect(run).rejects.toMatchObject({ name: 'ApiClientError', status: 0, hint: 'InProgress starts with the next prompt: run this command again then.' });
+        await expect(run).rejects.toMatchObject({
+          name: 'ApiClientError', status: 0, code: 'ECONNREFUSED',
+          hint: 'InProgress is not running. A brief to the inprogress-scribe starts it; run this command again after that.',
+        });
         expect(started).toBe(0);
       } finally {
         process.env.INPROGRESS_PORT = new URL(base).port;
+      }
+    });
+
+    it('says a retry is safe when the server is up but too slow to answer', async () => {
+      const slow = createServer((req) => req.resume()); // takes the request, never answers
+      await new Promise<void>((r) => slow.listen(0, '127.0.0.1', r));
+      try {
+        const url = `http://127.0.0.1:${(slow.address() as AddressInfo).port}`;
+        const run = runTasks(['88', '--session', 'cli-t4', '--done', 'x'], capture().out, { baseUrl: url, token: 't', timeoutMs: 200 });
+        await expect(run).rejects.toMatchObject({ name: 'ApiClientError', status: 0, code: 'TIMEOUT', hint: TASKS_TIMEOUT_HINT });
+        expect(TASKS_TIMEOUT_HINT).not.toBe(TASKS_NOT_RUNNING_HINT);
+      } finally {
+        slow.closeAllConnections();
+        slow.close();
       }
     });
   });

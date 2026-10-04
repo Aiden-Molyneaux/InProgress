@@ -1,6 +1,7 @@
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { homeDir } from '../../src/lib/home';
-import { taskCommand } from '../../src/lib/task-command';
+import { normalizePath } from '../../src/lib/paths';
 import { updateRules } from '../../src/server/briefing';
 import { listEventsSince, maxEventId } from '../../src/server/repo/events';
 import { addNodes, listNodes, updateNode } from '../../src/server/repo/nodes';
@@ -218,10 +219,13 @@ describe('briefing: live work', () => {
     expect(rules[1]).toMatch(/^- Never edit it yourself\. Brief the inprogress-scribe agent/);
   });
 
-  it("prints the command beside the running server, with the briefed session's id", () => {
+  it("prints the CLI beside the server module, with the briefed session's id", () => {
     const { ctx } = setup();
     const text = handleHookEvent(ctx, 's1', start()).context!;
-    expect(text).toContain(`\`${taskCommand('s1')}\``);
+    // Under vitest the module is src/lib/task-command.ts, so "beside" is src/cli/main.js; bundled, it is dist/cli/main.js
+    // (the smoke test checks that one against the installed rules).
+    const printed = /`node (\S+) tasks <step id> --session s1 --done "…" --doing "…" --todo "…"`/.exec(text);
+    expect(printed?.[1]).toBe(normalizePath(resolve('src/cli/main.js')));
   });
 });
 

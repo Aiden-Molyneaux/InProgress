@@ -17,10 +17,15 @@ const FLAG_STATUS = new Map<string, WorkStatus>([
 export const TASKS_USAGE = 'Usage: inprogress tasks [<step id>] --session <session id> [--done "<subject>"] [--doing "<subject>"] [--todo "<subject>"] ...';
 
 /**
- * What a session can do when the server does not answer. This command never starts the server: bare `node` may not be
- * the Node better-sqlite3 was built for, so only the hooks, deploy and `start` start it.
+ * What a session can do when nothing answers. This command never starts the server: bare `node` may not be the Node
+ * better-sqlite3 was built for. The session-start hook, the scribe's MCP server, `start`, `open` and `doctor` start it,
+ * and of those a session can reach the scribe.
  */
-export const TASKS_UNREACHABLE_HINT = 'InProgress starts with the next prompt: run this command again then.';
+export const TASKS_NOT_RUNNING_HINT = 'InProgress is not running. A brief to the inprogress-scribe starts it; run this command again after that.';
+/** The server is up but answered too slowly; it may have applied the write, which a second run repeats harmlessly. */
+export const TASKS_TIMEOUT_HINT = 'InProgress was too slow to answer. Running this command again is safe, because the list is replaced whole.';
+
+const isFlag = (arg: string): boolean => arg === '--session' || FLAG_STATUS.has(arg);
 
 /** `[<step id>] --session <id> [--done|--doing|--todo "<subject>"]...`, flags in list order. The step may carry a `#`. */
 export function parseTasksArgs(args: string[]): TasksArgs | { error: string } {
@@ -32,8 +37,8 @@ export function parseTasksArgs(args: string[]): TasksArgs | { error: string } {
     const status = FLAG_STATUS.get(arg);
     if (arg === '--session' || status) {
       const value = args[i + 1]?.trim();
-      // A value that is itself a flag means this one's value was left out.
-      if (!value || value.startsWith('--')) return { error: status ? `${arg} needs a subject` : '--session needs the session id' };
+      // Another of this command's flags means this one's value was left out; any other text, `--x` included, is a value.
+      if (!value || isFlag(value)) return { error: status ? `${arg} needs a subject` : '--session needs the session id' };
       i++;
       if (status) tasks.push({ subject: value, status });
       else if (session !== undefined) return { error: '--session is given twice' };
@@ -69,7 +74,7 @@ export function formatTaskCounts(nodeId: number, tasks: Pick<WorkItem, 'status'>
  * the counts. Bad arguments print the usage and return 1; a refusal or an unreachable server throws an ApiClientError,
  * which main.ts prints with its hint before exiting 1.
  */
-export async function runTasks(args: string[], out: (line: string) => void, o: { baseUrl: string; token?: string }): Promise<number> {
+export async function runTasks(args: string[], out: (line: string) => void, o: { baseUrl: string; token?: string; timeoutMs?: number }): Promise<number> {
   const parsed = parseTasksArgs(args);
   if ('error' in parsed) {
     out(parsed.error);
@@ -78,7 +83,7 @@ export async function runTasks(args: string[], out: (line: string) => void, o: {
   }
   const { session, nodeId, tasks } = parsed;
   try {
-    const res = await createClient({ baseUrl: o.baseUrl, token: o.token }).post<{ nodeId: number; tasks: WorkItem[] }>(
+    const res = await createClient({ baseUrl: o.baseUrl, token: o.token, timeoutMs: o.timeoutMs }).post<{ nodeId: number; tasks: WorkItem[] }>(
       `/api/sessions/${encodeURIComponent(session)}/tasks`,
       { ...(nodeId === undefined ? {} : { nodeId }), tasks },
       // Not `scribe:`: this write must not reset the stale-update nudge, because the plan may still be behind.
@@ -87,9 +92,11 @@ export async function runTasks(args: string[], out: (line: string) => void, o: {
     out(formatTaskCounts(res.nodeId, res.tasks));
     return 0;
   } catch (err) {
-    // The client's own hint names `inprogress start`, which a session cannot run by that name. The list is replaced
-    // whole, so running the command again is safe even after a timeout that the server did act on.
-    if (err instanceof ApiClientError && err.status === 0) throw new ApiClientError(0, err.message, TASKS_UNREACHABLE_HINT, err.code);
+    // The client's own hint names `inprogress start`, which a session cannot run by that name. After a timeout the
+    // server is up and may have acted; anything else at status 0 means nothing answered.
+    if (err instanceof ApiClientError && err.status === 0) {
+      throw new ApiClientError(0, err.message, err.code === 'TIMEOUT' ? TASKS_TIMEOUT_HINT : TASKS_NOT_RUNNING_HINT, err.code);
+    }
     throw err;
   }
 }

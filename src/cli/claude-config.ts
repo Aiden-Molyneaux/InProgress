@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { HOOK_NAMES, type HookName } from '../hooks/handlers';
 import { homeDir } from '../lib/home';
 import { normalizePath } from '../lib/paths';
-import { isTaskAllowRule, repoCli, taskAllowRules } from '../lib/task-command';
+import { isTaskAllowRule, repoCli, taskAllowRules, taskPrefix } from '../lib/task-command';
 
 /** The allow rules that are the same for every repo: the scribe's tools and its resource snapshots. */
 export const STATIC_ALLOW_RULES = ['mcp__inprogress', 'Edit(~/.inprogress/resources/**)'];
@@ -140,10 +140,13 @@ export function removeAllowRules(settings: Settings): Settings {
   return settings;
 }
 
-/** Fills a kit template. Replacer functions keep `$&`-style sequences in a path literal; every path gets forward slashes. */
+/**
+ * Fills a kit template. Replacer functions keep `$&`-style sequences in a path literal; every path gets forward slashes.
+ * `{{TASKS}}` is the tasks command's prefix from the helper the allow rules and the briefing use, so all three match.
+ */
 export function renderTemplate(text: string, repo: string): string {
-  const values: Record<string, string> = { REPO: repo, NODE: nodeBinary(), RESOURCES: `${homeDir()}/resources` };
-  return text.replace(/\{\{(REPO|NODE|RESOURCES)\}\}/g, (_match, key: string) => values[key].replace(/\\/g, '/'));
+  const values: Record<string, string> = { REPO: repo, NODE: nodeBinary(), RESOURCES: `${homeDir()}/resources`, TASKS: taskPrefix(repoCli(repo)) };
+  return text.replace(/\{\{(REPO|NODE|RESOURCES|TASKS)\}\}/g, (_match, key: string) => values[key].replace(/\\/g, '/'));
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);

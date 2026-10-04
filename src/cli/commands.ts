@@ -92,7 +92,7 @@ export async function runCli(args: string[], out: (line: string) => void = conso
       return 0;
     }
     case 'tasks':
-      // Run by a main session itself. It never starts the server (see TASKS_UNREACHABLE_HINT).
+      // Run by a main session itself. It never starts the server (see TASKS_NOT_RUNNING_HINT).
       return runTasks(rest, out, { baseUrl: url, token: readToken() });
     case 'doctor':
       // Start the server first, as `open` does, so doctor passes straight after claude-install stopped it.

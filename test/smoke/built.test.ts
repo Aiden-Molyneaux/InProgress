@@ -178,10 +178,14 @@ describe('built artifacts', () => {
     ]);
   });
 
-  it('the tasks command tells a session to retry after the next prompt when the server is unreachable', () => {
+  it('the tasks command says how the server gets started when it is not running, and starts nothing itself', async () => {
     const r = runTasks(['88', '--session', 'smoke-1', '--done', 'x'], { INPROGRESS_PORT: '1' });
     expect(r.status).toBe(1);
-    expect(lines(r.stderr)).toEqual([expect.stringContaining('InProgress server unreachable at http://127.0.0.1:1'), 'InProgress starts with the next prompt: run this command again then.']);
+    expect(lines(r.stderr)).toEqual([
+      expect.stringContaining('InProgress server unreachable at http://127.0.0.1:1'),
+      'InProgress is not running. A brief to the inprogress-scribe starts it; run this command again after that.',
+    ]);
+    expect(await isServerUp('http://127.0.0.1:1', 300)).toBe(false);
   });
 
   it('MCP server answers over stdio', async () => {

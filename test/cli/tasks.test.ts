@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatTaskCounts, parseTasksArgs, TASKS_UNREACHABLE_HINT, TASKS_USAGE } from '../../src/cli/tasks';
+import { formatTaskCounts, parseTasksArgs, TASKS_NOT_RUNNING_HINT, TASKS_TIMEOUT_HINT, TASKS_USAGE } from '../../src/cli/tasks';
 import { isTaskAllowRule, repoCli, taskAllowRules, taskCommand, taskPrefix } from '../../src/lib/task-command';
 
 describe('parseTasksArgs', () => {
@@ -49,7 +49,18 @@ describe('parseTasksArgs', () => {
   });
 
   it('does not mistake a prototype key for a flag', () => {
-    expect(parseTasksArgs(['--session', 'abc', 'toString'])).toHaveProperty('error');
+    expect(parseTasksArgs(['--session', 'abc', 'toString', 'x'])).toEqual({ error: 'Not a step id: toString' });
+  });
+
+  it('takes a subject that starts with --, and reads only a known flag as a missing value', () => {
+    expect(parseTasksArgs(['--session', 'abc', '--todo', '--dry-run support', '--done', '--verbose'])).toEqual({
+      session: 'abc',
+      tasks: [{ subject: '--dry-run support', status: 'pending' }, { subject: '--verbose', status: 'completed' }],
+    });
+    for (const flag of ['--session', '--done', '--doing', '--todo']) {
+      expect(parseTasksArgs(['--session', 'abc', '--todo', flag, 'x']), flag).toEqual({ error: '--todo needs a subject' });
+    }
+    expect(parseTasksArgs(['--session', '--done', 'x'])).toEqual({ error: '--session needs the session id' });
   });
 });
 
@@ -100,6 +111,12 @@ describe('the tasks command a session runs', () => {
   it('never prints "#" in the command, the usage or the hints: an unquoted # starts a comment in Bash and PowerShell', () => {
     expect(taskCommand('abc', { cli })).not.toContain('#');
     expect(TASKS_USAGE).not.toContain('#');
-    expect(TASKS_UNREACHABLE_HINT).not.toContain('#');
+    expect(TASKS_NOT_RUNNING_HINT).not.toContain('#');
+    expect(TASKS_TIMEOUT_HINT).not.toContain('#');
+  });
+
+  it('says how the server gets started, since this command never starts it, and that a retry after a timeout is safe', () => {
+    expect(TASKS_NOT_RUNNING_HINT).toBe('InProgress is not running. A brief to the inprogress-scribe starts it; run this command again after that.');
+    expect(TASKS_TIMEOUT_HINT).toMatch(/running this command again is safe, because the list is replaced whole/i);
   });
 });

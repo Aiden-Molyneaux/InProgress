@@ -150,6 +150,11 @@ describe('renderTemplate', () => {
     const text = 'node {{NODE}} · repo {{REPO}} · resources {{RESOURCES}}/ingame';
     expect(renderTemplate(text, "C:\\odd$&\\repo$'")).toBe(`node ${nodeBinary()} · repo C:/odd$&/repo$' · resources ${slashed(homeDir())}/resources/ingame`);
   });
+
+  it('fills {{TASKS}} with the tasks command prefix the allow rules are built from', () => {
+    expect(renderTemplate('{{TASKS}} <step id>', 'c:\\personal\\InProgress\\')).toBe('node C:/personal/InProgress/dist/cli/main.js tasks <step id>');
+    expect(renderTemplate('{{TASKS}}', 'C:/My Repos/InProgress')).toBe('node "C:/My Repos/InProgress/dist/cli/main.js" tasks');
+  });
 });
 
 describe('install', () => {
@@ -206,13 +211,17 @@ describe('install', () => {
     const skill = readFileSync(join(dir, 'skills', 'inprogress', 'SKILL.md'), 'utf8');
     expect(skill).toContain(`\`node ${repo}/dist/cli/main.js tasks <step id> --session <session id> --done "…" --doing "…" --todo "…"\``);
     // The rule's text minus " *" is the start of the command the skill prints: Claude Code matches by prefix.
-    for (const rule of readSettings(dir).permissions.allow.filter((r: string) => r.includes(' tasks '))) {
-      expect(skill, rule).toContain(`\`${rule.replace(/^\w+\(/, '').replace(/ \*\)$/, ' ')}<step id>`);
-    }
+    const skillPrefix = /`(node \S+ tasks) <step id> --session <session id>/.exec(skill)?.[1];
+    expect(skillPrefix).toBe(taskPrefix(repoCli(repo)));
+    const rules = readSettings(dir).permissions.allow.filter((r: string) => r.includes(' tasks '));
+    expect(rules).toHaveLength(2);
+    for (const rule of rules) expect(rule.replace(/^\w+\(/, '').replace(/ \*\)$/, ''), rule).toBe(skillPrefix);
     // The first paragraph names the exception to "you never edit it yourself"; nothing prints a step as "tasks #".
     expect(skill).toMatch(/You never edit it yourself, with one exception: .*tasks/);
     expect(skill).not.toMatch(/tasks #/);
-    expect(skill).toMatch(/single quotes around a subject that contains `\$`, a backtick or `"`/);
+    // Windows PowerShell 5.1 splits a " even inside single quotes, which could retarget the write to another step.
+    expect(skill).toContain('Put single quotes around a subject that contains `$` or a backtick, and leave double quotes out of subjects.');
+    expect(skill).not.toMatch(/single quotes around a subject that contains[^.]*`"`/);
   });
 
   it('allows the tasks command in the Bash and the PowerShell tool, keeping the static rules and every other rule', () => {
@@ -263,6 +272,9 @@ describe('install', () => {
     expect(log).toContain(`Allow rules: ${STATIC_ALLOW_RULES.join(', ')}`);
     expect(log.join('\n')).toMatch(/Left out the tasks command's allow rules: the repo path .*ip repo-.* holds a space/);
     expect(kitStatus({ repo: spaced, claudeDir: dir }).differs).not.toContain('settings');
+    // The skill quotes the path, as the briefing does, so its command still runs (with a prompt).
+    const skill = readFileSync(join(dir, 'skills', 'inprogress', 'SKILL.md'), 'utf8');
+    expect(skill).toContain(`\`node "${spaced}/dist/cli/main.js" tasks <step id> --session <session id>`);
   });
 
   it('writes the type-label rules into the skill and the scribe', () => {
