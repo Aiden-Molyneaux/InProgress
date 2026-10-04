@@ -1,7 +1,7 @@
 import type { Session, WorkItem, WorkStatus } from '../../core/types';
 import { write, type Ctx } from '../db/tx';
-import { badRequest } from '../errors';
-import { findNode, leadingNode, requireNode } from './nodes';
+import { badRequest, notFound } from '../errors';
+import { findNode, leadingNode } from './nodes';
 import { getProjectById } from './projects';
 import { findSession } from './sessions';
 import { subagentNode } from './subagents';
@@ -171,15 +171,23 @@ const ownList = (ctx: Ctx, sessionId: string, nodeId: number): WorkRow[] =>
   ctx.db.prepare("SELECT * FROM work_items WHERE session_id = ? AND agent_id = '' AND node_id = ? ORDER BY position, id").all(sessionId, nodeId) as WorkRow[];
 
 /**
- * The scribe's fallback where the task tools are absent: replaces the session's own working tasks on a node with
- * this list, in order (an empty list clears them). Its subagents' lists stay as they are.
+ * The tasks command, run by a main session where the task tools are absent: replaces the session's own working tasks
+ * on a node with this list, in order (an empty list clears them). With no node it uses the session's focus. Its
+ * subagents' lists stay as they are. The hints are for that main session: it has the CLI, none of the scribe's tools,
+ * and a shell where an unquoted `#` starts a comment.
  */
-export function setTasks(ctx: Ctx, actor: string, sessionId: string, nodeId: number, tasks: TaskInput[]): WorkItem[] {
+export function setTasks(ctx: Ctx, actor: string, sessionId: string, requested: number | undefined, tasks: TaskInput[]): { nodeId: number; tasks: WorkItem[] } {
   return write(ctx, actor, (record) => {
     const session = findSession(ctx, sessionId);
-    if (!session || session.projectId === null) throw badRequest(`Session ${sessionId} is not tracked`, 'Use enroll_session first.');
-    const node = requireNode(ctx, nodeId);
-    if (node.projectId !== session.projectId) throw badRequest(`#${nodeId} is not in this session's project`, 'Use get_outline to find the right #id.');
+    if (!session || session.projectId === null) {
+      throw badRequest(`Session ${sessionId} is not tracked`, 'Check --session against the session id in your InProgress briefing; an untracked session opts in through the inprogress skill first.');
+    }
+    const findStep = () => `Find the right step id with the CLI command: outline ${getProjectById(ctx, session.projectId!)?.slug ?? '<project>'}`;
+    const nodeId = requested ?? session.focusNodeId;
+    if (nodeId === null) throw badRequest('This session has no focus', 'Name the step: tasks <id> …');
+    const node = findNode(ctx, nodeId);
+    if (!node) throw notFound(`Node #${nodeId} not found`, findStep());
+    if (node.projectId !== session.projectId) throw badRequest(`#${nodeId} is not in this session's project`, findStep());
     const list = tasks.map((t) => ({ subject: t.subject.trim(), status: t.status }));
     if (list.some((t) => !t.subject)) throw badRequest('A task subject is empty');
     const before = ownList(ctx, sessionId, nodeId);
@@ -195,7 +203,7 @@ export function setTasks(ctx: Ctx, actor: string, sessionId: string, nodeId: num
       list.forEach((t, i) => insert.run(node.projectId, nodeId, sessionId, `set:${nodeId}:${i + 1}`, t.subject, t.status, first + i, now, now));
       record({ projectId: node.projectId, type: 'work.updated', entity: 'node', entityId: nodeId, data: { nodeId } });
     }
-    return toItems(ownList(ctx, sessionId, nodeId));
+    return { nodeId, tasks: toItems(ownList(ctx, sessionId, nodeId)) };
   });
 }
 

@@ -2,8 +2,9 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, 
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { ALLOW_RULES, claudeDir, HOOK_DEFS, hookEntry, install, isInProgressHook, kitStatus, nodeBinary, renderTemplate, uninstall } from '../../src/cli/claude-config';
+import { allowRules, claudeDir, HOOK_DEFS, hookEntry, install, isInProgressHook, kitStatus, nodeBinary, renderTemplate, STATIC_ALLOW_RULES, uninstall } from '../../src/cli/claude-config';
 import { homeDir } from '../../src/lib/home';
+import { repoCli, taskPrefix } from '../../src/lib/task-command';
 
 const temps: string[] = [];
 function tempDir(prefix: string): string {
@@ -16,8 +17,8 @@ afterAll(() => {
 });
 
 /** A stand-in repo: the real claude/ templates plus empty built entries, so these tests never depend on a build. */
-function fixtureRepo(): string {
-  const dir = tempDir('ip-repo-');
+function fixtureRepo(prefix = 'ip-repo-'): string {
+  const dir = tempDir(prefix);
   cpSync(join(process.cwd(), 'claude'), join(dir, 'claude'), { recursive: true });
   for (const entry of ['dist/hooks/hook.js', 'dist/mcp/main.js']) {
     mkdirSync(dirname(join(dir, entry)), { recursive: true });
@@ -70,10 +71,15 @@ const withForeign = {
   hooks: { ...existing.hooks, SessionStart: [{ hooks: [foreignShell] }], PreToolUse: [{ matcher: 'Bash', hooks: [foreignExec] }] },
 };
 
+/** The tasks command's rules for the fixture repo, written out as Claude Code's settings hold them. */
+const taskRules = [`Bash(node ${repo}/dist/cli/main.js tasks *)`, `PowerShell(node ${repo}/dist/cli/main.js tasks *)`];
+/** A tasks rule an older checkout left behind. */
+const staleTaskRules = ['Bash(node D:/old/InProgress/dist/cli/main.js tasks *)', 'PowerShell(node D:/old/InProgress/dist/cli/main.js tasks *)'];
+
 /** `settings` plus exactly what install adds: the allow rules and one InProgress group per hook event. */
 function withInstall(settings: object) {
   const s = JSON.parse(JSON.stringify(settings));
-  s.permissions.allow.push(...ALLOW_RULES);
+  s.permissions.allow.push(...allowRules(repo));
   for (const d of HOOK_DEFS) (s.hooks[d.event] ??= []).push({ ...(d.matcher ? { matcher: d.matcher } : {}), hooks: [hookEntry(repo, d.name, d.timeout)] });
   return s;
 }
@@ -144,6 +150,11 @@ describe('renderTemplate', () => {
     const text = 'node {{NODE}} · repo {{REPO}} · resources {{RESOURCES}}/ingame';
     expect(renderTemplate(text, "C:\\odd$&\\repo$'")).toBe(`node ${nodeBinary()} · repo C:/odd$&/repo$' · resources ${slashed(homeDir())}/resources/ingame`);
   });
+
+  it('fills {{TASKS}} with the tasks command prefix the allow rules are built from', () => {
+    expect(renderTemplate('{{TASKS}} <step id>', 'c:\\personal\\InProgress\\')).toBe('node C:/personal/InProgress/dist/cli/main.js tasks <step id>');
+    expect(renderTemplate('{{TASKS}}', 'C:/My Repos/InProgress')).toBe('node "C:/My Repos/InProgress/dist/cli/main.js" tasks');
+  });
 });
 
 describe('install', () => {
@@ -155,7 +166,7 @@ describe('install', () => {
     const s = readSettings(dir);
     expect(s.model).toBe('opus');
     expect(s.enabledPlugins).toEqual(existing.enabledPlugins);
-    expect(s.permissions.allow).toEqual(['Bash(git status)', ...ALLOW_RULES]);
+    expect(s.permissions.allow).toEqual(['Bash(git status)', ...STATIC_ALLOW_RULES, ...taskRules]);
     expect(s.hooks.Stop).toHaveLength(2);
     expect(s.hooks.Stop[0].hooks[0].command).toBe('other-tool --stop');
     for (const def of HOOK_DEFS) {
@@ -187,10 +198,83 @@ describe('install', () => {
     // The queue, new requests, and the fallback without task tools.
     expect(skill).toContain('`queue: #a, #b, #c`');
     expect(skill).toMatch(/new request with a deliverable .* becomes a step right away/);
-    expect(skill).toContain('tasks on #57:');
+    expect(skill).not.toContain('tasks on #');
     const agent = readFileSync(join(dir, 'agents', 'inprogress-scribe.md'), 'utf8');
     expect(agent).toMatch(/`set_queue`/);
-    expect(agent).toMatch(/`set_tasks`/);
+    // The scribe no longer sets working tasks: the main session runs the tasks command itself.
+    expect(agent).not.toMatch(/set_tasks|tasks on #/);
+  });
+
+  it('writes the tasks command into the skill, exactly as the allow rules allow it', () => {
+    const dir = claudeDirWithSettings(existing);
+    install({ repo, claudeDir: dir, stamp: 'tc' });
+    const skill = readFileSync(join(dir, 'skills', 'inprogress', 'SKILL.md'), 'utf8');
+    expect(skill).toContain(`\`node ${repo}/dist/cli/main.js tasks <step id> --session <session id> --done "…" --doing "…" --todo "…"\``);
+    // The rule's text minus " *" is the start of the command the skill prints: Claude Code matches by prefix.
+    const skillPrefix = /`(node \S+ tasks) <step id> --session <session id>/.exec(skill)?.[1];
+    expect(skillPrefix).toBe(taskPrefix(repoCli(repo)));
+    const rules = readSettings(dir).permissions.allow.filter((r: string) => r.includes(' tasks '));
+    expect(rules).toHaveLength(2);
+    for (const rule of rules) expect(rule.replace(/^\w+\(/, '').replace(/ \*\)$/, ''), rule).toBe(skillPrefix);
+    // The first paragraph names the exception to "you never edit it yourself"; nothing prints a step as "tasks #".
+    expect(skill).toMatch(/You never edit it yourself, with one exception: .*tasks/);
+    expect(skill).not.toMatch(/tasks #/);
+    // Windows PowerShell 5.1 splits a " even inside single quotes, which could retarget the write to another step.
+    expect(skill).toContain('Put single quotes around a subject that contains `$` or a backtick, and leave double quotes out of subjects.');
+    expect(skill).not.toMatch(/single quotes around a subject that contains[^.]*`"`/);
+  });
+
+  it('allows the tasks command in the Bash and the PowerShell tool, keeping the static rules and every other rule', () => {
+    expect(allowRules(repo)).toEqual([...STATIC_ALLOW_RULES, ...taskRules]);
+    const dir = claudeDirWithSettings({ ...existing, permissions: { allow: ['Bash(git status)', 'Bash(npm test:*)', 'Bash(node C:/tools/x.js tasks *)'], deny: ['Bash(rm:*)'] } });
+    const { log } = install({ repo, claudeDir: dir, stamp: 'ar' });
+    expect(readSettings(dir).permissions).toEqual({
+      allow: ['Bash(git status)', 'Bash(npm test:*)', 'Bash(node C:/tools/x.js tasks *)', ...STATIC_ALLOW_RULES, ...taskRules],
+      deny: ['Bash(rm:*)'],
+    });
+    expect(log).toContain(`Allow rules: ${[...STATIC_ALLOW_RULES, ...taskRules].join(', ')}`);
+  });
+
+  it.runIf(process.platform === 'win32')('normalises the repo path, so the rules match what the server prints whatever drive-letter case install got', () => {
+    const lower = `${repo[0].toLowerCase()}${repo.slice(1)}/`;
+    const dir = claudeDirWithSettings(existing);
+    install({ repo: lower, claudeDir: dir, stamp: 'lc' });
+    const s = readSettings(dir);
+    expect(s.permissions.allow).toEqual(['Bash(git status)', ...STATIC_ALLOW_RULES, ...taskRules]);
+    expect(s.hooks.Stop.at(-1).hooks[0].args[0]).toBe(`${repo}/dist/hooks/hook.js`);
+    expect(readFileSync(join(dir, 'skills', 'inprogress', 'SKILL.md'), 'utf8')).toContain(`\`${taskPrefix(repoCli(lower))} <step id>`);
+    expect(kitStatus({ repo: lower, claudeDir: dir })).toEqual({ installed: true, differs: [] });
+  });
+
+  it("upgrades an older install's rules (the two static ones) to the tasks rules, once each", () => {
+    const old = JSON.parse(JSON.stringify(withInstall(existing)));
+    old.permissions.allow = ['Bash(git status)', ...STATIC_ALLOW_RULES];
+    const dir = claudeDirWithSettings(old);
+    expect(kitStatus({ repo, claudeDir: dir }).differs).toContain('settings');
+    install({ repo, claudeDir: dir, stamp: 'up1' });
+    expect(readSettings(dir)).toEqual(withInstall(existing));
+    install({ repo, claudeDir: dir, stamp: 'up2' });
+    expect(readSettings(dir)).toEqual(withInstall(existing));
+  });
+
+  it('replaces the tasks rules an older checkout left, before adding its own', () => {
+    const dir = claudeDirWithSettings({ ...existing, permissions: { allow: ['Bash(git status)', ...staleTaskRules, 'mcp__inprogress'] } });
+    install({ repo, claudeDir: dir, stamp: 'st' });
+    expect(readSettings(dir).permissions.allow).toEqual(['Bash(git status)', 'mcp__inprogress', 'Edit(~/.inprogress/resources/**)', ...taskRules]);
+  });
+
+  it('leaves the tasks rules out for a repo path with a space, and says why', () => {
+    const spaced = fixtureRepo('ip repo-');
+    const dir = claudeDirWithSettings({ ...existing, permissions: { allow: ['Bash(git status)', ...staleTaskRules] } });
+    const { log } = install({ repo: spaced, claudeDir: dir, stamp: 'sp' });
+    // Nothing could allow it, and another checkout's rules still go.
+    expect(readSettings(dir).permissions.allow).toEqual(['Bash(git status)', ...STATIC_ALLOW_RULES]);
+    expect(log).toContain(`Allow rules: ${STATIC_ALLOW_RULES.join(', ')}`);
+    expect(log.join('\n')).toMatch(/Left out the tasks command's allow rules: the repo path .*ip repo-.* holds a space/);
+    expect(kitStatus({ repo: spaced, claudeDir: dir }).differs).not.toContain('settings');
+    // The skill quotes the path, as the briefing does, so its command still runs (with a prompt).
+    const skill = readFileSync(join(dir, 'skills', 'inprogress', 'SKILL.md'), 'utf8');
+    expect(skill).toContain(`\`node "${spaced}/dist/cli/main.js" tasks <step id> --session <session id>`);
   });
 
   it('writes the type-label rules into the skill and the scribe', () => {
@@ -227,7 +311,7 @@ describe('install', () => {
       const ours = once.hooks[d.event].flatMap((g: { hooks: object[] }) => g.hooks).filter(isInProgressHook);
       expect(ours, d.event).toHaveLength(1);
     }
-    for (const rule of ALLOW_RULES) expect(once.permissions.allow.filter((r: string) => r === rule), rule).toHaveLength(1);
+    for (const rule of allowRules(repo)) expect(once.permissions.allow.filter((r: string) => r === rule), rule).toHaveLength(1);
   });
 
   it('works without a settings file or Claude directory, and makes no backup', () => {
@@ -235,7 +319,7 @@ describe('install', () => {
     const { log } = install({ repo, claudeDir: dir, stamp: 'c' });
     const s = readSettings(dir);
     expect(Object.keys(s.hooks).sort()).toEqual(HOOK_DEFS.map((d) => d.event).sort());
-    expect(s.permissions.allow).toEqual(ALLOW_RULES);
+    expect(s.permissions.allow).toEqual(allowRules(repo));
     expect(backups(dir)).toEqual([]);
     expect(log.join('\n')).not.toContain('Backed up');
   });
@@ -269,7 +353,7 @@ describe('install', () => {
     for (const text of ['', ' \r\n\t']) {
       const dir = claudeDirWithSettings(text);
       install({ repo, claudeDir: dir, stamp: 'empty' });
-      expect(readSettings(dir).permissions.allow).toEqual(ALLOW_RULES);
+      expect(readSettings(dir).permissions.allow).toEqual(allowRules(repo));
     }
   });
 
@@ -360,6 +444,18 @@ describe('uninstall', () => {
     expect(log.join('\n')).toContain(`Removed ${HOOK_DEFS.length} InProgress hook entries`);
   });
 
+  it("removes the tasks rules of any checkout by their pattern, and leaves every other allow rule", () => {
+    const others = ['Bash(git status)', 'Bash(npm test:*)', 'Bash(node C:/tools/x.js tasks *)', 'Bash(node C:/x/dist/cli/main.js outline *)'];
+    const dir = claudeDirWithSettings({ ...existing, permissions: { allow: others } });
+    install({ repo, claudeDir: dir, stamp: 'ua' });
+    // A rule left by another checkout, which uninstall (it takes no repo) must find too.
+    const settings = readSettings(dir);
+    settings.permissions.allow.push(...staleTaskRules);
+    writeFileSync(join(dir, 'settings.json'), JSON.stringify(settings, null, 2));
+    uninstall({ claudeDir: dir, stamp: 'ub' });
+    expect(readSettings(dir)).toEqual({ ...existing, permissions: { allow: others } });
+  });
+
   it('leaves settings without permissions or hooks as they were, and drops what it emptied', () => {
     const plain = { model: 'opus' };
     const dir = claudeDirWithSettings(plain);
@@ -390,5 +486,18 @@ describe('kitStatus', () => {
     settings.permissions.allow = settings.permissions.allow.filter((r: string) => r !== 'mcp__inprogress');
     writeFileSync(join(dir, 'settings.json'), JSON.stringify(settings, null, 2));
     expect(kitStatus({ repo: changed, claudeDir: dir })).toEqual({ installed: true, differs: ['settings', 'agent', 'skill'] });
+  });
+
+  it('reports the settings as different when a tasks rule is missing or belongs to another checkout', () => {
+    const dir = claudeDirWithSettings({ theme: 'dark' });
+    install({ repo, claudeDir: dir, stamp: 'kt' });
+    const settings = readSettings(dir);
+    const write = (allow: string[]) => writeFileSync(join(dir, 'settings.json'), JSON.stringify({ ...settings, permissions: { allow } }, null, 2));
+    write([...STATIC_ALLOW_RULES, taskRules[0]]);
+    expect(kitStatus({ repo, claudeDir: dir })).toEqual({ installed: true, differs: ['settings'] });
+    write([...STATIC_ALLOW_RULES, ...staleTaskRules]);
+    expect(kitStatus({ repo, claudeDir: dir })).toEqual({ installed: true, differs: ['settings'] });
+    write([...STATIC_ALLOW_RULES, ...taskRules]);
+    expect(kitStatus({ repo, claudeDir: dir })).toEqual({ installed: true, differs: [] });
   });
 });

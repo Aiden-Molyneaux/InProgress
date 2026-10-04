@@ -4,8 +4,9 @@ import { createServer as createNetServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { install, nodeBinary } from '../../src/cli/claude-config';
+import { allowRules, install, nodeBinary } from '../../src/cli/claude-config';
 import { runCli } from '../../src/cli/commands';
+import { runTasks, TASKS_NOT_RUNNING_HINT, TASKS_TIMEOUT_HINT, TASKS_USAGE } from '../../src/cli/tasks';
 import { doctor, runChecks, type Check } from '../../src/cli/doctor';
 import { edgeArgs } from '../../src/cli/open';
 import { isServerUp } from '../../src/lib/ensure-server';
@@ -14,7 +15,9 @@ import { VERSION } from '../../src/lib/version';
 import { buildApp } from '../../src/server/app';
 import { openDb, type DB } from '../../src/server/db/connection';
 import { createCtx } from '../../src/server/db/tx';
+import { addNodes } from '../../src/server/repo/nodes';
 import { createProject } from '../../src/server/repo/projects';
+import { enrollSession, setFocus } from '../../src/server/session-flow';
 
 let base = '';
 let home = '';
@@ -227,6 +230,98 @@ describe('runCli', () => {
     }
   });
 
+  it('lists the tasks command in the usage, with the step bare', async () => {
+    const s = capture();
+    expect(await runCli([], s.out)).toBe(0);
+    expect(s.lines.join('\n')).toContain('tasks [<step id>] --session <session id>');
+    expect(s.lines.join('\n')).not.toMatch(/tasks #/);
+  });
+
+  describe('tasks', () => {
+    /** A session tracked in CLI Demo with a step, and its stale-update counter at 3. */
+    function trackedSession(id: string) {
+      const ctx = createCtx(db);
+      const project = enrollSession(ctx, `scribe:${id}`, id, 'cli-demo').session.projectId!;
+      const root = db.prepare('SELECT root_node_id AS r FROM projects WHERE id = ?').get(project) as { r: number };
+      const [step] = addNodes(ctx, 'test', { parentId: root.r, nodes: [{ title: `Step for ${id}`, status: 'active' }] });
+      db.prepare('UPDATE sessions SET prompts_since_update = 3 WHERE id = ?').run(id);
+      return { ctx, step };
+    }
+
+    it("replaces the session's tasks on a step, prints the counts, and leaves the stale nudge alone", async () => {
+      const { step } = trackedSession('cli-t1');
+      const s = capture();
+      expect(await runCli(['tasks', String(step.id), '--session', 'cli-t1', '--done', 'Write tests', '--doing', 'Make them pass', '--todo', 'Smoke', '--todo', 'Deploy'], s.out)).toBe(0);
+      expect(s.lines).toEqual([`#${step.id}: 1 done · 1 in progress · 2 pending`]);
+      const rows = db.prepare("SELECT subject, status FROM work_items WHERE session_id = 'cli-t1' ORDER BY position").all();
+      expect(rows).toEqual([
+        { subject: 'Write tests', status: 'completed' },
+        { subject: 'Make them pass', status: 'in_progress' },
+        { subject: 'Smoke', status: 'pending' },
+        { subject: 'Deploy', status: 'pending' },
+      ]);
+      const event = db.prepare("SELECT actor FROM events WHERE type = 'work.updated' ORDER BY id DESC LIMIT 1").get();
+      expect(event).toEqual({ actor: 'session:cli-t1' });
+      // Only the scribe's writes mean the plan is current: the nudge keeps counting.
+      expect(db.prepare("SELECT prompts_since_update AS n FROM sessions WHERE id = 'cli-t1'").get()).toEqual({ n: 3 });
+      const cleared = capture();
+      expect(await runCli(['tasks', `#${step.id}`, '--session', 'cli-t1'], cleared.out)).toBe(0);
+      expect(cleared.lines).toEqual([`#${step.id}: no tasks`]);
+    });
+
+    it("uses the session's focus when no step is named, and passes on the no-focus refusal with its hint", async () => {
+      const { ctx, step } = trackedSession('cli-t2');
+      await expect(runCli(['tasks', '--session', 'cli-t2', '--doing', 'x'], capture().out)).rejects.toMatchObject({
+        name: 'ApiClientError', status: 400, message: 'This session has no focus', hint: 'Name the step: tasks <id> …',
+      });
+      setFocus(ctx, 'scribe:cli-t2', 'cli-t2', step.id);
+      const s = capture();
+      expect(await runCli(['tasks', '--session', 'cli-t2', '--doing', 'x'], s.out)).toBe(0);
+      expect(s.lines).toEqual([`#${step.id}: 1 in progress`]);
+    });
+
+    it('prints what is wrong and the usage for bad arguments, without calling the server', async () => {
+      // Nothing listens on this port: a call would reject as unreachable instead of returning 1.
+      process.env.INPROGRESS_PORT = String(await freePort());
+      try {
+        const s = capture();
+        expect(await runCli(['tasks', '88', '--done', 'x'], s.out)).toBe(1);
+        expect(s.lines).toEqual(['Missing --session <session id>', TASKS_USAGE]);
+      } finally {
+        process.env.INPROGRESS_PORT = new URL(base).port;
+      }
+    });
+
+    it('never starts the server: one that is not running gets a hint a session can act on', async () => {
+      process.env.INPROGRESS_PORT = String(await freePort());
+      let started = 0;
+      try {
+        const run = runCli(['tasks', '88', '--session', 'cli-t3', '--done', 'x'], capture().out, { ensureServer: async () => (started++, true) });
+        await expect(run).rejects.toMatchObject({
+          name: 'ApiClientError', status: 0, code: 'ECONNREFUSED',
+          hint: 'InProgress is not running. A brief to the inprogress-scribe starts it; run this command again after that.',
+        });
+        expect(started).toBe(0);
+      } finally {
+        process.env.INPROGRESS_PORT = new URL(base).port;
+      }
+    });
+
+    it('says a retry is safe when the server is up but too slow to answer', async () => {
+      const slow = createServer((req) => req.resume()); // takes the request, never answers
+      await new Promise<void>((r) => slow.listen(0, '127.0.0.1', r));
+      try {
+        const url = `http://127.0.0.1:${(slow.address() as AddressInfo).port}`;
+        const run = runTasks(['88', '--session', 'cli-t4', '--done', 'x'], capture().out, { baseUrl: url, token: 't', timeoutMs: 200 });
+        await expect(run).rejects.toMatchObject({ name: 'ApiClientError', status: 0, code: 'TIMEOUT', hint: TASKS_TIMEOUT_HINT });
+        expect(TASKS_TIMEOUT_HINT).not.toBe(TASKS_NOT_RUNNING_HINT);
+      } finally {
+        slow.closeAllConnections();
+        slow.close();
+      }
+    });
+  });
+
   it('doctor says where to look when it cannot start the server', async () => {
     process.env.INPROGRESS_PORT = String(await freePort());
     try {
@@ -386,6 +481,17 @@ describe('doctor checks', () => {
     const { repo, claude, settingsFile } = installedClaudeDir();
     editEveryHook(settingsFile, (h) => (h.command = nodeBinary().toUpperCase().replace(/\//g, '\\')));
     expect(named(await checksFor(repo, claude), 'Hooks')).toEqual({ name: 'Hooks', ok: true, detail: 'all installed' });
+  });
+
+  it("checks this repo's tasks rules among the allow rules, naming a missing one", async () => {
+    const { repo, claude, settingsFile } = installedClaudeDir();
+    const powerShellRule = `PowerShell(node ${repo}/dist/cli/main.js tasks *)`;
+    expect(named(await checksFor(repo, claude), 'Allow rules')).toEqual({ name: 'Allow rules', ok: true, detail: allowRules(repo).join(', ') });
+    expect(allowRules(repo)).toContain(powerShellRule);
+    const settings = JSON.parse(readFileSync(settingsFile, 'utf8'));
+    settings.permissions.allow = settings.permissions.allow.filter((r: string) => r !== powerShellRule);
+    writeFileSync(settingsFile, JSON.stringify(settings, null, 2));
+    expect(named(await checksFor(repo, claude), 'Allow rules')).toEqual({ name: 'Allow rules', ok: false, detail: `missing: ${powerShellRule}: run npm run claude:install` });
   });
 
   it('reports an unparseable settings.json instead of missing hooks', async () => {

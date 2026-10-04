@@ -1,13 +1,7 @@
-import { glyphTitle, type NodeDetail, type Project, type Resource, type SearchResult, type TreeNode, type WorkItem } from '../core/types';
-
-const MARK: Record<WorkItem['status'], string> = { in_progress: '◐', pending: '○', completed: '✓' };
+import { glyphTitle, type NodeDetail, type Project, type Resource, type SearchResult, type TreeNode } from '../core/types';
 
 export function formatQueue(p: Project): string {
   return p.queue.length ? `Up next in ${p.slug}: ${p.queue.map((id) => `#${id}`).join(' → ')}.` : `Cleared the queue of ${p.slug}.`;
-}
-
-export function formatTasks(nodeId: number, items: WorkItem[]): string {
-  return items.length ? `Working tasks on #${nodeId}: ${items.map((i) => `${MARK[i.status]} ${i.subject}`).join(' · ')}.` : `Cleared the working tasks on #${nodeId}.`;
 }
 
 export function formatCreated(nodes: TreeNode[]): string {

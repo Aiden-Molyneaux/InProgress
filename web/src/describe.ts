@@ -62,5 +62,10 @@ export function actorLabel(e: EventRow, snapshot: ProjectSnapshot | null): strin
     return s ? `scribe (${sessionDisplayTitle(s)})` : 'scribe';
   }
   if (e.actor.startsWith('hook:')) return 'Claude';
+  // The tasks command a main session runs itself. An ended session has left the snapshot: its short id stands in.
+  if (e.actor.startsWith('session:')) {
+    const id = e.actor.slice('session:'.length);
+    return sessionDisplayTitle(snapshot?.sessions.find((x) => x.id === id) ?? { id, title: null });
+  }
   return e.actor;
 }

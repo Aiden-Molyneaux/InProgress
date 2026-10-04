@@ -1,5 +1,7 @@
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { homeDir } from '../../src/lib/home';
+import { normalizePath } from '../../src/lib/paths';
 import { updateRules } from '../../src/server/briefing';
 import { listEventsSince, maxEventId } from '../../src/server/repo/events';
 import { addNodes, listNodes, updateNode } from '../../src/server/repo/nodes';
@@ -74,7 +76,7 @@ describe('handleHookEvent', () => {
     const text = handleHookEvent(ctx, 's1', start()).context!;
     expect(text).toContain(`Content that only exists in chat is first written to ${homeDir().replace(/\\/g, '/')}/resources/<slug>/<yyyy-mm-dd>-<kebab-title>.md.`);
     expect(text).not.toContain('~/');
-    expect(updateRules('C:\\Users\\me\\.inprogress').join('\n')).toContain(' C:/Users/me/.inprogress/resources/<slug>/<yyyy-mm-dd>-<kebab-title>.md.');
+    expect(updateRules({ home: 'C:\\Users\\me\\.inprogress', sessionId: 's1' }).join('\n')).toContain(' C:/Users/me/.inprogress/resources/<slug>/<yyyy-mm-dd>-<kebab-title>.md.');
   });
 
   it('tracks prompt, stop and permission states and nudges when stale', () => {
@@ -196,12 +198,34 @@ describe('briefing: live work', () => {
   });
 
   it('carries the live-work rules: #id on subagents and tasks, the task tools, the queue, new requests', () => {
-    const rules = updateRules('C:/Users/me/.inprogress').join('\n');
+    const rules = updateRules({ home: 'C:/Users/me/.inprogress', sessionId: 's1' }).join('\n');
     expect(rules).toContain('"queue: #a, #b, #c"');
     expect(rules).toContain('a new request with a deliverable arrives (it becomes a step right away)');
     expect(rules).toContain('"#44 Build project tabs"');
     expect(rules).toContain('TaskCreate');
-    expect(rules).toContain('tasks on #57:');
+  });
+
+  it('writes out the tasks command with this session\'s id, as the one write the session makes itself', () => {
+    const cli = 'C:\\personal\\InProgress\\dist\\cli\\main.js';
+    const rules = updateRules({ home: 'C:/Users/me/.inprogress', sessionId: 'abc-123', cli });
+    const line = rules.find((l) => l.startsWith('- Working tasks'))!;
+    expect(line).toContain('Without the task tools, run this after each change; it is the one InProgress write you make yourself:');
+    expect(line).toContain('`node C:/personal/InProgress/dist/cli/main.js tasks <step id> --session abc-123 --done "…" --doing "…" --todo "…"`');
+    expect(line).toContain('leave out <step id> to use your focus');
+    // The scribe's old fallback is gone, and nothing prints a step as "tasks #…": an unquoted # starts a comment.
+    expect(rules.join('\n')).not.toContain('tasks on #');
+    expect(rules.join('\n')).not.toMatch(/tasks #/);
+    // Only that line changed: the scribe line stays for P8 to rewrite.
+    expect(rules[1]).toMatch(/^- Never edit it yourself\. Brief the inprogress-scribe agent/);
+  });
+
+  it("prints the CLI beside the server module, with the briefed session's id", () => {
+    const { ctx } = setup();
+    const text = handleHookEvent(ctx, 's1', start()).context!;
+    // Under vitest the module is src/lib/task-command.ts, so "beside" is src/cli/main.js; bundled, it is dist/cli/main.js
+    // (the smoke test checks that one against the installed rules).
+    const printed = /`node (\S+) tasks <step id> --session s1 --done "…" --doing "…" --todo "…"`/.exec(text);
+    expect(printed?.[1]).toBe(normalizePath(resolve('src/cli/main.js')));
   });
 });
 
@@ -222,7 +246,7 @@ describe('briefing: type labels', () => {
   });
 
   it('lists the label set and the picking rule once in the update rules', () => {
-    const rules = updateRules('C:/Users/me/.inprogress').join('\n');
+    const rules = updateRules({ home: 'C:/Users/me/.inprogress', sessionId: 's1' }).join('\n');
     expect(rules).toContain('⧉ ui, ⚙ server, ⛁ data, ⇄ integration, ⚒ ops, ¶ docs, ⚑ fix, ↻ refactor, ⌕ research');
     expect(rules.match(/⧉ ui/g)).toHaveLength(1);
     expect(rules).toMatch(/purpose first \(fix, refactor, research\), else by where the work lands/);

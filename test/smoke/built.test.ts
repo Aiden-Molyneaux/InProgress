@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -28,6 +28,9 @@ const sessionStart = (sessionId: string) => JSON.stringify({ session_id: session
 const briefing = (stdout: string) => (JSON.parse(stdout) as { hookSpecificOutput: { hookEventName: string; additionalContext: string } }).hookSpecificOutput;
 /** Run the built hook with this stdin payload, as Claude Code would. */
 const runHook = (name: string, payload: object) => spawnSync(process.execPath, [bin('hooks/hook.js'), name], { input: JSON.stringify(payload), env, encoding: 'utf8' });
+/** Run the built CLI's tasks command, as a session would. */
+const runTasks = (args: string[], extraEnv: NodeJS.ProcessEnv = {}) => spawnSync(process.execPath, [bin('cli/main.js'), 'tasks', ...args], { env: { ...env, ...extraEnv }, encoding: 'utf8' });
+const lines = (text: string) => text.split(/\r?\n/).filter(Boolean);
 
 /** A port nothing is listening on, so a stale server from an earlier run can never answer. */
 function freePort(): Promise<number> {
@@ -128,6 +131,26 @@ describe('built artifacts', () => {
     ]);
   });
 
+  it("the CLI's tasks command replaces a tracked session's tasks on a step and prints the counts", async () => {
+    const client = createClient({ baseUrl: base, token: readToken(home) });
+    const step = (await client.get<ProjectSnapshot>('/api/projects/smoke')).nodes.find((n) => n.title === 'Smoke the hooks')!;
+    const r = runTasks([String(step.id), '--session', 'smoke-1', '--done', 'Write the smoke test', '--doing', 'Run it', '--todo', 'Read the report']);
+    expect(r).toMatchObject({ status: 0, stderr: '' });
+    expect(lines(r.stdout)).toEqual([`#${step.id}: 1 done · 1 in progress · 1 pending`]);
+    const { workItems } = await client.get<ProjectSnapshot>('/api/projects/smoke');
+    expect(workItems.filter((w) => w.sessionId === 'smoke-1' && w.nodeId === step.id).map((w) => [w.subject, w.status])).toEqual([
+      ['Write the smoke test', 'completed'],
+      ['Run it', 'in_progress'],
+      ['Read the report', 'pending'],
+    ]);
+  });
+
+  it("the tasks command passes on the server's refusal and its hint when the session has no focus", () => {
+    const r = runTasks(['--session', 'smoke-1', '--todo', 'Unplaced']);
+    expect(r.status).toBe(1);
+    expect(lines(r.stderr)).toEqual(['This session has no focus', 'Name the step: tasks <id> …']);
+  });
+
   it('a hook whose reader has gone away exits 0 without stderr', async () => {
     const child = spawn(process.execPath, [bin('hooks/hook.js'), 'session-start'], { env, stdio: 'pipe' });
     child.stdout.destroy(); // Claude stopped reading before the briefing is written: the write fails with EPIPE.
@@ -153,6 +176,16 @@ describe('built artifacts', () => {
       expect.stringContaining('InProgress server unreachable at http://127.0.0.1:1'),
       'Run `inprogress start`, or `inprogress doctor` to diagnose.',
     ]);
+  });
+
+  it('the tasks command says how the server gets started when it is not running, and starts nothing itself', async () => {
+    const r = runTasks(['88', '--session', 'smoke-1', '--done', 'x'], { INPROGRESS_PORT: '1' });
+    expect(r.status).toBe(1);
+    expect(lines(r.stderr)).toEqual([
+      expect.stringContaining('InProgress server unreachable at http://127.0.0.1:1'),
+      'InProgress is not running. A brief to the inprogress-scribe starts it; run this command again after that.',
+    ]);
+    expect(await isServerUp('http://127.0.0.1:1', 300)).toBe(false);
   });
 
   it('MCP server answers over stdio', async () => {
@@ -194,6 +227,15 @@ describe('built artifacts', () => {
     expect(r.stderr).toBe('');
     expect(r.status).toBe(0);
     expect(briefing(r.stdout).additionalContext).toContain('tracked in project "Smoke"');
+    // The rules install wrote allow, byte for byte, the tasks command this server prints from its own path.
+    const allow: string[] = JSON.parse(readFileSync(join(claude, 'settings.json'), 'utf8')).permissions.allow;
+    const taskRules = allow.filter((rule) => / tasks \*\)$/.test(rule));
+    expect(taskRules.map((rule) => rule.slice(0, rule.indexOf('(')))).toEqual(['Bash', 'PowerShell']);
+    for (const rule of taskRules) {
+      const prefix = rule.slice(rule.indexOf('(') + 1, -' *)'.length);
+      expect(prefix).toMatch(/^node \S+\/dist\/cli\/main\.js tasks$/);
+      expect(briefing(r.stdout).additionalContext).toContain(`\`${prefix} <step id> --session smoke-2 --done "…" --doing "…" --todo "…"\``);
+    }
   });
 
   it('doctor starts a stopped server and passes', () => {

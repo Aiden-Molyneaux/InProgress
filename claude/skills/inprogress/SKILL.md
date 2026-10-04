@@ -5,7 +5,7 @@ description: Opt a Claude session into InProgress, adopt an existing project int
 
 # InProgress
 
-InProgress is a live tree of a project's plan, steps, resources and Claude sessions, shown in a window beside Claude. Aiden reads it. You keep it current by briefing the `inprogress-scribe` agent. You never edit it yourself: no HTTP calls, no database access, no InProgress tools in this session.
+InProgress is a live tree of a project's plan, steps, resources and Claude sessions, shown in a window beside Claude. Aiden reads it. You keep it current by briefing the `inprogress-scribe` agent. You never edit it yourself, with one exception: without the task tools, you set your own working tasks with the `tasks` command below. Otherwise no HTTP calls, no database access, no InProgress tools in this session.
 
 ## Tracked sessions
 
@@ -14,7 +14,7 @@ A tracked session has a context block starting `[InProgress] This session is tra
 - Brief the scribe with the Agent tool (`subagent_type: "inprogress-scribe"`, description "InProgress update"). It runs in the background: never wait for it or poll it. At most one brief per turn, with every change batched.
 - Checkpoints: a new request with a deliverable arrives (it becomes a step right away, before the work starts); a plan is made or changed (backtracking marks steps `dropped` or moves them); the order of work is decided or changes (brief `queue: #a, #b, #c`, next first); a step starts, finishes or is blocked; something worth finding again is produced; something is handed to Aiden (`assignee: me`) or he reports doing it; an open question appears (`kind: question`) or is answered (`done`, answer in `outcome`).
 - Steps are plan-level with outcomes, never single actions. Detours go in the log of the step they interrupted.
-- Working tasks sit under the steps, and Aiden watches them live. Start a subagent's description with its step's `#id` when the work belongs to a tracked step (`#44 Build project tabs`). Use the task tools (`TaskCreate`, `TaskUpdate`) for multi-step work, and start a task's subject with `#id` when it belongs to a step other than your focus. InProgress mirrors both on its own: they need no brief. Without the task tools, brief the list instead: `tasks on #57: in progress "Write the guide"; pending "Review it"`.
+- Working tasks sit under the steps, and Aiden watches them live. Start a subagent's description with its step's `#id` when the work belongs to a tracked step (`#44 Build project tabs`). Use the task tools (`TaskCreate`, `TaskUpdate`) for multi-step work, and start a task's subject with `#id` when it belongs to a step other than your focus. InProgress mirrors both on its own: they need no brief. Without the task tools, run this after each change; it is the one write you make yourself, with no brief: `{{TASKS}} <step id> --session <session id> --done "…" --doing "…" --todo "…"`. The flags repeat, in list order; no flags clears the list; leave out `<step id>` to use your focus. The same line runs in the Bash and the PowerShell tool. Put single quotes around a subject that contains `$` or a backtick, and leave double quotes out of subjects.
 - Resources always go to the scribe as a file path plus `snapshot_file`. Content that only exists in chat (for example a test suite written in a reply) is first written with the Write tool to `{{RESOURCES}}/<project-slug>/<yyyy-mm-dd>-<kebab-title>.md`.
 - After dispatching, write one line in chat, e.g. `↳ InProgress: #57 done, test suite attached to #58`. The scribe's completion notice needs no reply beyond that line.
 

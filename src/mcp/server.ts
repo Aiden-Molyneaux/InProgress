@@ -2,12 +2,12 @@ import { readFileSync, statSync } from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import {
-  ASSIGNEES, NODE_KINDS, NODE_LABELS, NODE_STATUSES, RESOURCE_KINDS, WORK_STATUSES, glyphTitle, unknownLabel,
-  type Binding, type LogEntry, type NodeDetail, type NodeInput, type Project, type ProjectSummary, type Resource, type SearchResult, type TreeNode, type WorkItem,
+  ASSIGNEES, NODE_KINDS, NODE_LABELS, NODE_STATUSES, RESOURCE_KINDS, glyphTitle, unknownLabel,
+  type Binding, type LogEntry, type NodeDetail, type NodeInput, type Project, type ProjectSummary, type Resource, type SearchResult, type TreeNode,
 } from '../core/types';
 import { ApiClientError, type Client } from '../lib/client';
 import { VERSION } from '../lib/version';
-import { formatCreated, formatNodeDetail, formatQueue, formatResource, formatSearch, formatTasks } from './format';
+import { formatCreated, formatNodeDetail, formatQueue, formatResource, formatSearch } from './format';
 
 const SNAPSHOT_LIMIT = 200 * 1024;
 
@@ -209,15 +209,6 @@ export function createMcpServer(client: Client, o: McpOptions = {}): McpServer {
     { project, nodes: z.array(id).max(200).describe('Step #ids in the planned order, next first'), session },
     async (a: { project: string; nodes: number[]; session?: string }) =>
       formatQueue(await client.post<Project>(`/api/projects/${enc(a.project)}/queue`, { nodes: a.nodes }, { actor: actor(a.session) })));
-
-  tool('set_tasks', "Replace a session's working tasks on one node, in order, where Claude Code's task tools are absent (a brief's \"tasks on #57: ...\"). An empty list clears them.",
-    {
-      session: z.string().min(1),
-      node: id,
-      tasks: z.array(z.object({ subject: z.string().min(1).max(300), status: z.enum(WORK_STATUSES).describe('pending, in_progress or completed') })).max(50),
-    },
-    async (a: { session: string; node: number; tasks: { subject: string; status: string }[] }) =>
-      formatTasks(a.node, await client.post<WorkItem[]>(`/api/sessions/${enc(a.session)}/tasks`, { nodeId: a.node, tasks: a.tasks }, { actor: actor(a.session) })));
 
   return server;
 }
