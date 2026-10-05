@@ -128,7 +128,7 @@ describe('layoutOutline', () => {
 const T0 = Date.parse('2026-10-02T12:00:00Z');
 const ago = (ms: number) => new Date(T0 - ms).toISOString();
 const agent = (agentId: string, extra: Partial<SubagentInfo> = {}): SubagentInfo => ({
-  agentId, agentType: 'general-purpose', startedAt: ago(60_000), description: `Agent ${agentId}`, model: 'sonnet', nodeId: null, endedAt: null, ...extra,
+  agentId, agentType: 'general-purpose', startedAt: ago(60_000), description: `Agent ${agentId}`, model: 'sonnet', nodeId: null, endedAt: null, ordinal: 1, ...extra,
 });
 let nextWork = 100;
 function work(nodeId: number, status: WorkStatus, extra: Partial<WorkItem> = {}): WorkItem {

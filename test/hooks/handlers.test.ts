@@ -294,7 +294,7 @@ describe('runHandler', () => {
     const response = { isAsync: true, status: 'async_launched', agentId: 'ag7', resolvedModel: 'claude-haiku-4-5-20251001', prompt: 'Read the transcripts' };
     expect(await run('post-tool', { session_id: 'h7', hook_event_name: 'PostToolUse', tool_name: 'Agent', tool_use_id: 'toolu_h7', tool_input: agentInput, tool_response: response })).toBeUndefined();
     expect(findSession(ctx, 'h7')!.subagents).toEqual([
-      { agentId: 'ag7', agentType: 'Explore', startedAt: expect.any(String), description: `#${step.id} Map the hook payloads`, model: 'haiku', nodeId: step.id, endedAt: null },
+      { agentId: 'ag7', agentType: 'Explore', startedAt: expect.any(String), description: `#${step.id} Map the hook payloads`, model: 'haiku', nodeId: step.id, endedAt: null, ordinal: 1 },
     ]);
   });
 
