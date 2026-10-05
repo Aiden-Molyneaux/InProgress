@@ -112,3 +112,7 @@ decision, why, what it costs if wrong. Review these and rework anything ruled wr
 41. Amends ruling 29: a same-project re-enroll of a live session is marked "briefing due" when it gives the session
     a different slot, and so is a `set_focus` that does, matching ruling 40 (final review fix wave). A re-enroll that
     keeps the slot still leaves the marker alone. Cost if wrong: one extra briefing.
+
+Aiden's answers to the overnight questions (2026-10-05): ruling 32 is confirmed. A subagent that dies without a stop
+should be represented in the window, and workflow agents should carry a representative label. Both are new
+research steps under "Feedback from daily use".
