@@ -20,7 +20,7 @@ Changes:
 - add under #55 after #57: "Run signing tests" (task, assignee me); body: run on a device build, report failures
 - add under #55: "Fix the upload-key check" (task, fix)
 - add under #55: "Which store regions at launch?" (question, assignee me)
-- #62 → done; outcome "EU and UK first" (the answer goes in the outcome)
+- #62 → done; outcome "EU and UK first"
 - #56 label → fix
 - #63 → dropped; outcome "Replaced by the upload-key check"
 - move #64 under #55 after #57
@@ -43,7 +43,7 @@ Give each new step one label in its brief: `add under #41: "Faster cold start" (
 2. Decide the project. If it is unclear, run `"{{NODE}}" "{{REPO}}/dist/cli/main.js" status` to see existing projects (from PowerShell, start the command with `& `), and ask Aiden.
 3. Brief the scribe to enroll the session (creating the project first if new: name, one-paragraph purpose, optional playbook) and, if Aiden agrees, bind the current folder. For ticket work in a shared repo, bind with a branch pattern like `*VCAD-978*`.
 4. Write the one-line chat note, e.g. `↳ InProgress: enrolled in InGame`.
-5. The full briefing, with the update rules, arrives with your next prompt after the enroll. Until then, where the task tools are absent, set your working tasks after each change with `{{TASKS}} <step id> --session <session id> --done "…" --doing "…" --todo "…"`. Run it with the Bash tool. The flags repeat, in list order; no flags clears the list; leave out `<step id>` to use your focus. Put single quotes around a subject that contains `$` or a backtick, and leave double quotes out of subjects.
+5. The full briefing, with the update rules, arrives with Aiden's next message after the enroll, not with the scribe's notice. Until then, where the task tools are absent, set your working tasks after each change with `{{TASKS}} <step id> --session <session id> --done "…" --doing "…" --todo "…"`. Run it with the Bash tool. The flags repeat, in list order; no flags clears the list; leave out `<step id>` to use your focus. Put single quotes around a subject that contains `$` or a backtick, and leave double quotes out of subjects.
 
 ## Adopting an existing project
 
@@ -54,7 +54,7 @@ Brief the scribe with:
 - anything waiting on Aiden;
 - paths of the key existing docs to attach with `snapshot_file`.
 
-Do not reconstruct history beyond that. As after opting in, the full briefing arrives with your next prompt.
+Do not reconstruct history beyond that. As after opting in, the full briefing arrives with Aiden's next message.
 
 ## Status questions
 

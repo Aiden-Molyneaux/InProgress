@@ -206,15 +206,18 @@ describe('install', () => {
     const template = /Brief template:\n\n```\n([\s\S]*?)```/.exec(skill)?.[1] ?? '';
     expect(template).toMatch(/^Session: <session id> · Project: <slug>\nChanges:\n/);
     expect(template).toContain('- #57 → done; outcome "Play app signing configured"');
-    expect(template).toMatch(/- add under #55: "[^"]+\?" \(question, assignee me\)\n/);
-    expect(template).toMatch(/- #\d+ → done; outcome "[^"]+" \(the answer goes in the outcome\)\n/);
+    // The question, then its answer, which marks it done with the answer as the outcome; no guidance inside the template.
+    expect(template).toMatch(/- add under #55: "[^"]+\?" \(question, assignee me\)\n- #\d+ → done; outcome "[^"]+"\n/);
+    expect(template).not.toMatch(/\(the answer/);
     expect(template).toMatch(/- #\d+ label → fix\n/);
     expect(template).toMatch(/- #\d+ → dropped; outcome "[^"]+"\n- move #\d+ under #55 after #57\n/);
     expect(template).toContain(`path ${slashed(homeDir())}/resources/ingame/2026-09-27-signing-test-suite.md, snapshot_file`);
     expect(template).toMatch(/- focus → the new "Run signing tests" node\n- queue: #59, #60\n- later: #61\n$/);
     expect(skill).not.toContain('tasks on #');
-    // An opted-in session gets the full briefing with its next prompt.
-    expect(skill).toMatch(/## Opting in[\s\S]*full briefing[^.]*arrives with your next prompt after the enroll/);
+    // An opted-in or adopting session gets the full briefing with Aiden's next message, not with the scribe's notice.
+    expect(skill).toMatch(/## Opting in[\s\S]*full briefing[^.]*arrives with Aiden's next message after the enroll, not with the scribe's notice/);
+    expect(skill).toMatch(/## Adopting[\s\S]*full briefing arrives with Aiden's next message/);
+    expect(skill).not.toMatch(/with your next prompt/);
     const agent = readFileSync(join(dir, 'agents', 'inprogress-scribe.md'), 'utf8');
     expect(agent).toMatch(/`set_queue`/);
     expect(agent).toMatch(/`queue: #a, #b`.*`set_queue` with those ids, next first, and `session`/);
