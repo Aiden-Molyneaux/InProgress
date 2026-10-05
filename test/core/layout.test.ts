@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { BADGE_ROW, ENDED_AGENT_MS, INDENT, ROW, WORK_GAP, WORK_ROW, eventTarget, findFrontier, formatUpNext, layoutOutline, queueView, type LayoutItem, type LayoutResult } from '../../src/core/layout';
-import type { EventRow, PastSession, QueueEntry, ResourceMeta, Session, SubagentInfo, TrailAgent, TreeNode, WorkItem, WorkStatus } from '../../src/core/types';
+import { BADGE_ROW, ENDED_AGENT_MS, INDENT, READERS_ROW, ROW, WORK_GAP, WORK_ROW, agentVisible, eventTarget, findFrontier, formatUpNext, layoutOutline, queueView, type LayoutItem, type LayoutResult } from '../../src/core/layout';
+import { READER_AGENT_TYPES, isReader, type EventRow, type PastSession, type QueueEntry, type ResourceMeta, type Session, type SubagentInfo, type TrailAgent, type TreeNode, type WorkItem, type WorkStatus } from '../../src/core/types';
 
 let nextId = 1;
 function n(parentId: number | null, title: string, extra: Partial<TreeNode> = {}): TreeNode {
@@ -272,6 +272,69 @@ describe('subagent badges', () => {
     const t = sample();
     const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [withAgents(session('s1', t.a1.id, 'ended'), [agent('x')])], now: T0 });
     expect(rowsOf(l, 'badge', 'agent')).toEqual([]);
+  });
+});
+
+describe('readers', () => {
+  const reader = (agentId: string, extra: Partial<SubagentInfo> = {}) => agent(agentId, { agentType: 'Explore', ...extra });
+
+  it('give a running reader no badge: each session folds its running readers on a row into one readers row after its badges', () => {
+    const t = sample();
+    const s1 = withAgents(session('s1', t.a1.id, 'working'), [
+      reader('r1'), agent('w1'), reader('r2', { agentType: 'Plan', nodeId: t.a1.id }), reader('r3', { agentType: 'claude-code-guide', nodeId: t.b.id }),
+    ]);
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [s1], now: T0 });
+    expect(rowsOf(l, 'badge', 'agent', 'readers')).toEqual([
+      ['badge', 'bs1', t.a1.id, 3 * INDENT, 3 * ROW],
+      ['agent', 'as1:w1', t.a1.id, 3 * INDENT, 3 * ROW + BADGE_ROW],
+      ['readers', `rs1:${t.a1.id}`, t.a1.id, 3 * INDENT, 3 * ROW + 2 * BADGE_ROW],
+      ['readers', `rs1:${t.b.id}`, t.b.id, 2 * INDENT, 5 * ROW + 2 * BADGE_ROW + READERS_ROW],
+    ]);
+    expect(l.items.find((i) => i.id === `rs1:${t.a1.id}`)).toEqual({ kind: 'readers', id: `rs1:${t.a1.id}`, sessionId: 's1', nodeId: t.a1.id, agentIds: ['r1', 'r2'], x: 3 * INDENT, y: 3 * ROW + 2 * BADGE_ROW });
+    expect(l.nodeItems.get(t.c.id)?.y).toBe(5 * ROW + 2 * BADGE_ROW + 2 * READERS_ROW);
+  });
+
+  it("keep each session's readers apart on a shared row, each after its own session's badges", () => {
+    const t = sample();
+    const s1 = withAgents(session('s1', t.a1.id, 'working'), [reader('r1')]);
+    const s2 = withAgents(session('s2', t.a1.id, 'working'), [reader('r2'), reader('r3')]);
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [s1, s2], now: T0 });
+    expect(rowsOf(l, 'badge', 'agent', 'readers').map(([kind, id]) => [kind, id])).toEqual([
+      ['badge', 'bs1'], ['readers', `rs1:${t.a1.id}`], ['badge', 'bs2'], ['readers', `rs2:${t.a1.id}`],
+    ]);
+    expect(l.items.find((i) => i.id === `rs2:${t.a1.id}`)).toMatchObject({ agentIds: ['r2', 'r3'] });
+  });
+
+  it('fold readers on a hidden step into the row of its nearest visible ancestor', () => {
+    const t = sample();
+    const s1 = withAgents(session('s1', null, 'working'), [reader('r1', { nodeId: t.a1.id }), reader('r2', { nodeId: t.a2.id })]);
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [s1], overrides: { ['n:' + t.a.id]: 'closed' }, now: T0 });
+    expect(l.items.filter((i) => i.kind === 'readers')).toEqual([expect.objectContaining({ id: `rs1:${t.a.id}`, nodeId: t.a.id, agentIds: ['r1', 'r2'] })]);
+  });
+
+  it('show an ended reader nowhere, pinning nothing, while a running one pins its step as a worker does', () => {
+    const t = sample();
+    const f = n(t.root.id, 'F');
+    const g = n(t.root.id, 'G');
+    const nodes = [...t.nodes, f, g];
+    const hidden = (l: LayoutResult) => l.items.flatMap((i) => (i.kind === 'more' ? i.hiddenIds : []));
+    const ended = withAgents(session('s1', t.a1.id, 'working'), [reader('r1', { nodeId: t.e.id, endedAt: ago(60_000) })]);
+    const gone = layoutOutline({ nodes, resources: [], sessions: [ended], now: T0 });
+    expect(rowsOf(gone, 'agent', 'readers')).toEqual([]);
+    expect(hidden(gone)).toContain(t.e.id);
+    const running = withAgents(session('s1', t.a1.id, 'working'), [reader('r1', { nodeId: t.e.id })]);
+    const shown = layoutOutline({ nodes, resources: [], sessions: [running], now: T0 });
+    expect(hidden(shown)).not.toContain(t.e.id);
+    expect(rowsOf(shown, 'agent', 'readers').map(([kind, id]) => [kind, id])).toEqual([['readers', `rs1:${t.e.id}`]]);
+  });
+
+  it('tell readers by type, and agentVisible keeps a running reader and drops an ended one', () => {
+    expect(READER_AGENT_TYPES).toEqual(['Explore', 'Plan', 'claude-code-guide']);
+    expect(['Explore', 'Plan', 'claude-code-guide', 'general-purpose', 'explore', 'inprogress-scribe'].map(isReader)).toEqual([true, true, true, false, false, false]);
+    expect(agentVisible(reader('r1'), T0)).toBe(true);
+    expect(agentVisible(reader('r1', { endedAt: ago(1000) }), T0)).toBe(false);
+    expect(agentVisible(agent('w1', { endedAt: ago(1000) }), T0)).toBe(true);
+    expect(agentVisible(agent('w1', { endedAt: ago(ENDED_AGENT_MS) }), T0)).toBe(false);
   });
 });
 

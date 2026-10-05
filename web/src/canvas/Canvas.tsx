@@ -20,6 +20,7 @@ import { BadgeNode } from './BadgeNode';
 import { breadcrumbFor } from './breadcrumb';
 import { MoreNode, type MoreNodeData } from './MoreNode';
 import { NodeCard, type NodeCardData } from './NodeCard';
+import { ReadersRow, type ReadersRowData } from './ReadersRow';
 import { visibleHeight } from './sheet';
 import { TrailAgentRow, type TrailAgentRowData } from './TrailAgentRow';
 import { useCamera } from './useCamera';
@@ -35,7 +36,14 @@ const FOCUS_FRAMES = 30;
 const CLOCK_MS = 30_000;
 
 const nodeTypes = {
-  ipNode: NodeCard, ipMore: MoreNode, ipBadge: BadgeNode, ipAgent: AgentBadge, ipWork: WorkRow, ipWorkDone: WorkDoneRow, ipTrailAgent: TrailAgentRow,
+  ipNode: NodeCard,
+  ipMore: MoreNode,
+  ipBadge: BadgeNode,
+  ipAgent: AgentBadge,
+  ipReaders: ReadersRow,
+  ipWork: WorkRow,
+  ipWorkDone: WorkDoneRow,
+  ipTrailAgent: TrailAgentRow,
 };
 
 export interface CanvasHandle {
@@ -149,6 +157,13 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
         // In its session's hue, led by its tag.
         const data: AgentBadgeData = { agent, nodeId: item.nodeId, slot: session.slot, now };
         return { ...fixed, type: 'ipAgent', data };
+      }
+      if (item.kind === 'readers') {
+        const session = sessionsById.get(item.sessionId);
+        const readers = session ? session.subagents.filter((a) => item.agentIds.includes(a.agentId)) : [];
+        if (!session || !readers.length) return null;
+        const data: ReadersRowData = { readers, slot: session.slot, nodeId: item.nodeId };
+        return { ...fixed, type: 'ipReaders', data };
       }
       if (item.kind === 'work') {
         const w = workById.get(item.workId);
