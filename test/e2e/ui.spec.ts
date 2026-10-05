@@ -1030,11 +1030,21 @@ async function task(api: APIRequestContext, s: Seeded, key: string, subject: str
   if (status !== 'pending') await hook(api, s.session, { event: 'task-updated', taskKey: key, status, ...agent });
 }
 
-/** A subagent dispatched, started and launched, as the Agent tool's hooks report it. */
-async function subagent(api: APIRequestContext, s: Seeded, agentId: string, description: string, model: string): Promise<void> {
+/**
+ * A subagent dispatched, started and launched, as the Agent tool's hooks report it: a general-purpose worker unless
+ * `agentType` says otherwise, with the prompt's first sentence as its `purpose` when one is given.
+ */
+async function subagent(
+  api: APIRequestContext,
+  s: Seeded,
+  agentId: string,
+  description: string,
+  model: string,
+  { agentType = 'general-purpose', purpose }: { agentType?: string; purpose?: string } = {},
+): Promise<void> {
   const toolUseId = `toolu-${agentId}`;
-  await hook(api, s.session, { event: 'agent-dispatch', toolUseId, agentType: 'general-purpose', description, model });
-  await hook(api, s.session, { event: 'subagent-start', agentId, agentType: 'general-purpose' });
+  await hook(api, s.session, { event: 'agent-dispatch', toolUseId, agentType, description, model, ...(purpose ? { purpose } : {}) });
+  await hook(api, s.session, { event: 'subagent-start', agentId, agentType });
   await hook(api, s.session, { event: 'agent-launched', toolUseId, agentId, model });
 }
 
@@ -1163,6 +1173,62 @@ test.describe('Live work', () => {
     await expect(wire).toHaveClass(/\bended\b/);
     await expect(wire).toHaveCSS('color', 'rgb(110, 110, 115)');
     await expect(review).not.toHaveClass(/\bended\b/);
+  });
+
+  test("a worker's badge says what it was asked to do, and a session's readers on a step fold into one reading row", async ({ page, api, fresh }) => {
+    const revenue = fresh.ids['3 RevenueCat'];
+    const purpose = 'Wire the paywall to RevenueCat and report the tiers.';
+    await subagent(api, fresh, 'agent-1', `#${revenue} Wire up RevenueCat`, 'sonnet', { purpose });
+    // Two readers on the session's focus, one with a purpose and one without.
+    await subagent(api, fresh, 'reader-1', 'Map the signing config', 'haiku', { agentType: 'Explore', purpose: 'Find where the keystore is configured.' });
+    await subagent(api, fresh, 'reader-2', 'Read the release docs', 'haiku', { agentType: 'Explore' });
+    await open(page, fresh);
+    const wire = page.locator('.ip-agent', { hasText: 'Wire up RevenueCat' });
+    const readers = page.locator('.ip-readers');
+    await expect(wire).toHaveAttribute('title', purpose);
+    // The readers take no badge of their own: one row, in the session's hue, their descriptions in its tooltip.
+    await expect(page.locator('.ip-agent')).toHaveCount(1);
+    await expect(readers).toHaveCount(1);
+    await expect(readers).toHaveText('◇ a · 2 reading');
+    await expect(readers).toHaveAttribute('title', 'a2 · Map the signing config\na3 · Read the release docs');
+    const [badge, readersBox, next] = await Promise.all(
+      [page.locator('.ip-badge', { hasText: 'E2E session' }), readers, page.locator('.ip-node', { hasText: 'Run signing tests' })].map(boxOf),
+    );
+    expect(readersBox.y).toBeGreaterThanOrEqual(badge.y + badge.height);
+    expect(next.y).toBeGreaterThanOrEqual(readersBox.y + readersBox.height);
+    expect(readersBox.height, 'a small row').toBeLessThanOrEqual(20);
+    await expect(readers).toHaveCSS('color', 'rgb(217, 119, 87)');
+    // They still count on the chip, whose list marks them.
+    const chip = page.locator('.ip-sessions').getByRole('button', { name: /E2E session/ });
+    await expect(chip).toHaveText('A · E2E session · 3 subagents');
+    await chip.hover();
+    const list = page.locator('.ip-chip-pop');
+    await expect(list.locator('li', { hasText: 'Map the signing config' })).toHaveText(new RegExp(`^◇ a2 · Map the signing config · haiku · ${RUNNING}$`));
+    await expect(list.locator('li', { hasText: 'Wire up RevenueCat' })).toHaveText(new RegExp(`^a1 · #${revenue} Wire up RevenueCat · sonnet · ${RUNNING}$`));
+    await page.locator('.ip-activity').hover();
+    await expect(list).toBeHidden();
+    // Details: the purpose is a second line, and a reader is marked.
+    await page.locator('.ip-node', { hasText: 'Play app signing' }).click();
+    const details = page.getByRole('complementary');
+    await expect(details.locator('.ip-dagent')).toHaveText([
+      new RegExp(`^◇ a2 · Map the signing config · haiku · ${RUNNING}Find where the keystore is configured\\.$`),
+      new RegExp(`^◇ a3 · Read the release docs · haiku · ${RUNNING}$`),
+    ]);
+    await page.locator('.ip-node', { hasText: '3 RevenueCat' }).click();
+    await expect(details.locator('.ip-dagent .ip-dpurpose')).toHaveText(purpose);
+    await details.getByRole('button', { name: 'Close' }).click();
+    // A reader that stops leaves no greyed badge and drops out of the row; the last one takes the row with it.
+    await hook(api, fresh.session, { event: 'subagent-stop', agentId: 'reader-1' });
+    await expect(readers).toHaveText('◇ a · 1 reading');
+    await hook(api, fresh.session, { event: 'subagent-stop', agentId: 'reader-2' });
+    await expect(readers).toHaveCount(0);
+    await expect(page.locator('.ip-agent')).toHaveCount(1);
+    // Once the session ends, only the worker is trail, its purpose the trail row's tooltip.
+    await hook(api, fresh.session, { event: 'end' });
+    const trailRow = page.locator('.ip-work-done');
+    await expect(trailRow).toHaveText('✓ 1 agent');
+    await trailRow.click();
+    await expect(page.locator('.ip-trail-agent')).toHaveAttribute('title', purpose);
   });
 
   test('Up next: the camera opens on its head while no session works, queued steps carry ①②③, and the line jumps to a step', async ({ page, api, fresh }) => {

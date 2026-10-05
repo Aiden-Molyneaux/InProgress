@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { agentHome, agentShown, homedTrailAgents } from '../../../src/core/layout';
+import { agentHome, agentVisible, homedTrailAgents } from '../../../src/core/layout';
 import { isNeedsYou } from '../../../src/core/tree';
-import { LABEL_GLYPHS, agentTag, sessionDisplayTitle, sessionTag, type NodeDetail, type ProjectSnapshot, type TrailAgent, type WorkItem } from '../../../src/core/types';
+import { LABEL_GLYPHS, agentTag, isReader, sessionDisplayTitle, sessionTag, type NodeDetail, type ProjectSnapshot, type TrailAgent, type WorkItem } from '../../../src/core/types';
 import { api } from '../api';
 import { familyVar } from '../family';
 import { TASK_MARK, agentLine, taskFamily, taskOwner, trailAgentLine, waitsFor, withTag, withoutOwnId, workMark } from '../live';
@@ -48,10 +48,16 @@ function trailGroups(snapshot: ProjectSnapshot, tasks: WorkItem[], agents: Trail
     }));
 }
 
+/** A subagent's purpose as the second line of its Details entry; nothing while it is unknown. */
+function PurposeLine({ purpose }: { purpose: string | null }) {
+  return purpose ? <div className="ip-dpurpose">{purpose}</div> : null;
+}
+
 /**
  * The node's working tasks, with who is on each, the subagents working on it, and its trail of ended work (tasks an
  * ended session left here and subagents that stopped), under each session's title: live, from the snapshot. Live tasks
- * and subagents wear their session's hue and a subagent's tag (`a1`); the trail stays neutral.
+ * and subagents wear their session's hue and a subagent's tag (`a1`); the trail stays neutral. A running reader is
+ * listed marked `◇`; an ended one is not. Each subagent's purpose, when known, is a second line under it.
  */
 function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'>) {
   const now = useNow(30_000);
@@ -60,7 +66,7 @@ function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'
   const tasks = onNode.filter((w) => w.endedAt === null);
   const inTree = new Set(snapshot.nodes.map((n) => n.id));
   const agents = snapshot.sessions.flatMap((s) =>
-    s.subagents.filter((a) => agentShown(a, now) && agentHome(s, a, (id) => inTree.has(id)) === nodeId).map((agent) => ({ session: s, agent })),
+    s.subagents.filter((a) => agentVisible(a, now) && agentHome(s, a, (id) => inTree.has(id)) === nodeId).map((agent) => ({ session: s, agent })),
   );
   const trailHere = homedTrailAgents({ sessions: snapshot.sessions, trailAgents, pastSessions, now }, (id) => inTree.has(id))
     .filter((t) => t.nodeId === nodeId)
@@ -114,6 +120,7 @@ function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'
                   style={{ '--fam': familyVar(session.slot) } as CSSProperties}
                   title={`${agent.agentType}, for ${withTag(sessionTag(session.slot), sessionDisplayTitle(session))}`}
                 >
+                  {isReader(agent.agentType) && <span className="ip-reader-mark">◇ </span>}
                   {tag && (
                     <>
                       <span className="ip-agent-tag">{tag}</span>
@@ -121,6 +128,7 @@ function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'
                     </>
                   )}
                   {agentLine(agent, now, nodeId)}
+                  <PurposeLine purpose={agent.purpose} />
                 </li>
               );
             })}
@@ -146,6 +154,7 @@ function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'
                 {g.agents.map((a) => (
                   <li key={`${a.sessionId}:${a.agentId}`} className="ip-dtrail" title={`${a.agentType}, for ${g.title}`}>
                     <span className="ip-agent-dot">◆</span> {trailAgentLine(a, now, nodeId)}
+                    <PurposeLine purpose={a.purpose} />
                   </li>
                 ))}
               </ul>

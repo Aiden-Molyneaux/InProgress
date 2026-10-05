@@ -13,12 +13,12 @@ export interface TrailAgentRowData extends Record<string, unknown> {
 
 /**
  * A subagent in the trail, under its node's open done row: `◆ description · model · ran 40 min · stopped 2 h ago`.
- * Greyed like an ended badge, with no colour of its own, and never pulsing.
+ * Greyed like an ended badge, with no colour of its own, and never pulsing. Its tooltip is its purpose when known.
  */
 export function TrailAgentRow({ data }: NodeProps<Node<TrailAgentRowData, 'ipTrailAgent'>>) {
   const { agent, nodeId, sessionTitle, now } = data;
   return (
-    <div className="ip-trail-agent" title={`${trailAgentLine(agent, now)} (${agent.agentType}), for ${sessionTitle}`}>
+    <div className="ip-trail-agent" title={agent.purpose ?? `${trailAgentLine(agent, now)} (${agent.agentType}), for ${sessionTitle}`}>
       ◆ {trailAgentLine(agent, now, nodeId)}
     </div>
   );

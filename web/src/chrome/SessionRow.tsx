@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react';
-import { agentShown } from '../../../src/core/layout';
-import { agentTag, sessionTag, type Session } from '../../../src/core/types';
+import { agentVisible } from '../../../src/core/layout';
+import { agentTag, isReader, sessionTag, type Session } from '../../../src/core/types';
 import { familyVar } from '../family';
 import { agentLine, chipLabel, withTag } from '../live';
 import { useNow } from '../useNow';
@@ -18,7 +18,7 @@ interface SessionRowProps {
 /**
  * The current project's sessions, with the needs-you pill and Follow at the right end. Each chip leads with its letter in
  * its family's hue (`A · Review actions controller`). Hovering a chip, or focusing it from the keyboard, lists its
- * subagents under the row, each led by its tag.
+ * subagents under the row, each led by its tag, a reader marked `◇` in front (`◇ a2 · …`). An ended reader is not listed.
  */
 export function SessionRow({ sessions, onPick, needsYou, onNeedsYou, follow, onFollow }: SessionRowProps) {
   const now = useNow(30_000);
@@ -28,7 +28,7 @@ export function SessionRow({ sessions, onPick, needsYou, onNeedsYou, follow, onF
         {sessions.map((s) => {
           const label = chipLabel(s);
           const where = s.focusNodeId ? `on #${s.focusNodeId}` : 'no focus set yet';
-          const agents = s.subagents.filter((a) => agentShown(a, now));
+          const agents = s.subagents.filter((a) => agentVisible(a, now));
           const listId = `ip-subagents-${s.id}`;
           const letter = sessionTag(s.slot);
           return (
@@ -58,6 +58,7 @@ export function SessionRow({ sessions, onPick, needsYou, onNeedsYou, follow, onF
                       const tag = agentTag(s.slot, a.ordinal);
                       return (
                         <li key={a.agentId} className={a.endedAt ? 'ended' : undefined}>
+                          {isReader(a.agentType) && <span className="ip-reader-mark">◇ </span>}
                           {tag && (
                             <>
                               <span className="ip-agent-tag">{tag}</span>

@@ -15,7 +15,8 @@ export interface AgentBadgeData extends Record<string, unknown> {
 
 /**
  * A subagent's badge: `a1 · description · model · 12 min` in its session's hue, greyed with `done 2 min ago` once it has
- * ended. It keeps its tag then: its session is live, so the letter is still its own.
+ * ended. It keeps its tag then: its session is live, so the letter is still its own. Its tooltip says what it was asked
+ * to do (its purpose), or names it and its type while that is unknown.
  */
 export function AgentBadge({ data }: NodeProps<Node<AgentBadgeData, 'ipAgent'>>) {
   const { agent, nodeId, slot, now } = data;
@@ -24,7 +25,7 @@ export function AgentBadge({ data }: NodeProps<Node<AgentBadgeData, 'ipAgent'>>)
     <div
       className={`ip-agent${agent.endedAt ? ' ended' : ''}`}
       style={{ '--fam': familyVar(slot) } as CSSProperties}
-      title={`${withTag(tag, agentLine(agent, now))} (${agent.agentType})`}
+      title={agent.purpose ?? `${withTag(tag, agentLine(agent, now))} (${agent.agentType})`}
     >
       {tag && (
         <>
