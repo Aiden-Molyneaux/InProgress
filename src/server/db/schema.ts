@@ -95,8 +95,8 @@ export const MIGRATIONS: string[] = [
   );
   CREATE INDEX events_project ON events (project_id, id);
   `,
-  // 2: live work. Claude's working tasks (mirrored from Claude Code's task tools, or briefed through set_tasks), what
-  // each subagent is doing and where, and a per-project queue of the steps Claude plans to take next.
+  // 2: live work. Claude's working tasks (mirrored from Claude Code's task tools, or set by the main session's tasks
+  // command), what each subagent is doing and where, and a per-project queue of the steps Claude plans to take next.
   `
   CREATE TABLE work_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
