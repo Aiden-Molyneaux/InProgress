@@ -1,6 +1,6 @@
 import { formatUpNext, queueView } from '../core/layout';
 import { NEEDS_YOU_STALE_MS, ancestors, buildIndex, dfsOrder, isNeedsYou, kids, needsYouAge, progress, type TreeIndex } from '../core/tree';
-import { LABEL_GLYPHS, NODE_LABELS, glyphTitle, sessionDisplayTitle, sessionTag, type ProjectSnapshot, type Session, type TreeNode, type WorkItem } from '../core/types';
+import { NODE_LABELS, glyphTitle, sessionDisplayTitle, sessionTag, type ProjectSnapshot, type Session, type TreeNode, type WorkItem } from '../core/types';
 import { homeDir } from '../lib/home';
 import { taskCommand } from '../lib/task-command';
 
@@ -18,22 +18,23 @@ export interface UpdateRulesOptions {
 }
 
 /**
- * The update rules the briefing carries. The resources folder is spelled out in full from the data dir
- * `home` (forward slashes, as the installed skill has it): the Write tool needs an absolute path. The tasks command
- * is written out in full, built by the same helper as its allow rules so it runs without a permission prompt.
+ * The update rules the briefing carries: a header and six bullets, complete on their own, at most 1,600 characters
+ * with real-length values (review-actions spec §8). Questions, relabelling and backtracking live in the skill's brief
+ * template only. The labels are named as words; their glyphs show on the node lines. The resources folder is spelled
+ * out in full from the data dir `home` (forward slashes, as the installed skill has it): the Write tool needs an
+ * absolute path. The tasks command is written out in full, built by the same helper as its allow rules so it runs
+ * without a permission prompt; the Bash tool's rule matches at once, where PowerShell's check can time out and ask.
  */
 export function updateRules(o: UpdateRulesOptions): string[] {
   const resources = `${(o.home ?? homeDir()).replace(/\\/g, '/')}/resources`;
   return [
-    'Keeping InProgress current (the tree beside Claude that Aiden watches):',
-    '- Never edit it yourself. Brief the inprogress-scribe agent (Agent tool, subagent_type "inprogress-scribe"); it runs in the background. At most one brief per turn, batching every change.',
-    '- Brief at these checkpoints: a new request with a deliverable arrives (it becomes a step right away); a plan is made or changed (backtracking = mark steps dropped or move them); the order of work is decided or changes ("queue: #a, #b, #c"); a step starts, finishes, or is blocked; something worth finding again is produced (test suite, runbook, walkthrough, roadmap, diagram, handoff); something is handed to Aiden (assignee me) or he reports doing it; an open question appears or is answered.',
-    '- Steps are plan-level with outcomes, never single actions. Detours go in the log of the step they interrupted.',
-    `- Give each new step one type label in its brief: add under #41: "Faster cold start" (task, server). Labels: ${NODE_LABELS.map((l) => `${LABEL_GLYPHS[l]} ${l}`).join(', ')}. Pick by purpose first (fix, refactor, research), else by where the work lands; relabel a step when its purpose changes.`,
-    `- Working tasks sit under the steps, and Aiden watches them live. Start an Agent description with its step's #id ("#44 Build project tabs"). For multi-step work use the task tools (TaskCreate, TaskUpdate), and start a task's subject with #id when it belongs to a step other than your focus. Without the task tools, run this after each change; it is the one InProgress write you make yourself: \`${taskCommand(o.sessionId, { cli: o.cli })}\` (the flags repeat, in list order; none clears the list; leave out <step id> to use your focus).`,
-    `- Resources: pass a file path with snapshot_file. Content that only exists in chat is first written to ${resources}/<slug>/<yyyy-mm-dd>-<kebab-title>.md.`,
-    '- Brief format: "Session: <id> · Project: <slug>", then one "- " line per change, e.g. "#57 → done; outcome ...", "add under #55: \\"Run signing tests\\" (assignee me)", "resource on #58: test-suite \\"Signing suite\\", path ..., snapshot_file", "log on #55: ...", "focus → #58".',
-    '- After dispatching, write one line in chat ("↳ InProgress: #57 done, suite attached to #58"). The scribe\'s completion notice needs no reply beyond that line.',
+    'Keeping InProgress current (Aiden watches it live):',
+    '- Brief the inprogress-scribe agent (Agent tool, subagent_type "inprogress-scribe", background), at most once per turn, every change batched. Never edit the tree another way, except tasks below.',
+    `- Brief when: a request with a deliverable arrives (a new step with one label: ${NODE_LABELS.join(', ')}); the plan or an order changes ("queue: #a, #b" is yours, "later: #c, #d" unowned); a step starts ("focus → #id"), finishes ("#id → done; outcome …") or blocks; something goes to Aiden (assignee me) or he answers.`,
+    '- Steps are plan-level with outcomes. Detours go in "log on #id: …".',
+    `- Something worth finding again is a resource: "resource on #id: <kind> "<title>", path <file>, snapshot_file". Chat-only content is first written to ${resources}/<slug>/<yyyy-mm-dd>-<kebab-title>.md.`,
+    `- Working tasks: TaskCreate/TaskUpdate mirror on their own; start a task's subject with #id when its step is not your focus. Without those tools, after each change run in the Bash tool: \`${taskCommand(o.sessionId, { cli: o.cli })}\` (no flags clears the list; no step id uses your focus). No double quotes in subjects; single-quote one with $ or a backtick. Start an Agent description with its step's #id.`,
+    '- After a brief, one line in chat ("↳ InProgress: #57 done"). The scribe\'s notice needs no reply. Brief header: "Session: <id> · Project: <slug>". Full format: the inprogress skill.',
   ];
 }
 

@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { LABEL_GLYPHS, NODE_LABELS } from '../../src/core/types';
 import { homeDir } from '../../src/lib/home';
 import { normalizePath } from '../../src/lib/paths';
 import { updateRules } from '../../src/server/briefing';
@@ -63,7 +64,7 @@ describe('handleHookEvent', () => {
     expect(text).toContain('tracked in project "InGame" (slug ingame). Session id: s1.');
     expect(text).toContain('Planning docs live in docs/planning.');
     expect(text).toContain('inprogress-scribe');
-    expect(text).toContain('At most one brief per turn');
+    expect(text).toContain('at most once per turn, every change batched');
     expect(text).toContain(`#${a2.id} Play app signing — active`);
     expect(text).toContain(`#${a3.id} Run signing tests — NEEDS YOU`);
     expect(text).toMatch(/Next: #\d+ 3 RevenueCat · #\d+ 4 Build to GitHub \(\+3 more\)/);
@@ -75,7 +76,7 @@ describe('handleHookEvent', () => {
   it('names the resources folder by its absolute path, which the Write tool needs', () => {
     const { ctx } = setup();
     const text = handleHookEvent(ctx, 's1', start()).context!;
-    expect(text).toContain(`Content that only exists in chat is first written to ${homeDir().replace(/\\/g, '/')}/resources/<slug>/<yyyy-mm-dd>-<kebab-title>.md.`);
+    expect(text).toContain(`Chat-only content is first written to ${homeDir().replace(/\\/g, '/')}/resources/<slug>/<yyyy-mm-dd>-<kebab-title>.md.`);
     expect(text).not.toContain('~/');
     expect(updateRules({ home: 'C:\\Users\\me\\.inprogress', sessionId: 's1' }).join('\n')).toContain(' C:/Users/me/.inprogress/resources/<slug>/<yyyy-mm-dd>-<kebab-title>.md.');
   });
@@ -255,26 +256,26 @@ describe('briefing: live work', () => {
     expect(text).not.toContain('Up next');
   });
 
-  it('carries the live-work rules: #id on subagents and tasks, the task tools, the queue, new requests', () => {
+  it('carries the live-work rules: #id on subagents and tasks, the task tools, both orders, new requests', () => {
     const rules = updateRules({ home: 'C:/Users/me/.inprogress', sessionId: 's1' }).join('\n');
-    expect(rules).toContain('"queue: #a, #b, #c"');
-    expect(rules).toContain('a new request with a deliverable arrives (it becomes a step right away)');
-    expect(rules).toContain('"#44 Build project tabs"');
-    expect(rules).toContain('TaskCreate');
+    expect(rules).toContain('"queue: #a, #b" is yours, "later: #c, #d" unowned');
+    expect(rules).toContain('a request with a deliverable arrives (a new step with one label:');
+    expect(rules).toContain("Start an Agent description with its step's #id.");
+    expect(rules).toContain("TaskCreate/TaskUpdate mirror on their own; start a task's subject with #id when its step is not your focus.");
   });
 
-  it('writes out the tasks command with this session\'s id, as the one write the session makes itself', () => {
+  it('writes out the tasks command with this session\'s id, to run in the Bash tool where the task tools are absent', () => {
     const cli = 'C:\\personal\\InProgress\\dist\\cli\\main.js';
     const rules = updateRules({ home: 'C:/Users/me/.inprogress', sessionId: 'abc-123', cli });
     const line = rules.find((l) => l.startsWith('- Working tasks'))!;
-    expect(line).toContain('Without the task tools, run this after each change; it is the one InProgress write you make yourself:');
-    expect(line).toContain('`node C:/personal/InProgress/dist/cli/main.js tasks <step id> --session abc-123 --done "…" --doing "…" --todo "…"`');
-    expect(line).toContain('leave out <step id> to use your focus');
+    expect(line).toContain('Without those tools, after each change run in the Bash tool: `node C:/personal/InProgress/dist/cli/main.js tasks <step id> --session abc-123 --done "…" --doing "…" --todo "…"`');
+    expect(line).toContain('(no flags clears the list; no step id uses your focus)');
+    expect(line).toContain('No double quotes in subjects; single-quote one with $ or a backtick.');
     // The scribe's old fallback is gone, and nothing prints a step as "tasks #…": an unquoted # starts a comment.
     expect(rules.join('\n')).not.toContain('tasks on #');
     expect(rules.join('\n')).not.toMatch(/tasks #/);
-    // Only that line changed: the scribe line stays for P8 to rewrite.
-    expect(rules[1]).toMatch(/^- Never edit it yourself\. Brief the inprogress-scribe agent/);
+    // The scribe line names the one exception.
+    expect(rules[1]).toMatch(/^- Brief the inprogress-scribe agent .*Never edit the tree another way, except tasks below\.$/);
   });
 
   it("prints the CLI beside the server module, with the briefed session's id", () => {
@@ -333,12 +334,61 @@ describe('briefing: type labels', () => {
     expect(lines).toContain(`Needs you (1): #${a3.id} ⚒ Run signing tests`);
   });
 
-  it('lists the label set and the picking rule once in the update rules', () => {
-    const rules = updateRules({ home: 'C:/Users/me/.inprogress', sessionId: 's1' }).join('\n');
-    expect(rules).toContain('⧉ ui, ⚙ server, ⛁ data, ⇄ integration, ⚒ ops, ¶ docs, ⚑ fix, ↻ refactor, ⌕ research');
-    expect(rules.match(/⧉ ui/g)).toHaveLength(1);
-    expect(rules).toMatch(/purpose first \(fix, refactor, research\), else by where the work lands/);
-    expect(rules).toContain('(task, server)');
+  it('names the labels as words, once, inside the checkpoint bullet, with no glyph list', () => {
+    const rules = updateRules({ home: 'C:/Users/me/.inprogress', sessionId: 's1' });
+    const text = rules.join('\n');
+    expect(rules.find((l) => l.startsWith('- Brief when:'))).toContain(`(a new step with one label: ${NODE_LABELS.join(', ')})`);
+    expect(text.split(NODE_LABELS.join(', '))).toHaveLength(2);
+    for (const glyph of Object.values(LABEL_GLYPHS)) expect(text, glyph).not.toContain(glyph);
+  });
+});
+
+describe('briefing: the rules block', () => {
+  /** Real-length values: a Claude Code session id (a UUID), the deployed CLI and Aiden's data dir. */
+  const real = { home: 'C:/Users/aiden.molyneaux/.inprogress', sessionId: '0f8c2a4e-5b7d-4c1e-9a3f-6d2b8e1c7a90', cli: 'C:/personal/InProgress/dist/cli/main.js' };
+
+  it('fits in 1,600 characters with real-length values and the tasks command written out in full', () => {
+    expect(real.sessionId).toHaveLength(36);
+    const text = updateRules(real).join('\n');
+    expect(text.length).toBeLessThanOrEqual(1600);
+    expect(text).toContain(`\`node C:/personal/InProgress/dist/cli/main.js tasks <step id> --session ${real.sessionId} --done "…" --doing "…" --todo "…"\``);
+  });
+
+  it('keeps every clause, under a header', () => {
+    const rules = updateRules(real);
+    expect(rules[0]).toBe('Keeping InProgress current (Aiden watches it live):');
+    expect(rules.slice(1).every((l) => l.startsWith('- '))).toBe(true);
+    const text = rules.join('\n');
+    const clauses = [
+      // Who to brief, how, how often, and the one exception.
+      'Brief the inprogress-scribe agent (Agent tool, subagent_type "inprogress-scribe", background)',
+      'at most once per turn, every change batched',
+      'Never edit the tree another way, except tasks below.',
+      // The checkpoints, with the labels and both orders (later: is Aiden's §8 clause).
+      'a request with a deliverable arrives (a new step with one label:',
+      'the plan or an order changes ("queue: #a, #b" is yours, "later: #c, #d" unowned)',
+      'a step starts ("focus → #id"), finishes ("#id → done; outcome …") or blocks',
+      'something goes to Aiden (assignee me) or he answers',
+      'Steps are plan-level with outcomes. Detours go in "log on #id: …".',
+      'Something worth finding again is a resource: "resource on #id: <kind> "<title>", path <file>, snapshot_file".',
+      'Chat-only content is first written to C:/Users/aiden.molyneaux/.inprogress/resources/<slug>/<yyyy-mm-dd>-<kebab-title>.md.',
+      // Working tasks: the subject #id (Aiden's §8 clause), the Bash tool (ruling 32), the usage note, quoting (ruling 31).
+      "TaskCreate/TaskUpdate mirror on their own; start a task's subject with #id when its step is not your focus.",
+      'after each change run in the Bash tool:',
+      'no step id uses your focus',
+      'No double quotes in subjects',
+      "Start an Agent description with its step's #id.",
+      // After a brief.
+      'After a brief, one line in chat ("↳ InProgress: #57 done").',
+      "The scribe's notice needs no reply.",
+      'Brief header: "Session: <id> · Project: <slug>". Full format: the inprogress skill.',
+    ];
+    for (const clause of clauses) expect(text, clause).toContain(clause);
+  });
+
+  it('leaves questions, relabelling and backtracking to the skill', () => {
+    const text = updateRules(real).join('\n');
+    expect(text).not.toMatch(/question|relabel|dropped|backtrack/i);
   });
 });
 
