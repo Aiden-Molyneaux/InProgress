@@ -853,6 +853,17 @@ describe('the full briefing on the first tracked prompt after an enroll', () => 
     expect(handleHookEvent(ctx, 'e1', prompt()).context).toBeUndefined();
   });
 
+  it("asks about old needs-you items in a compaction's briefing when it is the one that clears an enroll's marker", () => {
+    const { ctx, project, a3, tick } = projects();
+    const check = `Check with Aiden whether these are already done, then brief the answer (a "not yet" goes in "log on #id: …"): #${a3.id}.`;
+    enrollSession(ctx, 'scribe:e1', 'e1', project.slug);
+    tick(4 * 24 * 60 * 60 * 1000);
+    // The enroll's briefing went to the scribe, so this is the session's only full one: it counts as the enroll's.
+    expect(handleHookEvent(ctx, 'e1', { event: 'start', source: 'compact', cwd: 'C:/elsewhere' }).context!.split('\n')).toContain(check);
+    // A later compaction is an ordinary one.
+    expect(handleHookEvent(ctx, 'e1', { event: 'start', source: 'compact', cwd: 'C:/elsewhere' }).context).not.toContain('Check with Aiden');
+  });
+
   it('never marks a session the hook created, by a start or by a first prompt', () => {
     const { ctx } = projects();
     expect(handleHookEvent(ctx, 's1', start()).context).toContain(FULL);

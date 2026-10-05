@@ -67,7 +67,10 @@ const clean = (text: string | undefined): string | null => text?.trim() || null;
 
 export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInput): HookEventResult {
   let created = false;
-  /** A real prompt that clears a "briefing due" marker: it gets the full briefing, in place of a status answer or nudge. */
+  /**
+   * The session owed the full briefing (its "briefing due" marker was set) and this response carries it: a start, a
+   * session this event created, or a real prompt, which gets it in place of a status answer or nudge.
+   */
   let briefingOwed = false;
   const session = write(ctx, `hook:${input.event}`, (record): Session | undefined => {
     let before = findSession(ctx, sessionId);
@@ -172,13 +175,12 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
     if (input.event !== 'start' && before.state === 'ended' && after.state !== 'ended' && before.slot !== after.slot) markBriefingDue(ctx, sessionId);
     // Decided here, rendered after commit: the snapshot read may open its own write (stale expiry). Any response that
     // carries the full briefing clears the marker, so it arrives once; a background-task notice is not a prompt Aiden
-    // typed, and leaves it for the next one (ruling 27). Nothing is decided for a project that is not active, which gets no briefing.
-    if (after.projectId !== null && getProjectById(ctx, after.projectId)?.status === 'active') {
-      if (input.event === 'start' || created) clearBriefingDue(ctx, sessionId);
-      else if (input.event === 'prompt' && !input.notice && briefingDue(ctx, sessionId)) {
-        clearBriefingDue(ctx, sessionId);
-        briefingOwed = true;
-      }
+    // typed, and leaves it for the next one (ruling 27). Nothing is decided for a project that is not active, which gets
+    // no briefing.
+    const mayBrief = input.event === 'start' || created || (input.event === 'prompt' && !input.notice);
+    if (mayBrief && after.projectId !== null && getProjectById(ctx, after.projectId)?.status === 'active' && briefingDue(ctx, sessionId)) {
+      clearBriefingDue(ctx, sessionId);
+      briefingOwed = true;
     }
     return after;
   });
@@ -191,9 +193,10 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
   // A session that has just begun tracking gets the full briefing, whichever event brought it in, and so does the first
   // real prompt after an enroll or a revival into another letter. Every one but a compaction's is fresh, and asks about
   // old needs-you items: a session first tracked by a prompt (its start was missed), a start with a missing or unknown
-  // source, and an owed briefing (an enroll's) count as new.
+  // source, and an owed briefing count as new. An owed briefing is the enroll's even when a compaction's start brings
+  // it: the one the enroll returned went to the scribe.
   if (input.event === 'start' || created || briefingOwed) {
-    const checkOld = !(input.event === 'start' && input.source === 'compact');
+    const checkOld = briefingOwed || !(input.event === 'start' && input.source === 'compact');
     return { tracked: true, context: renderBriefing(getProjectSnapshot(ctx, project.id), sessionId, Date.parse(ctx.now()), { checkOld }) };
   }
   if (input.event === 'prompt' && !input.notice) {
