@@ -90,3 +90,6 @@ decision, why, what it costs if wrong. Review these and rework anything ruled wr
     an agent that was resumed.
 34. When a step is deleted, its trail agents fall back to their session's focus (P3): `ON DELETE SET NULL` leaves no
     way to tell a deleted step from no step. Cost if wrong: a rare trail agent shown on the wrong step.
+35. A revival that gives a session a different slot also marks it "briefing due" (P8), so its next prompt brings the
+    full briefing with the new letter. Without it, a session revived by a prompt keeps "You are session A." in its
+    context after it became B. Cost if wrong: one extra briefing on such a revival.
