@@ -80,3 +80,8 @@ decision, why, what it costs if wrong. Review these and rework anything ruled wr
 31. Task subjects leave out double quotes, and the skill says so (P1, P8): Windows PowerShell 5.1 drops or splits a
     `"` inside a quoted argument, so a subject like 'Retry "step 88"' can arrive as two arguments and send the write
     to step 88. Single quotes still protect `$` and backticks in both shells. Cost if wrong: none.
+32. The briefing and the skill tell sessions to prefer the Bash tool for the tasks command; the PowerShell rule stays
+    installed (P8). Found at P1's live check: Claude Code decides a PowerShell permission by spawning a PowerShell
+    parser, which took 4.7 to 6.8 s here, and under heavy load it timed out and fell back to asking (about fifteen
+    checks in a row were denied in don't-ask mode, and the same checks later passed eight times in a row). Bash rules
+    match in-process, at once, every time. Cost if wrong: none.
