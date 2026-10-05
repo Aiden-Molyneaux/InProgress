@@ -32,6 +32,24 @@ export function isNeedsYou(n: Pick<TreeNode, 'assignee' | 'status'>): boolean {
   return n.assignee === 'me' && (n.status === 'todo' || n.status === 'active' || n.status === 'blocked');
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** How long a needs-you item waits before a fresh briefing asks the session to check it with Aiden. */
+export const NEEDS_YOU_STALE_MS = 3 * DAY_MS;
+
+/**
+ * How long a needs-you item has waited, measured from its last update (a patch or a move; logs, resources and working
+ * tasks leave it alone): null under 24 hours, then whole days floored ("1d" … "13d"), then whole weeks ("2w" …). Null
+ * for a time it cannot read, or one ahead of `now`.
+ */
+export function needsYouAge(n: Pick<TreeNode, 'updatedAt'>, now: number): string | null {
+  const age = now - Date.parse(n.updatedAt);
+  // A NaN age fails this too.
+  if (!(age >= DAY_MS)) return null;
+  const days = Math.floor(age / DAY_MS);
+  return days < 14 ? `${days}d` : `${Math.floor(days / 7)}w`;
+}
+
 export function ancestors(index: TreeIndex, id: number): TreeNode[] {
   const out: TreeNode[] = [];
   let cur = index.byId.get(id);

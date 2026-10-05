@@ -1,5 +1,5 @@
 import { formatUpNext, queueView } from '../core/layout';
-import { ancestors, buildIndex, dfsOrder, isNeedsYou, kids, progress, type TreeIndex } from '../core/tree';
+import { NEEDS_YOU_STALE_MS, ancestors, buildIndex, dfsOrder, isNeedsYou, kids, needsYouAge, progress, type TreeIndex } from '../core/tree';
 import { LABEL_GLYPHS, NODE_LABELS, glyphTitle, sessionDisplayTitle, sessionTag, type ProjectSnapshot, type Session, type TreeNode, type WorkItem } from '../core/types';
 import { homeDir } from '../lib/home';
 import { taskCommand } from '../lib/task-command';
@@ -115,16 +115,46 @@ function upNextLine(snapshot: ProjectSnapshot, sessionId: string): string | unde
   return formatUpNext(view, snapshot.sessions, { sessionId, nodes: snapshot.nodes });
 }
 
-function needsYouLine(snapshot: ProjectSnapshot): string | undefined {
-  const index = buildIndex(snapshot.nodes);
-  const order = dfsOrder(index);
-  const needs = snapshot.nodes.filter(isNeedsYou).sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
-  if (!needs.length) return undefined;
-  const shown = needs.slice(0, 8).map((n) => `#${n.id} ${glyphTitle(n)}${n.kind === 'question' ? ' (question)' : ''}`);
-  return `Needs you (${needs.length}): ${shown.join(' · ')}${needs.length > 8 ? ` · +${needs.length - 8} more` : ''}`;
+/** How many items the Needs you line and the check line each name before "+n more". */
+const MAX_NEEDS_YOU = 8;
+
+/** The project's needs-you items, in tree order. */
+function needsYouItems(snapshot: ProjectSnapshot): TreeNode[] {
+  const order = dfsOrder(buildIndex(snapshot.nodes));
+  return snapshot.nodes.filter(isNeedsYou).sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
 }
 
-export function renderBriefing(snapshot: ProjectSnapshot, sessionId: string): string {
+/** `Needs you (2): #14 Merge PRs (5d) · #45 Pick a price (question)`: each with its age once it is a day old. `now` is the server's clock (ms). */
+function needsYouLine(snapshot: ProjectSnapshot, now: number): string | undefined {
+  const needs = needsYouItems(snapshot);
+  if (!needs.length) return undefined;
+  const shown = needs.slice(0, MAX_NEEDS_YOU).map((n) => {
+    const age = needsYouAge(n, now);
+    return `#${n.id} ${glyphTitle(n)}${n.kind === 'question' ? ' (question)' : ''}${age ? ` (${age})` : ''}`;
+  });
+  return `Needs you (${needs.length}): ${shown.join(' · ')}${needs.length > MAX_NEEDS_YOU ? ` · +${needs.length - MAX_NEEDS_YOU} more` : ''}`;
+}
+
+/**
+ * The fresh briefing's ask about old needs-you items: every one last changed more than NEEDS_YOU_STALE_MS ago, from all
+ * of them (not only those the Needs you line shows), in its order, up to MAX_NEEDS_YOU, then "+n more". A "not yet" goes
+ * in the step's log, which leaves its age counting.
+ */
+function checkLine(snapshot: ProjectSnapshot, now: number): string | undefined {
+  const old = needsYouItems(snapshot).filter((n) => now - Date.parse(n.updatedAt) > NEEDS_YOU_STALE_MS);
+  if (!old.length) return undefined;
+  const named = old.slice(0, MAX_NEEDS_YOU).map((n) => `#${n.id}`);
+  if (old.length > MAX_NEEDS_YOU) named.push(`+${old.length - MAX_NEEDS_YOU} more`);
+  return `Check with Aiden whether these are already done, then brief the answer (a "not yet" goes in "log on #id: …"): ${named.join(', ')}.`;
+}
+
+export interface BriefingOptions {
+  /** Ask about needs-you items older than NEEDS_YOU_STALE_MS: every fresh briefing does, one after a compaction does not. */
+  checkOld: boolean;
+}
+
+/** The session's briefing. `now` is the server's clock (ms), which needs-you ages count to. */
+export function renderBriefing(snapshot: ProjectSnapshot, sessionId: string, now: number, opts: BriefingOptions): string {
   const { project, resources, sessions } = snapshot;
   // Its letter, as the window shows it on its chip and badge; none while its slot is empty.
   const letter = sessionTag(sessions.find((s) => s.id === sessionId)?.slot ?? null);
@@ -142,8 +172,10 @@ export function renderBriefing(snapshot: ProjectSnapshot, sessionId: string): st
   lines.push('Where things stand:', ...frontierLines(snapshot, sessionId).map((l) => `  ${l}`));
   const upNext = upNextLine(snapshot, sessionId);
   if (upNext) lines.push(upNext);
-  const needs = needsYouLine(snapshot);
+  const needs = needsYouLine(snapshot, now);
   if (needs) lines.push(needs);
+  const check = opts.checkOld ? checkLine(snapshot, now) : undefined;
+  if (check) lines.push(check);
   const recent =[...resources].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id - a.id).slice(0, 5);
   if (recent.length) lines.push(`Recent resources: ${recent.map((r) => `r${r.id} ${r.title} (on #${r.nodeId})`).join(' · ')}`);
   const others = sessions.filter((s) => s.id !== sessionId && s.state !== 'ended');
@@ -157,11 +189,12 @@ export function renderBriefing(snapshot: ProjectSnapshot, sessionId: string): st
   return lines.join('\n');
 }
 
-export function renderStatusAnswer(snapshot: ProjectSnapshot, sessionId: string): string {
+/** The answer to a status question: the needs-you ages as the briefing has them (`now`, the server's clock), never its check line. */
+export function renderStatusAnswer(snapshot: ProjectSnapshot, sessionId: string, now: number): string {
   const lines = [`[InProgress] Where things stand in ${snapshot.project.name} (live):`, ...frontierLines(snapshot, sessionId).map((l) => `  ${l}`)];
   const upNext = upNextLine(snapshot, sessionId);
   if (upNext) lines.push(upNext);
-  const needs = needsYouLine(snapshot);
+  const needs = needsYouLine(snapshot, now);
   if (needs) lines.push(needs);
   return lines.join('\n');
 }

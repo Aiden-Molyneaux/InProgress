@@ -141,6 +141,9 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-marker.m-dropped { background: var(--faint); }
 .ip-node.needs-you .ip-marker { background: var(--amber); border: 0; color: #fff; }
 .ip-node.working .ip-marker.m-active { animation: ip-pulse 1.6s ease-in-out infinite; }
+/* Paused: an active step nobody is on. Its marker draws hollow in blue, and a question's ? takes the blue too (the
+   marker's ink is white for a filled dot). */
+.ip-node.paused .ip-marker { background: transparent; border: 1.5px solid var(--accent); color: var(--accent); }
 .ip-you { color: var(--amber-ink); background: color-mix(in srgb, var(--amber) 14%, transparent); border-radius: 3px; font-size: 9px; font-weight: 700; padding: 0 4px; }
 .ip-blocked { color: var(--red); font-size: 10px; font-weight: 600; }
 .ip-progress { color: var(--muted); font-size: 11px; }

@@ -462,6 +462,31 @@ test('at 520 px there is no minimap, old finished steps fold into "✓ n done", 
   await expect(page.locator('.ip-chip', { hasText: 'Signing checklist' })).toBeVisible();
 });
 
+test('an active step nobody is on draws a hollow marker that says so, and a needs-you step four days old shows YOU · 4d', async ({ page, demo }) => {
+  // The server stamps each change with its own clock and no route backdates one: a browser clock four days and an hour
+  // ahead makes the seed four days old. (It also folds the 25 done milestones into "✓ 25 done".)
+  await page.clock.install({ time: Date.now() + 4 * 86_400_000 + 3_600_000 });
+  await open(page, demo);
+  await expect(page.locator('.ip-node', { hasText: 'Play app signing' })).toBeInViewport();
+  // Milestones is active and Claude's, and no session, subagent or task is on it. Its stored status stays active.
+  const milestones = page.locator('.ip-node', { hasText: 'Milestones' });
+  await expect(milestones).toHaveClass(/\bst-active\b.*\bpaused\b/);
+  const marker = milestones.locator('.ip-marker');
+  await expect(marker).toHaveAttribute('title', 'Nobody is on this. Last change 4 d ago');
+  await expect(marker).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  await expect(marker).toHaveCSS('border-top-color', 'rgb(0, 113, 227)');
+  // The session's focus keeps its step and every step above it unpaused, with a filled marker and no such tooltip.
+  await expect(page.locator('.ip-node.paused')).toHaveCount(1);
+  for (const title of ['Road to market', '2 Android signing', 'Play app signing']) {
+    const card = page.locator('.ip-node', { hasText: title });
+    await expect(card, title).toHaveClass(/\bst-active\b/);
+    await expect(card.locator('.ip-marker'), title).not.toHaveAttribute('title', /.*/);
+    await expect(card.locator('.ip-marker'), title).toHaveCSS('background-color', 'rgb(0, 113, 227)');
+  }
+  // The needs-you step has waited four days, and says so inside its one YOU tag.
+  await expect(page.locator('.ip-node .ip-you')).toHaveText('YOU · 4d');
+});
+
 // Records whether the flash on "Run signing tests" is ever cleared from now on.
 const WATCH_FLASH = `(() => {
   const el = [...document.querySelectorAll('.ip-node')].find((n) => n.textContent.includes('Run signing tests'));

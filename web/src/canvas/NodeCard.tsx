@@ -10,8 +10,14 @@ export interface NodeCardData extends Record<string, unknown> {
   doneCount: number;
   progress: { done: number; total: number } | null;
   needsYou: boolean;
+  /** How long a needs-you item has waited (needsYouAge), or null: its YOU tag reads "YOU · 3d". */
+  age: string | null;
   hasChildren: boolean;
   working: boolean;
+  /** An active step nobody is on (LayoutNodeItem.paused): its marker draws hollow, with `lastChange` in its tooltip. */
+  paused: boolean;
+  /** When the step last changed, as relativeTime puts it ("3 d ago"). */
+  lastChange: string;
   /**
    * Its place in the Up next queue, or null: its number in its owner's list (1 is next), and the owning session's slot,
    * or no owner when it is unowned.
@@ -27,10 +33,11 @@ export interface NodeCardData extends Record<string, unknown> {
 }
 
 export function NodeCard({ data }: NodeProps<Node<NodeCardData, 'ipNode'>>) {
-  const { node, folded, doneCount, progress, needsYou, hasChildren, working, queue, resources, flash, selected } = data;
+  const { node, folded, doneCount, progress, needsYou, age, hasChildren, working, paused, lastChange, queue, resources, flash, selected } = data;
   // The type label shows as its glyph only; the word is the chip's tooltip and accessible name.
   const glyph = node.label ? LABEL_GLYPHS[node.label] : undefined;
-  const classes = ['ip-node', `st-${node.status}`, needsYou && 'needs-you', working && 'working', flash && 'flash', selected && 'selected', node.parentId === null && 'root']
+  // A paused step keeps st-active (its stored status); `paused` only changes how its marker draws.
+  const classes = ['ip-node', `st-${node.status}`, needsYou && 'needs-you', working && 'working', paused && 'paused', flash && 'flash', selected && 'selected', node.parentId === null && 'root']
     .filter(Boolean)
     .join(' ');
   return (
@@ -49,7 +56,9 @@ export function NodeCard({ data }: NodeProps<Node<NodeCardData, 'ipNode'>>) {
           data.onSelect(node.id);
         }}
       >
-        <span className={`ip-marker m-${node.status}${node.kind === 'question' ? ' q' : ''}`}>{node.kind === 'question' ? '?' : ''}</span>
+        <span className={`ip-marker m-${node.status}${node.kind === 'question' ? ' q' : ''}`} title={paused ? `Nobody is on this. Last change ${lastChange}` : undefined}>
+          {node.kind === 'question' ? '?' : ''}
+        </span>
         <span className="ip-title">
           {node.title}
           {folded ? ` · ${doneCount} done` : ''}
@@ -84,7 +93,7 @@ export function NodeCard({ data }: NodeProps<Node<NodeCardData, 'ipNode'>>) {
             {queueMark(queue.pos, queue.owner)}
           </span>
         )}
-        {needsYou && <span className="ip-you">YOU</span>}
+        {needsYou && <span className="ip-you">{age ? `YOU · ${age}` : 'YOU'}</span>}
         {node.status === 'blocked' && <span className="ip-blocked">blocked</span>}
         {progress && <span className="ip-progress">{progress.done}/{progress.total}</span>}
         {hasChildren && (

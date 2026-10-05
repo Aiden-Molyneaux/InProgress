@@ -1,5 +1,5 @@
 import type { After, Assignee, NodeInput, NodeKind, NodeLabel, NodeStatus, TreeNode } from '../../core/types';
-import { write, type Ctx } from '../db/tx';
+import { write, type Ctx, type RecordEvent } from '../db/tx';
 import { badRequest, notFound } from '../errors';
 import { definedOnly } from '../util';
 
@@ -132,28 +132,35 @@ export interface NodePatch {
 }
 
 export function updateNode(ctx: Ctx, actor: string, id: number, patch: NodePatch): TreeNode {
-  return write(ctx, actor, (record) => {
-    const before = requireNode(ctx, id);
-    const changes = definedOnly(patch);
-    if (before.parentId === null && (changes.title !== undefined || changes.body !== undefined)) {
-      throw badRequest(`#${id} is the project root; its title and body mirror the project`, 'Rename or re-describe it with update_project.');
-    }
-    if (changes.title !== undefined) changes.title = changes.title.trim();
-    const next = { ...before, ...changes };
-    if (!next.title) throw badRequest('title is empty');
-    if (before.parentId === null && next.kind !== 'goal') throw badRequest(`#${id} is the project root; its kind stays "goal"`);
-    const ts = ctx.now();
-    const completedAt = next.status === 'done' ? (before.status === 'done' ? before.completedAt : ts) : null;
-    ctx.db
-      .prepare('UPDATE nodes SET title = ?, kind = ?, status = ?, assignee = ?, body = ?, outcome = ?, label = ?, updated_at = ?, completed_at = ? WHERE id = ?')
-      .run(next.title, next.kind, next.status, next.assignee, next.body, next.outcome, next.label, ts, completedAt, id);
-    const diff: Record<string, { from: unknown; to: unknown }> = {};
-    for (const key of Object.keys(changes) as (keyof NodePatch)[]) {
-      if (before[key] !== next[key]) diff[key] = { from: before[key], to: next[key] };
-    }
-    record({ projectId: before.projectId, type: 'node.updated', entity: 'node', entityId: id, data: { changes: diff } });
-    return requireNode(ctx, id);
-  });
+  return write(ctx, actor, (record) => patchNode(ctx, record, requireNode(ctx, id), patch));
+}
+
+/**
+ * updateNode's work, inside a write() already open (write() never nests): applies `patch` to `before`, as read in this
+ * write, and records node.updated with the changed fields. setFocus uses it to make a focused step active in its own
+ * write. A patch moves `updatedAt`, which the needs-you age counts from; logs, resources and work items never do.
+ */
+export function patchNode(ctx: Ctx, record: RecordEvent, before: TreeNode, patch: NodePatch): TreeNode {
+  const id = before.id;
+  const changes = definedOnly(patch);
+  if (before.parentId === null && (changes.title !== undefined || changes.body !== undefined)) {
+    throw badRequest(`#${id} is the project root; its title and body mirror the project`, 'Rename or re-describe it with update_project.');
+  }
+  if (changes.title !== undefined) changes.title = changes.title.trim();
+  const next = { ...before, ...changes };
+  if (!next.title) throw badRequest('title is empty');
+  if (before.parentId === null && next.kind !== 'goal') throw badRequest(`#${id} is the project root; its kind stays "goal"`);
+  const ts = ctx.now();
+  const completedAt = next.status === 'done' ? (before.status === 'done' ? before.completedAt : ts) : null;
+  ctx.db
+    .prepare('UPDATE nodes SET title = ?, kind = ?, status = ?, assignee = ?, body = ?, outcome = ?, label = ?, updated_at = ?, completed_at = ? WHERE id = ?')
+    .run(next.title, next.kind, next.status, next.assignee, next.body, next.outcome, next.label, ts, completedAt, id);
+  const diff: Record<string, { from: unknown; to: unknown }> = {};
+  for (const key of Object.keys(changes) as (keyof NodePatch)[]) {
+    if (before[key] !== next[key]) diff[key] = { from: before[key], to: next[key] };
+  }
+  record({ projectId: before.projectId, type: 'node.updated', entity: 'node', entityId: id, data: { changes: diff } });
+  return requireNode(ctx, id);
 }
 
 export function moveNode(ctx: Ctx, actor: string, id: number, input: { parentId: number; after?: After }): TreeNode {

@@ -1,8 +1,8 @@
-import { SCRIBE_AGENT, type HookEvent, type Session, type WorkStatus } from '../core/types';
+import { SCRIBE_AGENT, type HookEvent, type Session, type TreeNode, type WorkStatus } from '../core/types';
 import { write, type Ctx } from './db/tx';
 import { badRequest } from './errors';
 import { renderBriefing, renderStatusAnswer, renderStatusLine, untrackedHint } from './briefing';
-import { findNode, leadingNode, requireNode } from './repo/nodes';
+import { findNode, leadingNode, patchNode, requireNode } from './repo/nodes';
 import { getProjectById, releaseQueue, resolveBinding, resolveProject } from './repo/projects';
 import { assignSlot, findSession, saveSession } from './repo/sessions';
 import { getProjectSnapshot } from './repo/snapshot';
@@ -172,10 +172,16 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
   if (!session || !project || project.status !== 'active') {
     return input.event === 'prompt' && input.mentionsInProgress ? { tracked: false, context: untrackedHint(sessionId) } : { tracked: false };
   }
-  // A session that has just begun tracking gets the full briefing, whichever event brought it in.
-  if (input.event === 'start' || created) return { tracked: true, context: renderBriefing(getProjectSnapshot(ctx, project.id), sessionId) };
+  // Needs-you ages count to the server's clock (ctx.now), never the wall clock behind it.
+  // A session that has just begun tracking gets the full briefing, whichever event brought it in. Every one but a
+  // compaction's is fresh, and asks about old needs-you items: a session first tracked by a prompt (its start was missed)
+  // and a start with a missing or unknown source count as new.
+  if (input.event === 'start' || created) {
+    const checkOld = !(input.event === 'start' && input.source === 'compact');
+    return { tracked: true, context: renderBriefing(getProjectSnapshot(ctx, project.id), sessionId, Date.parse(ctx.now()), { checkOld }) };
+  }
   if (input.event === 'prompt' && !input.notice) {
-    if (input.asksStatus) return { tracked: true, context: renderStatusAnswer(getProjectSnapshot(ctx, project.id), sessionId) };
+    if (input.asksStatus) return { tracked: true, context: renderStatusAnswer(getProjectSnapshot(ctx, project.id), sessionId, Date.parse(ctx.now())) };
     if (session.promptsSinceUpdate >= 2) return { tracked: true, context: renderStatusLine(getProjectSnapshot(ctx, project.id), session) };
   }
   return { tracked: true };
@@ -202,9 +208,10 @@ export function enrollSession(ctx: Ctx, actor: string, sessionId: string, projec
     }
     record({ projectId: project.id, type: 'session.updated', entity: 'session', entityId: sessionId, data: { changed: ['projectId'], state: next.state } });
   });
-  // Re-read after commit: write() resets prompts_since_update for scribe actors after fn() runs.
+  // Re-read after commit: write() resets prompts_since_update for scribe actors after fn() runs. An enroll's briefing is
+  // fresh, so it asks about old needs-you items.
   const session = findSession(ctx, sessionId)!;
-  return { session, briefing: renderBriefing(getProjectSnapshot(ctx, session.projectId!), sessionId) };
+  return { session, briefing: renderBriefing(getProjectSnapshot(ctx, session.projectId!), sessionId, Date.parse(ctx.now()), { checkOld: true }) };
 }
 
 export function setFocus(ctx: Ctx, actor: string, sessionId: string, nodeId: number | null): Session {
@@ -212,12 +219,17 @@ export function setFocus(ctx: Ctx, actor: string, sessionId: string, nodeId: num
     const existing = findSession(ctx, sessionId);
     if (!existing) throw badRequest(`Session ${sessionId} is not tracked`, 'Use enroll_session first.');
     let projectId = existing.projectId;
+    let node: TreeNode | undefined;
     if (nodeId !== null) {
-      const node = requireNode(ctx, nodeId);
+      node = requireNode(ctx, nodeId);
       if (projectId === null) projectId = node.projectId;
       else if (node.projectId !== projectId) throw badRequest(`#${nodeId} is not in this session's project`, 'Use enroll_session to move the session to another project first.');
     }
     if (projectId === null) throw badRequest(`Session ${sessionId} is not tracked`, 'Use enroll_session first.');
+    // Focus on a todo step of Claude's makes it active, in this write and under this actor. Any other status, or a step
+    // assigned to Aiden, stays as it is. Recorded before session.updated, so the activity strip's latest line still
+    // reads "<session> is on #id".
+    if (node && node.status === 'todo' && node.assignee === 'claude') patchNode(ctx, record, node, { status: 'active' });
     const next: Session = { ...existing, projectId, focusNodeId: nodeId, lastSeenAt: ctx.now() };
     // Being heard from again can bring a stale session back.
     placeSlot(ctx, existing, next);
