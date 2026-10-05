@@ -1038,7 +1038,9 @@ async function subagent(api: APIRequestContext, s: Seeded, agentId: string, desc
   await hook(api, s.session, { event: 'agent-launched', toolUseId, agentId, model });
 }
 
-const setQueue = (api: APIRequestContext, s: Seeded, nodes: number[]) => write(api, s.session, 'post', `/api/projects/${s.slug}/queue`, { nodes });
+/** A set_queue write as the scribe makes it: `session`'s own order (a `queue:` line), or without it the unowned order. */
+const setQueue = (api: APIRequestContext, s: Seeded, nodes: number[], session?: string) =>
+  write(api, s.session, 'post', `/api/projects/${s.slug}/queue`, { nodes, ...(session ? { session } : {}) });
 
 const boxOf = async (l: Locator) => (await l.boundingBox())!;
 
@@ -1180,11 +1182,14 @@ test.describe('Live work', () => {
     for (const [i, title] of ['Queued first', '4 Build to GitHub', long].entries()) await expect(page.locator('.ip-node', { hasText: title }).locator('.ip-queue')).toHaveText('①②③'[i]);
     await expect(page.locator('.ip-node', { hasText: 'Play app signing' }).locator('.ip-queue')).toHaveCount(0);
     const upNext = page.locator('.ip-upnext');
-    await expect(upNext).toHaveText(`Up next: ① #${order[0]} Queued first · ② #${order[1]} 4 Build to GitHub · ③ #${order[2]} ${long}`);
+    // Unowned steps: the heading, then one neutral "later" line.
+    await expect(upNext.locator('.ip-upnext-head')).toHaveText('Up next');
+    const laterLine = upNext.locator('.ip-upnext-line');
+    await expect(laterLine).toHaveText(`later ① #${order[0]} Queued first · ② #${order[1]} 4 Build to GitHub · ③ #${order[2]} ${long}`);
     // One line, cut short at the window's edge.
-    expect((await boxOf(upNext)).height, 'one line').toBeLessThan(30);
-    await expect(upNext).toHaveCSS('text-overflow', 'ellipsis');
-    expect(await page.evaluate<boolean>(`(() => { const l = document.querySelector('.ip-upnext'); return l.scrollWidth > l.clientWidth; })()`), 'cut short').toBe(true);
+    expect((await boxOf(laterLine)).height, 'one line').toBeLessThan(30);
+    await expect(laterLine).toHaveCSS('text-overflow', 'ellipsis');
+    expect(await page.evaluate<boolean>(`(() => { const l = document.querySelector('.ip-upnext-line'); return l.scrollWidth > l.clientWidth; })()`), 'cut short').toBe(true);
     const build = page.locator('.ip-node', { hasText: '4 Build to GitHub' });
     await expect(build).not.toBeInViewport();
     await upNext.getByRole('button', { name: /4 Build to GitHub/ }).click();
@@ -1193,6 +1198,68 @@ test.describe('Live work', () => {
     await setQueue(api, fresh, []);
     await expect(upNext).toHaveCount(0);
     await expect(page.locator('.ip-queue')).toHaveCount(0);
+  });
+
+  test("two sessions keep their own Up next order, in their letters and hues, and an ended session's step moves to later", async ({ page, api, fresh }) => {
+    const second = `e2e-${randomUUID()}`;
+    await write(api, second, 'post', `/api/sessions/${second}/enroll`, { project: fresh.slug, title: 'Second session' });
+    await write(api, second, 'post', `/api/sessions/${second}/focus`, { nodeId: fresh.ids['5 Store listing'] });
+    const b = { ...fresh, session: second };
+    const id = (title: string) => fresh.ids[title];
+    await setQueue(api, fresh, [id('3 RevenueCat'), id('4 Build to GitHub')], fresh.session);
+    await setQueue(api, b, [id('6 Beta')], second);
+    await open(page, fresh);
+    const upNext = page.locator('.ip-upnext');
+    const lines = upNext.locator('.ip-upnext-line');
+    const marker = (title: string) => page.locator('.ip-node', { hasText: title }).locator('.ip-queue');
+    await expect(upNext.locator('.ip-upnext-head')).toHaveText('Up next');
+    await expect(lines).toHaveText([
+      `A ① #${id('3 RevenueCat')} 3 RevenueCat · ② #${id('4 Build to GitHub')} 4 Build to GitHub`,
+      `B ① #${id('6 Beta')} 6 Beta`,
+    ]);
+    await expect(marker('3 RevenueCat')).toHaveText('A①');
+    await expect(marker('4 Build to GitHub')).toHaveText('A②');
+    await expect(marker('6 Beta')).toHaveText('B①');
+    // Each line's letter and each marker wear the session's hue: A session clay, B its chip's hue.
+    const hues = () => page.evaluate<Record<string, string | null>>(`(() => {
+      const find = (sel, text) => [...document.querySelectorAll(sel)].find((n) => n.textContent.includes(text));
+      const color = (n) => (n ? getComputedStyle(n).color : null);
+      const lead = (text) => color([...document.querySelectorAll('.ip-upnext-line .ip-upnext-lead')].find((n) => n.textContent === text));
+      const chipB = find('.ip-chip-s', 'Second session');
+      return {
+        chipB: chipB ? getComputedStyle(chipB).backgroundColor : null,
+        head: color(document.querySelector('.ip-upnext-head')),
+        leadA: lead('A'), leadB: lead('B'), leadLater: lead('later'),
+        markerA: color(find('.ip-node', '3 RevenueCat').querySelector('.ip-queue')),
+        markerB: color(find('.ip-node', '6 Beta').querySelector('.ip-queue')),
+      };
+    })()`);
+    let seen = await hues();
+    expect(seen.leadA).toBe('rgb(217, 119, 87)');
+    expect(seen.markerA).toBe(seen.leadA);
+    expect(seen.leadB).toBe(seen.chipB);
+    expect(seen.markerB).toBe(seen.chipB);
+    expect(seen.leadB).not.toBe(seen.leadA);
+    // A second queue: for A replaces A's order only.
+    await setQueue(api, fresh, [id('7 Launch')], fresh.session);
+    await expect(lines).toHaveText([`A ① #${id('7 Launch')} 7 Launch`, `B ① #${id('6 Beta')} 6 Beta`]);
+    await expect(marker('7 Launch')).toHaveText('A①');
+    await expect(marker('3 RevenueCat')).toHaveCount(0);
+    // B ends: its step turns unowned, on a neutral later line, with a bare numeral in the neutral accent.
+    await hook(api, second, { event: 'end' });
+    await expect(lines).toHaveText([`A ① #${id('7 Launch')} 7 Launch`, `later ① #${id('6 Beta')} 6 Beta`]);
+    await expect(marker('6 Beta')).toHaveText('①');
+    seen = await hues();
+    expect(seen.leadLater).toBe(seen.head);
+    expect(seen.markerB).toBe('rgb(0, 113, 227)');
+    // Each step still jumps to its row: pan it out of view first.
+    const beta = page.locator('.ip-node', { hasText: '6 Beta' });
+    const pane = (await page.locator('.react-flow__pane').boundingBox())!;
+    await page.mouse.move(pane.x + pane.width / 2, pane.y + pane.height / 2);
+    await page.mouse.wheel(0, 3000);
+    await expect(beta).not.toBeInViewport();
+    await lines.nth(1).getByRole('button', { name: /6 Beta/ }).click();
+    await expect(beta).toBeInViewport();
   });
 
   test('a session chip counts only live subagents, and lists them on hover and on keyboard focus', async ({ page, api, fresh }) => {

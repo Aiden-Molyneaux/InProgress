@@ -244,12 +244,33 @@ describe('live work routes', () => {
     const { app, ids: [tabs, guide] } = await planned();
     const res = await app.inject({ method: 'POST', url: '/api/projects/ingame/queue', headers: auth, payload: { nodes: [guide, tabs] } });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({ slug: 'ingame', queue: [guide, tabs] });
-    expect((await app.inject({ url: '/api/projects/ingame' })).json().project.queue).toEqual([guide, tabs]);
+    const unowned = [{ nodeId: guide, sessionId: null }, { nodeId: tabs, sessionId: null }];
+    expect(res.json()).toMatchObject({ slug: 'ingame', queue: unowned });
+    expect((await app.inject({ url: '/api/projects/ingame' })).json().project.queue).toEqual(unowned);
     const lines = (await app.inject({ url: '/api/projects/ingame/outline' })).body.split('\n');
-    expect(lines.slice(0, 2)).toEqual(['Project InGame (slug ingame)', `Up next: #${guide} → #${tabs}`]);
+    expect(lines.slice(0, 2)).toEqual(['Project InGame (slug ingame)', `Up next: later: #${guide} → #${tabs}`]);
+    // A session's own steps lead, under its letter.
+    await app.inject({ method: 'POST', url: '/api/projects/ingame/queue', headers: auth, payload: { nodes: [tabs], session: 's1' } });
+    expect((await app.inject({ url: '/api/projects/ingame/outline' })).body.split('\n')[1]).toBe(`Up next: A: #${tabs} | later: #${guide}`);
+    await app.inject({ method: 'POST', url: '/api/projects/ingame/queue', headers: auth, payload: { nodes: [], session: 's1' } });
     await app.inject({ method: 'POST', url: '/api/projects/ingame/queue', headers: auth, payload: { nodes: [] } });
     expect((await app.inject({ url: '/api/projects/ingame/outline' })).body).not.toContain('Up next');
+  });
+
+  it("writes a session's own entries with session, and the unowned ones without it or with unowned: true", async () => {
+    const { app, ids: [tabs, guide, polish] } = await planned();
+    const post = (payload: Record<string, unknown>) => app.inject({ method: 'POST', url: '/api/projects/ingame/queue', headers: auth, payload });
+    await post({ nodes: [tabs], session: 's1' });
+    await post({ nodes: [polish], session: 's1', unowned: true });
+    expect((await post({ nodes: [guide, polish], unowned: true })).json().queue).toEqual([
+      { nodeId: tabs, sessionId: 's1' }, { nodeId: guide, sessionId: null }, { nodeId: polish, sessionId: null },
+    ]);
+    const stranger = await post({ nodes: [tabs], session: 'nobody' });
+    expect(stranger.statusCode).toBe(400);
+    expect(stranger.json()).toEqual({ error: 'Session nobody is not tracked in project ingame', hint: expect.stringContaining('enroll_session') });
+    expect((await post({ nodes: [tabs], session: '' })).statusCode).toBe(400);
+    expect((await post({ nodes: [tabs], session: 'x'.repeat(101) })).statusCode).toBe(400);
+    expect((await post({ nodes: [tabs], unowned: 'yes' })).statusCode).toBe(400);
   });
 
   it('refuses a queue with a node of another project, an unknown project, or no token', async () => {

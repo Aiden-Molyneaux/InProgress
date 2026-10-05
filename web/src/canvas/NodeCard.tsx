@@ -1,6 +1,8 @@
+import type { CSSProperties } from 'react';
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
-import { LABEL_GLYPHS, type ResourceMeta, type TreeNode } from '../../../src/core/types';
-import { circled } from '../live';
+import { LABEL_GLYPHS, ownerTag, type ResourceMeta, type TreeNode } from '../../../src/core/types';
+import { familyVar } from '../family';
+import { queueMark } from '../live';
 
 export interface NodeCardData extends Record<string, unknown> {
   node: TreeNode;
@@ -10,8 +12,11 @@ export interface NodeCardData extends Record<string, unknown> {
   needsYou: boolean;
   hasChildren: boolean;
   working: boolean;
-  /** Its place in the Up next queue (1 is next), or null. */
-  queuePos: number | null;
+  /**
+   * Its place in the Up next queue, or null: its number in its owner's list (1 is next), and the owning session's slot,
+   * or no owner when it is unowned.
+   */
+  queue: { pos: number; owner: { slot: number | null } | null } | null;
   resources: ResourceMeta[];
   flash: boolean;
   selected: boolean;
@@ -22,7 +27,7 @@ export interface NodeCardData extends Record<string, unknown> {
 }
 
 export function NodeCard({ data }: NodeProps<Node<NodeCardData, 'ipNode'>>) {
-  const { node, folded, doneCount, progress, needsYou, hasChildren, working, queuePos, resources, flash, selected } = data;
+  const { node, folded, doneCount, progress, needsYou, hasChildren, working, queue, resources, flash, selected } = data;
   // The type label shows as its glyph only; the word is the chip's tooltip and accessible name.
   const glyph = node.label ? LABEL_GLYPHS[node.label] : undefined;
   const classes = ['ip-node', `st-${node.status}`, needsYou && 'needs-you', working && 'working', flash && 'flash', selected && 'selected', node.parentId === null && 'root']
@@ -69,9 +74,14 @@ export function NodeCard({ data }: NodeProps<Node<NodeCardData, 'ipNode'>>) {
             ▤ {resources.length}
           </button>
         )}
-        {queuePos !== null && (
-          <span className="ip-queue" title={`Up next: ${queuePos}`}>
-            {circled(queuePos)}
+        {/* An owned place wears its session's letter and hue (A①); an unowned one stays a neutral numeral (①). */}
+        {queue && (
+          <span
+            className={`ip-queue${queue.owner ? ' owned' : ''}`}
+            style={queue.owner ? ({ '--fam': familyVar(queue.owner.slot) } as CSSProperties) : undefined}
+            title={queue.owner ? `Up next for ${ownerTag(queue.owner.slot)}: ${queue.pos}` : `Up next, later: ${queue.pos}`}
+          >
+            {queueMark(queue.pos, queue.owner)}
           </span>
         )}
         {needsYou && <span className="ip-you">YOU</span>}

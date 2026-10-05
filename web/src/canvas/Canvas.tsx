@@ -187,7 +187,8 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
         needsYou: item.needsYou,
         hasChildren: item.hasChildren,
         working: item.working,
-        queuePos: item.queuePos,
+        // An owned place takes its session's slot, for the letter and hue it wears.
+        queue: item.queue && { pos: item.queue.pos, owner: item.queue.sessionId === null ? null : { slot: sessionsById.get(item.queue.sessionId)?.slot ?? null } },
         resources: item.resourceIds.map((id) => resourcesById.get(id)).filter((r): r is NonNullable<typeof r> => !!r),
         flash: flash === item.nodeId,
         selected: selectedNode === item.nodeId,

@@ -3,7 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import {
   ASSIGNEES, NODE_KINDS, NODE_LABELS, NODE_STATUSES, RESOURCE_KINDS, glyphTitle, unknownLabel,
-  type Binding, type LogEntry, type NodeDetail, type NodeInput, type Project, type ProjectSummary, type Resource, type SearchResult, type TreeNode,
+  type Binding, type LogEntry, type NodeDetail, type NodeInput, type Project, type ProjectSnapshot, type ProjectSummary, type Resource, type SearchResult, type TreeNode,
 } from '../core/types';
 import { ApiClientError, type Client } from '../lib/client';
 import { VERSION } from '../lib/version';
@@ -89,7 +89,7 @@ export function createMcpServer(client: Client, o: McpOptions = {}): McpServer {
       .join('\n');
   });
 
-  tool('get_outline', 'Outline of a project tree with #ids, statuses, assignees and resource ids, and the queue as "Up next: #a → #b". Finished branches are folded unless full is true.', { project, full: z.boolean().optional() },
+  tool('get_outline', 'Outline of a project tree with #ids, statuses, assignees and resource ids, and the queue as "Up next: A: #a → #b | later: #c": each live session\'s own order under its letter, then the unowned order. Finished branches are folded unless full is true.', { project, full: z.boolean().optional() },
     async (a: { project: string; full?: boolean }) => client.text(`/api/projects/${enc(a.project)}/outline${a.full ? '?full=1' : ''}`));
 
   tool('get_node', 'One node with its parent, children, resources and recent log.', { id },
@@ -205,10 +205,18 @@ export function createMcpServer(client: Client, o: McpOptions = {}): McpServer {
       return a.node === null ? 'Focus cleared.' : `Focus → #${a.node}.`;
     });
 
-  tool('set_queue', 'Set the order Claude plans to work in: #ids of steps in this project, next first. Replaces the whole queue; an empty list clears it. Done and dropped steps leave the queue on their own.',
-    { project, nodes: z.array(id).max(200).describe('Step #ids in the planned order, next first'), session },
-    async (a: { project: string; nodes: number[]; session?: string }) =>
-      formatQueue(await client.post<Project>(`/api/projects/${enc(a.project)}/queue`, { nodes: a.nodes }, { actor: actor(a.session) })));
+  tool('set_queue', 'Set the order Claude plans to work in: #ids of steps in this project, next first. With session, it replaces this session\'s own entries (a "queue:" line); with unowned: true, the unowned ones (a "later:" line). Other entries stay, but a step is in the queue once, so listing it takes it from wherever it was. An empty list clears only those entries. Done and dropped steps leave the queue on their own.',
+    {
+      project,
+      nodes: z.array(id).max(200).describe('Step #ids in the planned order, next first'),
+      session: z.string().optional().describe('The Claude session id from the brief. Always pass it: without unowned, the steps become this session\'s own order'),
+      unowned: z.boolean().optional().describe('true for a "later:" line: sets the unowned order, steps no session has taken on'),
+    },
+    async (a: { project: string; nodes: number[]; session?: string; unowned?: boolean }) => {
+      const p = await client.post<Project>(`/api/projects/${enc(a.project)}/queue`, { nodes: a.nodes, session: a.session, unowned: a.unowned }, { actor: actor(a.session) });
+      // The route returns the project alone: sessions, slots and focus come with the snapshot.
+      return formatQueue(await client.get<ProjectSnapshot>(`/api/projects/${enc(p.slug)}`));
+    });
 
   return server;
 }

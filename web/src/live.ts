@@ -1,4 +1,4 @@
-import { agentTag, sessionDisplayTitle, type PastSession, type Session, type SubagentInfo, type TrailAgent, type WorkItem, type WorkStatus } from '../../src/core/types';
+import { agentTag, ownerTag, sessionDisplayTitle, type PastSession, type Session, type SubagentInfo, type TrailAgent, type WorkItem, type WorkStatus } from '../../src/core/types';
 import { relativeTime } from './time';
 
 /** A working task's checklist mark. */
@@ -15,6 +15,14 @@ export function circled(n: number): string {
   if (n >= 21 && n <= 35) return String.fromCodePoint(0x3251 + n - 21);
   if (n >= 36 && n <= 50) return String.fromCodePoint(0x32b1 + n - 36);
   return `(${n})`;
+}
+
+/**
+ * A queued step's marker on its card: its number in its owner's list, led by the owner's letter (`A①`, `?①` while the
+ * session's slot is empty), or a bare numeral (`①`) when the step is unowned.
+ */
+export function queueMark(pos: number, owner: { slot: number | null } | null): string {
+  return owner ? `${ownerTag(owner.slot)}${circled(pos)}` : circled(pos);
 }
 
 /** How long something has been going: "<1 min", "12 min", "2 h 5 min". */

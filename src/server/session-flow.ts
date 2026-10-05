@@ -3,7 +3,7 @@ import { write, type Ctx } from './db/tx';
 import { badRequest } from './errors';
 import { renderBriefing, renderStatusAnswer, renderStatusLine, untrackedHint } from './briefing';
 import { findNode, leadingNode, requireNode } from './repo/nodes';
-import { getProjectById, resolveBinding, resolveProject } from './repo/projects';
+import { getProjectById, releaseQueue, resolveBinding, resolveProject } from './repo/projects';
 import { assignSlot, findSession, saveSession } from './repo/sessions';
 import { getProjectSnapshot } from './repo/snapshot';
 import { endSubagents, launchSubagent, pruneSubagents, recordDispatch, startSubagent, stopSubagent } from './repo/subagents';
@@ -137,6 +137,9 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
         next.state = 'ended';
         next.endedAt = now;
         endSubagents(ctx, sessionId, now);
+        // Its Up next entries turn unowned. Recorded before session.updated (after the switch), so the activity strip
+        // still reads "<session> ended".
+        releaseQueue(ctx, record, sessionId);
         break;
     }
     // Only an ended session has an end time; this also covers one revived after expiry.
@@ -181,6 +184,8 @@ export function enrollSession(ctx: Ctx, actor: string, sessionId: string, projec
     if (before.projectId !== project.id) next.focusNodeId = null;
     // Never revives an ended session (it keeps its state), so only a repoint gives an ended one a slot.
     placeSlot(ctx, before, next);
+    // Its Up next entries stay behind in the old project, unowned: that project no longer lists the session.
+    if (before.projectId !== null && before.projectId !== project.id) releaseQueue(ctx, record, sessionId);
     saveSession(ctx, next);
     // Tell the old project's viewers too, so they drop this session's badge.
     if (before.projectId !== null && before.projectId !== project.id) {

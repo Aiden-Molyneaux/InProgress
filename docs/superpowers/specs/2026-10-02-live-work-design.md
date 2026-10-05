@@ -66,7 +66,8 @@ exactly like mirrored tasks.
 - `session_subagents` gains: `description`, `model`, `node_id` (ON DELETE SET NULL), `tool_use_id`, `ended_at`.
 - `subagent_dispatches`: `session_id` · `tool_use_id` · `agent_type` · `description` · `model` · `node_id` ·
   `created_at` (unpaired dispatches older than 10 minutes are dropped).
-- `projects.queue`: JSON array of node ids, default `[]`.
+- `projects.queue`: JSON `[{ "node": id, "session": id | null }]`, each entry owned by a session or by nobody, default
+  `[]`; a bare node id from before reads as unowned (review actions §6).
 - Events: `work.updated` (entity `node`, data `{ nodeId }`) once per change, with no per-task history.
   `session.updated` with `changed: ['subagents']` as now. `project.updated` for the queue.
 

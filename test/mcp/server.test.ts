@@ -86,17 +86,43 @@ describe('scribe MCP tools', () => {
     expect(tool('update_resource').description).toMatch(/does not re-read the file/);
     expect(tool('set_queue').description).toMatch(/order .* plans to work in/);
     expect(tool('set_queue').description).toMatch(/Done and dropped steps leave the queue on their own/);
-    expect(tool('get_outline').description).toMatch(/Up next/);
+    expect(tool('set_queue').description).toMatch(/this session's own entries/);
+    expect(tool('set_queue').description).not.toMatch(/whole queue/);
+    expect(param('set_queue', 'unowned')).toMatch(/later:/);
+    expect(tool('get_outline').description).toMatch(/Up next: A: #a → #b \| later: #c/);
   });
 
-  it('sets the queue, which get_outline prints as Up next', async () => {
+  it("sets a session's own order and the unowned one, which get_outline prints as Up next", async () => {
     const created = await call('create_project', { name: 'Tabs', description: 'Project tabs', session: 'q1' });
     const rootId = ids(created.text)[0];
-    const [tabs, guide] = lineIds((await call('add_nodes', { parent: rootId, nodes: [{ title: 'Tab strip' }, { title: 'Guide' }], session: 'q1' })).text);
+    const [tabs, guide, polish] = lineIds((await call('add_nodes', { parent: rootId, nodes: [{ title: 'Tab strip' }, { title: 'Guide' }, { title: 'Polish' }], session: 'q1' })).text);
     await call('enroll_session', { session: 'q1', project: 'tabs' });
-    expect(await call('set_queue', { project: 'tabs', nodes: [guide, tabs], session: 'q1' })).toEqual({ text: `Up next in tabs: #${guide} → #${tabs}.`, isError: false });
-    expect((await call('get_outline', { project: 'tabs' })).text.split('\n')[1]).toBe(`Up next: #${guide} → #${tabs}`);
-    expect(await call('set_queue', { project: 'tabs', nodes: [], session: 'q1' })).toEqual({ text: 'Cleared the queue of tabs.', isError: false });
+    expect(await call('set_queue', { project: 'tabs', nodes: [guide, tabs], session: 'q1' })).toEqual({ text: `Up next: A: #${guide} → #${tabs}`, isError: false });
+    expect(await call('set_queue', { project: 'tabs', nodes: [polish], session: 'q1', unowned: true })).toEqual({ text: `Up next: A: #${guide} → #${tabs} | later: #${polish}`, isError: false });
+    expect((await call('get_outline', { project: 'tabs' })).text.split('\n')[1]).toBe(`Up next: A: #${guide} → #${tabs} | later: #${polish}`);
+    // An empty queue: clears only this session's entries.
+    expect(await call('set_queue', { project: 'tabs', nodes: [], session: 'q1' })).toEqual({ text: `Up next: later: #${polish}`, isError: false });
+    expect(await call('set_queue', { project: 'tabs', nodes: [], session: 'q1', unowned: true })).toEqual({ text: 'Up next in tabs is empty.', isError: false });
+  });
+
+  it("says nothing is up next, not that the queue is empty, when only the session's own focus is queued", async () => {
+    const created = await call('create_project', { name: 'Focused', description: 'x', session: 'q2' });
+    const rootId = ids(created.text)[0];
+    const [step] = lineIds((await call('add_nodes', { parent: rootId, nodes: [{ title: 'The one step' }], session: 'q2' })).text);
+    await call('enroll_session', { session: 'q2', project: 'focused' });
+    await call('set_focus', { session: 'q2', node: step });
+    expect(await call('set_queue', { project: 'focused', nodes: [step], session: 'q2' })).toEqual({
+      text: "Nothing is up next in focused: a session's own focus is not listed as next.",
+      isError: false,
+    });
+  });
+
+  it('refuses a queue for a session not tracked in the project, saying how to fix it', async () => {
+    const created = await call('create_project', { name: 'Unenrolled', description: 'x' });
+    const rootId = ids(created.text)[0];
+    const result = await call('set_queue', { project: 'unenrolled', nodes: [rootId], session: 'q9' });
+    expect(result.isError).toBe(true);
+    expect(result.text).toMatch(/^Session q9 is not tracked in project unenrolled\. .*enroll_session/);
   });
 
   it('returns the specific error when a queue is refused', async () => {

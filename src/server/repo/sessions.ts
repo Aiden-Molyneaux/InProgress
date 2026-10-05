@@ -1,5 +1,6 @@
 import { STALE_SESSION_MS, TRAIL_MS, type PastSession, type Session, type SessionState } from '../../core/types';
 import { write, type Ctx } from '../db/tx';
+import { releaseQueue } from './projects';
 import { endSubagents, listSubagents } from './subagents';
 
 interface SessionRow {
@@ -81,6 +82,9 @@ export function expireStaleSessions(ctx: Ctx): void {
   if (!stale.length) return;
   write(ctx, 'system', (record) => {
     const now = ctx.now();
+    // Their Up next entries turn unowned all at once, keeping their stored order among them (one release each would
+    // stack them in reverse). Recorded before the sessions' events, so the activity strip says they ended.
+    releaseQueue(ctx, record, stale.map((s) => s.id));
     for (const { id, project_id, last_seen_at } of stale) {
       ctx.db.prepare("UPDATE sessions SET state = 'ended', ended_at = ? WHERE id = ?").run(now, id);
       // Its running subagents stopped when the session was last heard from, not 12 hours later: the trail says how long

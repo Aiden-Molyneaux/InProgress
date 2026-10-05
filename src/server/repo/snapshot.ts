@@ -3,7 +3,7 @@ import type { Ctx } from '../db/tx';
 import { lastProjectEvent, maxEventId } from './events';
 import { listLogs } from './logs';
 import { listNodes, requireNode } from './nodes';
-import { resolveProject } from './projects';
+import { getProjectById, resolveProject } from './projects';
 import { listNodeResources, listResourceMeta } from './resources';
 import { listPastSessions, listProjectSessions } from './sessions';
 import { listTrailAgents } from './subagents';
@@ -15,9 +15,11 @@ import { listWorkItems } from './work';
  * another write().
  */
 export function getProjectSnapshot(ctx: Ctx, ref: string | number): ProjectSnapshot {
-  const project = resolveProject(ctx, ref);
-  // First: stale sessions expire here, so the trail reads below find them ended.
-  const sessions = listProjectSessions(ctx, project.id);
+  const { id } = resolveProject(ctx, ref);
+  // First: stale sessions expire here, releasing their Up next entries in the same write, so the project row and the
+  // trail reads below find them ended.
+  const sessions = listProjectSessions(ctx, id);
+  const project = getProjectById(ctx, id)!;
   return {
     project,
     nodes: listNodes(ctx, project.id),

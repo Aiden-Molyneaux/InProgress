@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { formatUpNext, queueView } from '../../core/layout';
 import { buildIndex, renderOutline } from '../../core/tree';
 import type { BuildInfo } from '../../lib/version';
 import type { Ctx } from '../db/tx';
@@ -18,7 +19,9 @@ export function registerReadRoutes(app: FastifyInstance, ctx: Ctx, version: stri
     const resourcesByNode = new Map<number, number[]>();
     for (const r of snap.resources) resourcesByNode.set(r.nodeId, [...(resourcesByNode.get(r.nodeId) ?? []), r.id]);
     const header = [`Project ${snap.project.name} (slug ${snap.project.slug}${snap.project.status === 'archived' ? ', archived' : ''})`];
-    if (snap.project.queue.length) header.push(`Up next: ${snap.project.queue.map((id) => `#${id}`).join(' → ')}`);
+    // `Up next: A: #82 → #78 | B: #90 | later: #79`: each live session's own order by its letter, then the unowned one.
+    const upNext = formatUpNext(queueView(snap.project.queue, snap.nodes, snap.sessions), snap.sessions);
+    if (upNext) header.push(upNext);
     // The scribe starts with get_outline, so this is where it reads the project's own instructions.
     const playbook = snap.project.playbook.trim();
     if (playbook) header.push('Playbook:', ...playbook.split(/\r?\n/).map((l) => `  ${l}`));

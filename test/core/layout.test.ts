@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { BADGE_ROW, ENDED_AGENT_MS, INDENT, ROW, WORK_GAP, WORK_ROW, eventTarget, findFrontier, layoutOutline, type LayoutItem, type LayoutResult } from '../../src/core/layout';
-import type { EventRow, PastSession, ResourceMeta, Session, SubagentInfo, TrailAgent, TreeNode, WorkItem, WorkStatus } from '../../src/core/types';
+import { BADGE_ROW, ENDED_AGENT_MS, INDENT, ROW, WORK_GAP, WORK_ROW, eventTarget, findFrontier, formatUpNext, layoutOutline, queueView, type LayoutItem, type LayoutResult } from '../../src/core/layout';
+import type { EventRow, PastSession, QueueEntry, ResourceMeta, Session, SubagentInfo, TrailAgent, TreeNode, WorkItem, WorkStatus } from '../../src/core/types';
 
 let nextId = 1;
 function n(parentId: number | null, title: string, extra: Partial<TreeNode> = {}): TreeNode {
@@ -10,6 +10,9 @@ function n(parentId: number | null, title: string, extra: Partial<TreeNode> = {}
 function session(id: string, focusNodeId: number | null, state: Session['state'], lastSeenAt = '2026-09-27T01:00:00Z'): Session {
   return { id, projectId: 1, title: id, cwd: null, branch: null, transcriptPath: null, state, focusNodeId, promptsSinceUpdate: 0, startedAt: 't', lastSeenAt, endedAt: null, slot: 0, subagents: [] };
 }
+/** Unowned queue entries. */
+const later = (...ids: number[]): QueueEntry[] => ids.map((nodeId) => ({ nodeId, sessionId: null }));
+const entry = (nodeId: number, sessionId: string | null = null): QueueEntry => ({ nodeId, sessionId });
 const resource = (id: number, nodeId: number): ResourceMeta => ({ id, projectId: 1, nodeId, kind: 'doc', title: `R${id}`, path: null, url: null, contentLength: 1, sessionId: null, createdAt: 't', updatedAt: 't' });
 
 function sample() {
@@ -290,12 +293,17 @@ describe('live work and the fold rules', () => {
     ]);
   });
 
-  it('number queued nodes in queue order', () => {
+  it('number queued nodes in queue order, per owner', () => {
     const t = sample();
-    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [], queue: [t.c.id, t.a1.id, 999, t.c.id], now: T0 });
-    expect(l.nodeItems.get(t.c.id)?.queuePos).toBe(1);
-    expect(l.nodeItems.get(t.a1.id)?.queuePos).toBe(2);
-    expect(l.nodeItems.get(t.b.id)?.queuePos).toBeNull();
+    let l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [], queue: later(t.c.id, t.a1.id, 999, t.c.id), now: T0 });
+    expect(l.nodeItems.get(t.c.id)?.queue).toEqual({ pos: 1, sessionId: null });
+    expect(l.nodeItems.get(t.a1.id)?.queue).toEqual({ pos: 2, sessionId: null });
+    expect(l.nodeItems.get(t.b.id)?.queue).toBeNull();
+    const sessions = [session('s1', t.b.id, 'idle'), session('s2', null, 'idle')];
+    l = layoutOutline({ nodes: t.nodes, resources: [], sessions, queue: [entry(t.c.id, 's1'), entry(t.a1.id, 's1'), entry(t.d.id, 's2'), entry(t.e.id)], now: T0 });
+    expect([t.c, t.a1, t.d, t.e].map((x) => l.nodeItems.get(x.id)?.queue)).toEqual([
+      { pos: 1, sessionId: 's1' }, { pos: 2, sessionId: 's1' }, { pos: 1, sessionId: 's2' }, { pos: 1, sessionId: null },
+    ]);
   });
 });
 
@@ -309,15 +317,25 @@ describe('camera helpers', () => {
     expect(findFrontier(idle, [], layoutOutline({ nodes: idle, resources: [], sessions: [] }))).toBe(t.c.id);
   });
 
+  it("takes the first owned entry when no session works, else the first unowned one, never a session's own focus", () => {
+    const t = sample();
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [] });
+    const idle = [session('s1', t.b.id, 'idle'), session('s2', t.c.id, 'idle')];
+    // s1's focus is left out of its own list; an ended owner's entry reads as unowned, behind every owned one.
+    const queue = [entry(t.e.id, 'gone'), entry(t.b.id, 's1'), entry(t.d.id, 's1'), entry(t.a2.id, 's2')];
+    expect(findFrontier(t.nodes, idle, l, queue)).toBe(t.d.id);
+    expect(findFrontier(t.nodes, idle, l, [entry(t.b.id, 's1'), entry(t.e.id, 'gone'), entry(t.c.id)])).toBe(t.e.id);
+  });
+
   it('takes the head of the queue when no session works, skipping entries that are gone or finished', () => {
     const t = sample();
     const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [] });
     const idle = [session('s1', t.b.id, 'idle')];
-    expect(findFrontier(t.nodes, idle, l, [t.c.id, t.b.id])).toBe(t.c.id);
+    expect(findFrontier(t.nodes, idle, l, later(t.c.id, t.b.id))).toBe(t.c.id);
     // A working session's focus still comes first.
-    expect(findFrontier(t.nodes, [session('s2', t.a2.id, 'working')], l, [t.c.id])).toBe(t.a2.id);
+    expect(findFrontier(t.nodes, [session('s2', t.a2.id, 'working')], l, later(t.c.id))).toBe(t.a2.id);
     const finished = t.nodes.map((x) => (x.id === t.c.id ? { ...x, status: 'done' as const } : x.id === t.d.id ? { ...x, status: 'dropped' as const } : x));
-    expect(findFrontier(finished, idle, l, [999, t.c.id, t.d.id, t.e.id])).toBe(t.e.id);
+    expect(findFrontier(finished, idle, l, later(999, t.c.id, t.d.id, t.e.id))).toBe(t.e.id);
     // With nothing queued: the latest active node, as before.
     expect(findFrontier(t.nodes, idle, l, [])).toBe(t.a1.id);
   });
@@ -344,8 +362,89 @@ describe('queued steps', () => {
     const t = sample();
     const before = layoutOutline({ nodes: t.nodes, resources: [], sessions: [] });
     expect(before.nodeItems.has(t.e.id)).toBe(false);
-    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [], queue: [t.e.id] });
-    expect(l.nodeItems.get(t.e.id)).toMatchObject({ queuePos: 1 });
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [], queue: later(t.e.id) });
+    expect(l.nodeItems.get(t.e.id)).toMatchObject({ queue: { pos: 1, sessionId: null } });
+  });
+
+  it('stay in view whoever owns them', () => {
+    const t = sample();
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [session('s1', t.b.id, 'idle')], queue: [entry(t.d.id, 's1'), entry(t.e.id, 'gone')] });
+    expect(l.nodeItems.get(t.d.id)).toMatchObject({ queue: { pos: 1, sessionId: 's1' } });
+    expect(l.nodeItems.get(t.e.id)).toMatchObject({ queue: { pos: 1, sessionId: null } });
+  });
+});
+
+describe('formatUpNext', () => {
+  /** s1 is A and s2 is B; s3 has no slot yet. */
+  function owners() {
+    const t = sample();
+    const sessions = [session('s1', t.b.id, 'idle'), { ...session('s2', null, 'idle'), slot: 1 }, { ...session('s3', null, 'idle'), slot: null }];
+    return { t, sessions };
+  }
+
+  it('prints each owner by its letter, then later, with bare ids: the outline and set_queue form', () => {
+    const { t, sessions } = owners();
+    const view = queueView([entry(t.c.id, 's1'), entry(t.a1.id, 's1'), entry(t.d.id, 's2'), entry(t.e.id)], t.nodes, sessions);
+    expect(formatUpNext(view, sessions)).toBe(`Up next: A: #${t.c.id} → #${t.a1.id} | B: #${t.d.id} | later: #${t.e.id}`);
+    expect(formatUpNext(queueView(later(t.e.id, t.d.id), t.nodes, sessions), sessions)).toBe(`Up next: later: #${t.e.id} → #${t.d.id}`);
+    expect(formatUpNext(queueView([entry(t.c.id, 's2')], t.nodes, sessions), sessions)).toBe(`Up next: B: #${t.c.id}`);
+  });
+
+  it('prints ? for an owner whose slot is still empty, never an empty letter', () => {
+    const { t, sessions } = owners();
+    const view = queueView([entry(t.c.id, 's3'), entry(t.d.id)], t.nodes, sessions);
+    expect(formatUpNext(view, sessions)).toBe(`Up next: ?: #${t.c.id} | later: #${t.d.id}`);
+    expect(formatUpNext(view, sessions, { sessionId: 's1', nodes: t.nodes })).toBe(`Up next: ?: #${t.c.id} · later: #${t.d.id}`);
+    // The reader's own part leaves the letter out instead.
+    expect(formatUpNext(view, sessions, { sessionId: 's3', nodes: t.nodes })).toBe(`Up next (you): #${t.c.id} C · later: #${t.d.id}`);
+  });
+
+  it("prints nothing when no step is up next, as when the only entry is a session's own focus", () => {
+    const { t, sessions } = owners();
+    expect(formatUpNext(queueView([], t.nodes, sessions), sessions)).toBeUndefined();
+    const focusOnly = queueView([entry(t.b.id, 's1')], t.nodes, sessions);
+    expect(formatUpNext(focusOnly, sessions)).toBeUndefined();
+    expect(formatUpNext(focusOnly, sessions, { sessionId: 's1', nodes: t.nodes })).toBeUndefined();
+  });
+
+  it("puts the reader's own part first, titled and capped at five, then the others with bare ids: the briefing form", () => {
+    const { t, sessions } = owners();
+    const glyphed = t.nodes.map((x) => (x.id === t.c.id ? { ...x, label: 'server' as const } : x));
+    const view = queueView([entry(t.d.id, 's2'), entry(t.c.id, 's1'), entry(t.a1.id, 's1'), entry(t.e.id)], glyphed, sessions);
+    expect(formatUpNext(view, sessions, { sessionId: 's1', nodes: glyphed })).toBe(`Up next (you, A): #${t.c.id} ⚙ C → #${t.a1.id} A1 · B: #${t.d.id} · later: #${t.e.id}`);
+    // With none of its own, the reader's part is left out, and the owners keep their stored order.
+    expect(formatUpNext(view, sessions, { sessionId: 's3', nodes: glyphed })).toBe(`Up next: B: #${t.d.id} · A: #${t.c.id} → #${t.a1.id} · later: #${t.e.id}`);
+    const many = [t.a.id, t.a1.id, t.a2.id, t.c.id, t.d.id, t.e.id, t.root.id];
+    const long = queueView(many.map((id) => entry(id, 's2')), t.nodes, sessions);
+    expect(formatUpNext(long, sessions, { sessionId: 's2', nodes: t.nodes })).toBe(`Up next (you, B): ${['A', 'A1', 'A2', 'C', 'D'].map((title, i) => `#${many[i]} ${title}`).join(' → ')} (+2 more)`);
+  });
+});
+
+describe('queueView', () => {
+  it('lists open steps once, in order, leaving out ids that are gone and steps already finished', () => {
+    const t = sample();
+    const nodes = t.nodes.map((x) => (x.id === t.d.id ? { ...x, status: 'done' as const } : x.id === t.e.id ? { ...x, status: 'dropped' as const } : x));
+    expect(queueView(later(t.c.id, t.a1.id, 999, t.c.id, t.d.id, t.e.id), nodes, [])).toEqual({ bySession: new Map(), unowned: [t.c.id, t.a1.id] });
+  });
+
+  it("splits the entries by owner, owners in stored order, each session's focus left out of its own list", () => {
+    const t = sample();
+    const sessions = [session('s1', t.a1.id, 'working'), session('s2', t.b.id, 'idle'), session('s3', t.e.id, 'idle')];
+    const queue = [entry(t.c.id, 's2'), entry(t.a1.id, 's1'), entry(t.d.id, 's1'), entry(t.b.id, 's2'), entry(t.e.id, 's3'), entry(t.a2.id)];
+    const view = queueView(queue, t.nodes, sessions);
+    // s3 queued only its own focus, so it has no list at all.
+    expect([...view.bySession]).toEqual([['s2', [t.c.id]], ['s1', [t.d.id]]]);
+    expect(view.unowned).toEqual([t.a2.id]);
+    // Another session's focus stays in the list of the session that queued it.
+    expect([...queueView([entry(t.a1.id, 's2')], t.nodes, sessions).bySession]).toEqual([['s2', [t.a1.id]]]);
+  });
+
+  it('reads the entries of a session that has ended, or is not given, as unowned in their stored place', () => {
+    const t = sample();
+    const sessions = [session('s1', null, 'idle'), session('s2', t.c.id, 'ended')];
+    const view = queueView([entry(t.c.id, 's2'), entry(t.a1.id, 's1'), entry(t.d.id, 'gone'), entry(t.e.id)], t.nodes, sessions);
+    expect([...view.bySession]).toEqual([['s1', [t.a1.id]]]);
+    expect(view.unowned).toEqual([t.c.id, t.d.id, t.e.id]);
   });
 });
 

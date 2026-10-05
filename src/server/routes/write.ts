@@ -16,7 +16,10 @@ export function registerWriteRoutes(app: FastifyInstance, ctx: Ctx, requireToken
 
   app.post('/api/projects', guarded, async (req, reply) => reply.code(201).send(createProject(ctx, actorOf(req), createProjectBody.parse(req.body))));
   app.patch('/api/projects/:ref', guarded, async (req) => updateProject(ctx, actorOf(req), ref(req.params), updateProjectBody.parse(req.body)));
-  app.post('/api/projects/:ref/queue', guarded, async (req) => setQueue(ctx, actorOf(req), ref(req.params), queueBody.parse(req.body).nodes));
+  app.post('/api/projects/:ref/queue', guarded, async (req) => {
+    const body = queueBody.parse(req.body);
+    return setQueue(ctx, actorOf(req), ref(req.params), body.nodes, body.session && body.unowned !== true ? { sessionId: body.session } : 'unowned');
+  });
   app.post('/api/projects/:ref/bindings', guarded, async (req, reply) => {
     const body = bindingBody.parse(req.body);
     return reply.code(201).send(addBinding(ctx, actorOf(req), ref(req.params), body.path, body.branchPattern));

@@ -1,7 +1,15 @@
-import { glyphTitle, type NodeDetail, type Project, type Resource, type SearchResult, type TreeNode } from '../core/types';
+import { formatUpNext, queueView } from '../core/layout';
+import { glyphTitle, type NodeDetail, type ProjectSnapshot, type Resource, type SearchResult, type TreeNode } from '../core/types';
 
-export function formatQueue(p: Project): string {
-  return p.queue.length ? `Up next in ${p.slug}: ${p.queue.map((id) => `#${id}`).join(' → ')}.` : `Cleared the queue of ${p.slug}.`;
+/**
+ * The queue after a set_queue, as the outline prints it: `Up next: A: #82 → #78 | later: #79`. With no step up next it
+ * says the queue is empty (an empty write clears only its owner's entries, so that is worth saying), unless open steps
+ * are still queued: then they are sessions' own focuses, which are "now", not "next".
+ */
+export function formatQueue(s: ProjectSnapshot): string {
+  const line = formatUpNext(queueView(s.project.queue, s.nodes, s.sessions), s.sessions);
+  if (line) return line;
+  return s.project.queue.length ? `Nothing is up next in ${s.project.slug}: a session's own focus is not listed as next.` : `Up next in ${s.project.slug} is empty.`;
 }
 
 export function formatCreated(nodes: TreeNode[]): string {
