@@ -7,7 +7,7 @@ const ago = (ms: number) => new Date(NOW - ms).toISOString();
 const MIN = 60_000;
 
 const agent = (extra: Partial<SubagentInfo> = {}): SubagentInfo => ({
-  agentId: 'a1', agentType: 'Explore', startedAt: ago(12 * MIN), description: 'Wire up RevenueCat', model: 'sonnet', nodeId: 57, endedAt: null, ordinal: 1, ...extra,
+  agentId: 'a1', agentType: 'Explore', startedAt: ago(12 * MIN), description: 'Wire up RevenueCat', model: 'sonnet', nodeId: 57, endedAt: null, ordinal: 1, purpose: null, ...extra,
 });
 const session = (extra: Partial<Session> = {}): Session => ({
   id: 's1abcdef', projectId: 1, title: 'E2E session', cwd: null, branch: null, transcriptPath: null, state: 'working', focusNodeId: 57,
@@ -151,7 +151,9 @@ describe('withTag', () => {
 });
 
 describe('taskFamily', () => {
-  const sessions = [session({ slot: 1, subagents: [agent({ agentId: 'a1', ordinal: 2 }), agent({ agentId: 'old', ordinal: null })] })];
+  // Workers: a reader leaves no trail, so a trail number is always a worker's.
+  const worker = (extra: Partial<SubagentInfo>) => agent({ agentType: 'general-purpose', ...extra });
+  const sessions = [session({ slot: 1, subagents: [worker({ agentId: 'a1', ordinal: 2 }), worker({ agentId: 'old', ordinal: null })] })];
 
   it("is the live session's slot, with no tag on the session's own tasks", () => {
     expect(taskFamily(task(1), sessions)).toEqual({ slot: 1, tag: '' });
@@ -162,7 +164,7 @@ describe('taskFamily', () => {
   });
 
   it("takes the number from the trail once the subagent has left the session's list, and gives no tag when it is unknown", () => {
-    const trailAgents: TrailAgent[] = [{ ...agent({ agentId: 'a9', ordinal: 4, endedAt: ago(60 * MIN) }), sessionId: 's1abcdef' }];
+    const trailAgents: TrailAgent[] = [{ ...worker({ agentId: 'a9', ordinal: 4, endedAt: ago(60 * MIN) }), sessionId: 's1abcdef' }];
     expect(taskFamily(task(1, { agentId: 'a9' }), sessions, trailAgents)).toEqual({ slot: 1, tag: 'b4' });
     expect(taskFamily(task(1, { agentId: 'old' }), sessions, trailAgents)).toEqual({ slot: 1, tag: '' });
     expect(taskFamily(task(1, { agentId: 'gone' }), sessions, trailAgents)).toEqual({ slot: 1, tag: '' });

@@ -35,8 +35,9 @@ Attribution of a working task to a node, decided once, at creation:
 
 ### Subagents (#48)
 - A **PreToolUse** hook on `^(Agent|Task)$` posts a dispatch: `tool_use_id`, `description` (clipped to 200),
-  `subagent_type` and `model`. It never forwards `prompt`. The node is the `#id` at the start of the description, if
-  any, else the session's focus.
+  `subagent_type` and `model`. Of the `prompt` it forwards only the first sentence, clipped to 200 characters, as the
+  subagent's purpose, which stays in the local database and is pruned with its row (review actions §5). The node is
+  the `#id` at the start of the description, if any, else the session's focus.
 - **SubagentStart** (already installed) pairs with the oldest unpaired dispatch for that session and agent type
   (first in, first out).
 - A **PostToolUse** hook on `^(Agent|Task)$` posts the launch response's `agentId`. For background agents this arrives
@@ -52,9 +53,10 @@ Attribution of a working task to a node, decided once, at creation:
 - Within a node: working tasks keep creation order, and their `blocks` links render as "after …" hints.
 
 ### Fallback
-Where the task tools are absent, Claude briefs its working tasks for a node through the scribe. The new MCP tool
-`set_tasks(session, node, tasks: [{ subject, status }])` replaces that session's list on that node, so these look
-exactly like mirrored tasks.
+Where the task tools are absent, the session writes its working tasks for a node itself with the `tasks` command
+(review actions §1):
+`node <repo>/dist/cli/main.js tasks <step id> --session <session id> --done "…" --doing "…" --todo "…"`. It replaces
+that session's list on that node through `POST /api/sessions/:id/tasks`, so these look exactly like mirrored tasks.
 
 ## Data (migration 2)
 - `work_items`: `id` AUTOINCREMENT · `project_id` · `node_id` (ON DELETE CASCADE) · `session_id` · `agent_id` (`''` for
@@ -85,7 +87,7 @@ exactly like mirrored tasks.
 - `ProjectSnapshot` gains `workItems: WorkItem[]` (`id`, `nodeId`, `sessionId`, `agentId`, `subject`, `status`,
   `blocks`, `position`, `updatedAt`) and `project.queue: number[]`.
 - MCP:
-  - new tools `set_queue` and `set_tasks`
+  - new tool `set_queue`
   - `get_outline` prints `Up next: #42 → #44 → #48`
 - Briefing:
   - an `Up next:` line
@@ -111,7 +113,8 @@ exactly like mirrored tasks.
   focus.
 - When the order of work is decided or changes, brief `queue: #a, #b, #c`.
 - Any new request that has a deliverable becomes a node right away (#47).
-- Without task tools, brief working tasks with `set_tasks`.
+- Without task tools, write working tasks with the `tasks` command
+  (`node <repo>/dist/cli/main.js tasks <step id> --session <session id> --done "…"`).
 
 ## Out of scope
 Token and cost figures per agent (hooks do not carry them). A live "last action" line per subagent (declined in the

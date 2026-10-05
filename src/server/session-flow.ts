@@ -24,6 +24,8 @@ export interface HookEventInput {
   toolUseId?: string;
   description?: string;
   model?: string;
+  /** agent-dispatch: the prompt's first sentence. */
+  purpose?: string;
   taskKey?: string;
   subject?: string;
   status?: WorkStatus | 'deleted';
@@ -117,7 +119,14 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
         const agentType = clean(input.agentType) ?? 'general-purpose';
         if (input.toolUseId && agentType !== SCRIBE_AGENT) {
           const nodeId = leadingNode(ctx, input.description, before.projectId) ?? before.focusNodeId;
-          recordDispatch(ctx, sessionId, { toolUseId: input.toolUseId, agentType, description: input.description?.trim() ?? '', model: clean(input.model), nodeId });
+          recordDispatch(ctx, sessionId, {
+            toolUseId: input.toolUseId,
+            agentType,
+            description: input.description?.trim() ?? '',
+            model: clean(input.model),
+            nodeId,
+            purpose: clean(input.purpose),
+          });
         }
         break;
       }

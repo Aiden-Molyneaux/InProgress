@@ -31,6 +31,9 @@ const dispatch = (toolUseId: string, description: string, agentType = 'Explore',
 const start = (agentId: string, agentType = 'Explore'): HookEventInput => ({ event: 'subagent-start', agentId, agentType });
 const launched = (toolUseId: string, agentId: string, model?: string): HookEventInput => ({ event: 'agent-launched', toolUseId, agentId, ...(model ? { model } : {}) });
 const subagents = (ctx: Ctx) => findSession(ctx, 's1')!.subagents;
+/** The input with the prompt's first sentence, as the pre-tool hook sends it. */
+const purposed = (input: HookEventInput, purpose: string): HookEventInput => ({ ...input, purpose });
+const purposes = (ctx: Ctx) => Object.fromEntries(subagents(ctx).map((s) => [s.agentId, s.purpose]));
 const descriptions = (ctx: Ctx) => Object.fromEntries(subagents(ctx).map((s) => [s.agentId, s.description]));
 
 describe('subagent dispatches', () => {
@@ -39,7 +42,7 @@ describe('subagent dispatches', () => {
     expect(hook(dispatch('toolu_1', 'Map the hook payloads', 'Explore', 'sonnet'))).toEqual({ tracked: true });
     hook(start('a1'));
     expect(subagents(ctx)).toEqual([
-      { agentId: 'a1', agentType: 'Explore', startedAt: expect.any(String), description: 'Map the hook payloads', model: 'sonnet', nodeId: play.id, endedAt: null, ordinal: 1 },
+      { agentId: 'a1', agentType: 'Explore', startedAt: expect.any(String), description: 'Map the hook payloads', model: 'sonnet', nodeId: play.id, endedAt: null, ordinal: 1, purpose: null },
     ]);
   });
 
@@ -146,6 +149,59 @@ describe('subagent dispatches', () => {
     expect(hook(launched('t1', 'a1'), 'nobody')).toEqual({ tracked: false });
     expect(ctx.db.prepare('SELECT COUNT(*) AS c FROM subagent_dispatches').get()).toEqual({ c: 0 });
     expect(findSession(ctx, 'nobody')).toBeUndefined();
+  });
+});
+
+describe('subagent purpose', () => {
+  it('stores the purpose with the dispatch and shows it on the subagent first in, first out', () => {
+    const { ctx, hook } = setup();
+    hook(purposed(dispatch('t1', 'Review P6', 'general-purpose'), 'Review the diff for P6.'));
+    expect(ctx.db.prepare('SELECT tool_use_id, purpose FROM subagent_dispatches').all()).toEqual([{ tool_use_id: 't1', purpose: 'Review the diff for P6.' }]);
+    hook(start('a1', 'general-purpose'));
+    expect(subagents(ctx)).toEqual([expect.objectContaining({ agentId: 'a1', description: 'Review P6', purpose: 'Review the diff for P6.' })]);
+  });
+
+  it('shows it through the named pairing, when the launch arrives before the start', () => {
+    const { ctx, hook } = setup();
+    hook(purposed(dispatch('t1', 'first'), 'Read the hooks.'));
+    hook(purposed(dispatch('t2', 'second'), 'Read the tests.'));
+    hook(launched('t2', 'x2'));
+    hook(start('x2'));
+    hook(start('x1'));
+    expect(purposes(ctx)).toEqual({ x2: 'Read the tests.', x1: 'Read the hooks.' });
+  });
+
+  it('moves it with the description when a launch swaps a crossed pairing, and clears it when none is left', () => {
+    const { ctx, hook } = setup();
+    hook(purposed(dispatch('t1', 'first'), 'First purpose.'));
+    hook(purposed(dispatch('t2', 'second'), 'Second purpose.'));
+    hook(start('x2'));
+    hook(start('x1'));
+    expect(purposes(ctx)).toEqual({ x2: 'First purpose.', x1: 'Second purpose.' });
+    hook(launched('t1', 'x1'));
+    expect(purposes(ctx)).toEqual({ x2: 'Second purpose.', x1: 'First purpose.' });
+    // One dispatch, taken by the wrong agent: its real agent's launch takes it back, and the other is left with none.
+    hook(purposed(dispatch('t3', 'third'), 'Third purpose.'));
+    hook(start('y2'));
+    expect(purposes(ctx).y2).toBe('Third purpose.');
+    hook(launched('t3', 'y1'));
+    expect(purposes(ctx).y2).toBeNull();
+  });
+
+  it('is null for a dispatch without one, and for a subagent with no dispatch', () => {
+    const { ctx, hook } = setup();
+    hook(dispatch('t1', 'Look around'));
+    hook(start('a1'));
+    hook(start('a2'));
+    expect(purposes(ctx)).toEqual({ a1: null, a2: null });
+  });
+
+  it('carries it into the trail', () => {
+    const { ctx, project, hook } = setup();
+    hook(purposed(dispatch('t1', 'Write the tests', 'general-purpose'), 'Write the layout tests.'));
+    hook(start('a1', 'general-purpose'));
+    hook({ event: 'subagent-stop', agentId: 'a1' });
+    expect(getProjectSnapshot(ctx, project.slug).trailAgents).toEqual([expect.objectContaining({ agentId: 'a1', purpose: 'Write the layout tests.' })]);
   });
 });
 
@@ -286,9 +342,26 @@ describe('the trail of ended subagents in the snapshot', () => {
     hook({ event: 'subagent-stop', agentId: 'a1' });
     // The layout, not the server, decides when a live session's stopped subagent leaves its greyed badge for the trail.
     expect(getProjectSnapshot(ctx, project.slug).trailAgents).toEqual([
-      { sessionId: 's1', agentId: 'a1', agentType: 'general-purpose', startedAt: '2026-10-02T09:00:00.000Z', description: 'Map the hooks', model: 'sonnet', nodeId: play.id, endedAt: '2026-10-02T09:01:00.000Z', ordinal: 1 },
+      { sessionId: 's1', agentId: 'a1', agentType: 'general-purpose', startedAt: '2026-10-02T09:00:00.000Z', description: 'Map the hooks', model: 'sonnet', nodeId: play.id, endedAt: '2026-10-02T09:01:00.000Z', ordinal: 1, purpose: null },
     ]);
     expect(getProjectSnapshot(ctx, other.slug).trailAgents.map((a) => a.agentId)).toEqual(['c1']);
+  });
+
+  it('leaves readers out of the trail, and an ended session whose only trail was readers out of the past sessions', () => {
+    const { ctx, project, hook } = setup();
+    for (const [id, type] of [['r1', 'Explore'], ['r2', 'Plan'], ['r3', 'claude-code-guide'], ['w1', 'general-purpose']]) {
+      hook(start(id, type));
+      hook({ event: 'subagent-stop', agentId: id });
+    }
+    handleHookEvent(ctx, 's2', { event: 'start', source: 'startup', cwd: 'C:/personal/InGame' });
+    hook(start('r4', 'Explore'), 's2');
+    hook({ event: 'end' }, 's2');
+    const snap = getProjectSnapshot(ctx, project.slug);
+    expect(snap.trailAgents.map((a) => a.agentId)).toEqual(['w1']);
+    expect(snap.pastSessions).toEqual([]);
+    // The session's own list still has its readers: the window shows the running ones.
+    hook(start('r5', 'Explore'));
+    expect(subagents(ctx).map((a) => a.agentId)).toEqual(['r1', 'r2', 'r3', 'r5', 'w1']);
   });
 
   it('keeps a trail agent for 7 days after it stopped, then leaves it out even before a prune', () => {

@@ -115,6 +115,8 @@ export function buildHookBody(name: Exclude<HookName, ToolHookName>, input: Hook
 
 /** Mirror the server's hookBody limits for the live-work fields (src/server/schemas.ts). */
 const DESCRIPTION_MAX = 200;
+/** In `.length` units, as zod counts them: a longer purpose is cut to one less, plus "…". */
+const PURPOSE_MAX = 200;
 const SUBJECT_MAX = 300;
 const MODEL_MAX = 100;
 const KEY_MAX = 100;
@@ -152,6 +154,19 @@ function launchedAgentId(response: unknown): string | undefined {
   return /\bagentId:\s*([\w-]{1,200})/.exec(responseText(response))?.[1];
 }
 
+/**
+ * What a subagent is for, from its Agent prompt: the first non-blank line, cut after its first sentence end (`.`, `?` or
+ * `!`, then a space or the end), at most 200 characters with "…". Nothing for a blank prompt. The rest of the prompt
+ * never leaves Claude Code.
+ */
+export function purposeOf(prompt: string): string | undefined {
+  const line = prompt.split(/\r?\n/).find((l) => l.trim())?.trim();
+  if (!line) return undefined;
+  const end = /[.?!](?=\s|$)/.exec(line);
+  const sentence = end ? line.slice(0, end.index + 1) : line;
+  return sentence.length > PURPOSE_MAX ? `${sentence.slice(0, PURPOSE_MAX - 1)}…` : sentence;
+}
+
 /** TaskCreate's new id: `{ task: { id } }`, or "Task #3 created successfully" as text. */
 function createdTaskKey(response: unknown): string | undefined {
   if (isRecord(response) && isRecord(response.task)) {
@@ -162,9 +177,10 @@ function createdTaskKey(response: unknown): string | undefined {
 }
 
 /**
- * The live-work body a tool hook posts, or nothing to post. pre-tool on the Agent tool: a dispatch. post-tool on the
- * Agent tool: the launched agent's id; on TaskCreate / TaskUpdate: the task change. A prompt and a task's description
- * are never sent, and the scribe's own dispatches are skipped (SubagentStart ignores the scribe too).
+ * The live-work body a tool hook posts, or nothing to post. pre-tool on the Agent tool: a dispatch, with the prompt's
+ * first sentence as its purpose (purposeOf). post-tool on the Agent tool: the launched agent's id; on TaskCreate /
+ * TaskUpdate: the task change. The rest of a prompt and a task's description are never sent, and the scribe's own
+ * dispatches are skipped (SubagentStart ignores the scribe too).
  */
 export function buildToolHookBody(name: ToolHookName, input: HookStdin): Record<string, unknown> | undefined {
   const tool = input.tool_name;
@@ -176,11 +192,14 @@ export function buildToolHookBody(name: ToolHookName, input: HookStdin): Record<
     const agentType = text(toolInput.subagent_type, ID_MAX) ?? 'general-purpose';
     if (!toolUseId || agentType === SCRIBE_AGENT) return undefined;
     if (name === 'pre-tool') {
-      // Every Agent call has a prompt: anything else under these names is not a dispatch. The prompt itself stays here.
+      // Every Agent call has a prompt: anything else under these names is not a dispatch. Only its first sentence leaves
+      // here, as the purpose; a blank prompt sends none, so the body stays what an older server accepts.
       if (typeof toolInput.prompt !== 'string') return undefined;
       const body: Record<string, unknown> = { event: 'agent-dispatch', toolUseId, agentType, description: text(toolInput.description, DESCRIPTION_MAX) ?? '' };
       const model = text(toolInput.model, MODEL_MAX);
       if (model) body.model = model;
+      const purpose = purposeOf(toolInput.prompt);
+      if (purpose) body.purpose = purpose;
       return body;
     }
     const agentId = launchedAgentId(input.tool_response);

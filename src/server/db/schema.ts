@@ -153,4 +153,12 @@ export const MIGRATIONS: string[] = [
   -- Only nullable columns: v1 to v3 builds can still read and write this schema, so a rollback across it works.
   INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
   `,
+  // 5: subagent purpose. The first sentence of the Agent prompt (at most 200 characters), carried from the dispatch to
+  // the subagent row. NULL for rows from before this migration and for a dispatch whose prompt was blank.
+  `
+  ALTER TABLE subagent_dispatches ADD COLUMN purpose TEXT;
+  ALTER TABLE session_subagents ADD COLUMN purpose TEXT;
+  -- Only nullable columns: v1 to v4 builds can still read and write this schema, so a rollback across it works.
+  INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+  `,
 ];

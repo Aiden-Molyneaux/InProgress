@@ -1,4 +1,4 @@
-import { TRAIL_MS, type SubagentInfo, type TrailAgent } from '../../core/types';
+import { READER_AGENT_TYPES, TRAIL_MS, type SubagentInfo, type TrailAgent } from '../../core/types';
 import type { Ctx } from '../db/tx';
 
 /** How long a dispatch waits for its subagent to start; an older one (a launch that was denied, say) never pairs. */
@@ -17,6 +17,7 @@ interface SubagentRow {
   tool_use_id: string | null;
   ended_at: string | null;
   ordinal: number | null;
+  purpose: string | null;
 }
 
 interface DispatchRow {
@@ -28,6 +29,7 @@ interface DispatchRow {
   node_id: number | null;
   agent_id: string | null;
   created_at: string;
+  purpose: string | null;
 }
 
 export interface DispatchInput {
@@ -36,7 +38,15 @@ export interface DispatchInput {
   description: string;
   model: string | null;
   nodeId: number | null;
+  /** The prompt's first sentence, as the hook sent it; null when it sent none. */
+  purpose: string | null;
 }
+
+/**
+ * SQL for "this subagent row is not a reader", for a row aliased `a`: the trail and the past sessions it names leave
+ * readers out. Built from READER_AGENT_TYPES, whose names are plain words.
+ */
+export const NOT_READER_SQL = `a.agent_type NOT IN (${READER_AGENT_TYPES.map((t) => `'${t}'`).join(', ')})`;
 
 const before = (ctx: Ctx, ms: number) => new Date(Date.parse(ctx.now()) - ms).toISOString();
 
@@ -50,6 +60,7 @@ const toInfo = (r: SubagentRow): SubagentInfo => ({
   nodeId: r.node_id,
   endedAt: r.ended_at,
   ordinal: r.ordinal,
+  purpose: r.purpose,
 });
 
 /** A session's subagents that are running or stopped less than 5 minutes ago, oldest first. */
@@ -63,13 +74,14 @@ export function listSubagents(ctx: Ctx, sessionId: string): SubagentInfo[] {
 /**
  * The trail's subagents: every subagent of the project's sessions, live or ended, that stopped less than 7 days ago,
  * oldest first. No 5-minute cut here: the client's clock decides when a live session's greyed badge becomes trail.
- * A plain read.
+ * Readers (READER_AGENT_TYPES) leave no trail. A plain read.
  */
 export function listTrailAgents(ctx: Ctx, projectId: number): TrailAgent[] {
   return (ctx.db
     .prepare(
       `SELECT a.* FROM session_subagents a JOIN sessions s ON s.id = a.session_id
-       WHERE s.project_id = ? AND a.ended_at IS NOT NULL AND a.ended_at >= ? ORDER BY a.started_at, a.session_id, a.agent_id`,
+       WHERE s.project_id = ? AND a.ended_at IS NOT NULL AND a.ended_at >= ? AND ${NOT_READER_SQL}
+       ORDER BY a.started_at, a.session_id, a.agent_id`,
     )
     .all(projectId, before(ctx, TRAIL_MS)) as SubagentRow[])
     .map((r) => ({ ...toInfo(r), sessionId: r.session_id }));
@@ -92,11 +104,11 @@ function assign(ctx: Ctx, d: DispatchRow, agentId: string | null): void {
   ctx.db.prepare('UPDATE subagent_dispatches SET agent_id = ? WHERE session_id = ? AND tool_use_id = ?').run(agentId, d.session_id, d.tool_use_id);
 }
 
-/** Show a dispatch's description, model and node on the subagent row (or clear them when it has none). */
+/** Show a dispatch's description, model, node and purpose on the subagent row (or clear them when it has none). */
 function show(ctx: Ctx, sessionId: string, agentId: string, d: DispatchRow | undefined): void {
   ctx.db
-    .prepare('UPDATE session_subagents SET description = ?, model = ?, node_id = ?, tool_use_id = ? WHERE session_id = ? AND agent_id = ?')
-    .run(d?.description ?? null, d?.model ?? null, d?.node_id ?? null, d?.tool_use_id ?? null, sessionId, agentId);
+    .prepare('UPDATE session_subagents SET description = ?, model = ?, node_id = ?, tool_use_id = ?, purpose = ? WHERE session_id = ? AND agent_id = ?')
+    .run(d?.description ?? null, d?.model ?? null, d?.node_id ?? null, d?.tool_use_id ?? null, d?.purpose ?? null, sessionId, agentId);
 }
 
 const forget = (ctx: Ctx, d: DispatchRow) => ctx.db.prepare('DELETE FROM subagent_dispatches WHERE session_id = ? AND tool_use_id = ?').run(d.session_id, d.tool_use_id);
@@ -113,8 +125,8 @@ function pairFifo(ctx: Ctx, sessionId: string, agentId: string, agentType: strin
 /** PreToolUse on the Agent tool. A repeated tool_use_id (a retried POST) is ignored. */
 export function recordDispatch(ctx: Ctx, sessionId: string, d: DispatchInput): void {
   ctx.db
-    .prepare('INSERT OR IGNORE INTO subagent_dispatches (session_id, tool_use_id, agent_type, description, model, node_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .run(sessionId, d.toolUseId, d.agentType, d.description, d.model, d.nodeId, ctx.now());
+    .prepare('INSERT OR IGNORE INTO subagent_dispatches (session_id, tool_use_id, agent_type, description, model, node_id, created_at, purpose) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(sessionId, d.toolUseId, d.agentType, d.description, d.model, d.nodeId, ctx.now(), d.purpose);
 }
 
 /**

@@ -1,7 +1,7 @@
 import { STALE_SESSION_MS, TRAIL_MS, type PastSession, type Session, type SessionState } from '../../core/types';
 import { write, type Ctx } from '../db/tx';
 import { releaseQueue } from './projects';
-import { endSubagents, listSubagents } from './subagents';
+import { NOT_READER_SQL, endSubagents, listSubagents } from './subagents';
 
 interface SessionRow {
   id: string;
@@ -107,7 +107,7 @@ export function listProjectSessions(ctx: Ctx, projectId: number): Session[] {
 
 /**
  * The project's ended sessions that the trail names, newest first: ones that ended less than 7 days ago leaving working
- * tasks here, or whose subagents stopped less than 7 days ago. A plain read.
+ * tasks here, or whose subagents (readers aside) stopped less than 7 days ago. A plain read.
  *
  * The end it shows is when the session was last heard from, if that came first: expiry stamps `ended_at` lazily, 12 hours
  * or more after the last hook. A hook `end` sets both to the same moment. The 7-day cutoffs stay on `ended_at`, as
@@ -120,8 +120,8 @@ export function listPastSessions(ctx: Ctx, projectId: number): PastSession[] {
       `SELECT id, title, focus_node_id, MIN(s.ended_at, s.last_seen_at) AS shown_end FROM sessions s
        WHERE s.project_id = ? AND s.state = 'ended' AND s.ended_at IS NOT NULL AND (
          (s.ended_at >= ? AND EXISTS (SELECT 1 FROM work_items w WHERE w.session_id = s.id AND w.project_id = s.project_id))
-         -- The same agents as listTrailAgents: a filter added there (P6's readers, say) belongs here too.
-         OR EXISTS (SELECT 1 FROM session_subagents a WHERE a.session_id = s.id AND a.ended_at IS NOT NULL AND a.ended_at >= ?))
+         -- The same agents as listTrailAgents (readers leave no trail): a filter added there belongs here too.
+         OR EXISTS (SELECT 1 FROM session_subagents a WHERE a.session_id = s.id AND a.ended_at IS NOT NULL AND a.ended_at >= ? AND ${NOT_READER_SQL}))
        ORDER BY shown_end DESC, s.id`,
     )
     .all(projectId, cutoff, cutoff) as { id: string; title: string | null; focus_node_id: number | null; shown_end: string }[];

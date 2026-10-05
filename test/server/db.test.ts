@@ -43,7 +43,7 @@ describe('database', () => {
       expect(db.prepare('SELECT id, title FROM nodes ORDER BY id').all()).toEqual([{ id: 1, title: 'InGame' }, { id: 2, title: 'Play app signing' }]);
       expect(db.prepare('SELECT id, focus_node_id FROM sessions').all()).toEqual([{ id: 's1', focus_node_id: 2 }]);
       expect(db.prepare('SELECT * FROM session_subagents').all()).toEqual([
-        { session_id: 's1', agent_id: 'a1', agent_type: 'Explore', started_at: 't', description: null, model: null, node_id: null, tool_use_id: null, ended_at: null, ordinal: null },
+        { session_id: 's1', agent_id: 'a1', agent_type: 'Explore', started_at: 't', description: null, model: null, node_id: null, tool_use_id: null, ended_at: null, ordinal: null, purpose: null },
       ]);
       expect((db.prepare('SELECT COUNT(*) AS c FROM events').get() as { c: number }).c).toBe(1);
       // The new tables take rows, and their foreign keys follow the node: work items go with it, a subagent forgets it.
@@ -249,6 +249,65 @@ describe('database', () => {
       db.prepare('UPDATE session_subagents SET ended_at = ? WHERE session_id = ? AND agent_id = ? AND ended_at IS NULL').run('t3', 's1', 'a1');
       expect(db.prepare("SELECT title, state, slot FROM sessions WHERE id = 's1'").get()).toEqual({ title: 'From v3', state: 'working', slot: 1 });
       expect(db.prepare("SELECT description, ended_at, ordinal FROM session_subagents WHERE agent_id = 'a1'").get()).toEqual({ description: 'Edited by v3', ended_at: 't3', ordinal: 2 });
+    } finally {
+      MIGRATIONS.push(...shipped);
+    }
+  });
+
+  /** A database file as the v4 build leaves it: migrations 1 to 4, with a live session, its subagent and an open dispatch. */
+  function v4Database(): { dir: string; file: string } {
+    const dir = mkdtempSync(join(tmpdir(), 'ip-migrate-v4-'));
+    const file = join(dir, 'inprogress.db');
+    const v4 = new Database(file);
+    v4.exec('CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+    for (const m of MIGRATIONS.slice(0, 4)) v4.exec(m);
+    v4.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '4')").run();
+    v4.prepare("INSERT INTO projects (id, slug, name, root_node_id, created_at, updated_at) VALUES (1, 'inprogress', 'InProgress', 1, 't', 't')").run();
+    v4.prepare("INSERT INTO nodes (id, project_id, parent_id, position, kind, title, status, label, created_at, updated_at) VALUES (1, 1, NULL, 1, 'goal', 'InProgress', 'active', NULL, 't', 't')").run();
+    v4.prepare("INSERT INTO sessions (id, project_id, state, focus_node_id, started_at, last_seen_at, slot) VALUES ('s1', 1, 'working', 1, 't', 't', 0)").run();
+    v4.prepare("INSERT INTO session_subagents (session_id, agent_id, agent_type, started_at, description, ordinal) VALUES ('s1', 'a1', 'general-purpose', 't', 'Write the tests', 1)").run();
+    v4.prepare("INSERT INTO subagent_dispatches (session_id, tool_use_id, agent_type, description, model, node_id, created_at) VALUES ('s1', 'toolu_1', 'Explore', 'Map the hooks', NULL, 1, 't')").run();
+    v4.close();
+    return { dir, file };
+  }
+
+  it('migrates a database at v4 with data to v5, every purpose null', () => {
+    const { dir, file } = v4Database();
+    const db = openDb(file);
+    try {
+      expect(schemaVersion(db)).toBe(MIGRATIONS.length);
+      expect(db.prepare('SELECT agent_id, description, ordinal, purpose FROM session_subagents').all()).toEqual([{ agent_id: 'a1', description: 'Write the tests', ordinal: 1, purpose: null }]);
+      expect(db.prepare('SELECT tool_use_id, description, purpose FROM subagent_dispatches').all()).toEqual([{ tool_use_id: 'toolu_1', description: 'Map the hooks', purpose: null }]);
+      expect(db.prepare("SELECT value FROM meta WHERE key = 'min_reader_version'").pluck().get()).toBe('1');
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('marks migration 5 readable by v1 builds, so a v4 build still opens a v5 database and its own writes work', () => {
+    const { db } = makeCtx();
+    expect(db.prepare("SELECT value FROM meta WHERE key = 'min_reader_version'").pluck().get()).toBe('1');
+    // This build as the v4 build sees the schema: four migrations.
+    const shipped = MIGRATIONS.splice(4);
+    try {
+      expect(() => migrate(db)).not.toThrow();
+      expect(schemaVersion(db)).toBe(4 + shipped.length);
+      db.prepare("INSERT INTO projects (id, slug, name, created_at, updated_at) VALUES (1, 'p', 'P', 't', 't')").run();
+      db.prepare('INSERT INTO sessions (id, project_id, state, started_at, last_seen_at, slot) VALUES (?, ?, ?, ?, ?, ?)').run('s1', 1, 'working', 't', 't', 0);
+      // The v4 build's own writes, which never name purpose: a new subagent and a new dispatch have none, and show()'s
+      // update keeps what the newer build gave.
+      db.prepare(
+        `INSERT INTO session_subagents (session_id, agent_id, agent_type, started_at, ordinal)
+         VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(ordinal), 0) + 1 FROM session_subagents WHERE session_id = ?))`,
+      ).run('s1', 'a1', 'general-purpose', 't', 's1');
+      db.prepare('INSERT OR IGNORE INTO subagent_dispatches (session_id, tool_use_id, agent_type, description, model, node_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run('s1', 'toolu_1', 'general-purpose', 'Write the tests', null, null, 't');
+      expect(db.prepare("SELECT purpose FROM session_subagents WHERE agent_id = 'a1'").pluck().get()).toBeNull();
+      expect(db.prepare("SELECT purpose FROM subagent_dispatches WHERE tool_use_id = 'toolu_1'").pluck().get()).toBeNull();
+      db.prepare("UPDATE session_subagents SET purpose = 'Review the diff.' WHERE agent_id = 'a1'").run();
+      db.prepare('UPDATE session_subagents SET description = ?, model = ?, node_id = ?, tool_use_id = ? WHERE session_id = ? AND agent_id = ?').run('Edited by v4', 'opus', null, 'toolu_1', 's1', 'a1');
+      expect(db.prepare("SELECT description, model, ordinal, purpose FROM session_subagents WHERE agent_id = 'a1'").get()).toEqual({ description: 'Edited by v4', model: 'opus', ordinal: 1, purpose: 'Review the diff.' });
     } finally {
       MIGRATIONS.push(...shipped);
     }

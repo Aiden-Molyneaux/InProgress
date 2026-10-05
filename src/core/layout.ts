@@ -1,5 +1,5 @@
 import { buildIndex, computeVisible, countDone, isNeedsYou, progress, type FoldOverrides } from './tree';
-import { glyphTitle, ownerTag, sessionTag, type EventRow, type PastSession, type QueueEntry, type ResourceMeta, type Session, type SubagentInfo, type TrailAgent, type TreeNode, type WorkItem } from './types';
+import { glyphTitle, isReader, ownerTag, sessionTag, type EventRow, type PastSession, type QueueEntry, type ResourceMeta, type Session, type SubagentInfo, type TrailAgent, type TreeNode, type WorkItem } from './types';
 
 export const ROW = 32;
 export const INDENT = 28;
@@ -9,6 +9,8 @@ export const BADGE_ROW = 26;
 export const WORK_ROW = 20;
 /** Room after a node's working tasks, so the next card doesn't sit right on them. */
 export const WORK_GAP = 6;
+/** A session's readers on a row (`◇ a · 2 reading`): as compact as a working task's row. */
+export const READERS_ROW = WORK_ROW;
 /** How long a live session's ended subagent keeps its badge, greyed; after that it shows in the trail. */
 export const ENDED_AGENT_MS = 5 * 60 * 1000;
 
@@ -72,6 +74,22 @@ export interface LayoutAgentItem {
   ended: boolean;
 }
 
+/**
+ * A session's running readers (READER_AGENT_TYPES) on one row, as one small row, `◇ a · 2 reading`: under that row's
+ * badges of the session, in place of a badge each. Id `r<sessionId>:<nodeId>`.
+ */
+export interface LayoutReadersItem {
+  kind: 'readers';
+  id: string;
+  sessionId: string;
+  /** The row it sits under. */
+  nodeId: number;
+  /** The readers it stands for, in the session's order. */
+  agentIds: string[];
+  x: number;
+  y: number;
+}
+
 /** One of Claude's working tasks, in its node's checklist. */
 export interface LayoutWorkItem {
   kind: 'work';
@@ -116,7 +134,15 @@ export interface LayoutTrailAgentItem {
   y: number;
 }
 
-export type LayoutItem = LayoutNodeItem | LayoutMoreItem | LayoutBadgeItem | LayoutAgentItem | LayoutWorkItem | LayoutWorkDoneItem | LayoutTrailAgentItem;
+export type LayoutItem =
+  | LayoutNodeItem
+  | LayoutMoreItem
+  | LayoutBadgeItem
+  | LayoutAgentItem
+  | LayoutReadersItem
+  | LayoutWorkItem
+  | LayoutWorkDoneItem
+  | LayoutTrailAgentItem;
 
 export interface LayoutEdge {
   id: string;
@@ -151,6 +177,14 @@ export interface LayoutInput {
 /** Whether a subagent still shows: running, or stopped less than ENDED_AGENT_MS ago. */
 export function agentShown(a: Pick<SubagentInfo, 'endedAt'>, now: number): boolean {
   return a.endedAt === null || now - Date.parse(a.endedAt) < ENDED_AGENT_MS;
+}
+
+/**
+ * Whether the window shows a subagent anywhere, and lets it pin its step: as agentShown, but a reader shows only while it
+ * runs. An ended reader keeps no greyed badge and leaves no trail.
+ */
+export function agentVisible(a: Pick<SubagentInfo, 'endedAt' | 'agentType'>, now: number): boolean {
+  return agentShown(a, now) && !(isReader(a.agentType) && a.endedAt !== null);
 }
 
 /** The node a subagent works on: the one its dispatch named, while that is still in the tree, else its session's focus. */
@@ -255,12 +289,12 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
   const index = buildIndex(input.nodes);
   const live = input.sessions.filter((s) => s.state !== 'ended');
   const work = [...(input.workItems ?? [])].sort((a, b) => a.position - b.position || a.id - b.id);
-  const shownAgents = (s: Session) => s.subagents.filter((a) => agentShown(a, now));
+  const shownAgents = (s: Session) => s.subagents.filter((a) => agentVisible(a, now));
   const homeOf = (s: Session, a: SubagentInfo) => agentHome(s, a, (id) => index.byId.has(id));
   const queue = queueView(input.queue ?? [], input.nodes, input.sessions);
-  // Where Claude works or plans to go next shows past the fold rules, as a session's focus does: a subagent's node,
-  // a live session's task in progress, and every queued step, whoever owns it (so an Up next entry never points into a
-  // "+n more" run). The trail never pins.
+  // Where Claude works or plans to go next shows past the fold rules, as a session's focus does: a subagent's node
+  // (a running reader's too; an ended reader shows nowhere), a live session's task in progress, and every queued step,
+  // whoever owns it (so an Up next entry never points into a "+n more" run). The trail never pins.
   const pins = [
     ...live.flatMap((s) => shownAgents(s).flatMap((a) => homeOf(s, a) ?? [])),
     ...work.filter((w) => w.status === 'in_progress' && w.endedAt === null).map((w) => w.nodeId),
@@ -279,15 +313,25 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
     while (cur && !visibleIds.has(cur.id)) cur = cur.parentId === null ? undefined : index.byId.get(cur.parentId);
     return cur?.id;
   };
-  /** Under each row: its sessions' badges, each followed by that session's subagents there. */
-  const badgesByNode = new Map<number, { session: Session; agent?: SubagentInfo }[]>();
-  const addBadge = (id: number | null, badge: { session: Session; agent?: SubagentInfo }) => {
-    const at = anchorOf(id);
+  /**
+   * Under each row: its sessions' badges, each followed by that session's subagents there, then that session's running
+   * readers there as one row.
+   */
+  type Badge = { session: Session; agent?: SubagentInfo; readers?: SubagentInfo[] };
+  const badgesByNode = new Map<number, Badge[]>();
+  const addAt = (at: number | undefined, badge: Badge) => {
     if (at !== undefined) badgesByNode.set(at, [...(badgesByNode.get(at) ?? []), badge]);
   };
   for (const s of live) {
-    addBadge(s.focusNodeId, { session: s });
-    for (const agent of shownAgents(s)) addBadge(homeOf(s, agent), { session: s, agent });
+    addAt(anchorOf(s.focusNodeId), { session: s });
+    const readersAt = new Map<number, SubagentInfo[]>();
+    for (const agent of shownAgents(s)) {
+      const at = anchorOf(homeOf(s, agent));
+      // Only running readers are shown (agentVisible), each in its session's readers row on the row it anchors to.
+      if (!isReader(agent.agentType)) addAt(at, { session: s, agent });
+      else if (at !== undefined) readersAt.set(at, [...(readersAt.get(at) ?? []), agent]);
+    }
+    for (const [at, readers] of readersAt) addAt(at, { session: s, readers });
   }
   const working = new Set<number>();
   for (const s of live) {
@@ -347,7 +391,12 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
     if (node.parentId !== null) edges.push({ id: `e-${item.id}`, source: `n${node.parentId}`, target: item.id });
     y += ROW;
     const inner = x + INDENT;
-    for (const { session, agent } of badgesByNode.get(node.id) ?? []) {
+    for (const { session, agent, readers } of badgesByNode.get(node.id) ?? []) {
+      if (readers) {
+        items.push({ kind: 'readers', id: `r${session.id}:${node.id}`, sessionId: session.id, nodeId: node.id, agentIds: readers.map((a) => a.agentId), x: inner, y });
+        y += READERS_ROW;
+        continue;
+      }
       items.push(
         agent
           ? { kind: 'agent', id: `a${session.id}:${agent.agentId}`, sessionId: session.id, agentId: agent.agentId, nodeId: node.id, x: inner, y, ended: agent.endedAt !== null }
