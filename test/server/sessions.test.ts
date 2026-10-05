@@ -587,8 +587,8 @@ describe('briefing: recently done and left unfinished', () => {
   });
 
   it('names the open tasks an ended session left on open steps, its subagents\' too, by step in tree order, three at most', () => {
-    const { ctx, a1, a2, step } = clocked();
-    const [s3, s4, s5] = [step('3 RevenueCat'), step('4 Build to GitHub'), step('5 Store listing')];
+    const { ctx, a1, a2, a3, step } = clocked();
+    const [s3, s4] = [step('3 RevenueCat'), step('4 Build to GitHub')];
     handleHookEvent(ctx, 's1', start());
     handleHookEvent(ctx, 's1', { event: 'task-created', taskKey: '1', subject: 'Still mine' });
     handleHookEvent(ctx, 's2', start());
@@ -599,12 +599,13 @@ describe('briefing: recently done and left unfinished', () => {
     task('3', 'Finished already');
     handleHookEvent(ctx, 's2', { event: 'task-updated', taskKey: '3', status: 'completed' });
     task('4', `#${a1.id} On a finished step`);
-    task('5', `#${s5.id} On a dropped step`);
+    // a1 (finished) and a3 (dropped below) come before s3 in tree order: counted, either would take a place.
+    task('5', `#${a3.id} On a dropped step`);
     task('6', `#${s4.id} Fourth in tree order`);
     handleHookEvent(ctx, 's2', { event: 'subagent-start', agentId: 'g1', agentType: 'general-purpose' });
     task('1', 'Price the tiers', 'g1');
     handleHookEvent(ctx, 's2', { event: 'task-updated', agentId: 'g1', taskKey: '1', status: 'in_progress' });
-    updateNode(ctx, 'test', s5.id, { status: 'dropped' });
+    updateNode(ctx, 'test', a3.id, { status: 'dropped' });
     // While s2 is live, nothing is left unfinished.
     expect(brief(ctx)).not.toContain('Left unfinished');
     handleHookEvent(ctx, 's2', { event: 'end' });
