@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { createProject } from '../../src/server/repo/projects';
-import { addNodes, deleteNode, insertPositions, listNodes, moveNode, requireNode, updateNode } from '../../src/server/repo/nodes';
+import { write } from '../../src/server/db/tx';
+import { listEventsSince, maxEventId } from '../../src/server/repo/events';
+import { addLog } from '../../src/server/repo/logs';
+import { addNodes, deleteNode, insertPositions, listNodes, moveNode, patchNode, requireNode, updateNode } from '../../src/server/repo/nodes';
+import { addResource } from '../../src/server/repo/resources';
 import { makeCtx } from '../helpers';
 
 function setup() {
@@ -130,5 +134,27 @@ describe('nodes', () => {
   it('rejects unknown parents with a hint', () => {
     const { ctx } = setup();
     expect(() => addNodes(ctx, 't', { parentId: 999, nodes: [{ title: 'X' }] })).toThrow('Node #999 not found');
+  });
+});
+
+describe('patchNode, the update inside an open write', () => {
+  it("applies updateNode's rules in the caller's write: one node.updated with the diff, completedAt, the root guards", () => {
+    const { ctx, root } = setup();
+    const [n] = addNodes(ctx, 't', { parentId: root, nodes: [{ title: 'Step' }] });
+    const mark = maxEventId(ctx);
+    const done = write(ctx, 'scribe:s1', (record) => patchNode(ctx, record, requireNode(ctx, n.id), { status: 'done' }));
+    expect(done).toMatchObject({ status: 'done', completedAt: expect.any(String) });
+    expect(done.updatedAt > n.updatedAt).toBe(true);
+    expect(listEventsSince(ctx, mark)).toMatchObject([{ type: 'node.updated', actor: 'scribe:s1', entityId: String(n.id), data: { changes: { status: { from: 'todo', to: 'done' } } } }]);
+    expect(() => write(ctx, 't', (record) => patchNode(ctx, record, requireNode(ctx, root), { title: 'X' }))).toThrow('project root');
+    expect(() => write(ctx, 't', (record) => patchNode(ctx, record, requireNode(ctx, root), { kind: 'task' }))).toThrow('project root');
+  });
+
+  it("leaves a step's updatedAt alone on a log entry or a resource, so a needs-you age keeps counting", () => {
+    const { ctx, root } = setup();
+    const [n] = addNodes(ctx, 't', { parentId: root, nodes: [{ title: 'Merge PRs', assignee: 'me' }] });
+    addLog(ctx, 'scribe:s1', n.id, 'Not yet: Aiden reviews them tomorrow.');
+    addResource(ctx, 't', { nodeId: n.id, kind: 'doc', title: 'PR list', content: 'x' });
+    expect(requireNode(ctx, n.id).updatedAt).toBe(n.updatedAt);
   });
 });

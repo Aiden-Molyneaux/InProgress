@@ -1,8 +1,8 @@
-import { SCRIBE_AGENT, type HookEvent, type Session, type WorkStatus } from '../core/types';
+import { SCRIBE_AGENT, type HookEvent, type Session, type TreeNode, type WorkStatus } from '../core/types';
 import { write, type Ctx } from './db/tx';
 import { badRequest } from './errors';
 import { renderBriefing, renderStatusAnswer, renderStatusLine, untrackedHint } from './briefing';
-import { findNode, leadingNode, requireNode } from './repo/nodes';
+import { findNode, leadingNode, patchNode, requireNode } from './repo/nodes';
 import { getProjectById, releaseQueue, resolveBinding, resolveProject } from './repo/projects';
 import { assignSlot, findSession, saveSession } from './repo/sessions';
 import { getProjectSnapshot } from './repo/snapshot';
@@ -212,12 +212,17 @@ export function setFocus(ctx: Ctx, actor: string, sessionId: string, nodeId: num
     const existing = findSession(ctx, sessionId);
     if (!existing) throw badRequest(`Session ${sessionId} is not tracked`, 'Use enroll_session first.');
     let projectId = existing.projectId;
+    let node: TreeNode | undefined;
     if (nodeId !== null) {
-      const node = requireNode(ctx, nodeId);
+      node = requireNode(ctx, nodeId);
       if (projectId === null) projectId = node.projectId;
       else if (node.projectId !== projectId) throw badRequest(`#${nodeId} is not in this session's project`, 'Use enroll_session to move the session to another project first.');
     }
     if (projectId === null) throw badRequest(`Session ${sessionId} is not tracked`, 'Use enroll_session first.');
+    // Focus on a todo step of Claude's makes it active, in this write and under this actor. Any other status, or a step
+    // assigned to Aiden, stays as it is. Recorded before session.updated, so the activity strip's latest line still
+    // reads "<session> is on #id".
+    if (node && node.status === 'todo' && node.assignee === 'claude') patchNode(ctx, record, node, { status: 'active' });
     const next: Session = { ...existing, projectId, focusNodeId: nodeId, lastSeenAt: ctx.now() };
     // Being heard from again can bring a stale session back.
     placeSlot(ctx, existing, next);

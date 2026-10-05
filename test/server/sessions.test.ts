@@ -431,6 +431,48 @@ describe('enrollSession and setFocus', () => {
     expect(() => setFocus(ctx, 'scribe:x', 'untracked', a2.id)).toThrow('not tracked');
     expect(findSession(ctx, 'untracked')).toBeUndefined();
   });
+
+  it("makes a todo step assigned to Claude active in the focus's own write, node.updated first", () => {
+    const { ctx, project } = setup();
+    const [s3] = listNodes(ctx, project.id).filter((n) => n.title === '3 RevenueCat');
+    handleHookEvent(ctx, 's1', start());
+    const mark = maxEventId(ctx);
+    // Each event reaches the bus after the commit; by then the focus is saved too, so both changes are one write.
+    const seen: string[] = [];
+    ctx.bus.on('event', (e: { type: string }) => seen.push(`${e.type} focus=${findSession(ctx, 's1')?.focusNodeId} status=${listNodes(ctx, project.id).find((n) => n.id === s3.id)?.status}`));
+    expect(setFocus(ctx, 'scribe:s1', 's1', s3.id).focusNodeId).toBe(s3.id);
+    expect(listNodes(ctx, project.id).find((n) => n.id === s3.id)).toMatchObject({ status: 'active', completedAt: null });
+    // node.updated before session.updated, so the activity strip's latest line reads "<session> is on #id".
+    expect(listEventsSince(ctx, mark)).toMatchObject([
+      { type: 'node.updated', actor: 'scribe:s1', entityId: String(s3.id), data: { changes: { status: { from: 'todo', to: 'active' } } } },
+      { type: 'session.updated', actor: 'scribe:s1', entityId: 's1', data: { changed: ['focusNodeId'], focusNodeId: s3.id } },
+    ]);
+    expect(seen).toEqual([`node.updated focus=${s3.id} status=active`, `session.updated focus=${s3.id} status=active`]);
+  });
+
+  it('leaves a blocked, done, dropped, active or Aiden-assigned step as it is, with no node.updated', () => {
+    const { ctx, project, road, a2, a3 } = setup();
+    const [blocked, done, dropped] = addNodes(ctx, 'test', { parentId: road.id, nodes: [{ title: 'Blocked', status: 'blocked' }, { title: 'Done', status: 'done' }, { title: 'Dropped', status: 'dropped' }] });
+    handleHookEvent(ctx, 's1', start());
+    const status = (id: number) => listNodes(ctx, project.id).find((n) => n.id === id)?.status;
+    const before = [blocked, done, dropped, a2, a3].map((n) => [n.id, status(n.id)]);
+    const mark = maxEventId(ctx);
+    for (const n of [blocked, done, dropped, a2, a3]) setFocus(ctx, 'scribe:s1', 's1', n.id);
+    setFocus(ctx, 'scribe:s1', 's1', null);
+    expect([blocked, done, dropped, a2, a3].map((n) => [n.id, status(n.id)])).toEqual(before);
+    expect(before.map(([, s]) => s)).toEqual(['blocked', 'done', 'dropped', 'active', 'todo']);
+    expect(listEventsSince(ctx, mark).map((e) => e.type)).toEqual(Array(6).fill('session.updated'));
+  });
+
+  it('promotes the step it focuses only once: focusing it again changes nothing more', () => {
+    const { ctx, project } = setup();
+    const [s3] = listNodes(ctx, project.id).filter((n) => n.title === '3 RevenueCat');
+    handleHookEvent(ctx, 's1', start());
+    setFocus(ctx, 'scribe:s1', 's1', s3.id);
+    const mark = maxEventId(ctx);
+    setFocus(ctx, 'scribe:s2', 's1', s3.id);
+    expect(listEventsSince(ctx, mark).map((e) => e.type)).toEqual(['session.updated']);
+  });
 });
 
 describe('session slots', () => {
