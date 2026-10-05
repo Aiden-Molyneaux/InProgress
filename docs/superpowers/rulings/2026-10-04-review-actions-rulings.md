@@ -100,3 +100,5 @@ decision, why, what it costs if wrong. Review these and rework anything ruled wr
     scribe prompt, and a session keeps the MCP server process and agent definitions it started with. Until a session
     restarts, its `queue:` briefs set the unowned order, as before P5. One restart after P8 covers P1, P5 and P8. Cost
     if wrong: none.
+38. The readers row's tooltip lists each reader as `a2 · description`, one per line (P6), following Aiden's
+    tags-first decision. The brief asked only for descriptions. Cost if wrong: none.
