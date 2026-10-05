@@ -85,3 +85,8 @@ decision, why, what it costs if wrong. Review these and rework anything ruled wr
     parser, which took 4.7 to 6.8 s here, and under heavy load it timed out and fell back to asking (about fifteen
     checks in a row were denied in don't-ask mode, and the same checks later passed eight times in a row). Bash rules
     match in-process, at once, every time. Cost if wrong: none.
+33. A resumed subagent keeps its first start time, so the trail's "ran …" spans its first start to its last stop
+    (P3). A true run time needs a new column, which P3 has no migration for. Cost if wrong: an overstated run time for
+    an agent that was resumed.
+34. When a step is deleted, its trail agents fall back to their session's focus (P3): `ON DELETE SET NULL` leaves no
+    way to tell a deleted step from no step. Cost if wrong: a rare trail agent shown on the wrong step.
