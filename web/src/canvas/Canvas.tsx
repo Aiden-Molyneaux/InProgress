@@ -11,9 +11,10 @@ import {
 } from 'react';
 import { Background, BackgroundVariant, Controls, ReactFlow, useReactFlow, type Edge, type Node, type NodeChange, type Viewport } from '@xyflow/react';
 import { layoutOutline, type LayoutItem } from '../../../src/core/layout';
-import { buildIndex, type FoldOverrides } from '../../../src/core/tree';
+import { buildIndex, needsYouAge, type FoldOverrides } from '../../../src/core/tree';
 import { sessionDisplayTitle, sessionTag, type EventRow, type ProjectSnapshot } from '../../../src/core/types';
 import { taskFamily, taskOwner, waitsFor, withTag } from '../live';
+import { relativeTime } from '../time';
 import { useNow } from '../useNow';
 import { AgentBadge, type AgentBadgeData } from './AgentBadge';
 import { BadgeNode } from './BadgeNode';
@@ -200,8 +201,12 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
         doneCount: item.doneCount,
         progress: item.progress,
         needsYou: item.needsYou,
+        // Both age with the clock, which only Canvas holds.
+        age: item.needsYou ? needsYouAge(node, now) : null,
         hasChildren: item.hasChildren,
         working: item.working,
+        paused: item.paused,
+        lastChange: relativeTime(node.updatedAt, now),
         // An owned place takes its session's slot, for the letter and hue it wears.
         queue: item.queue && { pos: item.queue.pos, owner: item.queue.sessionId === null ? null : { slot: sessionsById.get(item.queue.sessionId)?.slot ?? null } },
         resources: item.resourceIds.map((id) => resourcesById.get(id)).filter((r): r is NonNullable<typeof r> => !!r),
