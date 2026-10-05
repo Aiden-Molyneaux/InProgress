@@ -96,3 +96,7 @@ decision, why, what it costs if wrong. Review these and rework anything ruled wr
 36. A `later:` write may take a step out of a session's list (P5): a node sits in the queue once, so placing it in the
     unowned order claims it from wherever it was, as a `queue:` write does. Cost if wrong: one session can move
     another's step to `later`.
+37. Correction to ruling 15: P5 also needs open sessions restarted. It changed the scribe's `set_queue` tool and the
+    scribe prompt, and a session keeps the MCP server process and agent definitions it started with. Until a session
+    restarts, its `queue:` briefs set the unowned order, as before P5. One restart after P8 covers P1, P5 and P8. Cost
+    if wrong: none.
