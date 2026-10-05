@@ -172,10 +172,16 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
   if (!session || !project || project.status !== 'active') {
     return input.event === 'prompt' && input.mentionsInProgress ? { tracked: false, context: untrackedHint(sessionId) } : { tracked: false };
   }
-  // A session that has just begun tracking gets the full briefing, whichever event brought it in.
-  if (input.event === 'start' || created) return { tracked: true, context: renderBriefing(getProjectSnapshot(ctx, project.id), sessionId) };
+  // Needs-you ages count to the server's clock (ctx.now), never the wall clock behind it.
+  // A session that has just begun tracking gets the full briefing, whichever event brought it in. Every one but a
+  // compaction's is fresh, and asks about old needs-you items: a session first tracked by a prompt (its start was missed)
+  // and a start with a missing or unknown source count as new.
+  if (input.event === 'start' || created) {
+    const checkOld = !(input.event === 'start' && input.source === 'compact');
+    return { tracked: true, context: renderBriefing(getProjectSnapshot(ctx, project.id), sessionId, Date.parse(ctx.now()), { checkOld }) };
+  }
   if (input.event === 'prompt' && !input.notice) {
-    if (input.asksStatus) return { tracked: true, context: renderStatusAnswer(getProjectSnapshot(ctx, project.id), sessionId) };
+    if (input.asksStatus) return { tracked: true, context: renderStatusAnswer(getProjectSnapshot(ctx, project.id), sessionId, Date.parse(ctx.now())) };
     if (session.promptsSinceUpdate >= 2) return { tracked: true, context: renderStatusLine(getProjectSnapshot(ctx, project.id), session) };
   }
   return { tracked: true };
@@ -202,9 +208,10 @@ export function enrollSession(ctx: Ctx, actor: string, sessionId: string, projec
     }
     record({ projectId: project.id, type: 'session.updated', entity: 'session', entityId: sessionId, data: { changed: ['projectId'], state: next.state } });
   });
-  // Re-read after commit: write() resets prompts_since_update for scribe actors after fn() runs.
+  // Re-read after commit: write() resets prompts_since_update for scribe actors after fn() runs. An enroll's briefing is
+  // fresh, so it asks about old needs-you items.
   const session = findSession(ctx, sessionId)!;
-  return { session, briefing: renderBriefing(getProjectSnapshot(ctx, session.projectId!), sessionId) };
+  return { session, briefing: renderBriefing(getProjectSnapshot(ctx, session.projectId!), sessionId, Date.parse(ctx.now()), { checkOld: true }) };
 }
 
 export function setFocus(ctx: Ctx, actor: string, sessionId: string, nodeId: number | null): Session {
