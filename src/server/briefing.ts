@@ -108,7 +108,7 @@ export function frontierLines(snapshot: ProjectSnapshot, sessionId?: string): st
 /** The planned order (set_queue), with titles: `Up next: #42 Build tabs → #44 Write the guide`. */
 function upNextLine(snapshot: ProjectSnapshot): string | undefined {
   const byId = new Map(snapshot.nodes.map((n) => [n.id, n]));
-  const queued = snapshot.project.queue.map((id) => byId.get(id)).filter((n): n is TreeNode => n !== undefined);
+  const queued = snapshot.project.queue.map((e) => byId.get(e.nodeId)).filter((n): n is TreeNode => n !== undefined);
   if (!queued.length) return undefined;
   const shown = queued.slice(0, MAX_UP_NEXT).map((n) => `#${n.id} ${glyphTitle(n)}`);
   return `Up next: ${shown.join(' → ')}${queued.length > MAX_UP_NEXT ? ` (+${queued.length - MAX_UP_NEXT} more)` : ''}`;

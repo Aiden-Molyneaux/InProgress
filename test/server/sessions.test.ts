@@ -156,7 +156,8 @@ describe('handleHookEvent', () => {
 describe('briefing: live work', () => {
   it('names the planned order in an Up next line after where things stand, leaving out finished steps', () => {
     const { ctx, project, a2, a3 } = setup();
-    setQueue(ctx, 'scribe:s1', project.slug, [a3.id, a2.id]);
+    handleHookEvent(ctx, 's1', start());
+    setQueue(ctx, 'scribe:s1', project.slug, [a3.id, a2.id], { sessionId: 's1' });
     const text = handleHookEvent(ctx, 's1', start()).context!;
     expect(text).toContain(`\nUp next: #${a3.id} Run signing tests → #${a2.id} Play app signing\n`);
     expect(text.indexOf('Where things stand:')).toBeLessThan(text.indexOf('Up next:'));
@@ -168,7 +169,8 @@ describe('briefing: live work', () => {
   it('caps the Up next line at five steps', () => {
     const { ctx, project, road } = setup();
     const steps = addNodes(ctx, 'test', { parentId: road.id, nodes: Array.from({ length: 7 }, (_, i) => ({ title: `Step ${i + 1}` })) });
-    setQueue(ctx, 'scribe:s1', project.slug, steps.map((n) => n.id));
+    handleHookEvent(ctx, 's1', start());
+    setQueue(ctx, 'scribe:s1', project.slug, steps.map((n) => n.id), { sessionId: 's1' });
     const line = handleHookEvent(ctx, 's1', start()).context!.split('\n').find((l) => l.startsWith('Up next:'));
     expect(line).toBe(`Up next: ${steps.slice(0, 5).map((n) => `#${n.id} ${n.title}`).join(' → ')} (+2 more)`);
   });
@@ -289,7 +291,8 @@ describe('briefing: type labels', () => {
     updateNode(ctx, 'test', a2.id, { label: 'ui' });
     updateNode(ctx, 'test', a3.id, { label: 'ops' });
     updateNode(ctx, 'test', s3.id, { label: 'integration' });
-    setQueue(ctx, 'scribe:s1', project.slug, [a3.id]);
+    handleHookEvent(ctx, 's1', start());
+    setQueue(ctx, 'scribe:s1', project.slug, [a3.id], { sessionId: 's1' });
     const lines = handleHookEvent(ctx, 's1', start()).context!.split('\n');
     expect(lines).toContain(`      #${a2.id} ⧉ Play app signing — active`);
     expect(lines).toContain(`      #${a3.id} ⚒ Run signing tests — NEEDS YOU`);

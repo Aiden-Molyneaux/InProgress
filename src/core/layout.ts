@@ -1,5 +1,5 @@
 import { buildIndex, computeVisible, countDone, isNeedsYou, progress, type FoldOverrides } from './tree';
-import type { EventRow, PastSession, ResourceMeta, Session, SubagentInfo, TrailAgent, TreeNode, WorkItem } from './types';
+import type { EventRow, PastSession, QueueEntry, ResourceMeta, Session, SubagentInfo, TrailAgent, TreeNode, WorkItem } from './types';
 
 export const ROW = 32;
 export const INDENT = 28;
@@ -140,7 +140,7 @@ export interface LayoutInput {
   /** The ended sessions the trail names, for the focus of a trail agent that has no node. */
   pastSessions?: PastSession[];
   /** The project's Up next queue, next first. */
-  queue?: number[];
+  queue?: readonly QueueEntry[];
   /** When it is (ms), to tell which ended subagents still show. Defaults to now. */
   now?: number;
 }
@@ -196,7 +196,7 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
   const pins = [
     ...live.flatMap((s) => shownAgents(s).flatMap((a) => homeOf(s, a) ?? [])),
     ...work.filter((w) => w.status === 'in_progress' && w.endedAt === null).map((w) => w.nodeId),
-    ...upNext(input.queue ?? [], input.nodes),
+    ...upNext((input.queue ?? []).map((e) => e.nodeId), input.nodes),
   ];
   // Old finished steps fold into "✓ n done" rows on the canvas only; the text outline shows them all.
   const visible = computeVisible(index, live, { overrides: input.overrides, pins, doneRuns: { now } });
@@ -240,7 +240,7 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
   for (const w of work) workByNode.set(w.nodeId, [...(workByNode.get(w.nodeId) ?? []), w]);
   const trailByNode = new Map<number, TrailAgent[]>();
   for (const { agent, nodeId } of homedTrailAgents({ ...input, now }, (id) => index.byId.has(id))) trailByNode.set(nodeId, [...(trailByNode.get(nodeId) ?? []), agent]);
-  const queuePos = new Map(upNext(input.queue ?? [], input.nodes).map((id, i) => [id, i + 1]));
+  const queuePos = new Map(upNext((input.queue ?? []).map((e) => e.nodeId), input.nodes).map((id, i) => [id, i + 1]));
 
   const items: LayoutItem[] = [];
   const edges: LayoutEdge[] = [];
@@ -319,12 +319,12 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
  * Where the camera opens: the focus of the session that worked last; with no session working, the head of the Up next
  * queue; else the most recently updated active node; else the last row.
  */
-export function findFrontier(nodes: TreeNode[], sessions: Session[], layout: LayoutResult, queue: readonly number[] = []): number | undefined {
+export function findFrontier(nodes: TreeNode[], sessions: Session[], layout: LayoutResult, queue: readonly QueueEntry[] = []): number | undefined {
   const workingFocus = sessions
     .filter((s) => s.state === 'working' && s.focusNodeId !== null)
     .sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt));
   if (workingFocus.length) return workingFocus[0].focusNodeId!;
-  const head = upNext(queue, nodes)[0];
+  const head = upNext(queue.map((e) => e.nodeId), nodes)[0];
   if (head !== undefined) return head;
   const active = nodes.filter((n) => n.parentId !== null && n.status === 'active').sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   if (active.length) return active[0].id;

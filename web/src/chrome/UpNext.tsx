@@ -1,11 +1,11 @@
 import { Fragment, type KeyboardEvent } from 'react';
 import { upNext } from '../../../src/core/layout';
-import type { TreeNode } from '../../../src/core/types';
+import type { QueueEntry, TreeNode } from '../../../src/core/types';
 import { circled } from '../live';
 
 interface UpNextProps {
   /** The project's queue, next first. */
-  queue: number[];
+  queue: QueueEntry[];
   nodes: TreeNode[];
   /** Brings a step into view. */
   onJump: (id: number) => void;
@@ -17,7 +17,7 @@ interface UpNextProps {
  */
 export function UpNext({ queue, nodes, onJump }: UpNextProps) {
   const byId = new Map(nodes.map((n) => [n.id, n]));
-  const steps = upNext(queue, nodes).map((id) => byId.get(id)!);
+  const steps = upNext(queue.map((e) => e.nodeId), nodes).map((id) => byId.get(id)!);
   if (!steps.length) return null;
   const label = (n: TreeNode, i: number) => `${circled(i + 1)} #${n.id} ${n.title}`;
   // Inline spans, not buttons, so the line cuts a title short with an ellipsis instead of hiding a whole step.

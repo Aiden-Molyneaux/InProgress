@@ -1,7 +1,7 @@
 import { glyphTitle, type NodeDetail, type Project, type Resource, type SearchResult, type TreeNode } from '../core/types';
 
 export function formatQueue(p: Project): string {
-  return p.queue.length ? `Up next in ${p.slug}: ${p.queue.map((id) => `#${id}`).join(' → ')}.` : `Cleared the queue of ${p.slug}.`;
+  return p.queue.length ? `Up next in ${p.slug}: ${p.queue.map((e) => `#${e.nodeId}`).join(' → ')}.` : `Cleared the queue of ${p.slug}.`;
 }
 
 export function formatCreated(nodes: TreeNode[]): string {

@@ -40,8 +40,22 @@ export interface Project {
   rootNodeId: number;
   createdAt: string;
   updatedAt: string;
-  /** Node ids in the order Claude plans to work on them. Done and dropped nodes are left out as it is read. */
-  queue: number[];
+  /**
+   * The steps Claude plans to take next, next first: each owned by a session (its own order, set by its `queue:`) or
+   * by nobody (the `later:` order). Owned entries come before unowned ones, and a node is in it once. Done and dropped
+   * nodes are left out as it is read.
+   */
+  queue: QueueEntry[];
+}
+
+/**
+ * One step in a project's Up next queue. Stored as `{ "node": 82, "session": "3fa9…" }`; a bare number from before
+ * owned entries reads as unowned.
+ */
+export interface QueueEntry {
+  nodeId: number;
+  /** The session whose own order it is in; null when it is unowned. */
+  sessionId: string | null;
 }
 
 export interface ProjectSummary extends Project {
@@ -247,6 +261,11 @@ export function sessionTag(slot: number | null): string {
   let tag = '';
   for (let n = slot + 1; n > 0; n = Math.floor((n - 1) / 26)) tag = String.fromCharCode(65 + ((n - 1) % 26)) + tag;
   return tag;
+}
+
+/** A session's letter where an owner needs a label (an Up next line or marker): "?" while its slot is empty. */
+export function ownerTag(slot: number | null): string {
+  return sessionTag(slot) || '?';
 }
 
 /** "a1": the session's letter in lower case and the subagent's number; "" when either is null. */

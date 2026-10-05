@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BADGE_ROW, ENDED_AGENT_MS, INDENT, ROW, WORK_GAP, WORK_ROW, eventTarget, findFrontier, layoutOutline, type LayoutItem, type LayoutResult } from '../../src/core/layout';
-import type { EventRow, PastSession, ResourceMeta, Session, SubagentInfo, TrailAgent, TreeNode, WorkItem, WorkStatus } from '../../src/core/types';
+import type { EventRow, PastSession, QueueEntry, ResourceMeta, Session, SubagentInfo, TrailAgent, TreeNode, WorkItem, WorkStatus } from '../../src/core/types';
 
 let nextId = 1;
 function n(parentId: number | null, title: string, extra: Partial<TreeNode> = {}): TreeNode {
@@ -10,6 +10,8 @@ function n(parentId: number | null, title: string, extra: Partial<TreeNode> = {}
 function session(id: string, focusNodeId: number | null, state: Session['state'], lastSeenAt = '2026-09-27T01:00:00Z'): Session {
   return { id, projectId: 1, title: id, cwd: null, branch: null, transcriptPath: null, state, focusNodeId, promptsSinceUpdate: 0, startedAt: 't', lastSeenAt, endedAt: null, slot: 0, subagents: [] };
 }
+/** Unowned queue entries. */
+const later = (...ids: number[]): QueueEntry[] => ids.map((nodeId) => ({ nodeId, sessionId: null }));
 const resource = (id: number, nodeId: number): ResourceMeta => ({ id, projectId: 1, nodeId, kind: 'doc', title: `R${id}`, path: null, url: null, contentLength: 1, sessionId: null, createdAt: 't', updatedAt: 't' });
 
 function sample() {
@@ -292,7 +294,7 @@ describe('live work and the fold rules', () => {
 
   it('number queued nodes in queue order', () => {
     const t = sample();
-    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [], queue: [t.c.id, t.a1.id, 999, t.c.id], now: T0 });
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [], queue: later(t.c.id, t.a1.id, 999, t.c.id), now: T0 });
     expect(l.nodeItems.get(t.c.id)?.queuePos).toBe(1);
     expect(l.nodeItems.get(t.a1.id)?.queuePos).toBe(2);
     expect(l.nodeItems.get(t.b.id)?.queuePos).toBeNull();
@@ -313,11 +315,11 @@ describe('camera helpers', () => {
     const t = sample();
     const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [] });
     const idle = [session('s1', t.b.id, 'idle')];
-    expect(findFrontier(t.nodes, idle, l, [t.c.id, t.b.id])).toBe(t.c.id);
+    expect(findFrontier(t.nodes, idle, l, later(t.c.id, t.b.id))).toBe(t.c.id);
     // A working session's focus still comes first.
-    expect(findFrontier(t.nodes, [session('s2', t.a2.id, 'working')], l, [t.c.id])).toBe(t.a2.id);
+    expect(findFrontier(t.nodes, [session('s2', t.a2.id, 'working')], l, later(t.c.id))).toBe(t.a2.id);
     const finished = t.nodes.map((x) => (x.id === t.c.id ? { ...x, status: 'done' as const } : x.id === t.d.id ? { ...x, status: 'dropped' as const } : x));
-    expect(findFrontier(finished, idle, l, [999, t.c.id, t.d.id, t.e.id])).toBe(t.e.id);
+    expect(findFrontier(finished, idle, l, later(999, t.c.id, t.d.id, t.e.id))).toBe(t.e.id);
     // With nothing queued: the latest active node, as before.
     expect(findFrontier(t.nodes, idle, l, [])).toBe(t.a1.id);
   });
@@ -344,7 +346,7 @@ describe('queued steps', () => {
     const t = sample();
     const before = layoutOutline({ nodes: t.nodes, resources: [], sessions: [] });
     expect(before.nodeItems.has(t.e.id)).toBe(false);
-    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [], queue: [t.e.id] });
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [], queue: later(t.e.id) });
     expect(l.nodeItems.get(t.e.id)).toMatchObject({ queuePos: 1 });
   });
 });

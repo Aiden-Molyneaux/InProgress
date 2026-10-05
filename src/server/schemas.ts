@@ -78,7 +78,13 @@ export const hookBody = z
     addBlockedBy: z.array(z.string().min(1).max(100)).max(100).optional(),
   })
   .strict();
-export const queueBody = z.object({ nodes: z.array(z.number().int().positive()).max(200) }).strict();
+/**
+ * A set_queue write. With `session` and without `unowned: true` it replaces that session's own entries (a `queue:`);
+ * otherwise the unowned ones (a `later:`).
+ */
+export const queueBody = z
+  .object({ nodes: z.array(z.number().int().positive()).max(200), session: z.string().min(1).max(100).optional(), unowned: z.boolean().optional() })
+  .strict();
 export const tasksBody = z
   .object({
     // Left out, the session's focus is used.

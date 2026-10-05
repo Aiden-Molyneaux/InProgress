@@ -1,7 +1,7 @@
-import { STALE_SESSION_MS, type Binding, type Project, type ProjectSummary } from '../../core/types';
+import { STALE_SESSION_MS, type Binding, type Project, type ProjectSummary, type QueueEntry } from '../../core/types';
 import { globMatch } from '../../lib/glob';
 import { isUnder, normalizePath } from '../../lib/paths';
-import { write, type Ctx } from '../db/tx';
+import { write, type Ctx, type RecordEvent } from '../db/tx';
 import { badRequest, conflict, notFound } from '../errors';
 
 interface ProjectRow {
@@ -25,29 +25,101 @@ interface BindingRow {
   created_at: string;
 }
 
-/** The stored queue: node ids as set_queue last wrote them. */
-function parseQueue(json: string | undefined): number[] {
+const isNodeId = (v: unknown): v is number => Number.isInteger(v) && (v as number) > 0;
+
+/** One stored entry: `{ "node": 82, "session": "3fa9…" }` (session null: unowned), or a bare node id from before owners. */
+function toEntry(item: unknown): QueueEntry | undefined {
+  if (isNodeId(item)) return { nodeId: item, sessionId: null };
+  if (typeof item !== 'object' || item === null) return undefined;
+  const { node, session } = item as { node?: unknown; session?: unknown };
+  if (!isNodeId(node)) return undefined;
+  if (session === null || session === undefined) return { nodeId: node, sessionId: null };
+  return typeof session === 'string' && session ? { nodeId: node, sessionId: session } : undefined;
+}
+
+/**
+ * The stored queue, as set_queue and releaseQueue last left it. Both shapes read: a bare number is an unowned entry.
+ * Anything else is skipped, and a node listed twice keeps its first place. A build from before owned entries keeps only
+ * bare numbers, so it reads the object shape as an empty queue: that is the rollback.
+ */
+function parseQueue(json: string | undefined): QueueEntry[] {
+  let value: unknown;
   try {
-    const value: unknown = JSON.parse(json ?? '[]');
-    return Array.isArray(value) ? value.filter((id): id is number => Number.isInteger(id) && id > 0) : [];
+    value = JSON.parse(json ?? '[]');
   } catch {
     return [];
   }
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<number>();
+  const entries: QueueEntry[] = [];
+  for (const item of value) {
+    const entry = toEntry(item);
+    if (!entry || seen.has(entry.nodeId)) continue;
+    seen.add(entry.nodeId);
+    entries.push(entry);
+  }
+  return entries;
 }
+
+/** The stored JSON: every entry in the object shape. */
+const queueJson = (queue: QueueEntry[]): string => JSON.stringify(queue.map((e) => ({ node: e.nodeId, session: e.sessionId })));
 
 /** The queue as it is read: deleted, done and dropped nodes leave it on their own. */
-function liveQueue(ctx: Ctx, projectId: number, json: string | undefined): number[] {
-  const ids = parseQueue(json);
-  if (!ids.length) return [];
+function liveQueue(ctx: Ctx, projectId: number, json: string | undefined): QueueEntry[] {
+  const entries = parseQueue(json);
+  if (!entries.length) return [];
   const open = new Set(
     (ctx.db
-      .prepare(`SELECT id FROM nodes WHERE project_id = ? AND status NOT IN ('done', 'dropped') AND id IN (${ids.map(() => '?').join(', ')})`)
-      .all(projectId, ...ids) as { id: number }[]).map((r) => r.id),
+      .prepare(`SELECT id FROM nodes WHERE project_id = ? AND status NOT IN ('done', 'dropped') AND id IN (${entries.map(() => '?').join(', ')})`)
+      .all(projectId, ...entries.map((e) => e.nodeId)) as { id: number }[]).map((r) => r.id),
   );
-  return ids.filter((id) => open.has(id));
+  return entries.filter((e) => open.has(e.nodeId));
 }
 
-export const toProject = (r: ProjectRow, queue: number[] = parseQueue(r.queue)): Project => ({
+const isOwned = (e: QueueEntry) => e.sessionId !== null;
+
+/** Owned entries first, then the unowned ones, each part keeping its order. */
+const ownedFirst = (queue: QueueEntry[]): QueueEntry[] => [...queue.filter(isOwned), ...queue.filter((e) => !isOwned(e))];
+
+/**
+ * `queue` with `nodes` as the entries of `sessionId` (null: the unowned ones), replacing only its old entries: in place
+ * of its first old entry, or, when it had none, after the last owned entry. A node is in the queue once, so each one
+ * given leaves wherever it was. Splices every stored entry, not just the open ones, so a step that is reopened takes its
+ * old place again.
+ */
+function spliceQueue(queue: QueueEntry[], nodes: number[], sessionId: string | null): QueueEntry[] {
+  const given = new Set(nodes);
+  const first = queue.findIndex((e) => e.sessionId === sessionId);
+  const kept: QueueEntry[] = [];
+  let at = -1;
+  queue.forEach((e, i) => {
+    if (i === first) at = kept.length;
+    if (e.sessionId !== sessionId && !given.has(e.nodeId)) kept.push(e);
+  });
+  if (at < 0) at = kept.reduce((after, e, i) => (isOwned(e) ? i + 1 : after), 0);
+  return ownedFirst([...kept.slice(0, at), ...nodes.map((nodeId) => ({ nodeId, sessionId })), ...kept.slice(at)]);
+}
+
+/** `queue` with the entries of `sessionId` turned unowned, at the head of the unowned part, in their order. */
+function releaseEntries(queue: QueueEntry[], sessionId: string): QueueEntry[] {
+  const released = queue.filter((e) => e.sessionId === sessionId).map((e) => ({ nodeId: e.nodeId, sessionId: null }));
+  const rest = queue.filter((e) => e.sessionId !== sessionId);
+  return [...rest.filter(isOwned), ...released, ...rest.filter((e) => !isOwned(e))];
+}
+
+/**
+ * Stores `next` as the project's queue when its JSON differs from the stored `before`, recording project.updated with
+ * the queue as read before and after.
+ */
+function storeQueue(ctx: Ctx, record: RecordEvent, projectId: number, before: string, next: QueueEntry[]): void {
+  const json = queueJson(next);
+  if (json === before) return;
+  const from = liveQueue(ctx, projectId, before);
+  ctx.db.prepare('UPDATE projects SET queue = ?, updated_at = ? WHERE id = ?').run(json, ctx.now(), projectId);
+  record({ projectId, type: 'project.updated', entity: 'project', entityId: projectId, data: { changes: { queue: { from, to: liveQueue(ctx, projectId, json) } } } });
+}
+
+export const toProject = (r: ProjectRow, queue: QueueEntry[] = parseQueue(r.queue)): Project => ({
   id: r.id,
   slug: r.slug,
   name: r.name,
@@ -168,11 +240,17 @@ export function updateProject(ctx: Ctx, actor: string, ref: string | number, pat
   });
 }
 
+/** Whose entries a set_queue write replaces: a session's own order (`queue:`), or the unowned one (`later:`). */
+export type QueueOwner = { sessionId: string } | 'unowned';
+
 /**
- * Sets the order Claude plans to work in: node ids of this project, first one next (an id given twice keeps its first
- * place; an empty list clears the queue). Done and dropped nodes stay out of it as it is read.
+ * Sets one owner's part of the order Claude plans to work in: node ids of this project, first one next (an id given
+ * twice keeps its first place; an empty list clears that part). Other owners' entries stay where they are, except that a
+ * node is in the queue once: one given here leaves wherever it was. A session must be tracked in the project. One that
+ * has ended or gone stale owns nothing, so its steps go to the head of the unowned part, as releaseQueue would put them.
+ * Done and dropped nodes stay out of the queue as it is read.
  */
-export function setQueue(ctx: Ctx, actor: string, ref: string | number, nodes: number[]): Project {
+export function setQueue(ctx: Ctx, actor: string, ref: string | number, nodes: number[], owner: QueueOwner): Project {
   return write(ctx, actor, (record) => {
     const project = resolveProject(ctx, ref);
     const ids = [...new Set(nodes)];
@@ -182,15 +260,38 @@ export function setQueue(ctx: Ctx, actor: string, ref: string | number, nodes: n
         throw badRequest(`#${id} is not in project ${project.slug}`, 'Use get_outline to find the right #id.');
       }
     }
-    const row = ctx.db.prepare('SELECT queue FROM projects WHERE id = ?').get(project.id) as { queue: string };
-    const json = JSON.stringify(ids);
-    if (json !== row.queue) {
-      ctx.db.prepare('UPDATE projects SET queue = ?, updated_at = ? WHERE id = ?').run(json, ctx.now(), project.id);
-      const after = getProjectById(ctx, project.id)!;
-      record({ projectId: project.id, type: 'project.updated', entity: 'project', entityId: project.id, data: { changes: { queue: { from: project.queue, to: after.queue } } } });
+    let sessionId: string | null = null;
+    let gone = false;
+    if (owner !== 'unowned') {
+      // A direct read: listProjectSessions would expire stale sessions in a write of its own, inside this one.
+      const s = ctx.db.prepare('SELECT project_id, state, last_seen_at FROM sessions WHERE id = ?').get(owner.sessionId) as
+        | { project_id: number | null; state: string; last_seen_at: string }
+        | undefined;
+      if (s?.project_id !== project.id) {
+        throw badRequest(`Session ${owner.sessionId} is not tracked in project ${project.slug}`, 'Track it here with enroll_session first, or pass unowned: true to set the unowned order.');
+      }
+      sessionId = owner.sessionId;
+      const cutoff = new Date(Date.parse(ctx.now()) - STALE_SESSION_MS).toISOString();
+      gone = s.state === 'ended' || s.last_seen_at < cutoff;
     }
+    const row = ctx.db.prepare('SELECT queue FROM projects WHERE id = ?').get(project.id) as { queue: string };
+    let next = spliceQueue(parseQueue(row.queue), ids, sessionId);
+    if (gone) next = releaseEntries(next, sessionId!);
+    storeQueue(ctx, record, project.id, row.queue, next);
     return getProjectById(ctx, project.id)!;
   });
+}
+
+/**
+ * A session ended, went stale or moved to another project: its entries turn unowned and move to the head of the unowned
+ * part, in order, in every project whose queue holds any. Records project.updated for each queue it changes. Call inside
+ * an open write.
+ */
+export function releaseQueue(ctx: Ctx, record: RecordEvent, sessionId: string): void {
+  // Every write stores this exact text for the session's entries.
+  const needle = `"session":${JSON.stringify(sessionId)}`;
+  const rows = ctx.db.prepare('SELECT id, queue FROM projects WHERE instr(queue, ?) > 0').all(needle) as { id: number; queue: string }[];
+  for (const row of rows) storeQueue(ctx, record, row.id, row.queue, releaseEntries(parseQueue(row.queue), sessionId));
 }
 
 export function listProjectSummaries(ctx: Ctx): ProjectSummary[] {

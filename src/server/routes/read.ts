@@ -18,7 +18,7 @@ export function registerReadRoutes(app: FastifyInstance, ctx: Ctx, version: stri
     const resourcesByNode = new Map<number, number[]>();
     for (const r of snap.resources) resourcesByNode.set(r.nodeId, [...(resourcesByNode.get(r.nodeId) ?? []), r.id]);
     const header = [`Project ${snap.project.name} (slug ${snap.project.slug}${snap.project.status === 'archived' ? ', archived' : ''})`];
-    if (snap.project.queue.length) header.push(`Up next: ${snap.project.queue.map((id) => `#${id}`).join(' → ')}`);
+    if (snap.project.queue.length) header.push(`Up next: ${snap.project.queue.map((e) => `#${e.nodeId}`).join(' → ')}`);
     // The scribe starts with get_outline, so this is where it reads the project's own instructions.
     const playbook = snap.project.playbook.trim();
     if (playbook) header.push('Playbook:', ...playbook.split(/\r?\n/).map((l) => `  ${l}`));
