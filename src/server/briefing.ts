@@ -1,6 +1,6 @@
 import { formatUpNext, queueView } from '../core/layout';
 import { NEEDS_YOU_STALE_MS, ancestors, buildIndex, dfsOrder, isNeedsYou, kids, needsYouAge, progress, type TreeIndex } from '../core/tree';
-import { LABEL_GLYPHS, NODE_LABELS, glyphTitle, sessionDisplayTitle, sessionTag, type ProjectSnapshot, type Session, type TreeNode, type WorkItem } from '../core/types';
+import { NODE_LABELS, glyphTitle, sessionDisplayTitle, sessionTag, type ProjectSnapshot, type Session, type TreeNode, type WorkItem } from '../core/types';
 import { homeDir } from '../lib/home';
 import { taskCommand } from '../lib/task-command';
 
@@ -18,22 +18,23 @@ export interface UpdateRulesOptions {
 }
 
 /**
- * The update rules the briefing carries. The resources folder is spelled out in full from the data dir
- * `home` (forward slashes, as the installed skill has it): the Write tool needs an absolute path. The tasks command
- * is written out in full, built by the same helper as its allow rules so it runs without a permission prompt.
+ * The update rules the briefing carries: a header and six bullets, complete on their own, at most 1,600 characters
+ * with real-length values (review-actions spec §8). Questions, relabelling and backtracking live in the skill's brief
+ * template only. The labels are named as words; their glyphs show on the node lines. The resources folder is spelled
+ * out in full from the data dir `home` (forward slashes, as the installed skill has it): the Write tool needs an
+ * absolute path. The tasks command is written out in full, built by the same helper as its allow rules so it runs
+ * without a permission prompt; the Bash tool's rule matches at once, where PowerShell's check can time out and ask.
  */
 export function updateRules(o: UpdateRulesOptions): string[] {
   const resources = `${(o.home ?? homeDir()).replace(/\\/g, '/')}/resources`;
   return [
-    'Keeping InProgress current (the tree beside Claude that Aiden watches):',
-    '- Never edit it yourself. Brief the inprogress-scribe agent (Agent tool, subagent_type "inprogress-scribe"); it runs in the background. At most one brief per turn, batching every change.',
-    '- Brief at these checkpoints: a new request with a deliverable arrives (it becomes a step right away); a plan is made or changed (backtracking = mark steps dropped or move them); the order of work is decided or changes ("queue: #a, #b, #c"); a step starts, finishes, or is blocked; something worth finding again is produced (test suite, runbook, walkthrough, roadmap, diagram, handoff); something is handed to Aiden (assignee me) or he reports doing it; an open question appears or is answered.',
-    '- Steps are plan-level with outcomes, never single actions. Detours go in the log of the step they interrupted.',
-    `- Give each new step one type label in its brief: add under #41: "Faster cold start" (task, server). Labels: ${NODE_LABELS.map((l) => `${LABEL_GLYPHS[l]} ${l}`).join(', ')}. Pick by purpose first (fix, refactor, research), else by where the work lands; relabel a step when its purpose changes.`,
-    `- Working tasks sit under the steps, and Aiden watches them live. Start an Agent description with its step's #id ("#44 Build project tabs"). For multi-step work use the task tools (TaskCreate, TaskUpdate), and start a task's subject with #id when it belongs to a step other than your focus. Without the task tools, run this after each change; it is the one InProgress write you make yourself: \`${taskCommand(o.sessionId, { cli: o.cli })}\` (the flags repeat, in list order; none clears the list; leave out <step id> to use your focus).`,
-    `- Resources: pass a file path with snapshot_file. Content that only exists in chat is first written to ${resources}/<slug>/<yyyy-mm-dd>-<kebab-title>.md.`,
-    '- Brief format: "Session: <id> · Project: <slug>", then one "- " line per change, e.g. "#57 → done; outcome ...", "add under #55: \\"Run signing tests\\" (assignee me)", "resource on #58: test-suite \\"Signing suite\\", path ..., snapshot_file", "log on #55: ...", "focus → #58".',
-    '- After dispatching, write one line in chat ("↳ InProgress: #57 done, suite attached to #58"). The scribe\'s completion notice needs no reply beyond that line.',
+    'Keeping InProgress current:',
+    '- Brief the inprogress-scribe agent (Agent tool, subagent_type "inprogress-scribe", background), at most once per turn, every change batched. Never edit the tree another way, except tasks below.',
+    `- Brief when: a request with a deliverable arrives (a new step with one label: ${NODE_LABELS.join(', ')}); the plan or an order changes ("queue: #a, #b" is yours, "later: #c, #d" unowned); a step starts ("focus → #id"), finishes ("#id → done; outcome …") or blocks; something goes to Aiden (assignee me) or he answers.`,
+    '- Steps are plan-level with outcomes. Detours go in "log on #id: …".',
+    `- Something worth finding again is a resource: "resource on #id: <kind> "<title>", path <file>, snapshot_file". Chat-only content is first written to ${resources}/<slug>/<yyyy-mm-dd>-<kebab-title>.md.`,
+    `- Working tasks: TaskCreate/TaskUpdate mirror on their own (start a task's subject with #id when its step is not your focus); else, after each change, run in the Bash tool: \`${taskCommand(o.sessionId, { cli: o.cli })}\` (flags repeat in list order; no flags clears the list; no step id uses your focus). No double quotes in subjects; single-quote one with $ or a backtick. Start an Agent description with its step's #id.`,
+    '- After a brief, one line in chat ("↳ InProgress: #57 done"). The scribe\'s notice needs no reply. Brief header: "Session: <id> · Project: <slug>". Full format: the inprogress skill.',
   ];
 }
 
@@ -48,16 +49,27 @@ function lineFor(index: TreeIndex, n: TreeNode, focusOf: Map<number, Session[]>,
   return `#${n.id} ${glyphTitle(n)}${n.kind === 'question' ? ' (question)' : ''} — ${statusText(n)}${prog ? ` (${prog.done}/${prog.total})` : ''}${here.length ? `  ${here.join(' ')}` : ''}`;
 }
 
+/** The open ones of `items`: in progress first, then pending, each in the order given (creation order). */
+const inProgressFirst = (items: WorkItem[]): WorkItem[] => [...items.filter((i) => i.status === 'in_progress'), ...items.filter((i) => i.status === 'pending')];
+
 /**
  * The open working tasks of live sessions on a node, in progress first, then pending, each in creation order. An ended
- * session's tasks are trail, never live work.
+ * session's tasks are trail, never live work: the Left unfinished line names them.
  */
 function openTasks(items: WorkItem[], nodeId: number): WorkItem[] {
-  const on = items.filter((i) => i.nodeId === nodeId && i.endedAt === null);
-  return [...on.filter((i) => i.status === 'in_progress'), ...on.filter((i) => i.status === 'pending')];
+  return inProgressFirst(items.filter((i) => i.nodeId === nodeId && i.endedAt === null));
 }
 
-export function frontierLines(snapshot: ProjectSnapshot, sessionId?: string): string[] {
+export interface FrontierOptions {
+  /**
+   * Print the sibling `Next:` lines (default true). The briefing and the status answer pass false when they print an Up
+   * next line, so "what's next" has one answer (review-actions ruling 13).
+   */
+  siblingNext?: boolean;
+}
+
+export function frontierLines(snapshot: ProjectSnapshot, sessionId?: string, opts: FrontierOptions = {}): string[] {
+  const siblingNext = opts.siblingNext ?? true;
   const index = buildIndex(snapshot.nodes);
   const root = index.root;
   if (!root) return ['(empty project)'];
@@ -92,7 +104,7 @@ export function frontierLines(snapshot: ProjectSnapshot, sessionId?: string): st
       }
       walk(k, depth + 1);
     }
-    const upcoming = list.slice(last + 1).filter((k) => k.status === 'todo' && !chain.has(k.id));
+    const upcoming = siblingNext ? list.slice(last + 1).filter((k) => k.status === 'todo' && !chain.has(k.id)) : [];
     if (upcoming.length) {
       lines.push(`${'  '.repeat(depth)}Next: ${upcoming.slice(0, 2).map((k) => `#${k.id} ${glyphTitle(k)}`).join(' · ')}${upcoming.length > 2 ? ` (+${upcoming.length - 2} more)` : ''}`);
     }
@@ -108,7 +120,7 @@ export function frontierLines(snapshot: ProjectSnapshot, sessionId?: string): st
 /**
  * The planned order (set_queue), this session's own steps first, with titles, then the other sessions' by letter and
  * the unowned ones: `Up next (you, A): #42 ⧉ Build tabs → #44 ¶ Write the guide · B: #45 · later: #47`. Undefined when no
- * step is up next.
+ * step is up next (formatUpNext's guarantee), which is when the frontier keeps its sibling Next: lines.
  */
 function upNextLine(snapshot: ProjectSnapshot, sessionId: string): string | undefined {
   const view = queueView(snapshot.project.queue, snapshot.nodes, snapshot.sessions);
@@ -148,6 +160,72 @@ function checkLine(snapshot: ProjectSnapshot, now: number): string | undefined {
   return `Check with Aiden whether these are already done, then brief the answer (a "not yet" goes in "log on #id: …"): ${named.join(', ')}.`;
 }
 
+/** How many finished steps the Recently done line names. */
+const RECENTLY_DONE = 2;
+/** How long an outcome may run on the Recently done line, its "…" included. */
+const OUTCOME_MAX = 80;
+/** How many task subjects the Left unfinished line names, in all. */
+const MAX_LEFT_UNFINISHED = 3;
+
+/** An outcome on one line, at most OUTCOME_MAX characters (`.length` units): a longer one is cut to one less, plus "…". */
+function clipOutcome(outcome: string): string {
+  const line = outcome.replace(/\s+/g, ' ').trim();
+  return line.length > OUTCOME_MAX ? `${line.slice(0, OUTCOME_MAX - 1)}…` : line;
+}
+
+/**
+ * `Recently done: #87 ¶ Title — "outcome" · #86 Title`: the steps finished last, a tie (addNodes stamps one time per
+ * call) to the newer id, each with its outcome clipped, or bare without one. Only `done` sets completedAt, so a dropped
+ * step never shows. Undefined when nothing is done.
+ */
+function recentlyDoneLine(snapshot: ProjectSnapshot): string | undefined {
+  const done = snapshot.nodes
+    .filter((n): n is TreeNode & { completedAt: string } => n.parentId !== null && n.status === 'done' && n.completedAt !== null)
+    .sort((a, b) => b.completedAt.localeCompare(a.completedAt) || b.id - a.id)
+    .slice(0, RECENTLY_DONE);
+  if (!done.length) return undefined;
+  const named = done.map((n) => {
+    const outcome = clipOutcome(n.outcome);
+    return `#${n.id} ${glyphTitle(n)}${outcome ? ` — "${outcome}"` : ''}`;
+  });
+  return `Recently done: ${named.join(' · ')}`;
+}
+
+/**
+ * A subject without the leading `#id` of the step it is listed under (`#86 Review it` under #86 reads `Review it`), as
+ * leadingNode reads one, so the line names the step once. Another step's `#id`, or a subject that is only the `#id`, stays.
+ */
+function withoutStepId(subject: string, nodeId: number): string {
+  return subject.replace(new RegExp(`^\\s*#${nodeId}\\b[\\s:]*`), '') || subject;
+}
+
+/**
+ * `Left unfinished by an earlier session: on #86: "Review it", "Write tests" · on #90: "Check the hint"`: the open tasks
+ * of ended sessions (their subagents' too) on steps still open, by step in tree order, in progress first within a step,
+ * MAX_LEFT_UNFINISHED subjects in all. The snapshot holds only sessions that ended within the 7-day trail. Undefined when
+ * there are none.
+ */
+function leftUnfinishedLine(snapshot: ProjectSnapshot): string | undefined {
+  const index = buildIndex(snapshot.nodes);
+  const order = dfsOrder(index);
+  const stillOpen = (id: number) => {
+    const n = index.byId.get(id);
+    return n !== undefined && n.status !== 'done' && n.status !== 'dropped';
+  };
+  const left = snapshot.workItems.filter((i) => i.endedAt !== null && stillOpen(i.nodeId));
+  const steps = [...new Set(left.map((i) => i.nodeId))].sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
+  const parts: string[] = [];
+  let room = MAX_LEFT_UNFINISHED;
+  for (const nodeId of steps) {
+    const subjects = inProgressFirst(left.filter((i) => i.nodeId === nodeId)).slice(0, room);
+    if (!subjects.length) continue;
+    parts.push(`on #${nodeId}: ${subjects.map((i) => `"${withoutStepId(i.subject, nodeId)}"`).join(', ')}`);
+    room -= subjects.length;
+    if (room === 0) break;
+  }
+  return parts.length ? `Left unfinished by an earlier session: ${parts.join(' · ')}` : undefined;
+}
+
 export interface BriefingOptions {
   /** Ask about needs-you items older than NEEDS_YOU_STALE_MS: every fresh briefing does, one after a compaction does not. */
   checkOld: boolean;
@@ -160,7 +238,8 @@ export function renderBriefing(snapshot: ProjectSnapshot, sessionId: string, now
   const letter = sessionTag(sessions.find((s) => s.id === sessionId)?.slot ?? null);
   const lines = [
     `[InProgress] This session is tracked in project "${project.name}" (slug ${project.slug}). Session id: ${sessionId}.${letter ? ` You are session ${letter}.` : ''}`,
-    'All InProgress edits go through the inprogress-scribe agent in the background; follow the inprogress skill.',
+    // The rules below stand alone (review-actions spec §8); the skill keeps opt-in, adoption and the full template.
+    'Plan edits go through the inprogress-scribe agent in the background (working tasks excepted, below). The rules below are complete; the inprogress skill is for opt-in, adoption and the full brief format.',
   ];
   const playbook = project.playbook.trim();
   if (playbook) {
@@ -169,14 +248,19 @@ export function renderBriefing(snapshot: ProjectSnapshot, sessionId: string, now
     if (pl.length > 15) lines.push(`  … (${pl.length - 15} more lines)`);
   }
   lines.push(...updateRules({ sessionId }));
-  lines.push('Where things stand:', ...frontierLines(snapshot, sessionId).map((l) => `  ${l}`));
+  // One answer to "what's next": an Up next line (always at least one step) replaces the sibling Next: lines.
   const upNext = upNextLine(snapshot, sessionId);
+  lines.push('Where things stand:', ...frontierLines(snapshot, sessionId, { siblingNext: upNext === undefined }).map((l) => `  ${l}`));
   if (upNext) lines.push(upNext);
   const needs = needsYouLine(snapshot, now);
   if (needs) lines.push(needs);
   const check = opts.checkOld ? checkLine(snapshot, now) : undefined;
   if (check) lines.push(check);
-  const recent =[...resources].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id - a.id).slice(0, 5);
+  const recentlyDone = recentlyDoneLine(snapshot);
+  if (recentlyDone) lines.push(recentlyDone);
+  const leftUnfinished = leftUnfinishedLine(snapshot);
+  if (leftUnfinished) lines.push(leftUnfinished);
+  const recent = [...resources].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id - a.id).slice(0, 5);
   if (recent.length) lines.push(`Recent resources: ${recent.map((r) => `r${r.id} ${r.title} (on #${r.nodeId})`).join(' · ')}`);
   const others = sessions.filter((s) => s.id !== sessionId && s.state !== 'ended');
   if (others.length) {
@@ -191,8 +275,9 @@ export function renderBriefing(snapshot: ProjectSnapshot, sessionId: string, now
 
 /** The answer to a status question: the needs-you ages as the briefing has them (`now`, the server's clock), never its check line. */
 export function renderStatusAnswer(snapshot: ProjectSnapshot, sessionId: string, now: number): string {
-  const lines = [`[InProgress] Where things stand in ${snapshot.project.name} (live):`, ...frontierLines(snapshot, sessionId).map((l) => `  ${l}`)];
   const upNext = upNextLine(snapshot, sessionId);
+  const frontier = frontierLines(snapshot, sessionId, { siblingNext: upNext === undefined });
+  const lines = [`[InProgress] Where things stand in ${snapshot.project.name} (live):`, ...frontier.map((l) => `  ${l}`)];
   if (upNext) lines.push(upNext);
   const needs = needsYouLine(snapshot, now);
   if (needs) lines.push(needs);

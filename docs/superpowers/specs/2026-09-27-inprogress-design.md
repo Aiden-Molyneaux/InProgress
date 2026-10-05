@@ -297,6 +297,7 @@ The briefing also carries the update rules, because it is re-injected after comp
 skill body is not: the five checkpoints from 6.4, the one-dispatch-per-turn rule, the brief
 template (about 8 lines), the chat-only-resource rule, and "the scribe's completion notice needs
 no reply beyond your one line". The skill is then needed only for opt-in and adoption.
+Superseded by §8 of `2026-10-04-review-actions-design.md`: a six-bullet rules block that stands alone, line 2 as written there, and the full brief template in the skill; do not restore this paragraph's version.
 
 ## 6. Claude integration
 

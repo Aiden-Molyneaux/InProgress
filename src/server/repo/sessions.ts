@@ -48,6 +48,25 @@ export function saveSession(ctx: Ctx, s: Session): void {
     .run(s.projectId, s.title, s.cwd, s.branch, s.transcriptPath, s.state, s.focusNodeId, s.promptsSinceUpdate, s.lastSeenAt, s.endedAt, s.slot, s.id);
 }
 
+/*
+ * The "briefing due" marker (migration 6, review-actions spec §8): set when a session's next prompt owes it the full
+ * briefing, because it joined a project through an enroll (whose briefing goes to the scribe, which passes on only its
+ * first line) or came back into another letter; cleared by the response that carries the full briefing. It
+ * stays out of the Session type, which reaches the window: only session-flow sets, reads and clears it.
+ */
+
+export function markBriefingDue(ctx: Ctx, id: string): void {
+  ctx.db.prepare('UPDATE sessions SET briefing_due = 1 WHERE id = ?').run(id);
+}
+
+export function briefingDue(ctx: Ctx, id: string): boolean {
+  return ctx.db.prepare('SELECT briefing_due FROM sessions WHERE id = ?').pluck().get(id) === 1;
+}
+
+export function clearBriefingDue(ctx: Ctx, id: string): void {
+  ctx.db.prepare('UPDATE sessions SET briefing_due = NULL WHERE id = ? AND briefing_due IS NOT NULL').run(id);
+}
+
 /**
  * The slot for session `sessionId` in project `projectId`: `prefer` (the slot it has) when no other live session of the
  * project holds it, else the lowest slot none holds, from 0. Live means not ended and heard from within the stale limit,

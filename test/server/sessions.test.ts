@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { LABEL_GLYPHS, NODE_LABELS } from '../../src/core/types';
 import { homeDir } from '../../src/lib/home';
 import { normalizePath } from '../../src/lib/paths';
 import { updateRules } from '../../src/server/briefing';
@@ -8,7 +9,7 @@ import { addLog } from '../../src/server/repo/logs';
 import { addNodes, listNodes, updateNode } from '../../src/server/repo/nodes';
 import { addBinding, createProject, setQueue, updateProject } from '../../src/server/repo/projects';
 import { addResource } from '../../src/server/repo/resources';
-import { findSession, listProjectSessions } from '../../src/server/repo/sessions';
+import { briefingDue, findSession, listProjectSessions } from '../../src/server/repo/sessions';
 import { getNodeDetail, getProjectSnapshot } from '../../src/server/repo/snapshot';
 import { renderBriefing } from '../../src/server/briefing';
 import { enrollSession, handleHookEvent, setFocus } from '../../src/server/session-flow';
@@ -63,7 +64,7 @@ describe('handleHookEvent', () => {
     expect(text).toContain('tracked in project "InGame" (slug ingame). Session id: s1.');
     expect(text).toContain('Planning docs live in docs/planning.');
     expect(text).toContain('inprogress-scribe');
-    expect(text).toContain('At most one brief per turn');
+    expect(text).toContain('at most once per turn, every change batched');
     expect(text).toContain(`#${a2.id} Play app signing — active`);
     expect(text).toContain(`#${a3.id} Run signing tests — NEEDS YOU`);
     expect(text).toMatch(/Next: #\d+ 3 RevenueCat · #\d+ 4 Build to GitHub \(\+3 more\)/);
@@ -75,7 +76,7 @@ describe('handleHookEvent', () => {
   it('names the resources folder by its absolute path, which the Write tool needs', () => {
     const { ctx } = setup();
     const text = handleHookEvent(ctx, 's1', start()).context!;
-    expect(text).toContain(`Content that only exists in chat is first written to ${homeDir().replace(/\\/g, '/')}/resources/<slug>/<yyyy-mm-dd>-<kebab-title>.md.`);
+    expect(text).toContain(`Chat-only content is first written to ${homeDir().replace(/\\/g, '/')}/resources/<slug>/<yyyy-mm-dd>-<kebab-title>.md.`);
     expect(text).not.toContain('~/');
     expect(updateRules({ home: 'C:\\Users\\me\\.inprogress', sessionId: 's1' }).join('\n')).toContain(' C:/Users/me/.inprogress/resources/<slug>/<yyyy-mm-dd>-<kebab-title>.md.');
   });
@@ -255,26 +256,26 @@ describe('briefing: live work', () => {
     expect(text).not.toContain('Up next');
   });
 
-  it('carries the live-work rules: #id on subagents and tasks, the task tools, the queue, new requests', () => {
+  it('carries the live-work rules: #id on subagents and tasks, the task tools, both orders, new requests', () => {
     const rules = updateRules({ home: 'C:/Users/me/.inprogress', sessionId: 's1' }).join('\n');
-    expect(rules).toContain('"queue: #a, #b, #c"');
-    expect(rules).toContain('a new request with a deliverable arrives (it becomes a step right away)');
-    expect(rules).toContain('"#44 Build project tabs"');
-    expect(rules).toContain('TaskCreate');
+    expect(rules).toContain('"queue: #a, #b" is yours, "later: #c, #d" unowned');
+    expect(rules).toContain('a request with a deliverable arrives (a new step with one label:');
+    expect(rules).toContain("Start an Agent description with its step's #id.");
+    expect(rules).toContain("TaskCreate/TaskUpdate mirror on their own (start a task's subject with #id when its step is not your focus); else,");
   });
 
-  it('writes out the tasks command with this session\'s id, as the one write the session makes itself', () => {
+  it('writes out the tasks command with this session\'s id, to run in the Bash tool where the task tools are absent', () => {
     const cli = 'C:\\personal\\InProgress\\dist\\cli\\main.js';
     const rules = updateRules({ home: 'C:/Users/me/.inprogress', sessionId: 'abc-123', cli });
     const line = rules.find((l) => l.startsWith('- Working tasks'))!;
-    expect(line).toContain('Without the task tools, run this after each change; it is the one InProgress write you make yourself:');
-    expect(line).toContain('`node C:/personal/InProgress/dist/cli/main.js tasks <step id> --session abc-123 --done "…" --doing "…" --todo "…"`');
-    expect(line).toContain('leave out <step id> to use your focus');
+    expect(line).toContain('else, after each change, run in the Bash tool: `node C:/personal/InProgress/dist/cli/main.js tasks <step id> --session abc-123 --done "…" --doing "…" --todo "…"`');
+    expect(line).toContain('(flags repeat in list order; no flags clears the list; no step id uses your focus)');
+    expect(line).toContain('No double quotes in subjects; single-quote one with $ or a backtick.');
     // The scribe's old fallback is gone, and nothing prints a step as "tasks #…": an unquoted # starts a comment.
     expect(rules.join('\n')).not.toContain('tasks on #');
     expect(rules.join('\n')).not.toMatch(/tasks #/);
-    // Only that line changed: the scribe line stays for P8 to rewrite.
-    expect(rules[1]).toMatch(/^- Never edit it yourself\. Brief the inprogress-scribe agent/);
+    // The scribe line names the one exception.
+    expect(rules[1]).toMatch(/^- Brief the inprogress-scribe agent .*Never edit the tree another way, except tasks below\.$/);
   });
 
   it("prints the CLI beside the server module, with the briefed session's id", () => {
@@ -317,28 +318,93 @@ describe('briefing: session identity', () => {
 });
 
 describe('briefing: type labels', () => {
-  it('prints the glyph before the title on node lines, Next, Up next and Needs you', () => {
+  it('prints the glyph before the title on node lines, Next and Needs you', () => {
     const { ctx, project, a2, a3 } = setup();
     const [s3] = listNodes(ctx, project.id).filter((n) => n.title === '3 RevenueCat');
     updateNode(ctx, 'test', a2.id, { label: 'ui' });
     updateNode(ctx, 'test', a3.id, { label: 'ops' });
     updateNode(ctx, 'test', s3.id, { label: 'integration' });
-    handleHookEvent(ctx, 's1', start());
-    setQueue(ctx, 'scribe:s1', project.slug, [a3.id], { sessionId: 's1' });
     const lines = handleHookEvent(ctx, 's1', start()).context!.split('\n');
     expect(lines).toContain(`      #${a2.id} ⧉ Play app signing — active`);
     expect(lines).toContain(`      #${a3.id} ⚒ Run signing tests — NEEDS YOU`);
     expect(lines.find((l) => l.trim().startsWith('Next:'))?.trim()).toMatch(new RegExp(`^Next: #${s3.id} ⇄ 3 RevenueCat · #\\d+ 4 Build to GitHub`));
-    expect(lines).toContain(`Up next (you, A): #${a3.id} ⚒ Run signing tests`);
     expect(lines).toContain(`Needs you (1): #${a3.id} ⚒ Run signing tests`);
   });
 
-  it('lists the label set and the picking rule once in the update rules', () => {
-    const rules = updateRules({ home: 'C:/Users/me/.inprogress', sessionId: 's1' }).join('\n');
-    expect(rules).toContain('⧉ ui, ⚙ server, ⛁ data, ⇄ integration, ⚒ ops, ¶ docs, ⚑ fix, ↻ refactor, ⌕ research');
-    expect(rules.match(/⧉ ui/g)).toHaveLength(1);
-    expect(rules).toMatch(/purpose first \(fix, refactor, research\), else by where the work lands/);
-    expect(rules).toContain('(task, server)');
+  it('prints the glyph before the title on the Up next line', () => {
+    const { ctx, project, a3 } = setup();
+    updateNode(ctx, 'test', a3.id, { label: 'ops' });
+    handleHookEvent(ctx, 's1', start());
+    setQueue(ctx, 'scribe:s1', project.slug, [a3.id], { sessionId: 's1' });
+    expect(handleHookEvent(ctx, 's1', start()).context!.split('\n')).toContain(`Up next (you, A): #${a3.id} ⚒ Run signing tests`);
+  });
+
+  it('names the labels as words, once, inside the checkpoint bullet, with no glyph list', () => {
+    const rules = updateRules({ home: 'C:/Users/me/.inprogress', sessionId: 's1' });
+    const text = rules.join('\n');
+    expect(rules.find((l) => l.startsWith('- Brief when:'))).toContain(`(a new step with one label: ${NODE_LABELS.join(', ')})`);
+    expect(text.split(NODE_LABELS.join(', '))).toHaveLength(2);
+    for (const glyph of Object.values(LABEL_GLYPHS)) expect(text, glyph).not.toContain(glyph);
+  });
+});
+
+describe('briefing: the rules block', () => {
+  /** Real-length values: a Claude Code session id (a UUID), the deployed CLI and Aiden's data dir. */
+  const real = { home: 'C:/Users/aiden.molyneaux/.inprogress', sessionId: '0f8c2a4e-5b7d-4c1e-9a3f-6d2b8e1c7a90', cli: 'C:/personal/InProgress/dist/cli/main.js' };
+
+  it('fits in 1,600 characters with real-length values and the tasks command written out in full', () => {
+    expect(real.sessionId).toHaveLength(36);
+    const text = updateRules(real).join('\n');
+    expect(text.length).toBeLessThanOrEqual(1600);
+    expect(text).toContain(`\`node C:/personal/InProgress/dist/cli/main.js tasks <step id> --session ${real.sessionId} --done "…" --doing "…" --todo "…"\``);
+  });
+
+  it('keeps every clause, under a header', () => {
+    const rules = updateRules(real);
+    expect(rules[0]).toBe('Keeping InProgress current:');
+    expect(rules.slice(1).every((l) => l.startsWith('- '))).toBe(true);
+    const text = rules.join('\n');
+    const clauses = [
+      // Who to brief, how, how often, and the one exception.
+      'Brief the inprogress-scribe agent (Agent tool, subagent_type "inprogress-scribe", background)',
+      'at most once per turn, every change batched',
+      'Never edit the tree another way, except tasks below.',
+      // The checkpoints, with the labels and both orders (later: is Aiden's §8 clause).
+      'a request with a deliverable arrives (a new step with one label:',
+      'the plan or an order changes ("queue: #a, #b" is yours, "later: #c, #d" unowned)',
+      'a step starts ("focus → #id"), finishes ("#id → done; outcome …") or blocks',
+      'something goes to Aiden (assignee me) or he answers',
+      'Steps are plan-level with outcomes. Detours go in "log on #id: …".',
+      'Something worth finding again is a resource: "resource on #id: <kind> "<title>", path <file>, snapshot_file".',
+      'Chat-only content is first written to C:/Users/aiden.molyneaux/.inprogress/resources/<slug>/<yyyy-mm-dd>-<kebab-title>.md.',
+      // Working tasks: the subject #id (Aiden's §8 clause), the Bash tool (ruling 32), the usage note, quoting (ruling 31).
+      "TaskCreate/TaskUpdate mirror on their own (start a task's subject with #id when its step is not your focus)",
+      'else, after each change, run in the Bash tool:',
+      // A session must see that the flags repeat, one per task.
+      'flags repeat in list order',
+      'no flags clears the list',
+      'no step id uses your focus',
+      'No double quotes in subjects',
+      "Start an Agent description with its step's #id.",
+      // After a brief.
+      'After a brief, one line in chat ("↳ InProgress: #57 done").',
+      "The scribe's notice needs no reply.",
+      'Brief header: "Session: <id> · Project: <slug>". Full format: the inprogress skill.',
+    ];
+    for (const clause of clauses) expect(text, clause).toContain(clause);
+  });
+
+  it('leaves questions, relabelling and backtracking to the skill', () => {
+    const text = updateRules(real).join('\n');
+    expect(text).not.toMatch(/question|relabel|dropped|backtrack/i);
+  });
+
+  it('says on line 2 that plan edits go through the scribe, the rules below are complete, and what the skill is for', () => {
+    const { ctx, project } = setup();
+    const line2 = 'Plan edits go through the inprogress-scribe agent in the background (working tasks excepted, below). The rules below are complete; the inprogress skill is for opt-in, adoption and the full brief format.';
+    expect(handleHookEvent(ctx, 's1', start()).context!.split('\n')[1]).toBe(line2);
+    expect(enrollSession(ctx, 'scribe:e1', 'e1', project.slug).briefing.split('\n')[1]).toBe(line2);
+    expect(handleHookEvent(ctx, 's1', start()).context).not.toContain('follow the inprogress skill');
   });
 });
 
@@ -419,6 +485,190 @@ describe('briefing: needs-you ages and the check line', () => {
     const answer = statusAnswer(ctx);
     expect(answer).toContain(`Needs you (1): #${a3.id} Run signing tests (4d)`);
     expect(answer).not.toContain('Check with Aiden');
+  });
+});
+
+describe('briefing: one answer to "what\'s next"', () => {
+  const brief = (ctx: Ctx, session = 's1') => handleHookEvent(ctx, session, start()).context!;
+  const statusAnswer = (ctx: Ctx, session = 's1') => handleHookEvent(ctx, session, { event: 'prompt', asksStatus: true }).context!;
+  const nextLines = (text: string) => text.split('\n').filter((l) => l.trim().startsWith('Next:'));
+  const step = (ctx: Ctx, projectId: number, title: string) => listNodes(ctx, projectId).find((n) => n.title === title)!;
+
+  it('no Next: line when an Up next line prints, in the briefing and the status answer', () => {
+    const { ctx, project } = setup();
+    handleHookEvent(ctx, 's1', start());
+    expect(nextLines(brief(ctx))).toHaveLength(1);
+    expect(nextLines(statusAnswer(ctx))).toHaveLength(1);
+    const s4 = step(ctx, project.id, '4 Build to GitHub');
+    setQueue(ctx, 'scribe:s1', project.slug, [s4.id], { sessionId: 's1' });
+    for (const text of [brief(ctx), statusAnswer(ctx)]) {
+      expect(text).toContain(`\nUp next (you, A): #${s4.id} 4 Build to GitHub`);
+      expect(nextLines(text)).toEqual([]);
+    }
+  });
+
+  it("no Next: line either when the Up next line holds only another session's steps or unowned ones", () => {
+    const { ctx, project } = setup();
+    handleHookEvent(ctx, 's1', start());
+    handleHookEvent(ctx, 's2', start());
+    const [s4, s5] = [step(ctx, project.id, '4 Build to GitHub'), step(ctx, project.id, '5 Store listing')];
+    setQueue(ctx, 'scribe:s2', project.slug, [s4.id], { sessionId: 's2' });
+    let text = brief(ctx);
+    expect(text).toContain(`\nUp next: B: #${s4.id}\n`);
+    expect(nextLines(text)).toEqual([]);
+    setQueue(ctx, 'scribe:s2', project.slug, [], { sessionId: 's2' });
+    setQueue(ctx, 'scribe:s1', project.slug, [s5.id], 'unowned');
+    text = statusAnswer(ctx);
+    expect(text).toContain(`\nUp next: later: #${s5.id}`);
+    expect(nextLines(text)).toEqual([]);
+  });
+
+  it("keeps the Next: line when the queue's only entry is the reader's own focus, so no Up next line prints", () => {
+    const { ctx, project, a2 } = setup();
+    handleHookEvent(ctx, 's1', start());
+    setFocus(ctx, 'scribe:s1', 's1', a2.id);
+    setQueue(ctx, 'scribe:s1', project.slug, [a2.id], { sessionId: 's1' });
+    expect(getProjectSnapshot(ctx, project.slug).project.queue).toHaveLength(1);
+    for (const text of [brief(ctx), statusAnswer(ctx)]) {
+      expect(text).not.toContain('Up next');
+      expect(nextLines(text).map((l) => l.trim())).toEqual([expect.stringMatching(/^Next: #\d+ 3 RevenueCat · #\d+ 4 Build to GitHub \(\+3 more\)$/)]);
+    }
+  });
+});
+
+describe('briefing: recently done and left unfinished', () => {
+  const HOUR = 60 * 60 * 1000;
+  const DAY = 24 * HOUR;
+
+  /** setup()'s project on a clock the test moves by hand, so each finish gets its own time. */
+  function clocked() {
+    let now = Date.parse('2026-10-01T09:00:00.000Z');
+    const t = setup(createCtx(openDb(':memory:'), () => new Date(now).toISOString()));
+    const step = (title: string) => listNodes(t.ctx, t.project.id).find((n) => n.title === title)!;
+    return { ...t, step, tick: (ms: number) => (now += ms) };
+  }
+  const brief = (ctx: Ctx, session = 's1') => handleHookEvent(ctx, session, start()).context!;
+  const lineOf = (text: string, head: string) => text.split('\n').find((l) => l.startsWith(head));
+  const statusAnswer = (ctx: Ctx) => handleHookEvent(ctx, 's1', { event: 'prompt', asksStatus: true }).context!;
+
+  it('names the two steps finished last, each with its glyph and quoted outcome, a step with no outcome bare', () => {
+    const { ctx, a1, a2, tick } = clocked();
+    tick(HOUR);
+    updateNode(ctx, 'test', a2.id, { status: 'done', outcome: 'Signing configured in Play Console', label: 'docs' });
+    // a1 and 1 iOS certificate finished in one call, so at one time: the newer id comes first. a1 has no outcome.
+    expect(lineOf(brief(ctx), 'Recently done')).toBe(`Recently done: #${a2.id} ¶ Play app signing — "Signing configured in Play Console" · #${a1.id} Upload keystore`);
+    expect(statusAnswer(ctx)).not.toContain('Recently done');
+  });
+
+  it('orders by finish time, not by the last edit: a step finished earlier and edited later still comes second', () => {
+    const { ctx, a2, step, tick } = clocked();
+    const s3 = step('3 RevenueCat');
+    tick(HOUR);
+    updateNode(ctx, 'test', a2.id, { status: 'done', outcome: 'Configured' });
+    tick(HOUR);
+    updateNode(ctx, 'test', s3.id, { status: 'done' });
+    tick(HOUR);
+    // Its updatedAt moves past s3's; its completedAt stays.
+    updateNode(ctx, 'test', a2.id, { outcome: 'Configured in Play Console' });
+    expect(lineOf(brief(ctx), 'Recently done')).toBe(`Recently done: #${s3.id} 3 RevenueCat · #${a2.id} Play app signing — "Configured in Play Console"`);
+  });
+
+  it('breaks a tie in finish time by id, the newer first', () => {
+    const { ctx, s1, a1 } = clocked();
+    updateNode(ctx, 'test', s1.id, { outcome: 'Certificate in the keychain' });
+    expect(lineOf(brief(ctx), 'Recently done')).toBe(`Recently done: #${a1.id} Upload keystore · #${s1.id} 1 iOS certificate — "Certificate in the keychain"`);
+  });
+
+  it('clips an outcome to 80 characters with the … inside them, on one line', () => {
+    const { ctx, step, tick } = clocked();
+    const [s3, s4] = [step('3 RevenueCat'), step('4 Build to GitHub')];
+    tick(HOUR);
+    updateNode(ctx, 'test', s3.id, { status: 'done', outcome: 'y'.repeat(80) });
+    tick(HOUR);
+    const long = `Builds on push.\n\nThe workflow ${'x'.repeat(100)}`;
+    updateNode(ctx, 'test', s4.id, { status: 'done', outcome: long });
+    const clipped = `${`Builds on push. The workflow ${'x'.repeat(100)}`.slice(0, 79)}…`;
+    expect(clipped).toHaveLength(80);
+    expect(lineOf(brief(ctx), 'Recently done')).toBe(`Recently done: #${s4.id} 4 Build to GitHub — "${clipped}" · #${s3.id} 3 RevenueCat — "${'y'.repeat(80)}"`);
+  });
+
+  it('never names a dropped step, and leaves the line out when nothing is done', () => {
+    const { ctx, s1, a1, a2, tick } = clocked();
+    tick(HOUR);
+    updateNode(ctx, 'test', a2.id, { status: 'dropped', outcome: 'Not needed after all' });
+    updateNode(ctx, 'test', s1.id, { status: 'active' });
+    expect(lineOf(brief(ctx), 'Recently done')).toBe(`Recently done: #${a1.id} Upload keystore`);
+    updateNode(ctx, 'test', a1.id, { status: 'todo' });
+    expect(brief(ctx)).not.toContain('Recently done');
+  });
+
+  it('names the open tasks an ended session left on open steps, its subagents\' too, by step in tree order, three at most', () => {
+    const { ctx, a1, a2, a3, step } = clocked();
+    const [s3, s4] = [step('3 RevenueCat'), step('4 Build to GitHub')];
+    handleHookEvent(ctx, 's1', start());
+    handleHookEvent(ctx, 's1', { event: 'task-created', taskKey: '1', subject: 'Still mine' });
+    handleHookEvent(ctx, 's2', start());
+    setFocus(ctx, 'scribe:s2', 's2', s3.id);
+    const task = (key: string, subject: string, agentId?: string) => handleHookEvent(ctx, 's2', { event: 'task-created', taskKey: key, subject, agentId });
+    task('1', 'Wire the paywall');
+    task('2', `#${a2.id} Check the upload key`);
+    task('3', 'Finished already');
+    handleHookEvent(ctx, 's2', { event: 'task-updated', taskKey: '3', status: 'completed' });
+    task('4', `#${a1.id} On a finished step`);
+    // a1 (finished) and a3 (dropped below) come before s3 in tree order: counted, either would take a place.
+    task('5', `#${a3.id} On a dropped step`);
+    task('6', `#${s4.id} Fourth in tree order`);
+    handleHookEvent(ctx, 's2', { event: 'subagent-start', agentId: 'g1', agentType: 'general-purpose' });
+    task('1', 'Price the tiers', 'g1');
+    handleHookEvent(ctx, 's2', { event: 'task-updated', agentId: 'g1', taskKey: '1', status: 'in_progress' });
+    updateNode(ctx, 'test', a3.id, { status: 'dropped' });
+    // While s2 is live, nothing is left unfinished.
+    expect(brief(ctx)).not.toContain('Left unfinished');
+    handleHookEvent(ctx, 's2', { event: 'end' });
+    // In progress first within a step, as under the focus. The step's own #id leaves the subject: the line names it once.
+    const expected = `Left unfinished by an earlier session: on #${a2.id}: "Check the upload key" · on #${s3.id}: "Price the tiers", "Wire the paywall"`;
+    expect(lineOf(brief(ctx), 'Left unfinished')).toBe(expected);
+    expect(statusAnswer(ctx)).not.toContain('Left unfinished');
+  });
+
+  it("strips only the step's own leading #id from a subject", () => {
+    const { ctx, a2 } = clocked();
+    handleHookEvent(ctx, 's2', start());
+    setFocus(ctx, 'scribe:s2', 's2', a2.id);
+    // #999 is no step here, so that task lands on the focus with its subject as written.
+    for (const [key, subject] of [['1', `#${a2.id}: Review it`], ['2', '#999 Not a step'], ['3', `#${a2.id}`]]) {
+      handleHookEvent(ctx, 's2', { event: 'task-created', taskKey: key, subject });
+    }
+    handleHookEvent(ctx, 's2', { event: 'end' });
+    expect(lineOf(brief(ctx, 's1'), 'Left unfinished')).toBe(`Left unfinished by an earlier session: on #${a2.id}: "Review it", "#999 Not a step", "#${a2.id}"`);
+  });
+
+  it('leaves the line out when no ended session left work, and once the 7-day trail has passed', () => {
+    const { ctx, a2, tick } = clocked();
+    handleHookEvent(ctx, 's1', start());
+    expect(brief(ctx)).not.toContain('Left unfinished');
+    handleHookEvent(ctx, 's2', start());
+    setFocus(ctx, 'scribe:s2', 's2', a2.id);
+    handleHookEvent(ctx, 's2', { event: 'task-created', taskKey: '1', subject: 'Review it' });
+    handleHookEvent(ctx, 's2', { event: 'end' });
+    tick(7 * DAY - 1);
+    expect(lineOf(brief(ctx), 'Left unfinished')).toBe(`Left unfinished by an earlier session: on #${a2.id}: "Review it"`);
+    tick(2);
+    expect(brief(ctx)).not.toContain('Left unfinished');
+  });
+
+  it('places both after Needs you and its check line, Recently done first, before Recent resources', () => {
+    const { ctx, a2, a3, tick } = clocked();
+    addResource(ctx, 'test', { nodeId: a3.id, kind: 'doc', title: 'Notes', content: 'x' });
+    handleHookEvent(ctx, 's1', start());
+    handleHookEvent(ctx, 's2', start());
+    setFocus(ctx, 'scribe:s2', 's2', a2.id);
+    handleHookEvent(ctx, 's2', { event: 'task-created', taskKey: '1', subject: 'Review it' });
+    handleHookEvent(ctx, 's2', { event: 'end' });
+    tick(4 * DAY);
+    handleHookEvent(ctx, 's3', start());
+    const heads = brief(ctx).split('\n').map((l) => /^(Where things stand|Needs you|Check with Aiden|Recently done|Left unfinished|Recent resources|Other sessions here)/.exec(l)?.[1]).filter(Boolean);
+    expect(heads).toEqual(['Where things stand', 'Needs you', 'Check with Aiden', 'Recently done', 'Left unfinished', 'Recent resources', 'Other sessions here']);
   });
 });
 
@@ -552,6 +802,204 @@ describe('enrollSession and setFocus', () => {
     const mark = maxEventId(ctx);
     setFocus(ctx, 'scribe:s1', 's1', s3.id);
     expect(listEventsSince(ctx, mark).map((e) => e.type)).toEqual(['session.updated']);
+  });
+});
+
+describe('the full briefing on the first tracked prompt after an enroll', () => {
+  const FULL = 'This session is tracked in project';
+  const prompt = (extra = {}) => ({ event: 'prompt' as const, ...extra });
+
+  /** InGame bound to C:/personal/InGame and Other to C:/personal/Other, with a clock the test moves by hand. */
+  function projects() {
+    let now = Date.parse('2026-10-04T09:00:00.000Z');
+    const t = setup(createCtx(openDb(':memory:'), () => new Date(now).toISOString()));
+    const other = createProject(t.ctx, 'test', { name: 'Other' });
+    addBinding(t.ctx, 'test', other.slug, 'C:/personal/Other');
+    return { ...t, other, tick: (ms: number) => (now += ms) };
+  }
+
+  it('delivers it once, on the next prompt of a session the scribe enrolled, and still returns it to the scribe', () => {
+    const { ctx, project } = projects();
+    expect(enrollSession(ctx, 'scribe:e1', 'e1', project.slug).briefing).toContain(`${FULL} "InGame"`);
+    expect(briefingDue(ctx, 'e1')).toBe(true);
+    const first = handleHookEvent(ctx, 'e1', prompt()).context!;
+    expect(first.split('\n')[0]).toBe('[InProgress] This session is tracked in project "InGame" (slug ingame). Session id: e1. You are session A.');
+    expect(first).toContain('Keeping InProgress current');
+    expect(first).toContain('`node ');
+    expect(briefingDue(ctx, 'e1')).toBe(false);
+    // The next prompt is ordinary: the usual nudge, never a second briefing.
+    const second = handleHookEvent(ctx, 'e1', prompt()).context!;
+    expect(second).not.toContain(FULL);
+    expect(second).toMatch(/^\[InProgress\] InGame · no focus set · 1 need you · last scribe update 2 prompts ago/);
+  });
+
+  it('answers a status question on that prompt with the briefing, which carries where things stand', () => {
+    const { ctx, project } = projects();
+    enrollSession(ctx, 'scribe:e1', 'e1', project.slug);
+    const text = handleHookEvent(ctx, 'e1', prompt({ asksStatus: true })).context!;
+    expect(text).toContain(FULL);
+    expect(text).toContain('Where things stand:');
+    expect(text).not.toContain('[InProgress] Where things stand in');
+  });
+
+  it('asks about old needs-you items in that briefing, as an enroll briefing does', () => {
+    const { ctx, project, a3, tick } = projects();
+    enrollSession(ctx, 'scribe:e1', 'e1', project.slug);
+    tick(4 * 24 * 60 * 60 * 1000);
+    expect(handleHookEvent(ctx, 'e1', prompt()).context!.split('\n')).toContain(`Check with Aiden whether these are already done, then brief the answer (a "not yet" goes in "log on #id: …"): #${a3.id}.`);
+  });
+
+  it('neither delivers nor clears it on a background-task notice: the next real prompt brings it', () => {
+    const { ctx, project } = projects();
+    enrollSession(ctx, 'scribe:e1', 'e1', project.slug);
+    // The scribe's own enroll notice comes back as a notice.
+    expect(handleHookEvent(ctx, 'e1', prompt({ notice: true })).context).toBeUndefined();
+    expect(briefingDue(ctx, 'e1')).toBe(true);
+    expect(handleHookEvent(ctx, 'e1', prompt()).context).toContain(FULL);
+  });
+
+  it('clears it on a start, whose own briefing is the full one, so the prompt after gets none', () => {
+    const { ctx, project } = projects();
+    enrollSession(ctx, 'scribe:e1', 'e1', project.slug);
+    expect(handleHookEvent(ctx, 'e1', { event: 'start', source: 'compact', cwd: 'C:/elsewhere' }).context).toContain(FULL);
+    expect(briefingDue(ctx, 'e1')).toBe(false);
+    expect(handleHookEvent(ctx, 'e1', prompt()).context).toBeUndefined();
+  });
+
+  it("asks about old needs-you items in a compaction's briefing when it is the one that clears an enroll's marker", () => {
+    const { ctx, project, a3, tick } = projects();
+    const check = `Check with Aiden whether these are already done, then brief the answer (a "not yet" goes in "log on #id: …"): #${a3.id}.`;
+    enrollSession(ctx, 'scribe:e1', 'e1', project.slug);
+    tick(4 * 24 * 60 * 60 * 1000);
+    // The enroll's briefing went to the scribe, so this is the session's only full one: it counts as the enroll's.
+    expect(handleHookEvent(ctx, 'e1', { event: 'start', source: 'compact', cwd: 'C:/elsewhere' }).context!.split('\n')).toContain(check);
+    // A later compaction is an ordinary one.
+    expect(handleHookEvent(ctx, 'e1', { event: 'start', source: 'compact', cwd: 'C:/elsewhere' }).context).not.toContain('Check with Aiden');
+  });
+
+  it('never marks a session the hook created, by a start or by a first prompt', () => {
+    const { ctx } = projects();
+    expect(handleHookEvent(ctx, 's1', start()).context).toContain(FULL);
+    expect(handleHookEvent(ctx, 'p1', prompt({ cwd: 'C:/personal/InGame' })).context).toContain(FULL);
+    expect([briefingDue(ctx, 's1'), briefingDue(ctx, 'p1')]).toEqual([false, false]);
+    expect(handleHookEvent(ctx, 's1', prompt()).context).toBeUndefined();
+    expect(handleHookEvent(ctx, 'p1', prompt()).context).not.toContain(FULL);
+  });
+
+  it('sets it again when an enroll repoints a session, which then gets the new project\'s briefing', () => {
+    const { ctx, other } = projects();
+    handleHookEvent(ctx, 'o1', start('C:/personal/Other'));
+    enrollSession(ctx, 'scribe:s2', 's2', 'ingame');
+    handleHookEvent(ctx, 's2', prompt());
+    expect(briefingDue(ctx, 's2')).toBe(false);
+    enrollSession(ctx, 'scribe:s2', 's2', other.slug);
+    expect(briefingDue(ctx, 's2')).toBe(true);
+    expect(handleHookEvent(ctx, 's2', prompt()).context!.split('\n')[0]).toMatch(/project "Other" \(slug other\)\. Session id: s2\. You are session B\.$/);
+  });
+
+  it('sets it when an enroll names an ended session, whose next prompt revives it with the briefing', () => {
+    const { ctx, project } = projects();
+    handleHookEvent(ctx, 's1', start());
+    handleHookEvent(ctx, 's1', { event: 'end' });
+    expect(enrollSession(ctx, 'scribe:s1', 's1', project.slug).session.state).toBe('ended');
+    expect(briefingDue(ctx, 's1')).toBe(true);
+    const text = handleHookEvent(ctx, 's1', prompt()).context!;
+    expect(text).toContain(FULL);
+    expect(findSession(ctx, 's1')?.state).toBe('working');
+  });
+
+  it('leaves it as it is on a same-project re-enroll of a live session: set if still due, else unset', () => {
+    const { ctx, project } = projects();
+    handleHookEvent(ctx, 's1', start());
+    enrollSession(ctx, 'scribe:s1', 's1', project.slug);
+    expect(briefingDue(ctx, 's1')).toBe(false);
+    expect(handleHookEvent(ctx, 's1', prompt()).context).toBeUndefined();
+    enrollSession(ctx, 'scribe:e1', 'e1', project.slug);
+    enrollSession(ctx, 'scribe:e1', 'e1', project.slug);
+    expect(briefingDue(ctx, 'e1')).toBe(true);
+  });
+
+  it('sets it when a revival gives the session another letter, so the prompt brings "You are session B."', () => {
+    const { ctx } = projects();
+    handleHookEvent(ctx, 's1', start());
+    handleHookEvent(ctx, 's1', { event: 'end' });
+    handleHookEvent(ctx, 's2', start());
+    // Revived by a prompt into B, since s2 holds A: that prompt carries the briefing.
+    const text = handleHookEvent(ctx, 's1', prompt()).context!;
+    expect(text.split('\n')[0]).toMatch(/Session id: s1\. You are session B\.$/);
+    expect(briefingDue(ctx, 's1')).toBe(false);
+    expect(handleHookEvent(ctx, 's1', prompt()).context).not.toContain(FULL);
+  });
+
+  it('sets it on a revival into another letter by another event, for the next real prompt; keeping its letter sets nothing', () => {
+    const { ctx } = projects();
+    handleHookEvent(ctx, 's1', start());
+    handleHookEvent(ctx, 's1', { event: 'end' });
+    handleHookEvent(ctx, 's2', start());
+    handleHookEvent(ctx, 's1', { event: 'stop' });
+    expect(briefingDue(ctx, 's1')).toBe(true);
+    expect(handleHookEvent(ctx, 's1', prompt({ notice: true })).context).toBeUndefined();
+    expect(handleHookEvent(ctx, 's1', prompt()).context).toMatch(/You are session B\.\n/);
+    // s2 ends and comes back into its own free letter: no briefing owed.
+    handleHookEvent(ctx, 's2', { event: 'end' });
+    expect(handleHookEvent(ctx, 's2', prompt()).context).toBeUndefined();
+    expect(findSession(ctx, 's2')?.slot).toBe(0);
+    expect(briefingDue(ctx, 's2')).toBe(false);
+  });
+
+  it('sets it when a session idle past the stale limit, not yet marked ended, comes back into another letter', () => {
+    const { ctx, tick } = projects();
+    handleHookEvent(ctx, 's1', start());
+    handleHookEvent(ctx, 's2', start());
+    // s2 as from before migration 4. Past the stale limit its next event takes the lowest free slot, s1's: s1 is stale,
+    // and no snapshot read has marked it ended (a stop renders nothing).
+    ctx.db.prepare("UPDATE sessions SET slot = NULL WHERE id = 's2'").run();
+    tick(12 * 60 * 60 * 1000 + 60_000);
+    handleHookEvent(ctx, 's2', { event: 'stop' });
+    expect(findSession(ctx, 's2')?.slot).toBe(0);
+    expect(findSession(ctx, 's1')).toMatchObject({ state: 'idle', endedAt: null, slot: 0 });
+    // Back with a prompt, s1 finds A taken and becomes B: that prompt carries the briefing that says so.
+    const text = handleHookEvent(ctx, 's1', prompt()).context!;
+    expect(text.split('\n')[0]).toMatch(/Session id: s1\. You are session B\.$/);
+    expect(findSession(ctx, 's1')).toMatchObject({ state: 'working', endedAt: null, slot: 1 });
+    expect(briefingDue(ctx, 's1')).toBe(false);
+    // s2's slot went from none to A, so its next prompt brings a briefing that names its letter.
+    expect(briefingDue(ctx, 's2')).toBe(true);
+  });
+
+  it('leaves it unset on a revival by a start into another letter: the start carries the briefing', () => {
+    const { ctx } = projects();
+    handleHookEvent(ctx, 's1', start());
+    handleHookEvent(ctx, 's1', { event: 'end' });
+    handleHookEvent(ctx, 's2', start());
+    expect(handleHookEvent(ctx, 's1', { event: 'start', source: 'resume', cwd: 'C:/personal/InGame' }).context).toMatch(/You are session B\.\n/);
+    expect(briefingDue(ctx, 's1')).toBe(false);
+    expect(handleHookEvent(ctx, 's1', prompt()).context).toBeUndefined();
+  });
+
+  it('renders an owed briefing after the write commits, when its snapshot read expires another stale session', () => {
+    const { ctx, project, tick } = projects();
+    handleHookEvent(ctx, 's9', start());
+    enrollSession(ctx, 'scribe:e1', 'e1', project.slug);
+    tick(12 * 60 * 60 * 1000 + 60_000);
+    // s9 is past the stale limit and still idle: the briefing's snapshot read ends it in a write of its own, which could
+    // not run inside the prompt's write.
+    expect(findSession(ctx, 's9')?.state).toBe('idle');
+    const text = handleHookEvent(ctx, 'e1', prompt()).context!;
+    expect(text).toContain(FULL);
+    expect(text).not.toContain('Other sessions here');
+    expect(findSession(ctx, 's9')).toMatchObject({ state: 'ended', endedAt: expect.any(String) });
+    expect(briefingDue(ctx, 'e1')).toBe(false);
+  });
+
+  it('keeps it while the project is archived, and delivers it once the project is active again', () => {
+    const { ctx, project } = projects();
+    enrollSession(ctx, 'scribe:e1', 'e1', project.slug);
+    updateProject(ctx, 'test', project.slug, { status: 'archived' });
+    expect(handleHookEvent(ctx, 'e1', prompt())).toEqual({ tracked: false });
+    expect(briefingDue(ctx, 'e1')).toBe(true);
+    updateProject(ctx, 'test', project.slug, { status: 'active' });
+    expect(handleHookEvent(ctx, 'e1', prompt()).context).toContain(FULL);
   });
 });
 
