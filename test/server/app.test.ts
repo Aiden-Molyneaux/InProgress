@@ -320,7 +320,7 @@ describe('live work routes', () => {
     const { app } = await planned();
     const post = (payload: object) => app.inject({ method: 'POST', url: '/api/sessions/s1/hook', headers: auth, payload });
     for (const payload of [
-      { event: 'agent-dispatch', toolUseId: 'toolu_1', agentType: 'Explore', description: 'Map the hooks', model: 'sonnet' },
+      { event: 'agent-dispatch', toolUseId: 'toolu_1', agentType: 'Explore', description: 'Map the hooks', model: 'sonnet', purpose: `${'p'.repeat(199)}…` },
       { event: 'subagent-start', agentId: 'a1', agentType: 'Explore' },
       { event: 'agent-launched', toolUseId: 'toolu_1', agentId: 'a1', model: 'sonnet-5' },
       { event: 'task-created', taskKey: '1', subject: 'Write it' },
@@ -331,6 +331,7 @@ describe('live work routes', () => {
     expect((await post({ event: 'task-created', taskKey: '2', subject: 'x', prompt: 'never sent' })).statusCode).toBe(400);
     expect((await post({ event: 'task-updated', taskKey: '2', status: 'archived' })).statusCode).toBe(400);
     expect((await post({ event: 'task-created', taskKey: '3', subject: 'x'.repeat(301) })).statusCode).toBe(400);
+    expect((await post({ event: 'agent-dispatch', toolUseId: 'toolu_2', agentType: 'Explore', description: 'x', purpose: 'p'.repeat(201) })).statusCode).toBe(400);
   });
 });
 

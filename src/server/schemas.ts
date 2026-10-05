@@ -65,11 +65,13 @@ export const hookBody = z
     /** A prompt event that is really a background-task notice: the session works, but nothing was typed. */
     notice: z.boolean().optional(),
     // Live work (pre-tool and post-tool hooks). agent-dispatch: toolUseId, agentType (subagent_type), description,
-    // model. agent-launched: toolUseId, agentId (the launched agent), model (as the launch reported it).
-    // task-created / task-updated: agentId (the subagent whose task list it is; none for the main session), taskKey,
-    // subject, status, addBlocks, addBlockedBy. Never a prompt, and never a task's description.
+    // model, purpose (the prompt's first sentence, clipped to 200). agent-launched: toolUseId, agentId (the launched
+    // agent), model (as the launch reported it). task-created / task-updated: agentId (the subagent whose task list it
+    // is; none for the main session), taskKey, subject, status, addBlocks, addBlockedBy. Never a whole prompt, and never
+    // a task's description.
     toolUseId: z.string().min(1).max(200).optional(),
     description: z.string().max(200).optional(),
+    purpose: z.string().max(200).optional(),
     model: z.string().max(100).optional(),
     taskKey: z.string().min(1).max(100).optional(),
     subject: z.string().max(300).optional(),

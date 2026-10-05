@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { TreeNode } from '../../src/core/types';
-import { buildHookBody, buildToolHookBody, HOOK_NAMES, hookErrorLine, parseHookInput, runHandler, stripPasted, type HookName } from '../../src/hooks/handlers';
+import { buildHookBody, buildToolHookBody, HOOK_NAMES, hookErrorLine, parseHookInput, purposeOf, runHandler, stripPasted, type HookName } from '../../src/hooks/handlers';
 import { ApiClientError, createClient } from '../../src/lib/client';
 import { homeDir } from '../../src/lib/home';
 import { buildApp } from '../../src/server/app';
@@ -144,18 +144,58 @@ describe('buildHookBody', () => {
   });
 });
 
+describe('purposeOf', () => {
+  it('takes the first non-blank line, cut after its first sentence end', () => {
+    expect(purposeOf('\n   \n  Review the diff for P6. Then report back.\nSecond line.')).toBe('Review the diff for P6.');
+    expect(purposeOf('Is the hook wired? Check it.')).toBe('Is the hook wired?');
+    expect(purposeOf('Ship it! Now.')).toBe('Ship it!');
+    // A stop not followed by a space or the end (a version, a path) does not end the sentence.
+    expect(purposeOf('Bump v1.2 in src/core.ts now. Done.')).toBe('Bump v1.2 in src/core.ts now.');
+    expect(purposeOf('Wait... then go')).toBe('Wait...');
+  });
+
+  it('splits CRLF lines too', () => {
+    expect(purposeOf('\r\n\r\nFind the readers row\r\nThe rest stays here.\r\n')).toBe('Find the readers row');
+  });
+
+  it('keeps the whole line when it has no sentence end', () => {
+    expect(purposeOf('## Brief: implement P6')).toBe('## Brief: implement P6');
+    expect(purposeOf('Read every test file and list the helpers\nThen stop.')).toBe('Read every test file and list the helpers');
+  });
+
+  it('clips a first sentence over 200 characters to 199 and an ellipsis', () => {
+    const purpose = purposeOf(`${'w'.repeat(250)}. Second sentence.`)!;
+    expect(purpose).toBe(`${'w'.repeat(199)}…`);
+    expect(purpose.length).toBe(200);
+    expect(purposeOf(`${'x'.repeat(199)}. Next.`)).toBe(`${'x'.repeat(199)}.`);
+    expect(purposeOf('y'.repeat(201))).toBe(`${'y'.repeat(199)}…`);
+  });
+
+  it('returns nothing for a blank prompt', () => {
+    expect(purposeOf('')).toBeUndefined();
+    expect(purposeOf('  \r\n \t\n')).toBeUndefined();
+  });
+});
+
 describe('buildToolHookBody: pre-tool (Agent dispatch)', () => {
   const agentCall = (tool_input: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
     ({ session_id: 's', tool_name: 'Agent', tool_use_id: 'toolu_1', tool_input, ...extra });
 
-  it('sends the description (clipped to 200), type and model, never the prompt', () => {
-    const body = buildToolHookBody('pre-tool', agentCall({ description: `#44 ${'d'.repeat(250)}`, prompt: 'SECRET PROMPT TEXT', subagent_type: 'Explore', model: 'sonnet', run_in_background: true }));
-    expect(body).toEqual({ event: 'agent-dispatch', toolUseId: 'toolu_1', agentType: 'Explore', description: `#44 ${'d'.repeat(196)}`, model: 'sonnet' });
+  it('sends the description (clipped to 200), type and model, and of the prompt only its first sentence as the purpose', () => {
+    const prompt = 'Map the hook payloads. SECRET PROMPT TEXT follows.\nMore SECRET lines.';
+    const body = buildToolHookBody('pre-tool', agentCall({ description: `#44 ${'d'.repeat(250)}`, prompt, subagent_type: 'Explore', model: 'sonnet', run_in_background: true }));
+    expect(body).toEqual({ event: 'agent-dispatch', toolUseId: 'toolu_1', agentType: 'Explore', description: `#44 ${'d'.repeat(196)}`, model: 'sonnet', purpose: 'Map the hook payloads.' });
     expect(JSON.stringify(body)).not.toContain('SECRET');
   });
 
+  it('sends exactly the old body, with no purpose key, for a blank prompt', () => {
+    expect(buildToolHookBody('pre-tool', agentCall({ description: 'Look', prompt: ' \r\n\t\n', subagent_type: 'Explore' }))).toStrictEqual({
+      event: 'agent-dispatch', toolUseId: 'toolu_1', agentType: 'Explore', description: 'Look',
+    });
+  });
+
   it('takes the old Task tool name too, and a missing type as general-purpose', () => {
-    expect(buildToolHookBody('pre-tool', { ...agentCall({ description: 'Look', prompt: 'p' }), tool_name: 'Task' })).toEqual({ event: 'agent-dispatch', toolUseId: 'toolu_1', agentType: 'general-purpose', description: 'Look' });
+    expect(buildToolHookBody('pre-tool', { ...agentCall({ description: 'Look', prompt: 'p' }), tool_name: 'Task' })).toEqual({ event: 'agent-dispatch', toolUseId: 'toolu_1', agentType: 'general-purpose', description: 'Look', purpose: 'p' });
   });
 
   it("posts nothing for the scribe's dispatch, a call without an id, or another tool", () => {
