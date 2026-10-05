@@ -90,6 +90,7 @@ describe('scribe MCP tools', () => {
     expect(tool('set_queue').description).not.toMatch(/whole queue/);
     expect(param('set_queue', 'unowned')).toMatch(/later:/);
     expect(tool('get_outline').description).toMatch(/Up next: A: #a → #b \| later: #c/);
+    expect(tool('set_focus').description).toMatch(/Focusing a todo step assigned to Claude also sets it active, in the same write\./);
   });
 
   it("sets a session's own order and the unowned one, which get_outline prints as Up next", async () => {
