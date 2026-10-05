@@ -560,6 +560,19 @@ describe('briefing: recently done and left unfinished', () => {
     expect(statusAnswer(ctx)).not.toContain('Recently done');
   });
 
+  it('orders by finish time, not by the last edit: a step finished earlier and edited later still comes second', () => {
+    const { ctx, a2, step, tick } = clocked();
+    const s3 = step('3 RevenueCat');
+    tick(HOUR);
+    updateNode(ctx, 'test', a2.id, { status: 'done', outcome: 'Configured' });
+    tick(HOUR);
+    updateNode(ctx, 'test', s3.id, { status: 'done' });
+    tick(HOUR);
+    // Its updatedAt moves past s3's; its completedAt stays.
+    updateNode(ctx, 'test', a2.id, { outcome: 'Configured in Play Console' });
+    expect(lineOf(brief(ctx), 'Recently done')).toBe(`Recently done: #${s3.id} 3 RevenueCat · #${a2.id} Play app signing — "Configured in Play Console"`);
+  });
+
   it('breaks a tie in finish time by id, the newer first', () => {
     const { ctx, s1, a1 } = clocked();
     updateNode(ctx, 'test', s1.id, { outcome: 'Certificate in the keychain' });
@@ -962,6 +975,21 @@ describe('the full briefing on the first tracked prompt after an enroll', () => 
     expect(handleHookEvent(ctx, 's1', { event: 'start', source: 'resume', cwd: 'C:/personal/InGame' }).context).toMatch(/You are session B\.\n/);
     expect(briefingDue(ctx, 's1')).toBe(false);
     expect(handleHookEvent(ctx, 's1', prompt()).context).toBeUndefined();
+  });
+
+  it('renders an owed briefing after the write commits, when its snapshot read expires another stale session', () => {
+    const { ctx, project, tick } = projects();
+    handleHookEvent(ctx, 's9', start());
+    enrollSession(ctx, 'scribe:e1', 'e1', project.slug);
+    tick(12 * 60 * 60 * 1000 + 60_000);
+    // s9 is past the stale limit and still idle: the briefing's snapshot read ends it in a write of its own, which could
+    // not run inside the prompt's write.
+    expect(findSession(ctx, 's9')?.state).toBe('idle');
+    const text = handleHookEvent(ctx, 'e1', prompt()).context!;
+    expect(text).toContain(FULL);
+    expect(text).not.toContain('Other sessions here');
+    expect(findSession(ctx, 's9')).toMatchObject({ state: 'ended', endedAt: expect.any(String) });
+    expect(briefingDue(ctx, 'e1')).toBe(false);
   });
 
   it('keeps it while the project is archived, and delivers it once the project is active again', () => {
