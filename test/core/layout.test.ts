@@ -588,6 +588,18 @@ describe('the trail of ended work', () => {
     expect(l.items.find((i) => i.kind === 'workDone')).toMatchObject({ count: 0, unfinished: 0, agents: 2 });
   });
 
+  it('leaves a reader out of the trail, should the snapshot ever list one: readers leave no trail', () => {
+    const t = sample();
+    const task = work(t.a1.id, 'completed', { sessionId: 's0', endedAt: ENDED });
+    const l = layoutOutline({
+      nodes: t.nodes, resources: [], sessions: [], workItems: [task], now: T0,
+      trailAgents: [trailAgent('r', { nodeId: t.a1.id, agentType: 'Explore' })], pastSessions: [past('s0', t.a1.id)],
+      overrides: { [`work:${t.a1.id}`]: 'open' },
+    });
+    expect(rowsOf(l, 'trailAgent')).toEqual([]);
+    expect(l.items.find((i) => i.kind === 'workDone')).toMatchObject({ count: 1, unfinished: 0, agents: 0 });
+  });
+
   it("puts a trail agent on its step while that is in the tree; with no step, on its session's focus, live or past; else leaves it out", () => {
     const t = sample();
     const trailAgents = [

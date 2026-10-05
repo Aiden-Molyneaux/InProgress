@@ -208,7 +208,8 @@ export function agentHome(s: Pick<Session, 'focusNodeId'>, a: Pick<SubagentInfo,
  * shows as a greyed badge (agentShown), so none is both. Its node is the one it worked on, while that is in this tree;
  * one whose node is set but not in the tree (its session moved to another project, say) is left out. Only one with no
  * node falls back to its session's focus, live or past; with neither it is left out. A deleted step's agents fall back
- * too: its `node_id` is ON DELETE SET NULL, which can't tell a deleted step from none.
+ * too: its `node_id` is ON DELETE SET NULL, which can't tell a deleted step from none. Readers leave no trail: the
+ * server's query leaves them out already, and so does this.
  */
 export function homedTrailAgents(
   input: { sessions: Session[]; trailAgents?: TrailAgent[]; pastSessions?: PastSession[]; now: number },
@@ -219,7 +220,7 @@ export function homedTrailAgents(
   const badged = new Set(live.flatMap((s) => s.subagents.filter((a) => agentShown(a, input.now)).map((a) => key(s.id, a.agentId))));
   const focusOf = new Map<string, number | null>([...(input.pastSessions ?? []), ...live].map((s) => [s.id, s.focusNodeId]));
   return (input.trailAgents ?? []).flatMap((agent) => {
-    if (badged.has(key(agent.sessionId, agent.agentId))) return [];
+    if (isReader(agent.agentType) || badged.has(key(agent.sessionId, agent.agentId))) return [];
     const nodeId = agent.nodeId ?? focusOf.get(agent.sessionId) ?? null;
     return nodeId !== null && inTree(nodeId) ? [{ agent, nodeId }] : [];
   });
