@@ -121,6 +121,26 @@ const RECORD_MOVES = `(() => {
 const recordedMoves = (page: Page) => page.evaluate<string[]>('window.__moves');
 /** Longer than the camera's 400 ms glide. */
 const GLIDE_MS = 600;
+/** How long the viewport must go without a style change for the camera to count as at rest. */
+const CAMERA_QUIET_MS = 150;
+/** True when the viewport's style, which RECORD_MOVES watches, does not change for CAMERA_QUIET_MS. */
+const CAMERA_QUIET = `new Promise((resolve) => {
+  const viewport = document.querySelector('.react-flow__viewport');
+  let moved = false;
+  const observer = new MutationObserver(() => { moved = true; });
+  observer.observe(viewport, { attributes: true, attributeFilter: ['style'] });
+  setTimeout(() => { observer.disconnect(); resolve(!moved); }, ${CAMERA_QUIET_MS});
+})`;
+
+/**
+ * Passes once the camera is at rest. A glide's last frames move the viewport by fractions of a pixel after a card
+ * already looks in place (see expectLifted), so a test that records moves waits for this first, or it records them.
+ */
+async function cameraSettled(page: Page): Promise<void> {
+  await expect
+    .poll(() => page.evaluate<boolean>(CAMERA_QUIET), { message: 'the camera comes to rest', timeout: 3000, intervals: [0] })
+    .toBe(true);
+}
 
 /**
  * Where a card sits against the top edge of the narrow Details sheet, 40 % of the way down the canvas, whether or not
@@ -539,6 +559,7 @@ test("on a narrow window, Details' parent link moves the camera only for a row t
   await expect(sheet).toContainText(`#${demo.ids['Run signing tests']} Run signing tests`);
   const parent = page.locator('.ip-node', { hasText: '2 Android signing' });
   expect(await sheetSide(page, parent)).toBe('above');
+  await cameraSettled(page);
   await page.evaluate(RECORD_MOVES);
   await sheet.getByRole('button', { name: /2 Android signing/ }).click();
   await expect(sheet).toContainText(`#${demo.ids['2 Android signing']} 2 Android signing`);
@@ -560,6 +581,7 @@ test('on a narrow window with Details open, a session chip moves the camera only
   await page.keyboard.press('n');
   await expectLifted(page, page.locator('.ip-node', { hasText: 'Run signing tests' }));
   expect(await sheetSide(page, play)).toBe('above');
+  await cameraSettled(page);
   await page.evaluate(RECORD_MOVES);
   await chip.click();
   await page.waitForTimeout(GLIDE_MS);
