@@ -261,15 +261,15 @@ describe('briefing: live work', () => {
     expect(rules).toContain('"queue: #a, #b" is yours, "later: #c, #d" unowned');
     expect(rules).toContain('a request with a deliverable arrives (a new step with one label:');
     expect(rules).toContain("Start an Agent description with its step's #id.");
-    expect(rules).toContain("TaskCreate/TaskUpdate mirror on their own; start a task's subject with #id when its step is not your focus.");
+    expect(rules).toContain("TaskCreate/TaskUpdate mirror on their own (start a task's subject with #id when its step is not your focus); else,");
   });
 
   it('writes out the tasks command with this session\'s id, to run in the Bash tool where the task tools are absent', () => {
     const cli = 'C:\\personal\\InProgress\\dist\\cli\\main.js';
     const rules = updateRules({ home: 'C:/Users/me/.inprogress', sessionId: 'abc-123', cli });
     const line = rules.find((l) => l.startsWith('- Working tasks'))!;
-    expect(line).toContain('Without those tools, after each change run in the Bash tool: `node C:/personal/InProgress/dist/cli/main.js tasks <step id> --session abc-123 --done "…" --doing "…" --todo "…"`');
-    expect(line).toContain('(no flags clears the list; no step id uses your focus)');
+    expect(line).toContain('else, after each change, run in the Bash tool: `node C:/personal/InProgress/dist/cli/main.js tasks <step id> --session abc-123 --done "…" --doing "…" --todo "…"`');
+    expect(line).toContain('(flags repeat in list order; no flags clears the list; no step id uses your focus)');
     expect(line).toContain('No double quotes in subjects; single-quote one with $ or a backtick.');
     // The scribe's old fallback is gone, and nothing prints a step as "tasks #…": an unquoted # starts a comment.
     expect(rules.join('\n')).not.toContain('tasks on #');
@@ -361,7 +361,7 @@ describe('briefing: the rules block', () => {
 
   it('keeps every clause, under a header', () => {
     const rules = updateRules(real);
-    expect(rules[0]).toBe('Keeping InProgress current (Aiden watches it live):');
+    expect(rules[0]).toBe('Keeping InProgress current:');
     expect(rules.slice(1).every((l) => l.startsWith('- '))).toBe(true);
     const text = rules.join('\n');
     const clauses = [
@@ -378,8 +378,11 @@ describe('briefing: the rules block', () => {
       'Something worth finding again is a resource: "resource on #id: <kind> "<title>", path <file>, snapshot_file".',
       'Chat-only content is first written to C:/Users/aiden.molyneaux/.inprogress/resources/<slug>/<yyyy-mm-dd>-<kebab-title>.md.',
       // Working tasks: the subject #id (Aiden's §8 clause), the Bash tool (ruling 32), the usage note, quoting (ruling 31).
-      "TaskCreate/TaskUpdate mirror on their own; start a task's subject with #id when its step is not your focus.",
-      'after each change run in the Bash tool:',
+      "TaskCreate/TaskUpdate mirror on their own (start a task's subject with #id when its step is not your focus)",
+      'else, after each change, run in the Bash tool:',
+      // A session must see that the flags repeat, one per task.
+      'flags repeat in list order',
+      'no flags clears the list',
       'no step id uses your focus',
       'No double quotes in subjects',
       "Start an Agent description with its step's #id.",

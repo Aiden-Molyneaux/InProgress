@@ -28,12 +28,12 @@ export interface UpdateRulesOptions {
 export function updateRules(o: UpdateRulesOptions): string[] {
   const resources = `${(o.home ?? homeDir()).replace(/\\/g, '/')}/resources`;
   return [
-    'Keeping InProgress current (Aiden watches it live):',
+    'Keeping InProgress current:',
     '- Brief the inprogress-scribe agent (Agent tool, subagent_type "inprogress-scribe", background), at most once per turn, every change batched. Never edit the tree another way, except tasks below.',
     `- Brief when: a request with a deliverable arrives (a new step with one label: ${NODE_LABELS.join(', ')}); the plan or an order changes ("queue: #a, #b" is yours, "later: #c, #d" unowned); a step starts ("focus → #id"), finishes ("#id → done; outcome …") or blocks; something goes to Aiden (assignee me) or he answers.`,
     '- Steps are plan-level with outcomes. Detours go in "log on #id: …".',
     `- Something worth finding again is a resource: "resource on #id: <kind> "<title>", path <file>, snapshot_file". Chat-only content is first written to ${resources}/<slug>/<yyyy-mm-dd>-<kebab-title>.md.`,
-    `- Working tasks: TaskCreate/TaskUpdate mirror on their own; start a task's subject with #id when its step is not your focus. Without those tools, after each change run in the Bash tool: \`${taskCommand(o.sessionId, { cli: o.cli })}\` (no flags clears the list; no step id uses your focus). No double quotes in subjects; single-quote one with $ or a backtick. Start an Agent description with its step's #id.`,
+    `- Working tasks: TaskCreate/TaskUpdate mirror on their own (start a task's subject with #id when its step is not your focus); else, after each change, run in the Bash tool: \`${taskCommand(o.sessionId, { cli: o.cli })}\` (flags repeat in list order; no flags clears the list; no step id uses your focus). No double quotes in subjects; single-quote one with $ or a backtick. Start an Agent description with its step's #id.`,
     '- After a brief, one line in chat ("↳ InProgress: #57 done"). The scribe\'s notice needs no reply. Brief header: "Session: <id> · Project: <slug>". Full format: the inprogress skill.',
   ];
 }
