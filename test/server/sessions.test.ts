@@ -9,7 +9,7 @@ import { addLog } from '../../src/server/repo/logs';
 import { addNodes, listNodes, updateNode } from '../../src/server/repo/nodes';
 import { addBinding, createProject, setQueue, updateProject } from '../../src/server/repo/projects';
 import { addResource } from '../../src/server/repo/resources';
-import { findSession, listProjectSessions } from '../../src/server/repo/sessions';
+import { briefingDue, findSession, listProjectSessions } from '../../src/server/repo/sessions';
 import { getNodeDetail, getProjectSnapshot } from '../../src/server/repo/snapshot';
 import { renderBriefing } from '../../src/server/briefing';
 import { enrollSession, handleHookEvent, setFocus } from '../../src/server/session-flow';
@@ -773,6 +773,158 @@ describe('enrollSession and setFocus', () => {
     const mark = maxEventId(ctx);
     setFocus(ctx, 'scribe:s1', 's1', s3.id);
     expect(listEventsSince(ctx, mark).map((e) => e.type)).toEqual(['session.updated']);
+  });
+});
+
+describe('the full briefing on the first tracked prompt after an enroll', () => {
+  const FULL = 'This session is tracked in project';
+  const prompt = (extra = {}) => ({ event: 'prompt' as const, ...extra });
+
+  /** InGame bound to C:/personal/InGame and Other to C:/personal/Other, with a clock the test moves by hand. */
+  function projects() {
+    let now = Date.parse('2026-10-04T09:00:00.000Z');
+    const t = setup(createCtx(openDb(':memory:'), () => new Date(now).toISOString()));
+    const other = createProject(t.ctx, 'test', { name: 'Other' });
+    addBinding(t.ctx, 'test', other.slug, 'C:/personal/Other');
+    return { ...t, other, tick: (ms: number) => (now += ms) };
+  }
+
+  it('delivers it once, on the next prompt of a session the scribe enrolled, and still returns it to the scribe', () => {
+    const { ctx, project } = projects();
+    expect(enrollSession(ctx, 'scribe:e1', 'e1', project.slug).briefing).toContain(`${FULL} "InGame"`);
+    expect(briefingDue(ctx, 'e1')).toBe(true);
+    const first = handleHookEvent(ctx, 'e1', prompt()).context!;
+    expect(first.split('\n')[0]).toBe('[InProgress] This session is tracked in project "InGame" (slug ingame). Session id: e1. You are session A.');
+    expect(first).toContain('Keeping InProgress current');
+    expect(first).toContain('`node ');
+    expect(briefingDue(ctx, 'e1')).toBe(false);
+    // The next prompt is ordinary: the usual nudge, never a second briefing.
+    const second = handleHookEvent(ctx, 'e1', prompt()).context!;
+    expect(second).not.toContain(FULL);
+    expect(second).toMatch(/^\[InProgress\] InGame · no focus set · 1 need you · last scribe update 2 prompts ago/);
+  });
+
+  it('answers a status question on that prompt with the briefing, which carries where things stand', () => {
+    const { ctx, project } = projects();
+    enrollSession(ctx, 'scribe:e1', 'e1', project.slug);
+    const text = handleHookEvent(ctx, 'e1', prompt({ asksStatus: true })).context!;
+    expect(text).toContain(FULL);
+    expect(text).toContain('Where things stand:');
+    expect(text).not.toContain('[InProgress] Where things stand in');
+  });
+
+  it('asks about old needs-you items in that briefing, as an enroll briefing does', () => {
+    const { ctx, project, a3, tick } = projects();
+    enrollSession(ctx, 'scribe:e1', 'e1', project.slug);
+    tick(4 * 24 * 60 * 60 * 1000);
+    expect(handleHookEvent(ctx, 'e1', prompt()).context!.split('\n')).toContain(`Check with Aiden whether these are already done, then brief the answer (a "not yet" goes in "log on #id: …"): #${a3.id}.`);
+  });
+
+  it('neither delivers nor clears it on a background-task notice: the next real prompt brings it', () => {
+    const { ctx, project } = projects();
+    enrollSession(ctx, 'scribe:e1', 'e1', project.slug);
+    // The scribe's own enroll notice comes back as a notice.
+    expect(handleHookEvent(ctx, 'e1', prompt({ notice: true })).context).toBeUndefined();
+    expect(briefingDue(ctx, 'e1')).toBe(true);
+    expect(handleHookEvent(ctx, 'e1', prompt()).context).toContain(FULL);
+  });
+
+  it('clears it on a start, whose own briefing is the full one, so the prompt after gets none', () => {
+    const { ctx, project } = projects();
+    enrollSession(ctx, 'scribe:e1', 'e1', project.slug);
+    expect(handleHookEvent(ctx, 'e1', { event: 'start', source: 'compact', cwd: 'C:/elsewhere' }).context).toContain(FULL);
+    expect(briefingDue(ctx, 'e1')).toBe(false);
+    expect(handleHookEvent(ctx, 'e1', prompt()).context).toBeUndefined();
+  });
+
+  it('never marks a session the hook created, by a start or by a first prompt', () => {
+    const { ctx } = projects();
+    expect(handleHookEvent(ctx, 's1', start()).context).toContain(FULL);
+    expect(handleHookEvent(ctx, 'p1', prompt({ cwd: 'C:/personal/InGame' })).context).toContain(FULL);
+    expect([briefingDue(ctx, 's1'), briefingDue(ctx, 'p1')]).toEqual([false, false]);
+    expect(handleHookEvent(ctx, 's1', prompt()).context).toBeUndefined();
+    expect(handleHookEvent(ctx, 'p1', prompt()).context).not.toContain(FULL);
+  });
+
+  it('sets it again when an enroll repoints a session, which then gets the new project\'s briefing', () => {
+    const { ctx, other } = projects();
+    handleHookEvent(ctx, 'o1', start('C:/personal/Other'));
+    enrollSession(ctx, 'scribe:s2', 's2', 'ingame');
+    handleHookEvent(ctx, 's2', prompt());
+    expect(briefingDue(ctx, 's2')).toBe(false);
+    enrollSession(ctx, 'scribe:s2', 's2', other.slug);
+    expect(briefingDue(ctx, 's2')).toBe(true);
+    expect(handleHookEvent(ctx, 's2', prompt()).context!.split('\n')[0]).toMatch(/project "Other" \(slug other\)\. Session id: s2\. You are session B\.$/);
+  });
+
+  it('sets it when an enroll names an ended session, whose next prompt revives it with the briefing', () => {
+    const { ctx, project } = projects();
+    handleHookEvent(ctx, 's1', start());
+    handleHookEvent(ctx, 's1', { event: 'end' });
+    expect(enrollSession(ctx, 'scribe:s1', 's1', project.slug).session.state).toBe('ended');
+    expect(briefingDue(ctx, 's1')).toBe(true);
+    const text = handleHookEvent(ctx, 's1', prompt()).context!;
+    expect(text).toContain(FULL);
+    expect(findSession(ctx, 's1')?.state).toBe('working');
+  });
+
+  it('leaves it as it is on a same-project re-enroll of a live session: set if still due, else unset', () => {
+    const { ctx, project } = projects();
+    handleHookEvent(ctx, 's1', start());
+    enrollSession(ctx, 'scribe:s1', 's1', project.slug);
+    expect(briefingDue(ctx, 's1')).toBe(false);
+    expect(handleHookEvent(ctx, 's1', prompt()).context).toBeUndefined();
+    enrollSession(ctx, 'scribe:e1', 'e1', project.slug);
+    enrollSession(ctx, 'scribe:e1', 'e1', project.slug);
+    expect(briefingDue(ctx, 'e1')).toBe(true);
+  });
+
+  it('sets it when a revival gives the session another letter, so the prompt brings "You are session B."', () => {
+    const { ctx } = projects();
+    handleHookEvent(ctx, 's1', start());
+    handleHookEvent(ctx, 's1', { event: 'end' });
+    handleHookEvent(ctx, 's2', start());
+    // Revived by a prompt into B, since s2 holds A: that prompt carries the briefing.
+    const text = handleHookEvent(ctx, 's1', prompt()).context!;
+    expect(text.split('\n')[0]).toMatch(/Session id: s1\. You are session B\.$/);
+    expect(briefingDue(ctx, 's1')).toBe(false);
+    expect(handleHookEvent(ctx, 's1', prompt()).context).not.toContain(FULL);
+  });
+
+  it('sets it on a revival into another letter by another event, for the next real prompt; keeping its letter sets nothing', () => {
+    const { ctx } = projects();
+    handleHookEvent(ctx, 's1', start());
+    handleHookEvent(ctx, 's1', { event: 'end' });
+    handleHookEvent(ctx, 's2', start());
+    handleHookEvent(ctx, 's1', { event: 'stop' });
+    expect(briefingDue(ctx, 's1')).toBe(true);
+    expect(handleHookEvent(ctx, 's1', prompt({ notice: true })).context).toBeUndefined();
+    expect(handleHookEvent(ctx, 's1', prompt()).context).toMatch(/You are session B\.\n/);
+    // s2 ends and comes back into its own free letter: no briefing owed.
+    handleHookEvent(ctx, 's2', { event: 'end' });
+    expect(handleHookEvent(ctx, 's2', prompt()).context).toBeUndefined();
+    expect(findSession(ctx, 's2')?.slot).toBe(0);
+    expect(briefingDue(ctx, 's2')).toBe(false);
+  });
+
+  it('leaves it unset on a revival by a start into another letter: the start carries the briefing', () => {
+    const { ctx } = projects();
+    handleHookEvent(ctx, 's1', start());
+    handleHookEvent(ctx, 's1', { event: 'end' });
+    handleHookEvent(ctx, 's2', start());
+    expect(handleHookEvent(ctx, 's1', { event: 'start', source: 'resume', cwd: 'C:/personal/InGame' }).context).toMatch(/You are session B\.\n/);
+    expect(briefingDue(ctx, 's1')).toBe(false);
+    expect(handleHookEvent(ctx, 's1', prompt()).context).toBeUndefined();
+  });
+
+  it('keeps it while the project is archived, and delivers it once the project is active again', () => {
+    const { ctx, project } = projects();
+    enrollSession(ctx, 'scribe:e1', 'e1', project.slug);
+    updateProject(ctx, 'test', project.slug, { status: 'archived' });
+    expect(handleHookEvent(ctx, 'e1', prompt())).toEqual({ tracked: false });
+    expect(briefingDue(ctx, 'e1')).toBe(true);
+    updateProject(ctx, 'test', project.slug, { status: 'active' });
+    expect(handleHookEvent(ctx, 'e1', prompt()).context).toContain(FULL);
   });
 });
 

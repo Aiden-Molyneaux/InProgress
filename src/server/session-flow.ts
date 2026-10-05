@@ -4,7 +4,7 @@ import { badRequest } from './errors';
 import { renderBriefing, renderStatusAnswer, renderStatusLine, untrackedHint } from './briefing';
 import { findNode, leadingNode, patchNode, requireNode } from './repo/nodes';
 import { getProjectById, releaseQueue, resolveBinding, resolveProject } from './repo/projects';
-import { assignSlot, findSession, saveSession } from './repo/sessions';
+import { assignSlot, briefingDue, clearBriefingDue, findSession, markBriefingDue, saveSession } from './repo/sessions';
 import { getProjectSnapshot } from './repo/snapshot';
 import { endSubagents, launchSubagent, pruneSubagents, recordDispatch, startSubagent, stopSubagent } from './repo/subagents';
 import { taskCreated, taskUpdated } from './repo/work';
@@ -67,6 +67,8 @@ const clean = (text: string | undefined): string | null => text?.trim() || null;
 
 export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInput): HookEventResult {
   let created = false;
+  /** A real prompt that clears a "briefing due" marker: it gets the full briefing, in place of a status answer or nudge. */
+  let briefingOwed = false;
   const session = write(ctx, `hook:${input.event}`, (record): Session | undefined => {
     let before = findSession(ctx, sessionId);
     if (!before) {
@@ -165,6 +167,19 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
       const node = findNode(ctx, nodeId);
       if (node) record({ projectId: node.projectId, type: 'work.updated', entity: 'node', entityId: nodeId, data: { nodeId } });
     }
+    // A session back from ended in another letter holds a briefing that names the old one: its next prompt brings a fresh
+    // one. A start carries the full briefing already.
+    if (input.event !== 'start' && before.state === 'ended' && after.state !== 'ended' && before.slot !== after.slot) markBriefingDue(ctx, sessionId);
+    // Decided here, rendered after commit: the snapshot read may open its own write (stale expiry). Any response that
+    // carries the full briefing clears the marker, so it arrives once; a background-task notice is not a prompt Aiden
+    // typed, and leaves it for the next one. Nothing is decided for a project that is not active, which gets no briefing.
+    if (after.projectId !== null && getProjectById(ctx, after.projectId)?.status === 'active') {
+      if (input.event === 'start' || created) clearBriefingDue(ctx, sessionId);
+      else if (input.event === 'prompt' && !input.notice && briefingDue(ctx, sessionId)) {
+        clearBriefingDue(ctx, sessionId);
+        briefingOwed = true;
+      }
+    }
     return after;
   });
 
@@ -173,10 +188,11 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
     return input.event === 'prompt' && input.mentionsInProgress ? { tracked: false, context: untrackedHint(sessionId) } : { tracked: false };
   }
   // Needs-you ages count to the server's clock (ctx.now), never the wall clock behind it.
-  // A session that has just begun tracking gets the full briefing, whichever event brought it in. Every one but a
-  // compaction's is fresh, and asks about old needs-you items: a session first tracked by a prompt (its start was missed)
-  // and a start with a missing or unknown source count as new.
-  if (input.event === 'start' || created) {
+  // A session that has just begun tracking gets the full briefing, whichever event brought it in, and so does the first
+  // real prompt after an enroll or a revival into another letter. Every one but a compaction's is fresh, and asks about
+  // old needs-you items: a session first tracked by a prompt (its start was missed), a start with a missing or unknown
+  // source, and an owed briefing (an enroll's) count as new.
+  if (input.event === 'start' || created || briefingOwed) {
     const checkOld = !(input.event === 'start' && input.source === 'compact');
     return { tracked: true, context: renderBriefing(getProjectSnapshot(ctx, project.id), sessionId, Date.parse(ctx.now()), { checkOld }) };
   }
@@ -191,7 +207,8 @@ export function enrollSession(ctx: Ctx, actor: string, sessionId: string, projec
   write(ctx, actor, (record) => {
     const project = resolveProject(ctx, projectRef);
     if (project.status !== 'active') throw badRequest(`Project ${project.slug} is archived`, 'Unarchive it with update_project first.');
-    if (!findSession(ctx, sessionId)) insertSession(ctx, sessionId, project.id, 'working');
+    const isNew = !findSession(ctx, sessionId);
+    if (isNew) insertSession(ctx, sessionId, project.id, 'working');
     const before = findSession(ctx, sessionId)!;
     const next: Session = { ...before, projectId: project.id, lastSeenAt: ctx.now() };
     if (title?.trim() && !before.title) next.title = title.trim();
@@ -202,6 +219,9 @@ export function enrollSession(ctx: Ctx, actor: string, sessionId: string, projec
     // Its Up next entries stay behind in the old project, unowned: that project no longer lists the session.
     if (before.projectId !== null && before.projectId !== project.id) releaseQueue(ctx, record, sessionId);
     saveSession(ctx, next);
+    // The briefing returned below goes to the scribe, which passes on its first line only: the session's next real
+    // prompt brings the full one. A live session re-enrolled where it already is keeps what it has (due or not).
+    if (isNew || before.projectId !== project.id || before.state === 'ended') markBriefingDue(ctx, sessionId);
     // Tell the old project's viewers too, so they drop this session's badge.
     if (before.projectId !== null && before.projectId !== project.id) {
       record({ projectId: before.projectId, type: 'session.updated', entity: 'session', entityId: sessionId, data: { changed: ['projectId'], state: next.state } });

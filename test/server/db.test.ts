@@ -313,6 +313,64 @@ describe('database', () => {
     }
   });
 
+  /** A database file as the v5 build leaves it: migrations 1 to 5, with a live session and an ended one. */
+  function v5Database(): { dir: string; file: string } {
+    const dir = mkdtempSync(join(tmpdir(), 'ip-migrate-v5-'));
+    const file = join(dir, 'inprogress.db');
+    const v5 = new Database(file);
+    v5.exec('CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+    for (const m of MIGRATIONS.slice(0, 5)) v5.exec(m);
+    v5.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '5')").run();
+    v5.prepare("INSERT INTO projects (id, slug, name, root_node_id, created_at, updated_at) VALUES (1, 'inprogress', 'InProgress', 1, 't', 't')").run();
+    v5.prepare("INSERT INTO nodes (id, project_id, parent_id, position, kind, title, status, label, created_at, updated_at) VALUES (1, 1, NULL, 1, 'goal', 'InProgress', 'active', NULL, 't', 't')").run();
+    v5.prepare("INSERT INTO sessions (id, project_id, state, focus_node_id, started_at, last_seen_at, slot) VALUES ('s1', 1, 'working', 1, 't', 't', 0)").run();
+    v5.prepare("INSERT INTO sessions (id, project_id, state, started_at, last_seen_at, ended_at, slot) VALUES ('s2', 1, 'ended', 't', 't', 't', 1)").run();
+    v5.prepare("INSERT INTO session_subagents (session_id, agent_id, agent_type, started_at, description, ordinal, purpose) VALUES ('s1', 'a1', 'general-purpose', 't', 'Write the tests', 1, 'Write the tests.')").run();
+    v5.close();
+    return { dir, file };
+  }
+
+  it('migrates a database at v5 with data to v6, every briefing marker null', () => {
+    const { dir, file } = v5Database();
+    const db = openDb(file);
+    try {
+      expect(schemaVersion(db)).toBe(MIGRATIONS.length);
+      expect(db.prepare('SELECT id, state, focus_node_id, slot, briefing_due FROM sessions ORDER BY id').all()).toEqual([
+        { id: 's1', state: 'working', focus_node_id: 1, slot: 0, briefing_due: null },
+        { id: 's2', state: 'ended', focus_node_id: null, slot: 1, briefing_due: null },
+      ]);
+      expect(db.prepare('SELECT agent_id, ordinal, purpose FROM session_subagents').all()).toEqual([{ agent_id: 'a1', ordinal: 1, purpose: 'Write the tests.' }]);
+      expect(db.prepare("SELECT value FROM meta WHERE key = 'min_reader_version'").pluck().get()).toBe('1');
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('marks migration 6 readable by v1 builds, so a v5 build still opens a v6 database and its own writes work', () => {
+    const { db } = makeCtx();
+    expect(db.prepare("SELECT value FROM meta WHERE key = 'min_reader_version'").pluck().get()).toBe('1');
+    // This build as the v5 build sees the schema: five migrations.
+    const shipped = MIGRATIONS.splice(5);
+    try {
+      expect(shipped).toHaveLength(1);
+      expect(() => migrate(db)).not.toThrow();
+      expect(schemaVersion(db)).toBe(5 + shipped.length);
+      db.prepare("INSERT INTO projects (id, slug, name, created_at, updated_at) VALUES (1, 'p', 'P', 't', 't')").run();
+      // The v5 build's own writes, which never name the marker: a new session has none, and saveSession's update and
+      // expiry keep what the newer build set.
+      db.prepare('INSERT INTO sessions (id, project_id, state, started_at, last_seen_at, slot) VALUES (?, ?, ?, ?, ?, ?)').run('s1', 1, 'working', 't', 't', 0);
+      expect(db.prepare("SELECT briefing_due FROM sessions WHERE id = 's1'").pluck().get()).toBeNull();
+      db.prepare("UPDATE sessions SET briefing_due = 1 WHERE id = 's1'").run();
+      db.prepare('UPDATE sessions SET project_id = ?, title = ?, cwd = ?, branch = ?, transcript_path = ?, state = ?, focus_node_id = ?, prompts_since_update = ?, last_seen_at = ?, ended_at = ?, slot = ? WHERE id = ?')
+        .run(1, 'From v5', null, null, null, 'idle', null, 1, 't2', null, 0, 's1');
+      db.prepare("UPDATE sessions SET state = 'ended', ended_at = ? WHERE id = ?").run('t3', 's1');
+      expect(db.prepare("SELECT title, state, slot, briefing_due FROM sessions WHERE id = 's1'").get()).toEqual({ title: 'From v5', state: 'ended', slot: 0, briefing_due: 1 });
+    } finally {
+      MIGRATIONS.push(...shipped);
+    }
+  });
+
   it('records events inside the transaction and emits them after commit', () => {
     const ctx = makeCtx();
     const seen: EventRow[] = [];
