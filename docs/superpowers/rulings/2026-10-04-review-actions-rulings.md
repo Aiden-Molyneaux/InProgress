@@ -102,3 +102,10 @@ decision, why, what it costs if wrong. Review these and rework anything ruled wr
     if wrong: none.
 38. The readers row's tooltip lists each reader as `a2 · description`, one per line (P6), following Aiden's
     tags-first decision. The brief asked only for descriptions. Cost if wrong: none.
+39. The briefing's rules header drops "(Aiden watches it live)" (P8), which pays for "flags repeat in list order" in
+    the working-tasks bullet. The aside carried no instruction, and the block stays under 1,600 characters. Cost if
+    wrong: none.
+40. Amends ruling 35: a session is marked "briefing due" on any return into a different slot that is not a start,
+    whether from `ended` or from stale, and when a session from before migration 4 gets its first slot (P8). Its
+    next real prompt then brings the full briefing with its letter. Cost if wrong: one extra briefing per such
+    session.
