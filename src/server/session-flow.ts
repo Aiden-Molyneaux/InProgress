@@ -168,11 +168,11 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
       if (node) record({ projectId: node.projectId, type: 'work.updated', entity: 'node', entityId: nodeId, data: { nodeId } });
     }
     // A session back from ended in another letter holds a briefing that names the old one: its next prompt brings a fresh
-    // one. A start carries the full briefing already.
+    // one (review-actions ruling 35). A start carries the full briefing already.
     if (input.event !== 'start' && before.state === 'ended' && after.state !== 'ended' && before.slot !== after.slot) markBriefingDue(ctx, sessionId);
     // Decided here, rendered after commit: the snapshot read may open its own write (stale expiry). Any response that
     // carries the full briefing clears the marker, so it arrives once; a background-task notice is not a prompt Aiden
-    // typed, and leaves it for the next one. Nothing is decided for a project that is not active, which gets no briefing.
+    // typed, and leaves it for the next one (ruling 27). Nothing is decided for a project that is not active, which gets no briefing.
     if (after.projectId !== null && getProjectById(ctx, after.projectId)?.status === 'active') {
       if (input.event === 'start' || created) clearBriefingDue(ctx, sessionId);
       else if (input.event === 'prompt' && !input.notice && briefingDue(ctx, sessionId)) {
@@ -220,7 +220,7 @@ export function enrollSession(ctx: Ctx, actor: string, sessionId: string, projec
     if (before.projectId !== null && before.projectId !== project.id) releaseQueue(ctx, record, sessionId);
     saveSession(ctx, next);
     // The briefing returned below goes to the scribe, which passes on its first line only: the session's next real
-    // prompt brings the full one. A live session re-enrolled where it already is keeps what it has (due or not).
+    // prompt brings the full one. A live session re-enrolled where it already is keeps what it has, due or not (ruling 29).
     if (isNew || before.projectId !== project.id || before.state === 'ended') markBriefingDue(ctx, sessionId);
     // Tell the old project's viewers too, so they drop this session's badge.
     if (before.projectId !== null && before.projectId !== project.id) {
