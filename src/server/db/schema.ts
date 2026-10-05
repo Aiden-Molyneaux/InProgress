@@ -162,7 +162,7 @@ export const MIGRATIONS: string[] = [
   INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
   `,
   // 6: briefing due. 1 while a session owes its next prompt the full briefing: it joined a project through an enroll (a
-  // new session, a repoint, an ended session) or came back from ended into another letter. NULL otherwise, and for rows
+  // new session, a repoint, an ended session) or came back into another letter. NULL otherwise, and for rows
   // from before this migration.
   `
   ALTER TABLE sessions ADD COLUMN briefing_due INTEGER;

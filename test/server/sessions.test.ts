@@ -934,6 +934,26 @@ describe('the full briefing on the first tracked prompt after an enroll', () => 
     expect(briefingDue(ctx, 's2')).toBe(false);
   });
 
+  it('sets it when a session idle past the stale limit, not yet marked ended, comes back into another letter', () => {
+    const { ctx, tick } = projects();
+    handleHookEvent(ctx, 's1', start());
+    handleHookEvent(ctx, 's2', start());
+    // s2 as from before migration 4. Past the stale limit its next event takes the lowest free slot, s1's: s1 is stale,
+    // and no snapshot read has marked it ended (a stop renders nothing).
+    ctx.db.prepare("UPDATE sessions SET slot = NULL WHERE id = 's2'").run();
+    tick(12 * 60 * 60 * 1000 + 60_000);
+    handleHookEvent(ctx, 's2', { event: 'stop' });
+    expect(findSession(ctx, 's2')?.slot).toBe(0);
+    expect(findSession(ctx, 's1')).toMatchObject({ state: 'idle', endedAt: null, slot: 0 });
+    // Back with a prompt, s1 finds A taken and becomes B: that prompt carries the briefing that says so.
+    const text = handleHookEvent(ctx, 's1', prompt()).context!;
+    expect(text.split('\n')[0]).toMatch(/Session id: s1\. You are session B\.$/);
+    expect(findSession(ctx, 's1')).toMatchObject({ state: 'working', endedAt: null, slot: 1 });
+    expect(briefingDue(ctx, 's1')).toBe(false);
+    // s2's slot went from none to A, so its next prompt brings a briefing that names its letter.
+    expect(briefingDue(ctx, 's2')).toBe(true);
+  });
+
   it('leaves it unset on a revival by a start into another letter: the start carries the briefing', () => {
     const { ctx } = projects();
     handleHookEvent(ctx, 's1', start());

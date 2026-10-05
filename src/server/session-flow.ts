@@ -170,9 +170,10 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
       const node = findNode(ctx, nodeId);
       if (node) record({ projectId: node.projectId, type: 'work.updated', entity: 'node', entityId: nodeId, data: { nodeId } });
     }
-    // A session back from ended in another letter holds a briefing that names the old one: its next prompt brings a fresh
-    // one (review-actions ruling 35). A start carries the full briefing already.
-    if (input.event !== 'start' && before.state === 'ended' && after.state !== 'ended' && before.slot !== after.slot) markBriefingDue(ctx, sessionId);
+    // A session live after this event in another letter (back from ended, or from past the stale limit before expiry
+    // marked it ended, or given its first slot) holds a briefing that names the old letter or none: its next prompt
+    // brings a fresh one (review-actions ruling 35). A start carries the full briefing already.
+    if (input.event !== 'start' && after.state !== 'ended' && before.slot !== after.slot) markBriefingDue(ctx, sessionId);
     // Decided here, rendered after commit: the snapshot read may open its own write (stale expiry). Any response that
     // carries the full briefing clears the marker, so it arrives once; a background-task notice is not a prompt Aiden
     // typed, and leaves it for the next one (ruling 27). Nothing is decided for a project that is not active, which gets
