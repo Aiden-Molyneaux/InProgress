@@ -33,6 +33,11 @@ export interface LayoutNodeItem {
    * and the owner, a live session, or null for the unowned list.
    */
   queue: { pos: number; sessionId: string | null } | null;
+  /**
+   * An active step of Claude's that nobody is on: no live session focuses it or a descendant, and no running subagent or
+   * live task in progress is there. Never the root. Display only: the stored status stays active.
+   */
+  paused: boolean;
 }
 
 /**
@@ -342,6 +347,22 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
       cur = cur.parentId === null ? undefined : index.byId.get(cur.parentId);
     }
   }
+  // Who is on a step, for paused: each live session's focus (an idle one's too), each running subagent's home (a reader's
+  // too), each live session's task in progress, and every ancestor of those, walked in the tree itself, so a manual fold
+  // never changes it. A stopped subagent no longer counts, though it still shows greyed for a while.
+  const occupied = new Set<number>();
+  const occupy = (id: number | null) => {
+    let cur = id === null ? undefined : index.byId.get(id);
+    while (cur && !occupied.has(cur.id)) {
+      occupied.add(cur.id);
+      cur = cur.parentId === null ? undefined : index.byId.get(cur.parentId);
+    }
+  };
+  for (const s of live) {
+    occupy(s.focusNodeId);
+    for (const a of s.subagents) if (a.endedAt === null) occupy(homeOf(s, a));
+  }
+  for (const w of work) if (w.status === 'in_progress' && w.endedAt === null) occupy(w.nodeId);
   const sessionsById = new Map(live.map((s) => [s.id, s]));
   const pulses = (w: WorkItem): boolean => {
     const s = sessionsById.get(w.sessionId);
@@ -385,6 +406,7 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
       hasChildren: v.hasChildren,
       working: working.has(node.id),
       queue: queued.get(node.id) ?? null,
+      paused: node.parentId !== null && node.status === 'active' && node.assignee === 'claude' && !occupied.has(node.id),
     };
     items.push(item);
     nodeItems.set(node.id, item);

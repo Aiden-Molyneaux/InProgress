@@ -625,3 +625,67 @@ describe('the trail of ended work', () => {
     expect(rowsOf(opened, 'workDone').map(([kind, , nodeId]) => [kind, nodeId])).toEqual([['workDone', t.b.id]]);
   });
 });
+
+describe('paused', () => {
+  /** The ids of the rows drawn paused, in row order. */
+  const pausedIds = (l: LayoutResult) => [...l.nodeItems.values()].filter((i) => i.paused).map((i) => i.nodeId);
+  const layout = (t: ReturnType<typeof sample>, extra: Partial<Parameters<typeof layoutOutline>[0]> = {}) =>
+    layoutOutline({ nodes: t.nodes, resources: [], sessions: [], now: T0, ...extra });
+
+  it("marks an active step of Claude's that nothing occupies, its parent too, never the root", () => {
+    const t = sample();
+    expect(pausedIds(layout(t))).toEqual([t.a.id, t.a1.id]);
+    expect(layout(t).nodeItems.get(t.root.id)?.paused).toBe(false);
+  });
+
+  it("keeps a live session's focus and its ancestors unpaused, an idle session's too, but not an ended one's", () => {
+    const t = sample();
+    for (const state of ['working', 'idle', 'permission'] as const) {
+      expect(pausedIds(layout(t, { sessions: [session('s1', t.a1.id, state)] })), state).toEqual([]);
+    }
+    expect(pausedIds(layout(t, { sessions: [session('s1', t.a1.id, 'ended')] }))).toEqual([t.a.id, t.a1.id]);
+  });
+
+  it('keeps a parent unpaused while any descendant is occupied, and leaves the siblings paused', () => {
+    const t = sample();
+    // A focus on Aiden's step under A keeps A unpaused; A1 beside it is still nobody's.
+    expect(pausedIds(layout(t, { sessions: [session('s1', t.a2.id, 'idle')] }))).toEqual([t.a1.id]);
+  });
+
+  it("keeps a running subagent's step unpaused, a worker's or a reader's, but not one that has stopped", () => {
+    const t = sample();
+    const on = (a: SubagentInfo) => layout(t, { sessions: [withAgents(session('s1', t.b.id, 'working'), [a])] });
+    expect(pausedIds(on(agent('w1', { nodeId: t.a1.id })))).toEqual([]);
+    expect(pausedIds(on(agent('r1', { agentType: 'Explore', nodeId: t.a1.id })))).toEqual([]);
+    // Stopped a minute ago, it still shows greyed, but nobody is on the step any more.
+    expect(pausedIds(on(agent('w2', { nodeId: t.a1.id, endedAt: ago(60_000) })))).toEqual([t.a.id, t.a1.id]);
+    expect(pausedIds(on(agent('r2', { agentType: 'Explore', nodeId: t.a1.id, endedAt: ago(60_000) })))).toEqual([t.a.id, t.a1.id]);
+    // With no step of its own, a subagent is on its session's focus.
+    const s = withAgents(session('s1', t.a1.id, 'working'), [agent('w3')]);
+    expect(pausedIds(layout(t, { sessions: [s] }))).toEqual([]);
+  });
+
+  it("keeps a step with a live session's task in progress unpaused, but not an ended session's or a pending one", () => {
+    const t = sample();
+    expect(pausedIds(layout(t, { workItems: [work(t.a1.id, 'in_progress')] }))).toEqual([]);
+    expect(pausedIds(layout(t, { workItems: [work(t.a1.id, 'in_progress', { endedAt: ago(60_000) })] }))).toEqual([t.a.id, t.a1.id]);
+    expect(pausedIds(layout(t, { workItems: [work(t.a1.id, 'pending'), work(t.a1.id, 'completed')] }))).toEqual([t.a.id, t.a1.id]);
+  });
+
+  it('leaves a step assigned to Aiden, or not active, unpaused', () => {
+    const t = sample();
+    const nodes = t.nodes.map((x) => (x.id === t.a1.id ? { ...x, assignee: 'me' as const } : x.id === t.b.id ? { ...x, status: 'blocked' as const } : x));
+    const l = layout({ ...t, nodes });
+    expect(pausedIds(l)).toEqual([t.a.id]);
+    expect(l.nodeItems.get(t.a1.id)).toMatchObject({ needsYou: true, paused: false });
+  });
+
+  it('never changes with a manual fold: the hidden focus still keeps its ancestors unpaused', () => {
+    const t = sample();
+    const overrides = { ['n:' + t.a.id]: 'closed' as const };
+    expect(layout(t, { overrides }).nodeItems.has(t.a1.id)).toBe(false);
+    expect(pausedIds(layout(t, { overrides }))).toEqual([t.a.id]);
+    expect(pausedIds(layout(t, { overrides, sessions: [session('s1', t.a1.id, 'idle')] }))).toEqual([]);
+    expect(pausedIds(layout(t, { overrides, workItems: [work(t.a1.id, 'in_progress')] }))).toEqual([]);
+  });
+});
