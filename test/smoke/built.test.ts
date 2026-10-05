@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import Database from 'better-sqlite3';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ProjectSnapshot, TreeNode } from '../../src/core/types';
 import { nodeBinary } from '../../src/cli/claude-config';
@@ -31,6 +32,15 @@ const runHook = (name: string, payload: object) => spawnSync(process.execPath, [
 /** Run the built CLI's tasks command, as a session would. */
 const runTasks = (args: string[], extraEnv: NodeJS.ProcessEnv = {}) => spawnSync(process.execPath, [bin('cli/main.js'), 'tasks', ...args], { env: { ...env, ...extraEnv }, encoding: 'utf8' });
 const lines = (text: string) => text.split(/\r?\n/).filter(Boolean);
+/** Every row of these tables, read straight from the server's database file: what it has stored, not what it serves. */
+function storedRows(...tables: string[]): Record<string, unknown>[] {
+  const db = new Database(join(home, 'inprogress.db'), { readonly: true, fileMustExist: true });
+  try {
+    return tables.flatMap((t) => db.prepare(`SELECT * FROM ${t}`).all() as Record<string, unknown>[]);
+  } finally {
+    db.close();
+  }
+}
 
 /** A port nothing is listening on, so a stale server from an earlier run can never answer. */
 function freePort(): Promise<number> {
@@ -112,12 +122,18 @@ describe('built artifacts', () => {
     expect(workItems).toEqual([expect.objectContaining({ nodeId: step.id, sessionId: 'smoke-1', agentId: '', subject, status: 'in_progress' })]);
   });
 
-  it('pre-tool, subagent-start and post-tool pair a subagent with its description and node', async () => {
+  it('pre-tool, subagent-start and post-tool pair a subagent with its description and node, keeping only its first sentence', async () => {
     const client = createClient({ baseUrl: base, token: readToken(home) });
     const step = (await client.get<ProjectSnapshot>('/api/projects/smoke')).nodes.find((n) => n.title === 'Smoke the hooks')!;
-    const toolInput = { description: `#${step.id} Map the smoke run`, prompt: 'A prompt stays in Claude Code', subagent_type: 'Explore', model: 'haiku' };
+    // Two sentences on two lines: only "Map the smoke run." may leave Claude Code, never the rest of the prompt.
+    const prompt = 'Map the smoke run. The rest of the prompt stays in Claude Code.\nMore detail.';
+    const kept = ['stays in Claude Code', 'More detail'];
+    const toolInput = { description: `#${step.id} Map the smoke run`, prompt, subagent_type: 'Explore', model: 'haiku' };
     const dispatch = runHook('pre-tool', { session_id: 'smoke-1', hook_event_name: 'PreToolUse', tool_name: 'Agent', tool_use_id: 'toolu_smoke_agent', tool_input: toolInput });
     expect(dispatch).toMatchObject({ status: 0, stdout: '', stderr: '' });
+    // Read before the launch pairs it, which forgets the dispatch.
+    const dispatched = storedRows('subagent_dispatches');
+    expect(dispatched).toEqual([expect.objectContaining({ tool_use_id: 'toolu_smoke_agent', purpose: 'Map the smoke run.' })]);
     const started = runHook('subagent-start', { session_id: 'smoke-1', hook_event_name: 'SubagentStart', agent_id: 'a0smoke0agent0001', agent_type: 'Explore' });
     expect(started).toMatchObject({ status: 0, stdout: '', stderr: '' });
     const launched = runHook('post-tool', {
@@ -125,10 +141,16 @@ describe('built artifacts', () => {
       tool_response: [{ type: 'text', text: 'Async agent launched successfully.\nagentId: a0smoke0agent0001 (internal ID - do not mention to user.)' }],
     });
     expect(launched).toMatchObject({ status: 0, stdout: '', stderr: '' });
-    const session = (await client.get<ProjectSnapshot>('/api/projects/smoke')).sessions.find((s) => s.id === 'smoke-1')!;
+    const snapshot = await client.get<ProjectSnapshot>('/api/projects/smoke');
+    const session = snapshot.sessions.find((s) => s.id === 'smoke-1')!;
     expect(session.subagents).toEqual([
-      { agentId: 'a0smoke0agent0001', agentType: 'Explore', startedAt: expect.any(String), description: `#${step.id} Map the smoke run`, model: 'haiku', nodeId: step.id, endedAt: null, ordinal: 1, purpose: 'A prompt stays in Claude Code' },
+      { agentId: 'a0smoke0agent0001', agentType: 'Explore', startedAt: expect.any(String), description: `#${step.id} Map the smoke run`, model: 'haiku', nodeId: step.id, endedAt: null, ordinal: 1, purpose: 'Map the smoke run.' },
     ]);
+    const stored = JSON.stringify({ dispatched, now: storedRows('subagent_dispatches', 'session_subagents', 'events') });
+    for (const text of kept) {
+      expect(stored, text).not.toContain(text);
+      expect(JSON.stringify(snapshot), text).not.toContain(text);
+    }
   });
 
   it("the CLI's tasks command replaces a tracked session's tasks on a step and prints the counts", async () => {
