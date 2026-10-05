@@ -182,27 +182,39 @@ describe('install', () => {
     const skill = readFileSync(join(dir, 'skills', 'inprogress', 'SKILL.md'), 'utf8');
     expect(skill).toContain(`"${nodeBinary()}" "${repo}/dist/cli/main.js" status`);
     expect(skill).not.toMatch(/`node "/);
-    expect(skill).toContain(`${slashed(homeDir())}/resources/<project-slug>/`);
+    // The brief template's resource path; the chat-only rule itself is the briefing's (P8).
+    expect(skill).toContain(`${slashed(homeDir())}/resources/ingame/`);
     expect(skill).not.toContain('~/.inprogress/resources');
     expect(skill).not.toMatch(/\{\{\w+\}\}/);
   });
 
-  it('writes the live-work rules into the skill and the scribe', () => {
+  it('writes the full brief template into the skill, which points at the briefing for the rules, and the live-work rules into the scribe', () => {
     const dir = claudeDirWithSettings(existing);
     install({ repo, claudeDir: dir, stamp: 'lw' });
     const skill = readFileSync(join(dir, 'skills', 'inprogress', 'SKILL.md'), 'utf8');
-    // Subagent descriptions and task subjects carry the step's #id; the task tools for multi-step work.
-    expect(skill).toContain('`#44 Build project tabs`');
-    expect(skill).toMatch(/task tools \(`TaskCreate`, `TaskUpdate`\) for multi-step work/);
-    expect(skill).toMatch(/subject with `#id` when it belongs to a step other than your focus/);
-    // The queue (this session's own order without its focus, and the unowned order), new requests, and the fallback
-    // without task tools.
-    expect(skill).toMatch(/`queue: #a, #b` is this session's own order, next first, without its focus/);
-    expect(skill).toMatch(/`later: #c, #d` is the unowned order/);
-    // The template queues the steps after the focus, and has a later: line.
-    expect(skill).toMatch(/- focus → the new "Run signing tests" node\n- queue: #59, #60\n- later: #61\n/);
-    expect(skill).toMatch(/new request with a deliverable .* becomes a step right away/);
+    // For opting in, adopting and the full brief format; never for "what's next" or a restatement of the rules.
+    const description = /^description: (.*)$/m.exec(skill)?.[1] ?? '';
+    expect(description).toMatch(/[Oo]pt a Claude session into InProgress, adopt an existing project into it, or look up the full .*brief format/);
+    expect(description).not.toMatch(/what's next|restated|update rules/i);
+    // The briefing's rules are complete; the skill no longer restates them.
+    expect(skill).toMatch(/update rules, which are complete/);
+    expect(skill).not.toContain('In short');
+    expect(skill).not.toMatch(/new request with a deliverable .* becomes a step right away/);
+    expect(skill).not.toMatch(/`queue: #a, #b` is this session's own order/);
+    // The template: changes, a question and its answer, a relabel, backtracking, a resource, a log, the focus, and
+    // the steps queued after the focus, then the unowned order.
+    const template = /Brief template:\n\n```\n([\s\S]*?)```/.exec(skill)?.[1] ?? '';
+    expect(template).toMatch(/^Session: <session id> · Project: <slug>\nChanges:\n/);
+    expect(template).toContain('- #57 → done; outcome "Play app signing configured"');
+    expect(template).toMatch(/- add under #55: "[^"]+\?" \(question, assignee me\)\n/);
+    expect(template).toMatch(/- #\d+ → done; outcome "[^"]+" \(the answer goes in the outcome\)\n/);
+    expect(template).toMatch(/- #\d+ label → fix\n/);
+    expect(template).toMatch(/- #\d+ → dropped; outcome "[^"]+"\n- move #\d+ under #55 after #57\n/);
+    expect(template).toContain(`path ${slashed(homeDir())}/resources/ingame/2026-09-27-signing-test-suite.md, snapshot_file`);
+    expect(template).toMatch(/- focus → the new "Run signing tests" node\n- queue: #59, #60\n- later: #61\n$/);
     expect(skill).not.toContain('tasks on #');
+    // An opted-in session gets the full briefing with its next prompt.
+    expect(skill).toMatch(/## Opting in[\s\S]*full briefing[^.]*arrives with your next prompt after the enroll/);
     const agent = readFileSync(join(dir, 'agents', 'inprogress-scribe.md'), 'utf8');
     expect(agent).toMatch(/`set_queue`/);
     expect(agent).toMatch(/`queue: #a, #b`.*`set_queue` with those ids, next first, and `session`/);
@@ -231,6 +243,12 @@ describe('install', () => {
     // Windows PowerShell 5.1 splits a " even inside single quotes, which could retarget the write to another step.
     expect(skill).toContain('Put single quotes around a subject that contains `$` or a backtick, and leave double quotes out of subjects.');
     expect(skill).not.toMatch(/single quotes around a subject that contains[^.]*`"`/);
+    // It sits in the opt-in steps, for the prompts before the briefing arrives, and prefers the Bash tool, whose
+    // permission check matches at once (PowerShell's can time out and ask).
+    const optIn = /## Opting in[^\n]*\n([\s\S]*?)\n## /.exec(skill)?.[1] ?? '';
+    expect(optIn).toContain(`\`node ${repo}/dist/cli/main.js tasks <step id> --session <session id>`);
+    expect(optIn).toMatch(/Run it with the Bash tool/);
+    expect(skill).not.toMatch(/runs in the Bash and the PowerShell tool/);
   });
 
   it('allows the tasks command in the Bash and the PowerShell tool, keeping the static rules and every other rule', () => {
@@ -290,11 +308,14 @@ describe('install', () => {
     const dir = claudeDirWithSettings(existing);
     install({ repo, claudeDir: dir, stamp: 'tl' });
     const skill = readFileSync(join(dir, 'skills', 'inprogress', 'SKILL.md'), 'utf8');
-    // Claude picks the label as it briefs a new step, relabels when the purpose changes, and reads the gate from it.
+    // Claude picks the label as it briefs a new step, by the picking rule, and relabels when the purpose changes. The
+    // test gates moved to the inprogress project's playbook.
     expect(skill).toContain('`add under #41: "Faster cold start" (task, server)`');
     expect(skill).toContain('⧉ `ui` · ⚙ `server` · ⛁ `data` · ⇄ `integration` · ⚒ `ops` · ¶ `docs` · ⚑ `fix` · ↻ `refactor` · ⌕ `research`');
+    expect(skill).toMatch(/Pick by purpose first \(`fix`, `refactor`, `research`\), else by where the work lands/);
     expect(skill).toMatch(/[Rr]elabel .* when its purpose changes/);
-    for (const row of ['| `ui` |', '| `integration` |', '| `data` |', '| everything else |']) expect(skill, row).toContain(row);
+    for (const row of ['| `ui` |', '| `integration` |', '| `data` |', '| everything else |', '| Label | Gate |']) expect(skill, row).not.toContain(row);
+    expect(skill).not.toMatch(/test gate|typecheck/i);
     const agent = readFileSync(join(dir, 'agents', 'inprogress-scribe.md'), 'utf8');
     expect(agent).toMatch(/`label`/);
     expect(agent).toMatch(/[Nn]ever invent a label/);
