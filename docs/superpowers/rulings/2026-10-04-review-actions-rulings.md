@@ -109,3 +109,6 @@ decision, why, what it costs if wrong. Review these and rework anything ruled wr
     whether from `ended` or from stale, and when a session from before migration 4 gets its first slot (P8). Its
     next real prompt then brings the full briefing with its letter. Cost if wrong: one extra briefing per such
     session.
+41. Amends ruling 29: a same-project re-enroll of a live session is marked "briefing due" when it gives the session
+    a different slot, and so is a `set_focus` that does, matching ruling 40 (final review fix wave). A re-enroll that
+    keeps the slot still leaves the marker alone. Cost if wrong: one extra briefing.
