@@ -93,3 +93,6 @@ decision, why, what it costs if wrong. Review these and rework anything ruled wr
 35. A revival that gives a session a different slot also marks it "briefing due" (P8), so its next prompt brings the
     full briefing with the new letter. Without it, a session revived by a prompt keeps "You are session A." in its
     context after it became B. Cost if wrong: one extra briefing on such a revival.
+36. A `later:` write may take a step out of a session's list (P5): a node sits in the queue once, so placing it in the
+    unowned order claims it from wherever it was, as a `queue:` write does. Cost if wrong: one session can move
+    another's step to `later`.
