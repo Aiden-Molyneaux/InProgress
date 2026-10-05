@@ -97,7 +97,8 @@ exactly like mirrored tasks.
   - Tasks fold with their node and are never counted in plan progress.
   - A subagent's tasks carry its badge colour.
 - **Badges.** Each subagent gets its own badge under its node: `◆ description · model · 12 min`. Ended subagents show
-  greyed (`done 2 min ago`) and then drop off. The session's own badge stays under its focus.
+  greyed (`done 2 min ago`) for 5 minutes, then move into the step's trail (review actions §3). The session's own badge
+  stays under its focus.
 - **Session chip.** Lists its subagents (description · model · elapsed) on hover or focus.
 - **Queue.** Numbered markers ①②③ appear on queued steps. An `Up next` line sits under the session row, lists the
   queue, and jumps to an item on click. When the frontier has no working session, it prefers the queue head.

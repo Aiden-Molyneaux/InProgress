@@ -118,7 +118,8 @@ export function recordDispatch(ctx: Ctx, sessionId: string, d: DispatchInput): v
 /**
  * SubagentStart. A dispatch whose launch already named this agent pairs exactly (and is done with); otherwise the
  * oldest open dispatch of the agent's type pairs, and stays until a launch confirms or corrects it. An agent that
- * starts again (resumed) keeps what it had.
+ * starts again (resumed) keeps what it had, its first start time included: the trail's "ran …" then spans its first
+ * start to its last stop (a true run time would need a column of its own).
  */
 export function startSubagent(ctx: Ctx, sessionId: string, agentId: string, agentType: string, at: string): void {
   const existing = findSubagent(ctx, sessionId, agentId);

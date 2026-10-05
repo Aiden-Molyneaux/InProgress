@@ -159,7 +159,8 @@ export function agentHome(s: Pick<Session, 'focusNodeId'>, a: Pick<SubagentInfo,
  * The trail's subagents, each with the node it shows under. A live session's stopped subagent stays out while it still
  * shows as a greyed badge (agentShown), so none is both. Its node is the one it worked on, while that is in this tree;
  * one whose node is set but not in the tree (its session moved to another project, say) is left out. Only one with no
- * node falls back to its session's focus, live or past; with neither it is left out.
+ * node falls back to its session's focus, live or past; with neither it is left out. A deleted step's agents fall back
+ * too: its `node_id` is ON DELETE SET NULL, which can't tell a deleted step from none.
  */
 export function homedTrailAgents(
   input: { sessions: Session[]; trailAgents?: TrailAgent[]; pastSessions?: PastSession[]; now: number },

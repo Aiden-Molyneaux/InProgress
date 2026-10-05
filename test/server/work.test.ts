@@ -169,6 +169,18 @@ describe('the trail of ended work in the snapshot', () => {
     expect(items()).toEqual([]);
   });
 
+  it("dates an expired session's end by when it was last seen, not when the expiry ran", () => {
+    const { ctx, project, play, hook, tick } = setup();
+    hook(created('1', 'Write it'));
+    tick(30 * MIN);
+    hook({ event: 'stop' });
+    tick(16 * 60 * MIN);
+    expect(getProjectSnapshot(ctx, project.slug).pastSessions).toEqual([{ id: 's1', title: null, focusNodeId: play.id, endedAt: '2026-10-02T09:30:00.000Z' }]);
+    // The trail itself still lasts 7 days from the expiry, as the prune counts it.
+    tick(7 * DAY - MIN);
+    expect(getProjectSnapshot(ctx, project.slug).pastSessions.map((s) => s.id)).toEqual(['s1']);
+  });
+
   it('leaves out the tasks of a session that moved to another project, whether it is live or ended', () => {
     const { ctx, hook, items } = setup();
     hook(created('1', 'Write it'));
@@ -249,7 +261,7 @@ describe('setTasks (the tasks command, where the task tools are absent)', () => 
     const { ctx, play, items } = setup();
     const res = setTasks(ctx, 'session:s1', 's1', undefined, [{ subject: 'Sign the bundle', status: 'in_progress' }]);
     expect(res.nodeId).toBe(play.id);
-    expect(res.tasks.map((i) => [i.nodeId, i.subject, i.status])).toEqual([[play.id, 'Sign the bundle', 'in_progress']]);
+    expect(res.tasks.map((i) => [i.nodeId, i.subject, i.status, i.endedAt])).toEqual([[play.id, 'Sign the bundle', 'in_progress', null]]);
     expect(items().map((i) => [i.nodeId, i.subject])).toEqual([[play.id, 'Sign the bundle']]);
   });
 

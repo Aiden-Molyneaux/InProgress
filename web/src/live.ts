@@ -53,7 +53,10 @@ export function chipLabel(s: Session): string {
   return `${sessionDisplayTitle(s)}${live ? ` · ${live} subagent${live > 1 ? 's' : ''}` : ''}${STATE_SUFFIX[s.state]}`;
 }
 
-/** `description · model · ran 40 min · stopped 2 h ago`: a subagent in the trail, how long it ran and when it stopped. */
+/**
+ * `description · model · ran 40 min · stopped 2 h ago`: a subagent in the trail, how long it ran and when it stopped.
+ * A resumed subagent keeps its first start, so "ran" spans its first start to its last stop.
+ */
 export function trailAgentLine(a: SubagentInfo, now: number, underNode: number | null = null): string {
   const end = a.endedAt ?? new Date(now).toISOString();
   return [agentName(a, underNode), a.model, `ran ${elapsed(a.startedAt, Date.parse(end))}`, `stopped ${relativeTime(end, now)}`].filter(Boolean).join(' · ');

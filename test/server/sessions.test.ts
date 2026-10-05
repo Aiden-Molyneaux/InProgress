@@ -203,10 +203,12 @@ describe('briefing: live work', () => {
     handleHookEvent(ctx, 's2', { event: 'task-created', taskKey: '2', subject: 'Left pending' });
     handleHookEvent(ctx, 's1', { event: 'task-created', taskKey: '1', subject: 'Still mine' });
     handleHookEvent(ctx, 's2', { event: 'end' });
-    const status = handleHookEvent(ctx, 's1', { event: 'prompt', asksStatus: true }).context!;
-    expect(status).toContain('○ Still mine');
-    expect(status).not.toMatch(/Left (in progress|pending)/);
-    expect(handleHookEvent(ctx, 's1', start()).context!).not.toMatch(/Left (in progress|pending)/);
+    // Not as live task lines (P8 names them in a line of their own).
+    for (const text of [handleHookEvent(ctx, 's1', { event: 'prompt', asksStatus: true }).context!, handleHookEvent(ctx, 's1', start()).context!]) {
+      expect(text).toContain('○ Still mine');
+      expect(text).not.toContain('◐ Left in progress');
+      expect(text).not.toContain('○ Left pending');
+    }
   });
 
   it('shows no task lines without a focus, and no Up next line without a queue', () => {
