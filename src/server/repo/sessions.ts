@@ -15,6 +15,7 @@ interface SessionRow {
   started_at: string;
   last_seen_at: string;
   ended_at: string | null;
+  slot: number | null;
 }
 
 const toSession = (ctx: Ctx, r: SessionRow): Session => ({
@@ -30,6 +31,7 @@ const toSession = (ctx: Ctx, r: SessionRow): Session => ({
   startedAt: r.started_at,
   lastSeenAt: r.last_seen_at,
   endedAt: r.ended_at,
+  slot: r.slot,
   subagents: listSubagents(ctx, r.id),
 });
 
@@ -41,8 +43,29 @@ export function findSession(ctx: Ctx, id: string): Session | undefined {
 /** Persist every column except subagents (which live in session_subagents). */
 export function saveSession(ctx: Ctx, s: Session): void {
   ctx.db
-    .prepare('UPDATE sessions SET project_id = ?, title = ?, cwd = ?, branch = ?, transcript_path = ?, state = ?, focus_node_id = ?, prompts_since_update = ?, last_seen_at = ?, ended_at = ? WHERE id = ?')
-    .run(s.projectId, s.title, s.cwd, s.branch, s.transcriptPath, s.state, s.focusNodeId, s.promptsSinceUpdate, s.lastSeenAt, s.endedAt, s.id);
+    .prepare('UPDATE sessions SET project_id = ?, title = ?, cwd = ?, branch = ?, transcript_path = ?, state = ?, focus_node_id = ?, prompts_since_update = ?, last_seen_at = ?, ended_at = ?, slot = ? WHERE id = ?')
+    .run(s.projectId, s.title, s.cwd, s.branch, s.transcriptPath, s.state, s.focusNodeId, s.promptsSinceUpdate, s.lastSeenAt, s.endedAt, s.slot, s.id);
+}
+
+/**
+ * The slot for session `sessionId` in project `projectId`: `prefer` (the slot it has) when no other live session of the
+ * project holds it, else the lowest slot none holds, from 0. Live means not ended and heard from within the stale limit,
+ * the cutoff expireStaleSessions uses: expiry runs only on a snapshot read, never inside a write, so a session idle for
+ * 12 hours may still read 'idle' here, and it holds no slot. No unique index backs this (a rolled-back v3 build that
+ * revives a session would trip it): every flow that makes a session live calls this.
+ */
+export function assignSlot(ctx: Ctx, sessionId: string, projectId: number, prefer: number | null = null): number {
+  const cutoff = new Date(Date.parse(ctx.now()) - STALE_SESSION_MS).toISOString();
+  const held = new Set(
+    ctx.db
+      .prepare("SELECT slot FROM sessions WHERE project_id = ? AND id != ? AND state != 'ended' AND last_seen_at >= ? AND slot IS NOT NULL")
+      .pluck()
+      .all(projectId, sessionId, cutoff) as number[],
+  );
+  if (prefer !== null && !held.has(prefer)) return prefer;
+  let slot = 0;
+  while (held.has(slot)) slot++;
+  return slot;
 }
 
 /**

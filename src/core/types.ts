@@ -131,6 +131,8 @@ export interface SubagentInfo {
   nodeId: number | null;
   /** Set when it stopped, or when its session ended. A session's list keeps an ended subagent for 5 minutes. */
   endedAt: string | null;
+  /** Its number within its session, given at its start (the 1 in `a1`); null for a subagent from before migration 4. */
+  ordinal: number | null;
 }
 
 /**
@@ -181,6 +183,12 @@ export interface Session {
   startedAt: string;
   lastSeenAt: string;
   endedAt: string | null;
+  /**
+   * Its identity in its project: the lowest slot no other live session there held when it began, was revived or moved.
+   * Its letter (0 is A) and hue; its subagents wear them too. Null for a session from before migration 4, until its
+   * next hook event fills it.
+   */
+  slot: number | null;
   subagents: SubagentInfo[];
 }
 
@@ -231,4 +239,17 @@ export function glyphTitle(n: Pick<TreeNode, 'title' | 'label'>): string {
 
 export function sessionDisplayTitle(s: Pick<Session, 'id' | 'title'>): string {
   return s.title?.trim() || `Session ${s.id.slice(0, 6)}`;
+}
+
+/** A session's letter from its slot, in bijective base 26: 0 → "A", 25 → "Z", 26 → "AA"; "" for null (no slot yet). */
+export function sessionTag(slot: number | null): string {
+  if (slot === null) return '';
+  let tag = '';
+  for (let n = slot + 1; n > 0; n = Math.floor((n - 1) / 26)) tag = String.fromCharCode(65 + ((n - 1) % 26)) + tag;
+  return tag;
+}
+
+/** "a1": the session's letter in lower case and the subagent's number; "" when either is null. */
+export function agentTag(slot: number | null, ordinal: number | null): string {
+  return slot === null || ordinal === null ? '' : `${sessionTag(slot).toLowerCase()}${ordinal}`;
 }

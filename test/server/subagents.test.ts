@@ -39,7 +39,7 @@ describe('subagent dispatches', () => {
     expect(hook(dispatch('toolu_1', 'Map the hook payloads', 'Explore', 'sonnet'))).toEqual({ tracked: true });
     hook(start('a1'));
     expect(subagents(ctx)).toEqual([
-      { agentId: 'a1', agentType: 'Explore', startedAt: expect.any(String), description: 'Map the hook payloads', model: 'sonnet', nodeId: play.id, endedAt: null },
+      { agentId: 'a1', agentType: 'Explore', startedAt: expect.any(String), description: 'Map the hook payloads', model: 'sonnet', nodeId: play.id, endedAt: null, ordinal: 1 },
     ]);
   });
 
@@ -227,6 +227,50 @@ describe('subagent lifetimes', () => {
   });
 });
 
+describe('subagent numbers', () => {
+  const numbers = (ctx: Ctx, session = 's1') =>
+    Object.fromEntries((ctx.db.prepare('SELECT agent_id, ordinal FROM session_subagents WHERE session_id = ?').all(session) as { agent_id: string; ordinal: number | null }[]).map((r) => [r.agent_id, r.ordinal]));
+
+  it("numbers a session's subagents from 1 as they start, each session on its own, and never the scribe", () => {
+    const { ctx, hook } = setup();
+    hook({ event: 'start', source: 'startup', cwd: 'C:/personal/InGame' }, 's2');
+    hook(start('a1', 'general-purpose'));
+    hook(start('scribe', 'inprogress-scribe'));
+    hook(start('a2', 'general-purpose'));
+    hook(start('b1', 'general-purpose'), 's2');
+    expect(numbers(ctx)).toEqual({ a1: 1, a2: 2 });
+    expect(numbers(ctx, 's2')).toEqual({ b1: 1 });
+    expect(subagents(ctx).map((a) => a.ordinal)).toEqual([1, 2]);
+  });
+
+  it("keeps a resumed subagent's number, and gives the next one a new number even after the highest stopped", () => {
+    const { ctx, hook } = setup();
+    hook(start('a1', 'general-purpose'));
+    hook(start('a2', 'general-purpose'));
+    hook({ event: 'subagent-stop', agentId: 'a1' });
+    hook({ event: 'subagent-stop', agentId: 'a2' });
+    hook(start('a1', 'general-purpose'));
+    hook(start('a3', 'general-purpose'));
+    expect(numbers(ctx)).toEqual({ a1: 1, a2: 2, a3: 3 });
+  });
+
+  it('counts past a subagent from before migration 4, which has no number', () => {
+    const { ctx, hook } = setup();
+    hook(start('old', 'general-purpose'));
+    ctx.db.prepare('UPDATE session_subagents SET ordinal = NULL').run();
+    hook(start('a1', 'general-purpose'));
+    expect(numbers(ctx)).toEqual({ old: null, a1: 1 });
+  });
+
+  it('carries the number into the trail', () => {
+    const { ctx, project, hook } = setup();
+    hook(start('a1', 'general-purpose'));
+    hook(start('a2', 'general-purpose'));
+    hook({ event: 'subagent-stop', agentId: 'a2' });
+    expect(getProjectSnapshot(ctx, project.slug).trailAgents).toEqual([expect.objectContaining({ agentId: 'a2', ordinal: 2 })]);
+  });
+});
+
 describe('the trail of ended subagents in the snapshot', () => {
   it("lists a stopped subagent at once, with its session, and leaves out running ones and other projects' agents", () => {
     const { ctx, project, play, hook, tick } = setup();
@@ -242,7 +286,7 @@ describe('the trail of ended subagents in the snapshot', () => {
     hook({ event: 'subagent-stop', agentId: 'a1' });
     // The layout, not the server, decides when a live session's stopped subagent leaves its greyed badge for the trail.
     expect(getProjectSnapshot(ctx, project.slug).trailAgents).toEqual([
-      { sessionId: 's1', agentId: 'a1', agentType: 'general-purpose', startedAt: '2026-10-02T09:00:00.000Z', description: 'Map the hooks', model: 'sonnet', nodeId: play.id, endedAt: '2026-10-02T09:01:00.000Z' },
+      { sessionId: 's1', agentId: 'a1', agentType: 'general-purpose', startedAt: '2026-10-02T09:00:00.000Z', description: 'Map the hooks', model: 'sonnet', nodeId: play.id, endedAt: '2026-10-02T09:01:00.000Z', ordinal: 1 },
     ]);
     expect(getProjectSnapshot(ctx, other.slug).trailAgents.map((a) => a.agentId)).toEqual(['c1']);
   });

@@ -16,6 +16,7 @@ interface SubagentRow {
   node_id: number | null;
   tool_use_id: string | null;
   ended_at: string | null;
+  ordinal: number | null;
 }
 
 interface DispatchRow {
@@ -48,6 +49,7 @@ const toInfo = (r: SubagentRow): SubagentInfo => ({
   model: r.model,
   nodeId: r.node_id,
   endedAt: r.ended_at,
+  ordinal: r.ordinal,
 });
 
 /** A session's subagents that are running or stopped less than 5 minutes ago, oldest first. */
@@ -127,7 +129,16 @@ export function startSubagent(ctx: Ctx, sessionId: string, agentId: string, agen
     if (existing.ended_at) ctx.db.prepare('UPDATE session_subagents SET ended_at = NULL WHERE session_id = ? AND agent_id = ?').run(sessionId, agentId);
     return;
   }
-  ctx.db.prepare('INSERT INTO session_subagents (session_id, agent_id, agent_type, started_at) VALUES (?, ?, ?, ?)').run(sessionId, agentId, agentType, at);
+  // Its number in the session: one past the highest given (rows from before migration 4 have none, which MAX skips). A
+  // resumed agent returned above, keeping its own. Never reused while the session keeps a numbered row: once every row
+  // has been pruned (7 days after it stopped) the count starts again at 1, which only a session that outlives all its
+  // subagents by a week can see.
+  ctx.db
+    .prepare(
+      `INSERT INTO session_subagents (session_id, agent_id, agent_type, started_at, ordinal)
+       VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(ordinal), 0) + 1 FROM session_subagents WHERE session_id = ?))`,
+    )
+    .run(sessionId, agentId, agentType, at, sessionId);
   const named = dispatchOf(ctx, sessionId, agentId);
   if (named) {
     show(ctx, sessionId, agentId, named);

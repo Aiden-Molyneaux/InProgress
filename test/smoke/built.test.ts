@@ -127,7 +127,7 @@ describe('built artifacts', () => {
     expect(launched).toMatchObject({ status: 0, stdout: '', stderr: '' });
     const session = (await client.get<ProjectSnapshot>('/api/projects/smoke')).sessions.find((s) => s.id === 'smoke-1')!;
     expect(session.subagents).toEqual([
-      { agentId: 'a0smoke0agent0001', agentType: 'Explore', startedAt: expect.any(String), description: `#${step.id} Map the smoke run`, model: 'haiku', nodeId: step.id, endedAt: null },
+      { agentId: 'a0smoke0agent0001', agentType: 'Explore', startedAt: expect.any(String), description: `#${step.id} Map the smoke run`, model: 'haiku', nodeId: step.id, endedAt: null, ordinal: 1 },
     ]);
   });
 

@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { agentHome, agentShown, homedTrailAgents } from '../../../src/core/layout';
 import { isNeedsYou } from '../../../src/core/tree';
-import { LABEL_GLYPHS, sessionDisplayTitle, type NodeDetail, type ProjectSnapshot, type TrailAgent, type WorkItem } from '../../../src/core/types';
-import { agentKey } from '../agentColors';
+import { LABEL_GLYPHS, agentTag, sessionDisplayTitle, sessionTag, type NodeDetail, type ProjectSnapshot, type TrailAgent, type WorkItem } from '../../../src/core/types';
 import { api } from '../api';
-import { TASK_MARK, agentLine, taskOwner, trailAgentLine, waitsFor, withoutOwnId, workMark } from '../live';
+import { familyVar } from '../family';
+import { TASK_MARK, agentLine, taskFamily, taskOwner, trailAgentLine, waitsFor, withTag, withoutOwnId, workMark } from '../live';
 import { relativeTime } from '../time';
 import { useNow } from '../useNow';
 import { resourceSummary } from './format';
@@ -16,8 +16,6 @@ interface DetailsProps {
   onClose: () => void;
   onSelectNode: (id: number) => void;
   onOpenResource: (id: number) => void;
-  /** Each subagent's colour, by agentKey. */
-  agentColors: ReadonlyMap<string, string>;
 }
 
 /** One session's part of a node's trail: what it left there, under its title. */
@@ -52,9 +50,10 @@ function trailGroups(snapshot: ProjectSnapshot, tasks: WorkItem[], agents: Trail
 
 /**
  * The node's working tasks, with who is on each, the subagents working on it, and its trail of ended work (tasks an
- * ended session left here and subagents that stopped), under each session's title: live, from the snapshot.
+ * ended session left here and subagents that stopped), under each session's title: live, from the snapshot. Live tasks
+ * and subagents wear their session's hue and a subagent's tag (`a1`); the trail stays neutral.
  */
-function LiveWork({ nodeId, snapshot, agentColors }: Pick<DetailsProps, 'nodeId' | 'snapshot' | 'agentColors'>) {
+function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'>) {
   const now = useNow(30_000);
   const { pastSessions, trailAgents } = snapshot;
   const onNode = snapshot.workItems.filter((w) => w.nodeId === nodeId).sort((a, b) => a.position - b.position || a.id - b.id);
@@ -75,13 +74,25 @@ function LiveWork({ nodeId, snapshot, agentColors }: Pick<DetailsProps, 'nodeId'
           <ul className="ip-wts">
             {tasks.map((w) => {
               const waits = waitsFor(w, snapshot.workItems);
-              const color = w.agentId ? agentColors.get(agentKey(w.sessionId, w.agentId)) : undefined;
+              const family = taskFamily(w, snapshot.sessions, trailAgents);
+              const owner = taskOwner(w, snapshot.sessions, pastSessions, trailAgents);
               return (
-                <li key={w.id} className={`ip-wt w-${w.status}`}>
-                  <span className="ip-work-mark">{TASK_MARK[w.status]}</span> {color && <span className="ip-work-agent" style={{ background: color }} />}
+                <li
+                  key={w.id}
+                  className={`ip-wt w-${w.status}`}
+                  style={family ? ({ '--fam': familyVar(family.slot) } as CSSProperties) : undefined}
+                  // The session's own task names its letter here; a subagent's shows its tag on the row.
+                  title={family ? withTag(w.agentId ? family.tag : sessionTag(family.slot), owner) : undefined}
+                >
+                  {family?.tag && (
+                    <>
+                      <span className="ip-work-tag">{family.tag}</span>{' '}
+                    </>
+                  )}
+                  <span className="ip-work-mark">{TASK_MARK[w.status]}</span> {family && <span className="ip-work-agent" />}
                   {withoutOwnId(w.subject, w.nodeId)}{' '}
                   <span className="muted">
-                    — {taskOwner(w, snapshot.sessions, pastSessions, trailAgents)}
+                    — {owner}
                     {waits.length ? ` · after ${waits.join(', ')}` : ''}
                   </span>
                 </li>
@@ -94,16 +105,25 @@ function LiveWork({ nodeId, snapshot, agentColors }: Pick<DetailsProps, 'nodeId'
         <>
           <div className="ip-label">Subagents</div>
           <ul className="ip-dagents">
-            {agents.map(({ session, agent }) => (
-              <li
-                key={agentKey(session.id, agent.agentId)}
-                className={`ip-dagent${agent.endedAt ? ' ended' : ''}`}
-                style={{ '--agent': agentColors.get(agentKey(session.id, agent.agentId)) } as CSSProperties}
-                title={`${agent.agentType}, for ${sessionDisplayTitle(session)}`}
-              >
-                <span className="ip-agent-dot">◆</span> {agentLine(agent, now, nodeId)}
-              </li>
-            ))}
+            {agents.map(({ session, agent }) => {
+              const tag = agentTag(session.slot, agent.ordinal);
+              return (
+                <li
+                  key={`${session.id}:${agent.agentId}`}
+                  className={`ip-dagent${agent.endedAt ? ' ended' : ''}`}
+                  style={{ '--fam': familyVar(session.slot) } as CSSProperties}
+                  title={`${agent.agentType}, for ${withTag(sessionTag(session.slot), sessionDisplayTitle(session))}`}
+                >
+                  {tag && (
+                    <>
+                      <span className="ip-agent-tag">{tag}</span>
+                      {' · '}
+                    </>
+                  )}
+                  {agentLine(agent, now, nodeId)}
+                </li>
+              );
+            })}
           </ul>
         </>
       )}
@@ -124,7 +144,7 @@ function LiveWork({ nodeId, snapshot, agentColors }: Pick<DetailsProps, 'nodeId'
                   </li>
                 ))}
                 {g.agents.map((a) => (
-                  <li key={agentKey(a.sessionId, a.agentId)} className="ip-dtrail" title={`${a.agentType}, for ${g.title}`}>
+                  <li key={`${a.sessionId}:${a.agentId}`} className="ip-dtrail" title={`${a.agentType}, for ${g.title}`}>
                     <span className="ip-agent-dot">◆</span> {trailAgentLine(a, now, nodeId)}
                   </li>
                 ))}
@@ -137,7 +157,7 @@ function LiveWork({ nodeId, snapshot, agentColors }: Pick<DetailsProps, 'nodeId'
   );
 }
 
-export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResource, agentColors }: DetailsProps) {
+export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResource }: DetailsProps) {
   const [detail, setDetail] = useState<NodeDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -223,7 +243,7 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
           ))}
         </>
       )}
-      <LiveWork nodeId={node.id} snapshot={snapshot} agentColors={agentColors} />
+      <LiveWork nodeId={node.id} snapshot={snapshot} />
       {detail.children.length > 0 && (
         <>
           <div className="ip-label">Steps</div>

@@ -4,7 +4,7 @@ import { badRequest } from './errors';
 import { renderBriefing, renderStatusAnswer, renderStatusLine, untrackedHint } from './briefing';
 import { findNode, leadingNode, requireNode } from './repo/nodes';
 import { getProjectById, resolveBinding, resolveProject } from './repo/projects';
-import { findSession, saveSession } from './repo/sessions';
+import { assignSlot, findSession, saveSession } from './repo/sessions';
 import { getProjectSnapshot } from './repo/snapshot';
 import { endSubagents, launchSubagent, pruneSubagents, recordDispatch, startSubagent, stopSubagent } from './repo/subagents';
 import { taskCreated, taskUpdated } from './repo/work';
@@ -36,14 +36,29 @@ export interface HookEventResult {
   context?: string;
 }
 
-const VISIBLE = ['projectId', 'title', 'state', 'focusNodeId'] as const;
+const VISIBLE = ['projectId', 'title', 'state', 'focusNodeId', 'slot'] as const;
 
 /** SessionStart sources that reset the state to idle. 'compact' (mid-turn) and unknown sources leave it alone. */
 const RESET_SOURCES = new Set(['startup', 'resume', 'clear']);
 
+/** A new session, with the lowest slot free in its project: the hook path and enrollSession both create through here. */
 function insertSession(ctx: Ctx, id: string, projectId: number, state: Session['state']): void {
   const now = ctx.now();
-  ctx.db.prepare('INSERT INTO sessions (id, project_id, state, started_at, last_seen_at) VALUES (?, ?, ?, ?, ?)').run(id, projectId, state, now, now);
+  ctx.db
+    .prepare('INSERT INTO sessions (id, project_id, state, started_at, last_seen_at, slot) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(id, projectId, state, now, now, assignSlot(ctx, id, projectId));
+}
+
+/**
+ * Sets `next.slot` for a flow about to save it. A session moved to another project takes the lowest slot free there. One
+ * that is live after this flow keeps its slot while no other live session of the project holds it, else takes the
+ * lowest free one: that covers a session revived from ended or from stale (another may have taken its slot meanwhile)
+ * and a slot still null from before migration 4. An ended session keeps what it had, for its revival.
+ */
+function placeSlot(ctx: Ctx, before: Session, next: Session): void {
+  if (next.projectId === null) return;
+  if (next.projectId !== before.projectId) next.slot = assignSlot(ctx, next.id, next.projectId);
+  else if (next.state !== 'ended') next.slot = assignSlot(ctx, next.id, next.projectId, before.slot);
 }
 
 const clean = (text: string | undefined): string | null => text?.trim() || null;
@@ -126,6 +141,7 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
     }
     // Only an ended session has an end time; this also covers one revived after expiry.
     if (next.state !== 'ended') next.endedAt = null;
+    placeSlot(ctx, before, next);
     saveSession(ctx, next);
     const after = findSession(ctx, sessionId)!;
     const changed: string[] = VISIBLE.filter((k) => before![k] !== after[k]);
@@ -163,6 +179,8 @@ export function enrollSession(ctx: Ctx, actor: string, sessionId: string, projec
     if (title?.trim() && !before.title) next.title = title.trim();
     // A focus node belongs to the old project, so a repoint clears it.
     if (before.projectId !== project.id) next.focusNodeId = null;
+    // Never revives an ended session (it keeps its state), so only a repoint gives an ended one a slot.
+    placeSlot(ctx, before, next);
     saveSession(ctx, next);
     // Tell the old project's viewers too, so they drop this session's badge.
     if (before.projectId !== null && before.projectId !== project.id) {
@@ -186,7 +204,10 @@ export function setFocus(ctx: Ctx, actor: string, sessionId: string, nodeId: num
       else if (node.projectId !== projectId) throw badRequest(`#${nodeId} is not in this session's project`, 'Use enroll_session to move the session to another project first.');
     }
     if (projectId === null) throw badRequest(`Session ${sessionId} is not tracked`, 'Use enroll_session first.');
-    saveSession(ctx, { ...existing, projectId, focusNodeId: nodeId, lastSeenAt: ctx.now() });
+    const next: Session = { ...existing, projectId, focusNodeId: nodeId, lastSeenAt: ctx.now() };
+    // Being heard from again can bring a stale session back.
+    placeSlot(ctx, existing, next);
+    saveSession(ctx, next);
     record({ projectId, type: 'session.updated', entity: 'session', entityId: sessionId, data: { changed: ['focusNodeId'], focusNodeId: nodeId } });
   });
   return findSession(ctx, sessionId)!;

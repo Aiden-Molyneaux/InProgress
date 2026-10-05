@@ -12,9 +12,8 @@ import {
 import { Background, BackgroundVariant, Controls, ReactFlow, useReactFlow, type Edge, type Node, type NodeChange, type Viewport } from '@xyflow/react';
 import { layoutOutline, type LayoutItem } from '../../../src/core/layout';
 import { buildIndex, type FoldOverrides } from '../../../src/core/tree';
-import { sessionDisplayTitle, type EventRow, type ProjectSnapshot } from '../../../src/core/types';
-import { agentKey } from '../agentColors';
-import { taskOwner, waitsFor } from '../live';
+import { sessionDisplayTitle, sessionTag, type EventRow, type ProjectSnapshot } from '../../../src/core/types';
+import { taskFamily, taskOwner, waitsFor, withTag } from '../live';
 import { useNow } from '../useNow';
 import { AgentBadge, type AgentBadgeData } from './AgentBadge';
 import { BadgeNode } from './BadgeNode';
@@ -34,8 +33,6 @@ const FOCUS_FRAMES = 30;
  * subagent, which then moves into its step's trail.
  */
 const CLOCK_MS = 30_000;
-/** A subagent no longer in view, or one whose colour is unknown. */
-const NO_AGENT_COLOR = '#aeaeb2';
 
 const nodeTypes = {
   ipNode: NodeCard, ipMore: MoreNode, ipBadge: BadgeNode, ipAgent: AgentBadge, ipWork: WorkRow, ipWorkDone: WorkDoneRow, ipTrailAgent: TrailAgentRow,
@@ -58,12 +55,10 @@ export interface CanvasProps {
   selectedNode: number | null;
   onSelectNode: (id: number) => void;
   onOpenResource: (id: number) => void;
-  /** Each subagent's colour, by agentKey. */
-  agentColors: ReadonlyMap<string, string>;
 }
 
 export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(props, ref) {
-  const { snapshot, overrides, onToggleFold, onOpenResource, onSelectNode, selectedNode, agentColors } = props;
+  const { snapshot, overrides, onToggleFold, onOpenResource, onSelectNode, selectedNode } = props;
   const rf = useReactFlow();
   const now = useNow(CLOCK_MS);
   const layout = useMemo(
@@ -148,21 +143,26 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
         return session ? { ...fixed, type: 'ipBadge', data: { session } } : null;
       }
       if (item.kind === 'agent') {
-        const agent = sessionsById.get(item.sessionId)?.subagents.find((a) => a.agentId === item.agentId);
-        if (!agent) return null;
-        const data: AgentBadgeData = { agent, nodeId: item.nodeId, color: agentColors.get(agentKey(item.sessionId, item.agentId)) ?? NO_AGENT_COLOR, now };
+        const session = sessionsById.get(item.sessionId);
+        const agent = session?.subagents.find((a) => a.agentId === item.agentId);
+        if (!session || !agent) return null;
+        // In its session's hue, led by its tag.
+        const data: AgentBadgeData = { agent, nodeId: item.nodeId, slot: session.slot, now };
         return { ...fixed, type: 'ipAgent', data };
       }
       if (item.kind === 'work') {
         const w = workById.get(item.workId);
         if (!w) return null;
+        // A trail row is neutral: no hue, no tag, no letter (its session's slot may be a live session's by now).
+        const family = item.stale ? null : taskFamily(w, snapshot.sessions, trailAgents);
+        const owner = taskOwner(w, snapshot.sessions, pastSessions, trailAgents);
         const data: WorkRowData = {
           item: w,
           pulse: item.pulse,
           stale: item.stale,
-          // A trail row is neutral: no subagent colour.
-          color: w.agentId && !item.stale ? (agentColors.get(agentKey(w.sessionId, w.agentId)) ?? NO_AGENT_COLOR) : null,
-          owner: taskOwner(w, snapshot.sessions, pastSessions, trailAgents),
+          family,
+          // A live row's tooltip names its session's letter, or its subagent's tag.
+          owner: family ? withTag(w.agentId ? family.tag : sessionTag(family.slot), owner) : owner,
           waits: waitsFor(w, snapshot.workItems),
         };
         return { ...fixed, type: 'ipWork', data };
@@ -198,7 +198,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
       return { ...fixed, type: 'ipNode', data };
     };
     return layout.items.map(toNode).filter((n): n is Node => n !== null);
-  }, [layout, index, snapshot, agentColors, now, flash, selectedNode, onSelectNode, onToggleFold, onOpenResource, expandRun, sizes]);
+  }, [layout, index, snapshot, now, flash, selectedNode, onSelectNode, onToggleFold, onOpenResource, expandRun, sizes]);
 
   const edges = useMemo<Edge[]>(
     () =>
