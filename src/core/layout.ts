@@ -11,7 +11,10 @@ export const WORK_ROW = 20;
 export const WORK_GAP = 6;
 /** A session's readers on a row (`◇ a · 2 reading`): as compact as a working task's row. */
 export const READERS_ROW = WORK_ROW;
-/** How long a live session's ended subagent keeps its badge, greyed; after that it shows in the trail. */
+/**
+ * How long a live session's stopped worker keeps its greyed badge: five minutes, then it shows in the trail. A reader
+ * keeps none: it shows only while it runs, and leaves no trail (agentVisible).
+ */
 export const ENDED_AGENT_MS = 5 * 60 * 1000;
 
 export interface LayoutNodeItem {
@@ -175,7 +178,10 @@ export interface LayoutInput {
   pastSessions?: PastSession[];
   /** The project's Up next queue, as stored: owned entries first, next first. */
   queue?: readonly QueueEntry[];
-  /** When it is (ms), to tell which ended subagents still show. Defaults to now. */
+  /**
+   * When it is (ms). It decides which stopped subagents still show, and which finished steps are old enough to fold
+   * into a done run. Defaults to now.
+   */
   now?: number;
 }
 
