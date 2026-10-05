@@ -371,6 +371,28 @@ describe('the queue', () => {
     expect(queue()).toEqual([...owned('s2', b.id, c.id), ...owned('s1', a.id), ...owned(null, d.id)]);
   });
 
+  it('rewrites a session\'s entries where its first one stood, not at the head', () => {
+    const { ctx, project, a, c, d, e, queue } = twoSessions();
+    setQueue(ctx, 'scribe:s2', project.slug, [c.id], S2);
+    setQueue(ctx, 'scribe:s1', project.slug, [a.id], S1);
+    setQueue(ctx, 'scribe:s1', project.slug, [d.id], 'unowned');
+    expect(queue()).toEqual([...owned('s2', c.id), ...owned('s1', a.id), ...owned(null, d.id)]);
+    setQueue(ctx, 'scribe:s1', project.slug, [e.id, a.id], S1);
+    expect(queue()).toEqual([...owned('s2', c.id), ...owned('s1', e.id, a.id), ...owned(null, d.id)]);
+  });
+
+  it("keeps other owners' finished entries in store, so a step that is reopened takes its old place again", () => {
+    const { ctx, project, a, b, c, d, queue } = twoSessions();
+    setQueue(ctx, 'scribe:s2', project.slug, [a.id, b.id], S2);
+    updateNode(ctx, 'test', b.id, { status: 'done' });
+    setQueue(ctx, 'scribe:s1', project.slug, [c.id], S1);
+    setQueue(ctx, 'scribe:s1', project.slug, [d.id], 'unowned');
+    expect(stored(ctx, project.id)).toContainEqual({ node: b.id, session: 's2' });
+    expect(queue()).toEqual([...owned('s2', a.id), ...owned('s1', c.id), ...owned(null, d.id)]);
+    updateNode(ctx, 'test', b.id, { status: 'active' });
+    expect(queue()).toEqual([...owned('s2', a.id, b.id), ...owned('s1', c.id), ...owned(null, d.id)]);
+  });
+
   it("replaces only the unowned entries for 'unowned', after every owned one", () => {
     const { ctx, project, a, b, c, d, queue } = twoSessions();
     setQueue(ctx, 'scribe:s1', project.slug, [c.id, d.id], 'unowned');
