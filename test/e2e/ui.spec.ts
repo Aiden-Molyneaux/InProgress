@@ -1252,9 +1252,14 @@ test.describe('Live work', () => {
     seen = await hues();
     expect(seen.leadLater).toBe(seen.head);
     expect(seen.markerB).toBe('rgb(0, 113, 227)');
-    // Each step still jumps to its row.
+    // Each step still jumps to its row: pan it out of view first.
+    const beta = page.locator('.ip-node', { hasText: '6 Beta' });
+    const pane = (await page.locator('.react-flow__pane').boundingBox())!;
+    await page.mouse.move(pane.x + pane.width / 2, pane.y + pane.height / 2);
+    await page.mouse.wheel(0, 3000);
+    await expect(beta).not.toBeInViewport();
     await lines.nth(1).getByRole('button', { name: /6 Beta/ }).click();
-    await expect(page.locator('.ip-node', { hasText: '6 Beta' })).toBeInViewport();
+    await expect(beta).toBeInViewport();
   });
 
   test('a session chip counts only live subagents, and lists them on hover and on keyboard focus', async ({ page, api, fresh }) => {
