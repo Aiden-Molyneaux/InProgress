@@ -26,8 +26,11 @@ export interface LayoutNodeItem {
   needsYou: boolean;
   hasChildren: boolean;
   working: boolean;
-  /** Its place in the project's Up next queue (1 is next), or null when it isn't queued. */
-  queuePos: number | null;
+  /**
+   * Its place in the project's Up next queue, or null when it isn't queued: its number in its owner's list (1 is next),
+   * and the owner, a live session, or null for the unowned list.
+   */
+  queue: { pos: number; sessionId: string | null } | null;
 }
 
 /**
@@ -139,7 +142,7 @@ export interface LayoutInput {
   trailAgents?: TrailAgent[];
   /** The ended sessions the trail names, for the focus of a trail agent that has no node. */
   pastSessions?: PastSession[];
-  /** The project's Up next queue, next first. */
+  /** The project's Up next queue, as stored: owned entries first, next first. */
   queue?: readonly QueueEntry[];
   /** When it is (ms), to tell which ended subagents still show. Defaults to now. */
   now?: number;
@@ -177,11 +180,38 @@ export function homedTrailAgents(
   });
 }
 
-/** The queue as the UI shows it: each node once, in order, without ids that are gone or steps already finished. */
-export function upNext(queue: readonly number[], nodes: Pick<TreeNode, 'id' | 'status'>[]): number[] {
-  const open = new Set(nodes.filter((n) => n.status !== 'done' && n.status !== 'dropped').map((n) => n.id));
-  return [...new Set(queue)].filter((id) => open.has(id));
+/** The Up next queue as it reads: each live session's own list, in the order the owners first appear, then the unowned list. */
+export interface QueueView {
+  bySession: Map<string, number[]>;
+  unowned: number[];
 }
+
+/**
+ * The queue as the window and the text show it: open steps only, each once, in order, without ids that are gone. A
+ * session's focus is "now", not "next", so it is left out of its own list, and a session whose list is then empty has
+ * none. Entries of a session that is not live, or not among `sessions`, read as unowned in their stored place, which is
+ * ahead of the older unowned ones (releaseQueue puts them there when it runs).
+ */
+export function queueView(
+  queue: readonly QueueEntry[],
+  nodes: Pick<TreeNode, 'id' | 'status'>[],
+  sessions: Pick<Session, 'id' | 'state' | 'focusNodeId'>[],
+): QueueView {
+  const open = new Set(nodes.filter((n) => n.status !== 'done' && n.status !== 'dropped').map((n) => n.id));
+  const focusOf = new Map(sessions.filter((s) => s.state !== 'ended').map((s) => [s.id, s.focusNodeId]));
+  const view: QueueView = { bySession: new Map(), unowned: [] };
+  const seen = new Set<number>();
+  for (const { nodeId, sessionId } of queue) {
+    if (seen.has(nodeId) || !open.has(nodeId)) continue;
+    seen.add(nodeId);
+    if (sessionId === null || !focusOf.has(sessionId)) view.unowned.push(nodeId);
+    else if (focusOf.get(sessionId) !== nodeId) view.bySession.set(sessionId, [...(view.bySession.get(sessionId) ?? []), nodeId]);
+  }
+  return view;
+}
+
+/** Every step in the view, owners' lists first: what the queue pins in view. */
+const viewedSteps = (view: QueueView): number[] => [...[...view.bySession.values()].flat(), ...view.unowned];
 
 export function layoutOutline(input: LayoutInput): LayoutResult {
   const now = input.now ?? Date.now();
@@ -190,13 +220,14 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
   const work = [...(input.workItems ?? [])].sort((a, b) => a.position - b.position || a.id - b.id);
   const shownAgents = (s: Session) => s.subagents.filter((a) => agentShown(a, now));
   const homeOf = (s: Session, a: SubagentInfo) => agentHome(s, a, (id) => index.byId.has(id));
+  const queue = queueView(input.queue ?? [], input.nodes, input.sessions);
   // Where Claude works or plans to go next shows past the fold rules, as a session's focus does: a subagent's node,
-  // a live session's task in progress, and every queued step (so an Up next entry never points into a "+n more" run).
-  // The trail never pins.
+  // a live session's task in progress, and every queued step, whoever owns it (so an Up next entry never points into a
+  // "+n more" run). The trail never pins.
   const pins = [
     ...live.flatMap((s) => shownAgents(s).flatMap((a) => homeOf(s, a) ?? [])),
     ...work.filter((w) => w.status === 'in_progress' && w.endedAt === null).map((w) => w.nodeId),
-    ...upNext((input.queue ?? []).map((e) => e.nodeId), input.nodes),
+    ...viewedSteps(queue),
   ];
   // Old finished steps fold into "✓ n done" rows on the canvas only; the text outline shows them all.
   const visible = computeVisible(index, live, { overrides: input.overrides, pins, doneRuns: { now } });
@@ -240,7 +271,9 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
   for (const w of work) workByNode.set(w.nodeId, [...(workByNode.get(w.nodeId) ?? []), w]);
   const trailByNode = new Map<number, TrailAgent[]>();
   for (const { agent, nodeId } of homedTrailAgents({ ...input, now }, (id) => index.byId.has(id))) trailByNode.set(nodeId, [...(trailByNode.get(nodeId) ?? []), agent]);
-  const queuePos = new Map(upNext((input.queue ?? []).map((e) => e.nodeId), input.nodes).map((id, i) => [id, i + 1]));
+  /** Each queued step's number in its owner's list. */
+  const queued = new Map<number, { pos: number; sessionId: string | null }>();
+  for (const [sessionId, ids] of [...queue.bySession, [null, queue.unowned] as const]) ids.forEach((id, i) => queued.set(id, { pos: i + 1, sessionId }));
 
   const items: LayoutItem[] = [];
   const edges: LayoutEdge[] = [];
@@ -270,7 +303,7 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
       needsYou: isNeedsYou(node),
       hasChildren: v.hasChildren,
       working: working.has(node.id),
-      queuePos: queuePos.get(node.id) ?? null,
+      queue: queued.get(node.id) ?? null,
     };
     items.push(item);
     nodeItems.set(node.id, item);
@@ -316,15 +349,16 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
 }
 
 /**
- * Where the camera opens: the focus of the session that worked last; with no session working, the head of the Up next
- * queue; else the most recently updated active node; else the last row.
+ * Where the camera opens: the focus of the session that worked last; with no session working, the first owned entry of
+ * the Up next queue (the first numbered owned marker, owners in stored order; never a session's own focus), else the
+ * first unowned one; else the most recently updated active node; else the last row.
  */
 export function findFrontier(nodes: TreeNode[], sessions: Session[], layout: LayoutResult, queue: readonly QueueEntry[] = []): number | undefined {
   const workingFocus = sessions
     .filter((s) => s.state === 'working' && s.focusNodeId !== null)
     .sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt));
   if (workingFocus.length) return workingFocus[0].focusNodeId!;
-  const head = upNext(queue.map((e) => e.nodeId), nodes)[0];
+  const head = viewedSteps(queueView(queue, nodes, sessions))[0];
   if (head !== undefined) return head;
   const active = nodes.filter((n) => n.parentId !== null && n.status === 'active').sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   if (active.length) return active[0].id;

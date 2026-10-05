@@ -187,7 +187,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
         needsYou: item.needsYou,
         hasChildren: item.hasChildren,
         working: item.working,
-        queuePos: item.queuePos,
+        queuePos: item.queue?.pos ?? null,
         resources: item.resourceIds.map((id) => resourcesById.get(id)).filter((r): r is NonNullable<typeof r> => !!r),
         flash: flash === item.nodeId,
         selected: selectedNode === item.nodeId,
