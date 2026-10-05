@@ -1,5 +1,5 @@
 import { buildIndex, computeVisible, countDone, isNeedsYou, progress, type FoldOverrides } from './tree';
-import { glyphTitle, isReader, ownerTag, sessionTag, type EventRow, type PastSession, type QueueEntry, type ResourceMeta, type Session, type SubagentInfo, type TrailAgent, type TreeNode, type WorkItem } from './types';
+import { ENDED_AGENT_MS, glyphTitle, isReader, ownerTag, sessionTag, type EventRow, type PastSession, type QueueEntry, type ResourceMeta, type Session, type SubagentInfo, type TrailAgent, type TreeNode, type WorkItem } from './types';
 
 export const ROW = 32;
 export const INDENT = 28;
@@ -11,11 +11,6 @@ export const WORK_ROW = 20;
 export const WORK_GAP = 6;
 /** A session's readers on a row (`◇ a · 2 reading`): as compact as a working task's row. */
 export const READERS_ROW = WORK_ROW;
-/**
- * How long a live session's stopped worker keeps its greyed badge: five minutes, then it shows in the trail. A reader
- * keeps none: it shows only while it runs, and leaves no trail (agentVisible).
- */
-export const ENDED_AGENT_MS = 5 * 60 * 1000;
 
 export interface LayoutNodeItem {
   kind: 'node';
