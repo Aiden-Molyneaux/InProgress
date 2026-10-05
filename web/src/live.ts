@@ -1,4 +1,4 @@
-import { sessionDisplayTitle, type PastSession, type Session, type SubagentInfo, type TrailAgent, type WorkItem, type WorkStatus } from '../../src/core/types';
+import { agentTag, sessionDisplayTitle, type PastSession, type Session, type SubagentInfo, type TrailAgent, type WorkItem, type WorkStatus } from '../../src/core/types';
 import { relativeTime } from './time';
 
 /** A working task's checklist mark. */
@@ -83,6 +83,25 @@ export function taskOwner(w: WorkItem, sessions: Session[], pastSessions: PastSe
   if (w.agentId === '') return sessionDisplayTitle(s);
   const a = live?.subagents.find((x) => x.agentId === w.agentId) ?? trailAgents.find((x) => x.sessionId === w.sessionId && x.agentId === w.agentId);
   return a ? agentName(a, w.nodeId) : 'a subagent';
+}
+
+/** `a1 · text`: a label led by its letter or tag, or the bare text when there is none (a slot still empty, say). */
+export function withTag(tag: string, text: string): string {
+  return tag ? `${tag} · ${text}` : text;
+}
+
+/**
+ * The family a working task wears: its live session's slot, and its subagent's tag (`a1`; '' on the session's own list,
+ * or while the subagent's number is unknown). The number comes from the session's subagents, else from the trail: the
+ * session's list drops a subagent 5 minutes after it stops, while its tasks stay. Null for an ended session's task, as
+ * its slot may belong to a live session by now: trail rows stay neutral.
+ */
+export function taskFamily(w: WorkItem, sessions: Session[], trailAgents: TrailAgent[] = []): { slot: number | null; tag: string } | null {
+  const s = sessions.find((x) => x.id === w.sessionId);
+  if (!s || w.endedAt !== null) return null;
+  if (w.agentId === '') return { slot: s.slot, tag: '' };
+  const a = s.subagents.find((x) => x.agentId === w.agentId) ?? trailAgents.find((x) => x.sessionId === w.sessionId && x.agentId === w.agentId);
+  return { slot: s.slot, tag: agentTag(s.slot, a?.ordinal ?? null) };
 }
 
 /** What a working task waits for: the subjects of the open tasks that block it, in order. */

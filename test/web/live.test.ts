@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PastSession, Session, SubagentInfo, TrailAgent, WorkItem } from '../../src/core/types';
-import { agentLine, chipLabel, circled, elapsed, taskOwner, trailAgentLine, trailLabel, waitsFor, withoutOwnId, workMark } from '../../web/src/live';
+import { agentLine, chipLabel, circled, elapsed, taskFamily, taskOwner, trailAgentLine, trailLabel, waitsFor, withTag, withoutOwnId, workMark } from '../../web/src/live';
 
 const NOW = Date.parse('2026-10-02T12:00:00Z');
 const ago = (ms: number) => new Date(NOW - ms).toISOString();
@@ -127,6 +127,38 @@ describe('taskOwner', () => {
     expect(owner({ sessionId: 'old', agentId: 'p2', endedAt: ago(MIN) })).toBe('P2 canvas implementer');
     expect(owner({ agentId: 'a9' })).toBe('Stopped an hour ago');
     expect(owner({ sessionId: 'old', agentId: 'gone', endedAt: ago(MIN) })).toBe('a subagent');
+  });
+});
+
+describe('withTag', () => {
+  it('leads a label with its letter or tag, or leaves it bare when there is none', () => {
+    expect(withTag('a1', 'Wire up RevenueCat · sonnet · 12 min')).toBe('a1 · Wire up RevenueCat · sonnet · 12 min');
+    expect(withTag('A', 'E2E session')).toBe('A · E2E session');
+    expect(withTag('', 'E2E session')).toBe('E2E session');
+  });
+});
+
+describe('taskFamily', () => {
+  const sessions = [session({ slot: 1, subagents: [agent({ agentId: 'a1', ordinal: 2 }), agent({ agentId: 'old', ordinal: null })] })];
+
+  it("is the live session's slot, with no tag on the session's own tasks", () => {
+    expect(taskFamily(task(1), sessions)).toEqual({ slot: 1, tag: '' });
+  });
+
+  it("tags a subagent's task with the session's letter and the subagent's number", () => {
+    expect(taskFamily(task(1, { agentId: 'a1' }), sessions)).toEqual({ slot: 1, tag: 'b2' });
+  });
+
+  it("takes the number from the trail once the subagent has left the session's list, and gives no tag when it is unknown", () => {
+    const trailAgents: TrailAgent[] = [{ ...agent({ agentId: 'a9', ordinal: 4, endedAt: ago(60 * MIN) }), sessionId: 's1abcdef' }];
+    expect(taskFamily(task(1, { agentId: 'a9' }), sessions, trailAgents)).toEqual({ slot: 1, tag: 'b4' });
+    expect(taskFamily(task(1, { agentId: 'old' }), sessions, trailAgents)).toEqual({ slot: 1, tag: '' });
+    expect(taskFamily(task(1, { agentId: 'gone' }), sessions, trailAgents)).toEqual({ slot: 1, tag: '' });
+  });
+
+  it("is null for an ended session's task: the trail stays neutral", () => {
+    expect(taskFamily(task(1, { endedAt: ago(MIN) }), sessions)).toBeNull();
+    expect(taskFamily(task(1, { sessionId: 'gone' }), sessions)).toBeNull();
   });
 });
 

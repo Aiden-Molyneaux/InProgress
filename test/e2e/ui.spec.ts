@@ -1102,19 +1102,19 @@ test.describe('Live work', () => {
     await expect(upload.locator('.ip-work-mark')).toHaveCSS('animation-name', 'none');
   });
 
-  test('each subagent has a badge under its node in its own colour, shared by its tasks, greyed once it ends', async ({ page, api, fresh }) => {
+  test("each subagent has a badge under its node in its session's hue, led by its tag, shared by its tasks, greyed once it ends", async ({ page, api, fresh }) => {
     const id = fresh.ids['3 RevenueCat'];
     await subagent(api, fresh, 'agent-1', `#${id} Wire up RevenueCat`, 'sonnet');
     // Without an #id it works on the session's focus.
     await subagent(api, fresh, 'agent-2', 'Review the signing config', 'haiku');
-    // A subagent's task goes under its node; the session's own carries no colour.
+    // A subagent's task goes under its node, led by its tag; the session's own carries the session's marker, untagged.
     await task(api, fresh, '1', 'Compare the tiers', 'in_progress', 'agent-1');
     await task(api, fresh, '1', 'Upload the key', 'in_progress');
     await open(page, fresh);
     const wire = page.locator('.ip-agent', { hasText: 'Wire up RevenueCat' });
     const review = page.locator('.ip-agent', { hasText: 'Review the signing config' });
-    await expect(wire).toHaveText(new RegExp(`^◆ Wire up RevenueCat · sonnet · ${RUNNING}$`));
-    await expect(review).toHaveText(new RegExp(`^◆ Review the signing config · haiku · ${RUNNING}$`));
+    await expect(wire).toHaveText(new RegExp(`^a1 · Wire up RevenueCat · sonnet · ${RUNNING}$`));
+    await expect(review).toHaveText(new RegExp(`^a2 · Review the signing config · haiku · ${RUNNING}$`));
     const [revenue, build, play, own, run, wireBox, reviewBox] = await Promise.all(
       [
         page.locator('.ip-node', { hasText: '3 RevenueCat' }),
@@ -1133,20 +1133,31 @@ test.describe('Live work', () => {
     expect(own.y).toBeGreaterThanOrEqual(play.y + play.height);
     expect(reviewBox.y).toBeGreaterThanOrEqual(own.y + own.height);
     expect(run.y).toBeGreaterThanOrEqual(reviewBox.y + reviewBox.height);
-    await expect(page.locator('.ip-work', { hasText: 'Compare the tiers' }).locator('.ip-work-agent')).toBeVisible();
-    await expect(page.locator('.ip-work', { hasText: 'Upload the key' }).locator('.ip-work-agent')).toHaveCount(0);
-    // The badge and its task's marker share a colour; the other subagent has another.
-    const colours = await page.evaluate<{ wire: string; marker: string; review: string }>(`(() => {
-      const badge = (text) => [...document.querySelectorAll('.ip-agent')].find((n) => n.textContent.includes(text));
-      const row = [...document.querySelectorAll('.ip-work')].find((n) => n.textContent.includes('Compare the tiers'));
+    const tiers = page.locator('.ip-work', { hasText: 'Compare the tiers' });
+    const upload = page.locator('.ip-work', { hasText: 'Upload the key' });
+    await expect(tiers.locator('.ip-work-agent')).toBeVisible();
+    await expect(tiers.locator('.ip-work-tag')).toHaveText('a1');
+    await expect(upload.locator('.ip-work-agent')).toBeVisible();
+    await expect(upload.locator('.ip-work-tag')).toHaveCount(0);
+    // One family, one hue: the session's badge, both subagents' badges and every task's marker.
+    const colours = await page.evaluate<{ own: string; wire: string; marker: string; review: string; ownMarker: string }>(`(() => {
+      const find = (sel, text) => [...document.querySelectorAll(sel)].find((n) => n.textContent.includes(text));
       const bg = (n) => getComputedStyle(n).backgroundColor;
-      return { wire: bg(badge('Wire up RevenueCat')), marker: bg(row.querySelector('.ip-work-agent')), review: bg(badge('Review the signing config')) };
+      return {
+        own: bg(find('.ip-badge', 'E2E session')),
+        wire: bg(find('.ip-agent', 'Wire up RevenueCat')),
+        marker: bg(find('.ip-work', 'Compare the tiers').querySelector('.ip-work-agent')),
+        review: bg(find('.ip-agent', 'Review the signing config')),
+        ownMarker: bg(find('.ip-work', 'Upload the key').querySelector('.ip-work-agent')),
+      };
     })()`);
     expect(colours.wire).not.toBe('rgba(0, 0, 0, 0)');
     expect(colours.marker).toBe(colours.wire);
-    expect(colours.review).not.toBe(colours.wire);
+    expect(colours.review).toBe(colours.wire);
+    expect(colours.own).toBe(colours.wire);
+    expect(colours.ownMarker).toBe(colours.wire);
     await hook(api, fresh.session, { event: 'subagent-stop', agentId: 'agent-1' });
-    await expect(wire).toHaveText('◆ Wire up RevenueCat · sonnet · done just now');
+    await expect(wire).toHaveText('a1 · Wire up RevenueCat · sonnet · done just now');
     await expect(wire).toHaveClass(/\bended\b/);
     await expect(wire).toHaveCSS('color', 'rgb(110, 110, 115)');
     await expect(review).not.toHaveClass(/\bended\b/);
@@ -1190,13 +1201,13 @@ test.describe('Live work', () => {
     await hook(api, fresh.session, { event: 'subagent-stop', agentId: 'agent-2' });
     await open(page, fresh);
     const chip = page.locator('.ip-sessions').getByRole('button', { name: /E2E session/ });
-    await expect(chip).toHaveText('E2E session · 1 subagent');
+    await expect(chip).toHaveText('A · E2E session · 1 subagent');
     const list = page.locator('.ip-chip-pop');
     await expect(list).toBeHidden();
     await chip.hover();
     await expect(list).toBeVisible();
-    await expect(list.locator('li', { hasText: 'Wire up RevenueCat' })).toHaveText(new RegExp(`^◆ Wire up RevenueCat · sonnet · ${RUNNING}$`));
-    await expect(list.locator('li', { hasText: 'Check the paywall' })).toHaveText('◆ Check the paywall · haiku · done just now');
+    await expect(list.locator('li', { hasText: 'Wire up RevenueCat' })).toHaveText(new RegExp(`^a1 · Wire up RevenueCat · sonnet · ${RUNNING}$`));
+    await expect(list.locator('li', { hasText: 'Check the paywall' })).toHaveText('a2 · Check the paywall · haiku · done just now');
     await page.locator('.ip-activity').hover();
     await expect(list).toBeHidden();
     // Tab onto the chip from the tab strip.
@@ -1206,6 +1217,55 @@ test.describe('Live work', () => {
       await expect(chip).toBeFocused({ timeout: 200 });
     }).toPass({ timeout: 3000 });
     await expect(list).toBeVisible();
+  });
+
+  test("two sessions in a project show A and B in different hues, and a subagent of B shows b1 in B's hue under the step it names", async ({ page, api, fresh }) => {
+    const second = `e2e-${randomUUID()}`;
+    await write(api, second, 'post', `/api/sessions/${second}/enroll`, { project: fresh.slug, title: 'Second session' });
+    await write(api, second, 'post', `/api/sessions/${second}/focus`, { nodeId: fresh.ids['5 Store listing'] });
+    const b = { ...fresh, session: second };
+    await subagent(api, b, 'agent-b', `#${fresh.ids['3 RevenueCat']} Price the tiers`, 'sonnet');
+    await task(api, b, '1', 'Compare the plans', 'in_progress', 'agent-b');
+    await open(page, fresh);
+    // The letter leads each chip and focus badge, in its own span: the chip's label still starts with the title.
+    const chipA = page.locator('.ip-chip-s', { hasText: 'E2E session' });
+    const chipB = page.locator('.ip-chip-s', { hasText: 'Second session' });
+    await expect(chipA).toHaveText('A · E2E session');
+    await expect(chipB).toHaveText('B · Second session · 1 subagent');
+    await expect(chipB.locator('.ip-chip-label')).toHaveText('Second session · 1 subagent');
+    await expect(page.locator('.ip-badge', { hasText: 'E2E session' })).toHaveText('◆ A · E2E session · working');
+    await expect(page.locator('.ip-badge', { hasText: 'Second session' })).toHaveText('◆ B · Second session · working · 1 subagent');
+    // B's subagent leads with b1, and so does its task.
+    const agent = page.locator('.ip-agent', { hasText: 'Price the tiers' });
+    await expect(agent).toHaveText(new RegExp(`^b1 · Price the tiers · sonnet · ${RUNNING}$`));
+    await expect(page.locator('.ip-work', { hasText: 'Compare the plans' }).locator('.ip-work-tag')).toHaveText('b1');
+    // Under the step it names, one level in, before the next step.
+    const [revenue, build, agentBox] = await Promise.all(
+      [page.locator('.ip-node', { hasText: '3 RevenueCat' }), page.locator('.ip-node', { hasText: '4 Build to GitHub' }), agent].map(boxOf),
+    );
+    expect(agentBox.y).toBeGreaterThanOrEqual(revenue.y + revenue.height);
+    expect(build.y).toBeGreaterThanOrEqual(agentBox.y + agentBox.height);
+    expect(agentBox.x).toBeGreaterThan(revenue.x + 20);
+    // A wears session clay and B another hue, on its chip, its badge, its subagent and its subagent's task.
+    const hues = await page.evaluate<Record<string, string>>(`(() => {
+      const find = (sel, text) => [...document.querySelectorAll(sel)].find((n) => n.textContent.includes(text));
+      const bg = (n) => getComputedStyle(n).backgroundColor;
+      const row = find('.ip-work', 'Compare the plans');
+      return {
+        chipA: bg(find('.ip-chip-s', 'E2E session')),
+        badgeA: bg(find('.ip-badge', 'E2E session')),
+        chipB: bg(find('.ip-chip-s', 'Second session')),
+        badgeB: bg(find('.ip-badge', 'Second session')),
+        agentB: bg(find('.ip-agent', 'Price the tiers')),
+        markerB: bg(row.querySelector('.ip-work-agent')),
+        tagB: getComputedStyle(row.querySelector('.ip-work-tag')).color,
+      };
+    })()`);
+    expect(hues.chipA).toBe('rgb(217, 119, 87)');
+    expect(hues.badgeA).toBe(hues.chipA);
+    expect(hues.chipB).not.toBe(hues.chipA);
+    expect(hues.chipB).not.toBe('rgba(0, 0, 0, 0)');
+    for (const part of ['badgeB', 'agentB', 'markerB', 'tagB']) expect(hues[part], part).toBe(hues.chipB);
   });
 
   test("Details lists the node's working tasks with who is on each, and the subagents on it", async ({ page, api, fresh }) => {
@@ -1220,8 +1280,8 @@ test.describe('Live work', () => {
     // Anchored: the next row's "after Upload the key" names it too.
     await expect(details.locator('.ip-wt', { hasText: /^◐ Upload the key/ })).toHaveText('◐ Upload the key — E2E session');
     await expect(details.locator('.ip-wt', { hasText: 'Check the release track' })).toHaveText('○ Check the release track — E2E session · after Upload the key');
-    await expect(details.locator('.ip-wt', { hasText: 'Collect the screenshots' })).toHaveText('○ Collect the screenshots — Draft the store notes');
-    await expect(details.locator('.ip-dagent')).toHaveText(new RegExp(`^◆ Draft the store notes · sonnet · ${RUNNING}$`));
+    await expect(details.locator('.ip-wt', { hasText: 'Collect the screenshots' })).toHaveText('a1 ○ Collect the screenshots — Draft the store notes');
+    await expect(details.locator('.ip-dagent')).toHaveText(new RegExp(`^a1 · Draft the store notes · sonnet · ${RUNNING}$`));
   });
 
   test("an ended session's tasks and subagents stay on their steps as a trail row that opens, and Details lists them under its title", async ({ page, api, fresh }) => {

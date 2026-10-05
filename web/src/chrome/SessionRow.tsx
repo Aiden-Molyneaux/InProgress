@@ -1,8 +1,8 @@
 import type { CSSProperties } from 'react';
 import { agentShown } from '../../../src/core/layout';
-import type { Session } from '../../../src/core/types';
-import { agentKey } from '../agentColors';
-import { agentLine, chipLabel } from '../live';
+import { agentTag, sessionTag, type Session } from '../../../src/core/types';
+import { familyVar } from '../family';
+import { agentLine, chipLabel, withTag } from '../live';
 import { useNow } from '../useNow';
 
 interface SessionRowProps {
@@ -13,15 +13,14 @@ interface SessionRowProps {
   onNeedsYou: () => void;
   follow: boolean;
   onFollow: () => void;
-  /** Each subagent's colour, by agentKey. */
-  agentColors: ReadonlyMap<string, string>;
 }
 
 /**
- * The current project's sessions, with the needs-you pill and Follow at the right end. Hovering a chip, or focusing it
- * from the keyboard, lists its subagents under the row.
+ * The current project's sessions, with the needs-you pill and Follow at the right end. Each chip leads with its letter in
+ * its family's hue (`A · Review actions controller`). Hovering a chip, or focusing it from the keyboard, lists its
+ * subagents under the row, each led by its tag.
  */
-export function SessionRow({ sessions, onPick, needsYou, onNeedsYou, follow, onFollow, agentColors }: SessionRowProps) {
+export function SessionRow({ sessions, onPick, needsYou, onNeedsYou, follow, onFollow }: SessionRowProps) {
   const now = useNow(30_000);
   return (
     <div className="ip-sessions">
@@ -31,8 +30,9 @@ export function SessionRow({ sessions, onPick, needsYou, onNeedsYou, follow, onF
           const where = s.focusNodeId ? `on #${s.focusNodeId}` : 'no focus set yet';
           const agents = s.subagents.filter((a) => agentShown(a, now));
           const listId = `ip-subagents-${s.id}`;
+          const letter = sessionTag(s.slot);
           return (
-            <span key={s.id} className="ip-chip-wrap">
+            <span key={s.id} className="ip-chip-wrap" style={{ '--fam': familyVar(s.slot) } as CSSProperties}>
               {/* With subagents the list says it all, so a native tooltip would only cover it. */}
               <button
                 className={`ip-chip-s s-${s.state}`}
@@ -41,23 +41,33 @@ export function SessionRow({ sessions, onPick, needsYou, onNeedsYou, follow, onF
                 aria-describedby={agents.length ? listId : undefined}
               >
                 {s.state === 'working' && <span className="ip-pulse" />}
+                {/* Its own span, before the label: the label still starts with the title and is the part cut short. */}
+                {letter && (
+                  <span className="ip-chip-lead">
+                    <span className="ip-tag">{letter}</span>
+                    {' · '}
+                  </span>
+                )}
                 <span className="ip-chip-label">{label}</span>
               </button>
               {agents.length > 0 && (
                 <div className="ip-chip-pop" id={listId} role="tooltip">
-                  <div className="ip-chip-pop-head">
-                    {label} · {where}
-                  </div>
+                  <div className="ip-chip-pop-head">{withTag(letter, `${label} · ${where}`)}</div>
                   <ul>
-                    {agents.map((a) => (
-                      <li
-                        key={a.agentId}
-                        className={a.endedAt ? 'ended' : undefined}
-                        style={{ '--agent': agentColors.get(agentKey(s.id, a.agentId)) } as CSSProperties}
-                      >
-                        <span className="ip-agent-dot">◆</span> {agentLine(a, now)}
-                      </li>
-                    ))}
+                    {agents.map((a) => {
+                      const tag = agentTag(s.slot, a.ordinal);
+                      return (
+                        <li key={a.agentId} className={a.endedAt ? 'ended' : undefined}>
+                          {tag && (
+                            <>
+                              <span className="ip-agent-tag">{tag}</span>
+                              {' · '}
+                            </>
+                          )}
+                          {agentLine(a, now)}
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               )}
