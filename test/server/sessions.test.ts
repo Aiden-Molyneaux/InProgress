@@ -612,10 +612,22 @@ describe('briefing: recently done and left unfinished', () => {
     // While s2 is live, nothing is left unfinished.
     expect(brief(ctx)).not.toContain('Left unfinished');
     handleHookEvent(ctx, 's2', { event: 'end' });
-    // In progress first within a step, as under the focus.
-    const expected = `Left unfinished by an earlier session: on #${a2.id}: "#${a2.id} Check the upload key" · on #${s3.id}: "Price the tiers", "Wire the paywall"`;
+    // In progress first within a step, as under the focus. The step's own #id leaves the subject: the line names it once.
+    const expected = `Left unfinished by an earlier session: on #${a2.id}: "Check the upload key" · on #${s3.id}: "Price the tiers", "Wire the paywall"`;
     expect(lineOf(brief(ctx), 'Left unfinished')).toBe(expected);
     expect(statusAnswer(ctx)).not.toContain('Left unfinished');
+  });
+
+  it("strips only the step's own leading #id from a subject", () => {
+    const { ctx, a2 } = clocked();
+    handleHookEvent(ctx, 's2', start());
+    setFocus(ctx, 'scribe:s2', 's2', a2.id);
+    // #999 is no step here, so that task lands on the focus with its subject as written.
+    for (const [key, subject] of [['1', `#${a2.id}: Review it`], ['2', '#999 Not a step'], ['3', `#${a2.id}`]]) {
+      handleHookEvent(ctx, 's2', { event: 'task-created', taskKey: key, subject });
+    }
+    handleHookEvent(ctx, 's2', { event: 'end' });
+    expect(lineOf(brief(ctx, 's1'), 'Left unfinished')).toBe(`Left unfinished by an earlier session: on #${a2.id}: "Review it", "#999 Not a step", "#${a2.id}"`);
   });
 
   it('leaves the line out when no ended session left work, and once the 7-day trail has passed', () => {

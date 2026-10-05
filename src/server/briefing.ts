@@ -192,6 +192,14 @@ function recentlyDoneLine(snapshot: ProjectSnapshot): string | undefined {
 }
 
 /**
+ * A subject without the leading `#id` of the step it is listed under (`#86 Review it` under #86 reads `Review it`), as
+ * leadingNode reads one, so the line names the step once. Another step's `#id`, or a subject that is only the `#id`, stays.
+ */
+function withoutStepId(subject: string, nodeId: number): string {
+  return subject.replace(new RegExp(`^\\s*#${nodeId}\\b[\\s:]*`), '') || subject;
+}
+
+/**
  * `Left unfinished by an earlier session: on #86: "Review it", "Write tests" · on #90: "Check the hint"`: the open tasks
  * of ended sessions (their subagents' too) on steps still open, by step in tree order, in progress first within a step,
  * MAX_LEFT_UNFINISHED subjects in all. The snapshot holds only sessions that ended within the 7-day trail. Undefined when
@@ -211,7 +219,7 @@ function leftUnfinishedLine(snapshot: ProjectSnapshot): string | undefined {
   for (const nodeId of steps) {
     const subjects = inProgressFirst(left.filter((i) => i.nodeId === nodeId)).slice(0, room);
     if (!subjects.length) continue;
-    parts.push(`on #${nodeId}: ${subjects.map((i) => `"${i.subject}"`).join(', ')}`);
+    parts.push(`on #${nodeId}: ${subjects.map((i) => `"${withoutStepId(i.subject, nodeId)}"`).join(', ')}`);
     room -= subjects.length;
     if (room === 0) break;
   }
