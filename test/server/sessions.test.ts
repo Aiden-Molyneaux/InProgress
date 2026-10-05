@@ -144,7 +144,11 @@ describe('handleHookEvent', () => {
     expect(findSession(ctx, 's1')?.subagents).toEqual([expect.objectContaining({ agentId: 'a1', endedAt: expect.any(String) })]);
     handleHookEvent(ctx, 's1', { event: 'subagent-start', agentId: 'a4', agentType: 'general-purpose' });
     handleHookEvent(ctx, 's1', { event: 'end' });
-    expect(findSession(ctx, 's1')).toMatchObject({ state: 'ended', subagents: [] });
+    // Ending keeps the rows for the trail, and ends the one still running.
+    expect(findSession(ctx, 's1')).toMatchObject({
+      state: 'ended',
+      subagents: [{ agentId: 'a1', endedAt: expect.any(String) }, { agentId: 'a4', endedAt: findSession(ctx, 's1')!.endedAt }],
+    });
   });
 });
 
@@ -186,6 +190,23 @@ describe('briefing: live work', () => {
       '        ○ Task 5',
       `      #${a3.id} Run signing tests — NEEDS YOU`,
     ]);
+  });
+
+  it("leaves an ended session's open tasks out of the focused step's task lines", () => {
+    const { ctx, a2 } = setup();
+    handleHookEvent(ctx, 's1', start());
+    setFocus(ctx, 'scribe:s1', 's1', a2.id);
+    handleHookEvent(ctx, 's2', start());
+    setFocus(ctx, 'scribe:s2', 's2', a2.id);
+    handleHookEvent(ctx, 's2', { event: 'task-created', taskKey: '1', subject: 'Left in progress' });
+    handleHookEvent(ctx, 's2', { event: 'task-updated', taskKey: '1', status: 'in_progress' });
+    handleHookEvent(ctx, 's2', { event: 'task-created', taskKey: '2', subject: 'Left pending' });
+    handleHookEvent(ctx, 's1', { event: 'task-created', taskKey: '1', subject: 'Still mine' });
+    handleHookEvent(ctx, 's2', { event: 'end' });
+    const status = handleHookEvent(ctx, 's1', { event: 'prompt', asksStatus: true }).context!;
+    expect(status).toContain('○ Still mine');
+    expect(status).not.toMatch(/Left (in progress|pending)/);
+    expect(handleHookEvent(ctx, 's1', start()).context!).not.toMatch(/Left (in progress|pending)/);
   });
 
   it('shows no task lines without a focus, and no Up next line without a queue', () => {

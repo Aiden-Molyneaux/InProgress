@@ -6,7 +6,7 @@ import { findNode, leadingNode, requireNode } from './repo/nodes';
 import { getProjectById, resolveBinding, resolveProject } from './repo/projects';
 import { findSession, saveSession } from './repo/sessions';
 import { getProjectSnapshot } from './repo/snapshot';
-import { clearSubagents, launchSubagent, pruneSubagents, recordDispatch, startSubagent, stopSubagent } from './repo/subagents';
+import { endSubagents, launchSubagent, pruneSubagents, recordDispatch, startSubagent, stopSubagent } from './repo/subagents';
 import { taskCreated, taskUpdated } from './repo/work';
 
 export interface HookEventInput {
@@ -121,7 +121,7 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
       case 'end':
         next.state = 'ended';
         next.endedAt = now;
-        clearSubagents(ctx, sessionId);
+        endSubagents(ctx, sessionId, now);
         break;
     }
     // Only an ended session has an end time; this also covers one revived after expiry.

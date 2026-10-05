@@ -42,7 +42,8 @@ Attribution of a working task to a node, decided once, at creation:
 - A **PostToolUse** hook on `^(Agent|Task)$` posts the launch response's `agentId`. For background agents this arrives
   at launch and makes the pairing exact. Foreground agents get it at completion, which only confirms the pairing.
 - **SubagentStop** marks the subagent `ended_at` rather than deleting its row. Ended subagents show greyed for
-  5 minutes and are pruned after an hour.
+  5 minutes, then stay 7 days as the trail on their step (review actions §3). Session end marks the running ones
+  ended instead of deleting them.
 
 ### Planned order (#56)
 - Across plan steps: a per-project queue of node ids, set by the scribe with a new MCP tool

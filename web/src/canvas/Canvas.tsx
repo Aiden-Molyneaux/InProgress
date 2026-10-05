@@ -12,7 +12,7 @@ import {
 import { Background, BackgroundVariant, Controls, ReactFlow, useReactFlow, type Edge, type Node, type NodeChange, type Viewport } from '@xyflow/react';
 import { layoutOutline, type LayoutItem } from '../../../src/core/layout';
 import { buildIndex, type FoldOverrides } from '../../../src/core/tree';
-import type { EventRow, ProjectSnapshot } from '../../../src/core/types';
+import { sessionDisplayTitle, type EventRow, type ProjectSnapshot } from '../../../src/core/types';
 import { agentKey } from '../agentColors';
 import { taskOwner, waitsFor } from '../live';
 import { useNow } from '../useNow';
@@ -22,18 +22,24 @@ import { breadcrumbFor } from './breadcrumb';
 import { MoreNode, type MoreNodeData } from './MoreNode';
 import { NodeCard, type NodeCardData } from './NodeCard';
 import { visibleHeight } from './sheet';
+import { TrailAgentRow, type TrailAgentRowData } from './TrailAgentRow';
 import { useCamera } from './useCamera';
 import { WorkDoneRow, type WorkDoneRowData } from './WorkDoneRow';
 import { WorkRow, type WorkRowData } from './WorkRow';
 
 /** How many frames a newly shown card gets to appear before focus stops waiting for it. */
 const FOCUS_FRAMES = 30;
-/** How often time-based labels ("12 min", "done 2 min ago") and the 5-minute grey-out of ended subagents catch up. */
+/**
+ * How often time-based labels ("12 min", "done 2 min ago") catch up, and with them the 5-minute greyed badge of an ended
+ * subagent, which then moves into its step's trail.
+ */
 const CLOCK_MS = 30_000;
 /** A subagent no longer in view, or one whose colour is unknown. */
 const NO_AGENT_COLOR = '#aeaeb2';
 
-const nodeTypes = { ipNode: NodeCard, ipMore: MoreNode, ipBadge: BadgeNode, ipAgent: AgentBadge, ipWork: WorkRow, ipWorkDone: WorkDoneRow };
+const nodeTypes = {
+  ipNode: NodeCard, ipMore: MoreNode, ipBadge: BadgeNode, ipAgent: AgentBadge, ipWork: WorkRow, ipWorkDone: WorkDoneRow, ipTrailAgent: TrailAgentRow,
+};
 
 export interface CanvasHandle {
   focusNode: (id: number) => void;
@@ -67,6 +73,8 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
         resources: snapshot.resources,
         sessions: snapshot.sessions,
         workItems: snapshot.workItems,
+        trailAgents: snapshot.trailAgents,
+        pastSessions: snapshot.pastSessions,
         queue: snapshot.project.queue,
         overrides,
         now,
@@ -120,6 +128,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
     const resourcesById = new Map(snapshot.resources.map((r) => [r.id, r]));
     const sessionsById = new Map(snapshot.sessions.map((s) => [s.id, s]));
     const workById = new Map(snapshot.workItems.map((w) => [w.id, w]));
+    const { pastSessions, trailAgents } = snapshot;
     const toNode = (item: LayoutItem): Node | null => {
       const position = { x: item.x, y: item.y };
       const measured = sizes[item.id];
@@ -150,15 +159,24 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
         const data: WorkRowData = {
           item: w,
           pulse: item.pulse,
-          color: w.agentId ? (agentColors.get(agentKey(w.sessionId, w.agentId)) ?? NO_AGENT_COLOR) : null,
-          owner: taskOwner(w, snapshot.sessions),
+          stale: item.stale,
+          // A trail row is neutral: no subagent colour.
+          color: w.agentId && !item.stale ? (agentColors.get(agentKey(w.sessionId, w.agentId)) ?? NO_AGENT_COLOR) : null,
+          owner: taskOwner(w, snapshot.sessions, pastSessions, trailAgents),
           waits: waitsFor(w, snapshot.workItems),
         };
         return { ...fixed, type: 'ipWork', data };
       }
       if (item.kind === 'workDone') {
-        const data: WorkDoneRowData = { nodeId: item.nodeId, count: item.count, open: item.open, onToggleFold };
+        const data: WorkDoneRowData = { nodeId: item.nodeId, count: item.count, unfinished: item.unfinished, agents: item.agents, open: item.open, onToggleFold };
         return { ...fixed, type: 'ipWorkDone', data };
+      }
+      if (item.kind === 'trailAgent') {
+        const agent = trailAgents.find((a) => a.sessionId === item.sessionId && a.agentId === item.agentId);
+        if (!agent) return null;
+        const session = sessionsById.get(item.sessionId) ?? pastSessions.find((s) => s.id === item.sessionId);
+        const data: TrailAgentRowData = { agent, nodeId: item.nodeId, sessionTitle: session ? sessionDisplayTitle(session) : 'a session', now };
+        return { ...fixed, type: 'ipTrailAgent', data };
       }
       const node = index.byId.get(item.nodeId)!;
       const data: NodeCardData = {

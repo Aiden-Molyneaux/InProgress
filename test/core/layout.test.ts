@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BADGE_ROW, ENDED_AGENT_MS, INDENT, ROW, WORK_GAP, WORK_ROW, eventTarget, findFrontier, layoutOutline, type LayoutItem, type LayoutResult } from '../../src/core/layout';
-import type { EventRow, ResourceMeta, Session, SubagentInfo, TreeNode, WorkItem, WorkStatus } from '../../src/core/types';
+import type { EventRow, PastSession, ResourceMeta, Session, SubagentInfo, TrailAgent, TreeNode, WorkItem, WorkStatus } from '../../src/core/types';
 
 let nextId = 1;
 function n(parentId: number | null, title: string, extra: Partial<TreeNode> = {}): TreeNode {
@@ -133,9 +133,12 @@ const agent = (agentId: string, extra: Partial<SubagentInfo> = {}): SubagentInfo
 let nextWork = 100;
 function work(nodeId: number, status: WorkStatus, extra: Partial<WorkItem> = {}): WorkItem {
   const id = nextWork++;
-  return { id, nodeId, sessionId: 's1', agentId: '', subject: `Task ${id}`, status, blocks: [], position: id, updatedAt: 't', ...extra };
+  return { id, nodeId, sessionId: 's1', agentId: '', subject: `Task ${id}`, status, blocks: [], position: id, updatedAt: 't', endedAt: null, ...extra };
 }
 const withAgents = (s: Session, subagents: SubagentInfo[]): Session => ({ ...s, subagents });
+/** A stopped subagent as the snapshot's trail lists it; of the ended session s0 unless it says otherwise. */
+const trailAgent = (agentId: string, extra: Partial<TrailAgent> = {}): TrailAgent => ({ ...agent(agentId, { endedAt: ago(10 * 60_000) }), sessionId: 's0', ...extra });
+const past = (id: string, focusNodeId: number | null): PastSession => ({ id, title: `Past ${id}`, focusNodeId, endedAt: ago(60_000) });
 /** The layout's rows of these kinds, as [kind, id, nodeId, x, y]. */
 const rowsOf = (l: LayoutResult, ...kinds: LayoutItem['kind'][]) =>
   l.items.filter((i) => kinds.includes(i.kind)).map((i) => [i.kind, i.id, 'nodeId' in i ? i.nodeId : null, i.x, i.y]);
@@ -343,5 +346,120 @@ describe('queued steps', () => {
     expect(before.nodeItems.has(t.e.id)).toBe(false);
     const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [], queue: [t.e.id] });
     expect(l.nodeItems.get(t.e.id)).toMatchObject({ queuePos: 1 });
+  });
+});
+
+describe('the trail of ended work', () => {
+  const ENDED = ago(60_000);
+
+  it('counts a stale completed task as done and a stale open one as unfinished, shown only while the row is open, marked stale', () => {
+    const t = sample();
+    const live = work(t.a1.id, 'pending', { position: 1 });
+    const finished = work(t.a1.id, 'completed', { position: 2, sessionId: 's0', endedAt: ENDED });
+    const leftDoing = work(t.a1.id, 'in_progress', { position: 3, sessionId: 's0', endedAt: ENDED });
+    const leftTodo = work(t.a1.id, 'pending', { position: 4, sessionId: 's0', endedAt: ENDED });
+    const input = { nodes: t.nodes, resources: [], sessions: [], workItems: [live, finished, leftDoing, leftTodo], now: T0 };
+    const shut = layoutOutline(input);
+    expect(shut.items.find((i) => i.kind === 'workDone')).toMatchObject({ count: 1, unfinished: 2, agents: 0, open: false });
+    expect(rowsOf(shut, 'work', 'workDone').map(([kind, id]) => [kind, id])).toEqual([['workDone', `wd${t.a1.id}`], ['work', `w${live.id}`]]);
+    const open = layoutOutline({ ...input, overrides: { [`work:${t.a1.id}`]: 'open' } });
+    expect(open.items.flatMap((i) => (i.kind === 'work' ? [[i.id, i.stale]] : []))).toEqual([
+      [`w${live.id}`, false], [`w${finished.id}`, true], [`w${leftDoing.id}`, true], [`w${leftTodo.id}`, true],
+    ]);
+    // With nothing done, the unfinished ones still make the row.
+    const unfinishedOnly = layoutOutline({ ...input, workItems: [leftTodo] });
+    expect(rowsOf(unfinishedOnly, 'work', 'workDone').map(([kind]) => kind)).toEqual(['workDone']);
+    expect(unfinishedOnly.items.find((i) => i.kind === 'workDone')).toMatchObject({ count: 0, unfinished: 1, agents: 0 });
+  });
+
+  it('counts the trail agents on a step and lists them after its tasks while the row is open', () => {
+    const t = sample();
+    const task = work(t.a1.id, 'completed', { sessionId: 's0', endedAt: ENDED });
+    const input = {
+      nodes: t.nodes, resources: [], sessions: [], workItems: [task], now: T0,
+      trailAgents: [trailAgent('x', { nodeId: t.a1.id }), trailAgent('y', { nodeId: t.a1.id })], pastSessions: [past('s0', t.a1.id)],
+    };
+    const y = 3 * ROW;
+    const shut = layoutOutline(input);
+    expect(shut.items.find((i) => i.kind === 'workDone')).toMatchObject({ count: 1, unfinished: 0, agents: 2, open: false });
+    expect(rowsOf(shut, 'work', 'workDone', 'trailAgent').map(([kind]) => kind)).toEqual(['workDone']);
+    const open = layoutOutline({ ...input, overrides: { [`work:${t.a1.id}`]: 'open' } });
+    expect(rowsOf(open, 'work', 'workDone', 'trailAgent')).toEqual([
+      ['workDone', `wd${t.a1.id}`, t.a1.id, 3 * INDENT, y],
+      ['work', `w${task.id}`, t.a1.id, 3 * INDENT, y + WORK_ROW],
+      ['trailAgent', 'ts0:x', t.a1.id, 3 * INDENT, y + 2 * WORK_ROW],
+      ['trailAgent', 'ts0:y', t.a1.id, 3 * INDENT, y + 3 * WORK_ROW],
+    ]);
+    expect(open.items.find((i) => i.id === 'ts0:x')).toEqual({ kind: 'trailAgent', id: 'ts0:x', sessionId: 's0', agentId: 'x', nodeId: t.a1.id, x: 3 * INDENT, y: y + 2 * WORK_ROW });
+    expect(open.nodeItems.get(t.a2.id)?.y).toBe(y + 4 * WORK_ROW + WORK_GAP);
+    // Agents alone make the row too.
+    const agentsOnly = layoutOutline({ ...input, workItems: [] });
+    expect(agentsOnly.items.find((i) => i.kind === 'workDone')).toMatchObject({ count: 0, unfinished: 0, agents: 2 });
+  });
+
+  it('never pins a step open and never pulses', () => {
+    const t = sample();
+    // D and E sit in the "+2 more" tail: an unfinished task in progress and a trail agent there keep them hidden.
+    const left = work(t.e.id, 'in_progress', { sessionId: 's0', endedAt: ENDED });
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [], workItems: [left], trailAgents: [trailAgent('x', { nodeId: t.d.id })], pastSessions: [past('s0', null)], now: T0 });
+    expect(l.items.find((i) => i.kind === 'more')).toMatchObject({ hiddenIds: [t.d.id, t.e.id] });
+    expect(rowsOf(l, 'work', 'workDone', 'trailAgent')).toEqual([]);
+    const onA1 = work(t.a1.id, 'in_progress', { sessionId: 's0', endedAt: ENDED });
+    const shown = layoutOutline({
+      nodes: t.nodes, resources: [], sessions: [session('s0', t.a1.id, 'ended'), session('s1', t.a1.id, 'working')], workItems: [onA1],
+      overrides: { [`work:${t.a1.id}`]: 'open' }, now: T0,
+    });
+    expect(shown.items.flatMap((i) => (i.kind === 'work' ? [[i.stale, i.pulse]] : []))).toEqual([[true, false]]);
+  });
+
+  it("shows a live session's stopped subagent as its greyed badge for 5 minutes and as trail after, an ended session's as trail at once, never both", () => {
+    const t = sample();
+    const recent = agent('x', { nodeId: t.a1.id, endedAt: ago(ENDED_AGENT_MS - 1000) });
+    // The session's list can still carry an agent past 5 minutes on the client's clock: the snapshot is only refetched on events.
+    const older = agent('y', { nodeId: t.a1.id, endedAt: ago(ENDED_AGENT_MS) });
+    const s1 = withAgents(session('s1', t.a1.id, 'idle'), [recent, older]);
+    const trailAgents = [{ ...recent, sessionId: 's1' }, { ...older, sessionId: 's1' }, trailAgent('z', { nodeId: t.a1.id, endedAt: ago(1000) })];
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [s1], trailAgents, pastSessions: [past('s0', t.a1.id)], overrides: { [`work:${t.a1.id}`]: 'open' }, now: T0 });
+    expect(rowsOf(l, 'agent', 'workDone', 'trailAgent').map(([kind, id]) => [kind, id])).toEqual([
+      ['agent', 'as1:x'], ['workDone', `wd${t.a1.id}`], ['trailAgent', 'ts1:y'], ['trailAgent', 'ts0:z'],
+    ]);
+    expect(l.items.find((i) => i.kind === 'workDone')).toMatchObject({ count: 0, unfinished: 0, agents: 2 });
+  });
+
+  it("puts a trail agent on its step while that is in the tree; with no step, on its session's focus, live or past; else leaves it out", () => {
+    const t = sample();
+    const trailAgents = [
+      trailAgent('x', { nodeId: t.b.id }),
+      // Its step is not in this tree (its session moved to another project, say): left out, not moved to the focus.
+      trailAgent('g', { nodeId: 999 }),
+      trailAgent('p', { nodeId: null }),
+      trailAgent('l', { sessionId: 's1', nodeId: null }),
+      trailAgent('u', { sessionId: 'unknown', nodeId: null }),
+      trailAgent('f', { sessionId: 's2', nodeId: null }),
+      trailAgent('q', { sessionId: 's3', nodeId: null }),
+    ];
+    const pastSessions = [past('s0', t.a1.id), past('s2', null), past('s3', 999)];
+    const overrides = Object.fromEntries([t.a1.id, t.b.id, t.c.id].map((id) => [`work:${id}`, 'open' as const]));
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [session('s1', t.c.id, 'idle')], trailAgents, pastSessions, overrides, now: T0 });
+    expect(rowsOf(l, 'trailAgent').map(([, id, nodeId]) => [id, nodeId])).toEqual([['ts0:p', t.a1.id], ['ts0:x', t.b.id], ['ts1:l', t.c.id]]);
+  });
+
+  it('folds with its node: hidden under a folded ancestor or in a done run until that opens, never moved up to a visible row', () => {
+    const t = sample();
+    const onA1 = { nodes: t.nodes, resources: [], sessions: [], trailAgents: [trailAgent('x', { nodeId: t.a1.id })], pastSessions: [past('s0', null)], now: T0 };
+    expect(rowsOf(layoutOutline({ ...onA1, overrides: { ['n:' + t.a.id]: 'closed' } }), 'workDone', 'trailAgent')).toEqual([]);
+    // A, B and C finished two days ago and fold into one "✓ 3 done" run under the root.
+    const old = '2026-09-30T12:00:00Z';
+    const nodes = t.nodes.map((x) =>
+      x.id === t.a.id || x.id === t.a1.id || x.id === t.b.id ? { ...x, status: 'done' as const, assignee: 'claude' as const, completedAt: old }
+      : x.id === t.a2.id || x.id === t.c.id ? { ...x, status: 'dropped' as const, assignee: 'claude' as const, updatedAt: old }
+      : x,
+    );
+    const onB = { nodes, resources: [], sessions: [], trailAgents: [trailAgent('x', { nodeId: t.b.id })], pastSessions: [past('s0', null)], now: T0 };
+    const folded = layoutOutline(onB);
+    expect(folded.items.find((i) => i.kind === 'more')).toMatchObject({ variant: 'done', hiddenIds: [t.a.id, t.b.id, t.c.id] });
+    expect(rowsOf(folded, 'workDone', 'trailAgent')).toEqual([]);
+    const opened = layoutOutline({ ...onB, overrides: { [`done:${t.root.id}`]: 'open' } });
+    expect(rowsOf(opened, 'workDone').map(([kind, , nodeId]) => [kind, nodeId])).toEqual([['workDone', t.b.id]]);
   });
 });

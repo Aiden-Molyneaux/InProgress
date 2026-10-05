@@ -1,8 +1,13 @@
-import { sessionDisplayTitle, type Session, type SubagentInfo, type WorkItem, type WorkStatus } from '../../src/core/types';
+import { sessionDisplayTitle, type PastSession, type Session, type SubagentInfo, type TrailAgent, type WorkItem, type WorkStatus } from '../../src/core/types';
 import { relativeTime } from './time';
 
 /** A working task's checklist mark. */
 export const TASK_MARK: Record<WorkStatus, string> = { pending: '○', in_progress: '◐', completed: '✓' };
+
+/** A task's mark in a checklist: one an ended session left open (`stale`) is a hollow ○, a completed one keeps its ✓. */
+export function workMark(status: WorkStatus, stale: boolean): string {
+  return stale && status !== 'completed' ? TASK_MARK.pending : TASK_MARK[status];
+}
 
 /** A place in the Up next queue as one circled numeral, ① to ㊿, or in brackets past 50. */
 export function circled(n: number): string {
@@ -48,12 +53,32 @@ export function chipLabel(s: Session): string {
   return `${sessionDisplayTitle(s)}${live ? ` · ${live} subagent${live > 1 ? 's' : ''}` : ''}${STATE_SUFFIX[s.state]}`;
 }
 
-/** Who is on a working task: its session's title, or its subagent's description. */
-export function taskOwner(w: WorkItem, sessions: Session[]): string {
-  const s = sessions.find((x) => x.id === w.sessionId);
+/** `description · model · ran 40 min · stopped 2 h ago`: a subagent in the trail, how long it ran and when it stopped. */
+export function trailAgentLine(a: SubagentInfo, now: number, underNode: number | null = null): string {
+  const end = a.endedAt ?? new Date(now).toISOString();
+  return [agentName(a, underNode), a.model, `ran ${elapsed(a.startedAt, Date.parse(end))}`, `stopped ${relativeTime(end, now)}`].filter(Boolean).join(' · ');
+}
+
+/** A step's done row: `✓ 5 done · 2 unfinished · 2 agents`, each part left out while it is zero. */
+export function trailLabel(p: { done: number; unfinished: number; agents: number }): string {
+  const parts = [
+    p.done ? `${p.done} done` : '',
+    p.unfinished ? `${p.unfinished} unfinished` : '',
+    p.agents ? `${p.agents} agent${p.agents === 1 ? '' : 's'}` : '',
+  ].filter(Boolean);
+  return `✓ ${parts.length ? parts.join(' · ') : '0 done'}`;
+}
+
+/**
+ * Who is on a working task: its session's title, or its subagent's description. An ended session's task names that
+ * past session, and a subagent's task names its trail entry once it has left the session's list.
+ */
+export function taskOwner(w: WorkItem, sessions: Session[], pastSessions: PastSession[] = [], trailAgents: TrailAgent[] = []): string {
+  const live = sessions.find((x) => x.id === w.sessionId);
+  const s = live ?? pastSessions.find((x) => x.id === w.sessionId);
   if (!s) return 'a session';
   if (w.agentId === '') return sessionDisplayTitle(s);
-  const a = s.subagents.find((x) => x.agentId === w.agentId);
+  const a = live?.subagents.find((x) => x.agentId === w.agentId) ?? trailAgents.find((x) => x.sessionId === w.sessionId && x.agentId === w.agentId);
   return a ? agentName(a, w.nodeId) : 'a subagent';
 }
 

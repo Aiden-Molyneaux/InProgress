@@ -27,6 +27,8 @@ export const WORK_STATUSES = ['pending', 'in_progress', 'completed'] as const;
 export type WorkStatus = (typeof WORK_STATUSES)[number];
 export const SCRIBE_AGENT = 'inprogress-scribe';
 export const STALE_SESSION_MS = 12 * 60 * 60 * 1000;
+/** How long ended work stays on its step as the trail: an ended session's working tasks, and a subagent after it stopped. */
+export const TRAIL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface Project {
   id: number;
@@ -127,8 +129,25 @@ export interface SubagentInfo {
   model: string | null;
   /** The node it works on: the `#id` its description starts with, else the session's focus at dispatch. */
   nodeId: number | null;
-  /** Set when it stopped. A snapshot keeps an ended subagent for 5 minutes. */
+  /** Set when it stopped, or when its session ended. A session's list keeps an ended subagent for 5 minutes. */
   endedAt: string | null;
+}
+
+/**
+ * A subagent that has stopped, kept 7 days as the trail on its step. The snapshot lists every one; the layout shows a
+ * live session's subagent as its greyed badge for five minutes after it stops and as trail after that, and an ended
+ * session's subagents as trail at once.
+ */
+export interface TrailAgent extends SubagentInfo {
+  sessionId: string;
+}
+
+/** An ended session that a trail item or trail agent belongs to: what the trail needs to name it and place its agents. */
+export interface PastSession {
+  id: string;
+  title: string | null;
+  focusNodeId: number | null;
+  endedAt: string;
 }
 
 /** One of Claude's working tasks, under the node it was attributed to when it was created. */
@@ -145,6 +164,8 @@ export interface WorkItem {
   /** Creation order among the node's working tasks. */
   position: number;
   updatedAt: string;
+  /** When its session ended (it is trail then, kept 7 days); null while the session is live. */
+  endedAt: string | null;
 }
 
 export interface Session {
@@ -179,8 +200,12 @@ export interface ProjectSnapshot {
   nodes: TreeNode[];
   resources: ResourceMeta[];
   sessions: Session[];
-  /** The working tasks of `sessions` (sessions that have ended keep theirs out of view), by node, then position. */
+  /** The working tasks of `sessions`, and of the project's sessions that ended less than 7 days ago, by node, then position. */
   workItems: WorkItem[];
+  /** The project's sessions' subagents that stopped less than 7 days ago, live session or not. */
+  trailAgents: TrailAgent[];
+  /** The project's ended sessions that `workItems` or `trailAgents` name. */
+  pastSessions: PastSession[];
   lastEventId: number;
   lastEvent: EventRow | null;
 }
