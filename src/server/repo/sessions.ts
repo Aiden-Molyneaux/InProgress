@@ -1,5 +1,6 @@
 import { STALE_SESSION_MS, TRAIL_MS, type PastSession, type Session, type SessionState } from '../../core/types';
 import { write, type Ctx } from '../db/tx';
+import { releaseQueue } from './projects';
 import { endSubagents, listSubagents } from './subagents';
 
 interface SessionRow {
@@ -86,6 +87,7 @@ export function expireStaleSessions(ctx: Ctx): void {
       // Its running subagents stopped when the session was last heard from, not 12 hours later: the trail says how long
       // they ran.
       endSubagents(ctx, id, last_seen_at);
+      releaseQueue(ctx, record, id);
       record({ projectId: project_id, type: 'session.updated', entity: 'session', entityId: id, data: { changed: ['state'], state: 'ended' } });
     }
   });

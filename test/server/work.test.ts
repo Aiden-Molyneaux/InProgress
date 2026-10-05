@@ -417,6 +417,60 @@ describe('the queue', () => {
     expect(queue()).toEqual([...owned('s1', a.id), ...owned(null, b.id, d.id)]);
   });
 
+  it("turns an ended session's entries unowned, at the head of the unowned part, in order", () => {
+    const { ctx, project, hook, a, b, c, d, queue } = twoSessions();
+    setQueue(ctx, 'scribe:s1', project.slug, [a.id, b.id], S1);
+    setQueue(ctx, 'scribe:s2', project.slug, [c.id], S2);
+    setQueue(ctx, 'scribe:s1', project.slug, [d.id], 'unowned');
+    const mark = maxEventId(ctx);
+    hook({ event: 'end' });
+    expect(queue()).toEqual([...owned('s2', c.id), ...owned(null, a.id, b.id, d.id)]);
+    // Recorded in the end's own write, before the session's event, so the activity strip still says the session ended.
+    expect(listEventsSince(ctx, mark)).toMatchObject([
+      { type: 'project.updated', actor: 'hook:end', projectId: project.id, data: { changes: { queue: { from: [...owned('s1', a.id, b.id), ...owned('s2', c.id), ...owned(null, d.id)] } } } },
+      { type: 'session.updated', entityId: 's1', data: { state: 'ended' } },
+    ]);
+  });
+
+  it('records nothing for the queue when the ended session owned no entries', () => {
+    const { ctx, project, hook, a, queue } = twoSessions();
+    setQueue(ctx, 'scribe:s1', project.slug, [a.id], S1);
+    const mark = maxEventId(ctx);
+    hook({ event: 'end' }, 's2');
+    expect(listEventsSince(ctx, mark).map((e) => e.type)).toEqual(['session.updated']);
+    expect(queue()).toEqual(owned('s1', a.id));
+  });
+
+  it("turns a stale session's entries unowned when it expires", () => {
+    const { ctx, project, hook, tick, a, b, c, queue } = twoSessions();
+    setQueue(ctx, 'scribe:s2', project.slug, [b.id, c.id], S2);
+    setQueue(ctx, 'scribe:s1', project.slug, [a.id], 'unowned');
+    tick(STALE_SESSION_MS + MIN);
+    hook({ event: 'prompt' });
+    const mark = maxEventId(ctx);
+    getProjectSnapshot(ctx, project.slug);
+    expect(queue()).toEqual(owned(null, b.id, c.id, a.id));
+    expect(listEventsSince(ctx, mark)).toMatchObject([
+      { type: 'project.updated', actor: 'system', projectId: project.id },
+      { type: 'session.updated', entityId: 's2', data: { state: 'ended' } },
+    ]);
+  });
+
+  it("turns a session's entries unowned in its old project when it moves to another", () => {
+    const { ctx, project, a, b, d, queue } = twoSessions();
+    const other = createProject(ctx, 'test', { name: 'Other' });
+    setQueue(ctx, 'scribe:s2', project.slug, [a.id, b.id], S2);
+    setQueue(ctx, 'scribe:s1', project.slug, [d.id], 'unowned');
+    const mark = maxEventId(ctx);
+    enrollSession(ctx, 'scribe:s2', 's2', other.slug);
+    expect(queue()).toEqual(owned(null, a.id, b.id, d.id));
+    expect(listEventsSince(ctx, mark).filter((e) => e.type === 'project.updated')).toMatchObject([{ projectId: project.id, entityId: String(project.id) }]);
+    // Enrolling again where it already is moves nothing.
+    setQueue(ctx, 'scribe:s1', project.slug, [b.id], S1);
+    enrollSession(ctx, 'scribe:s1', 's1', project.slug);
+    expect(queue()).toEqual([...owned('s1', b.id), ...owned(null, a.id, d.id)]);
+  });
+
   it('refuses a node outside the project, naming it', () => {
     const { ctx, project, tests } = setup();
     const other = createProject(ctx, 'test', { name: 'Other' });
