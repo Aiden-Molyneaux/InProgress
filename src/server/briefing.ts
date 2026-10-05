@@ -60,7 +60,16 @@ function openTasks(items: WorkItem[], nodeId: number): WorkItem[] {
   return inProgressFirst(items.filter((i) => i.nodeId === nodeId && i.endedAt === null));
 }
 
-export function frontierLines(snapshot: ProjectSnapshot, sessionId?: string): string[] {
+export interface FrontierOptions {
+  /**
+   * Print the sibling `Next:` lines (default true). The briefing and the status answer pass false when they print an Up
+   * next line, so "what's next" has one answer (review-actions ruling 13).
+   */
+  siblingNext?: boolean;
+}
+
+export function frontierLines(snapshot: ProjectSnapshot, sessionId?: string, opts: FrontierOptions = {}): string[] {
+  const siblingNext = opts.siblingNext ?? true;
   const index = buildIndex(snapshot.nodes);
   const root = index.root;
   if (!root) return ['(empty project)'];
@@ -95,7 +104,7 @@ export function frontierLines(snapshot: ProjectSnapshot, sessionId?: string): st
       }
       walk(k, depth + 1);
     }
-    const upcoming = list.slice(last + 1).filter((k) => k.status === 'todo' && !chain.has(k.id));
+    const upcoming = siblingNext ? list.slice(last + 1).filter((k) => k.status === 'todo' && !chain.has(k.id)) : [];
     if (upcoming.length) {
       lines.push(`${'  '.repeat(depth)}Next: ${upcoming.slice(0, 2).map((k) => `#${k.id} ${glyphTitle(k)}`).join(' · ')}${upcoming.length > 2 ? ` (+${upcoming.length - 2} more)` : ''}`);
     }
@@ -111,7 +120,7 @@ export function frontierLines(snapshot: ProjectSnapshot, sessionId?: string): st
 /**
  * The planned order (set_queue), this session's own steps first, with titles, then the other sessions' by letter and
  * the unowned ones: `Up next (you, A): #42 ⧉ Build tabs → #44 ¶ Write the guide · B: #45 · later: #47`. Undefined when no
- * step is up next.
+ * step is up next (formatUpNext's guarantee), which is when the frontier keeps its sibling Next: lines.
  */
 function upNextLine(snapshot: ProjectSnapshot, sessionId: string): string | undefined {
   const view = queueView(snapshot.project.queue, snapshot.nodes, snapshot.sessions);
@@ -231,8 +240,9 @@ export function renderBriefing(snapshot: ProjectSnapshot, sessionId: string, now
     if (pl.length > 15) lines.push(`  … (${pl.length - 15} more lines)`);
   }
   lines.push(...updateRules({ sessionId }));
-  lines.push('Where things stand:', ...frontierLines(snapshot, sessionId).map((l) => `  ${l}`));
+  // One answer to "what's next": an Up next line (always at least one step) replaces the sibling Next: lines.
   const upNext = upNextLine(snapshot, sessionId);
+  lines.push('Where things stand:', ...frontierLines(snapshot, sessionId, { siblingNext: upNext === undefined }).map((l) => `  ${l}`));
   if (upNext) lines.push(upNext);
   const needs = needsYouLine(snapshot, now);
   if (needs) lines.push(needs);
@@ -257,8 +267,9 @@ export function renderBriefing(snapshot: ProjectSnapshot, sessionId: string, now
 
 /** The answer to a status question: the needs-you ages as the briefing has them (`now`, the server's clock), never its check line. */
 export function renderStatusAnswer(snapshot: ProjectSnapshot, sessionId: string, now: number): string {
-  const lines = [`[InProgress] Where things stand in ${snapshot.project.name} (live):`, ...frontierLines(snapshot, sessionId).map((l) => `  ${l}`)];
   const upNext = upNextLine(snapshot, sessionId);
+  const frontier = frontierLines(snapshot, sessionId, { siblingNext: upNext === undefined });
+  const lines = [`[InProgress] Where things stand in ${snapshot.project.name} (live):`, ...frontier.map((l) => `  ${l}`)];
   if (upNext) lines.push(upNext);
   const needs = needsYouLine(snapshot, now);
   if (needs) lines.push(needs);

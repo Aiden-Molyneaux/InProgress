@@ -318,20 +318,25 @@ describe('briefing: session identity', () => {
 });
 
 describe('briefing: type labels', () => {
-  it('prints the glyph before the title on node lines, Next, Up next and Needs you', () => {
+  it('prints the glyph before the title on node lines, Next and Needs you', () => {
     const { ctx, project, a2, a3 } = setup();
     const [s3] = listNodes(ctx, project.id).filter((n) => n.title === '3 RevenueCat');
     updateNode(ctx, 'test', a2.id, { label: 'ui' });
     updateNode(ctx, 'test', a3.id, { label: 'ops' });
     updateNode(ctx, 'test', s3.id, { label: 'integration' });
-    handleHookEvent(ctx, 's1', start());
-    setQueue(ctx, 'scribe:s1', project.slug, [a3.id], { sessionId: 's1' });
     const lines = handleHookEvent(ctx, 's1', start()).context!.split('\n');
     expect(lines).toContain(`      #${a2.id} ⧉ Play app signing — active`);
     expect(lines).toContain(`      #${a3.id} ⚒ Run signing tests — NEEDS YOU`);
     expect(lines.find((l) => l.trim().startsWith('Next:'))?.trim()).toMatch(new RegExp(`^Next: #${s3.id} ⇄ 3 RevenueCat · #\\d+ 4 Build to GitHub`));
-    expect(lines).toContain(`Up next (you, A): #${a3.id} ⚒ Run signing tests`);
     expect(lines).toContain(`Needs you (1): #${a3.id} ⚒ Run signing tests`);
+  });
+
+  it('prints the glyph before the title on the Up next line', () => {
+    const { ctx, project, a3 } = setup();
+    updateNode(ctx, 'test', a3.id, { label: 'ops' });
+    handleHookEvent(ctx, 's1', start());
+    setQueue(ctx, 'scribe:s1', project.slug, [a3.id], { sessionId: 's1' });
+    expect(handleHookEvent(ctx, 's1', start()).context!.split('\n')).toContain(`Up next (you, A): #${a3.id} ⚒ Run signing tests`);
   });
 
   it('names the labels as words, once, inside the checkpoint bullet, with no glyph list', () => {
@@ -477,6 +482,54 @@ describe('briefing: needs-you ages and the check line', () => {
     const answer = statusAnswer(ctx);
     expect(answer).toContain(`Needs you (1): #${a3.id} Run signing tests (4d)`);
     expect(answer).not.toContain('Check with Aiden');
+  });
+});
+
+describe('briefing: one answer to "what\'s next"', () => {
+  const brief = (ctx: Ctx, session = 's1') => handleHookEvent(ctx, session, start()).context!;
+  const statusAnswer = (ctx: Ctx, session = 's1') => handleHookEvent(ctx, session, { event: 'prompt', asksStatus: true }).context!;
+  const nextLines = (text: string) => text.split('\n').filter((l) => l.trim().startsWith('Next:'));
+  const step = (ctx: Ctx, projectId: number, title: string) => listNodes(ctx, projectId).find((n) => n.title === title)!;
+
+  it('no Next: line when an Up next line prints, in the briefing and the status answer', () => {
+    const { ctx, project } = setup();
+    handleHookEvent(ctx, 's1', start());
+    expect(nextLines(brief(ctx))).toHaveLength(1);
+    expect(nextLines(statusAnswer(ctx))).toHaveLength(1);
+    const s4 = step(ctx, project.id, '4 Build to GitHub');
+    setQueue(ctx, 'scribe:s1', project.slug, [s4.id], { sessionId: 's1' });
+    for (const text of [brief(ctx), statusAnswer(ctx)]) {
+      expect(text).toContain(`\nUp next (you, A): #${s4.id} 4 Build to GitHub`);
+      expect(nextLines(text)).toEqual([]);
+    }
+  });
+
+  it("no Next: line either when the Up next line holds only another session's steps or unowned ones", () => {
+    const { ctx, project } = setup();
+    handleHookEvent(ctx, 's1', start());
+    handleHookEvent(ctx, 's2', start());
+    const [s4, s5] = [step(ctx, project.id, '4 Build to GitHub'), step(ctx, project.id, '5 Store listing')];
+    setQueue(ctx, 'scribe:s2', project.slug, [s4.id], { sessionId: 's2' });
+    let text = brief(ctx);
+    expect(text).toContain(`\nUp next: B: #${s4.id}\n`);
+    expect(nextLines(text)).toEqual([]);
+    setQueue(ctx, 'scribe:s2', project.slug, [], { sessionId: 's2' });
+    setQueue(ctx, 'scribe:s1', project.slug, [s5.id], 'unowned');
+    text = statusAnswer(ctx);
+    expect(text).toContain(`\nUp next: later: #${s5.id}`);
+    expect(nextLines(text)).toEqual([]);
+  });
+
+  it("keeps the Next: line when the queue's only entry is the reader's own focus, so no Up next line prints", () => {
+    const { ctx, project, a2 } = setup();
+    handleHookEvent(ctx, 's1', start());
+    setFocus(ctx, 'scribe:s1', 's1', a2.id);
+    setQueue(ctx, 'scribe:s1', project.slug, [a2.id], { sessionId: 's1' });
+    expect(getProjectSnapshot(ctx, project.slug).project.queue).toHaveLength(1);
+    for (const text of [brief(ctx), statusAnswer(ctx)]) {
+      expect(text).not.toContain('Up next');
+      expect(nextLines(text).map((l) => l.trim())).toEqual([expect.stringMatching(/^Next: #\d+ 3 RevenueCat · #\d+ 4 Build to GitHub \(\+3 more\)$/)]);
+    }
   });
 });
 
