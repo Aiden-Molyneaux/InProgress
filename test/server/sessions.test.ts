@@ -368,6 +368,112 @@ describe('enrollSession and setFocus', () => {
   });
 });
 
+describe('session slots', () => {
+  const HOUR = 60 * 60 * 1000;
+
+  /** InGame bound to C:/personal/InGame and Other to C:/personal/Other, with a clock the test moves by hand. */
+  function slots() {
+    let now = Date.parse('2026-10-04T09:00:00.000Z');
+    const ctx = createCtx(openDb(':memory:'), () => new Date(now).toISOString());
+    const project = createProject(ctx, 'test', { name: 'InGame' });
+    addBinding(ctx, 'test', project.slug, 'C:/personal/InGame');
+    const other = createProject(ctx, 'test', { name: 'Other' });
+    addBinding(ctx, 'test', other.slug, 'C:/personal/Other');
+    const slot = (id: string) => findSession(ctx, id)?.slot;
+    return { ctx, project, other, slot, tick: (ms: number) => (now += ms) };
+  }
+  const here = () => start('C:/personal/InGame');
+
+  it('gives a new session the lowest slot no other live session of its project holds', () => {
+    const { ctx, slot } = slots();
+    handleHookEvent(ctx, 's1', here());
+    // A missed start: the first prompt begins tracking, and takes a slot the same way.
+    handleHookEvent(ctx, 's2', { event: 'prompt', cwd: 'C:/personal/InGame' });
+    handleHookEvent(ctx, 'o1', start('C:/personal/Other'));
+    expect([slot('s1'), slot('s2'), slot('o1')]).toEqual([0, 1, 0]);
+  });
+
+  it('gives a session that enrollSession creates the lowest free slot too', () => {
+    const { ctx, project, slot } = slots();
+    handleHookEvent(ctx, 's1', here());
+    expect(enrollSession(ctx, 'scribe:e1', 'e1', project.slug).session.slot).toBe(1);
+    expect(slot('e1')).toBe(1);
+  });
+
+  it("never gives two live sessions one slot, and frees an ended session's slot", () => {
+    const { ctx, project, slot } = slots();
+    for (const id of ['s1', 's2', 's3']) handleHookEvent(ctx, id, here());
+    expect([slot('s1'), slot('s2'), slot('s3')]).toEqual([0, 1, 2]);
+    handleHookEvent(ctx, 's2', { event: 'end' });
+    handleHookEvent(ctx, 's4', here());
+    handleHookEvent(ctx, 's5', here());
+    expect([slot('s1'), slot('s3'), slot('s4'), slot('s5')]).toEqual([0, 2, 1, 3]);
+    const live = getProjectSnapshot(ctx, project.slug).sessions.map((s) => s.slot);
+    expect(new Set(live).size).toBe(live.length);
+  });
+
+  it('frees the slot of a session idle past the stale limit, before expiry has marked it ended', () => {
+    const { ctx, slot, tick } = slots();
+    handleHookEvent(ctx, 's1', here());
+    tick(12 * HOUR + 60_000);
+    // Still idle when s2 arrives: only a snapshot read (here, s2's briefing, after its write) marks it ended.
+    expect(findSession(ctx, 's1')?.state).toBe('idle');
+    handleHookEvent(ctx, 's2', here());
+    expect(slot('s2')).toBe(0);
+    // Back, s1 finds its slot taken and takes the lowest free one.
+    handleHookEvent(ctx, 's1', { event: 'prompt' });
+    expect([slot('s1'), slot('s2')]).toEqual([1, 0]);
+  });
+
+  it("keeps a revived session's slot while it is free, and reassigns it when another live session holds it", () => {
+    const { ctx, slot } = slots();
+    handleHookEvent(ctx, 's1', here());
+    handleHookEvent(ctx, 's2', here());
+    handleHookEvent(ctx, 's1', { event: 'end' });
+    handleHookEvent(ctx, 's2', { event: 'end' });
+    // Slot 0 is free too, but s2 keeps its own.
+    handleHookEvent(ctx, 's2', { event: 'prompt' });
+    expect(slot('s2')).toBe(1);
+    handleHookEvent(ctx, 's3', here());
+    expect(slot('s3')).toBe(0);
+    handleHookEvent(ctx, 's1', { event: 'start', source: 'resume', cwd: 'C:/personal/InGame' });
+    expect([slot('s1'), slot('s2'), slot('s3')]).toEqual([2, 1, 0]);
+  });
+
+  it('gives a session enrollSession repoints the lowest free slot in its new project', () => {
+    const { ctx, other, slot } = slots();
+    handleHookEvent(ctx, 's1', here());
+    handleHookEvent(ctx, 's2', here());
+    handleHookEvent(ctx, 'o1', start('C:/personal/Other'));
+    expect(enrollSession(ctx, 'scribe:s2', 's2', other.slug).session.slot).toBe(1);
+    expect(enrollSession(ctx, 'scribe:s1', 's1', other.slug).session.slot).toBe(2);
+    handleHookEvent(ctx, 's3', here());
+    expect([slot('o1'), slot('s3')]).toEqual([0, 0]);
+  });
+
+  it('fills a null slot (a session from before migration 4) on its next hook event or enroll, and tells the UI', () => {
+    const { ctx, project, slot } = slots();
+    handleHookEvent(ctx, 's1', here());
+    handleHookEvent(ctx, 's2', here());
+    ctx.db.prepare('UPDATE sessions SET slot = NULL').run();
+    const mark = maxEventId(ctx);
+    // A stop on an idle session changes nothing else: the event is the slot's alone.
+    handleHookEvent(ctx, 's1', { event: 'stop' });
+    expect(slot('s1')).toBe(0);
+    expect(listEventsSince(ctx, mark)).toMatchObject([{ type: 'session.updated', entityId: 's1', data: { changed: ['slot'] } }]);
+    expect(enrollSession(ctx, 'scribe:s2', 's2', project.slug).session.slot).toBe(1);
+  });
+
+  it('leaves an ended session out: enrolling it neither revives it nor takes a slot from a live one', () => {
+    const { ctx, project, slot } = slots();
+    handleHookEvent(ctx, 's1', here());
+    handleHookEvent(ctx, 's1', { event: 'end' });
+    handleHookEvent(ctx, 's2', here());
+    expect(enrollSession(ctx, 'scribe:s1', 's1', project.slug).session).toMatchObject({ state: 'ended', slot: 0 });
+    expect(slot('s2')).toBe(0);
+  });
+});
+
 describe('snapshots', () => {
   it('returns nodes, resources, live sessions and the last event', () => {
     const { ctx, project } = setup();

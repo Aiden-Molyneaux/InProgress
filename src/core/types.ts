@@ -181,6 +181,12 @@ export interface Session {
   startedAt: string;
   lastSeenAt: string;
   endedAt: string | null;
+  /**
+   * Its identity in its project: the lowest slot no other live session there held when it began, was revived or moved.
+   * Its letter (0 is A) and hue; its subagents wear them too. Null for a session from before migration 4, until its
+   * next hook event fills it.
+   */
+  slot: number | null;
   subagents: SubagentInfo[];
 }
 
