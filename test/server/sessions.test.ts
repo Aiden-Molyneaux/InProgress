@@ -390,6 +390,14 @@ describe('briefing: the rules block', () => {
     const text = updateRules(real).join('\n');
     expect(text).not.toMatch(/question|relabel|dropped|backtrack/i);
   });
+
+  it('says on line 2 that plan edits go through the scribe, the rules below are complete, and what the skill is for', () => {
+    const { ctx, project } = setup();
+    const line2 = 'Plan edits go through the inprogress-scribe agent in the background (working tasks excepted, below). The rules below are complete; the inprogress skill is for opt-in, adoption and the full brief format.';
+    expect(handleHookEvent(ctx, 's1', start()).context!.split('\n')[1]).toBe(line2);
+    expect(enrollSession(ctx, 'scribe:e1', 'e1', project.slug).briefing.split('\n')[1]).toBe(line2);
+    expect(handleHookEvent(ctx, 's1', start()).context).not.toContain('follow the inprogress skill');
+  });
 });
 
 describe('briefing: needs-you ages and the check line', () => {

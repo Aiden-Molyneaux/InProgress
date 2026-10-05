@@ -161,7 +161,8 @@ export function renderBriefing(snapshot: ProjectSnapshot, sessionId: string, now
   const letter = sessionTag(sessions.find((s) => s.id === sessionId)?.slot ?? null);
   const lines = [
     `[InProgress] This session is tracked in project "${project.name}" (slug ${project.slug}). Session id: ${sessionId}.${letter ? ` You are session ${letter}.` : ''}`,
-    'All InProgress edits go through the inprogress-scribe agent in the background; follow the inprogress skill.',
+    // The rules below stand alone (review-actions spec §8); the skill keeps opt-in, adoption and the full template.
+    'Plan edits go through the inprogress-scribe agent in the background (working tasks excepted, below). The rules below are complete; the inprogress skill is for opt-in, adoption and the full brief format.',
   ];
   const playbook = project.playbook.trim();
   if (playbook) {
