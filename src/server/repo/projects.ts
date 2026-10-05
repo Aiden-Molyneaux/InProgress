@@ -64,15 +64,21 @@ function parseQueue(json: string | undefined): QueueEntry[] {
 /** The stored JSON: every entry in the object shape. */
 const queueJson = (queue: QueueEntry[]): string => JSON.stringify(queue.map((e) => ({ node: e.nodeId, session: e.sessionId })));
 
+/** Which of `ids` are open steps of the project: not done, dropped or deleted. */
+function openSteps(ctx: Ctx, projectId: number, ids: number[]): Set<number> {
+  if (!ids.length) return new Set();
+  return new Set(
+    ctx.db
+      .prepare(`SELECT id FROM nodes WHERE project_id = ? AND status NOT IN ('done', 'dropped') AND id IN (${ids.map(() => '?').join(', ')})`)
+      .pluck()
+      .all(projectId, ...ids) as number[],
+  );
+}
+
 /** The queue as it is read: deleted, done and dropped nodes leave it on their own. */
 function liveQueue(ctx: Ctx, projectId: number, json: string | undefined): QueueEntry[] {
   const entries = parseQueue(json);
-  if (!entries.length) return [];
-  const open = new Set(
-    (ctx.db
-      .prepare(`SELECT id FROM nodes WHERE project_id = ? AND status NOT IN ('done', 'dropped') AND id IN (${entries.map(() => '?').join(', ')})`)
-      .all(projectId, ...entries.map((e) => e.nodeId)) as { id: number }[]).map((r) => r.id),
-  );
+  const open = openSteps(ctx, projectId, entries.map((e) => e.nodeId));
   return entries.filter((e) => open.has(e.nodeId));
 }
 
@@ -100,11 +106,17 @@ function spliceQueue(queue: QueueEntry[], nodes: number[], sessionId: string | n
   return ownedFirst([...kept.slice(0, at), ...nodes.map((nodeId) => ({ nodeId, sessionId })), ...kept.slice(at)]);
 }
 
-/** `queue` with the entries of `sessionId` turned unowned, at the head of the unowned part, in their order. */
-function releaseEntries(queue: QueueEntry[], sessionId: string): QueueEntry[] {
-  const released = queue.filter((e) => e.sessionId === sessionId).map((e) => ({ nodeId: e.nodeId, sessionId: null }));
-  const rest = queue.filter((e) => e.sessionId !== sessionId);
-  return [...rest.filter(isOwned), ...released, ...rest.filter((e) => !isOwned(e))];
+/**
+ * `queue` with the entries of the sessions in `released` turned unowned, at the head of the unowned part, keeping their
+ * stored order (so several sessions released at once read as queueView showed them before). An entry whose step is not
+ * in `open` (done, dropped or deleted) is dropped instead: with no owner left, nothing would reopen it into place, and
+ * the stored unowned part keeps open steps only. A live owner's own finished entries are left where they are.
+ */
+function releaseEntries(queue: QueueEntry[], released: ReadonlySet<string>, open: ReadonlySet<number>): QueueEntry[] {
+  const isReleased = (e: QueueEntry) => e.sessionId !== null && released.has(e.sessionId);
+  const freed = queue.filter((e) => isReleased(e) && open.has(e.nodeId)).map((e) => ({ nodeId: e.nodeId, sessionId: null }));
+  const rest = queue.filter((e) => !isReleased(e));
+  return [...rest.filter(isOwned), ...freed, ...rest.filter((e) => !isOwned(e))];
 }
 
 /**
@@ -247,8 +259,8 @@ export type QueueOwner = { sessionId: string } | 'unowned';
  * Sets one owner's part of the order Claude plans to work in: node ids of this project, first one next (an id given
  * twice keeps its first place; an empty list clears that part). Other owners' entries stay where they are, except that a
  * node is in the queue once: one given here leaves wherever it was. A session must be tracked in the project. One that
- * has ended or gone stale owns nothing, so its steps go to the head of the unowned part, as releaseQueue would put them.
- * Done and dropped nodes stay out of the queue as it is read.
+ * has ended or gone stale owns nothing, so its steps, then its old entries, go to the head of the unowned part, as
+ * releaseQueue would put them. Done and dropped nodes stay out of the queue as it is read.
  */
 export function setQueue(ctx: Ctx, actor: string, ref: string | number, nodes: number[], owner: QueueOwner): Project {
   return write(ctx, actor, (record) => {
@@ -275,8 +287,17 @@ export function setQueue(ctx: Ctx, actor: string, ref: string | number, nodes: n
       gone = s.state === 'ended' || s.last_seen_at < cutoff;
     }
     const row = ctx.db.prepare('SELECT queue FROM projects WHERE id = ?').get(project.id) as { queue: string };
-    let next = spliceQueue(parseQueue(row.queue), ids, sessionId);
-    if (gone) next = releaseEntries(next, sessionId!);
+    const stored = parseQueue(row.queue);
+    let next: QueueEntry[];
+    if (gone) {
+      // It owns nothing any more: release its old entries, put these in as its own, and release those too. All of them
+      // end up unowned at the head of the unowned part, these first, as releaseQueue would leave them.
+      const self = new Set([sessionId!]);
+      const open = openSteps(ctx, project.id, [...stored.map((e) => e.nodeId), ...ids]);
+      next = releaseEntries(spliceQueue(releaseEntries(stored, self, open), ids, sessionId), self, open);
+    } else {
+      next = spliceQueue(stored, ids, sessionId);
+    }
     storeQueue(ctx, record, project.id, row.queue, next);
     return getProjectById(ctx, project.id)!;
   });
@@ -284,14 +305,17 @@ export function setQueue(ctx: Ctx, actor: string, ref: string | number, nodes: n
 
 /**
  * A session ended, went stale or moved to another project: its entries turn unowned and move to the head of the unowned
- * part, in order, in every project whose queue holds any. Records project.updated for each queue it changes. Call inside
- * an open write.
+ * part, in order, in every project whose queue holds any; those whose step is no longer open are dropped. Records
+ * project.updated for each queue it changes. Call inside an open write.
  */
 export function releaseQueue(ctx: Ctx, record: RecordEvent, sessionId: string): void {
   // Every write stores this exact text for the session's entries.
   const needle = `"session":${JSON.stringify(sessionId)}`;
   const rows = ctx.db.prepare('SELECT id, queue FROM projects WHERE instr(queue, ?) > 0').all(needle) as { id: number; queue: string }[];
-  for (const row of rows) storeQueue(ctx, record, row.id, row.queue, releaseEntries(parseQueue(row.queue), sessionId));
+  for (const row of rows) {
+    const queue = parseQueue(row.queue);
+    storeQueue(ctx, record, row.id, row.queue, releaseEntries(queue, new Set([sessionId]), openSteps(ctx, row.id, queue.map((e) => e.nodeId))));
+  }
 }
 
 export function listProjectSummaries(ctx: Ctx): ProjectSummary[] {

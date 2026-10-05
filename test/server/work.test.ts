@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { openDb } from '../../src/server/db/connection';
 import { createCtx, type Ctx } from '../../src/server/db/tx';
 import { listEventsSince, maxEventId } from '../../src/server/repo/events';
-import { addNodes, updateNode } from '../../src/server/repo/nodes';
+import { addNodes, deleteNode, updateNode } from '../../src/server/repo/nodes';
 import { STALE_SESSION_MS, type QueueEntry } from '../../src/core/types';
 import { addBinding, createProject, getProjectById, setQueue } from '../../src/server/repo/projects';
 import { getProjectSnapshot } from '../../src/server/repo/snapshot';
@@ -419,15 +419,15 @@ describe('the queue', () => {
   });
 
   it('stores a queue: from an ended session as unowned, at the head of the unowned part', () => {
-    const { ctx, project, hook, a, b, c, d, queue } = twoSessions();
+    const { ctx, project, hook, a, b, c, d, e, queue } = twoSessions();
     setQueue(ctx, 'scribe:s1', project.slug, [a.id], S1);
-    setQueue(ctx, 'scribe:s1', project.slug, [d.id], 'unowned');
+    setQueue(ctx, 'scribe:s1', project.slug, [d.id, e.id], 'unowned');
     hook({ event: 'end' }, 's2');
-    setQueue(ctx, 'scribe:s2', project.slug, [b.id, c.id, d.id], S2);
-    expect(queue()).toEqual([...owned('s1', a.id), ...owned(null, b.id, c.id, d.id)]);
+    setQueue(ctx, 'scribe:s2', project.slug, [b.id, c.id, e.id], S2);
+    expect(queue()).toEqual([...owned('s1', a.id), ...owned(null, b.id, c.id, e.id, d.id)]);
   });
 
-  it('stores a queue: from a session gone stale, not yet expired, as unowned too', () => {
+  it('stores a queue: from a session gone stale, not yet expired, as unowned, with its old entries released after it', () => {
     const { ctx, project, hook, tick, a, b, c, d, queue } = twoSessions();
     setQueue(ctx, 'scribe:s2', project.slug, [c.id], S2);
     setQueue(ctx, 'scribe:s1', project.slug, [d.id], 'unowned');
@@ -436,7 +436,21 @@ describe('the queue', () => {
     hook({ event: 'prompt' });
     setQueue(ctx, 'scribe:s1', project.slug, [a.id], S1);
     setQueue(ctx, 'scribe:s2', project.slug, [b.id], S2);
-    expect(queue()).toEqual([...owned('s1', a.id), ...owned(null, b.id, d.id)]);
+    // What releaseQueue would leave: none of it owned, all of it ahead of the older unowned entries.
+    expect(queue()).toEqual([...owned('s1', a.id), ...owned(null, b.id, c.id, d.id)]);
+  });
+
+  it('drops released entries whose step is no longer open: no owner is left to reopen them into place', () => {
+    const { ctx, project, hook, a, b, c, d, e, queue } = twoSessions();
+    setQueue(ctx, 'scribe:s1', project.slug, [a.id, b.id, c.id, e.id], S1);
+    setQueue(ctx, 'scribe:s1', project.slug, [d.id], 'unowned');
+    updateNode(ctx, 'test', b.id, { status: 'done' });
+    updateNode(ctx, 'test', c.id, { status: 'dropped' });
+    deleteNode(ctx, 'test', e.id, false);
+    hook({ event: 'end' });
+    expect(stored(ctx, project.id)).toEqual([{ node: a.id, session: null }, { node: d.id, session: null }]);
+    updateNode(ctx, 'test', b.id, { status: 'active' });
+    expect(queue()).toEqual(owned(null, a.id, d.id));
   });
 
   it("turns an ended session's entries unowned, at the head of the unowned part, in order", () => {
