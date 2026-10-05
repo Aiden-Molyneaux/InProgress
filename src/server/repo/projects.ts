@@ -280,6 +280,10 @@ export function setQueue(ctx: Ctx, actor: string, ref: string | number, nodes: n
         | { project_id: number | null; state: string; last_seen_at: string }
         | undefined;
       if (s?.project_id !== project.id) {
+        const home = s?.project_id == null ? undefined : (ctx.db.prepare('SELECT slug FROM projects WHERE id = ?').pluck().get(s.project_id) as string | undefined);
+        if (home) {
+          throw badRequest(`Session ${owner.sessionId} is tracked in project ${home}, not ${project.slug}`, `Check the project the brief names: this session's own order belongs in ${home}. Use enroll_session only if the session has really moved here.`);
+        }
         throw badRequest(`Session ${owner.sessionId} is not tracked in project ${project.slug}`, 'Track it here with enroll_session first, or pass unowned: true to set the unowned order.');
       }
       sessionId = owner.sessionId;

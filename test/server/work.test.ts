@@ -539,19 +539,22 @@ describe('the queue', () => {
     expect(getProjectSnapshot(ctx, project.slug).project.queue).toEqual([]);
   });
 
-  it('refuses a session not tracked in the project, with a hint', () => {
+  it('refuses a session not tracked in the project, with a hint for each case', () => {
     const { ctx, project, tests } = setup();
     const other = createProject(ctx, 'test', { name: 'Other' });
     enrollSession(ctx, 'scribe:s3', 's3', other.slug);
-    for (const sessionId of ['nobody', 's3']) {
-      let err: unknown;
+    const refusal = (sessionId: string): unknown => {
       try {
         setQueue(ctx, `scribe:${sessionId}`, project.slug, [tests.id], { sessionId });
       } catch (e) {
-        err = e;
+        return e;
       }
-      expect(err).toMatchObject({ status: 400, message: `Session ${sessionId} is not tracked in project ingame`, hint: expect.stringContaining('enroll_session') });
-    }
+      return undefined;
+    };
+    // Tracked nowhere: enroll it.
+    expect(refusal('nobody')).toMatchObject({ status: 400, message: 'Session nobody is not tracked in project ingame', hint: expect.stringContaining('enroll_session') });
+    // Tracked in another project: name it, and check the brief's project.
+    expect(refusal('s3')).toMatchObject({ status: 400, message: 'Session s3 is tracked in project other, not ingame', hint: expect.stringMatching(/project the brief names/) });
     expect(stored(ctx, project.id)).toEqual([]);
   });
 
