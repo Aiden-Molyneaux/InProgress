@@ -63,6 +63,15 @@ function placeSlot(ctx: Ctx, before: Session, next: Session): void {
   else if (next.state !== 'ended') next.slot = assignSlot(ctx, next.id, next.projectId, before.slot);
 }
 
+/**
+ * After placeSlot, for a flow that is not a hook event (setFocus, enrollSession): a session live after it in another
+ * slot holds a briefing that names its old letter or none, so its next real prompt brings a fresh one, as the hook path
+ * marks it (review-actions ruling 40). markBriefingDue is idempotent.
+ */
+function markIfRelettered(ctx: Ctx, before: Session, next: Session): void {
+  if (next.state !== 'ended' && before.slot !== next.slot) markBriefingDue(ctx, next.id);
+}
+
 const clean = (text: string | undefined): string | null => text?.trim() || null;
 
 export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInput): HookEventResult {
@@ -224,8 +233,10 @@ export function enrollSession(ctx: Ctx, actor: string, sessionId: string, projec
     if (before.projectId !== null && before.projectId !== project.id) releaseQueue(ctx, record, sessionId);
     saveSession(ctx, next);
     // The briefing returned below goes to the scribe, which passes on its first line only: the session's next real
-    // prompt brings the full one. A live session re-enrolled where it already is keeps what it has, due or not (ruling 29).
+    // prompt brings the full one. A live session re-enrolled where it already is keeps what it has, due or not (ruling
+    // 29), unless placeSlot just gave it another letter (ruling 40).
     if (isNew || before.projectId !== project.id || before.state === 'ended') markBriefingDue(ctx, sessionId);
+    markIfRelettered(ctx, before, next);
     // Tell the old project's viewers too, so they drop this session's badge.
     if (before.projectId !== null && before.projectId !== project.id) {
       record({ projectId: before.projectId, type: 'session.updated', entity: 'session', entityId: sessionId, data: { changed: ['projectId'], state: next.state } });
@@ -258,6 +269,7 @@ export function setFocus(ctx: Ctx, actor: string, sessionId: string, nodeId: num
     // Being heard from again can bring a stale session back.
     placeSlot(ctx, existing, next);
     saveSession(ctx, next);
+    markIfRelettered(ctx, existing, next);
     record({ projectId, type: 'session.updated', entity: 'session', entityId: sessionId, data: { changed: ['focusNodeId'], focusNodeId: nodeId } });
   });
   return findSession(ctx, sessionId)!;

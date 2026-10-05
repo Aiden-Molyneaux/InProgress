@@ -199,7 +199,7 @@ export function createMcpServer(client: Client, o: McpOptions = {}): McpServer {
       return r.briefing;
     });
 
-  tool('set_focus', 'Set which node a session is working on (null clears it). Drives the session badge in the UI.', { session: z.string().min(1), node: id.nullable() },
+  tool('set_focus', 'Set which node a session is working on (null clears it). Drives the session badge in the UI. Focusing a todo step assigned to Claude also sets it active, in the same write.', { session: z.string().min(1), node: id.nullable() },
     async (a: { session: string; node: number | null }) => {
       await client.post(`/api/sessions/${enc(a.session)}/focus`, { nodeId: a.node }, { actor: actor(a.session) });
       return a.node === null ? 'Focus cleared.' : `Focus → #${a.node}.`;

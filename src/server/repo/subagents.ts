@@ -1,10 +1,8 @@
-import { READER_AGENT_TYPES, TRAIL_MS, type SubagentInfo, type TrailAgent } from '../../core/types';
+import { ENDED_AGENT_MS, READER_AGENT_TYPES, TRAIL_MS, type SubagentInfo, type TrailAgent } from '../../core/types';
 import type { Ctx } from '../db/tx';
 
 /** How long a dispatch waits for its subagent to start; an older one (a launch that was denied, say) never pairs. */
 export const DISPATCH_TTL_MS = 10 * 60 * 1000;
-/** How long a session's list keeps a subagent after it stopped (its greyed badge in the UI). */
-export const SUBAGENT_RECENT_MS = 5 * 60 * 1000;
 
 interface SubagentRow {
   session_id: string;
@@ -63,11 +61,11 @@ const toInfo = (r: SubagentRow): SubagentInfo => ({
   purpose: r.purpose,
 });
 
-/** A session's subagents that are running or stopped less than 5 minutes ago, oldest first. */
+/** A session's subagents that are running or stopped less than ENDED_AGENT_MS (5 minutes) ago, oldest first. */
 export function listSubagents(ctx: Ctx, sessionId: string): SubagentInfo[] {
   return (ctx.db
     .prepare('SELECT * FROM session_subagents WHERE session_id = ? AND (ended_at IS NULL OR ended_at >= ?) ORDER BY started_at, agent_id')
-    .all(sessionId, before(ctx, SUBAGENT_RECENT_MS)) as SubagentRow[])
+    .all(sessionId, before(ctx, ENDED_AGENT_MS)) as SubagentRow[])
     .map(toInfo);
 }
 

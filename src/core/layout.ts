@@ -1,5 +1,5 @@
 import { buildIndex, computeVisible, countDone, isNeedsYou, progress, type FoldOverrides } from './tree';
-import { glyphTitle, isReader, ownerTag, sessionTag, type EventRow, type PastSession, type QueueEntry, type ResourceMeta, type Session, type SubagentInfo, type TrailAgent, type TreeNode, type WorkItem } from './types';
+import { ENDED_AGENT_MS, glyphTitle, isReader, ownerTag, sessionTag, type EventRow, type PastSession, type QueueEntry, type ResourceMeta, type Session, type SubagentInfo, type TrailAgent, type TreeNode, type WorkItem } from './types';
 
 export const ROW = 32;
 export const INDENT = 28;
@@ -11,8 +11,6 @@ export const WORK_ROW = 20;
 export const WORK_GAP = 6;
 /** A session's readers on a row (`◇ a · 2 reading`): as compact as a working task's row. */
 export const READERS_ROW = WORK_ROW;
-/** How long a live session's ended subagent keeps its badge, greyed; after that it shows in the trail. */
-export const ENDED_AGENT_MS = 5 * 60 * 1000;
 
 export interface LayoutNodeItem {
   kind: 'node';
@@ -175,7 +173,10 @@ export interface LayoutInput {
   pastSessions?: PastSession[];
   /** The project's Up next queue, as stored: owned entries first, next first. */
   queue?: readonly QueueEntry[];
-  /** When it is (ms), to tell which ended subagents still show. Defaults to now. */
+  /**
+   * When it is (ms). It decides which stopped subagents still show, and which finished steps are old enough to fold
+   * into a done run. Defaults to now.
+   */
   now?: number;
 }
 
@@ -202,7 +203,8 @@ export function agentHome(s: Pick<Session, 'focusNodeId'>, a: Pick<SubagentInfo,
  * shows as a greyed badge (agentShown), so none is both. Its node is the one it worked on, while that is in this tree;
  * one whose node is set but not in the tree (its session moved to another project, say) is left out. Only one with no
  * node falls back to its session's focus, live or past; with neither it is left out. A deleted step's agents fall back
- * too: its `node_id` is ON DELETE SET NULL, which can't tell a deleted step from none.
+ * too: its `node_id` is ON DELETE SET NULL, which can't tell a deleted step from none. Readers leave no trail: the
+ * server's query leaves them out already, and so does this.
  */
 export function homedTrailAgents(
   input: { sessions: Session[]; trailAgents?: TrailAgent[]; pastSessions?: PastSession[]; now: number },
@@ -213,7 +215,7 @@ export function homedTrailAgents(
   const badged = new Set(live.flatMap((s) => s.subagents.filter((a) => agentShown(a, input.now)).map((a) => key(s.id, a.agentId))));
   const focusOf = new Map<string, number | null>([...(input.pastSessions ?? []), ...live].map((s) => [s.id, s.focusNodeId]));
   return (input.trailAgents ?? []).flatMap((agent) => {
-    if (badged.has(key(agent.sessionId, agent.agentId))) return [];
+    if (isReader(agent.agentType) || badged.has(key(agent.sessionId, agent.agentId))) return [];
     const nodeId = agent.nodeId ?? focusOf.get(agent.sessionId) ?? null;
     return nodeId !== null && inTree(nodeId) ? [{ agent, nodeId }] : [];
   });

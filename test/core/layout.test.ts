@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { BADGE_ROW, ENDED_AGENT_MS, INDENT, READERS_ROW, ROW, WORK_GAP, WORK_ROW, agentVisible, eventTarget, findFrontier, formatUpNext, layoutOutline, queueView, type LayoutItem, type LayoutResult } from '../../src/core/layout';
-import { READER_AGENT_TYPES, isReader, type EventRow, type PastSession, type QueueEntry, type ResourceMeta, type Session, type SubagentInfo, type TrailAgent, type TreeNode, type WorkItem, type WorkStatus } from '../../src/core/types';
+import { BADGE_ROW, INDENT, READERS_ROW, ROW, WORK_GAP, WORK_ROW, agentVisible, eventTarget, findFrontier, formatUpNext, layoutOutline, queueView, type LayoutItem, type LayoutResult } from '../../src/core/layout';
+import { ENDED_AGENT_MS, READER_AGENT_TYPES, isReader, type EventRow, type PastSession, type QueueEntry, type ResourceMeta, type Session, type SubagentInfo, type TrailAgent, type TreeNode, type WorkItem, type WorkStatus } from '../../src/core/types';
 
 let nextId = 1;
 function n(parentId: number | null, title: string, extra: Partial<TreeNode> = {}): TreeNode {
@@ -586,6 +586,18 @@ describe('the trail of ended work', () => {
       ['agent', 'as1:x'], ['workDone', `wd${t.a1.id}`], ['trailAgent', 'ts1:y'], ['trailAgent', 'ts0:z'],
     ]);
     expect(l.items.find((i) => i.kind === 'workDone')).toMatchObject({ count: 0, unfinished: 0, agents: 2 });
+  });
+
+  it('leaves a reader out of the trail, should the snapshot ever list one: readers leave no trail', () => {
+    const t = sample();
+    const task = work(t.a1.id, 'completed', { sessionId: 's0', endedAt: ENDED });
+    const l = layoutOutline({
+      nodes: t.nodes, resources: [], sessions: [], workItems: [task], now: T0,
+      trailAgents: [trailAgent('r', { nodeId: t.a1.id, agentType: 'Explore' })], pastSessions: [past('s0', t.a1.id)],
+      overrides: { [`work:${t.a1.id}`]: 'open' },
+    });
+    expect(rowsOf(l, 'trailAgent')).toEqual([]);
+    expect(l.items.find((i) => i.kind === 'workDone')).toMatchObject({ count: 1, unfinished: 0, agents: 0 });
   });
 
   it("puts a trail agent on its step while that is in the tree; with no step, on its session's focus, live or past; else leaves it out", () => {

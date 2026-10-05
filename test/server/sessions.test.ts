@@ -967,6 +967,40 @@ describe('the full briefing on the first tracked prompt after an enroll', () => 
     expect(briefingDue(ctx, 's2')).toBe(true);
   });
 
+  it('sets it when a focus gives a live session its first letter, so the next prompt says "You are session A."; keeping it sets nothing', () => {
+    const { ctx, a1, a2 } = projects();
+    handleHookEvent(ctx, 's1', start());
+    // s1 as from before migration 4: the scribe's set_focus is the first write to give it a slot.
+    ctx.db.prepare("UPDATE sessions SET slot = NULL WHERE id = 's1'").run();
+    setFocus(ctx, 'scribe:s1', 's1', a1.id);
+    expect(findSession(ctx, 's1')?.slot).toBe(0);
+    expect(briefingDue(ctx, 's1')).toBe(true);
+    const text = handleHookEvent(ctx, 's1', prompt()).context!;
+    expect(text.split('\n')[0]).toMatch(/Session id: s1\. You are session A\.$/);
+    expect(briefingDue(ctx, 's1')).toBe(false);
+    setFocus(ctx, 'scribe:s1', 's1', a2.id);
+    expect(briefingDue(ctx, 's1')).toBe(false);
+  });
+
+  it('sets it when a same-project re-enroll moves a live session to another letter, so the next prompt says "You are session B."', () => {
+    const { ctx, project, tick } = projects();
+    handleHookEvent(ctx, 's1', start());
+    handleHookEvent(ctx, 's2', start());
+    // s2 as from before migration 4. Past the stale limit its stop takes the lowest free slot, s1's A: s1 is stale, and
+    // no snapshot read has marked it ended (a stop renders nothing).
+    ctx.db.prepare("UPDATE sessions SET slot = NULL WHERE id = 's2'").run();
+    tick(12 * 60 * 60 * 1000 + 60_000);
+    handleHookEvent(ctx, 's2', { event: 'stop' });
+    expect(findSession(ctx, 's1')).toMatchObject({ state: 'idle', slot: 0 });
+    // The scribe re-enrolls s1 where it already is: A is s2's now, so s1 becomes B.
+    enrollSession(ctx, 'scribe:s1', 's1', project.slug);
+    expect(findSession(ctx, 's1')).toMatchObject({ state: 'idle', slot: 1 });
+    expect(briefingDue(ctx, 's1')).toBe(true);
+    const text = handleHookEvent(ctx, 's1', prompt()).context!;
+    expect(text.split('\n')[0]).toMatch(/Session id: s1\. You are session B\.$/);
+    expect(briefingDue(ctx, 's1')).toBe(false);
+  });
+
   it('leaves it unset on a revival by a start into another letter: the start carries the briefing', () => {
     const { ctx } = projects();
     handleHookEvent(ctx, 's1', start());
