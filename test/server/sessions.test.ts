@@ -159,11 +159,43 @@ describe('briefing: live work', () => {
     handleHookEvent(ctx, 's1', start());
     setQueue(ctx, 'scribe:s1', project.slug, [a3.id, a2.id], { sessionId: 's1' });
     const text = handleHookEvent(ctx, 's1', start()).context!;
-    expect(text).toContain(`\nUp next: #${a3.id} Run signing tests → #${a2.id} Play app signing\n`);
-    expect(text.indexOf('Where things stand:')).toBeLessThan(text.indexOf('Up next:'));
-    expect(text.indexOf('Up next:')).toBeLessThan(text.indexOf('Needs you (1)'));
+    expect(text).toContain(`\nUp next (you, A): #${a3.id} Run signing tests → #${a2.id} Play app signing\n`);
+    expect(text.indexOf('Where things stand:')).toBeLessThan(text.indexOf('Up next'));
+    expect(text.indexOf('Up next')).toBeLessThan(text.indexOf('Needs you (1)'));
     updateNode(ctx, 'test', a3.id, { status: 'done' });
-    expect(handleHookEvent(ctx, 's1', { event: 'prompt', asksStatus: true }).context).toMatch(new RegExp(`\\nUp next: #${a2.id} Play app signing$`));
+    expect(handleHookEvent(ctx, 's1', { event: 'prompt', asksStatus: true }).context).toMatch(new RegExp(`\\nUp next \\(you, A\\): #${a2.id} Play app signing$`));
+  });
+
+  it("puts this session's own steps first, then other sessions' by letter and the unowned ones, in the briefing and the status answer", () => {
+    const { ctx, project, a1, a2, a3, road } = setup();
+    const [s3, s4] = addNodes(ctx, 'test', { parentId: road.id, nodes: [{ title: 'Later one' }, { title: 'Later two' }] });
+    handleHookEvent(ctx, 's1', start());
+    handleHookEvent(ctx, 's2', start());
+    setQueue(ctx, 'scribe:s2', project.slug, [a2.id], { sessionId: 's2' });
+    setQueue(ctx, 'scribe:s1', project.slug, [a3.id, a1.id], { sessionId: 's1' });
+    setQueue(ctx, 'scribe:s1', project.slug, [s3.id, s4.id], 'unowned');
+    const line = (text: string) => text.split('\n').find((l) => l.startsWith('Up next'));
+    const expected = `Up next (you, A): #${a3.id} Run signing tests · B: #${a2.id} · later: #${s3.id} → #${s4.id}`;
+    // a1 is done, so it is left out.
+    expect(line(handleHookEvent(ctx, 's1', start()).context!)).toBe(expected);
+    expect(line(handleHookEvent(ctx, 's1', { event: 'prompt', asksStatus: true }).context!)).toBe(expected);
+    expect(line(handleHookEvent(ctx, 's2', start()).context!)).toBe(`Up next (you, B): #${a2.id} Play app signing · A: #${a3.id} · later: #${s3.id} → #${s4.id}`);
+    // A session with nothing of its own queued reads the others' parts only; one that ended leaves its steps under later.
+    setQueue(ctx, 'scribe:s2', project.slug, [], { sessionId: 's2' });
+    handleHookEvent(ctx, 's1', { event: 'end' });
+    expect(line(handleHookEvent(ctx, 's2', start()).context!)).toBe(`Up next: later: #${a3.id} → #${s3.id} → #${s4.id}`);
+  });
+
+  it('leaves the letter out of its own part while the session has no slot, and prints ? for another owner without one', () => {
+    const { ctx, project, a2, a3 } = setup();
+    handleHookEvent(ctx, 's1', start());
+    handleHookEvent(ctx, 's2', start());
+    setQueue(ctx, 'scribe:s1', project.slug, [a3.id], { sessionId: 's1' });
+    setQueue(ctx, 'scribe:s2', project.slug, [a2.id], { sessionId: 's2' });
+    // As from before migration 4: the next hook event gives each a slot.
+    ctx.db.prepare('UPDATE sessions SET slot = NULL').run();
+    const lines = renderBriefing(getProjectSnapshot(ctx, project.slug), 's1').split('\n');
+    expect(lines).toContain(`Up next (you): #${a3.id} Run signing tests · ?: #${a2.id}`);
   });
 
   it('caps the Up next line at five steps', () => {
@@ -171,8 +203,8 @@ describe('briefing: live work', () => {
     const steps = addNodes(ctx, 'test', { parentId: road.id, nodes: Array.from({ length: 7 }, (_, i) => ({ title: `Step ${i + 1}` })) });
     handleHookEvent(ctx, 's1', start());
     setQueue(ctx, 'scribe:s1', project.slug, steps.map((n) => n.id), { sessionId: 's1' });
-    const line = handleHookEvent(ctx, 's1', start()).context!.split('\n').find((l) => l.startsWith('Up next:'));
-    expect(line).toBe(`Up next: ${steps.slice(0, 5).map((n) => `#${n.id} ${n.title}`).join(' → ')} (+2 more)`);
+    const line = handleHookEvent(ctx, 's1', start()).context!.split('\n').find((l) => l.startsWith('Up next'));
+    expect(line).toBe(`Up next (you, A): ${steps.slice(0, 5).map((n) => `#${n.id} ${n.title}`).join(' → ')} (+2 more)`);
   });
 
   it("lists the focused step's working tasks under it: in progress first, then pending, at most 5", () => {
@@ -297,7 +329,7 @@ describe('briefing: type labels', () => {
     expect(lines).toContain(`      #${a2.id} ⧉ Play app signing — active`);
     expect(lines).toContain(`      #${a3.id} ⚒ Run signing tests — NEEDS YOU`);
     expect(lines.find((l) => l.trim().startsWith('Next:'))?.trim()).toMatch(new RegExp(`^Next: #${s3.id} ⇄ 3 RevenueCat · #\\d+ 4 Build to GitHub`));
-    expect(lines).toContain(`Up next: #${a3.id} ⚒ Run signing tests`);
+    expect(lines).toContain(`Up next (you, A): #${a3.id} ⚒ Run signing tests`);
     expect(lines).toContain(`Needs you (1): #${a3.id} ⚒ Run signing tests`);
   });
 

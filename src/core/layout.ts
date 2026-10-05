@@ -1,5 +1,5 @@
 import { buildIndex, computeVisible, countDone, isNeedsYou, progress, type FoldOverrides } from './tree';
-import type { EventRow, PastSession, QueueEntry, ResourceMeta, Session, SubagentInfo, TrailAgent, TreeNode, WorkItem } from './types';
+import { glyphTitle, ownerTag, sessionTag, type EventRow, type PastSession, type QueueEntry, type ResourceMeta, type Session, type SubagentInfo, type TrailAgent, type TreeNode, type WorkItem } from './types';
 
 export const ROW = 32;
 export const INDENT = 28;
@@ -212,6 +212,43 @@ export function queueView(
 
 /** Every step in the view, owners' lists first: what the queue pins in view. */
 const viewedSteps = (view: QueueView): number[] => [...[...view.bySession.values()].flat(), ...view.unowned];
+
+/** How many of the reader's own steps the briefing's Up next line names, with their titles. */
+export const MAX_UP_NEXT = 5;
+
+/** Who reads the Up next line, in the briefing and the status answer: its own part leads, with titles. */
+export interface UpNextReader {
+  sessionId: string;
+  nodes: Pick<TreeNode, 'id' | 'title' | 'label'>[];
+}
+
+/**
+ * The Up next line as text, or undefined when no step is up next. Each owner is named by its letter (`?` while its slot
+ * is empty), in the view's order, and a part with no steps is left out. Without a reader (the outline, set_queue's
+ * result): `Up next: A: #82 → #78 | B: #90 | later: #79`. With one (the briefing, the status answer), its own part comes
+ * first, as `#id glyph Title` up to MAX_UP_NEXT, and the rest keep bare ids:
+ * `Up next (you, A): #82 ⚙ Trail → #78 ⧉ Guide · B: #90 · later: #79`. A reader with no steps of its own reads
+ * `Up next: B: #90 · later: #79`.
+ */
+export function formatUpNext(view: QueueView, sessions: Pick<Session, 'id' | 'slot'>[], reader?: UpNextReader): string | undefined {
+  const slotOf = new Map(sessions.map((s) => [s.id, s.slot]));
+  const ids = (list: number[]) => list.map((id) => `#${id}`).join(' → ');
+  const parts = [
+    ...[...view.bySession].filter(([id]) => id !== reader?.sessionId).map(([id, list]) => `${ownerTag(slotOf.get(id) ?? null)}: ${ids(list)}`),
+    ...(view.unowned.length ? [`later: ${ids(view.unowned)}`] : []),
+  ];
+  const own = reader ? (view.bySession.get(reader.sessionId) ?? []) : [];
+  if (!reader || !own.length) return parts.length ? `Up next: ${parts.join(reader ? ' · ' : ' | ')}` : undefined;
+  const byId = new Map(reader.nodes.map((n) => [n.id, n]));
+  const titled = own.slice(0, MAX_UP_NEXT).map((id) => {
+    const n = byId.get(id);
+    return n ? `#${id} ${glyphTitle(n)}` : `#${id}`;
+  });
+  const more = own.length > MAX_UP_NEXT ? ` (+${own.length - MAX_UP_NEXT} more)` : '';
+  // Its own letter, as the briefing's first line gives it; left out while its slot is empty.
+  const letter = sessionTag(slotOf.get(reader.sessionId) ?? null);
+  return [`Up next (you${letter ? `, ${letter}` : ''}): ${titled.join(' → ')}${more}`, ...parts].join(' · ');
+}
 
 export function layoutOutline(input: LayoutInput): LayoutResult {
   const now = input.now ?? Date.now();

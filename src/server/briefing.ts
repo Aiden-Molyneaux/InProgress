@@ -1,3 +1,4 @@
+import { formatUpNext, queueView } from '../core/layout';
 import { ancestors, buildIndex, dfsOrder, isNeedsYou, kids, progress, type TreeIndex } from '../core/tree';
 import { LABEL_GLYPHS, NODE_LABELS, glyphTitle, sessionDisplayTitle, sessionTag, type ProjectSnapshot, type Session, type TreeNode, type WorkItem } from '../core/types';
 import { homeDir } from '../lib/home';
@@ -6,7 +7,6 @@ import { taskCommand } from '../lib/task-command';
 const MAX_FRONTIER_LINES = 25;
 /** Working tasks listed under the focused step: in progress first, then pending. */
 const MAX_TASK_LINES = 5;
-const MAX_UP_NEXT = 5;
 
 export interface UpdateRulesOptions {
   /** The data dir (default: the real one). */
@@ -105,13 +105,14 @@ export function frontierLines(snapshot: ProjectSnapshot, sessionId?: string): st
   return lines;
 }
 
-/** The planned order (set_queue), with titles: `Up next: #42 Build tabs → #44 Write the guide`. */
-function upNextLine(snapshot: ProjectSnapshot): string | undefined {
-  const byId = new Map(snapshot.nodes.map((n) => [n.id, n]));
-  const queued = snapshot.project.queue.map((e) => byId.get(e.nodeId)).filter((n): n is TreeNode => n !== undefined);
-  if (!queued.length) return undefined;
-  const shown = queued.slice(0, MAX_UP_NEXT).map((n) => `#${n.id} ${glyphTitle(n)}`);
-  return `Up next: ${shown.join(' → ')}${queued.length > MAX_UP_NEXT ? ` (+${queued.length - MAX_UP_NEXT} more)` : ''}`;
+/**
+ * The planned order (set_queue), this session's own steps first, with titles, then the other sessions' by letter and
+ * the unowned ones: `Up next (you, A): #42 ⧉ Build tabs → #44 ¶ Write the guide · B: #45 · later: #47`. Undefined when no
+ * step is up next.
+ */
+function upNextLine(snapshot: ProjectSnapshot, sessionId: string): string | undefined {
+  const view = queueView(snapshot.project.queue, snapshot.nodes, snapshot.sessions);
+  return formatUpNext(view, snapshot.sessions, { sessionId, nodes: snapshot.nodes });
 }
 
 function needsYouLine(snapshot: ProjectSnapshot): string | undefined {
@@ -139,7 +140,7 @@ export function renderBriefing(snapshot: ProjectSnapshot, sessionId: string): st
   }
   lines.push(...updateRules({ sessionId }));
   lines.push('Where things stand:', ...frontierLines(snapshot, sessionId).map((l) => `  ${l}`));
-  const upNext = upNextLine(snapshot);
+  const upNext = upNextLine(snapshot, sessionId);
   if (upNext) lines.push(upNext);
   const needs = needsYouLine(snapshot);
   if (needs) lines.push(needs);
@@ -158,7 +159,7 @@ export function renderBriefing(snapshot: ProjectSnapshot, sessionId: string): st
 
 export function renderStatusAnswer(snapshot: ProjectSnapshot, sessionId: string): string {
   const lines = [`[InProgress] Where things stand in ${snapshot.project.name} (live):`, ...frontierLines(snapshot, sessionId).map((l) => `  ${l}`)];
-  const upNext = upNextLine(snapshot);
+  const upNext = upNextLine(snapshot, sessionId);
   if (upNext) lines.push(upNext);
   const needs = needsYouLine(snapshot);
   if (needs) lines.push(needs);

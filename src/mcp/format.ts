@@ -1,7 +1,12 @@
-import { glyphTitle, type NodeDetail, type Project, type Resource, type SearchResult, type TreeNode } from '../core/types';
+import { formatUpNext, queueView } from '../core/layout';
+import { glyphTitle, type NodeDetail, type ProjectSnapshot, type Resource, type SearchResult, type TreeNode } from '../core/types';
 
-export function formatQueue(p: Project): string {
-  return p.queue.length ? `Up next in ${p.slug}: ${p.queue.map((e) => `#${e.nodeId}`).join(' → ')}.` : `Cleared the queue of ${p.slug}.`;
+/**
+ * The queue after a set_queue, as the outline prints it: `Up next: A: #82 → #78 | later: #79`. Said to be empty when no
+ * step is up next: an empty write clears only its owner's entries, so the others may still be there.
+ */
+export function formatQueue(s: ProjectSnapshot): string {
+  return formatUpNext(queueView(s.project.queue, s.nodes, s.sessions), s.sessions) ?? `Up next in ${s.project.slug} is empty.`;
 }
 
 export function formatCreated(nodes: TreeNode[]): string {
