@@ -49,13 +49,15 @@ function lineFor(index: TreeIndex, n: TreeNode, focusOf: Map<number, Session[]>,
   return `#${n.id} ${glyphTitle(n)}${n.kind === 'question' ? ' (question)' : ''} — ${statusText(n)}${prog ? ` (${prog.done}/${prog.total})` : ''}${here.length ? `  ${here.join(' ')}` : ''}`;
 }
 
+/** The open ones of `items`: in progress first, then pending, each in the order given (creation order). */
+const inProgressFirst = (items: WorkItem[]): WorkItem[] => [...items.filter((i) => i.status === 'in_progress'), ...items.filter((i) => i.status === 'pending')];
+
 /**
  * The open working tasks of live sessions on a node, in progress first, then pending, each in creation order. An ended
- * session's tasks are trail, never live work.
+ * session's tasks are trail, never live work: the Left unfinished line names them.
  */
 function openTasks(items: WorkItem[], nodeId: number): WorkItem[] {
-  const on = items.filter((i) => i.nodeId === nodeId && i.endedAt === null);
-  return [...on.filter((i) => i.status === 'in_progress'), ...on.filter((i) => i.status === 'pending')];
+  return inProgressFirst(items.filter((i) => i.nodeId === nodeId && i.endedAt === null));
 }
 
 export function frontierLines(snapshot: ProjectSnapshot, sessionId?: string): string[] {
@@ -149,6 +151,64 @@ function checkLine(snapshot: ProjectSnapshot, now: number): string | undefined {
   return `Check with Aiden whether these are already done, then brief the answer (a "not yet" goes in "log on #id: …"): ${named.join(', ')}.`;
 }
 
+/** How many finished steps the Recently done line names. */
+const RECENTLY_DONE = 2;
+/** How long an outcome may run on the Recently done line, its "…" included. */
+const OUTCOME_MAX = 80;
+/** How many task subjects the Left unfinished line names, in all. */
+const MAX_LEFT_UNFINISHED = 3;
+
+/** An outcome on one line, at most OUTCOME_MAX characters (`.length` units): a longer one is cut to one less, plus "…". */
+function clipOutcome(outcome: string): string {
+  const line = outcome.replace(/\s+/g, ' ').trim();
+  return line.length > OUTCOME_MAX ? `${line.slice(0, OUTCOME_MAX - 1)}…` : line;
+}
+
+/**
+ * `Recently done: #87 ¶ Title — "outcome" · #86 Title`: the steps finished last, a tie (addNodes stamps one time per
+ * call) to the newer id, each with its outcome clipped, or bare without one. Only `done` sets completedAt, so a dropped
+ * step never shows. Undefined when nothing is done.
+ */
+function recentlyDoneLine(snapshot: ProjectSnapshot): string | undefined {
+  const done = snapshot.nodes
+    .filter((n): n is TreeNode & { completedAt: string } => n.parentId !== null && n.status === 'done' && n.completedAt !== null)
+    .sort((a, b) => b.completedAt.localeCompare(a.completedAt) || b.id - a.id)
+    .slice(0, RECENTLY_DONE);
+  if (!done.length) return undefined;
+  const named = done.map((n) => {
+    const outcome = clipOutcome(n.outcome);
+    return `#${n.id} ${glyphTitle(n)}${outcome ? ` — "${outcome}"` : ''}`;
+  });
+  return `Recently done: ${named.join(' · ')}`;
+}
+
+/**
+ * `Left unfinished by an earlier session: on #86: "Review it", "Write tests" · on #90: "Check the hint"`: the open tasks
+ * of ended sessions (their subagents' too) on steps still open, by step in tree order, in progress first within a step,
+ * MAX_LEFT_UNFINISHED subjects in all. The snapshot holds only sessions that ended within the 7-day trail. Undefined when
+ * there are none.
+ */
+function leftUnfinishedLine(snapshot: ProjectSnapshot): string | undefined {
+  const index = buildIndex(snapshot.nodes);
+  const order = dfsOrder(index);
+  const stillOpen = (id: number) => {
+    const n = index.byId.get(id);
+    return n !== undefined && n.status !== 'done' && n.status !== 'dropped';
+  };
+  const left = snapshot.workItems.filter((i) => i.endedAt !== null && stillOpen(i.nodeId));
+  const steps = [...new Set(left.map((i) => i.nodeId))].sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
+  const parts: string[] = [];
+  let room = MAX_LEFT_UNFINISHED;
+  for (const nodeId of steps) {
+    const subjects = inProgressFirst(left.filter((i) => i.nodeId === nodeId)).slice(0, room);
+    if (!subjects.length) continue;
+    parts.push(`on #${nodeId}: ${subjects.map((i) => `"${i.subject}"`).join(', ')}`);
+    room -= subjects.length;
+    if (room === 0) break;
+  }
+  return parts.length ? `Left unfinished by an earlier session: ${parts.join(' · ')}` : undefined;
+}
+
 export interface BriefingOptions {
   /** Ask about needs-you items older than NEEDS_YOU_STALE_MS: every fresh briefing does, one after a compaction does not. */
   checkOld: boolean;
@@ -178,7 +238,11 @@ export function renderBriefing(snapshot: ProjectSnapshot, sessionId: string, now
   if (needs) lines.push(needs);
   const check = opts.checkOld ? checkLine(snapshot, now) : undefined;
   if (check) lines.push(check);
-  const recent =[...resources].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id - a.id).slice(0, 5);
+  const recentlyDone = recentlyDoneLine(snapshot);
+  if (recentlyDone) lines.push(recentlyDone);
+  const leftUnfinished = leftUnfinishedLine(snapshot);
+  if (leftUnfinished) lines.push(leftUnfinished);
+  const recent = [...resources].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id - a.id).slice(0, 5);
   if (recent.length) lines.push(`Recent resources: ${recent.map((r) => `r${r.id} ${r.title} (on #${r.nodeId})`).join(' · ')}`);
   const others = sessions.filter((s) => s.id !== sessionId && s.state !== 'ended');
   if (others.length) {

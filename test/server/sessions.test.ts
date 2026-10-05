@@ -480,6 +480,116 @@ describe('briefing: needs-you ages and the check line', () => {
   });
 });
 
+describe('briefing: recently done and left unfinished', () => {
+  const HOUR = 60 * 60 * 1000;
+  const DAY = 24 * HOUR;
+
+  /** setup()'s project on a clock the test moves by hand, so each finish gets its own time. */
+  function clocked() {
+    let now = Date.parse('2026-10-01T09:00:00.000Z');
+    const t = setup(createCtx(openDb(':memory:'), () => new Date(now).toISOString()));
+    const step = (title: string) => listNodes(t.ctx, t.project.id).find((n) => n.title === title)!;
+    return { ...t, step, tick: (ms: number) => (now += ms) };
+  }
+  const brief = (ctx: Ctx, session = 's1') => handleHookEvent(ctx, session, start()).context!;
+  const lineOf = (text: string, head: string) => text.split('\n').find((l) => l.startsWith(head));
+  const statusAnswer = (ctx: Ctx) => handleHookEvent(ctx, 's1', { event: 'prompt', asksStatus: true }).context!;
+
+  it('names the two steps finished last, each with its glyph and quoted outcome, a step with no outcome bare', () => {
+    const { ctx, a1, a2, tick } = clocked();
+    tick(HOUR);
+    updateNode(ctx, 'test', a2.id, { status: 'done', outcome: 'Signing configured in Play Console', label: 'docs' });
+    // a1 and 1 iOS certificate finished in one call, so at one time: the newer id comes first. a1 has no outcome.
+    expect(lineOf(brief(ctx), 'Recently done')).toBe(`Recently done: #${a2.id} ¶ Play app signing — "Signing configured in Play Console" · #${a1.id} Upload keystore`);
+    expect(statusAnswer(ctx)).not.toContain('Recently done');
+  });
+
+  it('breaks a tie in finish time by id, the newer first', () => {
+    const { ctx, s1, a1 } = clocked();
+    updateNode(ctx, 'test', s1.id, { outcome: 'Certificate in the keychain' });
+    expect(lineOf(brief(ctx), 'Recently done')).toBe(`Recently done: #${a1.id} Upload keystore · #${s1.id} 1 iOS certificate — "Certificate in the keychain"`);
+  });
+
+  it('clips an outcome to 80 characters with the … inside them, on one line', () => {
+    const { ctx, step, tick } = clocked();
+    const [s3, s4] = [step('3 RevenueCat'), step('4 Build to GitHub')];
+    tick(HOUR);
+    updateNode(ctx, 'test', s3.id, { status: 'done', outcome: 'y'.repeat(80) });
+    tick(HOUR);
+    const long = `Builds on push.\n\nThe workflow ${'x'.repeat(100)}`;
+    updateNode(ctx, 'test', s4.id, { status: 'done', outcome: long });
+    const clipped = `${`Builds on push. The workflow ${'x'.repeat(100)}`.slice(0, 79)}…`;
+    expect(clipped).toHaveLength(80);
+    expect(lineOf(brief(ctx), 'Recently done')).toBe(`Recently done: #${s4.id} 4 Build to GitHub — "${clipped}" · #${s3.id} 3 RevenueCat — "${'y'.repeat(80)}"`);
+  });
+
+  it('never names a dropped step, and leaves the line out when nothing is done', () => {
+    const { ctx, s1, a1, a2, tick } = clocked();
+    tick(HOUR);
+    updateNode(ctx, 'test', a2.id, { status: 'dropped', outcome: 'Not needed after all' });
+    updateNode(ctx, 'test', s1.id, { status: 'active' });
+    expect(lineOf(brief(ctx), 'Recently done')).toBe(`Recently done: #${a1.id} Upload keystore`);
+    updateNode(ctx, 'test', a1.id, { status: 'todo' });
+    expect(brief(ctx)).not.toContain('Recently done');
+  });
+
+  it('names the open tasks an ended session left on open steps, its subagents\' too, by step in tree order, three at most', () => {
+    const { ctx, a1, a2, step } = clocked();
+    const [s3, s4, s5] = [step('3 RevenueCat'), step('4 Build to GitHub'), step('5 Store listing')];
+    handleHookEvent(ctx, 's1', start());
+    handleHookEvent(ctx, 's1', { event: 'task-created', taskKey: '1', subject: 'Still mine' });
+    handleHookEvent(ctx, 's2', start());
+    setFocus(ctx, 'scribe:s2', 's2', s3.id);
+    const task = (key: string, subject: string, agentId?: string) => handleHookEvent(ctx, 's2', { event: 'task-created', taskKey: key, subject, agentId });
+    task('1', 'Wire the paywall');
+    task('2', `#${a2.id} Check the upload key`);
+    task('3', 'Finished already');
+    handleHookEvent(ctx, 's2', { event: 'task-updated', taskKey: '3', status: 'completed' });
+    task('4', `#${a1.id} On a finished step`);
+    task('5', `#${s5.id} On a dropped step`);
+    task('6', `#${s4.id} Fourth in tree order`);
+    handleHookEvent(ctx, 's2', { event: 'subagent-start', agentId: 'g1', agentType: 'general-purpose' });
+    task('1', 'Price the tiers', 'g1');
+    handleHookEvent(ctx, 's2', { event: 'task-updated', agentId: 'g1', taskKey: '1', status: 'in_progress' });
+    updateNode(ctx, 'test', s5.id, { status: 'dropped' });
+    // While s2 is live, nothing is left unfinished.
+    expect(brief(ctx)).not.toContain('Left unfinished');
+    handleHookEvent(ctx, 's2', { event: 'end' });
+    // In progress first within a step, as under the focus.
+    const expected = `Left unfinished by an earlier session: on #${a2.id}: "#${a2.id} Check the upload key" · on #${s3.id}: "Price the tiers", "Wire the paywall"`;
+    expect(lineOf(brief(ctx), 'Left unfinished')).toBe(expected);
+    expect(statusAnswer(ctx)).not.toContain('Left unfinished');
+  });
+
+  it('leaves the line out when no ended session left work, and once the 7-day trail has passed', () => {
+    const { ctx, a2, tick } = clocked();
+    handleHookEvent(ctx, 's1', start());
+    expect(brief(ctx)).not.toContain('Left unfinished');
+    handleHookEvent(ctx, 's2', start());
+    setFocus(ctx, 'scribe:s2', 's2', a2.id);
+    handleHookEvent(ctx, 's2', { event: 'task-created', taskKey: '1', subject: 'Review it' });
+    handleHookEvent(ctx, 's2', { event: 'end' });
+    tick(7 * DAY - 1);
+    expect(lineOf(brief(ctx), 'Left unfinished')).toBe(`Left unfinished by an earlier session: on #${a2.id}: "Review it"`);
+    tick(2);
+    expect(brief(ctx)).not.toContain('Left unfinished');
+  });
+
+  it('places both after Needs you and its check line, Recently done first, before Recent resources', () => {
+    const { ctx, a2, a3, tick } = clocked();
+    addResource(ctx, 'test', { nodeId: a3.id, kind: 'doc', title: 'Notes', content: 'x' });
+    handleHookEvent(ctx, 's1', start());
+    handleHookEvent(ctx, 's2', start());
+    setFocus(ctx, 'scribe:s2', 's2', a2.id);
+    handleHookEvent(ctx, 's2', { event: 'task-created', taskKey: '1', subject: 'Review it' });
+    handleHookEvent(ctx, 's2', { event: 'end' });
+    tick(4 * DAY);
+    handleHookEvent(ctx, 's3', start());
+    const heads = brief(ctx).split('\n').map((l) => /^(Where things stand|Needs you|Check with Aiden|Recently done|Left unfinished|Recent resources|Other sessions here)/.exec(l)?.[1]).filter(Boolean);
+    expect(heads).toEqual(['Where things stand', 'Needs you', 'Check with Aiden', 'Recently done', 'Left unfinished', 'Recent resources', 'Other sessions here']);
+  });
+});
+
 describe('first prompt of a session the server has not seen (a missed start)', () => {
   const prompt = (cwd: string, extra = {}) => ({ event: 'prompt' as const, cwd, ...extra });
 
