@@ -147,7 +147,16 @@ export interface SubagentInfo {
   endedAt: string | null;
   /** Its number within its session, given at its start (the 1 in `a1`); null for a subagent from before migration 4. */
   ordinal: number | null;
+  /**
+   * What it was asked to do: the first sentence of its Agent prompt, at most 200 characters. Null until it is paired
+   * with its dispatch, for a blank prompt, and for a subagent from before migration 5.
+   */
+  purpose: string | null;
 }
+
+/** Agent types that only read. They get no badge of their own and leave no trail: a step shows them as one row. */
+export const READER_AGENT_TYPES = ['Explore', 'Plan', 'claude-code-guide'] as const;
+export const isReader = (agentType: string): boolean => (READER_AGENT_TYPES as readonly string[]).includes(agentType);
 
 /**
  * A subagent that has stopped, kept 7 days as the trail on its step. The snapshot lists every one; the layout shows a
