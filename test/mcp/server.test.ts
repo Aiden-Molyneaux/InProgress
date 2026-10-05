@@ -105,6 +105,18 @@ describe('scribe MCP tools', () => {
     expect(await call('set_queue', { project: 'tabs', nodes: [], session: 'q1', unowned: true })).toEqual({ text: 'Up next in tabs is empty.', isError: false });
   });
 
+  it("says nothing is up next, not that the queue is empty, when only the session's own focus is queued", async () => {
+    const created = await call('create_project', { name: 'Focused', description: 'x', session: 'q2' });
+    const rootId = ids(created.text)[0];
+    const [step] = lineIds((await call('add_nodes', { parent: rootId, nodes: [{ title: 'The one step' }], session: 'q2' })).text);
+    await call('enroll_session', { session: 'q2', project: 'focused' });
+    await call('set_focus', { session: 'q2', node: step });
+    expect(await call('set_queue', { project: 'focused', nodes: [step], session: 'q2' })).toEqual({
+      text: "Nothing is up next in focused: a session's own focus is not listed as next.",
+      isError: false,
+    });
+  });
+
   it('refuses a queue for a session not tracked in the project, saying how to fix it', async () => {
     const created = await call('create_project', { name: 'Unenrolled', description: 'x' });
     const rootId = ids(created.text)[0];
