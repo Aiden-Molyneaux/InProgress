@@ -12,7 +12,8 @@ InProgress is a live tree of a project's plan, steps, resources and Claude sessi
 A tracked session has a context block starting `[InProgress] This session is tracked in project …`. It carries the session id, the playbook, the update rules and where things stand. Follow those rules. In short:
 
 - Brief the scribe with the Agent tool (`subagent_type: "inprogress-scribe"`, description "InProgress update"). It runs in the background: never wait for it or poll it. At most one brief per turn, with every change batched.
-- Checkpoints: a new request with a deliverable arrives (it becomes a step right away, before the work starts); a plan is made or changed (backtracking marks steps `dropped` or moves them); the order of work is decided or changes (brief `queue: #a, #b, #c`, next first); a step starts, finishes or is blocked; something worth finding again is produced; something is handed to Aiden (`assignee: me`) or he reports doing it; an open question appears (`kind: question`) or is answered (`done`, answer in `outcome`).
+- Checkpoints: a new request with a deliverable arrives (it becomes a step right away, before the work starts); a plan is made or changed (backtracking marks steps `dropped` or moves them); the order of work is decided or changes (brief `queue:` and `later:`, below); a step starts, finishes or is blocked; something worth finding again is produced; something is handed to Aiden (`assignee: me`) or he reports doing it; an open question appears (`kind: question`) or is answered (`done`, answer in `outcome`).
+- The order of work: `queue: #a, #b` is this session's own order, next first, without its focus (the focus is "now", not "next"). `later: #c, #d` is the unowned order: steps no session has taken on. Each replaces only that order, so other sessions' orders stay as they are, and a step sits in the queue once: naming it takes it from wherever it was. When this session ends, its steps move to the head of `later`.
 - Steps are plan-level with outcomes, never single actions. Detours go in the log of the step they interrupted.
 - Working tasks sit under the steps, and Aiden watches them live. Start a subagent's description with its step's `#id` when the work belongs to a tracked step (`#44 Build project tabs`). Use the task tools (`TaskCreate`, `TaskUpdate`) for multi-step work, and start a task's subject with `#id` when it belongs to a step other than your focus. InProgress mirrors both on its own: they need no brief. Without the task tools, run this after each change; it is the one write you make yourself, with no brief: `{{TASKS}} <step id> --session <session id> --done "…" --doing "…" --todo "…"`. The flags repeat, in list order; no flags clears the list; leave out `<step id>` to use your focus. The same line runs in the Bash and the PowerShell tool. Put single quotes around a subject that contains `$` or a backtick, and leave double quotes out of subjects.
 - Resources always go to the scribe as a file path plus `snapshot_file`. Content that only exists in chat (for example a test suite written in a reply) is first written with the Write tool to `{{RESOURCES}}/<project-slug>/<yyyy-mm-dd>-<kebab-title>.md`.
@@ -29,7 +30,8 @@ Changes:
 - resource on the new "Run signing tests" node: test-suite "Signing test suite", path {{RESOURCES}}/ingame/2026-09-27-signing-test-suite.md, snapshot_file
 - log on #55: "Detour: sandbox network wedge, fixed by restarting VMware NAT"
 - focus → the new "Run signing tests" node
-- queue: the new "Run signing tests" node, #59, #60
+- queue: #59, #60
+- later: #61
 ```
 
 ## Type labels

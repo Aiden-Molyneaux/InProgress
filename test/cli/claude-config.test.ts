@@ -195,12 +195,21 @@ describe('install', () => {
     expect(skill).toContain('`#44 Build project tabs`');
     expect(skill).toMatch(/task tools \(`TaskCreate`, `TaskUpdate`\) for multi-step work/);
     expect(skill).toMatch(/subject with `#id` when it belongs to a step other than your focus/);
-    // The queue, new requests, and the fallback without task tools.
-    expect(skill).toContain('`queue: #a, #b, #c`');
+    // The queue (this session's own order without its focus, and the unowned order), new requests, and the fallback
+    // without task tools.
+    expect(skill).toMatch(/`queue: #a, #b` is this session's own order, next first, without its focus/);
+    expect(skill).toMatch(/`later: #c, #d` is the unowned order/);
+    // The template queues the steps after the focus, and has a later: line.
+    expect(skill).toMatch(/- focus → the new "Run signing tests" node\n- queue: #59, #60\n- later: #61\n/);
     expect(skill).toMatch(/new request with a deliverable .* becomes a step right away/);
     expect(skill).not.toContain('tasks on #');
     const agent = readFileSync(join(dir, 'agents', 'inprogress-scribe.md'), 'utf8');
     expect(agent).toMatch(/`set_queue`/);
+    expect(agent).toMatch(/`queue: #a, #b`.*`set_queue` with those ids, next first, and `session`/);
+    expect(agent).toMatch(/`later: #c, #d`.*`set_queue` with `unowned: true`/);
+    expect(agent).not.toMatch(/whole queue/);
+    // An adoption enrolls the session before it queues: a queue for a session not enrolled is refused.
+    expect(agent).toMatch(/then `enroll_session` and `set_focus`, and only then `set_queue`/);
     // The scribe no longer sets working tasks: the main session runs the tasks command itself.
     expect(agent).not.toMatch(/set_tasks|tasks on #/);
   });
