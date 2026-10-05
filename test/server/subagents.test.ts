@@ -194,15 +194,70 @@ describe('subagent lifetimes', () => {
     expect(changes(() => hook({ event: 'subagent-stop', agentId: 'x2' }))).toEqual([['subagents']]);
   });
 
-  it('clears subagents and dispatches when the session ends', () => {
-    const { ctx, hook } = setup();
-    hook(dispatch('t1', 'never started'));
-    hook(dispatch('t2', 'running'));
-    hook(start('a1'));
+  it('keeps the subagent rows when the session ends, ends the running ones then, and drops the dispatches', () => {
+    const { ctx, hook, tick } = setup();
+    hook(dispatch('t1', 'Map the hooks', 'general-purpose'));
+    hook(dispatch('t2', 'Write the tests', 'general-purpose'));
+    hook(dispatch('t3', 'Never started', 'general-purpose'));
+    hook(start('a1', 'general-purpose'));
+    hook(start('a2', 'general-purpose'));
+    tick(MIN);
+    hook({ event: 'subagent-stop', agentId: 'a1' });
+    tick(MIN);
     hook({ event: 'end' });
-    expect(findSession(ctx, 's1')!.subagents).toEqual([]);
-    expect(ctx.db.prepare('SELECT COUNT(*) AS c FROM session_subagents').get()).toEqual({ c: 0 });
+    // A row that had already stopped keeps its own time.
+    expect(ctx.db.prepare('SELECT agent_id, description, ended_at FROM session_subagents ORDER BY agent_id').all()).toEqual([
+      { agent_id: 'a1', description: 'Map the hooks', ended_at: '2026-10-02T09:01:00.000Z' },
+      { agent_id: 'a2', description: 'Write the tests', ended_at: '2026-10-02T09:02:00.000Z' },
+    ]);
     expect(ctx.db.prepare('SELECT COUNT(*) AS c FROM subagent_dispatches').get()).toEqual({ c: 0 });
+  });
+
+  it("ends a stale session's running subagents when it was last seen, not when it expired", () => {
+    const { ctx, project, hook, tick } = setup();
+    hook(dispatch('t1', 'Long job', 'general-purpose'));
+    hook(start('a1', 'general-purpose'));
+    tick(30 * MIN);
+    hook({ event: 'stop' });
+    tick(13 * 60 * MIN);
+    const snap = getProjectSnapshot(ctx, project.slug);
+    expect(findSession(ctx, 's1')).toMatchObject({ state: 'ended', endedAt: '2026-10-02T22:30:00.000Z' });
+    expect(snap.trailAgents).toEqual([expect.objectContaining({ sessionId: 's1', agentId: 'a1', startedAt: '2026-10-02T09:00:00.000Z', endedAt: '2026-10-02T09:30:00.000Z' })]);
+    expect(ctx.db.prepare('SELECT COUNT(*) AS c FROM subagent_dispatches').get()).toEqual({ c: 0 });
+  });
+});
+
+describe('the trail of ended subagents in the snapshot', () => {
+  it("lists a stopped subagent at once, with its session, and leaves out running ones and other projects' agents", () => {
+    const { ctx, project, play, hook, tick } = setup();
+    const other = createProject(ctx, 'test', { name: 'Other' });
+    addBinding(ctx, 'test', other.slug, 'C:/personal/Other');
+    handleHookEvent(ctx, 'o1', { event: 'start', source: 'startup', cwd: 'C:/personal/Other' });
+    hook(start('c1', 'general-purpose'), 'o1');
+    hook({ event: 'subagent-stop', agentId: 'c1' }, 'o1');
+    hook(dispatch('t1', 'Map the hooks', 'general-purpose', 'sonnet'));
+    hook(start('a1', 'general-purpose'));
+    hook(start('a2', 'general-purpose'));
+    tick(MIN);
+    hook({ event: 'subagent-stop', agentId: 'a1' });
+    // The layout, not the server, decides when a live session's stopped subagent leaves its greyed badge for the trail.
+    expect(getProjectSnapshot(ctx, project.slug).trailAgents).toEqual([
+      { sessionId: 's1', agentId: 'a1', agentType: 'general-purpose', startedAt: '2026-10-02T09:00:00.000Z', description: 'Map the hooks', model: 'sonnet', nodeId: play.id, endedAt: '2026-10-02T09:01:00.000Z' },
+    ]);
+    expect(getProjectSnapshot(ctx, other.slug).trailAgents.map((a) => a.agentId)).toEqual(['c1']);
+  });
+
+  it('keeps a trail agent for 7 days after it stopped, then leaves it out even before a prune', () => {
+    const { ctx, project, hook, tick } = setup();
+    hook(start('a1', 'general-purpose'));
+    hook({ event: 'subagent-stop', agentId: 'a1' });
+    hook({ event: 'end' });
+    const trail = () => getProjectSnapshot(ctx, project.slug).trailAgents.map((a) => a.agentId);
+    tick(7 * 24 * 60 * MIN - MIN);
+    expect(trail()).toEqual(['a1']);
+    tick(2 * MIN);
+    expect(trail()).toEqual([]);
+    expect(ctx.db.prepare('SELECT COUNT(*) AS c FROM session_subagents').get()).toEqual({ c: 1 });
   });
 });
 
@@ -240,13 +295,15 @@ describe('pruneSubagents', () => {
     expect(descriptions(ctx)).toEqual({ x2: 'second', x1: 'first' });
   });
 
-  it('removes subagents an hour after they ended, and their dispatches with them', () => {
+  it('removes subagents 7 days after they stopped, and their dispatches with them', () => {
     const { ctx, hook, tick } = setup();
-    hook(dispatch('t1', 'old'));
-    hook(start('a1'));
-    hook(start('a2'));
+    hook(dispatch('t1', 'old', 'general-purpose'));
+    hook(start('a1', 'general-purpose'));
+    hook(start('a2', 'general-purpose'));
     hook({ event: 'subagent-stop', agentId: 'a1' });
-    tick(61 * MIN);
+    tick(7 * 24 * 60 * MIN - MIN);
+    expect(pruneSubagents(ctx)).toEqual({ dispatches: 0, subagents: 0 });
+    tick(2 * MIN);
     expect(pruneSubagents(ctx)).toEqual({ dispatches: 1, subagents: 1 });
     expect(ctx.db.prepare('SELECT agent_id FROM session_subagents').all()).toEqual([{ agent_id: 'a2' }]);
   });

@@ -6,7 +6,7 @@ import { addNodes, updateNode } from '../../src/server/repo/nodes';
 import { addBinding, createProject, setQueue } from '../../src/server/repo/projects';
 import { getProjectSnapshot } from '../../src/server/repo/snapshot';
 import { pruneWorkItems, setTasks } from '../../src/server/repo/work';
-import { handleHookEvent, setFocus, type HookEventInput } from '../../src/server/session-flow';
+import { enrollSession, handleHookEvent, setFocus, type HookEventInput } from '../../src/server/session-flow';
 
 const MIN = 60 * 1000;
 const DAY = 24 * 60 * MIN;
@@ -41,8 +41,8 @@ describe('working tasks mirrored from the task tools', () => {
     expect(hook(created('1', 'Write the design note'))).toEqual({ tracked: true });
     hook(created('2', 'Read it before publishing'));
     expect(items()).toEqual([
-      { id: expect.any(Number), nodeId: play.id, sessionId: 's1', agentId: '', subject: 'Write the design note', status: 'pending', blocks: [], position: 1, updatedAt: '2026-10-02T09:00:00.000Z' },
-      { id: expect.any(Number), nodeId: play.id, sessionId: 's1', agentId: '', subject: 'Read it before publishing', status: 'pending', blocks: [], position: 2, updatedAt: '2026-10-02T09:00:00.000Z' },
+      { id: expect.any(Number), nodeId: play.id, sessionId: 's1', agentId: '', subject: 'Write the design note', status: 'pending', blocks: [], position: 1, updatedAt: '2026-10-02T09:00:00.000Z', endedAt: null },
+      { id: expect.any(Number), nodeId: play.id, sessionId: 's1', agentId: '', subject: 'Read it before publishing', status: 'pending', blocks: [], position: 2, updatedAt: '2026-10-02T09:00:00.000Z', endedAt: null },
     ]);
   });
 
@@ -139,13 +139,14 @@ describe('working tasks mirrored from the task tools', () => {
     expect(ctx.db.prepare('SELECT COUNT(*) AS c FROM work_items').get()).toEqual({ c: 0 });
   });
 
-  it("drops a session's tasks from view when it ends, and shows them again when it resumes", () => {
-    const { hook, items } = setup();
+  it("keeps a session's tasks in view when it ends, with when it ended, and reads them as live again when it resumes", () => {
+    const { hook, items, tick } = setup();
     hook(created('1', 'Write it'));
+    tick(5 * MIN);
     hook({ event: 'end' });
-    expect(items()).toEqual([]);
+    expect(items()).toEqual([expect.objectContaining({ subject: 'Write it', endedAt: '2026-10-02T09:05:00.000Z' })]);
     hook({ event: 'start', source: 'resume', cwd: 'C:/personal/InGame' });
-    expect(subjects(items())).toEqual(['Write it']);
+    expect(items()).toEqual([expect.objectContaining({ subject: 'Write it', endedAt: null })]);
   });
 
   it('goes with its node when the node is deleted', () => {
@@ -153,6 +154,70 @@ describe('working tasks mirrored from the task tools', () => {
     hook(created('1', `#${store.id} Draft the listing`));
     ctx.db.prepare('DELETE FROM nodes WHERE id = ?').run(store.id);
     expect(items()).toEqual([]);
+  });
+});
+
+describe('the trail of ended work in the snapshot', () => {
+  it("shows an ended session's tasks for 7 days after it ended, then leaves them out even before a prune", () => {
+    const { hook, items, tick } = setup();
+    hook(created('1', 'Write it'));
+    hook(updated('1', { status: 'in_progress' }));
+    hook({ event: 'end' });
+    tick(7 * DAY - MIN);
+    expect(items()).toEqual([expect.objectContaining({ subject: 'Write it', status: 'in_progress', endedAt: '2026-10-02T09:00:00.000Z' })]);
+    tick(2 * MIN);
+    expect(items()).toEqual([]);
+  });
+
+  it("dates an expired session's end by when it was last seen, not when the expiry ran", () => {
+    const { ctx, project, play, hook, tick } = setup();
+    hook(created('1', 'Write it'));
+    tick(30 * MIN);
+    hook({ event: 'stop' });
+    tick(16 * 60 * MIN);
+    expect(getProjectSnapshot(ctx, project.slug).pastSessions).toEqual([{ id: 's1', title: null, focusNodeId: play.id, endedAt: '2026-10-02T09:30:00.000Z' }]);
+    // The trail itself still lasts 7 days from the expiry, as the prune counts it.
+    tick(7 * DAY - MIN);
+    expect(getProjectSnapshot(ctx, project.slug).pastSessions.map((s) => s.id)).toEqual(['s1']);
+  });
+
+  it('leaves out the tasks of a session that moved to another project, whether it is live or ended', () => {
+    const { ctx, hook, items } = setup();
+    hook(created('1', 'Write it'));
+    const other = createProject(ctx, 'test', { name: 'Other' });
+    enrollSession(ctx, 'scribe:s1', 's1', other.slug);
+    expect(items()).toEqual([]);
+    hook({ event: 'end' });
+    expect(items()).toEqual([]);
+    expect(getProjectSnapshot(ctx, other.slug).workItems).toEqual([]);
+  });
+
+  it('names the ended sessions the trail needs: ones that left tasks or stopped subagents in the last 7 days', () => {
+    const { ctx, project, play, hook, tick } = setup();
+    const startIn = (id: string) => handleHookEvent(ctx, id, { event: 'start', source: 'startup', cwd: 'C:/personal/InGame', title: `Session ${id}` });
+    hook(created('1', 'Left by s1'));
+    startIn('s2');
+    hook({ event: 'subagent-start', agentId: 'b1', agentType: 'general-purpose' }, 's2');
+    startIn('s3');
+    startIn('s4');
+    hook(created('1', 'Still going'), 's4');
+    hook({ event: 'end' });
+    tick(MIN);
+    hook({ event: 'end' }, 's2');
+    hook({ event: 'end' }, 's3');
+    const past = () => getProjectSnapshot(ctx, project.slug).pastSessions;
+    // Newest first. s3 left nothing behind, and s4 is still live.
+    expect(past()).toEqual([
+      { id: 's2', title: 'Session s2', focusNodeId: null, endedAt: '2026-10-02T09:01:00.000Z' },
+      { id: 's1', title: null, focusNodeId: play.id, endedAt: '2026-10-02T09:00:00.000Z' },
+    ]);
+    // s4 keeps working meanwhile, so it never goes stale.
+    tick(7 * DAY - MIN + 1000);
+    hook({ event: 'prompt' }, 's4');
+    expect(past().map((s) => s.id)).toEqual(['s2']);
+    tick(MIN);
+    hook({ event: 'prompt' }, 's4');
+    expect(past()).toEqual([]);
   });
 });
 
@@ -196,7 +261,7 @@ describe('setTasks (the tasks command, where the task tools are absent)', () => 
     const { ctx, play, items } = setup();
     const res = setTasks(ctx, 'session:s1', 's1', undefined, [{ subject: 'Sign the bundle', status: 'in_progress' }]);
     expect(res.nodeId).toBe(play.id);
-    expect(res.tasks.map((i) => [i.nodeId, i.subject, i.status])).toEqual([[play.id, 'Sign the bundle', 'in_progress']]);
+    expect(res.tasks.map((i) => [i.nodeId, i.subject, i.status, i.endedAt])).toEqual([[play.id, 'Sign the bundle', 'in_progress', null]]);
     expect(items().map((i) => [i.nodeId, i.subject])).toEqual([[play.id, 'Sign the bundle']]);
   });
 

@@ -1,13 +1,10 @@
-import type { Session, WorkItem, WorkStatus } from '../../core/types';
+import { TRAIL_MS, type Session, type WorkItem, type WorkStatus } from '../../core/types';
 import { write, type Ctx } from '../db/tx';
 import { badRequest, notFound } from '../errors';
 import { findNode, leadingNode } from './nodes';
 import { getProjectById } from './projects';
 import { findSession } from './sessions';
 import { subagentNode } from './subagents';
-
-/** How long the working tasks of an ended session are kept: a session resumed within a week finds them again. */
-export const WORK_ITEM_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 interface WorkRow {
   id: number;
@@ -23,6 +20,9 @@ interface WorkRow {
   created_at: string;
   updated_at: string;
 }
+
+/** A row read with its session's end: `ended_at` is when that session ended, null while it is live. */
+type WorkRowWithEnd = WorkRow & { ended_at: string | null };
 
 /** A change to one task list entry, as the post-tool hook reports it. */
 export interface TaskChange {
@@ -141,7 +141,7 @@ export function taskUpdated(ctx: Ctx, session: Session, change: TaskChange): num
   return [...touched];
 }
 
-function toItems(rows: WorkRow[]): WorkItem[] {
+function toItems(rows: WorkRowWithEnd[]): WorkItem[] {
   const idOf = new Map(rows.map((r) => [`${r.session_id}\u0000${r.agent_id}\u0000${r.task_key}`, r.id]));
   return rows.map((r) => ({
     id: r.id,
@@ -155,20 +155,34 @@ function toItems(rows: WorkRow[]): WorkItem[] {
       .filter((id): id is number => id !== undefined),
     position: r.position,
     updatedAt: r.updated_at,
+    endedAt: r.ended_at,
   }));
 }
 
-/** The project's working tasks that belong to these sessions, by node, then position. */
-export function listWorkItems(ctx: Ctx, projectId: number, sessionIds: string[]): WorkItem[] {
-  if (!sessionIds.length) return [];
+/** The columns of a work row, plus its session's end (null unless the session has ended). */
+const WITH_END = "w.*, CASE WHEN s.state = 'ended' THEN s.ended_at END AS ended_at FROM work_items w JOIN sessions s ON s.id = w.session_id";
+
+/**
+ * The project's working tasks, by node, then position: those of its live sessions, and, as the trail, those of its
+ * sessions that ended less than 7 days ago. Only while the session still belongs to the project: a session moved to
+ * another project takes its old tasks out of view. A plain read.
+ */
+export function listWorkItems(ctx: Ctx, projectId: number): WorkItem[] {
+  const cutoff = new Date(Date.parse(ctx.now()) - TRAIL_MS).toISOString();
   const rows = ctx.db
-    .prepare(`SELECT * FROM work_items WHERE project_id = ? AND session_id IN (${sessionIds.map(() => '?').join(', ')}) ORDER BY node_id, position, id`)
-    .all(projectId, ...sessionIds) as WorkRow[];
+    .prepare(
+      `SELECT ${WITH_END}
+       WHERE w.project_id = ? AND s.project_id = w.project_id AND (s.state != 'ended' OR s.ended_at >= ?)
+       ORDER BY w.node_id, w.position, w.id`,
+    )
+    .all(projectId, cutoff) as WorkRowWithEnd[];
   return toItems(rows);
 }
 
-const ownList = (ctx: Ctx, sessionId: string, nodeId: number): WorkRow[] =>
-  ctx.db.prepare("SELECT * FROM work_items WHERE session_id = ? AND agent_id = '' AND node_id = ? ORDER BY position, id").all(sessionId, nodeId) as WorkRow[];
+const ownList = (ctx: Ctx, sessionId: string, nodeId: number): WorkRowWithEnd[] =>
+  ctx.db
+    .prepare(`SELECT ${WITH_END} WHERE w.session_id = ? AND w.agent_id = '' AND w.node_id = ? ORDER BY w.position, w.id`)
+    .all(sessionId, nodeId) as WorkRowWithEnd[];
 
 /**
  * The tasks command, run by a main session where the task tools are absent: replaces the session's own working tasks
@@ -207,9 +221,9 @@ export function setTasks(ctx: Ctx, actor: string, sessionId: string, requested: 
   });
 }
 
-/** Drops the working tasks of sessions that ended more than a week ago. Returns how many went. */
+/** Drops the working tasks of sessions that ended more than a week ago: they have left the trail. Returns how many went. */
 export function pruneWorkItems(ctx: Ctx): number {
-  const cutoff = new Date(Date.parse(ctx.now()) - WORK_ITEM_RETENTION_MS).toISOString();
+  const cutoff = new Date(Date.parse(ctx.now()) - TRAIL_MS).toISOString();
   return ctx.db
     .prepare("DELETE FROM work_items WHERE session_id IN (SELECT id FROM sessions WHERE state = 'ended' AND ended_at IS NOT NULL AND ended_at < ?)")
     .run(cutoff).changes;

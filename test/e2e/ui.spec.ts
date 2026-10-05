@@ -1223,4 +1223,64 @@ test.describe('Live work', () => {
     await expect(details.locator('.ip-wt', { hasText: 'Collect the screenshots' })).toHaveText('○ Collect the screenshots — Draft the store notes');
     await expect(details.locator('.ip-dagent')).toHaveText(new RegExp(`^◆ Draft the store notes · sonnet · ${RUNNING}$`));
   });
+
+  test("an ended session's tasks and subagents stay on their steps as a trail row that opens, and Details lists them under its title", async ({ page, api, fresh }) => {
+    const android = fresh.ids['2 Android signing'];
+    await task(api, fresh, '1', 'Read the signing guide', 'completed');
+    await task(api, fresh, '2', 'Write the release notes', 'completed');
+    await task(api, fresh, '3', 'Upload the key', 'in_progress');
+    await subagent(api, fresh, 'agent-1', `#${android} Check the keystore`, 'sonnet');
+    // On the subagent's own list, so it goes under the subagent's step.
+    await task(api, fresh, '1', 'Compare the keystores', 'in_progress', 'agent-1');
+    await hook(api, fresh.session, { event: 'end' });
+    // The newest active step, so the camera opens on it now that no session works.
+    await write(api, fresh.session, 'patch', `/api/nodes/${fresh.ids['Play app signing']}`, { outcome: 'Keys uploaded' });
+    await open(page, fresh);
+    const card = page.locator('.ip-node', { hasText: 'Play app signing' });
+    const playRow = page.locator('.ip-work-done', { hasText: '2 done' });
+    const androidRow = page.locator('.ip-work-done', { hasText: 'agent' });
+    const upload = page.locator('.ip-work', { hasText: 'Upload the key' });
+    await expect(card).toBeInViewport();
+    await expect(page.locator('.ip-work-done')).toHaveCount(2);
+    await expect(playRow).toHaveText('✓ 2 done · 1 unfinished');
+    await expect(playRow).toHaveAttribute('aria-expanded', 'false');
+    await expect(upload).toHaveCount(0);
+    // The session's badge left with it.
+    await expect(page.locator('.ip-badge')).toHaveCount(0);
+    const [cardBox, rowBox] = await Promise.all([card, playRow].map(boxOf));
+    expect(rowBox.y).toBeGreaterThanOrEqual(cardBox.y + cardBox.height);
+    expect(rowBox.x).toBeGreaterThan(cardBox.x + 20);
+    // Opened: the done tasks keep their ✓, the unfinished one is a hollow grey ○ that never pulses.
+    await playRow.click();
+    await expect(playRow).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.locator('.ip-work', { hasText: 'Read the signing guide' }).locator('.ip-work-mark')).toHaveText('✓');
+    await expect(upload).toHaveClass(/\bstale\b/);
+    await expect(upload.locator('.ip-work-mark')).toHaveText('○');
+    await expect(upload.locator('.ip-work-mark')).toHaveCSS('color', 'rgb(174, 174, 178)');
+    await expect(upload.locator('.ip-work-mark')).toHaveCSS('animation-name', 'none');
+    await playRow.click();
+    await expect(upload).toHaveCount(0);
+    // The subagent stays on its own step with the task it left, neutral grey, saying how long it ran and when it stopped.
+    await expect(androidRow).toHaveText('✓ 1 unfinished · 1 agent');
+    await expect(page.locator('.ip-agent')).toHaveCount(0);
+    await androidRow.click();
+    const compare = page.locator('.ip-work', { hasText: 'Compare the keystores' });
+    await expect(compare).toHaveClass(/\bstale\b/);
+    await expect(compare.locator('.ip-work-agent')).toHaveCount(0);
+    const agent = page.locator('.ip-trail-agent');
+    await expect(agent).toHaveText(new RegExp(`^◆ Check the keystore · sonnet · ran ${RUNNING} · stopped just now$`));
+    await expect(agent).toHaveCSS('color', 'rgb(110, 110, 115)');
+    // Details lists the trail under the session's title, and nothing as live work.
+    await card.click();
+    const details = page.getByRole('complementary');
+    await expect(details.locator('.ip-trail-head')).toHaveText('E2E session · ended just now');
+    await expect(details.locator('.ip-wt.stale')).toHaveText(['✓ Read the signing guide', '✓ Write the release notes', '○ Upload the key']);
+    await expect(details.locator('.ip-wt:not(.stale)')).toHaveCount(0);
+    await page.locator('.ip-node', { hasText: '2 Android signing' }).click();
+    await expect(details).toContainText(`#${android} 2 Android signing`);
+    const group = details.locator('.ip-trail', { hasText: 'E2E session · ended just now' });
+    await expect(group.locator('.ip-wt.stale')).toHaveText('○ Compare the keystores — Check the keystore');
+    await expect(group.locator('.ip-dtrail')).toHaveText(new RegExp(`^◆ Check the keystore · sonnet · ran ${RUNNING} · stopped just now$`));
+    await expect(details.locator('.ip-wt:not(.stale)')).toHaveCount(0);
+  });
 });

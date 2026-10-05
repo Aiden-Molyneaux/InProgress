@@ -1,6 +1,6 @@
-import { STALE_SESSION_MS, type Session, type SessionState } from '../../core/types';
+import { STALE_SESSION_MS, TRAIL_MS, type PastSession, type Session, type SessionState } from '../../core/types';
 import { write, type Ctx } from '../db/tx';
-import { clearSubagents, listSubagents } from './subagents';
+import { endSubagents, listSubagents } from './subagents';
 
 interface SessionRow {
   id: string;
@@ -53,14 +53,16 @@ export function saveSession(ctx: Ctx, s: Session): void {
 export function expireStaleSessions(ctx: Ctx): void {
   const cutoff = new Date(Date.parse(ctx.now()) - STALE_SESSION_MS).toISOString();
   const stale = ctx.db
-    .prepare("SELECT id, project_id FROM sessions WHERE state != 'ended' AND last_seen_at < ?")
-    .all(cutoff) as { id: string; project_id: number | null }[];
+    .prepare("SELECT id, project_id, last_seen_at FROM sessions WHERE state != 'ended' AND last_seen_at < ?")
+    .all(cutoff) as { id: string; project_id: number | null; last_seen_at: string }[];
   if (!stale.length) return;
   write(ctx, 'system', (record) => {
     const now = ctx.now();
-    for (const { id, project_id } of stale) {
+    for (const { id, project_id, last_seen_at } of stale) {
       ctx.db.prepare("UPDATE sessions SET state = 'ended', ended_at = ? WHERE id = ?").run(now, id);
-      clearSubagents(ctx, id);
+      // Its running subagents stopped when the session was last heard from, not 12 hours later: the trail says how long
+      // they ran.
+      endSubagents(ctx, id, last_seen_at);
       record({ projectId: project_id, type: 'session.updated', entity: 'session', entityId: id, data: { changed: ['state'], state: 'ended' } });
     }
   });
@@ -74,4 +76,27 @@ export function listProjectSessions(ctx: Ctx, projectId: number): Session[] {
   expireStaleSessions(ctx);
   return (ctx.db.prepare("SELECT * FROM sessions WHERE project_id = ? AND state != 'ended' ORDER BY last_seen_at DESC").all(projectId) as SessionRow[])
     .map((r) => toSession(ctx, r));
+}
+
+/**
+ * The project's ended sessions that the trail names, newest first: ones that ended less than 7 days ago leaving working
+ * tasks here, or whose subagents stopped less than 7 days ago. A plain read.
+ *
+ * The end it shows is when the session was last heard from, if that came first: expiry stamps `ended_at` lazily, 12 hours
+ * or more after the last hook. A hook `end` sets both to the same moment. The 7-day cutoffs stay on `ended_at`, as
+ * pruneWorkItems counts them.
+ */
+export function listPastSessions(ctx: Ctx, projectId: number): PastSession[] {
+  const cutoff = new Date(Date.parse(ctx.now()) - TRAIL_MS).toISOString();
+  const rows = ctx.db
+    .prepare(
+      `SELECT id, title, focus_node_id, MIN(s.ended_at, s.last_seen_at) AS shown_end FROM sessions s
+       WHERE s.project_id = ? AND s.state = 'ended' AND s.ended_at IS NOT NULL AND (
+         (s.ended_at >= ? AND EXISTS (SELECT 1 FROM work_items w WHERE w.session_id = s.id AND w.project_id = s.project_id))
+         -- The same agents as listTrailAgents: a filter added there (P6's readers, say) belongs here too.
+         OR EXISTS (SELECT 1 FROM session_subagents a WHERE a.session_id = s.id AND a.ended_at IS NOT NULL AND a.ended_at >= ?))
+       ORDER BY shown_end DESC, s.id`,
+    )
+    .all(projectId, cutoff, cutoff) as { id: string; title: string | null; focus_node_id: number | null; shown_end: string }[];
+  return rows.map((r) => ({ id: r.id, title: r.title, focusNodeId: r.focus_node_id, endedAt: r.shown_end }));
 }

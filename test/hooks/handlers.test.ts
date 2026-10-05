@@ -264,7 +264,8 @@ describe('runHandler', () => {
     await run('subagent-stop', { session_id: 'h4', agent_id: 'ag1', agent_type: 'Explore' });
     await run('stop', { session_id: 'h4' });
     await run('session-end', { session_id: 'h4' });
-    expect(findSession(ctx, 'h4')).toMatchObject({ state: 'ended', subagents: [] });
+    // The stopped subagent's row stays for the trail.
+    expect(findSession(ctx, 'h4')).toMatchObject({ state: 'ended', subagents: [{ agentId: 'ag1', endedAt: expect.any(String) }] });
   });
 
   it('does nothing without a session id', async () => {

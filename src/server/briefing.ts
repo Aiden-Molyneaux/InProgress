@@ -48,9 +48,12 @@ function lineFor(index: TreeIndex, n: TreeNode, focusOf: Map<number, Session[]>,
   return `#${n.id} ${glyphTitle(n)}${n.kind === 'question' ? ' (question)' : ''} — ${statusText(n)}${prog ? ` (${prog.done}/${prog.total})` : ''}${here.length ? `  ${here.join(' ')}` : ''}`;
 }
 
-/** The open working tasks on a node, in progress first, then pending, each in creation order. */
+/**
+ * The open working tasks of live sessions on a node, in progress first, then pending, each in creation order. An ended
+ * session's tasks are trail, never live work.
+ */
 function openTasks(items: WorkItem[], nodeId: number): WorkItem[] {
-  const on = items.filter((i) => i.nodeId === nodeId);
+  const on = items.filter((i) => i.nodeId === nodeId && i.endedAt === null);
   return [...on.filter((i) => i.status === 'in_progress'), ...on.filter((i) => i.status === 'pending')];
 }
 

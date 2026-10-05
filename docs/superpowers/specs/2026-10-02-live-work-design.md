@@ -42,7 +42,8 @@ Attribution of a working task to a node, decided once, at creation:
 - A **PostToolUse** hook on `^(Agent|Task)$` posts the launch response's `agentId`. For background agents this arrives
   at launch and makes the pairing exact. Foreground agents get it at completion, which only confirms the pairing.
 - **SubagentStop** marks the subagent `ended_at` rather than deleting its row. Ended subagents show greyed for
-  5 minutes and are pruned after an hour.
+  5 minutes, then stay 7 days as the trail on their step (review actions §3). Session end marks the running ones
+  ended instead of deleting them.
 
 ### Planned order (#56)
 - Across plan steps: a per-project queue of node ids, set by the scribe with a new MCP tool
@@ -96,7 +97,8 @@ exactly like mirrored tasks.
   - Tasks fold with their node and are never counted in plan progress.
   - A subagent's tasks carry its badge colour.
 - **Badges.** Each subagent gets its own badge under its node: `◆ description · model · 12 min`. Ended subagents show
-  greyed (`done 2 min ago`) and then drop off. The session's own badge stays under its focus.
+  greyed (`done 2 min ago`) for 5 minutes, then move into the step's trail (review actions §3). The session's own badge
+  stays under its focus.
 - **Session chip.** Lists its subagents (description · model · elapsed) on hover or focus.
 - **Queue.** Numbered markers ①②③ appear on queued steps. An `Up next` line sits under the session row, lists the
   queue, and jumps to an item on click. When the frontier has no working session, it prefers the queue head.

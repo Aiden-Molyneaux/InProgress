@@ -5,7 +5,8 @@ import { listLogs } from './logs';
 import { listNodes, requireNode } from './nodes';
 import { resolveProject } from './projects';
 import { listNodeResources, listResourceMeta } from './resources';
-import { listProjectSessions } from './sessions';
+import { listPastSessions, listProjectSessions } from './sessions';
+import { listTrailAgents } from './subagents';
 import { listWorkItems } from './work';
 
 /**
@@ -15,13 +16,16 @@ import { listWorkItems } from './work';
  */
 export function getProjectSnapshot(ctx: Ctx, ref: string | number): ProjectSnapshot {
   const project = resolveProject(ctx, ref);
+  // First: stale sessions expire here, so the trail reads below find them ended.
   const sessions = listProjectSessions(ctx, project.id);
   return {
     project,
     nodes: listNodes(ctx, project.id),
     resources: listResourceMeta(ctx, project.id),
     sessions,
-    workItems: listWorkItems(ctx, project.id, sessions.map((s) => s.id)),
+    workItems: listWorkItems(ctx, project.id),
+    trailAgents: listTrailAgents(ctx, project.id),
+    pastSessions: listPastSessions(ctx, project.id),
     lastEventId: maxEventId(ctx),
     lastEvent: lastProjectEvent(ctx, project.id),
   };

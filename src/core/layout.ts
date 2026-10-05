@@ -1,5 +1,5 @@
 import { buildIndex, computeVisible, countDone, isNeedsYou, progress, type FoldOverrides } from './tree';
-import type { EventRow, ResourceMeta, Session, SubagentInfo, TreeNode, WorkItem } from './types';
+import type { EventRow, PastSession, ResourceMeta, Session, SubagentInfo, TrailAgent, TreeNode, WorkItem } from './types';
 
 export const ROW = 32;
 export const INDENT = 28;
@@ -9,7 +9,7 @@ export const BADGE_ROW = 26;
 export const WORK_ROW = 20;
 /** Room after a node's working tasks, so the next card doesn't sit right on them. */
 export const WORK_GAP = 6;
-/** How long an ended subagent's badge stays, greyed. The snapshot keeps an ended subagent as long. */
+/** How long a live session's ended subagent keeps its badge, greyed; after that it shows in the trail. */
 export const ENDED_AGENT_MS = 5 * 60 * 1000;
 
 export interface LayoutNodeItem {
@@ -79,20 +79,41 @@ export interface LayoutWorkItem {
   y: number;
   /** In progress while its session works, or while its subagent runs. */
   pulse: boolean;
+  /** Its session has ended: it is trail, shown only while the node's done row is open, and never pulses. */
+  stale: boolean;
 }
 
-/** "✓ n done": a node's completed working tasks folded into one row. A `work:<nodeId>` override opens it. */
+/**
+ * "✓ n done · n unfinished · n agents": a node's completed working tasks and its trail of ended work folded into one
+ * row. A `work:<nodeId>` override opens it.
+ */
 export interface LayoutWorkDoneItem {
   kind: 'workDone';
   id: string;
   nodeId: number;
+  /** Completed tasks, of live and ended sessions. */
   count: number;
+  /** Tasks an ended session left pending or in progress. */
+  unfinished: number;
+  /** Trail agents on the node: subagents that stopped (a live session's, five minutes after). */
+  agents: number;
   open: boolean;
   x: number;
   y: number;
 }
 
-export type LayoutItem = LayoutNodeItem | LayoutMoreItem | LayoutBadgeItem | LayoutAgentItem | LayoutWorkItem | LayoutWorkDoneItem;
+/** A subagent in the trail, listed under its node's open done row after the node's tasks. Neutral: no colour, never pulsing. */
+export interface LayoutTrailAgentItem {
+  kind: 'trailAgent';
+  id: string;
+  sessionId: string;
+  agentId: string;
+  nodeId: number;
+  x: number;
+  y: number;
+}
+
+export type LayoutItem = LayoutNodeItem | LayoutMoreItem | LayoutBadgeItem | LayoutAgentItem | LayoutWorkItem | LayoutWorkDoneItem | LayoutTrailAgentItem;
 
 export interface LayoutEdge {
   id: string;
@@ -112,8 +133,12 @@ export interface LayoutInput {
   resources: ResourceMeta[];
   sessions: Session[];
   overrides?: FoldOverrides;
-  /** The snapshot's working tasks. */
+  /** The snapshot's working tasks, live and trail. */
   workItems?: WorkItem[];
+  /** The snapshot's stopped subagents. Those a live session still shows as greyed badges are left out of the trail. */
+  trailAgents?: TrailAgent[];
+  /** The ended sessions the trail names, for the focus of a trail agent that has no node. */
+  pastSessions?: PastSession[];
   /** The project's Up next queue, next first. */
   queue?: number[];
   /** When it is (ms), to tell which ended subagents still show. Defaults to now. */
@@ -130,6 +155,28 @@ export function agentHome(s: Pick<Session, 'focusNodeId'>, a: Pick<SubagentInfo,
   return a.nodeId !== null && inTree(a.nodeId) ? a.nodeId : s.focusNodeId;
 }
 
+/**
+ * The trail's subagents, each with the node it shows under. A live session's stopped subagent stays out while it still
+ * shows as a greyed badge (agentShown), so none is both. Its node is the one it worked on, while that is in this tree;
+ * one whose node is set but not in the tree (its session moved to another project, say) is left out. Only one with no
+ * node falls back to its session's focus, live or past; with neither it is left out. A deleted step's agents fall back
+ * too: its `node_id` is ON DELETE SET NULL, which can't tell a deleted step from none.
+ */
+export function homedTrailAgents(
+  input: { sessions: Session[]; trailAgents?: TrailAgent[]; pastSessions?: PastSession[]; now: number },
+  inTree: (id: number) => boolean,
+): { agent: TrailAgent; nodeId: number }[] {
+  const live = input.sessions.filter((s) => s.state !== 'ended');
+  const key = (sessionId: string, agentId: string) => `${sessionId}\u0000${agentId}`;
+  const badged = new Set(live.flatMap((s) => s.subagents.filter((a) => agentShown(a, input.now)).map((a) => key(s.id, a.agentId))));
+  const focusOf = new Map<string, number | null>([...(input.pastSessions ?? []), ...live].map((s) => [s.id, s.focusNodeId]));
+  return (input.trailAgents ?? []).flatMap((agent) => {
+    if (badged.has(key(agent.sessionId, agent.agentId))) return [];
+    const nodeId = agent.nodeId ?? focusOf.get(agent.sessionId) ?? null;
+    return nodeId !== null && inTree(nodeId) ? [{ agent, nodeId }] : [];
+  });
+}
+
 /** The queue as the UI shows it: each node once, in order, without ids that are gone or steps already finished. */
 export function upNext(queue: readonly number[], nodes: Pick<TreeNode, 'id' | 'status'>[]): number[] {
   const open = new Set(nodes.filter((n) => n.status !== 'done' && n.status !== 'dropped').map((n) => n.id));
@@ -144,10 +191,11 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
   const shownAgents = (s: Session) => s.subagents.filter((a) => agentShown(a, now));
   const homeOf = (s: Session, a: SubagentInfo) => agentHome(s, a, (id) => index.byId.has(id));
   // Where Claude works or plans to go next shows past the fold rules, as a session's focus does: a subagent's node,
-  // a task in progress, and every queued step (so an Up next entry never points into a "+n more" run).
+  // a live session's task in progress, and every queued step (so an Up next entry never points into a "+n more" run).
+  // The trail never pins.
   const pins = [
     ...live.flatMap((s) => shownAgents(s).flatMap((a) => homeOf(s, a) ?? [])),
-    ...work.filter((w) => w.status === 'in_progress').map((w) => w.nodeId),
+    ...work.filter((w) => w.status === 'in_progress' && w.endedAt === null).map((w) => w.nodeId),
     ...upNext(input.queue ?? [], input.nodes),
   ];
   // Old finished steps fold into "✓ n done" rows on the canvas only; the text outline shows them all.
@@ -190,6 +238,8 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
   };
   const workByNode = new Map<number, WorkItem[]>();
   for (const w of work) workByNode.set(w.nodeId, [...(workByNode.get(w.nodeId) ?? []), w]);
+  const trailByNode = new Map<number, TrailAgent[]>();
+  for (const { agent, nodeId } of homedTrailAgents({ ...input, now }, (id) => index.byId.has(id))) trailByNode.set(nodeId, [...(trailByNode.get(nodeId) ?? []), agent]);
   const queuePos = new Map(upNext(input.queue ?? [], input.nodes).map((id, i) => [id, i + 1]));
 
   const items: LayoutItem[] = [];
@@ -235,20 +285,30 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
       );
       y += BADGE_ROW;
     }
-    // The node's checklist: completed tasks folded into one row first, then the rest in the order Claude made them.
-    // It folds with its node.
+    // The node's checklist: completed tasks and the trail folded into one row first, then the live open tasks in the
+    // order Claude made them. Opened, the row shows every task in that order, then the trail's agents. It folds with
+    // its node.
     const tasks = v.folded ? [] : (workByNode.get(node.id) ?? []);
-    if (!tasks.length) continue;
+    const trail = v.folded ? [] : (trailByNode.get(node.id) ?? []);
+    if (!tasks.length && !trail.length) continue;
     const done = tasks.filter((w) => w.status === 'completed').length;
+    const unfinished = tasks.filter((w) => w.endedAt !== null && w.status !== 'completed').length;
     const open = input.overrides?.[`work:${node.id}`] === 'open';
-    if (done) {
-      items.push({ kind: 'workDone', id: `wd${node.id}`, nodeId: node.id, count: done, open, x: inner, y });
+    if (done || unfinished || trail.length) {
+      items.push({ kind: 'workDone', id: `wd${node.id}`, nodeId: node.id, count: done, unfinished, agents: trail.length, open, x: inner, y });
       y += WORK_ROW;
     }
     for (const w of tasks) {
-      if (w.status === 'completed' && !open) continue;
-      items.push({ kind: 'work', id: `w${w.id}`, workId: w.id, nodeId: node.id, x: inner, y, pulse: pulses(w) });
+      const stale = w.endedAt !== null;
+      if ((w.status === 'completed' || stale) && !open) continue;
+      items.push({ kind: 'work', id: `w${w.id}`, workId: w.id, nodeId: node.id, x: inner, y, pulse: pulses(w), stale });
       y += WORK_ROW;
+    }
+    if (open) {
+      for (const a of trail) {
+        items.push({ kind: 'trailAgent', id: `t${a.sessionId}:${a.agentId}`, sessionId: a.sessionId, agentId: a.agentId, nodeId: node.id, x: inner, y });
+        y += WORK_ROW;
+      }
     }
     y += WORK_GAP;
   }
