@@ -13,7 +13,7 @@ import { makeCtx } from '../helpers';
 describe('database', () => {
   it('migrates to the latest schema with foreign keys on', () => {
     const ctx = makeCtx();
-    expect(schemaVersion(ctx.db)).toBe(3);
+    expect(schemaVersion(ctx.db)).toBe(MIGRATIONS.length);
     const tables = (ctx.db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]).map((r) => r.name);
     expect(tables).toEqual(expect.arrayContaining([
       'projects', 'bindings', 'nodes', 'resources', 'log_entries', 'sessions', 'session_subagents', 'events', 'meta', 'work_items', 'subagent_dispatches',
@@ -43,7 +43,7 @@ describe('database', () => {
       expect(db.prepare('SELECT id, title FROM nodes ORDER BY id').all()).toEqual([{ id: 1, title: 'InGame' }, { id: 2, title: 'Play app signing' }]);
       expect(db.prepare('SELECT id, focus_node_id FROM sessions').all()).toEqual([{ id: 's1', focus_node_id: 2 }]);
       expect(db.prepare('SELECT * FROM session_subagents').all()).toEqual([
-        { session_id: 's1', agent_id: 'a1', agent_type: 'Explore', started_at: 't', description: null, model: null, node_id: null, tool_use_id: null, ended_at: null },
+        { session_id: 's1', agent_id: 'a1', agent_type: 'Explore', started_at: 't', description: null, model: null, node_id: null, tool_use_id: null, ended_at: null, ordinal: null },
       ]);
       expect((db.prepare('SELECT COUNT(*) AS c FROM events').get() as { c: number }).c).toBe(1);
       // The new tables take rows, and their foreign keys follow the node: work items go with it, a subagent forgets it.
@@ -152,7 +152,7 @@ describe('database', () => {
     const { dir, file } = v2Database();
     const db = openDb(file);
     try {
-      expect(schemaVersion(db)).toBe(3);
+      expect(schemaVersion(db)).toBe(MIGRATIONS.length);
       expect(db.prepare('SELECT id, title, status, label FROM nodes ORDER BY id').all()).toEqual([
         { id: 1, title: 'InProgress', status: 'active', label: null },
         { id: 2, title: 'Live work', status: 'active', label: null },
@@ -191,6 +191,64 @@ describe('database', () => {
       db.prepare('UPDATE nodes SET title = ?, kind = ?, status = ?, assignee = ?, body = ?, outcome = ?, updated_at = ?, completed_at = ? WHERE id = ?')
         .run('From v2, edited', 'task', 'active', 'claude', '', '', 't', null, id);
       expect(db.prepare('SELECT label FROM nodes WHERE id = ?').pluck().get(id)).toBe('ui');
+    } finally {
+      MIGRATIONS.push(...shipped);
+    }
+  });
+
+  /** A database file as the v3 build leaves it: migrations 1 to 3, with a project, a live session and its subagent. */
+  function v3Database(): { dir: string; file: string } {
+    const dir = mkdtempSync(join(tmpdir(), 'ip-migrate-v3-'));
+    const file = join(dir, 'inprogress.db');
+    const v3 = new Database(file);
+    v3.exec('CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+    for (const m of MIGRATIONS.slice(0, 3)) v3.exec(m);
+    v3.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '3')").run();
+    v3.prepare("INSERT INTO projects (id, slug, name, root_node_id, created_at, updated_at) VALUES (1, 'inprogress', 'InProgress', 1, 't', 't')").run();
+    v3.prepare("INSERT INTO nodes (id, project_id, parent_id, position, kind, title, status, label, created_at, updated_at) VALUES (1, 1, NULL, 1, 'goal', 'InProgress', 'active', NULL, 't', 't')").run();
+    v3.prepare("INSERT INTO sessions (id, project_id, state, focus_node_id, started_at, last_seen_at) VALUES ('s1', 1, 'working', 1, 't', 't')").run();
+    v3.prepare("INSERT INTO session_subagents (session_id, agent_id, agent_type, started_at, description) VALUES ('s1', 'a1', 'general-purpose', 't', 'Write the tests')").run();
+    v3.close();
+    return { dir, file };
+  }
+
+  it('migrates a database at v3 with data to v4, every slot and ordinal null', () => {
+    const { dir, file } = v3Database();
+    const db = openDb(file);
+    try {
+      expect(schemaVersion(db)).toBe(MIGRATIONS.length);
+      expect(db.prepare('SELECT id, state, focus_node_id, slot FROM sessions').all()).toEqual([{ id: 's1', state: 'working', focus_node_id: 1, slot: null }]);
+      expect(db.prepare('SELECT agent_id, description, ordinal FROM session_subagents').all()).toEqual([{ agent_id: 'a1', description: 'Write the tests', ordinal: null }]);
+      expect(db.prepare("SELECT value FROM meta WHERE key = 'min_reader_version'").pluck().get()).toBe('1');
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('marks migration 4 readable by v1 builds, so a v3 build still opens a v4 database and its own writes work', () => {
+    const { db } = makeCtx();
+    expect(db.prepare("SELECT value FROM meta WHERE key = 'min_reader_version'").pluck().get()).toBe('1');
+    // This build as the v3 build sees the schema: three migrations.
+    const shipped = MIGRATIONS.splice(3);
+    try {
+      expect(() => migrate(db)).not.toThrow();
+      expect(schemaVersion(db)).toBe(3 + shipped.length);
+      db.prepare("INSERT INTO projects (id, slug, name, created_at, updated_at) VALUES (1, 'p', 'P', 't', 't')").run();
+      // The v3 build's own writes, which never name the new columns: a new session has no slot, a new subagent no
+      // ordinal, and an update keeps what the newer build gave.
+      db.prepare('INSERT INTO sessions (id, project_id, state, started_at, last_seen_at) VALUES (?, ?, ?, ?, ?)').run('s1', 1, 'idle', 't', 't');
+      db.prepare('INSERT INTO session_subagents (session_id, agent_id, agent_type, started_at) VALUES (?, ?, ?, ?)').run('s1', 'a1', 'general-purpose', 't');
+      expect(db.prepare("SELECT slot FROM sessions WHERE id = 's1'").pluck().get()).toBeNull();
+      expect(db.prepare("SELECT ordinal FROM session_subagents WHERE agent_id = 'a1'").pluck().get()).toBeNull();
+      db.prepare("UPDATE sessions SET slot = 1 WHERE id = 's1'").run();
+      db.prepare("UPDATE session_subagents SET ordinal = 2 WHERE agent_id = 'a1'").run();
+      db.prepare('UPDATE sessions SET project_id = ?, title = ?, cwd = ?, branch = ?, transcript_path = ?, state = ?, focus_node_id = ?, prompts_since_update = ?, last_seen_at = ?, ended_at = ? WHERE id = ?')
+        .run(1, 'From v3', null, null, null, 'working', null, 1, 't2', null, 's1');
+      db.prepare('UPDATE session_subagents SET description = ?, model = ?, node_id = ?, tool_use_id = ? WHERE session_id = ? AND agent_id = ?').run('Edited by v3', null, null, null, 's1', 'a1');
+      db.prepare('UPDATE session_subagents SET ended_at = ? WHERE session_id = ? AND agent_id = ? AND ended_at IS NULL').run('t3', 's1', 'a1');
+      expect(db.prepare("SELECT title, state, slot FROM sessions WHERE id = 's1'").get()).toEqual({ title: 'From v3', state: 'working', slot: 1 });
+      expect(db.prepare("SELECT description, ended_at, ordinal FROM session_subagents WHERE agent_id = 'a1'").get()).toEqual({ description: 'Edited by v3', ended_at: 't3', ordinal: 2 });
     } finally {
       MIGRATIONS.push(...shipped);
     }
