@@ -240,3 +240,16 @@ export function glyphTitle(n: Pick<TreeNode, 'title' | 'label'>): string {
 export function sessionDisplayTitle(s: Pick<Session, 'id' | 'title'>): string {
   return s.title?.trim() || `Session ${s.id.slice(0, 6)}`;
 }
+
+/** A session's letter from its slot, in bijective base 26: 0 → "A", 25 → "Z", 26 → "AA"; "" for null (no slot yet). */
+export function sessionTag(slot: number | null): string {
+  if (slot === null) return '';
+  let tag = '';
+  for (let n = slot + 1; n > 0; n = Math.floor((n - 1) / 26)) tag = String.fromCharCode(65 + ((n - 1) % 26)) + tag;
+  return tag;
+}
+
+/** "a1": the session's letter in lower case and the subagent's number; "" when either is null. */
+export function agentTag(slot: number | null, ordinal: number | null): string {
+  return slot === null || ordinal === null ? '' : `${sessionTag(slot).toLowerCase()}${ordinal}`;
+}

@@ -14,6 +14,14 @@
   --red: #ff3b30;
   --purple: #af52de;
   --clay: #d97757;
+  /* Session families, by slot (familyVar in family.ts): a session's chip, focus badge, subagents and task marks. Slot 0
+     is session clay, 1 to 5 the old subagent colours; past six they repeat and the letter tells them apart. */
+  --family-0: var(--clay);
+  --family-1: #5856d6;
+  --family-2: #0b7285;
+  --family-3: #c2255c;
+  --family-4: #8c6239;
+  --family-5: #5c7a00;
   --edge: #aeaeb2;
   --shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
 }
