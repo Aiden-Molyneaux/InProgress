@@ -459,6 +459,7 @@ prompt-submit hook reports an untracked session that mentions InProgress. Conten
 
 `npm run claude:uninstall` removes exactly those hook entries, the allow rule, the agent file,
 and the skill directory, after the same backup step. The data dir is left alone.
+Superseded in part by §1 of `2026-10-04-review-actions-design.md`: install also allows the tasks command in the Bash and PowerShell tools (none when the repo path holds a space), and uninstall removes task rules of any checkout by pattern.
 
 ### 6.6 Admin CLI (`inprogress`)
 

@@ -48,8 +48,8 @@ Attribution of a working task to a node, decided once, at creation:
 
 ### Planned order (#56)
 - Across plan steps: a per-project queue of node ids, set by the scribe with a new MCP tool
-  `set_queue(project, nodes: number[])` whenever Claude decides or changes its order of work. Every id must belong to
-  the project. Done or dropped nodes leave the queue on their own.
+  `set_queue(project, nodes, session?, unowned?)` (review actions §6) whenever Claude decides or changes its order of
+  work. Every id must belong to the project. Done or dropped nodes leave the queue on their own.
 - Within a node: working tasks keep creation order, and their `blocks` links render as "after …" hints.
 
 ### Fallback
@@ -85,10 +85,11 @@ that session's list on that node through `POST /api/sessions/:id/tasks`, so thes
 ## Snapshot and API
 - `Session.subagents[]` gains `description`, `model`, `nodeId`, `endedAt`.
 - `ProjectSnapshot` gains `workItems: WorkItem[]` (`id`, `nodeId`, `sessionId`, `agentId`, `subject`, `status`,
-  `blocks`, `position`, `updatedAt`) and `project.queue: number[]`.
+  `blocks`, `position`, `updatedAt`) and `project.queue: QueueEntry[]` (`[{ nodeId, sessionId: id | null }]`, stored
+  as `[{ "node": id, "session": id | null }]`; review actions §6).
 - MCP:
   - new tool `set_queue`
-  - `get_outline` prints `Up next: #42 → #44 → #48`
+  - `get_outline` prints `Up next: A: #82 → #78 | later: #79` (review actions §6)
 - Briefing:
   - an `Up next:` line
   - under "Where things stand", the focused node's working tasks: ◐ in progress, then ○ pending, at most 5
@@ -104,7 +105,8 @@ that session's list on that node through `POST /api/sessions/:id/tasks`, so thes
   stays under its focus.
 - **Session chip.** Lists its subagents (description · model · elapsed) on hover or focus.
 - **Queue.** Numbered markers ①②③ appear on queued steps. An `Up next` line sits under the session row, lists the
-  queue, and jumps to an item on click. When the frontier has no working session, it prefers the queue head.
+  queue by owner (`Up next: A: #82 → #78 | later: #79`, review actions §6), and jumps to an item on click. When the
+  frontier has no working session, it prefers the queue head.
 - **Details.** Lists the node's working tasks (with session or subagent) and the subagents attributed to it.
 
 ## Skill and briefing rules
