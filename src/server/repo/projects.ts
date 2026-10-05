@@ -305,16 +305,20 @@ export function setQueue(ctx: Ctx, actor: string, ref: string | number, nodes: n
 
 /**
  * A session ended, went stale or moved to another project: its entries turn unowned and move to the head of the unowned
- * part, in order, in every project whose queue holds any; those whose step is no longer open are dropped. Records
- * project.updated for each queue it changes. Call inside an open write.
+ * part, in order, in every project whose queue holds any; those whose step is no longer open are dropped. Sessions
+ * released together (a batch of expiries) keep their stored order among themselves. Records project.updated for each
+ * queue it changes. Call inside an open write.
  */
-export function releaseQueue(ctx: Ctx, record: RecordEvent, sessionId: string): void {
-  // Every write stores this exact text for the session's entries.
-  const needle = `"session":${JSON.stringify(sessionId)}`;
-  const rows = ctx.db.prepare('SELECT id, queue FROM projects WHERE instr(queue, ?) > 0').all(needle) as { id: number; queue: string }[];
+export function releaseQueue(ctx: Ctx, record: RecordEvent, sessions: string | readonly string[]): void {
+  const released = new Set(typeof sessions === 'string' ? [sessions] : sessions);
+  if (!released.size) return;
+  // Every write stores exactly this text for a session's entries.
+  const needles = [...released].map((id) => `"session":${JSON.stringify(id)}`);
+  const rows = (ctx.db.prepare(`SELECT id, queue FROM projects WHERE instr(queue, '"session":"') > 0`).all() as { id: number; queue: string }[])
+    .filter((row) => needles.some((needle) => row.queue.includes(needle)));
   for (const row of rows) {
     const queue = parseQueue(row.queue);
-    storeQueue(ctx, record, row.id, row.queue, releaseEntries(queue, new Set([sessionId]), openSteps(ctx, row.id, queue.map((e) => e.nodeId))));
+    storeQueue(ctx, record, row.id, row.queue, releaseEntries(queue, released, openSteps(ctx, row.id, queue.map((e) => e.nodeId))));
   }
 }
 

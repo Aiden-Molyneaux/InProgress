@@ -492,6 +492,30 @@ describe('the queue', () => {
     ]);
   });
 
+  it('keeps the stored order of sessions that expire together, as Up next showed them before', () => {
+    const { ctx, project, hook, tick, a, b, c, d, queue } = twoSessions();
+    hook({ event: 'start', source: 'startup', cwd: 'C:/personal/InGame' }, 's3');
+    setQueue(ctx, 'scribe:s2', project.slug, [a.id, b.id], S2);
+    setQueue(ctx, 'scribe:s3', project.slug, [c.id], { sessionId: 's3' });
+    setQueue(ctx, 'scribe:s1', project.slug, [d.id], 'unowned');
+    tick(STALE_SESSION_MS + MIN);
+    hook({ event: 'prompt' });
+    getProjectSnapshot(ctx, project.slug);
+    expect(queue()).toEqual(owned(null, a.id, b.id, c.id, d.id));
+  });
+
+  it('shows the released queue in the very snapshot that expires the session', () => {
+    const { ctx, project, hook, tick, a, b, c } = twoSessions();
+    setQueue(ctx, 'scribe:s2', project.slug, [b.id], S2);
+    setQueue(ctx, 'scribe:s1', project.slug, [a.id], S1);
+    setQueue(ctx, 'scribe:s1', project.slug, [c.id], 'unowned');
+    tick(STALE_SESSION_MS + MIN);
+    hook({ event: 'prompt' });
+    const snap = getProjectSnapshot(ctx, project.slug);
+    expect(snap.sessions.map((s) => s.id)).toEqual(['s1']);
+    expect(snap.project.queue).toEqual([...owned('s1', a.id), ...owned(null, b.id, c.id)]);
+  });
+
   it("turns a session's entries unowned in its old project when it moves to another", () => {
     const { ctx, project, a, b, d, queue } = twoSessions();
     const other = createProject(ctx, 'test', { name: 'Other' });
