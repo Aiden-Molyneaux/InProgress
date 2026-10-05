@@ -550,7 +550,7 @@ describe('enrollSession and setFocus', () => {
     handleHookEvent(ctx, 's1', start());
     setFocus(ctx, 'scribe:s1', 's1', s3.id);
     const mark = maxEventId(ctx);
-    setFocus(ctx, 'scribe:s2', 's1', s3.id);
+    setFocus(ctx, 'scribe:s1', 's1', s3.id);
     expect(listEventsSince(ctx, mark).map((e) => e.type)).toEqual(['session.updated']);
   });
 });
