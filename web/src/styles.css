@@ -93,9 +93,13 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 /* The trail's ◆: neutral, as a trail row wears no family. */
 .ip-agent-dot { color: var(--faint); }
 .ip-chip-pop li.ended, .ip-dagent.ended, .ip-dtrail { color: var(--muted); }
-/* Up next: one line under the session row, cut short at the window's edge. */
-.ip-upnext { padding: 3px 10px; font-size: 12px; color: var(--muted); background: var(--panel); border-bottom: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ip-upnext-label { font-weight: 600; }
+/* Up next, under the session row: its heading, then one line per live session that has steps, led by its letter in
+   its family's hue (--fam), then a neutral "later" line. Each line is cut short at the window's edge. */
+.ip-upnext { padding: 3px 10px; font-size: 12px; color: var(--muted); background: var(--panel); border-bottom: 1px solid var(--border); }
+.ip-upnext-head { font-weight: 600; }
+.ip-upnext-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ip-upnext-lead { font-weight: 700; margin-right: 4px; }
+.ip-upnext-line.owned .ip-upnext-lead { color: var(--fam, var(--clay)); }
 .ip-upnext-item { color: var(--text); cursor: pointer; border-radius: 3px; }
 .ip-upnext-item:hover { color: var(--accent); }
 .ip-upnext-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -153,8 +157,10 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-type, .ip-glyph { font-variant-emoji: text; }
 /* ⛁ draws faint at text size. The chip keeps its height: its line height is fixed. */
 .ip-type.l-data, .ip-glyph.l-data { font-size: 1.33em; }
-/* Up next place on a card: ①②③. */
-.ip-queue { flex: none; color: var(--accent); font-size: 13px; font-weight: 600; line-height: 1; }
+/* Up next place on a card, numbered per owner: an unowned one stays a neutral ①, an owned one wears its session's
+   letter and hue (--fam): A①. */
+.ip-queue { flex: none; color: var(--accent); font-size: 13px; font-weight: 600; line-height: 1; white-space: nowrap; }
+.ip-queue.owned { color: var(--fam, var(--clay)); }
 /* A subagent's badge, in its session's hue (--fam) and led by its tag; greyed once it has ended, keeping the tag. A
    subagent in the trail wears the ended look, with no family of its own. */
 .ip-agent, .ip-trail-agent { height: 18px; line-height: 18px; max-width: 360px; padding: 0 8px; border-radius: 4px; font-size: 11px; font-weight: 600; color: #fff; background: var(--fam, var(--faint)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

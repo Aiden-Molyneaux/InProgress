@@ -1,42 +1,71 @@
-import { Fragment, type KeyboardEvent } from 'react';
+import { Fragment, type CSSProperties, type KeyboardEvent } from 'react';
 import { queueView } from '../../../src/core/layout';
-import type { QueueEntry, TreeNode } from '../../../src/core/types';
+import { ownerTag, type QueueEntry, type Session, type TreeNode } from '../../../src/core/types';
+import { familyVar } from '../family';
 import { circled } from '../live';
 
 interface UpNextProps {
-  /** The project's queue, next first. */
-  queue: QueueEntry[];
+  /** The project's queue, as stored: owned entries first, next first. */
+  queue: readonly QueueEntry[];
   nodes: TreeNode[];
+  /** The project's live sessions: each one's letter and hue lead its line, and its focus stays out of its list. */
+  sessions: Session[];
   /** Brings a step into view. */
   onJump: (id: number) => void;
 }
 
 /**
- * `Up next: ① #42 Title · ② #44 Title …`, the order Claude plans to work in. Each step jumps to its row. One line, cut
- * short at the window's edge; nothing at all while the queue is empty.
+ * The order Claude plans to work in, as Aiden reads it at a glance:
+ *
+ *     Up next
+ *     A  ① #82 Trail of ended work · ② #78 Guide
+ *     B  ① #90 Owned queue entries
+ *     later  ① #79 Taskbar icon
+ *
+ * One line per live session that has steps, in the queue's order, led by its letter in its family's hue (`?` while its
+ * slot is empty), then one neutral `later` line for the unowned steps. Each line is numbered as the markers on the
+ * cards are, and cut short at the window's edge; each step jumps to its row. Nothing at all while no step is up next.
  */
-export function UpNext({ queue, nodes, onJump }: UpNextProps) {
+export function UpNext({ queue, nodes, sessions, onJump }: UpNextProps) {
   const byId = new Map(nodes.map((n) => [n.id, n]));
-  const steps = queueView(queue, nodes, []).unowned.map((id) => byId.get(id)!);
-  if (!steps.length) return null;
+  const slotOf = new Map(sessions.map((s) => [s.id, s.slot]));
+  const view = queueView(queue, nodes, sessions);
+  const lines = [
+    ...[...view.bySession].map(([id, ids]) => ({ key: `s:${id}`, lead: ownerTag(slotOf.get(id) ?? null), slot: slotOf.get(id) ?? null, owned: true, ids })),
+    ...(view.unowned.length ? [{ key: 'later', lead: 'later', slot: null, owned: false, ids: view.unowned }] : []),
+  ];
+  if (!lines.length) return null;
   const label = (n: TreeNode, i: number) => `${circled(i + 1)} #${n.id} ${n.title}`;
-  // Inline spans, not buttons, so the line cuts a title short with an ellipsis instead of hiding a whole step.
+  // Inline spans, not buttons, so a line cuts a title short with an ellipsis instead of hiding a whole step.
   const onKeyDown = (e: KeyboardEvent, id: number) => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
     e.preventDefault();
     onJump(id);
   };
   return (
-    <div className="ip-upnext" title={`Up next: ${steps.map(label).join(' · ')}`}>
-      <span className="ip-upnext-label">Up next:</span>{' '}
-      {steps.map((n, i) => (
-        <Fragment key={n.id}>
-          {i > 0 && ' · '}
-          <span role="button" tabIndex={0} className="ip-upnext-item" onClick={() => onJump(n.id)} onKeyDown={(e) => onKeyDown(e, n.id)}>
-            {label(n, i)}
-          </span>
-        </Fragment>
-      ))}
+    <div className="ip-upnext">
+      <div className="ip-upnext-head">Up next</div>
+      {lines.map((line) => {
+        const steps = line.ids.map((id) => byId.get(id)!);
+        return (
+          <div
+            key={line.key}
+            className={`ip-upnext-line${line.owned ? ' owned' : ''}`}
+            style={line.owned ? ({ '--fam': familyVar(line.slot) } as CSSProperties) : undefined}
+            title={`${line.lead}: ${steps.map(label).join(' · ')}`}
+          >
+            <span className="ip-upnext-lead">{line.lead}</span>{' '}
+            {steps.map((n, i) => (
+              <Fragment key={n.id}>
+                {i > 0 && ' · '}
+                <span role="button" tabIndex={0} className="ip-upnext-item" onClick={() => onJump(n.id)} onKeyDown={(e) => onKeyDown(e, n.id)}>
+                  {label(n, i)}
+                </span>
+              </Fragment>
+            ))}
+          </div>
+        );
+      })}
     </div>
   );
 }

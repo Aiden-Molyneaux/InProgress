@@ -105,7 +105,7 @@ export function App() {
           follow={follow}
           onFollow={followOn}
         />
-        {snapshot && <UpNext queue={snapshot.project.queue} nodes={snapshot.nodes} onJump={(id) => canvas.current?.focusNode(id)} />}
+        {snapshot && <UpNext queue={snapshot.project.queue} nodes={snapshot.nodes} sessions={snapshot.sessions} onJump={(id) => canvas.current?.focusNode(id)} />}
         {state.connection === 'reconnecting' && <div className="ip-banner">Reconnecting to InProgress…</div>}
         <main className="ip-main">
           {projects.length === 0 ? (

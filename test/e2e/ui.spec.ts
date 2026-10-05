@@ -1038,7 +1038,9 @@ async function subagent(api: APIRequestContext, s: Seeded, agentId: string, desc
   await hook(api, s.session, { event: 'agent-launched', toolUseId, agentId, model });
 }
 
-const setQueue = (api: APIRequestContext, s: Seeded, nodes: number[]) => write(api, s.session, 'post', `/api/projects/${s.slug}/queue`, { nodes });
+/** A set_queue write as the scribe makes it: `session`'s own order (a `queue:` line), or without it the unowned order. */
+const setQueue = (api: APIRequestContext, s: Seeded, nodes: number[], session?: string) =>
+  write(api, s.session, 'post', `/api/projects/${s.slug}/queue`, { nodes, ...(session ? { session } : {}) });
 
 const boxOf = async (l: Locator) => (await l.boundingBox())!;
 
@@ -1180,11 +1182,14 @@ test.describe('Live work', () => {
     for (const [i, title] of ['Queued first', '4 Build to GitHub', long].entries()) await expect(page.locator('.ip-node', { hasText: title }).locator('.ip-queue')).toHaveText('①②③'[i]);
     await expect(page.locator('.ip-node', { hasText: 'Play app signing' }).locator('.ip-queue')).toHaveCount(0);
     const upNext = page.locator('.ip-upnext');
-    await expect(upNext).toHaveText(`Up next: ① #${order[0]} Queued first · ② #${order[1]} 4 Build to GitHub · ③ #${order[2]} ${long}`);
+    // Unowned steps: the heading, then one neutral "later" line.
+    await expect(upNext.locator('.ip-upnext-head')).toHaveText('Up next');
+    const laterLine = upNext.locator('.ip-upnext-line');
+    await expect(laterLine).toHaveText(`later ① #${order[0]} Queued first · ② #${order[1]} 4 Build to GitHub · ③ #${order[2]} ${long}`);
     // One line, cut short at the window's edge.
-    expect((await boxOf(upNext)).height, 'one line').toBeLessThan(30);
-    await expect(upNext).toHaveCSS('text-overflow', 'ellipsis');
-    expect(await page.evaluate<boolean>(`(() => { const l = document.querySelector('.ip-upnext'); return l.scrollWidth > l.clientWidth; })()`), 'cut short').toBe(true);
+    expect((await boxOf(laterLine)).height, 'one line').toBeLessThan(30);
+    await expect(laterLine).toHaveCSS('text-overflow', 'ellipsis');
+    expect(await page.evaluate<boolean>(`(() => { const l = document.querySelector('.ip-upnext-line'); return l.scrollWidth > l.clientWidth; })()`), 'cut short').toBe(true);
     const build = page.locator('.ip-node', { hasText: '4 Build to GitHub' });
     await expect(build).not.toBeInViewport();
     await upNext.getByRole('button', { name: /4 Build to GitHub/ }).click();
