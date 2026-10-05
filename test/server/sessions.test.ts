@@ -9,6 +9,7 @@ import { addBinding, createProject, setQueue, updateProject } from '../../src/se
 import { addResource } from '../../src/server/repo/resources';
 import { findSession, listProjectSessions } from '../../src/server/repo/sessions';
 import { getNodeDetail, getProjectSnapshot } from '../../src/server/repo/snapshot';
+import { renderBriefing } from '../../src/server/briefing';
 import { enrollSession, handleHookEvent, setFocus } from '../../src/server/session-flow';
 import { createCtx } from '../../src/server/db/tx';
 import { openDb } from '../../src/server/db/connection';
@@ -249,6 +250,35 @@ describe('briefing: live work', () => {
     // (the smoke test checks that one against the installed rules).
     const printed = /`node (\S+) tasks <step id> --session s1 --done "…" --doing "…" --todo "…"`/.exec(text);
     expect(printed?.[1]).toBe(normalizePath(resolve('src/cli/main.js')));
+  });
+});
+
+describe('briefing: session identity', () => {
+  it('ends the first line with the session\'s letter, in one sentence', () => {
+    const { ctx } = setup();
+    const first = handleHookEvent(ctx, 's1', start()).context!.split('\n')[0];
+    expect(first).toBe('[InProgress] This session is tracked in project "InGame" (slug ingame). Session id: s1. You are session A.');
+    expect(handleHookEvent(ctx, 's2', start()).context!.split('\n')[0]).toMatch(/Session id: s2\. You are session B\.$/);
+  });
+
+  it('leads each of the other sessions with its letter', () => {
+    const { ctx, a2 } = setup();
+    handleHookEvent(ctx, 's1', start(undefined, { title: 'Launch status' }));
+    setFocus(ctx, 'scribe:s1', 's1', a2.id);
+    handleHookEvent(ctx, 's2', start(undefined, { title: 'Store listing' }));
+    handleHookEvent(ctx, 's2', { event: 'prompt' });
+    const lines = handleHookEvent(ctx, 's3', start()).context!.split('\n');
+    expect(lines).toContain(`Other sessions here: B "Store listing" (working) · A "Launch status" (idle, on #${a2.id})`);
+  });
+
+  it('prints no letter for a session whose slot is still empty (it predates migration 4)', () => {
+    const { ctx, project } = setup();
+    handleHookEvent(ctx, 's1', start(undefined, { title: 'Launch status' }));
+    handleHookEvent(ctx, 's2', start());
+    ctx.db.prepare('UPDATE sessions SET slot = NULL').run();
+    const lines = renderBriefing(getProjectSnapshot(ctx, project.slug), 's2').split('\n');
+    expect(lines[0]).toMatch(/Session id: s2\.$/);
+    expect(lines).toContain('Other sessions here: "Launch status" (idle)');
   });
 });
 

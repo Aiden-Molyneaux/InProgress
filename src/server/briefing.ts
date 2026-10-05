@@ -1,5 +1,5 @@
 import { ancestors, buildIndex, dfsOrder, isNeedsYou, kids, progress, type TreeIndex } from '../core/tree';
-import { LABEL_GLYPHS, NODE_LABELS, glyphTitle, sessionDisplayTitle, type ProjectSnapshot, type Session, type TreeNode, type WorkItem } from '../core/types';
+import { LABEL_GLYPHS, NODE_LABELS, glyphTitle, sessionDisplayTitle, sessionTag, type ProjectSnapshot, type Session, type TreeNode, type WorkItem } from '../core/types';
 import { homeDir } from '../lib/home';
 import { taskCommand } from '../lib/task-command';
 
@@ -125,8 +125,10 @@ function needsYouLine(snapshot: ProjectSnapshot): string | undefined {
 
 export function renderBriefing(snapshot: ProjectSnapshot, sessionId: string): string {
   const { project, resources, sessions } = snapshot;
+  // Its letter, as the window shows it on its chip and badge; none while its slot is empty.
+  const letter = sessionTag(sessions.find((s) => s.id === sessionId)?.slot ?? null);
   const lines = [
-    `[InProgress] This session is tracked in project "${project.name}" (slug ${project.slug}). Session id: ${sessionId}.`,
+    `[InProgress] This session is tracked in project "${project.name}" (slug ${project.slug}). Session id: ${sessionId}.${letter ? ` You are session ${letter}.` : ''}`,
     'All InProgress edits go through the inprogress-scribe agent in the background; follow the inprogress skill.',
   ];
   const playbook = project.playbook.trim();
@@ -145,7 +147,11 @@ export function renderBriefing(snapshot: ProjectSnapshot, sessionId: string): st
   if (recent.length) lines.push(`Recent resources: ${recent.map((r) => `r${r.id} ${r.title} (on #${r.nodeId})`).join(' · ')}`);
   const others = sessions.filter((s) => s.id !== sessionId && s.state !== 'ended');
   if (others.length) {
-    lines.push(`Other sessions here: ${others.map((s) => `"${sessionDisplayTitle(s)}" (${s.state}${s.focusNodeId ? `, on #${s.focusNodeId}` : ''})`).join(' · ')}`);
+    const named = (s: Session) => {
+      const tag = sessionTag(s.slot);
+      return `${tag ? `${tag} ` : ''}"${sessionDisplayTitle(s)}" (${s.state}${s.focusNodeId ? `, on #${s.focusNodeId}` : ''})`;
+    };
+    lines.push(`Other sessions here: ${others.map(named).join(' · ')}`);
   }
   return lines.join('\n');
 }
