@@ -47,7 +47,7 @@ describe('withoutOwnId', () => {
   it('drops a leading #id that names the node the text sits under', () => {
     expect(withoutOwnId('#57 Write the note', 57)).toBe('Write the note');
     expect(withoutOwnId('  #57: Write the note', 57)).toBe('Write the note');
-    expect(withoutOwnId('#57 — Write the note', 57)).toBe('Write the note');
+    expect(withoutOwnId('#57 \u2014 Write the note', 57)).toBe('Write the note');
   });
 
   it('keeps any other #id, an #id later on, and a text that is only the #id', () => {

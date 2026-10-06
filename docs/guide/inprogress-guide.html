@@ -437,10 +437,10 @@ Keeping InProgress current (the tree beside Claude that Aiden watches):
 - Brief format: "Session: &lt;id&gt; · Project: &lt;slug&gt;", then one "- " line per change …
 - After dispatching, write one line in chat ("↳ InProgress: #57 done, suite attached to #58"). …
 Where things stand:
-  #53 Road to market — active (2/7)
-    #55 2 Android signing — active (1/3)
-      #57 Play app signing — active  ◆ this session
-      #58 Run signing tests — NEEDS YOU
+  #53 Road to market · active (2/7)
+    #55 2 Android signing · active (1/3)
+      #57 Play app signing · active  ◆ this session
+      #58 Run signing tests · NEEDS YOU
     Next: #59 3 RevenueCat · #60 4 Build → GitHub (+3 more)
 Needs you (2): #58 Run signing tests · #61 Which RevenueCat plan? (question)
 Recent resources: r12 Signing test suite (on #58) · r11 Signing runbook (on #54)
@@ -489,7 +489,7 @@ Changes:
 <dt>Claude</dt>
 <dd><p>Anything handed to you becomes a node with <code>assignee: me</code>. Needs-you means assigned to you and not yet done (todo, active or blocked). When you report it done, the brief says <code>#58 → done; outcome "…"</code>. A question for you is a <code>question</code> node assigned to you; answering it sets <code>done</code> with the answer in <code>outcome</code>.</p></dd>
 <dt>You see</dt>
-<dd><p>An amber border and tag: <span class="ip-node needs"><span class="m you"></span><span class="t">Run signing tests</span> <span class="you">YOU</span></span>. The top bar shows <span class="pill">● 2 need you</span>, the window title becomes <code>(2) InProgress — InGame</code> so the count shows on the taskbar, and the briefing's "Needs you" line lists it. Needs-you rows are never folded away. Press <kbd>N</kbd> or click the pill to cycle through them; each one flashes amber as the camera lands on it. A question carries a question-mark marker coloured by its status, amber while it waits on you: <span class="ip-node needs"><span class="m you q">?</span><span class="t">Which RevenueCat plan?</span> <span class="you">YOU</span></span>. Once it is done, the Details panel shows the answer as the outcome. A blocked step shows a red dot and the word blocked.</p></dd>
+<dd><p>An amber border and tag: <span class="ip-node needs"><span class="m you"></span><span class="t">Run signing tests</span> <span class="you">YOU</span></span>. The top bar shows <span class="pill">● 2 need you</span>, the window title becomes <code>(2) InProgress · InGame</code> so the count shows on the taskbar, and the briefing's "Needs you" line lists it. Needs-you rows are never folded away. Press <kbd>N</kbd> or click the pill to cycle through them; each one flashes amber as the camera lands on it. A question carries a question-mark marker coloured by its status, amber while it waits on you: <span class="ip-node needs"><span class="m you q">?</span><span class="t">Which RevenueCat plan?</span> <span class="you">YOU</span></span>. Once it is done, the Details panel shows the answer as the outcome. A blocked step shows a red dot and the word blocked.</p></dd>
 </dl>
 
 <h4>Resources</h4>
@@ -553,14 +553,14 @@ Changes:
 <pre><code>Project InProgress (slug inprogress)
 Playbook:
   Repo C:/personal/InProgress. One branch per fix off main, merged locally after a green `npm run deploy`; …
-#26 InProgress — active (2/4) [r11]
-  #27 v1 build (phase) — done
-  #28 Deploy loop (phase) — done (4/4)
-  #33 v1 follow-ups (phase) — active (0/7) [r12]
-    #34 Lift the clicked node above the narrow Details sheet — active
+#26 InProgress · active (2/4) [r11]
+  #27 v1 build (phase) · done
+  #28 Deploy loop (phase) · done (4/4)
+  #33 v1 follow-ups (phase) · active (0/7) [r12]
+    #34 Lift the clicked node above the narrow Details sheet · active
     …
-  #41 Feedback from daily use (phase) — active (0/3)
-    #44 Project tabs for quick switching — todo</code></pre>
+  #41 Feedback from daily use (phase) · active (0/3)
+    #44 Project tabs for quick switching · todo</code></pre>
 </dd>
 <dt>You see</dt>
 <dd><p>A plain answer in chat naming the ids. Nothing changes in the window, because reading never writes.</p></dd>
@@ -686,7 +686,7 @@ Playbook:
 <aside class="spec">
   <span class="eyebrow">From your spec</span>
   <blockquote>"The UI allows you to switch between projects, etc."</blockquote>
-  <p>The dropdown, with its per-project state dots and counts, and the URL hash. The window title carries the project name too: <code>InProgress — InGame</code>, or <code>(2) InProgress — InGame</code> while two things wait on you.</p>
+  <p>The dropdown, with its per-project state dots and counts, and the URL hash. The window title carries the project name too: <code>InProgress · InGame</code>, or <code>(2) InProgress · InGame</code> while two things wait on you.</p>
   <p class="where">web/src/chrome/TopBar.tsx · web/src/useInProgress.ts</p>
 </aside>
 </div>

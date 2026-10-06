@@ -33,7 +33,7 @@ export function WorkRow({ item, pulse, stale, family, owner, waits }: WorkRowPro
     <div
       className={`ip-work w-${item.status}${stale ? ' stale' : ''}${pulse ? ' pulse' : ''}`}
       style={family ? ({ '--fam': familyVar(family.slot) } as CSSProperties) : undefined}
-      title={`${subject} — ${owner}${left}${after ? ` · ${after}` : ''}`}
+      title={`${subject} · ${owner}${left}${after ? ` · ${after}` : ''}`}
     >
       <span className="ip-work-col">{family?.tag && <span className="ip-work-tag">{family.tag}</span>}</span>
       <span className="ip-work-mark">{workMark(item.status, stale)}</span>

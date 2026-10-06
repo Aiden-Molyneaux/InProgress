@@ -84,7 +84,7 @@ export function createMcpServer(client: Client, o: McpOptions = {}): McpServer {
     return projects
       .map((p) => {
         const own = bindings.filter((b) => b.projectId === p.id).map((b) => `  binding ${b.id}: ${b.path}${b.branchPattern ? ` [branch ${b.branchPattern}]` : ''}`);
-        return [`${p.slug} — ${p.name} (${p.status}) · root #${p.rootNodeId} · ${p.needsYou} need you · ${p.activeSessions} session(s)`, ...own].join('\n');
+        return [`${p.slug} · ${p.name} (${p.status}) · root #${p.rootNodeId} · ${p.needsYou} need you · ${p.activeSessions} session(s)`, ...own].join('\n');
       })
       .join('\n');
   });
@@ -146,7 +146,7 @@ export function createMcpServer(client: Client, o: McpOptions = {}): McpServer {
     { id, title: z.string().optional(), kind: z.enum(NODE_KINDS).optional(), status: z.enum(NODE_STATUSES).optional(), assignee: assignee.optional(), body: z.string().optional(), outcome: z.string().optional(), label: label.optional(), session },
     async ({ id: nodeId, session: s, ...patch }: { id: number; session?: string } & Record<string, unknown>) => {
       const n = await client.patch<TreeNode>(`/api/nodes/${nodeId}`, patch, { actor: actor(s) });
-      return `#${n.id} ${glyphTitle(n)} — ${n.status}${n.assignee === 'me' ? ' (you)' : ''}.`;
+      return `#${n.id} ${glyphTitle(n)} · ${n.status}${n.assignee === 'me' ? ' (you)' : ''}.`;
     });
 
   tool('move_node', 'Move a node and its subtree under a new parent, optionally after a sibling.', { id, parent: id, after, session },

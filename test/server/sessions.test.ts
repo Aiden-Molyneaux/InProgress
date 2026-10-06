@@ -65,8 +65,8 @@ describe('handleHookEvent', () => {
     expect(text).toContain('Planning docs live in docs/planning.');
     expect(text).toContain('inprogress-scribe');
     expect(text).toContain('at most once per turn, every change batched');
-    expect(text).toContain(`#${a2.id} Play app signing — active`);
-    expect(text).toContain(`#${a3.id} Run signing tests — NEEDS YOU`);
+    expect(text).toContain(`#${a2.id} Play app signing · active`);
+    expect(text).toContain(`#${a3.id} Run signing tests · NEEDS YOU`);
     expect(text).toMatch(/Next: #\d+ 3 RevenueCat · #\d+ 4 Build to GitHub \(\+3 more\)/);
     expect(text).toContain(`Needs you (1): #${a3.id} Run signing tests`);
     expect(text).toContain(`Signing suite (on #${a3.id})`);
@@ -111,7 +111,7 @@ describe('handleHookEvent', () => {
     handleHookEvent(ctx, 's1', start());
     const r = handleHookEvent(ctx, 's1', { event: 'prompt', asksStatus: true });
     expect(r.context).toContain('[InProgress] Where things stand in InGame');
-    expect(r.context).toContain(`#${a3.id} Run signing tests — NEEDS YOU`);
+    expect(r.context).toContain(`#${a3.id} Run signing tests · NEEDS YOU`);
   });
 
   it('leaves state alone on a compact restart but still re-briefs', () => {
@@ -217,14 +217,14 @@ describe('briefing: live work', () => {
     handleHookEvent(ctx, 's1', { event: 'task-updated', taskKey: '3', status: 'in_progress' });
     handleHookEvent(ctx, 's1', { event: 'task-updated', taskKey: '2', status: 'completed' });
     const lines = handleHookEvent(ctx, 's1', { event: 'prompt', asksStatus: true }).context!.split('\n');
-    const at = lines.findIndex((l) => l.includes(`#${a2.id} Play app signing — active  ◆ this session`));
+    const at = lines.findIndex((l) => l.includes(`#${a2.id} Play app signing · active  ◆ this session`));
     expect(lines.slice(at + 1, at + 7)).toEqual([
       '        ◐ Task 3',
       '        ◐ Task 6',
       '        ○ Task 1',
       '        ○ Task 4',
       '        ○ Task 5',
-      `      #${a3.id} Run signing tests — NEEDS YOU`,
+      `      #${a3.id} Run signing tests · NEEDS YOU`,
     ]);
   });
 
@@ -325,8 +325,8 @@ describe('briefing: type labels', () => {
     updateNode(ctx, 'test', a3.id, { label: 'ops' });
     updateNode(ctx, 'test', s3.id, { label: 'integration' });
     const lines = handleHookEvent(ctx, 's1', start()).context!.split('\n');
-    expect(lines).toContain(`      #${a2.id} ⧉ Play app signing — active`);
-    expect(lines).toContain(`      #${a3.id} ⚒ Run signing tests — NEEDS YOU`);
+    expect(lines).toContain(`      #${a2.id} ⧉ Play app signing · active`);
+    expect(lines).toContain(`      #${a3.id} ⚒ Run signing tests · NEEDS YOU`);
     expect(lines.find((l) => l.trim().startsWith('Next:'))?.trim()).toMatch(new RegExp(`^Next: #${s3.id} ⇄ 3 RevenueCat · #\\d+ 4 Build to GitHub`));
     expect(lines).toContain(`Needs you (1): #${a3.id} ⚒ Run signing tests`);
   });
@@ -556,7 +556,7 @@ describe('briefing: recently done and left unfinished', () => {
     tick(HOUR);
     updateNode(ctx, 'test', a2.id, { status: 'done', outcome: 'Signing configured in Play Console', label: 'docs' });
     // a1 and 1 iOS certificate finished in one call, so at one time: the newer id comes first. a1 has no outcome.
-    expect(lineOf(brief(ctx), 'Recently done')).toBe(`Recently done: #${a2.id} ¶ Play app signing — "Signing configured in Play Console" · #${a1.id} Upload keystore`);
+    expect(lineOf(brief(ctx), 'Recently done')).toBe(`Recently done: #${a2.id} ¶ Play app signing: "Signing configured in Play Console" · #${a1.id} Upload keystore`);
     expect(statusAnswer(ctx)).not.toContain('Recently done');
   });
 
@@ -570,13 +570,13 @@ describe('briefing: recently done and left unfinished', () => {
     tick(HOUR);
     // Its updatedAt moves past s3's; its completedAt stays.
     updateNode(ctx, 'test', a2.id, { outcome: 'Configured in Play Console' });
-    expect(lineOf(brief(ctx), 'Recently done')).toBe(`Recently done: #${s3.id} 3 RevenueCat · #${a2.id} Play app signing — "Configured in Play Console"`);
+    expect(lineOf(brief(ctx), 'Recently done')).toBe(`Recently done: #${s3.id} 3 RevenueCat · #${a2.id} Play app signing: "Configured in Play Console"`);
   });
 
   it('breaks a tie in finish time by id, the newer first', () => {
     const { ctx, s1, a1 } = clocked();
     updateNode(ctx, 'test', s1.id, { outcome: 'Certificate in the keychain' });
-    expect(lineOf(brief(ctx), 'Recently done')).toBe(`Recently done: #${a1.id} Upload keystore · #${s1.id} 1 iOS certificate — "Certificate in the keychain"`);
+    expect(lineOf(brief(ctx), 'Recently done')).toBe(`Recently done: #${a1.id} Upload keystore · #${s1.id} 1 iOS certificate: "Certificate in the keychain"`);
   });
 
   it('clips an outcome to 80 characters with the … inside them, on one line', () => {
@@ -589,7 +589,7 @@ describe('briefing: recently done and left unfinished', () => {
     updateNode(ctx, 'test', s4.id, { status: 'done', outcome: long });
     const clipped = `${`Builds on push. The workflow ${'x'.repeat(100)}`.slice(0, 79)}…`;
     expect(clipped).toHaveLength(80);
-    expect(lineOf(brief(ctx), 'Recently done')).toBe(`Recently done: #${s4.id} 4 Build to GitHub — "${clipped}" · #${s3.id} 3 RevenueCat — "${'y'.repeat(80)}"`);
+    expect(lineOf(brief(ctx), 'Recently done')).toBe(`Recently done: #${s4.id} 4 Build to GitHub: "${clipped}" · #${s3.id} 3 RevenueCat: "${'y'.repeat(80)}"`);
   });
 
   it('never names a dropped step, and leaves the line out when nothing is done', () => {

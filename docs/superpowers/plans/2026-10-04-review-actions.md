@@ -462,7 +462,7 @@ Keeping InProgress current (Aiden watches it live):
       task command and resources path of real length, and each clause is present.
 - [ ] Line 2 becomes: `All InProgress edits go through the inprogress-scribe agent in the background. The rules below
       are complete; the inprogress skill is for opt-in, adoption and the full brief format.`
-- [ ] `Recently done:` the two steps with the latest `completedAt`, as `#87 ¶ Title — "outcome"`, outcome clipped to
+- [ ] `Recently done:` the two steps with the latest `completedAt`, as `#87 ¶ Title: "outcome"`, outcome clipped to
       80 characters. Left out when nothing is done.
 - [ ] `Left unfinished by an earlier session:` open tasks with `endedAt` set, on steps that are not done or dropped,
       as `on #86: "Review it", "Write tests"`, at most three subjects. Left out when there are none.

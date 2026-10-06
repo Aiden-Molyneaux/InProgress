@@ -20,11 +20,11 @@ export function formatCreated(nodes: TreeNode[]): string {
 
 export function formatNodeDetail(d: NodeDetail): string {
   const n = d.node;
-  const lines = [`#${n.id} ${glyphTitle(n)} (${n.kind}${n.label ? `, ${n.label}` : ''}) — ${n.status}, ${n.assignee === 'me' ? 'assigned to Aiden' : 'Claude'}`];
+  const lines = [`#${n.id} ${glyphTitle(n)} (${n.kind}${n.label ? `, ${n.label}` : ''}) · ${n.status}, ${n.assignee === 'me' ? 'assigned to Aiden' : 'Claude'}`];
   if (d.parent) lines.push(`Parent: #${d.parent.id} ${d.parent.title}`);
   if (n.body) lines.push(`Body:\n${n.body}`);
   if (n.outcome) lines.push(`Outcome: ${n.outcome}`);
-  if (d.children.length) lines.push('Children:', ...d.children.map((c) => `  #${c.id} ${c.title} — ${c.status}${c.assignee === 'me' ? ' (you)' : ''}`));
+  if (d.children.length) lines.push('Children:', ...d.children.map((c) => `  #${c.id} ${c.title} · ${c.status}${c.assignee === 'me' ? ' (you)' : ''}`));
   if (d.resources.length) lines.push('Resources:', ...d.resources.map((r) => `  r${r.id} ${r.title} (${r.kind})${r.path ? ` ${r.path}` : ''}`));
   if (d.log.length) lines.push('Log:', ...d.log.map((l) => `  ${l.createdAt} ${l.text}`));
   return lines.join('\n');
@@ -41,7 +41,7 @@ export function formatResource(r: Resource): string {
 export function formatSearch(s: SearchResult): string {
   if (!s.nodes.length && !s.resources.length) return 'No matches.';
   return [
-    ...s.nodes.map((n) => `#${n.id} ${n.title} — ${n.status}`),
+    ...s.nodes.map((n) => `#${n.id} ${n.title} · ${n.status}`),
     ...s.resources.map((r) => `r${r.id} ${r.title} (${r.kind}) on #${r.nodeId}`),
   ].join('\n');
 }

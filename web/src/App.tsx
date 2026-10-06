@@ -59,7 +59,7 @@ export function App() {
   }, [viewerOpen]);
 
   useEffect(() => {
-    document.title = `${needsYou ? `(${needsYou}) ` : ''}InProgress${snapshot ? ` — ${snapshot.project.name}` : ''}`;
+    document.title = `${needsYou ? `(${needsYou}) ` : ''}InProgress${snapshot ? ` · ${snapshot.project.name}` : ''}`;
   }, [needsYou, snapshot]);
   useEffect(() => {
     setSelectedNode(null);

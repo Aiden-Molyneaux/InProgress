@@ -2212,16 +2212,16 @@ describe('renderOutline', () => {
     const t = sample();
     const text = renderOutline(buildIndex(t.nodes), [], { resourcesByNode: new Map([[t.a3.id, [12]]]) });
     expect(text.split('\n')).toEqual([
-      `#${t.root.id} InGame — active (1/2)`,
-      `  #${t.m.id} M1-M6 build (phase) — done (2/2) · 2 done inside (folded)`,
-      `  #${t.road.id} Road to market (phase) — active (1/7)`,
-      `    #${t.s1.id} 1 iOS certificate — done`,
-      `    #${t.s2.id} 2 Android signing — active (1/3)`,
-      `      #${t.a1.id} Upload keystore — done`,
-      `      #${t.a2.id} Play app signing — active`,
-      `      #${t.a3.id} Run signing tests — NEEDS YOU [r12]`,
-      `    #${t.s3.id} 3 RevenueCat — todo`,
-      `    #${t.s4.id} 4 Build to GitHub — todo`,
+      `#${t.root.id} InGame · active (1/2)`,
+      `  #${t.m.id} M1-M6 build (phase) · done (2/2) · 2 done inside (folded)`,
+      `  #${t.road.id} Road to market (phase) · active (1/7)`,
+      `    #${t.s1.id} 1 iOS certificate · done`,
+      `    #${t.s2.id} 2 Android signing · active (1/3)`,
+      `      #${t.a1.id} Upload keystore · done`,
+      `      #${t.a2.id} Play app signing · active`,
+      `      #${t.a3.id} Run signing tests · NEEDS YOU [r12]`,
+      `    #${t.s3.id} 3 RevenueCat · todo`,
+      `    #${t.s4.id} 4 Build to GitHub · todo`,
       `    +3 more: #${t.s5.id}, #${t.s6.id}, #${t.s7.id}`,
     ]);
   });
@@ -2397,7 +2397,7 @@ export function nodeLine(index: TreeIndex, n: TreeNode, resourcesByNode?: Map<nu
   const kind = n.parentId === null || n.kind === 'task' ? '' : ` (${n.kind})`;
   const prog = progress(index, n.id);
   const res = resourcesByNode?.get(n.id);
-  return `#${n.id} ${n.title}${kind} — ${statusLabel(n)}${prog ? ` (${prog.done}/${prog.total})` : ''}${res?.length ? ` [${res.map((r) => `r${r}`).join(', ')}]` : ''}`;
+  return `#${n.id} ${n.title}${kind} · ${statusLabel(n)}${prog ? ` (${prog.done}/${prog.total})` : ''}${res?.length ? ` [${res.map((r) => `r${r}`).join(', ')}]` : ''}`;
 }
 
 export interface OutlineOptions {
@@ -2511,8 +2511,8 @@ describe('handleHookEvent', () => {
     expect(text).toContain('tracked in project "InGame" (slug ingame). Session id: s1.');
     expect(text).toContain('Planning docs live in docs/planning.');
     expect(text).toContain('inprogress-scribe');
-    expect(text).toContain(`#${a2.id} Play app signing — active`);
-    expect(text).toContain(`#${a3.id} Run signing tests — NEEDS YOU`);
+    expect(text).toContain(`#${a2.id} Play app signing · active`);
+    expect(text).toContain(`#${a3.id} Run signing tests · NEEDS YOU`);
     expect(text).toMatch(/Next: #\d+ 3 RevenueCat · #\d+ 4 Build to GitHub \(\+3 more\)/);
     expect(text).toContain(`Needs you (1): #${a3.id} Run signing tests`);
     expect(text).toContain(`Signing suite (on #${a3.id})`);
@@ -2537,7 +2537,7 @@ describe('handleHookEvent', () => {
     handleHookEvent(ctx, 's1', start());
     const r = handleHookEvent(ctx, 's1', { event: 'prompt', asksStatus: true });
     expect(r.context).toContain('[InProgress] Where things stand in InGame');
-    expect(r.context).toContain(`#${a3.id} Run signing tests — NEEDS YOU`);
+    expect(r.context).toContain(`#${a3.id} Run signing tests · NEEDS YOU`);
   });
 
   it('leaves state alone on a compact restart but still re-briefs', () => {
@@ -2784,7 +2784,7 @@ function statusText(n: TreeNode): string {
 function lineFor(index: TreeIndex, n: TreeNode, focusOf: Map<number, Session[]>, sessionId?: string): string {
   const prog = progress(index, n.id);
   const here = (focusOf.get(n.id) ?? []).map((s) => (s.id === sessionId ? '◆ this session' : `◆ "${sessionDisplayTitle(s)}"`));
-  return `#${n.id} ${n.title}${n.kind === 'question' ? ' (question)' : ''} — ${statusText(n)}${prog ? ` (${prog.done}/${prog.total})` : ''}${here.length ? `  ${here.join(' ')}` : ''}`;
+  return `#${n.id} ${n.title}${n.kind === 'question' ? ' (question)' : ''} · ${statusText(n)}${prog ? ` (${prog.done}/${prog.total})` : ''}${here.length ? `  ${here.join(' ')}` : ''}`;
 }
 
 export function frontierLines(snapshot: ProjectSnapshot, sessionId?: string): string[] {
@@ -3123,7 +3123,7 @@ describe('project lifecycle over HTTP', () => {
     expect((await app.inject({ url: '/api/search?project=ingame&q=signing' })).json().resources[0].title).toBe('Suite v2');
     const outline = await app.inject({ url: '/api/projects/ingame/outline' });
     expect(outline.headers['content-type']).toContain('text/plain');
-    expect(outline.body).toContain(`#${tests.id} Run tests — NEEDS YOU [r${res.id}]`);
+    expect(outline.body).toContain(`#${tests.id} Run tests · NEEDS YOU [r${res.id}]`);
     const snap = (await app.inject({ url: '/api/projects/ingame' })).json();
     expect(snap.nodes).toHaveLength(4);
     expect(snap.lastEvent.type).toBe('log.created');
@@ -4137,7 +4137,7 @@ describe('scribe MCP tools', () => {
     const [road, play, tests] = lineIds(plan.text);
     expect(plan.text).toContain('Run signing tests (task, todo, you)');
 
-    expect((await call('update_node', { id: play, status: 'done', outcome: 'Configured', session: 's1' })).text).toBe(`#${play} Play app signing — done.`);
+    expect((await call('update_node', { id: play, status: 'done', outcome: 'Configured', session: 's1' })).text).toBe(`#${play} Play app signing · done.`);
 
     const file = join(mkdtempSync(join(tmpdir(), 'ip-mcp-')), 'suite.md');
     writeFileSync(file, '# Signing tests\n- upload key accepted');
@@ -4151,11 +4151,11 @@ describe('scribe MCP tools', () => {
     expect((await call('set_focus', { session: 's1', node: tests })).text).toBe(`Focus → #${tests}.`);
 
     const outline = await call('get_outline', { project: 'ingame' });
-    expect(outline.text).toContain(`#${tests} Run signing tests — NEEDS YOU [r${rid}]`);
+    expect(outline.text).toContain(`#${tests} Run signing tests · NEEDS YOU [r${rid}]`);
     const node = await call('get_node', { id: road });
     expect(node.text).toContain('Detour: sandbox wedge');
     expect((await call('search', { project: 'ingame', query: 'upload key' })).text).toContain(`r${rid} Signing suite`);
-    expect((await call('list_projects')).text).toMatch(/ingame — InGame \(active\) · root #\d+ · 1 need you/);
+    expect((await call('list_projects')).text).toMatch(/ingame · InGame \(active\) · root #\d+ · 1 need you/);
   });
 
   it('returns specific errors as tool errors', async () => {
@@ -4189,11 +4189,11 @@ export function formatCreated(nodes: TreeNode[]): string {
 
 export function formatNodeDetail(d: NodeDetail): string {
   const n = d.node;
-  const lines = [`#${n.id} ${n.title} (${n.kind}) — ${n.status}, ${n.assignee === 'me' ? 'assigned to Aiden' : 'Claude'}`];
+  const lines = [`#${n.id} ${n.title} (${n.kind}) · ${n.status}, ${n.assignee === 'me' ? 'assigned to Aiden' : 'Claude'}`];
   if (d.parent) lines.push(`Parent: #${d.parent.id} ${d.parent.title}`);
   if (n.body) lines.push(`Body:\n${n.body}`);
   if (n.outcome) lines.push(`Outcome: ${n.outcome}`);
-  if (d.children.length) lines.push('Children:', ...d.children.map((c) => `  #${c.id} ${c.title} — ${c.status}${c.assignee === 'me' ? ' (you)' : ''}`));
+  if (d.children.length) lines.push('Children:', ...d.children.map((c) => `  #${c.id} ${c.title} · ${c.status}${c.assignee === 'me' ? ' (you)' : ''}`));
   if (d.resources.length) lines.push('Resources:', ...d.resources.map((r) => `  r${r.id} ${r.title} (${r.kind})${r.path ? ` ${r.path}` : ''}`));
   if (d.log.length) lines.push('Log:', ...d.log.map((l) => `  ${l.createdAt} ${l.text}`));
   return lines.join('\n');
@@ -4210,7 +4210,7 @@ export function formatResource(r: Resource): string {
 export function formatSearch(s: SearchResult): string {
   if (!s.nodes.length && !s.resources.length) return 'No matches.';
   return [
-    ...s.nodes.map((n) => `#${n.id} ${n.title} — ${n.status}`),
+    ...s.nodes.map((n) => `#${n.id} ${n.title} · ${n.status}`),
     ...s.resources.map((r) => `r${r.id} ${r.title} (${r.kind}) on #${r.nodeId}`),
   ].join('\n');
 }
@@ -4275,7 +4275,7 @@ export function createMcpServer(client: Client): McpServer {
     return projects
       .map((p) => {
         const own = bindings.filter((b) => b.projectId === p.id).map((b) => `  binding ${b.id}: ${b.path}${b.branchPattern ? ` [branch ${b.branchPattern}]` : ''}`);
-        return [`${p.slug} — ${p.name} (${p.status}) · root #${p.rootNodeId} · ${p.needsYou} need you · ${p.activeSessions} session(s)`, ...own].join('\n');
+        return [`${p.slug} · ${p.name} (${p.status}) · root #${p.rootNodeId} · ${p.needsYou} need you · ${p.activeSessions} session(s)`, ...own].join('\n');
       })
       .join('\n');
   });
@@ -4332,7 +4332,7 @@ export function createMcpServer(client: Client): McpServer {
     { id, title: z.string().optional(), kind: z.enum(NODE_KINDS).optional(), status: z.enum(NODE_STATUSES).optional(), assignee: z.enum(ASSIGNEES).optional(), body: z.string().optional(), outcome: z.string().optional(), session },
     async ({ id: nodeId, session: s, ...patch }: { id: number; session?: string } & Record<string, unknown>) => {
       const n = await client.patch<TreeNode>(`/api/nodes/${nodeId}`, patch, { actor: actor(s) });
-      return `#${n.id} ${n.title} — ${n.status}${n.assignee === 'me' ? ' (you)' : ''}.`;
+      return `#${n.id} ${n.title} · ${n.status}${n.assignee === 'me' ? ' (you)' : ''}.`;
     });
 
   tool('move_node', 'Move a node and its subtree under a new parent, optionally after a sibling.', { id, parent: id, after, session },
@@ -6451,7 +6451,7 @@ export function App() {
   const { snapshot, projects } = state;
   const needsYou = useMemo(() => (snapshot ? snapshot.nodes.filter(isNeedsYou).length : 0), [snapshot]);
   useEffect(() => {
-    document.title = `${needsYou ? `(${needsYou}) ` : ''}InProgress${snapshot ? ` — ${snapshot.project.name}` : ''}`;
+    document.title = `${needsYou ? `(${needsYou}) ` : ''}InProgress${snapshot ? ` · ${snapshot.project.name}` : ''}`;
   }, [needsYou, snapshot]);
   if (!state.loaded) return <div className="ip-empty">Loading…</div>;
   return (
@@ -7101,7 +7101,7 @@ export function App() {
   const needsYou = useMemo(() => (snapshot ? snapshot.nodes.filter(isNeedsYou).length : 0), [snapshot]);
 
   useEffect(() => {
-    document.title = `${needsYou ? `(${needsYou}) ` : ''}InProgress${snapshot ? ` — ${snapshot.project.name}` : ''}`;
+    document.title = `${needsYou ? `(${needsYou}) ` : ''}InProgress${snapshot ? ` · ${snapshot.project.name}` : ''}`;
   }, [needsYou, snapshot]);
   useEffect(() => setSelectedNode(null), [snapshot?.project.id]);
 
@@ -7413,7 +7413,7 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
             {detail.log.map((l) => (
               <li key={l.id}>
                 {relativeTime(l.createdAt)} · {l.text}
-                {l.sessionTitle ? <i> — {l.sessionTitle}</i> : null}
+                {l.sessionTitle ? <i> · {l.sessionTitle}</i> : null}
               </li>
             ))}
           </ul>
@@ -7510,7 +7510,7 @@ export function App() {
   const needsYou = useMemo(() => (snapshot ? snapshot.nodes.filter(isNeedsYou).length : 0), [snapshot]);
 
   useEffect(() => {
-    document.title = `${needsYou ? `(${needsYou}) ` : ''}InProgress${snapshot ? ` — ${snapshot.project.name}` : ''}`;
+    document.title = `${needsYou ? `(${needsYou}) ` : ''}InProgress${snapshot ? ` · ${snapshot.project.name}` : ''}`;
   }, [needsYou, snapshot]);
   useEffect(() => {
     setSelectedNode(null);
@@ -7742,7 +7742,7 @@ test('opens on the current work with folding, needs-you and the session badge', 
   await expect(page.locator('.ip-node.needs-you', { hasText: 'Run signing tests' })).toBeVisible();
   await expect(page.locator('.ip-more', { hasText: '+3 more' })).toBeVisible();
   await expect(page.locator('.ip-badge', { hasText: 'E2E session' })).toBeVisible();
-  await expect(page).toHaveTitle('(1) InProgress — E2E Demo');
+  await expect(page).toHaveTitle('(1) InProgress · E2E Demo');
 });
 
 test('shows live changes and follows them', async ({ page }) => {

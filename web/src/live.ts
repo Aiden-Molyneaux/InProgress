@@ -34,7 +34,7 @@ export function elapsed(fromIso: string, now: number): string {
 /** The text without a leading `#<nodeId>`: shown under that node, the id only repeats it. A text that is only the id stays. */
 export function withoutOwnId(text: string, nodeId: number | null): string {
   if (nodeId === null) return text;
-  const rest = text.replace(new RegExp(`^\\s*#${nodeId}\\b[\\s:·—–-]*`), '');
+  const rest = text.replace(new RegExp(`^\\s*#${nodeId}\\b[\\s:·\u2014–-]*`), '');
   return rest === text || !rest.trim() ? text : rest;
 }
 

@@ -298,11 +298,11 @@ describe('computeVisible with doneRuns', () => {
     expect(computeVisible(index, [], opts).map(show)).toEqual(['P', '✓ 4 done']);
     // ...and the outline the CLI, MCP and briefing read never does.
     expect(renderOutline(index, []).split('\n')).toEqual([
-      `#${p.id} P — active (3/3)`,
-      `  #${kids[0].id} d1 — done`,
-      `  #${kids[1].id} d2 — dropped`,
-      `  #${kids[2].id} d3 — done`,
-      `  #${kids[3].id} d4 — done`,
+      `#${p.id} P · active (3/3)`,
+      `  #${kids[0].id} d1 · done`,
+      `  #${kids[1].id} d2 · dropped`,
+      `  #${kids[2].id} d3 · done`,
+      `  #${kids[3].id} d4 · done`,
     ]);
   });
 });
@@ -312,16 +312,16 @@ describe('renderOutline', () => {
     const t = sample();
     const text = renderOutline(buildIndex(t.nodes), [], { resourcesByNode: new Map([[t.a3.id, [12]]]) });
     expect(text.split('\n')).toEqual([
-      `#${t.root.id} InGame — active (1/2)`,
-      `  #${t.m.id} M1-M6 build (phase) — done (2/2) · 2 done inside (folded)`,
-      `  #${t.road.id} Road to market (phase) — active (1/7)`,
-      `    #${t.s1.id} 1 iOS certificate — done`,
-      `    #${t.s2.id} 2 Android signing — active (1/3)`,
-      `      #${t.a1.id} Upload keystore — done`,
-      `      #${t.a2.id} Play app signing — active`,
-      `      #${t.a3.id} Run signing tests — NEEDS YOU [r12]`,
-      `    #${t.s3.id} 3 RevenueCat — todo`,
-      `    #${t.s4.id} 4 Build to GitHub — todo`,
+      `#${t.root.id} InGame · active (1/2)`,
+      `  #${t.m.id} M1-M6 build (phase) · done (2/2) · 2 done inside (folded)`,
+      `  #${t.road.id} Road to market (phase) · active (1/7)`,
+      `    #${t.s1.id} 1 iOS certificate · done`,
+      `    #${t.s2.id} 2 Android signing · active (1/3)`,
+      `      #${t.a1.id} Upload keystore · done`,
+      `      #${t.a2.id} Play app signing · active`,
+      `      #${t.a3.id} Run signing tests · NEEDS YOU [r12]`,
+      `    #${t.s3.id} 3 RevenueCat · todo`,
+      `    #${t.s4.id} 4 Build to GitHub · todo`,
       `    +3 more: #${t.s5.id}, #${t.s6.id}, #${t.s7.id}`,
     ]);
   });
@@ -334,12 +334,12 @@ describe('renderOutline', () => {
     const plain = n(phase.id, 'Unlabelled step');
     const lines = renderOutline(buildIndex([root, phase, rows, plain]), []).split('\n');
     expect(lines).toEqual([
-      `#${root.id} InProgress — active (0/1)`,
-      `  #${phase.id} ⧉ Live work (phase) — active (0/2)`,
-      `    #${rows.id} ⧉ UI: working-task rows — active`,
-      `    #${plain.id} Unlabelled step — todo`,
+      `#${root.id} InProgress · active (0/1)`,
+      `  #${phase.id} ⧉ Live work (phase) · active (0/2)`,
+      `    #${rows.id} ⧉ UI: working-task rows · active`,
+      `    #${plain.id} Unlabelled step · todo`,
     ]);
     const glyphs = NODE_LABELS.map((label) => renderOutline(buildIndex([n(null, 'R', { id: 1 }), n(1, 'Step', { id: 2, label })]), []).split('\n')[1]);
-    expect(glyphs).toEqual(['⧉', '⚙', '⛁', '⇄', '⚒', '¶', '⚑', '↻', '⌕'].map((g) => `  #2 ${g} Step — todo`));
+    expect(glyphs).toEqual(['⧉', '⚙', '⛁', '⇄', '⚒', '¶', '⚑', '↻', '⌕'].map((g) => `  #2 ${g} Step · todo`));
   });
 });
