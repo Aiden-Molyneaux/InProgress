@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BADGE_ROW, INDENT, READERS_ROW, ROW, WORK_GAP, WORK_ROW, agentVisible, eventTarget, findFrontier, formatUpNext, layoutOutline, queueView, type LayoutItem, type LayoutResult } from '../../src/core/layout';
+import { AGENT_LINE, CARD_GAP, CARD_PAD, DONE_LINE, FOLD_ROW, NODE_H, READERS_LINE, ROW, STACK_HEAD, TASK_ROW, agentVisible, eventTarget, findFrontier, formatUpNext, layoutOutline, queueView, type LayoutItem, type LayoutResult } from '../../src/core/layout';
 import { ENDED_AGENT_MS, READER_AGENT_TYPES, isReader, type EventRow, type PastSession, type QueueEntry, type ResourceMeta, type Session, type SubagentInfo, type TrailAgent, type TreeNode, type WorkItem, type WorkStatus } from '../../src/core/types';
 
 let nextId = 1;
@@ -29,28 +29,37 @@ function sample() {
 }
 
 describe('layoutOutline', () => {
-  it('stacks rows downward and indents by depth', () => {
+  it('stacks one-line cards a ROW apart: the root at x 8, a depth-1 step at 56, its children at 84, every card ending at x 506', () => {
     const t = sample();
     const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [] });
-    const rows = l.items.map((i) => (i.kind === 'node' ? [i.id, i.x, i.y] : [i.id, i.x, i.y]));
-    expect(rows).toEqual([
-      [`n${t.root.id}`, 0, 0], [`n${t.a.id}`, INDENT, ROW], [`n${t.a1.id}`, 2 * INDENT, 2 * ROW], [`n${t.a2.id}`, 2 * INDENT, 3 * ROW],
-      [`n${t.b.id}`, INDENT, 4 * ROW], [`n${t.c.id}`, INDENT, 5 * ROW], [`more${t.root.id}-0`, INDENT, 6 * ROW],
+    expect(l.items.map((i) => (i.kind === 'node' ? [i.id, i.x, i.y, i.h, i.w] : [i.id, i.x, i.y]))).toEqual([
+      [`n${t.root.id}`, 8, 0, NODE_H, 498], [`n${t.a.id}`, 56, ROW, NODE_H, 450], [`n${t.a1.id}`, 84, 2 * ROW, NODE_H, 422],
+      [`n${t.a2.id}`, 84, 3 * ROW, NODE_H, 422], [`n${t.b.id}`, 56, 4 * ROW, NODE_H, 450], [`n${t.c.id}`, 56, 5 * ROW, NODE_H, 450],
+      [`more${t.root.id}-0`, 56, 6 * ROW],
     ]);
-    expect(l.edges).toContainEqual({ id: `e-more${t.root.id}-0`, source: `n${t.root.id}`, target: `more${t.root.id}-0` });
-    expect(l.edges).toContainEqual({ id: `e-n${t.a1.id}`, source: `n${t.a.id}`, target: `n${t.a1.id}` });
-    expect(l.height).toBe(7 * ROW);
+    expect(l.lanes).toEqual([]);
+    // A fold row is 26 px tall: FOLD_ROW less the gap under it.
+    expect(l.height).toBe(6 * ROW + FOLD_ROW - CARD_GAP);
   });
 
-  it('adds a badge row under a focused node and marks the working chain', () => {
+  it("draws a session's lead line inside its focus's card, marks the working chain, and the focus alone as the working focus", () => {
     const t = sample();
     const l = layoutOutline({ nodes: t.nodes, resources: [resource(9, t.a2.id)], sessions: [session('s1', t.a1.id, 'working'), session('s2', t.b.id, 'ended')] });
-    const badge = l.items.find((i) => i.kind === 'badge')!;
-    expect(badge).toMatchObject({ id: 'bs1', sessionId: 's1', nodeId: t.a1.id, x: 3 * INDENT, y: 3 * ROW });
-    expect(l.nodeItems.get(t.a2.id)).toMatchObject({ y: 3 * ROW + BADGE_ROW, needsYou: true, resourceIds: [9] });
-    expect(l.nodeItems.get(t.a.id)?.working).toBe(true);
-    expect(l.nodeItems.get(t.b.id)?.working).toBe(false);
-    expect(l.items.filter((i) => i.kind === 'badge')).toHaveLength(1);
+    expect(l.items.filter((i) => i.kind === 'line')).toEqual([
+      { kind: 'line', id: `ls1:${t.a1.id}`, sessionId: 's1', nodeId: t.a1.id, lead: true, agentIds: [], x: 84, y: 2 * ROW + NODE_H },
+    ]);
+    expect(l.nodeItems.get(t.a1.id)).toMatchObject({ h: NODE_H + AGENT_LINE + CARD_PAD, working: true, workingFocus: true });
+    expect(l.nodeItems.get(t.a2.id)).toMatchObject({ y: 2 * ROW + NODE_H + AGENT_LINE + CARD_PAD + CARD_GAP, needsYou: true, resourceIds: [9] });
+    expect(l.nodeItems.get(t.a.id)).toMatchObject({ working: true, workingFocus: false });
+    expect(l.nodeItems.get(t.b.id)).toMatchObject({ working: false, workingFocus: false });
+  });
+
+  it("marks only a working session's focus as the working focus: never its ancestors, nor an idle or waiting session's focus", () => {
+    const t = sample();
+    const sessions = [session('s1', t.a1.id, 'working'), session('s2', t.b.id, 'idle'), session('s3', t.c.id, 'permission')];
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions });
+    expect([...l.nodeItems.values()].filter((i) => i.workingFocus).map((i) => i.nodeId)).toEqual([t.a1.id]);
+    expect([...l.nodeItems.values()].filter((i) => i.working).map((i) => i.nodeId)).toEqual([t.root.id, t.a.id, t.a1.id]);
   });
 
   it('reports folded done counts and progress', () => {
@@ -61,46 +70,57 @@ describe('layoutOutline', () => {
     expect(l.nodeItems.has(t.a1.id)).toBe(false);
   });
 
-  it('badges the nearest visible ancestor when a manual fold hides the focus', () => {
+  it('draws the lead line on the nearest visible ancestor when a manual fold hides the focus', () => {
     const t = sample();
     const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [session('s1', t.a1.id, 'working')], overrides: { ['n:' + t.a.id]: 'closed' } });
     expect(l.nodeItems.has(t.a1.id)).toBe(false);
-    expect(l.items.find((i) => i.kind === 'badge')).toMatchObject({ id: 'bs1', nodeId: t.a.id, x: 2 * INDENT, y: 2 * ROW });
-    expect(l.nodeItems.get(t.a.id)?.working).toBe(true);
+    expect(l.items.find((i) => i.kind === 'line')).toMatchObject({ id: `ls1:${t.a.id}`, nodeId: t.a.id, lead: true, x: 56, y: ROW + NODE_H });
+    expect(l.nodeItems.get(t.a.id)).toMatchObject({ working: true, h: NODE_H + AGENT_LINE + CARD_PAD });
   });
 
-  it('gives no badge to a session without a focus or focused on a node that is gone', () => {
+  it('gives no line to a session without a focus or focused on a node that is gone', () => {
     const t = sample();
     const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [session('s1', null, 'working'), session('s2', 999, 'working')] });
-    expect(l.items.filter((i) => i.kind === 'badge')).toEqual([]);
-    expect([...l.nodeItems.values()].filter((i) => i.working)).toEqual([]);
+    expect(l.items.filter((i) => i.kind === 'line')).toEqual([]);
+    expect([...l.nodeItems.values()].filter((i) => i.working || i.workingFocus)).toEqual([]);
     expect(l.height).toBe(layoutOutline({ nodes: t.nodes, resources: [], sessions: [] }).height);
   });
 
-  it('stacks the badges of sessions sharing an anchor, one BADGE_ROW each', () => {
+  it('gives each session on a card a line of its own, one AGENT_LINE each, in session order', () => {
     const t = sample();
     const both = layoutOutline({ nodes: t.nodes, resources: [], sessions: [session('s1', t.a1.id, 'working'), session('s2', t.a1.id, 'idle')] });
-    const badges = both.items.filter((i) => i.kind === 'badge');
-    expect(badges.map((b) => [b.id, b.nodeId, b.x, b.y])).toEqual([['bs1', t.a1.id, 3 * INDENT, 3 * ROW], ['bs2', t.a1.id, 3 * INDENT, 3 * ROW + BADGE_ROW]]);
-    expect(both.nodeItems.get(t.a2.id)?.y).toBe(3 * ROW + 2 * BADGE_ROW);
-    expect(both.height).toBe(7 * ROW + 2 * BADGE_ROW);
-    // A fold that hides one session's focus stacks it on the anchor with the session already there.
+    const top = 2 * ROW + NODE_H;
+    expect(both.items.filter((i) => i.kind === 'line').map((b) => [b.id, b.nodeId, b.x, b.y])).toEqual([
+      [`ls1:${t.a1.id}`, t.a1.id, 84, top],
+      [`ls2:${t.a1.id}`, t.a1.id, 84, top + AGENT_LINE],
+    ]);
+    expect(both.nodeItems.get(t.a1.id)?.h).toBe(NODE_H + 2 * AGENT_LINE + CARD_PAD);
+    expect(both.nodeItems.get(t.a2.id)?.y).toBe(top + 2 * AGENT_LINE + CARD_PAD + CARD_GAP);
+    expect(both.height).toBe(6 * ROW + FOLD_ROW - CARD_GAP + 2 * AGENT_LINE + CARD_PAD);
+    // A fold that hides one session's focus puts its line on the anchor, after the line of the session already there.
     const folded = layoutOutline({ nodes: t.nodes, resources: [], sessions: [session('s1', t.a1.id, 'working'), session('s2', t.a.id, 'idle')], overrides: { ['n:' + t.a.id]: 'closed' } });
-    expect(folded.items.filter((i) => i.kind === 'badge').map((b) => [b.id, b.nodeId, b.y])).toEqual([['bs1', t.a.id, 2 * ROW], ['bs2', t.a.id, 2 * ROW + BADGE_ROW]]);
+    expect(folded.items.filter((i) => i.kind === 'line').map((b) => [b.id, b.nodeId, b.y])).toEqual([
+      [`ls1:${t.a.id}`, t.a.id, ROW + NODE_H],
+      [`ls2:${t.a.id}`, t.a.id, ROW + NODE_H + AGENT_LINE],
+    ]);
   });
 
-  it('draws one uniquely named edge into every visible row but the root', () => {
+  it("draws edges only inside a card's subtree, never out of the root or a stack head, each uniquely named", () => {
     const t = sample();
-    // A pinned needs-you child in the hidden tail splits it into two "+n more" runs.
+    // A pinned needs-you child in the hidden tail splits it into two "+n more" runs. The root's rows get no edge.
     const f = n(t.root.id, 'F', { assignee: 'me' });
     const g = n(t.root.id, 'G');
     const h = n(t.root.id, 'H');
     const l = layoutOutline({ nodes: [...t.nodes, f, g, h], resources: [], sessions: [session('s1', t.a1.id, 'working')] });
     expect(l.items.filter((i) => i.kind === 'more').map((i) => i.id)).toEqual([`more${t.root.id}-0`, `more${t.root.id}-1`]);
-    const ids = l.edges.map((e) => e.id);
-    expect(new Set(ids).size).toBe(ids.length);
-    const rows = l.items.filter((i) => i.kind !== 'badge' && i.id !== `n${t.root.id}`).map((i) => i.id);
-    expect(l.edges.map((e) => e.target)).toEqual(rows);
+    expect(l.edges).toEqual([
+      { id: `e-n${t.a1.id}`, source: `n${t.a.id}`, target: `n${t.a1.id}` },
+      { id: `e-n${t.a2.id}`, source: `n${t.a.id}`, target: `n${t.a2.id}` },
+    ]);
+    // Under a phase: none into the stack head's children, one into theirs.
+    const a1a = n(t.a1.id, 'A1a');
+    const phased = [...t.nodes.map((x) => (x.id === t.a.id ? { ...x, kind: 'phase' as const } : x)), a1a];
+    expect(layoutOutline({ nodes: phased, resources: [], sessions: [] }).edges).toEqual([{ id: `e-n${a1a.id}`, source: `n${t.a1.id}`, target: `n${a1a.id}` }]);
   });
 
   it('folds a run of old finished steps into one "done" row and tells it from the tail', () => {
@@ -117,14 +137,102 @@ describe('layoutOutline', () => {
     const l = layoutOutline({ nodes, resources: [], sessions: [], now });
     const id = `done${t.root.id}-0`;
     expect(l.items.map((i) => i.id)).toEqual([`n${t.root.id}`, id, `n${t.d.id}`, `n${t.e.id}`]);
-    expect(l.items[1]).toEqual({ kind: 'more', id, parentId: t.root.id, run: 0, x: INDENT, y: ROW, depth: 1, hiddenIds: [t.a.id, t.b.id, t.c.id], variant: 'done' });
-    expect(l.edges).toContainEqual({ id: `e-${id}`, source: `n${t.root.id}`, target: id });
+    expect(l.items[1]).toEqual({ kind: 'more', id, parentId: t.root.id, run: 0, x: 56, y: ROW, depth: 1, hiddenIds: [t.a.id, t.b.id, t.c.id], variant: 'done' });
+    expect(l.nodeItems.get(t.d.id)?.y).toBe(ROW + FOLD_ROW);
+    // A fold row under the root gets no edge.
+    expect(l.edges).toEqual([]);
     // Within a day of finishing, they show.
     expect(layoutOutline({ nodes, resources: [], sessions: [], now: Date.parse(old) + 60_000 }).items.some((i) => i.kind === 'more')).toBe(false);
     // The done: override opens the run.
     expect(layoutOutline({ nodes, resources: [], sessions: [], now, overrides: { [`done:${t.root.id}`]: 'open' } }).nodeItems.has(t.b.id)).toBe(true);
     // The tail keeps its id and says what it is.
     expect(layoutOutline({ nodes: t.nodes, resources: [], sessions: [], now }).items.find((i) => i.kind === 'more')).toMatchObject({ id: `more${t.root.id}-0`, variant: 'tail' });
+  });
+
+  it('keeps a deep card at least 240 wide', () => {
+    nextId = 1;
+    const chain = [n(null, 'Root', { status: 'active' })];
+    for (let d = 1; d <= 9; d++) chain.push(n(chain[d - 1].id, `D${d}`, { status: 'active' }));
+    const l = layoutOutline({ nodes: chain, resources: [], sessions: [] });
+    expect(l.nodeItems.get(chain[8].id)).toMatchObject({ x: 252, w: 254 });
+    expect(l.nodeItems.get(chain[9].id)).toMatchObject({ x: 280, w: 240 });
+  });
+});
+
+describe('stacks and lanes', () => {
+  /** sample(), with A and B as phases. */
+  function phased() {
+    const t = sample();
+    return { ...t, nodes: t.nodes.map((x) => (x.id === t.a.id || x.id === t.b.id ? { ...x, kind: 'phase' as const } : x)) };
+  }
+  /** Each row as [id, x, y], with h, w and stack on a card. */
+  const boxes = (l: LayoutResult) => l.items.map((i) => (i.kind === 'node' ? [i.id, i.x, i.y, i.h, i.w, i.stack] : [i.id, i.x, i.y]));
+
+  it("draws a depth-1 phase as a stack head at x 22 that opens a lane, with its children at 56 inside it and no edges", () => {
+    const t = phased();
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [] });
+    // A's lane opens 18 below the root's card (32 + 18 = 50), and its head sits 9 into it (59). A1 starts STACK_HEAD
+    // below the head's top. The lane closes 12 below A2 (176 + 12 = 188), and B's lane opens 18 below that (206).
+    expect(boxes(l)).toEqual([
+      [`n${t.root.id}`, 8, 0, 32, 498, false],
+      [`n${t.a.id}`, 22, 59, 33, 484, true],
+      [`n${t.a1.id}`, 56, 59 + STACK_HEAD, 32, 450, false],
+      [`n${t.a2.id}`, 56, 144, 32, 450, false],
+      [`n${t.b.id}`, 22, 215, 33, 484, true],
+      [`n${t.c.id}`, 56, 278, 32, 450, false],
+      [`more${t.root.id}-0`, 56, 320],
+    ]);
+    expect(l.lanes).toEqual([
+      { id: `lane${t.a.id}`, nodeId: t.a.id, x: 8, y: 50, w: 504, h: 138 },
+      { id: `lane${t.b.id}`, nodeId: t.b.id, x: 8, y: 206, w: 504, h: 54 },
+    ]);
+    expect(l.edges).toEqual([]);
+    expect(l.height).toBe(346);
+  });
+
+  it('gives a folded phase a lane that holds only its head', () => {
+    const t = phased();
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [], overrides: { ['n:' + t.a.id]: 'closed' } });
+    expect(l.nodeItems.get(t.a.id)).toMatchObject({ y: 59, h: 33, folded: true, stack: true });
+    // 9 above the head, the 33 px head, 12 below it.
+    expect(l.lanes[0]).toEqual({ id: `lane${t.a.id}`, nodeId: t.a.id, x: 8, y: 50, w: 504, h: 54 });
+  });
+
+  it("closes a lane at the root's fold row, which sits at x 56 outside it", () => {
+    const t = sample();
+    const nodes = t.nodes.map((x) => (x.id === t.a.id || x.id === t.c.id ? { ...x, kind: 'phase' as const } : x));
+    const l = layoutOutline({ nodes, resources: [], sessions: [] });
+    expect(l.lanes.map((x) => [x.id, x.y, x.h])).toEqual([[`lane${t.a.id}`, 50, 138], [`lane${t.c.id}`, 256, 54]]);
+    // C's lane ends 12 below its head (298 + 12 = 310), and the fold row starts LANE_GAP (18) below that.
+    expect(l.items.at(-1)).toMatchObject({ id: `more${t.root.id}-0`, x: 56, y: 328 });
+    expect(l.height).toBe(354);
+  });
+
+  it('draws a depth-1 step that is not a phase at x 56 outside any lane, its children at 84 with edges, and the root\'s fold rows at 56', () => {
+    const t = phased();
+    const c1 = n(t.c.id, 'C1');
+    const l = layoutOutline({ nodes: [...t.nodes, c1], resources: [], sessions: [] });
+    expect(boxes(l).slice(5)).toEqual([
+      [`n${t.c.id}`, 56, 278, 32, 450, false],
+      [`n${c1.id}`, 84, 320, 32, 422, false],
+      [`more${t.root.id}-0`, 56, 362],
+    ]);
+    expect(l.lanes.map((x) => x.id)).toEqual([`lane${t.a.id}`, `lane${t.b.id}`]);
+    expect(l.edges).toEqual([{ id: `e-n${c1.id}`, source: `n${t.c.id}`, target: `n${c1.id}` }]);
+    expect(l.height).toBe(388);
+  });
+
+  it("puts a session's line on a stack head STACK_HEAD below its top, and the lane grows with it", () => {
+    const t = phased();
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [session('s1', t.a.id, 'idle')] });
+    expect(l.items.filter((i) => i.kind === 'line')).toEqual([
+      { kind: 'line', id: `ls1:${t.a.id}`, sessionId: 's1', nodeId: t.a.id, lead: true, agentIds: [], x: 22, y: 59 + STACK_HEAD },
+    ]);
+    // A stack head's box ends with its own lines: no CARD_PAD.
+    expect(l.nodeItems.get(t.a.id)).toMatchObject({ y: 59, h: STACK_HEAD + AGENT_LINE });
+    expect([t.a1, t.a2, t.b, t.c].map((x) => l.nodeItems.get(x.id)?.y)).toEqual([140, 182, 253, 316]);
+    expect(l.lanes.map((x) => [x.id, x.y, x.h])).toEqual([[`lane${t.a.id}`, 50, 176], [`lane${t.b.id}`, 244, 54]]);
+    expect(l.height).toBe(384);
   });
 });
 
@@ -147,27 +255,29 @@ const rowsOf = (l: LayoutResult, ...kinds: LayoutItem['kind'][]) =>
   l.items.filter((i) => kinds.includes(i.kind)).map((i) => [i.kind, i.id, 'nodeId' in i ? i.nodeId : null, i.x, i.y]);
 
 describe('working tasks', () => {
-  it('sit in compact rows one level under their node, in position order, with a gap after them', () => {
+  it('sit in TASK_ROW rows inside their card, in position order, with CARD_PAD under the last', () => {
     const t = sample();
     const first = work(t.a1.id, 'in_progress', { position: 1 });
     const second = work(t.a1.id, 'pending', { position: 2 });
     const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [], workItems: [second, first], now: T0 });
+    const top = 2 * ROW + NODE_H;
     expect(rowsOf(l, 'work', 'workDone')).toEqual([
-      ['work', `w${first.id}`, t.a1.id, 3 * INDENT, 3 * ROW],
-      ['work', `w${second.id}`, t.a1.id, 3 * INDENT, 3 * ROW + WORK_ROW],
+      ['work', `w${first.id}`, t.a1.id, 84, top],
+      ['work', `w${second.id}`, t.a1.id, 84, top + TASK_ROW],
     ]);
     expect(l.items.find((i) => i.kind === 'work')).toMatchObject({ workId: first.id });
-    expect(l.nodeItems.get(t.a2.id)?.y).toBe(3 * ROW + 2 * WORK_ROW + WORK_GAP);
-    expect(l.height).toBe(7 * ROW + 2 * WORK_ROW + WORK_GAP);
+    expect(l.nodeItems.get(t.a1.id)?.h).toBe(NODE_H + 2 * TASK_ROW + CARD_PAD);
+    expect(l.nodeItems.get(t.a2.id)?.y).toBe(top + 2 * TASK_ROW + CARD_PAD + CARD_GAP);
+    expect(l.height).toBe(6 * ROW + FOLD_ROW - CARD_GAP + 2 * TASK_ROW + CARD_PAD);
   });
 
-  it('come after the badges under their node', () => {
+  it('come after the lines in their card', () => {
     const t = sample();
     const task = work(t.a1.id, 'pending');
     const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [session('s1', t.a1.id, 'working')], workItems: [task], now: T0 });
-    expect(rowsOf(l, 'badge', 'work')).toEqual([
-      ['badge', 'bs1', t.a1.id, 3 * INDENT, 3 * ROW],
-      ['work', `w${task.id}`, t.a1.id, 3 * INDENT, 3 * ROW + BADGE_ROW],
+    expect(rowsOf(l, 'line', 'work')).toEqual([
+      ['line', `ls1:${t.a1.id}`, t.a1.id, 84, 2 * ROW + NODE_H],
+      ['work', `w${task.id}`, t.a1.id, 84, 2 * ROW + NODE_H + AGENT_LINE],
     ]);
   });
 
@@ -177,25 +287,26 @@ describe('working tasks', () => {
     const p = work(t.a1.id, 'pending', { position: 2 });
     const c2 = work(t.a1.id, 'completed', { position: 3 });
     const input = { nodes: t.nodes, resources: [], sessions: [], workItems: [c1, p, c2], now: T0 };
-    const y = 3 * ROW;
+    const y = 2 * ROW + NODE_H;
     const shut = layoutOutline(input);
+    // With no agent or readers line on the card, the done row takes a line of its own.
     expect(rowsOf(shut, 'work', 'workDone')).toEqual([
-      ['workDone', `wd${t.a1.id}`, t.a1.id, 3 * INDENT, y],
-      ['work', `w${p.id}`, t.a1.id, 3 * INDENT, y + WORK_ROW],
+      ['workDone', `wd${t.a1.id}`, t.a1.id, 84, y],
+      ['work', `w${p.id}`, t.a1.id, 84, y + DONE_LINE],
     ]);
-    expect(shut.items.find((i) => i.kind === 'workDone')).toMatchObject({ count: 2, open: false });
+    expect(shut.items.find((i) => i.kind === 'workDone')).toMatchObject({ count: 2, open: false, shared: false });
     const open = layoutOutline({ ...input, overrides: { [`work:${t.a1.id}`]: 'open' } });
     expect(rowsOf(open, 'work', 'workDone').map(([kind, id, , , rowY]) => [kind, id, rowY])).toEqual([
       ['workDone', `wd${t.a1.id}`, y],
-      ['work', `w${c1.id}`, y + WORK_ROW],
-      ['work', `w${p.id}`, y + 2 * WORK_ROW],
-      ['work', `w${c2.id}`, y + 3 * WORK_ROW],
+      ['work', `w${c1.id}`, y + DONE_LINE],
+      ['work', `w${p.id}`, y + DONE_LINE + TASK_ROW],
+      ['work', `w${c2.id}`, y + DONE_LINE + 2 * TASK_ROW],
     ]);
     expect(open.items.find((i) => i.kind === 'workDone')).toMatchObject({ count: 2, open: true });
     // All done: the one row.
     const allDone = layoutOutline({ ...input, workItems: [c1, c2] });
     expect(rowsOf(allDone, 'work', 'workDone').map(([kind]) => kind)).toEqual(['workDone']);
-    expect(allDone.nodeItems.get(t.a2.id)?.y).toBe(y + WORK_ROW + WORK_GAP);
+    expect(allDone.nodeItems.get(t.a2.id)?.y).toBe(y + DONE_LINE + CARD_PAD + CARD_GAP);
   });
 
   it('fold with their node, and stay hidden with it under a folded ancestor or in a "+n more" run', () => {
@@ -210,7 +321,7 @@ describe('working tasks', () => {
     const folded = layoutOutline({ ...input, overrides: { ['n:' + t.a.id]: 'closed' } });
     expect(rowsOf(folded, 'work')).toEqual([]);
     // Root, A (folded), B, C and "+2 more".
-    expect(folded.height).toBe(5 * ROW);
+    expect(folded.height).toBe(4 * ROW + FOLD_ROW - CARD_GAP);
   });
 
   it('never count in plan progress', () => {
@@ -239,68 +350,73 @@ describe('working tasks', () => {
   });
 });
 
-describe('subagent badges', () => {
-  it('give each subagent a badge under its node, after its session badge, falling back to the focus', () => {
+describe('agent lines', () => {
+  /** What one line adds to a card that had none: the line and the pad under it. */
+  const grow = AGENT_LINE + CARD_PAD;
+
+  it("put a session's workers as kin on its lead line at its focus, and on a line without a lead on any other card", () => {
     const t = sample();
     const s1 = withAgents(session('s1', t.a1.id, 'working'), [agent('x', { nodeId: t.b.id }), agent('y'), agent('z', { nodeId: 999 })]);
     const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [s1], now: T0 });
-    expect(rowsOf(l, 'badge', 'agent')).toEqual([
-      ['badge', 'bs1', t.a1.id, 3 * INDENT, 3 * ROW],
-      ['agent', 'as1:y', t.a1.id, 3 * INDENT, 3 * ROW + BADGE_ROW],
-      ['agent', 'as1:z', t.a1.id, 3 * INDENT, 3 * ROW + 2 * BADGE_ROW],
-      ['agent', 'as1:x', t.b.id, 2 * INDENT, 5 * ROW + 3 * BADGE_ROW],
+    expect(rowsOf(l, 'line')).toEqual([
+      ['line', `ls1:${t.a1.id}`, t.a1.id, 84, 2 * ROW + NODE_H],
+      ['line', `ls1:${t.b.id}`, t.b.id, 56, 4 * ROW + grow + NODE_H],
     ]);
-    expect(l.items.find((i) => i.id === 'as1:x')).toMatchObject({ sessionId: 's1', agentId: 'x', ended: false });
-    expect(l.nodeItems.get(t.c.id)?.y).toBe(5 * ROW + 4 * BADGE_ROW);
+    expect(l.items.find((i) => i.id === `ls1:${t.a1.id}`)).toMatchObject({ sessionId: 's1', lead: true, agentIds: ['y', 'z'] });
+    expect(l.items.find((i) => i.id === `ls1:${t.b.id}`)).toMatchObject({ sessionId: 's1', lead: false, agentIds: ['x'] });
+    expect(l.nodeItems.get(t.c.id)?.y).toBe(5 * ROW + 2 * grow);
   });
 
-  it('keep an ended subagent, greyed, for 5 minutes after it stopped', () => {
+  it('keep an ended worker as a kin for 5 minutes after it stopped', () => {
     const t = sample();
     const s1 = withAgents(session('s1', t.a1.id, 'idle'), [agent('x', { endedAt: ago(ENDED_AGENT_MS - 1000) }), agent('y', { endedAt: ago(ENDED_AGENT_MS) })]);
     const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [s1], now: T0 });
-    expect(l.items.filter((i) => i.kind === 'agent')).toEqual([expect.objectContaining({ id: 'as1:x', ended: true })]);
+    expect(l.items.filter((i) => i.kind === 'line')).toEqual([expect.objectContaining({ id: `ls1:${t.a1.id}`, lead: true, agentIds: ['x'] })]);
   });
 
   it("sit on the nearest visible ancestor when a manual fold hides their node, and need a node or their session's focus", () => {
     const t = sample();
     const s1 = withAgents(session('s1', null, 'working'), [agent('x', { nodeId: t.a1.id }), agent('y')]);
     const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [s1], overrides: { ['n:' + t.a.id]: 'closed' }, now: T0 });
-    expect(rowsOf(l, 'badge', 'agent')).toEqual([['agent', 'as1:x', t.a.id, 2 * INDENT, 2 * ROW]]);
+    expect(rowsOf(l, 'line')).toEqual([['line', `ls1:${t.a.id}`, t.a.id, 56, ROW + NODE_H]]);
+    expect(l.items.find((i) => i.kind === 'line')).toMatchObject({ lead: false, agentIds: ['x'] });
   });
 
   it("leave an ended session's subagents out", () => {
     const t = sample();
     const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [withAgents(session('s1', t.a1.id, 'ended'), [agent('x')])], now: T0 });
-    expect(rowsOf(l, 'badge', 'agent')).toEqual([]);
+    expect(rowsOf(l, 'line')).toEqual([]);
   });
 });
 
 describe('readers', () => {
   const reader = (agentId: string, extra: Partial<SubagentInfo> = {}) => agent(agentId, { agentType: 'Explore', ...extra });
 
-  it('give a running reader no badge: each session folds its running readers on a row into one readers row after its badges', () => {
+  it('give a running reader no kin: each session folds its running readers on a card into one readers line after its own line', () => {
     const t = sample();
     const s1 = withAgents(session('s1', t.a1.id, 'working'), [
       reader('r1'), agent('w1'), reader('r2', { agentType: 'Plan', nodeId: t.a1.id }), reader('r3', { agentType: 'claude-code-guide', nodeId: t.b.id }),
     ]);
     const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [s1], now: T0 });
-    expect(rowsOf(l, 'badge', 'agent', 'readers')).toEqual([
-      ['badge', 'bs1', t.a1.id, 3 * INDENT, 3 * ROW],
-      ['agent', 'as1:w1', t.a1.id, 3 * INDENT, 3 * ROW + BADGE_ROW],
-      ['readers', `rs1:${t.a1.id}`, t.a1.id, 3 * INDENT, 3 * ROW + 2 * BADGE_ROW],
-      ['readers', `rs1:${t.b.id}`, t.b.id, 2 * INDENT, 5 * ROW + 2 * BADGE_ROW + READERS_ROW],
+    const top = 2 * ROW + NODE_H;
+    const bY = 4 * ROW + AGENT_LINE + READERS_LINE + CARD_PAD;
+    expect(rowsOf(l, 'line', 'readers')).toEqual([
+      ['line', `ls1:${t.a1.id}`, t.a1.id, 84, top],
+      ['readers', `rs1:${t.a1.id}`, t.a1.id, 84, top + AGENT_LINE],
+      ['readers', `rs1:${t.b.id}`, t.b.id, 56, bY + NODE_H],
     ]);
-    expect(l.items.find((i) => i.id === `rs1:${t.a1.id}`)).toEqual({ kind: 'readers', id: `rs1:${t.a1.id}`, sessionId: 's1', nodeId: t.a1.id, agentIds: ['r1', 'r2'], x: 3 * INDENT, y: 3 * ROW + 2 * BADGE_ROW });
-    expect(l.nodeItems.get(t.c.id)?.y).toBe(5 * ROW + 2 * BADGE_ROW + 2 * READERS_ROW);
+    expect(l.items.find((i) => i.id === `ls1:${t.a1.id}`)).toMatchObject({ lead: true, agentIds: ['w1'] });
+    expect(l.items.find((i) => i.id === `rs1:${t.a1.id}`)).toEqual({ kind: 'readers', id: `rs1:${t.a1.id}`, sessionId: 's1', nodeId: t.a1.id, agentIds: ['r1', 'r2'], x: 84, y: top + AGENT_LINE });
+    expect(l.nodeItems.get(t.c.id)?.y).toBe(bY + NODE_H + READERS_LINE + CARD_PAD + CARD_GAP);
   });
 
-  it("keep each session's readers apart on a shared row, each after its own session's badges", () => {
+  it("keep each session's readers apart on a shared card, each after its own session's line", () => {
     const t = sample();
     const s1 = withAgents(session('s1', t.a1.id, 'working'), [reader('r1')]);
     const s2 = withAgents(session('s2', t.a1.id, 'working'), [reader('r2'), reader('r3')]);
     const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [s1, s2], now: T0 });
-    expect(rowsOf(l, 'badge', 'agent', 'readers').map(([kind, id]) => [kind, id])).toEqual([
-      ['badge', 'bs1'], ['readers', `rs1:${t.a1.id}`], ['badge', 'bs2'], ['readers', `rs2:${t.a1.id}`],
+    expect(rowsOf(l, 'line', 'readers').map(([kind, id]) => [kind, id])).toEqual([
+      ['line', `ls1:${t.a1.id}`], ['readers', `rs1:${t.a1.id}`], ['line', `ls2:${t.a1.id}`], ['readers', `rs2:${t.a1.id}`],
     ]);
     expect(l.items.find((i) => i.id === `rs2:${t.a1.id}`)).toMatchObject({ agentIds: ['r2', 'r3'] });
   });
@@ -318,14 +434,18 @@ describe('readers', () => {
     const g = n(t.root.id, 'G');
     const nodes = [...t.nodes, f, g];
     const hidden = (l: LayoutResult) => l.items.flatMap((i) => (i.kind === 'more' ? i.hiddenIds : []));
+    const kin = (l: LayoutResult) => l.items.flatMap((i) => (i.kind === 'line' ? i.agentIds : []));
     const ended = withAgents(session('s1', t.a1.id, 'working'), [reader('r1', { nodeId: t.e.id, endedAt: ago(60_000) })]);
     const gone = layoutOutline({ nodes, resources: [], sessions: [ended], now: T0 });
-    expect(rowsOf(gone, 'agent', 'readers')).toEqual([]);
+    expect(rowsOf(gone, 'readers')).toEqual([]);
+    expect(kin(gone)).toEqual([]);
     expect(hidden(gone)).toContain(t.e.id);
     const running = withAgents(session('s1', t.a1.id, 'working'), [reader('r1', { nodeId: t.e.id })]);
     const shown = layoutOutline({ nodes, resources: [], sessions: [running], now: T0 });
     expect(hidden(shown)).not.toContain(t.e.id);
-    expect(rowsOf(shown, 'agent', 'readers').map(([kind, id]) => [kind, id])).toEqual([['readers', `rs1:${t.e.id}`]]);
+    expect(rowsOf(shown, 'readers').map(([kind, id]) => [kind, id])).toEqual([['readers', `rs1:${t.e.id}`]]);
+    // A reader is never a kin.
+    expect(kin(shown)).toEqual([]);
   });
 
   it('tell readers by type, and agentVisible keeps a running reader and drops an ended one', () => {
@@ -335,6 +455,54 @@ describe('readers', () => {
     expect(agentVisible(reader('r1', { endedAt: ago(1000) }), T0)).toBe(false);
     expect(agentVisible(agent('w1', { endedAt: ago(1000) }), T0)).toBe(true);
     expect(agentVisible(agent('w1', { endedAt: ago(ENDED_AGENT_MS) }), T0)).toBe(false);
+  });
+});
+
+describe('the done row in a card', () => {
+  /** s1 works on A1 with a worker x, and with two readers when asked; A1 holds four tasks, the first completed. */
+  function busy(readers: boolean) {
+    const t = sample();
+    const reading = readers ? [agent('r1', { agentType: 'Explore' }), agent('r2', { agentType: 'Explore' })] : [];
+    const s1 = withAgents(session('s1', t.a1.id, 'working'), [agent('x'), ...reading]);
+    const tasks = [1, 2, 3, 4].map((position) => work(t.a1.id, position === 1 ? 'completed' : 'pending', { position }));
+    return { t, tasks, l: layoutOutline({ nodes: t.nodes, resources: [], sessions: [s1], workItems: tasks, now: T0 }) };
+  }
+
+  it("shares the card's last line when that line holds no kin: here the readers line", () => {
+    const { t, tasks, l } = busy(true);
+    // 116 is A1's y (84) plus NODE_H; then the 28 px agent line, the 20 px readers line and three 22 px task rows.
+    expect(rowsOf(l, 'line', 'readers', 'workDone', 'work')).toEqual([
+      ['line', `ls1:${t.a1.id}`, t.a1.id, 84, 116],
+      ['readers', `rs1:${t.a1.id}`, t.a1.id, 84, 144],
+      ['workDone', `wd${t.a1.id}`, t.a1.id, 84, 144],
+      ['work', `w${tasks[1].id}`, t.a1.id, 84, 164],
+      ['work', `w${tasks[2].id}`, t.a1.id, 84, 186],
+      ['work', `w${tasks[3].id}`, t.a1.id, 84, 208],
+    ]);
+    expect(l.items.find((i) => i.kind === 'line')).toMatchObject({ lead: true, agentIds: ['x'] });
+    expect(l.items.find((i) => i.kind === 'workDone')).toMatchObject({ count: 1, shared: true });
+    // 32 + 28 + 20 + 3 × 22 + 8: the done row adds nothing.
+    expect(l.nodeItems.get(t.a1.id)).toMatchObject({ y: 84, h: 154, workingFocus: true });
+    expect(l.nodeItems.get(t.a2.id)?.y).toBe(248);
+    expect(l.height).toBe(400);
+  });
+
+  it('takes a DONE_LINE of its own when the last line holds kin', () => {
+    const { t, l } = busy(false);
+    expect(rowsOf(l, 'line', 'readers', 'workDone', 'work').map(([kind, , , , y]) => [kind, y])).toEqual([
+      ['line', 116], ['workDone', 144], ['work', 164], ['work', 186], ['work', 208],
+    ]);
+    expect(l.items.find((i) => i.kind === 'workDone')).toMatchObject({ shared: false });
+    // 32 + 28 + 20 + 3 × 22 + 8.
+    expect(l.nodeItems.get(t.a1.id)?.h).toBe(154);
+  });
+
+  it('shares a lead line that holds no kin, and adds no height', () => {
+    const t = sample();
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [session('s1', t.a1.id, 'idle')], workItems: [work(t.a1.id, 'completed')], now: T0 });
+    expect(rowsOf(l, 'line', 'workDone').map(([kind, , , , y]) => [kind, y])).toEqual([['line', 116], ['workDone', 116]]);
+    expect(l.items.find((i) => i.kind === 'workDone')).toMatchObject({ shared: true });
+    expect(l.nodeItems.get(t.a1.id)?.h).toBe(NODE_H + AGENT_LINE + CARD_PAD);
   });
 });
 
@@ -350,8 +518,9 @@ describe('live work and the fold rules', () => {
     const onG = work(g.id, 'in_progress');
     const l = layoutOutline({ nodes, resources: [], sessions: [s1], workItems: [onG, work(t.d.id, 'pending')], now: T0 });
     expect(hidden(l)).toEqual([[t.d.id], [f.id]]);
-    expect(rowsOf(l, 'agent', 'work').map(([kind, id, nodeId]) => [kind, id, nodeId])).toEqual([
-      ['agent', 'as1:x', t.e.id],
+    expect(rowsOf(l, 'line', 'work').map(([kind, id, nodeId]) => [kind, id, nodeId])).toEqual([
+      ['line', `ls1:${t.a1.id}`, t.a1.id],
+      ['line', `ls1:${t.e.id}`, t.e.id],
       ['work', `w${onG.id}`, g.id],
     ]);
   });
@@ -541,19 +710,19 @@ describe('the trail of ended work', () => {
       nodes: t.nodes, resources: [], sessions: [], workItems: [task], now: T0,
       trailAgents: [trailAgent('x', { nodeId: t.a1.id }), trailAgent('y', { nodeId: t.a1.id })], pastSessions: [past('s0', t.a1.id)],
     };
-    const y = 3 * ROW;
+    const y = 2 * ROW + NODE_H;
     const shut = layoutOutline(input);
-    expect(shut.items.find((i) => i.kind === 'workDone')).toMatchObject({ count: 1, unfinished: 0, agents: 2, open: false });
+    expect(shut.items.find((i) => i.kind === 'workDone')).toMatchObject({ count: 1, unfinished: 0, agents: 2, open: false, shared: false });
     expect(rowsOf(shut, 'work', 'workDone', 'trailAgent').map(([kind]) => kind)).toEqual(['workDone']);
     const open = layoutOutline({ ...input, overrides: { [`work:${t.a1.id}`]: 'open' } });
     expect(rowsOf(open, 'work', 'workDone', 'trailAgent')).toEqual([
-      ['workDone', `wd${t.a1.id}`, t.a1.id, 3 * INDENT, y],
-      ['work', `w${task.id}`, t.a1.id, 3 * INDENT, y + WORK_ROW],
-      ['trailAgent', 'ts0:x', t.a1.id, 3 * INDENT, y + 2 * WORK_ROW],
-      ['trailAgent', 'ts0:y', t.a1.id, 3 * INDENT, y + 3 * WORK_ROW],
+      ['workDone', `wd${t.a1.id}`, t.a1.id, 84, y],
+      ['work', `w${task.id}`, t.a1.id, 84, y + DONE_LINE],
+      ['trailAgent', 'ts0:x', t.a1.id, 84, y + DONE_LINE + TASK_ROW],
+      ['trailAgent', 'ts0:y', t.a1.id, 84, y + DONE_LINE + 2 * TASK_ROW],
     ]);
-    expect(open.items.find((i) => i.id === 'ts0:x')).toEqual({ kind: 'trailAgent', id: 'ts0:x', sessionId: 's0', agentId: 'x', nodeId: t.a1.id, x: 3 * INDENT, y: y + 2 * WORK_ROW });
-    expect(open.nodeItems.get(t.a2.id)?.y).toBe(y + 4 * WORK_ROW + WORK_GAP);
+    expect(open.items.find((i) => i.id === 'ts0:x')).toEqual({ kind: 'trailAgent', id: 'ts0:x', sessionId: 's0', agentId: 'x', nodeId: t.a1.id, x: 84, y: y + DONE_LINE + TASK_ROW });
+    expect(open.nodeItems.get(t.a2.id)?.y).toBe(y + DONE_LINE + 3 * TASK_ROW + CARD_PAD + CARD_GAP);
     // Agents alone make the row too.
     const agentsOnly = layoutOutline({ ...input, workItems: [] });
     expect(agentsOnly.items.find((i) => i.kind === 'workDone')).toMatchObject({ count: 0, unfinished: 0, agents: 2 });
@@ -582,9 +751,10 @@ describe('the trail of ended work', () => {
     const s1 = withAgents(session('s1', t.a1.id, 'idle'), [recent, older]);
     const trailAgents = [{ ...recent, sessionId: 's1' }, { ...older, sessionId: 's1' }, trailAgent('z', { nodeId: t.a1.id, endedAt: ago(1000) })];
     const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [s1], trailAgents, pastSessions: [past('s0', t.a1.id)], overrides: { [`work:${t.a1.id}`]: 'open' }, now: T0 });
-    expect(rowsOf(l, 'agent', 'workDone', 'trailAgent').map(([kind, id]) => [kind, id])).toEqual([
-      ['agent', 'as1:x'], ['workDone', `wd${t.a1.id}`], ['trailAgent', 'ts1:y'], ['trailAgent', 'ts0:z'],
+    expect(rowsOf(l, 'line', 'workDone', 'trailAgent').map(([kind, id]) => [kind, id])).toEqual([
+      ['line', `ls1:${t.a1.id}`], ['workDone', `wd${t.a1.id}`], ['trailAgent', 'ts1:y'], ['trailAgent', 'ts0:z'],
     ]);
+    expect(l.items.find((i) => i.kind === 'line')).toMatchObject({ lead: true, agentIds: ['x'] });
     expect(l.items.find((i) => i.kind === 'workDone')).toMatchObject({ count: 0, unfinished: 0, agents: 2 });
   });
 
