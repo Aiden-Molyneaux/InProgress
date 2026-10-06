@@ -251,6 +251,7 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-type.l-data, .ip-glyph.l-data { font-size: 1.33em; }
 /* A narrow window's single resource count, in the header (shown by the max-width: 719px block below). */
 .ip-res-count { display: none; flex: none; font-family: var(--font-mono); font-size: var(--fs-s); line-height: 14px; color: var(--muted); white-space: nowrap; }
+/* The YOU tag, on a card and in Details (NEEDS YOU, and YOU in its list of steps): amber ink on the amber tint. */
 .ip-you { flex: none; height: 18px; padding: 0 6px; border-radius: var(--radius); background: var(--amber-fill); color: var(--amber-ink); font-size: var(--fs-s); font-weight: var(--w-heavy); line-height: 18px; letter-spacing: .04em; white-space: nowrap; }
 .ip-blocked { flex: none; color: var(--red); font-size: var(--fs-s); line-height: 14px; }
 .ip-progress { flex: none; font-family: var(--font-mono); font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
@@ -360,12 +361,11 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-btn:hover { color: var(--text-2); }
 .ip-details :focus-visible, .ip-viewer header :focus-visible { outline: 2px solid var(--text-2); outline-offset: 1px; }
 /* Status (the shared Marker, then the word, or NEEDS YOU in the YOU tag's look), kind, label, who, parent: one muted
-   S line. */
+   S line. NEEDS YOU and a step's YOU take the canvas region's .ip-you rule. */
 .ip-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0 10px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
 .ip-meta .ip-glyph { font-variant-emoji: text; }
 /* ⛁ draws faint at text size. */
 .ip-meta .ip-glyph.l-data { font-size: 1.33em; }
-.ip-details .ip-you { display: inline-block; height: 18px; padding: 0 6px; border-radius: var(--radius); background: var(--amber-fill); color: var(--amber-ink); font-size: var(--fs-s); font-weight: var(--w-heavy); line-height: 18px; letter-spacing: 0.04em; }
 /* Section heads, as Up next's: S at 900, uppercase, spaced, muted. The archived menu's head shares this rule. */
 .ip-label { margin: 12px 0 4px; font-size: var(--fs-s); font-weight: var(--w-heavy); line-height: 14px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
 .ip-link { color: var(--link); text-decoration: underline; }

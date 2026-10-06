@@ -233,6 +233,12 @@ test('clicking a node opens its details and copies a reference', async ({ page, 
   await expect(active).toHaveCSS('background-color', 'rgb(194, 65, 12)');
   await expect(active).toHaveCSS('animation-name', 'none');
   await expect(steps.nth(2).locator('.ip-marker.m-you')).toHaveCount(1);
+  // Its YOU is the card's tag: amber ink on the amber tint, 18 px tall, S at 900.
+  const you = steps.nth(2).locator('.ip-you');
+  await expect(you).toHaveCSS('color', 'rgb(146, 64, 14)');
+  await expect(you).toHaveCSS('background-color', 'rgba(251, 191, 36, 0.18)');
+  await expect(you).toHaveCSS('height', '18px');
+  await expect(you).toHaveCSS('font-weight', '900');
 });
 
 test('Details keeps the last good detail when a refresh fails', async ({ page, api, fresh, consoleErrors }) => {
