@@ -36,9 +36,21 @@ describe('familyVar', () => {
     expect(familyVar(null)).toBe('var(--family-0)');
   });
 
-  it('has each hue defined in the stylesheet: session clay first, then the five old subagent colours', () => {
-    const css = readFileSync('web/src/styles.css', 'utf8');
-    const hues = ['var(--clay)', '#5856d6', '#0b7285', '#c2255c', '#8c6239', '#5c7a00'];
-    hues.forEach((hue, slot) => expect(css).toContain(`--family-${slot}: ${hue};`));
+  it('has each hue in the stylesheet, day in :root and night in the dark block: teal, clay, green, rose, brown, indigo', () => {
+    const css = readFileSync('web/src/styles.css', 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    const day = /:root\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
+    const night = /@media \(prefers-color-scheme: dark\)\s*\{\s*:root\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
+    const hues = [
+      ['#0b6b7d', '#3cc3d6'],
+      ['#b4532f', '#e8956f'],
+      ['#287a3a', '#7ad68f'],
+      ['#b0204f', '#f27aa5'],
+      ['#85593a', '#d4a574'],
+      ['#4f4dc4', '#9a98ff'],
+    ];
+    hues.forEach(([dayHue, nightHue], slot) => {
+      expect(day, `slot ${slot} by day`).toContain(`--family-${slot}: ${dayHue};`);
+      expect(night, `slot ${slot} by night`).toContain(`--family-${slot}: ${nightHue};`);
+    });
   });
 });

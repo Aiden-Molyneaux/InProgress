@@ -16,8 +16,6 @@ interface CameraArgs {
   selected: number | null;
 }
 
-/** Horizontal offset so the card, not its left edge, sits in the middle of the view. */
-const CARD_CENTER_X = 140;
 /** Under this media feature every camera move is instant instead of a glide. */
 const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
 
@@ -52,13 +50,15 @@ export function useCamera({ layout, snapshot, index, lastEvent, follow, selected
   const sheetOpen = useCallback(() => detailsRef.current && window.matchMedia(SHEET_QUERY).matches, []);
 
   /**
-   * Every camera move goes through here. With the Details sheet open, the point sits a quarter of the way down, above
-   * the sheet. Under reduced motion the move is instant.
+   * Every camera move goes through here, to a flow height. Flow x 0 stays at the canvas's left edge, so cards that run
+   * to x 506 are never cut and the lanes stay left of the Details side panel. With the Details sheet open, the point
+   * sits a quarter of the way down, above the sheet. Under reduced motion the move is instant.
    */
   const moveTo = useCallback(
-    (x: number, y: number, duration: number, zoom = rf.getZoom()) => {
+    (y: number, duration: number, zoom = rf.getZoom()) => {
       const glide = window.matchMedia(REDUCED_MOTION).matches ? 0 : duration;
-      void rf.setCenter(x, sheetOpen() ? y + store.getState().height / 4 / zoom : y, { zoom, duration: glide });
+      const { width, height } = store.getState();
+      void rf.setCenter(width / 2 / zoom, sheetOpen() ? y + height / 4 / zoom : y, { zoom, duration: glide });
       lastMove.current = Date.now();
     },
     [rf, store, sheetOpen],
@@ -68,7 +68,7 @@ export function useCamera({ layout, snapshot, index, lastEvent, follow, selected
     (nodeId: number, duration = 400): boolean => {
       const item = itemFor(nodeId);
       if (!item) return false;
-      moveTo(item.x + CARD_CENTER_X, item.y + NODE_H / 2, duration);
+      moveTo(item.y + NODE_H / 2, duration);
       return true;
     },
     [moveTo, itemFor],
@@ -92,15 +92,18 @@ export function useCamera({ layout, snapshot, index, lastEvent, follow, selected
     if (selected !== null && sheetOpen()) reveal(selected);
   }, [selected, sheetOpen, reveal]);
 
-  /** Brings a flow point to the middle at once, for keyboard focus that lands outside the view. */
-  const centerOnPoint = useCallback((x: number, y: number) => moveTo(x, y, 0), [moveTo]);
+  /** Brings a flow height to the middle at once, for keyboard focus that lands outside the view. */
+  const centerOnY = useCallback((y: number) => moveTo(y, 0), [moveTo]);
+
+  /** Whether any camera move has run yet: the first move, held for the fonts, gives way to one that came first. */
+  const hasMoved = useCallback(() => lastMove.current !== 0, []);
 
   const centerOnFrontier = useCallback(
     (duration = 400, zoom?: number) => {
       const s = snapRef.current;
       const id = findFrontier(s.nodes, s.sessions, layoutRef.current, s.project.queue);
       const item = id !== undefined ? itemFor(id) : undefined;
-      if (item) moveTo(item.x + CARD_CENTER_X, item.y + NODE_H / 2, duration, zoom);
+      if (item) moveTo(item.y + NODE_H / 2, duration, zoom);
     },
     [moveTo, itemFor],
   );
@@ -143,7 +146,7 @@ export function useCamera({ layout, snapshot, index, lastEvent, follow, selected
   }, [centerOn, itemFor]);
 
   return useMemo(
-    () => ({ centerOn, centerOnPoint, centerOnFrontier, focusNode, nextNeedsYou, sheetOpen }),
-    [centerOn, centerOnPoint, centerOnFrontier, focusNode, nextNeedsYou, sheetOpen],
+    () => ({ centerOn, centerOnY, centerOnFrontier, focusNode, hasMoved, nextNeedsYou, sheetOpen }),
+    [centerOn, centerOnY, centerOnFrontier, focusNode, hasMoved, nextNeedsYou, sheetOpen],
   );
 }

@@ -175,6 +175,32 @@ Three more came up while the packages were being built, and Aiden decided them t
 
 Controller rulings made while running the plan are in `docs/superpowers/rulings/2026-10-04-review-actions-rulings.md`.
 
+## Amended by the Quiet restyle (Aiden, 2026-10-05)
+
+The Quiet restyle ([2026-10-05-quiet-restyle-design.md](2026-10-05-quiet-restyle-design.md), #81) changes how the
+window draws sessions, subagents and the Up next strip. Aiden approved it on 2026-10-05. The lines named below stay as
+written above; this section amends them.
+
+- **§4, the session chip (D1).** The chip shows the session's character and letter only. Its accessible name and its
+  popover lead with the letter and carry the title: `A · Review actions controller`. A session waiting for permission
+  adds `needs permission`. The letter shows on the chip, the agent line and the session's queue markers.
+- **§4 and §5, subagents (D3, D4).** A worker is a kin on its session's agent line for that step: a small character,
+  its tag and, while it runs, its elapsed time (`a1 12m`). Its description, model, elapsed time and purpose are in its
+  tooltip and accessible name (`a1 · P2 canvas implementer · opus · 12 min`, then the purpose), and in Details. This
+  replaces "Every other type keeps the full badge". The purpose is the kin's tooltip's second line. Task rows keep
+  `a1 ◐ Write the tests`.
+- **§4, the order on an agent line (D5).** The line draws the lead character, then the kin, then the label
+  `A · Review actions controller · working`. Its accessible name still leads with the letter.
+- **§4, permission (D7).** In place of "keeps its red outline": the session's character wears an amber ring, and
+  `needs permission` shows in amber. The letter still shows the family.
+- **§4, hues (D8).** In place of "Slot 0 keeps today's session clay. Slots 1 to 5 use the five hues that subagent
+  badges use today": slot 0 teal, 1 clay, 2 green, 3 rose, 4 brown, 5 indigo, each with a night and a day value. They
+  stay `--family-0` to `--family-5`.
+- **§6, the Up next strip (D9).** In place of "`Up next` heads the strip once. Below it, …": `UP NEXT` sits once in a
+  left column. Beside it, one line per live session that has entries, led by its letter in its hue, then a neutral
+  `later` line. Each line is cut short at the window's edge.
+- **§7, paused (D16).** In place of "a hollow blue marker": a hollow sky ring, with the same tooltip.
+
 ## After this plan
 
 - The UI overhaul (#81) resumes with refreshed drafts. The scenario and the character brief are rewritten for

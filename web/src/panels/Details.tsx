@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { agentHome, agentVisible, homedTrailAgents } from '../../../src/core/layout';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { agentHome, agentVisible, homedTrailAgents, isPaused, occupiedSteps } from '../../../src/core/layout';
 import { isNeedsYou } from '../../../src/core/tree';
-import { LABEL_GLYPHS, agentTag, isReader, sessionDisplayTitle, sessionTag, type NodeDetail, type ProjectSnapshot, type TrailAgent, type WorkItem } from '../../../src/core/types';
+import { LABEL_GLYPHS, agentTag, isReader, sessionDisplayTitle, sessionTag, type NodeDetail, type ProjectSnapshot, type TrailAgent, type TreeNode, type WorkItem } from '../../../src/core/types';
 import { api } from '../api';
 import { familyVar } from '../family';
 import { TASK_MARK, agentLine, taskFamily, taskOwner, trailAgentLine, waitsFor, withTag, withoutOwnId, workMark } from '../live';
+import { Marker } from '../Marker';
 import { relativeTime } from '../time';
 import { useNow } from '../useNow';
 import { resourceSummary } from './format';
@@ -87,7 +88,7 @@ function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'
                   key={w.id}
                   className={`ip-wt w-${w.status}`}
                   style={family ? ({ '--fam': familyVar(family.slot) } as CSSProperties) : undefined}
-                  // The session's own task names its letter here; a subagent's shows its tag on the row.
+                  // The session's own task names its letter here and wears the hue bar; a subagent's shows its tag on the row.
                   title={family ? withTag(w.agentId ? family.tag : sessionTag(family.slot), owner) : undefined}
                 >
                   {family?.tag && (
@@ -95,7 +96,7 @@ function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'
                       <span className="ip-work-tag">{family.tag}</span>{' '}
                     </>
                   )}
-                  <span className="ip-work-mark">{TASK_MARK[w.status]}</span> {family && <span className="ip-work-agent" />}
+                  <span className="ip-work-mark">{TASK_MARK[w.status]}</span> {family && !w.agentId && <span className="ip-work-agent" />}
                   {withoutOwnId(w.subject, w.nodeId)}{' '}
                   <span className="muted">
                     — {owner}
@@ -172,6 +173,9 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
   const [copied, setCopied] = useState(false);
   const copiedTimer = useRef(0);
   useEffect(() => () => window.clearTimeout(copiedTimer.current), []);
+  // Paused as the canvas draws it: the layout's own test, run on the snapshot's copy of each step.
+  const byId = useMemo(() => new Map(snapshot.nodes.map((n) => [n.id, n] as const)), [snapshot.nodes]);
+  const occupied = useMemo(() => occupiedSteps(byId, snapshot.sessions, snapshot.workItems), [byId, snapshot.sessions, snapshot.workItems]);
 
   // Refetch whenever the snapshot changes, so the panel follows Claude's edits. A failed refetch keeps the last good detail.
   useEffect(() => {
@@ -202,6 +206,21 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
   }
 
   const { node } = detail;
+  /** A step's marker as its card draws it, the sky ring and its tooltip too when paused, but never pulsing. */
+  const marker = (n: Pick<TreeNode, 'id' | 'status' | 'kind' | 'assignee'>) => {
+    const step = byId.get(n.id);
+    const paused = step !== undefined && isPaused(step, occupied);
+    return (
+      <Marker
+        status={n.status}
+        question={n.kind === 'question'}
+        paused={paused}
+        needsYou={isNeedsYou(n)}
+        pulse={false}
+        title={paused ? `Nobody is on this. Last change ${relativeTime(step.updatedAt)}` : undefined}
+      />
+    );
+  };
   const copy = async () => {
     await navigator.clipboard.writeText(`#${node.id} ${node.title}`);
     setCopied(true);
@@ -218,7 +237,10 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
         <button className="ip-btn" onClick={onClose} aria-label="Close">×</button>
       </header>
       <div className="ip-meta">
-        {isNeedsYou(node) ? <span className="ip-pill you">NEEDS YOU</span> : <span className={`ip-pill st-${node.status}`}>{node.status}</span>}
+        {/* The canvas's marker, then the status as a muted word, or NEEDS YOU in the YOU tag's look. A paused step
+            draws the sky ring here too; nothing pulses here. */}
+        {marker(node)}
+        {isNeedsYou(node) ? <span className="ip-you">NEEDS YOU</span> : <span>{node.status}</span>}
         <span>{node.kind}</span>
         {node.label && (
           <span className="ip-meta-label">
@@ -260,7 +282,8 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
             {detail.children.map((c) => (
               <li key={c.id}>
                 <button onClick={() => onSelectNode(c.id)}>
-                  <span className={`ip-marker m-${c.status}`} />#{c.id} {c.title}
+                  <span className="ip-kid-mark">{marker(c)}</span>
+                  #{c.id} {c.title}
                   {c.assignee === 'me' && c.status !== 'done' ? <span className="ip-you">YOU</span> : null}
                 </button>
               </li>
@@ -274,8 +297,8 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
           <ul className="ip-log">
             {detail.log.map((l) => (
               <li key={l.id}>
-                {relativeTime(l.createdAt)} · {l.text}
-                {l.sessionTitle ? <i> — {l.sessionTitle}</i> : null}
+                <span className="ip-log-time">{relativeTime(l.createdAt)}</span> · <span className="ip-log-text">{l.text}</span>
+                {l.sessionTitle ? <span> — {l.sessionTitle}</span> : null}
               </li>
             ))}
           </ul>
