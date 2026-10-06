@@ -48,7 +48,11 @@ Attribution of a working task to a node, decided once, at creation:
   at launch and makes the pairing exact. Foreground agents get it at completion, which only confirms the pairing.
 - **SubagentStop** marks the subagent `ended_at` rather than deleting its row. Ended subagents show greyed for
   5 minutes, then stay 7 days as the trail on their step (review actions §3). Session end marks the running ones
-  ended instead of deleting them.
+  ended instead of deleting them, with the reason `session`.
+- **No SubagentStop** comes when a subagent hits the usage limit or an API error, or is stopped (#125). The server's
+  transcript watcher (`agent-watch.ts`) reads each running subagent's own transcript once a minute: a last line that
+  marks the end ends it with `limit`, `error` or `killed`, 20 minutes with no new line ends it as `silent`, and a newer
+  line brings it back (review-actions rulings 44 to 51).
 
 ### Planned order (#56)
 - Across plan steps: a per-project queue of node ids, set by the scribe with a new MCP tool
@@ -106,7 +110,8 @@ that session's list on that node through `POST /api/sessions/:id/tasks`, so thes
   - A subagent's tasks carry its badge colour.
 - **Badges.** Each subagent gets its own badge under its node: `◆ description · model · 12 min`. Ended subagents show
   greyed (`done 2 min ago`) for 5 minutes, then move into the step's trail (review actions §3). The session's own badge
-  stays under its focus.
+  stays under its focus. One that died without a stop adds a `!` and says why (`was stopped 3 min ago`); one at the
+  usage limit stays, in amber, until it runs again or its session ends (rulings 48 and 49).
 - **Session chip.** Lists its subagents (description · model · elapsed) on hover or focus.
 - **Queue.** Numbered markers ①②③ appear on queued steps. An `Up next` line sits under the session row, lists the
   queue by owner (`Up next: A: #82 → #78 | later: #79`, review actions §6), and jumps to an item on click. When the

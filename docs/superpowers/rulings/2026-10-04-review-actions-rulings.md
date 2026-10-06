@@ -133,3 +133,53 @@ Subagent lifecycle (2026-10-06, fix A of the subagent design approved in chat; i
     `setFocus` fills `start_focus_id` for the session's running rows that have neither a step nor a start focus.
     Without it such an agent would follow every later focus. An agent that stopped before any focus was set keeps none
     and follows its session's focus in the trail. Cost if wrong: a rare agent pinned to a step it never worked on.
+
+Subagent lifecycle, fix B (2026-10-06, #125: a subagent that dies without a SubagentStop; option 2 of the design, with
+Aiden's answers on the usage limit and on silence):
+
+44. Migration 7 carries fix B's two columns beside fix A's, since both ship on one branch: `end_reason` (NULL for a
+    clean stop or while running, else `limit`, `error`, `killed`, `silent` or `session`) and `last_active_at` (the last
+    sign of life for an end the watcher found). Only nullable columns, so `min_reader_version` stays 1. `ended_at` keeps
+    meaning "no longer running", stamped when InProgress noticed, so every dead agent gets the 5-minute ended kin, while
+    "ran …" and "… ago" count to `lastActiveAt ?? endedAt`. The server sends a reason only for an ended row, so a row a
+    rolled-back build revived reads as running. A session's end or expiry stamps `session` on rows still running. Cost
+    if wrong: none for old builds; old rows read as clean stops.
+45. The transcript watcher (`src/server/agent-watch.ts`) ticks once at start-up and then every 60 s on an unref'd
+    interval. It takes the running rows of every session that is not ended and has a transcript path, readers
+    included (a dead reader inflates the chip count as much as a worker), plus the rows it ended itself. A stat each,
+    a tail read only when the mtime moved. A marker ends a row once the file has been still 60 s; 20 minutes with no
+    change to the file ends it as `silent`; no silence end while the session's state is `permission`, and the count
+    starts again from the last tick that saw the permission; a gap between ticks over 3 minutes restarts every count;
+    a missing or unreadable file never ends anything. All flips go in one write by `system`, with one
+    `session.updated` per session (`changed: ['subagents']`, its state, and `ended: [{ agentId, reason }]` when any
+    ended). Cost if wrong: a long silent tool call ends early and comes back on its next line.
+46. Widens the design's revival: any end the watcher found (`limit`, `error`, `killed`, `silent`) is undone by a newer
+    line in the agent's own transcript, not only `silent`. A line written after the end means the agent lives, for
+    example after a resume whose SubagentStart POST timed out. A clean stop and a session's end are not revived by a
+    line; a resumed SubagentStart revives those, as before. A real SubagentStop still overwrites only a `silent` guess.
+    Cost if wrong: an agent that writes something after its marker (not seen in any transcript) comes back to running
+    until silence ends it.
+47. A resumed SubagentStart that revives a row the watcher ended is not undone by the marker it was ended on. The
+    watcher remembers, in memory, the line it ended each row on; while the file says nothing newer the marker is
+    ignored and the silence count runs from when the watcher first saw the row running again. The prior draft re-ended
+    it on the next tick and relied on the next line to bring it back, a minute of a wrong grey kin. After a server
+    restart that memory is gone, so such a row can end once more and comes back on its next line. Cost if wrong: none.
+48. A usage-limit death waits for Aiden (his answer): the server keeps a `limit` row in its live session's list past
+    5 minutes, and the window keeps it as a kin (`agentShown`), pinning and holding its step (`occupiedSteps`, so the
+    step does not draw paused), until a newer line revives it or its session ends. It is not running, so it leaves the
+    chip's `· n subagents` and its tasks stop pulsing; it never counts in the `n need you` pill or the tab count. The
+    kin keeps Quiet's ended character with the `!` mark, its tag and mark in `--amber-ink`. In the chip popover and
+    Details its tag and its words are amber too, and the line ends `· resume after the reset`. After its session ends,
+    its trail row (canvas and Details) keeps `ran … · hit the usage limit … ago` in `--amber-ink` and is otherwise
+    neutral, with no letter. Cost if wrong: a kin that waits too long for a resume Aiden never makes, until the
+    session ends.
+49. The mark is `!` in DM Mono at the text weight (DM Mono has no 900), `--muted` for every reason but `limit`. It
+    draws for any reason, `session` included, though a kin of that reason only shows when a session comes back within
+    5 minutes of its end. A clean stop draws none. Cost if wrong: none.
+50. The activity strip reads the watcher's event as `<session> · a3 hit the usage limit`, several joined with commas
+    (`a3 was stopped, a4 stopped responding`). An agent the snapshot cannot find, or one of a session with no letter,
+    reads "a subagent". The actor reads `system`. A revival alone reads as the state line it always had
+    (`<session> is working`). Cost if wrong: none.
+51. `INPROGRESS_AGENT_WATCH_MS` (a positive whole number of ms) replaces the 60 s interval; the e2e server sets 500.
+    The wake gap stays 3 minutes, so an interval of 3 minutes or more would hold every silence end; the override is
+    for tests. Cost if wrong: none in use.
