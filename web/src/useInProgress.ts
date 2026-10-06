@@ -25,7 +25,8 @@ export interface InProgressState {
   selectProject: (slug: string) => void;
   /**
    * Archives, unarchives, deletes or restores a project. When it goes through, the lists change at once and `goTo` opens
-   * (null: stay, or fall back as when the open project leaves the list), then the lists reload. A 401 reloads the page.
+   * if the window is still on the target (null: stay, or fall back as when the open project leaves the list), then the
+   * lists reload. A 401 reloads the page.
    * Answers 'ok', 'reload', or the server's message.
    */
   act: (action: ProjectAction, target: ActionTarget, goTo: string | null) => Promise<'ok' | 'reload' | string>;
@@ -196,7 +197,8 @@ export function useInProgress(): InProgressState {
       listApplied.current = listSeq.current;
       setProjects(list);
       setDeleted((cur) => patchDeleted(cur, action, target, Date.now()));
-      setSlug((cur) => goTo ?? pickSlug(list, cur));
+      // goTo only while the window is still on the project that left: a switch made during the write stands.
+      setSlug((cur) => (goTo !== null && cur === target.slug ? goTo : pickSlug(list, cur)));
       // Reconcile now, not after the stream's 400 ms.
       void loadProjects();
       return result;
