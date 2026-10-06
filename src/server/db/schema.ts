@@ -169,4 +169,12 @@ export const MIGRATIONS: string[] = [
   -- Only a nullable column: v1 to v5 builds can still read and write this schema, so a rollback across it works.
   INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
   `,
+  // 7: subagent lifecycle. The session's focus when a subagent started (or the first focus it saw, when it started
+  // before its session had one): where a subagent with no step of its own stays, kept apart from node_id, which every
+  // pairing change rewrites. NULL for rows from before this migration, and when there was no focus.
+  `
+  ALTER TABLE session_subagents ADD COLUMN start_focus_id INTEGER REFERENCES nodes(id) ON DELETE SET NULL;
+  -- Only nullable columns: v1 to v6 builds can still read and write this schema, so a rollback across it works.
+  INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+  `,
 ];

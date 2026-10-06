@@ -43,16 +43,16 @@ describe('database', () => {
       expect(db.prepare('SELECT id, title FROM nodes ORDER BY id').all()).toEqual([{ id: 1, title: 'InGame' }, { id: 2, title: 'Play app signing' }]);
       expect(db.prepare('SELECT id, focus_node_id FROM sessions').all()).toEqual([{ id: 's1', focus_node_id: 2 }]);
       expect(db.prepare('SELECT * FROM session_subagents').all()).toEqual([
-        { session_id: 's1', agent_id: 'a1', agent_type: 'Explore', started_at: 't', description: null, model: null, node_id: null, tool_use_id: null, ended_at: null, ordinal: null, purpose: null },
+        { session_id: 's1', agent_id: 'a1', agent_type: 'Explore', started_at: 't', description: null, model: null, node_id: null, tool_use_id: null, ended_at: null, ordinal: null, purpose: null, start_focus_id: null },
       ]);
       expect((db.prepare('SELECT COUNT(*) AS c FROM events').get() as { c: number }).c).toBe(1);
       // The new tables take rows, and their foreign keys follow the node: work items go with it, a subagent forgets it.
       db.prepare("INSERT INTO work_items (project_id, node_id, session_id, agent_id, task_key, subject, status, blocks, position, created_at, updated_at) VALUES (1, 2, 's1', '', '1', 'Write it', 'pending', '[]', 1, 't', 't')").run();
       db.prepare("INSERT INTO subagent_dispatches (session_id, tool_use_id, agent_type, description, model, node_id, created_at) VALUES ('s1', 'toolu_1', 'Explore', 'Look around', 'sonnet', 2, 't')").run();
-      db.prepare("UPDATE session_subagents SET node_id = 2 WHERE agent_id = 'a1'").run();
+      db.prepare("UPDATE session_subagents SET node_id = 2, start_focus_id = 2 WHERE agent_id = 'a1'").run();
       db.prepare('DELETE FROM nodes WHERE id = 2').run();
       expect((db.prepare('SELECT COUNT(*) AS c FROM work_items').get() as { c: number }).c).toBe(0);
-      expect(db.prepare('SELECT node_id FROM session_subagents').all()).toEqual([{ node_id: null }]);
+      expect(db.prepare('SELECT node_id, start_focus_id FROM session_subagents').all()).toEqual([{ node_id: null, start_focus_id: null }]);
       expect(db.prepare('SELECT node_id FROM subagent_dispatches').all()).toEqual([{ node_id: null }]);
       expect(() => db.prepare("INSERT INTO work_items (project_id, node_id, session_id, agent_id, task_key, subject, status, blocks, position, created_at, updated_at) VALUES (1, 1, 's1', '', '1', 'x', 'deleted', '[]', 1, 't', 't')").run()).toThrow(/CHECK/);
     } finally {
@@ -353,7 +353,7 @@ describe('database', () => {
     // This build as the v5 build sees the schema: five migrations.
     const shipped = MIGRATIONS.splice(5);
     try {
-      expect(shipped).toHaveLength(1);
+      expect(shipped[0]).toContain('briefing_due');
       expect(() => migrate(db)).not.toThrow();
       expect(schemaVersion(db)).toBe(5 + shipped.length);
       db.prepare("INSERT INTO projects (id, slug, name, created_at, updated_at) VALUES (1, 'p', 'P', 't', 't')").run();
@@ -366,6 +366,69 @@ describe('database', () => {
         .run(1, 'From v5', null, null, null, 'idle', null, 1, 't2', null, 0, 's1');
       db.prepare("UPDATE sessions SET state = 'ended', ended_at = ? WHERE id = ?").run('t3', 's1');
       expect(db.prepare("SELECT title, state, slot, briefing_due FROM sessions WHERE id = 's1'").get()).toEqual({ title: 'From v5', state: 'ended', slot: 0, briefing_due: 1 });
+    } finally {
+      MIGRATIONS.push(...shipped);
+    }
+  });
+
+  /** A database file as the v6 build leaves it: migrations 1 to 6, with a live session and its running subagent. */
+  function v6Database(): { dir: string; file: string } {
+    const dir = mkdtempSync(join(tmpdir(), 'ip-migrate-v6-'));
+    const file = join(dir, 'inprogress.db');
+    const v6 = new Database(file);
+    v6.exec('CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+    for (const m of MIGRATIONS.slice(0, 6)) v6.exec(m);
+    v6.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '6')").run();
+    v6.prepare("INSERT INTO projects (id, slug, name, root_node_id, created_at, updated_at) VALUES (1, 'inprogress', 'InProgress', 1, 't', 't')").run();
+    v6.prepare("INSERT INTO nodes (id, project_id, parent_id, position, kind, title, status, label, created_at, updated_at) VALUES (1, 1, NULL, 1, 'goal', 'InProgress', 'active', NULL, 't', 't')").run();
+    v6.prepare("INSERT INTO sessions (id, project_id, state, focus_node_id, started_at, last_seen_at, slot) VALUES ('s1', 1, 'working', 1, 't', 't', 0)").run();
+    v6.prepare("INSERT INTO session_subagents (session_id, agent_id, agent_type, started_at, ordinal) VALUES ('s1', 'a1', 'workflow-subagent', 't', 1)").run();
+    v6.prepare("INSERT INTO session_subagents (session_id, agent_id, agent_type, started_at, ordinal, ended_at) VALUES ('s1', 'a2', 'general-purpose', 't', 2, 't2')").run();
+    v6.close();
+    return { dir, file };
+  }
+
+  it('migrates a database at v6 with data to v7, every start focus null', () => {
+    const { dir, file } = v6Database();
+    const db = openDb(file);
+    try {
+      expect(schemaVersion(db)).toBe(MIGRATIONS.length);
+      expect(db.prepare('SELECT agent_id, ordinal, ended_at, start_focus_id FROM session_subagents ORDER BY agent_id').all()).toEqual([
+        { agent_id: 'a1', ordinal: 1, ended_at: null, start_focus_id: null },
+        { agent_id: 'a2', ordinal: 2, ended_at: 't2', start_focus_id: null },
+      ]);
+      expect(db.prepare("SELECT value FROM meta WHERE key = 'min_reader_version'").pluck().get()).toBe('1');
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('marks migration 7 readable by v1 builds, so a v6 build still opens a v7 database and its own writes work', () => {
+    const { db } = makeCtx();
+    expect(db.prepare("SELECT value FROM meta WHERE key = 'min_reader_version'").pluck().get()).toBe('1');
+    // This build as the v6 build sees the schema: six migrations.
+    const shipped = MIGRATIONS.splice(6);
+    try {
+      expect(shipped[0]).toContain('start_focus_id');
+      expect(() => migrate(db)).not.toThrow();
+      expect(schemaVersion(db)).toBe(6 + shipped.length);
+      db.prepare("INSERT INTO projects (id, slug, name, created_at, updated_at) VALUES (1, 'p', 'P', 't', 't')").run();
+      db.prepare("INSERT INTO nodes (id, project_id, parent_id, position, kind, title, created_at, updated_at) VALUES (1, 1, NULL, 1, 'goal', 'P', 't', 't')").run();
+      db.prepare('INSERT INTO sessions (id, project_id, state, started_at, last_seen_at, slot) VALUES (?, ?, ?, ?, ?, ?)').run('s1', 1, 'working', 't', 't', 0);
+      // The v6 build's own writes, which never name the start focus: a new subagent has none, and show()'s update, a
+      // stop and a session end keep what the newer build gave.
+      db.prepare(
+        `INSERT INTO session_subagents (session_id, agent_id, agent_type, started_at, ordinal)
+         VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(ordinal), 0) + 1 FROM session_subagents WHERE session_id = ?))`,
+      ).run('s1', 'a1', 'general-purpose', 't', 's1');
+      expect(db.prepare("SELECT start_focus_id FROM session_subagents WHERE agent_id = 'a1'").pluck().get()).toBeNull();
+      db.prepare("UPDATE session_subagents SET start_focus_id = 1 WHERE agent_id = 'a1'").run();
+      db.prepare('UPDATE session_subagents SET description = ?, model = ?, node_id = ?, tool_use_id = ?, purpose = ? WHERE session_id = ? AND agent_id = ?').run('Edited by v6', 'opus', null, null, null, 's1', 'a1');
+      db.prepare('UPDATE session_subagents SET ended_at = ? WHERE session_id = ? AND agent_id = ? AND ended_at IS NULL').run('t3', 's1', 'a1');
+      db.prepare('UPDATE session_subagents SET ended_at = NULL WHERE session_id = ? AND agent_id = ?').run('s1', 'a1');
+      db.prepare('UPDATE session_subagents SET ended_at = ? WHERE session_id = ? AND ended_at IS NULL').run('t4', 's1');
+      expect(db.prepare("SELECT description, ended_at, ordinal, start_focus_id FROM session_subagents WHERE agent_id = 'a1'").get()).toEqual({ description: 'Edited by v6', ended_at: 't4', ordinal: 1, start_focus_id: 1 });
     } finally {
       MIGRATIONS.push(...shipped);
     }
