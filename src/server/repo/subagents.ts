@@ -1,4 +1,4 @@
-import { ENDED_AGENT_MS, READER_AGENT_TYPES, TRAIL_MS, type SubagentInfo, type TrailAgent } from '../../core/types';
+import { ENDED_AGENT_MS, READER_AGENT_TYPES, TRAIL_MS, type EndReason, type SubagentInfo, type TrailAgent } from '../../core/types';
 import type { Ctx } from '../db/tx';
 
 /** How long a dispatch waits for its subagent to start; an older one (a launch that was denied, say) never pairs. */
@@ -17,6 +17,8 @@ interface SubagentRow {
   ordinal: number | null;
   purpose: string | null;
   start_focus_id: number | null;
+  end_reason: EndReason | null;
+  last_active_at: string | null;
 }
 
 interface DispatchRow {
@@ -64,12 +66,18 @@ const toInfo = (r: SubagentRow): SubagentInfo => ({
   endedAt: r.ended_at,
   ordinal: r.ordinal,
   purpose: r.purpose,
+  // Only for an ended row: one a rolled-back build revived clears ended_at and leaves these, and it is running.
+  endReason: r.ended_at ? r.end_reason : null,
+  lastActiveAt: r.ended_at ? r.last_active_at : null,
 });
 
-/** A session's subagents that are running or stopped less than ENDED_AGENT_MS (5 minutes) ago, oldest first. */
+/**
+ * A session's subagents that are running, stopped less than ENDED_AGENT_MS (5 minutes) ago, or ended at the usage limit
+ * (they wait on their line for Aiden until revived or their session ends), oldest first.
+ */
 export function listSubagents(ctx: Ctx, sessionId: string): SubagentInfo[] {
   return (ctx.db
-    .prepare('SELECT * FROM session_subagents WHERE session_id = ? AND (ended_at IS NULL OR ended_at >= ?) ORDER BY started_at, agent_id')
+    .prepare("SELECT * FROM session_subagents WHERE session_id = ? AND (ended_at IS NULL OR ended_at >= ? OR end_reason = 'limit') ORDER BY started_at, agent_id")
     .all(sessionId, before(ctx, ENDED_AGENT_MS)) as SubagentRow[])
     .map(toInfo);
 }
@@ -146,7 +154,10 @@ export function recordDispatch(ctx: Ctx, sessionId: string, d: DispatchInput): v
 export function startSubagent(ctx: Ctx, sessionId: string, agentId: string, agentType: string, at: string, startFocusId: number | null = null): void {
   const existing = findSubagent(ctx, sessionId, agentId);
   if (existing) {
-    if (existing.ended_at) ctx.db.prepare('UPDATE session_subagents SET ended_at = NULL WHERE session_id = ? AND agent_id = ?').run(sessionId, agentId);
+    // Running again, so whatever ended it no longer holds.
+    if (existing.ended_at || existing.end_reason || existing.last_active_at) {
+      ctx.db.prepare('UPDATE session_subagents SET ended_at = NULL, end_reason = NULL, last_active_at = NULL WHERE session_id = ? AND agent_id = ?').run(sessionId, agentId);
+    }
     return;
   }
   // Its number in the session: one past the highest given (rows from before migration 4 have none, which MAX skips). A
@@ -179,9 +190,35 @@ export function pinStartFocus(ctx: Ctx, sessionId: string, focusNodeId: number |
     .run(focusNodeId, sessionId);
 }
 
-/** SubagentStop: the row stays, ended. The UI greys its badge for 5 minutes, then keeps it 7 days in the trail. */
+/**
+ * SubagentStop: the row stays, ended. The UI greys its badge for 5 minutes, then keeps it 7 days in the trail. A real stop
+ * wins over the watcher's guess that it stopped responding (`silent`), and clears it; an end its transcript showed
+ * stays.
+ */
 export function stopSubagent(ctx: Ctx, sessionId: string, agentId: string, at: string): void {
-  ctx.db.prepare('UPDATE session_subagents SET ended_at = ? WHERE session_id = ? AND agent_id = ? AND ended_at IS NULL').run(at, sessionId, agentId);
+  ctx.db
+    .prepare("UPDATE session_subagents SET ended_at = ?, end_reason = NULL, last_active_at = NULL WHERE session_id = ? AND agent_id = ? AND (ended_at IS NULL OR end_reason = 'silent')")
+    .run(at, sessionId, agentId);
+}
+
+/**
+ * The watcher found a running subagent dead without a stop: it ends now (`at`, when InProgress noticed), with why and
+ * its last sign of life. False when the row was not running.
+ */
+export function endAgent(ctx: Ctx, sessionId: string, agentId: string, reason: Exclude<EndReason, 'session'>, at: string, lastActiveAt: string): boolean {
+  return ctx.db
+    .prepare('UPDATE session_subagents SET ended_at = ?, end_reason = ?, last_active_at = ? WHERE session_id = ? AND agent_id = ? AND ended_at IS NULL')
+    .run(at, reason, lastActiveAt, sessionId, agentId).changes > 0;
+}
+
+/**
+ * The watcher saw a new line from a subagent it had ended as `silent`, or one waiting at the usage limit: it runs again.
+ * Any other end stays (a resumed agent's SubagentStart revives it). False when nothing changed.
+ */
+export function reviveAgent(ctx: Ctx, sessionId: string, agentId: string): boolean {
+  return ctx.db
+    .prepare("UPDATE session_subagents SET ended_at = NULL, end_reason = NULL, last_active_at = NULL WHERE session_id = ? AND agent_id = ? AND ended_at IS NOT NULL AND end_reason IN ('silent', 'limit')")
+    .run(sessionId, agentId).changes > 0;
 }
 
 /**
@@ -220,11 +257,11 @@ export function launchSubagent(ctx: Ctx, sessionId: string, toolUseId: string, a
 }
 
 /**
- * Session end (or a stale session's expiry): its running subagents end at `at`, while one that already stopped keeps
- * its own time, and its dispatches go. The rows stay as the trail.
+ * Session end (or a stale session's expiry): its running subagents end at `at`, ended with their session (`session`),
+ * while one that already stopped keeps its own time and reason, and its dispatches go. The rows stay as the trail.
  */
 export function endSubagents(ctx: Ctx, sessionId: string, at: string): void {
-  ctx.db.prepare('UPDATE session_subagents SET ended_at = ? WHERE session_id = ? AND ended_at IS NULL').run(at, sessionId);
+  ctx.db.prepare("UPDATE session_subagents SET ended_at = ?, end_reason = 'session' WHERE session_id = ? AND ended_at IS NULL").run(at, sessionId);
   ctx.db.prepare('DELETE FROM subagent_dispatches WHERE session_id = ?').run(sessionId);
 }
 

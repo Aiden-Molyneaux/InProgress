@@ -5,7 +5,7 @@ import { listEventsSince, maxEventId } from '../../src/server/repo/events';
 import { addNodes, deleteNode } from '../../src/server/repo/nodes';
 import { addBinding, createProject } from '../../src/server/repo/projects';
 import { findSession } from '../../src/server/repo/sessions';
-import { pruneSubagents } from '../../src/server/repo/subagents';
+import { endAgent, pruneSubagents, reviveAgent } from '../../src/server/repo/subagents';
 import { getProjectSnapshot } from '../../src/server/repo/snapshot';
 import { handleHookEvent, setFocus, type HookEventInput } from '../../src/server/session-flow';
 
@@ -42,7 +42,7 @@ describe('subagent dispatches', () => {
     expect(hook(dispatch('toolu_1', 'Map the hook payloads', 'Explore', 'sonnet'))).toEqual({ tracked: true });
     hook(start('a1'));
     expect(subagents(ctx)).toEqual([
-      { agentId: 'a1', agentType: 'Explore', startedAt: expect.any(String), description: 'Map the hook payloads', model: 'sonnet', nodeId: play.id, endedAt: null, ordinal: 1, purpose: null },
+      { agentId: 'a1', agentType: 'Explore', startedAt: expect.any(String), description: 'Map the hook payloads', model: 'sonnet', nodeId: play.id, endedAt: null, ordinal: 1, purpose: null, endReason: null, lastActiveAt: null },
     ]);
   });
 
@@ -346,9 +346,9 @@ describe('subagent lifetimes', () => {
     tick(MIN);
     hook({ event: 'end' });
     // A row that had already stopped keeps its own time.
-    expect(ctx.db.prepare('SELECT agent_id, description, ended_at FROM session_subagents ORDER BY agent_id').all()).toEqual([
-      { agent_id: 'a1', description: 'Map the hooks', ended_at: '2026-10-02T09:01:00.000Z' },
-      { agent_id: 'a2', description: 'Write the tests', ended_at: '2026-10-02T09:02:00.000Z' },
+    expect(ctx.db.prepare('SELECT agent_id, description, ended_at, end_reason FROM session_subagents ORDER BY agent_id').all()).toEqual([
+      { agent_id: 'a1', description: 'Map the hooks', ended_at: '2026-10-02T09:01:00.000Z', end_reason: null },
+      { agent_id: 'a2', description: 'Write the tests', ended_at: '2026-10-02T09:02:00.000Z', end_reason: 'session' },
     ]);
     expect(ctx.db.prepare('SELECT COUNT(*) AS c FROM subagent_dispatches').get()).toEqual({ c: 0 });
   });
@@ -362,8 +362,80 @@ describe('subagent lifetimes', () => {
     tick(13 * 60 * MIN);
     const snap = getProjectSnapshot(ctx, project.slug);
     expect(findSession(ctx, 's1')).toMatchObject({ state: 'ended', endedAt: '2026-10-02T22:30:00.000Z' });
-    expect(snap.trailAgents).toEqual([expect.objectContaining({ sessionId: 's1', agentId: 'a1', startedAt: '2026-10-02T09:00:00.000Z', endedAt: '2026-10-02T09:30:00.000Z' })]);
+    expect(snap.trailAgents).toEqual([expect.objectContaining({ sessionId: 's1', agentId: 'a1', startedAt: '2026-10-02T09:00:00.000Z', endedAt: '2026-10-02T09:30:00.000Z', endReason: 'session' })]);
     expect(ctx.db.prepare('SELECT COUNT(*) AS c FROM subagent_dispatches').get()).toEqual({ c: 0 });
+  });
+});
+
+describe('how a subagent ended', () => {
+  const row = (ctx: Ctx, agentId: string) =>
+    ctx.db.prepare('SELECT ended_at, end_reason, last_active_at FROM session_subagents WHERE agent_id = ?').get(agentId);
+
+  it('ends a subagent the watcher found dead with its reason and its last sign of life, and only a running one', () => {
+    const { ctx, hook } = setup();
+    hook(start('a1', 'general-purpose'));
+    expect(endAgent(ctx, 's1', 'a1', 'killed', '2026-10-02T09:05:00.000Z', '2026-10-02T09:03:00.000Z')).toBe(true);
+    expect(subagents(ctx)[0]).toMatchObject({ endedAt: '2026-10-02T09:05:00.000Z', endReason: 'killed', lastActiveAt: '2026-10-02T09:03:00.000Z' });
+    expect(endAgent(ctx, 's1', 'a1', 'silent', '2026-10-02T09:06:00.000Z', '2026-10-02T09:04:00.000Z')).toBe(false);
+    expect(row(ctx, 'a1')).toEqual({ ended_at: '2026-10-02T09:05:00.000Z', end_reason: 'killed', last_active_at: '2026-10-02T09:03:00.000Z' });
+  });
+
+  it('revives a subagent ended as silent or at the usage limit, and nothing else', () => {
+    const { ctx, hook } = setup();
+    for (const id of ['s', 'l', 'k', 'c']) hook(start(id, 'general-purpose'));
+    endAgent(ctx, 's1', 's', 'silent', 't1', 't0');
+    endAgent(ctx, 's1', 'l', 'limit', 't1', 't0');
+    endAgent(ctx, 's1', 'k', 'killed', 't1', 't0');
+    hook({ event: 'subagent-stop', agentId: 'c' });
+    expect(['s', 'l', 'k', 'c'].map((id) => reviveAgent(ctx, 's1', id))).toEqual([true, true, false, false]);
+    expect(row(ctx, 's')).toEqual({ ended_at: null, end_reason: null, last_active_at: null });
+    expect(row(ctx, 'l')).toEqual({ ended_at: null, end_reason: null, last_active_at: null });
+    expect(row(ctx, 'k')).toMatchObject({ end_reason: 'killed' });
+  });
+
+  it('lets a real stop win over a silent guess, but not over an end the transcript showed', () => {
+    const { ctx, hook, tick } = setup();
+    hook(start('s', 'general-purpose'));
+    hook(start('l', 'general-purpose'));
+    endAgent(ctx, 's1', 's', 'silent', '2026-10-02T09:20:00.000Z', '2026-10-02T09:00:30.000Z');
+    endAgent(ctx, 's1', 'l', 'limit', '2026-10-02T09:20:00.000Z', '2026-10-02T09:00:30.000Z');
+    tick(25 * MIN);
+    hook({ event: 'subagent-stop', agentId: 's' });
+    hook({ event: 'subagent-stop', agentId: 'l' });
+    expect(row(ctx, 's')).toEqual({ ended_at: '2026-10-02T09:25:00.000Z', end_reason: null, last_active_at: null });
+    expect(row(ctx, 'l')).toEqual({ ended_at: '2026-10-02T09:20:00.000Z', end_reason: 'limit', last_active_at: '2026-10-02T09:00:30.000Z' });
+  });
+
+  it('clears any reason when a subagent starts again (resumed)', () => {
+    const { ctx, hook } = setup();
+    hook(start('a1', 'general-purpose'));
+    endAgent(ctx, 's1', 'a1', 'error', 't1', 't0');
+    hook(start('a1', 'general-purpose'));
+    expect(row(ctx, 'a1')).toEqual({ ended_at: null, end_reason: null, last_active_at: null });
+    expect(subagents(ctx)[0]).toMatchObject({ endedAt: null, endReason: null, lastActiveAt: null });
+  });
+
+  it('reads a row that a rolled-back build revived (ended_at cleared, its reason left) as running', () => {
+    const { ctx, hook } = setup();
+    hook(start('a1', 'general-purpose'));
+    endAgent(ctx, 's1', 'a1', 'silent', 't1', 't0');
+    // The v6 build's startSubagent revival, which never names the new columns.
+    ctx.db.prepare("UPDATE session_subagents SET ended_at = NULL WHERE agent_id = 'a1'").run();
+    expect(subagents(ctx)[0]).toMatchObject({ endedAt: null, endReason: null, lastActiveAt: null });
+  });
+
+  it("keeps a subagent that hit the usage limit in its live session's list past 5 minutes, until its session ends", () => {
+    const { ctx, project, hook, tick } = setup();
+    hook(start('l', 'general-purpose'));
+    hook(start('k', 'general-purpose'));
+    endAgent(ctx, 's1', 'l', 'limit', ctx.now(), ctx.now());
+    endAgent(ctx, 's1', 'k', 'killed', ctx.now(), ctx.now());
+    tick(3 * 60 * MIN);
+    hook({ event: 'prompt' });
+    expect(getProjectSnapshot(ctx, project.slug).sessions[0].subagents.map((a) => [a.agentId, a.endReason])).toEqual([['l', 'limit']]);
+    hook({ event: 'end' });
+    // Its session's end leaves the usage limit as the reason.
+    expect(getProjectSnapshot(ctx, project.slug).trailAgents.map((a) => [a.agentId, a.endReason])).toEqual([['k', 'killed'], ['l', 'limit']]);
   });
 });
 
@@ -426,7 +498,7 @@ describe('the trail of ended subagents in the snapshot', () => {
     hook({ event: 'subagent-stop', agentId: 'a1' });
     // The layout, not the server, decides when a live session's stopped subagent leaves its greyed badge for the trail.
     expect(getProjectSnapshot(ctx, project.slug).trailAgents).toEqual([
-      { sessionId: 's1', agentId: 'a1', agentType: 'general-purpose', startedAt: '2026-10-02T09:00:00.000Z', description: 'Map the hooks', model: 'sonnet', nodeId: play.id, endedAt: '2026-10-02T09:01:00.000Z', ordinal: 1, purpose: null },
+      { sessionId: 's1', agentId: 'a1', agentType: 'general-purpose', startedAt: '2026-10-02T09:00:00.000Z', description: 'Map the hooks', model: 'sonnet', nodeId: play.id, endedAt: '2026-10-02T09:01:00.000Z', ordinal: 1, purpose: null, endReason: null, lastActiveAt: null },
     ]);
     expect(getProjectSnapshot(ctx, other.slug).trailAgents.map((a) => a.agentId)).toEqual(['c1']);
   });

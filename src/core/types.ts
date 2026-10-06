@@ -139,6 +139,15 @@ export interface LogEntry {
   sessionTitle: string | null;
 }
 
+/**
+ * Why a subagent ended without a clean SubagentStop: `limit` (it hit the usage limit), `error` (another API error),
+ * `killed` (stopped: TaskStop, a stopped workflow, the UI), `silent` (no new line in its transcript for 20 minutes; its
+ * next line revives it), `session` (it was still running when its session ended or expired). The first four are read
+ * from its own transcript by the server's watcher (agent-watch).
+ */
+export const END_REASONS = ['limit', 'error', 'killed', 'silent', 'session'] as const;
+export type EndReason = (typeof END_REASONS)[number];
+
 export interface SubagentInfo {
   agentId: string;
   agentType: string;
@@ -162,6 +171,13 @@ export interface SubagentInfo {
    * with its dispatch, for a blank prompt, and for a subagent from before migration 5.
    */
   purpose: string | null;
+  /** Why it ended, when not by a clean stop (END_REASONS). Null while it runs and after a clean SubagentStop. */
+  endReason: EndReason | null;
+  /**
+   * Its last sign of life, for an end the transcript watcher found (its last transcript line): "ran …" and "… ago"
+   * count to it, while `endedAt` stays when InProgress noticed. Null otherwise.
+   */
+  lastActiveAt: string | null;
 }
 
 /** Agent types that only read. They get no badge of their own and leave no trail: a step shows them as one row. */
