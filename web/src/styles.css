@@ -281,54 +281,83 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-work-done:focus-visible { outline: 2px solid var(--text-2); outline-offset: 1px; }
 .ip-handle { opacity: 0; width: 1px; height: 1px; min-width: 0; min-height: 0; border: 0; }
 /* Region: Details and viewer. Task 5. */
-.ip-details { position: absolute; right: 0; top: 0; bottom: 0; width: 380px; background: var(--panel); border-left: 1px solid var(--border); box-shadow: var(--shadow); padding: 12px 14px; overflow-y: auto; z-index: 10; font-size: var(--fs-m); }
-.ip-grab { display: none; width: 36px; height: 4px; border-radius: 2px; background: var(--border); margin: 0 auto 8px; }
+/* Details: a side panel from 720 px, a bottom sheet over the lower 60 % below it (sheet.ts). Opaque --panel with the
+   shadow, body M. Details styles the classes it shares with the canvas and the chrome under its own parents (.ip-wt,
+   .ip-dagent, .ip-meta, .ip-details), so the other regions can scope their rules. */
+.ip-details { position: absolute; right: 0; top: 0; bottom: 0; z-index: 10; width: 380px; padding: 12px; overflow-y: auto; background: var(--panel); border-left: 1px solid var(--border); box-shadow: var(--shadow); font-size: var(--fs-m); line-height: 18px; }
+.ip-grab { display: none; width: 36px; height: 4px; margin: 0 auto 8px; border-radius: var(--radius); background: var(--muted); }
 @media (max-width: 719px) {
-  .ip-details { top: auto; left: 0; width: auto; height: 60%; border-left: 0; border-top: 1px solid var(--border); border-radius: 14px 14px 0 0; }
+  .ip-details { top: auto; left: 0; width: auto; height: 60%; border-left: 0; border-top: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
   .ip-grab { display: block; }
 }
-.ip-details header, .ip-viewer header { display: flex; align-items: center; gap: 6px; font-size: var(--fs-l); }
-.ip-details header b, .ip-viewer header b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--w-heavy); }
-.ip-btn { border: 1px solid var(--border); border-radius: 6px; padding: 0 7px; font-size: var(--fs-s); color: var(--muted); white-space: nowrap; }
-.ip-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; color: var(--muted); font-size: var(--fs-s); margin: 6px 0 10px; }
-.ip-pill { border-radius: 8px; padding: 0 6px; font-weight: var(--w-heavy); font-size: var(--fs-s); color: var(--bg); background: var(--faint); }
-.ip-pill.you { color: var(--amber-ink); background: var(--amber-fill); }
-.ip-pill.st-done { background: var(--muted); }
-.ip-pill.st-active { background: var(--active); }
-.ip-pill.st-blocked { background: var(--red); }
+/* The header, shared with the viewer: the title in L ink, cut on one line, then 24 px hairline buttons. */
+.ip-details header, .ip-viewer header { display: flex; align-items: center; gap: 6px; }
+.ip-details header b, .ip-viewer header b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-l); font-weight: var(--w-heavy); line-height: 20px; letter-spacing: var(--track-l); word-spacing: 0.05em; color: var(--text); }
+.ip-btn { flex: none; height: 24px; min-width: 24px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius); font-size: var(--fs-s); line-height: 14px; color: var(--muted); white-space: nowrap; }
+.ip-btn:hover { color: var(--text-2); }
+.ip-details :focus-visible, .ip-viewer header :focus-visible { outline: 2px solid var(--text-2); outline-offset: 1px; }
+/* Status (the shared Marker, then the word, or NEEDS YOU in the YOU tag's look), kind, label, who, parent: one muted
+   S line. */
+.ip-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0 10px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
+.ip-meta .ip-glyph { font-variant-emoji: text; }
+/* ⛁ draws faint at text size. */
+.ip-meta .ip-glyph.l-data { font-size: 1.33em; }
+.ip-details .ip-you { display: inline-block; height: 18px; padding: 0 6px; border-radius: var(--radius); background: var(--amber-fill); color: var(--amber-ink); font-size: var(--fs-s); font-weight: var(--w-heavy); line-height: 18px; letter-spacing: 0.04em; }
+/* Section heads, as Up next's: S at 900, uppercase, spaced, muted. The archived menu's head shares this rule. */
+.ip-label { margin: 12px 0 4px; font-size: var(--fs-s); font-weight: var(--w-heavy); line-height: 14px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
 .ip-link { color: var(--link); text-decoration: underline; }
-.ip-label { font-size: var(--fs-s); text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 12px 0 4px; }
-.ip-res { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; border: 1px solid var(--muted); background: color-mix(in srgb, var(--muted) 8%, transparent); color: var(--muted); border-radius: 6px; padding: 4px 8px; margin-bottom: 4px; }
-/* The browser draws <b> at 700, which only Inter 900 can serve: a resource's title names its weight. */
-.ip-res b { font-weight: var(--w-text); }
-.ip-res .sub { color: var(--muted); font-size: var(--fs-s); margin-left: auto; }
-.ip-kids { list-style: none; margin: 0; padding: 0; }
-.ip-kids li button { width: 100%; text-align: left; padding: 2px 0; display: flex; gap: 6px; align-items: center; }
-.ip-log { list-style: none; margin: 0; padding: 0; color: var(--muted); font-size: var(--fs-s); line-height: 1.7; }
-.ip-wts, .ip-dagents { list-style: none; margin: 0; padding: 0; line-height: 1.7; }
-.ip-wt .ip-work-agent { margin-right: 4px; }
-/* An ended subagent's line goes grey, its tag with it. The trail's ◆ is neutral, as a trail row wears no family. */
-.ip-dagent.ended .ip-agent-tag { color: inherit; }
-.ip-agent-dot { color: var(--faint); }
-.ip-dagent.ended, .ip-dtrail { color: var(--muted); }
-/* A subagent's purpose, under its line in Details. */
-.ip-dpurpose { padding-left: 12px; font-size: var(--fs-s); line-height: 1.4; color: var(--muted); }
-/* Details' ended work: one group per session, under its title. */
-.ip-trail + .ip-trail { margin-top: 4px; }
-.ip-trail-head { font-size: var(--fs-s); color: var(--muted); font-weight: var(--w-text); }
 .ip-outcome { margin: 8px 0; }
-/* Outcome's label and Markdown's bold name their weight too. */
-.ip-outcome b, .ip-md strong, .ip-md b { font-weight: var(--w-heavy); }
-.ip-md { font-size: var(--fs-m); line-height: 1.55; overflow-wrap: anywhere; }
-.ip-md pre { background: var(--panel-2); padding: 8px; border-radius: 6px; overflow: auto; }
-.ip-md code { font-family: ui-monospace, 'Cascadia Code', Consolas, monospace; font-size: var(--fs-m); }
+.ip-outcome b { font-weight: var(--w-heavy); }
+/* A resource: a muted row with a faint tint on hover, its title in ink at 500, its summary in DM Mono. */
+.ip-res { display: flex; align-items: center; gap: 6px; width: calc(100% + 12px); margin: 0 -6px 2px; padding: 3px 6px; border-radius: var(--radius); text-align: left; color: var(--muted); }
+.ip-res:hover { background: var(--panel-2); }
+.ip-res b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--w-text); color: var(--text-2); }
+.ip-res .sub { flex: none; margin-left: auto; font-family: var(--font-mono); font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
+/* Working tasks, subagents and ended work: text lines with the canvas rows' marks. The tag in DM Mono in the hue, ◐ in
+   the active ink and still, ○ and ✓ muted, a stale ○ faint, the hue bar on the session's own tasks only. */
+.ip-wts, .ip-dagents { list-style: none; margin: 0; padding: 0; line-height: 1.7; }
+.ip-wt, .ip-dagent { color: var(--text-2); }
+.ip-wt.w-in_progress { color: var(--text); }
+.ip-wt.w-completed, .ip-wt.stale, .ip-dagent.ended, .ip-dtrail { color: var(--muted); }
+.ip-wt .ip-work-tag, .ip-dagent .ip-agent-tag { font-family: var(--font-mono); font-size: var(--fs-s); font-weight: var(--w-text); color: var(--fam); }
+.ip-dagent.ended .ip-agent-tag { color: inherit; }
+.ip-wt .ip-work-mark { display: inline-block; width: 12px; text-align: center; color: var(--muted); }
+.ip-wt.w-in_progress .ip-work-mark { color: var(--active-ink); }
+.ip-wt.stale:not(.w-completed) .ip-work-mark { color: var(--faint); }
+.ip-wt .ip-work-agent { display: inline-block; width: 3px; height: 12px; margin-right: 4px; border-radius: var(--radius); vertical-align: -1px; background: var(--fam); }
+/* A reader's ◇ and the trail's ◆, muted. */
+.ip-dagent .ip-reader-mark, .ip-agent-dot { color: var(--muted); }
+/* A subagent's purpose, under its line. */
+.ip-dpurpose { padding-left: 12px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
+/* Ended work: one group per session, under its title. */
+.ip-trail + .ip-trail { margin-top: 4px; }
+.ip-trail-head { font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
+/* Steps: the shared Marker in a 13 px column, so the titles align, then #id and title. */
+.ip-kids { list-style: none; margin: 0; padding: 0; }
+.ip-kids li button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 2px 0; text-align: left; color: var(--text-2); }
+.ip-kids li button:hover { color: var(--text); }
+.ip-kid-mark { flex: none; display: inline-flex; justify-content: center; width: 13px; }
+/* The log: the time in DM Mono, the text in ink, the session muted and upright (no italic face ships). */
+.ip-log { list-style: none; margin: 0; padding: 0; line-height: 1.7; color: var(--muted); }
+.ip-log-time { font-family: var(--font-mono); font-size: var(--fs-s); }
+.ip-log-text { color: var(--text-2); }
+/* Markdown, in Details and the viewer: headings at L, M and S in 900, code in DM Mono, links in --link. */
+.ip-md { line-height: 1.55; overflow-wrap: anywhere; }
+.ip-md :is(h1, h2, h3, h4, h5, h6, strong, b, th) { font-weight: var(--w-heavy); }
+.ip-md h1 { font-size: var(--fs-l); line-height: 20px; letter-spacing: var(--track-l); word-spacing: 0.05em; }
+.ip-md h2 { font-size: var(--fs-m); line-height: 18px; }
+.ip-md :is(h3, h4, h5, h6) { font-size: var(--fs-s); line-height: 14px; }
+.ip-md a { color: var(--link); }
+.ip-md code { font-family: var(--font-mono); font-size: var(--fs-s); }
+.ip-md pre { padding: 8px; overflow: auto; background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius); }
 .ip-md table { border-collapse: collapse; }
-.ip-md td, .ip-md th { border: 1px solid var(--border); padding: 2px 6px; }
-.ip-viewer { position: fixed; inset: 0; background: var(--bg); z-index: 30; display: flex; flex-direction: column; }
-.ip-viewer header { padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--border); }
-.ip-viewer-body { flex: 1; overflow: auto; padding: 16px 20px; max-width: 900px; width: 100%; margin: 0 auto; outline: none; }
+.ip-md td, .ip-md th { padding: 2px 6px; border: 1px solid var(--border); }
+/* The resource viewer: the whole window on --panel. Its header shares Details' rules above. */
+.ip-viewer { position: fixed; inset: 0; z-index: 30; display: flex; flex-direction: column; background: var(--panel); }
+.ip-viewer header { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.ip-viewer-body { flex: 1; width: 100%; max-width: 900px; margin: 0 auto; padding: 16px 20px; overflow: auto; outline: none; }
 .ip-viewer-body:focus-visible { outline: 2px solid var(--amber); outline-offset: -2px; }
-.ip-toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 4px 12px; border-radius: 8px; font-size: var(--fs-m); z-index: 40; }
+.ip-toast { position: fixed; bottom: 16px; left: 50%; z-index: 40; transform: translateX(-50%); padding: 4px 12px; border-radius: var(--radius); background: var(--text); color: var(--bg); font-size: var(--fs-m); }
 /* Region: reduced motion. Task 1 only. */
 @media (prefers-reduced-motion: reduce) {
   /* Nothing moves: no pulse, no flash, no bob, blink or ring. The flash's static ring is in the canvas region. */
