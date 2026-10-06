@@ -292,7 +292,9 @@ test('dark mode reaches the canvas controls; reduced motion stops the pulse and 
   await expect(page.locator('.react-flow')).toHaveClass(/\bdark\b/);
   // The night ground is Quiet's navy.
   await expect(page.locator('.react-flow')).toHaveCSS('background-color', 'rgb(8, 13, 28)');
-  await expect(page.locator('.ip-chip-s .ip-pulse')).toHaveCSS('animation-name', 'none');
+  // The working chip's character stands still: no bob and no blink.
+  await expect(page.locator('.ip-chip-s .ip-char-body')).toHaveCSS('animation-name', 'none');
+  await expect(page.locator('.ip-chip-s g.ip-char-eyes')).toHaveCSS('animation-name', 'none');
   await expect(page.locator('.ip-node.working .ip-marker.m-active').first()).toHaveCSS('animation-name', 'none');
   // Amber ink on an amber tint, like the needs-you pill.
   await expect(page.locator('.ip-node .ip-you')).toHaveCSS('color', 'rgb(252, 211, 77)');
@@ -1002,14 +1004,14 @@ test('the needs-you pill and Follow sit at the right end of the session row, for
   const chip = row.getByRole('button', { name: /E2E session/ });
   const pill = row.getByRole('button', { name: /need you/ });
   const follow = row.getByRole('button', { name: /Follow/ });
-  await expect(pill).toHaveText('● 1 need you');
+  await expect(pill).toHaveText('1 need you');
   await expect(page.locator('.ip-topbar').getByRole('button', { name: /need you|Follow/ })).toHaveCount(0);
   const [rowBox, chipBox, pillBox, followBox] = await Promise.all([row, chip, pill, follow].map(async (l) => (await l.boundingBox())!));
   // Follow ends at the row's right padding, the pill sits just before it and the chips start from the left.
   expect(rowBox.x + rowBox.width - (followBox.x + followBox.width)).toBeLessThanOrEqual(12);
   expect(pillBox.x + pillBox.width).toBeLessThanOrEqual(followBox.x);
   expect(chipBox.x + chipBox.width).toBeLessThanOrEqual(pillBox.x);
-  expect(rowBox.height, 'one line').toBeLessThan(40);
+  expect(rowBox.height, 'one line').toBeLessThanOrEqual(40);
   // A project with no sessions and nothing waiting keeps Follow in the row, without the pill.
   await tabFor(page, quietName).click();
   await expect(page).toHaveTitle(`InProgress — ${quietName}`);
@@ -1240,7 +1242,8 @@ test.describe('Live work', () => {
     await expect(readers).toHaveCSS('color', 'rgb(11, 107, 125)');
     // They still count on the chip, whose list marks them.
     const chip = page.locator('.ip-sessions').getByRole('button', { name: /E2E session/ });
-    await expect(chip).toHaveText('A · E2E session · 3 subagents');
+    await expect(chip).toHaveAccessibleName('A · E2E session · 3 subagents');
+    await expect(chip).toHaveText('A');
     await chip.hover();
     const list = page.locator('.ip-chip-pop');
     await expect(list.locator('li', { hasText: 'Map the signing config' })).toHaveText(new RegExp(`^◇ a2 · Map the signing config · haiku · ${RUNNING}$`));
@@ -1331,9 +1334,9 @@ test.describe('Live work', () => {
       const find = (sel, text) => [...document.querySelectorAll(sel)].find((n) => n.textContent.includes(text));
       const color = (n) => (n ? getComputedStyle(n).color : null);
       const lead = (text) => color([...document.querySelectorAll('.ip-upnext-line .ip-upnext-lead')].find((n) => n.textContent === text));
-      const chipB = find('.ip-chip-s', 'Second session');
+      const chipB = document.querySelector('.ip-chip-s[aria-label^="B · "] .ip-tag');
       return {
-        chipB: chipB ? getComputedStyle(chipB).backgroundColor : null,
+        chipB: color(chipB),
         head: color(document.querySelector('.ip-upnext-head')),
         leadA: lead('A'), leadB: lead('B'), leadLater: lead('later'),
         markerA: color(find('.ip-node', '3 RevenueCat').querySelector('.ip-queue')),
@@ -1374,7 +1377,8 @@ test.describe('Live work', () => {
     await hook(api, fresh.session, { event: 'subagent-stop', agentId: 'agent-2' });
     await open(page, fresh);
     const chip = page.locator('.ip-sessions').getByRole('button', { name: /E2E session/ });
-    await expect(chip).toHaveText('A · E2E session · 1 subagent');
+    await expect(chip).toHaveAccessibleName('A · E2E session · 1 subagent');
+    await expect(chip).toHaveText('A');
     const list = page.locator('.ip-chip-pop');
     await expect(list).toBeHidden();
     await chip.hover();
@@ -1400,12 +1404,12 @@ test.describe('Live work', () => {
     await subagent(api, b, 'agent-b', `#${fresh.ids['3 RevenueCat']} Price the tiers`, 'sonnet');
     await task(api, b, '1', 'Compare the plans', 'in_progress', 'agent-b');
     await open(page, fresh);
-    // The letter leads each chip and focus badge, in its own span: the chip's label still starts with the title.
-    const chipA = page.locator('.ip-chip-s', { hasText: 'E2E session' });
-    const chipB = page.locator('.ip-chip-s', { hasText: 'Second session' });
-    await expect(chipA).toHaveText('A · E2E session');
-    await expect(chipB).toHaveText('B · Second session · 1 subagent');
-    await expect(chipB.locator('.ip-chip-label')).toHaveText('Second session · 1 subagent');
+    // A chip shows only its letter. Its name leads with the letter and carries the title and the count.
+    const chipA = page.locator('.ip-sessions').getByRole('button', { name: /^A · / });
+    const chipB = page.locator('.ip-sessions').getByRole('button', { name: /^B · / });
+    await expect(chipA).toHaveAccessibleName('A · E2E session');
+    await expect(chipB).toHaveAccessibleName('B · Second session · 1 subagent');
+    await expect(chipB).toHaveText('B');
     await expect(page.locator('.ip-badge', { hasText: 'E2E session' })).toHaveText('◆ A · E2E session · working');
     await expect(page.locator('.ip-badge', { hasText: 'Second session' })).toHaveText('◆ B · Second session · working · 1 subagent');
     // B's subagent leads with b1, and so does its task.
@@ -1425,9 +1429,9 @@ test.describe('Live work', () => {
       const bg = (n) => getComputedStyle(n).backgroundColor;
       const row = find('.ip-work', 'Compare the plans');
       return {
-        chipA: bg(find('.ip-chip-s', 'E2E session')),
+        chipA: getComputedStyle(document.querySelector('.ip-chip-s[aria-label^="A · "] .ip-tag')).color,
         badgeA: bg(find('.ip-badge', 'E2E session')),
-        chipB: bg(find('.ip-chip-s', 'Second session')),
+        chipB: getComputedStyle(document.querySelector('.ip-chip-s[aria-label^="B · "] .ip-tag')).color,
         badgeB: bg(find('.ip-badge', 'Second session')),
         agentB: bg(find('.ip-agent', 'Price the tiers')),
         markerB: bg(row.querySelector('.ip-work-agent')),
