@@ -168,6 +168,17 @@ export function startSubagent(ctx: Ctx, sessionId: string, agentId: string, agen
   pairFifo(ctx, sessionId, agentId, agentType);
 }
 
+/**
+ * A new focus for a session: its running subagents that have no step and started before it had a focus take this one
+ * as their start focus, so they stay on the first focus they see instead of following every later one.
+ */
+export function pinStartFocus(ctx: Ctx, sessionId: string, focusNodeId: number | null): void {
+  if (focusNodeId === null) return;
+  ctx.db
+    .prepare('UPDATE session_subagents SET start_focus_id = ? WHERE session_id = ? AND ended_at IS NULL AND node_id IS NULL AND start_focus_id IS NULL')
+    .run(focusNodeId, sessionId);
+}
+
 /** SubagentStop: the row stays, ended. The UI greys its badge for 5 minutes, then keeps it 7 days in the trail. */
 export function stopSubagent(ctx: Ctx, sessionId: string, agentId: string, at: string): void {
   ctx.db.prepare('UPDATE session_subagents SET ended_at = ? WHERE session_id = ? AND agent_id = ? AND ended_at IS NULL').run(at, sessionId, agentId);

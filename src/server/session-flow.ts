@@ -6,7 +6,7 @@ import { findNode, leadingNode, patchNode, requireNode } from './repo/nodes';
 import { getProjectById, releaseQueue, resolveBinding, resolveProject } from './repo/projects';
 import { assignSlot, briefingDue, clearBriefingDue, findSession, markBriefingDue, saveSession } from './repo/sessions';
 import { getProjectSnapshot } from './repo/snapshot';
-import { endSubagents, launchSubagent, pruneSubagents, recordDispatch, startSubagent, stopSubagent } from './repo/subagents';
+import { endSubagents, launchSubagent, pinStartFocus, pruneSubagents, recordDispatch, startSubagent, stopSubagent } from './repo/subagents';
 import { taskCreated, taskUpdated } from './repo/work';
 
 export interface HookEventInput {
@@ -270,6 +270,8 @@ export function setFocus(ctx: Ctx, actor: string, sessionId: string, nodeId: num
     // Being heard from again can bring a stale session back.
     placeSlot(ctx, existing, next);
     saveSession(ctx, next);
+    // A subagent that started while the session had no focus stays on this first one (session.updated below refetches).
+    pinStartFocus(ctx, sessionId, nodeId);
     markIfRelettered(ctx, existing, next);
     record({ projectId, type: 'session.updated', entity: 'session', entityId: sessionId, data: { changed: ['focusNodeId'], focusNodeId: nodeId } });
   });

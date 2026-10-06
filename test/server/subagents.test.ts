@@ -183,6 +183,27 @@ describe('the start focus of a subagent with no step', () => {
     expect(nodeOf(ctx, 'a2')).toBe(tests.id);
   });
 
+  it('takes the first focus its session sets when it started with none, and stays there when the focus moves again', () => {
+    const { ctx, signing, play, tests, hook } = setup();
+    setFocus(ctx, 'scribe:s1', 's1', null);
+    hook(start('w1', 'general-purpose'));
+    hook(start('w2', 'general-purpose'));
+    hook({ event: 'subagent-stop', agentId: 'w2' });
+    hook(dispatch('t1', `#${signing.id} Check the keystore`, 'general-purpose'));
+    hook(start('a1', 'general-purpose'));
+    expect(nodeOf(ctx, 'w1')).toBeNull();
+    setFocus(ctx, 'scribe:s1', 's1', play.id);
+    setFocus(ctx, 'scribe:s1', 's1', tests.id);
+    expect(nodeOf(ctx, 'w1')).toBe(play.id);
+    // Only a running subagent with no step takes it: a stopped one, and one whose dispatch named a step, keep none.
+    const columns = ctx.db.prepare('SELECT agent_id, node_id, start_focus_id FROM session_subagents ORDER BY agent_id').all();
+    expect(columns).toEqual([
+      { agent_id: 'a1', node_id: signing.id, start_focus_id: null },
+      { agent_id: 'w1', node_id: null, start_focus_id: play.id },
+      { agent_id: 'w2', node_id: null, start_focus_id: null },
+    ]);
+  });
+
   it('keeps the start focus of its first start when it is resumed after a focus change', () => {
     const { ctx, play, tests, hook } = setup();
     hook(start('w1', 'general-purpose'));
