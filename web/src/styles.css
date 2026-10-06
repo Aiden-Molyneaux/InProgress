@@ -283,10 +283,9 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-badge > .ip-char:not(.c-work) { margin: 0 2px; }
 .ip-agent > .ip-char { flex: none; }
 /* The label's parts sit in the line itself, so its title gives way first, down to nothing, and only then the done
-   row's label. Its letter starts 12 px after the last kin. */
+   row's label. Its letter starts 12 px after the last kin, or the lead. */
 .ip-badge-label { display: contents; }
 .ip-badge-label > :first-child { margin-left: 12px; }
-.ip-badge > .ip-badge-label:first-child > :first-child { margin-left: 0; }
 .ip-badge-label .ip-tag { flex: none; }
 .ip-badge-sep { flex: none; white-space: pre; color: var(--muted); }
 .ip-badge-title { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
