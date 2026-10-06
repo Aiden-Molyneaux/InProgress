@@ -54,6 +54,14 @@ export function useInProgress(): InProgressState {
   const snapshotSeq = useRef(0);
   const appliedSeq = useRef(0);
   /**
+   * The window's own deletes, by slug: 'sent' from just before the request until its answer, then 'done' while the
+   * window is still on the project, until the switch away has rendered (the slug effect clears it). The server deletes
+   * before it answers, and a refresh set off by an event or a reconnect can run in between, reading the slug only when
+   * its timer fires. So loadSnapshot never asks for one of these (a deleted project's address answers 404 by design),
+   * and loadProjects leaves the window on one for the answer to move on, to the tab beside it.
+   */
+  const deletes = useRef(new Map<string, 'sent' | 'done'>());
+  /**
    * Where the event stream starts, set once by the first load that settles: the first snapshot's lastEventId
    * (spec §7.6), or nothing when there is no snapshot to start from (no projects, or no server yet).
    */
@@ -83,11 +91,15 @@ export function useInProgress(): InProgressState {
     if (gone) setDeleted(gone);
     setLoaded(true);
     if (!list.length) startStream();
-    setSlug((cur) => pickSlug(list, cur));
+    // A list the server sent after deleting the open project, landing before the delete's answer, would open the
+    // busiest project here. The answer moves the window instead, to the tab beside it.
+    setSlug((cur) => (cur !== null && deletes.current.has(cur) ? cur : pickSlug(list, cur)));
   }, [startStream]);
 
   const loadSnapshot = useCallback(
     async (s: string) => {
+      // The delete's answer moves the window on.
+      if (deletes.current.has(s)) return;
       const seq = ++snapshotSeq.current;
       const snap = await api.project(s).catch(() => null);
       if (slugRef.current !== s) return;
@@ -115,6 +127,8 @@ export function useInProgress(): InProgressState {
   }, [loadProjects]);
 
   useEffect(() => {
+    // The switch away from a project the window deleted has rendered: slugRef no longer names it.
+    for (const [s, state] of deletes.current) if (state === 'done' && s !== slug) deletes.current.delete(s);
     if (!slug) {
       // The last project left the list: nothing of it may stay on screen, and the URL must not name it.
       projectIdRef.current = null;
@@ -189,9 +203,24 @@ export function useInProgress(): InProgressState {
 
   const act = useCallback(
     async (action: ProjectAction, target: ActionTarget, goTo: string | null) => {
+      // Marked before the request: the server may delete it before the answer arrives.
+      if (action === 'delete') deletes.current.set(target.slug, 'sent');
       const answer = await api.projectAction(action, target);
       if (answer === 'reload') window.location.reload();
-      if (typeof answer === 'string') return answer;
+      if (typeof answer === 'string') {
+        if (action === 'delete') {
+          // Not deleted after all: the window may ask for it again, and makes up any refresh it skipped meanwhile.
+          deletes.current.delete(target.slug);
+          if (answer !== 'reload' && slugRef.current === target.slug) void loadSnapshot(target.slug);
+        }
+        return answer;
+      }
+      if (action === 'delete' || action === 'restore') {
+        // The switch below leaves a deleted project the window is on, but a refresh can still read its slug until that
+        // renders. Otherwise, and once restored (before the switch, which may open it), it may be asked for again.
+        if (action === 'delete' && slugRef.current === target.slug) deletes.current.set(target.slug, 'done');
+        else deletes.current.delete(target.slug);
+      }
       // One batch: the patched lists and the project to open land together, so no tab jumps on the way. A restored
       // project joins the list now, under ⋯, rather than with the reload.
       const restored = action === 'restore' && answer.project ? summaryOf(answer.project) : undefined;
@@ -205,7 +234,7 @@ export function useInProgress(): InProgressState {
       void loadProjects();
       return 'ok' as const;
     },
-    [loadProjects],
+    [loadProjects, loadSnapshot],
   );
 
   return { projects, deleted, slug, snapshot, lastEvent, liveEvent, connection, loaded, selectProject: setSlug, act };

@@ -1454,6 +1454,48 @@ test('deleting the open project from its tab opens the tab before it, and a link
   await expect(tabFor(page, endName)).toHaveCount(0);
 });
 
+test('the window never asks for a project it is deleting, even when the delete is slow to answer, and asks again once it is restored', async ({ page, api }) => {
+  const keptName = unique('Slow kept');
+  const goneName = unique('Slow gone');
+  const kept = await bare(api, keptName);
+  const gone = await bare(api, goneName);
+  await archiveByScribe(api, gone.slug);
+  await page.goto(`/#/p/${gone.slug}`);
+  await expect(page).toHaveTitle(`InProgress · ${goneName}`);
+  // The server deletes it at once and its event arrives, but the answer is held past the snapshot refresh that an event
+  // for the open project sets off. A deleted project's address answers 404, so until the answer moves the window on,
+  // nothing may ask for it.
+  await page.route('**/api/ui/projects/*/delete', async (route) => {
+    const response = await route.fetch();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await route.fulfill({ response });
+  });
+  // Counted from the delete's request on: a refresh sent before it reaches the server first, and finds the project.
+  let sent = false;
+  const asked: string[] = [];
+  page.on('request', (r) => {
+    const path = new URL(r.url()).pathname;
+    if (path === `/api/ui/projects/${gone.id}/delete`) sent = true;
+    else if (sent && path === `/api/projects/${gone.slug}`) asked.push(r.method());
+  });
+  const more = moreButton(page);
+  const menu = moreMenu(page);
+  await more.click();
+  await menu.getByRole('menuitem', { name: `Delete ${goneName}`, exact: true }).click();
+  await page.getByRole('dialog', { name: `Delete ${goneName}?` }).getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(statusLine(page)).toHaveText(`Deleted ${goneName}. Restore it from ⋯ within 30 days.`);
+  await expect(page).toHaveURL(hereIs(kept.slug));
+  await expect(page).toHaveTitle(`InProgress · ${keptName}`);
+  expect(asked).toEqual([]);
+  // Restored, it opens as any archived project does.
+  await more.click();
+  await menu.getByRole('menuitem', { name: `Restore ${goneName}`, exact: true }).click();
+  await expect(statusLine(page)).toHaveText(`Restored ${goneName}. It is under Archived in ⋯.`);
+  await more.click();
+  await menu.getByRole('menuitem', { name: goneName, exact: true }).click();
+  await expect(page).toHaveTitle(`InProgress · ${goneName}`);
+});
+
 test("a scribe's archive of the open project keeps it open as the end tab, and its sessions and Up next go", async ({ page, api, fresh }) => {
   await setQueue(api, fresh, [fresh.ids['3 RevenueCat']], fresh.session);
   await open(page, fresh);
