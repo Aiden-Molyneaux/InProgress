@@ -61,6 +61,45 @@ describe('deleted projects are hidden', () => {
     expect(() => addBinding(ctx, 'test', 'gone-site', 'C:/work/other')).toThrow('not found');
   });
 
+  it('keeps a deleted slug for its project when a new one takes the name, so an old reference never lands on the new one', () => {
+    const ctx = makeCtx();
+    const old = createProject(ctx, 'test', { name: 'InGame' });
+    markDeleted(ctx, old.id, '2026-10-01T09:00:00.000Z');
+    const fresh = createProject(ctx, 'test', { name: 'InGame' });
+    expect(fresh.slug).toBe('ingame-2');
+    // The old slug and id, and the name typed as the old slug, all mean the deleted project: the restore hint, not the new one.
+    for (const ref of ['ingame', 'INGAME', 'InGame', old.id, String(old.id)]) {
+      const err = thrown(() => resolveProject(ctx, ref));
+      expect(err, String(ref)).toMatchObject({ status: 404, message: `Project "${String(ref)}" not found` });
+      expect(err.hint, String(ref)).toBe('It was deleted; restore it from Recently deleted in the window before 2026-10-31.');
+    }
+    // So a scribe call that still carries the old slug cannot archive the new project.
+    expect(() => updateProject(ctx, 'test', 'ingame', { status: 'archived' })).toThrow('not found');
+    expect(getProjectById(ctx, fresh.id)?.status).toBe('active');
+    expect(resolveProject(ctx, 'ingame-2').id).toBe(fresh.id);
+    expect(resolveProject(ctx, fresh.id).id).toBe(fresh.id);
+  });
+
+  it('finds the live project by a name it shares with a deleted one when the name is no slug', () => {
+    const ctx = makeCtx();
+    const old = createProject(ctx, 'test', { name: 'Shared', slug: 'shared-old' });
+    markDeleted(ctx, old.id);
+    const live = createProject(ctx, 'test', { name: 'Shared', slug: 'shared-new' });
+    expect(resolveProject(ctx, 'shared').id).toBe(live.id);
+  });
+
+  it('gives the restore hint for a deleted id even when a live project has that number as its slug', () => {
+    const ctx = makeCtx();
+    const old = createProject(ctx, 'test', { name: 'Old' });
+    const numbered = createProject(ctx, 'test', { name: String(old.id) });
+    expect(numbered.slug).toBe(String(old.id));
+    // Before the delete the id wins over the slug; the delete must not hand the reference to the other project.
+    expect(resolveProject(ctx, String(old.id)).id).toBe(old.id);
+    markDeleted(ctx, old.id, '2026-10-01T09:00:00.000Z');
+    expect(thrown(() => resolveProject(ctx, String(old.id))).hint).toBe('It was deleted; restore it from Recently deleted in the window before 2026-10-31.');
+    expect(resolveProject(ctx, numbered.id).id).toBe(numbered.id);
+  });
+
   it('names only the projects still there when a reference misses', () => {
     const { ctx } = deleted();
     expect(thrown(() => resolveProject(ctx, 'nope')).hint).toBe('Known projects: live');

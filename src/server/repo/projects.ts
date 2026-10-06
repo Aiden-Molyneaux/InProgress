@@ -182,13 +182,18 @@ export const purgeAtOf = (deletedAt: string): string => new Date(Date.parse(dele
  */
 export const inLiveProject = (column: string): string => `EXISTS (SELECT 1 FROM projects lp WHERE lp.id = ${column} AND lp.deleted_at IS NULL)`;
 
-/** By id, then slug, then name (ignoring case), among the projects that `deleted` picks: deleted ones, or the rest. */
-function findProjectRow(ctx: Ctx, text: string, deleted: boolean): ProjectRow | undefined {
-  const where = deleted ? 'deleted_at IS NOT NULL' : 'deleted_at IS NULL';
+/**
+ * By id, then slug, then name (ignoring case). Each step prefers a live project to a deleted one, but a deleted
+ * project's id or slug still beats a live project's slug or name: deleting a project never hands its reference on to
+ * another one (a new project of the same name gets slug `ingame-2`, and `ingame` keeps meaning the deleted one).
+ */
+function findProjectRow(ctx: Ctx, text: string): ProjectRow | undefined {
+  const pick = (match: string, arg: string | number) =>
+    ctx.db.prepare(`SELECT * FROM projects WHERE ${match} ORDER BY deleted_at IS NOT NULL, id LIMIT 1`).get(arg) as ProjectRow | undefined;
   let row: ProjectRow | undefined;
-  if (/^\d+$/.test(text)) row = ctx.db.prepare(`SELECT * FROM projects WHERE id = ? AND ${where}`).get(Number(text)) as ProjectRow | undefined;
-  row ??= ctx.db.prepare(`SELECT * FROM projects WHERE slug = ? AND ${where}`).get(text.toLowerCase()) as ProjectRow | undefined;
-  row ??= ctx.db.prepare(`SELECT * FROM projects WHERE lower(name) = lower(?) AND ${where}`).get(text) as ProjectRow | undefined;
+  if (/^\d+$/.test(text)) row = pick('id = ?', Number(text));
+  row ??= pick('slug = ?', text.toLowerCase());
+  row ??= pick('lower(name) = lower(?)', text);
   return row;
 }
 
@@ -198,25 +203,22 @@ function findProjectRow(ctx: Ctx, text: string, deleted: boolean): ProjectRow | 
  */
 export function resolveProject(ctx: Ctx, ref: string | number): Project {
   const text = String(ref).trim();
-  const row = findProjectRow(ctx, text, false);
-  if (!row) {
-    const gone = findProjectRow(ctx, text, true);
-    if (gone) {
-      const purgeAt = purgeAtOf(gone.deleted_at!);
-      throw notFound(
-        `Project "${text}" not found`,
-        purgeAt > ctx.now()
-          ? `It was deleted; restore it from Recently deleted in the window before ${purgeAt.slice(0, 10)}.`
-          : 'It was deleted over 30 days ago and is about to be removed for good.',
-      );
-    }
-    const slugs = (ctx.db.prepare('SELECT slug FROM projects WHERE deleted_at IS NULL ORDER BY slug').all() as { slug: string }[]).map((r) => r.slug);
+  const row = findProjectRow(ctx, text);
+  if (row && !row.deleted_at) return readProject(ctx, row);
+  if (row) {
+    const purgeAt = purgeAtOf(row.deleted_at!);
     throw notFound(
       `Project "${text}" not found`,
-      slugs.length ? `Known projects: ${slugs.join(', ')}` : 'No projects exist yet; create one first.',
+      purgeAt > ctx.now()
+        ? `It was deleted; restore it from Recently deleted in the window before ${purgeAt.slice(0, 10)}.`
+        : 'It was deleted over 30 days ago and is about to be removed for good.',
     );
   }
-  return readProject(ctx, row);
+  const slugs = (ctx.db.prepare('SELECT slug FROM projects WHERE deleted_at IS NULL ORDER BY slug').all() as { slug: string }[]).map((r) => r.slug);
+  throw notFound(
+    `Project "${text}" not found`,
+    slugs.length ? `Known projects: ${slugs.join(', ')}` : 'No projects exist yet; create one first.',
+  );
 }
 
 export interface CreateProjectInput {
