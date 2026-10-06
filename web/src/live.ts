@@ -131,3 +131,19 @@ export function leadTitle(s: Session): string {
   const count = running ? ` · ${running} subagent${running > 1 ? 's' : ''}` : '';
   return withTag(sessionTag(s.slot), `${sessionDisplayTitle(s)} · ${WORDS[s.state]}${count}`);
 }
+
+/** A kin's tooltip and accessible name: `withTag(tag, agentLine(...))`, then a newline and the purpose when known. */
+export function kinTitle(a: SubagentInfo, slot: number | null, now: number, underNode: number | null = null): string {
+  const line = withTag(agentTag(slot, a.ordinal), agentLine(a, now, underNode));
+  return a.purpose ? `${line}\n${a.purpose}` : line;
+}
+
+/** A running kin's elapsed time, compact: no spaces, at most five characters. The minutes are elapsed's. */
+export function runTime(fromIso: string, now: number): string {
+  const minutes = Math.floor(Math.max(0, now - Date.parse(fromIso)) / 60_000);
+  if (minutes < 1) return '<1m';
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return hours < 10 && rest ? `${hours}h${rest}m` : `${hours}h`;
+}

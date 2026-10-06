@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PastSession, Session, SubagentInfo, TrailAgent, WorkItem } from '../../src/core/types';
-import { WORDS, agentLine, chipLabel, chipName, circled, elapsed, leadTitle, queueMark, taskFamily, taskOwner, trailAgentLine, trailLabel, waitsFor, withTag, withoutOwnId, workMark } from '../../web/src/live';
+import { WORDS, agentLine, chipLabel, chipName, circled, elapsed, kinTitle, leadTitle, queueMark, runTime, taskFamily, taskOwner, trailAgentLine, trailLabel, waitsFor, withTag, withoutOwnId, workMark } from '../../web/src/live';
 
 const NOW = Date.parse('2026-10-02T12:00:00Z');
 const ago = (ms: number) => new Date(NOW - ms).toISOString();
@@ -250,5 +250,36 @@ describe('leadTitle', () => {
 
   it('takes its state words from WORDS', () => {
     expect(WORDS).toEqual({ working: 'working', idle: 'idle', permission: 'needs permission', ended: 'ended' });
+  });
+});
+
+describe('kinTitle', () => {
+  const kin = (extra: Partial<SubagentInfo> = {}) =>
+    agent({ agentType: 'general-purpose', ordinal: 10, description: 'Draft the whiteboard take', model: 'opus-5-5', startedAt: ago(18 * MIN), nodeId: null, ...extra });
+
+  it('is the tagged agent line, then the purpose on a second line', () => {
+    const purpose = 'You draft the whiteboard take of the InProgress window.';
+    expect(kinTitle(kin({ purpose }), 2, NOW)).toBe(`c10 · Draft the whiteboard take · opus-5-5 · 18 min\n${purpose}`);
+  });
+
+  it('says when an ended kin finished, and leaves out a purpose it does not know', () => {
+    expect(kinTitle(kin({ ordinal: 11, description: 'Draft the quiet take', endedAt: ago(3 * MIN) }), 2, NOW)).toBe('c11 · Draft the quiet take · opus-5-5 · done 3 min ago');
+  });
+
+  it('has no tag while the number is unknown, and drops the #id of the step it sits on', () => {
+    expect(kinTitle(kin({ ordinal: null }), 2, NOW)).toBe('Draft the whiteboard take · opus-5-5 · 18 min');
+    expect(kinTitle(agent({ description: '#57 Wire up RevenueCat' }), 0, NOW, 57)).toBe('a1 · Wire up RevenueCat · sonnet · 12 min');
+  });
+});
+
+describe('runTime', () => {
+  it('writes the minutes elapsed counts, compact: no spaces, at most five characters', () => {
+    const at = [0.5, 18, 59, 60, 65, 165, 599, 600, 725].map((m) => runTime(ago(m * MIN), NOW));
+    expect(at).toEqual(['<1m', '18m', '59m', '1h', '1h5m', '2h45m', '9h59m', '10h', '12h']);
+    expect(at.every((s) => s.length <= 5 && !s.includes(' '))).toBe(true);
+  });
+
+  it('reads a start in the future (clock skew) as just started', () => {
+    expect(runTime(ago(-5_000), NOW)).toBe('<1m');
   });
 });
