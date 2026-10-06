@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PastSession, Session, SubagentInfo, TrailAgent, WorkItem } from '../../src/core/types';
-import { WORDS, agentLine, chipLabel, chipName, circled, elapsed, kinTitle, leadTitle, queueMark, runTime, taskFamily, taskOwner, trailAgentLine, trailLabel, waitsFor, withTag, withoutOwnId, workMark } from '../../web/src/live';
+import { WORDS, agentLine, chipLabel, chipName, circled, elapsed, kinTitle, leadTitle, runTime, taskFamily, taskOwner, trailAgentLine, trailLabel, waitsFor, withTag, withoutOwnId, workMark } from '../../web/src/live';
 
 const NOW = Date.parse('2026-10-02T12:00:00Z');
 const ago = (ms: number) => new Date(NOW - ms).toISOString();
@@ -25,18 +25,6 @@ describe('circled', () => {
 
   it('falls back to brackets past 50', () => {
     expect(circled(51)).toBe('(51)');
-  });
-});
-
-describe('queueMark', () => {
-  it("leads an owned place with its session's letter, and leaves an unowned one a bare numeral", () => {
-    expect(queueMark(1, { slot: 0 })).toBe('A①');
-    expect(queueMark(2, { slot: 1 })).toBe('B②');
-    expect(queueMark(1, null)).toBe('①');
-  });
-
-  it('prints ? for an owner whose slot is still empty', () => {
-    expect(queueMark(1, { slot: null })).toBe('?①');
   });
 });
 
