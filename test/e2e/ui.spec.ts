@@ -212,6 +212,24 @@ test('clicking a node opens its details and copies a reference', async ({ page, 
   await expect(details.getByRole('button', { name: 'Copied' })).toBeVisible();
   // String form: the root tsconfig has no DOM lib, so `navigator` must not appear in test code.
   expect(await page.evaluate<string>('navigator.clipboard.readText()')).toBe(`#${id} Run signing tests`);
+  // Quiet: an opaque sheet with an 8 px top radius, the title in L ink, 24 px hairline buttons.
+  await expect(details).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+  await expect(details).toHaveCSS('border-top-left-radius', '8px');
+  const title = details.locator('header b');
+  await expect(title).toHaveCSS('font-size', '15px');
+  await expect(title).toHaveCSS('font-weight', '900');
+  await expect(title).toHaveCSS('color', 'rgb(15, 23, 42)');
+  await expect(details.getByRole('button', { name: 'Close' })).toHaveCSS('height', '24px');
+  // Its steps draw the canvas's marker: a ✓ when done, a still orange dot when active, the needs-you mark and YOU.
+  await details.getByRole('button', { name: /2 Android signing/ }).click();
+  await expect(details).toContainText(`#${demo.ids['2 Android signing']} 2 Android signing`);
+  const steps = details.locator('.ip-kids li');
+  await expect(steps).toHaveText([/Upload keystore$/, /Play app signing$/, /Run signing tests\s*YOU$/]);
+  await expect(steps.nth(0).locator('.ip-marker.m-done')).toHaveText('✓');
+  const active = steps.nth(1).locator('.ip-marker.m-active');
+  await expect(active).toHaveCSS('background-color', 'rgb(194, 65, 12)');
+  await expect(active).toHaveCSS('animation-name', 'none');
+  await expect(steps.nth(2).locator('.ip-marker.m-you')).toHaveCount(1);
 });
 
 test('Details keeps the last good detail when a refresh fails', async ({ page, api, fresh, consoleErrors }) => {
@@ -265,6 +283,18 @@ test('a labelled step shows its glyph in a neutral chip named by the word, and D
   await expect(meta.locator('.ip-meta-label')).toHaveText('· ⧉ ui');
   await expect(meta).toHaveText(/^active\s*task\s*· ⧉ ui\s*· Claude/);
   await expect(meta.locator('.ip-glyph')).toHaveCSS('font-variant-emoji', 'text');
+  // Quiet: the status is the shared marker and a muted word, in place of a filled pill.
+  await expect(meta.locator('.ip-marker.m-active')).toHaveCount(1);
+  await expect(meta.locator('.ip-pill')).toHaveCount(0);
+  await expect(meta).toHaveCSS('font-size', '11px');
+  await expect(meta).toHaveCSS('color', 'rgb(71, 85, 105)');
+  // The log: the time in DM Mono, the text in ink, the session muted and upright. The entry arrives live.
+  await write(api, fresh.session, 'post', `/api/nodes/${fresh.ids['Play app signing']}/log`, { text: 'Uploaded the key', sessionId: fresh.session });
+  const entry = page.getByRole('complementary').locator('.ip-log li');
+  await expect(entry).toHaveText('just now · Uploaded the key — E2E session');
+  await expect(entry.locator('.ip-log-time')).toHaveCSS('font-family', /DM Mono/);
+  await expect(entry.locator('.ip-log-text')).toHaveCSS('color', 'rgb(30, 41, 59)');
+  await expect(entry.locator('i')).toHaveCount(0);
 });
 
 test('a long project name is cut short and the top bar stays on one line', async ({ page, api }) => {
@@ -466,6 +496,13 @@ test('at 520 px there is no minimap, old finished steps fold into "✓ n done", 
   await expect(details).toContainText(`#${fresh.ids['Run signing tests']} Run signing tests`);
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(details.locator('.ip-res b')).toHaveText(['Signing test suite', 'Signing checklist']);
+  // Quiet: a resource is a muted row, no purple: its title in ink at 500, its summary in DM Mono.
+  const resource = details.locator('.ip-res').first();
+  await expect(resource).toHaveCSS('color', 'rgb(71, 85, 105)');
+  await expect(resource).toHaveCSS('border-top-style', 'none');
+  await expect(resource.locator('b')).toHaveCSS('color', 'rgb(30, 41, 59)');
+  await expect(resource.locator('b')).toHaveCSS('font-weight', '500');
+  await expect(resource.locator('.sub')).toHaveCSS('font-family', /DM Mono/);
   await details.locator('.ip-res', { hasText: 'Signing checklist' }).click();
   const viewer = page.getByRole('dialog');
   await expect(viewer.locator('h1')).toHaveText('Checklist');
@@ -1254,6 +1291,8 @@ test.describe('Live work', () => {
       new RegExp(`^◇ a2 · Map the signing config · haiku · ${RUNNING}Find where the keystore is configured\\.$`),
       new RegExp(`^◇ a3 · Read the release docs · haiku · ${RUNNING}$`),
     ]);
+    // Quiet: a reader's ◇ is muted in Details, not in the session's hue.
+    await expect(details.locator('.ip-dagent .ip-reader-mark').first()).toHaveCSS('color', 'rgb(71, 85, 105)');
     await page.locator('.ip-node', { hasText: '3 RevenueCat' }).click();
     await expect(details.locator('.ip-dagent .ip-dpurpose')).toHaveText(purpose);
     await details.getByRole('button', { name: 'Close' }).click();
@@ -1455,6 +1494,18 @@ test.describe('Live work', () => {
     await expect(details.locator('.ip-wt', { hasText: 'Check the release track' })).toHaveText('○ Check the release track — E2E session · after Upload the key');
     await expect(details.locator('.ip-wt', { hasText: 'Collect the screenshots' })).toHaveText('a1 ○ Collect the screenshots — Draft the store notes');
     await expect(details.locator('.ip-dagent')).toHaveText(new RegExp(`^a1 · Draft the store notes · sonnet · ${RUNNING}$`));
+    // Quiet: the rows read as the canvas's. ◐ in the active ink and still, the hue bar on the session's own task only,
+    // the tags in DM Mono in the session's hue.
+    const upload = details.locator('.ip-wt', { hasText: /^◐ Upload the key/ });
+    const screenshots = details.locator('.ip-wt', { hasText: 'Collect the screenshots' });
+    await expect(upload.locator('.ip-work-mark')).toHaveCSS('color', 'rgb(194, 65, 12)');
+    await expect(upload.locator('.ip-work-mark')).toHaveCSS('animation-name', 'none');
+    await expect(upload.locator('.ip-work-agent')).toHaveCSS('background-color', 'rgb(11, 107, 125)');
+    await expect(screenshots.locator('.ip-work-agent')).toHaveCount(0);
+    for (const tag of [screenshots.locator('.ip-work-tag'), details.locator('.ip-dagent .ip-agent-tag')]) {
+      await expect(tag).toHaveCSS('font-family', /DM Mono/);
+      await expect(tag).toHaveCSS('color', 'rgb(11, 107, 125)');
+    }
   });
 
   test("an ended session's tasks and subagents stay on their steps as a trail row that opens, and Details lists them under its title", async ({ page, api, fresh }) => {
@@ -1514,6 +1565,9 @@ test.describe('Live work', () => {
     const group = details.locator('.ip-trail', { hasText: 'E2E session · ended just now' });
     await expect(group.locator('.ip-wt.stale')).toHaveText('○ Compare the keystores — Check the keystore');
     await expect(group.locator('.ip-dtrail')).toHaveText(new RegExp(`^◆ Check the keystore · sonnet · ran ${RUNNING} · stopped just now$`));
+    // Quiet: the trail's ◆ is muted, and its open task a faint ○.
+    await expect(group.locator('.ip-dtrail .ip-agent-dot')).toHaveCSS('color', 'rgb(71, 85, 105)');
+    await expect(group.locator('.ip-wt.stale .ip-work-mark')).toHaveCSS('color', 'rgb(100, 116, 139)');
     await expect(details.locator('.ip-wt:not(.stale)')).toHaveCount(0);
   });
 });
