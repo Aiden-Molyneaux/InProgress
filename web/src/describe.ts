@@ -44,7 +44,12 @@ export function describeEvent(e: EventRow, snapshot: ProjectSnapshot | null): st
     case 'project.created':
       return 'project created';
     case 'project.updated':
+      if (d.changes?.status) return d.changes.status.to === 'archived' ? 'archived the project' : 'unarchived the project';
       return d.changes?.queue ? 'Up next changed' : 'project updated';
+    case 'project.deleted':
+      return 'deleted the project';
+    case 'project.restored':
+      return 'restored the project';
     case 'work.updated':
       return `tasks updated on ${nodeLabel(d.nodeId ?? Number(e.entityId), snapshot)}`;
     case 'binding.created':
@@ -67,5 +72,7 @@ export function actorLabel(e: EventRow, snapshot: ProjectSnapshot | null): strin
     const id = e.actor.slice('session:'.length);
     return sessionDisplayTitle(snapshot?.sessions.find((x) => x.id === id) ?? { id, title: null });
   }
+  // Archive, unarchive, delete and restore from the window itself: the person reading this.
+  if (e.actor === 'window') return 'you';
   return e.actor;
 }
