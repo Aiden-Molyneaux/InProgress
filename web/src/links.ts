@@ -7,7 +7,7 @@ import { api } from './api';
 export async function openLink(url: string): Promise<void> {
   const result = await api.openUrl(url);
   if (result === 'reload') window.location.reload();
-  else if (result !== 'opened') window.open(url, '_blank', 'noopener');
+  else if (result !== 'ok') window.open(url, '_blank', 'noopener');
 }
 
 /** For a container of rendered Markdown: sends clicks on http(s) links to openLink. */
