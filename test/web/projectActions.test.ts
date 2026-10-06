@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DELETED_RETENTION_MS } from '../../src/core/types';
-import { actionMessage, archiveNote, patchDeleted, patchProjects } from '../../web/src/projectActions';
+import { actionMessage, archiveNote, patchDeleted, patchProjects, summaryOf } from '../../web/src/projectActions';
 
 describe('actionMessage', () => {
   it("says what happened and where the project went, in the status line's words", () => {
@@ -30,14 +30,29 @@ describe('patchProjects', () => {
     expect(patchProjects(list, 'unarchive', 2)).toEqual([list[0], { id: 2, slug: 'b', status: 'active' }]);
   });
 
-  it('takes a deleted project out, and leaves a restore to the reload', () => {
+  it('takes a deleted project out', () => {
     expect(patchProjects(list, 'delete', 2)).toEqual([list[0]]);
+  });
+
+  it('puts a restored project back as the server answered it, so ⋯ never empties on the way', () => {
+    const back = { id: 3, slug: 'c', status: 'archived' as const };
+    expect(patchProjects(list, 'restore', 3, back)).toEqual([...list, back]);
+    // Already listed (a reload got there first): that row stands.
+    expect(patchProjects([...list, back], 'restore', 3, { ...back, slug: 'other' })).toEqual([...list, back]);
+    // No answer to add: the reload brings it.
     expect(patchProjects(list, 'restore', 3)).toBe(list);
   });
 
   it('leaves the list it was given alone', () => {
     patchProjects(list, 'archive', 1);
     expect(list[0].status).toBe('active');
+  });
+});
+
+describe('summaryOf', () => {
+  it('lists a project the server answered with, its counts at nothing until the reload brings them', () => {
+    const project = { id: 3, slug: 'c', name: 'C', description: '', playbook: '', status: 'archived' as const, rootNodeId: 9, createdAt: 'x', updatedAt: 'y', queue: [] };
+    expect(summaryOf(project)).toEqual({ ...project, needsYou: 0, activeSessions: 0, workingSessions: 0, lastEventAt: null });
   });
 });
 

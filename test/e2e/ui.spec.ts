@@ -1344,6 +1344,79 @@ test('Delete asks once, the project waits under Recently deleted with its days, 
   await expect(restore).toHaveCount(0);
 });
 
+/**
+ * Shows the window only the projects in `ids`, active, archived and deleted alike, so ⋯ can be down to one row: the
+ * suite's server is shared, and ⋯ would otherwise list every other test's projects too. Each fetch reads `ids` as it
+ * is then.
+ */
+async function showOnly(page: Page, ids: Set<number>): Promise<void> {
+  for (const path of ['**/api/projects', '**/api/deleted-projects']) {
+    await page.route(path, async (route) => {
+      const response = await route.fetch();
+      const rows = (await response.json()) as { id: number }[];
+      await route.fulfill({ response, json: rows.filter((r) => ids.has(r.id)) });
+    });
+  }
+}
+
+test('⋯ keeps focus when a delete or a restore leaves it one row, and goes when Unarchive leaves it none', async ({ page, api }) => {
+  const hereName = unique('Lone here');
+  const goneName = unique('Lone gone');
+  const here = await bare(api, hereName);
+  const gone = await bare(api, goneName);
+  await archiveByScribe(api, gone.slug);
+  const shown = new Set([here.id, gone.id]);
+  await showOnly(page, shown);
+  const more = moreButton(page);
+  const menu = moreMenu(page);
+  const deleteGone = async () => {
+    await more.click();
+    await menu.getByRole('menuitem', { name: `Delete ${goneName}`, exact: true }).click();
+    await page.getByRole('dialog', { name: `Delete ${goneName}?` }).getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(statusLine(page)).toHaveText(`Deleted ${goneName}. Restore it from ⋯ within 30 days.`);
+    await expect(more).toBeFocused();
+  };
+  // Restored while it is ⋯'s only row, it is under Archived at once: ⋯ never leaves the page (the same element stays),
+  // so focus stays on it.
+  const restoreGone = async () => {
+    await more.click();
+    await expect(menu.getByRole('menuitem')).toHaveText(['Restore']);
+    await page.evaluate(`document.querySelector('.ip-archive-btn').setAttribute('data-probe', 'kept')`);
+    await menu.getByRole('menuitem', { name: `Restore ${goneName}`, exact: true }).click();
+    await expect(statusLine(page)).toHaveText(`Restored ${goneName}. It is under Archived in ⋯.`);
+    await expect(more).toBeFocused();
+    await expect(more).toHaveAttribute('data-probe', 'kept');
+    await page.keyboard.press('ArrowDown');
+    await expect(menu.getByRole('group', { name: 'Archived', exact: true }).getByRole('menuitem', { name: goneName, exact: true })).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(more).toBeFocused();
+  };
+  // Deleting the open archived project from ⋯ opens the tab before it, and focus stays on ⋯, where the delete began.
+  await page.goto(`/#/p/${gone.slug}`);
+  await expect(tabFor(page, goneName)).toHaveAttribute('aria-selected', 'true');
+  await deleteGone();
+  await expect(tabFor(page, hereName)).toHaveAttribute('aria-selected', 'true');
+  await restoreGone();
+  await expect(page).toHaveURL(hereIs(here.slug));
+  // With no tab at all: the delete leaves only ⋯ and the empty text, and the restore still keeps focus on ⋯.
+  shown.delete(here.id);
+  await page.goto(`/#/p/${gone.slug}`);
+  await page.reload();
+  await expect(page.getByRole('tab')).toHaveCount(1);
+  await deleteGone();
+  await expect(page.getByRole('tab')).toHaveCount(0);
+  await expect(page.locator('.ip-empty')).toHaveText('No projects. Restore one from ⋯, or in a Claude session say "track this in InProgress".');
+  await restoreGone();
+  // Nothing else is listed, so it opens, as the list's fallback opens the first listed project.
+  await expect(page).toHaveURL(hereIs(gone.slug));
+  // Unarchive empties ⋯: ⋯ goes, and focus lands on the project's tab.
+  await more.click();
+  await menu.getByRole('menuitem', { name: `Unarchive ${goneName}`, exact: true }).click();
+  await expect(statusLine(page)).toHaveText(`${goneName} is back in the tabs.`);
+  await expect(more).toHaveCount(0);
+  await expect(tabFor(page, goneName)).toBeFocused();
+});
+
 test('deleting the open project from its tab opens the tab before it, and a link to it opens another project', async ({ page, api, consoleErrors }) => {
   // The deleted project's own address answers 404.
   consoleErrors.allow(/status of 404/);

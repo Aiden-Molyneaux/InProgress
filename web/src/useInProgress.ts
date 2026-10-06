@@ -4,7 +4,7 @@ import { eventTarget } from '../../src/core/layout';
 import type { DeletedProject, EventRow, ProjectSnapshot, ProjectSummary } from '../../src/core/types';
 import { api } from './api';
 import { pickSlug } from './chrome/tabs';
-import { patchDeleted, patchProjects, type ActionTarget, type ProjectAction } from './projectActions';
+import { patchDeleted, patchProjects, summaryOf, type ActionTarget, type ProjectAction } from './projectActions';
 import { load, save } from './storage';
 import { subscribe } from './stream';
 
@@ -189,11 +189,13 @@ export function useInProgress(): InProgressState {
 
   const act = useCallback(
     async (action: ProjectAction, target: ActionTarget, goTo: string | null) => {
-      const result = await api.projectAction(action, target);
-      if (result === 'reload') window.location.reload();
-      if (result !== 'ok') return result;
-      // One batch: the patched lists and the project to open land together, so no tab jumps on the way.
-      const list = patchProjects(projectsRef.current, action, target.id);
+      const answer = await api.projectAction(action, target);
+      if (answer === 'reload') window.location.reload();
+      if (typeof answer === 'string') return answer;
+      // One batch: the patched lists and the project to open land together, so no tab jumps on the way. A restored
+      // project joins the list now, under ⋯, rather than with the reload.
+      const restored = action === 'restore' && answer.project ? summaryOf(answer.project) : undefined;
+      const list = patchProjects(projectsRef.current, action, target.id, restored);
       listApplied.current = listSeq.current;
       setProjects(list);
       setDeleted((cur) => patchDeleted(cur, action, target, Date.now()));
@@ -201,7 +203,7 @@ export function useInProgress(): InProgressState {
       setSlug((cur) => (goTo !== null && cur === target.slug ? goTo : pickSlug(list, cur)));
       // Reconcile now, not after the stream's 400 ms.
       void loadProjects();
-      return result;
+      return 'ok' as const;
     },
     [loadProjects],
   );

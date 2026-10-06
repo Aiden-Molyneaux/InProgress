@@ -487,7 +487,12 @@ export function TopBar({ tabs, archived, deleted: listed, current, onSelect, onA
     setTabMenu(null);
     if (refocus && tab?.isConnected) tab.focus();
   };
-  /** Set once an action has gone through, so focus moves after the render that shows its result. */
+  /**
+   * Set once an action has gone through, so focus moves after the render that shows its result: back to where the
+   * action began while that is still in the page, else the current tab, else ⋯. So an action from ⋯ keeps focus on ⋯,
+   * even a delete of the open project that opened another tab. One from a tab's menu stays on that tab, or lands on the
+   * current tab once that one has left the strip.
+   */
   const [refocus, setRefocus] = useState<{ opener: HTMLElement | null } | null>(null);
   useLayoutEffect(() => {
     if (!refocus) return;

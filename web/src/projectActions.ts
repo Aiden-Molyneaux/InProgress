@@ -1,4 +1,4 @@
-import { DELETED_RETENTION_MS, type DeletedProject, type ProjectSummary } from '../../src/core/types';
+import { DELETED_RETENTION_MS, type DeletedProject, type Project, type ProjectSummary } from '../../src/core/types';
 
 /** The window's own writes to a project: archive and unarchive from a tab or ⋯, delete and restore from ⋯. */
 export type ProjectAction = 'archive' | 'unarchive' | 'delete' | 'restore';
@@ -28,9 +28,10 @@ export function archiveNote(activeSessions: number): string | null {
 
 /**
  * The project list as it stands once an action has gone through, until the reload that follows lands. A restored
- * project is not patched in: the list leaves deleted projects out, so the window has no summary of it to add.
+ * project comes back at once as `restored`, the server's answer: left to the reload, ⋯ would close in between when
+ * the project was its only row, and focus would fall elsewhere. One the list already holds stays as it is.
  */
-export function patchProjects<P extends Pick<ProjectSummary, 'id' | 'status'>>(projects: P[], action: ProjectAction, id: number): P[] {
+export function patchProjects<P extends Pick<ProjectSummary, 'id' | 'status'>>(projects: P[], action: ProjectAction, id: number, restored?: P): P[] {
   switch (action) {
     case 'archive':
     case 'unarchive': {
@@ -40,8 +41,13 @@ export function patchProjects<P extends Pick<ProjectSummary, 'id' | 'status'>>(p
     case 'delete':
       return projects.filter((p) => p.id !== id);
     case 'restore':
-      return projects;
+      return restored && !projects.some((p) => p.id === id) ? [...projects, restored] : projects;
   }
+}
+
+/** A project the server answered with, as the list holds it until the reload brings its counts: none of them yet. */
+export function summaryOf(project: Project): ProjectSummary {
+  return { ...project, needsYou: 0, activeSessions: 0, workingSessions: 0, lastEventAt: null };
 }
 
 /** The Recently deleted list once an action has gone through: a delete goes first with its 30 days, a restore leaves. */
