@@ -99,8 +99,8 @@ export interface LayoutLineItem {
   /** The session's focus anchors on this card: the line draws the session's character and label. */
   lead: boolean;
   /**
-   * The session's shown non-reader subagents homed on this card (agentVisible: running, or stopped less than
-   * ENDED_AGENT_MS ago), in the session's `subagents` order. Each is one kin.
+   * The session's shown non-reader subagents homed on this card (agentVisible: running, at the usage limit, or stopped
+   * less than ENDED_AGENT_MS ago), in the session's `subagents` order. Each is one kin.
    */
   agentIds: string[];
   x: number;
@@ -226,16 +226,24 @@ export interface LayoutInput {
   now?: number;
 }
 
-/** Whether a subagent still shows: running, or stopped less than ENDED_AGENT_MS ago. */
-export function agentShown(a: Pick<SubagentInfo, 'endedAt'>, now: number): boolean {
-  return a.endedAt === null || now - Date.parse(a.endedAt) < ENDED_AGENT_MS;
+/**
+ * A subagent that hit the usage limit (Aiden's answer on #125): it waits on its line for him to resume it after the reset,
+ * holding its step, until a new transcript line revives it or its session ends. Only an ended row carries a reason.
+ */
+export function atLimit(a: Pick<SubagentInfo, 'endReason'>): boolean {
+  return a.endReason === 'limit';
+}
+
+/** Whether a subagent still shows: running, at the usage limit (atLimit), or stopped less than ENDED_AGENT_MS ago. */
+export function agentShown(a: Pick<SubagentInfo, 'endedAt' | 'endReason'>, now: number): boolean {
+  return a.endedAt === null || atLimit(a) || now - Date.parse(a.endedAt) < ENDED_AGENT_MS;
 }
 
 /**
  * Whether the window shows a subagent anywhere, and lets it pin its step: as agentShown, but a reader shows only while it
  * runs. An ended reader drops out of its readers line and leaves no trail.
  */
-export function agentVisible(a: Pick<SubagentInfo, 'endedAt' | 'agentType'>, now: number): boolean {
+export function agentVisible(a: Pick<SubagentInfo, 'endedAt' | 'endReason' | 'agentType'>, now: number): boolean {
   return agentShown(a, now) && !(isReader(a.agentType) && a.endedAt !== null);
 }
 
@@ -250,9 +258,10 @@ export function agentHome(s: Pick<Session, 'focusNodeId'>, a: Pick<SubagentInfo,
 
 /**
  * Who is on a step, for paused: each live session's focus (an idle one's too), each running subagent's home (a reader's
- * too), each live session's task in progress, and every ancestor of those, walked in the tree itself, so a manual fold
- * never changes it. A stopped subagent no longer counts, though it still shows as an ended kin for a while. The layout
- * and Details both read it, so a step's marker draws the same on its card and in Details.
+ * too) and each one waiting at the usage limit (atLimit), each live session's task in progress, and every ancestor of
+ * those, walked in the tree itself, so a manual fold never changes it. Any other stopped subagent no longer counts,
+ * though it still shows as an ended kin for a while. The layout and Details both read it, so a step's marker draws the
+ * same on its card and in Details.
  */
 export function occupiedSteps(byId: ReadonlyMap<number, TreeNode>, sessions: readonly Session[], workItems: readonly WorkItem[] = []): Set<number> {
   const occupied = new Set<number>();
@@ -266,7 +275,7 @@ export function occupiedSteps(byId: ReadonlyMap<number, TreeNode>, sessions: rea
   for (const s of sessions) {
     if (s.state === 'ended') continue;
     occupy(s.focusNodeId);
-    for (const a of s.subagents) if (a.endedAt === null) occupy(agentHome(s, a, (id) => byId.has(id)));
+    for (const a of s.subagents) if (a.endedAt === null || atLimit(a)) occupy(agentHome(s, a, (id) => byId.has(id)));
   }
   for (const w of workItems) if (w.status === 'in_progress' && w.endedAt === null) occupy(w.nodeId);
   return occupied;
@@ -279,7 +288,7 @@ export function isPaused(node: Pick<TreeNode, 'id' | 'parentId' | 'status' | 'as
 
 /**
  * The trail's subagents, each with the node it shows under. A live session's stopped subagent stays out while it still
- * shows as an ended kin (agentShown), so none is both. Its node is the one it worked on (its dispatch's step, else its
+ * shows as an ended kin (agentShown; one at the usage limit until its session ends), so none is both. Its node is the one it worked on (its dispatch's step, else its
  * session's focus when it started), while that is in this tree; one whose node is set but not in the tree (its session
  * moved to another project, say) is left out. Only one with no node falls back to its session's focus, live or past;
  * with neither it is left out. A deleted step's agents fall back too: `node_id` and `start_focus_id` are ON DELETE SET
