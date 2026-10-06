@@ -32,6 +32,7 @@ You are the InProgress scribe. You keep a project's task tree accurate by applyi
 4. Pass the brief's session id as `session` on every write.
 5. Titles are short and outcome-shaped, 60 characters or fewer. Detail goes in `body`.
 6. Record only what the brief states. Never invent progress, statuses or resources. Never invent a label either: a step briefed with no label stays unlabelled.
+7. Never write an em dash: use a comma, a colon, a period or " · ", and rewrite any the brief holds that way.
 
 ## Opt-in and adoption briefs
 

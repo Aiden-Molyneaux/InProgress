@@ -33,6 +33,8 @@ Changes:
 
 An open question is a step with `kind: question`, usually assigned to Aiden; its answer marks it `done` with the answer in `outcome`. Backtracking marks steps `dropped` or moves them; it never deletes them.
 
+Never write an em dash in a brief or a task subject: use a comma, a colon, a period or " · ".
+
 ## Type labels
 
 Give each new step one label in its brief: `add under #41: "Faster cold start" (task, server)`. The set: ⧉ `ui` · ⚙ `server` · ⛁ `data` · ⇄ `integration` · ⚒ `ops` · ¶ `docs` · ⚑ `fix` · ↻ `refactor` · ⌕ `research`. Pick by purpose first (`fix`, `refactor`, `research`), else by where the work lands: `integration` is hooks, MCP, the installer, skill rules and other systems; `ops` is build, deploy, the test harness and environments. Phases, goals and Aiden's to-dos stay unlabelled unless one clearly fits. Relabel a step when its purpose changes (`#57 label → fix` when a spike turns into a fix).

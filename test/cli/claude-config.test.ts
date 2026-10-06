@@ -325,6 +325,14 @@ describe('install', () => {
     expect(agent).toMatch(/no label .* unlabelled/);
   });
 
+  it('writes the no-em-dash rule into the scribe and the skill', () => {
+    const dir = claudeDirWithSettings(existing);
+    install({ repo, claudeDir: dir, stamp: 'ed' });
+    const agent = readFileSync(join(dir, 'agents', 'inprogress-scribe.md'), 'utf8');
+    const skill = readFileSync(join(dir, 'skills', 'inprogress', 'SKILL.md'), 'utf8');
+    for (const text of [agent, skill]) expect(text).toMatch(/Never write an em dash.*: use a comma, a colon, a period or " · "/);
+  });
+
   it('begins its log with the target Claude directory and the node binary it wrote', () => {
     const dir = claudeDirWithSettings(existing);
     const { log } = install({ repo, claudeDir: dir, stamp: 's' });
