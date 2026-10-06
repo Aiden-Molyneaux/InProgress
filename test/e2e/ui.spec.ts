@@ -256,7 +256,7 @@ test('a labelled step shows its glyph in a neutral chip named by the word, and D
   await expect(chip).toHaveAttribute('title', 'ui');
   // After the title, in text ink (never a hue), and always text presentation, never an emoji.
   await expect(card.locator('.ip-title + .ip-type')).toHaveCount(1);
-  await expect(chip).toHaveCSS('color', 'rgb(110, 110, 115)');
+  await expect(chip).toHaveCSS('color', 'rgb(71, 85, 105)');
   await expect(chip).toHaveCSS('font-variant-emoji', 'text');
   await expect(page.locator('.ip-node', { hasText: 'Run signing tests' }).locator('.ip-type')).toHaveCount(0);
   await card.click();
@@ -282,20 +282,35 @@ test('a long project name is cut short and the top bar stays on one line', async
 });
 
 test('dark mode reaches the canvas controls; reduced motion stops the pulse and flash', async ({ page, demo }) => {
+  // Every font comes from the app's own server: the faces are bundled, never fetched from the network.
+  const fontHosts: string[] = [];
+  page.on('request', (request) => {
+    if (request.resourceType() === 'font') fontHosts.push(new URL(request.url()).hostname);
+  });
   await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
   await open(page, demo);
   await expect(page.locator('.react-flow')).toHaveClass(/\bdark\b/);
+  // The night ground is Quiet's navy.
+  await expect(page.locator('.react-flow')).toHaveCSS('background-color', 'rgb(8, 13, 28)');
   await expect(page.locator('.ip-chip-s .ip-pulse')).toHaveCSS('animation-name', 'none');
   await expect(page.locator('.ip-node.working .ip-marker.m-active').first()).toHaveCSS('animation-name', 'none');
   // Amber ink on an amber tint, like the needs-you pill.
-  await expect(page.locator('.ip-node .ip-you')).toHaveCSS('color', 'rgb(255, 179, 64)');
+  await expect(page.locator('.ip-node .ip-you')).toHaveCSS('color', 'rgb(252, 211, 77)');
   await page.keyboard.press('n');
   const flashed = page.locator('.ip-node.flash', { hasText: 'Run signing tests' });
   await expect(flashed).toHaveCSS('animation-name', 'none');
   await expect(flashed).not.toHaveCSS('box-shadow', 'none');
   // Section labels in Details are readable on the dark panel.
   await flashed.click();
-  await expect(page.getByRole('complementary').locator('.ip-label').first()).toHaveCSS('color', 'rgb(161, 161, 166)');
+  await expect(page.getByRole('complementary').locator('.ip-label').first()).toHaveCSS('color', 'rgb(148, 163, 184)');
+  // Inter is in use: a face that loaded, not only a family name that matched nothing (document.fonts.check() can't tell).
+  const loadedFaces = `(async () => {
+    await document.fonts.ready;
+    return [...document.fonts].filter((face) => face.status === 'loaded').map((face) => face.family.replace(/["']/g, ''));
+  })()`;
+  await expect.poll(() => page.evaluate<string[]>(loadedFaces)).toContain('Inter');
+  expect(fontHosts.length, 'the faces were requested').toBeGreaterThan(0);
+  expect(fontHosts.filter((host) => host !== '127.0.0.1'), 'font requests that left the app').toEqual([]);
 });
 
 test('reduced motion makes camera moves instant', async ({ page, demo }) => {
@@ -474,14 +489,14 @@ test('an active step nobody is on draws a hollow marker that says so, and a need
   const marker = milestones.locator('.ip-marker');
   await expect(marker).toHaveAttribute('title', 'Nobody is on this. Last change 4 d ago');
   await expect(marker).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-  await expect(marker).toHaveCSS('border-top-color', 'rgb(0, 113, 227)');
+  await expect(marker).toHaveCSS('border-top-color', 'rgb(2, 132, 199)');
   // The session's focus keeps its step and every step above it unpaused, with a filled marker and no such tooltip.
   await expect(page.locator('.ip-node.paused')).toHaveCount(1);
   for (const title of ['Road to market', '2 Android signing', 'Play app signing']) {
     const card = page.locator('.ip-node', { hasText: title });
     await expect(card, title).toHaveClass(/\bst-active\b/);
     await expect(card.locator('.ip-marker'), title).not.toHaveAttribute('title', /.*/);
-    await expect(card.locator('.ip-marker'), title).toHaveCSS('background-color', 'rgb(0, 113, 227)');
+    await expect(card.locator('.ip-marker'), title).toHaveCSS('background-color', 'rgb(194, 65, 12)');
   }
   // The needs-you step has waited four days, and says so inside its one YOU tag.
   await expect(page.locator('.ip-node .ip-you')).toHaveText('YOU · 4d');
@@ -1196,7 +1211,7 @@ test.describe('Live work', () => {
     await hook(api, fresh.session, { event: 'subagent-stop', agentId: 'agent-1' });
     await expect(wire).toHaveText('a1 · Wire up RevenueCat · sonnet · done just now');
     await expect(wire).toHaveClass(/\bended\b/);
-    await expect(wire).toHaveCSS('color', 'rgb(110, 110, 115)');
+    await expect(wire).toHaveCSS('color', 'rgb(71, 85, 105)');
     await expect(review).not.toHaveClass(/\bended\b/);
   });
 
@@ -1222,7 +1237,7 @@ test.describe('Live work', () => {
     expect(readersBox.y).toBeGreaterThanOrEqual(badge.y + badge.height);
     expect(next.y).toBeGreaterThanOrEqual(readersBox.y + readersBox.height);
     expect(readersBox.height, 'a small row').toBeLessThanOrEqual(20);
-    await expect(readers).toHaveCSS('color', 'rgb(217, 119, 87)');
+    await expect(readers).toHaveCSS('color', 'rgb(11, 107, 125)');
     // They still count on the chip, whose list marks them.
     const chip = page.locator('.ip-sessions').getByRole('button', { name: /E2E session/ });
     await expect(chip).toHaveText('A · E2E session · 3 subagents');
@@ -1311,7 +1326,7 @@ test.describe('Live work', () => {
     await expect(marker('3 RevenueCat')).toHaveText('A①');
     await expect(marker('4 Build to GitHub')).toHaveText('A②');
     await expect(marker('6 Beta')).toHaveText('B①');
-    // Each line's letter and each marker wear the session's hue: A session clay, B its chip's hue.
+    // Each line's letter and each marker wear the session's hue: A teal, B its chip's hue.
     const hues = () => page.evaluate<Record<string, string | null>>(`(() => {
       const find = (sel, text) => [...document.querySelectorAll(sel)].find((n) => n.textContent.includes(text));
       const color = (n) => (n ? getComputedStyle(n).color : null);
@@ -1326,7 +1341,7 @@ test.describe('Live work', () => {
       };
     })()`);
     let seen = await hues();
-    expect(seen.leadA).toBe('rgb(217, 119, 87)');
+    expect(seen.leadA).toBe('rgb(11, 107, 125)');
     expect(seen.markerA).toBe(seen.leadA);
     expect(seen.leadB).toBe(seen.chipB);
     expect(seen.markerB).toBe(seen.chipB);
@@ -1336,13 +1351,13 @@ test.describe('Live work', () => {
     await expect(lines).toHaveText([`A ① #${id('7 Launch')} 7 Launch`, `B ① #${id('6 Beta')} 6 Beta`]);
     await expect(marker('7 Launch')).toHaveText('A①');
     await expect(marker('3 RevenueCat')).toHaveCount(0);
-    // B ends: its step turns unowned, on a neutral later line, with a bare numeral in the neutral accent.
+    // B ends: its step turns unowned, on a neutral later line, with a bare numeral in ink.
     await hook(api, second, { event: 'end' });
     await expect(lines).toHaveText([`A ① #${id('7 Launch')} 7 Launch`, `later ① #${id('6 Beta')} 6 Beta`]);
     await expect(marker('6 Beta')).toHaveText('①');
     seen = await hues();
     expect(seen.leadLater).toBe(seen.head);
-    expect(seen.markerB).toBe('rgb(0, 113, 227)');
+    expect(seen.markerB).toBe('rgb(30, 41, 59)');
     // Each step still jumps to its row: pan it out of view first.
     const beta = page.locator('.ip-node', { hasText: '6 Beta' });
     const pane = (await page.locator('.react-flow__pane').boundingBox())!;
@@ -1404,7 +1419,7 @@ test.describe('Live work', () => {
     expect(agentBox.y).toBeGreaterThanOrEqual(revenue.y + revenue.height);
     expect(build.y).toBeGreaterThanOrEqual(agentBox.y + agentBox.height);
     expect(agentBox.x).toBeGreaterThan(revenue.x + 20);
-    // A wears session clay and B another hue, on its chip, its badge, its subagent and its subagent's task.
+    // A wears teal and B another hue, on its chip, its badge, its subagent and its subagent's task.
     const hues = await page.evaluate<Record<string, string>>(`(() => {
       const find = (sel, text) => [...document.querySelectorAll(sel)].find((n) => n.textContent.includes(text));
       const bg = (n) => getComputedStyle(n).backgroundColor;
@@ -1419,7 +1434,7 @@ test.describe('Live work', () => {
         tagB: getComputedStyle(row.querySelector('.ip-work-tag')).color,
       };
     })()`);
-    expect(hues.chipA).toBe('rgb(217, 119, 87)');
+    expect(hues.chipA).toBe('rgb(11, 107, 125)');
     expect(hues.badgeA).toBe(hues.chipA);
     expect(hues.chipB).not.toBe(hues.chipA);
     expect(hues.chipB).not.toBe('rgba(0, 0, 0, 0)');
@@ -1474,7 +1489,7 @@ test.describe('Live work', () => {
     await expect(page.locator('.ip-work', { hasText: 'Read the signing guide' }).locator('.ip-work-mark')).toHaveText('✓');
     await expect(upload).toHaveClass(/\bstale\b/);
     await expect(upload.locator('.ip-work-mark')).toHaveText('○');
-    await expect(upload.locator('.ip-work-mark')).toHaveCSS('color', 'rgb(174, 174, 178)');
+    await expect(upload.locator('.ip-work-mark')).toHaveCSS('color', 'rgb(100, 116, 139)');
     await expect(upload.locator('.ip-work-mark')).toHaveCSS('animation-name', 'none');
     await playRow.click();
     await expect(upload).toHaveCount(0);
@@ -1487,7 +1502,7 @@ test.describe('Live work', () => {
     await expect(compare.locator('.ip-work-agent')).toHaveCount(0);
     const agent = page.locator('.ip-trail-agent');
     await expect(agent).toHaveText(new RegExp(`^◆ Check the keystore · sonnet · ran ${RUNNING} · stopped just now$`));
-    await expect(agent).toHaveCSS('color', 'rgb(110, 110, 115)');
+    await expect(agent).toHaveCSS('color', 'rgb(71, 85, 105)');
     // Details lists the trail under the session's title, and nothing as live work.
     await card.click();
     const details = page.getByRole('complementary');
