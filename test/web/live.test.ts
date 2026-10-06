@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PastSession, Session, SubagentInfo, TrailAgent, WorkItem } from '../../src/core/types';
-import { agentLine, chipLabel, circled, elapsed, queueMark, taskFamily, taskOwner, trailAgentLine, trailLabel, waitsFor, withTag, withoutOwnId, workMark } from '../../web/src/live';
+import { WORDS, agentLine, chipLabel, chipName, circled, elapsed, leadTitle, queueMark, taskFamily, taskOwner, trailAgentLine, trailLabel, waitsFor, withTag, withoutOwnId, workMark } from '../../web/src/live';
 
 const NOW = Date.parse('2026-10-02T12:00:00Z');
 const ago = (ms: number) => new Date(NOW - ms).toISOString();
@@ -218,5 +218,37 @@ describe('waitsFor', () => {
     const items = [first, second, third, finished];
     expect(waitsFor(third, items)).toEqual(['Upload the key', 'Read the guide']);
     expect(waitsFor(first, items)).toEqual([]);
+  });
+});
+
+describe('chipName', () => {
+  it('leads the chip label with the session letter', () => {
+    expect(chipName(session({ title: "#4 Implement Fable's Notes", state: 'permission' }))).toBe("A · #4 Implement Fable's Notes · needs permission");
+    const three = [agent(), agent({ agentId: 'a2' }), agent({ agentId: 'a3' })];
+    expect(chipName(session({ slot: 2, title: '#5 UI Session post-Fable', subagents: three }))).toBe('C · #5 UI Session post-Fable · 3 subagents');
+    expect(chipName(session({ slot: 1, title: '#2 InProgress Dev Session', state: 'idle' }))).toBe('B · #2 InProgress Dev Session · idle');
+  });
+
+  it('is the bare chip label while the slot is empty', () => {
+    expect(chipName(session({ slot: null, title: '#2 InProgress Dev Session', state: 'idle' }))).toBe('#2 InProgress Dev Session · idle');
+  });
+});
+
+describe('leadTitle', () => {
+  it('names the letter, the title and the state word, then the running subagents, readers included', () => {
+    const three = [agent(), agent({ agentId: 'a2', agentType: 'general-purpose' }), agent({ agentId: 'a3', agentType: 'general-purpose' })];
+    expect(leadTitle(session({ slot: 2, title: '#5 UI Session post-Fable', subagents: three }))).toBe('C · #5 UI Session post-Fable · working · 3 subagents');
+    expect(leadTitle(session({ state: 'idle' }))).toBe('A · E2E session · idle');
+    expect(leadTitle(session({ state: 'permission' }))).toBe('A · E2E session · needs permission');
+  });
+
+  it('counts only the subagents still running, and drops the letter while the slot is empty', () => {
+    const subagents = [agent(), agent({ agentId: 'a2', endedAt: ago(MIN) })];
+    expect(leadTitle(session({ slot: 1, title: 'Second session', subagents }))).toBe('B · Second session · working · 1 subagent');
+    expect(leadTitle(session({ slot: null }))).toBe('E2E session · working');
+  });
+
+  it('takes its state words from WORDS', () => {
+    expect(WORDS).toEqual({ working: 'working', idle: 'idle', permission: 'needs permission', ended: 'ended' });
   });
 });

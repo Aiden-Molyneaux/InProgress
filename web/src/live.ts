@@ -1,4 +1,4 @@
-import { agentTag, ownerTag, sessionDisplayTitle, type PastSession, type Session, type SubagentInfo, type TrailAgent, type WorkItem, type WorkStatus } from '../../src/core/types';
+import { agentTag, ownerTag, sessionDisplayTitle, sessionTag, type PastSession, type Session, type SessionState, type SubagentInfo, type TrailAgent, type WorkItem, type WorkStatus } from '../../src/core/types';
 import { relativeTime } from './time';
 
 /** A working task's checklist mark. */
@@ -115,4 +115,19 @@ export function taskFamily(w: WorkItem, sessions: Session[], trailAgents: TrailA
 /** What a working task waits for: the subjects of the open tasks that block it, in order. */
 export function waitsFor(w: WorkItem, items: WorkItem[]): string[] {
   return items.filter((x) => x.status !== 'completed' && x.blocks.includes(w.id)).map((x) => withoutOwnId(x.subject, w.nodeId));
+}
+
+/** A session's state as a word: on its agent line and in its lead's tooltip. */
+export const WORDS: Record<SessionState, string> = { working: 'working', idle: 'idle', permission: 'needs permission', ended: 'ended' };
+
+/** A session chip's accessible name: its letter, then chipLabel. */
+export function chipName(s: Session): string {
+  return withTag(sessionTag(s.slot), chipLabel(s));
+}
+
+/** The lead character's tooltip: letter, title, state word, and how many subagents still run (readers included). */
+export function leadTitle(s: Session): string {
+  const running = s.subagents.filter((a) => a.endedAt === null).length;
+  const count = running ? ` · ${running} subagent${running > 1 ? 's' : ''}` : '';
+  return withTag(sessionTag(s.slot), `${sessionDisplayTitle(s)} · ${WORDS[s.state]}${count}`);
 }
