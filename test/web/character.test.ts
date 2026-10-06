@@ -8,7 +8,7 @@ const session = (extra: Partial<Session> = {}): Session => ({
 });
 const agent = (extra: Partial<SubagentInfo> = {}): SubagentInfo => ({
   agentId: 'a1', agentType: 'general-purpose', startedAt: 't', description: 'Draft the whiteboard take', model: 'opus-5-5', nodeId: 127,
-  endedAt: null, ordinal: 10, purpose: null, ...extra,
+  endedAt: null, ordinal: 10, purpose: null, endReason: null, lastActiveAt: null, ...extra,
 });
 
 describe('characterState', () => {

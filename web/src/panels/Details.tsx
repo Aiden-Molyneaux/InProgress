@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { agentHome, agentVisible, homedTrailAgents, isPaused, occupiedSteps } from '../../../src/core/layout';
+import { agentHome, agentVisible, atLimit, homedTrailAgents, isPaused, occupiedSteps } from '../../../src/core/layout';
 import { isNeedsYou } from '../../../src/core/tree';
 import { LABEL_GLYPHS, agentTag, isReader, sessionDisplayTitle, sessionTag, type NodeDetail, type ProjectSnapshot, type TrailAgent, type TreeNode, type WorkItem } from '../../../src/core/types';
+import { AgentWords } from '../AgentWords';
 import { api } from '../api';
 import { familyVar } from '../family';
-import { TASK_MARK, agentLine, taskFamily, taskOwner, trailAgentLine, waitsFor, withTag, withoutOwnId, workMark } from '../live';
+import { TASK_MARK, agentLineParts, taskFamily, taskOwner, trailAgentParts, waitsFor, withTag, withoutOwnId, workMark } from '../live';
 import { Marker } from '../Marker';
 import { relativeTime } from '../time';
 import { useNow } from '../useNow';
@@ -117,7 +118,7 @@ function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'
               return (
                 <li
                   key={`${session.id}:${agent.agentId}`}
-                  className={`ip-dagent${agent.endedAt ? ' ended' : ''}`}
+                  className={`ip-dagent${agent.endedAt ? ' ended' : ''}${atLimit(agent) ? ' limit' : ''}`}
                   style={{ '--fam': familyVar(session.slot) } as CSSProperties}
                   title={`${agent.agentType}, for ${withTag(sessionTag(session.slot), sessionDisplayTitle(session))}`}
                 >
@@ -128,7 +129,7 @@ function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'
                       {' · '}
                     </>
                   )}
-                  {agentLine(agent, now, nodeId)}
+                  <AgentWords parts={agentLineParts(agent, now, nodeId)} limit={atLimit(agent)} />
                   <PurposeLine purpose={agent.purpose} />
                 </li>
               );
@@ -154,7 +155,7 @@ function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'
                 ))}
                 {g.agents.map((a) => (
                   <li key={`${a.sessionId}:${a.agentId}`} className="ip-dtrail" title={`${a.agentType}, for ${g.title}`}>
-                    <span className="ip-agent-dot">◆</span> {trailAgentLine(a, now, nodeId)}
+                    <span className="ip-agent-dot">◆</span> <AgentWords parts={trailAgentParts(a, now, nodeId)} limit={atLimit(a)} />
                     <PurposeLine purpose={a.purpose} />
                   </li>
                 ))}

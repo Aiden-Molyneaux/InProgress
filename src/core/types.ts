@@ -34,7 +34,8 @@ export const DELETED_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 /**
  * How long a live session's stopped worker keeps its greyed badge: five minutes, then it shows in the trail. A reader
  * keeps none: it shows only while it runs, and leaves no trail (agentVisible in core/layout). The server's list of a
- * session's subagents keeps a stopped one this long too (listSubagents).
+ * session's subagents keeps a stopped one this long too (listSubagents). One that hit the usage limit keeps its badge
+ * until it runs again or its session ends (atLimit in core/layout).
  */
 export const ENDED_AGENT_MS = 5 * 60 * 1000;
 
@@ -154,6 +155,15 @@ export interface LogEntry {
   sessionTitle: string | null;
 }
 
+/**
+ * Why a subagent ended without a clean SubagentStop: `limit` (it hit the usage limit), `error` (another API error),
+ * `killed` (stopped: TaskStop, a stopped workflow, the UI), `silent` (no new line in its transcript for 20 minutes; its
+ * next line revives it), `session` (it was still running when its session ended or expired). The first four are read
+ * from its own transcript by the server's watcher (agent-watch).
+ */
+export const END_REASONS = ['limit', 'error', 'killed', 'silent', 'session'] as const;
+export type EndReason = (typeof END_REASONS)[number];
+
 export interface SubagentInfo {
   agentId: string;
   agentType: string;
@@ -162,7 +172,11 @@ export interface SubagentInfo {
   description: string | null;
   /** The model it was dispatched with, or the one its launch reported; null when neither is known. */
   model: string | null;
-  /** The node it works on: the `#id` its description starts with, else the session's focus at dispatch. */
+  /**
+   * The node it works on: the `#id` its description starts with, else the session's focus at dispatch, else the
+   * session's focus when it started (or the first focus the session set, when it started with none). Null with none of
+   * those: a subagent from before migration 7, or one whose step was deleted. The server merges them (toInfo).
+   */
   nodeId: number | null;
   /** Set when it stopped, or when its session ended. A session's list keeps an ended subagent for 5 minutes. */
   endedAt: string | null;
@@ -173,6 +187,13 @@ export interface SubagentInfo {
    * with its dispatch, for a blank prompt, and for a subagent from before migration 5.
    */
   purpose: string | null;
+  /** Why it ended, when not by a clean stop (END_REASONS). Null while it runs and after a clean SubagentStop. */
+  endReason: EndReason | null;
+  /**
+   * Its last sign of life, for an end the transcript watcher found (its last transcript line): "ran …" and "… ago"
+   * count to it, while `endedAt` stays when InProgress noticed. Null otherwise.
+   */
+  lastActiveAt: string | null;
 }
 
 /** Agent types that only read. They get no badge of their own and leave no trail: a step shows them as one row. */

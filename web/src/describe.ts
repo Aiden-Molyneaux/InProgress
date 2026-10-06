@@ -1,4 +1,5 @@
-import { sessionDisplayTitle, type EventRow, type ProjectSnapshot } from '../../src/core/types';
+import { agentTag, sessionDisplayTitle, type EndReason, type EventRow, type ProjectSnapshot } from '../../src/core/types';
+import { END_WORDS } from './live';
 
 const STATE_WORDS: Record<string, string> = { working: 'working', idle: 'idle', permission: 'waiting for a permission' };
 
@@ -13,10 +14,18 @@ function sessionLabel(id: string, snapshot: ProjectSnapshot | null): string {
   return s ? sessionDisplayTitle(s) : 'a session';
 }
 
+/** A subagent the watcher ended, by its tag (`a3`), found in its session's list or the trail; else "a subagent". */
+function agentLabel(sessionId: string, agentId: string, snapshot: ProjectSnapshot | null): string {
+  const s = snapshot?.sessions.find((x) => x.id === sessionId);
+  const a = s?.subagents?.find((x) => x.agentId === agentId) ?? snapshot?.trailAgents?.find((x) => x.sessionId === sessionId && x.agentId === agentId);
+  return agentTag(s?.slot ?? null, a?.ordinal ?? null) || 'a subagent';
+}
+
 export function describeEvent(e: EventRow, snapshot: ProjectSnapshot | null): string {
   const d = (e.data ?? {}) as {
     ids?: number[]; parentId?: number; nodeId?: number; title?: string; path?: string;
     changes?: { status?: { to: string }; queue?: unknown }; changed?: string[]; state?: string; focusNodeId?: number | null;
+    ended?: { agentId: string; reason: EndReason }[];
   };
   switch (e.type) {
     case 'node.created':
@@ -38,6 +47,8 @@ export function describeEvent(e: EventRow, snapshot: ProjectSnapshot | null): st
     case 'session.updated': {
       const who = sessionLabel(e.entityId, snapshot);
       if (d.changed?.includes('focusNodeId')) return d.focusNodeId ? `${who} is on ${nodeLabel(d.focusNodeId, snapshot)}` : `${who} cleared its focus`;
+      // The transcript watcher ended subagents that died without a stop: `<session> · a3 hit the usage limit`.
+      if (d.ended?.length) return `${who} · ${d.ended.map((x) => `${agentLabel(e.entityId, x.agentId, snapshot)} ${END_WORDS[x.reason] ?? 'ended'}`).join(', ')}`;
       if (d.state === 'ended') return `${who} ended`;
       return `${who} is ${STATE_WORDS[d.state ?? ''] ?? d.state ?? 'updated'}`;
     }

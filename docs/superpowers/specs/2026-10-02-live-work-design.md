@@ -30,21 +30,30 @@ too, keyed by agent.
 
 Attribution of a working task to a node, decided once, at creation:
 1. A `#id` at the start of the subject (`#57 Write the design note`), if that node is in the session's project.
-2. For a subagent's task: the subagent's node (below).
+2. For a subagent's task: the subagent's node (below), the step its badge sits on. For a subagent with no step of its
+   own that is the session's focus when the subagent started, not the focus at task time (amended 2026-10-06,
+   review-actions rulings 42 and 43).
 3. Otherwise: the session's focus node, else the project root.
 
 ### Subagents (#48)
 - A **PreToolUse** hook on `^(Agent|Task)$` posts a dispatch: `tool_use_id`, `description` (clipped to 200),
   `subagent_type` and `model`. Of the `prompt` it forwards only the first sentence, clipped to 200 characters, as the
   subagent's purpose, which stays in the local database and is pruned with its row (review actions §5). The node is
-  the `#id` at the start of the description, if any, else the session's focus.
+  the `#id` at the start of the description, if any, else the session's focus. A subagent with no dispatch (a workflow
+  agent) or whose dispatch left it no node stays on the session's focus at its SubagentStart, migration 7's
+  `start_focus_id`, or on the first focus the session sets when it had none (review-actions rulings 42 and 43).
 - **SubagentStart** (already installed) pairs with the oldest unpaired dispatch for that session and agent type
   (first in, first out).
 - A **PostToolUse** hook on `^(Agent|Task)$` posts the launch response's `agentId`. For background agents this arrives
   at launch and makes the pairing exact. Foreground agents get it at completion, which only confirms the pairing.
 - **SubagentStop** marks the subagent `ended_at` rather than deleting its row. Ended subagents show greyed for
   5 minutes, then stay 7 days as the trail on their step (review actions §3). Session end marks the running ones
-  ended instead of deleting them.
+  ended instead of deleting them, with the reason `session`.
+- **No SubagentStop** comes when a subagent hits the usage limit or an API error, or is stopped (#125). The server's
+  transcript watcher (`agent-watch.ts`) reads each running subagent's own transcript once a minute: a last line that
+  marks the end ends it with `limit`, `error` or `killed`, 20 minutes with no new line ends it as `silent`, and a newer
+  line brings it back while its session lives; a session that ends and comes back leaves them ended
+  (review-actions rulings 44 to 52).
 
 ### Planned order (#56)
 - Across plan steps: a per-project queue of node ids, set by the scribe with a new MCP tool
@@ -102,7 +111,8 @@ that session's list on that node through `POST /api/sessions/:id/tasks`, so thes
   - A subagent's tasks carry its badge colour.
 - **Badges.** Each subagent gets its own badge under its node: `◆ description · model · 12 min`. Ended subagents show
   greyed (`done 2 min ago`) for 5 minutes, then move into the step's trail (review actions §3). The session's own badge
-  stays under its focus.
+  stays under its focus. One that died without a stop adds a `!` and says why (`was stopped 3 min ago`); one at the
+  usage limit stays, in amber, until it runs again or its session ends (rulings 48 and 49).
 - **Session chip.** Lists its subagents (description · model · elapsed) on hover or focus.
 - **Queue.** Numbered markers ①②③ appear on queued steps. An `Up next` line sits under the session row, lists the
   queue by owner (`Up next: A: #82 → #78 | later: #79`, review actions §6), and jumps to an item on click. When the

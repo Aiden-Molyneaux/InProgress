@@ -1,10 +1,11 @@
 import type { CSSProperties } from 'react';
-import { agentVisible } from '../../../src/core/layout';
+import { agentVisible, atLimit } from '../../../src/core/layout';
 import { agentTag, isReader, sessionTag, type Session } from '../../../src/core/types';
+import { AgentWords } from '../AgentWords';
 import { Character } from '../Character';
 import { characterState } from '../characterState';
 import { familyVar } from '../family';
-import { agentLine, chipLabel, chipName, withTag, WORDS } from '../live';
+import { agentLineParts, chipLabel, chipName, withTag, WORDS } from '../live';
 import { useNow } from '../useNow';
 import { chipOrder } from './chips';
 
@@ -56,7 +57,7 @@ export function SessionRow({ sessions, onPick, needsYou, onNeedsYou, follow, onF
                     {agents.map((a) => {
                       const tag = agentTag(s.slot, a.ordinal);
                       return (
-                        <li key={a.agentId} className={a.endedAt ? 'ended' : undefined}>
+                        <li key={a.agentId} className={[a.endedAt && 'ended', atLimit(a) && 'limit'].filter(Boolean).join(' ') || undefined}>
                           {isReader(a.agentType) && <span className="ip-reader-mark">◇ </span>}
                           {tag && (
                             <>
@@ -64,7 +65,7 @@ export function SessionRow({ sessions, onPick, needsYou, onNeedsYou, follow, onF
                               {' · '}
                             </>
                           )}
-                          {agentLine(a, now)}
+                          <AgentWords parts={agentLineParts(a, now)} limit={atLimit(a)} />
                         </li>
                       );
                     })}

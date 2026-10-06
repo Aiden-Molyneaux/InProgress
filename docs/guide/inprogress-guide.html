@@ -535,6 +535,7 @@ Changes:
   <span class="eyebrow">From your spec</span>
   <blockquote>"you don't know what task they're knocking off the list without explicitly reading all the Claude chats and going into the subagents"</blockquote>
   <p>SubagentStart and SubagentStop hooks keep a row per running subagent, so the count on a chip or badge cannot drift; the scribe itself is excluded by the hook matcher so it costs no process spawn.</p>
+  <p>Claude Code sends no SubagentStop when a subagent hits the usage limit, hits an API error or is stopped. Once a minute the server reads the last line of each running subagent's own transcript: an interrupt or an API error ends it with that reason, and 20 minutes with nothing new ends it as "stopped responding" until it writes again. Its badge greys with a <code>!</code> and says why. One at the usage limit stays on its line in amber until it is resumed or its session ends.</p>
   <p class="where">session_subagents table · HOOK_DEFS matcher ^(?!inprogress-scribe$).*</p>
 </aside>
 </div>
@@ -905,7 +906,7 @@ Playbook:
 <tr><td>UserPromptSubmit</td><td><code>prompt-submit</code></td><td><code>prompt</code> with cwd, branch, title, whether the prompt mentions InProgress, asks for status, or is a background notice.</td><td>A status answer, the stale line, the untracked hint, or the briefing when the session is picked up late.</td></tr>
 <tr><td>Stop</td><td><code>stop</code></td><td><code>stop</code> with title.</td><td>State idle.</td></tr>
 <tr><td>Notification, matcher <code>permission_prompt</code></td><td><code>notification</code></td><td><code>permission</code></td><td>State permission.</td></tr>
-<tr><td>SubagentStart / SubagentStop, matcher excludes the scribe</td><td><code>subagent-start</code> / <code>subagent-stop</code></td><td>agent id and type</td><td>A subagent row added or removed.</td></tr>
+<tr><td>SubagentStart / SubagentStop, matcher excludes the scribe</td><td><code>subagent-start</code> / <code>subagent-stop</code></td><td>agent id and type</td><td>A subagent row added or ended. A subagent that dies without a stop is ended by the server's transcript watcher instead.</td></tr>
 <tr><td>SessionEnd</td><td><code>session-end</code></td><td><code>end</code></td><td>State ended; subagent rows cleared.</td></tr>
 </tbody>
 </table>
