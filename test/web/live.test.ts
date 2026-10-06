@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { PastSession, Session, SubagentInfo, TrailAgent, WorkItem } from '../../src/core/types';
-import { WORDS, agentLine, chipLabel, chipName, circled, elapsed, kinTitle, leadTitle, runTime, taskFamily, taskOwner, trailAgentLine, trailLabel, waitsFor, withTag, withoutOwnId, workMark } from '../../web/src/live';
+import { END_WORDS, WORDS, agentLine, agentLineParts, chipLabel, chipName, circled, elapsed, kinTitle, leadTitle, runTime, taskFamily, taskOwner, trailAgentLine, trailAgentParts, trailLabel, waitsFor, withTag, withoutOwnId, workMark } from '../../web/src/live';
 
 const NOW = Date.parse('2026-10-02T12:00:00Z');
 const ago = (ms: number) => new Date(NOW - ms).toISOString();
 const MIN = 60_000;
 
 const agent = (extra: Partial<SubagentInfo> = {}): SubagentInfo => ({
-  agentId: 'a1', agentType: 'Explore', startedAt: ago(12 * MIN), description: 'Wire up RevenueCat', model: 'sonnet', nodeId: 57, endedAt: null, ordinal: 1, purpose: null, ...extra,
+  agentId: 'a1', agentType: 'Explore', startedAt: ago(12 * MIN), description: 'Wire up RevenueCat', model: 'sonnet', nodeId: 57, endedAt: null, ordinal: 1, purpose: null, endReason: null, lastActiveAt: null, ...extra,
 });
 const session = (extra: Partial<Session> = {}): Session => ({
   id: 's1abcdef', projectId: 1, title: 'E2E session', cwd: null, branch: null, transcriptPath: null, state: 'working', focusNodeId: 57,
@@ -74,6 +74,24 @@ describe('agentLine', () => {
   it('says how long ago it finished once it ended', () => {
     expect(agentLine(agent({ endedAt: ago(2 * MIN) }), NOW)).toBe('Wire up RevenueCat · sonnet · done 2 min ago');
     expect(agentLine(agent({ endedAt: ago(10_000) }), NOW)).toBe('Wire up RevenueCat · sonnet · done just now');
+  });
+
+  it('says why and how long ago it last showed life when it ended without a stop, and asks for a resume at the usage limit', () => {
+    const dead = (endReason: SubagentInfo['endReason'], lastActive = 3 * MIN) => agent({ endedAt: ago(MIN), endReason, lastActiveAt: ago(lastActive) });
+    expect(agentLine(dead('limit'), NOW)).toBe('Wire up RevenueCat · sonnet · hit the usage limit 3 min ago · resume after the reset');
+    expect(agentLine(dead('error'), NOW)).toBe('Wire up RevenueCat · sonnet · hit an API error 3 min ago');
+    expect(agentLine(dead('killed'), NOW)).toBe('Wire up RevenueCat · sonnet · was stopped 3 min ago');
+    expect(agentLine(dead('silent', 21 * MIN), NOW)).toBe('Wire up RevenueCat · sonnet · stopped responding 21 min ago');
+    // A session's end has no last sign of life of its own: it counts from the end.
+    expect(agentLine(agent({ endedAt: ago(3 * MIN), endReason: 'session' }), NOW)).toBe('Wire up RevenueCat · sonnet · ended with its session 3 min ago');
+  });
+
+  it('splits into who it is and what it is doing, which agentLine joins with a dot', () => {
+    expect(agentLineParts(agent(), NOW)).toEqual({ who: 'Wire up RevenueCat · sonnet', when: '12 min' });
+    expect(agentLineParts(agent({ model: null, endedAt: ago(MIN), endReason: 'limit', lastActiveAt: ago(3 * MIN) }), NOW)).toEqual({
+      who: 'Wire up RevenueCat',
+      when: 'hit the usage limit 3 min ago · resume after the reset',
+    });
   });
 
   it('drops the #id of the node it is shown under', () => {
@@ -191,6 +209,21 @@ describe('trailAgentLine', () => {
     expect(trailAgentLine(stopped({ startedAt: ago(30 * MIN + 10_000), endedAt: ago(30 * MIN) }), NOW)).toBe('Wire up RevenueCat · sonnet · ran <1 min · stopped 30 min ago');
   });
 
+  it('says why it ended when it ended without a stop, and runs to its last sign of life, not to when that was noticed', () => {
+    const dead = (endReason: SubagentInfo['endReason'], ranMin: number, lastActiveMin: number) =>
+      stopped({ startedAt: ago((lastActiveMin + ranMin) * MIN), lastActiveAt: ago(lastActiveMin * MIN), endedAt: ago((lastActiveMin - 1) * MIN), endReason });
+    expect(trailAgentLine(dead('limit', 22, 600), NOW)).toBe('Wire up RevenueCat · sonnet · ran 22 min · hit the usage limit 10 h ago');
+    expect(trailAgentLine(dead('error', 22, 600), NOW)).toBe('Wire up RevenueCat · sonnet · ran 22 min · hit an API error 10 h ago');
+    expect(trailAgentLine(dead('killed', 9, 23 * 60), NOW)).toBe('Wire up RevenueCat · sonnet · ran 9 min · was stopped 23 h ago');
+    expect(trailAgentLine(dead('silent', 65, 120), NOW)).toBe('Wire up RevenueCat · sonnet · ran 1 h 5 min · stopped responding 2 h ago');
+    expect(trailAgentLine(stopped({ startedAt: ago(240 * MIN), endedAt: ago(60 * MIN), endReason: 'session' }), NOW)).toBe('Wire up RevenueCat · sonnet · ran 3 h · ended with its session 1 h ago');
+  });
+
+  it('splits into who it is and how it ran, which trailAgentLine joins with a dot', () => {
+    expect(trailAgentParts(stopped(), NOW)).toEqual({ who: 'Wire up RevenueCat · sonnet', when: 'ran 40 min · stopped 2 h ago' });
+    expect(Object.keys(END_WORDS).sort()).toEqual(['error', 'killed', 'limit', 'session', 'silent']);
+  });
+
   it("leaves out the #id of the node it is shown under and a model it does not know, and names an unpaired one by its type", () => {
     expect(trailAgentLine(stopped({ description: '#57 Wire up RevenueCat', model: null }), NOW, 57)).toBe('Wire up RevenueCat · ran 40 min · stopped 2 h ago');
     expect(trailAgentLine(stopped({ description: null }), NOW)).toBe('general-purpose · sonnet · ran 40 min · stopped 2 h ago');
@@ -267,6 +300,10 @@ describe('kinTitle', () => {
 
   it('says when an ended kin finished, and leaves out a purpose it does not know', () => {
     expect(kinTitle(kin({ ordinal: 11, description: 'Draft the quiet take', endedAt: ago(3 * MIN) }), 2, NOW)).toBe('c11 · Draft the quiet take · opus-5-5 · done 3 min ago');
+  });
+
+  it('asks for a resume after the reset on a kin that hit the usage limit', () => {
+    expect(kinTitle(kin({ endedAt: ago(MIN), endReason: 'limit', lastActiveAt: ago(3 * MIN) }), 0, NOW)).toBe('a10 · Draft the whiteboard take · opus-5-5 · hit the usage limit 3 min ago · resume after the reset');
   });
 
   it('has no tag while the number is unknown, and drops the #id of the step it sits on', () => {

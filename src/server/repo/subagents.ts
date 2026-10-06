@@ -1,4 +1,4 @@
-import { ENDED_AGENT_MS, READER_AGENT_TYPES, TRAIL_MS, type SubagentInfo, type TrailAgent } from '../../core/types';
+import { ENDED_AGENT_MS, READER_AGENT_TYPES, TRAIL_MS, type EndReason, type SubagentInfo, type TrailAgent } from '../../core/types';
 import type { Ctx } from '../db/tx';
 
 /** How long a dispatch waits for its subagent to start; an older one (a launch that was denied, say) never pairs. */
@@ -16,6 +16,9 @@ interface SubagentRow {
   ended_at: string | null;
   ordinal: number | null;
   purpose: string | null;
+  start_focus_id: number | null;
+  end_reason: EndReason | null;
+  last_active_at: string | null;
 }
 
 interface DispatchRow {
@@ -46,25 +49,48 @@ export interface DispatchInput {
  */
 export const NOT_READER_SQL = `a.agent_type NOT IN (${READER_AGENT_TYPES.map((t) => `'${t}'`).join(', ')})`;
 
+/**
+ * SQL for "this ended subagent row ended in its session's current life", for a row aliased `a` joined to its session
+ * aliased `s`: at or after the session last came back from ended (markRevived), or ever for one that never has. A
+ * session's end closes what its subagents were waiting on: one at the usage limit leaves its line for the trail, and the
+ * watcher no longer reads one it ended. Only a SubagentStart brings such a row back (startSubagent).
+ */
+export const ENDED_THIS_LIFE_SQL = "a.ended_at >= COALESCE(s.revived_at, '')";
+
 const before = (ctx: Ctx, ms: number) => new Date(Date.parse(ctx.now()) - ms).toISOString();
 
-/** One row as the UI has it: the live list and the trail share this, so a field added to one reaches both. */
+/**
+ * One row as the UI has it: the live list and the trail share this, so a field added to one reaches both. Its node is
+ * its dispatch's (the `#id`, else the focus at dispatch), else the focus at its start: the window, Details and task
+ * attribution all read this one merge.
+ */
 const toInfo = (r: SubagentRow): SubagentInfo => ({
   agentId: r.agent_id,
   agentType: r.agent_type,
   startedAt: r.started_at,
   description: r.description,
   model: r.model,
-  nodeId: r.node_id,
+  nodeId: r.node_id ?? r.start_focus_id,
   endedAt: r.ended_at,
   ordinal: r.ordinal,
   purpose: r.purpose,
+  // Only for an ended row: one a rolled-back build revived clears ended_at and leaves these, and it is running.
+  endReason: r.ended_at ? r.end_reason : null,
+  lastActiveAt: r.ended_at ? r.last_active_at : null,
 });
 
-/** A session's subagents that are running or stopped less than ENDED_AGENT_MS (5 minutes) ago, oldest first. */
+/**
+ * A session's subagents that are running, stopped less than ENDED_AGENT_MS (5 minutes) ago, or ended at the usage limit
+ * in the session's current life (they wait on their line for Aiden until revived or their session ends; a session that
+ * comes back after it ended leaves the old ones in the trail, ENDED_THIS_LIFE_SQL), oldest first.
+ */
 export function listSubagents(ctx: Ctx, sessionId: string): SubagentInfo[] {
   return (ctx.db
-    .prepare('SELECT * FROM session_subagents WHERE session_id = ? AND (ended_at IS NULL OR ended_at >= ?) ORDER BY started_at, agent_id')
+    .prepare(
+      `SELECT a.* FROM session_subagents a JOIN sessions s ON s.id = a.session_id
+       WHERE a.session_id = ? AND (a.ended_at IS NULL OR a.ended_at >= ? OR (a.end_reason = 'limit' AND ${ENDED_THIS_LIFE_SQL}))
+       ORDER BY a.started_at, a.agent_id`,
+    )
     .all(sessionId, before(ctx, ENDED_AGENT_MS)) as SubagentRow[])
     .map(toInfo);
 }
@@ -85,10 +111,13 @@ export function listTrailAgents(ctx: Ctx, projectId: number): TrailAgent[] {
     .map((r) => ({ ...toInfo(r), sessionId: r.session_id }));
 }
 
-/** The node a subagent works on, if it is known (paired with a dispatch that named or inherited one). */
+/**
+ * The node a subagent works on, if it is known: its dispatch's (named or inherited), else its session's focus when it
+ * started. The same merge as toInfo, so its tasks land where its badge sits.
+ */
 export function subagentNode(ctx: Ctx, sessionId: string, agentId: string): number | null {
-  const row = ctx.db.prepare('SELECT node_id FROM session_subagents WHERE session_id = ? AND agent_id = ?').get(sessionId, agentId) as { node_id: number | null } | undefined;
-  return row?.node_id ?? null;
+  const row = ctx.db.prepare('SELECT COALESCE(node_id, start_focus_id) AS node FROM session_subagents WHERE session_id = ? AND agent_id = ?').get(sessionId, agentId) as { node: number | null } | undefined;
+  return row?.node ?? null;
 }
 
 const findSubagent = (ctx: Ctx, sessionId: string, agentId: string) =>
@@ -131,12 +160,17 @@ export function recordDispatch(ctx: Ctx, sessionId: string, d: DispatchInput): v
  * SubagentStart. A dispatch whose launch already named this agent pairs exactly (and is done with); otherwise the
  * oldest open dispatch of the agent's type pairs, and stays until a launch confirms or corrects it. An agent that
  * starts again (resumed) keeps what it had, its first start time included: the trail's "ran …" then spans its first
- * start to its last stop (a true run time would need a column of its own).
+ * start to its last stop (a true run time would need a column of its own). `startFocusId` is the session's focus now:
+ * every new row keeps it, paired or not, since a launch can still take its dispatch away; a resumed row keeps its
+ * first one, as it keeps its first start time.
  */
-export function startSubagent(ctx: Ctx, sessionId: string, agentId: string, agentType: string, at: string): void {
+export function startSubagent(ctx: Ctx, sessionId: string, agentId: string, agentType: string, at: string, startFocusId: number | null = null): void {
   const existing = findSubagent(ctx, sessionId, agentId);
   if (existing) {
-    if (existing.ended_at) ctx.db.prepare('UPDATE session_subagents SET ended_at = NULL WHERE session_id = ? AND agent_id = ?').run(sessionId, agentId);
+    // Running again, so whatever ended it no longer holds.
+    if (existing.ended_at || existing.end_reason || existing.last_active_at) {
+      ctx.db.prepare('UPDATE session_subagents SET ended_at = NULL, end_reason = NULL, last_active_at = NULL WHERE session_id = ? AND agent_id = ?').run(sessionId, agentId);
+    }
     return;
   }
   // Its number in the session: one past the highest given (rows from before migration 4 have none, which MAX skips). A
@@ -145,10 +179,10 @@ export function startSubagent(ctx: Ctx, sessionId: string, agentId: string, agen
   // subagents by a week can see.
   ctx.db
     .prepare(
-      `INSERT INTO session_subagents (session_id, agent_id, agent_type, started_at, ordinal)
-       VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(ordinal), 0) + 1 FROM session_subagents WHERE session_id = ?))`,
+      `INSERT INTO session_subagents (session_id, agent_id, agent_type, started_at, ordinal, start_focus_id)
+       VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(ordinal), 0) + 1 FROM session_subagents WHERE session_id = ?), ?)`,
     )
-    .run(sessionId, agentId, agentType, at, sessionId);
+    .run(sessionId, agentId, agentType, at, sessionId, startFocusId);
   const named = dispatchOf(ctx, sessionId, agentId);
   if (named) {
     show(ctx, sessionId, agentId, named);
@@ -158,9 +192,47 @@ export function startSubagent(ctx: Ctx, sessionId: string, agentId: string, agen
   pairFifo(ctx, sessionId, agentId, agentType);
 }
 
-/** SubagentStop: the row stays, ended. The UI greys its badge for 5 minutes, then keeps it 7 days in the trail. */
+/**
+ * A new focus for a session: its running subagents that have no step and started before it had a focus take this one
+ * as their start focus, so they stay on the first focus they see instead of following every later one.
+ */
+export function pinStartFocus(ctx: Ctx, sessionId: string, focusNodeId: number | null): void {
+  if (focusNodeId === null) return;
+  ctx.db
+    .prepare('UPDATE session_subagents SET start_focus_id = ? WHERE session_id = ? AND ended_at IS NULL AND node_id IS NULL AND start_focus_id IS NULL')
+    .run(focusNodeId, sessionId);
+}
+
+/**
+ * SubagentStop: the row stays, ended. The UI greys its badge for 5 minutes, then keeps it 7 days in the trail. A real stop
+ * wins over the watcher's guess that it stopped responding (`silent`), and clears it; an end its transcript showed
+ * stays.
+ */
 export function stopSubagent(ctx: Ctx, sessionId: string, agentId: string, at: string): void {
-  ctx.db.prepare('UPDATE session_subagents SET ended_at = ? WHERE session_id = ? AND agent_id = ? AND ended_at IS NULL').run(at, sessionId, agentId);
+  ctx.db
+    .prepare("UPDATE session_subagents SET ended_at = ?, end_reason = NULL, last_active_at = NULL WHERE session_id = ? AND agent_id = ? AND (ended_at IS NULL OR end_reason = 'silent')")
+    .run(at, sessionId, agentId);
+}
+
+/**
+ * The watcher found a running subagent dead without a stop: it ends now (`at`, when InProgress noticed), with why and
+ * its last sign of life. False when the row was not running.
+ */
+export function endAgent(ctx: Ctx, sessionId: string, agentId: string, reason: Exclude<EndReason, 'session'>, at: string, lastActiveAt: string): boolean {
+  return ctx.db
+    .prepare('UPDATE session_subagents SET ended_at = ?, end_reason = ?, last_active_at = ? WHERE session_id = ? AND agent_id = ? AND ended_at IS NULL')
+    .run(at, reason, lastActiveAt, sessionId, agentId).changes > 0;
+}
+
+/**
+ * The watcher saw a new line from a subagent it had ended (a guess that it stopped responding, the usage limit, an API
+ * error or an interrupt): a subagent that writes is alive, so it runs again. A clean stop and a session's end stay (a
+ * resumed agent's SubagentStart revives those). False when nothing changed.
+ */
+export function reviveAgent(ctx: Ctx, sessionId: string, agentId: string): boolean {
+  return ctx.db
+    .prepare("UPDATE session_subagents SET ended_at = NULL, end_reason = NULL, last_active_at = NULL WHERE session_id = ? AND agent_id = ? AND ended_at IS NOT NULL AND end_reason IN ('limit', 'error', 'killed', 'silent')")
+    .run(sessionId, agentId).changes > 0;
 }
 
 /**
@@ -199,11 +271,11 @@ export function launchSubagent(ctx: Ctx, sessionId: string, toolUseId: string, a
 }
 
 /**
- * Session end (or a stale session's expiry): its running subagents end at `at`, while one that already stopped keeps
- * its own time, and its dispatches go. The rows stay as the trail.
+ * Session end (or a stale session's expiry): its running subagents end at `at`, ended with their session (`session`),
+ * while one that already stopped keeps its own time and reason, and its dispatches go. The rows stay as the trail.
  */
 export function endSubagents(ctx: Ctx, sessionId: string, at: string): void {
-  ctx.db.prepare('UPDATE session_subagents SET ended_at = ? WHERE session_id = ? AND ended_at IS NULL').run(at, sessionId);
+  ctx.db.prepare("UPDATE session_subagents SET ended_at = ?, end_reason = 'session' WHERE session_id = ? AND ended_at IS NULL").run(at, sessionId);
   ctx.db.prepare('DELETE FROM subagent_dispatches WHERE session_id = ?').run(sessionId);
 }
 

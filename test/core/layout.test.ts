@@ -239,7 +239,7 @@ describe('stacks and lanes', () => {
 const T0 = Date.parse('2026-10-02T12:00:00Z');
 const ago = (ms: number) => new Date(T0 - ms).toISOString();
 const agent = (agentId: string, extra: Partial<SubagentInfo> = {}): SubagentInfo => ({
-  agentId, agentType: 'general-purpose', startedAt: ago(60_000), description: `Agent ${agentId}`, model: 'sonnet', nodeId: null, endedAt: null, ordinal: 1, purpose: null, ...extra,
+  agentId, agentType: 'general-purpose', startedAt: ago(60_000), description: `Agent ${agentId}`, model: 'sonnet', nodeId: null, endedAt: null, ordinal: 1, purpose: null, endReason: null, lastActiveAt: null, ...extra,
 });
 let nextWork = 100;
 function work(nodeId: number, status: WorkStatus, extra: Partial<WorkItem> = {}): WorkItem {
@@ -372,6 +372,17 @@ describe('agent lines', () => {
     const s1 = withAgents(session('s1', t.a1.id, 'idle'), [agent('x', { endedAt: ago(ENDED_AGENT_MS - 1000) }), agent('y', { endedAt: ago(ENDED_AGENT_MS) })]);
     const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [s1], now: T0 });
     expect(l.items.filter((i) => i.kind === 'line')).toEqual([expect.objectContaining({ id: `ls1:${t.a1.id}`, lead: true, agentIds: ['x'] })]);
+  });
+
+  it('keep a worker that hit the usage limit as a kin past 5 minutes while its session lives; any other end leaves after 5', () => {
+    const t = sample();
+    const hour = 60 * 60_000;
+    const limit = agent('x', { endedAt: ago(hour), endReason: 'limit', lastActiveAt: ago(hour + 60_000) });
+    const killed = agent('y', { endedAt: ago(hour), endReason: 'killed', lastActiveAt: ago(hour + 60_000) });
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [withAgents(session('s1', t.a1.id, 'idle'), [limit, killed])], now: T0 });
+    expect(l.items.filter((i) => i.kind === 'line')).toEqual([expect.objectContaining({ id: `ls1:${t.a1.id}`, agentIds: ['x'] })]);
+    expect(agentVisible(limit, T0)).toBe(true);
+    expect(agentVisible(killed, T0)).toBe(false);
   });
 
   it("sit on the nearest visible ancestor when a manual fold hides their node, and need a node or their session's focus", () => {
@@ -758,6 +769,18 @@ describe('the trail of ended work', () => {
     expect(l.items.find((i) => i.kind === 'workDone')).toMatchObject({ count: 0, unfinished: 0, agents: 2 });
   });
 
+  it("keeps a live session's usage-limit agent out of the trail while it waits as a kin, and puts it there once its session ends", () => {
+    const t = sample();
+    const limit = agent('x', { nodeId: t.a1.id, endedAt: ago(60 * 60_000), endReason: 'limit', lastActiveAt: ago(61 * 60_000) });
+    const trailAgents = [{ ...limit, sessionId: 's1' }];
+    const input = { nodes: t.nodes, resources: [], trailAgents, overrides: { [`work:${t.a1.id}`]: 'open' as const }, now: T0 };
+    const live = layoutOutline({ ...input, sessions: [withAgents(session('s1', t.a1.id, 'idle'), [limit])] });
+    expect(rowsOf(live, 'trailAgent')).toEqual([]);
+    expect(live.items.find((i) => i.kind === 'line')).toMatchObject({ agentIds: ['x'] });
+    const ended = layoutOutline({ ...input, sessions: [], pastSessions: [past('s1', t.a1.id)] });
+    expect(rowsOf(ended, 'trailAgent').map(([kind, id]) => [kind, id])).toEqual([['trailAgent', 'ts1:x']]);
+  });
+
   it('leaves a reader out of the trail, should the snapshot ever list one: readers leave no trail', () => {
     const t = sample();
     const task = work(t.a1.id, 'completed', { sessionId: 's0', endedAt: ENDED });
@@ -770,7 +793,7 @@ describe('the trail of ended work', () => {
     expect(l.items.find((i) => i.kind === 'workDone')).toMatchObject({ count: 1, unfinished: 0, agents: 0 });
   });
 
-  it("puts a trail agent on its step while that is in the tree; with no step, on its session's focus, live or past; else leaves it out", () => {
+  it("puts a trail agent on its step while that is in the tree; with no node (no step, no start focus), on its session's focus, live or past; else leaves it out", () => {
     const t = sample();
     const trailAgents = [
       trailAgent('x', { nodeId: t.b.id }),
@@ -842,9 +865,21 @@ describe('paused', () => {
     // Stopped a minute ago, it still shows greyed, but nobody is on the step any more.
     expect(pausedIds(on(agent('w2', { nodeId: t.a1.id, endedAt: ago(60_000) })))).toEqual([t.a.id, t.a1.id]);
     expect(pausedIds(on(agent('r2', { agentType: 'Explore', nodeId: t.a1.id, endedAt: ago(60_000) })))).toEqual([t.a.id, t.a1.id]);
-    // With no step of its own, a subagent is on its session's focus.
+    // With no node of its own (no step and no start focus), a subagent is on its session's focus.
     const s = withAgents(session('s1', t.a1.id, 'working'), [agent('w3')]);
     expect(pausedIds(layout(t, { sessions: [s] }))).toEqual([]);
+  });
+
+  it('keeps a step unpaused while a subagent waits on it at the usage limit, and frees it for any other end', () => {
+    const t = sample();
+    const on = (a: SubagentInfo, state: Session['state'] = 'working') => layout(t, { sessions: [withAgents(session('s1', t.b.id, state), [a])] });
+    const ended = { nodeId: t.a1.id, endedAt: ago(60 * 60_000), lastActiveAt: ago(61 * 60_000) };
+    expect(pausedIds(on(agent('w1', { ...ended, endReason: 'limit' })))).toEqual([]);
+    for (const endReason of ['error', 'killed', 'silent', 'session'] as const) {
+      expect(pausedIds(on(agent('w2', { ...ended, endedAt: ago(60_000), endReason }))), endReason).toEqual([t.a.id, t.a1.id]);
+    }
+    // Its session's end frees it too.
+    expect(pausedIds(on(agent('w3', { ...ended, endReason: 'limit' }), 'ended'))).toEqual([t.a.id, t.a1.id]);
   });
 
   it("keeps a step with a live session's task in progress unpaused, but not an ended session's or a pending one", () => {

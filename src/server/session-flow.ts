@@ -4,9 +4,9 @@ import { badRequest } from './errors';
 import { renderBriefing, renderStatusAnswer, renderStatusLine, untrackedHint } from './briefing';
 import { findNode, leadingNode, patchNode, requireNode } from './repo/nodes';
 import { getProjectById, releaseQueue, resolveBinding, resolveProject } from './repo/projects';
-import { assignSlot, briefingDue, clearBriefingDue, findSession, markBriefingDue, saveSession } from './repo/sessions';
+import { assignSlot, briefingDue, clearBriefingDue, findSession, markBriefingDue, markRevived, saveSession } from './repo/sessions';
 import { getProjectSnapshot } from './repo/snapshot';
-import { endSubagents, launchSubagent, pruneSubagents, recordDispatch, startSubagent, stopSubagent } from './repo/subagents';
+import { endSubagents, launchSubagent, pinStartFocus, pruneSubagents, recordDispatch, startSubagent, stopSubagent } from './repo/subagents';
 import { taskCreated, taskUpdated } from './repo/work';
 
 export interface HookEventInput {
@@ -120,7 +120,8 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
       case 'subagent-start':
         if (input.agentId && input.agentType && input.agentType !== SCRIBE_AGENT) {
           pruneSubagents(ctx);
-          startSubagent(ctx, sessionId, input.agentId, input.agentType, now);
+          // A subagent-start never moves the focus, so `before`'s is the focus at its start.
+          startSubagent(ctx, sessionId, input.agentId, input.agentType, now, before.focusNodeId);
         }
         if (next.state === 'permission') next.state = 'working';
         break;
@@ -169,6 +170,9 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
     if (next.state !== 'ended') next.endedAt = null;
     placeSlot(ctx, before, next);
     saveSession(ctx, next);
+    // Back from ended: a new life, which leaves the subagents its last one ended in the trail (markRevived). Before the
+    // read below, so a usage-limit subagent leaving its line counts as a change to the subagents.
+    if (before.state === 'ended' && next.state !== 'ended') markRevived(ctx, sessionId, now);
     const after = findSession(ctx, sessionId)!;
     const changed: string[] = VISIBLE.filter((k) => before![k] !== after[k]);
     if (JSON.stringify(before.subagents) !== JSON.stringify(after.subagents)) changed.push('subagents');
@@ -269,6 +273,8 @@ export function setFocus(ctx: Ctx, actor: string, sessionId: string, nodeId: num
     // Being heard from again can bring a stale session back.
     placeSlot(ctx, existing, next);
     saveSession(ctx, next);
+    // A subagent that started while the session had no focus stays on this first one (session.updated below refetches).
+    pinStartFocus(ctx, sessionId, nodeId);
     markIfRelettered(ctx, existing, next);
     record({ projectId, type: 'session.updated', entity: 'session', entityId: sessionId, data: { changed: ['focusNodeId'], focusNodeId: nodeId } });
   });

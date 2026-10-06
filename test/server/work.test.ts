@@ -71,6 +71,15 @@ describe('working tasks mirrored from the task tools', () => {
     });
   });
 
+  it("puts a task of a subagent with no dispatch on the focus its session had when the subagent started, as its badge", () => {
+    const { ctx, play, tests, hook, items } = setup();
+    hook({ event: 'subagent-start', agentId: 'w1', agentType: 'general-purpose' });
+    setFocus(ctx, 'scribe:s1', 's1', tests.id);
+    hook(created('1', 'Read the workflow log', 'w1'));
+    hook(created('1', 'The session moved on'));
+    expect(Object.fromEntries(items().map((i) => [i.subject, i.nodeId]))).toEqual({ 'Read the workflow log': play.id, 'The session moved on': tests.id });
+  });
+
   it('keeps each task list apart: the main session and every subagent number their own', () => {
     const { hook, items } = setup();
     hook(created('1', 'Main session task'));

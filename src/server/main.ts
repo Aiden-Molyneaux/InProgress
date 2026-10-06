@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { baseUrl, ensureToken, homeDir, port as configuredPort } from '../lib/home';
 import { readBuild, VERSION } from '../lib/version';
+import { createWatchState, watchAgents, watchInterval } from './agent-watch';
 import { buildApp } from './app';
 import { backupDb, truncateIfLarge } from './backup';
 import { openDb } from './db/connection';
@@ -31,6 +32,7 @@ async function main(): Promise<void> {
   const db = openDb(join(home, 'inprogress.db'));
   const ctx = createCtx(db);
   let closing = false;
+  let watchTimer: NodeJS.Timeout | undefined;
   const app = buildApp({
     ctx,
     token,
@@ -44,6 +46,7 @@ async function main(): Promise<void> {
   async function shutdown(): Promise<void> {
     if (closing) return;
     closing = true;
+    clearInterval(watchTimer);
     await app.close().catch(() => undefined);
     db.close();
     rmSync(join(home, 'server.pid'), { force: true });
@@ -81,6 +84,21 @@ async function main(): Promise<void> {
   } catch (err) {
     app.log.error(`Could not prune live work: ${(err as Error).message}`);
   }
+  // The transcript watcher: once now, so subagents that died while the server was down end at once, then on a timer that
+  // never keeps the process alive. A failed tick is logged and the next one tries again.
+  const watchState = createWatchState();
+  const watch = () => {
+    try {
+      const { ended, revived } = watchAgents(ctx, watchState);
+      for (const e of ended) app.log.info(`Subagent ${e.agentId} of session ${e.sessionId} ended: ${e.reason}`);
+      for (const r of revived) app.log.info(`Subagent ${r.agentId} of session ${r.sessionId} is running again`);
+    } catch (err) {
+      app.log.error(`Could not watch subagent transcripts: ${(err as Error).message}`);
+    }
+  };
+  watch();
+  watchTimer = setInterval(watch, watchInterval(process.env));
+  watchTimer.unref();
   // A hidden, detached server on Windows never receives these signals; POST /api/admin/shutdown is the clean way to stop it.
   process.on('SIGINT', () => void shutdown());
   process.on('SIGTERM', () => void shutdown());

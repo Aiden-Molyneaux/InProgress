@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react';
+import { atLimit } from '../../../src/core/layout';
 import { agentTag, sessionDisplayTitle, sessionTag, type Session, type SubagentInfo } from '../../../src/core/types';
 import { Character } from '../Character';
 import { characterState } from '../characterState';
@@ -31,16 +32,19 @@ interface KinProps {
 
 /**
  * One shown worker: a 16 px character (working while it runs, ended once it stops), its tag and, while it runs, its
- * run time. Its name and tooltip carry the rest, then its purpose.
+ * run time. One that ended without a stop (endReason) adds a `!` after its tag, grey; at the usage limit (`.limit`) the
+ * tag and the mark go amber, as needing Aiden. Its name and tooltip carry the rest, then its purpose.
  */
 function Kin({ agent, session, nodeId, now }: KinProps) {
   const tag = agentTag(session.slot, agent.ordinal);
   const name = kinTitle(agent, session.slot, now, nodeId);
   const running = agent.endedAt === null;
+  const classes = ['ip-agent', !running && 'ended', atLimit(agent) && 'limit'].filter(Boolean).join(' ');
   return (
-    <span className={running ? 'ip-agent' : 'ip-agent ended'} role="img" aria-label={name} title={name}>
+    <span className={classes} role="img" aria-label={name} title={name}>
       <Character size={16} state={characterState(agent)} slot={session.slot} seed={`${session.id}:${agent.agentId}`} />
       {tag && <span className="ip-agent-tag">{tag}</span>}
+      {!running && agent.endReason && <span className="ip-agent-mark">!</span>}
       {running && <span className="ip-agent-time">{runTime(agent.startedAt, now)}</span>}
     </span>
   );
