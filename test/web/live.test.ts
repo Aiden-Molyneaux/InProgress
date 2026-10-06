@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PastSession, Session, SubagentInfo, TrailAgent, WorkItem } from '../../src/core/types';
-import { agentLine, chipLabel, circled, elapsed, queueMark, taskFamily, taskOwner, trailAgentLine, trailLabel, waitsFor, withTag, withoutOwnId, workMark } from '../../web/src/live';
+import { WORDS, agentLine, chipLabel, chipName, circled, elapsed, kinTitle, leadTitle, queueMark, runTime, taskFamily, taskOwner, trailAgentLine, trailLabel, waitsFor, withTag, withoutOwnId, workMark } from '../../web/src/live';
 
 const NOW = Date.parse('2026-10-02T12:00:00Z');
 const ago = (ms: number) => new Date(NOW - ms).toISOString();
@@ -218,5 +218,95 @@ describe('waitsFor', () => {
     const items = [first, second, third, finished];
     expect(waitsFor(third, items)).toEqual(['Upload the key', 'Read the guide']);
     expect(waitsFor(first, items)).toEqual([]);
+  });
+});
+
+describe('chipName', () => {
+  it('leads the chip label with the session letter', () => {
+    expect(chipName(session({ title: "#4 Implement Fable's Notes", state: 'permission' }))).toBe("A · #4 Implement Fable's Notes · needs permission");
+    const three = [agent(), agent({ agentId: 'a2' }), agent({ agentId: 'a3' })];
+    expect(chipName(session({ slot: 2, title: '#5 UI Session post-Fable', subagents: three }))).toBe('C · #5 UI Session post-Fable · 3 subagents');
+    expect(chipName(session({ slot: 1, title: '#2 InProgress Dev Session', state: 'idle' }))).toBe('B · #2 InProgress Dev Session · idle');
+  });
+
+  it('is the bare chip label while the slot is empty', () => {
+    expect(chipName(session({ slot: null, title: '#2 InProgress Dev Session', state: 'idle' }))).toBe('#2 InProgress Dev Session · idle');
+  });
+});
+
+describe('leadTitle', () => {
+  it('names the letter, the title and the state word, then the running subagents, readers included', () => {
+    const three = [agent(), agent({ agentId: 'a2', agentType: 'general-purpose' }), agent({ agentId: 'a3', agentType: 'general-purpose' })];
+    expect(leadTitle(session({ slot: 2, title: '#5 UI Session post-Fable', subagents: three }))).toBe('C · #5 UI Session post-Fable · working · 3 subagents');
+    expect(leadTitle(session({ state: 'idle' }))).toBe('A · E2E session · idle');
+    expect(leadTitle(session({ state: 'permission' }))).toBe('A · E2E session · needs permission');
+  });
+
+  it('counts only the subagents still running, and drops the letter while the slot is empty', () => {
+    const subagents = [agent(), agent({ agentId: 'a2', endedAt: ago(MIN) })];
+    expect(leadTitle(session({ slot: 1, title: 'Second session', subagents }))).toBe('B · Second session · working · 1 subagent');
+    expect(leadTitle(session({ slot: null }))).toBe('E2E session · working');
+  });
+
+  it('takes its state words from WORDS', () => {
+    expect(WORDS).toEqual({ working: 'working', idle: 'idle', permission: 'needs permission', ended: 'ended' });
+  });
+});
+
+describe('the running subagent count', () => {
+  it('reads the same in the chip label and in the lead title, whatever the state', () => {
+    const count = (text: string) => / · \d+ subagents?/.exec(text)?.[0] ?? '';
+    const cases: [number, string][] = [[0, ''], [1, ' · 1 subagent'], [2, ' · 2 subagents'], [7, ' · 7 subagents']];
+    for (const [running, text] of cases) {
+      for (const state of ['working', 'idle', 'permission', 'ended'] as const) {
+        const subagents = [agent({ agentId: 'gone', endedAt: ago(MIN) }), ...Array.from({ length: running }, (_, i) => agent({ agentId: `r${i}` }))];
+        const s = session({ state, subagents });
+        expect(count(chipLabel(s))).toBe(text);
+        expect(count(leadTitle(s))).toBe(text);
+      }
+    }
+  });
+});
+
+describe('kinTitle', () => {
+  const kin = (extra: Partial<SubagentInfo> = {}) =>
+    agent({ agentType: 'general-purpose', ordinal: 10, description: 'Draft the whiteboard take', model: 'opus-5-5', startedAt: ago(18 * MIN), nodeId: null, ...extra });
+
+  it('is the tagged agent line, then the purpose on a second line', () => {
+    const purpose = 'You draft the whiteboard take of the InProgress window.';
+    expect(kinTitle(kin({ purpose }), 2, NOW)).toBe(`c10 · Draft the whiteboard take · opus-5-5 · 18 min\n${purpose}`);
+  });
+
+  it('says when an ended kin finished, and leaves out a purpose it does not know', () => {
+    expect(kinTitle(kin({ ordinal: 11, description: 'Draft the quiet take', endedAt: ago(3 * MIN) }), 2, NOW)).toBe('c11 · Draft the quiet take · opus-5-5 · done 3 min ago');
+  });
+
+  it('has no tag while the number is unknown, and drops the #id of the step it sits on', () => {
+    expect(kinTitle(kin({ ordinal: null }), 2, NOW)).toBe('Draft the whiteboard take · opus-5-5 · 18 min');
+    expect(kinTitle(agent({ description: '#57 Wire up RevenueCat' }), 0, NOW, 57)).toBe('a1 · Wire up RevenueCat · sonnet · 12 min');
+  });
+});
+
+describe('runTime', () => {
+  it('writes the minutes elapsed counts, compact: no spaces, at most five characters', () => {
+    const at = [0.5, 18, 59, 60, 65, 165, 599, 600, 725].map((m) => runTime(ago(m * MIN), NOW));
+    expect(at).toEqual(['<1m', '18m', '59m', '1h', '1h5m', '2h45m', '9h59m', '10h', '12h']);
+    expect(at.every((s) => s.length <= 5 && !s.includes(' '))).toBe(true);
+  });
+
+  it('reads a start in the future (clock skew) as just started', () => {
+    expect(runTime(ago(-5_000), NOW)).toBe('<1m');
+  });
+
+  it("counts the minutes elapsed counts: a kin's '18m' is its tooltip's '18 min'", () => {
+    // Hours and minutes from either spelling: '12 h 5 min' (elapsed) and '12h5m' (runTime).
+    const parts = (text: string) => (text.startsWith('<') ? { h: 0, m: 0 } : { h: Number(/(\d+) ?h/.exec(text)?.[1] ?? 0), m: Number(/(\d+) ?m/.exec(text)?.[1] ?? 0) });
+    for (const minutes of [0.5, 18, 59, 60, 65, 599, 725]) {
+      const long = parts(elapsed(ago(minutes * MIN), NOW));
+      const short = parts(runTime(ago(minutes * MIN), NOW));
+      expect(short.h, `${minutes} min: hours`).toBe(long.h);
+      // From 10 h the five-character bound drops the minutes ('12h'); below that they agree to the minute.
+      expect(short.m, `${minutes} min: minutes`).toBe(long.h >= 10 ? 0 : long.m);
+    }
   });
 });
