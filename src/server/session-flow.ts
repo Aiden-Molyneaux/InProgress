@@ -120,7 +120,8 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
       case 'subagent-start':
         if (input.agentId && input.agentType && input.agentType !== SCRIBE_AGENT) {
           pruneSubagents(ctx);
-          startSubagent(ctx, sessionId, input.agentId, input.agentType, now);
+          // A subagent-start never moves the focus, so `before`'s is the focus at its start.
+          startSubagent(ctx, sessionId, input.agentId, input.agentType, now, before.focusNodeId);
         }
         if (next.state === 'permission') next.state = 'working';
         break;

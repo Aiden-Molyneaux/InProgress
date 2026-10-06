@@ -16,6 +16,7 @@ interface SubagentRow {
   ended_at: string | null;
   ordinal: number | null;
   purpose: string | null;
+  start_focus_id: number | null;
 }
 
 interface DispatchRow {
@@ -48,14 +49,18 @@ export const NOT_READER_SQL = `a.agent_type NOT IN (${READER_AGENT_TYPES.map((t)
 
 const before = (ctx: Ctx, ms: number) => new Date(Date.parse(ctx.now()) - ms).toISOString();
 
-/** One row as the UI has it: the live list and the trail share this, so a field added to one reaches both. */
+/**
+ * One row as the UI has it: the live list and the trail share this, so a field added to one reaches both. Its node is
+ * its dispatch's (the `#id`, else the focus at dispatch), else the focus at its start: the window, Details and task
+ * attribution all read this one merge.
+ */
 const toInfo = (r: SubagentRow): SubagentInfo => ({
   agentId: r.agent_id,
   agentType: r.agent_type,
   startedAt: r.started_at,
   description: r.description,
   model: r.model,
-  nodeId: r.node_id,
+  nodeId: r.node_id ?? r.start_focus_id,
   endedAt: r.ended_at,
   ordinal: r.ordinal,
   purpose: r.purpose,
@@ -85,10 +90,13 @@ export function listTrailAgents(ctx: Ctx, projectId: number): TrailAgent[] {
     .map((r) => ({ ...toInfo(r), sessionId: r.session_id }));
 }
 
-/** The node a subagent works on, if it is known (paired with a dispatch that named or inherited one). */
+/**
+ * The node a subagent works on, if it is known: its dispatch's (named or inherited), else its session's focus when it
+ * started. The same merge as toInfo, so its tasks land where its badge sits.
+ */
 export function subagentNode(ctx: Ctx, sessionId: string, agentId: string): number | null {
-  const row = ctx.db.prepare('SELECT node_id FROM session_subagents WHERE session_id = ? AND agent_id = ?').get(sessionId, agentId) as { node_id: number | null } | undefined;
-  return row?.node_id ?? null;
+  const row = ctx.db.prepare('SELECT COALESCE(node_id, start_focus_id) AS node FROM session_subagents WHERE session_id = ? AND agent_id = ?').get(sessionId, agentId) as { node: number | null } | undefined;
+  return row?.node ?? null;
 }
 
 const findSubagent = (ctx: Ctx, sessionId: string, agentId: string) =>
@@ -131,9 +139,11 @@ export function recordDispatch(ctx: Ctx, sessionId: string, d: DispatchInput): v
  * SubagentStart. A dispatch whose launch already named this agent pairs exactly (and is done with); otherwise the
  * oldest open dispatch of the agent's type pairs, and stays until a launch confirms or corrects it. An agent that
  * starts again (resumed) keeps what it had, its first start time included: the trail's "ran …" then spans its first
- * start to its last stop (a true run time would need a column of its own).
+ * start to its last stop (a true run time would need a column of its own). `startFocusId` is the session's focus now:
+ * every new row keeps it, paired or not, since a launch can still take its dispatch away; a resumed row keeps its
+ * first one, as it keeps its first start time.
  */
-export function startSubagent(ctx: Ctx, sessionId: string, agentId: string, agentType: string, at: string): void {
+export function startSubagent(ctx: Ctx, sessionId: string, agentId: string, agentType: string, at: string, startFocusId: number | null = null): void {
   const existing = findSubagent(ctx, sessionId, agentId);
   if (existing) {
     if (existing.ended_at) ctx.db.prepare('UPDATE session_subagents SET ended_at = NULL WHERE session_id = ? AND agent_id = ?').run(sessionId, agentId);
@@ -145,10 +155,10 @@ export function startSubagent(ctx: Ctx, sessionId: string, agentId: string, agen
   // subagents by a week can see.
   ctx.db
     .prepare(
-      `INSERT INTO session_subagents (session_id, agent_id, agent_type, started_at, ordinal)
-       VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(ordinal), 0) + 1 FROM session_subagents WHERE session_id = ?))`,
+      `INSERT INTO session_subagents (session_id, agent_id, agent_type, started_at, ordinal, start_focus_id)
+       VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(ordinal), 0) + 1 FROM session_subagents WHERE session_id = ?), ?)`,
     )
-    .run(sessionId, agentId, agentType, at, sessionId);
+    .run(sessionId, agentId, agentType, at, sessionId, startFocusId);
   const named = dispatchOf(ctx, sessionId, agentId);
   if (named) {
     show(ctx, sessionId, agentId, named);

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { openDb } from '../../src/server/db/connection';
 import { createCtx, type Ctx } from '../../src/server/db/tx';
 import { listEventsSince, maxEventId } from '../../src/server/repo/events';
-import { addNodes } from '../../src/server/repo/nodes';
+import { addNodes, deleteNode } from '../../src/server/repo/nodes';
 import { addBinding, createProject } from '../../src/server/repo/projects';
 import { findSession } from '../../src/server/repo/sessions';
 import { pruneSubagents } from '../../src/server/repo/subagents';
@@ -76,10 +76,10 @@ describe('subagent dispatches', () => {
     expect(descriptions(ctx)).toEqual({ a1: 'first explore', a2: 'second explore', a3: 'a general one' });
   });
 
-  it('shows a subagent without a dispatch by its type alone', () => {
-    const { ctx, hook } = setup();
+  it('shows a subagent without a dispatch by its type alone, on the focus its session had when it started', () => {
+    const { ctx, play, hook } = setup();
     hook(start('a1'));
-    expect(subagents(ctx)[0]).toMatchObject({ agentId: 'a1', description: null, model: null, nodeId: null });
+    expect(subagents(ctx)[0]).toMatchObject({ agentId: 'a1', description: null, model: null, nodeId: play.id });
   });
 
   it('corrects a crossed pairing when a launch names the agent (foreground agents, at completion)', () => {
@@ -149,6 +149,69 @@ describe('subagent dispatches', () => {
     expect(hook(launched('t1', 'a1'), 'nobody')).toEqual({ tracked: false });
     expect(ctx.db.prepare('SELECT COUNT(*) AS c FROM subagent_dispatches').get()).toEqual({ c: 0 });
     expect(findSession(ctx, 'nobody')).toBeUndefined();
+  });
+});
+
+describe('the start focus of a subagent with no step', () => {
+  const nodeOf = (ctx: Ctx, agentId: string) => subagents(ctx).find((a) => a.agentId === agentId)?.nodeId;
+  const trailNode = (ctx: Ctx, slug: string, agentId: string) => getProjectSnapshot(ctx, slug).trailAgents.find((a) => a.agentId === agentId)?.nodeId;
+
+  it('stays on the focus at its start while it runs, after it stops, and after its session ends on another focus', () => {
+    const { ctx, project, play, tests, hook } = setup();
+    // A workflow agent: no dispatch, so no step of its own.
+    hook(start('w1', 'general-purpose'));
+    setFocus(ctx, 'scribe:s1', 's1', tests.id);
+    expect(nodeOf(ctx, 'w1')).toBe(play.id);
+    hook({ event: 'subagent-stop', agentId: 'w1' });
+    expect(nodeOf(ctx, 'w1')).toBe(play.id);
+    expect(trailNode(ctx, project.slug, 'w1')).toBe(play.id);
+    hook({ event: 'end' });
+    expect(getProjectSnapshot(ctx, project.slug).pastSessions).toEqual([expect.objectContaining({ id: 's1', focusNodeId: tests.id })]);
+    expect(trailNode(ctx, project.slug, 'w1')).toBe(play.id);
+  });
+
+  it("gives way to a step its dispatch named, and to the focus at its dispatch", () => {
+    const { ctx, signing, tests, hook } = setup();
+    hook(dispatch('t1', `#${signing.id} Check the keystore`, 'general-purpose'));
+    setFocus(ctx, 'scribe:s1', 's1', null);
+    hook(start('a1', 'general-purpose'));
+    expect(nodeOf(ctx, 'a1')).toBe(signing.id);
+    hook(dispatch('t2', 'Look around', 'general-purpose'));
+    setFocus(ctx, 'scribe:s1', 's1', tests.id);
+    hook(start('a2', 'general-purpose'));
+    // The focus at dispatch was cleared (null), so the focus at its start stands in.
+    expect(nodeOf(ctx, 'a2')).toBe(tests.id);
+  });
+
+  it('keeps the start focus of its first start when it is resumed after a focus change', () => {
+    const { ctx, play, tests, hook } = setup();
+    hook(start('w1', 'general-purpose'));
+    hook({ event: 'subagent-stop', agentId: 'w1' });
+    setFocus(ctx, 'scribe:s1', 's1', tests.id);
+    hook(start('w1', 'general-purpose'));
+    expect(subagents(ctx)).toEqual([expect.objectContaining({ agentId: 'w1', endedAt: null, nodeId: play.id })]);
+  });
+
+  it("reads null once its start step is deleted, so it falls back to its session's focus as before", () => {
+    const { ctx, tests, hook } = setup();
+    const [extra] = addNodes(ctx, 'test', { parentId: tests.id, nodes: [{ title: 'Scratch step' }] });
+    setFocus(ctx, 'scribe:s1', 's1', extra.id);
+    hook(start('w1', 'general-purpose'));
+    expect(nodeOf(ctx, 'w1')).toBe(extra.id);
+    setFocus(ctx, 'scribe:s1', 's1', tests.id);
+    deleteNode(ctx, 'test', extra.id);
+    expect(nodeOf(ctx, 'w1')).toBeNull();
+  });
+
+  it('keeps it for the loser of a launch swap, whose dispatch goes back to its real agent', () => {
+    const { ctx, signing, play, tests, hook } = setup();
+    hook(dispatch('t1', `#${signing.id} Check the keystore`));
+    hook(start('y2'));
+    expect(nodeOf(ctx, 'y2')).toBe(signing.id);
+    hook(launched('t1', 'y1'));
+    expect(subagents(ctx)[0]).toMatchObject({ agentId: 'y2', description: null, nodeId: play.id });
+    setFocus(ctx, 'scribe:s1', 's1', tests.id);
+    expect(nodeOf(ctx, 'y2')).toBe(play.id);
   });
 });
 
