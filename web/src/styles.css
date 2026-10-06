@@ -252,6 +252,10 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-card.stack .ip-badge { padding-left: 0; }
 .ip-badge .ip-tag, .ip-readers .ip-tag { font-weight: var(--w-heavy); color: var(--fam, var(--family-0)); }
 .ip-badge > .ip-tag { flex: none; }
+/* The lead: 24 px while working, 20 px otherwise, in a 24 px slot, so its kin and label never move on a flip. */
+.ip-badge > .ip-char { flex: none; }
+.ip-badge > .ip-char:not(.c-work) { margin: 0 2px; }
+.ip-agent > .ip-char { flex: none; }
 /* The label's parts sit in the line itself, so its title gives way first, down to nothing, and only then the done
    row's label. Its letter starts 12 px after the last kin. */
 .ip-badge-label { display: contents; }
