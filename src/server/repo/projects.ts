@@ -2,7 +2,8 @@ import { DELETED_RETENTION_MS, STALE_SESSION_MS, type Binding, type Project, typ
 import { globMatch } from '../../lib/glob';
 import { isUnder, normalizePath } from '../../lib/paths';
 import { write, type Ctx, type RecordEvent } from '../db/tx';
-import { badRequest, conflict, notFound } from '../errors';
+import { ApiError, badRequest, conflict, notFound } from '../errors';
+import { endSubagents } from './subagents';
 
 interface ProjectRow {
   id: number;
@@ -256,7 +257,54 @@ export interface UpdateProjectInput {
   status?: 'active' | 'archived';
 }
 
+/** Whether InProgress tracks the sessions of project `projectId`: it exists, is active and is not deleted. */
+export function isTracking(ctx: Ctx, projectId: number | null): boolean {
+  if (projectId === null) return false;
+  return ctx.db.prepare("SELECT 1 FROM projects WHERE id = ? AND status = 'active' AND deleted_at IS NULL").get(projectId) !== undefined;
+}
+
+/** The refusal of a session's own write (its focus, its tasks) while its project `projectId` is not tracked. */
+export function notTracked(ctx: Ctx, sessionId: string, projectId: number, hint: string): ApiError {
+  const row = ctx.db.prepare('SELECT slug, deleted_at FROM projects WHERE id = ?').get(projectId) as Pick<ProjectRow, 'slug' | 'deleted_at'> | undefined;
+  return badRequest(`Session ${sessionId} is not tracked: project ${row?.slug ?? projectId} is ${row?.deleted_at ? 'deleted' : 'archived'}`, hint);
+}
+
+/**
+ * The project is archived (or deleted): its sessions that have not ended stop being tracked. They keep running, but
+ * their own Up next entries are dropped (not released: unowned entries stay for an unarchive), each ends with its
+ * subagents and dispatches, and the UI hears session.updated for each. A session already past the stale limit has its
+ * subagents end when it was last heard from, as expiry would. Its project, focus, slot and briefing marker stay, so the
+ * project keeps its trail and the session can come back on an unarchive. Returns their ids. Call inside an open write.
+ */
+export function endProjectSessions(ctx: Ctx, record: RecordEvent, projectId: number): string[] {
+  const live = ctx.db
+    .prepare("SELECT id, last_seen_at FROM sessions WHERE project_id = ? AND state != 'ended' ORDER BY started_at, id")
+    .all(projectId) as { id: string; last_seen_at: string }[];
+  if (!live.length) return [];
+  const ids = new Set(live.map((s) => s.id));
+  const row = ctx.db.prepare('SELECT queue FROM projects WHERE id = ?').get(projectId) as { queue: string };
+  const stored = parseQueue(row.queue);
+  const kept = stored.filter((e) => e.sessionId === null || !ids.has(e.sessionId));
+  if (kept.length !== stored.length) storeQueue(ctx, record, projectId, row.queue, kept);
+  const now = ctx.now();
+  const cutoff = new Date(Date.parse(now) - STALE_SESSION_MS).toISOString();
+  for (const { id, last_seen_at } of live) {
+    ctx.db.prepare("UPDATE sessions SET state = 'ended', ended_at = ? WHERE id = ?").run(now, id);
+    endSubagents(ctx, id, last_seen_at < cutoff ? last_seen_at : now);
+    record({ projectId, type: 'session.updated', entity: 'session', entityId: id, data: { changed: ['state'], state: 'ended' } });
+  }
+  return [...ids];
+}
+
 export function updateProject(ctx: Ctx, actor: string, ref: string | number, patch: UpdateProjectInput): Project {
+  return changeProject(ctx, actor, ref, patch).project;
+}
+
+/**
+ * updateProject, also naming the sessions an archive stopped tracking (endProjectSessions): the scribe's update_project
+ * and the window's archive both come through here.
+ */
+export function changeProject(ctx: Ctx, actor: string, ref: string | number, patch: UpdateProjectInput): { project: Project; endedSessions: string[] } {
   return write(ctx, actor, (record) => {
     const before = resolveProject(ctx, ref);
     const next = {
@@ -265,6 +313,8 @@ export function updateProject(ctx: Ctx, actor: string, ref: string | number, pat
       playbook: patch.playbook ?? before.playbook,
       status: patch.status ?? before.status,
     };
+    // Before the status change and its event, so the activity strip's newest line is the archive.
+    const endedSessions = before.status === 'active' && next.status === 'archived' ? endProjectSessions(ctx, record, before.id) : [];
     const ts = ctx.now();
     ctx.db
       .prepare('UPDATE projects SET name = ?, description = ?, playbook = ?, status = ?, updated_at = ? WHERE id = ?')
@@ -282,7 +332,7 @@ export function updateProject(ctx: Ctx, actor: string, ref: string | number, pat
       const rootChanges = { ...(changes.name ? { title: changes.name } : {}), ...(changes.description ? { body: changes.description } : {}) };
       record({ projectId: before.id, type: 'node.updated', entity: 'node', entityId: before.rootNodeId, data: { changes: rootChanges } });
     }
-    return getProjectById(ctx, before.id)!;
+    return { project: getProjectById(ctx, before.id)!, endedSessions };
   });
 }
 

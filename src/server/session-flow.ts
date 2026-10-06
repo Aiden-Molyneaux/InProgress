@@ -3,7 +3,7 @@ import { write, type Ctx } from './db/tx';
 import { badRequest } from './errors';
 import { renderBriefing, renderStatusAnswer, renderStatusLine, untrackedHint } from './briefing';
 import { findNode, leadingNode, patchNode, requireNode } from './repo/nodes';
-import { getProjectById, releaseQueue, resolveBinding, resolveProject } from './repo/projects';
+import { isTracking, notTracked, releaseQueue, resolveBinding, resolveProject } from './repo/projects';
 import { assignSlot, briefingDue, clearBriefingDue, findSession, markBriefingDue, saveSession } from './repo/sessions';
 import { getProjectSnapshot } from './repo/snapshot';
 import { endSubagents, launchSubagent, pruneSubagents, recordDispatch, startSubagent, stopSubagent } from './repo/subagents';
@@ -83,6 +83,10 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
   let briefingOwed = false;
   const session = write(ctx, `hook:${input.event}`, (record): Session | undefined => {
     let before = findSession(ctx, sessionId);
+    // A session whose project is archived or deleted is not tracked: nothing it does is recorded, so it never comes back
+    // into that project, even one that had ended before the archive. It is tracked again once the project is unarchived,
+    // or after an enroll elsewhere.
+    if (before && !isTracking(ctx, before.projectId)) return undefined;
     if (!before) {
       // A start begins tracking, and so does a first prompt when the start was missed (the server
       // was down then, say): both resolve the binding the same way.
@@ -188,17 +192,17 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
     // typed, and leaves it for the next one (ruling 27). Nothing is decided for a project that is not active, which gets
     // no briefing.
     const mayBrief = input.event === 'start' || created || (input.event === 'prompt' && !input.notice);
-    if (mayBrief && after.projectId !== null && getProjectById(ctx, after.projectId)?.status === 'active' && briefingDue(ctx, sessionId)) {
+    if (mayBrief && isTracking(ctx, after.projectId) && briefingDue(ctx, sessionId)) {
       clearBriefingDue(ctx, sessionId);
       briefingOwed = true;
     }
     return after;
   });
 
-  const project = session?.projectId != null ? getProjectById(ctx, session.projectId) : undefined;
-  if (!session || !project || project.status !== 'active') {
+  if (!session || !isTracking(ctx, session.projectId)) {
     return input.event === 'prompt' && input.mentionsInProgress ? { tracked: false, context: untrackedHint(sessionId) } : { tracked: false };
   }
+  const projectId = session.projectId!;
   // Needs-you ages count to the server's clock (ctx.now), never the wall clock behind it.
   // A session that has just begun tracking gets the full briefing, whichever event brought it in, and so does the first
   // real prompt after an enroll or a revival into another letter. Every one but a compaction's is fresh, and asks about
@@ -207,11 +211,11 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
   // it: the one the enroll returned went to the scribe.
   if (input.event === 'start' || created || briefingOwed) {
     const checkOld = briefingOwed || !(input.event === 'start' && input.source === 'compact');
-    return { tracked: true, context: renderBriefing(getProjectSnapshot(ctx, project.id), sessionId, Date.parse(ctx.now()), { checkOld }) };
+    return { tracked: true, context: renderBriefing(getProjectSnapshot(ctx, projectId), sessionId, Date.parse(ctx.now()), { checkOld }) };
   }
   if (input.event === 'prompt' && !input.notice) {
-    if (input.asksStatus) return { tracked: true, context: renderStatusAnswer(getProjectSnapshot(ctx, project.id), sessionId, Date.parse(ctx.now())) };
-    if (session.promptsSinceUpdate >= 2) return { tracked: true, context: renderStatusLine(getProjectSnapshot(ctx, project.id), session) };
+    if (input.asksStatus) return { tracked: true, context: renderStatusAnswer(getProjectSnapshot(ctx, projectId), sessionId, Date.parse(ctx.now())) };
+    if (session.promptsSinceUpdate >= 2) return { tracked: true, context: renderStatusLine(getProjectSnapshot(ctx, projectId), session) };
   }
   return { tracked: true };
 }
@@ -253,6 +257,8 @@ export function setFocus(ctx: Ctx, actor: string, sessionId: string, nodeId: num
   write(ctx, actor, (record) => {
     const existing = findSession(ctx, sessionId);
     if (!existing) throw badRequest(`Session ${sessionId} is not tracked`, 'Use enroll_session first.');
+    const untracked = (id: number) => notTracked(ctx, sessionId, id, 'Unarchive the project with update_project first, or move the session to an active project with enroll_session.');
+    if (existing.projectId !== null && !isTracking(ctx, existing.projectId)) throw untracked(existing.projectId);
     let projectId = existing.projectId;
     let node: TreeNode | undefined;
     if (nodeId !== null) {
@@ -261,6 +267,8 @@ export function setFocus(ctx: Ctx, actor: string, sessionId: string, nodeId: num
       else if (node.projectId !== projectId) throw badRequest(`#${nodeId} is not in this session's project`, 'Use enroll_session to move the session to another project first.');
     }
     if (projectId === null) throw badRequest(`Session ${sessionId} is not tracked`, 'Use enroll_session first.');
+    // A session with no project takes the step's, which must be tracked too.
+    if (!isTracking(ctx, projectId)) throw untracked(projectId);
     // Focus on a todo step of Claude's makes it active, in this write and under this actor. Any other status, or a step
     // assigned to Aiden, stays as it is. Recorded before session.updated, so the activity strip's latest line still
     // reads "<session> is on #id".
