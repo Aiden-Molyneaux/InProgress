@@ -169,4 +169,12 @@ export const MIGRATIONS: string[] = [
   -- Only a nullable column: v1 to v5 builds can still read and write this schema, so a rollback across it works.
   INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
   `,
+  // 8: soft delete. When the project was deleted; NULL while it is not. A deleted project is always archived too, so a
+  // build from before this migration shows it as an archived one: its bindings stay inert and enroll refuses it. It is
+  // hidden everywhere, restorable for 30 days (DELETED_RETENTION_MS), then purged.
+  `
+  ALTER TABLE projects ADD COLUMN deleted_at TEXT;
+  -- Only a nullable column: v1 to v7 builds can still read and write this schema, so a rollback across it works.
+  INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+  `,
 ];

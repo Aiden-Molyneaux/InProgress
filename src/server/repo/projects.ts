@@ -15,6 +15,8 @@ interface ProjectRow {
   created_at: string;
   updated_at: string;
   queue: string;
+  /** When it was deleted (it is archived then); null while it is not. Migration 8. */
+  deleted_at: string | null;
 }
 
 interface BindingRow {
