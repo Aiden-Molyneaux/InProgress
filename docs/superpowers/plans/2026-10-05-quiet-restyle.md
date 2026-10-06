@@ -5202,7 +5202,7 @@ Before:
             {detail.log.map((l) => (
               <li key={l.id}>
                 {relativeTime(l.createdAt)} · {l.text}
-                {l.sessionTitle ? <i> — {l.sessionTitle}</i> : null}
+                {l.sessionTitle ? <i> · {l.sessionTitle}</i> : null}
               </li>
             ))}
 ```
@@ -5213,13 +5213,13 @@ After:
             {detail.log.map((l) => (
               <li key={l.id}>
                 <span className="ip-log-time">{relativeTime(l.createdAt)}</span> · <span className="ip-log-text">{l.text}</span>
-                {l.sessionTitle ? <span> — {l.sessionTitle}</span> : null}
+                {l.sessionTitle ? <span> · {l.sessionTitle}</span> : null}
               </li>
             ))}
 ```
 
 The row and log texts do not change. The bar is an empty span, and a log line keeps its text, for example
-`just now · Uploaded the key — E2E session`.
+`just now · Uploaded the key · E2E session`.
 
 - [ ] **Step 6: Typecheck**
 
@@ -5436,7 +5436,7 @@ insert:
   // The log: the time in DM Mono, the text in ink, the session muted and upright. The entry arrives live.
   await write(api, fresh.session, 'post', `/api/nodes/${fresh.ids['Play app signing']}/log`, { text: 'Uploaded the key', sessionId: fresh.session });
   const entry = page.getByRole('complementary').locator('.ip-log li');
-  await expect(entry).toHaveText('just now · Uploaded the key — E2E session');
+  await expect(entry).toHaveText('just now · Uploaded the key · E2E session');
   await expect(entry.locator('.ip-log-time')).toHaveCSS('font-family', /DM Mono/);
   await expect(entry.locator('.ip-log-text')).toHaveCSS('color', 'rgb(30, 41, 59)');
   await expect(entry.locator('i')).toHaveCount(0);
@@ -6157,7 +6157,7 @@ export function WorkRow({ item, pulse, stale, family, owner, waits }: WorkRowPro
     <div
       className={`ip-work w-${item.status}${stale ? ' stale' : ''}${pulse ? ' pulse' : ''}`}
       style={family ? ({ '--fam': familyVar(family.slot) } as CSSProperties) : undefined}
-      title={`${subject} — ${owner}${left}${after ? ` · ${after}` : ''}`}
+      title={`${subject} · ${owner}${left}${after ? ` · ${after}` : ''}`}
     >
       <span className="ip-work-col">{family?.tag && <span className="ip-work-tag">{family.tag}</span>}</span>
       <span className="ip-work-mark">{workMark(item.status, stale)}</span>

@@ -1,4 +1,4 @@
-# InProgress — Design Spec
+# InProgress Design Spec
 
 **Date:** 2026-09-27 · **Status:** approved in brainstorming, pending written-spec review
 **Owner:** Aiden · **Builder:** Claude Code
@@ -131,29 +131,29 @@ and `web/dist/`, so nothing but `npm run deploy` writes there:
 
 ### 4.1 Tables
 
-**projects** — `id` INTEGER PK · `slug` TEXT UNIQUE (kebab-case from name, `-2` suffix on clash) ·
+**projects**: `id` INTEGER PK · `slug` TEXT UNIQUE (kebab-case from name, `-2` suffix on clash) ·
 `name` · `description` · `playbook` (markdown: per-project instructions the scribe follows and the
 briefing includes; this is how "each project works a little differently") · `status`
 (`active` | `archived`) · `root_node_id` · `created_at` · `updated_at`.
 
-**bindings** — `id` · `project_id` (cascade) · `path` (normalized, see 4.3) · `branch_pattern`
+**bindings**: `id` · `project_id` (cascade) · `path` (normalized, see 4.3) · `branch_pattern`
 (nullable glob, `*` wildcard, case-insensitive) · `created_at` · UNIQUE(`path`, `branch_pattern`).
 
-**nodes** — `id` INTEGER PK (the user-facing `#id`, global across projects) · `project_id` ·
+**nodes**: `id` INTEGER PK (the user-facing `#id`, global across projects) · `project_id` ·
 `parent_id` (NULL only for a project's root) · `position` REAL (sibling order) · `kind`
 (`goal` | `phase` | `task` | `question`) · `title` (≤ 200 chars) · `body` (markdown, ≤ 20k) ·
 `status` (`todo` | `active` | `done` | `blocked` | `dropped`) · `assignee` (`claude` | `me`) ·
 `outcome` (short closing note; for questions, the answer) · `created_at` · `updated_at` ·
 `completed_at` (set when status becomes `done`, cleared if it leaves `done`).
 
-**resources** — `id` (shown as `r12`) · `project_id` · `node_id` (cascade) · `kind` (`doc` |
+**resources**: `id` (shown as `r12`) · `project_id` · `node_id` (cascade) · `kind` (`doc` |
 `test-suite` | `runbook` | `roadmap` | `diagram` | `link` | `other`) · `title` · `content`
 (markdown snapshot, ≤ 1 MB) · `path` · `url` · `session_id` · `created_at` · `updated_at`.
 CHECK: at least one of `content`, `path`, `url` is set.
 
-**log_entries** — `id` · `node_id` (cascade) · `text` (≤ 2k) · `session_id` · `created_at`.
+**log_entries**: `id` · `node_id` (cascade) · `text` (≤ 2k) · `session_id` · `created_at`.
 
-**sessions** — `id` TEXT PK (Claude `session_id`) · `project_id` (set by a binding match at
+**sessions**: `id` TEXT PK (Claude `session_id`) · `project_id` (set by a binding match at
 start or by enrollment; enrollment may repoint it) · `title` · `cwd` · `branch` ·
 `transcript_path` · `state` (`working` | `idle` | `permission` | `ended`) · `focus_node_id`
 (SET NULL on node delete) · `prompts_since_update` INTEGER · `started_at` · `last_seen_at` ·
@@ -161,12 +161,12 @@ start or by enrollment; enrollment may repoint it) · `title` · `cwd` · `branc
 binding match write nothing. Title: the hook's `session_title` (SessionStart) or the transcript
 `custom-title`, whichever is available; `enroll` sets a title only when none exists.
 
-**session_subagents** — `session_id` (cascade) · `agent_id` · `agent_type` · `started_at` ·
+**session_subagents**: `session_id` (cascade) · `agent_id` · `agent_type` · `started_at` ·
 PK(`session_id`, `agent_id`). Inserted on SubagentStart, deleted on SubagentStop by `agent_id`,
 cleared when the session ends or goes stale. Events with an empty `agent_type` and the scribe
 itself are ignored. The running count is the row count, so it cannot drift.
 
-**events** — `id` INTEGER PK AUTOINCREMENT (monotonic and never reused: it is the SSE cursor) · `ts` · `project_id` · `actor` (e.g.
+**events**: `id` INTEGER PK AUTOINCREMENT (monotonic and never reused: it is the SSE cursor) · `ts` · `project_id` · `actor` (e.g.
 `scribe:<sessionId>`, `hook:prompt`, `system`) · `type` (e.g. `node.created`, `node.updated`,
 `node.moved`, `node.deleted`, `resource.created`, `log.created`, `session.updated`,
 `project.updated`) · `entity` · `entity_id` · `data` (JSON: the changed fields, before/after for
@@ -279,10 +279,10 @@ All InProgress edits go through the inprogress-scribe agent in the background; f
 Playbook:
   <playbook, truncated to 15 lines>
 Where things stand:
-  #53 Road to market — active (2/7)
-    #55 2 Android signing — active
-      #57 Play app signing — active  ◆ this session
-      #58 Run signing tests — NEEDS YOU
+  #53 Road to market · active (2/7)
+    #55 2 Android signing · active
+      #57 Play app signing · active  ◆ this session
+      #58 Run signing tests · NEEDS YOU
   Next: #59 3 RevenueCat · #60 4 Build → GitHub (+3 more)
 Needs you (2): #58 Run signing tests · #61 Which RevenueCat plan? (question)
 Recent resources: r12 Test suite (on #58) · r11 Signing runbook (on #54)
@@ -335,7 +335,7 @@ than a slightly late "needs permission" badge is worth.
 The `event` values posted to `/api/sessions/:id/hook` are exactly: `start`, `prompt`, `stop`,
 `permission`, `subagent-start`, `subagent-stop`, `end`.
 
-### 6.2 MCP server (`inprogress`, stdio) — scribe-only tools
+### 6.2 MCP server (`inprogress`, stdio): scribe-only tools
 
 Defined inline in the scribe agent's frontmatter, so the main session never sees these tools.
 It talks to the server over HTTP with the token (reading `token` from the data dir) and starts
@@ -498,8 +498,8 @@ of any checkout by pattern.
   topmost visible node.
 - **Activity strip**: one line with the latest event in plain words, e.g.
   `↳ scribe (InGame launch status) · 2 min ago · test suite attached to #58 Run signing tests`.
-- **Window title**: `(n) InProgress — <project>` when anything needs Aiden, else
-  `InProgress — <project>`.
+- **Window title**: `(n) InProgress · <project>` when anything needs Aiden, else
+  `InProgress · <project>`.
 - Light and dark themes follow the OS. Nothing is editable.
 
 ### 7.2 Nodes
@@ -530,7 +530,7 @@ node that session is focused on.
 - **Manual override**: clicking a chevron or `+n more` toggles fold. Overrides persist in
   `localStorage` per node id and beat auto rules.
 - Text outline for the API and briefing uses the same fold rules, rendered as indented lines
-  `#id title — status [r12, r13]`, where a needs-you node shows `NEEDS YOU` in place of its
+  `#id title · status [r12, r13]`, where a needs-you node shows `NEEDS YOU` in place of its
   status (as in the 5.2 example).
 
 ### 7.4 Camera
