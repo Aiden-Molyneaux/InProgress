@@ -213,7 +213,7 @@ export interface LayoutInput {
   overrides?: FoldOverrides;
   /** The snapshot's working tasks, live and trail. */
   workItems?: WorkItem[];
-  /** The snapshot's stopped subagents. Those a live session still shows as greyed badges are left out of the trail. */
+  /** The snapshot's stopped subagents. Those a live session still shows as ended kin are left out of the trail. */
   trailAgents?: TrailAgent[];
   /** The ended sessions the trail names, for the focus of a trail agent that has no node. */
   pastSessions?: PastSession[];
@@ -233,7 +233,7 @@ export function agentShown(a: Pick<SubagentInfo, 'endedAt'>, now: number): boole
 
 /**
  * Whether the window shows a subagent anywhere, and lets it pin its step: as agentShown, but a reader shows only while it
- * runs. An ended reader keeps no greyed badge and leaves no trail.
+ * runs. An ended reader drops out of its readers line and leaves no trail.
  */
 export function agentVisible(a: Pick<SubagentInfo, 'endedAt' | 'agentType'>, now: number): boolean {
   return agentShown(a, now) && !(isReader(a.agentType) && a.endedAt !== null);
@@ -247,8 +247,8 @@ export function agentHome(s: Pick<Session, 'focusNodeId'>, a: Pick<SubagentInfo,
 /**
  * Who is on a step, for paused: each live session's focus (an idle one's too), each running subagent's home (a reader's
  * too), each live session's task in progress, and every ancestor of those, walked in the tree itself, so a manual fold
- * never changes it. A stopped subagent no longer counts, though it still shows greyed for a while. The layout and Details
- * both read it, so a step's marker draws the same on its card and in Details.
+ * never changes it. A stopped subagent no longer counts, though it still shows as an ended kin for a while. The layout
+ * and Details both read it, so a step's marker draws the same on its card and in Details.
  */
 export function occupiedSteps(byId: ReadonlyMap<number, TreeNode>, sessions: readonly Session[], workItems: readonly WorkItem[] = []): Set<number> {
   const occupied = new Set<number>();
@@ -275,7 +275,7 @@ export function isPaused(node: Pick<TreeNode, 'id' | 'parentId' | 'status' | 'as
 
 /**
  * The trail's subagents, each with the node it shows under. A live session's stopped subagent stays out while it still
- * shows as a greyed badge (agentShown), so none is both. Its node is the one it worked on, while that is in this tree;
+ * shows as an ended kin (agentShown), so none is both. Its node is the one it worked on, while that is in this tree;
  * one whose node is set but not in the tree (its session moved to another project, say) is left out. Only one with no
  * node falls back to its session's focus, live or past; with neither it is left out. A deleted step's agents fall back
  * too: its `node_id` is ON DELETE SET NULL, which can't tell a deleted step from none. Readers leave no trail: the
@@ -287,10 +287,10 @@ export function homedTrailAgents(
 ): { agent: TrailAgent; nodeId: number }[] {
   const live = input.sessions.filter((s) => s.state !== 'ended');
   const key = (sessionId: string, agentId: string) => `${sessionId}\u0000${agentId}`;
-  const badged = new Set(live.flatMap((s) => s.subagents.filter((a) => agentShown(a, input.now)).map((a) => key(s.id, a.agentId))));
+  const stillKin = new Set(live.flatMap((s) => s.subagents.filter((a) => agentShown(a, input.now)).map((a) => key(s.id, a.agentId))));
   const focusOf = new Map<string, number | null>([...(input.pastSessions ?? []), ...live].map((s) => [s.id, s.focusNodeId]));
   return (input.trailAgents ?? []).flatMap((agent) => {
-    if (isReader(agent.agentType) || badged.has(key(agent.sessionId, agent.agentId))) return [];
+    if (isReader(agent.agentType) || stillKin.has(key(agent.sessionId, agent.agentId))) return [];
     const nodeId = agent.nodeId ?? focusOf.get(agent.sessionId) ?? null;
     return nodeId !== null && inTree(nodeId) ? [{ agent, nodeId }] : [];
   });

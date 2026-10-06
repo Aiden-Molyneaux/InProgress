@@ -743,7 +743,7 @@ describe('the trail of ended work', () => {
     expect(shown.items.flatMap((i) => (i.kind === 'work' ? [[i.stale, i.pulse]] : []))).toEqual([[true, false]]);
   });
 
-  it("shows a live session's stopped subagent as its greyed badge for 5 minutes and as trail after, an ended session's as trail at once, never both", () => {
+  it("shows a live session's stopped subagent as an ended kin for 5 minutes and as trail after, an ended session's as trail at once, never both", () => {
     const t = sample();
     const recent = agent('x', { nodeId: t.a1.id, endedAt: ago(ENDED_AGENT_MS - 1000) });
     // The session's list can still carry an agent past 5 minutes on the client's clock: the snapshot is only refetched on events.
