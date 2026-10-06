@@ -1,4 +1,4 @@
-import { STALE_SESSION_MS, type Binding, type Project, type ProjectSummary, type QueueEntry } from '../../core/types';
+import { DELETED_RETENTION_MS, STALE_SESSION_MS, type Binding, type Project, type ProjectSummary, type QueueEntry } from '../../core/types';
 import { globMatch } from '../../lib/glob';
 import { isUnder, normalizePath } from '../../lib/paths';
 import { write, type Ctx, type RecordEvent } from '../db/tx';
@@ -166,19 +166,50 @@ export function slugify(name: string): string {
   return s || 'project';
 }
 
+/** A raw read by id, deleted or not: for the server's own use, never for a reference someone typed. */
 export function getProjectById(ctx: Ctx, id: number): Project | undefined {
   const row = ctx.db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as ProjectRow | undefined;
   return row ? readProject(ctx, row) : undefined;
 }
 
+/** When a project deleted at `deletedAt` is purged: 30 days on. */
+export const purgeAtOf = (deletedAt: string): string => new Date(Date.parse(deletedAt) + DELETED_RETENTION_MS).toISOString();
+
+/**
+ * SQL that holds when the project whose id is in `column` is not deleted: lookups of a step or resource by its own id
+ * use it, so a deleted project's rows are not found.
+ */
+export const inLiveProject = (column: string): string => `EXISTS (SELECT 1 FROM projects lp WHERE lp.id = ${column} AND lp.deleted_at IS NULL)`;
+
+/** By id, then slug, then name (ignoring case), among the projects that `deleted` picks: deleted ones, or the rest. */
+function findProjectRow(ctx: Ctx, text: string, deleted: boolean): ProjectRow | undefined {
+  const where = deleted ? 'deleted_at IS NOT NULL' : 'deleted_at IS NULL';
+  let row: ProjectRow | undefined;
+  if (/^\d+$/.test(text)) row = ctx.db.prepare(`SELECT * FROM projects WHERE id = ? AND ${where}`).get(Number(text)) as ProjectRow | undefined;
+  row ??= ctx.db.prepare(`SELECT * FROM projects WHERE slug = ? AND ${where}`).get(text.toLowerCase()) as ProjectRow | undefined;
+  row ??= ctx.db.prepare(`SELECT * FROM projects WHERE lower(name) = lower(?) AND ${where}`).get(text) as ProjectRow | undefined;
+  return row;
+}
+
+/**
+ * A project by id, slug or name. A deleted project is not found: the miss says it was deleted and until when Recently
+ * deleted in the window can restore it.
+ */
 export function resolveProject(ctx: Ctx, ref: string | number): Project {
   const text = String(ref).trim();
-  let row: ProjectRow | undefined;
-  if (/^\d+$/.test(text)) row = ctx.db.prepare('SELECT * FROM projects WHERE id = ?').get(Number(text)) as ProjectRow | undefined;
-  row ??= ctx.db.prepare('SELECT * FROM projects WHERE slug = ?').get(text.toLowerCase()) as ProjectRow | undefined;
-  row ??= ctx.db.prepare('SELECT * FROM projects WHERE lower(name) = lower(?)').get(text) as ProjectRow | undefined;
+  const row = findProjectRow(ctx, text, false);
   if (!row) {
-    const slugs = (ctx.db.prepare('SELECT slug FROM projects ORDER BY slug').all() as { slug: string }[]).map((r) => r.slug);
+    const gone = findProjectRow(ctx, text, true);
+    if (gone) {
+      const purgeAt = purgeAtOf(gone.deleted_at!);
+      throw notFound(
+        `Project "${text}" not found`,
+        purgeAt > ctx.now()
+          ? `It was deleted; restore it from Recently deleted in the window before ${purgeAt.slice(0, 10)}.`
+          : 'It was deleted over 30 days ago and is about to be removed for good.',
+      );
+    }
+    const slugs = (ctx.db.prepare('SELECT slug FROM projects WHERE deleted_at IS NULL ORDER BY slug').all() as { slug: string }[]).map((r) => r.slug);
     throw notFound(
       `Project "${text}" not found`,
       slugs.length ? `Known projects: ${slugs.join(', ')}` : 'No projects exist yet; create one first.',
@@ -245,7 +276,8 @@ export function updateProject(ctx: Ctx, actor: string, ref: string | number, pat
     for (const key of ['name', 'description', 'playbook', 'status'] as const) {
       if (patch[key] !== undefined && before[key] !== next[key]) changes[key] = { from: before[key], to: next[key] };
     }
-    record({ projectId: before.id, type: 'project.updated', entity: 'project', entityId: before.id, data: { changes } });
+    // Only a real change is recorded, so a second archive (a double-click) logs nothing more.
+    if (Object.keys(changes).length) record({ projectId: before.id, type: 'project.updated', entity: 'project', entityId: before.id, data: { changes } });
     if (changes.name || changes.description) {
       const rootChanges = { ...(changes.name ? { title: changes.name } : {}), ...(changes.description ? { body: changes.description } : {}) };
       record({ projectId: before.id, type: 'node.updated', entity: 'node', entityId: before.rootNodeId, data: { changes: rootChanges } });
@@ -337,7 +369,7 @@ export function listProjectSummaries(ctx: Ctx): ProjectSummary[] {
         (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.state != 'ended' AND s.last_seen_at >= ?) AS active_sessions,
         (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.state = 'working' AND s.last_seen_at >= ?) AS working_sessions,
         (SELECT ts FROM events e WHERE e.project_id = p.id ORDER BY e.id DESC LIMIT 1) AS last_event_at
-       FROM projects p`,
+       FROM projects p WHERE p.deleted_at IS NULL`,
     )
     .all(liveSince, liveSince) as (ProjectRow & { needs_you: number; active_sessions: number; working_sessions: number; last_event_at: string | null })[];
   return rows
@@ -359,11 +391,16 @@ export function addBinding(ctx: Ctx, actor: string, ref: string | number, rawPat
       .get(path, pattern) as BindingRow | undefined;
     if (existing) {
       if (existing.project_id === project.id) return toBinding(existing);
-      const owner = getProjectById(ctx, existing.project_id);
-      throw conflict(
-        `${path}${pattern ? ` (branch ${pattern})` : ''} is already bound to project ${owner?.slug ?? existing.project_id}`,
-        'Unbind it first, or add a branch pattern to tell the projects apart.',
-      );
+      const owner = ctx.db.prepare('SELECT slug, deleted_at FROM projects WHERE id = ?').get(existing.project_id) as Pick<ProjectRow, 'slug' | 'deleted_at'> | undefined;
+      if (!owner?.deleted_at) {
+        throw conflict(
+          `${path}${pattern ? ` (branch ${pattern})` : ''} is already bound to project ${owner?.slug ?? existing.project_id}`,
+          'Unbind it first, or add a branch pattern to tell the projects apart.',
+        );
+      }
+      // A deleted project never blocks a folder: this binding takes its place, and a restore comes back without it.
+      ctx.db.prepare('DELETE FROM bindings WHERE id = ?').run(existing.id);
+      record({ projectId: existing.project_id, type: 'binding.deleted', entity: 'binding', entityId: existing.id, data: { path: existing.path } });
     }
     const info = ctx.db
       .prepare('INSERT INTO bindings (project_id, path, branch_pattern, created_at) VALUES (?, ?, ?, ?)')
@@ -383,13 +420,15 @@ export function removeBinding(ctx: Ctx, actor: string, id: number): void {
   });
 }
 
+/** Every binding but a deleted project's, which stay (inert, it is archived) for a restore. */
 export function listBindings(ctx: Ctx): Binding[] {
-  return (ctx.db.prepare('SELECT * FROM bindings ORDER BY id').all() as BindingRow[]).map(toBinding);
+  return (ctx.db.prepare('SELECT b.* FROM bindings b JOIN projects p ON p.id = b.project_id WHERE p.deleted_at IS NULL ORDER BY b.id').all() as BindingRow[]).map(toBinding);
 }
 
 export function resolveBinding(ctx: Ctx, cwd: string, branch?: string | null): Project | undefined {
+  // Deleted implies archived; the second filter holds for a deleted project an old build has unarchived.
   const rows = ctx.db
-    .prepare("SELECT b.* FROM bindings b JOIN projects p ON p.id = b.project_id WHERE p.status = 'active' ORDER BY b.id")
+    .prepare("SELECT b.* FROM bindings b JOIN projects p ON p.id = b.project_id WHERE p.status = 'active' AND p.deleted_at IS NULL ORDER BY b.id")
     .all() as BindingRow[];
   let best: BindingRow | undefined;
   for (const row of rows) {

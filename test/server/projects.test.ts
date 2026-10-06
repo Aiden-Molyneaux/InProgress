@@ -1,9 +1,128 @@
 import { describe, expect, it } from 'vitest';
+import type { Ctx } from '../../src/server/db/tx';
+import { listEventsSince, maxEventId } from '../../src/server/repo/events';
+import { addLog } from '../../src/server/repo/logs';
+import { addNodes, findNode, requireNode, updateNode } from '../../src/server/repo/nodes';
 import {
-  addBinding, createProject, listBindings, listProjectSummaries, removeBinding,
+  addBinding, createProject, getProjectById, listBindings, listProjectSummaries, removeBinding,
   resolveBinding, resolveProject, slugify, updateProject,
 } from '../../src/server/repo/projects';
+import { addResource, requireResource } from '../../src/server/repo/resources';
+import { search } from '../../src/server/repo/search';
+import { getProjectSnapshot } from '../../src/server/repo/snapshot';
 import { makeCtx } from '../helpers';
+
+/** As a delete leaves it: archived, with deleted_at set to `at` (default: now). */
+function markDeleted(ctx: Ctx, id: number, at = ctx.now()): void {
+  ctx.db.prepare("UPDATE projects SET status = 'archived', deleted_at = ? WHERE id = ?").run(at, id);
+}
+
+/** The error `fn` throws, so a test can read its status and hint. */
+function thrown(fn: () => unknown): { status?: number; message?: string; hint?: string } {
+  try {
+    fn();
+  } catch (err) {
+    return err as { status?: number; message?: string; hint?: string };
+  }
+  throw new Error('it did not throw');
+}
+
+describe('deleted projects are hidden', () => {
+  /** Live and Gone, both bound to a folder; Gone has a step with a resource and is deleted at 2026-10-01. */
+  function deleted() {
+    const ctx = makeCtx();
+    const live = createProject(ctx, 'test', { name: 'Live' });
+    const gone = createProject(ctx, 'test', { name: 'Gone Site' });
+    addBinding(ctx, 'test', live.slug, 'C:/work/live');
+    addBinding(ctx, 'test', gone.slug, 'C:/work/gone');
+    const [step] = addNodes(ctx, 'test', { parentId: gone.rootNodeId, nodes: [{ title: 'Ship it' }] });
+    const resource = addResource(ctx, 'test', { nodeId: step.id, kind: 'doc', title: 'Notes', content: 'x' });
+    markDeleted(ctx, gone.id, '2026-10-01T09:00:00.000Z');
+    return { ctx, live, gone, step, resource };
+  }
+
+  it('leaves the project list, which the window, status, list_projects and doctor read', () => {
+    const { ctx, live } = deleted();
+    expect(listProjectSummaries(ctx).map((p) => p.id)).toEqual([live.id]);
+  });
+
+  it('is not found by id, slug or name, and the miss says how to restore it and until when', () => {
+    const { ctx, gone } = deleted();
+    for (const ref of [gone.id, String(gone.id), 'gone-site', 'GONE-SITE', 'Gone Site']) {
+      const err = thrown(() => resolveProject(ctx, ref));
+      expect(err, String(ref)).toMatchObject({ status: 404, message: `Project "${String(ref)}" not found` });
+      expect(err.hint, String(ref)).toBe('It was deleted; restore it from Recently deleted in the window before 2026-10-31.');
+    }
+    // The snapshot route (a stale #/p/ link), the outline and search all resolve through it.
+    expect(() => getProjectSnapshot(ctx, 'gone-site')).toThrow('Project "gone-site" not found');
+    expect(() => search(ctx, resolveProject(ctx, 'gone-site').id, 'Ship')).toThrow('not found');
+    // Writes by reference refuse too: an update (an unarchive by an old reference) and a binding.
+    expect(() => updateProject(ctx, 'test', 'gone-site', { status: 'active' })).toThrow('not found');
+    expect(() => addBinding(ctx, 'test', 'gone-site', 'C:/work/other')).toThrow('not found');
+  });
+
+  it('names only the projects still there when a reference misses', () => {
+    const { ctx } = deleted();
+    expect(thrown(() => resolveProject(ctx, 'nope')).hint).toBe('Known projects: live');
+  });
+
+  it('says it is past its 30 days once the restore window has closed, before the purge has run', () => {
+    const { ctx, gone } = deleted();
+    markDeleted(ctx, gone.id, '2026-08-01T09:00:00.000Z');
+    expect(thrown(() => resolveProject(ctx, 'gone-site')).hint).toBe('It was deleted over 30 days ago and is about to be removed for good.');
+  });
+
+  it('leaves the binding list, and its folder no longer tracks sessions even if an old build unarchived it', () => {
+    const { ctx, live, gone } = deleted();
+    expect(listBindings(ctx).map((b) => b.projectId)).toEqual([live.id]);
+    expect(resolveBinding(ctx, 'C:/work/gone/src', 'main')).toBeUndefined();
+    ctx.db.prepare("UPDATE projects SET status = 'active' WHERE id = ?").run(gone.id);
+    expect(resolveBinding(ctx, 'C:/work/gone/src', 'main')).toBeUndefined();
+    expect(resolveBinding(ctx, 'C:/work/live', 'main')?.id).toBe(live.id);
+  });
+
+  it("treats its steps and resources as not found, for reads and writes by id", () => {
+    const { ctx, step, resource } = deleted();
+    expect(findNode(ctx, step.id)).toBeUndefined();
+    expect(thrown(() => requireNode(ctx, step.id))).toMatchObject({ status: 404, message: `Node #${step.id} not found` });
+    expect(() => updateNode(ctx, 'test', step.id, { status: 'done' })).toThrow(`Node #${step.id} not found`);
+    expect(() => addLog(ctx, 'test', step.id, 'Done')).toThrow(`Node #${step.id} not found`);
+    expect(() => addResource(ctx, 'test', { nodeId: step.id, kind: 'doc', title: 'More', content: 'y' })).toThrow(`Node #${step.id} not found`);
+    expect(thrown(() => requireResource(ctx, resource.id))).toMatchObject({ status: 404, message: `Resource r${resource.id} not found` });
+    // Nothing was written.
+    expect(ctx.db.prepare("SELECT status FROM nodes WHERE id = ?").pluck().get(step.id)).toBe('todo');
+  });
+
+  it('gives up a folder it was bound to: binding it to another project takes it over', () => {
+    const { ctx, live, gone } = deleted();
+    const old = listBindings(ctx);
+    const mark = maxEventId(ctx);
+    const binding = addBinding(ctx, 'test', live.slug, 'C:\\work\\gone');
+    expect(binding).toMatchObject({ projectId: live.id, path: 'C:/work/gone' });
+    expect(listBindings(ctx).map((b) => b.path)).toEqual(['C:/work/live', 'C:/work/gone']);
+    expect(ctx.db.prepare('SELECT COUNT(*) FROM bindings WHERE project_id = ?').pluck().get(gone.id)).toBe(0);
+    expect(listEventsSince(ctx, mark).map((e) => [e.type, e.projectId])).toEqual([['binding.deleted', gone.id], ['binding.created', live.id]]);
+    expect(old).toHaveLength(1);
+  });
+
+  it('still reads by id inside the server', () => {
+    const { ctx, gone } = deleted();
+    expect(getProjectById(ctx, gone.id)).toMatchObject({ slug: 'gone-site', status: 'archived' });
+  });
+});
+
+describe('updateProject', () => {
+  it('records nothing when nothing changes, so a second archive logs no second event', () => {
+    const ctx = makeCtx();
+    const p = createProject(ctx, 'test', { name: 'P' });
+    const mark = maxEventId(ctx);
+    updateProject(ctx, 'test', p.slug, { status: 'archived' });
+    updateProject(ctx, 'test', p.slug, { status: 'archived' });
+    updateProject(ctx, 'test', p.slug, { name: 'P', description: '' });
+    expect(listEventsSince(ctx, mark).map((e) => e.type)).toEqual(['project.updated']);
+    expect(getProjectById(ctx, p.id)?.status).toBe('archived');
+  });
+});
 
 describe('projects', () => {
   it('slugifies names', () => {
