@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test as base, expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 
 interface Seeded {
@@ -1216,6 +1218,28 @@ const RUN_TIME = '(<1m|\\d+m)';
 /** A card's frame: the `.ip-card` around its header (`.ip-node`) and its lines. */
 const frameOf = (header: Locator) => header.locator('xpath=..');
 
+/** A session transcript in a temp folder, laid out as Claude Code keeps it, for the server's transcript watcher. */
+function transcripts(session: string): { path: string; agent: (agentId: string, last: object, ago?: number) => void } {
+  const dir = mkdtempSync(join(tmpdir(), 'ip-e2e-agents-'));
+  const path = join(dir, `${session}.jsonl`);
+  writeFileSync(path, '');
+  return {
+    path,
+    /** Writes subagent `agentId`'s own transcript ending on `last`: that line, and the file, `ago` ms old. */
+    agent: (agentId, last, ago = 2 * 60_000) => {
+      const at = new Date(Date.now() - ago);
+      const file = join(dir, session, 'subagents', `agent-${agentId}.jsonl`);
+      mkdirSync(join(dir, session, 'subagents'), { recursive: true });
+      writeFileSync(file, `${JSON.stringify({ ...last, timestamp: at.toISOString() })}\n`);
+      utimesSync(file, at, at);
+    },
+  };
+}
+
+/** The last line of a subagent's own transcript when it was stopped, and when it hit the usage limit. */
+const INTERRUPTED = { type: 'user', message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] } };
+const RATE_LIMITED = { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: "You've hit your session limit" }] }, isApiErrorMessage: true, error: 'rate_limit' };
+
 type Point = { x: number; y: number };
 type Box = { x: number; y: number; width: number; height: number };
 
@@ -1451,6 +1475,75 @@ test.describe('Live work', () => {
     await expect(page.locator('.ip-badge')).toHaveCount(0);
     await expect(trailRow).toHaveCount(1);
     await expect(revenueFrame.locator('.ip-work-done')).toHaveCount(0);
+  });
+
+  test('a subagent stopped without a SubagentStop greys with a mark once its transcript says so, then joins the trail with the same words', async ({ page, api, fresh }) => {
+    const files = transcripts(fresh.session);
+    await hook(api, fresh.session, { event: 'prompt', transcriptPath: files.path });
+    await hook(api, fresh.session, { event: 'subagent-start', agentId: 'wf-agent-1', agentType: 'general-purpose' });
+    await open(page, fresh);
+    const chip = page.locator('.ip-chip-s');
+    const kin = page.getByRole('img', { name: /^a1 · general-purpose · / });
+    await expect(chip).toHaveAccessibleName('A · E2E session · 1 subagent');
+    await expect(kin).not.toHaveClass(/\bended\b/);
+    // Its workflow is stopped: its own transcript ends on the interrupt, and no SubagentStop comes. The watcher's next
+    // tick (half a second here) ends it.
+    files.agent('wf-agent-1', INTERRUPTED);
+    await expect(kin).toHaveClass(/\bended\b/);
+    await expect(kin).not.toHaveClass(/\blimit\b/);
+    await expect(kin).toHaveAccessibleName('a1 · general-purpose · was stopped 2 min ago');
+    await expect(kin).toHaveText('a1!');
+    await expect(kin.locator('.ip-agent-mark')).toHaveCSS('color', 'rgb(71, 85, 105)');
+    await expect(chip).toHaveAccessibleName('A · E2E session');
+    await expect(page.locator('.ip-act-what')).toHaveText('E2E session · a1 was stopped');
+    // Five minutes on, it is a neutral trail row on its step with the same words, its run ending at its last line.
+    await page.clock.install({ time: Date.now() + 6 * 60_000 });
+    await page.reload();
+    await expect(chip).toBeVisible();
+    await expect(page.locator('.ip-agent')).toHaveCount(0);
+    const playFrame = frameOf(page.locator('.ip-node', { hasText: 'Play app signing' }));
+    await playFrame.locator('.ip-work-done').click();
+    const row = playFrame.locator('.ip-trail-agent');
+    await expect(row).toHaveText(/^◆ general-purpose · ran <1 min · was stopped \d+ min ago$/);
+    await expect(row.locator('.ip-limit-words')).toHaveCount(0);
+  });
+
+  test('a subagent at the usage limit waits on its line in amber, holding its step, until its session ends; its trail words stay amber', async ({ page, api, fresh }) => {
+    const files = transcripts(fresh.session);
+    await hook(api, fresh.session, { event: 'prompt', transcriptPath: files.path });
+    await hook(api, fresh.session, { event: 'subagent-start', agentId: 'wf-agent-2', agentType: 'general-purpose' });
+    await open(page, fresh);
+    const kin = page.getByRole('img', { name: /^a1 · general-purpose · / });
+    await expect(kin).not.toHaveClass(/\bended\b/);
+    files.agent('wf-agent-2', RATE_LIMITED);
+    await expect(kin).toHaveClass(/\bended\b.*\blimit\b/);
+    await expect(kin).toHaveAccessibleName('a1 · general-purpose · hit the usage limit 2 min ago · resume after the reset');
+    await expect(page.locator('.ip-act-what')).toHaveText('E2E session · a1 hit the usage limit');
+    // The session moves on. Six minutes later the subagent still waits on Play app signing, on the letter's line there.
+    await write(api, fresh.session, 'post', `/api/sessions/${fresh.session}/focus`, { nodeId: fresh.ids['3 RevenueCat'] });
+    await page.clock.install({ time: Date.now() + 6 * 60_000 });
+    await page.reload();
+    const play = page.locator('.ip-node', { hasText: 'Play app signing' });
+    const away = frameOf(play).getByRole('group', { name: 'A · subagents of E2E session', exact: true });
+    const waiting = away.getByRole('img', { name: /^a1 · general-purpose · hit the usage limit \d+ min ago · resume after the reset$/ });
+    await expect(waiting).toHaveText('a1!');
+    // Amber, as needing Aiden: its tag and its mark. Its character is any ended kin's.
+    await expect(waiting.locator('.ip-agent-tag')).toHaveCSS('color', 'rgb(146, 64, 14)');
+    await expect(waiting.locator('.ip-agent-mark')).toHaveCSS('color', 'rgb(146, 64, 14)');
+    // It holds its step, so Play app signing is not paused; it is not a step of Aiden's, so the pill still counts one.
+    await expect(play).not.toHaveClass(/\bpaused\b/);
+    await expect(page.getByRole('button', { name: /need you/ })).toHaveText('1 need you');
+    await expect(page.locator('.ip-chip-s')).toHaveAccessibleName('A · E2E session');
+    // The session ends: the subagent leaves for the trail, its words still amber in a neutral row, and the step is nobody's.
+    await hook(api, fresh.session, { event: 'end' });
+    await expect(page.locator('.ip-agent')).toHaveCount(0);
+    await expect(play).toHaveClass(/\bpaused\b/);
+    await frameOf(play).locator('.ip-work-done').click();
+    const row = frameOf(play).locator('.ip-trail-agent');
+    await expect(row).toHaveText(/^◆ general-purpose · ran <1 min · hit the usage limit \d+ min ago$/);
+    await expect(row).toHaveCSS('color', 'rgb(71, 85, 105)');
+    await expect(row.locator('.ip-limit-words')).toHaveText(/^ran <1 min · hit the usage limit \d+ min ago$/);
+    await expect(row.locator('.ip-limit-words')).toHaveCSS('color', 'rgb(146, 64, 14)');
   });
 
   test("a worker's badge says what it was asked to do, and a session's readers on a step fold into one reading row", async ({ page, api, fresh }) => {

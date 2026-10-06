@@ -151,6 +151,8 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 /* A subagent's tag in the popover: DM Mono in its session's hue. An ended row goes grey, tag and all. */
 .ip-chip-pop .ip-agent-tag { font-family: var(--font-mono); font-size: var(--fs-s); font-weight: var(--w-text); color: var(--fam, var(--family-0)); }
 .ip-chip-pop li.ended, .ip-chip-pop li.ended .ip-agent-tag { color: var(--muted); }
+/* One that hit the usage limit waits for Aiden: its tag and its words go amber. */
+.ip-chip-pop li.limit .ip-agent-tag, .ip-chip-pop .ip-limit-words { color: var(--amber-ink); }
 /* A reader's ◇ in a list (the popover, Details): neutral, as only the letter wears the hue. */
 .ip-reader-mark { color: var(--muted); }
 /* The needs-you pill and Follow: 26 px hairline buttons, centred on the row's first line. */
@@ -298,6 +300,10 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-agent-tag { font-family: var(--font-mono); font-size: var(--fs-s); font-weight: var(--w-text); line-height: 14px; color: var(--fam, var(--faint)); }
 .ip-agent-time { font-family: var(--font-mono); font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
 .ip-agent.ended, .ip-agent.ended .ip-agent-tag { color: var(--muted); }
+/* A kin that ended without a stop: a one-character mark after its tag, grey. At the usage limit it waits for Aiden, so its
+   tag and mark go amber; amber's ring stays permission's. */
+.ip-agent-mark { font-family: var(--font-mono); font-size: var(--fs-s); font-weight: var(--w-text); line-height: 14px; color: var(--muted); }
+.ip-agent.limit .ip-agent-tag, .ip-agent.limit .ip-agent-mark { color: var(--amber-ink); }
 .ip-agent-more { flex: none; margin-left: 8px; font-family: var(--font-mono); font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
 /* A session's running readers: one muted line, indented past the lead. Only the letter wears the hue. */
 .ip-readers { display: flex; align-items: center; height: var(--readers-line); min-width: 0; padding-left: 38px; white-space: nowrap; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
@@ -334,6 +340,8 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-work.stale:not(.w-completed) .ip-work-mark { color: var(--faint); animation: none; }
 /* A subagent in the trail, under its step's open done row: neutral, its ◆ muted. */
 .ip-trail-agent { height: var(--task-row); padding-left: 30px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--fs-m); line-height: var(--task-row); color: var(--muted); }
+/* Except the words of one that hit the usage limit: `ran 22 min · hit the usage limit 10 h ago`, amber, with no letter. */
+.ip-trail-agent .ip-limit-words { color: var(--amber-ink); }
 /* "+n more" and "✓ n done": a fold row, 26 px, a dashed hairline on no fill, as wide as its words. */
 .ip-more { display: flex; align-items: center; gap: 6px; height: calc(var(--fold-row) - var(--card-gap)); padding: 0 12px; border: 1px dashed var(--border); border-radius: var(--radius); background: transparent; white-space: nowrap; font-size: var(--fs-m); line-height: 18px; color: var(--muted); cursor: pointer; }
 .ip-more-mark { color: var(--muted); }
@@ -384,6 +392,8 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-wt.w-completed, .ip-wt.stale, .ip-dagent.ended, .ip-dtrail { color: var(--muted); }
 .ip-wt .ip-work-tag, .ip-dagent .ip-agent-tag { font-family: var(--font-mono); font-size: var(--fs-s); font-weight: var(--w-text); color: var(--fam); }
 .ip-dagent.ended .ip-agent-tag { color: inherit; }
+/* A subagent at the usage limit, and its trail entry: its tag and its words amber, as on the canvas. */
+.ip-dagent.limit .ip-agent-tag, .ip-dagent .ip-limit-words, .ip-dtrail .ip-limit-words { color: var(--amber-ink); }
 .ip-wt .ip-work-mark { display: inline-block; width: 12px; text-align: center; color: var(--muted); }
 .ip-wt.w-in_progress .ip-work-mark { color: var(--active-ink); }
 .ip-wt.stale:not(.w-completed) .ip-work-mark { color: var(--faint); }
