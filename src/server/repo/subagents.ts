@@ -49,6 +49,14 @@ export interface DispatchInput {
  */
 export const NOT_READER_SQL = `a.agent_type NOT IN (${READER_AGENT_TYPES.map((t) => `'${t}'`).join(', ')})`;
 
+/**
+ * SQL for "this ended subagent row ended in its session's current life", for a row aliased `a` joined to its session
+ * aliased `s`: at or after the session last came back from ended (markRevived), or ever for one that never has. A
+ * session's end closes what its subagents were waiting on: one at the usage limit leaves its line for the trail, and the
+ * watcher no longer reads one it ended. Only a SubagentStart brings such a row back (startSubagent).
+ */
+export const ENDED_THIS_LIFE_SQL = "a.ended_at >= COALESCE(s.revived_at, '')";
+
 const before = (ctx: Ctx, ms: number) => new Date(Date.parse(ctx.now()) - ms).toISOString();
 
 /**
@@ -73,11 +81,16 @@ const toInfo = (r: SubagentRow): SubagentInfo => ({
 
 /**
  * A session's subagents that are running, stopped less than ENDED_AGENT_MS (5 minutes) ago, or ended at the usage limit
- * (they wait on their line for Aiden until revived or their session ends), oldest first.
+ * in the session's current life (they wait on their line for Aiden until revived or their session ends; a session that
+ * comes back after it ended leaves the old ones in the trail, ENDED_THIS_LIFE_SQL), oldest first.
  */
 export function listSubagents(ctx: Ctx, sessionId: string): SubagentInfo[] {
   return (ctx.db
-    .prepare("SELECT * FROM session_subagents WHERE session_id = ? AND (ended_at IS NULL OR ended_at >= ? OR end_reason = 'limit') ORDER BY started_at, agent_id")
+    .prepare(
+      `SELECT a.* FROM session_subagents a JOIN sessions s ON s.id = a.session_id
+       WHERE a.session_id = ? AND (a.ended_at IS NULL OR a.ended_at >= ? OR (a.end_reason = 'limit' AND ${ENDED_THIS_LIFE_SQL}))
+       ORDER BY a.started_at, a.agent_id`,
+    )
     .all(sessionId, before(ctx, ENDED_AGENT_MS)) as SubagentRow[])
     .map(toInfo);
 }

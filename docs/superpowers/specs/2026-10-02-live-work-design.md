@@ -52,7 +52,8 @@ Attribution of a working task to a node, decided once, at creation:
 - **No SubagentStop** comes when a subagent hits the usage limit or an API error, or is stopped (#125). The server's
   transcript watcher (`agent-watch.ts`) reads each running subagent's own transcript once a minute: a last line that
   marks the end ends it with `limit`, `error` or `killed`, 20 minutes with no new line ends it as `silent`, and a newer
-  line brings it back (review-actions rulings 44 to 51).
+  line brings it back while its session lives; a session that ends and comes back leaves them ended
+  (review-actions rulings 44 to 52).
 
 ### Planned order (#56)
 - Across plan steps: a per-project queue of node ids, set by the scribe with a new MCP tool

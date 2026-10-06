@@ -439,6 +439,50 @@ describe('how a subagent ended', () => {
     // Its session's end leaves the usage limit as the reason.
     expect(getProjectSnapshot(ctx, project.slug).trailAgents.map((a) => [a.agentId, a.endReason])).toEqual([['k', 'killed'], ['l', 'limit']]);
   });
+
+  const comeBack: [string, (s: ReturnType<typeof setup>) => void][] = [
+    ['a resume after it ended', ({ hook, tick }) => {
+      hook({ event: 'end' });
+      tick(6 * 60 * MIN);
+      hook({ event: 'start', source: 'resume' });
+    }],
+    ['a prompt after stale expiry ended it', ({ ctx, project, hook, tick }) => {
+      tick(13 * 60 * MIN);
+      getProjectSnapshot(ctx, project.slug);
+      expect(findSession(ctx, 's1')!.state).toBe('ended');
+      hook({ event: 'prompt' });
+    }],
+  ];
+  it.each(comeBack)("leaves a usage-limit subagent in the trail when its session comes back by %s, and holds one from the session's new life", (_, revive) => {
+    const s = setup();
+    const { ctx, project, hook, tick } = s;
+    hook(start('l', 'general-purpose'));
+    endAgent(ctx, 's1', 'l', 'limit', ctx.now(), ctx.now());
+    revive(s);
+    const snap = getProjectSnapshot(ctx, project.slug);
+    expect(snap.sessions.map((x) => [x.id, x.state, x.subagents])).toEqual([['s1', expect.not.stringMatching(/^ended$/), []]]);
+    expect(snap.trailAgents.map((a) => [a.agentId, a.endReason])).toEqual([['l', 'limit']]);
+    // One that hits the limit in this life waits on its line, past 5 minutes, as before.
+    hook(start('m', 'general-purpose'));
+    endAgent(ctx, 's1', 'm', 'limit', ctx.now(), ctx.now());
+    tick(10 * MIN);
+    expect(subagents(ctx).map((a) => [a.agentId, a.endReason])).toEqual([['m', 'limit']]);
+    // And a SubagentStart brings the old one back from the trail.
+    hook(start('l', 'general-purpose'));
+    expect(subagents(ctx).map((a) => [a.agentId, a.endReason])).toEqual([['l', null], ['m', 'limit']]);
+  });
+
+  it("tells the UI its subagents changed when a session comes back without the usage-limit subagents of its last life", () => {
+    const { ctx, hook, tick } = setup();
+    hook(start('l', 'general-purpose'));
+    endAgent(ctx, 's1', 'l', 'limit', ctx.now(), ctx.now());
+    hook({ event: 'end' });
+    tick(6 * 60 * MIN);
+    const mark = maxEventId(ctx);
+    hook({ event: 'start', source: 'resume' });
+    const updated = listEventsSince(ctx, mark).filter((e) => e.type === 'session.updated');
+    expect(updated.map((e) => (e.data as { changed: string[] }).changed)).toEqual([expect.arrayContaining(['state', 'subagents'])]);
+  });
 });
 
 describe('subagent numbers', () => {

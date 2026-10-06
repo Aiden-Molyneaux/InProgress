@@ -2,7 +2,7 @@ import { statSync } from 'node:fs';
 import type { EndReason, SessionState } from '../core/types';
 import { agentTranscriptPath, readAgentTail, type TranscriptEnding, type TranscriptTail } from '../lib/agent-transcript';
 import { write, type Ctx } from './db/tx';
-import { endAgent, reviveAgent } from './repo/subagents';
+import { ENDED_THIS_LIFE_SQL, endAgent, reviveAgent } from './repo/subagents';
 
 /**
  * The transcript watcher (#125). Claude Code fires no SubagentStop when a subagent hits the usage limit or an API error,
@@ -80,8 +80,9 @@ const mtimeOf = (path: string): number | undefined => {
 
 /**
  * One tick. Takes the running subagents of live sessions that have a transcript, and the ones it ended itself
- * (`limit`, `error`, `killed`, `silent`) while their session lives: a stat each, and a tail read only when the file
- * moved. Rules:
+ * (`limit`, `error`, `killed`, `silent`) in their session's current life (ENDED_THIS_LIFE_SQL: a session's end closes
+ * them, and one that comes back leaves them as its end did, until a SubagentStart): a stat each, and a tail read only
+ * when the file moved. Rules:
  * - a last line that marks an end (`killed`, `limit`, `error`) ends a running subagent once the file has been still for
  *   MARKER_QUIET_MS, with its last sign of life (that line's time, else the file's) and `ended_at` = now;
  * - SILENT_MS with no change to the file ends it as `silent`, unless its session waits for a permission (a prompt inside
@@ -101,7 +102,7 @@ export function watchAgents(ctx: Ctx, state: WatchState): WatchResult {
       `SELECT a.session_id, a.agent_id, a.ended_at, a.last_active_at, s.transcript_path, s.state
        FROM session_subagents a JOIN sessions s ON s.id = a.session_id
        WHERE s.state != 'ended' AND s.transcript_path IS NOT NULL
-         AND (a.ended_at IS NULL OR a.end_reason IN ('limit', 'error', 'killed', 'silent'))
+         AND (a.ended_at IS NULL OR (a.end_reason IN ('limit', 'error', 'killed', 'silent') AND ${ENDED_THIS_LIFE_SQL}))
        ORDER BY a.session_id, a.started_at, a.agent_id`,
     )
     .all() as WatchRow[];

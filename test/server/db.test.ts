@@ -388,7 +388,7 @@ describe('database', () => {
     return { dir, file };
   }
 
-  it('migrates a database at v6 with data to v7, every start focus, end reason and last sign of life null', () => {
+  it('migrates a database at v6 with data to v7, every start focus, end reason, last sign of life and session revival null', () => {
     const { dir, file } = v6Database();
     const db = openDb(file);
     try {
@@ -397,6 +397,7 @@ describe('database', () => {
         { agent_id: 'a1', ordinal: 1, ended_at: null, start_focus_id: null, end_reason: null, last_active_at: null },
         { agent_id: 'a2', ordinal: 2, ended_at: 't2', start_focus_id: null, end_reason: null, last_active_at: null },
       ]);
+      expect(db.prepare('SELECT id, state, revived_at FROM sessions').all()).toEqual([{ id: 's1', state: 'working', revived_at: null }]);
       expect(db.prepare("SELECT value FROM meta WHERE key = 'min_reader_version'").pluck().get()).toBe('1');
     } finally {
       db.close();
@@ -434,6 +435,13 @@ describe('database', () => {
       db.prepare("UPDATE session_subagents SET end_reason = 'silent', last_active_at = 't3' WHERE agent_id = 'a1'").run();
       db.prepare('UPDATE session_subagents SET ended_at = NULL WHERE session_id = ? AND agent_id = ?').run('s1', 'a1');
       expect(db.prepare("SELECT ended_at, end_reason, last_active_at FROM session_subagents WHERE agent_id = 'a1'").get()).toEqual({ ended_at: null, end_reason: 'silent', last_active_at: 't3' });
+      // Its session writes never name the revival either: its insert above has none, and its saveSession keeps what the
+      // newer build stamped.
+      expect(db.prepare("SELECT revived_at FROM sessions WHERE id = 's1'").pluck().get()).toBeNull();
+      db.prepare("UPDATE sessions SET revived_at = 't5' WHERE id = 's1'").run();
+      db.prepare('UPDATE sessions SET project_id = ?, title = ?, cwd = ?, branch = ?, transcript_path = ?, state = ?, focus_node_id = ?, prompts_since_update = ?, last_seen_at = ?, ended_at = ?, slot = ? WHERE id = ?')
+        .run(1, null, null, null, null, 'ended', null, 0, 't6', 't6', 0, 's1');
+      expect(db.prepare("SELECT state, revived_at FROM sessions WHERE id = 's1'").get()).toEqual({ state: 'ended', revived_at: 't5' });
     } finally {
       MIGRATIONS.push(...shipped);
     }

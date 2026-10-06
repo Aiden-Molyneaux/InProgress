@@ -146,7 +146,8 @@ Aiden's answers on the usage limit and on silence):
     if wrong: none for old builds; old rows read as clean stops.
 45. The transcript watcher (`src/server/agent-watch.ts`) ticks once at start-up and then every 60 s on an unref'd
     interval. It takes the running rows of every session that is not ended and has a transcript path, readers
-    included (a dead reader inflates the chip count as much as a worker), plus the rows it ended itself. A stat each,
+    included (a dead reader inflates the chip count as much as a worker), plus the rows it ended itself in the
+    session's current life (ruling 52). A stat each,
     a tail read only when the mtime moved. A marker ends a row once the file has been still 60 s; 20 minutes with no
     change to the file ends it as `silent`; no silence end while the session's state is `permission`, and the count
     starts again from the last tick that saw the permission; a gap between ticks over 3 minutes restarts every count;
@@ -155,8 +156,8 @@ Aiden's answers on the usage limit and on silence):
     ended). Cost if wrong: a long silent tool call ends early and comes back on its next line.
 46. Widens the design's revival: any end the watcher found (`limit`, `error`, `killed`, `silent`) is undone by a newer
     line in the agent's own transcript, not only `silent`. A line written after the end means the agent lives, for
-    example after a resume whose SubagentStart POST timed out. A clean stop and a session's end are not revived by a
-    line; a resumed SubagentStart revives those, as before. A real SubagentStop still overwrites only a `silent` guess.
+    example after a resume whose SubagentStart POST timed out. A clean stop, a session's end and any end from before
+    the session last ended (ruling 52) are not revived by a line; a resumed SubagentStart revives those, as before. A real SubagentStop still overwrites only a `silent` guess.
     Cost if wrong: an agent that writes something after its marker (not seen in any transcript) comes back to running
     until silence ends it.
 47. A resumed SubagentStart that revives a row the watcher ended is not undone by the marker it was ended on. The
@@ -166,7 +167,8 @@ Aiden's answers on the usage limit and on silence):
     restart that memory is gone, so such a row can end once more and comes back on its next line. Cost if wrong: none.
 48. A usage-limit death waits for Aiden (his answer): the server keeps a `limit` row in its live session's list past
     5 minutes, and the window keeps it as a kin (`agentShown`), pinning and holding its step (`occupiedSteps`, so the
-    step does not draw paused), until a newer line revives it or its session ends. It is not running, so it leaves the
+    step does not draw paused), until a newer line revives it or its session ends (and a session that comes back
+    leaves it in the trail, ruling 52). It is not running, so it leaves the
     chip's `· n subagents` and its tasks stop pulsing; it never counts in the `n need you` pill or the tab count. The
     kin keeps Quiet's ended character with the `!` mark, its tag and mark in `--amber-ink`. In the chip popover and
     Details its tag and its words are amber too, and the line ends `· resume after the reset`. After its session ends,
@@ -183,3 +185,15 @@ Aiden's answers on the usage limit and on silence):
 51. `INPROGRESS_AGENT_WATCH_MS` (a positive whole number of ms) replaces the 60 s interval; the e2e server sets 500.
     The wake gap stays 3 minutes, so an interval of 3 minutes or more would hold every silence end; the override is
     for tests. Cost if wrong: none in use.
+52. A session's end closes its subagents, and a session that comes back does not reopen them (review round 1). Migration
+    7 also adds `sessions.revived_at`, stamped when a hook event brings an ended session back (a `resume` start, or a
+    prompt after stale expiry ended it), outside the Session type like `briefing_due`. `ENDED_THIS_LIFE_SQL` keeps an
+    ended row only from the session's current life (ended at or after `revived_at`, or ever when it never came back):
+    `listSubagents` keeps a `limit` row on its line only on those terms, and the watcher reads ended rows only on those
+    terms. So after `claude --resume` past the reset, the old process's usage-limit agents stay in the trail with their
+    amber words, instead of coming back as kin that pin their steps for the session's whole new life, and a line one of
+    them writes does not revive it; its SubagentStart does, as for any ended row. Other ended rows keep the 5-minute
+    kin whatever the life (ruling 49). The column is nullable, so `min_reader_version` stays 1; a v6 build that revives
+    a session leaves it as it was, so after a rollback and back an older life's usage-limit agent can show again until
+    its session next ends. Cost if wrong: an agent resumed after its session came back, whose SubagentStart POST was
+    lost, stays in the trail while it runs.

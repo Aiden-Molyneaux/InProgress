@@ -249,14 +249,41 @@ describe('watchAgents: coming back', () => {
   });
 
   it("stops watching a session once it has ended, and leaves its subagents as the session's end left them", () => {
-    const { hook, run, transcript, start, row } = setup();
+    const { hook, run, watch, transcript, append, start, row } = setup();
     start('a1');
     start('a2');
     transcript('a1', [[interrupted, 2 * MIN]]);
-    transcript('a2', [[said, 30 * MIN]]);
+    transcript('a2', [[said, 30 * SEC]]);
+    // a1 ends by its marker while the session lives; a2 is still running when the session ends.
+    expect(run(WATCH_MS)).toEqual(['a1:killed']);
+    const killed = row('a1');
     hook({ event: 'end' });
+    // Both write again after the end: neither comes back, and nothing ends again.
+    append('a1');
+    append('a2');
+    expect(watch()).toEqual({ ended: [], revived: [] });
     expect(run(30 * MIN)).toEqual([]);
-    expect([row('a1').end_reason, row('a2').end_reason]).toEqual(['session', 'session']);
+    expect(row('a1')).toEqual(killed);
+    expect(row('a2').end_reason).toBe('session');
+  });
+
+  it('leaves what it ended before its session ended alone when the session comes back, until a SubagentStart', () => {
+    const { hook, run, watch, transcript, append, start, row, tick } = setup();
+    start('l');
+    transcript('l', [[(ts) => apiError('rate_limit', ts), 2 * MIN]]);
+    expect(run(WATCH_MS)).toEqual(['l:limit']);
+    const limited = row('l');
+    hook({ event: 'end' });
+    tick(6 * 60 * MIN);
+    hook({ event: 'start', source: 'resume' });
+    // A newer line in the session's new life is not enough: the session's end closed it.
+    append('l');
+    expect(watch()).toEqual({ ended: [], revived: [] });
+    expect(row('l')).toEqual(limited);
+    // A SubagentStart brings it back, and the watcher watches it again.
+    start('l');
+    append('l', interrupted);
+    expect(run(2 * MIN)).toEqual(['l:killed']);
   });
 });
 
