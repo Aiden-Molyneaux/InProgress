@@ -1849,7 +1849,7 @@ test.describe('Live work', () => {
     await expect(upload.locator('.ip-work-mark')).toHaveCSS('animation-name', 'none');
     await playRow.click();
     await expect(upload).toHaveCount(0);
-    // The subagent stays on its own step with the task it left, neutral grey, saying how long it ran and when it stopped.
+    // The subagent stays on its own step with the task it left, neutral grey, saying how long it ran and that it ended with its session.
     await expect(androidRow).toHaveText('✓ 1 unfinished · 1 agent');
     await expect(page.locator('.ip-agent')).toHaveCount(0);
     await androidRow.click();
@@ -1857,7 +1857,7 @@ test.describe('Live work', () => {
     await expect(compare).toHaveClass(/\bstale\b/);
     await expect(compare.locator('.ip-work-agent')).toHaveCount(0);
     const agent = page.locator('.ip-trail-agent');
-    await expect(agent).toHaveText(new RegExp(`^◆ Check the keystore · sonnet · ran ${RUNNING} · stopped just now$`));
+    await expect(agent).toHaveText(new RegExp(`^◆ Check the keystore · sonnet · ran ${RUNNING} · ended with its session just now$`));
     await expect(agent).toHaveCSS('color', 'rgb(71, 85, 105)');
     // Details lists the trail under the session's title, and nothing as live work.
     await card.click();
@@ -1869,7 +1869,7 @@ test.describe('Live work', () => {
     await expect(details).toContainText(`#${android} 2 Android signing`);
     const group = details.locator('.ip-trail', { hasText: 'E2E session · ended just now' });
     await expect(group.locator('.ip-wt.stale')).toHaveText('○ Compare the keystores · Check the keystore');
-    await expect(group.locator('.ip-dtrail')).toHaveText(new RegExp(`^◆ Check the keystore · sonnet · ran ${RUNNING} · stopped just now$`));
+    await expect(group.locator('.ip-dtrail')).toHaveText(new RegExp(`^◆ Check the keystore · sonnet · ran ${RUNNING} · ended with its session just now$`));
     // Quiet: the trail's ◆ is muted, and its open task a faint ○.
     await expect(group.locator('.ip-dtrail .ip-agent-dot')).toHaveCSS('color', 'rgb(71, 85, 105)');
     await expect(group.locator('.ip-wt.stale .ip-work-mark')).toHaveCSS('color', 'rgb(100, 116, 139)');
