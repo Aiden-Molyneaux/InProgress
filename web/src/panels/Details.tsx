@@ -5,6 +5,7 @@ import { LABEL_GLYPHS, agentTag, isReader, sessionDisplayTitle, sessionTag, type
 import { api } from '../api';
 import { familyVar } from '../family';
 import { TASK_MARK, agentLine, taskFamily, taskOwner, trailAgentLine, waitsFor, withTag, withoutOwnId, workMark } from '../live';
+import { Marker } from '../Marker';
 import { relativeTime } from '../time';
 import { useNow } from '../useNow';
 import { resourceSummary } from './format';
@@ -87,7 +88,7 @@ function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'
                   key={w.id}
                   className={`ip-wt w-${w.status}`}
                   style={family ? ({ '--fam': familyVar(family.slot) } as CSSProperties) : undefined}
-                  // The session's own task names its letter here; a subagent's shows its tag on the row.
+                  // The session's own task names its letter here and wears the hue bar; a subagent's shows its tag on the row.
                   title={family ? withTag(w.agentId ? family.tag : sessionTag(family.slot), owner) : undefined}
                 >
                   {family?.tag && (
@@ -95,7 +96,7 @@ function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'
                       <span className="ip-work-tag">{family.tag}</span>{' '}
                     </>
                   )}
-                  <span className="ip-work-mark">{TASK_MARK[w.status]}</span> {family && <span className="ip-work-agent" />}
+                  <span className="ip-work-mark">{TASK_MARK[w.status]}</span> {family && !w.agentId && <span className="ip-work-agent" />}
                   {withoutOwnId(w.subject, w.nodeId)}{' '}
                   <span className="muted">
                     — {owner}
@@ -218,7 +219,10 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
         <button className="ip-btn" onClick={onClose} aria-label="Close">×</button>
       </header>
       <div className="ip-meta">
-        {isNeedsYou(node) ? <span className="ip-pill you">NEEDS YOU</span> : <span className={`ip-pill st-${node.status}`}>{node.status}</span>}
+        {/* The canvas's marker, then the status as a muted word, or NEEDS YOU in the YOU tag's look. Details has no
+            layout item, so a paused step shows its plain status marker, and nothing pulses here. */}
+        <Marker status={node.status} question={node.kind === 'question'} paused={false} needsYou={isNeedsYou(node)} pulse={false} />
+        {isNeedsYou(node) ? <span className="ip-you">NEEDS YOU</span> : <span>{node.status}</span>}
         <span>{node.kind}</span>
         {node.label && (
           <span className="ip-meta-label">
@@ -260,7 +264,10 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
             {detail.children.map((c) => (
               <li key={c.id}>
                 <button onClick={() => onSelectNode(c.id)}>
-                  <span className={`ip-marker m-${c.status}`} />#{c.id} {c.title}
+                  <span className="ip-kid-mark">
+                    <Marker status={c.status} question={c.kind === 'question'} paused={false} needsYou={isNeedsYou(c)} pulse={false} />
+                  </span>
+                  #{c.id} {c.title}
                   {c.assignee === 'me' && c.status !== 'done' ? <span className="ip-you">YOU</span> : null}
                 </button>
               </li>
@@ -274,8 +281,8 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
           <ul className="ip-log">
             {detail.log.map((l) => (
               <li key={l.id}>
-                {relativeTime(l.createdAt)} · {l.text}
-                {l.sessionTitle ? <i> — {l.sessionTitle}</i> : null}
+                <span className="ip-log-time">{relativeTime(l.createdAt)}</span> · <span className="ip-log-text">{l.text}</span>
+                {l.sessionTitle ? <span> — {l.sessionTitle}</span> : null}
               </li>
             ))}
           </ul>
