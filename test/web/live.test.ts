@@ -253,6 +253,21 @@ describe('leadTitle', () => {
   });
 });
 
+describe('the running subagent count', () => {
+  it('reads the same in the chip label and in the lead title, whatever the state', () => {
+    const count = (text: string) => / · \d+ subagents?/.exec(text)?.[0] ?? '';
+    const cases: [number, string][] = [[0, ''], [1, ' · 1 subagent'], [2, ' · 2 subagents'], [7, ' · 7 subagents']];
+    for (const [running, text] of cases) {
+      for (const state of ['working', 'idle', 'permission', 'ended'] as const) {
+        const subagents = [agent({ agentId: 'gone', endedAt: ago(MIN) }), ...Array.from({ length: running }, (_, i) => agent({ agentId: `r${i}` }))];
+        const s = session({ state, subagents });
+        expect(count(chipLabel(s))).toBe(text);
+        expect(count(leadTitle(s))).toBe(text);
+      }
+    }
+  });
+});
+
 describe('kinTitle', () => {
   const kin = (extra: Partial<SubagentInfo> = {}) =>
     agent({ agentType: 'general-purpose', ordinal: 10, description: 'Draft the whiteboard take', model: 'opus-5-5', startedAt: ago(18 * MIN), nodeId: null, ...extra });
@@ -281,5 +296,17 @@ describe('runTime', () => {
 
   it('reads a start in the future (clock skew) as just started', () => {
     expect(runTime(ago(-5_000), NOW)).toBe('<1m');
+  });
+
+  it("counts the minutes elapsed counts: a kin's '18m' is its tooltip's '18 min'", () => {
+    // Hours and minutes from either spelling: '12 h 5 min' (elapsed) and '12h5m' (runTime).
+    const parts = (text: string) => (text.startsWith('<') ? { h: 0, m: 0 } : { h: Number(/(\d+) ?h/.exec(text)?.[1] ?? 0), m: Number(/(\d+) ?m/.exec(text)?.[1] ?? 0) });
+    for (const minutes of [0.5, 18, 59, 60, 65, 599, 725]) {
+      const long = parts(elapsed(ago(minutes * MIN), NOW));
+      const short = parts(runTime(ago(minutes * MIN), NOW));
+      expect(short.h, `${minutes} min: hours`).toBe(long.h);
+      // From 10 h the five-character bound drops the minutes ('12h'); below that they agree to the minute.
+      expect(short.m, `${minutes} min: minutes`).toBe(long.h >= 10 ? 0 : long.m);
+    }
   });
 });

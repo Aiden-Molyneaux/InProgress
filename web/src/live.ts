@@ -25,9 +25,14 @@ export function queueMark(pos: number, owner: { slot: number | null } | null): s
   return owner ? `${ownerTag(owner.slot)}${circled(pos)}` : circled(pos);
 }
 
+/** Whole minutes from an ISO time to `now`; a start in the future (clock skew) reads as 0. The one count behind `elapsed` and `runTime`. */
+function minutesSince(fromIso: string, now: number): number {
+  return Math.floor(Math.max(0, now - Date.parse(fromIso)) / 60_000);
+}
+
 /** How long something has been going: "<1 min", "12 min", "2 h 5 min". */
 export function elapsed(fromIso: string, now: number): string {
-  const minutes = Math.floor(Math.max(0, now - Date.parse(fromIso)) / 60_000);
+  const minutes = minutesSince(fromIso, now);
   if (minutes < 1) return '<1 min';
   if (minutes < 60) return `${minutes} min`;
   const rest = minutes % 60;
@@ -55,10 +60,15 @@ export function agentLine(a: SubagentInfo, now: number, underNode: number | null
 
 const STATE_SUFFIX: Record<Session['state'], string> = { working: '', idle: ' · idle', permission: ' · needs permission', ended: ' · ended' };
 
+/** ` · 2 subagents` for the subagents of a session that still run (readers included), nothing while none do. The one count behind `chipLabel` and `leadTitle`. */
+function subagentSuffix(s: Session): string {
+  const running = s.subagents.filter((a) => a.endedAt === null).length;
+  return running ? ` · ${running} subagent${running > 1 ? 's' : ''}` : '';
+}
+
 /** A session chip's label: its title, how many subagents still run, and its state unless it is working. */
 export function chipLabel(s: Session): string {
-  const live = s.subagents.filter((a) => a.endedAt === null).length;
-  return `${sessionDisplayTitle(s)}${live ? ` · ${live} subagent${live > 1 ? 's' : ''}` : ''}${STATE_SUFFIX[s.state]}`;
+  return `${sessionDisplayTitle(s)}${subagentSuffix(s)}${STATE_SUFFIX[s.state]}`;
 }
 
 /**
@@ -127,9 +137,7 @@ export function chipName(s: Session): string {
 
 /** The lead character's tooltip: letter, title, state word, and how many subagents still run (readers included). */
 export function leadTitle(s: Session): string {
-  const running = s.subagents.filter((a) => a.endedAt === null).length;
-  const count = running ? ` · ${running} subagent${running > 1 ? 's' : ''}` : '';
-  return withTag(sessionTag(s.slot), `${sessionDisplayTitle(s)} · ${WORDS[s.state]}${count}`);
+  return withTag(sessionTag(s.slot), `${sessionDisplayTitle(s)} · ${WORDS[s.state]}${subagentSuffix(s)}`);
 }
 
 /** A kin's tooltip and accessible name: `withTag(tag, agentLine(...))`, then a newline and the purpose when known. */
@@ -140,7 +148,7 @@ export function kinTitle(a: SubagentInfo, slot: number | null, now: number, unde
 
 /** A running kin's elapsed time, compact: no spaces, at most five characters. The minutes are elapsed's. */
 export function runTime(fromIso: string, now: number): string {
-  const minutes = Math.floor(Math.max(0, now - Date.parse(fromIso)) / 60_000);
+  const minutes = minutesSince(fromIso, now);
   if (minutes < 1) return '<1m';
   if (minutes < 60) return `${minutes}m`;
   const hours = Math.floor(minutes / 60);
