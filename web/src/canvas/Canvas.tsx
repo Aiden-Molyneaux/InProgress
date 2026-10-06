@@ -90,7 +90,10 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
   const focusFrame = useRef(0);
 
   // React Flow 12.12 keeps a node hidden until the node object passed in carries a size, and the nodes below are new
-  // objects on every snapshot, flash, selection and clock tick. Cards and lanes carry layout's size. Fold rows are
+  // objects on every snapshot, flash, selection and clock tick. A new object without a `measured` size also drops the
+  // handle positions React Flow measured, and an edge draws only between measured handles. Cards and lanes carry
+  // layout's size as both their size and their measured size, which is the size of their DOM box: React Flow measures
+  // a card's handles when it first draws, again whenever it resizes, and keeps them across rebuilds. Fold rows are
   // measured: keep the sizes React Flow reports and pass them back, so they stay measured across rebuilds and never
   // blink out (ruling 1).
   const [sizes, setSizes] = useState<Record<string, { width: number; height: number }>>({});
@@ -233,9 +236,10 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
         onToggleFold,
         onOpenResource,
       };
-      // Layout's size: React Flow shows the card without waiting to measure it, and the frame is as tall as layout
-      // spaced it.
-      return [{ id: item.id, position, width: item.w, height: item.h, draggable: false, selectable: false, type: 'ipNode', data }];
+      // Layout's size: React Flow shows the card without waiting to measure it, keeps its handles across rebuilds so
+      // its rails draw, and the frame is as tall as layout spaced it.
+      const size = { width: item.w, height: item.h };
+      return [{ id: item.id, position, ...size, measured: size, draggable: false, selectable: false, type: 'ipNode', data }];
     });
 
     // Lanes first, and below everything, edges included. React Flow writes pointer-events: all on every node while the
@@ -247,6 +251,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
         position: { x: lane.x, y: lane.y },
         width: lane.w,
         height: lane.h,
+        measured: { width: lane.w, height: lane.h },
         zIndex: -1,
         draggable: false,
         selectable: false,

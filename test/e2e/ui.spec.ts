@@ -1109,6 +1109,7 @@ const RUN_TIME = '(<1m|\\d+m)';
 /** A card's frame: the `.ip-card` around its header (`.ip-node`) and its lines. */
 const frameOf = (header: Locator) => header.locator('xpath=..');
 
+type Point = { x: number; y: number };
 type Box = { x: number; y: number; width: number; height: number };
 
 /** The box lies inside the frame's box, give or take half a pixel of rounding. */
@@ -1118,6 +1119,45 @@ function expectInside(box: Box, frame: Box, what = 'inside the frame'): void {
   expect(box.x + box.width, what).toBeLessThanOrEqual(frame.x + frame.width + 0.5);
   expect(box.y + box.height, what).toBeLessThanOrEqual(frame.y + frame.height + 0.5);
 }
+
+/**
+ * The rail into a child: where its path starts and ends, its parent's frame and the child's frame and header, in page
+ * coordinates and all from one frame, since the camera may be gliding. A path's bounding box would not do for its
+ * ends: the miter at each bend pokes past the line.
+ */
+const railInto = (page: Page, parentId: number, childId: number) =>
+  page.evaluate<{ from: Point; to: Point; parentFrame: Box; childFrame: Box; header: Box }>(`(() => {
+    const box = (selector) => {
+      const { x, y, width, height } = document.querySelector(selector).getBoundingClientRect();
+      return { x, y, width, height };
+    };
+    const path = document.querySelector('.react-flow__edge[data-id="e-n${childId}"] .react-flow__edge-path');
+    const toPage = path.getScreenCTM();
+    const at = (length) => {
+      const { x, y } = path.getPointAtLength(length).matrixTransform(toPage);
+      return { x, y };
+    };
+    return {
+      from: at(0),
+      to: at(path.getTotalLength()),
+      parentFrame: box('.react-flow__node[data-id="n${parentId}"] .ip-card'),
+      childFrame: box('.react-flow__node[data-id="n${childId}"] .ip-card'),
+      header: box('.react-flow__node[data-id="n${childId}"] .ip-node'),
+    };
+  })()`);
+
+/** Records in `window.__railsLost` the id of every edge that leaves the canvas from now on. */
+const WATCH_RAILS = `(() => {
+  window.__railsLost = [];
+  new MutationObserver((records) => {
+    for (const { removedNodes } of records) {
+      for (const n of removedNodes) {
+        if (n.nodeType !== 1) continue;
+        for (const e of n.matches('.react-flow__edge') ? [n] : n.querySelectorAll('.react-flow__edge')) window.__railsLost.push(e.dataset.id);
+      }
+    }
+  }).observe(document.querySelector('.react-flow__edges'), { subtree: true, childList: true });
+})()`;
 
 test.describe('Live work', () => {
   test('working tasks sit under their node as a checklist that folds with it, the done ones in a row that opens, the one in progress pulsing', async ({ page, api, fresh }) => {
@@ -1165,6 +1205,27 @@ test.describe('Live work', () => {
     const [parentBox, rotateBox, childBox] = await Promise.all([parent, rotate, child].map(boxOf));
     expect(rotateBox.y).toBeGreaterThanOrEqual(parentBox.y + parentBox.height);
     expect(childBox.y).toBeGreaterThanOrEqual(rotateBox.y + rotateBox.height);
+    // The rail into its children draws: down from its frame's foot, 18 px in, then a 10 px stub to the child's header.
+    const keystore = fresh.ids['Upload keystore'];
+    const rail = page.locator(`.react-flow__edge[data-id="e-n${keystore}"] .react-flow__edge-path`);
+    const near = (a: number, b: number, what: string) => expect(Math.abs(a - b), what).toBeLessThanOrEqual(1);
+    const expectRail = async () => {
+      await expect(rail).toBeVisible();
+      await expect(async () => {
+        const { from, to, parentFrame, childFrame, header } = await railInto(page, android, keystore);
+        near(from.x, parentFrame.x + 18, '18 px in from the frame');
+        near(from.y, parentFrame.y + parentFrame.height, "from the frame's foot");
+        near(to.x, childFrame.x, "to the child's frame");
+        near(to.y, header.y + header.height / 2, "at the header's middle");
+      }).toPass();
+    };
+    await expectRail();
+    // It stays drawn while the canvas rebuilds: the card grows by a task, and the rail starts at its new foot.
+    await page.evaluate(WATCH_RAILS);
+    await task(api, fresh, '6', `#${android} Archive the old key`);
+    await expect(page.locator('.ip-work', { hasText: 'Archive the old key' })).toBeVisible();
+    await expectRail();
+    expect(await page.evaluate<string[]>('window.__railsLost'), 'no rail drops out').toEqual([]);
     // Tasks fold with their node, like its children.
     await parent.getByRole('button', { name: 'Fold' }).click();
     await expect(child).toHaveCount(0);
