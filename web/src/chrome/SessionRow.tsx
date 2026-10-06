@@ -1,7 +1,7 @@
 import type { CSSProperties } from 'react';
 import { agentVisible, atLimit } from '../../../src/core/layout';
-import { AgentWords } from '../AgentWords';
 import { agentTag, isReader, sessionTag, type Session } from '../../../src/core/types';
+import { AgentWords } from '../AgentWords';
 import { Character } from '../Character';
 import { characterState } from '../characterState';
 import { familyVar } from '../family';
