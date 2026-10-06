@@ -6,45 +6,39 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type FocusEvent as ReactFocusEvent,
   type MouseEvent as ReactMouseEvent,
 } from 'react';
-import { Background, BackgroundVariant, Controls, ReactFlow, useReactFlow, type Edge, type Node, type NodeChange, type Viewport } from '@xyflow/react';
+import { Controls, ReactFlow, useReactFlow, type Edge, type Node, type NodeChange, type Viewport } from '@xyflow/react';
 import { layoutOutline, type LayoutItem } from '../../../src/core/layout';
 import { buildIndex, needsYouAge, type FoldOverrides } from '../../../src/core/tree';
 import { sessionDisplayTitle, sessionTag, type EventRow, type ProjectSnapshot } from '../../../src/core/types';
 import { taskFamily, taskOwner, waitsFor, withTag } from '../live';
 import { relativeTime } from '../time';
 import { useNow } from '../useNow';
-import { AgentBadge, type AgentBadgeData } from './AgentBadge';
-import { BadgeNode } from './BadgeNode';
 import { breadcrumbFor } from './breadcrumb';
+import { LaneNode } from './LaneNode';
 import { MoreNode, type MoreNodeData } from './MoreNode';
-import { NodeCard, type NodeCardData } from './NodeCard';
-import { ReadersRow, type ReadersRowData } from './ReadersRow';
+import { NodeCard, type CardRow, type NodeCardData } from './NodeCard';
+import { PITCH } from './pitch';
 import { visibleHeight } from './sheet';
-import { TrailAgentRow, type TrailAgentRowData } from './TrailAgentRow';
 import { useCamera } from './useCamera';
-import { WorkDoneRow, type WorkDoneRowData } from './WorkDoneRow';
-import { WorkRow, type WorkRowData } from './WorkRow';
+import type { WorkDoneRowProps } from './WorkDoneRow';
 
 /** How many frames a newly shown card gets to appear before focus stops waiting for it. */
 const FOCUS_FRAMES = 30;
 /**
- * How often time-based labels ("12 min", "done 2 min ago") catch up, and with them the 5-minute greyed badge of an ended
- * subagent, which then moves into its step's trail.
+ * How often time-based labels ("12 min", a kin's "18m", "done 2 min ago") catch up, and with them the 5-minute grey
+ * kin of an ended subagent, which then moves into its step's trail.
  */
 const CLOCK_MS = 30_000;
 
+/** A step is one node with its lines inside it. Fold rows and lanes are nodes of their own. */
 const nodeTypes = {
   ipNode: NodeCard,
   ipMore: MoreNode,
-  ipBadge: BadgeNode,
-  ipAgent: AgentBadge,
-  ipReaders: ReadersRow,
-  ipWork: WorkRow,
-  ipWorkDone: WorkDoneRow,
-  ipTrailAgent: TrailAgentRow,
+  ipLane: LaneNode,
 };
 
 export interface CanvasHandle {
@@ -95,10 +89,13 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
   const initFrame = useRef(0);
   const focusFrame = useRef(0);
 
-  // React Flow 12.12 keeps a node hidden until the node object passed in carries its measured size, and the nodes below
-  // are new objects on every snapshot, flash, selection and clock tick. Keep the sizes it reports and pass them back, so
-  // cards stay measured across rebuilds: without this, every card blinks out to be measured again and a focused card
-  // can't keep focus.
+  // React Flow 12.12 keeps a node hidden until the node object passed in carries a size, and the nodes below are new
+  // objects on every snapshot, flash, selection and clock tick. A new object without a `measured` size also drops the
+  // handle positions React Flow measured, and an edge draws only between measured handles. Cards and lanes carry
+  // layout's size as both their size and their measured size, which is the size of their DOM box: React Flow measures
+  // a card's handles when it first draws, again whenever it resizes, and keeps them across rebuilds. Fold rows are
+  // measured: keep the sizes React Flow reports and pass them back, so they stay measured across rebuilds and never
+  // blink out (ruling 1).
   const [sizes, setSizes] = useState<Record<string, { width: number; height: number }>>({});
   const onNodesChange = useCallback((changes: NodeChange[]) => {
     const measured = changes.flatMap((c) => (c.type === 'dimensions' && c.dimensions ? [[c.id, c.dimensions] as const] : []));
@@ -133,10 +130,73 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
     const sessionsById = new Map(snapshot.sessions.map((s) => [s.id, s]));
     const workById = new Map(snapshot.workItems.map((w) => [w.id, w]));
     const { pastSessions, trailAgents } = snapshot;
-    const toNode = (item: LayoutItem): Node | null => {
+
+    /** A row item as its card draws it, or null when what it stands for has left the snapshot. */
+    const toRow = (item: LayoutItem): CardRow | null => {
+      switch (item.kind) {
+        case 'line': {
+          const session = sessionsById.get(item.sessionId);
+          if (!session) return null;
+          const agents = item.agentIds.flatMap((id) => session.subagents.find((a) => a.agentId === id) ?? []);
+          return { kind: 'line', id: item.id, props: { session, nodeId: item.nodeId, lead: item.lead, agents, now, done: null } };
+        }
+        case 'readers': {
+          const session = sessionsById.get(item.sessionId);
+          const readers = session ? session.subagents.filter((a) => item.agentIds.includes(a.agentId)) : [];
+          if (!session || !readers.length) return null;
+          return { kind: 'readers', id: item.id, props: { readers, slot: session.slot, nodeId: item.nodeId, done: null } };
+        }
+        case 'work': {
+          const w = workById.get(item.workId);
+          if (!w) return null;
+          // A trail row is neutral: no hue, no tag, no letter (its session's slot may be a live session's by now).
+          const family = item.stale ? null : taskFamily(w, snapshot.sessions, trailAgents);
+          const owner = taskOwner(w, snapshot.sessions, pastSessions, trailAgents);
+          return {
+            kind: 'work',
+            id: item.id,
+            props: {
+              item: w,
+              pulse: item.pulse,
+              stale: item.stale,
+              family,
+              // A live row's tooltip names its session's letter, or its subagent's tag.
+              owner: family ? withTag(w.agentId ? family.tag : sessionTag(family.slot), owner) : owner,
+              waits: waitsFor(w, snapshot.workItems),
+            },
+          };
+        }
+        case 'trailAgent': {
+          const agent = trailAgents.find((a) => a.sessionId === item.sessionId && a.agentId === item.agentId);
+          if (!agent) return null;
+          const session = sessionsById.get(item.sessionId) ?? pastSessions.find((s) => s.id === item.sessionId);
+          return { kind: 'trailAgent', id: item.id, props: { agent, nodeId: item.nodeId, sessionTitle: session ? sessionDisplayTitle(session) : 'a session', now } };
+        }
+        default:
+          return null;
+      }
+    };
+
+    // Each card's lines, in layout's order. A done row that shares a line rides at that line's right end: layout gave it
+    // that line's y and no height of its own.
+    const rowsByNode = new Map<number, CardRow[]>();
+    for (const item of layout.items) {
+      if (item.kind === 'node' || item.kind === 'more') continue;
+      const rows = rowsByNode.get(item.nodeId) ?? [];
+      rowsByNode.set(item.nodeId, rows);
+      if (item.kind === 'workDone') {
+        const done: WorkDoneRowProps = { nodeId: item.nodeId, count: item.count, unfinished: item.unfinished, agents: item.agents, open: item.open, onToggleFold };
+        const last = rows[rows.length - 1];
+        if (item.shared && (last?.kind === 'line' || last?.kind === 'readers')) last.props.done = done;
+        else rows.push({ kind: 'workDone', id: item.id, props: done });
+        continue;
+      }
+      const row = toRow(item);
+      if (row) rows.push(row);
+    }
+
+    const cards = layout.items.flatMap((item): Node[] => {
       const position = { x: item.x, y: item.y };
-      const measured = sizes[item.id];
-      const fixed = { id: item.id, position, measured, draggable: false, selectable: false };
       if (item.kind === 'more') {
         const data: MoreNodeData = {
           count: item.hiddenIds.length,
@@ -145,55 +205,9 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
           firstId: item.hiddenIds[0],
           onExpand: expandRun,
         };
-        return { ...fixed, type: 'ipMore', data };
+        return [{ id: item.id, position, measured: sizes[item.id], draggable: false, selectable: false, type: 'ipMore', data }];
       }
-      if (item.kind === 'badge') {
-        const session = sessionsById.get(item.sessionId);
-        return session ? { ...fixed, type: 'ipBadge', data: { session } } : null;
-      }
-      if (item.kind === 'agent') {
-        const session = sessionsById.get(item.sessionId);
-        const agent = session?.subagents.find((a) => a.agentId === item.agentId);
-        if (!session || !agent) return null;
-        // In its session's hue, led by its tag.
-        const data: AgentBadgeData = { agent, nodeId: item.nodeId, slot: session.slot, now };
-        return { ...fixed, type: 'ipAgent', data };
-      }
-      if (item.kind === 'readers') {
-        const session = sessionsById.get(item.sessionId);
-        const readers = session ? session.subagents.filter((a) => item.agentIds.includes(a.agentId)) : [];
-        if (!session || !readers.length) return null;
-        const data: ReadersRowData = { readers, slot: session.slot, nodeId: item.nodeId };
-        return { ...fixed, type: 'ipReaders', data };
-      }
-      if (item.kind === 'work') {
-        const w = workById.get(item.workId);
-        if (!w) return null;
-        // A trail row is neutral: no hue, no tag, no letter (its session's slot may be a live session's by now).
-        const family = item.stale ? null : taskFamily(w, snapshot.sessions, trailAgents);
-        const owner = taskOwner(w, snapshot.sessions, pastSessions, trailAgents);
-        const data: WorkRowData = {
-          item: w,
-          pulse: item.pulse,
-          stale: item.stale,
-          family,
-          // A live row's tooltip names its session's letter, or its subagent's tag.
-          owner: family ? withTag(w.agentId ? family.tag : sessionTag(family.slot), owner) : owner,
-          waits: waitsFor(w, snapshot.workItems),
-        };
-        return { ...fixed, type: 'ipWork', data };
-      }
-      if (item.kind === 'workDone') {
-        const data: WorkDoneRowData = { nodeId: item.nodeId, count: item.count, unfinished: item.unfinished, agents: item.agents, open: item.open, onToggleFold };
-        return { ...fixed, type: 'ipWorkDone', data };
-      }
-      if (item.kind === 'trailAgent') {
-        const agent = trailAgents.find((a) => a.sessionId === item.sessionId && a.agentId === item.agentId);
-        if (!agent) return null;
-        const session = sessionsById.get(item.sessionId) ?? pastSessions.find((s) => s.id === item.sessionId);
-        const data: TrailAgentRowData = { agent, nodeId: item.nodeId, sessionTitle: session ? sessionDisplayTitle(session) : 'a session', now };
-        return { ...fixed, type: 'ipTrailAgent', data };
-      }
+      if (item.kind !== 'node') return [];
       const node = index.byId.get(item.nodeId)!;
       const data: NodeCardData = {
         node,
@@ -212,13 +226,41 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
         resources: item.resourceIds.map((id) => resourcesById.get(id)).filter((r): r is NonNullable<typeof r> => !!r),
         flash: flash === item.nodeId,
         selected: selectedNode === item.nodeId,
+        x: item.x,
+        w: item.w,
+        h: item.h,
+        stack: item.stack,
+        workingFocus: item.workingFocus,
+        rows: rowsByNode.get(item.nodeId) ?? [],
         onSelect: onSelectNode,
         onToggleFold,
         onOpenResource,
       };
-      return { ...fixed, type: 'ipNode', data };
-    };
-    return layout.items.map(toNode).filter((n): n is Node => n !== null);
+      // Layout's size: React Flow shows the card without waiting to measure it, keeps its handles across rebuilds so
+      // its rails draw, and the frame is as tall as layout spaced it.
+      const size = { width: item.w, height: item.h };
+      return [{ id: item.id, position, ...size, measured: size, draggable: false, selectable: false, type: 'ipNode', data }];
+    });
+
+    // Lanes first, and below everything, edges included. React Flow writes pointer-events: all on every node while the
+    // flow has an onNodeClick, then spreads node.style over it: only the style lets clicks, pans and wheel ticks through.
+    const lanes = layout.lanes.map(
+      (lane): Node => ({
+        id: lane.id,
+        type: 'ipLane',
+        position: { x: lane.x, y: lane.y },
+        width: lane.w,
+        height: lane.h,
+        measured: { width: lane.w, height: lane.h },
+        zIndex: -1,
+        draggable: false,
+        selectable: false,
+        focusable: false,
+        style: { pointerEvents: 'none' },
+        data: {},
+      }),
+    );
+    return [...lanes, ...cards];
   }, [layout, index, snapshot, now, flash, selectedNode, onSelectNode, onToggleFold, onOpenResource, expandRun, sizes]);
 
   const edges = useMemo<Edge[]>(
@@ -230,11 +272,11 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
         sourceHandle: 'out',
         targetHandle: 'in',
         type: 'step',
-        // The source handle sits 12 px in and children indent 28 px: an offset of 16 keeps the rail straight.
-        pathOptions: { offset: 16 },
+        // The source handle sits 18 px in and children indent 28 px: an offset of 10 keeps the rail 10 px left of them.
+        pathOptions: { offset: 10 },
         selectable: false,
         focusable: false,
-        style: { stroke: 'var(--border)', strokeWidth: 1.2 },
+        style: { stroke: 'var(--border)', strokeWidth: 1 },
       })),
     [layout.edges],
   );
@@ -321,28 +363,39 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
       const view = flow.getBoundingClientRect();
       const bottom = view.top + visibleHeight(view.height, camera.sheetOpen());
       if (top >= view.top && top + r.height <= bottom && left >= view.left && left + r.width <= view.right) return;
+      // Only its height counts: the camera keeps flow x 0 at the canvas's left edge.
       const p = rf.screenToFlowPosition({ x: left + r.width / 2, y: top + r.height / 2 });
-      camera.centerOnPoint(p.x, p.y);
+      camera.centerOnY(p.y);
     },
     [rf, camera],
   );
 
+  // The first move waits for the bundled fonts, so it never runs on fallback metrics. A promise can't be cancelled:
+  // skip the move once the canvas has gone, or once the camera has moved already (a Home pressed meanwhile, say).
+  const alive = useRef(true);
   const onInit = useCallback(() => {
-    initFrame.current = requestAnimationFrame(() => camera.centerOnFrontier(0, 1));
+    void document.fonts.ready.then(() => {
+      if (!alive.current || camera.hasMoved()) return;
+      initFrame.current = requestAnimationFrame(() => {
+        if (!camera.hasMoved()) camera.centerOnFrontier(0, 1);
+      });
+    });
   }, [camera]);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
       cancelAnimationFrame(initFrame.current);
       cancelAnimationFrame(flashFrame.current);
       cancelAnimationFrame(focusFrame.current);
       window.clearTimeout(flashTimer.current);
-    },
-    [],
-  );
+    };
+  }, []);
 
   return (
-    <div className="ip-canvas" ref={root} onFocus={onFocus}>
+    // Layout's pitch, written once: the canvas rules read it for every fixed height.
+    <div className="ip-canvas" ref={root} onFocus={onFocus} style={PITCH as CSSProperties}>
       {crumb.length > 0 && <div className="ip-crumb">{crumb.join(' › ')}</div>}
       <ReactFlow
         nodes={nodes}
@@ -363,8 +416,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
         colorMode="system"
         proOptions={{ hideAttribution: true }}
       >
-        <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
-        <Controls position="bottom-left" showInteractive={false} onZoomIn={manualMove} onZoomOut={manualMove} onFitView={manualMove} />
+        <Controls position="top-right" orientation="horizontal" showInteractive={false} onZoomIn={manualMove} onZoomOut={manualMove} onFitView={manualMove} />
       </ReactFlow>
     </div>
   );

@@ -1,7 +1,6 @@
-import type { Node, NodeProps } from '@xyflow/react';
 import { trailLabel } from '../live';
 
-export interface WorkDoneRowData extends Record<string, unknown> {
+export interface WorkDoneRowProps {
   nodeId: number;
   /** Completed tasks, of live and ended sessions. */
   count: number;
@@ -15,28 +14,30 @@ export interface WorkDoneRowData extends Record<string, unknown> {
 }
 
 /** What the row shows on a click: "the done and unfinished tasks and the agents". */
-function contents({ count, unfinished, agents }: WorkDoneRowData): string {
+function contents({ count, unfinished, agents }: WorkDoneRowProps): string {
   const tasks = [count ? 'done' : '', unfinished ? 'unfinished' : ''].filter(Boolean).join(' and ');
   return [tasks ? `the ${tasks} tasks` : '', agents ? `the ${agents === 1 ? 'agent' : 'agents'} that stopped` : ''].filter(Boolean).join(' and ');
 }
 
 /**
- * `✓ 5 done · 2 unfinished · 2 agents`: a node's completed working tasks and its trail of ended work, folded into one
- * row that shows them on a click.
+ * `✓ 5 done · 2 unfinished · 2 agents`: a step's completed working tasks and its trail of ended work, folded into one
+ * row that shows them on a click. It sits at the right end of its card's last line, or on a line of its own. Its label
+ * is the part that cuts, so the ✓ and the ▸ stay.
  */
-export function WorkDoneRow({ data }: NodeProps<Node<WorkDoneRowData, 'ipWorkDone'>>) {
-  const label = trailLabel({ done: data.count, unfinished: data.unfinished, agents: data.agents }).replace(/^✓ /, '');
+export function WorkDoneRow(props: WorkDoneRowProps) {
+  const label = trailLabel({ done: props.count, unfinished: props.unfinished, agents: props.agents }).replace(/^✓ /, '');
   return (
     <button
       className="ip-work-done"
-      aria-expanded={data.open}
-      title={`${data.open ? 'Hide' : 'Show'} ${contents(data)}`}
+      aria-expanded={props.open}
+      title={`${props.open ? 'Hide' : 'Show'} ${contents(props)}`}
       onClick={(e) => {
+        // It opens the row, not Details.
         e.stopPropagation();
-        data.onToggleFold(`work:${data.nodeId}`, data.open ? 'closed' : 'open');
+        props.onToggleFold(`work:${props.nodeId}`, props.open ? 'closed' : 'open');
       }}
     >
-      <span className="ip-work-mark">✓</span> {label}
+      <span className="ip-work-mark">✓</span> <span className="ip-work-done-label">{label}</span>
     </button>
   );
 }

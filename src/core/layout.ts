@@ -1,16 +1,43 @@
 import { buildIndex, computeVisible, countDone, isNeedsYou, progress, type FoldOverrides } from './tree';
 import { ENDED_AGENT_MS, glyphTitle, isReader, ownerTag, sessionTag, type EventRow, type PastSession, type QueueEntry, type ResourceMeta, type Session, type SubagentInfo, type TrailAgent, type TreeNode, type WorkItem } from './types';
 
-export const ROW = 32;
+/** A card's header box and a one-line card: a 30 px header inside the frame's 1 px border. The camera aims at y + NODE_H / 2. */
+export const NODE_H = 32;
+/** Between a card's frame and the next row. */
+export const CARD_GAP = 10;
+/** A one-line card's pitch. */
+export const ROW = NODE_H + CARD_GAP; // 42
+/** A fold row's pitch: the row is 26 px tall, then CARD_GAP. */
+export const FOLD_ROW = 36;
+/** A session's agent line in a card, whatever its lead's size. */
+export const AGENT_LINE = 28;
+/** A session's readers line (`◇ c · 2 reading`). */
+export const READERS_LINE = 20;
+/** The done row on a line of its own. It adds nothing when it shares a kin-less last line. */
+export const DONE_LINE = 20;
+/** A working task's row, and an opened done row's trail-agent row. */
+export const TASK_ROW = 22;
+/** Under the last line of a card that has lines. */
+export const CARD_PAD = 8;
 export const INDENT = 28;
-export const NODE_H = 24;
-export const BADGE_ROW = 26;
-/** One working task's row: compact, in its node's checklist. */
-export const WORK_ROW = 20;
-/** Room after a node's working tasks, so the next card doesn't sit right on them. */
-export const WORK_GAP = 6;
-/** A session's readers on a row (`◇ a · 2 reading`): as compact as a working task's row. */
-export const READERS_ROW = WORK_ROW;
+/** From a stack head's box top to the first row under it. */
+export const STACK_HEAD = 43;
+
+/** The root card's x. */
+const ROOT_X = 8;
+/** A stack head's x. */
+const STACK_X = 22;
+/** Every card ends here: w = Math.max(CARD_MIN_W, CARD_RIGHT - x). */
+const CARD_RIGHT = 506;
+const CARD_MIN_W = 240;
+const LANE_X = 8;
+const LANE_W = 504;
+/** A lane's top, above its head box. */
+const LANE_PAD_TOP = 9;
+/** Below the last row of the phase's subtree. */
+const LANE_PAD_BOTTOM = 12;
+/** Clear space between a lane and the next lane, or any row outside lanes. */
+const LANE_GAP = 18;
 
 export interface LayoutNodeItem {
   kind: 'node';
@@ -36,6 +63,14 @@ export interface LayoutNodeItem {
    * live task in progress is there. Never the root. Display only: the stored status stays active.
    */
   paused: boolean;
+  /** A card: its frame's height. A stack head: its box, from the head's top to the end of its own lines. */
+  h: number;
+  /** Math.max(240, 506 - x): 498 for the root, 484 for a stack head, 450 at x 56, 422 at x 84. */
+  w: number;
+  /** A depth-1 step of kind 'phase': drawn as an unframed stack head that opens a lane. */
+  stack: boolean;
+  /** The focus of a live session whose state is 'working'. Never its ancestors: `working` still marks the chain. */
+  workingFocus: boolean;
 }
 
 /**
@@ -54,32 +89,27 @@ export interface LayoutMoreItem {
   variant: 'tail' | 'done';
 }
 
-export interface LayoutBadgeItem {
-  kind: 'badge';
+/** One session's line on one card, one per session per card: its character where its focus anchors, then its kin. */
+export interface LayoutLineItem {
+  kind: 'line';
+  /** `l<sessionId>:<nodeId>` */
   id: string;
   sessionId: string;
   nodeId: number;
+  /** The session's focus anchors on this card: the line draws the session's character and label. */
+  lead: boolean;
+  /**
+   * The session's shown non-reader subagents homed on this card (agentVisible: running, or stopped less than
+   * ENDED_AGENT_MS ago), in the session's `subagents` order. Each is one kin.
+   */
+  agentIds: string[];
   x: number;
   y: number;
-}
-
-/** A subagent's badge: under the node it works on, else under its session's focus, or their nearest visible ancestor. */
-export interface LayoutAgentItem {
-  kind: 'agent';
-  id: string;
-  sessionId: string;
-  agentId: string;
-  /** The row it sits under. */
-  nodeId: number;
-  x: number;
-  y: number;
-  /** It stopped less than ENDED_AGENT_MS ago: drawn greyed. */
-  ended: boolean;
 }
 
 /**
- * A session's running readers (READER_AGENT_TYPES) on one row, as one small row, `◇ a · 2 reading`: under that row's
- * badges of the session, in place of a badge each. Id `r<sessionId>:<nodeId>`.
+ * A session's running readers (READER_AGENT_TYPES) on one card, as one small line, `◇ a · 2 reading`: after that
+ * session's agent line there, in place of a kin each. Id `r<sessionId>:<nodeId>`.
  */
 export interface LayoutReadersItem {
   kind: 'readers';
@@ -124,6 +154,8 @@ export interface LayoutWorkDoneItem {
   open: boolean;
   x: number;
   y: number;
+  /** True: it sits at the right end of the card's last line and has that line's y. False: a DONE_LINE of its own. */
+  shared: boolean;
 }
 
 /** A subagent in the trail, listed under its node's open done row after the node's tasks. Neutral: no colour, never pulsing. */
@@ -140,8 +172,7 @@ export interface LayoutTrailAgentItem {
 export type LayoutItem =
   | LayoutNodeItem
   | LayoutMoreItem
-  | LayoutBadgeItem
-  | LayoutAgentItem
+  | LayoutLineItem
   | LayoutReadersItem
   | LayoutWorkItem
   | LayoutWorkDoneItem
@@ -153,10 +184,25 @@ export interface LayoutEdge {
   target: string;
 }
 
+/** A depth-1 phase's lane, drawn behind its subtree. */
+export interface LayoutLane {
+  /** `lane<nodeId>`: the React Flow node id. */
+  id: string;
+  /** The phase. */
+  nodeId: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 export interface LayoutResult {
   items: LayoutItem[];
   edges: LayoutEdge[];
   nodeItems: Map<number, LayoutNodeItem>;
+  /** One per depth-1 phase, in outline order. Kept out of `items`, so `items` keeps its shape. */
+  lanes: LayoutLane[];
+  /** The bottom of the last row or lane. */
   height: number;
 }
 
@@ -312,8 +358,8 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
 
   const resourcesByNode = new Map<number, number[]>();
   for (const r of [...input.resources].sort((a, b) => a.id - b.id)) resourcesByNode.set(r.nodeId, [...(resourcesByNode.get(r.nodeId) ?? []), r.id]);
-  // A manual fold can hide a live session's focus or a subagent's node: badge the nearest visible ancestor, so a fold
-  // never hides a badge.
+  // A manual fold can hide a live session's focus or a subagent's node: its line goes on the nearest visible ancestor,
+  // so a fold never hides a session or a subagent.
   const visibleIds = new Set(visible.flatMap((v) => (v.type === 'node' ? [v.node.id] : [])));
   const anchorOf = (id: number | null): number | undefined => {
     let cur = id === null ? undefined : index.byId.get(id);
@@ -321,24 +367,28 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
     return cur?.id;
   };
   /**
-   * Under each row: its sessions' badges, each followed by that session's subagents there, then that session's running
-   * readers there as one row.
+   * On each card, per live session in `live` order: whether its focus anchors there (the lead), its shown workers homed
+   * there (the kin) and its running readers there, each in the session's order.
    */
-  type Badge = { session: Session; agent?: SubagentInfo; readers?: SubagentInfo[] };
-  const badgesByNode = new Map<number, Badge[]>();
-  const addAt = (at: number | undefined, badge: Badge) => {
-    if (at !== undefined) badgesByNode.set(at, [...(badgesByNode.get(at) ?? []), badge]);
+  type Group = { session: Session; lead: boolean; agentIds: string[]; readerIds: string[] };
+  const groupsByNode = new Map<number, Map<string, Group>>();
+  const groupAt = (at: number, s: Session): Group => {
+    const bySession = groupsByNode.get(at) ?? new Map<string, Group>();
+    groupsByNode.set(at, bySession);
+    const group = bySession.get(s.id) ?? { session: s, lead: false, agentIds: [], readerIds: [] };
+    bySession.set(s.id, group);
+    return group;
   };
   for (const s of live) {
-    addAt(anchorOf(s.focusNodeId), { session: s });
-    const readersAt = new Map<number, SubagentInfo[]>();
+    const focusAt = anchorOf(s.focusNodeId);
+    if (focusAt !== undefined) groupAt(focusAt, s).lead = true;
     for (const agent of shownAgents(s)) {
       const at = anchorOf(homeOf(s, agent));
-      // Only running readers are shown (agentVisible), each in its session's readers row on the row it anchors to.
-      if (!isReader(agent.agentType)) addAt(at, { session: s, agent });
-      else if (at !== undefined) readersAt.set(at, [...(readersAt.get(at) ?? []), agent]);
+      if (at === undefined) continue;
+      // Only running readers are shown (agentVisible), each in its session's readers line on the card it anchors to.
+      if (isReader(agent.agentType)) groupAt(at, s).readerIds.push(agent.agentId);
+      else groupAt(at, s).agentIds.push(agent.agentId);
     }
-    for (const [at, readers] of readersAt) addAt(at, { session: s, readers });
   }
   const working = new Set<number>();
   for (const s of live) {
@@ -349,6 +399,8 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
       cur = cur.parentId === null ? undefined : index.byId.get(cur.parentId);
     }
   }
+  /** Each working session's focus: its card alone wears the orange frame. */
+  const workingFoci = new Set(live.flatMap((s) => (s.state === 'working' && s.focusNodeId !== null ? [s.focusNodeId] : [])));
   // Who is on a step, for paused: each live session's focus (an idle one's too), each running subagent's home (a reader's
   // too), each live session's task in progress, and every ancestor of those, walked in the tree itself, so a manual fold
   // never changes it. A stopped subagent no longer counts, though it still shows greyed for a while.
@@ -382,14 +434,46 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
   const items: LayoutItem[] = [];
   const edges: LayoutEdge[] = [];
   const nodeItems = new Map<number, LayoutNodeItem>();
+  const lanes: LayoutLane[] = [];
+  /** Where the next row goes. */
   let y = 0;
+  /** The bottom of the last row or lane. */
+  let bottom = 0;
+  /** The open lane: its phase and its top. */
+  let lane: { nodeId: number; top: number } | null = null;
+  /** The rows walked now sit under a stack head, so they draw one indent further left. */
+  let underStack = false;
+  const closeLane = () => {
+    if (!lane) return;
+    const laneBottom = bottom + LANE_PAD_BOTTOM;
+    lanes.push({ id: `lane${lane.nodeId}`, nodeId: lane.nodeId, x: LANE_X, y: lane.top, w: LANE_W, h: laneBottom - lane.top });
+    bottom = laneBottom;
+    y = laneBottom + LANE_GAP;
+    lane = null;
+  };
   for (const v of visible) {
-    const x = v.depth * INDENT;
+    const stack = v.type === 'node' && v.depth === 1 && v.node.kind === 'phase';
+    // A row at depth 0 or 1 closes the open lane, and a stack head opens its own.
+    if (v.depth <= 1) {
+      closeLane();
+      underStack = stack;
+    }
+    if (stack) {
+      const top = items.length ? bottom + LANE_GAP : 0;
+      lane = { nodeId: v.node.id, top };
+      y = top + LANE_PAD_TOP;
+    }
+    const x = v.depth === 0 ? ROOT_X : stack ? STACK_X : (v.depth + (underStack ? 0 : 1)) * INDENT;
+    // Edges run only inside a card's subtree: never out of the root or a stack head.
+    const parentId = v.type === 'more' ? v.parentId : v.node.parentId;
+    const parent = parentId === null ? undefined : index.byId.get(parentId);
+    const edge = v.depth >= 3 || (v.depth === 2 && parent?.kind !== 'phase');
     if (v.type === 'more') {
       const id = `${v.variant === 'done' ? 'done' : 'more'}${v.parentId}-${v.run}`;
       items.push({ kind: 'more', id, parentId: v.parentId, run: v.run, x, y, depth: v.depth, hiddenIds: v.hiddenIds, variant: v.variant });
-      edges.push({ id: `e-${id}`, source: `n${v.parentId}`, target: id });
-      y += ROW;
+      if (edge) edges.push({ id: `e-${id}`, source: `n${v.parentId}`, target: id });
+      bottom = y + FOLD_ROW - CARD_GAP;
+      y += FOLD_ROW;
       continue;
     }
     const node = v.node;
@@ -409,53 +493,64 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
       working: working.has(node.id),
       queue: queued.get(node.id) ?? null,
       paused: node.parentId !== null && node.status === 'active' && node.assignee === 'claude' && !occupied.has(node.id),
+      h: NODE_H,
+      w: Math.max(CARD_MIN_W, CARD_RIGHT - x),
+      stack,
+      workingFocus: workingFoci.has(node.id),
     };
     items.push(item);
     nodeItems.set(node.id, item);
-    if (node.parentId !== null) edges.push({ id: `e-${item.id}`, source: `n${node.parentId}`, target: item.id });
-    y += ROW;
-    const inner = x + INDENT;
-    for (const { session, agent, readers } of badgesByNode.get(node.id) ?? []) {
-      if (readers) {
-        items.push({ kind: 'readers', id: `r${session.id}:${node.id}`, sessionId: session.id, nodeId: node.id, agentIds: readers.map((a) => a.agentId), x: inner, y });
-        y += READERS_ROW;
-        continue;
+    if (edge) edges.push({ id: `e-${item.id}`, source: `n${node.parentId}`, target: item.id });
+    // The card's lines, from under its header (a stack head's: under its track). Row items take the card's x.
+    const top = y + (stack ? STACK_HEAD : NODE_H);
+    let ly = top;
+    /** The card's last agent or readers line, and whether it holds kin. */
+    let last: { y: number; kin: boolean } | null = null;
+    for (const { session, lead, agentIds, readerIds } of groupsByNode.get(node.id)?.values() ?? []) {
+      if (lead || agentIds.length) {
+        items.push({ kind: 'line', id: `l${session.id}:${node.id}`, sessionId: session.id, nodeId: node.id, lead, agentIds, x, y: ly });
+        last = { y: ly, kin: agentIds.length > 0 };
+        ly += AGENT_LINE;
       }
-      items.push(
-        agent
-          ? { kind: 'agent', id: `a${session.id}:${agent.agentId}`, sessionId: session.id, agentId: agent.agentId, nodeId: node.id, x: inner, y, ended: agent.endedAt !== null }
-          : { kind: 'badge', id: `b${session.id}`, sessionId: session.id, nodeId: node.id, x: inner, y },
-      );
-      y += BADGE_ROW;
+      if (readerIds.length) {
+        items.push({ kind: 'readers', id: `r${session.id}:${node.id}`, sessionId: session.id, nodeId: node.id, agentIds: readerIds, x, y: ly });
+        last = { y: ly, kin: false };
+        ly += READERS_LINE;
+      }
     }
-    // The node's checklist: completed tasks and the trail folded into one row first, then the live open tasks in the
-    // order Claude made them. Opened, the row shows every task in that order, then the trail's agents. It folds with
-    // its node.
+    // The node's checklist: completed tasks and the trail folded into one done row first, then the live open tasks in
+    // the order Claude made them. Opened, the row shows every task in that order, then the trail's agents. It folds
+    // with its node.
     const tasks = v.folded ? [] : (workByNode.get(node.id) ?? []);
     const trail = v.folded ? [] : (trailByNode.get(node.id) ?? []);
-    if (!tasks.length && !trail.length) continue;
     const done = tasks.filter((w) => w.status === 'completed').length;
     const unfinished = tasks.filter((w) => w.endedAt !== null && w.status !== 'completed').length;
     const open = input.overrides?.[`work:${node.id}`] === 'open';
     if (done || unfinished || trail.length) {
-      items.push({ kind: 'workDone', id: `wd${node.id}`, nodeId: node.id, count: done, unfinished, agents: trail.length, open, x: inner, y });
-      y += WORK_ROW;
+      // At the end of the card's last line when that line holds no kin; else on a line of its own.
+      const sharedY = last && !last.kin ? last.y : null;
+      items.push({ kind: 'workDone', id: `wd${node.id}`, nodeId: node.id, count: done, unfinished, agents: trail.length, open, x, y: sharedY ?? ly, shared: sharedY !== null });
+      if (sharedY === null) ly += DONE_LINE;
     }
     for (const w of tasks) {
       const stale = w.endedAt !== null;
       if ((w.status === 'completed' || stale) && !open) continue;
-      items.push({ kind: 'work', id: `w${w.id}`, workId: w.id, nodeId: node.id, x: inner, y, pulse: pulses(w), stale });
-      y += WORK_ROW;
+      items.push({ kind: 'work', id: `w${w.id}`, workId: w.id, nodeId: node.id, x, y: ly, pulse: pulses(w), stale });
+      ly += TASK_ROW;
     }
     if (open) {
       for (const a of trail) {
-        items.push({ kind: 'trailAgent', id: `t${a.sessionId}:${a.agentId}`, sessionId: a.sessionId, agentId: a.agentId, nodeId: node.id, x: inner, y });
-        y += WORK_ROW;
+        items.push({ kind: 'trailAgent', id: `t${a.sessionId}:${a.agentId}`, sessionId: a.sessionId, agentId: a.agentId, nodeId: node.id, x, y: ly });
+        ly += TASK_ROW;
       }
     }
-    y += WORK_GAP;
+    const lines = ly - top;
+    item.h = stack ? (lines ? STACK_HEAD + lines : STACK_HEAD - CARD_GAP) : lines ? NODE_H + lines + CARD_PAD : NODE_H;
+    bottom = y + item.h;
+    y = bottom + CARD_GAP;
   }
-  return { items, edges, nodeItems, height: y };
+  closeLane();
+  return { items, edges, nodeItems, lanes, height: bottom };
 }
 
 /**
