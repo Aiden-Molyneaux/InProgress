@@ -234,7 +234,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
         pathOptions: { offset: 16 },
         selectable: false,
         focusable: false,
-        style: { stroke: 'var(--edge)', strokeWidth: 1.2 },
+        style: { stroke: 'var(--border)', strokeWidth: 1.2 },
       })),
     [layout.edges],
   );
