@@ -12,7 +12,7 @@ interface TopBarProps {
   onSelect: (slug: string) => void;
 }
 
-/** The amber count of items waiting on Aiden, and the clay dot while a session works in the project. */
+/** How many items wait on Aiden, as a muted numeral, and an ink dot while a session works in the project. */
 function Badges({ p }: { p: ProjectSummary }) {
   return (
     <>

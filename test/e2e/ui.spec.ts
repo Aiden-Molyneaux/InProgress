@@ -292,7 +292,9 @@ test('dark mode reaches the canvas controls; reduced motion stops the pulse and 
   await expect(page.locator('.react-flow')).toHaveClass(/\bdark\b/);
   // The night ground is Quiet's navy.
   await expect(page.locator('.react-flow')).toHaveCSS('background-color', 'rgb(8, 13, 28)');
-  await expect(page.locator('.ip-chip-s .ip-pulse')).toHaveCSS('animation-name', 'none');
+  // The working chip's character stands still: no bob and no blink.
+  await expect(page.locator('.ip-chip-s .ip-char-body')).toHaveCSS('animation-name', 'none');
+  await expect(page.locator('.ip-chip-s g.ip-char-eyes')).toHaveCSS('animation-name', 'none');
   await expect(page.locator('.ip-node.working .ip-marker.m-active').first()).toHaveCSS('animation-name', 'none');
   // Amber ink on an amber tint, like the needs-you pill.
   await expect(page.locator('.ip-node .ip-you')).toHaveCSS('color', 'rgb(252, 211, 77)');
@@ -1002,14 +1004,14 @@ test('the needs-you pill and Follow sit at the right end of the session row, for
   const chip = row.getByRole('button', { name: /E2E session/ });
   const pill = row.getByRole('button', { name: /need you/ });
   const follow = row.getByRole('button', { name: /Follow/ });
-  await expect(pill).toHaveText('● 1 need you');
+  await expect(pill).toHaveText('1 need you');
   await expect(page.locator('.ip-topbar').getByRole('button', { name: /need you|Follow/ })).toHaveCount(0);
   const [rowBox, chipBox, pillBox, followBox] = await Promise.all([row, chip, pill, follow].map(async (l) => (await l.boundingBox())!));
   // Follow ends at the row's right padding, the pill sits just before it and the chips start from the left.
   expect(rowBox.x + rowBox.width - (followBox.x + followBox.width)).toBeLessThanOrEqual(12);
   expect(pillBox.x + pillBox.width).toBeLessThanOrEqual(followBox.x);
   expect(chipBox.x + chipBox.width).toBeLessThanOrEqual(pillBox.x);
-  expect(rowBox.height, 'one line').toBeLessThan(40);
+  expect(rowBox.height, 'one line').toBeLessThanOrEqual(40);
   // A project with no sessions and nothing waiting keeps Follow in the row, without the pill.
   await tabFor(page, quietName).click();
   await expect(page).toHaveTitle(`InProgress — ${quietName}`);
@@ -1040,20 +1042,64 @@ test('the tab strip is one stop in the tab order, and the arrow keys move along 
   await expect(page.locator('[role="tab"]:focus')).toHaveCount(0);
 });
 
-test('a long session title is cut short, and the pill and Follow stay at the end of the first line', async ({ page, api, fresh }) => {
+test('a session chip is its character and letter: its name carries the title, and waiting for permission rings it in amber', async ({ page, api, fresh }) => {
   const title = 'A session title long enough to run on well past the edge of a narrow window';
-  const session = `e2e-${randomUUID()}`;
-  await write(api, session, 'post', `/api/sessions/${session}/enroll`, { project: fresh.slug, title });
+  const second = `e2e-${randomUUID()}`;
+  await write(api, second, 'post', `/api/sessions/${second}/enroll`, { project: fresh.slug, title });
   await open(page, fresh);
   const row = page.locator('.ip-sessions');
-  const chip = row.getByRole('button', { name: title });
-  await expect(chip).toHaveAttribute('title', `${title} · no focus set yet`);
-  const cut = `(() => { const l = [...document.querySelectorAll('.ip-chip-label')].find((n) => n.textContent.startsWith('A session title')); return l.scrollWidth > l.clientWidth; })()`;
-  expect(await page.evaluate<boolean>(cut), 'the label is cut short').toBe(true);
+  const chips = row.locator('.ip-chip-s');
+  const chipA = row.getByRole('button', { name: /^A · / });
+  const chipB = row.getByRole('button', { name: /^B · / });
+  // Letter order, though the server lists B first: it was seen last.
+  await expect(chips).toHaveCount(2);
+  await expect(chips.first()).toHaveAccessibleName('A · E2E session');
+  await expect(chips.nth(1)).toHaveAccessibleName(`B · ${title}`);
+  // The chip shows its character and its letter in its family's hue. The title is in its name and its popover, with
+  // no native tooltip, which would never show on keyboard focus.
+  await expect(chipB).toHaveText('B');
+  await expect(chipB).not.toHaveAttribute('title');
+  await expect(chipB.locator('.ip-char')).toHaveAttribute('data-state', 'work');
+  await expect(chipB.locator('.ip-tag')).toHaveCSS('color', 'rgb(180, 83, 47)');
+  expect((await row.boundingBox())!.height, 'one line').toBeLessThanOrEqual(40);
+  // Its popover opens on keyboard focus: Tab from the tab strip reaches A, then B.
+  const popB = page.locator(`[id="${await chipB.getAttribute('aria-describedby')}"]`);
+  await expect(popB).toBeHidden();
+  await page.getByRole('tab', { selected: true }).focus();
+  await expect(async () => {
+    await page.keyboard.press('Tab');
+    await expect(chipA).toBeFocused({ timeout: 200 });
+  }).toPass({ timeout: 3000 });
+  await page.keyboard.press('Tab');
+  await expect(chipB).toBeFocused();
+  await expect(popB).toBeVisible();
+  await expect(popB).toHaveText(`B · ${title} · no focus set yet`);
+  await expect(chipB).toHaveAccessibleDescription(`B · ${title} · no focus set yet`);
+  // Waiting for permission: the word shows in amber, and the character wears the amber ring, the outer one running.
+  await write(api, second, 'post', `/api/sessions/${second}/hook`, { event: 'permission' });
+  await expect(chipB).toHaveAccessibleName(`B · ${title} · needs permission`);
+  await expect(chipB).toHaveText('B · needs permission');
+  await expect(chipB.locator('.ip-chip-word')).toHaveCSS('color', 'rgb(146, 64, 14)');
+  await expect(chipB.locator('.ip-char')).toHaveAttribute('data-state', 'wait');
+  const ring2 = chipB.locator('.ip-char-ring2');
+  await expect(ring2).toHaveCSS('animation-name', 'ip-ring');
+  // Under reduced motion the outer ring stops, and the solid ring stays.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect(ring2).toHaveCSS('animation-name', 'none');
+  await expect(chipB.locator('.ip-char-ring')).toBeVisible();
+  // Five more sessions overflow the first line. The chips wrap, still in letter order, and the pill and Follow stay at
+  // the right end of the first line.
+  for (let i = 1; i <= 5; i++) {
+    const extra = `e2e-${randomUUID()}`;
+    await write(api, extra, 'post', `/api/sessions/${extra}/enroll`, { project: fresh.slug, title: `Extra session ${i}` });
+  }
+  await expect(chips).toHaveCount(7);
+  for (const [i, letter] of [...'ABCDEFG'].entries()) await expect(chips.nth(i)).toHaveAccessibleName(new RegExp(`^${letter} · `));
   const pill = row.getByRole('button', { name: /need you/ });
   const follow = row.getByRole('button', { name: /Follow/ });
-  const [rowBox, chipBox, pillBox, followBox] = await Promise.all([row, chip, pill, follow].map(async (l) => (await l.boundingBox())!));
-  expect(chipBox.x + chipBox.width).toBeLessThanOrEqual(pillBox.x);
+  const [rowBox, chipsBox, pillBox, followBox] = await Promise.all([row, row.locator('.ip-chips'), pill, follow].map(async (l) => (await l.boundingBox())!));
+  expect(rowBox.height, 'two lines').toBeGreaterThan(40);
+  expect(chipsBox.x + chipsBox.width).toBeLessThanOrEqual(pillBox.x);
   for (const box of [pillBox, followBox]) expect(box.y - rowBox.y, 'on the first line').toBeLessThanOrEqual(8);
   await expect(follow).toBeInViewport({ ratio: 1 });
 });
@@ -1240,7 +1286,8 @@ test.describe('Live work', () => {
     await expect(readers).toHaveCSS('color', 'rgb(11, 107, 125)');
     // They still count on the chip, whose list marks them.
     const chip = page.locator('.ip-sessions').getByRole('button', { name: /E2E session/ });
-    await expect(chip).toHaveText('A · E2E session · 3 subagents');
+    await expect(chip).toHaveAccessibleName('A · E2E session · 3 subagents');
+    await expect(chip).toHaveText('A');
     await chip.hover();
     const list = page.locator('.ip-chip-pop');
     await expect(list.locator('li', { hasText: 'Map the signing config' })).toHaveText(new RegExp(`^◇ a2 · Map the signing config · haiku · ${RUNNING}$`));
@@ -1331,9 +1378,9 @@ test.describe('Live work', () => {
       const find = (sel, text) => [...document.querySelectorAll(sel)].find((n) => n.textContent.includes(text));
       const color = (n) => (n ? getComputedStyle(n).color : null);
       const lead = (text) => color([...document.querySelectorAll('.ip-upnext-line .ip-upnext-lead')].find((n) => n.textContent === text));
-      const chipB = find('.ip-chip-s', 'Second session');
+      const chipB = document.querySelector('.ip-chip-s[aria-label^="B · "] .ip-tag');
       return {
-        chipB: chipB ? getComputedStyle(chipB).backgroundColor : null,
+        chipB: color(chipB),
         head: color(document.querySelector('.ip-upnext-head')),
         leadA: lead('A'), leadB: lead('B'), leadLater: lead('later'),
         markerA: color(find('.ip-node', '3 RevenueCat').querySelector('.ip-queue')),
@@ -1374,7 +1421,8 @@ test.describe('Live work', () => {
     await hook(api, fresh.session, { event: 'subagent-stop', agentId: 'agent-2' });
     await open(page, fresh);
     const chip = page.locator('.ip-sessions').getByRole('button', { name: /E2E session/ });
-    await expect(chip).toHaveText('A · E2E session · 1 subagent');
+    await expect(chip).toHaveAccessibleName('A · E2E session · 1 subagent');
+    await expect(chip).toHaveText('A');
     const list = page.locator('.ip-chip-pop');
     await expect(list).toBeHidden();
     await chip.hover();
@@ -1400,12 +1448,12 @@ test.describe('Live work', () => {
     await subagent(api, b, 'agent-b', `#${fresh.ids['3 RevenueCat']} Price the tiers`, 'sonnet');
     await task(api, b, '1', 'Compare the plans', 'in_progress', 'agent-b');
     await open(page, fresh);
-    // The letter leads each chip and focus badge, in its own span: the chip's label still starts with the title.
-    const chipA = page.locator('.ip-chip-s', { hasText: 'E2E session' });
-    const chipB = page.locator('.ip-chip-s', { hasText: 'Second session' });
-    await expect(chipA).toHaveText('A · E2E session');
-    await expect(chipB).toHaveText('B · Second session · 1 subagent');
-    await expect(chipB.locator('.ip-chip-label')).toHaveText('Second session · 1 subagent');
+    // A chip shows only its letter. Its name leads with the letter and carries the title and the count.
+    const chipA = page.locator('.ip-sessions').getByRole('button', { name: /^A · / });
+    const chipB = page.locator('.ip-sessions').getByRole('button', { name: /^B · / });
+    await expect(chipA).toHaveAccessibleName('A · E2E session');
+    await expect(chipB).toHaveAccessibleName('B · Second session · 1 subagent');
+    await expect(chipB).toHaveText('B');
     await expect(page.locator('.ip-badge', { hasText: 'E2E session' })).toHaveText('◆ A · E2E session · working');
     await expect(page.locator('.ip-badge', { hasText: 'Second session' })).toHaveText('◆ B · Second session · working · 1 subagent');
     // B's subagent leads with b1, and so does its task.
@@ -1425,9 +1473,9 @@ test.describe('Live work', () => {
       const bg = (n) => getComputedStyle(n).backgroundColor;
       const row = find('.ip-work', 'Compare the plans');
       return {
-        chipA: bg(find('.ip-chip-s', 'E2E session')),
+        chipA: getComputedStyle(document.querySelector('.ip-chip-s[aria-label^="A · "] .ip-tag')).color,
         badgeA: bg(find('.ip-badge', 'E2E session')),
-        chipB: bg(find('.ip-chip-s', 'Second session')),
+        chipB: getComputedStyle(document.querySelector('.ip-chip-s[aria-label^="B · "] .ip-tag')).color,
         badgeB: bg(find('.ip-badge', 'Second session')),
         agentB: bg(find('.ip-agent', 'Price the tiers')),
         markerB: bg(row.querySelector('.ip-work-agent')),
