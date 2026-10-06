@@ -87,8 +87,11 @@
 .ip-marker.m-active { background: var(--active); }
 .ip-marker.m-blocked { background: var(--red); }
 .ip-marker.m-dropped { background: var(--faint); }
-/* Done: a muted ✓, no dot. */
+/* Done: a muted ✓, no dot. The ✓ and a question's ? are drawn here, not written into the DOM, so a step's name and
+   Details' status word stay the first text; the empty alternative text after the slash keeps them out of accessible
+   names. The plain content line is the fallback for an engine without that syntax. */
 .ip-marker.m-done { width: 9px; height: auto; }
+.ip-marker.m-done::before { content: '✓'; content: '✓' / ''; }
 /* A question: a 13 px muted disc with its ? in the ground colour, whatever its status. A done question keeps the ?. */
 .ip-marker.q {
   width: 13px;
@@ -99,6 +102,8 @@
   font-weight: var(--w-heavy);
   line-height: 13px;
 }
+/* After the done ✓, so a done question keeps its ?. */
+.ip-marker.q::before { content: '?'; content: '?' / ''; }
 /* Paused: an active step nobody is on. A hollow sky ring; a question's ? takes the sky. */
 .ip-marker.m-paused { width: 9px; height: 9px; border: 1.5px solid var(--sky); background: transparent; color: var(--sky); }
 /* Needs you: an amber dot, whatever the status; a question's disc turns amber and keeps its ? in the ground colour. */

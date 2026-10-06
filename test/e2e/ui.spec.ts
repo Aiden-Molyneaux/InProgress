@@ -225,7 +225,10 @@ test('clicking a node opens its details and copies a reference', async ({ page, 
   await expect(details).toContainText(`#${demo.ids['2 Android signing']} 2 Android signing`);
   const steps = details.locator('.ip-kids li');
   await expect(steps).toHaveText([/Upload keystore$/, /Play app signing$/, /Run signing tests\s*YOU$/]);
-  await expect(steps.nth(0).locator('.ip-marker.m-done')).toHaveText('✓');
+  // The stylesheet draws the ✓, so the marker holds no text and the step's name starts with its #id.
+  await expect(steps.nth(0).locator('.ip-marker.m-done')).toHaveText('');
+  expect(await page.evaluate<string>(`getComputedStyle(document.querySelector('.ip-kids .ip-marker.m-done'), '::before').content`)).toMatch(/^"✓"/);
+  await expect(steps.nth(0).getByRole('button')).toHaveAccessibleName(`#${demo.ids['Upload keystore']} Upload keystore`);
   const active = steps.nth(1).locator('.ip-marker.m-active');
   await expect(active).toHaveCSS('background-color', 'rgb(194, 65, 12)');
   await expect(active).toHaveCSS('animation-name', 'none');
@@ -465,13 +468,16 @@ test('at 520 px there is no minimap, old finished steps fold into "✓ n done", 
   await expect(firstOld).toHaveCount(0);
   // The seed's milestones fold too.
   await expect(page.getByRole('button', { name: 'Show 25 done' })).toHaveClass(/\bip-more-done\b/);
-  // A done card's header reads "✓Milestone 1": anchor on the title, or this would pass even if the run never folded.
+  // Anchor on the title, so this fails if the run never folded, whatever else a header holds.
   await expect(page.locator('.ip-node .ip-title', { hasText: /^Milestone 1$/ })).toHaveCount(0);
   await expect(page.locator('.ip-more.ip-more-done')).toHaveCount(2);
   // A click opens the run and hands focus to its first step.
   await oldRun.click();
   await expect(page.locator('.ip-node', { hasText: 'Old step 4' })).toBeVisible();
   await expect(firstOld).toBeFocused();
+  // A done card's ✓ comes from the stylesheet, so its header's text and name are its title alone.
+  await expect(firstOld).toHaveText('Old step 1');
+  await expect(firstOld).toHaveAccessibleName('Old step 1');
   await expect(page.locator('.ip-more.ip-more-done')).toHaveCount(1);
   // Folding the parent and unfolding it folds the run again.
   const parent = page.locator('.ip-node', { hasText: 'Finished work' });

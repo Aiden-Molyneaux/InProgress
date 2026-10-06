@@ -15,14 +15,15 @@ export interface MarkerProps {
   title?: string;
 }
 
-/** A step's status marker, on a card's header and in Details' step list. Its look is in character.css. */
+/**
+ * A step's status marker, on a card's header and in Details' step list. Its look is in character.css, which also draws
+ * the done ✓ and the question's ?, so the span holds no text and a step's name stays the first text beside it.
+ */
 export function Marker({ status, question, paused, needsYou, pulse, title }: MarkerProps) {
   return (
     <span
       className={['ip-marker', `m-${status}`, question && 'q', paused && 'm-paused', needsYou && 'm-you', pulse && 'm-pulse'].filter(Boolean).join(' ')}
       title={title}
-    >
-      {question ? '?' : status === 'done' ? '✓' : ''}
-    </span>
+    />
   );
 }
