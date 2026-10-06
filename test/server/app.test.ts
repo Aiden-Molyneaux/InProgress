@@ -18,6 +18,8 @@ afterAll(() => {
 
 const TOKEN = 'test-token';
 const auth = { authorization: `Bearer ${TOKEN}`, 'x-inprogress-actor': 'scribe:s1' };
+/** The window's own pages send this Origin: the scheme and the Host (inject's default Host is localhost:80). */
+const SAME_ORIGIN = { origin: 'http://localhost:80' };
 
 function setup(extra: Partial<AppOptions> = {}) {
   const ctx = makeCtx();
@@ -28,7 +30,7 @@ function setup(extra: Partial<AppOptions> = {}) {
 /** Store a resource with this path on the node, then ask the UI route to open it. */
 async function openStoredPath(app: FastifyInstance, nodeId: number, path: string) {
   const resource = (await app.inject({ method: 'POST', url: '/api/resources', headers: auth, payload: { nodeId, kind: 'doc', title: 'Doc', path } })).json();
-  return app.inject({ method: 'POST', url: '/api/ui/open', headers: { 'x-ip-ui-token': 'ui-token' }, payload: { resourceId: resource.id } });
+  return app.inject({ method: 'POST', url: '/api/ui/open', headers: { ...SAME_ORIGIN, 'x-ip-ui-token': 'ui-token' }, payload: { resourceId: resource.id } });
 }
 
 describe('guards', () => {
@@ -359,11 +361,11 @@ describe('ui routes', () => {
     writeFileSync(file, '# x');
     const withPath = (await app.inject({ method: 'POST', url: '/api/resources', headers: auth, payload: { nodeId: p.rootNodeId, kind: 'doc', title: 'Doc', path: file } })).json();
     const noPath = (await app.inject({ method: 'POST', url: '/api/resources', headers: auth, payload: { nodeId: p.rootNodeId, kind: 'doc', title: 'Inline', content: 'x' } })).json();
-    expect((await app.inject({ method: 'POST', url: '/api/ui/open', payload: { resourceId: withPath.id } })).statusCode).toBe(401);
-    const ok = await app.inject({ method: 'POST', url: '/api/ui/open', headers: { 'x-ip-ui-token': 'ui-token' }, payload: { resourceId: withPath.id } });
+    expect((await app.inject({ method: 'POST', url: '/api/ui/open', headers: SAME_ORIGIN, payload: { resourceId: withPath.id } })).statusCode).toBe(401);
+    const ok = await app.inject({ method: 'POST', url: '/api/ui/open', headers: { ...SAME_ORIGIN, 'x-ip-ui-token': 'ui-token' }, payload: { resourceId: withPath.id } });
     expect(ok.statusCode).toBe(200);
     expect(opened).toEqual([file]);
-    const none = await app.inject({ method: 'POST', url: '/api/ui/open', headers: { 'x-ip-ui-token': 'ui-token' }, payload: { resourceId: noPath.id } });
+    const none = await app.inject({ method: 'POST', url: '/api/ui/open', headers: { ...SAME_ORIGIN, 'x-ip-ui-token': 'ui-token' }, payload: { resourceId: noPath.id } });
     expect(none.statusCode).toBe(400);
   });
 
@@ -390,7 +392,7 @@ describe('ui routes', () => {
     writeFileSync(file, '# x');
     const resource = (await app.inject({ method: 'POST', url: '/api/resources', headers: auth, payload: { nodeId: p.rootNodeId, kind: 'doc', title: 'Doc', path: file } })).json();
     for (const token of ['ui-tokeN', 'ui-token-longer', '']) {
-      const res = await app.inject({ method: 'POST', url: '/api/ui/open', headers: { 'x-ip-ui-token': token }, payload: { resourceId: resource.id } });
+      const res = await app.inject({ method: 'POST', url: '/api/ui/open', headers: { ...SAME_ORIGIN, 'x-ip-ui-token': token }, payload: { resourceId: resource.id } });
       expect(res.statusCode, token).toBe(401);
       expect(res.json()).toEqual({ error: 'Missing or invalid UI token' });
     }
@@ -470,7 +472,7 @@ describe('ui/open-url', () => {
     const opened: string[] = [];
     const { app } = setup({ openUrl: async (u) => { opened.push(u); } });
     const post = (url: unknown, token = 'ui-token') =>
-      app.inject({ method: 'POST', url: '/api/ui/open-url', headers: { 'x-ip-ui-token': token }, payload: { url } });
+      app.inject({ method: 'POST', url: '/api/ui/open-url', headers: { ...SAME_ORIGIN, 'x-ip-ui-token': token }, payload: { url } });
     expect((await post('https://github.com/acme/repo/pull/7')).statusCode).toBe(200);
     expect((await post('http://localhost:3000/x?a=1&b=2')).statusCode).toBe(200);
     expect(opened).toEqual(['https://github.com/acme/repo/pull/7', 'http://localhost:3000/x?a=1&b=2']);
@@ -479,5 +481,178 @@ describe('ui/open-url', () => {
     }
     expect((await post('https://example.com', 'wrong')).statusCode).toBe(401);
     expect(opened).toHaveLength(2);
+  });
+});
+
+describe('window routes', () => {
+  const UI = { ...SAME_ORIGIN, 'x-ip-ui-token': 'ui-token' };
+  const ACTIONS = ['archive', 'unarchive', 'delete', 'restore'] as const;
+
+  /** InGame, bound to C:/personal/InGame, with a live session there. */
+  async function withProject() {
+    const { ctx, app } = setup();
+    const p = (await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'InGame' } })).json();
+    await app.inject({ method: 'POST', url: `/api/projects/${p.slug}/bindings`, headers: auth, payload: { path: 'C:/personal/InGame' } });
+    await app.inject({ method: 'POST', url: '/api/sessions/s1/hook', headers: auth, payload: { event: 'start', source: 'startup', cwd: 'C:/personal/InGame' } });
+    const act = (action: string, body: unknown = { slug: p.slug }, headers: Record<string, string> = UI) =>
+      app.inject({ method: 'POST', url: `/api/ui/projects/${p.id}/${action}`, headers, payload: body as object });
+    return { ctx, app, p, act };
+  }
+
+  it('archives, deletes, restores and unarchives a project as the window', async () => {
+    const { ctx, app, p, act } = await withProject();
+    const archived = await act('archive');
+    expect(archived.statusCode).toBe(200);
+    expect(archived.json()).toMatchObject({ project: { id: p.id, slug: 'ingame', status: 'archived' }, endedSessions: 1 });
+    const lastEvent = () => ctx.db.prepare('SELECT type, actor FROM events ORDER BY id DESC LIMIT 1').get();
+    expect(lastEvent()).toEqual({ type: 'project.updated', actor: 'window' });
+    // Twice is the same as once, and records nothing more.
+    const events = ctx.db.prepare('SELECT COUNT(*) FROM events').pluck().get();
+    expect((await act('archive')).json()).toMatchObject({ project: { status: 'archived' }, endedSessions: 0 });
+    expect(ctx.db.prepare('SELECT COUNT(*) FROM events').pluck().get()).toBe(events);
+
+    const deleted = await act('delete');
+    expect(deleted.statusCode).toBe(200);
+    const { deletedAt, purgeAt } = deleted.json();
+    expect(deleted.json()).toEqual({ id: p.id, slug: 'ingame', deletedAt: expect.any(String), purgeAt: expect.any(String) });
+    expect(Date.parse(purgeAt) - Date.parse(deletedAt)).toBe(30 * 24 * 60 * 60 * 1000);
+    expect(lastEvent()).toEqual({ type: 'project.deleted', actor: 'window' });
+    expect((await app.inject({ url: '/api/deleted-projects' })).json()).toEqual([{ id: p.id, slug: 'ingame', name: 'InGame', deletedAt, purgeAt }]);
+    expect((await app.inject({ url: '/api/projects' })).json()).toEqual([]);
+    // A stale #/p/ link never paints it.
+    const stale = await app.inject({ url: '/api/projects/ingame' });
+    expect(stale.statusCode).toBe(404);
+    expect(stale.json()).toEqual({ error: 'Project "ingame" not found', hint: `It was deleted; restore it from Recently deleted in the window before ${purgeAt.slice(0, 10)}.` });
+    expect((await act('delete')).statusCode).toBe(409);
+    // Deleted is hidden: unarchive it only after a restore.
+    expect((await act('unarchive')).statusCode).toBe(404);
+
+    const restored = await act('restore');
+    expect(restored.statusCode).toBe(200);
+    expect(restored.json()).toMatchObject({ project: { id: p.id, status: 'archived' } });
+    expect(lastEvent()).toEqual({ type: 'project.restored', actor: 'window' });
+    expect((await app.inject({ url: '/api/deleted-projects' })).json()).toEqual([]);
+    expect((await act('restore')).json()).toMatchObject({ error: 'Project ingame is not deleted' });
+
+    const back = await act('unarchive');
+    expect(back.statusCode).toBe(200);
+    expect(back.json()).toEqual({ project: expect.objectContaining({ id: p.id, status: 'active' }) });
+    expect((await act('unarchive')).statusCode).toBe(200);
+    expect((await act('delete')).json()).toMatchObject({ error: 'Archive it first' });
+    expect((await act('delete')).statusCode).toBe(409);
+  });
+
+  it('answers 409 when the id now names another project, and 404 for an id that is gone', async () => {
+    const { app, p, act } = await withProject();
+    for (const action of ACTIONS) {
+      const res = await act(action, { slug: 'old-site' });
+      expect(res.statusCode, action).toBe(409);
+      expect(res.json(), action).toEqual({ error: 'This project changed; reload', hint: 'Reload the window: another project has this id now.' });
+      const gone = await app.inject({ method: 'POST', url: `/api/ui/projects/${p.id + 100}/${action}`, headers: UI, payload: { slug: p.slug } });
+      expect(gone.statusCode, action).toBe(404);
+    }
+  });
+
+  it('takes only { slug }', async () => {
+    const { act } = await withProject();
+    for (const body of [{}, { slug: '' }, { slug: 'x'.repeat(201) }, { slug: 'ingame', status: 'active' }, { slug: 7 }]) {
+      expect((await act('archive', body)).statusCode, JSON.stringify(body)).toBe(400);
+    }
+  });
+
+  it('lists recently deleted projects without any token, as /api/projects does', async () => {
+    const { app } = setup();
+    const res = await app.inject({ url: '/api/deleted-projects' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual([]);
+  });
+});
+
+describe('requireUi: every UI write', () => {
+  const routes = (id: number) => [
+    ...['archive', 'unarchive', 'delete', 'restore'].map((a) => ({ url: `/api/ui/projects/${id}/${a}`, payload: { slug: 'ingame' } })),
+    { url: '/api/ui/open', payload: { resourceId: 1 } },
+    { url: '/api/ui/open-url', payload: { url: 'https://example.com' } },
+  ];
+
+  async function guarded() {
+    const opened: string[] = [];
+    const { ctx, app } = setup({ openPath: async (p) => { opened.push(p); }, openUrl: async (u) => { opened.push(u); } });
+    const p = (await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'InGame' } })).json();
+    return { ctx, app, p, opened, events: () => ctx.db.prepare('SELECT COUNT(*) FROM events').pluck().get() };
+  }
+
+  it('refuses a request without an Origin, or from another one, first: before the token or the body is looked at', async () => {
+    const { app, p, opened, events } = await guarded();
+    const before = events();
+    for (const { url, payload } of routes(p.id)) {
+      for (const origin of [undefined, 'http://evil.example', 'http://localhost:4317', 'https://localhost:80', 'null', 'http://localhost:80.evil.example']) {
+        const headers: Record<string, string> = { 'x-ip-ui-token': 'ui-token', ...(origin ? { origin } : {}) };
+        for (const res of [
+          await app.inject({ method: 'POST', url, headers, payload }),
+          // No token and a form body: still the origin that refuses it.
+          await app.inject({ method: 'POST', url, headers: { ...(origin ? { origin } : {}), 'content-type': 'application/x-www-form-urlencoded' }, payload: 'slug=ingame' }),
+        ]) {
+          expect(res.statusCode, `${url} ${origin}`).toBe(403);
+          expect(res.json()).toEqual({ error: 'Forbidden origin' });
+        }
+      }
+    }
+    expect(events()).toBe(before);
+    expect(opened).toEqual([]);
+  });
+
+  it('accepts the Origin whatever the case of its host, as the Host header has it', async () => {
+    const { app, p } = await guarded();
+    const res = await app.inject({ method: 'POST', url: `/api/ui/projects/${p.id}/archive`, headers: { host: '127.0.0.1:4317', origin: 'http://127.0.0.1:4317', 'x-ip-ui-token': 'ui-token' }, payload: { slug: 'ingame' } });
+    expect(res.statusCode).toBe(200);
+    const upper = await app.inject({ method: 'POST', url: `/api/ui/projects/${p.id}/unarchive`, headers: { host: 'LOCALHOST:4317', origin: 'http://localhost:4317', 'x-ip-ui-token': 'ui-token' }, payload: { slug: 'ingame' } });
+    expect(upper.statusCode).toBe(200);
+  });
+
+  it('takes only a JSON body: text/plain and form bodies, the ones a cross-site form can send, get 415', async () => {
+    const { app, p, opened, events } = await guarded();
+    const before = events();
+    for (const { url, payload } of routes(p.id)) {
+      for (const [type, body] of [['text/plain', JSON.stringify(payload)], ['text/plain;charset=UTF-8', JSON.stringify(payload)], ['application/x-www-form-urlencoded', 'slug=ingame'], ['multipart/form-data; boundary=x', '--x--']]) {
+        const res = await app.inject({ method: 'POST', url, headers: { ...SAME_ORIGIN, 'x-ip-ui-token': 'ui-token', 'content-type': type }, payload: body });
+        expect(res.statusCode, `${url} ${type}`).toBe(415);
+        expect(res.json()).toEqual({ error: 'Send the body as application/json' });
+      }
+    }
+    expect(events()).toBe(before);
+    expect(opened).toEqual([]);
+  });
+
+  it('needs the UI token, checked last, so only the window itself ever sees its 401', async () => {
+    const { app, p, opened, events } = await guarded();
+    const before = events();
+    for (const { url, payload } of routes(p.id)) {
+      for (const token of [undefined, '', 'ui-tokeN', 'ui-token-longer']) {
+        const res = await app.inject({ method: 'POST', url, headers: { ...SAME_ORIGIN, ...(token === undefined ? {} : { 'x-ip-ui-token': token }) }, payload });
+        expect(res.statusCode, `${url} ${token}`).toBe(401);
+        expect(res.json()).toEqual({ error: 'Missing or invalid UI token' });
+      }
+    }
+    expect(events()).toBe(before);
+    expect(opened).toEqual([]);
+  });
+
+  it('lets the window through with all three, a charset on the JSON type included', async () => {
+    const { app, p } = await guarded();
+    const res = await app.inject({
+      method: 'POST', url: `/api/ui/projects/${p.id}/archive`,
+      headers: { ...SAME_ORIGIN, 'x-ip-ui-token': 'ui-token', 'content-type': 'application/json; charset=utf-8' },
+      payload: JSON.stringify({ slug: 'ingame' }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ project: { status: 'archived' }, endedSessions: 0 });
+  });
+
+  it('leaves the bearer routes as they were: the scribe archives with its token and no Origin', async () => {
+    const { app } = await guarded();
+    const res = await app.inject({ method: 'PATCH', url: '/api/projects/ingame', headers: auth, payload: { status: 'archived' } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ status: 'archived' });
   });
 });

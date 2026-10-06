@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { sameBuild, type BuildInfo } from '../../src/core/build';
 import { eventTarget } from '../../src/core/layout';
-import type { EventRow, ProjectSnapshot, ProjectSummary } from '../../src/core/types';
+import type { DeletedProject, EventRow, ProjectSnapshot, ProjectSummary } from '../../src/core/types';
 import { api } from './api';
+import { pickSlug } from './chrome/tabs';
+import { patchDeleted, patchProjects, summaryOf, type ActionTarget, type ProjectAction } from './projectActions';
 import { load, save } from './storage';
 import { subscribe } from './stream';
 
@@ -10,6 +12,8 @@ const hashSlug = () => /^#\/p\/([^/]+)$/.exec(window.location.hash)?.[1] ?? null
 
 export interface InProgressState {
   projects: ProjectSummary[];
+  /** Projects deleted in the last 30 days, restorable from ⋯. */
+  deleted: DeletedProject[];
   slug: string | null;
   snapshot: ProjectSnapshot | null;
   /** Newest event for the activity strip, including the one loaded with the snapshot. */
@@ -19,10 +23,18 @@ export interface InProgressState {
   connection: 'open' | 'reconnecting';
   loaded: boolean;
   selectProject: (slug: string) => void;
+  /**
+   * Archives, unarchives, deletes or restores a project. When it goes through, the lists change at once and `goTo` opens
+   * if the window is still on the target (null: stay, or fall back as when the open project leaves the list), then the
+   * lists reload. A 401 reloads the page.
+   * Answers 'ok', 'reload', or the server's message.
+   */
+  act: (action: ProjectAction, target: ActionTarget, goTo: string | null) => Promise<'ok' | 'reload' | string>;
 }
 
 export function useInProgress(): InProgressState {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [deleted, setDeleted] = useState<DeletedProject[]>([]);
   const [slug, setSlug] = useState<string | null>(() => hashSlug() ?? load('ip.project'));
   const [snapshot, setSnapshot] = useState<ProjectSnapshot | null>(null);
   const [lastEvent, setLastEvent] = useState<EventRow | null>(null);
@@ -31,6 +43,11 @@ export function useInProgress(): InProgressState {
   const [loaded, setLoaded] = useState(false);
   const slugRef = useRef(slug);
   slugRef.current = slug;
+  const projectsRef = useRef(projects);
+  projectsRef.current = projects;
+  /** Numbers list requests, as snapshotSeq does snapshots, so a list fetched before an action never undoes its patch. */
+  const listSeq = useRef(0);
+  const listApplied = useRef(0);
   const projectIdRef = useRef<number | null>(null);
   projectIdRef.current = snapshot?.project.id ?? null;
   /** Numbers snapshot requests. A response lands when it is newer than the last one applied, so a slow older one never overwrites newer data. */
@@ -53,16 +70,20 @@ export function useInProgress(): InProgressState {
   }, []);
 
   const loadProjects = useCallback(async () => {
-    const list = await api.projects().catch(() => null);
+    const seq = ++listSeq.current;
+    const [list, gone] = await Promise.all([api.projects().catch(() => null), api.deletedProjects().catch(() => null)]);
+    if (seq <= listApplied.current) return;
     if (!list) {
       // Open the stream anyway: its reconnect loop shows that the server is unreachable and retries.
       startStream();
       return;
     }
+    listApplied.current = seq;
     setProjects(list);
+    if (gone) setDeleted(gone);
     setLoaded(true);
     if (!list.length) startStream();
-    setSlug((cur) => (cur && list.some((p) => p.slug === cur) ? cur : (list.find((p) => p.status === 'active') ?? list[0])?.slug ?? null));
+    setSlug((cur) => pickSlug(list, cur));
   }, [startStream]);
 
   const loadSnapshot = useCallback(
@@ -94,7 +115,15 @@ export function useInProgress(): InProgressState {
   }, [loadProjects]);
 
   useEffect(() => {
-    if (!slug) return;
+    if (!slug) {
+      // The last project left the list: nothing of it may stay on screen, and the URL must not name it.
+      projectIdRef.current = null;
+      setSnapshot(null);
+      setLastEvent(null);
+      setLiveEvent(null);
+      if (window.location.hash) window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      return;
+    }
     save('ip.project', slug);
     if (window.location.hash !== `#/p/${slug}`) window.history.replaceState(null, '', `#/p/${slug}`);
     setSnapshot(null);
@@ -158,5 +187,26 @@ export function useInProgress(): InProgressState {
     };
   }, [stream, loadProjects, loadSnapshot, checkBuild]);
 
-  return { projects, slug, snapshot, lastEvent, liveEvent, connection, loaded, selectProject: setSlug };
+  const act = useCallback(
+    async (action: ProjectAction, target: ActionTarget, goTo: string | null) => {
+      const answer = await api.projectAction(action, target);
+      if (answer === 'reload') window.location.reload();
+      if (typeof answer === 'string') return answer;
+      // One batch: the patched lists and the project to open land together, so no tab jumps on the way. A restored
+      // project joins the list now, under ⋯, rather than with the reload.
+      const restored = action === 'restore' && answer.project ? summaryOf(answer.project) : undefined;
+      const list = patchProjects(projectsRef.current, action, target.id, restored);
+      listApplied.current = listSeq.current;
+      setProjects(list);
+      setDeleted((cur) => patchDeleted(cur, action, target, Date.now()));
+      // goTo only while the window is still on the project that left: a switch made during the write stands.
+      setSlug((cur) => (goTo !== null && cur === target.slug ? goTo : pickSlug(list, cur)));
+      // Reconcile now, not after the stream's 400 ms.
+      void loadProjects();
+      return 'ok' as const;
+    },
+    [loadProjects],
+  );
+
+  return { projects, deleted, slug, snapshot, lastEvent, liveEvent, connection, loaded, selectProject: setSlug, act };
 }

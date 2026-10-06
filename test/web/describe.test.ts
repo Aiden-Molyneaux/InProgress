@@ -75,6 +75,21 @@ describe('describeEvent', () => {
     expect(describeEvent(ev('session.updated', 's1', { changed: ['state'], state: 'ended' }), snapshot)).toBe('InGame launch status ended');
     expect(describeEvent(ev('session.updated', 'gone', { changed: ['state'], state: 'ended' }), snapshot)).toBe('a session ended');
   });
+
+  it('says when the project was archived, unarchived, deleted or restored', () => {
+    const status = (from: string, to: string) => ({ changes: { status: { from, to } } });
+    expect(describeEvent(ev('project.updated', '1', status('active', 'archived'), 'window'), snapshot)).toBe('archived the project');
+    expect(describeEvent(ev('project.updated', '1', status('archived', 'active'), 'window'), snapshot)).toBe('unarchived the project');
+    // The scribe's update_project reads the same.
+    expect(describeEvent(ev('project.updated', '1', status('active', 'archived')), snapshot)).toBe('archived the project');
+    expect(describeEvent(ev('project.deleted', '1', { slug: 'p', name: 'P', purgeAt: '2026-11-05T12:00:00Z' }, 'window'), snapshot)).toBe('deleted the project');
+    expect(describeEvent(ev('project.restored', '1', { slug: 'p', name: 'P' }, 'window'), snapshot)).toBe('restored the project');
+  });
+
+  it("labels the window's own writes as you", () => {
+    expect(actorLabel(ev('project.updated', '1', {}, 'window'), snapshot)).toBe('you');
+    expect(actorLabel(ev('project.updated', '1', {}, 'window'), null)).toBe('you');
+  });
 });
 
 describe('relativeTime', () => {

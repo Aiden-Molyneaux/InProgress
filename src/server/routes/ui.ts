@@ -3,7 +3,7 @@ import { stat } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import fastifyStatic from '@fastify/static';
 import type { FastifyInstance } from 'fastify';
-import { tokenMatches, type AppOptions, type Guard } from '../app';
+import type { AppOptions, Guard } from '../app';
 import { badRequest } from '../errors';
 import { openInDefaultBrowser, openInEditorOrReveal } from '../open-path';
 import { requireResource } from '../repo/resources';
@@ -27,17 +27,14 @@ function isLocalAbsolutePath(path: string): boolean {
   return process.platform === 'win32' ? /^[A-Za-z]:[\\/]/.test(path) : isAbsolute(path);
 }
 
-export function registerUi(app: FastifyInstance, opts: AppOptions, requireToken: Guard): void {
+export function registerUi(app: FastifyInstance, opts: AppOptions, requireToken: Guard, requireUi: Guard): void {
   app.post('/api/admin/shutdown', { preHandler: requireToken }, async () => {
     setImmediate(() => opts.onShutdown?.());
     return { ok: true };
   });
 
-  app.post('/api/ui/open', async (req, reply) => {
-    if (!tokenMatches(req.headers['x-ip-ui-token'], opts.uiToken)) {
-      reply.code(401).send({ error: 'Missing or invalid UI token' });
-      return reply;
-    }
+  // The window's launches, behind the same guard as its other writes (requireUi: Origin, JSON, UI token).
+  app.post('/api/ui/open', { onRequest: requireUi }, async (req) => {
     const { resourceId } = openBody.parse(req.body);
     const resource = requireResource(opts.ctx, resourceId);
     if (!resource.path) throw badRequest(`r${resourceId} has no file path`);
@@ -57,11 +54,7 @@ export function registerUi(app: FastifyInstance, opts: AppOptions, requireToken:
   });
 
   // The UI runs in an Edge app window, where a plain link opens in Edge: links go through here to the default browser.
-  app.post('/api/ui/open-url', async (req, reply) => {
-    if (!tokenMatches(req.headers['x-ip-ui-token'], opts.uiToken)) {
-      reply.code(401).send({ error: 'Missing or invalid UI token' });
-      return reply;
-    }
+  app.post('/api/ui/open-url', { onRequest: requireUi }, async (req) => {
     const { url } = openUrlBody.parse(req.body);
     let parsed: URL;
     try {

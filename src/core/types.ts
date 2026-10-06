@@ -29,6 +29,8 @@ export const SCRIBE_AGENT = 'inprogress-scribe';
 export const STALE_SESSION_MS = 12 * 60 * 60 * 1000;
 /** How long ended work stays on its step as the trail: an ended session's working tasks, and a subagent after it stopped. */
 export const TRAIL_MS = 7 * 24 * 60 * 60 * 1000;
+/** How long a deleted project waits under Recently deleted, restorable, before it is purged for good. */
+export const DELETED_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 /**
  * How long a live session's stopped worker keeps its greyed badge: five minutes, then it shows in the trail. A reader
  * keeps none: it shows only while it runs, and leaves no trail (agentVisible in core/layout). The server's list of a
@@ -70,6 +72,19 @@ export interface ProjectSummary extends Project {
   activeSessions: number;
   workingSessions: number;
   lastEventAt: string | null;
+}
+
+/**
+ * A project deleted less than 30 days ago: hidden everywhere else, restorable until `purgeAt`, when it is removed for
+ * good. Newest first in its list.
+ */
+export interface DeletedProject {
+  id: number;
+  slug: string;
+  name: string;
+  deletedAt: string;
+  /** `deletedAt` plus DELETED_RETENTION_MS. */
+  purgeAt: string;
 }
 
 export interface Binding {

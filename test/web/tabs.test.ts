@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { archivedProjects, projectLabel, projectTabs, stepTab } from '../../web/src/chrome/tabs';
+import { archivedProjects, neighbourTab, pickSlug, projectLabel, projectTabs, recentlyDeleted, stepTab } from '../../web/src/chrome/tabs';
 
 const project = (id: number, status: 'active' | 'archived' = 'active') => ({ id, slug: `p${id}`, status });
 const slugs = (list: { slug: string }[]) => list.map((p) => p.slug);
@@ -68,5 +68,70 @@ describe('projectLabel', () => {
     expect(projectLabel({ ...summary, needsYou: 3 })).toBe('InThink: Marathon v3, 3 need you');
     expect(projectLabel({ ...summary, workingSessions: 2 })).toBe('InThink: Marathon v3, working');
     expect(projectLabel({ ...summary, needsYou: 1, workingSessions: 1 })).toBe('InThink: Marathon v3, 1 need you, working');
+  });
+});
+
+describe('neighbourTab', () => {
+  const tabs = [project(1), project(2), project(3)];
+
+  it('is the tab to the right, as a browser does when a tab closes', () => {
+    expect(neighbourTab(tabs, 'p1')).toBe('p2');
+    expect(neighbourTab(tabs, 'p2')).toBe('p3');
+  });
+
+  it('is the tab to the left for the last tab', () => {
+    expect(neighbourTab(tabs, 'p3')).toBe('p2');
+  });
+
+  it('is nothing for a lone tab, an unknown slug or no tabs', () => {
+    expect(neighbourTab([project(7)], 'p7')).toBeNull();
+    expect(neighbourTab(tabs, 'gone')).toBeNull();
+    expect(neighbourTab(tabs, null)).toBeNull();
+    expect(neighbourTab([], 'p1')).toBeNull();
+  });
+});
+
+describe('pickSlug', () => {
+  const listed = [project(3, 'archived'), project(1), project(2)];
+
+  it('keeps the current project while it is listed, archived or not', () => {
+    expect(pickSlug(listed, 'p2')).toBe('p2');
+    expect(pickSlug(listed, 'p3')).toBe('p3');
+  });
+
+  it("falls back to the first active project in the server's order, else the first listed", () => {
+    expect(pickSlug(listed, 'gone')).toBe('p1');
+    expect(pickSlug(listed, null)).toBe('p1');
+    expect(pickSlug([project(5, 'archived'), project(4, 'archived')], 'gone')).toBe('p5');
+  });
+
+  it('is nothing when nothing is listed', () => {
+    expect(pickSlug([], 'p1')).toBeNull();
+  });
+});
+
+describe('recentlyDeleted', () => {
+  const day = 24 * 60 * 60 * 1000;
+  const now = Date.parse('2026-10-06T12:00:00Z');
+  const gone = (id: number, deletedDaysAgo: number) => ({
+    id,
+    slug: `d${id}`,
+    name: `D${id}`,
+    deletedAt: new Date(now - deletedDaysAgo * day).toISOString(),
+    purgeAt: new Date(now + (30 - deletedDaysAgo) * day).toISOString(),
+  });
+
+  it('lists the most recently deleted first', () => {
+    expect(slugs(recentlyDeleted([gone(1, 5), gone(2, 1), gone(3, 9)], now))).toEqual(['d2', 'd1', 'd3']);
+  });
+
+  it('drops a project past its purge time, in case the purge has not run yet', () => {
+    expect(slugs(recentlyDeleted([gone(1, 30), gone(2, 31), gone(3, 29)], now))).toEqual(['d3']);
+  });
+
+  it('leaves the list it was given alone', () => {
+    const list = [gone(1, 5), gone(2, 1)];
+    recentlyDeleted(list, now);
+    expect(slugs(list)).toEqual(['d1', 'd2']);
   });
 });

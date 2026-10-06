@@ -4,11 +4,12 @@ import type { ProjectSnapshot } from '../../src/core/types';
 import { Canvas, type CanvasHandle } from './canvas/Canvas';
 import { ActivityStrip } from './chrome/ActivityStrip';
 import { SessionRow } from './chrome/SessionRow';
-import { archivedProjects, projectTabs, stepTab } from './chrome/tabs';
+import { archivedProjects, neighbourTab, projectTabs, stepTab } from './chrome/tabs';
 import { TopBar } from './chrome/TopBar';
 import { UpNext } from './chrome/UpNext';
 import { Details } from './panels/Details';
 import { ResourceViewer } from './panels/ResourceViewer';
+import { actionMessage, type ActionTarget, type ProjectAction } from './projectActions';
 import { useFoldOverrides } from './useFoldOverrides';
 import { useInProgress } from './useInProgress';
 import { useKeyboard } from './useKeyboard';
@@ -42,6 +43,25 @@ export function App() {
   const stepProject = (step: 1 | -1) => {
     const slug = stepTab(tabs, state.slug, step);
     if (slug) state.selectProject(slug);
+  };
+
+  /** The status line: what an archive, unarchive, delete or restore did, or why it failed. Shown for 3 s. */
+  const [status, setStatus] = useState<string | null>(null);
+  const statusTimer = useRef(0);
+  const say = (text: string) => {
+    setStatus(text);
+    window.clearTimeout(statusTimer.current);
+    statusTimer.current = window.setTimeout(() => setStatus(null), 3000);
+  };
+  useEffect(() => () => window.clearTimeout(statusTimer.current), []);
+  const onAction = async (action: ProjectAction, target: ActionTarget): Promise<boolean> => {
+    // Picked before the write: archiving or deleting the open project opens the tab beside it, as a browser does when a
+    // tab closes. With none, an archived project stays open as the end tab and a deleted one falls back.
+    const leaving = (action === 'archive' || action === 'delete') && target.slug === state.slug;
+    const result = await state.act(action, target, leaving ? neighbourTab(tabs, target.slug) : null);
+    if (result === 'reload') return false;
+    say(result === 'ok' ? actionMessage(action, target.name) : result);
+    return result === 'ok';
   };
 
   const openViewer = useCallback((id: number) => {
@@ -95,7 +115,7 @@ export function App() {
   return (
     <>
       <div className="ip-app" ref={app}>
-        <TopBar tabs={tabs} archived={archived} current={state.slug} onSelect={state.selectProject} />
+        <TopBar tabs={tabs} archived={archived} deleted={state.deleted} current={state.slug} onSelect={state.selectProject} onAction={onAction} />
         {/* Always there, so the canvas doesn't jump while a project loads: it holds the needs-you pill and Follow. */}
         <SessionRow
           sessions={snapshot?.sessions ?? []}
@@ -109,7 +129,11 @@ export function App() {
         {state.connection === 'reconnecting' && <div className="ip-banner">Reconnecting to InProgress…</div>}
         <main className="ip-main">
           {projects.length === 0 ? (
-            <div className="ip-empty">No projects yet. In a Claude session, say "track this in InProgress".</div>
+            <div className="ip-empty">
+              {state.deleted.length > 0
+                ? 'No projects. Restore one from ⋯, or in a Claude session say "track this in InProgress".'
+                : 'No projects yet. In a Claude session, say "track this in InProgress".'}
+            </div>
           ) : snapshot ? (
             <Canvas
               key={snapshot.project.id}
@@ -145,6 +169,10 @@ export function App() {
       </div>
       {/* Outside .ip-app, which turns inert while the viewer is open. */}
       {viewerOpen && <ResourceViewer key={viewerResource} resourceId={viewerResource} onClose={() => setViewerResource(null)} />}
+      {/* Always mounted, so a screen reader hears each new line; drawn over the activity strip, not on it. */}
+      <div role="status" className="ip-status">
+        {status && <div className="ip-toast">{status}</div>}
+      </div>
     </>
   );
 }

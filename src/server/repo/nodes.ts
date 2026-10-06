@@ -2,6 +2,7 @@ import type { After, Assignee, NodeInput, NodeKind, NodeLabel, NodeStatus, TreeN
 import { write, type Ctx, type RecordEvent } from '../db/tx';
 import { badRequest, notFound } from '../errors';
 import { definedOnly } from '../util';
+import { inLiveProject } from './projects';
 
 interface NodeRow {
   id: number;
@@ -37,8 +38,9 @@ export const toNode = (r: NodeRow): TreeNode => ({
   completedAt: r.completed_at,
 });
 
+/** A step by id. A deleted project's steps are not found, so every read and write by id refuses them. */
 export function findNode(ctx: Ctx, id: number): TreeNode | undefined {
-  const row = ctx.db.prepare('SELECT * FROM nodes WHERE id = ?').get(id) as NodeRow | undefined;
+  const row = ctx.db.prepare(`SELECT * FROM nodes WHERE id = ? AND ${inLiveProject('nodes.project_id')}`).get(id) as NodeRow | undefined;
   return row ? toNode(row) : undefined;
 }
 

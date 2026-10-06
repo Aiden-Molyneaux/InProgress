@@ -134,7 +134,11 @@ and `web/dist/`, so nothing but `npm run deploy` writes there:
 **projects**: `id` INTEGER PK · `slug` TEXT UNIQUE (kebab-case from name, `-2` suffix on clash) ·
 `name` · `description` · `playbook` (markdown: per-project instructions the scribe follows and the
 briefing includes; this is how "each project works a little differently") · `status`
-(`active` | `archived`) · `root_node_id` · `created_at` · `updated_at`.
+(`active` | `archived`; archiving stops tracking the project's live sessions, which keep running, and drops
+their own Up next entries) · `root_node_id` · `created_at` · `updated_at` · `deleted_at` (migration 8: set by a
+delete from the window, which needs an archived project and leaves it archived; a deleted project is hidden
+everywhere, restorable from Recently deleted for 30 days, then purged with its rows and InProgress's own copies of
+its files under `<home>/resources/`).
 
 **bindings**: `id` · `project_id` (cascade) · `path` (normalized, see 4.3) · `branch_pattern`
 (nullable glob, `*` wildcard, case-insensitive) · `created_at` · UNIQUE(`path`, `branch_pattern`).
@@ -177,7 +181,8 @@ each project's newest event. Drives SSE and history.
 
 - **Needs you** = `assignee = 'me'` AND `status IN ('todo','active','blocked')`.
 - **Project root**: created with the project (`kind = goal`, title = project name, body =
-  description). Cannot be deleted or moved; archive the project instead.
+  description). Cannot be deleted or moved; archive the project instead (and delete the archived project from the
+  window, if it should go for good).
 - **Progress count** on any node with children: done / (total − dropped), direct children only.
 - **Status side effects**: entering `done` sets `completed_at`; leaving it clears it. No automatic
   parent roll-up: the scribe sets parent statuses explicitly.
@@ -211,7 +216,10 @@ without. The resolved project is assigned at session start only if the session h
 - **Auth**: all mutating routes require `Authorization: Bearer <token file contents>` and
   record `X-InProgress-Actor` (default `system`). Reads need no token.
 - **UI token**: a random per-process token is injected into the served `index.html`
-  (`<meta name="ip-ui-token">`); only `POST /api/ui/open` accepts it.
+  (`<meta name="ip-ui-token">`); only the `/api/ui/` writes accept it. Each of them (`requireUi`, `app.ts`) checks,
+  in order: an `Origin` equal to `http://` plus the request's `Host` (else 403), an `application/json` body (else
+  415, which closes the text/plain and form bodies a page on another site can post without a preflight), then the
+  token (else 401, last, so a hostile request never trips the window's reload on 401). Never add a CORS plugin.
 - All writes run inside a transaction together with their `events` insert; after commit the
   event is broadcast over SSE.
 - **Single instance**: on start, if the port answers `/api/health` with the InProgress
@@ -223,6 +231,9 @@ without. The resolved project is assigned at session start only if the session h
 - **Backups**: on each start, back up the DB with better-sqlite3's backup API into
   `backups/inprogress-YYYYMMDD-HHmmss.db`, keeping the newest 7. The backup is skipped (with a
   log line) when `PRAGMA quick_check` fails, so a damaged DB never displaces good backups.
+- **Maintenance** (`runMaintenance`): right after the start's backup, then every 6 hours, purge projects deleted 30
+  or more days ago, prune events older than 30 days (each project's newest kept), and prune live work that has left
+  the trail. A failing job is logged and the next still runs.
 - `server.log` is truncated on start when above 5 MB. Request logging is off: the log holds
   startup lines and errors. `hooks.log` rolls over to `hooks.log.1` past 1 MiB.
 
@@ -263,6 +274,12 @@ Writes (token):
 - `POST /api/ui/open` `{ resourceId }` (UI token) → opens that resource's stored `path` in VS Code
   (`code`) if on PATH, else reveals it in Explorer (`explorer /select,<path>`). It never runs a
   file through the OS default handler, so a poisoned path cannot execute anything.
+- `POST /api/ui/projects/:id/archive`, `/unarchive`, `/delete`, `/restore` `{ slug }` (UI token, actor `window`):
+  the window's project actions. A slug that no longer matches the id is 409 "This project changed; reload" (a purge
+  frees the newest project's id). Archive answers `{ project, endedSessions }`, delete `{ id, slug, deletedAt,
+  purgeAt }`, the others `{ project }`. Archive and unarchive are idempotent; delete needs an archived project and
+  restore a deleted one inside its 30 days, else 409. Delete and restore exist nowhere else.
+- `GET /api/deleted-projects` (a read) → Recently deleted: `{ id, slug, name, deletedAt, purgeAt }[]`, newest first.
 
 `ProjectSnapshot` also carries `lastEvent` (the project's newest event) for the activity strip.
 
@@ -352,7 +369,7 @@ naming the ids touched. Errors return `isError` with the server's specific messa
 | `get_resource(id)` | resource with content |
 | `search(project, query)` | find nodes/resources by text |
 | `create_project(name, description, playbook?, slug?, bind_path?, branch_pattern?, session?)` | new project + root (+ optional binding) |
-| `update_project(project, name?, description?, playbook?, status?)` | edit / archive |
+| `update_project(project, name?, description?, playbook?, status?)` | edit / archive (stops tracking its live sessions, drops their Up next entries) / unarchive; delete and restore are window-only |
 | `bind_folder(project, path, branch_pattern?)` / `unbind_folder(binding_id)` | manage bindings |
 | `add_nodes(parent, nodes, after?, session?)` | add one node or a whole nested plan |
 | `update_node(id, title?, kind?, status?, assignee?, body?, outcome?, session?)` | edit / change status |

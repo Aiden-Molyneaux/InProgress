@@ -2,6 +2,7 @@ import type { Resource, ResourceKind, ResourceMeta } from '../../core/types';
 import { write, type Ctx } from '../db/tx';
 import { badRequest, notFound } from '../errors';
 import { requireNode } from './nodes';
+import { inLiveProject } from './projects';
 
 interface ResourceRow {
   id: number;
@@ -55,8 +56,9 @@ export interface ResourcePatch {
 
 const clean = (v: string | null | undefined) => (v?.trim() ? v.trim() : null);
 
+/** A resource by id. A deleted project's resources are not found: reading, opening or editing one is refused. */
 export function requireResource(ctx: Ctx, id: number): Resource {
-  const row = ctx.db.prepare(`SELECT ${META}, content FROM resources WHERE id = ?`).get(id) as ResourceRow | undefined;
+  const row = ctx.db.prepare(`SELECT ${META}, content FROM resources WHERE id = ? AND ${inLiveProject('resources.project_id')}`).get(id) as ResourceRow | undefined;
   if (!row) throw notFound(`Resource r${id} not found`, 'get_node lists a node\'s resources.');
   return { ...toMeta(row), content: row.content ?? null };
 }

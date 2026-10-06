@@ -34,7 +34,7 @@ export function ResourceViewer({ resourceId, onClose }: { resourceId: number; on
   const open = async (id: number) => {
     const result = await api.openResource(id);
     if (result === 'reload') window.location.reload();
-    else flash(result === 'opened' ? 'Opened' : result);
+    else flash(result === 'ok' ? 'Opened' : result);
   };
   // Only web links open. The server accepts nothing else, and this keeps any other scheme away from window.open.
   const link = resource?.url && /^https?:/i.test(resource.url) ? resource.url : null;

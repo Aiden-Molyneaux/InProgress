@@ -8,6 +8,7 @@ import { registerReadRoutes } from './routes/read';
 import { registerSessionRoutes } from './routes/sessions';
 import { registerSse } from './routes/sse';
 import { registerUi } from './routes/ui';
+import { registerWindowRoutes } from './routes/window';
 import { registerWriteRoutes } from './routes/write';
 
 export interface AppOptions {
@@ -76,10 +77,35 @@ export function buildApp(opts: AppOptions): FastifyInstance {
     }
   };
 
+  /**
+   * Every write the window makes (its project actions, opening a file or a link), used as an onRequest hook so it runs
+   * before the body is parsed. In this order, after the Host allow-list above: the Origin must be this server's own,
+   * else 403 (Chromium sends Origin on every POST, same-origin ones too, and a page on another site can never send
+   * ours); the body must be JSON, else 415, which closes the text/plain and form bodies a page can post cross-site
+   * without a preflight; then the page's UI token, else 401, last, so a hostile request never trips the window's reload
+   * on 401. Never register a CORS plugin: the reads stay unreadable cross-site because no answer carries CORS headers.
+   */
+  const requireUi: Guard = async (req, reply) => {
+    const host = (req.headers.host ?? '').toLowerCase();
+    if (!host || (req.headers.origin ?? '').toLowerCase() !== `http://${host}`) {
+      reply.code(403).send({ error: 'Forbidden origin' });
+      return reply;
+    }
+    if ((req.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase() !== 'application/json') {
+      reply.code(415).send({ error: 'Send the body as application/json' });
+      return reply;
+    }
+    if (!tokenMatches(req.headers['x-ip-ui-token'], opts.uiToken)) {
+      reply.code(401).send({ error: 'Missing or invalid UI token' });
+      return reply;
+    }
+  };
+
   registerReadRoutes(app, opts.ctx, opts.version, opts.build ?? null);
   registerWriteRoutes(app, opts.ctx, requireToken);
   registerSessionRoutes(app, opts.ctx, requireToken);
   registerSse(app, opts.ctx);
-  registerUi(app, opts, requireToken);
+  registerWindowRoutes(app, opts.ctx, requireUi);
+  registerUi(app, opts, requireToken, requireUi);
   return app;
 }

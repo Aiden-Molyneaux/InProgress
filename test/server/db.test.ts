@@ -39,7 +39,7 @@ describe('database', () => {
     const db = openDb(file);
     try {
       expect(schemaVersion(db)).toBe(MIGRATIONS.length);
-      expect(db.prepare('SELECT id, slug, queue FROM projects').all()).toEqual([{ id: 1, slug: 'ingame', queue: '[]' }]);
+      expect(db.prepare('SELECT id, slug, queue, deleted_at FROM projects').all()).toEqual([{ id: 1, slug: 'ingame', queue: '[]', deleted_at: null }]);
       expect(db.prepare('SELECT id, title FROM nodes ORDER BY id').all()).toEqual([{ id: 1, title: 'InGame' }, { id: 2, title: 'Play app signing' }]);
       expect(db.prepare('SELECT id, focus_node_id FROM sessions').all()).toEqual([{ id: 's1', focus_node_id: 2 }]);
       expect(db.prepare('SELECT * FROM session_subagents').all()).toEqual([
@@ -405,6 +405,34 @@ describe('database', () => {
     }
   });
 
+  /** Where migration 8 (soft delete) sits: after every migration before it. */
+  const SOFT_DELETE = MIGRATIONS.findIndex((m) => m.includes('ADD COLUMN deleted_at'));
+
+  it('migrates a database at v7 with data to v8, no project deleted', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ip-migrate-v7-'));
+    const file = join(dir, 'inprogress.db');
+    const v7 = new Database(file);
+    v7.exec('CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+    for (const m of MIGRATIONS.slice(0, SOFT_DELETE)) v7.exec(m);
+    v7.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', ?)").run(String(SOFT_DELETE));
+    v7.prepare("INSERT INTO projects (id, slug, name, status, root_node_id, created_at, updated_at) VALUES (1, 'live', 'Live', 'active', 0, 't', 't')").run();
+    v7.prepare("INSERT INTO projects (id, slug, name, status, root_node_id, created_at, updated_at) VALUES (2, 'shelved', 'Shelved', 'archived', 0, 't', 't')").run();
+    v7.close();
+    const db = openDb(file);
+    try {
+      expect(SOFT_DELETE).toBe(MIGRATIONS.length - 1);
+      expect(schemaVersion(db)).toBe(MIGRATIONS.length);
+      expect(db.prepare('SELECT id, status, deleted_at FROM projects ORDER BY id').all()).toEqual([
+        { id: 1, status: 'active', deleted_at: null },
+        { id: 2, status: 'archived', deleted_at: null },
+      ]);
+      expect(db.prepare("SELECT value FROM meta WHERE key = 'min_reader_version'").pluck().get()).toBe('1');
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('marks migration 7 readable by v1 builds, so a v6 build still opens a v7 database and its own writes work', () => {
     const { db } = makeCtx();
     expect(db.prepare("SELECT value FROM meta WHERE key = 'min_reader_version'").pluck().get()).toBe('1');
@@ -442,6 +470,28 @@ describe('database', () => {
       db.prepare('UPDATE sessions SET project_id = ?, title = ?, cwd = ?, branch = ?, transcript_path = ?, state = ?, focus_node_id = ?, prompts_since_update = ?, last_seen_at = ?, ended_at = ?, slot = ? WHERE id = ?')
         .run(1, null, null, null, null, 'ended', null, 0, 't6', 't6', 0, 's1');
       expect(db.prepare("SELECT state, revived_at FROM sessions WHERE id = 's1'").get()).toEqual({ state: 'ended', revived_at: 't5' });
+    } finally {
+      MIGRATIONS.push(...shipped);
+    }
+  });
+
+  it('marks migration 8 readable by v1 builds, so a v7 build still opens a v8 database and its own writes work', () => {
+    const { db } = makeCtx();
+    expect(db.prepare("SELECT value FROM meta WHERE key = 'min_reader_version'").pluck().get()).toBe('1');
+    // This build as the v7 build sees the schema: every migration before soft delete.
+    const shipped = MIGRATIONS.splice(SOFT_DELETE);
+    try {
+      expect(shipped[0]).toContain('deleted_at');
+      expect(() => migrate(db)).not.toThrow();
+      expect(schemaVersion(db)).toBe(SOFT_DELETE + shipped.length);
+      // The v7 build's own writes, which never name deleted_at: a new project is not deleted, and its update (an
+      // unarchive, say) keeps what the newer build set, so a deleted project stays hidden from the newer build.
+      db.prepare("INSERT INTO projects (slug, name, description, playbook, status, root_node_id, created_at, updated_at) VALUES ('p', 'P', '', '', 'active', 0, 't', 't')").run();
+      expect(db.prepare("SELECT deleted_at FROM projects WHERE slug = 'p'").pluck().get()).toBeNull();
+      db.prepare("UPDATE projects SET status = 'archived', deleted_at = 't2' WHERE slug = 'p'").run();
+      db.prepare('UPDATE projects SET name = ?, description = ?, playbook = ?, status = ?, updated_at = ? WHERE id = ?').run('P', '', '', 'active', 't3', 1);
+      db.prepare('UPDATE projects SET queue = ?, updated_at = ? WHERE id = ?').run('[]', 't4', 1);
+      expect(db.prepare("SELECT status, deleted_at FROM projects WHERE slug = 'p'").get()).toEqual({ status: 'active', deleted_at: 't2' });
     } finally {
       MIGRATIONS.push(...shipped);
     }

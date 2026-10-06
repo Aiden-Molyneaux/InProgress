@@ -9,10 +9,11 @@ import { buildApp } from './app';
 import { backupDb, truncateIfLarge } from './backup';
 import { openDb } from './db/connection';
 import { createCtx } from './db/tx';
-import { EVENTS_RETENTION_DAYS, pruneEvents } from './repo/events';
-import { pruneSubagents } from './repo/subagents';
-import { pruneWorkItems } from './repo/work';
+import { runMaintenance } from './project-lifecycle';
 import { portState, reportStartupFailure } from './startup';
+
+/** How often a running server purges deleted projects past their 30 days and prunes old rows. */
+const MAINTENANCE_MS = 6 * 60 * 60 * 1000;
 
 async function main(): Promise<void> {
   const home = homeDir();
@@ -32,6 +33,7 @@ async function main(): Promise<void> {
   const db = openDb(join(home, 'inprogress.db'));
   const ctx = createCtx(db);
   let closing = false;
+  let maintenance: NodeJS.Timeout | undefined;
   let watchTimer: NodeJS.Timeout | undefined;
   const app = buildApp({
     ctx,
@@ -46,6 +48,7 @@ async function main(): Promise<void> {
   async function shutdown(): Promise<void> {
     if (closing) return;
     closing = true;
+    clearInterval(maintenance);
     clearInterval(watchTimer);
     await app.close().catch(() => undefined);
     db.close();
@@ -72,18 +75,12 @@ async function main(): Promise<void> {
   }
   // Back up only once we own the port, so two racing starts never write the same backup file.
   await backupDb(db, join(home, 'backups'), 7).catch((err: Error) => app.log.error(err.message));
-  try {
-    app.log.info(`Pruned ${pruneEvents(ctx)} events older than ${EVENTS_RETENTION_DAYS} days`);
-  } catch (err) {
-    app.log.error(`Could not prune old events: ${(err as Error).message}`);
-  }
-  try {
-    const { dispatches, subagents } = pruneSubagents(ctx);
-    const tasks = pruneWorkItems(ctx);
-    app.log.info(`Pruned ${dispatches} unpaired dispatches, ${subagents} ended subagents and ${tasks} working tasks of sessions ended over a week ago`);
-  } catch (err) {
-    app.log.error(`Could not prune live work: ${(err as Error).message}`);
-  }
+  // After the backup, so the newest backup still holds a project the purge is about to remove; then on a timer, since
+  // the server can run for weeks. runMaintenance never throws.
+  const log = { info: (message: string) => app.log.info(message), error: (message: string) => app.log.error(message) };
+  runMaintenance(ctx, home, log);
+  maintenance = setInterval(() => runMaintenance(ctx, home, log), MAINTENANCE_MS);
+  maintenance.unref();
   // The transcript watcher: once now, so subagents that died while the server was down end at once, then on a timer that
   // never keeps the process alive. A failed tick is logged and the next one tries again.
   const watchState = createWatchState();

@@ -12,6 +12,7 @@ import { addResource } from '../../src/server/repo/resources';
 import { briefingDue, findSession, listProjectSessions } from '../../src/server/repo/sessions';
 import { getNodeDetail, getProjectSnapshot } from '../../src/server/repo/snapshot';
 import { renderBriefing } from '../../src/server/briefing';
+import { setTasks } from '../../src/server/repo/work';
 import { enrollSession, handleHookEvent, setFocus } from '../../src/server/session-flow';
 import { createCtx, type Ctx } from '../../src/server/db/tx';
 import { openDb } from '../../src/server/db/connection';
@@ -1034,6 +1035,177 @@ describe('the full briefing on the first tracked prompt after an enroll', () => 
     expect(briefingDue(ctx, 'e1')).toBe(true);
     updateProject(ctx, 'test', project.slug, { status: 'active' });
     expect(handleHookEvent(ctx, 'e1', prompt()).context).toContain(FULL);
+  });
+});
+
+describe('archiving a project stops tracking its sessions', () => {
+  const HOUR = 60 * 60 * 1000;
+  const FULL = 'This session is tracked in project';
+
+  /** InGame bound to C:/personal/InGame and Other to C:/personal/Other, with a clock the test moves by hand. */
+  function archiving() {
+    let now = Date.parse('2026-10-04T09:00:00.000Z');
+    const t = setup(createCtx(openDb(':memory:'), () => new Date(now).toISOString()));
+    const other = createProject(t.ctx, 'test', { name: 'Other' });
+    addBinding(t.ctx, 'test', other.slug, 'C:/personal/Other');
+    const step = (title: string) => listNodes(t.ctx, t.project.id).find((n) => n.title === title)!;
+    return { ...t, other, step, tick: (ms: number) => (now += ms) };
+  }
+  const there = () => start('C:/personal/Other');
+  const rows = (ctx: Ctx, table: string, session: string) => ctx.db.prepare(`SELECT * FROM ${table} WHERE session_id = ?`).all(session);
+
+  it("ends its live sessions, their subagents and dispatches, keeping each session's project, slot and focus for the trail", () => {
+    const { ctx, project, other, a2 } = archiving();
+    handleHookEvent(ctx, 's1', start());
+    handleHookEvent(ctx, 's2', start());
+    handleHookEvent(ctx, 's3', there());
+    setFocus(ctx, 'scribe:s1', 's1', a2.id);
+    handleHookEvent(ctx, 's1', { event: 'subagent-start', agentId: 'a1', agentType: 'general-purpose' });
+    handleHookEvent(ctx, 's1', { event: 'agent-dispatch', toolUseId: 'toolu_9', agentType: 'Explore', description: 'Look around' });
+    expect(rows(ctx, 'subagent_dispatches', 's1')).toHaveLength(1);
+    const at = ctx.now();
+    updateProject(ctx, 'scribe:s1', project.slug, { status: 'archived' });
+    expect(findSession(ctx, 's1')).toMatchObject({ projectId: project.id, state: 'ended', endedAt: at, slot: 0, focusNodeId: a2.id });
+    expect(findSession(ctx, 's2')).toMatchObject({ projectId: project.id, state: 'ended', endedAt: at, slot: 1 });
+    expect(findSession(ctx, 's3')).toMatchObject({ projectId: other.id, state: 'idle', endedAt: null });
+    expect(ctx.db.prepare("SELECT ended_at FROM session_subagents WHERE agent_id = 'a1'").pluck().get()).toBe(at);
+    expect(rows(ctx, 'subagent_dispatches', 's1')).toEqual([]);
+  });
+
+  it("drops only its sessions' own Up next entries, keeping the unowned ones for an unarchive, and records each change in order", () => {
+    const { ctx, project, other, a2, a3, step } = archiving();
+    handleHookEvent(ctx, 's1', start());
+    handleHookEvent(ctx, 's2', start());
+    handleHookEvent(ctx, 's3', there());
+    setQueue(ctx, 'test', project.slug, [a2.id], { sessionId: 's1' });
+    setQueue(ctx, 'test', project.slug, [step('3 RevenueCat').id], { sessionId: 's2' });
+    setQueue(ctx, 'test', project.slug, [a3.id], 'unowned');
+    setQueue(ctx, 'test', other.slug, [other.rootNodeId], { sessionId: 's3' });
+    const mark = maxEventId(ctx);
+    const archived = updateProject(ctx, 'scribe:s1', project.slug, { status: 'archived' });
+    expect(archived.queue).toEqual([{ nodeId: a3.id, sessionId: null }]);
+    expect(getProjectSnapshot(ctx, other.slug).project.queue).toEqual([{ nodeId: other.rootNodeId, sessionId: 's3' }]);
+    // The queue first, then each session's end, then the archive itself, so the activity strip's newest line is it.
+    expect(listEventsSince(ctx, mark).map((e) => [e.type, e.entityId, e.data])).toEqual([
+      ['project.updated', String(project.id), { changes: { queue: {
+        from: [{ nodeId: a2.id, sessionId: 's1' }, { nodeId: step('3 RevenueCat').id, sessionId: 's2' }, { nodeId: a3.id, sessionId: null }],
+        to: [{ nodeId: a3.id, sessionId: null }],
+      } } }],
+      ['session.updated', 's1', { changed: ['state'], state: 'ended' }],
+      ['session.updated', 's2', { changed: ['state'], state: 'ended' }],
+      ['project.updated', String(project.id), { changes: { status: { from: 'active', to: 'archived' } } }],
+    ]);
+    expect(listEventsSince(ctx, mark).every((e) => e.projectId === project.id)).toBe(true);
+  });
+
+  it('ends the subagents of a session already past the stale limit when it was last heard from, as expiry would', () => {
+    const { ctx, project, tick } = archiving();
+    handleHookEvent(ctx, 's1', start());
+    handleHookEvent(ctx, 's1', { event: 'subagent-start', agentId: 'a1', agentType: 'general-purpose' });
+    const lastSeen = findSession(ctx, 's1')!.lastSeenAt;
+    tick(13 * HOUR);
+    updateProject(ctx, 'test', project.slug, { status: 'archived' });
+    expect(findSession(ctx, 's1')).toMatchObject({ state: 'ended', endedAt: ctx.now() });
+    expect(ctx.db.prepare("SELECT ended_at FROM session_subagents WHERE agent_id = 'a1'").pluck().get()).toBe(lastSeen);
+  });
+
+  it('ends nothing and drops nothing on an unarchive, or on an archive of a project that is already archived', () => {
+    const { ctx, project } = archiving();
+    updateProject(ctx, 'test', project.slug, { status: 'archived' });
+    handleHookEvent(ctx, 's1', there());
+    const mark = maxEventId(ctx);
+    updateProject(ctx, 'test', project.slug, { status: 'archived' });
+    expect(listEventsSince(ctx, mark)).toEqual([]);
+    updateProject(ctx, 'test', project.slug, { status: 'active' });
+    expect(listEventsSince(ctx, mark).map((e) => e.type)).toEqual(['project.updated']);
+  });
+
+  it('writes nothing for any later hook event from such a session, and answers tracked: false', () => {
+    const { ctx, project, a2 } = archiving();
+    handleHookEvent(ctx, 's1', start());
+    setFocus(ctx, 'scribe:s1', 's1', a2.id);
+    updateProject(ctx, 'test', project.slug, { status: 'archived' });
+    const before = findSession(ctx, 's1');
+    const mark = maxEventId(ctx);
+    const events = [
+      start(), { event: 'prompt' as const }, { event: 'stop' as const }, { event: 'permission' as const },
+      { event: 'subagent-start' as const, agentId: 'a1', agentType: 'general-purpose' },
+      { event: 'agent-dispatch' as const, toolUseId: 'toolu_1', agentType: 'Explore', description: `#${a2.id} Look around` },
+      { event: 'agent-launched' as const, toolUseId: 'toolu_1', agentId: 'a1' },
+      { event: 'subagent-stop' as const, agentId: 'a1' },
+      { event: 'task-created' as const, taskKey: '1', subject: 'Write the tests' },
+      { event: 'task-updated' as const, taskKey: '1', subject: 'Write the tests', status: 'in_progress' as const },
+      { event: 'end' as const },
+    ];
+    for (const e of events) expect(handleHookEvent(ctx, 's1', e), e.event).toEqual({ tracked: false });
+    expect(handleHookEvent(ctx, 's1', { event: 'prompt', mentionsInProgress: true })).toEqual({ tracked: false, context: expect.stringContaining('Session id: s1') });
+    expect(findSession(ctx, 's1')).toEqual(before);
+    expect(listEventsSince(ctx, mark)).toEqual([]);
+    expect(rows(ctx, 'session_subagents', 's1')).toEqual([]);
+    expect(rows(ctx, 'subagent_dispatches', 's1')).toEqual([]);
+    expect(rows(ctx, 'work_items', 's1')).toEqual([]);
+  });
+
+  it('never revives a session that had ended before the archive', () => {
+    const { ctx, project } = archiving();
+    handleHookEvent(ctx, 's1', start());
+    handleHookEvent(ctx, 's1', { event: 'end' });
+    updateProject(ctx, 'test', project.slug, { status: 'archived' });
+    expect(handleHookEvent(ctx, 's1', start())).toEqual({ tracked: false });
+    expect(handleHookEvent(ctx, 's1', { event: 'prompt' })).toEqual({ tracked: false });
+    expect(findSession(ctx, 's1')?.state).toBe('ended');
+  });
+
+  it('refuses its focus and tasks, writing nothing', () => {
+    const { ctx, project, a2 } = archiving();
+    handleHookEvent(ctx, 's1', start());
+    updateProject(ctx, 'test', project.slug, { status: 'archived' });
+    const before = findSession(ctx, 's1');
+    const mark = maxEventId(ctx);
+    expect(() => setFocus(ctx, 'scribe:s1', 's1', a2.id)).toThrow('Session s1 is not tracked: project ingame is archived');
+    expect(() => setFocus(ctx, 'scribe:s1', 's1', null)).toThrow('Session s1 is not tracked: project ingame is archived');
+    expect(() => setTasks(ctx, 'session:s1', 's1', a2.id, [{ subject: 'Run the suite', status: 'pending' }])).toThrow('Session s1 is not tracked: project ingame is archived');
+    expect(findSession(ctx, 's1')).toEqual(before);
+    expect(ctx.db.prepare('SELECT status FROM nodes WHERE id = ?').pluck().get(a2.id)).toBe('active');
+    expect(listEventsSince(ctx, mark)).toEqual([]);
+    expect(rows(ctx, 'work_items', 's1')).toEqual([]);
+  });
+
+  it('refuses the focus of a session with no project on a step of an archived one', () => {
+    const { ctx, project, a2 } = archiving();
+    ctx.db.prepare("INSERT INTO sessions (id, project_id, state, started_at, last_seen_at) VALUES ('loose', NULL, 'idle', 't', 't')").run();
+    updateProject(ctx, 'test', project.slug, { status: 'archived' });
+    expect(() => setFocus(ctx, 'scribe:loose', 'loose', a2.id)).toThrow('Session loose is not tracked: project ingame is archived');
+    expect(findSession(ctx, 'loose')?.projectId).toBeNull();
+  });
+
+  it('tracks it again after an unarchive, on its next hook event, with a briefing when it comes back in another letter', () => {
+    const { ctx, project } = archiving();
+    handleHookEvent(ctx, 's1', start());
+    handleHookEvent(ctx, 's2', start());
+    updateProject(ctx, 'test', project.slug, { status: 'archived' });
+    updateProject(ctx, 'test', project.slug, { status: 'active' });
+    // A new session takes A, the letter s1 had.
+    handleHookEvent(ctx, 's3', start());
+    // s2 keeps B: no briefing, as for any revival in its own letter.
+    expect(handleHookEvent(ctx, 's2', { event: 'prompt' })).toEqual({ tracked: true });
+    expect(findSession(ctx, 's2')).toMatchObject({ state: 'working', endedAt: null, slot: 1 });
+    // s1 comes back as C, and that prompt brings the briefing that names it.
+    const text = handleHookEvent(ctx, 's1', { event: 'prompt' }).context!;
+    expect(text.split('\n')[0]).toContain(`${FULL} "InGame"`);
+    expect(text.split('\n')[0]).toContain('You are session C.');
+    expect(findSession(ctx, 's1')).toMatchObject({ state: 'working', endedAt: null, slot: 2 });
+  });
+
+  it('lets an enroll move such a session to an active project, where it is tracked again', () => {
+    const { ctx, project, other } = archiving();
+    handleHookEvent(ctx, 's1', start());
+    updateProject(ctx, 'test', project.slug, { status: 'archived' });
+    expect(enrollSession(ctx, 'scribe:s1', 's1', other.slug).session).toMatchObject({ projectId: other.id });
+    expect(handleHookEvent(ctx, 's1', { event: 'prompt' }).tracked).toBe(true);
+    expect(findSession(ctx, 's1')).toMatchObject({ projectId: other.id, state: 'working' });
+    // An enroll into the archived project itself is still refused.
+    expect(() => enrollSession(ctx, 'scribe:s1', 's1', project.slug)).toThrow('Project ingame is archived');
   });
 });
 

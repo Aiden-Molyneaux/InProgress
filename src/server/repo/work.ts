@@ -2,7 +2,7 @@ import { TRAIL_MS, type Session, type WorkItem, type WorkStatus } from '../../co
 import { write, type Ctx } from '../db/tx';
 import { badRequest, notFound } from '../errors';
 import { findNode, leadingNode } from './nodes';
-import { getProjectById } from './projects';
+import { getProjectById, isTracking, notTracked } from './projects';
 import { findSession } from './sessions';
 import { subagentNode } from './subagents';
 
@@ -195,6 +195,9 @@ export function setTasks(ctx: Ctx, actor: string, sessionId: string, requested: 
     const session = findSession(ctx, sessionId);
     if (!session || session.projectId === null) {
       throw badRequest(`Session ${sessionId} is not tracked`, 'Check --session against the session id in your InProgress briefing; an untracked session opts in through the inprogress skill first.');
+    }
+    if (!isTracking(ctx, session.projectId)) {
+      throw notTracked(ctx, sessionId, session.projectId, 'InProgress stopped tracking this session when its project was archived; there is nothing to keep current, so skip the tasks command.');
     }
     const findStep = () => `Find the right step id with the CLI command: outline ${getProjectById(ctx, session.projectId!)?.slug ?? '<project>'}`;
     const nodeId = requested ?? session.focusNodeId;
