@@ -298,8 +298,11 @@ test('dark mode reaches the canvas controls; reduced motion stops the pulse and 
   await expect(page.locator('.ip-node .ip-you')).toHaveCSS('color', 'rgb(252, 211, 77)');
   await page.keyboard.press('n');
   const flashed = page.locator('.ip-node.flash', { hasText: 'Run signing tests' });
-  await expect(flashed).toHaveCSS('animation-name', 'none');
-  await expect(flashed).not.toHaveCSS('box-shadow', 'none');
+  // The frame draws the flash: under reduced motion, a static amber ring.
+  await expect(frameOf(flashed)).toHaveCSS('animation-name', 'none');
+  await expect(frameOf(flashed)).not.toHaveCSS('box-shadow', 'none');
+  // No dot grid, so the night ground is --bg itself.
+  await expect(page.locator('.react-flow__background')).toHaveCount(0);
   // Section labels in Details are readable on the dark panel.
   await flashed.click();
   await expect(page.getByRole('complementary').locator('.ip-label').first()).toHaveCSS('color', 'rgb(148, 163, 184)');
@@ -309,6 +312,8 @@ test('dark mode reaches the canvas controls; reduced motion stops the pulse and 
     return [...document.fonts].filter((face) => face.status === 'loaded').map((face) => face.family.replace(/["']/g, ''));
   })()`;
   await expect.poll(() => page.evaluate<string[]>(loadedFaces)).toContain('Inter');
+  // The canvas's counts, tags and times bring DM Mono in.
+  await expect.poll(() => page.evaluate<string[]>(loadedFaces)).toContain('DM Mono');
   expect(fontHosts.length, 'the faces were requested').toBeGreaterThan(0);
   expect(fontHosts.filter((host) => host !== '127.0.0.1'), 'font requests that left the app').toEqual([]);
 });
@@ -428,7 +433,8 @@ test('at 520 px there is no minimap, old finished steps fold into "✓ n done", 
   await expect(firstOld).toHaveCount(0);
   // The seed's milestones fold too.
   await expect(page.getByRole('button', { name: 'Show 25 done' })).toHaveClass(/\bip-more-done\b/);
-  await expect(page.locator('.ip-node', { hasText: /^Milestone 1$/ })).toHaveCount(0);
+  // A done card's header reads "✓Milestone 1": anchor on the title, or this would pass even if the run never folded.
+  await expect(page.locator('.ip-node .ip-title', { hasText: /^Milestone 1$/ })).toHaveCount(0);
   await expect(page.locator('.ip-more.ip-more-done')).toHaveCount(2);
   // A click opens the run and hands focus to its first step.
   await oldRun.click();
@@ -1097,6 +1103,22 @@ const boxOf = async (l: Locator) => (await l.boundingBox())!;
 /** A running subagent's time: under a minute, or whole minutes. */
 const RUNNING = '(<1 min|\\d+ min)';
 
+/** A running kin's run time on the canvas (runTime): under a minute, or whole minutes. */
+const RUN_TIME = '(<1m|\\d+m)';
+
+/** A card's frame: the `.ip-card` around its header (`.ip-node`) and its lines. */
+const frameOf = (header: Locator) => header.locator('xpath=..');
+
+type Box = { x: number; y: number; width: number; height: number };
+
+/** The box lies inside the frame's box, give or take half a pixel of rounding. */
+function expectInside(box: Box, frame: Box, what = 'inside the frame'): void {
+  expect(box.x, what).toBeGreaterThanOrEqual(frame.x - 0.5);
+  expect(box.y, what).toBeGreaterThanOrEqual(frame.y - 0.5);
+  expect(box.x + box.width, what).toBeLessThanOrEqual(frame.x + frame.width + 0.5);
+  expect(box.y + box.height, what).toBeLessThanOrEqual(frame.y + frame.height + 0.5);
+}
+
 test.describe('Live work', () => {
   test('working tasks sit under their node as a checklist that folds with it, the done ones in a row that opens, the one in progress pulsing', async ({ page, api, fresh }) => {
     const android = fresh.ids['2 Android signing'];
@@ -1118,14 +1140,15 @@ test.describe('Live work', () => {
     await expect(upload.locator('.ip-work-mark')).toHaveText('◐');
     await expect(check.locator('.ip-work-mark')).toHaveText('○');
     await expect(guide).toHaveCount(0);
-    // Under the card and one level in: the done row, then the open tasks in the order they were created.
+    // Inside the card, under its header: the done row at the end of the session's line, then the open tasks in order.
     const [cardBox, doneBox, uploadBox, checkBox, nextBox] = await Promise.all([card, done, upload, check, next].map(boxOf));
     expect(doneBox.y).toBeGreaterThanOrEqual(cardBox.y + cardBox.height);
     expect(uploadBox.y).toBeGreaterThan(doneBox.y);
     expect(checkBox.y).toBeGreaterThan(uploadBox.y);
     expect(nextBox.y).toBeGreaterThanOrEqual(checkBox.y + checkBox.height);
-    for (const box of [doneBox, uploadBox, checkBox]) expect(box.x).toBeGreaterThan(cardBox.x + 20);
-    expect(uploadBox.height, 'a compact row').toBeLessThanOrEqual(20);
+    const frameBox = await boxOf(frameOf(card));
+    for (const box of [doneBox, uploadBox, checkBox]) expectInside(box, frameBox);
+    expect(uploadBox.height, 'a compact row').toBeLessThanOrEqual(22);
     // In progress while the session works.
     await expect(upload.locator('.ip-work-mark')).toHaveCSS('animation-name', 'ip-pulse');
     await done.click();
@@ -1163,53 +1186,59 @@ test.describe('Live work', () => {
     await task(api, fresh, '1', 'Compare the tiers', 'in_progress', 'agent-1');
     await task(api, fresh, '1', 'Upload the key', 'in_progress');
     await open(page, fresh);
-    const wire = page.locator('.ip-agent', { hasText: 'Wire up RevenueCat' });
-    const review = page.locator('.ip-agent', { hasText: 'Review the signing config' });
-    await expect(wire).toHaveText(new RegExp(`^a1 · Wire up RevenueCat · sonnet · ${RUNNING}$`));
-    await expect(review).toHaveText(new RegExp(`^a2 · Review the signing config · haiku · ${RUNNING}$`));
-    const [revenue, build, play, own, run, wireBox, reviewBox] = await Promise.all(
+    const wire = page.getByRole('img', { name: /^a1 · Wire up RevenueCat/ });
+    const review = page.getByRole('img', { name: /^a2 · Review the signing config/ });
+    // A kin shows its tag and its run time; its name and tooltip carry its description, model and elapsed time.
+    await expect(wire).toHaveText(new RegExp(`^a1${RUN_TIME}$`));
+    await expect(wire).toHaveAccessibleName(new RegExp(`^a1 · Wire up RevenueCat · sonnet · ${RUNNING}$`));
+    await expect(review).toHaveText(new RegExp(`^a2${RUN_TIME}$`));
+    await expect(review).toHaveAccessibleName(new RegExp(`^a2 · Review the signing config · haiku · ${RUNNING}$`));
+    const revenueHeader = page.locator('.ip-node', { hasText: '3 RevenueCat' });
+    const [revenue, build, play, own, run, wireBox, reviewBox, revenueFrame] = await Promise.all(
       [
-        page.locator('.ip-node', { hasText: '3 RevenueCat' }),
+        revenueHeader,
         page.locator('.ip-node', { hasText: '4 Build to GitHub' }),
         page.locator('.ip-node', { hasText: 'Play app signing' }),
         page.locator('.ip-badge', { hasText: 'E2E session' }),
         page.locator('.ip-node', { hasText: 'Run signing tests' }),
         wire,
         review,
+        frameOf(revenueHeader),
       ].map(boxOf),
     );
-    // One under 3 RevenueCat, one level in; the other under the session's own badge, on its focus.
+    // One inside 3 RevenueCat's frame, under its header; the other a kin on the session's own line, on its focus.
     expect(wireBox.y).toBeGreaterThanOrEqual(revenue.y + revenue.height);
     expect(build.y).toBeGreaterThanOrEqual(wireBox.y + wireBox.height);
-    expect(wireBox.x).toBeGreaterThan(revenue.x + 20);
+    expectInside(wireBox, revenueFrame);
     expect(own.y).toBeGreaterThanOrEqual(play.y + play.height);
-    expect(reviewBox.y).toBeGreaterThanOrEqual(own.y + own.height);
+    expectInside(reviewBox, own, "on the session's line");
     expect(run.y).toBeGreaterThanOrEqual(reviewBox.y + reviewBox.height);
     const tiers = page.locator('.ip-work', { hasText: 'Compare the tiers' });
     const upload = page.locator('.ip-work', { hasText: 'Upload the key' });
-    await expect(tiers.locator('.ip-work-agent')).toBeVisible();
+    // A subagent's task carries its tag in the card's left column and no bar; the session's own carries the bar.
+    await expect(tiers.locator('.ip-work-agent')).toHaveCount(0);
     await expect(tiers.locator('.ip-work-tag')).toHaveText('a1');
     await expect(upload.locator('.ip-work-agent')).toBeVisible();
     await expect(upload.locator('.ip-work-tag')).toHaveCount(0);
-    // One family, one hue: the session's badge, both subagents' badges and every task's marker.
-    const colours = await page.evaluate<{ own: string; wire: string; marker: string; review: string; ownMarker: string }>(`(() => {
+    // One family, one hue: the session's letter, both kin's tags, the subagent's task tag and the session's task bar.
+    const colours = await page.evaluate<Record<string, string>>(`(() => {
       const find = (sel, text) => [...document.querySelectorAll(sel)].find((n) => n.textContent.includes(text));
-      const bg = (n) => getComputedStyle(n).backgroundColor;
+      const kin = (tag) => document.querySelector('.ip-agent[aria-label^="' + tag + ' · "]');
+      const color = (n) => getComputedStyle(n).color;
       return {
-        own: bg(find('.ip-badge', 'E2E session')),
-        wire: bg(find('.ip-agent', 'Wire up RevenueCat')),
-        marker: bg(find('.ip-work', 'Compare the tiers').querySelector('.ip-work-agent')),
-        review: bg(find('.ip-agent', 'Review the signing config')),
-        ownMarker: bg(find('.ip-work', 'Upload the key').querySelector('.ip-work-agent')),
+        own: color(find('.ip-badge', 'E2E session').querySelector('.ip-badge-label .ip-tag')),
+        wire: color(kin('a1').querySelector('.ip-agent-tag')),
+        review: color(kin('a2').querySelector('.ip-agent-tag')),
+        tag: color(find('.ip-work', 'Compare the tiers').querySelector('.ip-work-tag')),
+        ownMarker: getComputedStyle(find('.ip-work', 'Upload the key').querySelector('.ip-work-agent')).backgroundColor,
       };
     })()`);
-    expect(colours.wire).not.toBe('rgba(0, 0, 0, 0)');
-    expect(colours.marker).toBe(colours.wire);
-    expect(colours.review).toBe(colours.wire);
-    expect(colours.own).toBe(colours.wire);
-    expect(colours.ownMarker).toBe(colours.wire);
+    expect(colours.own).toBe('rgb(11, 107, 125)');
+    for (const part of ['wire', 'review', 'tag', 'ownMarker']) expect(colours[part], part).toBe(colours.own);
     await hook(api, fresh.session, { event: 'subagent-stop', agentId: 'agent-1' });
-    await expect(wire).toHaveText('a1 · Wire up RevenueCat · sonnet · done just now');
+    // Stopped, it keeps its tag, loses its time and goes grey; its name says when it finished.
+    await expect(wire).toHaveText('a1');
+    await expect(wire).toHaveAccessibleName('a1 · Wire up RevenueCat · sonnet · done just now');
     await expect(wire).toHaveClass(/\bended\b/);
     await expect(wire).toHaveCSS('color', 'rgb(71, 85, 105)');
     await expect(review).not.toHaveClass(/\bended\b/);
@@ -1223,9 +1252,10 @@ test.describe('Live work', () => {
     await subagent(api, fresh, 'reader-1', 'Map the signing config', 'haiku', { agentType: 'Explore', purpose: 'Find where the keystore is configured.' });
     await subagent(api, fresh, 'reader-2', 'Read the release docs', 'haiku', { agentType: 'Explore' });
     await open(page, fresh);
-    const wire = page.locator('.ip-agent', { hasText: 'Wire up RevenueCat' });
+    const wire = page.getByRole('img', { name: /^a1 · Wire up RevenueCat/ });
     const readers = page.locator('.ip-readers');
-    await expect(wire).toHaveAttribute('title', purpose);
+    // A kin's tooltip is its line, then what it was asked to do.
+    await expect(wire).toHaveAttribute('title', new RegExp(`^a1 · Wire up RevenueCat · sonnet · ${RUNNING}\\nWire the paywall to RevenueCat and report the tiers\\.$`));
     // The readers take no badge of their own: one row, in the session's hue, their descriptions in its tooltip.
     await expect(page.locator('.ip-agent')).toHaveCount(1);
     await expect(readers).toHaveCount(1);
@@ -1237,7 +1267,7 @@ test.describe('Live work', () => {
     expect(readersBox.y).toBeGreaterThanOrEqual(badge.y + badge.height);
     expect(next.y).toBeGreaterThanOrEqual(readersBox.y + readersBox.height);
     expect(readersBox.height, 'a small row').toBeLessThanOrEqual(20);
-    await expect(readers).toHaveCSS('color', 'rgb(11, 107, 125)');
+    await expect(readers.locator('.ip-tag')).toHaveCSS('color', 'rgb(11, 107, 125)');
     // They still count on the chip, whose list marks them.
     const chip = page.locator('.ip-sessions').getByRole('button', { name: /E2E session/ });
     await expect(chip).toHaveText('A · E2E session · 3 subagents');
@@ -1254,6 +1284,8 @@ test.describe('Live work', () => {
       new RegExp(`^◇ a2 · Map the signing config · haiku · ${RUNNING}Find where the keystore is configured\\.$`),
       new RegExp(`^◇ a3 · Read the release docs · haiku · ${RUNNING}$`),
     ]);
+    // Play app signing's card now holds its lines, so 3 RevenueCat sits under the open sheet: close it, then click.
+    await details.getByRole('button', { name: 'Close' }).click();
     await page.locator('.ip-node', { hasText: '3 RevenueCat' }).click();
     await expect(details.locator('.ip-dagent .ip-dpurpose')).toHaveText(purpose);
     await details.getByRole('button', { name: 'Close' }).click();
@@ -1326,6 +1358,9 @@ test.describe('Live work', () => {
     await expect(marker('3 RevenueCat')).toHaveText('A①');
     await expect(marker('4 Build to GitHub')).toHaveText('A②');
     await expect(marker('6 Beta')).toHaveText('B①');
+    // The numeral sits in the gutter, left of its card's header.
+    const [aMark, aCard] = await Promise.all([marker('3 RevenueCat'), page.locator('.ip-node', { hasText: '3 RevenueCat' })].map(boxOf));
+    expect(aMark.x + aMark.width).toBeLessThanOrEqual(aCard.x);
     // Each line's letter and each marker wear the session's hue: A teal, B its chip's hue.
     const hues = () => page.evaluate<Record<string, string | null>>(`(() => {
       const find = (sel, text) => [...document.querySelectorAll(sel)].find((n) => n.textContent.includes(text));
@@ -1406,19 +1441,22 @@ test.describe('Live work', () => {
     await expect(chipA).toHaveText('A · E2E session');
     await expect(chipB).toHaveText('B · Second session · 1 subagent');
     await expect(chipB.locator('.ip-chip-label')).toHaveText('Second session · 1 subagent');
-    await expect(page.locator('.ip-badge', { hasText: 'E2E session' })).toHaveText('◆ A · E2E session · working');
-    await expect(page.locator('.ip-badge', { hasText: 'Second session' })).toHaveText('◆ B · Second session · working · 1 subagent');
-    // B's subagent leads with b1, and so does its task.
-    const agent = page.locator('.ip-agent', { hasText: 'Price the tiers' });
-    await expect(agent).toHaveText(new RegExp(`^b1 · Price the tiers · sonnet · ${RUNNING}$`));
+    // Each agent line's name leads with its letter: no ◆, no count.
+    await expect(page.locator('.ip-badge', { hasText: 'E2E session' })).toHaveAccessibleName('A · E2E session · working');
+    await expect(page.locator('.ip-badge', { hasText: 'Second session' })).toHaveAccessibleName('B · Second session · working');
+    // B's subagent is a kin led by b1, and so is its task.
+    const agent = page.getByRole('img', { name: /^b1 · Price the tiers/ });
+    await expect(agent).toHaveText(new RegExp(`^b1${RUN_TIME}$`));
+    await expect(agent).toHaveAccessibleName(new RegExp(`^b1 · Price the tiers · sonnet · ${RUNNING}$`));
     await expect(page.locator('.ip-work', { hasText: 'Compare the plans' }).locator('.ip-work-tag')).toHaveText('b1');
-    // Under the step it names, one level in, before the next step.
-    const [revenue, build, agentBox] = await Promise.all(
-      [page.locator('.ip-node', { hasText: '3 RevenueCat' }), page.locator('.ip-node', { hasText: '4 Build to GitHub' }), agent].map(boxOf),
+    // Inside the step it names, under its header, before the next step.
+    const revenueHeader = page.locator('.ip-node', { hasText: '3 RevenueCat' });
+    const [revenue, build, agentBox, revenueFrame] = await Promise.all(
+      [revenueHeader, page.locator('.ip-node', { hasText: '4 Build to GitHub' }), agent, frameOf(revenueHeader)].map(boxOf),
     );
     expect(agentBox.y).toBeGreaterThanOrEqual(revenue.y + revenue.height);
     expect(build.y).toBeGreaterThanOrEqual(agentBox.y + agentBox.height);
-    expect(agentBox.x).toBeGreaterThan(revenue.x + 20);
+    expectInside(agentBox, revenueFrame);
     // A wears teal and B another hue, on its chip, its badge, its subagent and its subagent's task.
     const hues = await page.evaluate<Record<string, string>>(`(() => {
       const find = (sel, text) => [...document.querySelectorAll(sel)].find((n) => n.textContent.includes(text));
@@ -1426,11 +1464,10 @@ test.describe('Live work', () => {
       const row = find('.ip-work', 'Compare the plans');
       return {
         chipA: bg(find('.ip-chip-s', 'E2E session')),
-        badgeA: bg(find('.ip-badge', 'E2E session')),
+        badgeA: getComputedStyle(find('.ip-badge', 'E2E session').querySelector('.ip-badge-label .ip-tag')).color,
         chipB: bg(find('.ip-chip-s', 'Second session')),
-        badgeB: bg(find('.ip-badge', 'Second session')),
-        agentB: bg(find('.ip-agent', 'Price the tiers')),
-        markerB: bg(row.querySelector('.ip-work-agent')),
+        badgeB: getComputedStyle(find('.ip-badge', 'Second session').querySelector('.ip-badge-label .ip-tag')).color,
+        agentB: getComputedStyle(document.querySelector('.ip-agent[aria-label^="b1 · "] .ip-agent-tag')).color,
         tagB: getComputedStyle(row.querySelector('.ip-work-tag')).color,
       };
     })()`);
@@ -1438,7 +1475,7 @@ test.describe('Live work', () => {
     expect(hues.badgeA).toBe(hues.chipA);
     expect(hues.chipB).not.toBe(hues.chipA);
     expect(hues.chipB).not.toBe('rgba(0, 0, 0, 0)');
-    for (const part of ['badgeB', 'agentB', 'markerB', 'tagB']) expect(hues[part], part).toBe(hues.chipB);
+    for (const part of ['badgeB', 'agentB', 'tagB']) expect(hues[part], part).toBe(hues.chipB);
   });
 
   test("Details lists the node's working tasks with who is on each, and the subagents on it", async ({ page, api, fresh }) => {
@@ -1482,7 +1519,7 @@ test.describe('Live work', () => {
     await expect(page.locator('.ip-badge')).toHaveCount(0);
     const [cardBox, rowBox] = await Promise.all([card, playRow].map(boxOf));
     expect(rowBox.y).toBeGreaterThanOrEqual(cardBox.y + cardBox.height);
-    expect(rowBox.x).toBeGreaterThan(cardBox.x + 20);
+    expectInside(rowBox, await boxOf(frameOf(card)));
     // Opened: the done tasks keep their ✓, the unfinished one is a hollow grey ○ that never pulses.
     await playRow.click();
     await expect(playRow).toHaveAttribute('aria-expanded', 'true');
