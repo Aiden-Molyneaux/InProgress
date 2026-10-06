@@ -1,4 +1,4 @@
-import { agentTag, sessionDisplayTitle, sessionTag, type PastSession, type Session, type SessionState, type SubagentInfo, type TrailAgent, type WorkItem, type WorkStatus } from '../../src/core/types';
+import { agentTag, sessionDisplayTitle, sessionTag, type EndReason, type PastSession, type Session, type SessionState, type SubagentInfo, type TrailAgent, type WorkItem, type WorkStatus } from '../../src/core/types';
 import { relativeTime } from './time';
 
 /** A working task's checklist mark. */
@@ -44,10 +44,44 @@ export function agentName(a: Pick<SubagentInfo, 'description' | 'agentType'>, un
   return description ? withoutOwnId(description, underNode) : a.agentType;
 }
 
-/** `description · model · 12 min` while a subagent runs, `… · done 2 min ago` once it has ended. */
+/** Why a subagent ended without a clean stop, as the window says it: `a3 hit the usage limit`, `… 3 min ago`. */
+export const END_WORDS: Record<EndReason, string> = {
+  limit: 'hit the usage limit',
+  error: 'hit an API error',
+  killed: 'was stopped',
+  silent: 'stopped responding',
+  session: 'ended with its session',
+};
+
+/** A subagent's line in two parts: `who` (description · model) and `when`, which the window may draw apart. */
+export interface LineParts {
+  who: string;
+  when: string;
+}
+
+/**
+ * The time an ended subagent's "… ago" and "ran …" count to: its last sign of life when the transcript watcher ended it,
+ * else when it ended.
+ */
+const lastAlive = (a: SubagentInfo): string => a.lastActiveAt ?? a.endedAt ?? '';
+
+/**
+ * agentLine in its two parts. `when`: the elapsed time while it runs; `done 2 min ago` after a clean stop; else why it
+ * ended and how long ago it last showed life (`stopped responding 21 min ago`), and at the usage limit what to do
+ * about it (`hit the usage limit 3 min ago · resume after the reset`).
+ */
+export function agentLineParts(a: SubagentInfo, now: number, underNode: number | null = null): LineParts {
+  const who = [agentName(a, underNode), a.model].filter(Boolean).join(' · ');
+  if (!a.endedAt) return { who, when: elapsed(a.startedAt, now) };
+  if (!a.endReason) return { who, when: `done ${relativeTime(a.endedAt, now)}` };
+  const when = `${END_WORDS[a.endReason]} ${relativeTime(lastAlive(a), now)}`;
+  return { who, when: a.endReason === 'limit' ? `${when} · resume after the reset` : when };
+}
+
+/** `description · model · 12 min` while a subagent runs, `… · done 2 min ago` once it has ended (agentLineParts). */
 export function agentLine(a: SubagentInfo, now: number, underNode: number | null = null): string {
-  const when = a.endedAt ? `done ${relativeTime(a.endedAt, now)}` : elapsed(a.startedAt, now);
-  return [agentName(a, underNode), a.model, when].filter(Boolean).join(' · ');
+  const { who, when } = agentLineParts(a, now, underNode);
+  return `${who} · ${when}`;
 }
 
 const STATE_SUFFIX: Record<Session['state'], string> = { working: '', idle: ' · idle', permission: ' · needs permission', ended: ' · ended' };
@@ -64,12 +98,20 @@ export function chipLabel(s: Session): string {
 }
 
 /**
- * `description · model · ran 40 min · stopped 2 h ago`: a subagent in the trail, how long it ran and when it stopped.
- * A resumed subagent keeps its first start, so "ran" spans its first start to its last stop.
+ * trailAgentLine in its two parts: `who` (description · model) and `when`, how long it ran and when it stopped, or why
+ * it ended (`ran 22 min · hit the usage limit 10 h ago`). Both count to its last sign of life when the transcript
+ * watcher ended it. A resumed subagent keeps its first start, so "ran" spans its first start to its last stop.
  */
+export function trailAgentParts(a: SubagentInfo, now: number, underNode: number | null = null): LineParts {
+  const end = a.endedAt ? lastAlive(a) : new Date(now).toISOString();
+  const how = a.endReason ? END_WORDS[a.endReason] : 'stopped';
+  return { who: [agentName(a, underNode), a.model].filter(Boolean).join(' · '), when: `ran ${elapsed(a.startedAt, Date.parse(end))} · ${how} ${relativeTime(end, now)}` };
+}
+
+/** `description · model · ran 40 min · stopped 2 h ago`: a subagent in the trail (trailAgentParts). */
 export function trailAgentLine(a: SubagentInfo, now: number, underNode: number | null = null): string {
-  const end = a.endedAt ?? new Date(now).toISOString();
-  return [agentName(a, underNode), a.model, `ran ${elapsed(a.startedAt, Date.parse(end))}`, `stopped ${relativeTime(end, now)}`].filter(Boolean).join(' · ');
+  const { who, when } = trailAgentParts(a, now, underNode);
+  return `${who} · ${when}`;
 }
 
 /** A step's done row: `✓ 5 done · 2 unfinished · 2 agents`, each part left out while it is zero. */

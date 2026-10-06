@@ -23,6 +23,20 @@ describe('describeEvent', () => {
     expect(describeEvent(ev('session.updated', 's1', { changed: ['focusNodeId'], focusNodeId: 58 }), snapshot)).toBe('InGame launch status is on #58 Run signing tests');
   });
 
+  it("names the subagents the transcript watcher ended after their session's title, by tag, and why", () => {
+    const withAgents = {
+      ...snapshot,
+      sessions: [{ id: 's1', title: 'InGame launch status', slot: 0, subagents: [{ agentId: 'x3', ordinal: 3 }] }],
+      trailAgents: [{ sessionId: 's1', agentId: 'x4', ordinal: 4 }],
+    } as unknown as ProjectSnapshot;
+    const ended = (...list: [string, string][]) => ev('session.updated', 's1', { changed: ['subagents'], state: 'working', ended: list.map(([agentId, reason]) => ({ agentId, reason })) }, 'system');
+    expect(describeEvent(ended(['x3', 'limit']), withAgents)).toBe('InGame launch status · a3 hit the usage limit');
+    expect(describeEvent(ended(['x3', 'killed'], ['x4', 'silent']), withAgents)).toBe('InGame launch status · a3 was stopped, a4 stopped responding');
+    // One it cannot find, or a session with no letter, reads as "a subagent".
+    expect(describeEvent(ended(['zz', 'error']), withAgents)).toBe('InGame launch status · a subagent hit an API error');
+    expect(describeEvent(ended(['x3', 'error']), snapshot)).toBe('InGame launch status · a subagent hit an API error');
+  });
+
   it('labels actors', () => {
     expect(actorLabel(ev('node.created', '1', {}), snapshot)).toBe('scribe (InGame launch status)');
     expect(actorLabel(ev('node.created', '1', {}, 'hook:prompt'), snapshot)).toBe('Claude');
