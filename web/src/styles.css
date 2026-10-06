@@ -311,7 +311,8 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-work-done[aria-expanded='true']::after { content: '▾'; }
 .ip-work-done:hover { color: var(--text-2); }
 .ip-work-done:focus-visible { outline: 2px solid var(--text-2); outline-offset: 1px; border-radius: var(--radius); }
-/* Shared with Details' task rows (.ip-wt, Details.tsx:93-98): the tag, the mark's colour, the hue bar and the trail. */
+/* Shared with Details' task rows (.ip-wt): the tag, the mark's colour and the hue bar. Details restyles them, and its
+   trail rows, under .ip-wt in its own region. */
 .ip-work-tag { font-family: var(--font-mono); font-size: var(--fs-s); font-weight: var(--w-text); line-height: 14px; color: var(--fam, var(--family-0)); }
 .ip-work-mark { color: var(--muted); }
 .w-in_progress .ip-work-mark { color: var(--active-ink); }
@@ -329,8 +330,8 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-card .ip-work.w-completed .ip-work-subject { color: var(--muted); }
 .ip-work-after { flex: none; max-width: 150px; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
 /* The trail: a task an ended session left open is a hollow ○ in --faint that never pulses; one it completed keeps ✓. */
-.ip-card .ip-work.stale .ip-work-subject, .ip-wt.stale { color: var(--muted); }
-.ip-work.stale:not(.w-completed) .ip-work-mark, .ip-wt.stale:not(.w-completed) .ip-work-mark { color: var(--faint); animation: none; }
+.ip-card .ip-work.stale .ip-work-subject { color: var(--muted); }
+.ip-work.stale:not(.w-completed) .ip-work-mark { color: var(--faint); animation: none; }
 /* A subagent in the trail, under its step's open done row: neutral, its ◆ muted. */
 .ip-trail-agent { height: var(--task-row); padding-left: 30px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--fs-m); line-height: var(--task-row); color: var(--muted); }
 /* "+n more" and "✓ n done": a fold row, 26 px, a dashed hairline on no fill, as wide as its words. */
