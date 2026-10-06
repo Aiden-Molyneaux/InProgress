@@ -1042,20 +1042,64 @@ test('the tab strip is one stop in the tab order, and the arrow keys move along 
   await expect(page.locator('[role="tab"]:focus')).toHaveCount(0);
 });
 
-test('a long session title is cut short, and the pill and Follow stay at the end of the first line', async ({ page, api, fresh }) => {
+test('a session chip is its character and letter: its name carries the title, and waiting for permission rings it in amber', async ({ page, api, fresh }) => {
   const title = 'A session title long enough to run on well past the edge of a narrow window';
-  const session = `e2e-${randomUUID()}`;
-  await write(api, session, 'post', `/api/sessions/${session}/enroll`, { project: fresh.slug, title });
+  const second = `e2e-${randomUUID()}`;
+  await write(api, second, 'post', `/api/sessions/${second}/enroll`, { project: fresh.slug, title });
   await open(page, fresh);
   const row = page.locator('.ip-sessions');
-  const chip = row.getByRole('button', { name: title });
-  await expect(chip).toHaveAttribute('title', `${title} · no focus set yet`);
-  const cut = `(() => { const l = [...document.querySelectorAll('.ip-chip-label')].find((n) => n.textContent.startsWith('A session title')); return l.scrollWidth > l.clientWidth; })()`;
-  expect(await page.evaluate<boolean>(cut), 'the label is cut short').toBe(true);
+  const chips = row.locator('.ip-chip-s');
+  const chipA = row.getByRole('button', { name: /^A · / });
+  const chipB = row.getByRole('button', { name: /^B · / });
+  // Letter order, though the server lists B first: it was seen last.
+  await expect(chips).toHaveCount(2);
+  await expect(chips.first()).toHaveAccessibleName('A · E2E session');
+  await expect(chips.nth(1)).toHaveAccessibleName(`B · ${title}`);
+  // The chip shows its character and its letter in its family's hue. The title is in its name and its popover, with
+  // no native tooltip, which would never show on keyboard focus.
+  await expect(chipB).toHaveText('B');
+  await expect(chipB).not.toHaveAttribute('title');
+  await expect(chipB.locator('.ip-char')).toHaveAttribute('data-state', 'work');
+  await expect(chipB.locator('.ip-tag')).toHaveCSS('color', 'rgb(180, 83, 47)');
+  expect((await row.boundingBox())!.height, 'one line').toBeLessThanOrEqual(40);
+  // Its popover opens on keyboard focus: Tab from the tab strip reaches A, then B.
+  const popB = page.locator(`[id="${await chipB.getAttribute('aria-describedby')}"]`);
+  await expect(popB).toBeHidden();
+  await page.getByRole('tab', { selected: true }).focus();
+  await expect(async () => {
+    await page.keyboard.press('Tab');
+    await expect(chipA).toBeFocused({ timeout: 200 });
+  }).toPass({ timeout: 3000 });
+  await page.keyboard.press('Tab');
+  await expect(chipB).toBeFocused();
+  await expect(popB).toBeVisible();
+  await expect(popB).toHaveText(`B · ${title} · no focus set yet`);
+  await expect(chipB).toHaveAccessibleDescription(`B · ${title} · no focus set yet`);
+  // Waiting for permission: the word shows in amber, and the character wears the amber ring, the outer one running.
+  await write(api, second, 'post', `/api/sessions/${second}/hook`, { event: 'permission' });
+  await expect(chipB).toHaveAccessibleName(`B · ${title} · needs permission`);
+  await expect(chipB).toHaveText('B · needs permission');
+  await expect(chipB.locator('.ip-chip-word')).toHaveCSS('color', 'rgb(146, 64, 14)');
+  await expect(chipB.locator('.ip-char')).toHaveAttribute('data-state', 'wait');
+  const ring2 = chipB.locator('.ip-char-ring2');
+  await expect(ring2).toHaveCSS('animation-name', 'ip-ring');
+  // Under reduced motion the outer ring stops, and the solid ring stays.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect(ring2).toHaveCSS('animation-name', 'none');
+  await expect(chipB.locator('.ip-char-ring')).toBeVisible();
+  // Five more sessions overflow the first line. The chips wrap, still in letter order, and the pill and Follow stay at
+  // the right end of the first line.
+  for (let i = 1; i <= 5; i++) {
+    const extra = `e2e-${randomUUID()}`;
+    await write(api, extra, 'post', `/api/sessions/${extra}/enroll`, { project: fresh.slug, title: `Extra session ${i}` });
+  }
+  await expect(chips).toHaveCount(7);
+  for (const [i, letter] of [...'ABCDEFG'].entries()) await expect(chips.nth(i)).toHaveAccessibleName(new RegExp(`^${letter} · `));
   const pill = row.getByRole('button', { name: /need you/ });
   const follow = row.getByRole('button', { name: /Follow/ });
-  const [rowBox, chipBox, pillBox, followBox] = await Promise.all([row, chip, pill, follow].map(async (l) => (await l.boundingBox())!));
-  expect(chipBox.x + chipBox.width).toBeLessThanOrEqual(pillBox.x);
+  const [rowBox, chipsBox, pillBox, followBox] = await Promise.all([row, row.locator('.ip-chips'), pill, follow].map(async (l) => (await l.boundingBox())!));
+  expect(rowBox.height, 'two lines').toBeGreaterThan(40);
+  expect(chipsBox.x + chipsBox.width).toBeLessThanOrEqual(pillBox.x);
   for (const box of [pillBox, followBox]) expect(box.y - rowBox.y, 'on the first line').toBeLessThanOrEqual(8);
   await expect(follow).toBeInViewport({ ratio: 1 });
 });
