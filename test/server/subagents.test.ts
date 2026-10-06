@@ -380,17 +380,19 @@ describe('how a subagent ended', () => {
     expect(row(ctx, 'a1')).toEqual({ ended_at: '2026-10-02T09:05:00.000Z', end_reason: 'killed', last_active_at: '2026-10-02T09:03:00.000Z' });
   });
 
-  it('revives a subagent ended as silent or at the usage limit, and nothing else', () => {
+  it('revives a subagent the watcher ended, and never one that stopped cleanly or ended with its session', () => {
     const { ctx, hook } = setup();
-    for (const id of ['s', 'l', 'k', 'c']) hook(start(id, 'general-purpose'));
+    for (const id of ['s', 'l', 'k', 'e', 'c', 'w']) hook(start(id, 'general-purpose'));
     endAgent(ctx, 's1', 's', 'silent', 't1', 't0');
     endAgent(ctx, 's1', 'l', 'limit', 't1', 't0');
     endAgent(ctx, 's1', 'k', 'killed', 't1', 't0');
+    endAgent(ctx, 's1', 'e', 'error', 't1', 't0');
     hook({ event: 'subagent-stop', agentId: 'c' });
-    expect(['s', 'l', 'k', 'c'].map((id) => reviveAgent(ctx, 's1', id))).toEqual([true, true, false, false]);
-    expect(row(ctx, 's')).toEqual({ ended_at: null, end_reason: null, last_active_at: null });
-    expect(row(ctx, 'l')).toEqual({ ended_at: null, end_reason: null, last_active_at: null });
-    expect(row(ctx, 'k')).toMatchObject({ end_reason: 'killed' });
+    ctx.db.prepare("UPDATE session_subagents SET ended_at = 't1', end_reason = 'session' WHERE agent_id = 'w'").run();
+    expect(['s', 'l', 'k', 'e', 'c', 'w'].map((id) => reviveAgent(ctx, 's1', id))).toEqual([true, true, true, true, false, false]);
+    for (const id of ['s', 'l', 'k', 'e']) expect(row(ctx, id), id).toEqual({ ended_at: null, end_reason: null, last_active_at: null });
+    expect(row(ctx, 'c')).toMatchObject({ end_reason: null, ended_at: expect.any(String) });
+    expect(row(ctx, 'w')).toMatchObject({ end_reason: 'session' });
   });
 
   it('lets a real stop win over a silent guess, but not over an end the transcript showed', () => {

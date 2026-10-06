@@ -212,12 +212,13 @@ export function endAgent(ctx: Ctx, sessionId: string, agentId: string, reason: E
 }
 
 /**
- * The watcher saw a new line from a subagent it had ended as `silent`, or one waiting at the usage limit: it runs again.
- * Any other end stays (a resumed agent's SubagentStart revives it). False when nothing changed.
+ * The watcher saw a new line from a subagent it had ended (a guess that it stopped responding, the usage limit, an API
+ * error or an interrupt): a subagent that writes is alive, so it runs again. A clean stop and a session's end stay (a
+ * resumed agent's SubagentStart revives those). False when nothing changed.
  */
 export function reviveAgent(ctx: Ctx, sessionId: string, agentId: string): boolean {
   return ctx.db
-    .prepare("UPDATE session_subagents SET ended_at = NULL, end_reason = NULL, last_active_at = NULL WHERE session_id = ? AND agent_id = ? AND ended_at IS NOT NULL AND end_reason IN ('silent', 'limit')")
+    .prepare("UPDATE session_subagents SET ended_at = NULL, end_reason = NULL, last_active_at = NULL WHERE session_id = ? AND agent_id = ? AND ended_at IS NOT NULL AND end_reason IN ('limit', 'error', 'killed', 'silent')")
     .run(sessionId, agentId).changes > 0;
 }
 
