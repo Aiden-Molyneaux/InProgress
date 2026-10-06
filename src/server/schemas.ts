@@ -98,3 +98,8 @@ export const enrollBody = z.object({ project: z.union([z.string().min(1), z.numb
 export const focusBody = z.object({ nodeId: z.number().int().positive().nullable() }).strict();
 export const openBody = z.object({ resourceId: z.number().int().positive() }).strict();
 export const openUrlBody = z.object({ url: z.string().min(1).max(2048) }).strict();
+/**
+ * A window write on a project by id: the slug it shows, checked against the id (purging the newest project frees its
+ * id). Not max 60: a slug made from a 120-character name is longer.
+ */
+export const windowProjectBody = z.object({ slug: z.string().min(1).max(200) }).strict();

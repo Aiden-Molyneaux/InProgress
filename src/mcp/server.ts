@@ -118,7 +118,7 @@ export function createMcpServer(client: Client, o: McpOptions = {}): McpServer {
       return lines.join('\n');
     });
 
-  tool('update_project', 'Rename a project, change its description or playbook, or archive / unarchive it.',
+  tool('update_project', "Rename a project, change its description or playbook, or archive / unarchive it. Archiving stops tracking the project's live sessions (they keep running) and drops their Up next entries.",
     { project, name: z.string().optional(), description: z.string().optional(), playbook: z.string().optional(), status: z.enum(['active', 'archived']).optional(), session },
     async ({ project, session: s, ...patch }: { project: string; session?: string; name?: string; description?: string; playbook?: string; status?: 'active' | 'archived' }) => {
       const p = await client.patch<Project>(`/api/projects/${enc(project)}`, patch, { actor: actor(s) });
