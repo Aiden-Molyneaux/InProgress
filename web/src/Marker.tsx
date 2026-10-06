@@ -5,13 +5,13 @@ export interface MarkerProps {
   status: NodeStatus;
   /** node.kind === 'question': the ? disc. A done question keeps the ?. */
   question: boolean;
-  /** LayoutNodeItem.paused: the hollow sky ring. */
+  /** LayoutNodeItem.paused on a card, isPaused in Details: the hollow sky ring. */
   paused: boolean;
   /** isNeedsYou(node): the amber dot. */
   needsYou: boolean;
   /** LayoutNodeItem.working: an active marker pulses (ip-pulse). Details passes false. */
   pulse: boolean;
-  /** The card passes `Nobody is on this. Last change ${lastChange}` when paused. */
+  /** The card and Details pass `Nobody is on this. Last change ${lastChange}` when paused. */
   title?: string;
 }
 

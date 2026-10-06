@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AGENT_LINE, CARD_GAP, CARD_PAD, DONE_LINE, FOLD_ROW, NODE_H, READERS_LINE, ROW, STACK_HEAD, TASK_ROW, agentVisible, eventTarget, findFrontier, formatUpNext, layoutOutline, queueView, type LayoutItem, type LayoutResult } from '../../src/core/layout';
+import { AGENT_LINE, CARD_GAP, CARD_PAD, DONE_LINE, FOLD_ROW, NODE_H, READERS_LINE, ROW, STACK_HEAD, TASK_ROW, agentVisible, eventTarget, findFrontier, formatUpNext, isPaused, layoutOutline, occupiedSteps, queueView, type LayoutItem, type LayoutResult } from '../../src/core/layout';
 import { ENDED_AGENT_MS, READER_AGENT_TYPES, isReader, type EventRow, type PastSession, type QueueEntry, type ResourceMeta, type Session, type SubagentInfo, type TrailAgent, type TreeNode, type WorkItem, type WorkStatus } from '../../src/core/types';
 
 let nextId = 1;
@@ -869,5 +869,22 @@ describe('paused', () => {
     expect(pausedIds(layout(t, { overrides }))).toEqual([t.a.id]);
     expect(pausedIds(layout(t, { overrides, sessions: [session('s1', t.a1.id, 'idle')] }))).toEqual([]);
     expect(pausedIds(layout(t, { overrides, workItems: [work(t.a1.id, 'in_progress')] }))).toEqual([]);
+  });
+
+  it('is the test Details runs on the snapshot: occupiedSteps and isPaused pick the steps the layout draws paused', () => {
+    const t = sample();
+    const byId = new Map(t.nodes.map((x) => [x.id, x]));
+    const pausedBy = (sessions: Session[], workItems: WorkItem[] = []) => t.nodes.filter((x) => isPaused(x, occupiedSteps(byId, sessions, workItems))).map((x) => x.id);
+    for (const [sessions, workItems] of [
+      [[], []],
+      [[session('s1', t.a2.id, 'idle')], []],
+      [[session('s1', t.a1.id, 'ended')], []],
+      [[withAgents(session('s1', t.b.id, 'working'), [agent('w1', { nodeId: t.a1.id })])], []],
+      [[], [work(t.a1.id, 'in_progress')]],
+    ] as [Session[], WorkItem[]][]) {
+      expect(pausedBy(sessions, workItems)).toEqual(pausedIds(layout(t, { sessions, workItems })));
+    }
+    expect(pausedBy([])).toEqual([t.a.id, t.a1.id]);
+    expect(pausedBy([session('s1', t.a2.id, 'idle')])).toEqual([t.a1.id]);
   });
 });

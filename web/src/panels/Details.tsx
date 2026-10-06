@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { agentHome, agentVisible, homedTrailAgents } from '../../../src/core/layout';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { agentHome, agentVisible, homedTrailAgents, isPaused, occupiedSteps } from '../../../src/core/layout';
 import { isNeedsYou } from '../../../src/core/tree';
-import { LABEL_GLYPHS, agentTag, isReader, sessionDisplayTitle, sessionTag, type NodeDetail, type ProjectSnapshot, type TrailAgent, type WorkItem } from '../../../src/core/types';
+import { LABEL_GLYPHS, agentTag, isReader, sessionDisplayTitle, sessionTag, type NodeDetail, type ProjectSnapshot, type TrailAgent, type TreeNode, type WorkItem } from '../../../src/core/types';
 import { api } from '../api';
 import { familyVar } from '../family';
 import { TASK_MARK, agentLine, taskFamily, taskOwner, trailAgentLine, waitsFor, withTag, withoutOwnId, workMark } from '../live';
@@ -173,6 +173,9 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
   const [copied, setCopied] = useState(false);
   const copiedTimer = useRef(0);
   useEffect(() => () => window.clearTimeout(copiedTimer.current), []);
+  // Paused as the canvas draws it: the layout's own test, run on the snapshot's copy of each step.
+  const byId = useMemo(() => new Map(snapshot.nodes.map((n) => [n.id, n] as const)), [snapshot.nodes]);
+  const occupied = useMemo(() => occupiedSteps(byId, snapshot.sessions, snapshot.workItems), [byId, snapshot.sessions, snapshot.workItems]);
 
   // Refetch whenever the snapshot changes, so the panel follows Claude's edits. A failed refetch keeps the last good detail.
   useEffect(() => {
@@ -203,6 +206,21 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
   }
 
   const { node } = detail;
+  /** A step's marker as its card draws it, the sky ring and its tooltip too when paused, but never pulsing. */
+  const marker = (n: Pick<TreeNode, 'id' | 'status' | 'kind' | 'assignee'>) => {
+    const step = byId.get(n.id);
+    const paused = step !== undefined && isPaused(step, occupied);
+    return (
+      <Marker
+        status={n.status}
+        question={n.kind === 'question'}
+        paused={paused}
+        needsYou={isNeedsYou(n)}
+        pulse={false}
+        title={paused ? `Nobody is on this. Last change ${relativeTime(step.updatedAt)}` : undefined}
+      />
+    );
+  };
   const copy = async () => {
     await navigator.clipboard.writeText(`#${node.id} ${node.title}`);
     setCopied(true);
@@ -219,9 +237,9 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
         <button className="ip-btn" onClick={onClose} aria-label="Close">×</button>
       </header>
       <div className="ip-meta">
-        {/* The canvas's marker, then the status as a muted word, or NEEDS YOU in the YOU tag's look. Details has no
-            layout item, so a paused step shows its plain status marker, and nothing pulses here. */}
-        <Marker status={node.status} question={node.kind === 'question'} paused={false} needsYou={isNeedsYou(node)} pulse={false} />
+        {/* The canvas's marker, then the status as a muted word, or NEEDS YOU in the YOU tag's look. A paused step
+            draws the sky ring here too; nothing pulses here. */}
+        {marker(node)}
         {isNeedsYou(node) ? <span className="ip-you">NEEDS YOU</span> : <span>{node.status}</span>}
         <span>{node.kind}</span>
         {node.label && (
@@ -264,9 +282,7 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
             {detail.children.map((c) => (
               <li key={c.id}>
                 <button onClick={() => onSelectNode(c.id)}>
-                  <span className="ip-kid-mark">
-                    <Marker status={c.status} question={c.kind === 'question'} paused={false} needsYou={isNeedsYou(c)} pulse={false} />
-                  </span>
+                  <span className="ip-kid-mark">{marker(c)}</span>
                   #{c.id} {c.title}
                   {c.assignee === 'me' && c.status !== 'done' ? <span className="ip-you">YOU</span> : null}
                 </button>

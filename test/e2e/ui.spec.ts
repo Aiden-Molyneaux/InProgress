@@ -551,6 +551,18 @@ test('an active step nobody is on draws a hollow marker that says so, and a need
   }
   // The needs-you step has waited four days, and says so inside its one YOU tag.
   await expect(page.locator('.ip-node .ip-you')).toHaveText('YOU · 4d');
+  // Details draws the same ring, with the same tooltip, for the step and in its parent's list of steps.
+  await milestones.focus();
+  await page.keyboard.press('Enter');
+  const details = page.getByRole('complementary');
+  const own = details.locator('.ip-meta .ip-marker');
+  await expect(own).toHaveClass(/\bm-paused\b/);
+  await expect(own).toHaveAttribute('title', 'Nobody is on this. Last change 4 d ago');
+  await expect(own).toHaveCSS('border-top-color', 'rgb(2, 132, 199)');
+  await details.locator('.ip-link').click();
+  const steps = details.locator('.ip-kids li');
+  await expect(steps.filter({ hasText: 'Milestones' }).locator('.ip-marker')).toHaveClass(/\bm-paused\b/);
+  await expect(steps.filter({ hasText: 'Road to market' }).locator('.ip-marker')).not.toHaveClass(/\bm-paused\b/);
 });
 
 // Records whether the flash on "Run signing tests" is ever cleared from now on.

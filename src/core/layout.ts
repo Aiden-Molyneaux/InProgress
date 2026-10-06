@@ -245,6 +245,35 @@ export function agentHome(s: Pick<Session, 'focusNodeId'>, a: Pick<SubagentInfo,
 }
 
 /**
+ * Who is on a step, for paused: each live session's focus (an idle one's too), each running subagent's home (a reader's
+ * too), each live session's task in progress, and every ancestor of those, walked in the tree itself, so a manual fold
+ * never changes it. A stopped subagent no longer counts, though it still shows greyed for a while. The layout and Details
+ * both read it, so a step's marker draws the same on its card and in Details.
+ */
+export function occupiedSteps(byId: ReadonlyMap<number, TreeNode>, sessions: readonly Session[], workItems: readonly WorkItem[] = []): Set<number> {
+  const occupied = new Set<number>();
+  const occupy = (id: number | null) => {
+    let cur = id === null ? undefined : byId.get(id);
+    while (cur && !occupied.has(cur.id)) {
+      occupied.add(cur.id);
+      cur = cur.parentId === null ? undefined : byId.get(cur.parentId);
+    }
+  };
+  for (const s of sessions) {
+    if (s.state === 'ended') continue;
+    occupy(s.focusNodeId);
+    for (const a of s.subagents) if (a.endedAt === null) occupy(agentHome(s, a, (id) => byId.has(id)));
+  }
+  for (const w of workItems) if (w.status === 'in_progress' && w.endedAt === null) occupy(w.nodeId);
+  return occupied;
+}
+
+/** An active step of Claude's that nobody is on (occupiedSteps): its marker draws the hollow sky ring. Never the root. */
+export function isPaused(node: Pick<TreeNode, 'id' | 'parentId' | 'status' | 'assignee'>, occupied: ReadonlySet<number>): boolean {
+  return node.parentId !== null && node.status === 'active' && node.assignee === 'claude' && !occupied.has(node.id);
+}
+
+/**
  * The trail's subagents, each with the node it shows under. A live session's stopped subagent stays out while it still
  * shows as a greyed badge (agentShown), so none is both. Its node is the one it worked on, while that is in this tree;
  * one whose node is set but not in the tree (its session moved to another project, say) is left out. Only one with no
@@ -401,22 +430,7 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
   }
   /** Each working session's focus: its card alone wears the orange frame. */
   const workingFoci = new Set(live.flatMap((s) => (s.state === 'working' && s.focusNodeId !== null ? [s.focusNodeId] : [])));
-  // Who is on a step, for paused: each live session's focus (an idle one's too), each running subagent's home (a reader's
-  // too), each live session's task in progress, and every ancestor of those, walked in the tree itself, so a manual fold
-  // never changes it. A stopped subagent no longer counts, though it still shows greyed for a while.
-  const occupied = new Set<number>();
-  const occupy = (id: number | null) => {
-    let cur = id === null ? undefined : index.byId.get(id);
-    while (cur && !occupied.has(cur.id)) {
-      occupied.add(cur.id);
-      cur = cur.parentId === null ? undefined : index.byId.get(cur.parentId);
-    }
-  };
-  for (const s of live) {
-    occupy(s.focusNodeId);
-    for (const a of s.subagents) if (a.endedAt === null) occupy(homeOf(s, a));
-  }
-  for (const w of work) if (w.status === 'in_progress' && w.endedAt === null) occupy(w.nodeId);
+  const occupied = occupiedSteps(index.byId, live, work);
   const sessionsById = new Map(live.map((s) => [s.id, s]));
   const pulses = (w: WorkItem): boolean => {
     const s = sessionsById.get(w.sessionId);
@@ -492,7 +506,7 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
       hasChildren: v.hasChildren,
       working: working.has(node.id),
       queue: queued.get(node.id) ?? null,
-      paused: node.parentId !== null && node.status === 'active' && node.assignee === 'claude' && !occupied.has(node.id),
+      paused: isPaused(node, occupied),
       h: NODE_H,
       w: Math.max(CARD_MIN_W, CARD_RIGHT - x),
       stack,
