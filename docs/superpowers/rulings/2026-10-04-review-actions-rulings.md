@@ -116,3 +116,20 @@ decision, why, what it costs if wrong. Review these and rework anything ruled wr
 Aiden's answers to the overnight questions (2026-10-05): ruling 32 is confirmed. A subagent that dies without a stop
 should be represented in the window, and workflow agents should carry a representative label. Both are new
 research steps under "Feedback from daily use".
+
+Subagent lifecycle (2026-10-06, fix A of the subagent design approved in chat; it ships with #125):
+
+42. A subagent with no step of its own stays on the focus its session had when it started, not on the session's current
+    focus. Migration 7 records that focus in `session_subagents.start_focus_id`, apart from `node_id`, which every
+    pairing change rewrites, and the server merges the two: the dispatch's `#id`, then the focus at dispatch, then the
+    focus at start, and only with none of those the session's current focus. The badge, the trail row and the
+    subagent's own tasks read the same merge, so they share one step, which amends the live-work note's attribution
+    rule. Amends 17: a start focus no longer in the tree (the session was repointed) drops the trail agent like any
+    step, so a repointed session's no-step agents stop landing on the new project's focus. Amends 34: a deleted
+    dispatch step now falls back to the start focus first; a deleted start focus goes NULL and the agent follows its
+    session's focus as before. Rows from before migration 7 keep the old behaviour until they leave the trail. Cost if
+    wrong: a no-step agent stays on a step its session has left, which is what Aiden asked for.
+43. A subagent that started while its session had no focus takes the first focus the session then sets, and keeps it:
+    `setFocus` fills `start_focus_id` for the session's running rows that have neither a step nor a start focus.
+    Without it such an agent would follow every later focus. An agent that stopped before any focus was set keeps none
+    and follows its session's focus in the trail. Cost if wrong: a rare agent pinned to a step it never worked on.

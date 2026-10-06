@@ -770,7 +770,7 @@ describe('the trail of ended work', () => {
     expect(l.items.find((i) => i.kind === 'workDone')).toMatchObject({ count: 1, unfinished: 0, agents: 0 });
   });
 
-  it("puts a trail agent on its step while that is in the tree; with no step, on its session's focus, live or past; else leaves it out", () => {
+  it("puts a trail agent on its step while that is in the tree; with no node (no step, no start focus), on its session's focus, live or past; else leaves it out", () => {
     const t = sample();
     const trailAgents = [
       trailAgent('x', { nodeId: t.b.id }),
@@ -842,7 +842,7 @@ describe('paused', () => {
     // Stopped a minute ago, it still shows greyed, but nobody is on the step any more.
     expect(pausedIds(on(agent('w2', { nodeId: t.a1.id, endedAt: ago(60_000) })))).toEqual([t.a.id, t.a1.id]);
     expect(pausedIds(on(agent('r2', { agentType: 'Explore', nodeId: t.a1.id, endedAt: ago(60_000) })))).toEqual([t.a.id, t.a1.id]);
-    // With no step of its own, a subagent is on its session's focus.
+    // With no node of its own (no step and no start focus), a subagent is on its session's focus.
     const s = withAgents(session('s1', t.a1.id, 'working'), [agent('w3')]);
     expect(pausedIds(layout(t, { sessions: [s] }))).toEqual([]);
   });

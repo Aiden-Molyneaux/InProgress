@@ -30,14 +30,18 @@ too, keyed by agent.
 
 Attribution of a working task to a node, decided once, at creation:
 1. A `#id` at the start of the subject (`#57 Write the design note`), if that node is in the session's project.
-2. For a subagent's task: the subagent's node (below).
+2. For a subagent's task: the subagent's node (below), the step its badge sits on. For a subagent with no step of its
+   own that is the session's focus when the subagent started, not the focus at task time (amended 2026-10-06,
+   review-actions rulings 42 and 43).
 3. Otherwise: the session's focus node, else the project root.
 
 ### Subagents (#48)
 - A **PreToolUse** hook on `^(Agent|Task)$` posts a dispatch: `tool_use_id`, `description` (clipped to 200),
   `subagent_type` and `model`. Of the `prompt` it forwards only the first sentence, clipped to 200 characters, as the
   subagent's purpose, which stays in the local database and is pruned with its row (review actions §5). The node is
-  the `#id` at the start of the description, if any, else the session's focus.
+  the `#id` at the start of the description, if any, else the session's focus. A subagent with no dispatch (a workflow
+  agent) or whose dispatch left it no node stays on the session's focus at its SubagentStart, migration 7's
+  `start_focus_id`, or on the first focus the session sets when it had none (review-actions rulings 42 and 43).
 - **SubagentStart** (already installed) pairs with the oldest unpaired dispatch for that session and agent type
   (first in, first out).
 - A **PostToolUse** hook on `^(Agent|Task)$` posts the launch response's `agentId`. For background agents this arrives

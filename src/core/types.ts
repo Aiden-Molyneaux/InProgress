@@ -147,7 +147,11 @@ export interface SubagentInfo {
   description: string | null;
   /** The model it was dispatched with, or the one its launch reported; null when neither is known. */
   model: string | null;
-  /** The node it works on: the `#id` its description starts with, else the session's focus at dispatch. */
+  /**
+   * The node it works on: the `#id` its description starts with, else the session's focus at dispatch, else the
+   * session's focus when it started (or the first focus the session set, when it started with none). Null with none of
+   * those: a subagent from before migration 7, or one whose step was deleted. The server merges them (toInfo).
+   */
   nodeId: number | null;
   /** Set when it stopped, or when its session ended. A session's list keeps an ended subagent for 5 minutes. */
   endedAt: string | null;

@@ -1415,6 +1415,44 @@ test.describe('Live work', () => {
     await expect(review).not.toHaveClass(/\bended\b/);
   });
 
+  test('a subagent with no dispatch stays on the step its session was on when it started, as a kin and then in the trail', async ({ page, api, fresh }) => {
+    const revenue = fresh.ids['3 RevenueCat'];
+    // A workflow agent arrives as a bare SubagentStart: no dispatch, so no step and no description of its own.
+    await hook(api, fresh.session, { event: 'subagent-start', agentId: 'wf-agent-1', agentType: 'general-purpose' });
+    await open(page, fresh);
+    const playFrame = frameOf(page.locator('.ip-node', { hasText: 'Play app signing' }));
+    const revenueFrame = frameOf(page.locator('.ip-node', { hasText: '3 RevenueCat' }));
+    const kin = page.getByRole('img', { name: /^a1 · general-purpose · / });
+    const lead = (frame: Locator) => frame.getByRole('group', { name: 'A · E2E session · working', exact: true });
+    await expect(lead(playFrame).getByRole('img', { name: /^a1 · general-purpose · / })).toHaveCount(1);
+    // The session moves on to 3 RevenueCat. Its lead goes with it; the kin stays, on a line of the letter alone.
+    await write(api, fresh.session, 'post', `/api/sessions/${fresh.session}/focus`, { nodeId: revenue });
+    await expect(lead(revenueFrame)).toBeVisible();
+    const away = playFrame.getByRole('group', { name: 'A · subagents of E2E session', exact: true });
+    await expect(away.getByRole('img', { name: /^a1 · general-purpose · / })).toHaveCount(1);
+    await expect(away.locator(':scope > .ip-tag')).toHaveText('A');
+    await expect(away.locator('.ip-badge-label')).toHaveCount(0);
+    await expect(revenueFrame.locator('.ip-agent')).toHaveCount(0);
+    // It stops; five minutes on, it is a trail row on the same step, not on the session's focus.
+    await hook(api, fresh.session, { event: 'subagent-stop', agentId: 'wf-agent-1' });
+    await expect(kin).toHaveClass(/\bended\b/);
+    await page.clock.install({ time: Date.now() + 6 * 60_000 });
+    await page.reload();
+    await expect(lead(revenueFrame)).toBeVisible();
+    await expect(page.locator('.ip-agent')).toHaveCount(0);
+    const playDone = playFrame.locator('.ip-work-done');
+    await expect(playDone).toHaveText('✓ 1 agent');
+    await expect(revenueFrame.locator('.ip-work-done')).toHaveCount(0);
+    await playDone.click();
+    const trailRow = playFrame.locator('.ip-trail-agent');
+    await expect(trailRow).toHaveText(/^◆ general-purpose · ran <1 min · stopped \d+ min ago$/);
+    // The session ends on 3 RevenueCat, and the row stays where the subagent started.
+    await hook(api, fresh.session, { event: 'end' });
+    await expect(page.locator('.ip-badge')).toHaveCount(0);
+    await expect(trailRow).toHaveCount(1);
+    await expect(revenueFrame.locator('.ip-work-done')).toHaveCount(0);
+  });
+
   test("a worker's badge says what it was asked to do, and a session's readers on a step fold into one reading row", async ({ page, api, fresh }) => {
     const revenue = fresh.ids['3 RevenueCat'];
     const purpose = 'Wire the paywall to RevenueCat and report the tiers.';
