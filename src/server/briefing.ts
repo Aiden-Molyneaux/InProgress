@@ -46,7 +46,7 @@ function statusText(n: TreeNode): string {
 function lineFor(index: TreeIndex, n: TreeNode, focusOf: Map<number, Session[]>, sessionId?: string): string {
   const prog = progress(index, n.id);
   const here = (focusOf.get(n.id) ?? []).map((s) => (s.id === sessionId ? '◆ this session' : `◆ "${sessionDisplayTitle(s)}"`));
-  return `#${n.id} ${glyphTitle(n)}${n.kind === 'question' ? ' (question)' : ''} — ${statusText(n)}${prog ? ` (${prog.done}/${prog.total})` : ''}${here.length ? `  ${here.join(' ')}` : ''}`;
+  return `#${n.id} ${glyphTitle(n)}${n.kind === 'question' ? ' (question)' : ''} · ${statusText(n)}${prog ? ` (${prog.done}/${prog.total})` : ''}${here.length ? `  ${here.join(' ')}` : ''}`;
 }
 
 /** The open ones of `items`: in progress first, then pending, each in the order given (creation order). */
@@ -174,7 +174,7 @@ function clipOutcome(outcome: string): string {
 }
 
 /**
- * `Recently done: #87 ¶ Title — "outcome" · #86 Title`: the steps finished last, a tie (addNodes stamps one time per
+ * `Recently done: #87 ¶ Title: "outcome" · #86 Title`: the steps finished last, a tie (addNodes stamps one time per
  * call) to the newer id, each with its outcome clipped, or bare without one. Only `done` sets completedAt, so a dropped
  * step never shows. Undefined when nothing is done.
  */
@@ -186,7 +186,7 @@ function recentlyDoneLine(snapshot: ProjectSnapshot): string | undefined {
   if (!done.length) return undefined;
   const named = done.map((n) => {
     const outcome = clipOutcome(n.outcome);
-    return `#${n.id} ${glyphTitle(n)}${outcome ? ` — "${outcome}"` : ''}`;
+    return `#${n.id} ${glyphTitle(n)}${outcome ? `: "${outcome}"` : ''}`;
   });
   return `Recently done: ${named.join(' · ')}`;
 }

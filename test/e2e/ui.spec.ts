@@ -172,7 +172,7 @@ test('opens on the current work with folding, needs-you and the session badge', 
   await expect(page.locator('.ip-node.needs-you', { hasText: 'Run signing tests' })).toBeVisible();
   await expect(page.locator('.ip-more', { hasText: '+3 more' })).toBeVisible();
   await expect(page.locator('.ip-badge', { hasText: 'E2E session' })).toBeVisible();
-  await expect(page).toHaveTitle('(1) InProgress — E2E Demo');
+  await expect(page).toHaveTitle('(1) InProgress · E2E Demo');
 });
 
 test('shows live changes and follows them', async ({ page, api, fresh }) => {
@@ -300,7 +300,7 @@ test('a labelled step shows its glyph in a neutral chip named by the word, and D
   // The log: the time in DM Mono, the text in ink, the session muted and upright. The entry arrives live.
   await write(api, fresh.session, 'post', `/api/nodes/${fresh.ids['Play app signing']}/log`, { text: 'Uploaded the key', sessionId: fresh.session });
   const entry = page.getByRole('complementary').locator('.ip-log li');
-  await expect(entry).toHaveText('just now · Uploaded the key — E2E session');
+  await expect(entry).toHaveText('just now · Uploaded the key · E2E session');
   await expect(entry.locator('.ip-log-time')).toHaveCSS('font-family', /DM Mono/);
   await expect(entry.locator('.ip-log-text')).toHaveCSS('color', 'rgb(30, 41, 59)');
   await expect(entry.locator('i')).toHaveCount(0);
@@ -759,7 +759,7 @@ test('the resource viewer neutralises unsafe Markdown', async ({ page, demo }) =
   await page.route('**/x', (route) => route.fulfill({ status: 204 }));
   await widen(page);
   await open(page, demo);
-  await expect(page).toHaveTitle('(1) InProgress — E2E Demo');
+  await expect(page).toHaveTitle('(1) InProgress · E2E Demo');
   await page.evaluate(RECORD_TITLES);
   const image = page.waitForEvent('requestfinished', (r) => r.url().endsWith('/x'));
   await page.locator('.ip-chip', { hasText: 'Unsafe Markdown' }).click();
@@ -897,7 +897,7 @@ test('the tabs hold every active project, oldest first, mark the current one and
   await expect(tabFor(page, newerName)).toHaveAttribute('aria-selected', 'true');
   await expect(tabFor(page, olderName)).toHaveAttribute('aria-selected', 'false');
   await expect(page).toHaveURL(new RegExp(`#/p/${newer.slug}$`));
-  await expect(page).toHaveTitle(`(1) InProgress — ${newerName}`);
+  await expect(page).toHaveTitle(`(1) InProgress · ${newerName}`);
   await expect(page.locator('.ip-node.root')).toContainText(newerName);
   // A visit with no project in the URL opens the one picked last.
   await page.goto('/');
@@ -953,7 +953,7 @@ test('archived projects move into the ⋯ menu, and picking one opens it', async
   await item.focus();
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(new RegExp(`#/p/${shelved.slug}$`));
-  await expect(page).toHaveTitle(`InProgress — ${shelvedName}`);
+  await expect(page).toHaveTitle(`InProgress · ${shelvedName}`);
   await expect(more).toHaveAttribute('aria-expanded', 'false');
   await expect(more).toBeFocused();
   // While it is open, the archived project has a tab of its own at the end, marked archived.
@@ -1081,7 +1081,7 @@ test('the needs-you pill and Follow sit at the right end of the session row, for
   expect(rowBox.height, 'one line').toBeLessThanOrEqual(40);
   // A project with no sessions and nothing waiting keeps Follow in the row, without the pill.
   await tabFor(page, quietName).click();
-  await expect(page).toHaveTitle(`InProgress — ${quietName}`);
+  await expect(page).toHaveTitle(`InProgress · ${quietName}`);
   await expect(pill).toHaveCount(0);
   await expect(row.locator('.ip-chip-s')).toHaveCount(0);
   await expect(follow).toBeInViewport({ ratio: 1 });
@@ -1664,9 +1664,9 @@ test.describe('Live work', () => {
     await page.locator('.ip-node', { hasText: 'Play app signing' }).click();
     const details = page.getByRole('complementary');
     // Anchored: the next row's "after Upload the key" names it too.
-    await expect(details.locator('.ip-wt', { hasText: /^◐ Upload the key/ })).toHaveText('◐ Upload the key — E2E session');
-    await expect(details.locator('.ip-wt', { hasText: 'Check the release track' })).toHaveText('○ Check the release track — E2E session · after Upload the key');
-    await expect(details.locator('.ip-wt', { hasText: 'Collect the screenshots' })).toHaveText('a1 ○ Collect the screenshots — Draft the store notes');
+    await expect(details.locator('.ip-wt', { hasText: /^◐ Upload the key/ })).toHaveText('◐ Upload the key · E2E session');
+    await expect(details.locator('.ip-wt', { hasText: 'Check the release track' })).toHaveText('○ Check the release track · E2E session · after Upload the key');
+    await expect(details.locator('.ip-wt', { hasText: 'Collect the screenshots' })).toHaveText('a1 ○ Collect the screenshots · Draft the store notes');
     await expect(details.locator('.ip-dagent')).toHaveText(new RegExp(`^a1 · Draft the store notes · sonnet · ${RUNNING}$`));
     // Quiet: the rows read as the canvas's. ◐ in the active ink and still, the hue bar on the session's own task only,
     // the tags in DM Mono in the session's hue.
@@ -1737,7 +1737,7 @@ test.describe('Live work', () => {
     await page.locator('.ip-node', { hasText: '2 Android signing' }).click();
     await expect(details).toContainText(`#${android} 2 Android signing`);
     const group = details.locator('.ip-trail', { hasText: 'E2E session · ended just now' });
-    await expect(group.locator('.ip-wt.stale')).toHaveText('○ Compare the keystores — Check the keystore');
+    await expect(group.locator('.ip-wt.stale')).toHaveText('○ Compare the keystores · Check the keystore');
     await expect(group.locator('.ip-dtrail')).toHaveText(new RegExp(`^◆ Check the keystore · sonnet · ran ${RUNNING} · stopped just now$`));
     // Quiet: the trail's ◆ is muted, and its open task a faint ○.
     await expect(group.locator('.ip-dtrail .ip-agent-dot')).toHaveCSS('color', 'rgb(71, 85, 105)');

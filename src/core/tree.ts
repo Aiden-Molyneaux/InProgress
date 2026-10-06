@@ -227,7 +227,7 @@ export function nodeLine(index: TreeIndex, n: TreeNode, resourcesByNode?: Map<nu
   const kind = n.parentId === null || n.kind === 'task' ? '' : ` (${n.kind})`;
   const prog = progress(index, n.id);
   const res = resourcesByNode?.get(n.id);
-  return `#${n.id} ${glyphTitle(n)}${kind} — ${statusLabel(n)}${prog ? ` (${prog.done}/${prog.total})` : ''}${res?.length ? ` [${res.map((r) => `r${r}`).join(', ')}]` : ''}`;
+  return `#${n.id} ${glyphTitle(n)}${kind} · ${statusLabel(n)}${prog ? ` (${prog.done}/${prog.total})` : ''}${res?.length ? ` [${res.map((r) => `r${r}`).join(', ')}]` : ''}`;
 }
 
 export interface OutlineOptions {

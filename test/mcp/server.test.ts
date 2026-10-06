@@ -145,7 +145,7 @@ describe('scribe MCP tools', () => {
     const [road, play, tests] = lineIds(plan.text);
     expect(plan.text).toContain('Run signing tests (task, todo, you)');
 
-    expect((await call('update_node', { id: play, status: 'done', outcome: 'Configured', session: 's1' })).text).toBe(`#${play} Play app signing — done.`);
+    expect((await call('update_node', { id: play, status: 'done', outcome: 'Configured', session: 's1' })).text).toBe(`#${play} Play app signing · done.`);
 
     const file = join(tempDir(), 'suite.md');
     writeFileSync(file, '# Signing tests\n- upload key accepted');
@@ -159,11 +159,11 @@ describe('scribe MCP tools', () => {
     expect((await call('set_focus', { session: 's1', node: tests })).text).toBe(`Focus → #${tests}.`);
 
     const outline = await call('get_outline', { project: 'ingame' });
-    expect(outline.text).toContain(`#${tests} Run signing tests — NEEDS YOU [r${rid}]`);
+    expect(outline.text).toContain(`#${tests} Run signing tests · NEEDS YOU [r${rid}]`);
     const node = await call('get_node', { id: road });
     expect(node.text).toContain('Detour: sandbox wedge');
     expect((await call('search', { project: 'ingame', query: 'upload key' })).text).toContain(`r${rid} Signing suite`);
-    expect((await call('list_projects')).text).toMatch(/ingame — InGame \(active\) · root #\d+ · 1 need you/);
+    expect((await call('list_projects')).text).toMatch(/ingame · InGame \(active\) · root #\d+ · 1 need you/);
   });
 
   it('labels steps through add_nodes and update_node, where null clears a label, and shows the glyph', async () => {
@@ -178,11 +178,11 @@ describe('scribe MCP tools', () => {
       `#${migration} ⛁ Migration 3 (task, todo) under #${phase}`,
       `#${chip} ⧉ Glyph chip (task, todo, you) under #${phase}`,
     ]);
-    expect((await call('get_outline', { project: 'labels' })).text.split('\n')).toContain(`    #${migration} ⛁ Migration 3 — todo`);
-    expect((await call('get_node', { id: migration })).text.split('\n')[0]).toBe(`#${migration} ⛁ Migration 3 (task, data) — todo, Claude`);
-    expect(await call('update_node', { id: migration, label: 'fix', session: 'l1' })).toEqual({ text: `#${migration} ⚑ Migration 3 — todo.`, isError: false });
-    expect(await call('update_node', { id: migration, label: null, session: 'l1' })).toEqual({ text: `#${migration} Migration 3 — todo.`, isError: false });
-    expect((await call('get_node', { id: migration })).text.split('\n')[0]).toBe(`#${migration} Migration 3 (task) — todo, Claude`);
+    expect((await call('get_outline', { project: 'labels' })).text.split('\n')).toContain(`    #${migration} ⛁ Migration 3 · todo`);
+    expect((await call('get_node', { id: migration })).text.split('\n')[0]).toBe(`#${migration} ⛁ Migration 3 (task, data) · todo, Claude`);
+    expect(await call('update_node', { id: migration, label: 'fix', session: 'l1' })).toEqual({ text: `#${migration} ⚑ Migration 3 · todo.`, isError: false });
+    expect(await call('update_node', { id: migration, label: null, session: 'l1' })).toEqual({ text: `#${migration} Migration 3 · todo.`, isError: false });
+    expect((await call('get_node', { id: migration })).text.split('\n')[0]).toBe(`#${migration} Migration 3 (task) · todo, Claude`);
   });
 
   it('refuses an unknown label as a tool error that lists the set, nested steps too', async () => {
@@ -220,7 +220,7 @@ describe('scribe MCP tools', () => {
     expect(res.isError).toBe(false);
     expect(res.text).toContain('Created project unbound');
     expect(res.text).toContain('Binding failed: Binding path must be absolute: relative/path. Use the full folder path, e.g. C:/personal/InGame. Use bind_folder to retry.');
-    expect((await call('list_projects')).text.match(/ — Unbound \(active\)/g)).toHaveLength(1);
+    expect((await call('list_projects')).text.match(/ · Unbound \(active\)/g)).toHaveLength(1);
   });
 });
 

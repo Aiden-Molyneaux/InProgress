@@ -156,7 +156,7 @@ describe('project lifecycle over HTTP', () => {
     expect((await app.inject({ url: '/api/search?project=ingame&q=signing' })).json().resources[0].title).toBe('Suite v2');
     const outline = await app.inject({ url: '/api/projects/ingame/outline' });
     expect(outline.headers['content-type']).toContain('text/plain');
-    expect(outline.body).toContain(`#${tests.id} Run tests — NEEDS YOU [r${res.id}]`);
+    expect(outline.body).toContain(`#${tests.id} Run tests · NEEDS YOU [r${res.id}]`);
     const snap = (await app.inject({ url: '/api/projects/ingame' })).json();
     expect(snap.nodes).toHaveLength(4);
     expect(snap.lastEvent.type).toBe('log.created');
@@ -342,11 +342,11 @@ describe('outline', () => {
     const lines = (await app.inject({ url: '/api/projects/ingame/outline' })).body.split('\n');
     expect(lines.slice(0, 3)).toEqual(['Project InGame (slug ingame)', 'Playbook:', '  Planning docs live in docs/planning.']);
     expect(lines[3]).toBe('  Tickets are VCAD-###.');
-    expect(lines[4]).toMatch(/^#\d+ InGame — active$/);
+    expect(lines[4]).toMatch(/^#\d+ InGame · active$/);
     await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'Plain', playbook: '  \n' } });
     const plain = (await app.inject({ url: '/api/projects/plain/outline' })).body;
     expect(plain).not.toContain('Playbook:');
-    expect(plain.split('\n')[1]).toMatch(/^#\d+ Plain — active$/);
+    expect(plain.split('\n')[1]).toMatch(/^#\d+ Plain · active$/);
   });
 });
 

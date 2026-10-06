@@ -99,7 +99,7 @@ function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'
                   <span className="ip-work-mark">{TASK_MARK[w.status]}</span> {family && !w.agentId && <span className="ip-work-agent" />}
                   {withoutOwnId(w.subject, w.nodeId)}{' '}
                   <span className="muted">
-                    — {owner}
+                    · {owner}
                     {waits.length ? ` · after ${waits.join(', ')}` : ''}
                   </span>
                 </li>
@@ -149,7 +149,7 @@ function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'
                 {g.tasks.map((w) => (
                   <li key={w.id} className={`ip-wt w-${w.status} stale`}>
                     <span className="ip-work-mark">{workMark(w.status, true)}</span> {withoutOwnId(w.subject, w.nodeId)}
-                    {w.agentId ? <span className="muted"> — {taskOwner(w, snapshot.sessions, pastSessions, trailAgents)}</span> : null}
+                    {w.agentId ? <span className="muted"> · {taskOwner(w, snapshot.sessions, pastSessions, trailAgents)}</span> : null}
                   </li>
                 ))}
                 {g.agents.map((a) => (
@@ -298,7 +298,7 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
             {detail.log.map((l) => (
               <li key={l.id}>
                 <span className="ip-log-time">{relativeTime(l.createdAt)}</span> · <span className="ip-log-text">{l.text}</span>
-                {l.sessionTitle ? <span> — {l.sessionTitle}</span> : null}
+                {l.sessionTitle ? <span> · {l.sessionTitle}</span> : null}
               </li>
             ))}
           </ul>
