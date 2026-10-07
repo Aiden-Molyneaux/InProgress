@@ -136,9 +136,9 @@ and `web/dist/`, so nothing but `npm run deploy` writes there:
 briefing includes; this is how "each project works a little differently") · `status`
 (`active` | `archived`; archiving stops tracking the project's live sessions, which keep running, and drops
 their own Up next entries) · `root_node_id` · `created_at` · `updated_at` · `deleted_at` (migration 8: set by a
-delete from the window, which needs an archived project and leaves it archived; a deleted project is hidden
-everywhere, restorable from Recently deleted for 30 days, then purged with its rows and InProgress's own copies of
-its files under `<home>/resources/`).
+delete from the window, which leaves the project archived, archiving an active one in the same write; a deleted
+project is hidden everywhere, restorable from Recently deleted for 30 days, then purged with its rows and
+InProgress's own copies of its files under `<home>/resources/`).
 
 **bindings**: `id` · `project_id` (cascade) · `path` (normalized, see 4.3) · `branch_pattern`
 (nullable glob, `*` wildcard, case-insensitive) · `created_at` · UNIQUE(`path`, `branch_pattern`).
@@ -277,8 +277,10 @@ Writes (token):
 - `POST /api/ui/projects/:id/archive`, `/unarchive`, `/delete`, `/restore` `{ slug }` (UI token, actor `window`):
   the window's project actions. A slug that no longer matches the id is 409 "This project changed; reload" (a purge
   frees the newest project's id). Archive answers `{ project, endedSessions }`, delete `{ id, slug, deletedAt,
-  purgeAt }`, the others `{ project }`. Archive and unarchive are idempotent; delete needs an archived project and
-  restore a deleted one inside its 30 days, else 409. Delete and restore exist nowhere else.
+  purgeAt }`, the others `{ project }`. Archive and unarchive are idempotent. Delete takes a project that is not
+  deleted yet, active or archived: an active one is archived in the same write (its live sessions end and their own
+  Up next entries go, as an archive does) and then deleted, with the archive's events before the delete's. Restore
+  needs a deleted one inside its 30 days. Either answers 409 otherwise. Delete and restore exist nowhere else.
 - `GET /api/deleted-projects` (a read) → Recently deleted: `{ id, slug, name, deletedAt, purgeAt }[]`, newest first.
 
 `ProjectSnapshot` also carries `lastEvent` (the project's newest event) for the activity strip.

@@ -538,8 +538,31 @@ describe('window routes', () => {
     expect(back.statusCode).toBe(200);
     expect(back.json()).toEqual({ project: expect.objectContaining({ id: p.id, status: 'active' }) });
     expect((await act('unarchive')).statusCode).toBe(200);
-    expect((await act('delete')).json()).toMatchObject({ error: 'Archive it first' });
-    expect((await act('delete')).statusCode).toBe(409);
+  });
+
+  it('deletes an active project in one step, ending its live session, and a restore brings it back under Archived', async () => {
+    const { ctx, app, p, act } = await withProject();
+    const mark = ctx.db.prepare('SELECT MAX(id) FROM events').pluck().get();
+    const deleted = await act('delete');
+    expect(deleted.statusCode).toBe(200);
+    expect(deleted.json()).toEqual({ id: p.id, slug: 'ingame', deletedAt: expect.any(String), purgeAt: expect.any(String) });
+    // The archive's events, then the delete's, all as the window.
+    expect(ctx.db.prepare('SELECT type, entity_id AS entityId, actor FROM events WHERE id > ? ORDER BY id').all(mark)).toEqual([
+      { type: 'session.updated', entityId: 's1', actor: 'window' },
+      { type: 'project.updated', entityId: String(p.id), actor: 'window' },
+      { type: 'project.deleted', entityId: String(p.id), actor: 'window' },
+    ]);
+    expect(ctx.db.prepare("SELECT state FROM sessions WHERE id = 's1'").pluck().get()).toBe('ended');
+    expect((await app.inject({ url: '/api/projects' })).json()).toEqual([]);
+    expect((await app.inject({ url: '/api/deleted-projects' })).json()).toEqual([{ id: p.id, slug: 'ingame', name: 'InGame', deletedAt: deleted.json().deletedAt, purgeAt: deleted.json().purgeAt }]);
+    // Already deleted is still a conflict.
+    const again = await act('delete');
+    expect(again.statusCode).toBe(409);
+    expect(again.json()).toEqual({ error: 'Project ingame is already deleted', hint: 'Restore it from Recently deleted in the window.' });
+    const restored = await act('restore');
+    expect(restored.statusCode).toBe(200);
+    expect(restored.json()).toMatchObject({ project: { id: p.id, status: 'archived' } });
+    expect((await app.inject({ url: '/api/projects' })).json()).toMatchObject([{ id: p.id, status: 'archived', activeSessions: 0 }]);
   });
 
   it('answers 409 when the id now names another project, and 404 for an id that is gone', async () => {

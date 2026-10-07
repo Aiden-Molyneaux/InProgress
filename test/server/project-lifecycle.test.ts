@@ -69,15 +69,19 @@ describe('deleteProject', () => {
     ]);
   });
 
-  it('needs an archived project that exists and is not deleted yet', () => {
+  it('needs a project that exists and is not deleted yet, archived or active', () => {
     const { ctx } = clocked();
-    const live = createProject(ctx, 'test', { name: 'Live' });
-    expect(thrown(() => deleteProject(ctx, 'window', live.id))).toMatchObject({ status: 409, message: 'Archive it first' });
+    const kept = createProject(ctx, 'test', { name: 'Kept' });
     expect(thrown(() => deleteProject(ctx, 'window', 999))).toMatchObject({ status: 404, message: 'Project 999 not found' });
     const p = archived(ctx, 'Old');
     deleteProject(ctx, 'window', p.id);
     expect(thrown(() => deleteProject(ctx, 'window', p.id))).toMatchObject({ status: 409, message: 'Project old is already deleted' });
-    expect(getProjectById(ctx, live.id)?.status).toBe('active');
+    const live = createProject(ctx, 'test', { name: 'Live' });
+    deleteProject(ctx, 'window', live.id);
+    const mark = maxEventId(ctx);
+    expect(thrown(() => deleteProject(ctx, 'window', live.id))).toMatchObject({ status: 409, message: 'Project live is already deleted' });
+    expect(listEventsSince(ctx, mark)).toEqual([]);
+    expect(getProjectById(ctx, kept.id)?.status).toBe('active');
   });
 
   it('keeps its bindings, inert, for a restore', () => {
@@ -99,6 +103,98 @@ describe('deleteProject', () => {
     deleteProject(ctx, 'window', p.id);
     expect(findSession(ctx, 's1')).toMatchObject({ state: 'ended', projectId: p.id });
     expect(listEventsSince(ctx, mark).map((e) => e.type)).toEqual(['session.updated', 'project.deleted']);
+  });
+});
+
+describe('deleteProject of an active project', () => {
+  /**
+   * Live Site bound to C:/work/live with sessions s1 (and its subagent) and s2, Other bound to C:/work/other with s3,
+   * and Up next entries owned by each session plus an unowned one in Live Site.
+   */
+  function live() {
+    const { ctx, tick } = clocked();
+    const p = createProject(ctx, 'test', { name: 'Live Site' });
+    const other = createProject(ctx, 'test', { name: 'Other' });
+    addBinding(ctx, 'test', p.slug, 'C:/work/live');
+    addBinding(ctx, 'test', other.slug, 'C:/work/other');
+    const [a, b, c] = addNodes(ctx, 'test', { parentId: p.rootNodeId, nodes: [{ title: 'A' }, { title: 'B' }, { title: 'C' }] });
+    handleHookEvent(ctx, 's1', { event: 'start', source: 'startup', cwd: 'C:/work/live' });
+    handleHookEvent(ctx, 's2', { event: 'start', source: 'startup', cwd: 'C:/work/live' });
+    handleHookEvent(ctx, 's3', { event: 'start', source: 'startup', cwd: 'C:/work/other' });
+    handleHookEvent(ctx, 's1', { event: 'subagent-start', agentId: 's1-a1', agentType: 'general-purpose' });
+    setQueue(ctx, 'test', p.slug, [a.id], { sessionId: 's1' });
+    setQueue(ctx, 'test', p.slug, [b.id], { sessionId: 's2' });
+    setQueue(ctx, 'test', p.slug, [c.id], 'unowned');
+    setQueue(ctx, 'test', other.slug, [other.rootNodeId], { sessionId: 's3' });
+    return { ctx, tick, p, other, a, b, c };
+  }
+
+  it("archives and deletes it in one write: its live sessions end, their own Up next entries go, and the archive's events come before the delete's", () => {
+    const { ctx, p, other, a, b, c } = live();
+    const mark = maxEventId(ctx);
+    const at = ctx.now();
+    const purgeAt = new Date(Date.parse(at) + 30 * DAY).toISOString();
+    // One write: every event is delivered after its commit, so each one finds the project deleted already.
+    const seen: unknown[] = [];
+    ctx.bus.on('event', () => seen.push(ctx.db.prepare('SELECT deleted_at FROM projects WHERE id = ?').pluck().get(p.id)));
+    expect(deleteProject(ctx, 'window', p.id)).toEqual({ id: p.id, slug: 'live-site', deletedAt: at, purgeAt });
+    expect(seen).toEqual([at, at, at, at, at]);
+    expect(ctx.db.prepare('SELECT status, deleted_at FROM projects WHERE id = ?').get(p.id)).toEqual({ status: 'archived', deleted_at: at });
+    expect(findSession(ctx, 's1')).toMatchObject({ projectId: p.id, state: 'ended', endedAt: at });
+    expect(findSession(ctx, 's2')).toMatchObject({ projectId: p.id, state: 'ended', endedAt: at });
+    expect(findSession(ctx, 's3')).toMatchObject({ projectId: other.id, state: 'idle', endedAt: null });
+    expect(ctx.db.prepare("SELECT ended_at FROM session_subagents WHERE agent_id = 's1-a1'").pluck().get()).toBe(at);
+    expect(getProjectById(ctx, p.id)?.queue).toEqual([{ nodeId: c.id, sessionId: null }]);
+    expect(getProjectById(ctx, other.id)?.queue).toEqual([{ nodeId: other.rootNodeId, sessionId: 's3' }]);
+    expect(listEventsSince(ctx, mark).map((e) => [e.type, e.entityId, e.projectId, e.actor, e.data])).toEqual([
+      ['project.updated', String(p.id), p.id, 'window', { changes: { queue: {
+        from: [{ nodeId: a.id, sessionId: 's1' }, { nodeId: b.id, sessionId: 's2' }, { nodeId: c.id, sessionId: null }],
+        to: [{ nodeId: c.id, sessionId: null }],
+      } } }],
+      ['session.updated', 's1', p.id, 'window', { changed: ['state'], state: 'ended' }],
+      ['session.updated', 's2', p.id, 'window', { changed: ['state'], state: 'ended' }],
+      ['project.updated', String(p.id), p.id, 'window', { changes: { status: { from: 'active', to: 'archived' } } }],
+      ['project.deleted', String(p.id), p.id, 'window', { slug: 'live-site', name: 'Live Site', purgeAt }],
+    ]);
+    // Hidden, its bindings inert, and nothing its sessions do afterwards is recorded.
+    expect(listProjectSummaries(ctx).map((x) => x.slug)).toEqual(['other']);
+    expect(listDeletedProjects(ctx).map((d) => d.slug)).toEqual(['live-site']);
+    const after = maxEventId(ctx);
+    expect(handleHookEvent(ctx, 's1', { event: 'prompt' })).toEqual({ tracked: false });
+    expect(handleHookEvent(ctx, 'x1', { event: 'start', source: 'startup', cwd: 'C:/work/live' })).toEqual({ tracked: false });
+    expect(listEventsSince(ctx, after)).toEqual([]);
+  });
+
+  it('records only the status change and the delete when no session is live and Up next holds nobody', () => {
+    const { ctx } = clocked();
+    const p = createProject(ctx, 'test', { name: 'Quiet' });
+    const mark = maxEventId(ctx);
+    deleteProject(ctx, 'window', p.id);
+    expect(listEventsSince(ctx, mark).map((e) => e.type)).toEqual(['project.updated', 'project.deleted']);
+  });
+
+  it('comes back archived on a restore, its sessions still ended, and an unarchive puts it back in the tabs', () => {
+    const { ctx, tick, p, c } = live();
+    deleteProject(ctx, 'window', p.id);
+    tick(DAY);
+    expect(restoreProject(ctx, 'window', p.id)).toMatchObject({ id: p.id, slug: 'live-site', status: 'archived', queue: [{ nodeId: c.id, sessionId: null }] });
+    expect(listProjectSummaries(ctx).find((x) => x.id === p.id)).toMatchObject({ status: 'archived', activeSessions: 0 });
+    expect(findSession(ctx, 's1')?.state).toBe('ended');
+    updateProject(ctx, 'test', p.slug, { status: 'active' });
+    expect(listProjectSummaries(ctx).find((x) => x.id === p.id)?.status).toBe('active');
+    // Tracked again on its next hook event, as after any unarchive.
+    expect(handleHookEvent(ctx, 's2', { event: 'prompt' }).tracked).toBe(true);
+  });
+
+  it('leaves the project as it was when the write fails part way', () => {
+    const { ctx, p } = live();
+    const mark = maxEventId(ctx);
+    ctx.db.exec("CREATE TRIGGER fail_delete BEFORE UPDATE OF deleted_at ON projects BEGIN SELECT RAISE(ABORT, 'disk full'); END");
+    expect(thrown(() => deleteProject(ctx, 'window', p.id))).toMatchObject({ message: 'disk full' });
+    expect(ctx.db.prepare('SELECT status, deleted_at FROM projects WHERE id = ?').get(p.id)).toEqual({ status: 'active', deleted_at: null });
+    expect(findSession(ctx, 's1')?.state).not.toBe('ended');
+    expect(getProjectById(ctx, p.id)?.queue).toHaveLength(3);
+    expect(listEventsSince(ctx, mark)).toEqual([]);
   });
 });
 

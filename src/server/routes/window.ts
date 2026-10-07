@@ -12,8 +12,9 @@ const ACTOR = 'window';
 /**
  * The window's own writes: archive, unarchive, delete and restore, behind requireUi (the window has no bearer token).
  * Delete and restore exist only here, never in MCP or the bearer API. Archive and unarchive are the scribe's
- * update_project, with the same effects, and answer the same whether or not anything changed; delete and restore
- * answer 409 on the wrong state.
+ * update_project, with the same effects, and answer the same whether or not anything changed. Delete takes an active
+ * project or an archived one (an active one is archived in the same write); delete and restore answer 409 on the wrong
+ * state: already deleted, or not deleted.
  */
 export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: Guard): void {
   const guarded = { onRequest: requireUi };

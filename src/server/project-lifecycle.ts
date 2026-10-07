@@ -5,14 +5,15 @@ import { isUnder, normalizePath } from '../lib/paths';
 import { write, type Ctx } from './db/tx';
 import { conflict, notFound } from './errors';
 import { EVENTS_RETENTION_DAYS, pruneEvents } from './repo/events';
-import { endProjectSessions, getProjectById, purgeAtOf } from './repo/projects';
+import { applyProjectChange, endProjectSessions, getProjectById, purgeAtOf } from './repo/projects';
 import { pruneSubagents } from './repo/subagents';
 import { pruneWorkItems } from './repo/work';
 
 /*
- * Deleting a project, from the window only. A delete is soft: the project, already archived, is hidden everywhere
- * (repo/projects filters on deleted_at) and Recently deleted can restore it for 30 days. After that, maintenance purges
- * it for good, with InProgress's own copies of its files. File handling lives here, out of the repo layer.
+ * Deleting a project, from the window only. A delete is soft: the project, archived by then (an active one is archived
+ * in the same write), is hidden everywhere (repo/projects filters on deleted_at) and Recently deleted can restore it for
+ * 30 days. After that, maintenance purges it for good, with InProgress's own copies of its files. File handling lives
+ * here, out of the repo layer.
  */
 
 /** Where maintenance reports: the server's logger in main.ts. */
@@ -43,17 +44,19 @@ export interface DeleteResult {
 }
 
 /**
- * Soft-deletes an archived project: hidden from now on, purged after 30 days. It stays archived, so a build from before
- * migration 8 shows it as an archived project. Any session an older build left live in it is ended, as an archive
- * ends them. Its bindings stay, inert, for a restore.
+ * Soft-deletes a project: hidden from now on, purged after 30 days. A deleted project is always archived, so a build
+ * from before migration 8 shows it as an archived one. An active project is archived first, in the same write, exactly
+ * as an archive does it (applyProjectChange): its live sessions end, their own Up next entries go, and the archive's
+ * events come before the delete's. An archived one has any session an older build left live in it ended the same
+ * way. Its bindings stay, inert, for a restore, which brings it back archived.
  */
 export function deleteProject(ctx: Ctx, actor: string, id: number): DeleteResult {
   return write(ctx, actor, (record) => {
     const row = readRow(ctx, id);
     if (!row) throw notFound(`Project ${id} not found`, 'Reload the window.');
     if (row.deleted_at) throw conflict(`Project ${row.slug} is already deleted`, 'Restore it from Recently deleted in the window.');
-    if (row.status !== 'archived') throw conflict('Archive it first', `Project ${row.slug} is active; only an archived project can be deleted.`);
-    endProjectSessions(ctx, record, id);
+    if (row.status === 'active') applyProjectChange(ctx, record, getProjectById(ctx, id)!, { status: 'archived' });
+    else endProjectSessions(ctx, record, id);
     const deletedAt = ctx.now();
     const purgeAt = purgeAtOf(deletedAt);
     ctx.db.prepare('UPDATE projects SET deleted_at = ?, updated_at = ? WHERE id = ?').run(deletedAt, deletedAt, id);
