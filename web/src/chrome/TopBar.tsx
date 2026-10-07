@@ -29,12 +29,15 @@ type Run = (action: ProjectAction, target: ActionTarget, opener: HTMLElement | n
 /** The project a Delete… item asks about. Its live sessions, which the delete stops tracking, give the confirm a line. */
 type Confirming = ActionTarget & Pick<ProjectSummary, 'activeSessions'>;
 
-/** How many items wait on Aiden, as a muted numeral, and an ink dot while a session works in the project. */
+/**
+ * How many items wait on Aiden, as a muted numeral, and an ink dot while a session works in the project or waits on a
+ * running worker of its own (busySessions).
+ */
 function Badges({ p }: { p: ProjectSummary }) {
   return (
     <>
       {p.needsYou > 0 && <span className="ip-tab-count">{p.needsYou}</span>}
-      {p.workingSessions > 0 && <span className="ip-tab-dot" />}
+      {p.busySessions > 0 && <span className="ip-tab-dot" />}
     </>
   );
 }

@@ -3,7 +3,7 @@ import { globMatch } from '../../lib/glob';
 import { isUnder, normalizePath } from '../../lib/paths';
 import { write, type Ctx, type RecordEvent } from '../db/tx';
 import { ApiError, badRequest, conflict, notFound } from '../errors';
-import { endSubagents } from './subagents';
+import { endSubagents, NOT_READER_SQL } from './subagents';
 
 interface ProjectRow {
   id: number;
@@ -431,13 +431,23 @@ export function listProjectSummaries(ctx: Ctx): ProjectSummary[] {
         (SELECT COUNT(*) FROM nodes n WHERE n.project_id = p.id AND n.assignee = 'me' AND n.status IN ('todo','active','blocked')) AS needs_you,
         (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.state != 'ended' AND s.last_seen_at >= ?) AS active_sessions,
         (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.state = 'working' AND s.last_seen_at >= ?) AS working_sessions,
+        (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.state != 'ended' AND s.last_seen_at >= ? AND (s.state = 'working'
+          OR EXISTS (SELECT 1 FROM session_subagents a WHERE a.session_id = s.id AND a.ended_at IS NULL AND ${NOT_READER_SQL}))) AS busy_sessions,
         (SELECT ts FROM events e WHERE e.project_id = p.id ORDER BY e.id DESC LIMIT 1) AS last_event_at
        FROM projects p WHERE p.deleted_at IS NULL`,
     )
-    .all(liveSince, liveSince) as (ProjectRow & { needs_you: number; active_sessions: number; working_sessions: number; last_event_at: string | null })[];
+    .all(liveSince, liveSince, liveSince) as (ProjectRow & { needs_you: number; active_sessions: number; working_sessions: number; busy_sessions: number; last_event_at: string | null })[];
   return rows
-    .map((r) => ({ ...readProject(ctx, r), needsYou: r.needs_you, activeSessions: r.active_sessions, workingSessions: r.working_sessions, lastEventAt: r.last_event_at }))
-    .sort((a, b) => b.workingSessions - a.workingSessions || (b.lastEventAt ?? '').localeCompare(a.lastEventAt ?? ''));
+    .map((r) => ({
+      ...readProject(ctx, r),
+      needsYou: r.needs_you,
+      activeSessions: r.active_sessions,
+      workingSessions: r.working_sessions,
+      busySessions: r.busy_sessions,
+      lastEventAt: r.last_event_at,
+    }))
+    // The busiest first: a session waiting on its workers is busy too.
+    .sort((a, b) => b.busySessions - a.busySessions || b.workingSessions - a.workingSessions || (b.lastEventAt ?? '').localeCompare(a.lastEventAt ?? ''));
 }
 
 export function addBinding(ctx: Ctx, actor: string, ref: string | number, rawPath: string, branchPattern?: string | null): Binding {

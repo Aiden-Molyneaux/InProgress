@@ -58,7 +58,7 @@ describe('stepTab', () => {
 });
 
 describe('projectLabel', () => {
-  const summary = { name: 'InThink: Marathon v3', needsYou: 0, workingSessions: 0 };
+  const summary = { name: 'InThink: Marathon v3', needsYou: 0, busySessions: 0 };
 
   it('is the full name when nothing needs you and nothing works', () => {
     expect(projectLabel(summary)).toBe('InThink: Marathon v3');
@@ -66,8 +66,8 @@ describe('projectLabel', () => {
 
   it('says what the badges show', () => {
     expect(projectLabel({ ...summary, needsYou: 3 })).toBe('InThink: Marathon v3, 3 need you');
-    expect(projectLabel({ ...summary, workingSessions: 2 })).toBe('InThink: Marathon v3, working');
-    expect(projectLabel({ ...summary, needsYou: 1, workingSessions: 1 })).toBe('InThink: Marathon v3, 1 need you, working');
+    expect(projectLabel({ ...summary, busySessions: 2 })).toBe('InThink: Marathon v3, working');
+    expect(projectLabel({ ...summary, needsYou: 1, busySessions: 1 })).toBe('InThink: Marathon v3, 1 need you, working');
   });
 });
 

@@ -70,7 +70,13 @@ export interface QueueEntry {
 export interface ProjectSummary extends Project {
   needsYou: number;
   activeSessions: number;
+  /** Live sessions in state working. */
   workingSessions: number;
+  /**
+   * Live sessions with work going on: working, or with a running worker (a subagent that is not a reader) while the
+   * session itself is idle or waiting. A tab's dot shows while any is.
+   */
+  busySessions: number;
   lastEventAt: string | null;
 }
 

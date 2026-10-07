@@ -280,7 +280,53 @@ describe('projects', () => {
     ctx.db.prepare("INSERT INTO nodes (project_id, parent_id, position, kind, title, status, assignee, created_at, updated_at) VALUES (?, ?, 1, 'task', 'Run tests', 'todo', 'me', ?, ?)").run(p.id, p.rootNodeId, ts, ts);
     ctx.db.prepare("INSERT INTO sessions (id, project_id, state, started_at, last_seen_at) VALUES ('s1', ?, 'working', ?, ?)").run(p.id, ts, ts);
     const [s] = listProjectSummaries(ctx);
-    expect(s).toMatchObject({ slug: 'p', needsYou: 1, activeSessions: 1, workingSessions: 1 });
+    expect(s).toMatchObject({ slug: 'p', needsYou: 1, activeSessions: 1, workingSessions: 1, busySessions: 1 });
     expect(s.lastEventAt).not.toBeNull();
+  });
+
+  it('counts a live idle session with a running worker as busy, but not as working, and leaves readers out', () => {
+    const ctx = makeCtx();
+    const p = createProject(ctx, 'test', { name: 'P' });
+    const ts = ctx.now();
+    const session = ctx.db.prepare('INSERT INTO sessions (id, project_id, state, started_at, last_seen_at, ended_at) VALUES (?, ?, ?, ?, ?, ?)');
+    const agent = ctx.db.prepare('INSERT INTO session_subagents (session_id, agent_id, agent_type, started_at, ended_at) VALUES (?, ?, ?, ?, ?)');
+    const summary = () => listProjectSummaries(ctx).find((x) => x.id === p.id)!;
+    session.run('idle', p.id, 'idle', ts, ts, null);
+    expect(summary()).toMatchObject({ activeSessions: 1, workingSessions: 0, busySessions: 0 });
+    // A reader alone (Explore, Plan, claude-code-guide) does not make it busy.
+    agent.run('idle', 'r1', 'Explore', ts, null);
+    agent.run('idle', 'r2', 'Plan', ts, null);
+    agent.run('idle', 'r3', 'claude-code-guide', ts, null);
+    expect(summary()).toMatchObject({ workingSessions: 0, busySessions: 0 });
+    // Nor does a worker that has ended.
+    agent.run('idle', 'w0', 'general-purpose', ts, ts);
+    expect(summary().busySessions).toBe(0);
+    // A running worker does, once per session however many it has.
+    agent.run('idle', 'w1', 'general-purpose', ts, null);
+    agent.run('idle', 'w2', 'general-purpose', ts, null);
+    expect(summary()).toMatchObject({ activeSessions: 1, workingSessions: 0, busySessions: 1 });
+    // A working session counts once, with or without workers.
+    session.run('busy', p.id, 'working', ts, ts, null);
+    agent.run('busy', 'w3', 'general-purpose', ts, null);
+    expect(summary()).toMatchObject({ activeSessions: 2, workingSessions: 1, busySessions: 2 });
+    // An ended session, or one past the stale limit, is not busy, whatever its rows say.
+    const old = new Date(Date.parse(ts) - 13 * 60 * 60 * 1000).toISOString();
+    session.run('ended', p.id, 'ended', ts, ts, ts);
+    agent.run('ended', 'w4', 'general-purpose', ts, null);
+    session.run('stale', p.id, 'idle', old, old, null);
+    agent.run('stale', 'w5', 'general-purpose', old, null);
+    expect(summary()).toMatchObject({ activeSessions: 2, workingSessions: 1, busySessions: 2 });
+  });
+
+  it('lists a project whose idle session has a running worker before a quiet one', () => {
+    const ctx = makeCtx();
+    const busy = createProject(ctx, 'test', { name: 'Busy' });
+    const quiet = createProject(ctx, 'test', { name: 'Quiet' });
+    const ts = ctx.now();
+    ctx.db.prepare("INSERT INTO sessions (id, project_id, state, started_at, last_seen_at) VALUES ('s1', ?, 'idle', ?, ?)").run(busy.id, ts, ts);
+    ctx.db.prepare("INSERT INTO session_subagents (session_id, agent_id, agent_type, started_at) VALUES ('s1', 'w1', 'general-purpose', ?)").run(ts);
+    // Quiet has the newer event, so only the worker puts Busy first.
+    updateProject(ctx, 'test', quiet.slug, { description: 'newer' });
+    expect(listProjectSummaries(ctx).map((x) => x.slug)).toEqual(['busy', 'quiet']);
   });
 });

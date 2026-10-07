@@ -53,7 +53,7 @@ export function patchProjects<P extends Pick<ProjectSummary, 'id' | 'status'>>(p
 
 /** A project the server answered with, as the list holds it until the reload brings its counts: none of them yet. */
 export function summaryOf(project: Project): ProjectSummary {
-  return { ...project, needsYou: 0, activeSessions: 0, workingSessions: 0, lastEventAt: null };
+  return { ...project, needsYou: 0, activeSessions: 0, workingSessions: 0, busySessions: 0, lastEventAt: null };
 }
 
 /** The Recently deleted list once an action has gone through: a delete goes first with its 30 days, a restore leaves. */

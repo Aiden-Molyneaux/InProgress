@@ -1804,6 +1804,34 @@ const setQueue = (api: APIRequestContext, s: Seeded, nodes: number[], session?: 
 
 const boxOf = async (l: Locator) => (await l.boundingBox())!;
 
+test("a tab's dot also shows while an idle session has a running worker, but not for a reader alone", async ({ page, api }) => {
+  const name = unique('Dot worker');
+  const s = await seed(api, name);
+  await open(page, s);
+  const tab = tabFor(page, name);
+  const dot = tab.locator('.ip-tab-dot');
+  const counts = async () => {
+    const p = ((await (await api.get('/api/projects')).json()) as { slug: string; workingSessions: number; busySessions: number }[]).find((x) => x.slug === s.slug);
+    return { workingSessions: p?.workingSessions, busySessions: p?.busySessions };
+  };
+  await expect(dot).toHaveCount(1);
+  // A reader starts, then the session stops: idle, with only a reader running, so no dot.
+  await subagent(api, s, 'reader-1', 'Look around the repo', 'haiku', { agentType: 'Explore' });
+  await hook(api, s.session, { event: 'stop' });
+  await expect(dot).toHaveCount(0);
+  await expect(tab).toHaveAccessibleName(`${name}, 1 need you`);
+  expect(await counts()).toEqual({ workingSessions: 0, busySessions: 0 });
+  // A worker running on while the session is idle lights it, and the tab says so.
+  await subagent(api, s, 'worker-1', 'Wire up RevenueCat', 'sonnet');
+  await expect(dot).toHaveCount(1);
+  await expect(tab).toHaveAccessibleName(`${name}, 1 need you, working`);
+  expect(await counts()).toEqual({ workingSessions: 0, busySessions: 1 });
+  // Once the worker stops, the dot goes.
+  await hook(api, s.session, { event: 'subagent-stop', agentId: 'worker-1' });
+  await expect(dot).toHaveCount(0);
+  await expect(tab).toHaveAccessibleName(`${name}, 1 need you`);
+});
+
 /** A running subagent's time: under a minute, or whole minutes. */
 const RUNNING = '(<1 min|\\d+ min)';
 
