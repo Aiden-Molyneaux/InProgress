@@ -1145,7 +1145,7 @@ test('a right-click on a tab opens its menu under it without switching, and Arch
   const menu = tabMenu(page, shelfName);
   const items = menu.getByRole('menuitem');
   await expect(menu).toBeVisible();
-  await expect(items).toHaveCount(1);
+  await expect(items).toHaveText(['Archive', 'Delete…']);
   await expect(items.first()).toHaveAccessibleName('Archive');
   await expect(items.first()).toBeFocused();
   // The tab says whose menu it is, and is not opened by it.
@@ -1505,6 +1505,112 @@ test('a delete slow to answer never makes the window ask for the project, still 
   await expect(page).toHaveTitle(`InProgress · ${goneName}`);
 });
 
+/** The project as /api/projects lists it, or undefined once it is deleted. */
+async function listed(api: APIRequestContext, slug: string): Promise<{ status: string; activeSessions: number } | undefined> {
+  return ((await (await api.get('/api/projects')).json()) as { slug: string; status: string; activeSessions: number }[]).find((p) => p.slug === slug);
+}
+
+test("an active tab's Delete… says how many sessions it stops tracking, and deleting another tab leaves the window where it is", async ({ page, api }) => {
+  const hereName = unique('Active here');
+  const busyName = unique('Active busy');
+  const here = await bare(api, hereName);
+  // A session works in it.
+  const busy = await seed(api, busyName);
+  expect(await listed(api, busy.slug)).toMatchObject({ status: 'active', activeSessions: 1 });
+  await page.goto(`/#/p/${here.slug}`);
+  await expect(tabFor(page, hereName)).toHaveAttribute('aria-selected', 'true');
+  const busyTab = tabFor(page, busyName);
+  await busyTab.click({ button: 'right' });
+  const menu = tabMenu(page, busyName);
+  const items = menu.getByRole('menuitem');
+  await expect(items).toHaveCount(2);
+  await expect(items.nth(0)).toHaveAccessibleName('Archive');
+  await expect(items.nth(0)).toHaveAccessibleDescription('Stops tracking 1 session');
+  await expect(items.nth(1)).toHaveAccessibleName('Delete…');
+  await items.nth(1).click();
+  // The confirm Delete always asks, with Archive's line under it.
+  const confirm = page.getByRole('dialog', { name: `Delete ${busyName}?` });
+  const go = confirm.getByRole('button', { name: 'Delete', exact: true });
+  await expect(confirm).toHaveAccessibleDescription('Hidden now, removed for good after 30 days. Restore it from ⋯ until then. Stops tracking 1 session');
+  const note = confirm.getByText('Stops tracking 1 session', { exact: true });
+  await expect(note).toBeVisible();
+  await expect(note).toHaveCSS('color', await tokenColour(page, '--muted'));
+  await expect(note).toHaveCSS('font-size', '11px');
+  await expect(go).toBeFocused();
+  // Escape goes back to the menu, on Delete….
+  await page.keyboard.press('Escape');
+  await expect(confirm).toBeHidden();
+  await expect(items.nth(1)).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(go).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(busyTab).toHaveCount(0);
+  await expect(statusLine(page)).toHaveText(`Deleted ${busyName}. Restore it from ⋯ within 30 days.`);
+  // Not the open project: the window stays where it was, and focus is on its tab.
+  await expect(tabFor(page, hereName)).toHaveAttribute('aria-selected', 'true');
+  await expect(tabFor(page, hereName)).toBeFocused();
+  await expect(page).toHaveURL(hereIs(here.slug));
+  expect(await listed(api, busy.slug)).toBeUndefined();
+  // Restore brings it back under Archived, its session no longer tracked.
+  await moreButton(page).click();
+  await moreMenu(page).getByRole('menuitem', { name: `Restore ${busyName}`, exact: true }).click();
+  await expect(statusLine(page)).toHaveText(`Restored ${busyName}. It is under Archived in ⋯.`);
+  await expect(busyTab).toHaveCount(0);
+  expect(await listed(api, busy.slug)).toMatchObject({ status: 'archived', activeSessions: 0 });
+});
+
+test('deleting the open active project from its tab opens the tab beside it with focus there, and Unarchive after a restore puts the tab back', async ({ page, api }) => {
+  const names = [unique('Active left'), unique('Active middle'), unique('Active right')];
+  const made: { slug: string }[] = [];
+  for (const name of names) made.push(await bare(api, name));
+  await page.goto(`/#/p/${made[1].slug}`);
+  const middle = tabFor(page, names[1]);
+  await expect(middle).toHaveAttribute('aria-selected', 'true');
+  await middle.focus();
+  await page.keyboard.press('Shift+F10');
+  const menu = tabMenu(page, names[1]);
+  await expect(menu.getByRole('menuitem')).toHaveText(['Archive', 'Delete…']);
+  await page.keyboard.press('ArrowDown');
+  await expect(menu.getByRole('menuitem', { name: 'Delete…', exact: true })).toBeFocused();
+  await page.keyboard.press('Enter');
+  const confirm = page.getByRole('dialog', { name: `Delete ${names[1]}?` });
+  // No session is live there, so the confirm has no line about one.
+  await expect(confirm).toHaveAccessibleDescription('Hidden now, removed for good after 30 days. Restore it from ⋯ until then.');
+  await expect(confirm.getByText(/Stops tracking/)).toHaveCount(0);
+  await page.keyboard.press('Enter');
+  // The tab to its right opens and has focus, as when the open project is archived.
+  await expect(middle).toHaveCount(0);
+  await expect(tabFor(page, names[2])).toHaveAttribute('aria-selected', 'true');
+  await expect(tabFor(page, names[2])).toBeFocused();
+  await expect(page).toHaveURL(hereIs(made[2].slug));
+  await expect(page).toHaveTitle(`InProgress · ${names[2]}`);
+  await expect(statusLine(page)).toHaveText(`Deleted ${names[1]}. Restore it from ⋯ within 30 days.`);
+  expect(await listed(api, made[1].slug)).toBeUndefined();
+  // The newest project has the last tab, so deleting it opens the one to its left.
+  await expect(page.getByRole('tab').last()).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('Shift+F10');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  await expect(tabFor(page, names[2])).toHaveCount(0);
+  await expect(tabFor(page, names[0])).toHaveAttribute('aria-selected', 'true');
+  await expect(tabFor(page, names[0])).toBeFocused();
+  await expect(page).toHaveURL(hereIs(made[0].slug));
+  // Restored, it is under Archived, not back in the tabs; Unarchive puts its tab back.
+  const more = moreButton(page);
+  await more.click();
+  await moreMenu(page).getByRole('menuitem', { name: `Restore ${names[1]}`, exact: true }).click();
+  await expect(statusLine(page)).toHaveText(`Restored ${names[1]}. It is under Archived in ⋯.`);
+  await expect(middle).toHaveCount(0);
+  expect((await listed(api, made[1].slug))?.status).toBe('archived');
+  await more.click();
+  await moreMenu(page).getByRole('menuitem', { name: `Unarchive ${names[1]}`, exact: true }).click();
+  await expect(statusLine(page)).toHaveText(`${names[1]} is back in the tabs.`);
+  await expect(middle).toBeVisible();
+  const titles = await tabTitles(page);
+  expect(titles.indexOf(names[1])).toBe(titles.indexOf(names[0]) + 1);
+});
+
 test("a scribe's archive of the open project keeps it open as the end tab, and its sessions and Up next go", async ({ page, api, fresh }) => {
   await setQueue(api, fresh, [fresh.ids['3 RevenueCat']], fresh.session);
   await open(page, fresh);
@@ -1544,7 +1650,8 @@ test('the menus and the confirm wear Quiet, by day and by night', async ({ page,
     await tabFor(page, keptName).click({ button: 'right' });
     const menu = tabMenu(page, keptName);
     await surface(menu);
-    await expect(menu.getByRole('menuitem')).toHaveCSS('font-size', '12.5px');
+    await expect(menu.getByRole('menuitem', { name: 'Archive', exact: true })).toHaveCSS('font-size', '12.5px');
+    await expect(menu.getByRole('menuitem', { name: 'Delete…', exact: true })).toHaveCSS('font-size', '12.5px');
     await expect(tabFor(page, keptName)).toHaveCSS('color', text);
     await page.keyboard.press('Escape');
     // ⋯: heads S at 900 in muted ink, rows M, actions S.

@@ -26,6 +26,9 @@ interface TopBarProps {
  */
 type Run = (action: ProjectAction, target: ActionTarget, opener: HTMLElement | null) => void;
 
+/** The project a Delete… item asks about. Its live sessions, which the delete stops tracking, give the confirm a line. */
+type Confirming = ActionTarget & Pick<ProjectSummary, 'activeSessions'>;
+
 /** How many items wait on Aiden, as a muted numeral, and an ink dot while a session works in the project. */
 function Badges({ p }: { p: ProjectSummary }) {
   return (
@@ -150,7 +153,7 @@ interface MenuSurfaceProps {
   /** The item focus starts on. */
   start: 'first' | 'last';
   /** While set, the delete confirm stands in for the items, on the same surface. */
-  confirm: ActionTarget | null;
+  confirm: Confirming | null;
   onDelete: () => void;
   /** Back from the confirm to the items, focus on the Delete item that asked. */
   onCancel: () => void;
@@ -168,6 +171,8 @@ function MenuSurface(props: MenuSurfaceProps) {
   const { surface, id, className, style, label, labelledBy, start, confirm, onDelete, onCancel, onClose, children } = props;
   const ids = useId();
   const confirming = confirm !== null;
+  /** The live sessions a delete stops tracking, as Archive's line says it: a delete archives an active project first. */
+  const note = confirm && archiveNote(confirm.activeSessions);
   /** The project whose Delete item asked for the confirm, so a cancel puts focus back on that item. */
   const asked = useRef<number | null>(null);
   if (confirm) asked.current = confirm.id;
@@ -214,7 +219,7 @@ function MenuSurface(props: MenuSurfaceProps) {
       aria-modal={confirming ? false : undefined}
       aria-label={confirming ? undefined : label}
       aria-labelledby={confirming ? `${ids}q` : labelledBy}
-      aria-describedby={confirming ? `${ids}d` : undefined}
+      aria-describedby={confirming ? (note ? `${ids}d ${ids}n` : `${ids}d`) : undefined}
       onKeyDown={onKeyDown}
       onBlur={onBlur}
       onContextMenu={(e) => e.preventDefault()}
@@ -223,6 +228,7 @@ function MenuSurface(props: MenuSurfaceProps) {
         <div className="ip-confirm">
           <b id={`${ids}q`}>Delete {confirm.name}?</b>
           <p id={`${ids}d`}>Hidden now, removed for good after 30 days. Restore it from ⋯ until then.</p>
+          {note && <p id={`${ids}n`}>{note}</p>}
           <div>
             <button className="ip-btn go" onClick={onDelete}>
               Delete
@@ -248,14 +254,15 @@ interface TabMenuProps {
 }
 
 /**
- * A tab's menu: Archive on an active project's tab, Unarchive and Delete… on the open archived project's. It floats
- * under its tab, outside the strip (whose overflow would clip it), and closes when the strip scrolls or the window
- * resizes, since it would point at nothing.
+ * A tab's menu: Archive and Delete… on an active project's tab, Unarchive and Delete… on the open archived project's.
+ * Delete… on an active project archives and deletes it in one step, behind the same confirm. The menu floats under its
+ * tab, outside the strip (whose overflow would clip it), and closes when the strip scrolls or the window resizes, since
+ * it would point at nothing.
  */
 function TabMenu({ project, tab, strip, onClose, run }: TabMenuProps) {
   const surface = useRef<HTMLDivElement>(null);
   const noteId = useId();
-  const [confirm, setConfirm] = useState<ActionTarget | null>(null);
+  const [confirm, setConfirm] = useState<Confirming | null>(null);
   const [at, setAt] = useState(() => {
     const r = tab.getBoundingClientRect();
     return { top: r.bottom + 4, left: r.left };
@@ -289,6 +296,11 @@ function TabMenu({ project, tab, strip, onClose, run }: TabMenuProps) {
   };
   const archived = project.status === 'archived';
   const note = archived ? null : archiveNote(project.activeSessions);
+  const ask = (
+    <button role="menuitem" tabIndex={-1} className="ip-mi" data-item={`delete-${project.id}`} onClick={() => setConfirm(project)}>
+      Delete…
+    </button>
+  );
   return (
     <MenuSurface
       surface={surface}
@@ -306,22 +318,23 @@ function TabMenu({ project, tab, strip, onClose, run }: TabMenuProps) {
           <button role="menuitem" tabIndex={-1} className="ip-mi" onClick={() => choose('unarchive')}>
             Unarchive
           </button>
-          <button role="menuitem" tabIndex={-1} className="ip-mi" data-item={`delete-${project.id}`} onClick={() => setConfirm(project)}>
-            Delete…
-          </button>
+          {ask}
         </>
       ) : (
-        // No confirm: Unarchive undoes it. The live sessions it stops tracking keep running, and the note says so.
-        <button role="menuitem" tabIndex={-1} className="ip-mi" aria-label="Archive" aria-describedby={note ? noteId : undefined} onClick={() => choose('archive')}>
-          <span>
-            Archive
-            {note && (
-              <span id={noteId} className="ip-mi-note">
-                {note}
-              </span>
-            )}
-          </span>
-        </button>
+        <>
+          {/* No confirm: Unarchive undoes it. The live sessions it stops tracking keep running, and the note says so. */}
+          <button role="menuitem" tabIndex={-1} className="ip-mi" aria-label="Archive" aria-describedby={note ? noteId : undefined} onClick={() => choose('archive')}>
+            <span>
+              Archive
+              {note && (
+                <span id={noteId} className="ip-mi-note">
+                  {note}
+                </span>
+              )}
+            </span>
+          </button>
+          {ask}
+        </>
       )}
     </MenuSurface>
   );
@@ -343,7 +356,7 @@ function ArchiveMenu({ archived, deleted, current, onSelect, run }: ArchiveMenuP
   const ids = useId();
   /** Where focus starts when the menu is open: ArrowUp on ⋯ starts at the last item. */
   const [open, setOpen] = useState<'first' | 'last' | null>(null);
-  const [confirm, setConfirm] = useState<ActionTarget | null>(null);
+  const [confirm, setConfirm] = useState<Confirming | null>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const surface = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
