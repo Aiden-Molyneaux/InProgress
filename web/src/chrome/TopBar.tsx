@@ -262,7 +262,8 @@ interface TabMenuProps {
 function TabMenu({ project, tab, strip, onClose, run }: TabMenuProps) {
   const surface = useRef<HTMLDivElement>(null);
   const noteId = useId();
-  const [confirm, setConfirm] = useState<Confirming | null>(null);
+  /** Whether Delete… is asking. The confirm reads the project as it is now, so its line follows the live sessions. */
+  const [asking, setAsking] = useState(false);
   const [at, setAt] = useState(() => {
     const r = tab.getBoundingClientRect();
     return { top: r.bottom + 4, left: r.left };
@@ -272,7 +273,7 @@ function TabMenu({ project, tab, strip, onClose, run }: TabMenuProps) {
     const r = tab.getBoundingClientRect();
     const width = surface.current!.offsetWidth;
     setAt({ top: r.bottom + 4, left: Math.max(8, Math.min(r.left, window.innerWidth - width - 8)) });
-  }, [tab, confirm !== null]);
+  }, [tab, asking]);
   const close = useRef(onClose);
   close.current = onClose;
   useEffect(() => {
@@ -297,7 +298,7 @@ function TabMenu({ project, tab, strip, onClose, run }: TabMenuProps) {
   const archived = project.status === 'archived';
   const note = archived ? null : archiveNote(project.activeSessions);
   const ask = (
-    <button role="menuitem" tabIndex={-1} className="ip-mi" data-item={`delete-${project.id}`} onClick={() => setConfirm(project)}>
+    <button role="menuitem" tabIndex={-1} className="ip-mi" data-item={`delete-${project.id}`} onClick={() => setAsking(true)}>
       Delete…
     </button>
   );
@@ -308,9 +309,9 @@ function TabMenu({ project, tab, strip, onClose, run }: TabMenuProps) {
       style={at}
       label={project.name}
       start="first"
-      confirm={confirm}
+      confirm={asking ? project : null}
       onDelete={() => choose('delete')}
-      onCancel={() => setConfirm(null)}
+      onCancel={() => setAsking(false)}
       onClose={onClose}
     >
       {archived ? (
