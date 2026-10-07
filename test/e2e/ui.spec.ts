@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test as base, expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
+import { phaseDelay } from '../../web/src/characterState';
 
 interface Seeded {
   slug: string;
@@ -2218,6 +2219,81 @@ test.describe('Live work', () => {
       await expect(chip).toBeFocused({ timeout: 200 });
     }).toPass({ timeout: 3000 });
     await expect(list).toBeVisible();
+  });
+
+  test('an idle session chip draws a working kin after its letter per running worker, three at most then +n, never a reader', async ({ page, api, fresh }) => {
+    // Aiden's report: A idle while its subagents work showed only "A".
+    await subagent(api, fresh, 'worker-1', 'Wire up RevenueCat', 'sonnet');
+    await subagent(api, fresh, 'worker-2', 'Check the paywall', 'haiku');
+    await subagent(api, fresh, 'reader-1', 'Map the signing config', 'haiku', { agentType: 'Explore' });
+    await hook(api, fresh.session, { event: 'stop' });
+    await open(page, fresh);
+    const row = page.locator('.ip-sessions');
+    const chip = row.getByRole('button', { name: /^A · / });
+    const kin = chip.locator('.ip-chip-kin .ip-char');
+    const more = chip.locator('.ip-chip-more');
+    // Two workers, two kin. The reader gets none, though the name counts it as it always has.
+    await expect(kin).toHaveCount(2);
+    await expect(chip).toHaveAccessibleName('A · E2E session · 3 subagents · idle');
+    // No tags, no run times and no +n: the chip still reads "A".
+    await expect(chip).toHaveText('A');
+    await expect(more).toHaveCount(0);
+    // The session's own character stays idle, before its letter; the kin work in its hue after it, each bobbing from
+    // its own phase.
+    await expect(chip.locator(':scope > .ip-char')).toHaveAttribute('data-state', 'idle');
+    const [own, letter, first] = await Promise.all([chip.locator(':scope > .ip-char'), chip.locator('.ip-tag'), kin.first()].map(boxOf));
+    expect(own.x + own.width).toBeLessThanOrEqual(letter.x);
+    expect(letter.x + letter.width).toBeLessThanOrEqual(first.x);
+    for (const [i, agentId] of ['worker-1', 'worker-2'].entries()) {
+      const one = kin.nth(i);
+      await expect(one).toHaveAttribute('data-state', 'work');
+      await expect(one).toHaveAttribute('data-size', '14');
+      await expect(one).toHaveCSS('color', 'rgb(11, 107, 125)');
+      await expect(one.locator('.ip-char-body')).toHaveCSS('animation-name', 'ip-bob');
+      await expect(one.locator('.ip-char-body')).toHaveCSS('animation-delay', `${phaseDelay(`${fresh.session}:${agentId}`, 2400) / 1000}s`);
+    }
+    // The kin fit the 30 px chip, and the row stays one line.
+    expect((await chip.boundingBox())!.height).toBe(30);
+    for (const box of await Promise.all([kin.first(), kin.nth(1)].map(boxOf))) expect(box.height).toBe(14);
+    expect((await row.boundingBox())!.height, 'one line').toBeLessThanOrEqual(40);
+    // The kin are neither named nor kin of the canvas: the canvas's two kin are still the only images named a1 and a2.
+    await expect(page.getByRole('img', { name: /^a1 · Wire up RevenueCat/ })).toHaveCount(1);
+    await expect(page.locator('.ip-agent')).toHaveCount(2);
+    // The popover is as it was: every subagent, the reader marked.
+    await chip.hover();
+    const pop = page.locator('.ip-chip-pop');
+    await expect(pop.locator('li')).toHaveText([
+      new RegExp(`^a1 · Wire up RevenueCat · sonnet · ${RUNNING}$`),
+      new RegExp(`^a2 · Check the paywall · haiku · ${RUNNING}$`),
+      new RegExp(`^◇ a3 · Map the signing config · haiku · ${RUNNING}$`),
+    ]);
+    await page.locator('.ip-activity').hover();
+    // A third and a fourth worker: three kin, then a muted +1 in DM Mono.
+    await subagent(api, fresh, 'worker-3', 'Price the tiers', 'sonnet');
+    await subagent(api, fresh, 'worker-4', 'Write the store copy', 'sonnet');
+    await expect(chip).toHaveAccessibleName('A · E2E session · 5 subagents · idle');
+    await expect(kin).toHaveCount(3);
+    await expect(more).toHaveText('+1');
+    await expect(chip).toHaveText('A+1');
+    await expect(more).toHaveCSS('color', 'rgb(71, 85, 105)');
+    await expect(more).toHaveCSS('font-family', /DM Mono/);
+    await expect(more).toHaveCSS('font-size', '11px');
+    expect((await row.boundingBox())!.height, 'still one line').toBeLessThanOrEqual(40);
+    // A worker that stops leaves the chip: the fourth moves up into the third place, and the +1 goes.
+    await hook(api, fresh.session, { event: 'subagent-stop', agentId: 'worker-1' });
+    await expect(chip).toHaveAccessibleName('A · E2E session · 4 subagents · idle');
+    await expect(more).toHaveCount(0);
+    await expect(kin).toHaveCount(3);
+    await expect(kin.nth(2).locator('.ip-char-body')).toHaveCSS('animation-delay', `${phaseDelay(`${fresh.session}:worker-4`, 2400) / 1000}s`);
+    await expect(chip).toHaveText('A');
+    // Under reduced motion the kin stand still, like every character.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    for (let i = 0; i < 3; i++) await expect(kin.nth(i).locator('.ip-char-body')).toHaveCSS('animation-name', 'none');
+    // With only the reader left running, the chip draws no kin at all.
+    for (const agentId of ['worker-2', 'worker-3', 'worker-4']) await hook(api, fresh.session, { event: 'subagent-stop', agentId });
+    await expect(chip).toHaveAccessibleName('A · E2E session · 1 subagent · idle');
+    await expect(chip.locator('.ip-chip-kin')).toHaveCount(0);
+    await expect(chip).toHaveText('A');
   });
 
   test("two sessions in a project show A and B in different hues, and a subagent of B shows b1 in B's hue under the step it names", async ({ page, api, fresh }) => {

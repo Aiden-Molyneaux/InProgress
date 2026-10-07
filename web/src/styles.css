@@ -161,6 +161,11 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-chip-s { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; border-radius: var(--radius); color: var(--muted); font-size: var(--fs-m); line-height: 18px; white-space: nowrap; }
 .ip-chip-s .ip-char { flex: none; }
 .ip-chip-s .ip-tag { color: var(--fam, var(--family-0)); }
+/* A chip's kin, after its letter: a 14 px working character per worker that still runs, in the session's hue, each
+   bobbing out of step with the others (phaseDelay). At most three, then a muted +n. No tags or times: those stay in the
+   popover and on the cards. */
+.ip-chip-kin { flex: none; display: inline-flex; align-items: center; gap: 3px; }
+.ip-chip-more { margin-left: 1px; font-family: var(--font-mono); font-size: var(--fs-s); font-weight: var(--w-text); line-height: 14px; color: var(--muted); }
 /* Waiting for permission, the chip adds "· needs permission", and its character wears the amber ring (character.css). */
 .ip-chip-word { color: var(--amber-ink); }
 /* A session's letter: on its chip, and on its agent and readers lines on the canvas. */
