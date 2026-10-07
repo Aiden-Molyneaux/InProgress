@@ -282,6 +282,12 @@ column. The hairline sits outside `.ip-topbar`, so T270 l.280 and T938 l.954 mea
   (T1028 l.1041-1043).
 - Chip `button.ip-chip-s`: no border and no fill in any state, 30 px tall, `padding: 0 8px`, gap 6, radius 8, M,
   `--muted`. It holds the 18 px character (section 4), then the letter `.ip-tag` at 900 in `var(--fam)`.
+- Running workers (Aiden, 2026-10-07: an idle session's working subagent was invisible in the row). After the letter,
+  `span.ip-chip-kin[aria-hidden]` draws a 14 px `work` character per worker that still runs, in `var(--fam)`, seeded
+  `${sessionId}:${agentId}` so each bobs in its own phase. `chipKin` (`chips.ts`) picks them: running only, readers
+  and every stopped worker (the usage limit too) left out, in the session's order, at most three, then a muted
+  `.ip-chip-more` `+n` in DM Mono S. No tags or times: those stay in the popover and on the cards. The session's own
+  character keeps its state, and the name and the popover do not change.
 - A session waiting for permission adds a muted `·` and `needs permission` in `--amber-ink`, and its character wears
   the amber ring. Working and idle add no word: the character carries the state.
 - Name: `aria-label={withTag(letter, chipLabel(s))}`. Examples: `A · #4 Implement Fable's Notes · needs permission`,
@@ -623,7 +629,7 @@ and `ip-ring` on `.ip-char-ring2`. Tests read `animation-name` on these three.
   per-theme percentage. Only working characters glow.
 - **Blink**: `ip-blink`, ease-in-out, each eye pair scaled from its own centre. The artboard's periods run 3.6 to
   5.6 s.
-- **Sizes**: 18 on a chip. A lead is 20, or 24 while working, inside the 28 px line. A kin is 16.
+- **Sizes**: 18 on a chip, 14 for a chip's kin. A lead is 20, or 24 while working, inside the 28 px line. A kin is 16.
 
 ### Helpers
 

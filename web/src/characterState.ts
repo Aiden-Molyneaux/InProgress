@@ -2,7 +2,8 @@
 import type { Session, SessionState, SubagentInfo } from '../../src/core/types';
 
 export type CharacterState = 'work' | 'idle' | 'wait' | 'ended';
-export type CharacterSize = 16 | 18 | 20 | 24;
+/** 14 is a kin on a session chip, 16 a kin on a card, 18 a chip, 20 and 24 a lead. */
+export type CharacterSize = 14 | 16 | 18 | 20 | 24;
 
 const BY_SESSION: Record<SessionState, CharacterState> = { working: 'work', idle: 'idle', permission: 'wait', ended: 'ended' };
 

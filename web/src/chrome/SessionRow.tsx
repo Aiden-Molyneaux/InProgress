@@ -7,7 +7,7 @@ import { characterState } from '../characterState';
 import { familyVar } from '../family';
 import { agentLineParts, chipLabel, chipName, withTag, WORDS } from '../live';
 import { useNow } from '../useNow';
-import { chipOrder } from './chips';
+import { chipKin, chipOrder } from './chips';
 
 interface SessionRowProps {
   sessions: Session[];
@@ -21,8 +21,10 @@ interface SessionRowProps {
 
 /**
  * The current project's sessions in letter order, with the needs-you pill and Follow at the right end of the first
- * line. A chip is the session's character and its letter in its family's hue; one waiting for permission adds
- * `· needs permission`. Its name leads with the letter and carries the title (`B · Review actions controller · idle`).
+ * line. A chip is the session's character and its letter in its family's hue, then a small working kin per worker that
+ * still runs (chipKin: at most three, then a muted `+n`; no tags or times, which stay in the popover and on the cards);
+ * one waiting for permission adds `· needs permission`. Its name leads with the letter and carries the title
+ * (`B · Review actions controller · idle`); the kin add nothing to it, as it already counts them.
  * Hovering a chip, or focusing it from the keyboard, opens its popover under the row: that line and where the session
  * is, then its subagents, each led by its tag, a reader marked `◇` in front (`◇ a2 · …`). An ended reader is not
  * listed.
@@ -37,12 +39,21 @@ export function SessionRow({ sessions, onPick, needsYou, onNeedsYou, follow, onF
           const agents = s.subagents.filter((a) => agentVisible(a, now));
           const popId = `ip-chip-pop-${s.id}`;
           const letter = sessionTag(s.slot);
+          const kin = chipKin(s.subagents);
           return (
             <span key={s.id} className="ip-chip-wrap" style={{ '--fam': familyVar(s.slot) } as CSSProperties}>
               {/* No native title: it never shows on keyboard focus, and the popover is the one place the row shows the title. */}
               <button className={`ip-chip-s s-${s.state}`} onClick={() => onPick(s)} aria-label={chipName(s)} aria-describedby={popId}>
                 <Character size={18} state={characterState(s)} slot={s.slot} seed={s.id} />
                 {letter && <span className="ip-tag">{letter}</span>}
+                {kin.shown.length > 0 && (
+                  <span className="ip-chip-kin" aria-hidden="true">
+                    {kin.shown.map((a) => (
+                      <Character key={a.agentId} size={14} state={characterState(a)} slot={s.slot} seed={`${s.id}:${a.agentId}`} />
+                    ))}
+                    {kin.more > 0 && <span className="ip-chip-more">+{kin.more}</span>}
+                  </span>
+                )}
                 {s.state === 'permission' && (
                   <>
                     {' · '}
