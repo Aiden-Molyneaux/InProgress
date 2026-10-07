@@ -1454,20 +1454,28 @@ test('deleting the open project from its tab opens the tab before it, and a link
   await expect(tabFor(page, endName)).toHaveCount(0);
 });
 
-test('the window never asks for a project it is deleting, even when the delete is slow to answer, and asks again once it is restored', async ({ page, api }) => {
+test('a delete slow to answer never makes the window ask for the project, still opens the tab beside it, and the project is asked for again once restored', async ({ page, api }) => {
   const keptName = unique('Slow kept');
   const goneName = unique('Slow gone');
+  const busy = await bare(api, unique('Slow busy'));
   const kept = await bare(api, keptName);
   const gone = await bare(api, goneName);
   await archiveByScribe(api, gone.slug);
+  // kept is the newest active project, so its tab is the one beside gone's. An event after kept's lists busy ahead of
+  // it, so the list's fallback (the first active project the server lists) never opens kept: only the tab rule can.
+  await write(api, `e2e-${randomUUID()}`, 'patch', `/api/projects/${busy.slug}`, { description: 'Busier than kept' });
+  const listed = ((await (await api.get('/api/projects')).json()) as { slug: string }[]).map((p) => p.slug);
+  expect(listed.indexOf(busy.slug)).toBeGreaterThanOrEqual(0);
+  expect(listed.indexOf(busy.slug)).toBeLessThan(listed.indexOf(kept.slug));
   await page.goto(`/#/p/${gone.slug}`);
   await expect(page).toHaveTitle(`InProgress · ${goneName}`);
-  // The server deletes it at once and its event arrives, but the answer is held past the snapshot refresh that an event
-  // for the open project sets off. A deleted project's address answers 404, so until the answer moves the window on,
-  // nothing may ask for it.
+  // The server deletes it at once and its event arrives, but the answer is held past what the event sets off: the
+  // snapshot refresh for the open project (150 ms) and the list reload (400 ms). A deleted project's address answers
+  // 404, so until the answer moves the window on, nothing may ask for it. The reloaded list no longer has it, and must
+  // leave the window on it for the answer to open the tab beside it.
   await page.route('**/api/ui/projects/*/delete', async (route) => {
     const response = await route.fetch();
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, 1000));
     await route.fulfill({ response });
   });
   // Counted from the delete's request on: a refresh sent before it reaches the server first, and finds the project.
@@ -1484,6 +1492,7 @@ test('the window never asks for a project it is deleting, even when the delete i
   await menu.getByRole('menuitem', { name: `Delete ${goneName}`, exact: true }).click();
   await page.getByRole('dialog', { name: `Delete ${goneName}?` }).getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(statusLine(page)).toHaveText(`Deleted ${goneName}. Restore it from ⋯ within 30 days.`);
+  // The tab beside it, not the list's fallback.
   await expect(page).toHaveURL(hereIs(kept.slug));
   await expect(page).toHaveTitle(`InProgress · ${keptName}`);
   expect(asked).toEqual([]);
