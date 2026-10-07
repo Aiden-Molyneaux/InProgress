@@ -566,14 +566,16 @@ describe('window routes', () => {
   });
 
   it('answers 409 when the id now names another project, and 404 for an id that is gone', async () => {
-    const { app, p, act } = await withProject();
-    for (const action of ACTIONS) {
-      const res = await act(action, { slug: 'old-site' });
+    const { ctx, app, p, act } = await withProject();
+    for (const action of [...ACTIONS, 'rename']) {
+      const body = action === 'rename' ? { name: 'Renamed' } : {};
+      const res = await act(action, { slug: 'old-site', ...body });
       expect(res.statusCode, action).toBe(409);
       expect(res.json(), action).toEqual({ error: 'This project changed; reload', hint: 'Reload the window: another project has this id now.' });
-      const gone = await app.inject({ method: 'POST', url: `/api/ui/projects/${p.id + 100}/${action}`, headers: UI, payload: { slug: p.slug } });
+      const gone = await app.inject({ method: 'POST', url: `/api/ui/projects/${p.id + 100}/${action}`, headers: UI, payload: { slug: p.slug, ...body } });
       expect(gone.statusCode, action).toBe(404);
     }
+    expect(ctx.db.prepare('SELECT name FROM projects WHERE id = ?').pluck().get(p.id)).toBe('InGame');
   });
 
   it('takes only { slug }', async () => {
@@ -581,6 +583,47 @@ describe('window routes', () => {
     for (const body of [{}, { slug: '' }, { slug: 'x'.repeat(201) }, { slug: 'ingame', status: 'active' }, { slug: 7 }]) {
       expect((await act('archive', body)).statusCode, JSON.stringify(body)).toBe(400);
     }
+  });
+
+  it('renames a project as the window: the name and its root step change, the slug and bindings stay', async () => {
+    const { ctx, app, p, act } = await withProject();
+    const mark = ctx.db.prepare('SELECT MAX(id) FROM events').pluck().get();
+    const res = await act('rename', { slug: p.slug, name: '  InGame: Season 2  ' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ project: expect.objectContaining({ id: p.id, slug: 'ingame', name: 'InGame: Season 2', status: 'active' }) });
+    expect(ctx.db.prepare('SELECT type, actor, data FROM events WHERE id > ? ORDER BY id').all(mark)).toEqual([
+      // The root step's title first, so the activity strip's newest line is the rename.
+      { type: 'node.updated', actor: 'window', data: JSON.stringify({ changes: { title: { from: 'InGame', to: 'InGame: Season 2' } } }) },
+      { type: 'project.updated', actor: 'window', data: JSON.stringify({ changes: { name: { from: 'InGame', to: 'InGame: Season 2' } } }) },
+    ]);
+    // The slug is the address: the old link and the binding still find it, under its new name.
+    expect((await app.inject({ url: '/api/projects/ingame' })).json()).toMatchObject({ project: { id: p.id, name: 'InGame: Season 2' } });
+    expect((await app.inject({ url: '/api/projects' })).json()).toMatchObject([{ id: p.id, slug: 'ingame', name: 'InGame: Season 2' }]);
+    expect(ctx.db.prepare('SELECT path FROM bindings WHERE project_id = ?').pluck().all(p.id)).toEqual(['C:/personal/InGame']);
+    // The same name again records nothing more.
+    const events = ctx.db.prepare('SELECT COUNT(*) FROM events').pluck().get();
+    expect((await act('rename', { slug: p.slug, name: 'InGame: Season 2' })).statusCode).toBe(200);
+    expect(ctx.db.prepare('SELECT COUNT(*) FROM events').pluck().get()).toBe(events);
+  });
+
+  it('renames an archived project, and refuses a deleted one', async () => {
+    const { app, p, act } = await withProject();
+    await act('archive');
+    expect((await act('rename', { slug: p.slug, name: 'Shelved' })).json()).toMatchObject({ project: { name: 'Shelved', status: 'archived' } });
+    await act('delete');
+    const res = await act('rename', { slug: p.slug, name: 'Gone' });
+    expect(res.statusCode).toBe(404);
+    expect((await app.inject({ url: '/api/deleted-projects' })).json()).toMatchObject([{ id: p.id, name: 'Shelved' }]);
+  });
+
+  it('takes only { slug, name }, the name trimmed to 1 to 120 characters', async () => {
+    const { ctx, act } = await withProject();
+    const events = ctx.db.prepare('SELECT COUNT(*) FROM events').pluck().get();
+    for (const body of [{ slug: 'ingame' }, { name: 'X' }, { slug: 'ingame', name: '' }, { slug: 'ingame', name: '   ' }, { slug: 'ingame', name: 'x'.repeat(121) }, { slug: 'ingame', name: 7 }, { slug: 'ingame', name: 'X', status: 'archived' }]) {
+      expect((await act('rename', body)).statusCode, JSON.stringify(body)).toBe(400);
+    }
+    expect(ctx.db.prepare('SELECT COUNT(*) FROM events').pluck().get()).toBe(events);
+    expect((await act('rename', { slug: 'ingame', name: ` ${'x'.repeat(120)} ` })).statusCode).toBe(200);
   });
 
   it('lists recently deleted projects without any token, as /api/projects does', async () => {
@@ -594,6 +637,7 @@ describe('window routes', () => {
 describe('requireUi: every UI write', () => {
   const routes = (id: number) => [
     ...['archive', 'unarchive', 'delete', 'restore'].map((a) => ({ url: `/api/ui/projects/${id}/${a}`, payload: { slug: 'ingame' } })),
+    { url: `/api/ui/projects/${id}/rename`, payload: { slug: 'ingame', name: 'Renamed' } },
     { url: '/api/ui/open', payload: { resourceId: 1 } },
     { url: '/api/ui/open-url', payload: { url: 'https://example.com' } },
   ];

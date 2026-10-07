@@ -24,7 +24,7 @@ function agentLabel(sessionId: string, agentId: string, snapshot: ProjectSnapsho
 export function describeEvent(e: EventRow, snapshot: ProjectSnapshot | null): string {
   const d = (e.data ?? {}) as {
     ids?: number[]; parentId?: number; nodeId?: number; title?: string; path?: string;
-    changes?: { status?: { to: string }; queue?: unknown }; changed?: string[]; state?: string; focusNodeId?: number | null;
+    changes?: { status?: { to: string }; queue?: unknown; name?: unknown }; changed?: string[]; state?: string; focusNodeId?: number | null;
     ended?: { agentId: string; reason: EndReason }[];
   };
   switch (e.type) {
@@ -56,6 +56,7 @@ export function describeEvent(e: EventRow, snapshot: ProjectSnapshot | null): st
       return 'project created';
     case 'project.updated':
       if (d.changes?.status) return d.changes.status.to === 'archived' ? 'archived the project' : 'unarchived the project';
+      if (d.changes?.name) return 'renamed the project';
       return d.changes?.queue ? 'Up next changed' : 'project updated';
     case 'project.deleted':
       return 'deleted the project';

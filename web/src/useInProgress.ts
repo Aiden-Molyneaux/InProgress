@@ -4,7 +4,7 @@ import { eventTarget } from '../../src/core/layout';
 import type { DeletedProject, EventRow, ProjectSnapshot, ProjectSummary } from '../../src/core/types';
 import { api } from './api';
 import { pickSlug } from './chrome/tabs';
-import { patchDeleted, patchProjects, summaryOf, type ActionTarget, type ProjectAction } from './projectActions';
+import { patchDeleted, patchName, patchProjects, renamedSnapshot, summaryOf, type ActionTarget, type ProjectAction } from './projectActions';
 import { load, save } from './storage';
 import { subscribe } from './stream';
 
@@ -30,6 +30,11 @@ export interface InProgressState {
    * Answers 'ok', 'reload', or the server's message.
    */
   act: (action: ProjectAction, target: ActionTarget, goTo: string | null) => Promise<'ok' | 'reload' | string>;
+  /**
+   * Renames a project. When it goes through, the tab, ⋯ and the window title show the new name at once, then the lists
+   * reload. A 401 reloads the page. Answers 'ok', 'reload', or the server's message.
+   */
+  rename: (target: ActionTarget, name: string) => Promise<'ok' | 'reload' | string>;
 }
 
 export function useInProgress(): InProgressState {
@@ -237,5 +242,22 @@ export function useInProgress(): InProgressState {
     [loadProjects, loadSnapshot],
   );
 
-  return { projects, deleted, slug, snapshot, lastEvent, liveEvent, connection, loaded, selectProject: setSlug, act };
+  const rename = useCallback(
+    async (target: ActionTarget, name: string) => {
+      const answer = await api.renameProject(target, name);
+      if (answer === 'reload') window.location.reload();
+      if (typeof answer === 'string') return answer;
+      const named = answer.project.name;
+      // So a list, or the open project's snapshot, fetched before the rename never undoes the patch.
+      listApplied.current = listSeq.current;
+      if (projectIdRef.current === target.id) appliedSeq.current = snapshotSeq.current;
+      setProjects((cur) => patchName(cur, target.id, named));
+      setSnapshot((cur) => renamedSnapshot(cur, target.id, named));
+      void loadProjects();
+      return 'ok' as const;
+    },
+    [loadProjects],
+  );
+
+  return { projects, deleted, slug, snapshot, lastEvent, liveEvent, connection, loaded, selectProject: setSlug, act, rename };
 }

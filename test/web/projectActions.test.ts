@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DELETED_RETENTION_MS } from '../../src/core/types';
-import { actionMessage, archiveNote, patchDeleted, patchProjects, summaryOf } from '../../web/src/projectActions';
+import { actionMessage, archiveNote, patchDeleted, patchName, patchProjects, renamedSnapshot, renamedTo, renameMessage, summaryOf } from '../../web/src/projectActions';
 
 describe('actionMessage', () => {
   it("says what happened and where the project went, in the status line's words", () => {
@@ -8,6 +8,66 @@ describe('actionMessage', () => {
     expect(actionMessage('unarchive', 'Old Site')).toBe('Old Site is back in the tabs.');
     expect(actionMessage('delete', 'Old Site')).toBe('Deleted Old Site. Restore it from ⋯ within 30 days.');
     expect(actionMessage('restore', 'Old Site')).toBe('Restored Old Site. It is under Archived in ⋯.');
+  });
+});
+
+describe('renamedTo', () => {
+  it('is the new name, trimmed, when it is 1 to 120 characters and differs from the current one', () => {
+    expect(renamedTo('  Old Site v2 ', 'Old Site')).toBe('Old Site v2');
+    expect(renamedTo('x'.repeat(120), 'Old Site')).toBe('x'.repeat(120));
+    // A change of case is a change.
+    expect(renamedTo('old site', 'Old Site')).toBe('old site');
+  });
+
+  it('is null for an empty, unchanged or too long name: the field does nothing then', () => {
+    expect(renamedTo('', 'Old Site')).toBeNull();
+    expect(renamedTo('   ', 'Old Site')).toBeNull();
+    expect(renamedTo('Old Site', 'Old Site')).toBeNull();
+    expect(renamedTo(' Old Site  ', 'Old Site')).toBeNull();
+    expect(renamedTo('x'.repeat(121), 'Old Site')).toBeNull();
+  });
+});
+
+describe('renameMessage', () => {
+  it("says the new name, in the status line's words", () => {
+    expect(renameMessage('Old Site v2')).toBe('Renamed to Old Site v2.');
+  });
+});
+
+describe('patchName', () => {
+  const list = [
+    { id: 1, name: 'A' },
+    { id: 2, name: 'B' },
+  ];
+
+  it('renames one project in place and leaves the list it was given alone', () => {
+    expect(patchName(list, 2, 'B2')).toEqual([list[0], { id: 2, name: 'B2' }]);
+    expect(list[1].name).toBe('B');
+  });
+
+  it('leaves the list as it is for a project it does not hold', () => {
+    expect(patchName(list, 3, 'C')).toEqual(list);
+  });
+});
+
+describe('renamedSnapshot', () => {
+  const snapshot = {
+    project: { id: 3, name: 'Old', rootNodeId: 9 },
+    nodes: [
+      { id: 9, title: 'Old' },
+      { id: 10, title: 'Old' },
+    ],
+  };
+
+  it("renames the open project and its root step's title, until the refresh brings them", () => {
+    expect(renamedSnapshot(snapshot, 3, 'New')).toEqual({ project: { id: 3, name: 'New', rootNodeId: 9 }, nodes: [{ id: 9, title: 'New' }, snapshot.nodes[1]] });
+    expect(snapshot.project.name).toBe('Old');
+    expect(snapshot.nodes[0].title).toBe('Old');
+  });
+
+  it("leaves another project's snapshot, or none, as it is", () => {
+    expect(renamedSnapshot(snapshot, 4, 'New')).toBe(snapshot);
+    expect(renamedSnapshot(null, 3, 'New')).toBeNull();
   });
 });
 

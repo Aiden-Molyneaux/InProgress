@@ -32,6 +32,8 @@ export const api = {
     const answer = await sendUi<{ project?: Project }>(`/api/ui/projects/${p.id}/${action}`, { slug: p.slug });
     return typeof answer === 'string' ? answer : { project: answer.project ?? null };
   },
+  /** Renames a project, by id, the slug going along as for projectAction. Done, it answers the project as renamed. */
+  renameProject: (p: ActionTarget, name: string) => sendUi<{ project: Project }>(`/api/ui/projects/${p.id}/rename`, { slug: p.slug, name }),
 };
 
 /**

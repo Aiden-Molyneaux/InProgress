@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
-import type { DeletedProject, ProjectSummary } from '../../../src/core/types';
-import { archiveNote, type ActionTarget, type ProjectAction } from '../projectActions';
+import { PROJECT_NAME_MAX, type DeletedProject, type ProjectSummary } from '../../../src/core/types';
+import { archiveNote, renamedTo, type ActionTarget, type ProjectAction } from '../projectActions';
 import { daysLeftLabel } from '../time';
 import { useNow } from '../useNow';
 import { menuStep } from './menu';
@@ -18,6 +18,8 @@ interface TopBarProps {
   onSelect: (slug: string) => void;
   /** Archive, unarchive, delete or restore. Resolves true when it went through. */
   onAction: (action: ProjectAction, target: ActionTarget) => Promise<boolean>;
+  /** Renames a project (its name only: the slug stays). Resolves true when it went through. */
+  onRename: (target: ActionTarget, name: string) => Promise<boolean>;
 }
 
 /**
@@ -25,6 +27,9 @@ interface TopBarProps {
  * still there, else to the current tab, else to ⋯.
  */
 type Run = (action: ProjectAction, target: ActionTarget, opener: HTMLElement | null) => void;
+
+/** Runs a rename saved in a tab's menu, focus moving afterwards as for Run. */
+type RunRename = (target: ActionTarget, name: string, opener: HTMLElement | null) => void;
 
 /** The project a Delete… item asks about. Its live sessions, which the delete stops tracking, give the confirm a line. */
 type Confirming = ActionTarget & Pick<ProjectSummary, 'activeSessions'>;
@@ -158,49 +163,94 @@ interface MenuSurfaceProps {
   /** While set, the delete confirm stands in for the items, on the same surface. */
   confirm: Confirming | null;
   onDelete: () => void;
-  /** Back from the confirm to the items, focus on the Delete item that asked. */
+  /** While set, the rename field stands in for the items, on the same surface (a tab's menu only). */
+  rename?: Renaming | null;
+  /** Back from the confirm or the rename field to the items, focus on the item that asked. */
   onCancel: () => void;
   /** Closes the menu. With `refocus`, focus goes back to whatever opened it; otherwise it stays where it went. */
   onClose: (refocus: boolean) => void;
   children: ReactNode;
 }
 
+/** The rename field's project: its name now, the item that opened the field, and what Enter does with the text. */
+interface Renaming {
+  name: string;
+  /** The data-item of the Rename… item, which gets focus back on a cancel. */
+  item: string;
+  onSave: (text: string) => void;
+}
+
+/**
+ * The rename field: the name selected, so typing replaces it. Enter saves; Escape (MenuSurface's) and a blur cancel.
+ * Up to 120 characters, the server's rule.
+ */
+function RenameField({ rename, onCancel }: { rename: Renaming; onCancel: () => void }) {
+  const [text, setText] = useState(rename.name);
+  return (
+    <input
+      className="ip-rename"
+      aria-label={`Rename ${rename.name}`}
+      value={text}
+      maxLength={PROJECT_NAME_MAX}
+      spellCheck={false}
+      autoComplete="off"
+      onChange={(e) => setText(e.target.value)}
+      onKeyDown={(e) => {
+        // Enter that ends an IME composition picks the characters; it is not the save.
+        if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
+        e.preventDefault();
+        rename.onSave(text);
+      }}
+      onBlur={onCancel}
+    />
+  );
+}
+
 /**
  * What a tab's menu and the ⋯ menu share: roving focus over the menuitems (Down and Up wrap, Home and End), Escape
- * back to the opener, closing when focus leaves, and the delete confirm in place of the items. Every key stays here:
- * [ ] 1-9 f n Home End and Escape are the app's own keys otherwise, and would act under the open menu.
+ * back to the opener, closing when focus leaves, and the delete confirm or the rename field in place of the items.
+ * Every key stays here: [ ] 1-9 f n Home End and Escape are the app's own keys otherwise, and would act under the open
+ * menu (or, in the rename field, take the typing).
  */
 function MenuSurface(props: MenuSurfaceProps) {
-  const { surface, id, className, style, label, labelledBy, start, confirm, onDelete, onCancel, onClose, children } = props;
+  const { surface, id, className, style, label, labelledBy, start, confirm, onDelete, rename = null, onCancel, onClose, children } = props;
   const ids = useId();
-  const confirming = confirm !== null;
+  const mode = confirm ? 'confirm' : rename ? 'rename' : 'items';
   /** The live sessions a delete stops tracking, as Archive's line says it: a delete archives an active project first. */
   const note = confirm && archiveNote(confirm.activeSessions);
-  /** The project whose Delete item asked for the confirm, so a cancel puts focus back on that item. */
-  const asked = useRef<number | null>(null);
-  if (confirm) asked.current = confirm.id;
-  // On opening, focus the first (or last) item; on the confirm, its Delete, so Enter confirms; back from it, the asker.
+  /** The item that asked for the confirm or the field (its data-item), so a cancel puts focus back on that item. */
+  const asked = useRef<string | null>(null);
+  if (confirm) asked.current = `delete-${confirm.id}`;
+  else if (rename) asked.current = rename.item;
+  // On opening, focus the first (or last) item; on the confirm, its Delete, so Enter confirms; in the rename field, the
+  // whole name, so typing replaces it; back from either, the asker.
   useLayoutEffect(() => {
     const el = surface.current!;
-    if (confirming) {
+    if (mode === 'confirm') {
       el.querySelector<HTMLElement>('.ip-btn.go')?.focus();
       return;
     }
+    if (mode === 'rename') {
+      const field = el.querySelector<HTMLInputElement>('.ip-rename');
+      field?.focus();
+      field?.select();
+      return;
+    }
     const items = [...el.querySelectorAll<HTMLElement>('[role="menuitem"]')];
-    const back = asked.current === null ? null : el.querySelector<HTMLElement>(`[data-item="delete-${asked.current}"]`);
+    const back = asked.current === null ? null : el.querySelector<HTMLElement>(`[data-item="${asked.current}"]`);
     asked.current = null;
     (back ?? (start === 'last' ? items[items.length - 1] : items[0]))?.focus();
-  }, [confirming]);
+  }, [mode]);
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     e.stopPropagation();
     if (e.key === 'Escape') {
       e.preventDefault();
-      if (confirming) onCancel();
+      if (mode !== 'items') onCancel();
       else onClose(true);
       return;
     }
-    // In the confirm, Tab, Enter and Space do what they do on its two buttons.
-    if (confirming) return;
+    // In the confirm, Tab, Enter and Space do what they do on its two buttons; in the rename field, every key types.
+    if (mode !== 'items') return;
     const items = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')];
     const next = menuStep(e.key, items.indexOf(document.activeElement as HTMLElement), items.length);
     if (next === null) return;
@@ -218,11 +268,12 @@ function MenuSurface(props: MenuSurfaceProps) {
       id={id}
       className={className}
       style={style}
-      role={confirming ? 'dialog' : 'menu'}
-      aria-modal={confirming ? false : undefined}
-      aria-label={confirming ? undefined : label}
-      aria-labelledby={confirming ? `${ids}q` : labelledBy}
-      aria-describedby={confirming ? (note ? `${ids}d ${ids}n` : `${ids}d`) : undefined}
+      // The rename field names itself, so the surface around it is no menu and needs no name.
+      role={mode === 'confirm' ? 'dialog' : mode === 'items' ? 'menu' : undefined}
+      aria-modal={mode === 'confirm' ? false : undefined}
+      aria-label={mode === 'items' ? label : undefined}
+      aria-labelledby={mode === 'confirm' ? `${ids}q` : mode === 'items' ? labelledBy : undefined}
+      aria-describedby={mode === 'confirm' ? (note ? `${ids}d ${ids}n` : `${ids}d`) : undefined}
       onKeyDown={onKeyDown}
       onBlur={onBlur}
       onContextMenu={(e) => e.preventDefault()}
@@ -241,6 +292,8 @@ function MenuSurface(props: MenuSurfaceProps) {
             </button>
           </div>
         </div>
+      ) : rename ? (
+        <RenameField rename={rename} onCancel={onCancel} />
       ) : (
         children
       )}
@@ -254,19 +307,24 @@ interface TabMenuProps {
   strip: HTMLDivElement | null;
   onClose: (refocus: boolean) => void;
   run: Run;
+  runRename: RunRename;
 }
 
 /**
- * A tab's menu: Archive and Delete… on an active project's tab, Unarchive and Delete… on the open archived project's.
- * Delete… on an active project archives and deletes it in one step, behind the same confirm. The menu floats under its
- * tab, outside the strip (whose overflow would clip it), and closes when the strip scrolls or the window resizes, since
- * it would point at nothing.
+ * A tab's menu: Archive, Rename… and Delete… on an active project's tab, Unarchive, Rename… and Delete… on the open
+ * archived project's. Delete… on an active project archives and deletes it in one step, behind the same confirm.
+ * Rename… turns the menu into a field holding the name: Enter saves a new one (the slug, so the project's links, stays),
+ * Escape goes back to the items, and leaving it cancels. The menu floats under its tab, outside the strip (whose
+ * overflow would clip it), and closes when the strip scrolls or the window resizes, since it would point at nothing.
  */
-function TabMenu({ project, tab, strip, onClose, run }: TabMenuProps) {
+function TabMenu({ project, tab, strip, onClose, run, runRename }: TabMenuProps) {
   const surface = useRef<HTMLDivElement>(null);
   const noteId = useId();
-  /** Whether Delete… is asking. The confirm reads the project as it is now, so its line follows the live sessions. */
-  const [asking, setAsking] = useState(false);
+  /**
+   * What stands in for the items: Delete…'s confirm, or Rename…'s field. The confirm reads the project as it is now, so
+   * its line follows the live sessions.
+   */
+  const [panel, setPanel] = useState<'confirm' | 'rename' | null>(null);
   const [at, setAt] = useState(() => {
     const r = tab.getBoundingClientRect();
     return { top: r.bottom + 4, left: r.left };
@@ -276,7 +334,7 @@ function TabMenu({ project, tab, strip, onClose, run }: TabMenuProps) {
     const r = tab.getBoundingClientRect();
     const width = surface.current!.offsetWidth;
     setAt({ top: r.bottom + 4, left: Math.max(8, Math.min(r.left, window.innerWidth - width - 8)) });
-  }, [tab, asking]);
+  }, [tab, panel]);
   const close = useRef(onClose);
   close.current = onClose;
   useEffect(() => {
@@ -298,10 +356,25 @@ function TabMenu({ project, tab, strip, onClose, run }: TabMenuProps) {
     onClose(true);
     run(action, project, tab);
   };
+  /** Enter in the field. An empty name does nothing; the same name closes the menu with nothing to save. */
+  const save = (text: string) => {
+    const name = renamedTo(text, project.name);
+    if (name === null) {
+      if (text.trim() === project.name) onClose(true);
+      return;
+    }
+    onClose(true);
+    runRename(project, name, tab);
+  };
   const archived = project.status === 'archived';
   const note = archived ? null : archiveNote(project.activeSessions);
+  const renameItem = (
+    <button role="menuitem" tabIndex={-1} className="ip-mi" data-item={`rename-${project.id}`} onClick={() => setPanel('rename')}>
+      Rename…
+    </button>
+  );
   const ask = (
-    <button role="menuitem" tabIndex={-1} className="ip-mi" data-item={`delete-${project.id}`} onClick={() => setAsking(true)}>
+    <button role="menuitem" tabIndex={-1} className="ip-mi" data-item={`delete-${project.id}`} onClick={() => setPanel('confirm')}>
       Delete…
     </button>
   );
@@ -312,9 +385,10 @@ function TabMenu({ project, tab, strip, onClose, run }: TabMenuProps) {
       style={at}
       label={project.name}
       start="first"
-      confirm={asking ? project : null}
+      confirm={panel === 'confirm' ? project : null}
       onDelete={() => choose('delete')}
-      onCancel={() => setAsking(false)}
+      rename={panel === 'rename' ? { name: project.name, item: `rename-${project.id}`, onSave: save } : null}
+      onCancel={() => setPanel(null)}
       onClose={onClose}
     >
       {archived ? (
@@ -322,6 +396,7 @@ function TabMenu({ project, tab, strip, onClose, run }: TabMenuProps) {
           <button role="menuitem" tabIndex={-1} className="ip-mi" onClick={() => choose('unarchive')}>
             Unarchive
           </button>
+          {renameItem}
           {ask}
         </>
       ) : (
@@ -337,6 +412,7 @@ function TabMenu({ project, tab, strip, onClose, run }: TabMenuProps) {
               )}
             </span>
           </button>
+          {renameItem}
           {ask}
         </>
       )}
@@ -486,7 +562,7 @@ function ArchiveMenu({ archived, deleted, current, onSelect, run }: ArchiveMenuP
 }
 
 /** One tab per active project, then ⋯ with the archived and recently deleted ones. */
-export function TopBar({ tabs, archived, deleted: listed, current, onSelect, onAction }: TopBarProps) {
+export function TopBar({ tabs, archived, deleted: listed, current, onSelect, onAction, onRename }: TopBarProps) {
   const header = useRef<HTMLElement>(null);
   // A row past its purge time drops out even if the purge has not run yet; the clock is the bar's, not the app's.
   const now = useNow(60_000);
@@ -522,6 +598,9 @@ export function TopBar({ tabs, archived, deleted: listed, current, onSelect, onA
   const run: Run = async (action, target, opener) => {
     if (await onAction(action, target)) setRefocus({ opener });
   };
+  const runRename: RunRename = async (target, name, opener) => {
+    if (await onRename(target, name)) setRefocus({ opener });
+  };
   return (
     <header className="ip-topbar" ref={header}>
       {tabs.length > 0 && (
@@ -535,7 +614,7 @@ export function TopBar({ tabs, archived, deleted: listed, current, onSelect, onA
         />
       )}
       {tabMenu && menuProject && !menuGone && (
-        <TabMenu key={tabMenu.id} project={menuProject} tab={tabMenu.tab} strip={strip.current} onClose={closeTabMenu} run={run} />
+        <TabMenu key={tabMenu.id} project={menuProject} tab={tabMenu.tab} strip={strip.current} onClose={closeTabMenu} run={run} runRename={runRename} />
       )}
       {(archived.length > 0 || deleted.length > 0) && <ArchiveMenu archived={archived} deleted={deleted} current={current} onSelect={onSelect} run={run} />}
     </header>

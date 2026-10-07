@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ASSIGNEES, HOOK_EVENTS, NODE_KINDS, NODE_LABELS, NODE_STATUSES, RESOURCE_KINDS, WORK_STATUSES, unknownLabel, type NodeInput } from '../core/types';
+import { ASSIGNEES, HOOK_EVENTS, NODE_KINDS, NODE_LABELS, NODE_STATUSES, PROJECT_NAME_MAX, RESOURCE_KINDS, WORK_STATUSES, unknownLabel, type NodeInput } from '../core/types';
 
 const title = z.string().trim().min(1, 'title is empty').max(200);
 /** A step's type label; null leaves it unlabelled (or clears it on a patch). */
@@ -25,11 +25,13 @@ export const idParam = z.object({ id: z.coerce.number().int().positive() });
 export const sessionParam = z.object({ id: z.string().min(1).max(100) });
 export const searchQuery = z.object({ project: z.string().min(1), q: z.string().min(1).max(200) });
 
+/** A project's name: trimmed, 1 to 120 characters. */
+const projectName = z.string().trim().min(1, 'name is empty').max(PROJECT_NAME_MAX);
 export const createProjectBody = z
-  .object({ name: z.string().trim().min(1, 'name is empty').max(120), description: z.string().max(5_000).optional(), playbook: z.string().max(10_000).optional(), slug: z.string().max(60).optional() })
+  .object({ name: projectName, description: z.string().max(5_000).optional(), playbook: z.string().max(10_000).optional(), slug: z.string().max(60).optional() })
   .strict();
 export const updateProjectBody = z
-  .object({ name: z.string().trim().min(1).max(120).optional(), description: z.string().max(5_000).optional(), playbook: z.string().max(10_000).optional(), status: z.enum(['active', 'archived']).optional() })
+  .object({ name: z.string().trim().min(1).max(PROJECT_NAME_MAX).optional(), description: z.string().max(5_000).optional(), playbook: z.string().max(10_000).optional(), status: z.enum(['active', 'archived']).optional() })
   .strict();
 export const bindingBody = z.object({ path: z.string().trim().min(1).max(500), branchPattern: z.string().trim().max(200).nullish() }).strict();
 export const addNodesBody = z.object({ parentId: z.number().int().positive(), after, nodes: z.array(nodeInput).min(1).max(200) }).strict();
@@ -103,3 +105,5 @@ export const openUrlBody = z.object({ url: z.string().min(1).max(2048) }).strict
  * id). Not max 60: a slug made from a 120-character name is longer.
  */
 export const windowProjectBody = z.object({ slug: z.string().min(1).max(200) }).strict();
+/** The window's rename: the slug it shows, as windowProjectBody, and the new name under the project name rule. */
+export const windowRenameBody = z.object({ slug: windowProjectBody.shape.slug, name: projectName }).strict();

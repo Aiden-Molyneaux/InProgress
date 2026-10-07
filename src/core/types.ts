@@ -67,6 +67,9 @@ export interface QueueEntry {
   sessionId: string | null;
 }
 
+/** The longest a project's name may be, once trimmed: the server's rule, and the window's rename field. */
+export const PROJECT_NAME_MAX = 120;
+
 export interface ProjectSummary extends Project {
   needsYou: number;
   activeSessions: number;

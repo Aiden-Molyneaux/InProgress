@@ -340,12 +340,13 @@ export function applyProjectChange(ctx: Ctx, record: RecordEvent, before: Projec
   for (const key of ['name', 'description', 'playbook', 'status'] as const) {
     if (patch[key] !== undefined && before[key] !== next[key]) changes[key] = { from: before[key], to: next[key] };
   }
-  // Only a real change is recorded, so a second archive (a double-click) logs nothing more.
-  if (Object.keys(changes).length) record({ projectId: before.id, type: 'project.updated', entity: 'project', entityId: before.id, data: { changes } });
+  // The root step's change first, so the activity strip's newest line is the project's own (renamed the project).
   if (changes.name || changes.description) {
     const rootChanges = { ...(changes.name ? { title: changes.name } : {}), ...(changes.description ? { body: changes.description } : {}) };
     record({ projectId: before.id, type: 'node.updated', entity: 'node', entityId: before.rootNodeId, data: { changes: rootChanges } });
   }
+  // Only a real change is recorded, so a second archive (a double-click) logs nothing more.
+  if (Object.keys(changes).length) record({ projectId: before.id, type: 'project.updated', entity: 'project', entityId: before.id, data: { changes } });
   return { project: getProjectById(ctx, before.id)!, endedSessions };
 }
 

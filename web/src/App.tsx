@@ -9,7 +9,7 @@ import { TopBar } from './chrome/TopBar';
 import { UpNext } from './chrome/UpNext';
 import { Details } from './panels/Details';
 import { ResourceViewer } from './panels/ResourceViewer';
-import { actionMessage, type ActionTarget, type ProjectAction } from './projectActions';
+import { actionMessage, renameMessage, type ActionTarget, type ProjectAction } from './projectActions';
 import { useFoldOverrides } from './useFoldOverrides';
 import { useInProgress } from './useInProgress';
 import { useKeyboard } from './useKeyboard';
@@ -45,7 +45,7 @@ export function App() {
     if (slug) state.selectProject(slug);
   };
 
-  /** The status line: what an archive, unarchive, delete or restore did, or why it failed. Shown for 3 s. */
+  /** The status line: what an archive, unarchive, rename, delete or restore did, or why it failed. Shown for 3 s. */
   const [status, setStatus] = useState<string | null>(null);
   const statusTimer = useRef(0);
   const say = (text: string) => {
@@ -61,6 +61,12 @@ export function App() {
     const result = await state.act(action, target, leaving ? neighbourTab(tabs, target.slug) : null);
     if (result === 'reload') return false;
     say(result === 'ok' ? actionMessage(action, target.name) : result);
+    return result === 'ok';
+  };
+  const onRename = async (target: ActionTarget, name: string): Promise<boolean> => {
+    const result = await state.rename(target, name);
+    if (result === 'reload') return false;
+    say(result === 'ok' ? renameMessage(name) : result);
     return result === 'ok';
   };
 
@@ -115,7 +121,7 @@ export function App() {
   return (
     <>
       <div className="ip-app" ref={app}>
-        <TopBar tabs={tabs} archived={archived} deleted={state.deleted} current={state.slug} onSelect={state.selectProject} onAction={onAction} />
+        <TopBar tabs={tabs} archived={archived} deleted={state.deleted} current={state.slug} onSelect={state.selectProject} onAction={onAction} onRename={onRename} />
         {/* Always there, so the canvas doesn't jump while a project loads: it holds the needs-you pill and Follow. */}
         <SessionRow
           sessions={snapshot?.sessions ?? []}

@@ -153,6 +153,10 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-confirm p + p { margin-top: 2px; }
 .ip-confirm div { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
 .ip-confirm .ip-btn.go { color: var(--text-2); border-color: var(--text); }
+/* Rename's field, on the same surface: an M line of ink on the panel, a hairline round it and the focus ring the
+   items' focus-visible draws, since focus is always in it. */
+.ip-rename { display: block; width: min(240px, calc(100vw - 30px)); padding: 6px 8px; font: inherit; font-size: var(--fs-m); line-height: 18px; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); }
+.ip-rename:focus { outline: 2px solid var(--text-2); outline-offset: 1px; }
 /* The current project's sessions on the left, wrapping onto a second line only when they overflow; the needs-you pill
    and Follow at the right end of the first line. One line is 4 + 30 + 5 px, plus the rule: 40 px. */
 .ip-sessions { position: relative; flex: none; display: flex; align-items: flex-start; gap: 4px; min-height: 40px; padding: 4px 12px 5px 8px; background: var(--bar); border-bottom: 1px solid var(--border); }
