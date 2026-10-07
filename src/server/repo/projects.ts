@@ -302,40 +302,51 @@ export function updateProject(ctx: Ctx, actor: string, ref: string | number, pat
   return changeProject(ctx, actor, ref, patch).project;
 }
 
+export interface ProjectChange {
+  project: Project;
+  /** The sessions an archive stopped tracking (endProjectSessions); none for any other change. */
+  endedSessions: string[];
+}
+
 /**
  * updateProject, also naming the sessions an archive stopped tracking (endProjectSessions): the scribe's update_project
  * and the window's archive both come through here.
  */
-export function changeProject(ctx: Ctx, actor: string, ref: string | number, patch: UpdateProjectInput): { project: Project; endedSessions: string[] } {
-  return write(ctx, actor, (record) => {
-    const before = resolveProject(ctx, ref);
-    const next = {
-      name: patch.name?.trim() || before.name,
-      description: patch.description ?? before.description,
-      playbook: patch.playbook ?? before.playbook,
-      status: patch.status ?? before.status,
-    };
-    // Before the status change and its event, so the activity strip's newest line is the archive.
-    const endedSessions = before.status === 'active' && next.status === 'archived' ? endProjectSessions(ctx, record, before.id) : [];
-    const ts = ctx.now();
-    ctx.db
-      .prepare('UPDATE projects SET name = ?, description = ?, playbook = ?, status = ?, updated_at = ? WHERE id = ?')
-      .run(next.name, next.description, next.playbook, next.status, ts, before.id);
-    if (patch.name !== undefined || patch.description !== undefined) {
-      ctx.db.prepare('UPDATE nodes SET title = ?, body = ?, updated_at = ? WHERE id = ?').run(next.name, next.description, ts, before.rootNodeId);
-    }
-    const changes: Record<string, { from: unknown; to: unknown }> = {};
-    for (const key of ['name', 'description', 'playbook', 'status'] as const) {
-      if (patch[key] !== undefined && before[key] !== next[key]) changes[key] = { from: before[key], to: next[key] };
-    }
-    // Only a real change is recorded, so a second archive (a double-click) logs nothing more.
-    if (Object.keys(changes).length) record({ projectId: before.id, type: 'project.updated', entity: 'project', entityId: before.id, data: { changes } });
-    if (changes.name || changes.description) {
-      const rootChanges = { ...(changes.name ? { title: changes.name } : {}), ...(changes.description ? { body: changes.description } : {}) };
-      record({ projectId: before.id, type: 'node.updated', entity: 'node', entityId: before.rootNodeId, data: { changes: rootChanges } });
-    }
-    return { project: getProjectById(ctx, before.id)!, endedSessions };
-  });
+export function changeProject(ctx: Ctx, actor: string, ref: string | number, patch: UpdateProjectInput): ProjectChange {
+  return write(ctx, actor, (record) => applyProjectChange(ctx, record, resolveProject(ctx, ref), patch));
+}
+
+/**
+ * changeProject's work on the project `before`, inside a write that is already open. The window's delete of an active
+ * project archives it this way, in the delete's own write, so the archive and the delete land together or not at all.
+ */
+export function applyProjectChange(ctx: Ctx, record: RecordEvent, before: Project, patch: UpdateProjectInput): ProjectChange {
+  const next = {
+    name: patch.name?.trim() || before.name,
+    description: patch.description ?? before.description,
+    playbook: patch.playbook ?? before.playbook,
+    status: patch.status ?? before.status,
+  };
+  // Before the status change and its event, so the activity strip's newest line is the archive.
+  const endedSessions = before.status === 'active' && next.status === 'archived' ? endProjectSessions(ctx, record, before.id) : [];
+  const ts = ctx.now();
+  ctx.db
+    .prepare('UPDATE projects SET name = ?, description = ?, playbook = ?, status = ?, updated_at = ? WHERE id = ?')
+    .run(next.name, next.description, next.playbook, next.status, ts, before.id);
+  if (patch.name !== undefined || patch.description !== undefined) {
+    ctx.db.prepare('UPDATE nodes SET title = ?, body = ?, updated_at = ? WHERE id = ?').run(next.name, next.description, ts, before.rootNodeId);
+  }
+  const changes: Record<string, { from: unknown; to: unknown }> = {};
+  for (const key of ['name', 'description', 'playbook', 'status'] as const) {
+    if (patch[key] !== undefined && before[key] !== next[key]) changes[key] = { from: before[key], to: next[key] };
+  }
+  // Only a real change is recorded, so a second archive (a double-click) logs nothing more.
+  if (Object.keys(changes).length) record({ projectId: before.id, type: 'project.updated', entity: 'project', entityId: before.id, data: { changes } });
+  if (changes.name || changes.description) {
+    const rootChanges = { ...(changes.name ? { title: changes.name } : {}), ...(changes.description ? { body: changes.description } : {}) };
+    record({ projectId: before.id, type: 'node.updated', entity: 'node', entityId: before.rootNodeId, data: { changes: rootChanges } });
+  }
+  return { project: getProjectById(ctx, before.id)!, endedSessions };
 }
 
 /** Whose entries a set_queue write replaces: a session's own order (`queue:`), or the unowned one (`later:`). */

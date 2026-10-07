@@ -144,12 +144,14 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-mi-act:hover, .ip-mi-act:focus { background: var(--panel-2); color: var(--text-2); }
 /* A deleted project's days left, a time, so DM Mono as the activity strip's time is. */
 .ip-mi-left { flex: none; margin-left: auto; padding-right: 4px; font-family: var(--font-mono); font-size: var(--fs-s); line-height: 14px; color: var(--muted); white-space: nowrap; }
-/* Delete's confirm, on the same surface: the question, what it means, then Delete and Cancel. Delete is ink, never
-   red: red marks only a blocked step. */
+/* Delete's confirm, on the same surface: the question, what it means (and, for an active project with live sessions,
+   Archive's line on how many it stops tracking), then Delete and Cancel. Delete is ink, never red: red marks only a
+   blocked step. */
 .ip-confirm { padding: 4px 6px 2px; max-width: 268px; }
 .ip-confirm b { display: block; font-size: var(--fs-m); font-weight: var(--w-heavy); line-height: 18px; color: var(--text); overflow-wrap: anywhere; }
-.ip-confirm p { margin: 4px 0 8px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
-.ip-confirm div { display: flex; justify-content: flex-end; gap: 6px; }
+.ip-confirm p { margin: 4px 0 0; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
+.ip-confirm p + p { margin-top: 2px; }
+.ip-confirm div { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
 .ip-confirm .ip-btn.go { color: var(--text-2); border-color: var(--text); }
 /* The current project's sessions on the left, wrapping onto a second line only when they overflow; the needs-you pill
    and Follow at the right end of the first line. One line is 4 + 30 + 5 px, plus the rule: 40 px. */
