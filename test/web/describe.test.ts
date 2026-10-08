@@ -68,7 +68,7 @@ describe('describeEvent', () => {
     expect(describeEvent(ev('work.updated', '58', { nodeId: 58 }, 'hook:task-updated'), snapshot)).toBe('tasks updated on #58 Run signing tests');
     expect(describeEvent(ev('work.updated', '99', { nodeId: 99 }, 'hook:task-created'), snapshot)).toBe('tasks updated on #99');
     expect(describeEvent(ev('project.updated', '1', { changes: { queue: { from: [58], to: [55, 58] } } }), snapshot)).toBe('Up next changed');
-    expect(describeEvent(ev('project.updated', '1', { changes: { name: { from: 'P', to: 'Q' } } }), snapshot)).toBe('project updated');
+    expect(describeEvent(ev('project.updated', '1', { changes: { description: { from: 'P', to: 'Q' } } }), snapshot)).toBe('project updated');
   });
 
   it('says when a session ended', () => {
@@ -84,6 +84,13 @@ describe('describeEvent', () => {
     expect(describeEvent(ev('project.updated', '1', status('active', 'archived')), snapshot)).toBe('archived the project');
     expect(describeEvent(ev('project.deleted', '1', { slug: 'p', name: 'P', purgeAt: '2026-11-05T12:00:00Z' }, 'window'), snapshot)).toBe('deleted the project');
     expect(describeEvent(ev('project.restored', '1', { slug: 'p', name: 'P' }, 'window'), snapshot)).toBe('restored the project');
+  });
+
+  it('says when the project was renamed, from the window or by the scribe', () => {
+    const renamed = { changes: { name: { from: 'P', to: 'Q' } } };
+    expect(describeEvent(ev('project.updated', '1', renamed, 'window'), snapshot)).toBe('renamed the project');
+    expect(describeEvent(ev('project.updated', '1', renamed), snapshot)).toBe('renamed the project');
+    expect(describeEvent(ev('project.updated', '1', { changes: { ...renamed.changes, description: { from: '', to: 'x' } } }), snapshot)).toBe('renamed the project');
   });
 
   it("labels the window's own writes as you", () => {

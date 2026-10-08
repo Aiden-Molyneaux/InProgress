@@ -59,7 +59,10 @@ export function stepTab(tabs: Pick<ProjectSummary, 'slug'>[], current: string | 
   return tabs[(from + step + tabs.length) % tabs.length].slug;
 }
 
-/** A tab's or a ⋯ row's accessible name: the full name, then what its badges show. */
-export function projectLabel(p: Pick<ProjectSummary, 'name' | 'needsYou' | 'workingSessions'>): string {
-  return [p.name, p.needsYou > 0 && `${p.needsYou} need you`, p.workingSessions > 0 && 'working'].filter(Boolean).join(', ');
+/**
+ * A tab's or a ⋯ row's accessible name: the full name, then what its badges show. Working stands for the dot, which
+ * shows while a session works there or waits on a running worker of its own.
+ */
+export function projectLabel(p: Pick<ProjectSummary, 'name' | 'needsYou' | 'busySessions'>): string {
+  return [p.name, p.needsYou > 0 && `${p.needsYou} need you`, p.busySessions > 0 && 'working'].filter(Boolean).join(', ');
 }

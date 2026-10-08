@@ -1146,7 +1146,7 @@ test('a right-click on a tab opens its menu under it without switching, and Arch
   const menu = tabMenu(page, shelfName);
   const items = menu.getByRole('menuitem');
   await expect(menu).toBeVisible();
-  await expect(items).toHaveText(['Archive', 'Delete…']);
+  await expect(items).toHaveText(['Archive', 'Rename…', 'Delete…']);
   await expect(items.first()).toHaveAccessibleName('Archive');
   await expect(items.first()).toBeFocused();
   // The tab says whose menu it is, and is not opened by it.
@@ -1434,8 +1434,8 @@ test('deleting the open project from its tab opens the tab before it, and a link
   await endTab.focus();
   await page.keyboard.press('Shift+F10');
   const menu = tabMenu(page, endName);
-  await expect(menu.getByRole('menuitem')).toHaveText(['Unarchive', 'Delete…']);
-  await page.keyboard.press('ArrowDown');
+  await expect(menu.getByRole('menuitem')).toHaveText(['Unarchive', 'Rename…', 'Delete…']);
+  await page.keyboard.press('End');
   await expect(menu.getByRole('menuitem', { name: 'Delete…' })).toBeFocused();
   await page.keyboard.press('Enter');
   const confirm = page.getByRole('dialog', { name: `Delete ${endName}?` });
@@ -1524,11 +1524,12 @@ test("an active tab's Delete… says how many sessions it stops tracking, and de
   await busyTab.click({ button: 'right' });
   const menu = tabMenu(page, busyName);
   const items = menu.getByRole('menuitem');
-  await expect(items).toHaveCount(2);
+  await expect(items).toHaveCount(3);
   await expect(items.nth(0)).toHaveAccessibleName('Archive');
   await expect(items.nth(0)).toHaveAccessibleDescription('Stops tracking 1 session');
-  await expect(items.nth(1)).toHaveAccessibleName('Delete…');
-  await items.nth(1).click();
+  await expect(items.nth(1)).toHaveAccessibleName('Rename…');
+  await expect(items.nth(2)).toHaveAccessibleName('Delete…');
+  await items.nth(2).click();
   // The confirm Delete always asks, with Archive's line under it.
   const confirm = page.getByRole('dialog', { name: `Delete ${busyName}?` });
   const go = confirm.getByRole('button', { name: 'Delete', exact: true });
@@ -1541,7 +1542,7 @@ test("an active tab's Delete… says how many sessions it stops tracking, and de
   // Escape goes back to the menu, on Delete….
   await page.keyboard.press('Escape');
   await expect(confirm).toBeHidden();
-  await expect(items.nth(1)).toBeFocused();
+  await expect(items.nth(2)).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(go).toBeFocused();
   await page.keyboard.press('Enter');
@@ -1570,8 +1571,8 @@ test('deleting the open active project from its tab opens the tab beside it with
   await middle.focus();
   await page.keyboard.press('Shift+F10');
   const menu = tabMenu(page, names[1]);
-  await expect(menu.getByRole('menuitem')).toHaveText(['Archive', 'Delete…']);
-  await page.keyboard.press('ArrowDown');
+  await expect(menu.getByRole('menuitem')).toHaveText(['Archive', 'Rename…', 'Delete…']);
+  await page.keyboard.press('End');
   await expect(menu.getByRole('menuitem', { name: 'Delete…', exact: true })).toBeFocused();
   await page.keyboard.press('Enter');
   const confirm = page.getByRole('dialog', { name: `Delete ${names[1]}?` });
@@ -1590,7 +1591,7 @@ test('deleting the open active project from its tab opens the tab beside it with
   // The newest project has the last tab, so deleting it opens the one to its left.
   await expect(page.getByRole('tab').last()).toHaveAttribute('aria-selected', 'true');
   await page.keyboard.press('Shift+F10');
-  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('End');
   await page.keyboard.press('Enter');
   await page.keyboard.press('Enter');
   await expect(tabFor(page, names[2])).toHaveCount(0);
@@ -1610,6 +1611,125 @@ test('deleting the open active project from its tab opens the tab beside it with
   await expect(middle).toBeVisible();
   const titles = await tabTitles(page);
   expect(titles.indexOf(names[1])).toBe(titles.indexOf(names[0]) + 1);
+});
+
+/** A write as the window makes it: from the page, with its UI token and a JSON body. Answers the status and the body. */
+const windowPost = (page: Page, path: string, body: unknown) =>
+  page.evaluate<{ status: number; body: unknown }>(`(async () => {
+    const token = document.querySelector('meta[name="ip-ui-token"]').content;
+    const headers = { 'content-type': 'application/json', 'x-ip-ui-token': token };
+    const res = await fetch(${JSON.stringify(path)}, { method: 'POST', headers, body: ${JSON.stringify(JSON.stringify(body))} });
+    return { status: res.status, body: await res.json() };
+  })()`);
+
+/** A project as /api/projects lists it, by id. */
+async function listedById(api: APIRequestContext, id: number): Promise<{ slug: string; name: string } | undefined> {
+  return ((await (await api.get('/api/projects')).json()) as { id: number; slug: string; name: string }[]).find((p) => p.id === id);
+}
+
+test('Rename… turns a tab menu into a field: Escape and leaving cancel, Enter saves, and the slug and link stay', async ({ page, api, consoleErrors }) => {
+  // The stale write at the end answers 409 on purpose.
+  consoleErrors.allow(/status of 409/);
+  const oldName = unique('Rename old');
+  const newName = unique('Rename new');
+  const made = await bare(api, oldName);
+  await page.goto(`/#/p/${made.slug}`);
+  const tab = tabFor(page, oldName);
+  await expect(tab).toHaveAttribute('aria-selected', 'true');
+  await expect(page).toHaveTitle(`InProgress · ${oldName}`);
+  await tab.focus();
+  await page.keyboard.press('Shift+F10');
+  const menu = tabMenu(page, oldName);
+  const item = menu.getByRole('menuitem', { name: 'Rename…', exact: true });
+  await page.keyboard.press('ArrowDown');
+  await expect(item).toBeFocused();
+  await page.keyboard.press('Enter');
+  // The menu becomes the field, named for the project, holding its name, all of it selected so typing replaces it.
+  const field = page.getByRole('textbox', { name: `Rename ${oldName}`, exact: true });
+  await expect(field).toBeFocused();
+  await expect(field).toHaveValue(oldName);
+  expect(await field.evaluate((el: { selectionStart: number | null; selectionEnd: number | null }) => [el.selectionStart, el.selectionEnd])).toEqual([0, oldName.length]);
+  await expect(page.locator('.ip-tab-menu')).toBeVisible();
+  await expect(page.locator('.ip-tab-menu')).not.toHaveAttribute('role', /./);
+  // Quiet's look: an M line in ink on the panel, inside a hairline.
+  await expect(field).toHaveCSS('font-size', '12.5px');
+  await expect(field).toHaveCSS('color', await tokenColour(page, '--text'));
+  await expect(field).toHaveCSS('border-top-color', await tokenColour(page, '--border'));
+  // Every key typed there stays there: ] 1 f n would switch tabs or move the camera, Home and End would leave the field.
+  await page.keyboard.type('x]1fn');
+  await page.keyboard.press('Home');
+  await page.keyboard.type('y');
+  await expect(field).toHaveValue('yx]1fn');
+  await expect(page).toHaveURL(hereIs(made.slug));
+  // Escape goes back to the menu, on Rename…, and saves nothing.
+  await page.keyboard.press('Escape');
+  await expect(field).toBeHidden();
+  await expect(item).toBeFocused();
+  // Leaving the field cancels too: Tab closes the menu, and nothing is saved.
+  await page.keyboard.press('Enter');
+  await expect(field).toHaveValue(oldName);
+  await page.keyboard.type('Left behind');
+  await page.keyboard.press('Tab');
+  await expect(page.locator('.ip-tab-menu')).toBeHidden();
+  expect((await listedById(api, made.id))?.name).toBe(oldName);
+  // An empty name does nothing: the field stays, and so does the name.
+  await tab.click({ button: 'right' });
+  await item.click();
+  await field.fill('   ');
+  await page.keyboard.press('Enter');
+  await expect(field).toBeFocused();
+  expect((await listedById(api, made.id))?.name).toBe(oldName);
+  // Enter saves the new name, trimmed: the tab, the window title, the root step and the activity strip show it at once.
+  await field.fill(`  ${newName}  `);
+  await page.keyboard.press('Enter');
+  await expect(field).toBeHidden();
+  const renamed = tabFor(page, newName);
+  await expect(renamed).toHaveAttribute('aria-selected', 'true');
+  await expect(renamed).toHaveAttribute('title', newName);
+  await expect(renamed).toBeFocused();
+  await expect(tabFor(page, oldName)).toHaveCount(0);
+  await expect(page).toHaveTitle(`InProgress · ${newName}`);
+  await expect(statusLine(page)).toHaveText(`Renamed to ${newName}.`);
+  await expect(page.locator('.ip-node.root')).toContainText(newName);
+  await expect(page.locator('.ip-act-who')).toHaveText('you');
+  await expect(page.locator('.ip-act-what')).toHaveText('renamed the project');
+  // Display only: the slug, so the URL and every link, stays.
+  await expect(page).toHaveURL(hereIs(made.slug));
+  expect(await listedById(api, made.id)).toMatchObject({ slug: made.slug, name: newName });
+  await page.reload();
+  await expect(tabFor(page, newName)).toHaveAttribute('aria-selected', 'true');
+  await expect(page).toHaveURL(hereIs(made.slug));
+  // A window that holds a stale slug for this id is refused, and the name stays.
+  const stale = await windowPost(page, `/api/ui/projects/${made.id}/rename`, { slug: `${made.slug}-old`, name: 'Stale rename' });
+  expect(stale).toEqual({ status: 409, body: { error: 'This project changed; reload', hint: 'Reload the window: another project has this id now.' } });
+  expect((await listedById(api, made.id))?.name).toBe(newName);
+});
+
+test('the open archived project can be renamed from its tab, and ⋯ shows the new name', async ({ page, api }) => {
+  const keptName = unique('Rename kept');
+  const oldName = unique('Rename shelved');
+  const newName = unique('Rename shelf');
+  await bare(api, keptName);
+  const shelved = await bare(api, oldName);
+  await archiveByScribe(api, shelved.slug);
+  await page.goto(`/#/p/${shelved.slug}`);
+  const tab = tabFor(page, oldName);
+  await expect(tab).toHaveAccessibleName(`${oldName}, archived`);
+  await tab.click({ button: 'right' });
+  const menu = tabMenu(page, oldName);
+  await expect(menu.getByRole('menuitem')).toHaveText(['Unarchive', 'Rename…', 'Delete…']);
+  await menu.getByRole('menuitem', { name: 'Rename…', exact: true }).click();
+  await page.getByRole('textbox', { name: `Rename ${oldName}`, exact: true }).fill(newName);
+  await page.keyboard.press('Enter');
+  await expect(tabFor(page, newName)).toHaveAccessibleName(`${newName}, archived`);
+  await expect(page).toHaveTitle(`InProgress · ${newName}`);
+  await expect(statusLine(page)).toHaveText(`Renamed to ${newName}.`);
+  await moreButton(page).click();
+  const archived = moreMenu(page).getByRole('group', { name: 'Archived', exact: true });
+  await expect(archived.getByRole('menuitem', { name: newName, exact: true })).toBeVisible();
+  await expect(archived.getByRole('menuitem', { name: `Unarchive ${newName}`, exact: true })).toBeVisible();
+  await expect(archived.getByRole('menuitem', { name: oldName, exact: true })).toHaveCount(0);
+  expect(await listedById(api, shelved.id)).toMatchObject({ slug: shelved.slug, name: newName });
 });
 
 test("a scribe's archive of the open project keeps it open as the end tab, and its sessions and Up next go", async ({ page, api, fresh }) => {
@@ -1803,6 +1923,34 @@ const setQueue = (api: APIRequestContext, s: Seeded, nodes: number[], session?: 
   write(api, s.session, 'post', `/api/projects/${s.slug}/queue`, { nodes, ...(session ? { session } : {}) });
 
 const boxOf = async (l: Locator) => (await l.boundingBox())!;
+
+test("a tab's dot also shows while an idle session has a running worker, but not for a reader alone", async ({ page, api }) => {
+  const name = unique('Dot worker');
+  const s = await seed(api, name);
+  await open(page, s);
+  const tab = tabFor(page, name);
+  const dot = tab.locator('.ip-tab-dot');
+  const counts = async () => {
+    const p = ((await (await api.get('/api/projects')).json()) as { slug: string; workingSessions: number; busySessions: number }[]).find((x) => x.slug === s.slug);
+    return { workingSessions: p?.workingSessions, busySessions: p?.busySessions };
+  };
+  await expect(dot).toHaveCount(1);
+  // A reader starts, then the session stops: idle, with only a reader running, so no dot.
+  await subagent(api, s, 'reader-1', 'Look around the repo', 'haiku', { agentType: 'Explore' });
+  await hook(api, s.session, { event: 'stop' });
+  await expect(dot).toHaveCount(0);
+  await expect(tab).toHaveAccessibleName(`${name}, 1 need you`);
+  expect(await counts()).toEqual({ workingSessions: 0, busySessions: 0 });
+  // A worker running on while the session is idle lights it, and the tab says so.
+  await subagent(api, s, 'worker-1', 'Wire up RevenueCat', 'sonnet');
+  await expect(dot).toHaveCount(1);
+  await expect(tab).toHaveAccessibleName(`${name}, 1 need you, working`);
+  expect(await counts()).toEqual({ workingSessions: 0, busySessions: 1 });
+  // Once the worker stops, the dot goes.
+  await hook(api, s.session, { event: 'subagent-stop', agentId: 'worker-1' });
+  await expect(dot).toHaveCount(0);
+  await expect(tab).toHaveAccessibleName(`${name}, 1 need you`);
+});
 
 /** A running subagent's time: under a minute, or whole minutes. */
 const RUNNING = '(<1 min|\\d+ min)';
