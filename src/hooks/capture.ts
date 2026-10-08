@@ -56,9 +56,9 @@ export function captureEnabled(env: NodeJS.ProcessEnv = process.env, home: strin
   return !existsSync(join(captureDir(home), 'off'));
 }
 
-/** Stop and UserPromptSubmit always; PostToolUse only for the tools the design reads. */
+/** Stop, SubagentStop (both carry background_tasks) and UserPromptSubmit always; PostToolUse only for the tools the design reads. */
 export function shouldCapture(name: HookName, input: HookStdin): boolean {
-  if (name === 'stop' || name === 'prompt-submit') return true;
+  if (name === 'stop' || name === 'subagent-stop' || name === 'prompt-submit') return true;
   return name === 'post-tool' && typeof input.tool_name === 'string' && CAPTURED_TOOLS.has(input.tool_name);
 }
 

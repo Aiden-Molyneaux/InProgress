@@ -35,11 +35,11 @@ const bashBackgrounded = {
 };
 
 describe('shouldCapture', () => {
-  it('takes Stop, UserPromptSubmit, and PostToolUse on the five tools the design reads', () => {
+  it('takes Stop, SubagentStop, UserPromptSubmit, and PostToolUse on the five tools the design reads', () => {
     for (const tool of ['Bash', 'PowerShell', 'Monitor', 'SendMessage', 'TaskStop']) expect(shouldCapture('post-tool', { tool_name: tool }), tool).toBe(true);
     for (const tool of ['Agent', 'Task', 'TaskCreate', 'Read', 'BashOutput', undefined]) expect(shouldCapture('post-tool', { tool_name: tool }), String(tool)).toBe(false);
     expect(shouldCapture('pre-tool', { tool_name: 'Bash' })).toBe(false);
-    expect(HOOK_NAMES.filter((n) => n !== 'post-tool' && shouldCapture(n, {}))).toEqual(['prompt-submit', 'stop']);
+    expect(HOOK_NAMES.filter((n) => n !== 'post-tool' && shouldCapture(n, {}))).toEqual(['prompt-submit', 'stop', 'subagent-stop']);
   });
 });
 
@@ -144,6 +144,26 @@ describe('captureHookInput', () => {
     expect(written.map((l) => l.hook)).toEqual(['post-tool', 'stop']);
     expect(written[0]).toEqual({ ts: noon.toISOString(), hook: 'post-tool', input: redactInput('post-tool', bashBackgrounded) });
     expect(written[1].input).toEqual({ session_id: 's1', background_tasks: [] });
+  });
+
+  it("captures a SubagentStop with its background_tasks, the subagent's last message cut to 80", () => {
+    const home = tempHome();
+    const input = {
+      session_id: 's1',
+      hook_event_name: 'SubagentStop',
+      agent_id: 'a373c032d6014db3e',
+      agent_type: 'general-purpose',
+      agent_transcript_path: 'C:/Users/me/.claude/projects/x/s1/subagents/agent-a373c032d6014db3e.jsonl',
+      stop_hook_active: false,
+      last_assistant_message: 'r'.repeat(400),
+      background_tasks: [{ id: 'b2ngazqom', type: 'shell', status: 'running', description: 'Run the e2e suite', command: `npm run test:e2e ${'y'.repeat(200)}` }],
+    };
+    expect(captureHookInput('subagent-stop', input, { home, env: on, now: noon })).toBe(true);
+    const [line] = lines(home);
+    expect(line.hook).toBe('subagent-stop');
+    expect(line.input).toMatchObject({ agent_id: 'a373c032d6014db3e', agent_type: 'general-purpose', stop_hook_active: false });
+    expect(line.input.last_assistant_message).toBe(`${'r'.repeat(COMMAND_KEEP)}…[400 chars]`);
+    expect(line.input.background_tasks).toEqual([{ ...input.background_tasks[0], command: `${input.background_tasks[0].command.slice(0, COMMAND_KEEP)}…[${input.background_tasks[0].command.length} chars]` }]);
   });
 
   it('writes nothing when turned off', () => {
