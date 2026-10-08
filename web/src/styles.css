@@ -119,6 +119,12 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-archive { position: relative; flex: none; margin-left: auto; display: flex; align-items: center; padding-left: 6px; }
 .ip-archive-btn { display: flex; align-items: center; justify-content: center; width: 30px; height: 26px; border-radius: var(--radius); color: var(--muted); font-size: var(--fs-l); font-weight: var(--w-heavy); line-height: 20px; }
 .ip-archive-btn:hover, .ip-archive-btn[aria-expanded='true'] { background: var(--panel-2); color: var(--text); }
+/* Go to: a magnifier at the bar's right end, ⋯'s size and ink. It takes the free space before it when ⋯ is not there. */
+.ip-goto { position: relative; flex: none; margin-left: auto; display: flex; align-items: center; padding-left: 2px; }
+.ip-archive ~ .ip-goto { margin-left: 0; }
+.ip-goto-btn { display: flex; align-items: center; justify-content: center; width: 30px; height: 26px; border-radius: var(--radius); color: var(--muted); }
+.ip-goto-btn:hover, .ip-goto-btn[aria-expanded='true'] { background: var(--panel-2); color: var(--text); }
+.ip-goto-btn:focus-visible { outline: 2px solid var(--text-2); outline-offset: 1px; }
 /* The ⋯ menu floats over the canvas as the crumb and the zoom buttons do: a hairline, no shadow. Its "Archived" head
    takes the section-head look of .ip-label (Details region). */
 .ip-menu { position: absolute; top: calc(100% + 4px); right: 0; width: 280px; max-width: calc(100vw - 20px); max-height: calc(100vh - 60px); overflow-y: auto; padding: 6px; background: var(--float); border: 1px solid var(--border); border-radius: var(--radius); z-index: 20; }
@@ -157,6 +163,21 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
    items' focus-visible draws, since focus is always in it. */
 .ip-rename { display: block; width: min(240px, calc(100vw - 30px)); padding: 6px 8px; font: inherit; font-size: var(--fs-m); line-height: 18px; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); }
 .ip-rename:focus { outline: 2px solid var(--text-2); outline-offset: 1px; }
+/* The Go to field on ⋯'s surface: the rename field's look, then the steps as rows, M in ink with the project S and
+   muted at the right, and a muted M line when there is nothing to list. The option Up and Down reach shows as a
+   hovered row does, since focus stays in the field. */
+.ip-menu.ip-goto-menu { width: 360px; }
+.ip-goto-field { display: block; width: 100%; padding: 6px 8px; font: inherit; font-size: var(--fs-m); line-height: 18px; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); }
+.ip-goto-field:focus { outline: 2px solid var(--text-2); outline-offset: 1px; }
+.ip-goto-field::placeholder { color: var(--faint); }
+.ip-goto-list { margin-top: 4px; }
+.ip-goto-hit { cursor: pointer; color: var(--text-2); }
+.ip-goto-hit .nm { flex: 1; }
+.ip-goto-hit[aria-selected='true'] { background: var(--panel-2); }
+.ip-goto-hit.finished .nm { color: var(--muted); }
+.ip-goto-proj { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
+.ip-goto-proj.archived { font-style: italic; }
+.ip-goto-note:not(:empty) { padding: 7px 8px 3px; font-size: var(--fs-m); line-height: 18px; color: var(--muted); }
 /* The current project's sessions on the left, wrapping onto a second line only when they overflow; the needs-you pill
    and Follow at the right end of the first line. One line is 4 + 30 + 5 px, plus the rule: 40 px. */
 .ip-sessions { position: relative; flex: none; display: flex; align-items: flex-start; gap: 4px; min-height: 40px; padding: 4px 12px 5px 8px; background: var(--bar); border-bottom: 1px solid var(--border); }

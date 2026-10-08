@@ -1,4 +1,5 @@
 import type { BuildInfo } from '../../src/core/build';
+import type { StepHit } from '../../src/core/goto';
 import type { DeletedProject, NodeDetail, Project, ProjectSnapshot, ProjectSummary, Resource } from '../../src/core/types';
 import type { ActionTarget, ProjectAction } from './projectActions';
 
@@ -21,6 +22,8 @@ export const api = {
   project: (slug: string) => getJson<ProjectSnapshot>(`/api/projects/${encodeURIComponent(slug)}`),
   node: (id: number) => getJson<NodeDetail>(`/api/nodes/${id}`),
   resource: (id: number) => getJson<Resource>(`/api/resources/${id}`),
+  /** The Go to field: the step an id names, or the steps whose titles hold the words, across projects. */
+  find: (q: string) => getJson<StepHit[]>(`/api/find?q=${encodeURIComponent(q)}`),
   openResource: (id: number) => postUi('/api/ui/open', { resourceId: id }),
   /** Opens an http(s) link in the default browser: from the Edge app window a plain link would open in Edge. */
   openUrl: (url: string) => postUi('/api/ui/open-url', { url }),

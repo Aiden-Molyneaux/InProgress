@@ -2818,3 +2818,208 @@ test.describe('Live work', () => {
     await expect(eyes).toHaveCSS('animation-name', 'none');
   });
 });
+
+test.describe('Go to', () => {
+  const field = (page: Page) => page.getByRole('combobox', { name: 'Go to a step' });
+  const goToButton = (page: Page) => page.getByRole('button', { name: 'Go to a step' });
+  const options = (page: Page) => page.getByRole('listbox', { name: 'Steps' }).getByRole('option');
+  const followButton = (page: Page) => page.getByRole('button', { name: /Follow/ });
+
+  /** A project of its own with `nodes` under its root. Answers its slug and its top steps' ids by title. */
+  async function project(api: APIRequestContext, name: string, nodes: unknown[]): Promise<{ slug: string; ids: Record<string, number> }> {
+    const session = `e2e-${randomUUID()}`;
+    const p = await write<{ slug: string; rootNodeId: number }>(api, session, 'post', '/api/projects', { name });
+    const created = await write<{ id: number; title: string }[]>(api, session, 'post', '/api/nodes', { parentId: p.rootNodeId, nodes });
+    return { slug: p.slug, ids: Object.fromEntries(created.map((n) => [n.title, n.id])) };
+  }
+
+  /** Passes once the card's header sits in the middle of the canvas, top to bottom. */
+  async function expectCentred(page: Page, card: Locator): Promise<void> {
+    await expect(async () => {
+      const canvas = (await page.locator('.react-flow').boundingBox())!;
+      const box = (await card.boundingBox())!;
+      expect(Math.abs(box.y + 16 - (canvas.y + canvas.height / 2))).toBeLessThanOrEqual(3);
+    }).toPass({ timeout: 3000 });
+  }
+
+  test('/ and Ctrl+K open it, Escape closes it back to the opener, Tab closes it, and the app keys wait while typing', async ({ page, api, demo }) => {
+    // Somewhere else for ] and 1 to go.
+    await bare(api, unique('Go to keys'));
+    await widen(page);
+    await open(page, demo);
+    const here = hereIs(demo.slug);
+    const tab = page.getByRole('tab', { selected: true });
+    await tab.focus();
+    await page.keyboard.press('/');
+    await expect(field(page)).toBeFocused();
+    await expect(goToButton(page)).toHaveAttribute('aria-expanded', 'true');
+    // ] 1 f n and Home would act under the field.
+    await page.keyboard.type(']1fn');
+    await page.keyboard.press('Home');
+    await expect(field(page)).toHaveValue(']1fn');
+    await expect(page).toHaveURL(here);
+    await expect(followButton(page)).toHaveAttribute('aria-pressed', 'true');
+    await page.keyboard.press('Escape');
+    await expect(field(page)).toBeHidden();
+    await expect(tab).toBeFocused();
+    // Ctrl+K opens it empty, and Escape still only closes it: Details stays open.
+    await page.locator('.ip-node', { hasText: 'Play app signing' }).click();
+    const details = page.getByRole('complementary');
+    await expect(details).toBeVisible();
+    await tab.focus();
+    await page.keyboard.press('Control+k');
+    await expect(field(page)).toBeFocused();
+    await expect(field(page)).toHaveValue('');
+    await page.keyboard.press('Escape');
+    await expect(field(page)).toBeHidden();
+    await expect(tab).toBeFocused();
+    await expect(details).toBeVisible();
+    // The button opens it too, and Escape gives focus back to the button. Tab leaves and closes it.
+    await goToButton(page).click();
+    await expect(field(page)).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(goToButton(page)).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(field(page)).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(field(page)).toBeHidden();
+    // Neither opens it from a text field.
+    await page.evaluate(`document.body.append(Object.assign(document.createElement('input'), { id: 'typing' }))`);
+    await page.locator('#typing').focus();
+    await page.keyboard.press('/');
+    await page.keyboard.press('Control+k');
+    await expect(page.locator('#typing')).toHaveValue('/');
+    await expect(field(page)).toBeHidden();
+  });
+
+  test("wears the menus' surface, under the bar at its right end", async ({ page, demo }) => {
+    await open(page, demo);
+    const button = (await goToButton(page).boundingBox())!;
+    const bar = (await page.locator('.ip-topbar').boundingBox())!;
+    expect(bar.x + bar.width - (button.x + button.width), 'at the right end').toBeLessThanOrEqual(8);
+    await goToButton(page).click();
+    const panel = page.locator('.ip-goto-menu');
+    await expect(panel).toHaveCSS('background-color', await tokenColour(page, '--float'));
+    await expect(panel).toHaveCSS('border-top-width', '1px');
+    await expect(panel).toHaveCSS('border-top-color', await tokenColour(page, '--border'));
+    await expect(panel).toHaveCSS('border-radius', '8px');
+    await expect(panel).toHaveCSS('box-shadow', 'none');
+    await expect(field(page)).toHaveCSS('font-size', '12.5px');
+    const box = (await panel.boundingBox())!;
+    expect(box.y).toBeGreaterThanOrEqual(bar.y + bar.height);
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(520);
+  });
+
+  test('an id in another project opens it, unfolds the folded step above it, centres it, flashes it and opens Details', async ({ page, api, fresh }) => {
+    const far = await project(api, unique('Go to elsewhere'), [
+      { title: 'Shipped', status: 'done', children: [{ title: 'Old release notes', status: 'done' }] },
+      ...Array.from({ length: 30 }, (_, i) => ({ title: `Filler ${i + 1}`, status: 'done' as const })),
+      { title: 'Now', status: 'active' },
+    ]);
+    // A child, so not in `ids`: the search finds it.
+    const found = (await (await api.get(`/api/find?q=${encodeURIComponent('Old release notes')}`)).json()) as { id: number; projectSlug: string }[];
+    const notes = found.find((h) => h.projectSlug === far.slug)!.id;
+    await widen(page);
+    await open(page, fresh);
+    await expect(page.locator('.ip-node', { hasText: 'Play app signing' })).toBeInViewport();
+    await page.keyboard.press('/');
+    await page.keyboard.type(` #${notes} `);
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(hereIs(far.slug));
+    await expect(field(page)).toBeHidden();
+    const card = page.locator('.ip-node', { hasText: 'Old release notes' });
+    await expect(card).toBeVisible();
+    await expect(card).toHaveClass(/\bflash\b/);
+    await expect(page.getByRole('complementary')).toContainText(`#${notes} Old release notes`);
+    await expectCentred(page, card);
+    // The unfold is the window's own fold override, so it stays unfolded.
+    await page.reload();
+    await expect(page.locator('.ip-node', { hasText: 'Old release notes' })).toBeAttached();
+  });
+
+  test('a step in a "+n more" run of the open project shows, and Follow turns off', async ({ page, demo }) => {
+    await widen(page);
+    await open(page, demo);
+    await expect(page.locator('.ip-more', { hasText: '+3 more' })).toBeVisible();
+    await expect(followButton(page)).toHaveAttribute('aria-pressed', 'true');
+    await page.keyboard.press('Control+k');
+    await page.keyboard.type(`${demo.ids['7 Launch']}`);
+    await expect(options(page)).toHaveAccessibleName(`#${demo.ids['7 Launch']} 7 Launch, E2E Demo`);
+    await page.keyboard.press('Enter');
+    const card = page.locator('.ip-node', { hasText: '7 Launch' });
+    await expect(card).toHaveClass(/\bflash\b/);
+    await expect(page.locator('.ip-more', { hasText: '+3 more' })).toBeHidden();
+    await expectCentred(page, card);
+    await expect(followButton(page)).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  test('an unknown or deleted id says there is no such step, and the field stays open', async ({ page, api, demo }) => {
+    const gone = await project(api, unique('Go to gone'), [{ title: 'Soon deleted' }, { title: 'Kept' }]);
+    const deleted = gone.ids['Soon deleted'];
+    await write(api, `e2e-${randomUUID()}`, 'delete', `/api/nodes/${deleted}`);
+    await open(page, demo);
+    await expect(page.getByRole('tab', { selected: true })).toBeVisible();
+    await page.keyboard.press('/');
+    await page.keyboard.type('#99999999');
+    await page.keyboard.press('Enter');
+    const panel = page.locator('.ip-goto-menu');
+    await expect(panel).toContainText('No step #99999999');
+    await expect(panel.locator('.ip-goto-note')).toHaveCSS('color', await tokenColour(page, '--muted'));
+    await expect(field(page)).toBeFocused();
+    await expect(page).toHaveURL(hereIs(demo.slug));
+    // A deleted step says the same; typing on clears the line.
+    await field(page).fill(`${deleted}`);
+    await page.keyboard.press('Enter');
+    await expect(panel).toContainText(`No step #${deleted}`);
+    await page.keyboard.type('1');
+    await expect(panel).not.toContainText('No step');
+    await expect(page).toHaveURL(hereIs(demo.slug));
+  });
+
+  test('words list matching steps across projects as they are typed; the arrows move, Enter jumps, and more words narrow the list', async ({ page, api }) => {
+    const word = `Quokka${randomUUID().slice(0, 6)}`;
+    const homeName = unique('Go to home');
+    const awayName = unique('Go to away');
+    const homeTitle = `${word} home step`;
+    const awayTitle = `Tidy the ${word} away step`;
+    // The most recently changed step lists first: home's, made last.
+    const away = await project(api, awayName, [{ title: awayTitle }, { title: 'Unrelated' }]);
+    const home = await project(api, homeName, [{ title: homeTitle, status: 'active' }]);
+    await widen(page);
+    await page.goto(`/#/p/${home.slug}`);
+    await expect(tabFor(page, homeName)).toHaveAttribute('aria-selected', 'true');
+    await goToButton(page).click();
+    await page.keyboard.type(`${word.toLowerCase()} step`);
+    await expect(options(page)).toHaveCount(2);
+    await expect(options(page).nth(0)).toHaveAccessibleName(`#${home.ids[homeTitle]} ${homeTitle}, ${homeName}`);
+    await expect(options(page).nth(1)).toHaveAccessibleName(`#${away.ids[awayTitle]} ${awayTitle}, ${awayName}`);
+    await expect(options(page).nth(1).locator('.ip-goto-proj')).toHaveText(awayName);
+    await expect(options(page).nth(0)).toHaveAttribute('aria-selected', 'true');
+    await page.keyboard.press('ArrowDown');
+    await expect(options(page).nth(1)).toHaveAttribute('aria-selected', 'true');
+    await expect(field(page)).toHaveAttribute('aria-activedescendant', (await options(page).nth(1).getAttribute('id'))!);
+    await page.keyboard.press('ArrowDown');
+    await expect(options(page).nth(0)).toHaveAttribute('aria-selected', 'true');
+    await page.keyboard.press('ArrowUp');
+    await expect(options(page).nth(1)).toHaveAttribute('aria-selected', 'true');
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(hereIs(away.slug));
+    await expect(page.locator('.ip-node', { hasText: awayTitle })).toHaveClass(/\bflash\b/);
+    await expect(page.getByRole('complementary')).toContainText(`#${away.ids[awayTitle]} ${awayTitle}`);
+    // Focus went back to the button that opened it. More words narrow the list; none matching says so.
+    await expect(goToButton(page)).toBeFocused();
+    await page.keyboard.press('Enter');
+    await page.keyboard.type(`${word} home`);
+    await expect(options(page)).toHaveCount(1);
+    await page.keyboard.type(' nowhere');
+    await expect(page.locator('.ip-goto-menu')).toContainText('No step titles match');
+    await expect(options(page)).toHaveCount(0);
+    // A click picks too.
+    await field(page).fill(word);
+    await expect(options(page)).toHaveCount(2);
+    await options(page).nth(0).click();
+    await expect(page).toHaveURL(hereIs(home.slug));
+    await expect(page.getByRole('complementary')).toContainText(`#${home.ids[homeTitle]} ${homeTitle}`);
+  });
+});

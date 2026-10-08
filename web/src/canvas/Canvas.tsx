@@ -11,9 +11,10 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from 'react';
 import { Controls, ReactFlow, useReactFlow, type Edge, type Node, type NodeChange, type Viewport } from '@xyflow/react';
-import { layoutOutline, type LayoutItem } from '../../../src/core/layout';
-import { buildIndex, needsYouAge, type FoldOverrides } from '../../../src/core/tree';
+import { layoutOutline, type LayoutInput, type LayoutItem } from '../../../src/core/layout';
+import { ancestors, buildIndex, needsYouAge, type FoldOverrides } from '../../../src/core/tree';
 import { sessionDisplayTitle, sessionTag, type EventRow, type ProjectSnapshot } from '../../../src/core/types';
+import { revealKeys } from '../folds';
 import { taskFamily, taskOwner, waitsFor, withTag } from '../live';
 import { relativeTime } from '../time';
 import { useNow } from '../useNow';
@@ -46,6 +47,12 @@ export interface CanvasHandle {
   nextNeedsYou: () => void;
   goRoot: () => void;
   goFrontier: () => void;
+  /**
+   * The Go to field's jump: opens whatever folds hide the step (its folded ancestors, and a "+n more" or "✓ n done" run
+   * on the way down), then centres on it and flashes it. Waits for the canvas's first paint when it is new. False when
+   * the step is not in this snapshot.
+   */
+  goTo: (id: number) => boolean;
 }
 
 export interface CanvasProps {
@@ -64,21 +71,21 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
   const { snapshot, overrides, onToggleFold, onOpenResource, onSelectNode, selectedNode } = props;
   const rf = useReactFlow();
   const now = useNow(CLOCK_MS);
-  const layout = useMemo(
-    () =>
-      layoutOutline({
-        nodes: snapshot.nodes,
-        resources: snapshot.resources,
-        sessions: snapshot.sessions,
-        workItems: snapshot.workItems,
-        trailAgents: snapshot.trailAgents,
-        pastSessions: snapshot.pastSessions,
-        queue: snapshot.project.queue,
-        overrides,
-        now,
-      }),
-    [snapshot, overrides, now],
+  /** Everything layout reads but the folds. */
+  const layoutInput = useMemo<LayoutInput>(
+    () => ({
+      nodes: snapshot.nodes,
+      resources: snapshot.resources,
+      sessions: snapshot.sessions,
+      workItems: snapshot.workItems,
+      trailAgents: snapshot.trailAgents,
+      pastSessions: snapshot.pastSessions,
+      queue: snapshot.project.queue,
+      now,
+    }),
+    [snapshot, now],
   );
+  const layout = useMemo(() => layoutOutline({ ...layoutInput, overrides }), [layoutInput, overrides]);
   const index = useMemo(() => buildIndex(snapshot.nodes), [snapshot.nodes]);
   const [flash, setFlash] = useState<number | null>(null);
   const [crumb, setCrumb] = useState<string[]>([]);
@@ -88,6 +95,12 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
   const flashFrame = useRef(0);
   const initFrame = useRef(0);
   const focusFrame = useRef(0);
+  /** Set once the first paint has its fonts: a Go to jump waits for it, so it never moves a canvas not yet measured. */
+  const [ready, setReady] = useState(false);
+  /** A Go to jump whose folds have opened, waiting for the layout that shows them (and, on a new canvas, for ready). */
+  const [going, setGoing] = useState<{ id: number } | null>(null);
+  const goingRef = useRef(going);
+  goingRef.current = going;
 
   // React Flow 12.12 keeps a node hidden until the node object passed in carries a size, and the nodes below are new
   // objects on every snapshot, flash, selection and clock tick. A new object without a `measured` size also drops the
@@ -281,26 +294,44 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
     [layout.edges],
   );
 
+  /** Flashes a row. Clear, then set on the next frame: a row already flashing flashes again. */
+  const flashRow = useCallback((id: number) => {
+    setFlash(null);
+    cancelAnimationFrame(flashFrame.current);
+    flashFrame.current = requestAnimationFrame(() => setFlash(id));
+    window.clearTimeout(flashTimer.current);
+    flashTimer.current = window.setTimeout(() => setFlash((f) => (f === id ? null : f)), 1500);
+  }, []);
+
+  // The jump lands once the layout shows the step: the folds it opened render with it.
+  useEffect(() => {
+    if (!going || !ready) return;
+    setGoing(null);
+    camera.centerOn(going.id);
+    flashRow(going.id);
+  }, [going, ready, camera, flashRow]);
+
   useImperativeHandle(
     ref,
     () => ({
       focusNode: (id) => camera.focusNode(id),
       nextNeedsYou: () => {
         const id = camera.nextNeedsYou();
-        if (id === undefined) return;
-        // Clear, then set on the next frame: a press that lands on the row already flashing restarts its flash.
-        setFlash(null);
-        cancelAnimationFrame(flashFrame.current);
-        flashFrame.current = requestAnimationFrame(() => setFlash(id));
-        window.clearTimeout(flashTimer.current);
-        flashTimer.current = window.setTimeout(() => setFlash((f) => (f === id ? null : f)), 1500);
+        if (id !== undefined) flashRow(id);
       },
       goRoot: () => {
         if (index.root) camera.centerOn(index.root.id);
       },
       goFrontier: () => camera.centerOnFrontier(),
+      goTo: (id) => {
+        if (!index.byId.has(id)) return false;
+        const path = [...ancestors(index, id).map((n) => n.id), id];
+        for (const key of revealKeys(path, overrides, (o) => layoutOutline({ ...layoutInput, overrides: o }))) onToggleFold(key, 'open');
+        setGoing({ id });
+        return true;
+      },
     }),
-    [camera, index],
+    [camera, index, overrides, layoutInput, onToggleFold, flashRow],
   );
 
   // Keep the same array while the titles are unchanged, so a glide doesn't re-render the canvas every frame.
@@ -375,9 +406,12 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
   const alive = useRef(true);
   const onInit = useCallback(() => {
     void document.fonts.ready.then(() => {
-      if (!alive.current || camera.hasMoved()) return;
+      if (!alive.current) return;
+      setReady(true);
+      // A Go to jump waiting for the first paint takes the camera instead.
+      if (camera.hasMoved() || goingRef.current) return;
       initFrame.current = requestAnimationFrame(() => {
-        if (!camera.hasMoved()) camera.centerOnFrontier(0, 1);
+        if (!camera.hasMoved() && !goingRef.current) camera.centerOnFrontier(0, 1);
       });
     });
   }, [camera]);
