@@ -80,7 +80,7 @@ const staleTaskRules = ['Bash(node D:/old/InProgress/dist/cli/main.js tasks *)',
 function withInstall(settings: object) {
   const s = JSON.parse(JSON.stringify(settings));
   s.permissions.allow.push(...allowRules(repo));
-  for (const d of HOOK_DEFS) (s.hooks[d.event] ??= []).push({ ...(d.matcher ? { matcher: d.matcher } : {}), hooks: [hookEntry(repo, d.name, d.timeout)] });
+  for (const d of HOOK_DEFS) (s.hooks[d.event] ??= []).push({ ...(d.matcher ? { matcher: d.matcher } : {}), hooks: [hookEntry(repo, d.name, d.timeout, d.async)] });
   return s;
 }
 
@@ -100,14 +100,21 @@ describe('isInProgressHook', () => {
 });
 
 describe('HOOK_DEFS', () => {
-  it('hooks the Agent tool before it runs, and the Agent and task tools after', () => {
+  it('hooks the Agent tool before it runs; the Agent and task tools after, in step; and the command tools after, async', () => {
     expect(HOOK_DEFS.filter((d) => d.event === 'PreToolUse' || d.event === 'PostToolUse')).toEqual([
       { event: 'PreToolUse', name: 'pre-tool', matcher: '^(Agent|Task)$', timeout: 5 },
       { event: 'PostToolUse', name: 'post-tool', matcher: '^(Agent|Task|TaskCreate|TaskUpdate)$', timeout: 5 },
+      { event: 'PostToolUse', name: 'post-tool', matcher: '^(Bash|PowerShell|Monitor|SendMessage|TaskStop)$', timeout: 5, async: true },
     ]);
-    const matches = (event: string, tool: string) => new RegExp(HOOK_DEFS.find((d) => d.event === event)!.matcher!).test(tool);
+    const matching = (event: string, tool: string) => HOOK_DEFS.filter((d) => d.event === event && new RegExp(d.matcher!).test(tool));
+    const matches = (event: string, tool: string) => matching(event, tool).length > 0;
     expect(['Agent', 'Task', 'TaskCreate', 'Bash'].map((t) => matches('PreToolUse', t))).toEqual([true, true, false, false]);
     expect(['Agent', 'Task', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet', 'AgentX'].map((t) => matches('PostToolUse', t))).toEqual([true, true, true, true, false, false, false]);
+    const commandTools = ['Bash', 'PowerShell', 'Monitor', 'SendMessage', 'TaskStop'];
+    expect(commandTools.map((t) => matching('PostToolUse', t).map((d) => d.async))).toEqual(commandTools.map(() => [true]));
+    expect(['BashOutput', 'TaskStopX', 'Read', 'mcp__x__Bash'].map((t) => matches('PostToolUse', t))).toEqual([false, false, false, false]);
+    // No tool runs two InProgress PostToolUse hooks: the groups' matchers never overlap.
+    for (const t of ['Agent', 'Task', 'TaskCreate', 'TaskUpdate', ...commandTools]) expect(matching('PostToolUse', t), t).toHaveLength(1);
   });
 });
 
@@ -170,10 +177,12 @@ describe('install', () => {
     expect(s.hooks.Stop).toHaveLength(2);
     expect(s.hooks.Stop[0].hooks[0].command).toBe('other-tool --stop');
     for (const def of HOOK_DEFS) {
-      const group = s.hooks[def.event].at(-1);
-      expect(group.matcher).toBe(def.matcher);
-      expect(group.hooks[0]).toEqual({ type: 'command', command: nodeBinary(), args: [`${repo}/dist/hooks/hook.js`, def.name], timeout: def.timeout });
+      const group = s.hooks[def.event].find((g: { matcher?: string; hooks: object[] }) => g.matcher === def.matcher && g.hooks.some(isInProgressHook));
+      const entry = { type: 'command', command: nodeBinary(), args: [`${repo}/dist/hooks/hook.js`, def.name], timeout: def.timeout };
+      expect(group.hooks).toEqual([def.async ? { ...entry, async: true } : entry]);
     }
+    // The command tools' group is the one async entry, written as Claude Code reads it.
+    expect(s.hooks.PostToolUse.map((g: { hooks: { async?: boolean }[] }) => g.hooks[0].async)).toEqual([undefined, true]);
     expect(existsSync(join(dir, 'settings.json.inprogress-backup-20260927-120000'))).toBe(true);
     const agent = readFileSync(join(dir, 'agents', 'inprogress-scribe.md'), 'utf8');
     expect(agent).toContain(`args: ["${repo}/dist/mcp/main.js"]`);
@@ -349,8 +358,8 @@ describe('install', () => {
     expect(readSettings(dir)).toEqual(once);
     expect(once).toEqual(withInstall(existing));
     for (const d of HOOK_DEFS) {
-      const ours = once.hooks[d.event].flatMap((g: { hooks: object[] }) => g.hooks).filter(isInProgressHook);
-      expect(ours, d.event).toHaveLength(1);
+      const ours = once.hooks[d.event].filter((g: { matcher?: string }) => g.matcher === d.matcher).flatMap((g: { hooks: object[] }) => g.hooks).filter(isInProgressHook);
+      expect(ours, `${d.event} ${d.matcher ?? ''}`).toHaveLength(1);
     }
     for (const rule of allowRules(repo)) expect(once.permissions.allow.filter((r: string) => r === rule), rule).toHaveLength(1);
   });
@@ -359,7 +368,7 @@ describe('install', () => {
     const dir = join(tempDir('ip-claude-'), 'fresh');
     const { log } = install({ repo, claudeDir: dir, stamp: 'c' });
     const s = readSettings(dir);
-    expect(Object.keys(s.hooks).sort()).toEqual(HOOK_DEFS.map((d) => d.event).sort());
+    expect(Object.keys(s.hooks).sort()).toEqual([...new Set(HOOK_DEFS.map((d) => d.event))].sort());
     expect(s.permissions.allow).toEqual(allowRules(repo));
     expect(backups(dir)).toEqual([]);
     expect(log.join('\n')).not.toContain('Backed up');
@@ -485,6 +494,19 @@ describe('uninstall', () => {
     expect(log.join('\n')).toContain(`Removed ${HOOK_DEFS.length} InProgress hook entries`);
   });
 
+  it("strips the async group and keeps other tools' async hooks on the same tools", () => {
+    const foreignAsync = { type: 'command', command: 'C:/x/node.exe', args: ['C:/tools/foo/bin/check.js', 'post-tool'], async: true };
+    const settings = { ...existing, hooks: { ...existing.hooks, PostToolUse: [{ matcher: '^(Bash|PowerShell|Monitor|SendMessage|TaskStop)$', hooks: [foreignAsync] }] } };
+    const dir = claudeDirWithSettings(settings);
+    install({ repo, claudeDir: dir, stamp: 'as1' });
+    const installed = readSettings(dir);
+    expect(installed.hooks.PostToolUse[0]).toEqual(settings.hooks.PostToolUse[0]);
+    expect(installed.hooks.PostToolUse).toHaveLength(3);
+    const log = uninstall({ claudeDir: dir, stamp: 'as2' });
+    expect(readSettings(dir)).toEqual(settings);
+    expect(log.join('\n')).toContain(`Removed ${HOOK_DEFS.length} InProgress hook entries`);
+  });
+
   it("removes the tasks rules of any checkout by their pattern, and leaves every other allow rule", () => {
     const others = ['Bash(git status)', 'Bash(npm test:*)', 'Bash(node C:/tools/x.js tasks *)', 'Bash(node C:/x/dist/cli/main.js outline *)'];
     const dir = claudeDirWithSettings({ ...existing, permissions: { allow: others } });
@@ -527,6 +549,24 @@ describe('kitStatus', () => {
     settings.permissions.allow = settings.permissions.allow.filter((r: string) => r !== 'mcp__inprogress');
     writeFileSync(join(dir, 'settings.json'), JSON.stringify(settings, null, 2));
     expect(kitStatus({ repo: changed, claudeDir: dir })).toEqual({ installed: true, differs: ['settings', 'agent', 'skill'] });
+  });
+
+  it('reports the settings as different for an install from before the async command-tools group, until install runs again', () => {
+    const dir = claudeDirWithSettings({ theme: 'dark' });
+    install({ repo, claudeDir: dir, stamp: 'ka1' });
+    // What the previous kit wrote: the same hooks without the async group.
+    const settings = readSettings(dir);
+    settings.hooks.PostToolUse = settings.hooks.PostToolUse.filter((g: { hooks: { async?: boolean }[] }) => !g.hooks[0].async);
+    writeFileSync(join(dir, 'settings.json'), JSON.stringify(settings, null, 2));
+    expect(kitStatus({ repo, claudeDir: dir })).toEqual({ installed: true, differs: ['settings'] });
+    // The group without its async flag would make every Bash call wait on the hook: also a difference.
+    const sync = readSettings(dir);
+    sync.hooks.PostToolUse.push({ matcher: '^(Bash|PowerShell|Monitor|SendMessage|TaskStop)$', hooks: [hookEntry(repo, 'post-tool', 5)] });
+    writeFileSync(join(dir, 'settings.json'), JSON.stringify(sync, null, 2));
+    expect(kitStatus({ repo, claudeDir: dir })).toEqual({ installed: true, differs: ['settings'] });
+    install({ repo, claudeDir: dir, stamp: 'ka2' });
+    expect(kitStatus({ repo, claudeDir: dir })).toEqual({ installed: true, differs: [] });
+    expect(readSettings(dir).hooks.PostToolUse.filter((g: { hooks: { async?: boolean }[] }) => g.hooks[0].async)).toHaveLength(1);
   });
 
   it('reports the settings as different when a tasks rule is missing or belongs to another checkout', () => {

@@ -277,6 +277,13 @@ describe('buildToolHookBody: post-tool', () => {
     expect(buildToolHookBody('post-tool', { session_id: 's', tool_name: 'TaskList', tool_input: {}, tool_response: {} })).toBeUndefined();
     expect(buildToolHookBody('post-tool', { session_id: 's' })).toBeUndefined();
   });
+
+  it('posts nothing yet for the async group: Bash, PowerShell, Monitor, SendMessage and TaskStop are only captured', () => {
+    const response = { backgroundTaskId: 'b2ngazqom', success: true, resumedAgentId: 'a1', task_id: 'b1', task_type: 'local_bash' };
+    for (const tool of ['Bash', 'PowerShell', 'Monitor', 'SendMessage', 'TaskStop']) {
+      expect(buildToolHookBody('post-tool', { session_id: 's', tool_name: tool, tool_use_id: 'toolu_x', tool_input: { command: 'ls', to: 'a1' }, tool_response: response }), tool).toBeUndefined();
+    }
+  });
 });
 
 describe('runHandler', () => {

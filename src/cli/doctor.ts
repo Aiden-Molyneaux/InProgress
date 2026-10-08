@@ -124,7 +124,7 @@ function hooksCheck(file: string, settings: { value?: Json; error?: string }): C
   const fail = (detail: string): Check => ({ name: 'Hooks', ok: false, detail });
   if (settings.error) return fail(invalidSettings(file, settings.error));
   const hooks: Record<string, HookGroup[]> = settings.value?.hooks ?? {};
-  const missing = HOOK_DEFS.filter((d) => !(hooks[d.event] ?? []).some((g) => (g.hooks ?? []).some((h) => isInProgressHook(h)))).map((d) => d.event);
+  const missing = [...new Set(HOOK_DEFS.filter((d) => !(hooks[d.event] ?? []).some((g) => (g.hooks ?? []).some((h) => isInProgressHook(h)))).map((d) => d.event))];
   if (missing.length) return fail(`missing: ${missing.join(', ')}: run npm run claude:install`);
   const ours = Object.values(hooks)
     .flat()

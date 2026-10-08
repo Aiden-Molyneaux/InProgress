@@ -21,6 +21,8 @@ export interface HookDef {
   name: HookName;
   matcher?: string;
   timeout: number;
+  /** Written as `"async": true`: Claude Code runs the hook in the background, so the tool call never waits on it. */
+  async?: boolean;
 }
 
 export const HOOK_DEFS: HookDef[] = [
@@ -34,9 +36,12 @@ export const HOOK_DEFS: HookDef[] = [
   // Live work: a subagent's dispatch before the Agent tool runs; its launch, and the task tools' changes, after.
   { event: 'PreToolUse', name: 'pre-tool', matcher: '^(Agent|Task)$', timeout: 5 },
   { event: 'PostToolUse', name: 'post-tool', matcher: '^(Agent|Task|TaskCreate|TaskUpdate)$', timeout: 5 },
+  // Background commands, messages to agents and stopped tasks, after the call. Async: about 2,700 Bash calls a day must
+  // never wait on a Node start. For now the hook only captures these (src/hooks/capture.ts) and posts nothing for them.
+  { event: 'PostToolUse', name: 'post-tool', matcher: '^(Bash|PowerShell|Monitor|SendMessage|TaskStop)$', timeout: 5, async: true },
 ];
 
-type HookEntry = { type?: string; command?: string; args?: string[]; timeout?: number };
+type HookEntry = { type?: string; command?: string; args?: string[]; timeout?: number; async?: boolean };
 type HookGroup = { matcher?: string; hooks?: HookEntry[] };
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Settings = Record<string, any>;
@@ -62,8 +67,8 @@ export function nodeBinary(execPath: string = process.execPath): string {
   return realpathSync(execPath).replace(/\\/g, '/');
 }
 
-export function hookEntry(repo: string, name: HookName, timeout: number): HookEntry {
-  return { type: 'command', command: nodeBinary(), args: [`${repo}${HOOK_SCRIPT_SUFFIX}`, name], timeout };
+export function hookEntry(repo: string, name: HookName, timeout: number, async = false): HookEntry {
+  return { type: 'command', command: nodeBinary(), args: [`${repo}${HOOK_SCRIPT_SUFFIX}`, name], timeout, ...(async ? { async: true } : {}) };
 }
 
 /**
@@ -94,7 +99,7 @@ export function addInProgressHooks(settings: Settings, repo: string): Settings {
   stripInProgressHooks(settings);
   settings.hooks ??= {};
   for (const d of HOOK_DEFS) {
-    const group: HookGroup = { ...(d.matcher ? { matcher: d.matcher } : {}), hooks: [hookEntry(repo, d.name, d.timeout)] };
+    const group: HookGroup = { ...(d.matcher ? { matcher: d.matcher } : {}), hooks: [hookEntry(repo, d.name, d.timeout, d.async)] };
     (settings.hooks[d.event] ??= []).push(group);
   }
   return settings;
@@ -291,7 +296,7 @@ export function install(o: { repo: string; claudeDir: string; stamp: string }): 
   backup(settingsFile, o.stamp, log);
   writeFileSync(settingsFile, `${JSON.stringify(settings, null, 2)}\n`);
   if (replaced > 0) log.push(`Replaced ${replaced} existing ${hookEntryLabel(replaced)}`);
-  log.push(`Hooks: ${HOOK_DEFS.map((d) => d.event).join(', ')}`, `Allow rules: ${allowRules(repo).join(', ')}`);
+  log.push(`Hooks: ${[...new Set(HOOK_DEFS.map((d) => d.event))].join(', ')}`, `Allow rules: ${allowRules(repo).join(', ')}`);
   if (!taskAllowRules(repoCli(repo)).length) {
     log.push(`Left out the tasks command's allow rules: the repo path ${repo} holds a space, which an unquoted path cannot hold and a quoted one never matches in PowerShell. Sessions are asked before each tasks command; a repo path without spaces avoids that.`);
   }

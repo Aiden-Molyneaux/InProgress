@@ -4,6 +4,7 @@ import { ensureServer } from '../lib/ensure-server';
 import { baseUrl, homeDir, readToken } from '../lib/home';
 import { appendLog } from '../lib/log';
 import { hookBudget } from './budget';
+import { captureHookInput } from './capture';
 import { CONTEXT_EVENT_NAME, HOOK_NAMES, hookErrorLine, parseHookInput, runHandler, type HookName } from './handlers';
 
 // Claude may stop reading before the briefing is written (say after a timeout): an EPIPE must not reach stderr.
@@ -41,6 +42,9 @@ async function main(): Promise<void> {
   const budget = hookBudget(name);
   const work = (async () => {
     const input = parseHookInput(await readStdin(1000));
+    // Task 0 capture (src/hooks/capture.ts): a redacted copy of this input, for the hooks the activity design reads.
+    // Synchronous and silent; it never throws. Off with INPROGRESS_HOOK_CAPTURE=0 or a file ~/.inprogress/capture/off.
+    captureHookInput(name, input);
     const url = baseUrl();
     const context = await runHandler(name, input, {
       ensureServer: () => ensureServer({ baseUrl: url, waitMs: budget.serverWaitMs }),

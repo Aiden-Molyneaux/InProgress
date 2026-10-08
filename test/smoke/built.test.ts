@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -189,6 +189,47 @@ describe('built artifacts', () => {
     expect(r.status).toBe(0);
     expect(r.stdout).toBe('');
     expect(r.stderr).toBe('');
+  });
+
+  it('a backgrounded Bash call is captured, redacted, to the day file, and posts nothing', () => {
+    const command = `cd /c/x && INTHINK_TOKEN=abc123 npm run test:e2e -- --grep busy 2>&1 | tail -40 ${'x'.repeat(100)}`;
+    const r = runHook('post-tool', {
+      session_id: 'smoke-capture', hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_use_id: 'toolu_smoke_capture',
+      tool_input: { command, description: 'Run the e2e suite', run_in_background: true },
+      tool_response: { stdout: '', stderr: '', interrupted: false, isImage: false, backgroundTaskId: 'bsmoke01' },
+    });
+    expect(r).toMatchObject({ status: 0, stdout: '', stderr: '' });
+    const dir = join(home, 'capture');
+    const captured = readdirSync(dir)
+      .filter((f) => f.endsWith('.jsonl'))
+      .flatMap((f) => lines(readFileSync(join(dir, f), 'utf8')).map((l) => JSON.parse(l) as { hook: string; input: { tool_use_id?: string; tool_input: { command: string }; tool_response: { backgroundTaskId: string } } }))
+      .filter((l) => l.input.tool_use_id === 'toolu_smoke_capture');
+    expect(captured).toHaveLength(1);
+    expect(captured[0].hook).toBe('post-tool');
+    expect(captured[0].input.tool_response.backgroundTaskId).toBe('bsmoke01');
+    const kept = captured[0].input.tool_input.command;
+    expect(kept.startsWith('cd /c/x && INTHINK_TOKEN=[redacted] npm run test:e2e -- --grep busy')).toBe(true);
+    expect(kept.endsWith(`…[${command.length} chars]`)).toBe(true);
+    expect(kept.length).toBe(80 + `…[${command.length} chars]`.length);
+    expect(JSON.stringify(captured)).not.toContain('abc123');
+  });
+
+  it('hooks exit 0 silently when the capture folder cannot be written, or capture is off', () => {
+    const blocked = mkdtempSync(join(tmpdir(), 'ip-smoke-capture-'));
+    try {
+      writeFileSync(join(blocked, 'capture'), 'a file where the capture folder goes');
+      const bash = { session_id: 'x', hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_use_id: 't', tool_input: { command: 'ls' }, tool_response: { backgroundTaskId: 'b1' } };
+      for (const [name, payload] of [['stop', { session_id: 'x' }], ['prompt-submit', { session_id: 'x', prompt: '<task-notification></task-notification>' }], ['post-tool', bash]] as const) {
+        const r = spawnSync(process.execPath, [bin('hooks/hook.js'), name], { input: JSON.stringify(payload), env: { ...env, INPROGRESS_HOME: blocked, INPROGRESS_PORT: '1' }, encoding: 'utf8' });
+        expect(r, name).toMatchObject({ status: 0, stdout: '', stderr: '' });
+      }
+      rmSync(join(blocked, 'capture'));
+      const off = spawnSync(process.execPath, [bin('hooks/hook.js'), 'post-tool'], { input: JSON.stringify(bash), env: { ...env, INPROGRESS_HOME: blocked, INPROGRESS_PORT: '1', INPROGRESS_HOOK_CAPTURE: '0' }, encoding: 'utf8' });
+      expect(off).toMatchObject({ status: 0, stdout: '', stderr: '' });
+      expect(existsSync(join(blocked, 'capture'))).toBe(false);
+    } finally {
+      rmSync(blocked, { recursive: true, force: true });
+    }
   });
 
   it('CLI prints the client hint under an error', () => {
