@@ -5,9 +5,9 @@ import type { BuildInfo } from '../../lib/version';
 import type { Ctx } from '../db/tx';
 import { listBindings, listProjectSummaries, resolveProject } from '../repo/projects';
 import { requireResource } from '../repo/resources';
-import { search } from '../repo/search';
+import { findSteps, search } from '../repo/search';
 import { getNodeDetail, getProjectSnapshot } from '../repo/snapshot';
-import { idParam, searchQuery } from '../schemas';
+import { findQuery, idParam, searchQuery } from '../schemas';
 
 export function registerReadRoutes(app: FastifyInstance, ctx: Ctx, version: string, build: BuildInfo | null): void {
   app.get('/api/health', async () => ({ ok: true, app: 'inprogress', version, build, pid: process.pid }));
@@ -34,5 +34,10 @@ export function registerReadRoutes(app: FastifyInstance, ctx: Ctx, version: stri
   app.get('/api/search', async (req) => {
     const q = searchQuery.parse(req.query);
     return search(ctx, resolveProject(ctx, q.project).id, q.q);
+  });
+  // The window's Go to field: a step by id, or steps by title words, across every project that is not deleted.
+  app.get('/api/find', async (req) => {
+    const { q, here } = findQuery.parse(req.query);
+    return findSteps(ctx, q, here);
   });
 }

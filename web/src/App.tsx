@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { StepHit } from '../../src/core/goto';
 import { isNeedsYou } from '../../src/core/tree';
 import type { ProjectSnapshot } from '../../src/core/types';
+import { api } from './api';
 import { Canvas, type CanvasHandle } from './canvas/Canvas';
 import { ActivityStrip } from './chrome/ActivityStrip';
+import type { GoToHandle } from './chrome/GoTo';
 import { SessionRow } from './chrome/SessionRow';
 import { archivedProjects, neighbourTab, projectTabs, stepTab } from './chrome/tabs';
 import { TopBar } from './chrome/TopBar';
@@ -33,6 +36,7 @@ export function App() {
   const viewerOpen = viewerResource !== null;
   const [overrides, setOverride] = useFoldOverrides(snapshot?.project.id);
   const canvas = useRef<CanvasHandle>(null);
+  const goToField = useRef<GoToHandle>(null);
   const app = useRef<HTMLDivElement>(null);
   /** Whatever had focus when the viewer opened. It gets focus back when the viewer closes. */
   const opener = useRef<HTMLElement | null>(null);
@@ -92,6 +96,51 @@ export function App() {
     setViewerResource(null);
   }, [snapshot?.project.id]);
 
+  /**
+   * A step picked in the Go to field, until the window shows its project with the step in it. Declared after the
+   * effect above, so on a switch the selection that effect clears is set again here, in the same commit.
+   */
+  const [goingTo, setGoingTo] = useState<{ id: number; projectId: number; slug: string } | null>(null);
+  const goingRef = useRef(goingTo);
+  goingRef.current = goingTo;
+  /** The jump whose step the snapshot lacked, checked with the server once so a stale snapshot never drops it. */
+  const checked = useRef<typeof goingTo>(null);
+  const goTo = (hit: StepHit) => {
+    setGoingTo({ id: hit.id, projectId: hit.projectId, slug: hit.projectSlug });
+    if (hit.projectSlug !== state.slug) state.selectProject(hit.projectSlug);
+  };
+  useEffect(() => {
+    const going = goingTo;
+    if (!going) return;
+    const drop = () => {
+      setGoingTo(null);
+      say(`No step #${going.id}`);
+    };
+    if (state.slug !== going.slug) {
+      setGoingTo(null);
+      // The project left the list (deleted since the search, so its address answered 404) and the window moved on. A
+      // project Aiden opened himself before this one loaded only calls the jump off.
+      if (!projects.some((p) => p.slug === going.slug)) drop();
+      return;
+    }
+    if (snapshot?.project.id !== going.projectId || !canvas.current) return;
+    if (!holds(snapshot, going.id)) {
+      // Gone since the search, or newer than this snapshot: the server knows which. A newer one waits for the next.
+      if (checked.current === going) return;
+      checked.current = going;
+      api.node(going.id).then(
+        (d) => d.node.projectId !== going.projectId && goingRef.current === going && drop(),
+        () => goingRef.current === going && drop(),
+      );
+      return;
+    }
+    setGoingTo(null);
+    // A jump is a move of Aiden's own, as a pan is: Follow would take the camera straight back.
+    setFollow(false);
+    setSelectedNode(going.id);
+    canvas.current.goTo(going.id);
+  }, [goingTo, snapshot, state.slug, projects]);
+
   const followOn = useCallback(() => {
     setFollow(true);
     canvas.current?.goFrontier();
@@ -113,6 +162,7 @@ export function App() {
             if (tab) state.selectProject(tab.slug);
           },
           onEscape: () => setSelectedNode(null),
+          onGoTo: () => goToField.current?.open(),
         },
   );
 
@@ -121,7 +171,7 @@ export function App() {
   return (
     <>
       <div className="ip-app" ref={app}>
-        <TopBar tabs={tabs} archived={archived} deleted={state.deleted} current={state.slug} onSelect={state.selectProject} onAction={onAction} onRename={onRename} />
+        <TopBar tabs={tabs} archived={archived} deleted={state.deleted} current={state.slug} onSelect={state.selectProject} onAction={onAction} onRename={onRename} goTo={goToField} onGoTo={goTo} />
         {/* Always there, so the canvas doesn't jump while a project loads: it holds the needs-you pill and Follow. */}
         <SessionRow
           sessions={snapshot?.sessions ?? []}
