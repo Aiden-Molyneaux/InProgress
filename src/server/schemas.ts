@@ -24,6 +24,8 @@ export const nodeInput: z.ZodType<NodeInput> = z.lazy(() =>
 export const idParam = z.object({ id: z.coerce.number().int().positive() });
 export const sessionParam = z.object({ id: z.string().min(1).max(100) });
 export const searchQuery = z.object({ project: z.string().min(1), q: z.string().min(1).max(200) });
+/** The window's Go to field: an id or words, as parseGoTo reads them. Empty answers nothing. */
+export const findQuery = z.object({ q: z.string().max(200).default('') });
 
 /** A project's name: trimmed, 1 to 120 characters. */
 const projectName = z.string().trim().min(1, 'name is empty').max(PROJECT_NAME_MAX);
