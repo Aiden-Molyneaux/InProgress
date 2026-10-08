@@ -36,5 +36,8 @@ export function registerReadRoutes(app: FastifyInstance, ctx: Ctx, version: stri
     return search(ctx, resolveProject(ctx, q.project).id, q.q);
   });
   // The window's Go to field: a step by id, or steps by title words, across every project that is not deleted.
-  app.get('/api/find', async (req) => findSteps(ctx, findQuery.parse(req.query).q));
+  app.get('/api/find', async (req) => {
+    const { q, here } = findQuery.parse(req.query);
+    return findSteps(ctx, q, here);
+  });
 }

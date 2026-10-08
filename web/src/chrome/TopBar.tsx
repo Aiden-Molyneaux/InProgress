@@ -623,7 +623,7 @@ export function TopBar({ tabs, archived, deleted: listed, current, onSelect, onA
         <TabMenu key={tabMenu.id} project={menuProject} tab={tabMenu.tab} strip={strip.current} onClose={closeTabMenu} run={run} runRename={runRename} />
       )}
       {(archived.length > 0 || deleted.length > 0) && <ArchiveMenu archived={archived} deleted={deleted} current={current} onSelect={onSelect} run={run} />}
-      <GoTo ref={goTo} onGo={onGoTo} />
+      <GoTo ref={goTo} onGo={onGoTo} current={current} />
     </header>
   );
 }

@@ -20,9 +20,10 @@ export function search(ctx: Ctx, projectId: number, query: string): SearchResult
  * The window's Go to field, across every project that is not deleted, archived ones included. An id (`#77`, `77`)
  * answers that step alone, or nothing when it is gone or its project is deleted. Words answer the steps whose titles
  * hold every one of them, in any order and ignoring case: active projects' first, then open steps before finished
- * ones, then the most recently changed. At most GOTO_LIMIT.
+ * ones; within each of those, the steps of `here` (the slug of the project the window has open) first; then the most
+ * recently changed. At most GOTO_LIMIT.
  */
-export function findSteps(ctx: Ctx, text: string): StepHit[] {
+export function findSteps(ctx: Ctx, text: string, here?: string): StepHit[] {
   const q = parseGoTo(text);
   const select = `SELECT n.id, n.title, n.status, p.id AS projectId, p.slug AS projectSlug, p.name AS projectName, p.status AS projectStatus
     FROM nodes n JOIN projects p ON p.id = n.project_id WHERE p.deleted_at IS NULL`;
@@ -32,7 +33,7 @@ export function findSteps(ctx: Ctx, text: string): StepHit[] {
   return ctx.db
     .prepare(
       `${select} AND ${likes.map(() => "n.title LIKE ? ESCAPE '\\'").join(' AND ')}
-       ORDER BY p.status = 'archived', n.status IN ('done', 'dropped'), n.updated_at DESC, n.id DESC LIMIT ${GOTO_LIMIT}`,
+       ORDER BY p.status = 'archived', n.status IN ('done', 'dropped'), p.slug IS ? DESC, n.updated_at DESC, n.id DESC LIMIT ${GOTO_LIMIT}`,
     )
-    .all(...likes) as StepHit[];
+    .all(...likes, here ?? null) as StepHit[];
 }

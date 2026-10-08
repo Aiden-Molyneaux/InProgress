@@ -44,6 +44,20 @@ describe('findSteps', () => {
     expect(findSteps(ctx, 'signing keystore')).toEqual([]);
   });
 
+  it("lists the open project's steps first within each tier, and keeps the tiers", () => {
+    const { ctx, here, shelf, play, shelved } = setup();
+    const other = createProject(ctx, 't', { name: 'Other' });
+    const [later] = addNodes(ctx, 't', { parentId: other.rootNodeId, nodes: [{ title: 'Signing again' }] });
+    const [doneHere] = addNodes(ctx, 't', { parentId: here.rootNodeId, nodes: [{ title: 'Signing done here' }] });
+    updateNode(ctx, 't', doneHere.id, { status: 'done' });
+    // Recency alone: the newer step of Other leads.
+    expect(findSteps(ctx, 'signing').map((h) => h.id)).toEqual([later.id, play.id, doneHere.id, shelved.id]);
+    expect(findSteps(ctx, 'signing', here.slug).map((h) => h.id)).toEqual([play.id, later.id, doneHere.id, shelved.id]);
+    // An archived project open in the window still lists after the active ones.
+    expect(findSteps(ctx, 'signing', shelf.slug).map((h) => h.id)).toEqual([later.id, play.id, doneHere.id, shelved.id]);
+    expect(findSteps(ctx, 'signing', 'no-such-project').map((h) => h.id)).toEqual([later.id, play.id, doneHere.id, shelved.id]);
+  });
+
   it('lists open steps before finished ones, then the most recently changed, at most 20', () => {
     const { ctx, here } = setup();
     const many = addNodes(ctx, 't', { parentId: here.rootNodeId, nodes: Array.from({ length: 25 }, (_, i) => ({ title: `Cap step ${i}` })) });
@@ -74,6 +88,7 @@ describe('GET /api/find', () => {
     expect(byId.statusCode).toBe(200);
     expect(byId.json()).toEqual([expect.objectContaining({ id: play.id, title: 'Play app signing' })]);
     expect((await app.inject({ url: '/api/find?q=play%20signing' })).json()).toEqual([expect.objectContaining({ id: play.id })]);
+    expect((await app.inject({ url: '/api/find?q=signing&here=ingame' })).json()[0]).toMatchObject({ id: play.id });
     expect((await app.inject({ url: '/api/find' })).json()).toEqual([]);
     expect((await app.inject({ url: `/api/find?q=${'x'.repeat(201)}` })).statusCode).toBe(400);
   });

@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent } from 'react';
 import { parseGoTo, type StepHit } from '../../../src/core/goto';
 import { api } from '../api';
-import { goToMessage, hitLabel, isGoToChord } from './goToText';
+import { goToMessage, hitLabel, isGoToChord, pickHit } from './goToText';
 import { menuStep } from './menu';
 
 /** How long typing rests before the field asks the server. */
@@ -13,8 +13,13 @@ export interface GoToHandle {
 }
 
 interface GoToProps {
-  /** The step picked: the window opens its project, unfolds it, centres on it and opens its Details. */
+  /**
+   * The step picked: the window opens its project, unfolds it, centres on it, opens its Details and gives its card focus.
+   * Until then focus waits on the search button, which keeps it if the jump is dropped.
+   */
   onGo: (hit: StepHit) => void;
+  /** The open project's slug: its steps list first within each tier. */
+  current: string | null;
 }
 
 /** What the server answered for a query, as typed. */
@@ -36,10 +41,11 @@ const Glass = () => (
  * The search button at the right end of the top bar, and the Go to field it opens: a combobox floating under the bar on
  * the menus' surface. An id (`#77`, `77`) and Enter jumps to that step in whatever project holds it; words list the
  * steps whose titles hold them, across projects, as they are typed. Up and Down move through the list, Enter picks,
- * Escape closes back to whatever had focus before, and Tab closes. Every key stays in here: the app's own keys would
+ * Escape closes back to whatever had focus before, and Tab closes. Typing clears the highlight, so Enter never picks a
+ * row of the old list. Every key stays in here: the app's own keys would
  * otherwise act under it.
  */
-export const GoTo = forwardRef<GoToHandle, GoToProps>(function GoTo({ onGo }, ref) {
+export const GoTo = forwardRef<GoToHandle, GoToProps>(function GoTo({ onGo, current }, ref) {
   const ids = useId();
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
@@ -107,7 +113,7 @@ export const GoTo = forwardRef<GoToHandle, GoToProps>(function GoTo({ onGo }, re
     const mine = ++seq.current;
     let next: Answer;
     try {
-      next = { text: q, hits: await api.find(q) };
+      next = { text: q, hits: await api.find(q, current) };
     } catch (e) {
       next = { text: q, hits: [], error: e instanceof Error ? e.message : String(e) };
     }
@@ -130,14 +136,18 @@ export const GoTo = forwardRef<GoToHandle, GoToProps>(function GoTo({ onGo }, re
     timer.current = window.setTimeout(() => void ask(trimmed), DEBOUNCE_MS);
   }, [open, trimmed]);
 
+  /** Focus waits on the search button (the opener may be a card the switch takes away); the card takes it on landing. */
   const pick = (hit: StepHit) => {
-    close(true);
+    button.current?.focus();
+    close(false);
     onGo(hit);
   };
 
   /** Enter: the option reached, else the first, asking at once when the answer is not in yet. An id found nowhere says so. */
   const enter = async () => {
     if (query.kind === 'empty') return;
+    // By id: the list on screen may be an older one than the answer Enter waits for.
+    const highlighted = active >= 0 ? hits[active]?.id : undefined;
     let now = settled;
     if (!now) {
       window.clearTimeout(timer.current);
@@ -145,7 +155,7 @@ export const GoTo = forwardRef<GoToHandle, GoToProps>(function GoTo({ onGo }, re
       // The text changed while the server answered: the newer text has its own Enter.
       if (!now) return;
     }
-    const hit = now.hits[active >= 0 && active < now.hits.length ? active : 0];
+    const hit = pickHit(now.hits, highlighted);
     if (hit) pick(hit);
     else if (query.kind === 'id') setMissing(query.id);
   };
@@ -196,6 +206,7 @@ export const GoTo = forwardRef<GoToHandle, GoToProps>(function GoTo({ onGo }, re
         className="ip-goto-btn"
         aria-label="Go to a step"
         title="Go to a step (/ or Ctrl+K)"
+        aria-keyshortcuts="/ Control+K"
         aria-expanded={open}
         aria-controls={open ? `${ids}p` : undefined}
         // While open, a press on the button keeps focus in the field, so it closes on the click rather than the blur.
@@ -223,6 +234,7 @@ export const GoTo = forwardRef<GoToHandle, GoToProps>(function GoTo({ onGo }, re
             onChange={(e) => {
               setText(e.target.value);
               setMissing(null);
+              setActive(-1);
             }}
           />
           <div role="listbox" id={`${ids}l`} aria-label="Steps" className="ip-goto-list" hidden={!listed}>

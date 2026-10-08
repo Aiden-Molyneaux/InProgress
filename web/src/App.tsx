@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { StepHit } from '../../src/core/goto';
 import { isNeedsYou } from '../../src/core/tree';
 import type { ProjectSnapshot } from '../../src/core/types';
+import { api } from './api';
 import { Canvas, type CanvasHandle } from './canvas/Canvas';
 import { ActivityStrip } from './chrome/ActivityStrip';
 import type { GoToHandle } from './chrome/GoTo';
@@ -100,25 +101,45 @@ export function App() {
    * effect above, so on a switch the selection that effect clears is set again here, in the same commit.
    */
   const [goingTo, setGoingTo] = useState<{ id: number; projectId: number; slug: string } | null>(null);
+  const goingRef = useRef(goingTo);
+  goingRef.current = goingTo;
+  /** The jump whose step the snapshot lacked, checked with the server once so a stale snapshot never drops it. */
+  const checked = useRef<typeof goingTo>(null);
   const goTo = (hit: StepHit) => {
-    // A jump is a move of Aiden's own, as a pan is: Follow would take the camera straight back.
-    setFollow(false);
     setGoingTo({ id: hit.id, projectId: hit.projectId, slug: hit.projectSlug });
     if (hit.projectSlug !== state.slug) state.selectProject(hit.projectSlug);
   };
   useEffect(() => {
-    if (!goingTo) return;
-    // Another project was opened before this one loaded: the jump is off.
-    if (state.slug !== goingTo.slug) {
+    const going = goingTo;
+    if (!going) return;
+    const drop = () => {
       setGoingTo(null);
+      say(`No step #${going.id}`);
+    };
+    if (state.slug !== going.slug) {
+      setGoingTo(null);
+      // The project left the list (deleted since the search, so its address answered 404) and the window moved on. A
+      // project Aiden opened himself before this one loaded only calls the jump off.
+      if (!projects.some((p) => p.slug === going.slug)) drop();
       return;
     }
-    // Its snapshot, holding the step (a step newer than the snapshot waits for the next one).
-    if (snapshot?.project.id !== goingTo.projectId || !holds(snapshot, goingTo.id) || !canvas.current) return;
+    if (snapshot?.project.id !== going.projectId || !canvas.current) return;
+    if (!holds(snapshot, going.id)) {
+      // Gone since the search, or newer than this snapshot: the server knows which. A newer one waits for the next.
+      if (checked.current === going) return;
+      checked.current = going;
+      api.node(going.id).then(
+        (d) => d.node.projectId !== going.projectId && goingRef.current === going && drop(),
+        () => goingRef.current === going && drop(),
+      );
+      return;
+    }
     setGoingTo(null);
-    setSelectedNode(goingTo.id);
-    canvas.current.goTo(goingTo.id);
-  }, [goingTo, snapshot, state.slug]);
+    // A jump is a move of Aiden's own, as a pan is: Follow would take the camera straight back.
+    setFollow(false);
+    setSelectedNode(going.id);
+    canvas.current.goTo(going.id);
+  }, [goingTo, snapshot, state.slug, projects]);
 
   const followOn = useCallback(() => {
     setFollow(true);

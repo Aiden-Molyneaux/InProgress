@@ -6,15 +6,25 @@ export function hitLabel(h: StepHit): string {
 }
 
 /**
- * The Go to field's muted line under the list. `settled` is the server's answer to the text as it is now (null while it
- * is not in), and `missing` the id Enter found nothing at. Empty when there is nothing to say.
+ * The Go to field's muted line under the list, which a screen reader hears: how many steps the list holds, or why it
+ * holds none. `settled` is the server's answer to the text as it is now (null while it is not in), and `missing` the id
+ * Enter found nothing at. Empty when there is nothing to say.
  */
 export function goToMessage(query: GoToQuery, settled: { hits: StepHit[]; error?: string } | null, missing: number | null): string {
   if (query.kind === 'id' && missing === query.id) return `No step #${query.id}`;
   if (!settled) return '';
   if (settled.error) return `Couldn't search: ${settled.error}`;
   if (query.kind === 'words' && settled.hits.length === 0) return 'No step titles match';
-  return '';
+  const n = settled.hits.length;
+  return n === 0 ? '' : n === 1 ? '1 step' : `${n} steps`;
+}
+
+/**
+ * The step Enter picks from `hits`: the one highlighted (by id, so a highlight never lands on a different row of a newer
+ * list), else the first. Undefined when there are none.
+ */
+export function pickHit(hits: readonly StepHit[], highlighted: number | undefined): StepHit | undefined {
+  return hits.find((h) => h.id === highlighted) ?? hits[0];
 }
 
 /** Ctrl+K (Cmd+K on a Mac), with nothing else held: the Go to field's chord. */

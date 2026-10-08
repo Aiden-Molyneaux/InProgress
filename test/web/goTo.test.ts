@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseGoTo, type StepHit } from '../../src/core/goto';
-import { goToMessage, hitLabel, isGoToChord } from '../../web/src/chrome/goToText';
+import { goToMessage, hitLabel, isGoToChord, pickHit } from '../../web/src/chrome/goToText';
 
 const hit = (extra: Partial<StepHit> = {}): StepHit => ({ id: 77, title: 'Play app signing', status: 'active', projectId: 3, projectSlug: 'ingame', projectName: 'InGame', projectStatus: 'active', ...extra });
 
@@ -23,7 +23,14 @@ describe('goToMessage', () => {
   it('says when words match no title, once the answer for them is in', () => {
     expect(goToMessage(parseGoTo('signing'), { hits: [] }, null)).toBe('No step titles match');
     expect(goToMessage(parseGoTo('signing'), null, null)).toBe('');
-    expect(goToMessage(parseGoTo('signing'), { hits: [hit()] }, null)).toBe('');
+  });
+
+  it('counts the steps listed, for a screen reader as much as the eye', () => {
+    expect(goToMessage(parseGoTo('signing'), { hits: [hit()] }, null)).toBe('1 step');
+    expect(goToMessage(parseGoTo('signing'), { hits: [hit(), hit({ id: 78 })] }, null)).toBe('2 steps');
+    expect(goToMessage(parseGoTo('#77'), { hits: [hit()] }, null)).toBe('1 step');
+    // Before the answer for the text as it is now, no count: the list on screen may be an older one.
+    expect(goToMessage(parseGoTo('signing'), null, null)).toBe('');
   });
 
   it("says why a search failed, and nothing for an empty field", () => {
@@ -46,5 +53,20 @@ describe('isGoToChord', () => {
     expect(isGoToChord(press('j', { ctrlKey: true }))).toBe(false);
     // An autofill keydown carries no key.
     expect(isGoToChord(press(undefined as unknown as string, { ctrlKey: true }))).toBe(false);
+  });
+});
+
+describe('pickHit', () => {
+  const list = [hit({ id: 1 }), hit({ id: 2 }), hit({ id: 3 })];
+
+  it('picks the highlighted step by id, wherever it sits in the list now', () => {
+    expect(pickHit(list, 2)?.id).toBe(2);
+    expect(pickHit([list[2], list[1]], 2)?.id).toBe(2);
+  });
+
+  it('picks the first when nothing is highlighted, or when the highlight is not in the newer list', () => {
+    expect(pickHit(list, undefined)?.id).toBe(1);
+    expect(pickHit([list[2], list[0]], 2)?.id).toBe(3);
+    expect(pickHit([], 2)).toBeUndefined();
   });
 });

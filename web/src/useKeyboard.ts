@@ -17,7 +17,6 @@ export interface KeyHandlers {
   onGoTo?: () => void;
 }
 
-
 export function useKeyboard(handlers: KeyHandlers): void {
   const ref = useRef(handlers);
   ref.current = handlers;

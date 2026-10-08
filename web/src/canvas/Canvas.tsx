@@ -49,8 +49,9 @@ export interface CanvasHandle {
   goFrontier: () => void;
   /**
    * The Go to field's jump: opens whatever folds hide the step (its folded ancestors, and a "+n more" or "✓ n done" run
-   * on the way down), then centres on it and flashes it. Waits for the canvas's first paint when it is new. False when
-   * the step is not in this snapshot.
+   * on the way down), then centres on it, flashes it and gives its card focus (unless focus has gone somewhere other
+   * than the page or the Go to button meanwhile). Waits for the canvas's first paint when it is new. False when the step
+   * is not in this snapshot.
    */
   goTo: (id: number) => boolean;
 }
@@ -303,13 +304,32 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
     flashTimer.current = window.setTimeout(() => setFlash((f) => (f === id ? null : f)), 1500);
   }, []);
 
+  /**
+   * Gives a card focus once it shows. React Flow keeps a new card hidden until it has measured it, and a hidden card
+   * can't take focus: try again each frame, as expandRun does. Focus that has gone elsewhere meanwhile stays there.
+   */
+  const focusCard = useCallback((id: number) => {
+    let frames = 0;
+    const attempt = () => {
+      const active = document.activeElement;
+      if (active && active !== document.body && !active.classList.contains('ip-goto-btn')) return;
+      const card = root.current?.querySelector<HTMLElement>(`.react-flow__node[data-id="n${id}"] .ip-node`);
+      // No scroll: the camera has the card in place, and a scroll of the flow's wrapper would fight it.
+      if (card && getComputedStyle(card).visibility === 'visible') card.focus({ preventScroll: true });
+      else if (++frames < FOCUS_FRAMES) focusFrame.current = requestAnimationFrame(attempt);
+    };
+    cancelAnimationFrame(focusFrame.current);
+    focusFrame.current = requestAnimationFrame(attempt);
+  }, []);
+
   // The jump lands once the layout shows the step: the folds it opened render with it.
   useEffect(() => {
     if (!going || !ready) return;
     setGoing(null);
     camera.centerOn(going.id);
     flashRow(going.id);
-  }, [going, ready, camera, flashRow]);
+    focusCard(going.id);
+  }, [going, ready, camera, flashRow, focusCard]);
 
   useImperativeHandle(
     ref,
