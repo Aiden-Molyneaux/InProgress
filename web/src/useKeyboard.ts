@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { isGoToChord } from './chrome/goToText';
 
 /** A key without a handler is left to the browser, so Home/End can scroll whatever has focus. */
 export interface KeyHandlers {
@@ -16,8 +17,6 @@ export interface KeyHandlers {
   onGoTo?: () => void;
 }
 
-/** Ctrl+K (Cmd+K on a Mac), and nothing else held. */
-export const isGoToChord = (e: KeyboardEvent) => (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === 'k' || e.key === 'K');
 
 export function useKeyboard(handlers: KeyHandlers): void {
   const ref = useRef(handlers);

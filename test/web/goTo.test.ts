@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseGoTo, type StepHit } from '../../src/core/goto';
-import { goToMessage, hitLabel } from '../../web/src/chrome/goToText';
-import { isGoToChord } from '../../web/src/useKeyboard';
+import { goToMessage, hitLabel, isGoToChord } from '../../web/src/chrome/goToText';
 
 const hit = (extra: Partial<StepHit> = {}): StepHit => ({ id: 77, title: 'Play app signing', status: 'active', projectId: 3, projectSlug: 'ingame', projectName: 'InGame', projectStatus: 'active', ...extra });
 
@@ -35,7 +34,7 @@ describe('goToMessage', () => {
 
 describe('isGoToChord', () => {
   const press = (key: string, mods: Partial<Record<'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey', boolean>> = {}) =>
-    ({ key, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...mods }) as KeyboardEvent;
+    ({ key, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...mods });
 
   it('is Ctrl+K or Cmd+K, either case, with nothing else held', () => {
     expect(isGoToChord(press('k', { ctrlKey: true }))).toBe(true);

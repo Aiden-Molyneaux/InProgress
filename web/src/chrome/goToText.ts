@@ -16,3 +16,8 @@ export function goToMessage(query: GoToQuery, settled: { hits: StepHit[]; error?
   if (query.kind === 'words' && settled.hits.length === 0) return 'No step titles match';
   return '';
 }
+
+/** Ctrl+K (Cmd+K on a Mac), with nothing else held: the Go to field's chord. */
+export function isGoToChord(e: { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }): boolean {
+  return (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === 'k' || e.key === 'K');
+}

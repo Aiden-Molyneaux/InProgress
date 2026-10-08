@@ -1,8 +1,7 @@
 import { forwardRef, useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent } from 'react';
 import { parseGoTo, type StepHit } from '../../../src/core/goto';
 import { api } from '../api';
-import { isGoToChord } from '../useKeyboard';
-import { goToMessage, hitLabel } from './goToText';
+import { goToMessage, hitLabel, isGoToChord } from './goToText';
 import { menuStep } from './menu';
 
 /** How long typing rests before the field asks the server. */
