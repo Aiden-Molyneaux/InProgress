@@ -7,8 +7,8 @@
 //   node scripts/session-cost.mjs                          cost per branch, all time
 //   node scripts/session-cost.mjs --by=session             cost per session
 //   node scripts/session-cost.mjs --since=2026-10-09       only requests on or after that date
-//   node scripts/session-cost.mjs --sessions=ab12cd34,ef56 only these sessions (id prefixes), e.g. a pilot's
-//   node scripts/session-cost.mjs --exclude=c0dc2f4d       leave these sessions out
+//   node scripts/session-cost.mjs --sessions=ab12cd34,ef56 only these sessions (full ids or their starts), e.g. a pilot's
+//   node scripts/session-cost.mjs --exclude=c0dc2f4d       leave these sessions out (same)
 //
 // Costs are API-equivalent list prices (USD), not what a subscription bills. They exist to
 // compare sessions and branches against each other, nothing else.
@@ -63,8 +63,9 @@ function learnAgentWorktrees() {
         let meta;
         try {
           meta = JSON.parse(fs.readFileSync(path.join(subDir, f), 'utf8'));
-        } catch (err) {
-          throw new Error(`Cannot parse subagent metadata ${path.join(subDir, f)}: ${err.message}`);
+        } catch {
+          // A meta file still being written (a live session) is skipped, as the scan loop below does.
+          continue;
         }
         const [name, label] = agentWorktreeEntry(f, meta);
         if (!WORKTREES.has(name)) WORKTREES.set(name, label);
@@ -74,6 +75,10 @@ function learnAgentWorktrees() {
 }
 learnAgentWorktrees();
 
+// The message ids priced so far in this run. A forked or resumed session's transcript starts with copies of the
+// messages it was forked from; each is priced once, in whichever transcript is read first.
+const SEEN = new Set();
+
 function readCalls(file, start) {
   let raw;
   try {
@@ -81,7 +86,7 @@ function readCalls(file, start) {
   } catch (err) {
     throw new Error(`Cannot read transcript ${file}: ${err.code ?? err.message}`);
   }
-  return readCallsFromText(raw, start, WORKTREES);
+  return readCallsFromText(raw, start, WORKTREES, SEEN);
 }
 
 // ---- Aggregation -------------------------------------------------------------------------------
@@ -120,7 +125,7 @@ function add(agg, call, role, session) {
 // named from its second parent, by `git name-rev` (nameMerges).
 
 function commitsOnMain() {
-  const commits = parseMainLog(git(['log', 'main', '--first-parent', '--diff-merges=first-parent', '--numstat', '--format=@@%H%x09%P%x09%cI%x09%s']));
+  const commits = parseMainLog(git(['log', 'main', '--first-parent', '--diff-merges=first-parent', '--numstat', '--format=%x00%H%x09%P%x09%cI%x09%s']));
   const merges = commits.filter((c) => c.second);
   if (merges.length) {
     nameMerges(commits, git(['name-rev', '--name-only', '--refs=refs/heads/*', ...merges.map((c) => c.second)]).trim().split(/\r?\n/));
@@ -149,14 +154,22 @@ const take = (call, id) => {
   return true;
 };
 
+// The --sessions entries that matched a transcript.
+const matched = new Set();
+
 for (const dir of dirs) {
   for (const name of fs.readdirSync(path.join(PROJECTS, dir)).filter((f) => f.endsWith('.jsonl'))) {
-    const id = name.replace('.jsonl', '').slice(0, 8);
-    if (EXCLUDE.some((p) => id.startsWith(p))) continue;
-    if (ONLY.length && !ONLY.some((p) => id.startsWith(p))) continue;
+    // --sessions and --exclude match the whole session id, so a pasted full id works; the report names a session by
+    // its first 8 characters.
+    const fullId = name.replace('.jsonl', '');
+    const id = fullId.slice(0, 8);
+    const wanted = ONLY.filter((p) => fullId.startsWith(p));
+    for (const p of wanted) matched.add(p);
+    if (EXCLUDE.some((p) => fullId.startsWith(p))) continue;
+    if (ONLY.length && !wanted.length) continue;
     const main = readCalls(path.join(PROJECTS, dir, name), MAIN);
     for (const c of main.calls) if (take(c, id)) add(group(BY === 'session' ? id : c.branch), c, 'main', id);
-    const subDir = path.join(PROJECTS, dir, name.replace('.jsonl', ''), 'subagents');
+    const subDir = path.join(PROJECTS, dir, fullId, 'subagents');
     if (!fs.existsSync(subDir)) continue;
     for (const sub of fs.readdirSync(subDir).filter((f) => f.endsWith('.jsonl'))) {
       let meta = {};
@@ -169,6 +182,11 @@ for (const dir of dirs) {
       for (const c of s.calls) if (take(c, id)) add(group(BY === 'session' ? id : c.branch), c, 'sub', id);
     }
   }
+}
+// A --sessions entry that matches nothing is a typo or an id from another machine; without this the report would
+// quietly leave that session out.
+for (const p of ONLY) {
+  if (!matched.has(p)) console.error(`warning: --sessions=${p} matches no session transcript. It takes a session id or the start of one.`);
 }
 
 // ---- Report ------------------------------------------------------------------------------------

@@ -29,14 +29,29 @@ export const COLD_MIN = 50_000;
 // last working on: walking the transcript in order, a line switches the current branch when its
 // `gitBranch` is a feature branch, when a tool call touches `.claude/worktrees/<name>`, or when a
 // command creates a branch. A `git merge` run in the main checkout ends the branch: what follows
-// is `(main)` (planning, landing, chat) until the next marker.
+// is `(main)` (planning, landing, chat) until the next marker. A worktree that `git worktree remove`
+// or `prune` names is not one the session works in, so the cleanup after a merge is not a marker.
 
 export const MAIN = '(main)';
 const MAIN_BRANCHES = new Set(['main', 'master', 'HEAD', '']);
 const WT_RE = /\.claude[\\/]+worktrees[\\/]+([A-Za-z0-9._-]+)(\*)?/g;
 const NEW_BRANCH_RE = /\bgit\b[^\n;&|]*?\b(?:checkout\s+-[bB]|switch\s+-[cC]|worktree\s+add\b[^\n;&|]*?\s-[bB])\s+([A-Za-z0-9._/-]+)/g;
 const WT_ADD_RE = /\bworktree\s+add\b[^\n;&|]*/g;
-const MERGE_RE = /\bgit\s+merge\b/;
+
+// A merge or a cleanup is recognised per simple command, not anywhere in the text: `git merge-base`, a grep for
+// "git merge" and a commit message that mentions one are not merges. A command is split on `&&`, `||`, `;`, `|` and
+// newlines (quotes are not understood, which is close enough here), and `git -C <dir>` may precede the subcommand.
+const SEGMENT_SPLIT_RE = /&&|\|\|?|;|\r?\n/;
+const MERGE_RE = /^git(?:\s+-C\s+\S+)?\s+merge(?=\s|$)/;
+const WT_CLEANUP_RE = /^git(?:\s+-C\s+\S+)?\s+worktree\s+(?:remove|prune)(?=\s|$)/;
+
+const segmentsOf = (command) => command.split(SEGMENT_SPLIT_RE).map((s) => s.trim());
+const isMerge = (segment) => MERGE_RE.test(segment) && !segment.includes(' --abort') && !segment.includes(' --quit');
+// A merge runs in the main checkout unless it names a worktree itself (`git -C .claude/worktrees/x merge main`) or an
+// earlier segment moved into one (`cd .claude/worktrees/x && git merge main`). A worktree path in a later segment, such
+// as the cleanup in `git merge --no-ff x && git worktree remove .claude/worktrees/x`, does not change where it ran.
+const mergesIntoMainCheckout = (segments) => segments.some((s, i) =>
+  isMerge(s) && !s.match(WT_RE) && !segments.slice(0, i).some((p) => /^(?:cd|pushd)\s/.test(p) && p.match(WT_RE)));
 
 // Worktree directory name -> branch: the live worktree list, plus `git worktree add` commands
 // seen in transcripts for worktrees removed since.
@@ -64,10 +79,18 @@ export function agentWorktreeEntry(metaFile, meta) {
   return [name, meta.description ?? meta.worktreeBranch ?? name];
 }
 
+// `git worktree add <path> <branch>` (no -b or -B) checks out a branch that exists: the first word after the path that
+// is not an option. A detached worktree has no branch, and `git worktree add <path>` alone is named after its path.
+function existingBranchOf(add, pathMatch) {
+  if (!pathMatch || /\s--detach\b/.test(add)) return null;
+  return add.slice(pathMatch.index + pathMatch[0].length).match(/^\S*\s+(?:-\S*\s+)*([A-Za-z0-9._/][A-Za-z0-9._/-]*)/)?.[1] ?? null;
+}
+
 function learnWorktrees(command, worktrees) {
   for (const add of command.match(WT_ADD_RE) ?? []) {
-    const name = [...add.matchAll(WT_RE)][0]?.[1];
-    const branch = add.match(/\s-[bB]\s+([A-Za-z0-9._/-]+)/)?.[1];
+    const pathMatch = [...add.matchAll(WT_RE)][0];
+    const name = pathMatch?.[1];
+    const branch = add.match(/\s-[bB]\s+([A-Za-z0-9._/-]+)/)?.[1] ?? existingBranchOf(add, pathMatch);
     if (name && branch && !worktrees.has(name)) worktrees.set(name, branch);
   }
 }
@@ -93,13 +116,18 @@ export function markersOf(j, worktrees) {
   for (const block of content) {
     if (block?.type !== 'tool_use' || !block.input) continue;
     const command = typeof block.input.command === 'string' ? block.input.command : '';
+    const segments = segmentsOf(command);
     if (command) learnWorktrees(command, worktrees);
-    for (const m of JSON.stringify(block.input).matchAll(WT_RE)) {
-      const branch = branchOfWorktree(m[1], worktrees, m[2] === '*');
-      hits.set(branch, (hits.get(branch) ?? 0) + 1);
+    // Removing a worktree is not working in it: its path in a cleanup command is no marker, or the cleanup after a
+    // merge would send the session back to the branch it just merged.
+    if (!segments.some((s) => WT_CLEANUP_RE.test(s))) {
+      for (const m of JSON.stringify(block.input).matchAll(WT_RE)) {
+        const branch = branchOfWorktree(m[1], worktrees, m[2] === '*');
+        hits.set(branch, (hits.get(branch) ?? 0) + 1);
+      }
     }
     for (const m of command.matchAll(NEW_BRANCH_RE)) created = m[1];
-    if (MERGE_RE.test(command) && !command.match(WT_RE)) merged = true;
+    if (mergesIntoMainCheckout(segments)) merged = true;
   }
   if (created) return { branch: created, merged };
   const top = [...hits.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
@@ -109,7 +137,10 @@ export function markersOf(j, worktrees) {
 // One assistant message can be written as several transcript lines; the last carries the
 // final usage, so key by message id and keep the last. `spawns` maps each tool_use id to the
 // branch current when it was issued, so a subagent can inherit its dispatcher's branch.
-export function readCallsFromText(raw, start, worktrees) {
+// `seen`, when given, holds the message ids already priced from other transcripts: a forked or resumed session's file
+// starts with copies of the messages it was forked from, and each must be priced once. This text's own ids join it
+// only at the end, so a message written as several lines here still keeps its last one.
+export function readCallsFromText(raw, start, worktrees, seen) {
   const byId = new Map();
   const spawns = new Map();
   let current = start;
@@ -128,7 +159,7 @@ export function readCallsFromText(raw, start, worktrees) {
     if (Array.isArray(m?.content)) {
       for (const block of m.content) if (block?.type === 'tool_use' && block.id) spawns.set(block.id, current);
     }
-    if (m?.usage && m.id && m.model && m.model !== '<synthetic>') {
+    if (m?.usage && m.id && m.model && m.model !== '<synthetic>' && !seen?.has(m.id)) {
       const u = m.usage;
       byId.set(m.id, {
         branch: current,
@@ -143,6 +174,7 @@ export function readCallsFromText(raw, start, worktrees) {
     }
     if (merged) current = MAIN;
   }
+  if (seen) for (const id of byId.keys()) seen.add(id);
   return { calls: [...byId.values()], spawns };
 }
 
@@ -161,7 +193,11 @@ export function priceOf(model, u) {
   };
 }
 
-/** True when a request is a cold re-write (see COLD_MIN). The caller decides whether it came from the main session. */
+/**
+ * True when a request is a cold re-write (see COLD_MIN). The caller decides whether it came from the main session.
+ * Known false positive: one large tool result written onto a small cached context also makes a prompt of 50k or more
+ * that is mostly cache writes, though the cache was warm. The count is an upper bound.
+ */
 export function isCold(u) {
   const context = u.input + u.cacheRead + u.cw5m + u.cw1h;
   return context >= COLD_MIN && u.cw5m + u.cw1h >= context / 2;
@@ -175,10 +211,13 @@ export function isCold(u) {
 
 const SKIP_FILES = /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/;
 
-/** Parses `git log --first-parent --diff-merges=first-parent --numstat --format=@@%H%x09%P%x09%cI%x09%s`. A merge's `branch` is null until nameMerges. */
+/**
+ * Parses `git log --first-parent --diff-merges=first-parent --numstat --format=%x00%H%x09%P%x09%cI%x09%s`. Each record
+ * starts with a NUL, which a subject cannot contain. A merge's `branch` is null until nameMerges.
+ */
 export function parseMainLog(log) {
   const commits = [];
-  for (const chunk of log.split('@@').slice(1)) {
+  for (const chunk of log.split('\0').slice(1)) {
     const [head, ...rest] = chunk.split('\n');
     const [sha, parents, at, subject] = head.split('\t');
     let lines = 0;

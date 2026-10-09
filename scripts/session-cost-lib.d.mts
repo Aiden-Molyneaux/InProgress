@@ -12,7 +12,7 @@ export function parseWorktreeList(porcelain: string): Map<string, string>;
 export function agentWorktreeEntry(metaFile: string, meta: { worktreePath?: string; worktreeBranch?: string; description?: string }): [string, string];
 export function branchOfWorktree(written: string, worktrees: Map<string, string>, glob?: boolean): string;
 export function markersOf(line: unknown, worktrees: Map<string, string>): { branch: string | null; merged: boolean };
-export function readCallsFromText(raw: string, start: string, worktrees: Map<string, string>): { calls: Call[]; spawns: Map<string, string> };
+export function readCallsFromText(raw: string, start: string, worktrees: Map<string, string>, seen?: Set<string>): { calls: Call[]; spawns: Map<string, string> };
 export function parseMainLog(log: string): Commit[];
 export function nameMerges(commits: Commit[], names: string[]): void;
 export function committedWithin(commits: Commit[], span: { first: string; last: string }): Commit[];

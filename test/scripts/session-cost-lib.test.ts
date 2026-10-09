@@ -28,6 +28,8 @@ const worktrees = () => new Map([
   ['agent-ae03e131a99d47df8', '#98 P4 session identity implementer'],
 ]);
 const branches = (lines: string[], map = worktrees()) => readCallsFromText(lines.join('\n'), MAIN, map).calls.map((c) => c.branch);
+/** The branch of three requests: one on feat/x, one that runs `command`, and the one after it. */
+const branchesAfter = (command: string) => branches([assistant('a', { branch: 'feat/x' }), assistant('b', { tools: [tool('t1', 'Bash', { command })] }), assistant('c')]);
 
 describe('priceOf', () => {
   it('prices every bucket at Opus 5.5 list rates', () => {
@@ -54,6 +56,15 @@ describe('readCallsFromText', () => {
     const raw = [assistant('m1'), assistant('m2', { model: '<synthetic>' }), '{"type":"assist'].join('\n');
     expect(readCallsFromText(raw, MAIN, new Map()).calls).toHaveLength(1);
   });
+  it('prices a message id once across texts that share a seen set, and still keeps the last line within one text', () => {
+    const seen = new Set<string>();
+    const first = readCallsFromText([assistant('m1', { out: 1 }), assistant('m2', { out: 2 }), assistant('m2', { out: 3 })].join('\n'), MAIN, new Map(), seen);
+    // A forked or resumed session's file starts with copies of the messages it was forked from.
+    const second = readCallsFromText([assistant('m2', { out: 20 }), assistant('m3', { out: 4 })].join('\n'), MAIN, new Map(), seen);
+    expect(first.calls.map((c) => c.output)).toEqual([1, 3]);
+    expect(second.calls.map((c) => c.output)).toEqual([4]);
+    expect([...seen].sort()).toEqual(['m1', 'm2', 'm3']);
+  });
 });
 
 describe('attribution', () => {
@@ -77,6 +88,61 @@ describe('attribution', () => {
     const mergeInWorktree = tool('t2', 'Bash', { command: 'git -C .claude/worktrees/goto merge main' });
     expect(branches([assistant('a', { branch: 'feat/x' }), assistant('b', { tools: [mergeMain] }), assistant('c')])).toEqual(['feat/x', 'feat/x', MAIN]);
     expect(branches([assistant('a', { tools: [mergeInWorktree] }), assistant('b')])).toEqual(['goto', 'goto']);
+  });
+  it('sees a merge followed by its cleanup in one command, but not a merge after moving into a worktree', () => {
+    const mergeAndClean = tool('t1', 'Bash', { command: 'git merge --no-ff goto -m "Merge" && git worktree remove .claude/worktrees/goto' });
+    const cdThenMerge = tool('t2', 'Bash', { command: 'cd .claude/worktrees/goto && git merge main' });
+    expect(branches([assistant('a', { branch: 'feat/x' }), assistant('b', { tools: [mergeAndClean] }), assistant('c')])).toEqual(['feat/x', 'feat/x', MAIN]);
+    expect(branches([assistant('a', { tools: [cdThenMerge] }), assistant('b')])).toEqual(['goto', 'goto']);
+  });
+  it('ends a branch for a git merge anywhere in a command chain', () => {
+    for (const command of [
+      'git merge --no-ff x',
+      'cd /c/personal/InProgress && git merge --no-ff x -m "Merge x" && npm run deploy',
+      'git status; git merge x',
+      'git -C /c/personal/InProgress merge x',
+    ]) {
+      expect(branchesAfter(command), command).toEqual(['feat/x', 'feat/x', MAIN]);
+    }
+  });
+  it('does not end a branch for a command that only mentions a merge', () => {
+    for (const command of [
+      'git merge-base main HEAD',
+      'git merge --abort',
+      'git merge --quit',
+      'git log --oneline --grep="git merge"',
+      'grep -rn "git merge" docs',
+      'git commit -m "Fix git merge detection"',
+    ]) {
+      expect(branchesAfter(command), command).toEqual(['feat/x', 'feat/x', 'feat/x']);
+    }
+  });
+  it('does not follow a worktree that a cleanup command removes', () => {
+    for (const command of [
+      'git worktree remove .claude/worktrees/old',
+      'git worktree remove --force .claude/worktrees/old && git branch -D old',
+      'git -C /c/personal/InProgress worktree remove .claude\\worktrees\\old',
+      'git worktree prune && rm -rf .claude/worktrees/old',
+    ]) {
+      expect(branchesAfter(command), command).toEqual(['feat/x', 'feat/x', 'feat/x']);
+    }
+  });
+  it('stays on main through the post-merge cleanup', () => {
+    const merge = tool('t1', 'Bash', { command: 'git merge --no-ff goto -m "Merge"' });
+    const cleanup = tool('t2', 'Bash', { command: 'git worktree remove .claude/worktrees/goto && git branch -d goto' });
+    expect(branches([assistant('a', { branch: 'feat/x' }), assistant('b', { tools: [merge] }), assistant('c', { tools: [cleanup] }), assistant('d')]))
+      .toEqual(['feat/x', 'feat/x', MAIN, MAIN]);
+  });
+  it('learns the branch of a worktree added for an existing branch, and not of a detached one', () => {
+    const map = worktrees();
+    const add = (id: string, command: string) => assistant(id, { tools: [tool(id, 'Bash', { command })] });
+    expect(branches([add('a', 'git worktree add .claude/worktrees/foo existing-branch')], map)).toEqual(['existing-branch']);
+    expect(map.get('foo')).toBe('existing-branch');
+    branches([add('b', 'git worktree add -f .claude/worktrees/bar team/other-branch')], map);
+    expect(map.get('bar')).toBe('team/other-branch');
+    branches([add('c', 'git worktree add --detach .claude/worktrees/baz HEAD'), add('d', 'git worktree add .claude/worktrees/qux')], map);
+    expect(map.has('baz')).toBe(false);
+    expect(map.has('qux')).toBe(false);
   });
   it('resolves a trailing dot always, and a prefix only for a glob', () => {
     expect(branchOfWorktree('goto.', worktrees())).toBe('goto');
@@ -123,12 +189,13 @@ describe('isCold', () => {
 });
 
 describe('lines landed', () => {
+  // Each record starts with a NUL, the way `--format=%x00%H%x09%P%x09%cI%x09%s` writes it.
   const log = [
-    '@@aaa\tp1 p2\t2026-10-09T12:00:00+00:00\tMerge: Go to a step (#227)',
+    '\u0000aaa\tp1 p2\t2026-10-09T12:00:00+00:00\tMerge: Go to a step (#227)',
     '10\t2\tweb/src/chrome/GoTo.tsx',
     '500\t0\tpackage-lock.json',
     '',
-    '@@bbb\tp0\t2026-10-08T12:00:00+00:00\tSpec: something (#228)',
+    '\u0000bbb\tp0\t2026-10-08T12:00:00+00:00\tSpec: something (#228)',
     '30\t0\tdocs/superpowers/specs/x.md',
     '-\t-\tdocs/image.png',
     '',
@@ -136,6 +203,17 @@ describe('lines landed', () => {
 
   it('counts added plus deleted lines per first-parent commit, without lockfiles or binaries', () => {
     expect(parseMainLog(log).map((c) => [c.sha, c.second, c.lines, c.branch])).toEqual([['aaa', 'p2', 12, null], ['bbb', null, 30, MAIN]]);
+  });
+  it('parses a subject that contains @@', () => {
+    const tricky = [
+      '\u0000ccc\tp0\t2026-10-09T12:00:00+00:00\tFix the @@ marker (#300)',
+      '5\t1\tsrc/a.ts',
+      '',
+      '\u0000ddd\tp0\t2026-10-08T12:00:00+00:00\tNext',
+      '2\t0\tsrc/b.ts',
+      '',
+    ].join('\n');
+    expect(parseMainLog(tricky).map((c) => [c.sha, c.subject, c.lines])).toEqual([['ccc', 'Fix the @@ marker (#300)', 6], ['ddd', 'Next', 2]]);
   });
   it('names a merge by a clean name-rev result, else by a "Merge branch" subject', () => {
     const commits = parseMainLog(log);
