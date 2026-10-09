@@ -89,7 +89,7 @@ Pass `model` (and `effort` if needed) on the Agent call only when one of these h
 
 ## 4. Session rhythm
 
-**Window.** Opus 5.5 runs with a native 1M window, and `opus[1m]` changes nothing, so the cap comes from settings. The committed `.claude/settings.json` sets `"autoCompactWindow": 200000`. The docs show this key in user settings and do not say whether project settings honour it, so the first pilot session checks with `/context`. If project scope does not take, the fallback is `"env": { "CLAUDE_CODE_DISABLE_1M_CONTEXT": "1" }` in the same file, which makes Claude Code treat the model as a 200K one.
+**Window.** Opus 5.5 runs with a native 1M window, and `opus[1m]` changes nothing, so the cap comes from settings. The committed `.claude/settings.json` sets `"autoCompactWindow": 300000`: Aiden chose 300k over 200k for more room before a compaction, and the nudge below still asks for a cut at 120k and 160k. The setting moves only the compaction point. The model keeps its 1M window, so a large tool result never fails a request. The docs show this key in user settings and do not say whether project settings honour it, so the first pilot session checks with `/context`. If project scope does not take, set `"env": { "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "300000" }` in the same file and check again. If neither takes, ask Aiden: a user-level setting would change every project.
 
 **Nudge hook.** `scripts/context-nudge.mjs`, registered in `.claude/settings.json` on `PostToolBatch` (once per batch of tool calls, before the next model call), as `node "$CLAUDE_PROJECT_DIR/scripts/context-nudge.mjs"`. It reads the hook input from stdin and:
 
@@ -106,7 +106,7 @@ It always exits 0, and any error (unreadable transcript, bad JSON) is silence. T
 
 **One worktree per session.** A session works only in its own worktree under `.claude/worktrees/`. A session spawned from a chip already starts in one; any other session creates its own (`git worktree add .claude/worktrees/<topic> -b <topic> main`). The main checkout takes only merges and deploys. The v1 ruling about absolute hook paths (rulings 2026-09-27, item 1) concerns only `claude:install` and deploy, which stay in the main checkout. Uncommitted changes outside a session's own worktree belong to another session: it does not stage them, ask about them or mention them. Stage explicit paths only.
 
-**Overnight.** Same rhythm without stopping. At each clean point the session writes the handoff, so a compaction or a crash loses nothing, then takes the next queued item. Compaction at 200k is the reset. Provisional rulings and open questions go to the rulings file, as today.
+**Overnight.** Same rhythm without stopping. At each clean point the session writes the handoff, so a compaction or a crash loses nothing, then takes the next queued item. Compaction at 300k is the reset. Provisional rulings and open questions go to the rulings file, as today.
 
 **Handoff.** InThink's shape, shorter, because the standing rules live in CLAUDE.md:
 
@@ -154,8 +154,8 @@ Each handoff carries a **pilot log**: session ids and what each did, each sessio
 | Fact | Source |
 |---|---|
 | Opus 4.7 and later run a native 1M window; `opus[1m]` has no effect on them; they compact at about 967K by default | code.claude.com/docs/en/model-config |
-| `"autoCompactWindow": 200000` sets the compaction window for every model, in a settings file | code.claude.com/docs/en/model-config |
-| `CLAUDE_CODE_DISABLE_1M_CONTEXT=1`, in the shell or a settings file, holds 1M models to a 200K window | code.claude.com/docs/en/model-config |
+| `autoCompactWindow` (a token count) sets the compaction window for every model, in a settings file | code.claude.com/docs/en/model-config |
+| `CLAUDE_CODE_AUTO_COMPACT_WINDOW` takes precedence over the setting, accepts a plain token count, and is capped at the model's window | code.claude.com/docs/en/model-config |
 | `PostToolBatch` fires after a batch of parallel tool calls resolves, before the next model call, and supports `additionalContext` | code.claude.com/docs/en/hooks |
 | Hook input carries `transcript_path` and `session_id`; `agent_id` is present only inside a subagent; settings hooks also fire inside subagents | code.claude.com/docs/en/hooks |
 | Subagent frontmatter accepts full model ids, `effort` and `omitClaudeMd`; subagents load CLAUDE.md by default | code.claude.com/docs/en/sub-agents |
@@ -197,7 +197,7 @@ The label is ops: typecheck and unit.
 
 ## Risks
 
-- **Compaction at 200k drops detail mid-thread.** The nudge asks for a cut well before it, and the handoff written at each clean point survives it.
+- **Compaction at 300k drops detail mid-thread.** The nudge asks for a cut well before it, and the handoff written at each clean point survives it.
 - **A Sonnet reviewer misses a major.** The Opus overrides cover the risky areas, and the calibration run measures the gap on a real diff.
 - **The screen reviewer misses a state.** It lists states from the diff before it drives anything, and reports the ones it could not reach.
 - **`autoCompactWindow` may not apply at project scope.** The first pilot session checks it, and the env fallback is written down.
