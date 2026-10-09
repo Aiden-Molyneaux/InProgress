@@ -187,7 +187,7 @@ The label is ops: typecheck and unit.
 - **Manual:**
   - run the cost script against the baseline and match r105;
   - feed the nudge hook a real transcript past 120k and read its output;
-  - the first pilot session confirms the 200k window with `/context`.
+  - the first pilot session confirms the 300k compaction window with `/context`.
 
 ## Out of scope
 
