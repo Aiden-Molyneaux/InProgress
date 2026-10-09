@@ -91,8 +91,9 @@ try {
         writeLevel(file, due[0]);
         process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: input.hook_event_name ?? 'PostToolBatch', additionalContext: due[1] } }));
       }
-    } else if (level !== 0) {
-      // Below 120k: a level still set means a compaction, and a missing file is the session's first run.
+    } else if (cur === undefined ? level === undefined : level !== 0) {
+      // Below 120k: a level still set means a compaction, and a missing file is the session's first run. With no
+      // usage line in reach (a huge tool result), keep what was announced: only a real reading can re-arm it.
       writeLevel(file, 0);
     }
   }

@@ -95,6 +95,21 @@ describe('attribution', () => {
     expect(branches([assistant('a', { branch: 'feat/x' }), assistant('b', { tools: [mergeAndClean] }), assistant('c')])).toEqual(['feat/x', 'feat/x', MAIN]);
     expect(branches([assistant('a', { tools: [cdThenMerge] }), assistant('b')])).toEqual(['goto', 'goto']);
   });
+  it('does not read a merge into quoted text or a heredoc body', () => {
+    const quoted = tool('t1', 'Bash', { command: 'git commit -m "Fix: x; git merge y"' });
+    const heredoc = tool('t2', 'Bash', { command: "git commit -q -F - <<'EOF'\nTitle\n\ngit merge main is mentioned here\nEOF\ngit log --oneline -1" });
+    const echoed = tool('t3', 'Bash', { command: 'echo "run:\ngit merge main"' });
+    for (const t of [quoted, heredoc, echoed]) {
+      expect(branches([assistant('a', { branch: 'feat/x' }), assistant('b', { tools: [t] }), assistant('c')])).toEqual(['feat/x', 'feat/x', 'feat/x']);
+    }
+  });
+  it('learns no branch from a worktree added at HEAD, a commit id or a remote ref', () => {
+    for (const ref of ['HEAD', 'abc1234', 'origin/main']) {
+      const map = worktrees();
+      readCallsFromText(assistant('a', { tools: [tool('t1', 'Bash', { command: `git worktree add .claude/worktrees/foo ${ref}` })] }), MAIN, map);
+      expect(map.has('foo')).toBe(false);
+    }
+  });
   it('ends a branch for a git merge anywhere in a command chain', () => {
     for (const command of [
       'git merge --no-ff x',

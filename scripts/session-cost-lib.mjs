@@ -45,7 +45,12 @@ const SEGMENT_SPLIT_RE = /&&|\|\|?|;|\r?\n/;
 const MERGE_RE = /^git(?:\s+-C\s+\S+)?\s+merge(?=\s|$)/;
 const WT_CLEANUP_RE = /^git(?:\s+-C\s+\S+)?\s+worktree\s+(?:remove|prune)(?=\s|$)/;
 
-const segmentsOf = (command) => command.split(SEGMENT_SPLIT_RE).map((s) => s.trim());
+// A heredoc body is text, not commands, so it goes; inside quotes a separator is text too, so it becomes a space
+// (the quoted text stays, for the worktree paths it may hold). `git commit -m "x; git merge y"` is then one segment.
+const HEREDOC_RE = /<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n\s*\2(?=\s|$)/g;
+const QUOTED_RE = /"(?:[^"\\]|\\.)*"|'[^']*'/g;
+const unquoted = (command) => command.replace(HEREDOC_RE, ' ').replace(QUOTED_RE, (q) => q.replace(/[;&|\r\n]/g, ' '));
+const segmentsOf = (command) => unquoted(command).split(SEGMENT_SPLIT_RE).map((s) => s.trim());
 const isMerge = (segment) => MERGE_RE.test(segment) && !segment.includes(' --abort') && !segment.includes(' --quit');
 // A merge runs in the main checkout unless it names a worktree itself (`git -C .claude/worktrees/x merge main`) or an
 // earlier segment moved into one (`cd .claude/worktrees/x && git merge main`). A worktree path in a later segment, such
@@ -83,7 +88,9 @@ export function agentWorktreeEntry(metaFile, meta) {
 // is not an option. A detached worktree has no branch, and `git worktree add <path>` alone is named after its path.
 function existingBranchOf(add, pathMatch) {
   if (!pathMatch || /\s--detach\b/.test(add)) return null;
-  return add.slice(pathMatch.index + pathMatch[0].length).match(/^\S*\s+(?:-\S*\s+)*([A-Za-z0-9._/][A-Za-z0-9._/-]*)/)?.[1] ?? null;
+  const ref = add.slice(pathMatch.index + pathMatch[0].length).match(/^\S*\s+(?:-\S*\s+)*([A-Za-z0-9._/][A-Za-z0-9._/-]*)/)?.[1] ?? null;
+  // HEAD, a commit id or a remote ref checks out a detached worktree: there is no branch to learn.
+  return ref && !/^(HEAD|[0-9a-f]{7,40}|origin\/.*)$/.test(ref) ? ref : null;
 }
 
 function learnWorktrees(command, worktrees) {

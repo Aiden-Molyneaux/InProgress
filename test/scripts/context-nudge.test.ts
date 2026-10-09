@@ -118,6 +118,13 @@ describe('context-nudge', () => {
     expect(batch(early, bulky(100))).toBe('');
     expect(stored(early)).toBe(0);
   });
+  it('keeps an announced level when a huge line hides every usage line', () => {
+    const session = fresh();
+    expect(said(batch(session, line('a', 125_000)))).toContain('about 120k');
+    expect(batch(session, line('a', 125_000), bulky(9 * 1024 * 1024))).toBe('');
+    expect(stored(session)).toBe(120_000);
+    expect(batch(session, line('a', 125_000), line('b', 126_000))).toBe('');
+  });
   it('stays silent inside a subagent and writes no state', () => {
     const session = fresh();
     const file = transcript(line('a', 110_000), line('b', 125_000));
