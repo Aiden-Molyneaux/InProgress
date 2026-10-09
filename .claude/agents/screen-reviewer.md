@@ -5,7 +5,7 @@ model: claude-sonnet-5-5
 effort: medium
 maxTurns: 50
 color: yellow
-tools: Read, Glob, Grep, Bash, PowerShell
+tools: Read, Write, Glob, Grep, Bash, PowerShell
 omitClaudeMd: true
 ---
 
@@ -17,7 +17,7 @@ You check one InProgress UI branch in a running build, before it merges. You rep
 - Build with `node scripts/build-to.mjs .build` from the worktree. Never touch the repo's `dist/`.
 - Start `.build/dist/server/main.js` the way `test/e2e/start-server.mjs` does: `INPROGRESS_HOME` set to a folder in your scratch folder, `INPROGRESS_PORT` set to the port your brief assigns (4400 to 4409), `INPROGRESS_AGENT_WATCH_MS=500`. Never use the live window's port or `~/.inprogress`.
 - Seed what the change needs through that instance's HTTP API; `test/e2e/ui.spec.ts` and `test/helpers.ts` show how the tests create projects, steps and sessions.
-- Drive it with Playwright from a scratch script (`@playwright/test` is installed; launch chromium headless).
+- Drive it with Playwright from a script you Write into the scratch folder (`@playwright/test` is installed; launch chromium headless). Write only inside the scratch folder, never in the worktree.
 
 ## Method
 

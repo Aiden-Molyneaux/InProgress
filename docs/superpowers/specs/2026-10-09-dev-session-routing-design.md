@@ -36,7 +36,7 @@ Files in `.claude/agents/`. Frontmatter pins full model ids; an override at disp
 | `explorer` | `claude-haiku-5-5` | low | Read, Glob, Grep | true |
 | `implementer` | `claude-sonnet-5-5` | medium | Read, Write, Edit, Glob, Grep, Bash, PowerShell | false |
 | `code-reviewer` | `claude-sonnet-5-5` | high | Read, Glob, Grep, Bash | false |
-| `screen-reviewer` | `claude-sonnet-5-5` | medium | Read, Glob, Grep, Bash, PowerShell | true |
+| `screen-reviewer` | `claude-sonnet-5-5` | medium | Read, Write (scratch folder only), Glob, Grep, Bash, PowerShell | true |
 
 **explorer.** Answers one lookup question that means reading across several files: callers, where something is used, an inventory. Every claim carries a `file:line` and, where it helps, a one-line quote. It ends with what it searched and did not find. It never edits, suggests fixes or judges quality. It skips CLAUDE.md because none of the routing rules apply to it.
 
@@ -91,14 +91,15 @@ Pass `model` (and `effort` if needed) on the Agent call only when one of these h
 
 **Window.** Opus 5.5 runs with a native 1M window, and `opus[1m]` changes nothing, so the cap comes from settings. The committed `.claude/settings.json` sets `"autoCompactWindow": 300000`: Aiden chose 300k over 200k for more room before a compaction, and the nudge below still asks for a cut at 120k and 160k. The setting moves only the compaction point. The model keeps its 1M window, so a large tool result never fails a request. The docs show this key in user settings and do not say whether project settings honour it, so the first pilot session checks with `/context`. If project scope does not take, set `"env": { "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "300000" }` in the same file and check again. If neither takes, ask Aiden: a user-level setting would change every project.
 
-**Nudge hook.** `scripts/context-nudge.mjs`, registered in `.claude/settings.json` on `PostToolBatch` (once per batch of tool calls, before the next model call), as `node "$CLAUDE_PROJECT_DIR/scripts/context-nudge.mjs"`. It reads the hook input from stdin and:
+**Nudge hook.** `scripts/context-nudge.mjs`, registered in `.claude/settings.json` on `PostToolBatch` (once per batch of tool calls, before the next model call) in exec form: `"command": "node", "args": ["${CLAUDE_PROJECT_DIR}/scripts/context-nudge.mjs"]`. It reads the hook input from stdin and:
 
-- exits silently when the input has `agent_id` (a subagent);
-- reads the last 512 KB of `transcript_path` and finds the last two assistant messages with usage, by message id; a message's context is input plus cache read plus cache creation tokens;
-- when the newer one crosses 120k or 160k and the older one is below that line, prints `hookSpecificOutput.additionalContext` with one line: at 120k, "Context is about 120k. Finish what you're on; at the next clean point, write the handoff and cut the session."; at 160k, the same with "cut the session now at the next clean point";
-- otherwise prints nothing.
+- exits silently, writing nothing, when the input has `agent_id` (a subagent);
+- reads the tail of `transcript_path` (512 KB, doubled up to 8 MB when no usage line is in it) and takes the context of the last non-synthetic assistant message: input plus cache read plus cache creation tokens;
+- keeps a per-session state file, `<tmp>/claude-context-nudge/<session_id>.json`, holding the highest level announced (0, 120000 or 160000);
+- when the context is at or above a level not yet announced, records it and prints `hookSpecificOutput.additionalContext` with that level's line: at 120k, finish what you're on and cut at the next clean point; at 160k, cut at the next clean point; on an unattended overnight run, write the handoff and carry on instead;
+- below 120k, prints nothing and resets the level to 0, so after a compaction the nudge can fire again.
 
-It always exits 0, and any error (unreadable transcript, bad JSON) is silence. The transcript is written asynchronously and may lag one request; for a size estimate that does not matter. After a compaction the context drops, and the nudge can fire again when it climbs back.
+Because it compares with the announced level rather than the previous request, a crossing on a turn that ends without a tool call is caught on the next batch. It always exits 0, and any error (unreadable transcript, bad JSON) is silence. The transcript is written asynchronously and may lag one request; for a size estimate that does not matter. The state file is written on the first run of every session, so its presence proves the hook runs.
 
 **One thread per session.** A thread is a feature, or a suite of related features that share code. A clean point is right after a merge, or after a finished plan task with everything committed in the worktree. The session cuts when its thread is done, when the next queued item is unrelated, or when the nudge says so. At a cut it writes the handoff, attaches it through the scribe, offers the next session as a one-click chip (`spawn_task`, whose prompt is the handoff prompt), prints the handoff's path as well, and stops.
 
@@ -178,10 +179,14 @@ The label is ops: typecheck and unit.
     - a trailing dot and a glob prefix resolve;
   - cold re-write detection;
   - lines credited by session window and by branch.
-- **`test/scripts/context-nudge.test.ts`**, running the script as a child process on fixture transcripts:
-  - each threshold fires once, on the crossing;
-  - silence below the thresholds, after a drop, inside a subagent, with no usage, or with a partial last line;
+- **`test/scripts/context-nudge.test.ts`**, running the script as a child process on fixture transcripts with a temporary state folder:
+  - each level fires once per session, including a crossing on a turn without tool calls;
+  - a fall below 120k re-arms it;
+  - silence below 120k, inside a subagent (with no state written), for synthetic messages and a partial last line;
+  - a usage line before a 600 KB line is still found;
+  - the state file appears on a session's first run;
   - exit 0 on unreadable input.
+- **`test/repo/settings.test.ts`:** `.claude/settings.json` compacts at 300000 and registers the nudge, whose script path exists once `${CLAUDE_PROJECT_DIR}` is filled in.
 - **`test/repo/agents.test.ts`:** every `.claude/agents/*.md` has a name and a description, pins a full model id (`claude-...`, never an alias), and sets `effort`.
 - The existing em-dash guard covers every new file.
 - **Manual:**
@@ -201,3 +206,4 @@ The label is ops: typecheck and unit.
 - **A Sonnet reviewer misses a major.** The Opus overrides cover the risky areas, and the calibration run measures the gap on a real diff.
 - **The screen reviewer misses a state.** It lists states from the diff before it drives anything, and reports the ones it could not reach.
 - **`autoCompactWindow` may not apply at project scope.** The first pilot session checks it, and the env fallback is written down.
+- **The hook needs `node` on the PATH the desktop app inherits.** The product's own hooks avoid that with an absolute path; this one stays portable because the registry PATH holds `C:\nvm4w\nodejs` and `C:\Program Files\nodejs`. The first pilot session checks that the hook's state file exists for its session id; if it does not, the hook's `command` becomes the absolute Node path.

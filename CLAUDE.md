@@ -1,6 +1,6 @@
 # InProgress: working rules
 
-The Roles, Routing, Overrides, Evidence, Session rhythm and Handoff sections are for the main session. A subagent follows its own agent file; the house rules at the end apply to everyone. Design: `docs/superpowers/specs/2026-10-09-dev-session-routing-design.md`.
+The Roles, Routing, Overrides, Evidence, Session rhythm and Handoff sections are for the main session. A subagent follows its own agent file; the house rules at the end apply to every subagent that loads this file (`explorer` and `screen-reviewer` skip it and carry their own). Design: `docs/superpowers/specs/2026-10-09-dev-session-routing-design.md`.
 
 ## Roles
 
@@ -16,7 +16,7 @@ The main session (Opus 5.5, effort high) holds the plan and the judgment calls. 
 | `screen-reviewer` | Sonnet, medium | Every branch that changes the window, before merge |
 
 - When a superpowers skill (subagent-driven-development, requesting-code-review) dispatches an implementer or a reviewer, use these agents, never `general-purpose`: it inherits Opus. Specs and plans get no reviewer subagent.
-- Give each implementer and reviewer its worktree, its scope and the request; give each screen-reviewer a port from 4400 to 4409 and a scratch folder.
+- Give each implementer and reviewer its worktree, its scope and the request. Give each screen-reviewer a port from 4400 to 4409 and a scratch folder, and each implementer on a UI plan an `INPROGRESS_E2E_PORT` from 4410 to 4419, so parallel sessions never share the e2e default (4399).
 - Start every Agent description with its step's `#id`.
 
 ## Overrides
@@ -42,7 +42,7 @@ Subagent claims are not evidence. After an implementer, rerun its checks and rea
 
 - You can't see your context size. A hook (`scripts/context-nudge.mjs`) tells you when it crosses 120k and 160k, and `.claude/settings.json` compacts at 300k.
 - One thread per session: a feature, or a suite of related features that share code. A clean point is right after a merge, or after a finished plan task with everything committed in your worktree.
-- Cut the session when the thread is done, when the next queued item is unrelated, or when the nudge says so. At a cut: write the handoff, brief the scribe to attach it to its step, offer the next session as a `spawn_task` chip whose prompt is the handoff prompt, print the handoff's path, and stop.
+- Cut the session when the thread is done, when the next queued item is unrelated, or when the nudge says so. At a cut: write the handoff, brief the scribe to attach it to its step, print the handoff's path, offer the next session as a chip whose prompt is the handoff prompt when the `spawn_task` tool is available (the desktop app), and stop.
 - A new request mid-session becomes a queued step through the scribe (`later: #id`, or a new step), unless it is a few lines in code that is already open. The InProgress tree is the memory between sessions.
 - Work only in your own worktree under `.claude/worktrees/`. A session spawned from a chip starts in one; otherwise create it with `git worktree add .claude/worktrees/<topic> -b <topic> main`. The main checkout takes only merges, deploys and `claude:install`.
 - Uncommitted changes outside your worktree belong to another session: don't stage them, ask about them or mention them. Stage explicit paths only.
