@@ -191,13 +191,13 @@ export function watchAgents(ctx: Ctx, state: WatchState): WatchResult {
       touched.set(row.session_id, touched.get(row.session_id) ?? []);
     }
     for (const [sessionId, ended] of touched) {
-      const session = ctx.db.prepare('SELECT project_id, state FROM sessions WHERE id = ?').get(sessionId) as { project_id: number | null; state: SessionState };
+      const session = findSession(ctx, sessionId)!;
       record({
-        projectId: session.project_id,
+        projectId: session.projectId,
         type: 'session.updated',
         entity: 'session',
         entityId: sessionId,
-        data: { changed: ['subagents'], state: session.state, ...(ended.length ? { ended } : {}) },
+        data: { changed: ['subagents'], state: session.state, activity: sessionActivity(session, Date.parse(at)), ...(ended.length ? { ended } : {}) },
       });
     }
   });

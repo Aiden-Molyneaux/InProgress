@@ -131,3 +131,57 @@ that session's list on that node through `POST /api/sessions/:id/tasks`, so thes
 ## Out of scope
 Token and cost figures per agent (hooks do not carry them). A live "last action" line per subagent (declined in the
 #48 design).
+
+## Amended by background work (#228, 2026-10-10)
+
+Plan: `docs/superpowers/plans/2026-10-09-background-work.md`. Rulings 53 to 80: `docs/superpowers/rulings/2026-10-04-review-actions-rulings.md`, under "Background work (#228)". The sections above stay as written; this
+adds what changed against them.
+
+### Background commands
+
+A session can stop while work runs behind it. Three tools start such work: Bash and PowerShell (`run_in_background`,
+Ctrl+B, or the auto-background after a timeout) and Monitor. The window now shows these commands.
+
+- **What the hook sends.** A second PostToolUse group, async so it never holds a tool call, matches
+  `^(Bash|PowerShell|Monitor|SendMessage|TaskStop)$`. A call posts `command-started` only when its response carries a
+  background task id; any other Bash call posts nothing. The body holds the task id, the kind (`shell` or `monitor`),
+  `agent_id` for a subagent's call, how long the call ran, the tool's description (at most 200 characters) and a
+  command head: the command's first words, at most 3 words and 60 characters, without leading `cd`, assignments and
+  flags (`cd /c/x && npm run test:e2e` sends `npm run test:e2e`), and runs through `scrub()`, which redacts inline
+  credentials. The full command is never posted to the server. Locally, `src/hooks/capture.ts` (on by default; off
+  with `INPROGRESS_HOOK_CAPTURE=0` or a file `~/.inprogress/capture/off`) keeps the first 80 scrubbed characters of a
+  Bash or PowerShell command in `~/.inprogress/capture/<day>.jsonl`.
+- **How a command starts.** On `command-started`, with `started_at` = now minus the call's duration, in the new
+  `session_commands` table (migration 9). Its step is a leading `#id` of the description, else the starting
+  subagent's step, else the session's focus.
+- **How it ends.** From the first source to arrive, and a later real end replaces a guessed one: the notice prompt's
+  `<task-notification>` (`completed`, `failed` with its exit code, or `killed`); a TaskStop; the Stop hook's
+  `background_tasks` list, which is session-wide, so a running command missing from it ends as `unknown` (unless it
+  started within 10 s of the Stop, `RECONCILE_GRACE_MS`) and a listed one the server lacks is added; and, for a subagent's commands, whose notices never reach the prompt hook, the end
+  lines the agent watcher reads from the session's transcript on its 60 s tick (it also reads the transcript of a
+  session with a command a Stop ended as `unknown` in the last 5 minutes, so a real end line replaces the guess). A `resume` start, a session's end and
+  stale expiry end the rest as `session`. A `compact` or `clear` start leaves them.
+- **Busy.** A stored `idle` is read as `busy` while a subagent that is not a reader runs or a command counts as
+  work (`src/core/activity.ts`). Nothing new is stored.
+- **Serving.** A command counts as work for its first 30 minutes. One that is older, or whose head is `dev`,
+  `serve`, `preview`, `start` or `watch` (or a `:` part of a word, as in `test:watch`), or a persistent Monitor, is
+  serving: it shows, faint, but is never busy or live.
+- **Retention.** The window gets a session's running commands and those ended in the last 5 minutes, at most 30. They
+  leave no trail row. A prune deletes ended rows after 24 hours and keeps at most 200 per session.
+
+### Re-homing a resumed agent
+
+The hook also posts `agent-messaged` for a SendMessage whose response succeeded (the real agent id comes from the
+response, since `to` can be a name). The server moves the agent to the step named by a leading `#id` of the message's
+summary, else of its first sentence, else the session's focus, and takes the summary as its description. A message to
+an agent that is still running moves it only for a `#id` naming another step. A resumed agent that had ended is
+running again, unless its run started (or restarted) within the last 60 s (`MARKER_QUIET_MS`): the SendMessage post is
+async and SubagentStart is not, so a message that close to the start only moves the agent. A SendMessage from inside a
+subagent posts nothing; only the main thread's calls count. A TaskStop on an agent ends it as `killed`. The agent
+keeps one trail row, which follows it.
+
+### Run time
+
+`SubagentInfo.runStartedAt` is when the current run started: the first start, restarted by a resume (a SendMessage or
+a SubagentStart on a known row; a message within 60 s of the run's start leaves it). The kin's running time, the chip popover, the kin tooltip and Details count from it.
+The trail's `ran …` still counts from `startedAt`, the first start (ruling 33).

@@ -120,8 +120,8 @@ describe('watchAgents: transcript markers', () => {
     writeFileSync(join(dir, 's2', 'subagents', 'agent-b1.jsonl'), `${interrupted(iso(Date.parse(ctx.now()) - 2 * MIN))}\n`);
     utimesSync(join(dir, 's2', 'subagents', 'agent-b1.jsonl'), new Date(Date.parse(ctx.now()) - 2 * MIN), new Date(Date.parse(ctx.now()) - 2 * MIN));
     expect(events(ctx, watch)).toEqual([
-      { actor: 'system', session: 's1', changed: ['subagents'], state: 'working', ended: [{ agentId: 'a1', reason: 'killed' }, { agentId: 'a2', reason: 'limit' }] },
-      { actor: 'system', session: 's2', changed: ['subagents'], state: 'idle', ended: [{ agentId: 'b1', reason: 'killed' }] },
+      { actor: 'system', session: 's1', changed: ['subagents'], state: 'working', activity: 'working', ended: [{ agentId: 'a1', reason: 'killed' }, { agentId: 'a2', reason: 'limit' }] },
+      { actor: 'system', session: 's2', changed: ['subagents'], state: 'idle', activity: 'idle', ended: [{ agentId: 'b1', reason: 'killed' }] },
     ]);
     // Nothing more to say on the next tick.
     expect(events(ctx, watch)).toEqual([]);
@@ -186,9 +186,19 @@ describe('watchAgents: coming back', () => {
     expect(run(MIN)).toEqual(['a1:silent']);
     append('a1');
     expect(events(ctx, () => expect(watch().revived).toEqual([{ sessionId: 's1', agentId: 'a1' }]))).toEqual([
-      { actor: 'system', session: 's1', changed: ['subagents'], state: 'working' },
+      { actor: 'system', session: 's1', changed: ['subagents'], state: 'working', activity: 'working' },
     ]);
     expect(row('a1')).toEqual({ ended_at: null, end_reason: null, last_active_at: null });
+  });
+
+  it('says the session is busy when a revival alone leaves an idle session with a running worker', () => {
+    const { ctx, hook, run, watch, transcript, append, start } = setup();
+    start('a1');
+    transcript('a1', [[said, 20 * MIN]]);
+    expect(run(MIN)).toEqual(['a1:silent']);
+    hook({ event: 'stop' });
+    append('a1');
+    expect(events(ctx, watch)).toEqual([{ actor: 'system', session: 's1', changed: ['subagents'], state: 'idle', activity: 'busy' }]);
   });
 
   it('leaves a subagent at the usage limit on its line until it writes again', () => {

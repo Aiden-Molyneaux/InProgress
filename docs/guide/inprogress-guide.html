@@ -511,6 +511,19 @@ Changes:
 <dt>You see</dt>
 <dd><p>The strip says <code>note on #55 2 Android signing</code>. Click the row and the Details panel shows the log, newest last, with a relative time and the session's title. The tree itself is unchanged, which is the point.</p></dd>
 </dl>
+
+<h4>Background work</h4>
+<dl class="trio">
+<dt>You</dt>
+<dd><p>Ask for a long job: "run the full e2e suite and tell me when it's done". Claude starts it in the background and its turn ends. You go and do something else.</p></dd>
+<dt>Claude</dt>
+<dd>
+<p>Three hooks follow the command. A post-tool hook, run async so it never holds a tool call, sees Bash, PowerShell and Monitor calls that came back with a background task id and posts the command's first three words (<code>npm run test:e2e</code>) to the server, never the command itself. InProgress's hook capture, on by default, keeps the first 80 characters of a Bash or PowerShell command in a local file under <code>~/.inprogress/capture/</code>; nothing in it is posted, and credentials in the text are redacted. The Stop hook lists what is still in flight. When the command finishes, Claude Code writes a notice to the transcript, and the next prompt hook, the server's transcript watcher or a TaskStop ends the row. A subagent's commands are read from the transcript once a minute.</p>
+<p>A message to a subagent that has finished resumes it. A SendMessage hook moves the agent to the step the message names (<code>#168 fix round 2</code>), or the session's current step, restarts its running time (a message within a minute of the run's start only moves it) and takes the message's summary as its description. A message sent from inside a subagent is ignored.</p>
+</dd>
+<dt>You see</dt>
+<dd><p>The session's chip stops being outlined-idle and reads <strong>busy</strong>: the character breathes with its eyes open, and a muted <code>▸1</code> follows the letter. Under the step, a line reads <code>▸ a · npm run test:e2e · 4m</code>. The step's card is framed in orange, like a working step. When the notice arrives the line shows <code>✓</code> for 5 minutes and goes, and the chip goes back to idle. A command that has run 30 minutes, or is a <code>dev</code>, <code>serve</code>, <code>preview</code>, <code>start</code> or <code>watch</code> command, is <em>serving</em>: <code>◦ a · npm run dev · serving 3h</code>, faint, and it does not make the session busy.</p></dd>
+</dl>
 </div>
 <div class="rail">
 <aside class="spec">
@@ -537,6 +550,12 @@ Changes:
   <p>SubagentStart and SubagentStop hooks keep a row per running subagent, so the count on a chip or badge cannot drift; the scribe itself is excluded by the hook matcher so it costs no process spawn.</p>
   <p>Claude Code sends no SubagentStop when a subagent hits the usage limit, hits an API error or is stopped. Once a minute the server reads the last line of each running subagent's own transcript: an interrupt or an API error ends it with that reason, and 20 minutes with nothing new ends it as "stopped responding" until it writes again. Its badge greys with a <code>!</code> and says why. One at the usage limit stays on its line in amber until it is resumed or its session ends.</p>
   <p class="where">session_subagents table · HOOK_DEFS matcher ^(?!inprogress-scribe$).*</p>
+</aside>
+<aside class="spec">
+  <span class="eyebrow">From your spec</span>
+  <blockquote>"Show with a different label/indicator"</blockquote>
+  <p>Your answer on long-running dev and preview servers. The 30-minute limit and the <code>dev</code>, <code>serve</code>, <code>preview</code>, <code>start</code>, <code>watch</code> words that make them draw as <code>serving</code> with a hollow mark, out of busy, were a controller ruling on that. The rest came from 7 October, when an InThink session resumed one agent twelve times in 20 hours: the window kept its first step and a 21-hour run time, and said nothing about its background shells, so an idle chip hid the work. Busy is worked out from the rows when the window draws, not stored, so no path that ends work has to remember to clear it.</p>
+  <p class="where">src/core/activity.ts · src/server/repo/commands.ts · src/server/agent-watch.ts · docs/superpowers/specs/2026-10-02-live-work-design.md</p>
 </aside>
 </div>
 </div>
@@ -602,7 +621,8 @@ Playbook:
   <span class="badge"><span class="pulse"></span>◆ InGame launch status · working · 2 subagents</span>
   <span class="badge idle">◆ QA drill · idle</span>
   <span class="badge perm">◆ Ticket VCAD-978 · needs permission</span>
-  <span class="cap">Session badges sit on their own row directly under the step the session is focused on. Hover one to see which subagent types are running. If a manual fold hides the focused step, the badge moves up to the nearest visible ancestor rather than disappearing.</span>
+  <span class="badge idle">◆ InThink redesign · busy · 1 subagent · 2 commands</span>
+  <span class="cap">Session badges sit on their own row directly under the step the session is focused on. Busy means the session has stopped but a subagent or a background command it started still runs. Hover one to see which subagent types are running. If a manual fold hides the focused step, the badge moves up to the nearest visible ancestor rather than disappearing.</span>
 </div>
 
 <h4>The outline flow and the fold rules</h4>
@@ -637,14 +657,31 @@ Playbook:
   <span class="crumb">InGame › Road to market › 2 Android signing</span>
   <span class="schip working"><span class="pulse"></span>InGame launch status · 2 subagents</span>
   <span class="schip">QA drill · idle</span>
+  <span class="schip">InThink redesign · 2 commands · busy <code>▸2</code></span>
   <span class="schip perm">Ticket VCAD-978 · needs permission</span>
   <span class="strip">↳ scribe (InGame launch status) · 2 min ago · "Signing test suite" attached to #58 Run signing tests</span>
-  <span class="cap">The breadcrumb at the top-left names the ancestors of the topmost row still on screen, so a deep tree never loses its place. Chips: solid clay with a pulsing dot is working, an outline is idle, a red outline is waiting for a permission (Claude Code raises that notification after a few seconds of waiting; the next prompt, stop or subagent event clears it). Click a chip to jump to that session's focus. Sessions drop off the row when they end or after 12 hours without a hook event.</span>
+  <span class="cap">The breadcrumb at the top-left names the ancestors of the topmost row still on screen, so a deep tree never loses its place. Chips: solid clay with a pulsing dot is working, an outline is idle, an outline with a breathing character and a muted <code>▸n</code> is busy (n counts the commands that count as work), a red outline is waiting for a permission (Claude Code raises that notification after a few seconds of waiting; the next prompt, stop or subagent event clears it). Click a chip to jump to that session's focus. Sessions drop off the row when they end or after 12 hours without a hook event.</span>
 </div>
 <p>The strip is the newest event in plain words: who (<code>scribe (session title)</code> for scribe writes, <code>Claude</code> for hook events, <code>system</code> otherwise), when, and what: added a step, added 5 steps under a parent, a step → done, moved, removed, a resource attached, a note on a step, a session is on a step, is working, is idle, is waiting for a permission, ended, a folder bound. Hover it for the exact timestamp.</p>
 
+<h4>Background work on the canvas</h4>
+<div class="mock">
+  <span class="ip-node active"><span class="m active"></span><span class="t">2 Android signing</span> <span class="prog">1/3</span></span>
+  <span class="badge idle">◆ InThink redesign · busy</span>
+  <span class="badge idle">▸ a · npm run test:e2e +1 · 12m</span>
+  <span class="badge idle">◦ a3 · npm run dev · serving 3h</span>
+  <span class="badge idle">✓ a · npm run test:e2e</span>
+  <span class="cap">The commands line sits under a session's badge, once per session and step. The lead is the oldest running command that counts as work, <code>+1</code> counts the others, and the time is the lead's. <code>◦ … serving</code> is a command that ran 30 minutes or more, a server (<code>dev</code>, <code>serve</code>, <code>preview</code>, <code>start</code>, <code>watch</code>) or a persistent Monitor: faint, not busy. When every command on the line has ended it reads <code>✓</code>, or <code>!</code> if any failed, was stopped, ended with its session or went missing from a Stop (<code>unknown</code>), for 5 minutes, then goes. The tag is the subagent's when a subagent started it. Hover the line for each command's description and result.</span>
+</div>
+<ul>
+<li>A step holding running work is <em>live</em>: it takes the orange frame a working session's step has, without the large title. A running subagent, a reader, a command that counts as work and a pulsing task all light their step, and the markers up its chain pulse. A busy session's step alone does not light until something runs on it.</li>
+<li>A command's step is its description's leading <code>#id</code>, else the starting subagent's step, else the session's. A running command also keeps its step from folding away, and one that counts as work stops it drawing as paused.</li>
+<li>A resumed subagent moves to the step its message names, and its running time restarts: <code>a1 &lt;1m</code> on the new step. The step it left keeps its tasks but no agent row, and the agent's one trail row follows it.</li>
+<li>The tab's dot pulses only while a session of that project is working. With sessions only busy it stays still, and the tab's name reads <code>busy</code>.</li>
+</ul>
+
 <h4>Details and the resource viewer</h4>
-<p>Clicking a row opens Details: the id and title, <code>Copy #58</code> (which copies <code>#58 Run signing tests</code>, ready to paste into chat), the status or NEEDS YOU pill, kind, owner, a link to the parent, the body as Markdown, the outcome, the resources, the child steps, and the log. It refreshes itself whenever the tree changes, and keeps the last good view with a "Couldn't refresh" line if a fetch fails. In a window 720 px or wider it is a 380 px right-hand panel; narrower, including the 520 px app window, it is a bottom sheet over the lower 60 % with a grab bar, and camera moves land their target a quarter of the way down the view, above the sheet. The row you clicked may itself end up under the sheet for now; lifting it is <a href="#inflight">in flight</a>.</p>
+<p>Clicking a row opens Details: the id and title, <code>Copy #58</code> (which copies <code>#58 Run signing tests</code>, ready to paste into chat), the status or NEEDS YOU pill, kind, owner, a link to the parent, the body as Markdown, the outcome, the resources, the child steps, the subagents and a Background section for the step's commands (running ones, and those ended in the last 5 minutes), and the log. It refreshes itself whenever the tree changes, and keeps the last good view with a "Couldn't refresh" line if a fetch fails. In a window 720 px or wider it is a 380 px right-hand panel; narrower, including the 520 px app window, it is a bottom sheet over the lower 60 % with a grab bar, and camera moves land their target a quarter of the way down the view, above the sheet. The row you clicked may itself end up under the sheet for now; lifting it is <a href="#inflight">in flight</a>.</p>
 <p>The viewer is full-window and modal. Markdown is rendered by marked and cleaned by DOMPurify: no scripts, styles, forms, classes or inline styles survive, links open in a new tab with <code>noopener noreferrer</code>, and task-list checkboxes are kept but disabled. Remote images do not load, by the page's Content-Security-Policy. If Open file answers 401 the server has restarted with a new UI token, and the page reloads itself.</p>
 
 <h4>When the connection drops</h4>
@@ -904,15 +941,16 @@ Playbook:
 <thead><tr><th>Claude Code event</th><th>Hook</th><th>Posts</th><th>Comes back</th></tr></thead>
 <tbody>
 <tr><td>SessionStart (timeout 10 s)</td><td><code>session-start</code></td><td>Starts the server if it is down, then <code>start</code> with source, cwd, branch, transcript path, title.</td><td>The briefing, for a tracked session.</td></tr>
-<tr><td>UserPromptSubmit</td><td><code>prompt-submit</code></td><td><code>prompt</code> with cwd, branch, title, whether the prompt mentions InProgress, asks for status, or is a background notice.</td><td>A status answer, the stale line, the untracked hint, or the briefing when the session is picked up late.</td></tr>
-<tr><td>Stop</td><td><code>stop</code></td><td><code>stop</code> with title.</td><td>State idle.</td></tr>
+<tr><td>UserPromptSubmit</td><td><code>prompt-submit</code></td><td><code>prompt</code> with cwd, branch, title, whether the prompt mentions InProgress, asks for status, or is a background notice (a notice also posts the finished task ids and their status).</td><td>A status answer, the stale line, the untracked hint, or the briefing when the session is picked up late.</td></tr>
+<tr><td>Stop</td><td><code>stop</code></td><td><code>stop</code> with title and the list of background tasks still running.</td><td>State idle (the window shows busy while work runs); commands missing from the list end as <code>unknown</code>, unless they started within 10 s of the Stop.</td></tr>
 <tr><td>Notification, matcher <code>permission_prompt</code></td><td><code>notification</code></td><td><code>permission</code></td><td>State permission.</td></tr>
 <tr><td>SubagentStart / SubagentStop, matcher excludes the scribe</td><td><code>subagent-start</code> / <code>subagent-stop</code></td><td>agent id and type</td><td>A subagent row added or ended. A subagent that dies without a stop is ended by the server's transcript watcher instead.</td></tr>
-<tr><td>SessionEnd</td><td><code>session-end</code></td><td><code>end</code></td><td>State ended; subagent rows cleared.</td></tr>
+<tr><td>PostToolUse, matcher <code>^(Bash|PowerShell|Monitor|SendMessage|TaskStop)$</code>, async</td><td><code>post-tool</code></td><td><code>command-started</code> for a call that went to the background (task id, first three words, description), <code>command-ended</code> or <code>agent-ended</code> for a TaskStop, <code>agent-messaged</code> for a SendMessage that succeeded.</td><td>A command row added or ended, or a subagent moved to the step its message names.</td></tr>
+<tr><td>SessionEnd</td><td><code>session-end</code></td><td><code>end</code></td><td>State ended; subagent rows cleared; running commands end as <code>session</code>.</td></tr>
 </tbody>
 </table>
 </div>
-<p>All hooks except SessionStart have a 5 s timeout in settings and a 0.5 s budget inside. There is no per-tool-call hook, by design.</p>
+<p>All hooks except SessionStart have a 5 s timeout in settings and a 0.5 s budget inside. There is no hook on every tool call, by design: the post-tool hooks match only the tools named above, and a Bash call that was not backgrounded posts nothing.</p>
 
 <h3>The scribe's tools</h3>
 <div class="scroll">
@@ -946,7 +984,11 @@ Playbook:
 <tr><td>Node status</td><td><code>todo</code>, <code>active</code>, <code>done</code> (sets <code>completed_at</code>), <code>blocked</code>, <code>dropped</code></td></tr>
 <tr><td>Assignee</td><td><code>claude</code>, <code>me</code>. Needs you = <code>me</code> and not done.</td></tr>
 <tr><td>Resource kind</td><td><code>doc</code>, <code>test-suite</code>, <code>runbook</code>, <code>roadmap</code>, <code>diagram</code>, <code>link</code>, <code>other</code></td></tr>
-<tr><td>Session state</td><td><code>working</code>, <code>idle</code>, <code>permission</code>, <code>ended</code>. Not seen for 12 h means ended.</td></tr>
+<tr><td>Session state</td><td><code>working</code>, <code>idle</code>, <code>permission</code>, <code>ended</code>. Not seen for 12 h means ended. The window also draws <code>busy</code>, which is never stored.</td></tr>
+<tr><td>Busy</td><td>An idle session with a subagent (not a reader) running, or a background command that counts as work. Worked out when the window draws; it ends when the last one ends.</td></tr>
+<tr><td>Background command</td><td>A Bash, PowerShell or Monitor call that went to the background. Shows its first three words and its description; the full command is never posted to the server. Ends as <code>completed</code>, <code>failed</code>, <code>killed</code>, <code>session</code> (its session ended) or <code>unknown</code> (a Stop found it missing, and a later notice can still replace that). A Stop does not end a command that started within 10 s of it.</td></tr>
+<tr><td>Serving</td><td>A background command that has run 30 minutes or more, whose first words are <code>dev</code>, <code>serve</code>, <code>preview</code>, <code>start</code> or <code>watch</code>, or that is a persistent Monitor. Drawn faint with <code>◦</code>; it never makes a session busy or a step live.</td></tr>
+<tr><td>Live step</td><td>A step with running work anchored to it: a subagent, a reader, a command that counts as work, a pulsing task or a working session's focus. Drawn with the orange frame.</td></tr>
 <tr><td>Project status</td><td><code>active</code>, <code>archived</code></td></tr>
 <tr><td>References</td><td><code>#58</code> is a node, <code>r12</code> a resource, both global across projects and never reused.</td></tr>
 </tbody>
