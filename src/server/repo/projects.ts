@@ -3,6 +3,7 @@ import { globMatch } from '../../lib/glob';
 import { isUnder, normalizePath } from '../../lib/paths';
 import { write, type Ctx, type RecordEvent } from '../db/tx';
 import { ApiError, badRequest, conflict, notFound } from '../errors';
+import { endSessionCommands } from './commands';
 import { endSubagents, NOT_READER_SQL } from './subagents';
 
 interface ProjectRow {
@@ -292,8 +293,10 @@ export function endProjectSessions(ctx: Ctx, record: RecordEvent, projectId: num
   const cutoff = new Date(Date.parse(now) - STALE_SESSION_MS).toISOString();
   for (const { id, last_seen_at } of live) {
     ctx.db.prepare("UPDATE sessions SET state = 'ended', ended_at = ? WHERE id = ?").run(now, id);
-    endSubagents(ctx, id, last_seen_at < cutoff ? last_seen_at : now);
-    record({ projectId, type: 'session.updated', entity: 'session', entityId: id, data: { changed: ['state'], state: 'ended' } });
+    const endedAt = last_seen_at < cutoff ? last_seen_at : now;
+    endSubagents(ctx, id, endedAt);
+    endSessionCommands(ctx, id, endedAt);
+    record({ projectId, type: 'session.updated', entity: 'session', entityId: id, data: { changed: ['state'], state: 'ended', activity: 'ended' } });
   }
   return [...ids];
 }

@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { LABEL_GLYPHS, NODE_LABELS } from '../../src/core/types';
+import { LABEL_GLYPHS, NODE_LABELS, STALE_SESSION_MS } from '../../src/core/types';
 import { homeDir } from '../../src/lib/home';
 import { normalizePath } from '../../src/lib/paths';
 import { updateRules } from '../../src/server/briefing';
@@ -9,7 +9,7 @@ import { addLog } from '../../src/server/repo/logs';
 import { addNodes, listNodes, updateNode } from '../../src/server/repo/nodes';
 import { addBinding, createProject, setQueue, updateProject } from '../../src/server/repo/projects';
 import { addResource } from '../../src/server/repo/resources';
-import { briefingDue, findSession, listProjectSessions } from '../../src/server/repo/sessions';
+import { briefingDue, expireStaleSessions, findSession, listProjectSessions } from '../../src/server/repo/sessions';
 import { getNodeDetail, getProjectSnapshot } from '../../src/server/repo/snapshot';
 import { renderBriefing } from '../../src/server/briefing';
 import { setTasks } from '../../src/server/repo/work';
@@ -1101,8 +1101,8 @@ describe('archiving a project stops tracking its sessions', () => {
         from: [{ nodeId: a2.id, sessionId: 's1' }, { nodeId: step('3 RevenueCat').id, sessionId: 's2' }, { nodeId: a3.id, sessionId: null }],
         to: [{ nodeId: a3.id, sessionId: null }],
       } } }],
-      ['session.updated', 's1', { changed: ['state'], state: 'ended' }],
-      ['session.updated', 's2', { changed: ['state'], state: 'ended' }],
+      ['session.updated', 's1', { changed: ['state'], state: 'ended', activity: 'ended' }],
+      ['session.updated', 's2', { changed: ['state'], state: 'ended', activity: 'ended' }],
       ['project.updated', String(project.id), { changes: { status: { from: 'active', to: 'archived' } } }],
     ]);
     expect(listEventsSince(ctx, mark).every((e) => e.projectId === project.id)).toBe(true);
@@ -1117,6 +1117,14 @@ describe('archiving a project stops tracking its sessions', () => {
     updateProject(ctx, 'test', project.slug, { status: 'archived' });
     expect(findSession(ctx, 's1')).toMatchObject({ state: 'ended', endedAt: ctx.now() });
     expect(ctx.db.prepare("SELECT ended_at FROM session_subagents WHERE agent_id = 'a1'").pluck().get()).toBe(lastSeen);
+  });
+
+  it('ends its running background commands as session, at the archive', () => {
+    const { ctx, project } = archiving();
+    handleHookEvent(ctx, 's1', start());
+    handleHookEvent(ctx, 's1', { event: 'command-started', taskId: 'b1', kind: 'shell' });
+    updateProject(ctx, 'test', project.slug, { status: 'archived' });
+    expect(ctx.db.prepare("SELECT outcome, ended_at FROM session_commands WHERE task_id = 'b1'").get()).toEqual({ outcome: 'session', ended_at: ctx.now() });
   });
 
   it('ends nothing and drops nothing on an unarchive, or on an archive of a project that is already archived', () => {
@@ -1370,5 +1378,191 @@ describe('snapshots', () => {
     expect(d.children.map((c) => c.title)).toEqual(['Upload keystore', 'Play app signing', 'Run signing tests']);
     expect(d.resources).toEqual([]);
     expect(d.log).toEqual([]);
+  });
+});
+
+describe('background commands', () => {
+  const MIN = 60 * 1000;
+  /** A tracked session s1 on a step, under a clock the test moves by hand. */
+  function world() {
+    let now = Date.parse('2026-10-09T12:00:00.000Z');
+    const iso = (ms: number) => new Date(ms).toISOString();
+    const ctx = createCtx(openDb(':memory:'), () => iso(now));
+    const project = createProject(ctx, 'test', { name: 'InGame' });
+    addBinding(ctx, 'test', project.slug, 'C:/personal/InGame');
+    const [focus, other] = addNodes(ctx, 'test', { parentId: project.rootNodeId, nodes: [{ title: 'Focus step', status: 'active' }, { title: 'Other step' }] });
+    const elsewhere = createProject(ctx, 'test', { name: 'Elsewhere' });
+    const [foreign] = addNodes(ctx, 'test', { parentId: elsewhere.rootNodeId, nodes: [{ title: 'Foreign step' }] });
+    const hook = (input: Parameters<typeof handleHookEvent>[2], session = 's1') => handleHookEvent(ctx, session, input);
+    hook({ event: 'start', source: 'startup', cwd: 'C:/personal/InGame' });
+    setFocus(ctx, 'test', 's1', focus.id);
+    hook({ event: 'prompt' });
+    const row = (taskId: string) => ctx.db.prepare('SELECT * FROM session_commands WHERE session_id = ? AND task_id = ?').get('s1', taskId) as Record<string, unknown> | undefined;
+    /** The session.updated events a call records, as their data. */
+    const updates = (fn: () => void) => {
+      const mark = maxEventId(ctx);
+      fn();
+      return listEventsSince(ctx, mark).filter((e) => e.type === 'session.updated').map((e) => e.data as Record<string, unknown>);
+    };
+    return { ctx, project, focus, other, foreign, hook, row, updates, iso, now: () => now, tick: (ms: number) => (now += ms) };
+  }
+  const begin = (taskId: string, extra = {}) => ({ event: 'command-started' as const, taskId, kind: 'shell' as const, commandHead: 'npm run build', ...extra });
+
+  it('command-started stores the row at now minus durationMs', () => {
+    const { hook, row, iso, now } = world();
+    hook(begin('b1', { durationMs: 130, toolUseId: 'toolu_1', description: 'Build it' }));
+    expect(row('b1')).toMatchObject({ kind: 'shell', started_at: iso(now() - 130), tool_use_id: 'toolu_1', description: 'Build it', command_head: 'npm run build', ended_at: null });
+  });
+
+  it('ignores a command-started without a task id or a kind', () => {
+    const { hook, ctx } = world();
+    hook({ event: 'command-started', kind: 'shell' });
+    hook({ event: 'command-started', taskId: 'b9' });
+    expect(ctx.db.prepare('SELECT COUNT(*) AS n FROM session_commands').get()).toEqual({ n: 0 });
+  });
+
+  it('attributes the node: a leading #id, then the subagent, then the focus, never another project', () => {
+    const { hook, row, focus, other, foreign } = world();
+    hook(begin('lead', { description: `#${other.id} Build it` }));
+    expect(row('lead')!.node_id).toBe(other.id);
+    hook(begin('foreignlead', { description: `#${foreign.id} Build it` }));
+    expect(row('foreignlead')!.node_id).toBe(focus.id);
+    hook({ event: 'subagent-start', agentId: 'a1', agentType: 'general-purpose' });
+    hook({ event: 'agent-dispatch', toolUseId: 'toolu_a', agentType: 'general-purpose', description: `#${other.id} Do it` });
+    hook({ event: 'agent-launched', toolUseId: 'toolu_a', agentId: 'a1' });
+    hook(begin('sub', { agentId: 'a1' }));
+    expect(row('sub')).toMatchObject({ node_id: other.id, agent_id: 'a1' });
+  });
+
+  it("does not take a subagent's node from another project", () => {
+    const { ctx, hook, row, focus, foreign } = world();
+    hook({ event: 'subagent-start', agentId: 'a2', agentType: 'general-purpose' });
+    ctx.db.prepare('UPDATE session_subagents SET start_focus_id = ? WHERE agent_id = ?').run(foreign.id, 'a2');
+    hook(begin('far', { agentId: 'a2' }));
+    expect(row('far')!.node_id).toBe(focus.id);
+  });
+
+  it('lifts permission to working on the post-tool command events', () => {
+    const { ctx, hook } = world();
+    for (const input of [begin('b1'), { event: 'command-ended' as const, taskId: 'b1', outcome: 'killed' as const }, { event: 'agent-ended' as const, agentId: 'a1', reason: 'killed' as const }]) {
+      hook({ event: 'permission' });
+      expect(findSession(ctx, 's1')!.state).toBe('permission');
+      hook(input);
+      expect(findSession(ctx, 's1')!.state).toBe('working');
+    }
+  });
+
+  it('command-ended ends the row at now', () => {
+    const { hook, row, tick, iso, now } = world();
+    hook(begin('b1'));
+    tick(MIN);
+    hook({ event: 'command-ended', taskId: 'b1', outcome: 'killed' });
+    expect(row('b1')).toMatchObject({ outcome: 'killed', ended_at: iso(now()) });
+  });
+
+  it('a notice with tasks ends each entry, keeping the exit code', () => {
+    const { hook, row } = world();
+    hook(begin('b1'));
+    hook(begin('b2'));
+    hook({ event: 'prompt', notice: true, tasks: [{ taskId: 'b1', status: 'failed', exitCode: 2 }, { taskId: 'b2', status: 'completed', exitCode: 0 }, { taskId: 'agentx', status: 'completed' }] });
+    expect(row('b1')).toMatchObject({ outcome: 'failed', exit_code: 2 });
+    expect(row('b2')).toMatchObject({ outcome: 'completed', exit_code: 0 });
+    expect(row('agentx')).toBeUndefined();
+  });
+
+  it('a Stop with background reconciles, and one without does nothing', () => {
+    const { hook, row, tick } = world();
+    hook(begin('gone'));
+    hook({ event: 'stop' });
+    expect(row('gone')).toMatchObject({ ended_at: null });
+    tick(15_000);
+    hook({ event: 'stop', background: [{ taskId: 'bnew', type: 'shell', description: 'Merge', commandHead: 'git merge' }] });
+    expect(row('gone')).toMatchObject({ outcome: 'unknown' });
+    expect(row('bnew')).toMatchObject({ agent_id: '', ended_at: null, command_head: 'git merge' });
+    hook(begin('later'));
+    tick(15_000);
+    hook({ event: 'stop', background: [], backgroundTruncated: true });
+    expect(row('later')).toMatchObject({ ended_at: null });
+    expect(row('bnew')).toMatchObject({ ended_at: null });
+    hook({ event: 'stop', background: [] });
+    expect(row('later')).toMatchObject({ outcome: 'unknown' });
+  });
+
+  it('a resume start and an end close running rows as session; a compact start does not', () => {
+    const { hook, row } = world();
+    hook(begin('b1'));
+    hook({ event: 'start', source: 'compact' });
+    expect(row('b1')).toMatchObject({ ended_at: null });
+    hook({ event: 'start', source: 'resume' });
+    expect(row('b1')).toMatchObject({ outcome: 'session' });
+    hook(begin('b2'));
+    hook({ event: 'end' });
+    expect(row('b2')).toMatchObject({ outcome: 'session' });
+  });
+
+  it('agent-ended ends the subagent as killed', () => {
+    const { ctx, hook } = world();
+    hook({ event: 'subagent-start', agentId: 'a1', agentType: 'general-purpose' });
+    hook({ event: 'agent-ended', agentId: 'a1', reason: 'killed' });
+    expect(findSession(ctx, 's1')!.subagents[0]).toMatchObject({ agentId: 'a1', endReason: 'killed' });
+    expect(findSession(ctx, 's1')!.subagents[0].endedAt).not.toBeNull();
+  });
+
+  it("session.updated carries 'commands' in changed, the activity and the command label and outcome", () => {
+    const { hook, updates } = world();
+    const started = updates(() => hook(begin('b1')));
+    expect(started).toEqual([expect.objectContaining({ changed: ['commands'], state: 'working', activity: 'working', command: { label: 'npm run build' } })]);
+    const ended = updates(() => hook({ event: 'command-ended', taskId: 'b1', outcome: 'completed' }));
+    expect(ended).toEqual([expect.objectContaining({ changed: ['commands'], command: { label: 'npm run build', outcome: 'completed' } })]);
+  });
+
+  it('activity is busy on a Stop with a counting command running and idle with only a serving one', () => {
+    const { hook, updates } = world();
+    hook(begin('build'));
+    expect(updates(() => hook({ event: 'stop' }))).toEqual([expect.objectContaining({ changed: ['state'], activity: 'busy' })]);
+    const second = world();
+    second.hook(begin('server', { commandHead: 'npm run dev' }));
+    expect(second.updates(() => second.hook({ event: 'stop' }))).toEqual([expect.objectContaining({ changed: ['state'], activity: 'idle' })]);
+  });
+
+  it('names no command for a late start that only fills an ended row, or a start on a reconcile-inserted row', () => {
+    const { hook, updates, tick } = world();
+    hook(begin('b1'));
+    hook({ event: 'command-ended', taskId: 'b1', outcome: 'completed' });
+    const late = updates(() => hook({ event: 'command-started', taskId: 'b1', kind: 'shell', commandHead: 'npm run build', description: 'Filled late' }));
+    expect(late[0]).toMatchObject({ changed: ['commands'] });
+    expect(late[0]).not.toHaveProperty('command');
+    tick(15_000);
+    hook({ event: 'stop', background: [{ taskId: 'bnew', type: 'shell' }] });
+    const reconciled = updates(() => hook(begin('bnew', { description: 'Later description' })));
+    expect(reconciled[0]).toMatchObject({ changed: ['commands'] });
+    expect(reconciled[0]).not.toHaveProperty('command');
+  });
+
+  it('names no command when an event started or ended two', () => {
+    const { hook, updates } = world();
+    hook(begin('b1'));
+    const out = updates(() => hook({ event: 'stop', background: [{ taskId: 'b2', type: 'shell' }, { taskId: 'b3', type: 'monitor' }] }));
+    expect(out[0]).toMatchObject({ changed: expect.arrayContaining(['commands']) });
+    expect(out[0]).not.toHaveProperty('command');
+  });
+
+  it("adds no 'commands' when an event changes nothing about them", () => {
+    const { hook, updates } = world();
+    hook(begin('b1'));
+    const out = updates(() => hook({ event: 'stop' }));
+    expect(out[0].changed).toEqual(['state']);
+    expect(out[0]).not.toHaveProperty('command');
+    expect(updates(() => hook({ event: 'command-ended', taskId: 'unknown-id', outcome: 'killed' }))).toEqual([]);
+  });
+
+  it('expireStaleSessions ends commands at last_seen_at and reports activity ended', () => {
+    const { ctx, hook, row, tick, iso, now, updates } = world();
+    hook(begin('b1'));
+    const seen = iso(now());
+    tick(STALE_SESSION_MS + MIN);
+    const out = updates(() => expireStaleSessions(ctx));
+    expect(row('b1')).toMatchObject({ outcome: 'session', ended_at: seen });
+    expect(out).toEqual([expect.objectContaining({ changed: ['state'], state: 'ended', activity: 'ended' })]);
   });
 });

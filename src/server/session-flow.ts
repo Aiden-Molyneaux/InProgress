@@ -1,12 +1,14 @@
-import { SCRIBE_AGENT, type HookEvent, type Session, type TreeNode, type WorkStatus } from '../core/types';
+import { commandLabel, sessionActivity } from '../core/activity';
+import { SCRIBE_AGENT, type CommandKind, type CommandOutcome, type HookEvent, type Session, type TreeNode, type WorkStatus } from '../core/types';
 import { write, type Ctx } from './db/tx';
 import { badRequest } from './errors';
 import { renderBriefing, renderStatusAnswer, renderStatusLine, untrackedHint } from './briefing';
+import { endCommand, endSessionCommands, pruneCommands, reconcileCommands, startCommand, type BackgroundEntry } from './repo/commands';
 import { findNode, leadingNode, patchNode, requireNode } from './repo/nodes';
 import { isTracking, notTracked, releaseQueue, resolveBinding, resolveProject } from './repo/projects';
 import { assignSlot, briefingDue, clearBriefingDue, findSession, markBriefingDue, markRevived, saveSession } from './repo/sessions';
 import { getProjectSnapshot } from './repo/snapshot';
-import { endSubagents, launchSubagent, pinStartFocus, pruneSubagents, recordDispatch, startSubagent, stopSubagent } from './repo/subagents';
+import { endAgent, endSubagents, launchSubagent, pinStartFocus, pruneSubagents, recordDispatch, startSubagent, stopSubagent, subagentNode } from './repo/subagents';
 import { taskCreated, taskUpdated } from './repo/work';
 
 export interface HookEventInput {
@@ -31,6 +33,24 @@ export interface HookEventInput {
   status?: WorkStatus | 'deleted';
   addBlocks?: string[];
   addBlockedBy?: string[];
+  /** command-started: Claude Code's task id, the tool (kind), a Monitor's persistence, the command's first words and how long the call took. */
+  taskId?: string;
+  kind?: CommandKind;
+  persistent?: boolean;
+  commandHead?: string;
+  durationMs?: number;
+  /** command-ended: how it ended. */
+  outcome?: CommandOutcome;
+  exitCode?: number;
+  /** agent-ended: why (only 'killed'). agent-messaged: whether it resumed the agent, and the message's summary. */
+  reason?: 'killed';
+  resumed?: boolean;
+  summary?: string;
+  /** A notice prompt: the task-notification blocks it carries. */
+  tasks?: { taskId: string; toolUseId?: string; status: 'completed' | 'failed' | 'killed'; exitCode?: number }[];
+  /** A stop: the session's running background tasks, also when empty; `backgroundTruncated` when the list was cut at 50. */
+  background?: BackgroundEntry[];
+  backgroundTruncated?: boolean;
 }
 
 export interface HookEventResult {
@@ -109,14 +129,20 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
       case 'start':
         // A missing source counts as 'startup'.
         if (RESET_SOURCES.has(input.source ?? 'startup')) next.state = 'idle';
+        // A resumed session is a new life: what ran in the old one is gone.
+        if (input.source === 'resume') endSessionCommands(ctx, sessionId, now);
         break;
       case 'prompt':
         next.state = 'working';
+        // A notice ends the commands it names. Agent ids never have a row, so an agent's notice does nothing here.
+        for (const t of input.tasks ?? []) endCommand(ctx, sessionId, t.taskId, t.status, now, t.exitCode);
         // A background-task notice (the scribe finishing, say) is not a prompt Aiden typed: no stale count.
         if (!input.notice) next.promptsSinceUpdate += 1;
         break;
       case 'stop':
         next.state = 'idle';
+        // Absent `background` says nothing about what runs; an empty one says nothing does.
+        if (input.background) reconcileCommands(ctx, sessionId, input.background, now, { truncated: input.backgroundTruncated === true, nodeId: before.focusNodeId });
         break;
       case 'permission':
         next.state = 'permission';
@@ -152,6 +178,36 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
       case 'agent-launched':
         if (input.toolUseId && input.agentId) launchSubagent(ctx, sessionId, input.toolUseId, input.agentId, clean(input.model));
         break;
+      case 'command-started':
+        if (input.taskId && input.kind) {
+          pruneCommands(ctx);
+          const inProject = (id: number | null | undefined) => (id != null && findNode(ctx, id)?.projectId === before.projectId ? id : undefined);
+          // A leading #id in the description is exact; then the subagent's node (as a working task attributes), then the focus.
+          const nodeId = leadingNode(ctx, input.description, before.projectId)
+            ?? (input.agentId ? inProject(subagentNode(ctx, sessionId, input.agentId)) : undefined)
+            ?? before.focusNodeId;
+          startCommand(ctx, sessionId, {
+            taskId: input.taskId,
+            toolUseId: input.toolUseId,
+            agentId: input.agentId,
+            kind: input.kind,
+            persistent: input.persistent,
+            description: clean(input.description) ?? undefined,
+            commandHead: input.commandHead,
+            startedAt: new Date(Date.parse(now) - (input.durationMs ?? 0)).toISOString(),
+            nodeId,
+          });
+        }
+        if (next.state === 'permission') next.state = 'working';
+        break;
+      case 'command-ended':
+        if (input.taskId && input.outcome) endCommand(ctx, sessionId, input.taskId, input.outcome, now, input.exitCode);
+        if (next.state === 'permission') next.state = 'working';
+        break;
+      case 'agent-ended':
+        if (input.agentId) endAgent(ctx, sessionId, input.agentId, 'killed', now, now);
+        if (next.state === 'permission') next.state = 'working';
+        break;
       case 'task-created':
         if (input.taskKey && input.subject) worked.push(...taskCreated(ctx, before, input.agentId ?? '', input.taskKey, input.subject));
         break;
@@ -165,6 +221,7 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
         next.state = 'ended';
         next.endedAt = now;
         endSubagents(ctx, sessionId, now);
+        endSessionCommands(ctx, sessionId, now);
         // Its Up next entries turn unowned. Recorded before session.updated (after the switch), so the activity strip
         // still reads "<session> ended".
         releaseQueue(ctx, record, sessionId);
@@ -180,8 +237,22 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
     const after = findSession(ctx, sessionId)!;
     const changed: string[] = VISIBLE.filter((k) => before![k] !== after[k]);
     if (JSON.stringify(before.subagents) !== JSON.stringify(after.subagents)) changed.push('subagents');
+    if (JSON.stringify(before.commands) !== JSON.stringify(after.commands)) changed.push('commands');
     if (created || changed.length) {
-      record({ projectId: after.projectId, type: 'session.updated', entity: 'session', entityId: sessionId, data: { changed: created ? ['created', ...changed] : changed, state: after.state } });
+      // The one command this event started or ended, for the window's line; none when it touched several.
+      // New rows (a start) and rows that ended or changed how they ended; a start that only fills a field does not count.
+      const touched = after.commands.filter((c) => {
+        const was = before!.commands.find((b) => b.taskId === c.taskId);
+        return !was || was.endedAt !== c.endedAt || was.outcome !== c.outcome;
+      });
+      const command = touched.length === 1 ? { label: commandLabel(touched[0]), ...(touched[0].outcome ? { outcome: touched[0].outcome } : {}) } : undefined;
+      record({
+        projectId: after.projectId,
+        type: 'session.updated',
+        entity: 'session',
+        entityId: sessionId,
+        data: { changed: created ? ['created', ...changed] : changed, state: after.state, activity: sessionActivity(after, Date.parse(now)), ...(command ? { command } : {}) },
+      });
     }
     for (const nodeId of new Set(worked)) {
       const node = findNode(ctx, nodeId);

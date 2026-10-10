@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { ID_MAX, TASK_ID_MAX, noticeTasks, text } from '../core/notices';
 import { SCRIBE_AGENT, WORK_STATUSES, type HookEvent } from '../core/types';
 import { detectBranch } from '../lib/git';
 import { homeDir } from '../lib/home';
@@ -134,16 +135,13 @@ const PURPOSE_MAX = 200;
 const SUBJECT_MAX = 300;
 const MODEL_MAX = 100;
 const KEY_MAX = 100;
-const ID_MAX = 200;
 const BLOCKS_MAX = 100;
-/** Mirror the server's hookBody limits for background work (src/server/schemas.ts). */
-const TASK_ID_MAX = 100;
+/** Mirror the server's hookBody limits for background work (src/server/schemas.ts). ID_MAX, TASK_ID_MAX and `text` live in core/notices. */
 const HEAD_MAX = 60;
 const HEAD_WORDS = 3;
 /** The one-letter flags that take a value as their next word (`-C dir`, `-o opt`, `-i key`); other short flags stand alone. */
 const FLAG_WITH_VALUE = /^-[CcdeFfHimopiu]$/;
 const TASK_TYPE_MAX = 40;
-const NOTICE_TASKS_MAX = 20;
 const BACKGROUND_MAX = 50;
 const DURATION_MAX_MS = 7 * 24 * 60 * 60 * 1000;
 /** Claude Code's background task ids: a letter, then lowercase letters and digits ("bc802pkev"). */
@@ -153,8 +151,6 @@ const AGENT_TOOLS = new Set(['Agent', 'Task']);
 const TASK_STATUSES: readonly string[] = [...WORK_STATUSES, 'deleted'];
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
-/** A non-blank string, trimmed and clipped, else nothing. */
-const text = (v: unknown, max: number): string | undefined => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : undefined);
 /** A task id: Claude Code sends strings ("3"), but a number reads the same. */
 const taskKey = (v: unknown): string | undefined => (typeof v === 'number' && Number.isFinite(v) ? String(v) : text(v, KEY_MAX));
 const taskKeys = (v: unknown): string[] => (Array.isArray(v) ? v.map(taskKey).filter((k): k is string => !!k).slice(0, BLOCKS_MAX) : []);
@@ -365,43 +361,6 @@ export function commandHead(command: string): string | undefined {
   const head = kept.slice(0, HEAD_WORDS).join(' ');
   if (!head) return undefined;
   return head.length > HEAD_MAX ? `${head.slice(0, HEAD_MAX - 1)}…` : head;
-}
-
-/**
- * The task-notification blocks of a notice prompt: id, tool use id, status and the exit code the summary names. Only a
- * block's header is read: from its opening tag to the first of `<result>`, its closing tag or the next opening tag. An
- * agent's `<result>` is skipped whole, so a notification it quotes is never read as a task. A block with no closing tag
- * still has its header.
- */
-function noticeTasks(prompt: string): Record<string, unknown>[] {
-  const tasks: Record<string, unknown>[] = [];
-  const OPEN = '<task-notification>';
-  let pos = 0;
-  while (tasks.length < NOTICE_TASKS_MAX) {
-    const open = prompt.indexOf(OPEN, pos);
-    if (open < 0) break;
-    const from = open + OPEN.length;
-    const result = prompt.indexOf('<result>', from);
-    const ends = [result, prompt.indexOf('</task-notification>', from), prompt.indexOf(OPEN, from)].filter((i) => i >= 0);
-    const end = ends.length ? Math.min(...ends) : prompt.length;
-    const header = prompt.slice(from, end);
-    if (end === result) {
-      const close = prompt.indexOf('</result>', result);
-      pos = close < 0 ? prompt.length : close + '</result>'.length;
-    } else pos = end;
-    const field = (tag: string) => new RegExp(`<${tag}>([^<]*)</${tag}>`).exec(header)?.[1];
-    const taskId = text(field('task-id'), TASK_ID_MAX);
-    const status = field('status')?.trim();
-    if (!taskId || (status !== 'completed' && status !== 'failed' && status !== 'killed')) continue;
-    const task: Record<string, unknown> = { taskId, status };
-    const toolUseId = text(field('tool-use-id'), ID_MAX);
-    if (toolUseId) task.toolUseId = toolUseId;
-    // The last one: a command's own name can say "exit code 0" ("Retry until exit code 0") before the real outcome.
-    const exit = [...(field('summary') ?? '').matchAll(/exit code (-?\d+)/g)].pop()?.[1];
-    if (exit !== undefined && Number.isSafeInteger(Number(exit))) task.exitCode = Number(exit);
-    tasks.push(task);
-  }
-  return tasks;
 }
 
 /**

@@ -331,6 +331,8 @@ Design: section 3 (`:254-301`).
 
 **Files:** `src/server/repo/subagents.ts` (`messageAgent` per the table at `:266-272`; `startSubagent` revival sets `run_started_at = at`; `pinStartFocus` skips rows with `node_id` set), `src/server/session-flow.ts` (`agent-messaged` case). Tests: `test/server/subagents.test.ts` (each row of the table, revival, ruling 42 merge after a move, `pinStartFocus`).
 
+**From task 3's review (pilot session 4), unconfirmed:** `agent-ended` (TaskStop on an agent) calls `endAgent(…, 'killed', now, now)`, and `reviveAgent` accepts `killed`; if the stopped agent writes its interrupt line after the async PostToolUse lands, the watcher's next tick sees a line newer than `last_active_at` and revives it, so it reads busy until `SILENT_MS`. Check against a captured TaskStop transcript; if it reproduces, a hook `killed` end is not revived by the watcher (only a SendMessage resume brings it back, per this task's table).
+
 ### Task 5: Core activity and layout (label: ui)
 
 Design: section 1 "Derived, not stored" and the window rules (`:58-126`), section 2 "Window" layout bullet (`:235-238`), section 4 (`:303-323`), Aiden's answers (`:443-446`).

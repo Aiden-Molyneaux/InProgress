@@ -1,7 +1,11 @@
-import { statSync } from 'node:fs';
-import type { EndReason, SessionState } from '../core/types';
+import { closeSync, openSync, readSync, statSync } from 'node:fs';
+import { sessionActivity } from '../core/activity';
+import { noticeTasks } from '../core/notices';
+import { ENDED_AGENT_MS, type CommandOutcome, type EndReason, type SessionState } from '../core/types';
 import { agentTranscriptPath, readAgentTail, type TranscriptEnding, type TranscriptTail } from '../lib/agent-transcript';
 import { write, type Ctx } from './db/tx';
+import { endCommand } from './repo/commands';
+import { findSession } from './repo/sessions';
 import { ENDED_THIS_LIFE_SQL, endAgent, reviveAgent } from './repo/subagents';
 
 /**
@@ -46,10 +50,14 @@ export interface WatchState {
   /** When the last wake gap was seen: every silence counts from no earlier than this. */
   wokeAt: number | null;
   agents: Map<string, Watched>;
+  /** Per session, how far into its transcript the command-end reader has got (watchCommandEnds). */
+  commandOffsets: Map<string, { path: string; offset: number }>;
+  /** Sessions whose transcript could not be read last time it was tried, so the failure is reported once. */
+  unreadable: Set<string>;
 }
 
 export function createWatchState(): WatchState {
-  return { lastTick: null, wokeAt: null, agents: new Map() };
+  return { lastTick: null, wokeAt: null, agents: new Map(), commandOffsets: new Map(), unreadable: new Set() };
 }
 
 export interface WatchResult {
@@ -185,4 +193,139 @@ export function watchAgents(ctx: Ctx, state: WatchState): WatchResult {
     }
   });
   return result;
+}
+
+/** The most the command-end reader takes from one transcript in one read; a first sight starts this far from the end. */
+export const COMMAND_READ_MAX = 8 * 1024 * 1024;
+
+/** Bytes `from` to `to` of a file, in one buffer. Throws when the file cannot be read. */
+function readRange(path: string, from: number, to: number): Buffer {
+  const buf = Buffer.allocUnsafe(to - from);
+  const fd = openSync(path, 'r');
+  try {
+    let filled = 0;
+    while (filled < buf.length) {
+      const n = readSync(fd, buf, filled, buf.length - filled, from + filled);
+      if (n === 0) break;
+      filled += n;
+    }
+    return buf.subarray(0, filled);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * Claude Code tells the model a background command finished with a notice, and the transcript records it as a
+ * `queue-operation` `enqueue` line (the session's own notices reach the UserPromptSubmit hook, a subagent's command
+ * only the transcript). So each tick reads the new lines of every live session's transcript that has a running command
+ * (or one a Stop reconcile ended as `unknown` less than five minutes ago, which a real end repairs), and ends the
+ * commands those lines name, at the line's own time, with its status and exit code. Per session it remembers a byte
+ * offset (memory only, kept while the session lives): a first sight, a changed path or a file that shrank starts at most
+ * 8 MB from the end, dropping the partial line it lands in; a partial last line waits for the next tick. A missing or
+ * unreadable file changes nothing and is reported once; an id with no such row is skipped. All ends go in one write,
+ * with one `session.updated` per session they touch.
+ */
+export function watchCommandEnds(ctx: Ctx, state: WatchState): { ended: { sessionId: string; taskId: string; outcome: CommandOutcome }[]; unreadable: { sessionId: string; path: string; code: string }[] } {
+  const repairable = new Date(Date.parse(ctx.now()) - ENDED_AGENT_MS).toISOString();
+  const open = "(c.ended_at IS NULL OR (c.outcome = 'unknown' AND c.ended_at >= ?))";
+  const sessions = ctx.db
+    .prepare(
+      `SELECT s.id, s.transcript_path FROM sessions s
+       WHERE s.state != 'ended' AND s.transcript_path IS NOT NULL
+         AND EXISTS (SELECT 1 FROM session_commands c WHERE c.session_id = s.id AND ${open})
+       ORDER BY s.id`,
+    )
+    .all(repairable) as { id: string; transcript_path: string }[];
+  // An offset outlives a pause in commands (the next one must not re-read 8 MB); it goes with its session.
+  const live = new Set((ctx.db.prepare("SELECT id FROM sessions WHERE state != 'ended'").all() as { id: string }[]).map((r) => r.id));
+  for (const id of state.commandOffsets.keys()) if (!live.has(id)) state.commandOffsets.delete(id);
+  for (const id of state.unreadable) if (!live.has(id)) state.unreadable.delete(id);
+  const unreadable: { sessionId: string; path: string; code: string }[] = [];
+  const failed = (sessionId: string, path: string, err: unknown) => {
+    if (state.unreadable.has(sessionId)) return;
+    state.unreadable.add(sessionId);
+    unreadable.push({ sessionId, path, code: (err as NodeJS.ErrnoException).code ?? 'UNKNOWN' });
+  };
+  const ends: { sessionId: string; taskId: string; outcome: CommandOutcome; exitCode?: number; at: string }[] = [];
+  const offsets = new Map<string, { path: string; offset: number }>();
+  for (const { id, transcript_path: path } of sessions) {
+    let size: number;
+    try {
+      size = statSync(path).size;
+    } catch (err) {
+      // Not there (yet, or any more): look again next tick, with the offset kept.
+      failed(id, path, err);
+      continue;
+    }
+    state.unreadable.delete(id);
+    const seen = state.commandOffsets.get(id);
+    let from = seen && seen.path === path && size >= seen.offset ? seen.offset : 0;
+    let partial = false;
+    if (size - from > COMMAND_READ_MAX) {
+      from = size - COMMAND_READ_MAX;
+      partial = true;
+    }
+    if (size === from) {
+      offsets.set(id, { path, offset: from });
+      continue;
+    }
+    let bytes: Buffer;
+    try {
+      bytes = readRange(path, from, size);
+    } catch (err) {
+      // Unreadable (locked, say): keep the offset and try again next tick.
+      failed(id, path, err);
+      continue;
+    }
+    // Only whole lines: the last, partial one is read again once its newline is there.
+    const last = bytes.lastIndexOf(0x0a);
+    const lines = last < 0 ? '' : bytes.subarray(0, last + 1).toString('utf8');
+    offsets.set(id, { path, offset: last < 0 ? (partial ? size : from) : from + last + 1 });
+    const running = new Set((ctx.db.prepare(`SELECT c.task_id FROM session_commands c WHERE c.session_id = ? AND ${open}`).all(id, repairable) as { task_id: string }[]).map((r) => r.task_id));
+    const rows = lines.split('\n');
+    // The first line of a read that began mid-file may be cut in half.
+    for (const text of partial ? rows.slice(1) : rows) {
+      if (!running.size) break;
+      if (!text.includes('"queue-operation"')) continue;
+      let entry: { type?: unknown; operation?: unknown; content?: unknown; timestamp?: unknown };
+      try {
+        entry = JSON.parse(text);
+      } catch {
+        // The format is undocumented: a line that is not JSON is skipped, never an error.
+        continue;
+      }
+      if (entry.type !== 'queue-operation' || entry.operation !== 'enqueue' || typeof entry.content !== 'string') continue;
+      const stamp = typeof entry.timestamp === 'string' ? Date.parse(entry.timestamp) : NaN;
+      const at = Number.isNaN(stamp) ? ctx.now() : new Date(stamp).toISOString();
+      for (const t of noticeTasks(entry.content)) {
+        if (!running.delete(t.taskId)) continue;
+        ends.push({ sessionId: id, taskId: t.taskId, outcome: t.status, exitCode: t.exitCode, at });
+      }
+    }
+  }
+  const ended: { sessionId: string; taskId: string; outcome: CommandOutcome }[] = [];
+  if (ends.length) {
+    write(ctx, 'system', (record) => {
+      const touched = new Set<string>();
+      for (const e of ends) {
+        if (!endCommand(ctx, e.sessionId, e.taskId, e.outcome, e.at, e.exitCode)) continue;
+        ended.push({ sessionId: e.sessionId, taskId: e.taskId, outcome: e.outcome });
+        touched.add(e.sessionId);
+      }
+      for (const sessionId of touched) {
+        const session = findSession(ctx, sessionId)!;
+        record({
+          projectId: session.projectId,
+          type: 'session.updated',
+          entity: 'session',
+          entityId: sessionId,
+          data: { changed: ['commands'], state: session.state, activity: sessionActivity(session, Date.parse(ctx.now())) },
+        });
+      }
+    });
+  }
+  // Remembered only once the ends are stored: a failed write reads the same lines again next tick.
+  for (const [id, o] of offsets) state.commandOffsets.set(id, o);
+  return { ended, unreadable };
 }

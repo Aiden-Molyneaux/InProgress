@@ -229,7 +229,7 @@ describe('built artifacts', () => {
       session_id: 'smoke-bg', transcript_path: 'C:\\Users\\test\\.claude\\projects\\C--demo\\smoke-bg.jsonl', hook_event_name: 'PostToolUse', tool_name: 'Bash',
       tool_input: { command: 'git status --short && git merge --no-ff goto -m "Merge goto"', description: 'Merge goto and deploy', run_in_background: true },
       tool_response: { stdout: '', stderr: '', interrupted: false, isImage: false, noOutputExpected: false, backgroundTaskId: 'bc802pkev' },
-      tool_use_id: 'toolu_smoke_bg', duration_ms: 130,
+      tool_use_id: 'toolu_smoke_bg', duration_ms: 60000,
     });
     expect(bash).toMatchObject({ status: 0, stdout: '', stderr: '' });
     // The server stamps every event it accepts: a command-started it refused would leave the time as it was.
@@ -245,6 +245,16 @@ describe('built artifacts', () => {
     expect(stop).toMatchObject({ status: 0, stdout: '', stderr: '' });
     // A body the server's strict schema rejected would leave the state as it was and put a line in hooks.log.
     expect(storedRows('sessions').find((r) => r.id === 'smoke-bg')).toMatchObject({ state: 'idle' });
+    expect(logged().slice(before)).toBe('');
+    // The built server stored the command the Bash call started, and the monitor only the Stop listed.
+    const commands = () => storedRows('session_commands').filter((r) => r.session_id === 'smoke-bg');
+    expect(commands().find((r) => r.task_id === 'bc802pkev')).toMatchObject({ kind: 'shell', agent_id: '', ended_at: null, outcome: null, tool_use_id: 'toolu_smoke_bg' });
+    expect(commands().find((r) => r.task_id === 'sb0o4266c')).toMatchObject({ kind: 'monitor', ended_at: null });
+    // A second Stop that lists nothing ends the command that started a minute ago as unknown; the monitor the first Stop
+    // inserted a moment ago is inside the reconcile grace and keeps running.
+    const again = runHook('stop', { session_id: 'smoke-bg', hook_event_name: 'Stop', stop_hook_active: false, background_tasks: [], session_crons: [] });
+    expect(again).toMatchObject({ status: 0, stdout: '', stderr: '' });
+    expect(commands().map((r) => [r.task_id, r.outcome]).sort()).toEqual([['bc802pkev', 'unknown'], ['sb0o4266c', null]]);
     expect(logged().slice(before)).toBe('');
   });
 

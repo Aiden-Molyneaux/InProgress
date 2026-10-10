@@ -151,8 +151,8 @@ describe('deleteProject of an active project', () => {
         from: [{ nodeId: a.id, sessionId: 's1' }, { nodeId: b.id, sessionId: 's2' }, { nodeId: c.id, sessionId: null }],
         to: [{ nodeId: c.id, sessionId: null }],
       } } }],
-      ['session.updated', 's1', p.id, 'window', { changed: ['state'], state: 'ended' }],
-      ['session.updated', 's2', p.id, 'window', { changed: ['state'], state: 'ended' }],
+      ['session.updated', 's1', p.id, 'window', { changed: ['state'], state: 'ended', activity: 'ended' }],
+      ['session.updated', 's2', p.id, 'window', { changed: ['state'], state: 'ended', activity: 'ended' }],
       ['project.updated', String(p.id), p.id, 'window', { changes: { status: { from: 'active', to: 'archived' } } }],
       ['project.deleted', String(p.id), p.id, 'window', { slug: 'live-site', name: 'Live Site', purgeAt }],
     ]);
