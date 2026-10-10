@@ -8,7 +8,7 @@ import { findNode, leadingNode, patchNode, requireNode } from './repo/nodes';
 import { isTracking, notTracked, releaseQueue, resolveBinding, resolveProject } from './repo/projects';
 import { assignSlot, briefingDue, clearBriefingDue, findSession, markBriefingDue, markRevived, saveSession } from './repo/sessions';
 import { getProjectSnapshot } from './repo/snapshot';
-import { endAgent, endSubagents, launchSubagent, pinStartFocus, pruneSubagents, recordDispatch, startSubagent, stopSubagent, subagentNode } from './repo/subagents';
+import { endAgent, endSubagents, launchSubagent, messageAgent, pinStartFocus, pruneSubagents, recordDispatch, startSubagent, stopSubagent, subagentNode } from './repo/subagents';
 import { taskCreated, taskUpdated } from './repo/work';
 
 export interface HookEventInput {
@@ -206,6 +206,18 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
         break;
       case 'agent-ended':
         if (input.agentId) endAgent(ctx, sessionId, input.agentId, 'killed', now, now);
+        if (next.state === 'permission') next.state = 'working';
+        break;
+      case 'agent-messaged':
+        if (input.agentId) {
+          messageAgent(
+            ctx,
+            sessionId,
+            input.agentId,
+            { resumed: input.resumed === true, summary: clean(input.summary) ?? undefined, purpose: clean(input.purpose) ?? undefined, focusNodeId: before.focusNodeId, projectId: before.projectId },
+            now,
+          );
+        }
         if (next.state === 'permission') next.state = 'working';
         break;
       case 'task-created':

@@ -282,6 +282,8 @@ describe('watchAgents: coming back', () => {
     expect(row('l')).toEqual(limited);
     // A SubagentStart brings it back, and the watcher watches it again.
     start('l');
+    // The agent's own marker comes after the start, as it would in a real run.
+    tick(SEC);
     append('l', interrupted);
     expect(run(2 * MIN)).toEqual(['l:killed']);
   });
@@ -503,5 +505,71 @@ describe('watchCommandEnds', () => {
     expect(events(ctx, () => watchCommandEnds(ctx, state))).toEqual([{ actor: 'system', session: 's1', changed: ['commands'], state: 'idle', activity: 'busy' }]);
     push(enqueue(notice('b2', 'completed', 0), '2026-10-06T09:06:00.000Z'));
     expect(events(ctx, () => watchCommandEnds(ctx, state))).toEqual([{ actor: 'system', session: 's1', changed: ['commands'], state: 'idle', activity: 'idle' }]);
+  });
+});
+
+describe('watchAgents: a stopped agent writing its last line', () => {
+  it('leaves a killed agent ended when its transcript gains a line 30 s after the TaskStop end', () => {
+    const { ctx, hook, watch, transcript, append, start, row, tick } = setup();
+    start('a1');
+    transcript('a1', [[said, MIN]]);
+    // TaskStop's PostToolUse ends it as killed; the stopped agent then writes its interrupt line.
+    hook({ event: 'agent-ended', agentId: 'a1', reason: 'killed' });
+    const ended = row('a1');
+    expect(ended.end_reason).toBe('killed');
+    tick(30 * SEC);
+    append('a1', interrupted);
+    expect(watch().revived).toEqual([]);
+    expect(row('a1')).toEqual(ended);
+    expect(findSession(ctx, 's1')!.subagents[0].endReason).toBe('killed');
+  });
+
+  it('revives a killed agent whose transcript gains a line 90 s after the end', () => {
+    const { hook, watch, transcript, append, start, row, tick } = setup();
+    start('a1');
+    transcript('a1', [[said, MIN]]);
+    hook({ event: 'agent-ended', agentId: 'a1', reason: 'killed' });
+    tick(90 * SEC);
+    append('a1');
+    expect(watch().revived).toEqual([{ sessionId: 's1', agentId: 'a1' }]);
+    expect(row('a1')).toEqual({ ended_at: null, end_reason: null, last_active_at: null });
+  });
+
+  it('still revives a silent agent 30 s after its end line', () => {
+    const { run, watch, transcript, append, start, row, tick } = setup();
+    start('a1');
+    transcript('a1', [[said, 20 * MIN]]);
+    expect(run(MIN)).toEqual(['a1:silent']);
+    tick(30 * SEC);
+    append('a1');
+    expect(watch().revived).toEqual([{ sessionId: 's1', agentId: 'a1' }]);
+    expect(row('a1').ended_at).toBeNull();
+  });
+});
+
+describe('watchAgents: a row a message revived', () => {
+  const resumeMessage: HookEventInput = { event: 'agent-messaged', agentId: 'a1', resumed: true, summary: 'Carry on' };
+
+  it('is not ended again by the marker it was killed on', () => {
+    const { hook, run, transcript, start, row } = setup();
+    start('a1');
+    transcript('a1', [[interrupted, 5 * MIN]]);
+    hook({ event: 'agent-ended', agentId: 'a1', reason: 'killed' });
+    expect(row('a1').end_reason).toBe('killed');
+    hook(resumeMessage);
+    expect(row('a1').ended_at).toBeNull();
+    expect(run(2 * MIN)).toEqual([]);
+    expect(row('a1').ended_at).toBeNull();
+  });
+
+  it('is not ended silent at once for an old transcript, but is after SILENT_MS from the revive', () => {
+    const { hook, run, transcript, start, row } = setup();
+    start('a1');
+    transcript('a1', [[said, 30 * MIN]]);
+    hook({ event: 'subagent-stop', agentId: 'a1' });
+    hook(resumeMessage);
+    expect(run(SILENT_MS - 2 * MIN)).toEqual([]);
+    expect(run(3 * MIN)).toEqual(['a1:silent']);
+    expect(row('a1').end_reason).toBe('silent');
   });
 });

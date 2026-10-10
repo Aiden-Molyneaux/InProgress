@@ -72,7 +72,8 @@ export function clearBriefingDue(ctx: Ctx, id: string): void {
 /**
  * An ended session came back (a resume, or a prompt after stale expiry ended it): its current life starts `at`
  * (migration 7's revived_at). Its subagents that the transcript watcher ended before then, one at the usage limit
- * included, stay as its end left them, in the trail: only a SubagentStart brings one back (ENDED_THIS_LIFE_SQL). Like
+ * included, stay as its end left them, in the trail: only a resume brings one back, a SubagentStart or the SendMessage that
+ * resumed it (ENDED_THIS_LIFE_SQL). Like
  * the briefing marker, it stays out of the Session type: only session-flow sets it.
  */
 export function markRevived(ctx: Ctx, id: string, at: string): void {

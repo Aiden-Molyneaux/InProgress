@@ -6,7 +6,7 @@ import { agentTranscriptPath, readAgentTail, type TranscriptEnding, type Transcr
 import { write, type Ctx } from './db/tx';
 import { endCommand } from './repo/commands';
 import { findSession } from './repo/sessions';
-import { ENDED_THIS_LIFE_SQL, endAgent, reviveAgent } from './repo/subagents';
+import { ENDED_THIS_LIFE_SQL, MARKER_QUIET_MS, endAgent, reviveAgent } from './repo/subagents';
 
 /**
  * The transcript watcher (#125). Claude Code fires no SubagentStop when a subagent hits the usage limit or an API error,
@@ -18,7 +18,7 @@ import { ENDED_THIS_LIFE_SQL, endAgent, reviveAgent } from './repo/subagents';
 /** How often the server's timer ticks: a handful of stats a minute; the window's own clock is 30 s. */
 export const WATCH_MS = 60 * 1000;
 /** A marker ends its subagent once the file has been still this long: a resumed or still-writing agent gets one tick. */
-export const MARKER_QUIET_MS = 60 * 1000;
+export { MARKER_QUIET_MS };
 /** No new line for this long ends a subagent as `silent`; its next line undoes it. */
 export const SILENT_MS = 20 * 60 * 1000;
 /** A gap between ticks over this long (a sleeping machine) restarts every silence count. */
@@ -71,6 +71,8 @@ interface WatchRow {
   session_id: string;
   agent_id: string;
   ended_at: string | null;
+  end_reason: string | null;
+  run_started_at: string | null;
   last_active_at: string | null;
   transcript_path: string;
   state: SessionState;
@@ -89,7 +91,7 @@ const mtimeOf = (path: string): number | undefined => {
 /**
  * One tick. Takes the running subagents of live sessions that have a transcript, and the ones it ended itself
  * (`limit`, `error`, `killed`, `silent`) in their session's current life (ENDED_THIS_LIFE_SQL: a session's end closes
- * them, and one that comes back leaves them as its end did, until a SubagentStart): a stat each, and a tail read only
+ * them, and one that comes back leaves them as its end did, until a resume: a SubagentStart or SendMessage): a stat each, and a tail read only
  * when the file moved. Rules:
  * - a last line that marks an end (`killed`, `limit`, `error`) ends a running subagent once the file has been still for
  *   MARKER_QUIET_MS, with its last sign of life (that line's time, else the file's) and `ended_at` = now;
@@ -107,7 +109,7 @@ export function watchAgents(ctx: Ctx, state: WatchState): WatchResult {
   state.lastTick = now;
   const rows = ctx.db
     .prepare(
-      `SELECT a.session_id, a.agent_id, a.ended_at, a.last_active_at, s.transcript_path, s.state
+      `SELECT a.session_id, a.agent_id, a.ended_at, a.end_reason, a.run_started_at, a.last_active_at, s.transcript_path, s.state
        FROM session_subagents a JOIN sessions s ON s.id = a.session_id
        WHERE s.state != 'ended' AND s.transcript_path IS NOT NULL
          AND (a.ended_at IS NULL OR (a.end_reason IN ('limit', 'error', 'killed', 'silent') AND ${ENDED_THIS_LIFE_SQL}))
@@ -138,7 +140,12 @@ export function watchAgents(ctx: Ctx, state: WatchState): WatchResult {
     if (row.ended_at !== null) {
       // One it ended: a newer line than the one it ended on means it lives.
       const since = row.last_active_at ?? row.ended_at;
-      if (Date.parse(lastActive) > Date.parse(since)) revives.push({ row, w });
+      // A killed end comes from TaskStop's PostToolUse or from the watcher's own marker. The stopped agent can write its
+      // interrupt line just after the hook's end: that line is not a sign of life. The grace costs the marker case
+      // nothing: the watcher ends only after MARKER_QUIET_MS of quiet, so a line that late is real. A real resume is
+      // caught by SendMessage and SubagentStart instead.
+      const grace = row.end_reason === 'killed' ? MARKER_QUIET_MS : 0;
+      if (Date.parse(lastActive) > Date.parse(since) + grace) revives.push({ row, w });
       continue;
     }
     // Running. On the very line the watcher ended it on, a start revived it (resumed): wait for a new line.
@@ -147,7 +154,9 @@ export function watchAgents(ctx: Ctx, state: WatchState): WatchResult {
       w.endedOn = undefined;
       w.revivedAt = undefined;
     } else w.revivedAt ??= now;
-    if (w.tail.ending && !sameLine && now - mtime >= MARKER_QUIET_MS) {
+    // A run a hook started (a resume) is newer than any marker before it: that marker ended the run before.
+    const runStart = row.run_started_at === null ? -Infinity : Date.parse(row.run_started_at);
+    if (w.tail.ending && !sameLine && Date.parse(lastActive) > runStart && now - mtime >= MARKER_QUIET_MS) {
       ends.push({ row, reason: REASON[w.tail.ending], lastActive, w });
       continue;
     }
@@ -155,7 +164,7 @@ export function watchAgents(ctx: Ctx, state: WatchState): WatchResult {
       w.heldAt = now;
       continue;
     }
-    const from = Math.max(mtime, w.heldAt ?? -Infinity, state.wokeAt ?? -Infinity, w.revivedAt ?? -Infinity);
+    const from = Math.max(mtime, w.heldAt ?? -Infinity, state.wokeAt ?? -Infinity, w.revivedAt ?? -Infinity, runStart);
     if (now - from >= SILENT_MS) ends.push({ row, reason: 'silent', lastActive, w });
   }
   for (const key of state.agents.keys()) if (!seen.has(key)) state.agents.delete(key);

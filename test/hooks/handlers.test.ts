@@ -391,6 +391,15 @@ describe('buildToolHookBody: post-tool, background commands', () => {
     expect(body).toEqual({ event: 'agent-messaged', agentId: 'a64d5c5b1b244eb35', resumed: false, summary: 'Owner request', purpose: 'New owner request.' });
   });
 
+  it('posts nothing for a SendMessage a subagent made: it would move a sibling to the main focus', () => {
+    const body = {
+      tool_input: { to: 'a64d5c5b1b244eb35', summary: 's', message: 'm' },
+      tool_response: { success: true, message: 'Resuming agent a64d5c5', resumedAgentId: 'a64d5c5b1b244eb35' },
+    };
+    expect(post('SendMessage', body)).toMatchObject({ event: 'agent-messaged' });
+    expect(post('SendMessage', { ...body, agent_id: 'agent-0001', agent_type: 'general-purpose' })).toBeUndefined();
+  });
+
   it('posts nothing for a SendMessage that failed or names no agent id', () => {
     const tool_input = { to: 'a64d5c5b1b244eb35', summary: 's', message: 'm' };
     expect(post('SendMessage', { tool_input, tool_response: { success: false, message: 'No such agent' } })).toBeUndefined();

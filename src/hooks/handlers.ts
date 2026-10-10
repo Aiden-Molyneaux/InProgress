@@ -281,6 +281,8 @@ export function buildToolHookBody(name: ToolHookName, input: HookStdin): Record<
     return undefined;
   }
   if (tool === 'SendMessage') {
+    // A subagent messaging a sibling would move it under the main session's focus: only the main thread's calls count.
+    if (agentId) return undefined;
     if (!isRecord(response) || response.success !== true) return undefined;
     const resumedId = text(response.resumedAgentId, ID_MAX);
     const target = resumedId ?? (isRecord(response.pin) ? text(response.pin.id, ID_MAX) : undefined);
