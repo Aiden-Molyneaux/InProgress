@@ -275,6 +275,8 @@ Design: section 2 "Server" (`:203-231`), section 1 "How it enters and leaves" (`
 
 **From task 1's review:** `listCommands` compares `ended_at` and orders by `started_at` as text, which only holds for `toISOString()` form with milliseconds (`...T12:00:00Z` sorts after `...T12:00:00.500Z`). Every writer normalizes an `at` through `new Date(x).toISOString()`, and a test pins it.
 
+**From task 2's review (pilot session 3):** the Stop body may carry `backgroundTruncated: true` (over 50 entries); then `reconcileCommands` ends nothing. The async `command-started` can land after the sync Stop or notice that ended a fast command: `startCommand` on an ended row keeps it ended (only fills missing fields). A notice `tasks` entry for an unknown or already-ended id is a no-op apart from replacing `unknown`; an agent notice quoting another notice is parsed by header only, but a stale id can still arrive. Accepted, not fixed: between `promote` and `restart` in a deploy (seconds), the old server 400s a Stop carrying `background`, so a session stopping then stays working until its next prompt.
+
 **Interfaces produced:** `startCommand(ctx, sessionId, c: { taskId; toolUseId?; agentId?; kind; persistent?; description?; commandHead?; startedAt })`, `endCommand(ctx, sessionId, taskId, outcome: CommandOutcome, at: string, exitCode?: number)`, `reconcileCommands(ctx, sessionId, background: { taskId; type; description?; commandHead? }[], at)`, `endSessionCommands(ctx, sessionId, at)`, `pruneCommands(ctx)`. Note: `activity` in event data needs `sessionActivity`; task 3 adds `src/core/activity.ts` with `sessionActivity` and `countsAsWork` (design `:64-77`, plus Aiden's server-head rule below) so task 5 only extends it.
 
 ### Task 4: Re-home a resumed agent (label: server)

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ASSIGNEES, HOOK_EVENTS, NODE_KINDS, NODE_LABELS, NODE_STATUSES, PROJECT_NAME_MAX, RESOURCE_KINDS, WORK_STATUSES, unknownLabel, type NodeInput } from '../core/types';
+import { ASSIGNEES, COMMAND_KINDS, COMMAND_OUTCOMES, HOOK_EVENTS, NODE_KINDS, NODE_LABELS, NODE_STATUSES, PROJECT_NAME_MAX, RESOURCE_KINDS, WORK_STATUSES, unknownLabel, type NodeInput } from '../core/types';
 
 const title = z.string().trim().min(1, 'title is empty').max(200);
 /** A step's type label; null leaves it unlabelled (or clears it on a patch). */
@@ -73,6 +73,12 @@ export const hookBody = z
     // agent), model (as the launch reported it). task-created / task-updated: agentId (the subagent whose task list it
     // is; none for the main session), taskKey, subject, status, addBlocks, addBlockedBy. Never a whole prompt, and never
     // a task's description.
+    // Background work. command-started: taskId, toolUseId, kind, persistent (a Monitor), description, commandHead (the
+    // command's first words, never the command), durationMs, agentId (the subagent that ran it). command-ended (TaskStop
+    // on a command): taskId, outcome. agent-ended (TaskStop on an agent): agentId, reason. agent-messaged (SendMessage):
+    // agentId (the target), resumed, summary, purpose. A prompt notice carries `tasks` (its task-notification blocks); a
+    // stop carries `background` (the session's running background tasks, also when empty) and, when the list was cut at
+    // 50, `backgroundTruncated: true`: such a list must not be reconciled against.
     toolUseId: z.string().min(1).max(200).optional(),
     description: z.string().max(200).optional(),
     purpose: z.string().max(200).optional(),
@@ -82,6 +88,29 @@ export const hookBody = z
     status: z.enum([...WORK_STATUSES, 'deleted']).optional(),
     addBlocks: z.array(z.string().min(1).max(100)).max(100).optional(),
     addBlockedBy: z.array(z.string().min(1).max(100)).max(100).optional(),
+    taskId: z.string().min(1).max(100).optional(),
+    kind: z.enum(COMMAND_KINDS).optional(),
+    persistent: z.boolean().optional(),
+    commandHead: z.string().max(60).optional(),
+    durationMs: z.number().int().min(0).max(604_800_000).optional(),
+    outcome: z.enum(COMMAND_OUTCOMES).optional(),
+    exitCode: z.number().int().optional(),
+    reason: z.enum(['killed']).optional(),
+    resumed: z.boolean().optional(),
+    summary: z.string().max(200).optional(),
+    tasks: z
+      .array(
+        z
+          .object({ taskId: z.string().min(1).max(100), toolUseId: z.string().min(1).max(200).optional(), status: z.enum(['completed', 'failed', 'killed']), exitCode: z.number().int().optional() })
+          .strict(),
+      )
+      .max(20)
+      .optional(),
+    background: z
+      .array(z.object({ taskId: z.string().min(1).max(100), type: z.string().min(1).max(40), description: z.string().max(200).optional(), commandHead: z.string().max(60).optional() }).strict())
+      .max(50)
+      .optional(),
+    backgroundTruncated: z.boolean().optional(),
   })
   .strict();
 /**

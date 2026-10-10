@@ -37,7 +37,8 @@ export const HOOK_DEFS: HookDef[] = [
   { event: 'PreToolUse', name: 'pre-tool', matcher: '^(Agent|Task)$', timeout: 5 },
   { event: 'PostToolUse', name: 'post-tool', matcher: '^(Agent|Task|TaskCreate|TaskUpdate)$', timeout: 5 },
   // Background commands, messages to agents and stopped tasks, after the call. Async: about 2,700 Bash calls a day must
-  // never wait on a Node start. For now the hook only captures these (src/hooks/capture.ts) and posts nothing for them.
+  // never wait on a Node start. The hook posts a command's start, its stop, a stopped agent and a message to one
+  // (buildToolHookBody), and also copies these inputs to the capture folder (src/hooks/capture.ts).
   { event: 'PostToolUse', name: 'post-tool', matcher: '^(Bash|PowerShell|Monitor|SendMessage|TaskStop)$', timeout: 5, async: true },
 ];
 

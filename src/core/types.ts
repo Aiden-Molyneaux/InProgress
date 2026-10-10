@@ -20,6 +20,7 @@ export type SessionState = (typeof SESSION_STATES)[number];
 export const HOOK_EVENTS = [
   'start', 'prompt', 'stop', 'permission', 'subagent-start', 'subagent-stop', 'end',
   'agent-dispatch', 'agent-launched', 'task-created', 'task-updated',
+  'command-started', 'command-ended', 'agent-ended', 'agent-messaged',
 ] as const;
 export type HookEvent = (typeof HOOK_EVENTS)[number];
 /** A working task's status, as Claude Code's task tools have it (their `deleted` removes the task instead). */
