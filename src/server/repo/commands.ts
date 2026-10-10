@@ -1,3 +1,4 @@
+import { COMMAND_WORK_MS, SERVER_WORDS } from '../../core/activity';
 import { ENDED_AGENT_MS, type CommandInfo, type CommandKind, type CommandOutcome } from '../../core/types';
 import { msAgo, type Ctx } from '../db/tx';
 
@@ -34,16 +35,30 @@ export const toCommandInfo = (r: CommandRow): CommandInfo => ({
   exitCode: r.exit_code,
 });
 
-/** Running commands and those ended less than ENDED_AGENT_MS ago: running first, then newest first, at most 30. */
+/**
+ * core's countsAsWork as SQL on the `session_commands` row aliased `alias`: running, not persistent, started after the one
+ * `?` (msAgo(ctx, COMMAND_WORK_MS)) and no server word in its head (looksLikeServer: a word, or a `:` part of one).
+ */
+export function countsAsWorkSql(alias: string): string {
+  const head = `' ' || lower(replace(replace(replace(replace(coalesce(${alias}.command_head, ''), ':', ' '), char(9), ' '), char(10), ' '), char(13), ' ')) || ' '`;
+  const server = SERVER_WORDS.map((word) => `${head} LIKE '% ${word} %'`).join(' OR ');
+  return `${alias}.ended_at IS NULL AND ${alias}.persistent = 0 AND ${alias}.started_at > ? AND NOT (${server})`;
+}
+
+/**
+ * Running commands and those ended less than ENDED_AGENT_MS ago: running first, then those that count as work, then newest
+ * first, at most 30. Counting ones come before the rest, so past 30 running the window still sees the work that decides
+ * `busy`, as the server's EXISTS does.
+ */
 export function listCommands(ctx: Ctx, sessionId: string): CommandInfo[] {
   return (ctx.db
     .prepare(
-      `SELECT * FROM session_commands
+      `SELECT * FROM session_commands c
        WHERE session_id = ? AND (ended_at IS NULL OR ended_at >= ?)
-       ORDER BY (ended_at IS NULL) DESC, started_at DESC, task_id
+       ORDER BY (ended_at IS NULL) DESC, CASE WHEN ${countsAsWorkSql('c')} THEN 0 ELSE 1 END, started_at DESC, task_id
        LIMIT ${COMMANDS_LISTED}`,
     )
-    .all(sessionId, msAgo(ctx, ENDED_AGENT_MS)) as CommandRow[])
+    .all(sessionId, msAgo(ctx, ENDED_AGENT_MS), msAgo(ctx, COMMAND_WORK_MS)) as CommandRow[])
     .map(toCommandInfo);
 }
 

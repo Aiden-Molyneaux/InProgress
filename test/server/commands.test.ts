@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../../src/server/db/connection';
 import { createCtx } from '../../src/server/db/tx';
-import { COMMANDS_LISTED, RECONCILE_GRACE_MS, endCommand, endSessionCommands, listCommands, pruneCommands, reconcileCommands, startCommand } from '../../src/server/repo/commands';
+import { looksLikeServer } from '../../src/core/activity';
+import { COMMANDS_LISTED, RECONCILE_GRACE_MS, countsAsWorkSql, endCommand, endSessionCommands, listCommands, pruneCommands, reconcileCommands, startCommand } from '../../src/server/repo/commands';
 
 const MIN = 60 * 1000;
 const NOW = Date.parse('2026-10-09T12:00:00.000Z');
@@ -43,6 +44,17 @@ describe('listCommands', () => {
     expect(listed).toHaveLength(30);
     expect(listed[0].taskId).toBe('t34');
     expect(listed[29].taskId).toBe('t05');
+  });
+
+  it('lists a counting command first even past 30 running persistent monitors started after it', () => {
+    const { ctx, insert } = setup();
+    insert('build', ago(20 * MIN));
+    for (let i = 0; i < 31; i++) {
+      ctx.db.prepare("INSERT INTO session_commands (session_id, task_id, kind, persistent, started_at) VALUES ('s1', ?, 'monitor', 1, ?)").run(`m${String(i).padStart(2, '0')}`, ago((10 - i / 10) * MIN));
+    }
+    const listed = listCommands(ctx, 's1');
+    expect(listed).toHaveLength(30);
+    expect(listed[0].taskId).toBe('build');
   });
 
   it('maps a row to CommandInfo', () => {
@@ -283,5 +295,32 @@ describe('pruneCommands', () => {
     for (let i = 0; i < 205; i++) insert(`r${i}`, ago(2 * HOUR + i));
     pruneCommands(ctx);
     expect((ctx.db.prepare('SELECT COUNT(*) AS n FROM session_commands').get() as { n: number }).n).toBe(205);
+  });
+});
+
+describe('countsAsWorkSql', () => {
+  const heads = ['npm run dev', 'vite:preview', 'npm run test:watch', 'npm run test:e2e', 'NPM START', 'devserver', 'node scripts/serve.mjs', 'tsc', null, 'npm run\tdev', 'npm run dev\r'];
+
+  it('agrees with looksLikeServer on a table of heads, for a running command started a minute ago', () => {
+    const { ctx } = setup();
+    const matches = (head: string | null) => {
+      ctx.db.prepare('DELETE FROM session_commands').run();
+      ctx.db.prepare("INSERT INTO session_commands (session_id, task_id, kind, command_head, started_at) VALUES ('s1', 'b1', 'shell', ?, ?)").run(head, ago(MIN));
+      const sql = `SELECT COUNT(*) FROM session_commands c WHERE ${countsAsWorkSql('c')}`;
+      return ctx.db.prepare(sql).pluck().get(ago(30 * MIN)) === 1;
+    };
+    for (const head of heads) expect(matches(head), String(head)).toBe(!looksLikeServer(head));
+  });
+
+  it('leaves out an ended, a persistent and a command 30 minutes old or more', () => {
+    const { ctx } = setup();
+    const insert = ctx.db.prepare("INSERT INTO session_commands (session_id, task_id, kind, persistent, started_at, ended_at) VALUES ('s1', ?, 'shell', ?, ?, ?)");
+    insert.run('running', 0, ago(MIN), null);
+    insert.run('ended', 0, ago(MIN), ago(1000));
+    insert.run('persistent', 1, ago(MIN), null);
+    insert.run('old', 0, ago(30 * MIN + 1000), null);
+    insert.run('exactly30', 0, ago(30 * MIN), null);
+    const sql = `SELECT task_id FROM session_commands c WHERE ${countsAsWorkSql('c')}`;
+    expect(ctx.db.prepare(sql).pluck().all(ago(30 * MIN))).toEqual(['running']);
   });
 });

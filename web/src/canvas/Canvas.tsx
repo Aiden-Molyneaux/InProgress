@@ -186,6 +186,9 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
           const session = sessionsById.get(item.sessionId) ?? pastSessions.find((s) => s.id === item.sessionId);
           return { kind: 'trailAgent', id: item.id, props: { agent, nodeId: item.nodeId, sessionTitle: session ? sessionDisplayTitle(session) : 'a session', now } };
         }
+        // Drawn from task 6 on; its COMMAND_LINE stays reserved in the card until then.
+        case 'commands':
+          return null;
         default:
           return null;
       }

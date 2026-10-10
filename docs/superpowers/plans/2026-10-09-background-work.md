@@ -415,6 +415,10 @@ Design: section 1 "How busy reads in the window" (`:96-126`), section 2 "Window"
 
 **Files:** the Simple character (`busy` state, `ip-breathe`), chip and popover, focus badge and lead title, tab dot (still for busy), `CommandLine.tsx` (new), Details `Background` section, `.ip-card.live`, copy helpers in `web/src/live.ts` (`commandLabel`, `commandLineParts`, `commandsSuffix`), `WORDS.busy`, activity strip `is busy`. Tests: `test/web/*` per design section 5, and the five e2e tests (`test/e2e/ui.spec.ts`, design `:355-369`). Screen-reviewer before merge.
 
+**From task 5's review (pilot session 5), to settle here:**
+- `web/src/canvas/Canvas.tsx` (about `:207`): the done row's sharing test checks `last?.kind === 'line' || 'readers'`; add `'commands'`, or a done row the layout shares with a commands line attaches to the row before it (a kin line included). Task 5 left `case 'commands': return null`, with the 20 px reserved.
+- The tab dot can go stale: `busySessions` and core's activity change with the clock (a command crossing 30 minutes), but project summaries refresh only on stream events (`web/src/useInProgress.ts:173-180`, `TopBar.tsx:51`), so a quiet machine's dot keeps pulsing past the edge. Refetch summaries on the window's 30 s clock while any `busySessions > 0`, or accept it and record the ruling (design section 7 already names the lag).
+
 ### Task 7: Docs (label: docs)
 
 **Files:** rulings 53 onward in `docs/superpowers/rulings/`, the live-work note (commands, re-home, run time), `docs/guide/inprogress-guide.html`, an amendment to the Quiet spec for `busy` and live steps.

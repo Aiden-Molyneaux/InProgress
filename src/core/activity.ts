@@ -1,5 +1,5 @@
 import type { CommandInfo, Session } from './types';
-import { isReader } from './types';
+import { ENDED_AGENT_MS, isReader } from './types';
 
 /** What a session is doing, for the window: its stored state, with `idle` told apart from `busy` (work still running). */
 export type Activity = 'working' | 'busy' | 'idle' | 'permission' | 'ended';
@@ -20,6 +20,11 @@ export function countsAsWork(c: Pick<CommandInfo, 'endedAt' | 'startedAt' | 'per
   if (c.endedAt !== null || c.persistent) return false;
   if (now - Date.parse(c.startedAt) >= COMMAND_WORK_MS) return false;
   return !looksLikeServer(c.commandHead);
+}
+
+/** Whether the window shows a command: running, or ended less than ENDED_AGENT_MS ago. */
+export function commandShown(c: Pick<CommandInfo, 'endedAt'>, now: number): boolean {
+  return c.endedAt === null || now - Date.parse(c.endedAt) < ENDED_AGENT_MS;
 }
 
 /** The stored state, except that `idle` is `busy` while a subagent that is not a reader runs or a command counts as work. */

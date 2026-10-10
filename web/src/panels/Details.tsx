@@ -176,7 +176,8 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
   useEffect(() => () => window.clearTimeout(copiedTimer.current), []);
   // Paused as the canvas draws it: the layout's own test, run on the snapshot's copy of each step.
   const byId = useMemo(() => new Map(snapshot.nodes.map((n) => [n.id, n] as const)), [snapshot.nodes]);
-  const occupied = useMemo(() => occupiedSteps(byId, snapshot.sessions, snapshot.workItems), [byId, snapshot.sessions, snapshot.workItems]);
+  const now = useNow(30_000);
+  const occupied = useMemo(() => occupiedSteps(byId, snapshot.sessions, snapshot.workItems, now), [byId, snapshot.sessions, snapshot.workItems, now]);
 
   // Refetch whenever the snapshot changes, so the panel follows Claude's edits. A failed refetch keeps the last good detail.
   useEffect(() => {

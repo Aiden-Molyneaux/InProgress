@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { COMMAND_WORK_MS, commandLabel, countsAsWork, looksLikeServer, sessionActivity } from '../../src/core/activity';
+import { COMMAND_WORK_MS, commandLabel, commandShown, countsAsWork, looksLikeServer, sessionActivity } from '../../src/core/activity';
 import type { CommandInfo, SessionState, SubagentInfo } from '../../src/core/types';
 
 const MIN = 60 * 1000;
@@ -65,4 +65,12 @@ describe('commandLabel', () => {
     expect(commandLabel({ commandHead: null, description: '#228 Run the e2e suite' })).toBe('Run the e2e suite');
   });
   it('falls back to a generic label', () => expect(commandLabel({ commandHead: null, description: null })).toBe('a background command'));
+});
+
+describe('commandShown', () => {
+  it('shows a running command, one ended 4 minutes ago, and not one ended 5 minutes ago', () => {
+    expect(commandShown({ endedAt: null }, NOW)).toBe(true);
+    expect(commandShown({ endedAt: ago(4 * MIN) }, NOW)).toBe(true);
+    expect(commandShown({ endedAt: ago(5 * MIN) }, NOW)).toBe(false);
+  });
 });

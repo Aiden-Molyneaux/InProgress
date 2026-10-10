@@ -28,7 +28,10 @@ export interface NodeCardData extends Record<string, unknown> {
   /** How long a needs-you item has waited (needsYouAge), or null: its YOU tag reads "YOU · 3d". */
   age: string | null;
   hasChildren: boolean;
-  /** On a working session's focus chain: an active marker pulses. */
+  /**
+   * On a live step's chain (a running worker or reader, a counting command, a pulsing task, a working session's focus) or
+   * a working focus: an active marker pulses.
+   */
   working: boolean;
   /** An active step nobody is on (LayoutNodeItem.paused): its marker draws hollow, with `lastChange` in its tooltip. */
   paused: boolean;

@@ -317,6 +317,19 @@ describe('briefing: session identity', () => {
     expect(lines).toContain(`Other sessions here: B "Store listing" (working) · A "Launch status" (idle, on #${a2.id})`);
   });
 
+  it('reads busy for another idle session with a running worker, and idle for one with nothing running', () => {
+    const { ctx, a2 } = setup();
+    handleHookEvent(ctx, 's1', start(undefined, { title: 'Launch status' }));
+    setFocus(ctx, 'scribe:s1', 's1', a2.id);
+    handleHookEvent(ctx, 's2', start(undefined, { title: 'Store listing' }));
+    setFocus(ctx, 'scribe:s2', 's2', a2.id);
+    const others = () => handleHookEvent(ctx, 's3', start()).context!.split('\n').find((l) => l.startsWith('Other sessions here:'))!;
+    expect(others()).toContain(`"Launch status" (idle, on #${a2.id})`);
+    ctx.db.prepare("INSERT INTO session_subagents (session_id, agent_id, agent_type, started_at) VALUES ('s1', 'w1', 'general-purpose', ?)").run(ctx.now());
+    expect(others()).toContain(`"Launch status" (busy, on #${a2.id})`);
+    expect(others()).toContain(`"Store listing" (idle, on #${a2.id})`);
+  });
+
   it('prints no letter for a session whose slot is still empty (it predates migration 4)', () => {
     const { ctx, project } = setup();
     handleHookEvent(ctx, 's1', start(undefined, { title: 'Launch status' }));
