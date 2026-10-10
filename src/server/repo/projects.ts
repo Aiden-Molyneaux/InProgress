@@ -1,8 +1,10 @@
+import { COMMAND_WORK_MS } from '../../core/activity';
 import { DELETED_RETENTION_MS, STALE_SESSION_MS, type Binding, type Project, type ProjectSummary, type QueueEntry } from '../../core/types';
 import { globMatch } from '../../lib/glob';
 import { isUnder, normalizePath } from '../../lib/paths';
-import { write, type Ctx, type RecordEvent } from '../db/tx';
+import { msAgo, write, type Ctx, type RecordEvent } from '../db/tx';
 import { ApiError, badRequest, conflict, notFound } from '../errors';
+import { countsAsWorkSql, endSessionCommands } from './commands';
 import { endSubagents, NOT_READER_SQL } from './subagents';
 
 interface ProjectRow {
@@ -292,8 +294,10 @@ export function endProjectSessions(ctx: Ctx, record: RecordEvent, projectId: num
   const cutoff = new Date(Date.parse(now) - STALE_SESSION_MS).toISOString();
   for (const { id, last_seen_at } of live) {
     ctx.db.prepare("UPDATE sessions SET state = 'ended', ended_at = ? WHERE id = ?").run(now, id);
-    endSubagents(ctx, id, last_seen_at < cutoff ? last_seen_at : now);
-    record({ projectId, type: 'session.updated', entity: 'session', entityId: id, data: { changed: ['state'], state: 'ended' } });
+    const endedAt = last_seen_at < cutoff ? last_seen_at : now;
+    endSubagents(ctx, id, endedAt);
+    endSessionCommands(ctx, id, endedAt);
+    record({ projectId, type: 'session.updated', entity: 'session', entityId: id, data: { changed: ['state'], state: 'ended', activity: 'ended' } });
   }
   return [...ids];
 }
@@ -433,11 +437,12 @@ export function listProjectSummaries(ctx: Ctx): ProjectSummary[] {
         (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.state != 'ended' AND s.last_seen_at >= ?) AS active_sessions,
         (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.state = 'working' AND s.last_seen_at >= ?) AS working_sessions,
         (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.state != 'ended' AND s.last_seen_at >= ? AND (s.state = 'working'
-          OR EXISTS (SELECT 1 FROM session_subagents a WHERE a.session_id = s.id AND a.ended_at IS NULL AND ${NOT_READER_SQL}))) AS busy_sessions,
+          OR EXISTS (SELECT 1 FROM session_subagents a WHERE a.session_id = s.id AND a.ended_at IS NULL AND ${NOT_READER_SQL})
+          OR EXISTS (SELECT 1 FROM session_commands c WHERE c.session_id = s.id AND ${countsAsWorkSql('c')}))) AS busy_sessions,
         (SELECT ts FROM events e WHERE e.project_id = p.id ORDER BY e.id DESC LIMIT 1) AS last_event_at
        FROM projects p WHERE p.deleted_at IS NULL`,
     )
-    .all(liveSince, liveSince, liveSince) as (ProjectRow & { needs_you: number; active_sessions: number; working_sessions: number; busy_sessions: number; last_event_at: string | null })[];
+    .all(liveSince, liveSince, liveSince, msAgo(ctx, COMMAND_WORK_MS)) as (ProjectRow & { needs_you: number; active_sessions: number; working_sessions: number; busy_sessions: number; last_event_at: string | null })[];
   return rows
     .map((r) => ({
       ...readProject(ctx, r),

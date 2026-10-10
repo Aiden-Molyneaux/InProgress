@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { AGENT_LINE, CARD_GAP, CARD_PAD, DONE_LINE, FOLD_ROW, NODE_H, READERS_LINE, ROW, STACK_HEAD, TASK_ROW, agentVisible, eventTarget, findFrontier, formatUpNext, isPaused, layoutOutline, occupiedSteps, queueView, type LayoutItem, type LayoutResult } from '../../src/core/layout';
-import { ENDED_AGENT_MS, READER_AGENT_TYPES, isReader, type EventRow, type PastSession, type QueueEntry, type ResourceMeta, type Session, type SubagentInfo, type TrailAgent, type TreeNode, type WorkItem, type WorkStatus } from '../../src/core/types';
+import { AGENT_LINE, CARD_GAP, CARD_PAD, COMMAND_LINE, DONE_LINE, FOLD_ROW, NODE_H, READERS_LINE, ROW, STACK_HEAD, TASK_ROW, agentVisible, eventTarget, findFrontier, formatUpNext, isPaused, layoutOutline, occupiedSteps, queueView, type LayoutItem, type LayoutResult } from '../../src/core/layout';
+import { ENDED_AGENT_MS, READER_AGENT_TYPES, isReader, type CommandInfo, type EventRow, type PastSession, type QueueEntry, type ResourceMeta, type Session, type SubagentInfo, type TrailAgent, type TreeNode, type WorkItem, type WorkStatus } from '../../src/core/types';
 
 let nextId = 1;
 function n(parentId: number | null, title: string, extra: Partial<TreeNode> = {}): TreeNode {
@@ -8,7 +8,7 @@ function n(parentId: number | null, title: string, extra: Partial<TreeNode> = {}
   return { id, projectId: 1, parentId, position: id, kind: parentId === null ? 'goal' : 'task', title, body: '', status: 'todo', assignee: 'claude', outcome: '', label: null, createdAt: 't', updatedAt: `2026-09-27T00:00:${String(id).padStart(2, '0')}Z`, completedAt: null, ...extra };
 }
 function session(id: string, focusNodeId: number | null, state: Session['state'], lastSeenAt = '2026-09-27T01:00:00Z'): Session {
-  return { id, projectId: 1, title: id, cwd: null, branch: null, transcriptPath: null, state, focusNodeId, promptsSinceUpdate: 0, startedAt: 't', lastSeenAt, endedAt: null, slot: 0, subagents: [] };
+  return { id, projectId: 1, title: id, cwd: null, branch: null, transcriptPath: null, state, focusNodeId, promptsSinceUpdate: 0, startedAt: 't', lastSeenAt, endedAt: null, slot: 0, subagents: [], commands: [] };
 }
 /** Unowned queue entries. */
 const later = (...ids: number[]): QueueEntry[] => ids.map((nodeId) => ({ nodeId, sessionId: null }));
@@ -239,7 +239,7 @@ describe('stacks and lanes', () => {
 const T0 = Date.parse('2026-10-02T12:00:00Z');
 const ago = (ms: number) => new Date(T0 - ms).toISOString();
 const agent = (agentId: string, extra: Partial<SubagentInfo> = {}): SubagentInfo => ({
-  agentId, agentType: 'general-purpose', startedAt: ago(60_000), description: `Agent ${agentId}`, model: 'sonnet', nodeId: null, endedAt: null, ordinal: 1, purpose: null, endReason: null, lastActiveAt: null, ...extra,
+  agentId, agentType: 'general-purpose', startedAt: ago(60_000), runStartedAt: ago(60_000), description: `Agent ${agentId}`, model: 'sonnet', nodeId: null, endedAt: null, ordinal: 1, purpose: null, endReason: null, lastActiveAt: null, ...extra,
 });
 let nextWork = 100;
 function work(nodeId: number, status: WorkStatus, extra: Partial<WorkItem> = {}): WorkItem {
@@ -921,5 +921,198 @@ describe('paused', () => {
     }
     expect(pausedBy([])).toEqual([t.a.id, t.a1.id]);
     expect(pausedBy([session('s1', t.a2.id, 'idle')])).toEqual([t.a1.id]);
+  });
+});
+
+const MIN = 60_000;
+const command = (taskId: string, extra: Partial<CommandInfo> = {}): CommandInfo => ({
+  taskId, kind: 'shell', agentId: '', persistent: false, description: null, commandHead: 'npm run build', nodeId: null,
+  startedAt: ago(MIN), endedAt: null, outcome: null, exitCode: null, ...extra,
+});
+const withCommands = (s: Session, commands: CommandInfo[]): Session => ({ ...s, commands });
+
+describe('commands', () => {
+  const layout = (t: ReturnType<typeof sample>, sessions: Session[], extra: Partial<Parameters<typeof layoutOutline>[0]> = {}) =>
+    layoutOutline({ nodes: t.nodes, resources: [], sessions, now: T0, ...extra });
+  const hidden = (l: LayoutResult) => l.items.flatMap((i) => (i.kind === 'more' ? i.hiddenIds : []));
+
+  it("draws a running command's line after the session's agent line and readers line, and grows the card by COMMAND_LINE", () => {
+    const t = sample();
+    const s1 = withCommands(withAgents(session('s1', t.a1.id, 'working'), [agent('w1'), agent('r1', { agentType: 'Explore' })]), [command('b1')]);
+    const l = layout(t, [s1]);
+    const top = 2 * ROW + NODE_H;
+    expect(rowsOf(l, 'line', 'readers', 'commands')).toEqual([
+      ['line', `ls1:${t.a1.id}`, t.a1.id, 84, top],
+      ['readers', `rs1:${t.a1.id}`, t.a1.id, 84, top + AGENT_LINE],
+      ['commands', `cs1:${t.a1.id}`, t.a1.id, 84, top + AGENT_LINE + READERS_LINE],
+    ]);
+    expect(COMMAND_LINE).toBe(20);
+    expect(l.nodeItems.get(t.a1.id)?.h).toBe(NODE_H + AGENT_LINE + READERS_LINE + COMMAND_LINE + CARD_PAD);
+    expect(l.nodeItems.get(t.a2.id)?.y).toBe(3 * ROW + AGENT_LINE + READERS_LINE + COMMAND_LINE + CARD_PAD);
+  });
+
+  it('gives a session with only commands on a card just the commands line', () => {
+    const t = sample();
+    const l = layout(t, [withCommands(session('s1', null, 'idle'), [command('b1', { nodeId: t.b.id })])]);
+    expect(rowsOf(l, 'line', 'readers', 'commands')).toEqual([['commands', `cs1:${t.b.id}`, t.b.id, 56, 4 * ROW + NODE_H]]);
+    expect(l.nodeItems.get(t.b.id)?.h).toBe(NODE_H + COMMAND_LINE + CARD_PAD);
+  });
+
+  it('lists task ids running first by start, then ended ones by start', () => {
+    const t = sample();
+    const cmds = [
+      command('e1', { startedAt: ago(10 * MIN), endedAt: ago(MIN) }), command('r2', { startedAt: ago(2 * MIN) }),
+      command('e0', { startedAt: ago(20 * MIN), endedAt: ago(2 * MIN) }), command('r1', { startedAt: ago(5 * MIN) }),
+    ];
+    const l = layout(t, [withCommands(session('s1', t.a1.id, 'idle'), cmds)]);
+    expect(l.items.find((i) => i.kind === 'commands')).toMatchObject({ sessionId: 's1', nodeId: t.a1.id, taskIds: ['r1', 'r2', 'e0', 'e1'] });
+  });
+
+  it('shows an ended command until ENDED_AGENT_MS after its end, by now', () => {
+    const t = sample();
+    const on = (endedAt: string) => layout(t, [withCommands(session('s1', t.a1.id, 'idle'), [command('b1', { endedAt })])]);
+    expect(on(ago(ENDED_AGENT_MS - 1000)).items.filter((i) => i.kind === 'commands')).toHaveLength(1);
+    expect(on(ago(ENDED_AGENT_MS)).items.filter((i) => i.kind === 'commands')).toHaveLength(0);
+    expect(on(ago(ENDED_AGENT_MS)).nodeItems.get(t.a1.id)?.h).toBe(NODE_H + AGENT_LINE + CARD_PAD);
+  });
+
+  it("homes a subagent's command to its node, and one with no node (or a node outside the tree) to the session's focus", () => {
+    const t = sample();
+    const cmds = [command('b1', { agentId: 'x', nodeId: t.b.id }), command('b2'), command('b3', { agentId: 'x', nodeId: 999 })];
+    const l = layout(t, [withCommands(session('s1', t.a1.id, 'idle'), cmds)]);
+    expect(l.items.filter((i) => i.kind === 'commands').map((i) => [i.id, 'taskIds' in i ? i.taskIds : []])).toEqual([
+      [`cs1:${t.a1.id}`, ['b2', 'b3']], [`cs1:${t.b.id}`, ['b1']],
+    ]);
+  });
+
+  it('anchors a command under a manual fold to the visible ancestor', () => {
+    const t = sample();
+    const l = layout(t, [withCommands(session('s1', null, 'idle'), [command('b1', { nodeId: t.a1.id })])], { overrides: { ['n:' + t.a.id]: 'closed' } });
+    expect(rowsOf(l, 'commands')).toEqual([['commands', `cs1:${t.a.id}`, t.a.id, 56, ROW + NODE_H]]);
+  });
+
+  it('pins the step of a running command past the fold rules, and an ended one does not', () => {
+    const t = sample();
+    const on = (c: CommandInfo) => layout(t, [withCommands(session('s1', t.a1.id, 'idle'), [{ ...c, nodeId: t.e.id }])]);
+    expect(hidden(on(command('b1')))).not.toContain(t.e.id);
+    expect(hidden(on(command('b1', { persistent: true, commandHead: 'npm run dev' })))).not.toContain(t.e.id);
+    expect(hidden(on(command('b1', { endedAt: ago(MIN) })))).toContain(t.e.id);
+  });
+
+  it('shares the commands line with the done row, as it shares a readers line', () => {
+    const t = sample();
+    const l = layout(t, [withCommands(session('s1', t.a1.id, 'idle'), [command('b1')])], { workItems: [work(t.a1.id, 'completed')] });
+    const line = l.items.find((i) => i.kind === 'commands')!;
+    expect(l.items.find((i) => i.kind === 'workDone')).toMatchObject({ shared: true, y: line.y });
+    expect(l.nodeItems.get(t.a1.id)?.h).toBe(NODE_H + AGENT_LINE + COMMAND_LINE + CARD_PAD);
+  });
+
+  it('gives each of two sessions on one card its own commands line, after its own lines', () => {
+    const t = sample();
+    const s1 = withCommands(session('s1', t.a1.id, 'idle'), [command('b1')]);
+    const s2 = withCommands(session('s2', t.a1.id, 'idle'), [command('b2')]);
+    const l = layout(t, [s1, s2]);
+    expect(rowsOf(l, 'line', 'commands').map(([kind, id]) => [kind, id])).toEqual([
+      ['line', `ls1:${t.a1.id}`], ['commands', `cs1:${t.a1.id}`], ['line', `ls2:${t.a1.id}`], ['commands', `cs2:${t.a1.id}`],
+    ]);
+  });
+});
+
+describe('command occupancy and live cards', () => {
+  const byIdOf = (t: ReturnType<typeof sample>) => new Map(t.nodes.map((x) => [x.id, x]));
+  const layout = (t: ReturnType<typeof sample>, sessions: Session[], extra: Partial<Parameters<typeof layoutOutline>[0]> = {}) =>
+    layoutOutline({ nodes: t.nodes, resources: [], sessions, now: T0, ...extra });
+  const liveIds = (l: LayoutResult) => [...l.nodeItems.values()].filter((i) => i.live).map((i) => i.nodeId);
+
+  it('lets a counting command occupy its step and ancestors, but not an old one, a server, a persistent one or an ended one', () => {
+    const t = sample();
+    const occupiedBy = (c: CommandInfo) => [...occupiedSteps(byIdOf(t), [withCommands(session('s1', t.b.id, 'idle'), [{ ...c, nodeId: t.a1.id }])], [], T0)];
+    expect(occupiedBy(command('b1'))).toEqual(expect.arrayContaining([t.a1.id, t.a.id, t.root.id]));
+    expect(occupiedBy(command('b1', { startedAt: ago(30 * MIN) }))).not.toContain(t.a1.id);
+    expect(occupiedBy(command('b1', { commandHead: 'npm run dev' }))).not.toContain(t.a1.id);
+    expect(occupiedBy(command('b1', { kind: 'monitor', persistent: true }))).not.toContain(t.a1.id);
+    expect(occupiedBy(command('b1', { endedAt: ago(MIN) }))).not.toContain(t.a1.id);
+    expect(layout(t, [withCommands(session('s1', t.b.id, 'idle'), [command('b1', { nodeId: t.a1.id })])]).nodeItems.get(t.a1.id)?.paused).toBe(false);
+    expect(layout(t, [withCommands(session('s1', t.b.id, 'idle'), [command('b1', { nodeId: t.a1.id, commandHead: 'npm run dev' })])]).nodeItems.get(t.a1.id)?.paused).toBe(true);
+  });
+
+  it('does not let a session that has ended occupy a step with its command', () => {
+    const t = sample();
+    const ended = withCommands(session('s1', t.b.id, 'ended'), [command('b1', { nodeId: t.a1.id })]);
+    expect([...occupiedSteps(byIdOf(t), [ended], [], T0)]).not.toContain(t.a1.id);
+  });
+
+  it('lights a card with a running worker, a running reader, a counting command, a pulsing task or the lead of a working session', () => {
+    const t = sample();
+    const idle = session('s1', t.b.id, 'idle');
+    expect(liveIds(layout(t, [withAgents(idle, [agent('w1', { nodeId: t.a1.id })])]))).toEqual([t.a1.id]);
+    expect(liveIds(layout(t, [withAgents(idle, [agent('r1', { agentType: 'Explore', nodeId: t.a1.id })])]))).toEqual([t.a1.id]);
+    expect(liveIds(layout(t, [withCommands(idle, [command('b1', { nodeId: t.a1.id })])]))).toEqual([t.a1.id]);
+    expect(liveIds(layout(t, [session('s1', t.b.id, 'working')], { workItems: [work(t.a1.id, 'in_progress')] }))).toEqual([t.a1.id, t.b.id]);
+    expect(liveIds(layout(t, [session('s1', t.a1.id, 'working')]))).toEqual([t.a1.id]);
+  });
+
+  it('lights the card of a pulsing task whether or not it is folded', () => {
+    const t = sample();
+    const l = layout(t, [session('s1', t.b.id, 'working')], { workItems: [work(t.a.id, 'in_progress')], overrides: { ['n:' + t.a.id]: 'closed' } });
+    expect(l.nodeItems.get(t.a.id)).toMatchObject({ folded: true, live: true });
+  });
+
+  it('does not light the lead of a busy session, an ended kin, or a serving command', () => {
+    const t = sample();
+    const busyLead = layout(t, [withAgents(session('s1', t.a1.id, 'idle'), [agent('w1', { nodeId: t.b.id })])]);
+    expect(liveIds(busyLead)).toEqual([t.b.id]);
+    expect(liveIds(layout(t, [withAgents(session('s1', t.b.id, 'idle'), [agent('w1', { nodeId: t.a1.id, endedAt: ago(MIN) })])]))).toEqual([]);
+    expect(liveIds(layout(t, [withCommands(session('s1', t.b.id, 'idle'), [command('b1', { nodeId: t.a1.id, commandHead: 'npm run dev' })])]))).toEqual([]);
+  });
+
+  it('lights the folded card over an in-progress task of a running subagent, which a pin cannot unfold', () => {
+    const t = sample();
+    const s1 = withAgents(session('s1', t.b.id, 'idle'), [agent('x', { nodeId: t.b.id })]);
+    const l = layout(t, [s1], { workItems: [work(t.a1.id, 'in_progress', { agentId: 'x' })], overrides: { ['n:' + t.a.id]: 'closed' } });
+    expect(l.nodeItems.get(t.a.id)).toMatchObject({ folded: true, live: true, working: true });
+  });
+
+  it("lights the visible ancestor of a folded subtree's running agent", () => {
+    const t = sample();
+    const s1 = withAgents(session('s1', t.b.id, 'idle'), [agent('w1', { nodeId: t.a1.id })]);
+    expect(liveIds(layout(t, [s1], { overrides: { ['n:' + t.a.id]: 'closed' } }))).toEqual([t.a.id]);
+  });
+
+  it('marks every live card and its ancestors as working, a stack head included, and the visible ancestor of a folded working focus as live and working', () => {
+    const t = sample();
+    const phased = t.nodes.map((x) => (x.id === t.a.id ? { ...x, kind: 'phase' as const } : x));
+    const l = layoutOutline({ nodes: phased, resources: [], sessions: [withAgents(session('s1', t.b.id, 'idle'), [agent('w1', { nodeId: t.a1.id })])], now: T0 });
+    expect(l.nodeItems.get(t.a1.id)).toMatchObject({ live: true, working: true });
+    expect(l.nodeItems.get(t.a.id)).toMatchObject({ stack: true, live: false, working: true });
+    expect(l.nodeItems.get(t.root.id)?.working).toBe(true);
+    expect(l.nodeItems.get(t.b.id)?.working).toBe(false);
+    const folded = layout(t, [session('s1', t.a1.id, 'working')], { overrides: { ['n:' + t.a.id]: 'closed' } });
+    expect(folded.nodeItems.get(t.a.id)).toMatchObject({ working: true, live: true });
+    expect(folded.nodeItems.get(t.root.id)?.working).toBe(true);
+  });
+});
+
+describe('findFrontier with busy sessions', () => {
+  it('prefers a working session over a busy one', () => {
+    const t = sample();
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [], now: T0 });
+    const busy = withAgents(session('s1', t.b.id, 'idle', '2026-09-27T05:00:00Z'), [agent('w1')]);
+    expect(findFrontier(t.nodes, [busy, session('s2', t.a2.id, 'working', '2026-09-27T01:00:00Z')], l, [], T0)).toBe(t.a2.id);
+  });
+
+  it('takes the busy session seen last over the queue when none works', () => {
+    const t = sample();
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [], now: T0 });
+    const older = withAgents(session('s1', t.b.id, 'idle', '2026-09-27T01:00:00Z'), [agent('w1')]);
+    const newer = withCommands(session('s2', t.c.id, 'idle', '2026-09-27T05:00:00Z'), [command('b1')]);
+    expect(findFrontier(t.nodes, [older, newer], l, later(t.d.id), T0)).toBe(t.c.id);
+  });
+
+  it('does not count an idle session with only a serving command as busy', () => {
+    const t = sample();
+    const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [], now: T0 });
+    const serving = withCommands(session('s1', t.b.id, 'idle'), [command('b1', { commandHead: 'npm run dev' })]);
+    expect(findFrontier(t.nodes, [serving], l, later(t.d.id), T0)).toBe(t.d.id);
   });
 });

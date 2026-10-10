@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react';
+import { sessionActivity } from '../../../src/core/activity';
 import { atLimit } from '../../../src/core/layout';
 import { agentTag, sessionDisplayTitle, sessionTag, type Session, type SubagentInfo } from '../../../src/core/types';
 import { Character } from '../Character';
@@ -42,34 +43,35 @@ function Kin({ agent, session, nodeId, now }: KinProps) {
   const classes = ['ip-agent', !running && 'ended', atLimit(agent) && 'limit'].filter(Boolean).join(' ');
   return (
     <span className={classes} role="img" aria-label={name} title={name}>
-      <Character size={16} state={characterState(agent)} slot={session.slot} seed={`${session.id}:${agent.agentId}`} />
+      <Character size={16} state={characterState(agent, now)} slot={session.slot} seed={`${session.id}:${agent.agentId}`} />
       {tag && <span className="ip-agent-tag">{tag}</span>}
       {!running && agent.endReason && <span className="ip-agent-mark">!</span>}
-      {running && <span className="ip-agent-time">{runTime(agent.startedAt, now)}</span>}
+      {running && <span className="ip-agent-time">{runTime(agent.runStartedAt, now)}</span>}
     </span>
   );
 }
 
 /**
  * One session's line in a card. Where its focus anchors: its lead (the session's character, 24 px while working, else
- * 20), its kin, then its label `A · E2E session · working`. Away from its focus: its letter, then its kin, with no
+ * 20, busy included), its kin, then its label `A · E2E session · working`. Away from its focus: its letter, then its kin, with no
  * label. Its accessible name leads with the letter either way. The card's done row rides at its right end when this is
  * the card's last line and it holds no kin.
  */
 export function AgentLine({ session, nodeId, lead, agents, now, done }: AgentLineProps) {
   const letter = sessionTag(session.slot);
   const title = sessionDisplayTitle(session);
-  const word = WORDS[session.state];
+  const activity = sessionActivity(session, now);
+  const word = WORDS[activity];
   const hidden = agents.slice(MAX_KIN);
   return (
     <div
-      className={`ip-badge s-${session.state}`}
+      className={`ip-badge s-${activity}`}
       role="group"
       aria-label={withTag(letter, lead ? `${title} · ${word}` : `subagents of ${title}`)}
       style={{ '--fam': familyVar(session.slot) } as CSSProperties}
     >
       {lead ? (
-        <Character size={session.state === 'working' ? 24 : 20} state={characterState(session)} slot={session.slot} seed={session.id} title={leadTitle(session)} />
+        <Character size={activity === 'working' ? 24 : 20} state={characterState(session, now)} slot={session.slot} seed={session.id} title={leadTitle(session, now)} />
       ) : (
         letter && <span className="ip-tag">{letter}</span>
       )}

@@ -1,5 +1,6 @@
 import { STALE_SESSION_MS, TRAIL_MS, type PastSession, type Session, type SessionState } from '../../core/types';
 import { write, type Ctx } from '../db/tx';
+import { endSessionCommands, listCommands } from './commands';
 import { releaseQueue } from './projects';
 import { NOT_READER_SQL, endSubagents, listSubagents } from './subagents';
 
@@ -34,6 +35,7 @@ const toSession = (ctx: Ctx, r: SessionRow): Session => ({
   endedAt: r.ended_at,
   slot: r.slot,
   subagents: listSubagents(ctx, r.id),
+  commands: listCommands(ctx, r.id),
 });
 
 export function findSession(ctx: Ctx, id: string): Session | undefined {
@@ -70,7 +72,8 @@ export function clearBriefingDue(ctx: Ctx, id: string): void {
 /**
  * An ended session came back (a resume, or a prompt after stale expiry ended it): its current life starts `at`
  * (migration 7's revived_at). Its subagents that the transcript watcher ended before then, one at the usage limit
- * included, stay as its end left them, in the trail: only a SubagentStart brings one back (ENDED_THIS_LIFE_SQL). Like
+ * included, stay as its end left them, in the trail: only a resume brings one back, a SubagentStart or the SendMessage that
+ * resumed it (ENDED_THIS_LIFE_SQL). Like
  * the briefing marker, it stays out of the Session type: only session-flow sets it.
  */
 export function markRevived(ctx: Ctx, id: string, at: string): void {
@@ -119,7 +122,9 @@ export function expireStaleSessions(ctx: Ctx): void {
       // Its running subagents stopped when the session was last heard from, not 12 hours later: the trail says how long
       // they ran.
       endSubagents(ctx, id, last_seen_at);
-      record({ projectId: project_id, type: 'session.updated', entity: 'session', entityId: id, data: { changed: ['state'], state: 'ended' } });
+      // Likewise its background commands: they ended with the session, not 12 hours later.
+      endSessionCommands(ctx, id, last_seen_at);
+      record({ projectId: project_id, type: 'session.updated', entity: 'session', entityId: id, data: { changed: ['state'], state: 'ended', activity: 'ended' } });
     }
   });
 }

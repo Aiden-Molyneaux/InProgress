@@ -1,0 +1,102 @@
+import { describe, expect, it } from 'vitest';
+import { COMMAND_WORK_MS, commandDescriptionText, commandLabel, commandShown, countsAsWork, looksLikeServer, orderCommands, sessionActivity } from '../../src/core/activity';
+import type { CommandInfo, SessionState, SubagentInfo } from '../../src/core/types';
+
+const MIN = 60 * 1000;
+const NOW = Date.parse('2026-10-09T12:00:00.000Z');
+const ago = (ms: number) => new Date(NOW - ms).toISOString();
+
+const command = (over: Partial<CommandInfo> = {}): CommandInfo => ({
+  taskId: 'b1', kind: 'shell', agentId: '', persistent: false, description: null, commandHead: 'npm run build', nodeId: null,
+  startedAt: ago(MIN), endedAt: null, outcome: null, exitCode: null, ...over,
+});
+const subagent = (over: Partial<SubagentInfo> = {}): SubagentInfo => ({
+  agentId: 'a1', agentType: 'general-purpose', startedAt: ago(MIN), runStartedAt: ago(MIN), description: null, model: null, nodeId: null,
+  endedAt: null, ordinal: 1, purpose: null, endReason: null, lastActiveAt: null, ...over,
+});
+const session = (state: SessionState, subagents: SubagentInfo[] = [], commands: CommandInfo[] = []) => ({ state, subagents, commands });
+
+describe('countsAsWork', () => {
+  it('counts a running command', () => expect(countsAsWork(command(), NOW)).toBe(true));
+  it('does not count an ended one', () => expect(countsAsWork(command({ endedAt: ago(1) }), NOW)).toBe(false));
+  it('does not count a persistent Monitor', () => expect(countsAsWork(command({ kind: 'monitor', persistent: true }), NOW)).toBe(false));
+  it('counts one 29:59 old and not one 30:00 old', () => {
+    expect(COMMAND_WORK_MS).toBe(30 * MIN);
+    expect(countsAsWork(command({ startedAt: ago(30 * MIN - 1000) }), NOW)).toBe(true);
+    expect(countsAsWork(command({ startedAt: ago(30 * MIN) }), NOW)).toBe(false);
+  });
+  it.each(['dev', 'serve', 'preview', 'start', 'watch'])('does not count a head word %s', (word) => {
+    expect(countsAsWork(command({ commandHead: `npm run ${word}` }), NOW)).toBe(false);
+    expect(countsAsWork(command({ commandHead: word }), NOW)).toBe(false);
+  });
+  it('does not count test:watch, and counts npm run build and a missing head', () => {
+    expect(countsAsWork(command({ commandHead: 'npm run test:watch' }), NOW)).toBe(false);
+    expect(countsAsWork(command({ commandHead: 'npm run build' }), NOW)).toBe(true);
+    expect(countsAsWork(command({ commandHead: null }), NOW)).toBe(true);
+  });
+});
+
+describe('looksLikeServer', () => {
+  it('matches a whole word or a colon part, not a substring', () => {
+    expect(looksLikeServer('npm run dev')).toBe(true);
+    expect(looksLikeServer('vite:preview')).toBe(true);
+    expect(looksLikeServer('npm run devtools')).toBe(false);
+    expect(looksLikeServer(undefined)).toBe(false);
+  });
+});
+
+describe('sessionActivity', () => {
+  it('passes the other stored states through', () => {
+    for (const state of ['working', 'permission', 'ended'] as const) expect(sessionActivity(session(state, [subagent()], [command()]), NOW)).toBe(state);
+  });
+  it('is idle with nothing running', () => expect(sessionActivity(session('idle'), NOW)).toBe('idle'));
+  it('is busy with a running subagent', () => expect(sessionActivity(session('idle', [subagent()]), NOW)).toBe('busy'));
+  it('is idle with only a running reader', () => expect(sessionActivity(session('idle', [subagent({ agentType: 'Explore' })]), NOW)).toBe('idle'));
+  it('is idle with a subagent that ended at the limit', () => {
+    expect(sessionActivity(session('idle', [subagent({ endedAt: ago(1), endReason: 'limit' })]), NOW)).toBe('idle');
+  });
+  it('is busy with a counting command', () => expect(sessionActivity(session('idle', [], [command()]), NOW)).toBe('busy'));
+  it('is idle with only a serving command', () => expect(sessionActivity(session('idle', [], [command({ commandHead: 'npm run dev' })]), NOW)).toBe('idle'));
+});
+
+describe('commandLabel', () => {
+  it('prefers the head', () => expect(commandLabel({ commandHead: 'npm run build', description: 'Build it' })).toBe('npm run build'));
+  it('falls back to the description without its leading #id', () => {
+    expect(commandLabel({ commandHead: null, description: '#228 Run the e2e suite' })).toBe('Run the e2e suite');
+  });
+  it('falls back to a generic label', () => expect(commandLabel({ commandHead: null, description: null })).toBe('a background command'));
+});
+
+describe('commandShown', () => {
+  it('shows a running command, one ended 4 minutes ago, and not one ended 5 minutes ago', () => {
+    expect(commandShown({ endedAt: null }, NOW)).toBe(true);
+    expect(commandShown({ endedAt: ago(4 * MIN) }, NOW)).toBe(true);
+    expect(commandShown({ endedAt: ago(5 * MIN) }, NOW)).toBe(false);
+  });
+});
+
+describe('commandDescriptionText', () => {
+  it('strips a leading #id and trims, and is null for nothing', () => {
+    expect(commandDescriptionText({ description: '#57 Run the suite' })).toBe('Run the suite');
+    expect(commandDescriptionText({ description: '  Run the suite ' })).toBe('Run the suite');
+    expect(commandDescriptionText({ description: null })).toBeNull();
+    expect(commandDescriptionText({ description: '#57' })).toBeNull();
+  });
+
+  it('is what commandLabel falls back to', () => {
+    expect(commandLabel({ commandHead: null, description: '#57 Run the suite' })).toBe('Run the suite');
+  });
+});
+
+describe('orderCommands', () => {
+  it('lists running commands by start, then ended ones by start, without changing the list it was given', () => {
+    const list = [
+      command({ taskId: 'e2', startedAt: ago(2 * MIN), endedAt: ago(MIN), outcome: 'completed' }),
+      command({ taskId: 'r2', startedAt: ago(3 * MIN) }),
+      command({ taskId: 'e1', startedAt: ago(9 * MIN), endedAt: ago(MIN), outcome: 'completed' }),
+      command({ taskId: 'r1', startedAt: ago(8 * MIN) }),
+    ];
+    expect(orderCommands(list).map((c) => c.taskId)).toEqual(['r1', 'r2', 'e1', 'e2']);
+    expect(list.map((c) => c.taskId)).toEqual(['e2', 'r2', 'e1', 'r1']);
+  });
+});

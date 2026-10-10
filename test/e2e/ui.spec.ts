@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test as base, expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
@@ -1944,7 +1944,9 @@ test("a tab's dot also shows while an idle session has a running worker, but not
   // A worker running on while the session is idle lights it, and the tab says so.
   await subagent(api, s, 'worker-1', 'Wire up RevenueCat', 'sonnet');
   await expect(dot).toHaveCount(1);
-  await expect(tab).toHaveAccessibleName(`${name}, 1 need you, working`);
+  await expect(tab).toHaveAccessibleName(`${name}, 1 need you, busy`);
+  // Busy only: the dot is still. A working session's pulses.
+  await expect(dot).toHaveClass(/\bstill\b/);
   expect(await counts()).toEqual({ workingSessions: 0, busySessions: 1 });
   // Once the worker stops, the dot goes.
   await hook(api, s.session, { event: 'subagent-stop', agentId: 'worker-1' });
@@ -2489,13 +2491,13 @@ test.describe('Live work', () => {
     const more = chip.locator('.ip-chip-more');
     // Two workers, two kin. The reader gets none, though the name counts it as it always has.
     await expect(kin).toHaveCount(2);
-    await expect(chip).toHaveAccessibleName('A · E2E session · 3 subagents · idle');
+    await expect(chip).toHaveAccessibleName('A · E2E session · 3 subagents · busy');
     // No tags, no run times and no +n: the chip still reads "A".
     await expect(chip).toHaveText('A');
     await expect(more).toHaveCount(0);
-    // The session's own character stays idle, before its letter; the kin work in its hue after it, each bobbing from
+    // The session's own character reads busy (idle, with workers running), before its letter; the kin work in its hue after it, each bobbing from
     // its own phase.
-    await expect(chip.locator(':scope > .ip-char')).toHaveAttribute('data-state', 'idle');
+    await expect(chip.locator(':scope > .ip-char')).toHaveAttribute('data-state', 'busy');
     const [own, letter, first] = await Promise.all([chip.locator(':scope > .ip-char'), chip.locator('.ip-tag'), kin.first()].map(boxOf));
     expect(own.x + own.width).toBeLessThanOrEqual(letter.x);
     expect(letter.x + letter.width).toBeLessThanOrEqual(first.x);
@@ -2526,7 +2528,7 @@ test.describe('Live work', () => {
     // A third and a fourth worker: three kin, then a muted +1 in DM Mono.
     await subagent(api, fresh, 'worker-3', 'Price the tiers', 'sonnet');
     await subagent(api, fresh, 'worker-4', 'Write the store copy', 'sonnet');
-    await expect(chip).toHaveAccessibleName('A · E2E session · 5 subagents · idle');
+    await expect(chip).toHaveAccessibleName('A · E2E session · 5 subagents · busy');
     await expect(kin).toHaveCount(3);
     await expect(more).toHaveText('+1');
     await expect(chip).toHaveText('A+1');
@@ -2536,7 +2538,7 @@ test.describe('Live work', () => {
     expect((await row.boundingBox())!.height, 'still one line').toBeLessThanOrEqual(40);
     // A worker that stops leaves the chip: the fourth moves up into the third place, and the +1 goes.
     await hook(api, fresh.session, { event: 'subagent-stop', agentId: 'worker-1' });
-    await expect(chip).toHaveAccessibleName('A · E2E session · 4 subagents · idle');
+    await expect(chip).toHaveAccessibleName('A · E2E session · 4 subagents · busy');
     await expect(more).toHaveCount(0);
     await expect(kin).toHaveCount(3);
     await expect(kin.nth(2).locator('.ip-char-body')).toHaveCSS('animation-delay', `${phaseDelay(`${fresh.session}:worker-4`, 2400) / 1000}s`);
@@ -3091,5 +3093,179 @@ test.describe('Go to', () => {
     await expect(statusLine(page)).toHaveText(`No step #${gone.ids[`${word} lost`]}`);
     await expect(page).not.toHaveURL(hereIs(gone.slug));
     await expect(goToButton(page)).toBeFocused();
+  });
+});
+
+// Background work (#228): commands a session started, a session busy while work runs, a resumed agent re-homed, live steps.
+
+/** Posts a command-started for `taskId`, as the PostToolUse hook does for a Bash/PowerShell call run in the background. */
+const startCommand = (api: APIRequestContext, session: string, taskId: string, commandHead: string, extra: Record<string, unknown> = {}) =>
+  hook(api, session, { event: 'command-started', taskId, toolUseId: `toolu-${taskId}`, kind: 'shell', commandHead, description: 'Run the e2e suite', ...extra });
+
+/** A stop that lists the session's running background tasks, as the Stop hook reads them. */
+const stopWith = (api: APIRequestContext, session: string, running: { taskId: string; commandHead?: string }[]) =>
+  hook(api, session, { event: 'stop', background: running.map((r) => ({ type: 'shell', ...r })) });
+
+/** A task notice as the model receives it. */
+const NOTICE = (taskId: string, status = 'completed') =>
+  `<task-notification><task-id>${taskId}</task-id><status>${status}</status><summary>Background command "Run the e2e suite" completed (exit code 0)</summary></task-notification>`;
+
+test.describe('Background work', () => {
+  test('a session busy only on a command reads busy: a still dot, a live step with its commands line, then a check and gone after five minutes', async ({ page, api }) => {
+    const name = unique('Busy command');
+    const s = await seed(api, name);
+    await open(page, s);
+    const header = page.locator('.ip-node', { hasText: 'Play app signing' });
+    const frame = frameOf(header);
+    const dot = tabFor(page, name).locator('.ip-tab-dot');
+    const chip = page.locator('.ip-chip-s');
+    const lead = frame.locator('.ip-badge > .ip-char');
+    // Working: the dot pulses.
+    await expect(dot).toHaveCSS('animation-name', 'ip-pulse');
+    await startCommand(api, s.session, 'b1', 'npm run test:e2e');
+    await stopWith(api, s.session, [{ taskId: 'b1', commandHead: 'npm run test:e2e' }]);
+    await expect(lead).toHaveAttribute('data-state', 'busy');
+    await expect(frame.locator('.ip-badge-word')).toHaveText('busy');
+    await expect(chip.locator('.ip-chip-count')).toHaveText('▸1');
+    await expect(chip).toHaveAccessibleName('A · E2E session · 1 command · busy');
+    // The dot is still while the session is only busy.
+    await expect(dot).toHaveCount(1);
+    await expect(dot).toHaveClass(/\bstill\b/);
+    await expect(dot).toHaveCSS('animation-name', 'none');
+    await expect(tabFor(page, name)).toHaveAccessibleName(`${name}, 1 need you, busy`);
+    // The step is live, not the working focus, and its line names the command.
+    await expect(frame).toHaveClass(/\blive\b/);
+    await expect(frame).not.toHaveClass(/\bfocus\b/);
+    const line = frame.locator('.ip-commands');
+    await expect(line).toHaveText(/^▸ A · npm run test:e2e · <1m$/);
+    await expect(line).toHaveAttribute('title', /^npm run test:e2e · Run the e2e suite · <1m$/);
+    await expect(line).toHaveAccessibleName('npm run test:e2e · Run the e2e suite · <1m');
+    await expect(line).toHaveRole('group');
+    // Details lists it under Background.
+    await header.click();
+    const details = page.getByRole('complementary');
+    await expect(details.getByText('Background', { exact: true })).toBeVisible();
+    await expect(details).toContainText('Run the e2e suite · npm run test:e2e');
+    // The notice ends it; the Stop that follows lists nothing.
+    await hook(api, s.session, { event: 'prompt', notice: true, tasks: [{ taskId: 'b1', status: 'completed', exitCode: 0 }] });
+    await stopWith(api, s.session, []);
+    await expect(lead).toHaveAttribute('data-state', 'idle');
+    await expect(line).toHaveText(/^✓ A · npm run test:e2e$/);
+    await expect(line).toHaveClass(/\bended\b/);
+    await expect(line).toHaveAttribute('title', /completed \(exit 0\)/);
+    await expect(chip.locator('.ip-chip-count')).toHaveCount(0);
+    await expect(frame).not.toHaveClass(/\blive\b/);
+    await expect(dot).toHaveCount(0);
+    // Five minutes on, the line is gone.
+    await page.clock.install({ time: Date.now() + 6 * 60_000 });
+    await page.reload();
+    await expect(chip).toBeVisible();
+    await expect(page.locator('.ip-commands')).toHaveCount(0);
+  });
+
+  test("a subagent's command is tagged with the subagent and ends from the session's transcript", async ({ page, api, fresh }) => {
+    const files = transcripts(fresh.session);
+    await hook(api, fresh.session, { event: 'prompt', transcriptPath: files.path });
+    await subagent(api, fresh, 'agent-1', `#${fresh.ids['Play app signing']} Build the app`, 'sonnet');
+    await startCommand(api, fresh.session, 'b7', 'npm run build', { agentId: 'agent-1', description: 'Build the app' });
+    await open(page, fresh);
+    const line = frameOf(page.locator('.ip-node', { hasText: 'Play app signing' })).locator('.ip-commands');
+    await expect(line).toHaveText(/^▸ a1 · npm run build · <1m$/);
+    // The notice reaches only the transcript: the watcher's next tick (half a second here) ends the command at that line.
+    appendFileSync(files.path, `${JSON.stringify({ type: 'queue-operation', operation: 'enqueue', timestamp: new Date().toISOString(), content: NOTICE('b7') })}\n`);
+    await expect(line).toHaveText(/^✓ a1 · npm run build$/);
+    await expect(line).toHaveAttribute('title', /completed \(exit 0\)/);
+  });
+
+  test("a resumed agent moves to the step it was sent to, counts from its resume, and keeps its first start in the trail", async ({ page, api, fresh }) => {
+    test.setTimeout(120_000);
+    const a = fresh.ids['Play app signing'];
+    const b = fresh.ids['Run signing tests'];
+    await subagent(api, fresh, 'agent-1', `#${a} Fix the checkbox`, 'sonnet');
+    await hook(api, fresh.session, { event: 'subagent-stop', agentId: 'agent-1' });
+    await write(api, fresh.session, 'post', `/api/sessions/${fresh.session}/focus`, { nodeId: b });
+    await open(page, fresh);
+    const frameA = frameOf(page.locator('.ip-node', { hasText: 'Play app signing' }));
+    const frameB = frameOf(page.locator('.ip-node', { hasText: 'Run signing tests' }));
+    await expect(frameA.getByRole('img', { name: /^a1 · / })).toHaveClass(/\bended\b/);
+    // A message within a minute of the run's start only re-homes it: the resume waits for the minute to pass.
+    await new Promise((resolve) => setTimeout(resolve, 61_000));
+    await hook(api, fresh.session, { event: 'agent-messaged', agentId: 'agent-1', resumed: true, summary: 'Checkbox fix' });
+    const kin = frameB.getByRole('img', { name: /^a1 · / });
+    await expect(kin).not.toHaveClass(/\bended\b/);
+    // Its time counts from the resume, not from its first start over a minute ago.
+    await expect(kin).toHaveText('a1<1m');
+    await expect(kin).toHaveAccessibleName(/^a1 · Checkbox fix · sonnet · <1 min/);
+    await expect(frameA.locator('.ip-agent')).toHaveCount(0);
+    // It stops again; five minutes on, the trail row on B says it ran from the first start.
+    await hook(api, fresh.session, { event: 'subagent-stop', agentId: 'agent-1' });
+    await page.clock.install({ time: Date.now() + 6 * 60_000 });
+    await page.reload();
+    await expect(page.locator('.ip-chip-s')).toBeVisible();
+    await frameB.locator('.ip-work-done').click();
+    await expect(frameB.locator('.ip-trail-agent')).toHaveText(/^◆ Checkbox fix · sonnet · ran [12] min · stopped \d+ min ago$/);
+  });
+
+  test('a command the next Stop no longer lists greys with a bang and the session leaves busy', async ({ page, api, fresh }) => {
+    // Started a minute ago, past the reconcile's grace.
+    await startCommand(api, fresh.session, 'b4', 'npm run test:e2e', { durationMs: 60_000 });
+    await stopWith(api, fresh.session, [{ taskId: 'b4', commandHead: 'npm run test:e2e' }]);
+    await open(page, fresh);
+    const frame = frameOf(page.locator('.ip-node', { hasText: 'Play app signing' }));
+    const line = frame.locator('.ip-commands');
+    await expect(frame.locator('.ip-badge > .ip-char')).toHaveAttribute('data-state', 'busy');
+    await expect(line).toHaveText(/^▸ A · npm run test:e2e · 1m$/);
+    await hook(api, fresh.session, { event: 'prompt' });
+    await stopWith(api, fresh.session, []);
+    await expect(line).toHaveText(/^! A · npm run test:e2e$/);
+    await expect(line).toHaveAttribute('title', /ended \d+ min ago|ended just now/);
+    await expect(frame.locator('.ip-badge > .ip-char')).toHaveAttribute('data-state', 'idle');
+    await expect(frame).not.toHaveClass(/\blive\b/);
+    await expect(page.locator('.ip-chip-s')).toHaveAccessibleName('A · E2E session · idle');
+  });
+
+  test("a step another session's worker runs on is live without the working focus's large title, and its marker pulses", async ({ page, api, fresh }) => {
+    const second = `e2e-${randomUUID()}`;
+    await write(api, second, 'post', `/api/sessions/${second}/enroll`, { project: fresh.slug, title: 'Second session' });
+    await write(api, second, 'post', `/api/sessions/${second}/focus`, { nodeId: fresh.ids['3 RevenueCat'] });
+    await hook(api, second, { event: 'prompt' });
+    const milestones = fresh.ids['Milestones'];
+    await subagent(api, { ...fresh, session: second }, 'agent-y', `#${milestones} Tidy the milestones`, 'sonnet');
+    await hook(api, second, { event: 'stop' });
+    await open(page, fresh);
+    const x = page.locator('.ip-node', { hasText: 'Play app signing' });
+    const y = page.locator('.ip-node').filter({ has: page.locator('.ip-title', { hasText: /^Milestones/ }) });
+    await expect(frameOf(x)).toHaveClass(/\bfocus\b/);
+    await expect(frameOf(y)).toHaveClass(/\blive\b/);
+    await expect(frameOf(y)).not.toHaveClass(/\bfocus\b/);
+    await expect(y.locator('.ip-marker')).toHaveCSS('animation-name', 'ip-pulse');
+    // The live card's title is at ink (--text), as the focus's is.
+    const ink = await page.evaluate<string>(`(() => {
+      const probe = document.body.appendChild(document.createElement('span'));
+      probe.style.color = 'var(--text)';
+      const color = getComputedStyle(probe).color;
+      probe.remove();
+      return color;
+    })()`);
+    await expect(y.locator('.ip-title')).toHaveCSS('color', ink);
+    // The large title is `.ip-card.focus .ip-title` (the working focus alone), and Y's frame lacks `.focus` (asserted above).
+    // A stack head's title is already large, so its size cannot tell the two apart.
+  });
+
+  test('a server command reads serving: a hollow mark and the word, no live step, no count on the chip, no dot', async ({ page, api }) => {
+    const name = unique('Serving');
+    const s = await seed(api, name);
+    await startCommand(api, s.session, 'b9', 'npm run dev', { description: 'Dev server', durationMs: 3 * 3_600_000 });
+    await stopWith(api, s.session, [{ taskId: 'b9', commandHead: 'npm run dev' }]);
+    await open(page, s);
+    const frame = frameOf(page.locator('.ip-node', { hasText: 'Play app signing' }));
+    const line = frame.locator('.ip-commands');
+    await expect(line).toHaveText(/^◦ A · npm run dev · serving 3h(\d+m)?$/);
+    await expect(line).toHaveClass(/\bserving\b/);
+    await expect(frame).not.toHaveClass(/\blive\b/);
+    await expect(frame.locator('.ip-badge > .ip-char')).toHaveAttribute('data-state', 'idle');
+    await expect(page.locator('.ip-chip-s .ip-chip-count')).toHaveCount(0);
+    await expect(page.locator('.ip-chip-s')).toHaveAccessibleName('A · E2E session · idle');
+    await expect(tabFor(page, name).locator('.ip-tab-dot')).toHaveCount(0);
   });
 });

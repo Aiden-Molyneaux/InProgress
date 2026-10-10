@@ -144,7 +144,7 @@ describe('built artifacts', () => {
     const snapshot = await client.get<ProjectSnapshot>('/api/projects/smoke');
     const session = snapshot.sessions.find((s) => s.id === 'smoke-1')!;
     expect(session.subagents).toEqual([
-      { agentId: 'a0smoke0agent0001', agentType: 'Explore', startedAt: expect.any(String), description: `#${step.id} Map the smoke run`, model: 'haiku', nodeId: step.id, endedAt: null, ordinal: 1, purpose: 'Map the smoke run.', endReason: null, lastActiveAt: null },
+      { agentId: 'a0smoke0agent0001', agentType: 'Explore', startedAt: expect.any(String), runStartedAt: expect.any(String), description: `#${step.id} Map the smoke run`, model: 'haiku', nodeId: step.id, endedAt: null, ordinal: 1, purpose: 'Map the smoke run.', endReason: null, lastActiveAt: null },
     ]);
     const stored = JSON.stringify({ dispatched, now: storedRows('subagent_dispatches', 'session_subagents', 'events') });
     for (const text of kept) {
@@ -191,7 +191,7 @@ describe('built artifacts', () => {
     expect(r.stderr).toBe('');
   });
 
-  it('a backgrounded Bash call is captured, redacted, to the day file, and posts nothing', () => {
+  it('a backgrounded Bash call is captured, redacted, to the day file', () => {
     const command = `cd /c/x && INTHINK_TOKEN=abc123 npm run test:e2e -- --grep busy 2>&1 | tail -40 ${'x'.repeat(100)}`;
     const r = runHook('post-tool', {
       session_id: 'smoke-capture', hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_use_id: 'toolu_smoke_capture',
@@ -212,6 +212,50 @@ describe('built artifacts', () => {
     expect(kept.endsWith(`…[${command.length} chars]`)).toBe(true);
     expect(kept.length).toBe(80 + `…[${command.length} chars]`.length);
     expect(JSON.stringify(captured)).not.toContain('abc123');
+  });
+
+  it('a backgrounded Bash call and a Stop with background_tasks exit 0 silently, and the built server accepts both bodies', async () => {
+    expect(spawnSync(process.execPath, [bin('hooks/hook.js'), 'session-start'], { input: sessionStart('smoke-bg'), env, encoding: 'utf8' }).status).toBe(0);
+    expect(runHook('prompt-submit', { session_id: 'smoke-bg', prompt: 'run it in the background' }).status).toBe(0);
+    expect(storedRows('sessions').find((r) => r.id === 'smoke-bg')).toMatchObject({ state: 'working' });
+    const log = join(home, 'hooks.log');
+    const logged = () => (existsSync(log) ? readFileSync(log, 'utf8') : '');
+    const before = logged().length;
+    const lastSeen = () => storedRows('sessions').find((r) => r.id === 'smoke-bg')!.last_seen_at as string;
+    const seenBefore = lastSeen();
+    await new Promise((r) => setTimeout(r, 30)); // the server stamps to the millisecond
+    // The shapes real Claude Code sends (redacted): the Bash call that went to the background, then the Stop listing it.
+    const bash = runHook('post-tool', {
+      session_id: 'smoke-bg', transcript_path: 'C:\\Users\\test\\.claude\\projects\\C--demo\\smoke-bg.jsonl', hook_event_name: 'PostToolUse', tool_name: 'Bash',
+      tool_input: { command: 'git status --short && git merge --no-ff goto -m "Merge goto"', description: 'Merge goto and deploy', run_in_background: true },
+      tool_response: { stdout: '', stderr: '', interrupted: false, isImage: false, noOutputExpected: false, backgroundTaskId: 'bc802pkev' },
+      tool_use_id: 'toolu_smoke_bg', duration_ms: 60000,
+    });
+    expect(bash).toMatchObject({ status: 0, stdout: '', stderr: '' });
+    // The server stamps every event it accepts: a command-started it refused would leave the time as it was.
+    expect(lastSeen() > seenBefore).toBe(true);
+    const stop = runHook('stop', {
+      session_id: 'smoke-bg', transcript_path: 'C:\\Users\\test\\.claude\\projects\\C--demo\\smoke-bg.jsonl', hook_event_name: 'Stop', stop_hook_active: false, last_assistant_message: 'Waiting.',
+      background_tasks: [
+        { id: 'sb0o4266c', type: 'monitor', status: 'running', description: 'live updates for the artifact' },
+        { id: 'bc802pkev', type: 'shell', status: 'running', description: 'Merge goto and deploy', command: 'git status --short && git merge --no-ff goto -m "Merge goto"' },
+      ],
+      session_crons: [],
+    });
+    expect(stop).toMatchObject({ status: 0, stdout: '', stderr: '' });
+    // A body the server's strict schema rejected would leave the state as it was and put a line in hooks.log.
+    expect(storedRows('sessions').find((r) => r.id === 'smoke-bg')).toMatchObject({ state: 'idle' });
+    expect(logged().slice(before)).toBe('');
+    // The built server stored the command the Bash call started, and the monitor only the Stop listed.
+    const commands = () => storedRows('session_commands').filter((r) => r.session_id === 'smoke-bg');
+    expect(commands().find((r) => r.task_id === 'bc802pkev')).toMatchObject({ kind: 'shell', agent_id: '', ended_at: null, outcome: null, tool_use_id: 'toolu_smoke_bg' });
+    expect(commands().find((r) => r.task_id === 'sb0o4266c')).toMatchObject({ kind: 'monitor', ended_at: null });
+    // A second Stop that lists nothing ends the command that started a minute ago as unknown; the monitor the first Stop
+    // inserted a moment ago is inside the reconcile grace and keeps running.
+    const again = runHook('stop', { session_id: 'smoke-bg', hook_event_name: 'Stop', stop_hook_active: false, background_tasks: [], session_crons: [] });
+    expect(again).toMatchObject({ status: 0, stdout: '', stderr: '' });
+    expect(commands().map((r) => [r.task_id, r.outcome]).sort()).toEqual([['bc802pkev', 'unknown'], ['sb0o4266c', null]]);
+    expect(logged().slice(before)).toBe('');
   });
 
   it('hooks exit 0 silently when the capture folder cannot be written, or capture is off', () => {

@@ -1,15 +1,19 @@
 // The Simple character's pure helpers. No DOM and no React, so test/web/character.test.ts can import this file.
-import type { Session, SessionState, SubagentInfo } from '../../src/core/types';
+import { sessionActivity, type Activity } from '../../src/core/activity';
+import type { Session, SubagentInfo } from '../../src/core/types';
 
-export type CharacterState = 'work' | 'idle' | 'wait' | 'ended';
+export type CharacterState = 'work' | 'busy' | 'idle' | 'wait' | 'ended';
 /** 14 is a kin on a session chip, 16 a kin on a card, 18 a chip, 20 and 24 a lead. */
 export type CharacterSize = 14 | 16 | 18 | 20 | 24;
 
-const BY_SESSION: Record<SessionState, CharacterState> = { working: 'work', idle: 'idle', permission: 'wait', ended: 'ended' };
+const BY_ACTIVITY: Record<Activity, CharacterState> = { working: 'work', busy: 'busy', idle: 'idle', permission: 'wait', ended: 'ended' };
 
-/** A session's state as its character's (working, idle, permission give work, idle, wait); a subagent works until it stops. */
-export function characterState(who: Pick<Session, 'state'> | Pick<SubagentInfo, 'endedAt'>): CharacterState {
-  return 'state' in who ? BY_SESSION[who.state] : who.endedAt === null ? 'work' : 'ended';
+/**
+ * A session's activity as its character's (working, busy, idle, permission give work, busy, idle, wait): an idle session
+ * with a running worker or a command that counts as work at `now` is busy. A subagent works until it stops.
+ */
+export function characterState(who: Pick<Session, 'state' | 'subagents' | 'commands'> | Pick<SubagentInfo, 'endedAt'>, now: number): CharacterState {
+  return 'state' in who ? BY_ACTIVITY[sessionActivity(who, now)] : who.endedAt === null ? 'work' : 'ended';
 }
 
 /** A negative animation-delay in ms, in (-periodMs, 0], from a 32-bit FNV-1a hash of the seed: stable per seed. */

@@ -904,6 +904,32 @@ names stay as written. The section says:
   `later` line. Each line is cut short at the window's edge.
 - **§7, paused (D16).** In place of "a hollow blue marker": a hollow sky ring, with the same tooltip.
 
+## Amended by background work (#228, 2026-10-10)
+
+Plan: `docs/superpowers/plans/2026-10-09-background-work.md`. Rulings 53 to 80: `docs/superpowers/rulings/2026-10-04-review-actions-rulings.md`. The lines named stay as written.
+
+- **§4, the `busy` character.** A fifth state beside `work`, `idle`, `wait` and `ended`: a session whose stored state
+  is `idle` while a worker or a command that counts as work runs. Eyes as `work`'s (round, blinking), body solid at full
+  opacity with no glow, motion `ip-breathe`, 3.6 s ease-in-out from the bottom centre, `scale(1, 1)` to
+  `scale(1.03, .97)` and back. Under reduced motion the blanket rule stops the breathe and the blink, and the open eyes
+  still tell it from idle's lids. `characterState` maps a session by its activity and takes the clock. A lead is 24 px
+  while working and 20 px otherwise, busy included.
+- **§3, live steps.** A card with running work anchored to it gets `.ip-card.live`: the `.focus` frame (orange
+  hairline, active fill) and its title at `--text`, size M. The large 15/900 title stays on a working session's focus
+  only. A busy lead alone does not light its card. Markers pulse up the chain of every live card, not only the working
+  foci's.
+- **§3, the commands line.** One `.ip-commands` line per session and card, 20 px, after the agent line and readers
+  line: S, `--muted`, DM Mono for the tag, head and time. `▸ a3 · npm run test:e2e +4 · 12m`. A serving command reads
+  `◦ a3 · npm run dev · serving 3h` in `--faint`. When every command has ended it reads `✓` or a muted `!` for 5
+  minutes, then goes. The done toggle sits at its right end, as on the readers line.
+- **§2, the session chip.** After the kin, a muted `▸n` in DM Mono S for the commands that count as work (aria-hidden).
+  The accessible name and popover head add `· n commands` and `· busy`. The popover lists one line per shown command
+  after the subagents; ended and serving ones are faint.
+- **§2, the tab dot.** It shows for a project with a busy session, as before, but pulses only while a session of the
+  project works; with sessions only busy it is still (`.ip-tab-dot.still`). The tab's accessible name says `working`,
+  else `busy`.
+- **§6, Details.** A `Background` section after Subagents lists the step's shown commands.
+
 ## Testing
 
 Gates for the `ui` label: typecheck and unit; no failing-test-first for styling or wording; one e2e per user-visible

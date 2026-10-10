@@ -1,3 +1,4 @@
+import { sessionActivity } from '../core/activity';
 import { formatUpNext, queueView } from '../core/layout';
 import { NEEDS_YOU_STALE_MS, ancestors, buildIndex, dfsOrder, isNeedsYou, kids, needsYouAge, progress, type TreeIndex } from '../core/tree';
 import { NODE_LABELS, glyphTitle, sessionDisplayTitle, sessionTag, type ProjectSnapshot, type Session, type TreeNode, type WorkItem } from '../core/types';
@@ -266,7 +267,7 @@ export function renderBriefing(snapshot: ProjectSnapshot, sessionId: string, now
   if (others.length) {
     const named = (s: Session) => {
       const tag = sessionTag(s.slot);
-      return `${tag ? `${tag} ` : ''}"${sessionDisplayTitle(s)}" (${s.state}${s.focusNodeId ? `, on #${s.focusNodeId}` : ''})`;
+      return `${tag ? `${tag} ` : ''}"${sessionDisplayTitle(s)}" (${sessionActivity(s, now)}${s.focusNodeId ? `, on #${s.focusNodeId}` : ''})`;
     };
     lines.push(`Other sessions here: ${others.map(named).join(' · ')}`);
   }

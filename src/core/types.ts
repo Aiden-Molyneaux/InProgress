@@ -20,6 +20,7 @@ export type SessionState = (typeof SESSION_STATES)[number];
 export const HOOK_EVENTS = [
   'start', 'prompt', 'stop', 'permission', 'subagent-start', 'subagent-stop', 'end',
   'agent-dispatch', 'agent-launched', 'task-created', 'task-updated',
+  'command-started', 'command-ended', 'agent-ended', 'agent-messaged',
 ] as const;
 export type HookEvent = (typeof HOOK_EVENTS)[number];
 /** A working task's status, as Claude Code's task tools have it (their `deleted` removes the task instead). */
@@ -76,8 +77,9 @@ export interface ProjectSummary extends Project {
   /** Live sessions in state working. */
   workingSessions: number;
   /**
-   * Live sessions with work going on: working, or with a running worker (a subagent that is not a reader) while the
-   * session itself is idle or waiting. A tab's dot shows while any is.
+   * Live sessions with work going on: working, or with a running worker (a subagent that is not a reader) or a background
+   * command that counts as work (countsAsWork) while the session itself is idle or waiting. A tab's dot shows while any
+   * is, pulsing only while one is working.
    */
   busySessions: number;
   lastEventAt: string | null;
@@ -173,10 +175,37 @@ export interface LogEntry {
 export const END_REASONS = ['limit', 'error', 'killed', 'silent', 'session'] as const;
 export type EndReason = (typeof END_REASONS)[number];
 
+export const COMMAND_KINDS = ['shell', 'monitor'] as const;
+export type CommandKind = (typeof COMMAND_KINDS)[number];
+export const COMMAND_OUTCOMES = ['completed', 'failed', 'killed', 'session', 'unknown'] as const;
+export type CommandOutcome = (typeof COMMAND_OUTCOMES)[number];
+
+/** A background command (Bash, PowerShell or Monitor) a session or one of its subagents started. */
+export interface CommandInfo {
+  /** Claude Code's background task id (`b...`). */
+  taskId: string;
+  kind: CommandKind;
+  /** The subagent that started it; '' for the main thread. */
+  agentId: string;
+  /** A persistent Monitor: never counts as work. */
+  persistent: boolean;
+  /** The tool call's description, at most 200 characters. */
+  description: string | null;
+  /** The command's first words, at most 60 characters; never the full command. */
+  commandHead: string | null;
+  nodeId: number | null;
+  startedAt: string;
+  endedAt: string | null;
+  outcome: CommandOutcome | null;
+  exitCode: number | null;
+}
+
 export interface SubagentInfo {
   agentId: string;
   agentType: string;
   startedAt: string;
+  /** When its current run started: `startedAt` until it is resumed. The server sends `run_started_at ?? started_at`. */
+  runStartedAt: string;
   /** The Agent tool call's description (at most 200 characters); null until the subagent is paired with its dispatch. */
   description: string | null;
   /** The model it was dispatched with, or the one its launch reported; null when neither is known. */
@@ -264,6 +293,8 @@ export interface Session {
    */
   slot: number | null;
   subagents: SubagentInfo[];
+  /** Its background commands: running ones and those that ended in the last five minutes, at most 30. */
+  commands: CommandInfo[];
 }
 
 export interface EventRow {

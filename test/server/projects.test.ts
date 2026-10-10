@@ -318,6 +318,27 @@ describe('projects', () => {
     expect(summary()).toMatchObject({ activeSessions: 2, workingSessions: 1, busySessions: 2 });
   });
 
+  it('counts a live idle session with only a counting command as busy, once, and leaves out one that is old, a server, persistent or ended', () => {
+    const ctx = makeCtx();
+    const p = createProject(ctx, 'test', { name: 'P' });
+    const ts = ctx.now();
+    ctx.db.prepare("INSERT INTO sessions (id, project_id, state, started_at, last_seen_at) VALUES ('s1', ?, 'idle', ?, ?)").run(p.id, ts, ts);
+    const command = ctx.db.prepare('INSERT INTO session_commands (session_id, task_id, kind, persistent, command_head, started_at, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
+    const summary = () => listProjectSummaries(ctx).find((x) => x.id === p.id)!;
+    const old = new Date(Date.parse(ts) - 30 * 60_000).toISOString();
+    command.run('s1', 'old', 'shell', 0, 'npm run build', old, null);
+    command.run('s1', 'dev', 'shell', 0, 'npm run dev', ts, null);
+    command.run('s1', 'mon', 'monitor', 1, 'tail -f', ts, null);
+    command.run('s1', 'done', 'shell', 0, 'npm run build', ts, ts);
+    expect(summary()).toMatchObject({ activeSessions: 1, workingSessions: 0, busySessions: 0 });
+    command.run('s1', 'b1', 'shell', 0, 'npm run build', ts, null);
+    command.run('s1', 'b2', 'shell', 0, 'npm test', ts, null);
+    expect(summary()).toMatchObject({ workingSessions: 0, busySessions: 1 });
+    // Busy by a worker too, it still counts once.
+    ctx.db.prepare("INSERT INTO session_subagents (session_id, agent_id, agent_type, started_at) VALUES ('s1', 'w1', 'general-purpose', ?)").run(ts);
+    expect(summary().busySessions).toBe(1);
+  });
+
   it('lists a project whose idle session has a running worker before a quiet one', () => {
     const ctx = makeCtx();
     const busy = createProject(ctx, 'test', { name: 'Busy' });

@@ -114,8 +114,10 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-tab-name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
 /* How many items wait on Aiden there: a muted numeral, no pill. */
 .ip-tab-count { flex: none; font-family: var(--font-mono); font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
-/* A session works there: an ink dot, never a hue. */
+/* A session works there: an ink dot, never a hue. It pulses while a session works and stays still (.still) while sessions
+   are only busy on a running worker or command. */
 .ip-tab-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--text-2); animation: ip-pulse 1.6s ease-in-out infinite; }
+.ip-tab-dot.still { animation: none; }
 .ip-archive { position: relative; flex: none; margin-left: auto; display: flex; align-items: center; padding-left: 6px; }
 .ip-archive-btn { display: flex; align-items: center; justify-content: center; width: 30px; height: 26px; border-radius: var(--radius); color: var(--muted); font-size: var(--fs-l); font-weight: var(--w-heavy); line-height: 20px; }
 .ip-archive-btn:hover, .ip-archive-btn[aria-expanded='true'] { background: var(--panel-2); color: var(--text); }
@@ -192,6 +194,8 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
    bobbing out of step with the others (phaseDelay). At most three, then a muted +n. No tags or times: those stay in the
    popover and on the cards. */
 .ip-chip-kin { flex: none; display: inline-flex; align-items: center; gap: 3px; }
+/* The count of commands that count as work, after the kin: muted DM Mono, `▸3`. */
+.ip-chip-count { flex: none; font-family: var(--font-mono); font-size: var(--fs-s); font-weight: var(--w-text); line-height: 14px; color: var(--muted); }
 .ip-chip-more { margin-left: 1px; font-family: var(--font-mono); font-size: var(--fs-s); font-weight: var(--w-text); line-height: 14px; color: var(--muted); }
 /* Waiting for permission, the chip adds "· needs permission", and its character wears the amber ring (character.css). */
 .ip-chip-word { color: var(--amber-ink); }
@@ -208,6 +212,11 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 /* A subagent's tag in the popover: DM Mono in its session's hue. An ended row goes grey, tag and all. */
 .ip-chip-pop .ip-agent-tag { font-family: var(--font-mono); font-size: var(--fs-s); font-weight: var(--w-text); color: var(--fam, var(--family-0)); }
 .ip-chip-pop li.ended, .ip-chip-pop li.ended .ip-agent-tag { color: var(--muted); }
+/* A command in the popover: its mark and tag, then its label and time. A serving one goes faint. */
+.ip-chip-pop li.serving, .ip-chip-pop li.serving .ip-agent-tag { color: var(--faint); }
+.ip-chip-pop .ip-cmd-mark { color: var(--muted); }
+/* A command's mark in a fixed 12 px centred box, as .ip-work-mark: `!`, `✓` and `▸` all sit the same distance from the tag. */
+.ip-cmd-mark { display: inline-block; width: 12px; text-align: center; }
 /* One that hit the usage limit waits for Aiden: its tag and its words go amber. */
 .ip-chip-pop li.limit .ip-agent-tag, .ip-chip-pop .ip-limit-words { color: var(--amber-ink); }
 /* A reader's ◇ in a list (the popover, Details): neutral, as only the letter wears the hue. */
@@ -277,6 +286,10 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-card.st-done, .ip-card.st-dropped { background: none; }
 /* The working focus: the one orange hairline on the canvas. */
 .ip-card.focus { border-color: var(--active-line); background: var(--active-fill); }
+/* A live step: work runs on it or under a fold. The hairline and fill of the focus, and its title at ink, but at the
+   normal size: the large title stays on the working focus. */
+.ip-card.live { border-color: var(--active-line); background: var(--active-fill); }
+.ip-card.live .ip-node:not(.st-done):not(.st-dropped) .ip-title { color: var(--text); }
 .ip-card.selected { box-shadow: 0 0 0 2px var(--text-2); }
 .ip-card.flash { animation: ip-flash 1.2s ease-out; }
 @keyframes ip-flash { 0% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--amber) 60%, transparent); } 100% { box-shadow: 0 0 0 0 transparent; } }
@@ -365,6 +378,13 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 /* A session's running readers: one muted line, indented past the lead. Only the letter wears the hue. */
 .ip-readers { display: flex; align-items: center; height: var(--readers-line); min-width: 0; padding-left: 38px; white-space: nowrap; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
 .ip-readers-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* A session's background commands on one step: one muted line, indented past the lead. The tag wears the hue; a serving
+   or ended line goes faint, tag and all. */
+.ip-commands { display: flex; align-items: center; height: var(--command-line); min-width: 0; padding-left: 38px; white-space: nowrap; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
+.ip-commands-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ip-commands-mono { font-family: var(--font-mono); }
+.ip-commands .ip-cmd-tag { color: var(--fam, var(--family-0)); }
+.ip-commands.serving, .ip-commands.ended, .ip-commands.serving .ip-cmd-tag, .ip-commands.ended .ip-cmd-tag { color: var(--faint); }
 /* The done row: at the right end of a kin-less last line, else on a 20 px line of its own. Its label cuts last. */
 .ip-work-done { flex: 0 1 auto; display: inline-flex; align-items: center; gap: 4px; min-width: 0; margin-left: auto; padding-left: 6px; white-space: nowrap; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
 .ip-lines > .ip-work-done { display: flex; width: max-content; max-width: 100%; height: var(--done-line); margin-left: 30px; padding-left: 0; }
@@ -449,6 +469,7 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-wt.w-completed, .ip-wt.stale, .ip-dagent.ended, .ip-dtrail { color: var(--muted); }
 .ip-wt .ip-work-tag, .ip-dagent .ip-agent-tag { font-family: var(--font-mono); font-size: var(--fs-s); font-weight: var(--w-text); color: var(--fam); }
 .ip-dagent.ended .ip-agent-tag { color: inherit; }
+.ip-dagent.serving, .ip-dagent.serving .ip-agent-tag { color: var(--faint); }
 /* A subagent at the usage limit, and its trail entry: its tag and its words amber, as on the canvas. */
 .ip-dagent.limit .ip-agent-tag, .ip-dagent .ip-limit-words, .ip-dtrail .ip-limit-words { color: var(--amber-ink); }
 .ip-wt .ip-work-mark { display: inline-block; width: 12px; text-align: center; color: var(--muted); }

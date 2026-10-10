@@ -1,11 +1,12 @@
 import type { CSSProperties } from 'react';
+import { commandShown, orderCommands, sessionActivity } from '../../../src/core/activity';
 import { agentVisible, atLimit } from '../../../src/core/layout';
 import { agentTag, isReader, sessionTag, type Session } from '../../../src/core/types';
 import { AgentWords } from '../AgentWords';
 import { Character } from '../Character';
 import { characterState } from '../characterState';
 import { familyVar } from '../family';
-import { agentLineParts, chipLabel, chipName, withTag, WORDS } from '../live';
+import { agentLineParts, chipLabel, chipName, commandLabel, commandMark, commandTag, commandWhen, withTag, workingCommands, WORDS } from '../live';
 import { useNow } from '../useNow';
 import { chipKin, chipOrder } from './chips';
 
@@ -27,7 +28,8 @@ interface SessionRowProps {
  * (`B · Review actions controller · idle`); the kin add nothing to it, as it already counts them.
  * Hovering a chip, or focusing it from the keyboard, opens its popover under the row: that line and where the session
  * is, then its subagents, each led by its tag, a reader marked `◇` in front (`◇ a2 · …`). An ended reader is not
- * listed.
+ * listed. A session whose commands count as work adds a muted `▸n` after its kin; the popover lists its shown commands
+ * after the subagents (`▸ a3 · npm run test:e2e · 12m`, an ended one grey, a serving one faint).
  */
 export function SessionRow({ sessions, onPick, needsYou, onNeedsYou, follow, onFollow }: SessionRowProps) {
   const now = useNow(30_000);
@@ -40,18 +42,25 @@ export function SessionRow({ sessions, onPick, needsYou, onNeedsYou, follow, onF
           const popId = `ip-chip-pop-${s.id}`;
           const letter = sessionTag(s.slot);
           const kin = chipKin(s.subagents);
+          const working = workingCommands(s, now);
+          const commands = orderCommands(s.commands.filter((c) => commandShown(c, now)));
           return (
             <span key={s.id} className="ip-chip-wrap" style={{ '--fam': familyVar(s.slot) } as CSSProperties}>
               {/* No native title: it never shows on keyboard focus, and the popover is the one place the row shows the title. */}
-              <button className={`ip-chip-s s-${s.state}`} onClick={() => onPick(s)} aria-label={chipName(s)} aria-describedby={popId}>
-                <Character size={18} state={characterState(s)} slot={s.slot} seed={s.id} />
+              <button className={`ip-chip-s s-${sessionActivity(s, now)}`} onClick={() => onPick(s)} aria-label={chipName(s, now)} aria-describedby={popId}>
+                <Character size={18} state={characterState(s, now)} slot={s.slot} seed={s.id} />
                 {letter && <span className="ip-tag">{letter}</span>}
                 {kin.shown.length > 0 && (
                   <span className="ip-chip-kin" aria-hidden="true">
                     {kin.shown.map((a) => (
-                      <Character key={a.agentId} size={14} state={characterState(a)} slot={s.slot} seed={`${s.id}:${a.agentId}`} />
+                      <Character key={a.agentId} size={14} state={characterState(a, now)} slot={s.slot} seed={`${s.id}:${a.agentId}`} />
                     ))}
                     {kin.more > 0 && <span className="ip-chip-more">+{kin.more}</span>}
+                  </span>
+                )}
+                {working > 0 && (
+                  <span className="ip-chip-count" aria-hidden="true">
+                    ▸{working}
                   </span>
                 )}
                 {s.state === 'permission' && (
@@ -62,7 +71,7 @@ export function SessionRow({ sessions, onPick, needsYou, onNeedsYou, follow, onF
                 )}
               </button>
               <div className="ip-chip-pop" id={popId} role="tooltip">
-                <div className="ip-chip-pop-head">{withTag(letter, `${chipLabel(s)} · ${where}`)}</div>
+                <div className="ip-chip-pop-head">{withTag(letter, `${chipLabel(s, now)} · ${where}`)}</div>
                 {agents.length > 0 && (
                   <ul>
                     {agents.map((a) => {
@@ -77,6 +86,26 @@ export function SessionRow({ sessions, onPick, needsYou, onNeedsYou, follow, onF
                             </>
                           )}
                           <AgentWords parts={agentLineParts(a, now)} limit={atLimit(a)} />
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+                {commands.length > 0 && (
+                  <ul>
+                    {commands.map((c) => {
+                      const tag = commandTag(s, c);
+                      const serving = c.endedAt === null && commandMark(c, now) === '◦';
+                      return (
+                        <li key={c.taskId} className={[c.endedAt && 'ended', serving && 'serving'].filter(Boolean).join(' ') || undefined}>
+                          <span className="ip-cmd-mark">{commandMark(c, now)}</span>{' '}
+                          {tag && (
+                            <>
+                              <span className="ip-agent-tag">{tag}</span>
+                              {' · '}
+                            </>
+                          )}
+                          {commandLabel(c)} · {commandWhen(c, now)}
                         </li>
                       );
                     })}

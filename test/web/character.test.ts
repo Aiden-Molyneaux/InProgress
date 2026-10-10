@@ -1,34 +1,56 @@
 import { describe, expect, it } from 'vitest';
-import type { Session, SubagentInfo } from '../../src/core/types';
+import type { CommandInfo, Session, SubagentInfo } from '../../src/core/types';
 import { characterState, phaseDelay } from '../../web/src/characterState';
 
 const session = (extra: Partial<Session> = {}): Session => ({
   id: 's1abcdef', projectId: 1, title: '#5 UI Session post-Fable', cwd: null, branch: null, transcriptPath: null, state: 'working',
-  focusNodeId: 127, promptsSinceUpdate: 0, startedAt: 't', lastSeenAt: 't', endedAt: null, slot: 2, subagents: [], ...extra,
+  focusNodeId: 127, promptsSinceUpdate: 0, startedAt: 't', lastSeenAt: 't', endedAt: null, slot: 2, subagents: [], commands: [], ...extra,
 });
 const agent = (extra: Partial<SubagentInfo> = {}): SubagentInfo => ({
-  agentId: 'a1', agentType: 'general-purpose', startedAt: 't', description: 'Draft the whiteboard take', model: 'opus-5-5', nodeId: 127,
+  agentId: 'a1', agentType: 'general-purpose', startedAt: 't', runStartedAt: 't', description: 'Draft the whiteboard take', model: 'opus-5-5', nodeId: 127,
   endedAt: null, ordinal: 10, purpose: null, endReason: null, lastActiveAt: null, ...extra,
+});
+
+const NOW = Date.parse('2026-10-10T12:00:00Z');
+const command = (extra: Partial<CommandInfo> = {}): CommandInfo => ({
+  taskId: 'b1', kind: 'shell', agentId: '', persistent: false, description: null, commandHead: 'npm run test:e2e', nodeId: 127,
+  startedAt: new Date(NOW - 60_000).toISOString(), endedAt: null, outcome: null, exitCode: null, ...extra,
 });
 
 describe('characterState', () => {
   it("gives a session's working, idle and permission as work, idle and wait, and an ended session ended", () => {
-    expect(characterState(session({ state: 'working' }))).toBe('work');
-    expect(characterState(session({ state: 'idle' }))).toBe('idle');
-    expect(characterState(session({ state: 'permission' }))).toBe('wait');
-    expect(characterState(session({ state: 'ended', endedAt: '2026-10-05T11:57:00Z' }))).toBe('ended');
+    expect(characterState(session({ state: 'working' }), NOW)).toBe('work');
+    expect(characterState(session({ state: 'idle' }), NOW)).toBe('idle');
+    expect(characterState(session({ state: 'permission' }), NOW)).toBe('wait');
+    expect(characterState(session({ state: 'ended', endedAt: '2026-10-05T11:57:00Z' }), NOW)).toBe('ended');
   });
 
   it('reads a session by its state alone: a live session has no endedAt yet, and that never makes it a worker', () => {
-    expect(characterState(session({ state: 'idle', endedAt: null }))).toBe('idle');
-    expect(characterState({ state: 'permission' })).toBe('wait');
+    expect(characterState(session({ state: 'idle', endedAt: null }), NOW)).toBe('idle');
+    expect(characterState({ state: 'permission', subagents: [], commands: [] }, NOW)).toBe('wait');
+  });
+
+  it('gives an idle session busy while a worker runs or a command counts as work', () => {
+    expect(characterState(session({ state: 'idle', subagents: [agent()] }), NOW)).toBe('busy');
+    expect(characterState(session({ state: 'idle', commands: [command()] }), NOW)).toBe('busy');
+    // A working session stays work, and a waiting one wait, whatever else runs.
+    expect(characterState(session({ state: 'working', commands: [command()] }), NOW)).toBe('work');
+    expect(characterState(session({ state: 'permission', commands: [command()] }), NOW)).toBe('wait');
+  });
+
+  it('keeps an idle session idle for a reader, a serving command, a 30-minute-old one, a persistent monitor or an ended one', () => {
+    expect(characterState(session({ state: 'idle', subagents: [agent({ agentType: 'Explore' })] }), NOW)).toBe('idle');
+    expect(characterState(session({ state: 'idle', commands: [command({ commandHead: 'npm run dev' })] }), NOW)).toBe('idle');
+    expect(characterState(session({ state: 'idle', commands: [command({ startedAt: new Date(NOW - 31 * 60_000).toISOString() })] }), NOW)).toBe('idle');
+    expect(characterState(session({ state: 'idle', commands: [command({ persistent: true })] }), NOW)).toBe('idle');
+    expect(characterState(session({ state: 'idle', commands: [command({ endedAt: new Date(NOW - 1000).toISOString(), outcome: 'completed' })] }), NOW)).toBe('idle');
   });
 
   it('gives a running subagent work and a stopped one ended', () => {
-    expect(characterState(agent())).toBe('work');
-    expect(characterState(agent({ endedAt: '2026-10-05T11:57:00Z' }))).toBe('ended');
-    expect(characterState({ endedAt: null })).toBe('work');
-    expect(characterState({ endedAt: '2026-10-05T11:57:00Z' })).toBe('ended');
+    expect(characterState(agent(), NOW)).toBe('work');
+    expect(characterState(agent({ endedAt: '2026-10-05T11:57:00Z' }), NOW)).toBe('ended');
+    expect(characterState({ endedAt: null }, NOW)).toBe('work');
+    expect(characterState({ endedAt: '2026-10-05T11:57:00Z' }, NOW)).toBe('ended');
   });
 });
 

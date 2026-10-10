@@ -42,13 +42,14 @@ type Confirming = ActionTarget & Pick<ProjectSummary, 'activeSessions'>;
 
 /**
  * How many items wait on Aiden, as a muted numeral, and an ink dot while a session works in the project or waits on a
- * running worker of its own (busySessions).
+ * running worker or command of its own (busySessions). The dot pulses while a session works and is still when sessions
+ * are only busy.
  */
 function Badges({ p }: { p: ProjectSummary }) {
   return (
     <>
       {p.needsYou > 0 && <span className="ip-tab-count">{p.needsYou}</span>}
-      {p.busySessions > 0 && <span className="ip-tab-dot" />}
+      {p.busySessions > 0 && <span className={p.workingSessions > 0 ? 'ip-tab-dot' : 'ip-tab-dot still'} />}
     </>
   );
 }

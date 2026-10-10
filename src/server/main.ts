@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { baseUrl, ensureToken, homeDir, port as configuredPort } from '../lib/home';
 import { readBuild, VERSION } from '../lib/version';
-import { createWatchState, watchAgents, watchInterval } from './agent-watch';
+import { createWatchState, watchAgents, watchCommandEnds, watchInterval } from './agent-watch';
 import { buildApp } from './app';
 import { backupDb, truncateIfLarge } from './backup';
 import { openDb } from './db/connection';
@@ -91,6 +91,13 @@ async function main(): Promise<void> {
       for (const r of revived) app.log.info(`Subagent ${r.agentId} of session ${r.sessionId} is running again`);
     } catch (err) {
       app.log.error(`Could not watch subagent transcripts: ${(err as Error).message}`);
+    }
+    try {
+      const { ended, unreadable } = watchCommandEnds(ctx, watchState);
+      for (const e of ended) app.log.info(`Command ${e.taskId} of session ${e.sessionId} ended: ${e.outcome}`);
+      for (const u of unreadable) app.log.warn(`Could not read the transcript of session ${u.sessionId} for command ends (${u.code}): ${u.path}`);
+    } catch (err) {
+      app.log.error(`Could not watch command ends: ${(err as Error).message}`);
     }
   };
   watch();

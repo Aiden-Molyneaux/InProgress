@@ -186,6 +186,13 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
           const session = sessionsById.get(item.sessionId) ?? pastSessions.find((s) => s.id === item.sessionId);
           return { kind: 'trailAgent', id: item.id, props: { agent, nodeId: item.nodeId, sessionTitle: session ? sessionDisplayTitle(session) : 'a session', now } };
         }
+        case 'commands': {
+          const session = sessionsById.get(item.sessionId);
+          // Ids the session no longer lists (pruned since the layout ran) drop out; none left, no line.
+          const commands = session ? item.taskIds.flatMap((id) => session.commands.find((c) => c.taskId === id) ?? []) : [];
+          if (!session || !commands.length) return null;
+          return { kind: 'commands', id: item.id, props: { session, commands, now, done: null } };
+        }
         default:
           return null;
       }
@@ -201,7 +208,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
       if (item.kind === 'workDone') {
         const done: WorkDoneRowProps = { nodeId: item.nodeId, count: item.count, unfinished: item.unfinished, agents: item.agents, open: item.open, onToggleFold };
         const last = rows[rows.length - 1];
-        if (item.shared && (last?.kind === 'line' || last?.kind === 'readers')) last.props.done = done;
+        if (item.shared && (last?.kind === 'line' || last?.kind === 'readers' || last?.kind === 'commands')) last.props.done = done;
         else rows.push({ kind: 'workDone', id: item.id, props: done });
         continue;
       }
@@ -245,6 +252,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(prop
         h: item.h,
         stack: item.stack,
         workingFocus: item.workingFocus,
+        live: item.live,
         rows: rowsByNode.get(item.nodeId) ?? [],
         onSelect: onSelectNode,
         onToggleFold,

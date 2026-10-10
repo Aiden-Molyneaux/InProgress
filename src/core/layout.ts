@@ -1,5 +1,6 @@
+import { commandShown, countsAsWork, orderCommands, sessionActivity } from './activity';
 import { buildIndex, computeVisible, countDone, isNeedsYou, progress, type FoldOverrides } from './tree';
-import { ENDED_AGENT_MS, glyphTitle, isReader, ownerTag, sessionTag, type EventRow, type PastSession, type QueueEntry, type ResourceMeta, type Session, type SubagentInfo, type TrailAgent, type TreeNode, type WorkItem } from './types';
+import { ENDED_AGENT_MS, glyphTitle, isReader, ownerTag, sessionTag, type CommandInfo, type EventRow, type PastSession, type QueueEntry, type ResourceMeta, type Session, type SubagentInfo, type TrailAgent, type TreeNode, type WorkItem } from './types';
 
 /** A card's header box and a one-line card: a 30 px header inside the frame's 1 px border. The camera aims at y + NODE_H / 2. */
 export const NODE_H = 32;
@@ -13,6 +14,8 @@ export const FOLD_ROW = 36;
 export const AGENT_LINE = 28;
 /** A session's readers line (`◇ c · 2 reading`). */
 export const READERS_LINE = 20;
+/** A session's commands line (`▸ b1 · npm run build`). */
+export const COMMAND_LINE = 20;
 /** The done row on a line of its own. It adds nothing when it shares a kin-less last line. */
 export const DONE_LINE = 20;
 /** A working task's row, and an opened done row's trail-agent row. */
@@ -53,6 +56,12 @@ export interface LayoutNodeItem {
   needsYou: boolean;
   hasChildren: boolean;
   working: boolean;
+  /**
+   * Work is running on this card: a running worker or reader of a live session, or a command that counts as work, anchored
+   * here (a folded subtree's work lights the visible card that shows it), a pulsing task on it, or the lead of a working
+   * session. A busy lead alone does not light it.
+   */
+  live: boolean;
   /**
    * Its place in the project's Up next queue, or null when it isn't queued: its number in its owner's list (1 is next),
    * and the owner, a live session, or null for the unowned list.
@@ -123,6 +132,22 @@ export interface LayoutReadersItem {
   y: number;
 }
 
+/**
+ * A session's background commands on one card, as one line after that session's agent and readers lines. Id
+ * `c<sessionId>:<nodeId>`.
+ */
+export interface LayoutCommandsItem {
+  kind: 'commands';
+  id: string;
+  sessionId: string;
+  /** The row it sits under. */
+  nodeId: number;
+  /** The commands shown here: running ones by start, then ended ones by start. The line names the first, then `+n`. */
+  taskIds: string[];
+  x: number;
+  y: number;
+}
+
 /** One of Claude's working tasks, in its node's checklist. */
 export interface LayoutWorkItem {
   kind: 'work';
@@ -174,6 +199,7 @@ export type LayoutItem =
   | LayoutMoreItem
   | LayoutLineItem
   | LayoutReadersItem
+  | LayoutCommandsItem
   | LayoutWorkItem
   | LayoutWorkDoneItem
   | LayoutTrailAgentItem;
@@ -260,10 +286,10 @@ export function agentHome(s: Pick<Session, 'focusNodeId'>, a: Pick<SubagentInfo,
  * Who is on a step, for paused: each live session's focus (an idle one's too), each running subagent's home (a reader's
  * too) and each one waiting at the usage limit (atLimit), each live session's task in progress, and every ancestor of
  * those, walked in the tree itself, so a manual fold never changes it. Any other stopped subagent no longer counts,
- * though it still shows as an ended kin for a while. The layout and Details both read it, so a step's marker draws the
- * same on its card and in Details.
+ * though it still shows as an ended kin for a while. A live session's command that counts as work (countsAsWork at `now`)
+ * occupies its home. The layout and Details both read it, so a step's marker draws the same on its card and in Details.
  */
-export function occupiedSteps(byId: ReadonlyMap<number, TreeNode>, sessions: readonly Session[], workItems: readonly WorkItem[] = []): Set<number> {
+export function occupiedSteps(byId: ReadonlyMap<number, TreeNode>, sessions: readonly Session[], workItems: readonly WorkItem[] = [], now: number = Date.now()): Set<number> {
   const occupied = new Set<number>();
   const occupy = (id: number | null) => {
     let cur = id === null ? undefined : byId.get(id);
@@ -276,6 +302,7 @@ export function occupiedSteps(byId: ReadonlyMap<number, TreeNode>, sessions: rea
     if (s.state === 'ended') continue;
     occupy(s.focusNodeId);
     for (const a of s.subagents) if (a.endedAt === null || atLimit(a)) occupy(agentHome(s, a, (id) => byId.has(id)));
+    for (const c of s.commands) if (countsAsWork(c, now)) occupy(agentHome(s, c, (id) => byId.has(id)));
   }
   for (const w of workItems) if (w.status === 'in_progress' && w.endedAt === null) occupy(w.nodeId);
   return occupied;
@@ -386,13 +413,16 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
   const live = input.sessions.filter((s) => s.state !== 'ended');
   const work = [...(input.workItems ?? [])].sort((a, b) => a.position - b.position || a.id - b.id);
   const shownAgents = (s: Session) => s.subagents.filter((a) => agentVisible(a, now));
-  const homeOf = (s: Session, a: SubagentInfo) => agentHome(s, a, (id) => index.byId.has(id));
+  const homeOf = (s: Session, a: Pick<SubagentInfo, 'nodeId'>) => agentHome(s, a, (id) => index.byId.has(id));
+  const shownCommands = (s: Session) => s.commands.filter((c) => commandShown(c, now));
   const queue = queueView(input.queue ?? [], input.nodes, input.sessions);
   // Where Claude works or plans to go next shows past the fold rules, as a session's focus does: a subagent's node
   // (a running reader's too; an ended reader shows nowhere), a live session's task in progress, and every queued step,
-  // whoever owns it (so an Up next entry never points into a "+n more" run). The trail never pins.
+  // whoever owns it (so an Up next entry never points into a "+n more" run). A running command pins its home, a serving
+  // one too; an ended one does not. The trail never pins.
   const pins = [
     ...live.flatMap((s) => shownAgents(s).flatMap((a) => homeOf(s, a) ?? [])),
+    ...live.flatMap((s) => s.commands.filter((c) => c.endedAt === null).flatMap((c) => homeOf(s, c) ?? [])),
     ...work.filter((w) => w.status === 'in_progress' && w.endedAt === null).map((w) => w.nodeId),
     ...viewedSteps(queue),
   ];
@@ -411,46 +441,65 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
   };
   /**
    * On each card, per live session in `live` order: whether its focus anchors there (the lead), its shown workers homed
-   * there (the kin) and its running readers there, each in the session's order.
+   * there (the kin), its running readers there and its shown commands there, each in the session's order.
    */
-  type Group = { session: Session; lead: boolean; agentIds: string[]; readerIds: string[] };
+  type Group = { session: Session; lead: boolean; agentIds: string[]; readerIds: string[]; commands: CommandInfo[] };
   const groupsByNode = new Map<number, Map<string, Group>>();
   const groupAt = (at: number, s: Session): Group => {
     const bySession = groupsByNode.get(at) ?? new Map<string, Group>();
     groupsByNode.set(at, bySession);
-    const group = bySession.get(s.id) ?? { session: s, lead: false, agentIds: [], readerIds: [] };
+    const group = bySession.get(s.id) ?? { session: s, lead: false, agentIds: [], readerIds: [], commands: [] };
     bySession.set(s.id, group);
     return group;
   };
+  /** The cards with work running on them, anchored to the visible card: the `live` flag. */
+  const liveCards = new Set<number>();
   for (const s of live) {
     const focusAt = anchorOf(s.focusNodeId);
-    if (focusAt !== undefined) groupAt(focusAt, s).lead = true;
+    if (focusAt !== undefined) {
+      groupAt(focusAt, s).lead = true;
+      if (s.state === 'working') liveCards.add(focusAt);
+    }
     for (const agent of shownAgents(s)) {
       const at = anchorOf(homeOf(s, agent));
       if (at === undefined) continue;
       // Only running readers are shown (agentVisible), each in its session's readers line on the card it anchors to.
       if (isReader(agent.agentType)) groupAt(at, s).readerIds.push(agent.agentId);
       else groupAt(at, s).agentIds.push(agent.agentId);
+      if (agent.endedAt === null) liveCards.add(at);
+    }
+    for (const command of shownCommands(s)) {
+      const at = anchorOf(homeOf(s, command));
+      if (at === undefined) continue;
+      groupAt(at, s).commands.push(command);
+      if (countsAsWork(command, now)) liveCards.add(at);
     }
   }
-  const working = new Set<number>();
-  for (const s of live) {
-    if (s.state !== 'working' || s.focusNodeId === null) continue;
-    let cur = index.byId.get(s.focusNodeId);
-    while (cur) {
-      working.add(cur.id);
-      cur = cur.parentId === null ? undefined : index.byId.get(cur.parentId);
-    }
-  }
-  /** Each working session's focus: its card alone wears the orange frame. */
-  const workingFoci = new Set(live.flatMap((s) => (s.state === 'working' && s.focusNodeId !== null ? [s.focusNodeId] : [])));
-  const occupied = occupiedSteps(index.byId, live, work);
   const sessionsById = new Map(live.map((s) => [s.id, s]));
   const pulses = (w: WorkItem): boolean => {
     const s = sessionsById.get(w.sessionId);
     if (w.status !== 'in_progress' || !s) return false;
     return w.agentId === '' ? s.state === 'working' : s.subagents.some((a) => a.agentId === w.agentId && a.endedAt === null);
   };
+  for (const w of work) {
+    if (!pulses(w)) continue;
+    // A manual fold beats a pin, so the task can sit under a closed card: that card lights.
+    const at = anchorOf(w.nodeId);
+    if (at !== undefined) liveCards.add(at);
+  }
+  // The chain: every live card and its tree ancestors. Ancestors draw first, so it is complete before the card loop.
+  const working = new Set<number>();
+  const markChain = (id: number | null) => {
+    let cur = id === null ? undefined : index.byId.get(id);
+    while (cur) {
+      working.add(cur.id);
+      cur = cur.parentId === null ? undefined : index.byId.get(cur.parentId);
+    }
+  };
+  for (const id of liveCards) markChain(id);
+  /** Each working session's focus: its card alone wears the orange frame. */
+  const workingFoci = new Set(live.flatMap((s) => (s.state === 'working' && s.focusNodeId !== null ? [s.focusNodeId] : [])));
+  const occupied = occupiedSteps(index.byId, live, work, now);
   const workByNode = new Map<number, WorkItem[]>();
   for (const w of work) workByNode.set(w.nodeId, [...(workByNode.get(w.nodeId) ?? []), w]);
   const trailByNode = new Map<number, TrailAgent[]>();
@@ -519,6 +568,7 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
       needsYou: isNeedsYou(node),
       hasChildren: v.hasChildren,
       working: working.has(node.id),
+      live: liveCards.has(node.id),
       queue: queued.get(node.id) ?? null,
       paused: isPaused(node, occupied),
       h: NODE_H,
@@ -532,9 +582,9 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
     // The card's lines, from under its header (a stack head's: under its track). Row items take the card's x.
     const top = y + (stack ? STACK_HEAD : NODE_H);
     let ly = top;
-    /** The card's last agent or readers line, and whether it holds kin. */
+    /** The card's last agent, readers or commands line, and whether it holds kin. */
     let last: { y: number; kin: boolean } | null = null;
-    for (const { session, lead, agentIds, readerIds } of groupsByNode.get(node.id)?.values() ?? []) {
+    for (const { session, lead, agentIds, readerIds, commands } of groupsByNode.get(node.id)?.values() ?? []) {
       if (lead || agentIds.length) {
         items.push({ kind: 'line', id: `l${session.id}:${node.id}`, sessionId: session.id, nodeId: node.id, lead, agentIds, x, y: ly });
         last = { y: ly, kin: agentIds.length > 0 };
@@ -544,6 +594,13 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
         items.push({ kind: 'readers', id: `r${session.id}:${node.id}`, sessionId: session.id, nodeId: node.id, agentIds: readerIds, x, y: ly });
         last = { y: ly, kin: false };
         ly += READERS_LINE;
+      }
+      if (commands.length) {
+        // Running ones first, each part by start, so the line's first name is the oldest running command.
+        const taskIds = orderCommands(commands).map((c) => c.taskId);
+        items.push({ kind: 'commands', id: `c${session.id}:${node.id}`, sessionId: session.id, nodeId: node.id, taskIds, x, y: ly });
+        last = { y: ly, kin: false };
+        ly += COMMAND_LINE;
       }
     }
     // The node's checklist: completed tasks and the trail folded into one done row first, then the live open tasks in
@@ -582,15 +639,20 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
 }
 
 /**
- * Where the camera opens: the focus of the session that worked last; with no session working, the first owned entry of
- * the Up next queue (the first numbered owned marker, owners in stored order; never a session's own focus), else the
- * first unowned one; else the most recently updated active node; else the last row.
+ * Where the camera opens: the focus of the session that worked last; else the focus of the busy session (work still
+ * running) seen last; with none, the first owned entry of the Up next queue (the first numbered owned marker, owners in
+ * stored order; never a session's own focus), else the first unowned one; else the most recently updated active node;
+ * else the last row.
  */
-export function findFrontier(nodes: TreeNode[], sessions: Session[], layout: LayoutResult, queue: readonly QueueEntry[] = []): number | undefined {
+export function findFrontier(nodes: TreeNode[], sessions: Session[], layout: LayoutResult, queue: readonly QueueEntry[] = [], now: number = Date.now()): number | undefined {
   const workingFocus = sessions
     .filter((s) => s.state === 'working' && s.focusNodeId !== null)
     .sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt));
   if (workingFocus.length) return workingFocus[0].focusNodeId!;
+  const busyFocus = sessions
+    .filter((s) => sessionActivity(s, now) === 'busy' && s.focusNodeId !== null)
+    .sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt));
+  if (busyFocus.length) return busyFocus[0].focusNodeId!;
   const head = viewedSteps(queueView(queue, nodes, sessions))[0];
   if (head !== undefined) return head;
   const active = nodes.filter((n) => n.parentId !== null && n.status === 'active').sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));

@@ -1,5 +1,9 @@
 import { ENDED_AGENT_MS, READER_AGENT_TYPES, TRAIL_MS, type EndReason, type SubagentInfo, type TrailAgent } from '../../core/types';
-import type { Ctx } from '../db/tx';
+import { msAgo, type Ctx } from '../db/tx';
+import { leadingNode } from './nodes';
+
+/** A marker ends its subagent once the file has been still this long; also how close a message must be to a start to be the same resume. */
+export const MARKER_QUIET_MS = 60 * 1000;
 
 /** How long a dispatch waits for its subagent to start; an older one (a launch that was denied, say) never pairs. */
 export const DISPATCH_TTL_MS = 10 * 60 * 1000;
@@ -19,6 +23,7 @@ interface SubagentRow {
   start_focus_id: number | null;
   end_reason: EndReason | null;
   last_active_at: string | null;
+  run_started_at: string | null;
 }
 
 interface DispatchRow {
@@ -53,11 +58,10 @@ export const NOT_READER_SQL = `a.agent_type NOT IN (${READER_AGENT_TYPES.map((t)
  * SQL for "this ended subagent row ended in its session's current life", for a row aliased `a` joined to its session
  * aliased `s`: at or after the session last came back from ended (markRevived), or ever for one that never has. A
  * session's end closes what its subagents were waiting on: one at the usage limit leaves its line for the trail, and the
- * watcher no longer reads one it ended. Only a SubagentStart brings such a row back (startSubagent).
+ * watcher no longer reads one it ended. Only a resume brings such a row back: a SubagentStart (startSubagent) or the
+ * SendMessage that resumed it (messageAgent).
  */
 export const ENDED_THIS_LIFE_SQL = "a.ended_at >= COALESCE(s.revived_at, '')";
-
-const before = (ctx: Ctx, ms: number) => new Date(Date.parse(ctx.now()) - ms).toISOString();
 
 /**
  * One row as the UI has it: the live list and the trail share this, so a field added to one reaches both. Its node is
@@ -68,6 +72,7 @@ const toInfo = (r: SubagentRow): SubagentInfo => ({
   agentId: r.agent_id,
   agentType: r.agent_type,
   startedAt: r.started_at,
+  runStartedAt: r.run_started_at ?? r.started_at,
   description: r.description,
   model: r.model,
   nodeId: r.node_id ?? r.start_focus_id,
@@ -91,7 +96,7 @@ export function listSubagents(ctx: Ctx, sessionId: string): SubagentInfo[] {
        WHERE a.session_id = ? AND (a.ended_at IS NULL OR a.ended_at >= ? OR (a.end_reason = 'limit' AND ${ENDED_THIS_LIFE_SQL}))
        ORDER BY a.started_at, a.agent_id`,
     )
-    .all(sessionId, before(ctx, ENDED_AGENT_MS)) as SubagentRow[])
+    .all(sessionId, msAgo(ctx, ENDED_AGENT_MS)) as SubagentRow[])
     .map(toInfo);
 }
 
@@ -107,7 +112,7 @@ export function listTrailAgents(ctx: Ctx, projectId: number): TrailAgent[] {
        WHERE s.project_id = ? AND a.ended_at IS NOT NULL AND a.ended_at >= ? AND ${NOT_READER_SQL}
        ORDER BY a.started_at, a.session_id, a.agent_id`,
     )
-    .all(projectId, before(ctx, TRAIL_MS)) as SubagentRow[])
+    .all(projectId, msAgo(ctx, TRAIL_MS)) as SubagentRow[])
     .map((r) => ({ ...toInfo(r), sessionId: r.session_id }));
 }
 
@@ -144,7 +149,7 @@ const forget = (ctx: Ctx, d: DispatchRow) => ctx.db.prepare('DELETE FROM subagen
 function pairFifo(ctx: Ctx, sessionId: string, agentId: string, agentType: string): void {
   const d = ctx.db
     .prepare('SELECT * FROM subagent_dispatches WHERE session_id = ? AND agent_type = ? AND agent_id IS NULL AND created_at >= ? ORDER BY created_at, rowid LIMIT 1')
-    .get(sessionId, agentType, before(ctx, DISPATCH_TTL_MS)) as DispatchRow | undefined;
+    .get(sessionId, agentType, msAgo(ctx, DISPATCH_TTL_MS)) as DispatchRow | undefined;
   if (d) assign(ctx, d, agentId);
   show(ctx, sessionId, agentId, d);
 }
@@ -160,17 +165,15 @@ export function recordDispatch(ctx: Ctx, sessionId: string, d: DispatchInput): v
  * SubagentStart. A dispatch whose launch already named this agent pairs exactly (and is done with); otherwise the
  * oldest open dispatch of the agent's type pairs, and stays until a launch confirms or corrects it. An agent that
  * starts again (resumed) keeps what it had, its first start time included: the trail's "ran …" then spans its first
- * start to its last stop (a true run time would need a column of its own). `startFocusId` is the session's focus now:
+ * start to its last stop; its `run_started_at` restarts, which is what the window times. `startFocusId` is the session's focus now:
  * every new row keeps it, paired or not, since a launch can still take its dispatch away; a resumed row keeps its
  * first one, as it keeps its first start time.
  */
 export function startSubagent(ctx: Ctx, sessionId: string, agentId: string, agentType: string, at: string, startFocusId: number | null = null): void {
   const existing = findSubagent(ctx, sessionId, agentId);
   if (existing) {
-    // Running again, so whatever ended it no longer holds.
-    if (existing.ended_at || existing.end_reason || existing.last_active_at) {
-      ctx.db.prepare('UPDATE session_subagents SET ended_at = NULL, end_reason = NULL, last_active_at = NULL WHERE session_id = ? AND agent_id = ?').run(sessionId, agentId);
-    }
+    // Running again, so whatever ended it no longer holds, and this run starts now.
+    ctx.db.prepare('UPDATE session_subagents SET ended_at = NULL, end_reason = NULL, last_active_at = NULL, run_started_at = ? WHERE session_id = ? AND agent_id = ?').run(at, sessionId, agentId);
     return;
   }
   // Its number in the session: one past the highest given (rows from before migration 4 have none, which MAX skips). A
@@ -190,6 +193,43 @@ export function startSubagent(ctx: Ctx, sessionId: string, agentId: string, agen
     return;
   }
   pairFifo(ctx, sessionId, agentId, agentType);
+}
+
+/**
+ * PostToolUse on SendMessage: a message reached agent `agentId`, which a `resumed` one started again. A step is a leading
+ * `#id` (in the project) of the summary, else of the purpose; a resume with none takes the session's focus, and with no
+ * focus either the row keeps its node. A resume revives the row, whatever ended it, and restarts its run time. A message
+ * that only reaches a running agent moves it when it names a step other than the one it has (and then changes its words
+ * as a resume does); otherwise it changes nothing. A message never touches `started_at` or `start_focus_id`: the move is
+ * `node_id`, which wins over the start focus (ruling 42). No row, no change. True when the row changed.
+ */
+export function messageAgent(
+  ctx: Ctx,
+  sessionId: string,
+  agentId: string,
+  m: { resumed: boolean; summary?: string; purpose?: string; focusNodeId: number | null; projectId: number | null },
+  at: string,
+): boolean {
+  const row = findSubagent(ctx, sessionId, agentId);
+  if (!row) return false;
+  const named = leadingNode(ctx, m.summary, m.projectId) ?? leadingNode(ctx, m.purpose, m.projectId);
+  let nodeId = row.node_id;
+  if (m.resumed) nodeId = named ?? m.focusNodeId ?? row.node_id;
+  else if (named !== undefined && named !== (row.node_id ?? row.start_focus_id)) nodeId = named;
+  else return false;
+  const description = m.summary ?? m.purpose ?? row.description;
+  const purpose = m.purpose ?? row.purpose;
+  // SendMessage's PostToolUse is async and SubagentStart is not: a message right after the run's own start has been
+  // handled by it (the agent may even have stopped again), so it only re-homes the row.
+  const revive = m.resumed && !(row.run_started_at && Date.parse(at) - Date.parse(row.run_started_at) < MARKER_QUIET_MS);
+  ctx.db
+    .prepare(
+      `UPDATE session_subagents SET node_id = ?, description = ?, purpose = ?${
+        revive ? ', run_started_at = ?, ended_at = NULL, end_reason = NULL, last_active_at = NULL' : ''
+      } WHERE session_id = ? AND agent_id = ?`,
+    )
+    .run(...[nodeId, description, purpose, ...(revive ? [at] : []), sessionId, agentId]);
+  return true;
 }
 
 /**
@@ -227,7 +267,7 @@ export function endAgent(ctx: Ctx, sessionId: string, agentId: string, reason: E
 /**
  * The watcher saw a new line from a subagent it had ended (a guess that it stopped responding, the usage limit, an API
  * error or an interrupt): a subagent that writes is alive, so it runs again. A clean stop and a session's end stay (a
- * resumed agent's SubagentStart revives those). False when nothing changed.
+ * resume revives those: its SubagentStart, or the SendMessage that resumed it, messageAgent). False when nothing changed.
  */
 export function reviveAgent(ctx: Ctx, sessionId: string, agentId: string): boolean {
   return ctx.db
@@ -285,12 +325,12 @@ export function endSubagents(ctx: Ctx, sessionId: string, at: string): void {
  * a foreground agent's launch, which may correct it, only arrives when that agent finishes.
  */
 export function pruneSubagents(ctx: Ctx): { dispatches: number; subagents: number } {
-  const subagents = ctx.db.prepare('DELETE FROM session_subagents WHERE ended_at IS NOT NULL AND ended_at < ?').run(before(ctx, TRAIL_MS)).changes;
+  const subagents = ctx.db.prepare('DELETE FROM session_subagents WHERE ended_at IS NOT NULL AND ended_at < ?').run(msAgo(ctx, TRAIL_MS)).changes;
   const dispatches = ctx.db
     .prepare(
       `DELETE FROM subagent_dispatches WHERE created_at < ? AND (agent_id IS NULL OR NOT EXISTS (
          SELECT 1 FROM session_subagents s WHERE s.session_id = subagent_dispatches.session_id AND s.agent_id = subagent_dispatches.agent_id))`,
     )
-    .run(before(ctx, DISPATCH_TTL_MS)).changes;
+    .run(msAgo(ctx, DISPATCH_TTL_MS)).changes;
   return { dispatches, subagents };
 }

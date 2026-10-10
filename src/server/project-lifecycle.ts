@@ -4,6 +4,7 @@ import { DELETED_RETENTION_MS, type DeletedProject, type Project } from '../core
 import { isUnder, normalizePath } from '../lib/paths';
 import { write, type Ctx } from './db/tx';
 import { conflict, notFound } from './errors';
+import { pruneCommands } from './repo/commands';
 import { EVENTS_RETENTION_DAYS, pruneEvents } from './repo/events';
 import { applyProjectChange, endProjectSessions, getProjectById, purgeAtOf } from './repo/projects';
 import { pruneSubagents } from './repo/subagents';
@@ -204,6 +205,7 @@ export function runMaintenance(ctx: Ctx, home: string, log: MaintenanceLog): voi
   try {
     const { dispatches, subagents } = pruneSubagents(ctx);
     const tasks = pruneWorkItems(ctx);
+    pruneCommands(ctx);
     log.info(`Pruned ${dispatches} unpaired dispatches, ${subagents} ended subagents and ${tasks} working tasks of sessions ended over a week ago`);
   } catch (err) {
     log.error(`Could not prune live work: ${(err as Error).message}`);

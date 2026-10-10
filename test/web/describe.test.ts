@@ -37,6 +37,37 @@ describe('describeEvent', () => {
     expect(describeEvent(ended(['x3', 'error']), snapshot)).toBe('InGame launch status · a subagent hit an API error');
   });
 
+  it('says a session is busy when it went idle with work still running', () => {
+    expect(describeEvent(ev('session.updated', 's1', { changed: ['state'], state: 'idle', activity: 'busy' }), snapshot)).toBe('InGame launch status is busy');
+    expect(describeEvent(ev('session.updated', 's1', { changed: ['state'], state: 'idle', activity: 'idle' }), snapshot)).toBe('InGame launch status is idle');
+    expect(describeEvent(ev('session.updated', 's1', { changed: ['state'], state: 'idle' }), snapshot)).toBe('InGame launch status is idle');
+    expect(describeEvent(ev('session.updated', 's1', { changed: ['state'], state: 'working', activity: 'working' }), snapshot)).toBe('InGame launch status is working');
+  });
+
+  it('says which background command a session started, and how one ended', () => {
+    const command = (data: object) => ev('session.updated', 's1', { changed: ['commands'], state: 'idle', activity: 'busy', ...data }, 'hook:command');
+    expect(describeEvent(command({ command: { label: 'npm run test:e2e' } }), snapshot)).toBe('InGame launch status started npm run test:e2e');
+    expect(describeEvent(command({ command: { label: 'npm run test:e2e', outcome: 'completed' } }), snapshot)).toBe('InGame launch status: npm run test:e2e completed');
+    expect(describeEvent(command({ command: { label: 'tsc', outcome: 'failed' } }), snapshot)).toBe('InGame launch status: tsc failed');
+    expect(describeEvent(command({ command: { label: 'tsc', outcome: 'killed' } }), snapshot)).toBe('InGame launch status: tsc was stopped');
+    expect(describeEvent(command({ command: { label: 'tsc', outcome: 'session' } }), snapshot)).toBe('InGame launch status: tsc ended with its session');
+    expect(describeEvent(command({ command: { label: 'tsc', outcome: 'unknown' } }), snapshot)).toBe('InGame launch status: tsc ended');
+  });
+
+  it('keeps a session end as the end when it also ended a command, and puts a command after a state change', () => {
+    const upd = (data: object) => ev('session.updated', 's1', data, 'hook:end');
+    expect(describeEvent(upd({ changed: ['state', 'commands'], state: 'ended', activity: 'ended', command: { label: 'npm run dev', outcome: 'session' } }), snapshot)).toBe('InGame launch status ended');
+    expect(describeEvent(upd({ changed: ['state', 'commands'], state: 'idle', activity: 'busy', command: { label: 'tsc', outcome: 'completed' } }), snapshot)).toBe('InGame launch status is busy · tsc completed');
+    expect(describeEvent(upd({ changed: ['state', 'commands'], state: 'idle', activity: 'idle', command: { label: 'tsc', outcome: 'killed' } }), snapshot)).toBe('InGame launch status is idle · tsc was stopped');
+    expect(describeEvent(upd({ changed: ['state', 'commands'], state: 'working', activity: 'working', command: { label: 'tsc' } }), snapshot)).toBe('InGame launch status is working · started tsc');
+  });
+
+  it('says a background command ended when the watcher changed only the commands', () => {
+    const watcher = ev('session.updated', 's1', { changed: ['commands'], state: 'idle', activity: 'idle' }, 'system');
+    expect(describeEvent(watcher, snapshot)).toBe('InGame launch status: a background command ended');
+    expect(describeEvent(watcher, null)).toBe('a session: a background command ended');
+  });
+
   it('labels actors', () => {
     expect(actorLabel(ev('node.created', '1', {}), snapshot)).toBe('scribe (InGame launch status)');
     expect(actorLabel(ev('node.created', '1', {}, 'hook:prompt'), snapshot)).toBe('Claude');

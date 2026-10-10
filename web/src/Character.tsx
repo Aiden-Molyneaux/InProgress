@@ -27,11 +27,12 @@ const ENDED_EYES = 'M9.4 15.8H13.6M18.4 15.8H22.6';
 // animation-delay, so the period lives here once; character.css names the keyframes.
 const BOB_MS = 2400;
 const RING_MS = 1800;
+const BREATHE_MS = 3600;
 
 /** The eyes that blink, in g.ip-char-eyes: round, with their centres, radius and blink period. Idle and ended have none. */
 function blinkingEyes(state: CharacterState, size: CharacterSize) {
   if (state === 'wait') return { xs: [11.5, 20.5], cy: 14.8, r: 2.7, blinkMs: 3600 };
-  if (state !== 'work') return null;
+  if (state !== 'work' && state !== 'busy') return null;
   return size === 24 ? { xs: [12.5, 19.5], cy: 15, r: 2.1, blinkMs: 5200 } : { xs: [11.5, 20.5], cy: 15.5, r: 2.4, blinkMs: 5200 };
 }
 
@@ -41,7 +42,10 @@ const timing = (seed: string, periodMs: number): CSSProperties => ({
   animationDelay: `${phaseDelay(seed, periodMs)}ms`,
 });
 
-/** A session or a subagent as a small creature in its family's hue: working, idle, waiting for permission, or ended. */
+/**
+ * A session or a subagent as a small creature in its family's hue: working, busy (idle with work still running: it
+ * wears the working eyes and breathes instead of bobbing, with no glow), idle, waiting for permission, or ended.
+ */
 export function Character({ size, state, slot, seed, title }: CharacterProps) {
   const eyes = blinkingEyes(state, size);
   return (
@@ -58,7 +62,7 @@ export function Character({ size, state, slot, seed, title }: CharacterProps) {
           <span className="ip-char-ring2" style={timing(seed, RING_MS)} />
         </>
       )}
-      <span className="ip-char-body" style={state === 'work' ? timing(seed, BOB_MS) : undefined}>
+      <span className="ip-char-body" style={state === 'work' ? timing(seed, BOB_MS) : state === 'busy' ? timing(seed, BREATHE_MS) : undefined}>
         <svg viewBox="0 0 32 32" aria-hidden="true">
           {state === 'ended' ? (
             <>

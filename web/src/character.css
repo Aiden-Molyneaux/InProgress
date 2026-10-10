@@ -1,6 +1,6 @@
 /* The Simple character (Character.tsx) and the status marker (Marker.tsx). Both components import this file, so it
    loads after styles.css. Tokens come from styles.css; the keyframes ip-pulse and ip-flash stay there. Reduced motion is
-   styles.css's blanket rule: it stops the bob, the blink and the outer ring, and leaves the glow and the solid ring. */
+   styles.css's blanket rule: it stops the bob, the breathing, the blink and the outer ring, and leaves the glow and the solid ring. */
 
 /* The character. Its hue is --fam (Character.tsx sets it from the slot); ended wears --gone. The body path fills with
    currentColor and the eyes inherit fill: var(--bg), the ground colour. Durations and delays are inline. */
@@ -26,6 +26,14 @@
   transform-origin: 50% 100%;
   filter: drop-shadow(0 0 var(--ip-glow-r) color-mix(in srgb, var(--fam, var(--family-0)) var(--ip-glow-mix), transparent));
   animation-name: ip-bob;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+/* Busy: the working eyes and a solid body at full opacity, no glow. It breathes from its bottom centre instead of bobbing;
+   the reduced-motion rule in styles.css stops it. */
+.ip-char.c-busy .ip-char-body {
+  transform-origin: 50% 100%;
+  animation-name: ip-breathe;
   animation-timing-function: ease-in-out;
   animation-iteration-count: infinite;
 }
@@ -55,6 +63,10 @@
 @keyframes ip-bob {
   0%, 100% { transform: translateY(0) scale(1.04, 0.96); }
   50% { transform: translateY(-14%) scale(0.98, 1.02); }
+}
+@keyframes ip-breathe {
+  0%, 100% { transform: scale(1, 1); }
+  50% { transform: scale(1.03, 0.97); }
 }
 @keyframes ip-blink {
   0%, 91%, 100% { transform: scaleY(1); }

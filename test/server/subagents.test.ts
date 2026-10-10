@@ -5,10 +5,11 @@ import { listEventsSince, maxEventId } from '../../src/server/repo/events';
 import { addNodes, deleteNode } from '../../src/server/repo/nodes';
 import { addBinding, createProject } from '../../src/server/repo/projects';
 import { findSession } from '../../src/server/repo/sessions';
-import { endAgent, pruneSubagents, reviveAgent } from '../../src/server/repo/subagents';
+import { endAgent, listSubagents, messageAgent, pruneSubagents, reviveAgent, subagentNode } from '../../src/server/repo/subagents';
 import { getProjectSnapshot } from '../../src/server/repo/snapshot';
 import { handleHookEvent, setFocus, type HookEventInput } from '../../src/server/session-flow';
 
+const SEC = 1000;
 const MIN = 60 * 1000;
 
 /** A tracked session s1 in project InGame, focused on #play, with a clock the test moves by hand. */
@@ -36,13 +37,26 @@ const purposed = (input: HookEventInput, purpose: string): HookEventInput => ({ 
 const purposes = (ctx: Ctx) => Object.fromEntries(subagents(ctx).map((s) => [s.agentId, s.purpose]));
 const descriptions = (ctx: Ctx) => Object.fromEntries(subagents(ctx).map((s) => [s.agentId, s.description]));
 
+describe('runStartedAt', () => {
+  it('is the start time while run_started_at is null, and run_started_at once it is set', () => {
+    const { ctx, hook, tick } = setup();
+    hook(start('a1'));
+    const startedAt = subagents(ctx)[0].startedAt;
+    expect(subagents(ctx)[0].runStartedAt).toBe(startedAt);
+    tick(MIN);
+    const later = new Date(Date.parse(startedAt) + MIN).toISOString();
+    ctx.db.prepare("UPDATE session_subagents SET run_started_at = ? WHERE agent_id = 'a1'").run(later);
+    expect(subagents(ctx)[0]).toMatchObject({ startedAt, runStartedAt: later });
+  });
+});
+
 describe('subagent dispatches', () => {
   it('pairs a dispatch with the next SubagentStart of its type, with its description, model and the focus node', () => {
     const { ctx, play, hook } = setup();
     expect(hook(dispatch('toolu_1', 'Map the hook payloads', 'Explore', 'sonnet'))).toEqual({ tracked: true });
     hook(start('a1'));
     expect(subagents(ctx)).toEqual([
-      { agentId: 'a1', agentType: 'Explore', startedAt: expect.any(String), description: 'Map the hook payloads', model: 'sonnet', nodeId: play.id, endedAt: null, ordinal: 1, purpose: null, endReason: null, lastActiveAt: null },
+      { agentId: 'a1', agentType: 'Explore', startedAt: expect.any(String), runStartedAt: expect.any(String), description: 'Map the hook payloads', model: 'sonnet', nodeId: play.id, endedAt: null, ordinal: 1, purpose: null, endReason: null, lastActiveAt: null },
     ]);
   });
 
@@ -544,7 +558,7 @@ describe('the trail of ended subagents in the snapshot', () => {
     hook({ event: 'subagent-stop', agentId: 'a1' });
     // The layout, not the server, decides when a live session's stopped subagent leaves its greyed badge for the trail.
     expect(getProjectSnapshot(ctx, project.slug).trailAgents).toEqual([
-      { sessionId: 's1', agentId: 'a1', agentType: 'general-purpose', startedAt: '2026-10-02T09:00:00.000Z', description: 'Map the hooks', model: 'sonnet', nodeId: play.id, endedAt: '2026-10-02T09:01:00.000Z', ordinal: 1, purpose: null, endReason: null, lastActiveAt: null },
+      { sessionId: 's1', agentId: 'a1', agentType: 'general-purpose', startedAt: '2026-10-02T09:00:00.000Z', runStartedAt: '2026-10-02T09:00:00.000Z', description: 'Map the hooks', model: 'sonnet', nodeId: play.id, endedAt: '2026-10-02T09:01:00.000Z', ordinal: 1, purpose: null, endReason: null, lastActiveAt: null },
     ]);
     expect(getProjectSnapshot(ctx, other.slug).trailAgents.map((a) => a.agentId)).toEqual(['c1']);
   });
@@ -625,5 +639,195 @@ describe('pruneSubagents', () => {
     tick(2 * MIN);
     expect(pruneSubagents(ctx)).toEqual({ dispatches: 1, subagents: 1 });
     expect(ctx.db.prepare('SELECT agent_id FROM session_subagents').all()).toEqual([{ agent_id: 'a2' }]);
+  });
+});
+
+describe('a message re-homes its agent', () => {
+  const messaged = (agentId: string, resumed: boolean, extra: Partial<HookEventInput> = {}): HookEventInput => ({ event: 'agent-messaged', agentId, resumed, ...extra });
+  interface Row {
+    node_id: number | null;
+    start_focus_id: number | null;
+    started_at: string;
+    run_started_at: string | null;
+    description: string | null;
+    purpose: string | null;
+    ended_at: string | null;
+    end_reason: string | null;
+    last_active_at: string | null;
+  }
+  const rowOf = (ctx: Ctx, agentId: string) =>
+    ctx.db
+      .prepare('SELECT node_id, start_focus_id, started_at, run_started_at, description, purpose, ended_at, end_reason, last_active_at FROM session_subagents WHERE agent_id = ?')
+      .get(agentId) as Row;
+  const info = (ctx: Ctx, agentId: string) => subagents(ctx).find((a) => a.agentId === agentId)!;
+
+  it('moves a resumed agent to the step its summary names, with the summary, the purpose and a new run time', () => {
+    const { ctx, tests, play, hook, tick } = setup();
+    hook(start('a1'));
+    const startedAt = info(ctx, 'a1').startedAt;
+    tick(5 * MIN);
+    hook(messaged('a1', true, { summary: `#${tests.id} Run the suite`, purpose: 'Check the signing tests.' }));
+    expect(info(ctx, 'a1')).toMatchObject({ nodeId: tests.id, description: `#${tests.id} Run the suite`, purpose: 'Check the signing tests.', startedAt, runStartedAt: '2026-10-02T09:05:00.000Z' });
+    expect(rowOf(ctx, 'a1')).toMatchObject({ node_id: tests.id, start_focus_id: play.id });
+  });
+
+  it('takes the step from the purpose when the summary names none, and the summary wins when both do', () => {
+    const { ctx, signing, tests, hook } = setup();
+    hook(start('a1'));
+    hook(start('a2'));
+    hook(messaged('a1', true, { summary: 'Run it', purpose: `#${signing.id} Check everything.` }));
+    hook(messaged('a2', true, { summary: `#${tests.id} Run it`, purpose: `#${signing.id} Check everything.` }));
+    expect(info(ctx, 'a1')).toMatchObject({ nodeId: signing.id, description: 'Run it' });
+    expect(info(ctx, 'a2').nodeId).toBe(tests.id);
+  });
+
+  it('takes the session focus when a resumed message names no step, and keeps its node when there is no focus either', () => {
+    const { ctx, play, tests, hook } = setup();
+    hook(start('a1'));
+    expect(rowOf(ctx, 'a1').node_id).toBeNull();
+    setFocus(ctx, 'scribe:s1', 's1', tests.id);
+    hook(messaged('a1', true, { summary: 'Carry on' }));
+    expect(info(ctx, 'a1')).toMatchObject({ nodeId: tests.id, description: 'Carry on' });
+    expect(rowOf(ctx, 'a1')).toMatchObject({ node_id: tests.id, start_focus_id: play.id });
+    // No focus: the row keeps the node it has.
+    const bare = setup();
+    bare.hook(start('b1'));
+    bare.ctx.db.prepare('UPDATE sessions SET focus_node_id = NULL WHERE id = ?').run('s1');
+    bare.ctx.db.prepare('UPDATE session_subagents SET node_id = ? WHERE agent_id = ?').run(bare.tests.id, 'b1');
+    bare.hook(messaged('b1', true, { summary: 'Again' }));
+    expect(rowOf(bare.ctx, 'b1').node_id).toBe(bare.tests.id);
+  });
+
+  it('ignores a #id of another project', () => {
+    const { ctx, play, hook } = setup();
+    const other = createProject(ctx, 'test', { name: 'Other' });
+    const [foreign] = addNodes(ctx, 'test', { parentId: other.rootNodeId, nodes: [{ title: 'Elsewhere' }] });
+    hook(start('a1'));
+    hook(messaged('a1', true, { summary: `#${foreign.id} Not here` }));
+    expect(info(ctx, 'a1')).toMatchObject({ nodeId: play.id, description: `#${foreign.id} Not here` });
+    expect(rowOf(ctx, 'a1').node_id).toBe(play.id);
+  });
+
+  it.each([[null], ['limit'], ['killed'], ['silent'], ['session']])('revives an ended row on a resume, whatever its end reason (%s)', (reason) => {
+    const { ctx, hook, tick } = setup();
+    hook(start('a1'));
+    ctx.db
+      .prepare('UPDATE session_subagents SET ended_at = ?, end_reason = ?, last_active_at = ? WHERE agent_id = ?')
+      .run('2026-10-02T09:01:00.000Z', reason, reason ? '2026-10-02T09:00:30.000Z' : null, 'a1');
+    tick(10 * MIN);
+    hook(messaged('a1', true, { summary: 'Back to it' }));
+    expect(rowOf(ctx, 'a1')).toMatchObject({ ended_at: null, end_reason: null, last_active_at: null, run_started_at: '2026-10-02T09:10:00.000Z' });
+  });
+
+  it('moves a running agent that is reached with a #id naming another step, and changes its words', () => {
+    const { ctx, signing, tests, hook, tick } = setup();
+    hook(start('a1'));
+    const before = rowOf(ctx, 'a1');
+    tick(MIN);
+    hook(messaged('a1', false, { summary: `#${tests.id} Run the suite`, purpose: 'Check the tests.' }));
+    expect(info(ctx, 'a1')).toMatchObject({ nodeId: tests.id, description: `#${tests.id} Run the suite`, purpose: 'Check the tests.', runStartedAt: info(ctx, 'a1').startedAt });
+    expect(rowOf(ctx, 'a1').run_started_at).toBe(before.run_started_at);
+    // The purpose names a step when the summary does not.
+    hook(messaged('a1', false, { summary: 'Now this', purpose: `#${signing.id} Wider.` }));
+    expect(info(ctx, 'a1')).toMatchObject({ nodeId: signing.id, description: 'Now this', purpose: `#${signing.id} Wider.` });
+  });
+
+  it('changes nothing when a running agent is reached with no #id, or the step it has', () => {
+    const { ctx, play, project, hook, tick } = setup();
+    hook(start('a1'));
+    const before = rowOf(ctx, 'a1');
+    tick(MIN);
+    hook(messaged('a1', false, { summary: 'Plain note', purpose: 'Just a nudge.' }));
+    hook(messaged('a1', false, { summary: `#${play.id} Same step`, purpose: 'Same.' }));
+    expect(rowOf(ctx, 'a1')).toEqual(before);
+    expect(messageAgent(ctx, 's1', 'a1', { resumed: false, summary: 'Plain note', focusNodeId: play.id, projectId: project.id }, ctx.now())).toBe(false);
+  });
+
+  it('does not revive an ended row it reaches while "running"', () => {
+    const { ctx, tests, hook } = setup();
+    hook(start('a1'));
+    endAgent(ctx, 's1', 'a1', 'limit', '2026-10-02T09:01:00.000Z', '2026-10-02T09:00:30.000Z');
+    hook(messaged('a1', false, { summary: `#${tests.id} Late` }));
+    expect(rowOf(ctx, 'a1')).toMatchObject({ ended_at: '2026-10-02T09:01:00.000Z', end_reason: 'limit' });
+  });
+
+  it('is a no-op for an agent it does not know', () => {
+    const { ctx, hook } = setup();
+    const mark = maxEventId(ctx);
+    hook(messaged('ghost', true, { summary: 'Hello' }));
+    expect(ctx.db.prepare('SELECT COUNT(*) AS n FROM session_subagents').get()).toEqual({ n: 0 });
+    expect(listEventsSince(ctx, mark).filter((e) => e.type === 'session.updated')).toEqual([]);
+  });
+
+  it('keeps the start focus after a move (ruling 42), and a later focus no longer drags the moved agent', () => {
+    const { ctx, play, signing, tests, hook } = setup();
+    hook(start('a1'));
+    hook(messaged('a1', true, { summary: `#${tests.id} Move` }));
+    expect(subagentNode(ctx, 's1', 'a1')).toBe(tests.id);
+    expect(rowOf(ctx, 'a1').start_focus_id).toBe(play.id);
+    // A row with no start focus is pinned by the next focus unless it has a node; a moved row has one.
+    ctx.db.prepare('UPDATE session_subagents SET start_focus_id = NULL WHERE agent_id = ?').run('a1');
+    setFocus(ctx, 'scribe:s1', 's1', signing.id);
+    expect(rowOf(ctx, 'a1')).toMatchObject({ node_id: tests.id, start_focus_id: null });
+    expect(subagentNode(ctx, 's1', 'a1')).toBe(tests.id);
+  });
+
+  it('sets the run time when a SubagentStart finds the row, running or ended', () => {
+    const { ctx, hook, tick } = setup();
+    hook(start('a1'));
+    tick(3 * MIN);
+    hook(start('a1'));
+    expect(rowOf(ctx, 'a1').run_started_at).toBe('2026-10-02T09:03:00.000Z');
+    hook({ event: 'subagent-stop', agentId: 'a1' });
+    tick(MIN);
+    hook(start('a1'));
+    expect(rowOf(ctx, 'a1')).toMatchObject({ run_started_at: '2026-10-02T09:04:00.000Z', ended_at: null, started_at: info(ctx, 'a1').startedAt });
+  });
+
+  it('through a hook event: records one session.updated for the subagents with no node, lifts permission, and sends later commands to the new step', () => {
+    const { ctx, tests, hook } = setup();
+    hook(start('a1'));
+    hook({ event: 'permission' });
+    expect(findSession(ctx, 's1')!.state).toBe('permission');
+    const mark = maxEventId(ctx);
+    hook(messaged('a1', true, { summary: `#${tests.id} Run the suite` }));
+    const updated = listEventsSince(ctx, mark).filter((e) => e.type === 'session.updated');
+    expect(updated).toHaveLength(1);
+    expect(updated[0].data).toMatchObject({ changed: expect.arrayContaining(['subagents']), state: 'working' });
+    expect(updated.some((e) => e.entity === 'node')).toBe(false);
+    expect(findSession(ctx, 's1')!.state).toBe('working');
+    hook({ event: 'command-started', taskId: 'b1', kind: 'shell', agentId: 'a1', commandHead: 'npm test' });
+    expect(findSession(ctx, 's1')!.commands[0].nodeId).toBe(tests.id);
+  });
+
+  it('applies a late resume message to the row without reviving it or resetting its run time, when its start already ran', () => {
+    const { ctx, tests, hook, tick } = setup();
+    hook(start('a1'));
+    hook({ event: 'subagent-stop', agentId: 'a1' });
+    tick(MIN);
+    // The resume: SubagentStart is synchronous, so the agent runs and stops before the async SendMessage hook lands.
+    hook(start('a1'));
+    const runStartedAt = rowOf(ctx, 'a1').run_started_at;
+    tick(2 * SEC);
+    hook({ event: 'subagent-stop', agentId: 'a1' });
+    const stopped = rowOf(ctx, 'a1').ended_at;
+    tick(3 * SEC);
+    hook(messaged('a1', true, { summary: `#${tests.id} Run the suite`, purpose: 'Check it.' }));
+    expect(rowOf(ctx, 'a1')).toMatchObject({ node_id: tests.id, description: `#${tests.id} Run the suite`, purpose: 'Check it.', ended_at: stopped, run_started_at: runStartedAt });
+  });
+
+  it('revives a row a session end closed in an earlier life when a resume message reaches it', () => {
+    const { ctx, hook, tick } = setup();
+    hook(start('a1'));
+    hook({ event: 'end' });
+    expect(rowOf(ctx, 'a1').end_reason).toBe('session');
+    tick(10 * MIN);
+    hook({ event: 'prompt' });
+    expect(findSession(ctx, 's1')!.state).toBe('working');
+    // Back from ended: the old row is in the trail, not running.
+    expect(listSubagents(ctx, 's1').filter((a) => a.endedAt === null)).toEqual([]);
+    hook(messaged('a1', true, { summary: 'Carry on' }));
+    expect(rowOf(ctx, 'a1')).toMatchObject({ ended_at: null, end_reason: null });
+    expect(listSubagents(ctx, 's1')).toEqual([expect.objectContaining({ agentId: 'a1', endedAt: null, description: 'Carry on' })]);
   });
 });

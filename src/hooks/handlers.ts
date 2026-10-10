@@ -1,9 +1,11 @@
 import { join } from 'node:path';
+import { ID_MAX, TASK_ID_MAX, noticeTasks, text } from '../core/notices';
 import { SCRIBE_AGENT, WORK_STATUSES, type HookEvent } from '../core/types';
 import { detectBranch } from '../lib/git';
 import { homeDir } from '../lib/home';
 import { appendLog } from '../lib/log';
 import { readTranscriptTitle } from '../lib/transcript';
+import { scrub } from './capture';
 
 export const HOOK_NAMES = ['session-start', 'prompt-submit', 'stop', 'notification', 'subagent-start', 'subagent-stop', 'session-end', 'pre-tool', 'post-tool'] as const;
 export type HookName = (typeof HOOK_NAMES)[number];
@@ -105,6 +107,19 @@ export function buildHookBody(name: Exclude<HookName, ToolHookName>, input: Hook
     const prompt = notice ? '' : stripPasted(raw);
     body.mentionsInProgress = MENTIONS.test(prompt);
     body.asksStatus = ASKS_STATUS.test(prompt);
+    // Only the notice's task blocks leave (id, status, exit code), never its text.
+    if (notice) {
+      const tasks = noticeTasks(stripPasted(raw));
+      if (tasks.length) body.tasks = tasks;
+    }
+  }
+  // The session's running background tasks, so the server can end the rows that are gone. An empty array is sent too:
+  // it says nothing is running.
+  if (name === 'stop' && Array.isArray(input.background_tasks)) {
+    const { tasks, truncated } = stoppedBackground(input.background_tasks);
+    body.background = tasks;
+    // The server must not reconcile against a list that was cut: it would end commands that are still running.
+    if (truncated) body.backgroundTruncated = true;
   }
   if (name === 'subagent-start' || name === 'subagent-stop') {
     if (input.agent_id) body.agentId = input.agent_id;
@@ -120,15 +135,22 @@ const PURPOSE_MAX = 200;
 const SUBJECT_MAX = 300;
 const MODEL_MAX = 100;
 const KEY_MAX = 100;
-const ID_MAX = 200;
 const BLOCKS_MAX = 100;
+/** Mirror the server's hookBody limits for background work (src/server/schemas.ts). ID_MAX, TASK_ID_MAX and `text` live in core/notices. */
+const HEAD_MAX = 60;
+const HEAD_WORDS = 3;
+/** The one-letter flags that take a value as their next word (`-C dir`, `-o opt`, `-i key`); other short flags stand alone. */
+const FLAG_WITH_VALUE = /^-[CcdeFfHimopiu]$/;
+const TASK_TYPE_MAX = 40;
+const BACKGROUND_MAX = 50;
+const DURATION_MAX_MS = 7 * 24 * 60 * 60 * 1000;
+/** Claude Code's background task ids: a letter, then lowercase letters and digits ("bc802pkev"). */
+const BACKGROUND_ID = /^[a-z][a-z0-9]{5,39}$/;
 /** The Agent tool, under its current name and its old one. */
 const AGENT_TOOLS = new Set(['Agent', 'Task']);
 const TASK_STATUSES: readonly string[] = [...WORK_STATUSES, 'deleted'];
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
-/** A non-blank string, trimmed and clipped, else nothing. */
-const text = (v: unknown, max: number): string | undefined => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : undefined);
 /** A task id: Claude Code sends strings ("3"), but a number reads the same. */
 const taskKey = (v: unknown): string | undefined => (typeof v === 'number' && Number.isFinite(v) ? String(v) : text(v, KEY_MAX));
 const taskKeys = (v: unknown): string[] => (Array.isArray(v) ? v.map(taskKey).filter((k): k is string => !!k).slice(0, BLOCKS_MAX) : []);
@@ -233,7 +255,138 @@ export function buildToolHookBody(name: ToolHookName, input: HookStdin): Record<
     if (blockedBy.length) body.addBlockedBy = blockedBy;
     return body;
   }
+  if (tool === 'Bash' || tool === 'PowerShell' || tool === 'Monitor') {
+    const monitor = tool === 'Monitor';
+    const taskId = monitor ? monitorId(response) : backgroundShellId(response);
+    if (!taskId) return undefined;
+    const body: Record<string, unknown> = { event: 'command-started', taskId, kind: monitor ? 'monitor' : 'shell' };
+    const toolUseId = text(input.tool_use_id, ID_MAX);
+    if (toolUseId) body.toolUseId = toolUseId;
+    if (monitor) body.persistent = isRecord(response) && typeof response.persistent === 'boolean' ? response.persistent : toolInput.persistent === true;
+    const description = text(toolInput.description, DESCRIPTION_MAX);
+    if (description) body.description = description;
+    const head = typeof toolInput.command === 'string' ? commandHead(toolInput.command) : undefined;
+    if (head) body.commandHead = head;
+    const durationMs = durationOf(input.duration_ms);
+    if (durationMs !== undefined) body.durationMs = durationMs;
+    return { ...body, ...agent };
+  }
+  if (tool === 'TaskStop') {
+    // The target is the stopped task, not the caller: the caller's agent_id is not sent.
+    const stopped = text(isRecord(response) ? response.task_id : undefined, TASK_ID_MAX) ?? text(toolInput.task_id, TASK_ID_MAX);
+    const type = isRecord(response) && typeof response.task_type === 'string' ? response.task_type : '';
+    if (!stopped) return undefined;
+    if (type === 'local_bash' || type.includes('monitor')) return { event: 'command-ended', taskId: stopped, outcome: 'killed' };
+    if (type === 'local_agent') return { event: 'agent-ended', agentId: stopped, reason: 'killed' };
+    return undefined;
+  }
+  if (tool === 'SendMessage') {
+    // A subagent messaging a sibling would move it under the main session's focus: only the main thread's calls count.
+    if (agentId) return undefined;
+    if (!isRecord(response) || response.success !== true) return undefined;
+    const resumedId = text(response.resumedAgentId, ID_MAX);
+    const target = resumedId ?? (isRecord(response.pin) ? text(response.pin.id, ID_MAX) : undefined);
+    if (!target) return undefined;
+    const body: Record<string, unknown> = { event: 'agent-messaged', agentId: target, resumed: !!resumedId };
+    const summary = text(toolInput.summary, DESCRIPTION_MAX);
+    if (summary) body.summary = summary;
+    // Only the message's first sentence leaves, as purposeOf cuts it; the rest stays in Claude Code.
+    const message = typeof toolInput.message === 'string' ? toolInput.message : typeof toolInput.content === 'string' ? toolInput.content : undefined;
+    const purpose = message === undefined ? undefined : purposeOf(message);
+    if (purpose) body.purpose = purpose;
+    return body;
+  }
   return undefined;
+}
+
+/** The id a Bash or PowerShell call was given when it went to the background: the response's field, or the text's "running in background with ID: …". */
+function backgroundShellId(response: unknown): string | undefined {
+  const id = isRecord(response) ? response.backgroundTaskId : /running in background with ID:\s*([a-z][a-z0-9]{5,39})\b/.exec(responseText(response))?.[1];
+  return typeof id === 'string' && BACKGROUND_ID.test(id) ? id : undefined;
+}
+
+/** A Monitor's task id: the response object's taskId, or "Monitor started (task …" in its text. */
+function monitorId(response: unknown): string | undefined {
+  const id = isRecord(response) ? response.taskId : /Monitor started \(task ([a-z][a-z0-9]{5,39})\b/.exec(responseText(response))?.[1];
+  return typeof id === 'string' && BACKGROUND_ID.test(id) ? id : undefined;
+}
+
+/** How long the tool call took, when it is a number the server accepts. */
+const durationOf = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= DURATION_MAX_MS ? Math.round(v) : undefined);
+
+/** Where a set-up segment of a command ends: the first `;` or newline (and `&&` when andAnd) outside quotes, as [index, length]. */
+function segmentEnd(s: string, andAnd: boolean): [number, number] | undefined {
+  let quote = '';
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (quote) {
+      if (c === quote) quote = '';
+    } else if (c === '"' || c === "'") quote = c;
+    else if (c === ';' || c === '\n') return [i, 1];
+    else if (andAnd && c === '&' && s[i + 1] === '&') return [i, 2];
+  }
+  return undefined;
+}
+
+/**
+ * A background command's first words, to name it without sending it: set-up segments dropped (cd, pushd, Set-Location,
+ * a PowerShell assignment, export), the rest cut at the first quote, pipe, redirect or separator, then the words with
+ * NAME=value words and flags (and a one-letter flag's value) dropped. At most 3 words and 60 characters.
+ */
+export function commandHead(command: string): string | undefined {
+  let rest = command;
+  for (;;) {
+    rest = rest.trimStart();
+    if (rest.startsWith('#')) {
+      const nl = rest.indexOf('\n');
+      rest = nl < 0 ? '' : rest.slice(nl + 1);
+      continue;
+    }
+    const cd = /^(?:cd|pushd|push-location|set-location|sl)(?=\s)/i.test(rest);
+    if (!cd && !/^\$(?:\{[^}]*\}|[\w:]+)\s*=/.test(rest) && !/^export\s+\w+=/.test(rest)) break;
+    const end = segmentEnd(rest, cd);
+    rest = end ? rest.slice(end[0] + end[1]) : '';
+  }
+  const cut = /['"`|;(\n]|&&|\d*[<>]/.exec(rest);
+  // Scrubbed before the flags are dropped, so `--password hunter2` is redacted while it is still a pair.
+  const words = scrub(cut ? rest.slice(0, cut.index) : rest).split(/\s+/).filter(Boolean);
+  const kept: string[] = [];
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    if (/^\$?[\w:{}]+=/.test(w)) continue;
+    if (w.startsWith('-')) {
+      if (FLAG_WITH_VALUE.test(w) && words[i + 1] && !words[i + 1].startsWith('-')) i++;
+      continue;
+    }
+    kept.push(w);
+  }
+  const head = kept.slice(0, HEAD_WORDS).join(' ');
+  if (!head) return undefined;
+  return head.length > HEAD_MAX ? `${head.slice(0, HEAD_MAX - 1)}…` : head;
+}
+
+/**
+ * The Stop hook's background_tasks, reduced to what the server reconciles with: no command, only its head. A task whose
+ * status is a string other than running or pending is gone and skipped. Past 50 entries the rest is cut and `truncated`
+ * says so.
+ */
+function stoppedBackground(tasks: unknown[]): { tasks: Record<string, unknown>[]; truncated: boolean } {
+  const out: Record<string, unknown>[] = [];
+  for (const t of tasks) {
+    if (!isRecord(t)) continue;
+    if (typeof t.status === 'string' && t.status !== 'running' && t.status !== 'pending') continue;
+    const taskId = text(t.id, TASK_ID_MAX);
+    const type = text(t.type, TASK_TYPE_MAX);
+    if (!taskId || !type) continue;
+    if (out.length === BACKGROUND_MAX) return { tasks: out, truncated: true };
+    const entry: Record<string, unknown> = { taskId, type };
+    const description = text(t.description, DESCRIPTION_MAX);
+    if (description) entry.description = description;
+    const head = typeof t.command === 'string' ? commandHead(t.command) : undefined;
+    if (head) entry.commandHead = head;
+    out.push(entry);
+  }
+  return { tasks: out, truncated: false };
 }
 
 export async function runHandler(name: HookName, input: HookStdin, deps: HookDeps): Promise<string | undefined> {
