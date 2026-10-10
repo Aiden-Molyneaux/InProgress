@@ -6,6 +6,7 @@ import { familyVar } from '../family';
 import { circled } from '../live';
 import { Marker } from '../Marker';
 import { AgentLine, type AgentLineProps } from './AgentLine';
+import { CommandLine, type CommandLineProps } from './CommandLine';
 import { ReadersRow, type ReadersRowProps } from './ReadersRow';
 import { TrailAgentRow, type TrailAgentRowProps } from './TrailAgentRow';
 import { WorkDoneRow, type WorkDoneRowProps } from './WorkDoneRow';
@@ -15,6 +16,7 @@ import { WorkRow, type WorkRowProps } from './WorkRow';
 export type CardRow =
   | { kind: 'line'; id: string; props: AgentLineProps }
   | { kind: 'readers'; id: string; props: ReadersRowProps }
+  | { kind: 'commands'; id: string; props: CommandLineProps }
   | { kind: 'workDone'; id: string; props: WorkDoneRowProps }
   | { kind: 'work'; id: string; props: WorkRowProps }
   | { kind: 'trailAgent'; id: string; props: TrailAgentRowProps };
@@ -54,7 +56,9 @@ export interface NodeCardData extends Record<string, unknown> {
   stack: boolean;
   /** A working session's focus (LayoutNodeItem.workingFocus): the orange hairline, the active fill, the large title. */
   workingFocus: boolean;
-  /** Its lines: agent and readers lines, a done row on a line of its own, task rows, trail rows. */
+  /** Work runs on this step or under a fold (LayoutNodeItem.live): the hairline and fill of the focus, the title at the normal size. */
+  live: boolean;
+  /** Its lines: agent, readers and commands lines, a done row on a line of its own, task rows, trail rows. */
   rows: CardRow[];
   /** Opens Details, as a click on the card does. */
   onSelect: (id: number) => void;
@@ -68,6 +72,8 @@ function CardLine({ row }: { row: CardRow }) {
       return <AgentLine {...row.props} />;
     case 'readers':
       return <ReadersRow {...row.props} />;
+    case 'commands':
+      return <CommandLine {...row.props} />;
     case 'workDone':
       return <WorkDoneRow {...row.props} />;
     case 'work':
@@ -83,14 +89,14 @@ function CardLine({ row }: { row: CardRow }) {
  * first two resources sit beside the frame.
  */
 export function NodeCard({ data }: NodeProps<Node<NodeCardData, 'ipNode'>>) {
-  const { node, folded, doneCount, progress, needsYou, age, hasChildren, working, paused, lastChange, queue, resources, flash, selected, x, w, h, stack, workingFocus, rows } = data;
+  const { node, folded, doneCount, progress, needsYou, age, hasChildren, working, paused, lastChange, queue, resources, flash, selected, x, w, h, stack, workingFocus, live, rows } = data;
   // The type label shows as its glyph only; the word is the chip's tooltip and accessible name.
   const glyph = node.label ? LABEL_GLYPHS[node.label] : undefined;
   // A paused step keeps st-active (its stored status); `paused` only changes how its marker draws.
   const classes = ['ip-node', `st-${node.status}`, stack && 'stack', needsYou && 'needs-you', working && 'working', paused && 'paused', flash && 'flash', selected && 'selected', node.parentId === null && 'root']
     .filter(Boolean)
     .join(' ');
-  const frame = ['ip-card', `st-${node.status}`, stack && 'stack', workingFocus && 'focus', flash && 'flash', selected && 'selected'].filter(Boolean).join(' ');
+  const frame = ['ip-card', `st-${node.status}`, stack && 'stack', workingFocus && 'focus', live && !workingFocus && 'live', flash && 'flash', selected && 'selected'].filter(Boolean).join(' ');
   const marker = (
     <Marker
       status={node.status}

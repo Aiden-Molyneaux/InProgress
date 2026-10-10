@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { AGENT_LINE, CARD_GAP, CARD_PAD, DONE_LINE, FOLD_ROW, INDENT, NODE_H, READERS_LINE, ROW, STACK_HEAD, TASK_ROW } from '../../src/core/layout';
+import { AGENT_LINE, CARD_GAP, CARD_PAD, COMMAND_LINE, DONE_LINE, FOLD_ROW, INDENT, NODE_H, READERS_LINE, ROW, STACK_HEAD, TASK_ROW } from '../../src/core/layout';
 import { PITCH } from '../../web/src/canvas/pitch';
 
 /** The canvas region of styles.css, from its head comment to the next region's, without comments. */
@@ -29,6 +29,7 @@ const PITCHED: [selector: string, property: string][] = [
   ['.ip-node.stack', 'height'],
   ['.ip-badge', 'height'],
   ['.ip-readers', 'height'],
+  ['.ip-commands', 'height'],
   ['.ip-lines > .ip-work-done', 'height'],
   ['.ip-card .ip-work', 'height'],
   ['.ip-trail-agent', 'height'],
@@ -50,6 +51,7 @@ describe('the canvas pitch', () => {
       '--fold-row': `${FOLD_ROW}px`,
       '--agent-line': `${AGENT_LINE}px`,
       '--readers-line': `${READERS_LINE}px`,
+      '--command-line': `${COMMAND_LINE}px`,
       '--done-line': `${DONE_LINE}px`,
       '--task-row': `${TASK_ROW}px`,
       '--card-pad': `${CARD_PAD}px`,

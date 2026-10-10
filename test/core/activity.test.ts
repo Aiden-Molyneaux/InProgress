@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { COMMAND_WORK_MS, commandLabel, commandShown, countsAsWork, looksLikeServer, sessionActivity } from '../../src/core/activity';
+import { COMMAND_WORK_MS, commandDescriptionText, commandLabel, commandShown, countsAsWork, looksLikeServer, orderCommands, sessionActivity } from '../../src/core/activity';
 import type { CommandInfo, SessionState, SubagentInfo } from '../../src/core/types';
 
 const MIN = 60 * 1000;
@@ -72,5 +72,31 @@ describe('commandShown', () => {
     expect(commandShown({ endedAt: null }, NOW)).toBe(true);
     expect(commandShown({ endedAt: ago(4 * MIN) }, NOW)).toBe(true);
     expect(commandShown({ endedAt: ago(5 * MIN) }, NOW)).toBe(false);
+  });
+});
+
+describe('commandDescriptionText', () => {
+  it('strips a leading #id and trims, and is null for nothing', () => {
+    expect(commandDescriptionText({ description: '#57 Run the suite' })).toBe('Run the suite');
+    expect(commandDescriptionText({ description: '  Run the suite ' })).toBe('Run the suite');
+    expect(commandDescriptionText({ description: null })).toBeNull();
+    expect(commandDescriptionText({ description: '#57' })).toBeNull();
+  });
+
+  it('is what commandLabel falls back to', () => {
+    expect(commandLabel({ commandHead: null, description: '#57 Run the suite' })).toBe('Run the suite');
+  });
+});
+
+describe('orderCommands', () => {
+  it('lists running commands by start, then ended ones by start, without changing the list it was given', () => {
+    const list = [
+      command({ taskId: 'e2', startedAt: ago(2 * MIN), endedAt: ago(MIN), outcome: 'completed' }),
+      command({ taskId: 'r2', startedAt: ago(3 * MIN) }),
+      command({ taskId: 'e1', startedAt: ago(9 * MIN), endedAt: ago(MIN), outcome: 'completed' }),
+      command({ taskId: 'r1', startedAt: ago(8 * MIN) }),
+    ];
+    expect(orderCommands(list).map((c) => c.taskId)).toEqual(['r1', 'r2', 'e1', 'e2']);
+    expect(list.map((c) => c.taskId)).toEqual(['e2', 'r2', 'e1', 'r1']);
   });
 });

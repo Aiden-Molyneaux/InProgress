@@ -36,6 +36,16 @@ export function sessionActivity(s: Pick<Session, 'state' | 'subagents' | 'comman
 
 /** A command's name for the window: its head, else its description without a leading `#id`, else a generic one. */
 export function commandLabel(c: Pick<CommandInfo, 'commandHead' | 'description'>): string {
-  const description = c.description?.replace(/^\s*#\d+\b\s*/, '').trim();
-  return c.commandHead || description || 'a background command';
+  return c.commandHead || commandDescriptionText(c) || 'a background command';
+}
+
+/** A command's description without a leading `#id`, trimmed; null when nothing is left. The one strip behind the label and the lines. */
+export function commandDescriptionText(c: Pick<CommandInfo, 'description'>): string | null {
+  return c.description?.replace(/^\s*#\d+\b\s*/, '').trim() || null;
+}
+
+/** Commands as the window lists them: running ones by start, then ended ones by start (ties by task id). A new array. */
+export function orderCommands<T extends Pick<CommandInfo, 'taskId' | 'startedAt' | 'endedAt'>>(commands: readonly T[]): T[] {
+  const byStart = (a: T, b: T) => a.startedAt.localeCompare(b.startedAt) || a.taskId.localeCompare(b.taskId);
+  return [...commands.filter((c) => c.endedAt === null).sort(byStart), ...commands.filter((c) => c.endedAt !== null).sort(byStart)];
 }

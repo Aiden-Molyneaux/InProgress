@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { commandShown } from '../../../src/core/activity';
 import { agentHome, agentVisible, atLimit, homedTrailAgents, isPaused, occupiedSteps } from '../../../src/core/layout';
 import { isNeedsYou } from '../../../src/core/tree';
 import { LABEL_GLYPHS, agentTag, isReader, sessionDisplayTitle, sessionTag, type NodeDetail, type ProjectSnapshot, type TrailAgent, type TreeNode, type WorkItem } from '../../../src/core/types';
 import { AgentWords } from '../AgentWords';
 import { api } from '../api';
 import { familyVar } from '../family';
-import { TASK_MARK, agentLineParts, taskFamily, taskOwner, trailAgentParts, waitsFor, withTag, withoutOwnId, workMark } from '../live';
+import { TASK_MARK, agentLineParts, commandDescription, commandLabel, commandMark, commandTag, commandWhen, taskFamily, taskOwner, trailAgentParts, waitsFor, withTag, withoutOwnId, workMark } from '../live';
 import { Marker } from '../Marker';
 import { relativeTime } from '../time';
 import { useNow } from '../useNow';
@@ -59,7 +60,8 @@ function PurposeLine({ purpose }: { purpose: string | null }) {
  * The node's working tasks, with who is on each, the subagents working on it, and its trail of ended work (tasks an
  * ended session left here and subagents that stopped), under each session's title: live, from the snapshot. Live tasks
  * and subagents wear their session's hue and a subagent's tag (`a1`); the trail stays neutral. A running reader is
- * listed marked `◇`; an ended one is not. Each subagent's purpose, when known, is a second line under it.
+ * listed marked `◇`; an ended one is not. Each subagent's purpose, when known, is a second line under it. The commands
+ * homed here (running, or ended under five minutes ago) are listed under Background.
  */
 function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'>) {
   const now = useNow(30_000);
@@ -69,6 +71,9 @@ function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'
   const inTree = new Set(snapshot.nodes.map((n) => n.id));
   const agents = snapshot.sessions.flatMap((s) =>
     s.subagents.filter((a) => agentVisible(a, now) && agentHome(s, a, (id) => inTree.has(id)) === nodeId).map((agent) => ({ session: s, agent })),
+  );
+  const commands = snapshot.sessions.flatMap((s) =>
+    s.commands.filter((c) => commandShown(c, now) && agentHome(s, c, (id) => inTree.has(id)) === nodeId).map((command) => ({ session: s, command })),
   );
   const trailHere = homedTrailAgents({ sessions: snapshot.sessions, trailAgents, pastSessions, now }, (id) => inTree.has(id))
     .filter((t) => t.nodeId === nodeId)
@@ -131,6 +136,35 @@ function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'
                   )}
                   <AgentWords parts={agentLineParts(agent, now, nodeId)} limit={atLimit(agent)} />
                   <PurposeLine purpose={agent.purpose} />
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+      {commands.length > 0 && (
+        <>
+          <div className="ip-label">Background</div>
+          <ul className="ip-dagents">
+            {commands.map(({ session, command }) => {
+              const tag = commandTag(session, command);
+              const description = commandDescription(command);
+              return (
+                <li
+                  key={`${session.id}:${command.taskId}`}
+                  className={`ip-dagent${command.endedAt ? ' ended' : ''}${command.endedAt === null && commandMark(command, now) === '◦' ? ' serving' : ''}`}
+                  style={{ '--fam': familyVar(session.slot) } as CSSProperties}
+                  title={`Background command, for ${withTag(sessionTag(session.slot), sessionDisplayTitle(session))}`}
+                >
+                  <span className="ip-cmd-mark">{commandMark(command, now)}</span>{' '}
+                  {tag && (
+                    <>
+                      <span className="ip-agent-tag">{tag}</span>
+                      {' · '}
+                    </>
+                  )}
+                  {description && `${description} · `}
+                  {commandLabel(command)} · {commandWhen(command, now)}
                 </li>
               );
             })}

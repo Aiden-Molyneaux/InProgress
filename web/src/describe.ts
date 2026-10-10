@@ -1,5 +1,5 @@
-import { agentTag, sessionDisplayTitle, type EndReason, type EventRow, type ProjectSnapshot } from '../../src/core/types';
-import { END_WORDS } from './live';
+import { agentTag, sessionDisplayTitle, type CommandOutcome, type EndReason, type EventRow, type ProjectSnapshot } from '../../src/core/types';
+import { COMMAND_OUTCOME_WORDS, END_WORDS } from './live';
 
 const STATE_WORDS: Record<string, string> = { working: 'working', idle: 'idle', permission: 'waiting for a permission' };
 
@@ -26,6 +26,7 @@ export function describeEvent(e: EventRow, snapshot: ProjectSnapshot | null): st
     ids?: number[]; parentId?: number; nodeId?: number; title?: string; path?: string;
     changes?: { status?: { to: string }; queue?: unknown; name?: unknown }; changed?: string[]; state?: string; focusNodeId?: number | null;
     ended?: { agentId: string; reason: EndReason }[];
+    activity?: string; command?: { label: string; outcome?: CommandOutcome };
   };
   switch (e.type) {
     case 'node.created':
@@ -49,8 +50,17 @@ export function describeEvent(e: EventRow, snapshot: ProjectSnapshot | null): st
       if (d.changed?.includes('focusNodeId')) return d.focusNodeId ? `${who} is on ${nodeLabel(d.focusNodeId, snapshot)}` : `${who} cleared its focus`;
       // The transcript watcher ended subagents that died without a stop: `<session> · a3 hit the usage limit`.
       if (d.ended?.length) return `${who} · ${d.ended.map((x) => `${agentLabel(e.entityId, x.agentId, snapshot)} ${END_WORDS[x.reason] ?? 'ended'}`).join(', ')}`;
+      // A session's end is its end, whatever commands it took along.
       if (d.state === 'ended') return `${who} ended`;
-      return `${who} is ${STATE_WORDS[d.state ?? ''] ?? d.state ?? 'updated'}`;
+      // session-flow records the one command an event started (no outcome) or ended.
+      const command = d.command ? (d.command.outcome ? `${d.command.label} ${COMMAND_OUTCOME_WORDS[d.command.outcome] ?? 'ended'}` : `started ${d.command.label}`) : null;
+      // Idle with work still running: the session is busy, not idle.
+      const state = d.state === 'idle' && d.activity === 'busy' ? 'is busy' : `is ${STATE_WORDS[d.state ?? ''] ?? d.state ?? 'updated'}`;
+      if (d.changed?.includes('state')) return command ? `${who} ${state} · ${command}` : `${who} ${state}`;
+      if (d.command) return d.command.outcome ? `${who}: ${command}` : `${who} ${command}`;
+      // The transcript watcher ended commands and recorded no single one.
+      if (d.changed?.includes('commands')) return `${who}: a background command ended`;
+      return `${who} ${state}`;
     }
     case 'project.created':
       return 'project created';

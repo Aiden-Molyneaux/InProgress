@@ -77,8 +77,9 @@ export interface ProjectSummary extends Project {
   /** Live sessions in state working. */
   workingSessions: number;
   /**
-   * Live sessions with work going on: working, or with a running worker (a subagent that is not a reader) while the
-   * session itself is idle or waiting. A tab's dot shows while any is.
+   * Live sessions with work going on: working, or with a running worker (a subagent that is not a reader) or a background
+   * command that counts as work (countsAsWork) while the session itself is idle or waiting. A tab's dot shows while any
+   * is, pulsing only while one is working.
    */
   busySessions: number;
   lastEventAt: string | null;

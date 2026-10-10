@@ -1,4 +1,5 @@
-import { agentTag, sessionDisplayTitle, sessionTag, type EndReason, type PastSession, type Session, type SessionState, type SubagentInfo, type TrailAgent, type WorkItem, type WorkStatus } from '../../src/core/types';
+import { commandDescriptionText, commandLabel, countsAsWork, sessionActivity, type Activity } from '../../src/core/activity';
+import { agentTag, sessionDisplayTitle, sessionTag, type CommandInfo, type CommandOutcome, type EndReason, type PastSession, type Session, type SubagentInfo, type TrailAgent, type WorkItem, type WorkStatus } from '../../src/core/types';
 import { relativeTime } from './time';
 
 /** A working task's checklist mark. */
@@ -72,7 +73,7 @@ const lastAlive = (a: SubagentInfo): string => a.lastActiveAt ?? a.endedAt ?? ''
  */
 export function agentLineParts(a: SubagentInfo, now: number, underNode: number | null = null): LineParts {
   const who = [agentName(a, underNode), a.model].filter(Boolean).join(' · ');
-  if (!a.endedAt) return { who, when: elapsed(a.startedAt, now) };
+  if (!a.endedAt) return { who, when: elapsed(a.runStartedAt, now) };
   if (!a.endReason) return { who, when: `done ${relativeTime(a.endedAt, now)}` };
   const when = `${END_WORDS[a.endReason]} ${relativeTime(lastAlive(a), now)}`;
   return { who, when: a.endReason === 'limit' ? `${when} · resume after the reset` : when };
@@ -84,7 +85,7 @@ export function agentLine(a: SubagentInfo, now: number, underNode: number | null
   return `${who} · ${when}`;
 }
 
-const STATE_SUFFIX: Record<Session['state'], string> = { working: '', idle: ' · idle', permission: ' · needs permission', ended: ' · ended' };
+const STATE_SUFFIX: Record<Activity, string> = { working: '', busy: ' · busy', idle: ' · idle', permission: ' · needs permission', ended: ' · ended' };
 
 /** ` · 2 subagents` for the subagents of a session that still run (readers included), nothing while none do. The one count behind `chipLabel` and `leadTitle`. */
 function subagentSuffix(s: Session): string {
@@ -92,9 +93,20 @@ function subagentSuffix(s: Session): string {
   return running ? ` · ${running} subagent${running > 1 ? 's' : ''}` : '';
 }
 
-/** A session chip's label: its title, how many subagents still run, and its state unless it is working. */
-export function chipLabel(s: Session): string {
-  return `${sessionDisplayTitle(s)}${subagentSuffix(s)}${STATE_SUFFIX[s.state]}`;
+/** How many of a session's commands (its subagents' included) count as work at `now`: the count behind `commandsSuffix` and the chip's `▸n`. */
+export function workingCommands(s: Pick<Session, 'commands'>, now: number): number {
+  return s.commands.filter((c) => countsAsWork(c, now)).length;
+}
+
+/** ` · 5 commands` for the session's commands that count as work, nothing while none do. Serving commands are not named. */
+export function commandsSuffix(s: Pick<Session, 'commands'>, now: number): string {
+  const n = workingCommands(s, now);
+  return n ? ` · ${n} command${n > 1 ? 's' : ''}` : '';
+}
+
+/** A session chip's label: its title, how many subagents still run and commands count as work, and its activity unless it is working. */
+export function chipLabel(s: Session, now: number): string {
+  return `${sessionDisplayTitle(s)}${subagentSuffix(s)}${commandsSuffix(s, now)}${STATE_SUFFIX[sessionActivity(s, now)]}`;
 }
 
 /**
@@ -161,17 +173,17 @@ export function waitsFor(w: WorkItem, items: WorkItem[]): string[] {
   return items.filter((x) => x.status !== 'completed' && x.blocks.includes(w.id)).map((x) => withoutOwnId(x.subject, w.nodeId));
 }
 
-/** A session's state as a word: on its agent line and in its lead's tooltip. */
-export const WORDS: Record<SessionState, string> = { working: 'working', idle: 'idle', permission: 'needs permission', ended: 'ended' };
+/** A session's activity as a word: on its agent line and in its lead's tooltip. */
+export const WORDS: Record<Activity, string> = { working: 'working', busy: 'busy', idle: 'idle', permission: 'needs permission', ended: 'ended' };
 
 /** A session chip's accessible name: its letter, then chipLabel. */
-export function chipName(s: Session): string {
-  return withTag(sessionTag(s.slot), chipLabel(s));
+export function chipName(s: Session, now: number): string {
+  return withTag(sessionTag(s.slot), chipLabel(s, now));
 }
 
-/** The lead character's tooltip: letter, title, state word, and how many subagents still run (readers included). */
-export function leadTitle(s: Session): string {
-  return withTag(sessionTag(s.slot), `${sessionDisplayTitle(s)} · ${WORDS[s.state]}${subagentSuffix(s)}`);
+/** The lead character's tooltip: letter, title, activity word, then how many subagents still run (readers included) and commands count as work. */
+export function leadTitle(s: Session, now: number): string {
+  return withTag(sessionTag(s.slot), `${sessionDisplayTitle(s)} · ${WORDS[sessionActivity(s, now)]}${subagentSuffix(s)}${commandsSuffix(s, now)}`);
 }
 
 /** A kin's tooltip and accessible name: `withTag(tag, agentLine(...))`, then a newline and the purpose when known. */
@@ -188,4 +200,93 @@ export function runTime(fromIso: string, now: number): string {
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
   return hours < 10 && rest ? `${hours}h${rest}m` : `${hours}h`;
+}
+
+export { commandLabel };
+
+/** The tag a command wears: its subagent's (`a3`) while that subagent is still in the session's list, else the session's letter. */
+export function commandTag(s: Pick<Session, 'slot' | 'subagents'>, c: Pick<CommandInfo, 'agentId'>): string {
+  const a = c.agentId ? s.subagents.find((x) => x.agentId === c.agentId) : undefined;
+  return a ? agentTag(s.slot, a.ordinal) : sessionTag(s.slot);
+}
+
+/** How a command ended, in words: `completed`, `failed`, `was stopped`, `ended with its session`, `ended`. */
+export const COMMAND_OUTCOME_WORDS: Record<CommandOutcome, string> = {
+  completed: 'completed',
+  failed: 'failed',
+  killed: 'was stopped',
+  session: 'ended with its session',
+  unknown: 'ended',
+};
+
+/** What an ended command's outcome says, without the time: `completed (exit 0)`, `failed (exit 2)`, `was stopped`. */
+export function commandOutcomeWords(c: Pick<CommandInfo, 'outcome' | 'exitCode'>): string {
+  const words = COMMAND_OUTCOME_WORDS[c.outcome ?? 'unknown'];
+  const withCode = (c.outcome === 'completed' || c.outcome === 'failed') && c.exitCode !== null;
+  return withCode ? `${words} (exit ${c.exitCode})` : words;
+}
+
+/** An ended command's line end: `completed (exit 0) 2 min ago`. */
+export function commandEnded(c: Pick<CommandInfo, 'outcome' | 'exitCode' | 'endedAt'>, now: number): string {
+  return `${commandOutcomeWords(c)} ${relativeTime(c.endedAt ?? new Date(now).toISOString(), now)}`;
+}
+
+/** A command's time: its run time while it counts, `serving 3h` while it serves, how it ended once it has. */
+export function commandWhen(c: CommandInfo, now: number): string {
+  if (c.endedAt !== null) return commandEnded(c, now);
+  return countsAsWork(c, now) ? runTime(c.startedAt, now) : `serving ${runTime(c.startedAt, now)}`;
+}
+
+/** A command's mark: `▸` running and counting, `◦` serving, `✓` completed, `!` any other end. */
+export function commandMark(c: CommandInfo, now: number): string {
+  if (c.endedAt !== null) return c.outcome === 'completed' ? '✓' : '!';
+  return countsAsWork(c, now) ? '▸' : '◦';
+}
+
+/** A command's description for a line: without a leading `#id`, and null when empty or only the label. */
+export function commandDescription(c: Pick<CommandInfo, 'commandHead' | 'description'>): string | null {
+  const description = commandDescriptionText(c);
+  return description && description !== commandLabel(c) ? description : null;
+}
+
+/** One command as text: `label · description · when`, the description left out when it only repeats the label. */
+export function commandText(c: CommandInfo, now: number): string {
+  return [commandLabel(c), commandDescription(c), commandWhen(c, now)].filter(Boolean).join(' · ');
+}
+
+/** One card line for a session's commands on a step. */
+export interface CommandLineParts {
+  mark: string;
+  tag: string;
+  /** The lead's label, then ` +n` for the other running commands (when all have ended, the other commands). */
+  label: string;
+  /** The lead's run time, `serving <time>`, or empty when every command has ended. */
+  when: string;
+  /** The lead is a serving command. */
+  serving: boolean;
+  /** Every command has ended. */
+  ended: boolean;
+  /** One line per command: `label · description · when`. */
+  title: string;
+}
+
+/**
+ * The card's commands line in parts. The lead is the first running command that counts as work, else the first running
+ * one, else the first. `commands` come in the layout's taskIds order (running by start, then ended by start).
+ */
+export function commandLineParts(s: Pick<Session, 'slot' | 'subagents'>, commands: CommandInfo[], now: number): CommandLineParts {
+  const running = commands.filter((c) => c.endedAt === null);
+  const lead = running.find((c) => countsAsWork(c, now)) ?? running[0] ?? commands[0];
+  const allEnded = running.length === 0;
+  const others = (allEnded ? commands.length : running.length) - 1;
+  const mark = allEnded ? (commands.every((c) => c.outcome === 'completed') ? '✓' : '!') : commandMark(lead, now);
+  return {
+    mark,
+    tag: commandTag(s, lead),
+    label: `${commandLabel(lead)}${others > 0 ? ` +${others}` : ''}`,
+    when: allEnded ? '' : commandWhen(lead, now),
+    serving: !allEnded && !countsAsWork(lead, now),
+    ended: allEnded,
+    title: commands.map((c) => commandText(c, now)).join('\n'),
+  };
 }

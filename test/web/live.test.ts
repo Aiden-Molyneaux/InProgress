@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { PastSession, Session, SubagentInfo, TrailAgent, WorkItem } from '../../src/core/types';
-import { END_WORDS, WORDS, agentLine, agentLineParts, chipLabel, chipName, circled, elapsed, kinTitle, leadTitle, runTime, taskFamily, taskOwner, trailAgentLine, trailAgentParts, trailLabel, waitsFor, withTag, withoutOwnId, workMark } from '../../web/src/live';
+import type { CommandInfo, PastSession, Session, SubagentInfo, TrailAgent, WorkItem } from '../../src/core/types';
+import { END_WORDS, WORDS, agentLine, agentLineParts, chipLabel, chipName, circled, commandEnded, commandLineParts, commandMark, commandTag, commandWhen, commandsSuffix, elapsed, kinTitle, leadTitle, runTime, taskFamily, taskOwner, trailAgentLine, trailAgentParts, trailLabel, waitsFor, withTag, withoutOwnId, workMark } from '../../web/src/live';
 
 const NOW = Date.parse('2026-10-02T12:00:00Z');
 const ago = (ms: number) => new Date(NOW - ms).toISOString();
@@ -62,7 +62,7 @@ describe('withoutOwnId', () => {
 describe('agentLine', () => {
   it('reads description · model · time while it runs', () => {
     expect(agentLine(agent(), NOW)).toBe('Wire up RevenueCat · sonnet · 12 min');
-    expect(agentLine(agent({ startedAt: ago(10_000) }), NOW)).toBe('Wire up RevenueCat · sonnet · <1 min');
+    expect(agentLine(agent({ startedAt: ago(10_000), runStartedAt: ago(10_000) }), NOW)).toBe('Wire up RevenueCat · sonnet · <1 min');
   });
 
   it('leaves out a model it does not know, and names an unpaired subagent by its type', () => {
@@ -102,14 +102,14 @@ describe('agentLine', () => {
 
 describe('chipLabel', () => {
   it('counts only the subagents still running', () => {
-    expect(chipLabel(session({ subagents: [agent(), agent({ agentId: 'a2', endedAt: ago(MIN) })] }))).toBe('E2E session · 1 subagent');
-    expect(chipLabel(session({ subagents: [agent(), agent({ agentId: 'a2' })] }))).toBe('E2E session · 2 subagents');
-    expect(chipLabel(session({ subagents: [agent({ endedAt: ago(MIN) })] }))).toBe('E2E session');
+    expect(chipLabel(session({ subagents: [agent(), agent({ agentId: 'a2', endedAt: ago(MIN) })] }), NOW)).toBe('E2E session · 1 subagent');
+    expect(chipLabel(session({ subagents: [agent(), agent({ agentId: 'a2' })] }), NOW)).toBe('E2E session · 2 subagents');
+    expect(chipLabel(session({ subagents: [agent({ endedAt: ago(MIN) })] }), NOW)).toBe('E2E session');
   });
 
   it('adds the state when the session is not working', () => {
-    expect(chipLabel(session({ state: 'idle', subagents: [agent()] }))).toBe('E2E session · 1 subagent · idle');
-    expect(chipLabel(session({ state: 'permission', title: null }))).toBe('Session s1abcd · needs permission');
+    expect(chipLabel(session({ state: 'idle', subagents: [agent()] }), NOW)).toBe('E2E session · 1 subagent · idle');
+    expect(chipLabel(session({ state: 'permission', title: null }), NOW)).toBe('Session s1abcd · needs permission');
   });
 });
 
@@ -244,33 +244,33 @@ describe('waitsFor', () => {
 
 describe('chipName', () => {
   it('leads the chip label with the session letter', () => {
-    expect(chipName(session({ title: "#4 Implement Fable's Notes", state: 'permission' }))).toBe("A · #4 Implement Fable's Notes · needs permission");
+    expect(chipName(session({ title: "#4 Implement Fable's Notes", state: 'permission' }), NOW)).toBe("A · #4 Implement Fable's Notes · needs permission");
     const three = [agent(), agent({ agentId: 'a2' }), agent({ agentId: 'a3' })];
-    expect(chipName(session({ slot: 2, title: '#5 UI Session post-Fable', subagents: three }))).toBe('C · #5 UI Session post-Fable · 3 subagents');
-    expect(chipName(session({ slot: 1, title: '#2 InProgress Dev Session', state: 'idle' }))).toBe('B · #2 InProgress Dev Session · idle');
+    expect(chipName(session({ slot: 2, title: '#5 UI Session post-Fable', subagents: three }), NOW)).toBe('C · #5 UI Session post-Fable · 3 subagents');
+    expect(chipName(session({ slot: 1, title: '#2 InProgress Dev Session', state: 'idle' }), NOW)).toBe('B · #2 InProgress Dev Session · idle');
   });
 
   it('is the bare chip label while the slot is empty', () => {
-    expect(chipName(session({ slot: null, title: '#2 InProgress Dev Session', state: 'idle' }))).toBe('#2 InProgress Dev Session · idle');
+    expect(chipName(session({ slot: null, title: '#2 InProgress Dev Session', state: 'idle' }), NOW)).toBe('#2 InProgress Dev Session · idle');
   });
 });
 
 describe('leadTitle', () => {
   it('names the letter, the title and the state word, then the running subagents, readers included', () => {
     const three = [agent(), agent({ agentId: 'a2', agentType: 'general-purpose' }), agent({ agentId: 'a3', agentType: 'general-purpose' })];
-    expect(leadTitle(session({ slot: 2, title: '#5 UI Session post-Fable', subagents: three }))).toBe('C · #5 UI Session post-Fable · working · 3 subagents');
-    expect(leadTitle(session({ state: 'idle' }))).toBe('A · E2E session · idle');
-    expect(leadTitle(session({ state: 'permission' }))).toBe('A · E2E session · needs permission');
+    expect(leadTitle(session({ slot: 2, title: '#5 UI Session post-Fable', subagents: three }), NOW)).toBe('C · #5 UI Session post-Fable · working · 3 subagents');
+    expect(leadTitle(session({ state: 'idle' }), NOW)).toBe('A · E2E session · idle');
+    expect(leadTitle(session({ state: 'permission' }), NOW)).toBe('A · E2E session · needs permission');
   });
 
   it('counts only the subagents still running, and drops the letter while the slot is empty', () => {
     const subagents = [agent(), agent({ agentId: 'a2', endedAt: ago(MIN) })];
-    expect(leadTitle(session({ slot: 1, title: 'Second session', subagents }))).toBe('B · Second session · working · 1 subagent');
-    expect(leadTitle(session({ slot: null }))).toBe('E2E session · working');
+    expect(leadTitle(session({ slot: 1, title: 'Second session', subagents }), NOW)).toBe('B · Second session · working · 1 subagent');
+    expect(leadTitle(session({ slot: null }), NOW)).toBe('E2E session · working');
   });
 
   it('takes its state words from WORDS', () => {
-    expect(WORDS).toEqual({ working: 'working', idle: 'idle', permission: 'needs permission', ended: 'ended' });
+    expect(WORDS).toEqual({ working: 'working', busy: 'busy', idle: 'idle', permission: 'needs permission', ended: 'ended' });
   });
 });
 
@@ -282,8 +282,8 @@ describe('the running subagent count', () => {
       for (const state of ['working', 'idle', 'permission', 'ended'] as const) {
         const subagents = [agent({ agentId: 'gone', endedAt: ago(MIN) }), ...Array.from({ length: running }, (_, i) => agent({ agentId: `r${i}` }))];
         const s = session({ state, subagents });
-        expect(count(chipLabel(s))).toBe(text);
-        expect(count(leadTitle(s))).toBe(text);
+        expect(count(chipLabel(s, NOW))).toBe(text);
+        expect(count(leadTitle(s, NOW))).toBe(text);
       }
     }
   });
@@ -291,7 +291,7 @@ describe('the running subagent count', () => {
 
 describe('kinTitle', () => {
   const kin = (extra: Partial<SubagentInfo> = {}) =>
-    agent({ agentType: 'general-purpose', ordinal: 10, description: 'Draft the whiteboard take', model: 'opus-5-5', startedAt: ago(18 * MIN), nodeId: null, ...extra });
+    agent({ agentType: 'general-purpose', ordinal: 10, description: 'Draft the whiteboard take', model: 'opus-5-5', startedAt: ago(18 * MIN), runStartedAt: ago(18 * MIN), nodeId: null, ...extra });
 
   it('is the tagged agent line, then the purpose on a second line', () => {
     const purpose = 'You draft the whiteboard take of the InProgress window.';
@@ -333,5 +333,137 @@ describe('runTime', () => {
       // From 10 h the five-character bound drops the minutes ('12h'); below that they agree to the minute.
       expect(short.m, `${minutes} min: minutes`).toBe(long.h >= 10 ? 0 : long.m);
     }
+  });
+});
+
+const command = (extra: Partial<CommandInfo> = {}): CommandInfo => ({
+  taskId: 'b1', kind: 'shell', agentId: '', persistent: false, description: 'Run the e2e suite', commandHead: 'npm run test:e2e', nodeId: 57,
+  startedAt: ago(12 * MIN), endedAt: null, outcome: null, exitCode: null, ...extra,
+});
+const ended = (extra: Partial<CommandInfo> = {}) => command({ endedAt: ago(2 * MIN), outcome: 'completed', exitCode: 0, ...extra });
+
+describe('busy words', () => {
+  const worker = agent({ agentType: 'general-purpose' });
+
+  it('reads busy in the chip label, the chip name and the lead title, after the counts', () => {
+    const s = session({ state: 'idle', slot: 0, subagents: [worker], commands: [command(), command({ taskId: 'b2' })] });
+    expect(chipLabel(s, NOW)).toBe('E2E session · 1 subagent · 2 commands · busy');
+    expect(chipName(s, NOW)).toBe('A · E2E session · 1 subagent · 2 commands · busy');
+    expect(leadTitle(s, NOW)).toBe('A · E2E session · busy · 1 subagent · 2 commands');
+  });
+
+  it('says command in the singular for one, and names nothing when none counts', () => {
+    expect(commandsSuffix(session({ state: 'idle', commands: [command()] }), NOW)).toBe(' · 1 command');
+    expect(commandsSuffix(session({ commands: [] }), NOW)).toBe('');
+  });
+
+  it('does not count serving, persistent, 30-minute-old or ended commands', () => {
+    const commands = [
+      command({ commandHead: 'npm run dev' }),
+      command({ taskId: 'b2', persistent: true }),
+      command({ taskId: 'b3', startedAt: ago(31 * MIN) }),
+      ended({ taskId: 'b4' }),
+      command({ taskId: 'b5' }),
+    ];
+    expect(commandsSuffix(session({ state: 'idle', commands }), NOW)).toBe(' · 1 command');
+    expect(chipLabel(session({ state: 'idle', commands: commands.slice(0, 4) }), NOW)).toBe('E2E session · idle');
+    expect(leadTitle(session({ state: 'idle', commands: commands.slice(0, 4) }), NOW)).toBe('A · E2E session · idle');
+  });
+
+  it('keeps a working session working with its commands counted', () => {
+    expect(chipLabel(session({ commands: [command()] }), NOW)).toBe('E2E session · 1 command');
+  });
+});
+
+describe('a resumed subagent', () => {
+  it('counts its run time from runStartedAt, in the line parts and the line', () => {
+    const resumed = agent({ startedAt: ago(90 * MIN), runStartedAt: ago(3 * MIN) });
+    expect(agentLineParts(resumed, NOW).when).toBe('3 min');
+    expect(agentLine(resumed, NOW)).toBe('Wire up RevenueCat · sonnet · 3 min');
+  });
+
+  it('keeps the trail ran span from startedAt', () => {
+    const resumed = agent({ startedAt: ago(90 * MIN), runStartedAt: ago(3 * MIN), endedAt: ago(MIN) });
+    expect(trailAgentParts(resumed, NOW).when).toBe('ran 1 h 29 min · stopped 1 min ago');
+  });
+});
+
+describe('commandTag', () => {
+  it('is the subagent tag for a command a live subagent started, else the session letter', () => {
+    const s = session({ slot: 0, subagents: [agent({ agentId: 'x3', ordinal: 3 })] });
+    expect(commandTag(s, command({ agentId: 'x3' }))).toBe('a3');
+    expect(commandTag(s, command({ agentId: '' }))).toBe('A');
+    expect(commandTag(s, command({ agentId: 'gone' }))).toBe('A');
+    expect(commandTag(session({ slot: null }), command())).toBe('');
+  });
+});
+
+describe('commandEnded', () => {
+  it('says how each outcome ended, with the exit code for completed and failed, then how long ago', () => {
+    expect(commandEnded(ended(), NOW)).toBe('completed (exit 0) 2 min ago');
+    expect(commandEnded(ended({ outcome: 'failed', exitCode: 2 }), NOW)).toBe('failed (exit 2) 2 min ago');
+    expect(commandEnded(ended({ exitCode: null }), NOW)).toBe('completed 2 min ago');
+    expect(commandEnded(ended({ outcome: 'killed', exitCode: 137 }), NOW)).toBe('was stopped 2 min ago');
+    expect(commandEnded(ended({ outcome: 'session', exitCode: null }), NOW)).toBe('ended with its session 2 min ago');
+    expect(commandEnded(ended({ outcome: 'unknown', exitCode: null }), NOW)).toBe('ended 2 min ago');
+    expect(commandEnded(ended({ outcome: null, exitCode: null }), NOW)).toBe('ended 2 min ago');
+  });
+});
+
+describe('commandWhen and commandMark', () => {
+  it('reads the run time of a counting command, serving and the time of a server, and the end of an ended one', () => {
+    expect(commandWhen(command(), NOW)).toBe('12m');
+    expect(commandMark(command(), NOW)).toBe('▸');
+    expect(commandWhen(command({ commandHead: 'npm run dev', startedAt: ago(180 * MIN) }), NOW)).toBe('serving 3h');
+    expect(commandMark(command({ commandHead: 'npm run dev' }), NOW)).toBe('◦');
+    expect(commandWhen(ended(), NOW)).toBe('completed (exit 0) 2 min ago');
+    expect(commandMark(ended(), NOW)).toBe('✓');
+    expect(commandMark(ended({ outcome: 'failed', exitCode: 1 }), NOW)).toBe('!');
+  });
+});
+
+describe('commandLineParts', () => {
+  const s = session({ slot: 0, subagents: [agent({ agentId: 'x3', ordinal: 3 })] });
+
+  it('reads one running command: mark, tag, head and run time', () => {
+    const parts = commandLineParts(s, [command()], NOW);
+    expect(parts).toMatchObject({ mark: '▸', tag: 'A', label: 'npm run test:e2e', when: '12m', serving: false, ended: false });
+    expect(parts.title).toBe('npm run test:e2e · Run the e2e suite · 12m');
+  });
+
+  it('adds +n for the other running commands and leads with the first one that counts', () => {
+    const commands = [
+      command({ taskId: 'b0', commandHead: 'npm run dev', startedAt: ago(180 * MIN) }),
+      command({ taskId: 'b1', agentId: 'x3', commandHead: 'tsc', description: null }),
+      command({ taskId: 'b2', commandHead: 'vitest' }),
+      ended({ taskId: 'b3' }),
+    ];
+    const parts = commandLineParts(s, commands, NOW);
+    expect(parts).toMatchObject({ mark: '▸', tag: 'a3', label: 'tsc +2', when: '12m', serving: false, ended: false });
+    expect(parts.title.split('\n')).toEqual([
+      'npm run dev · Run the e2e suite · serving 3h',
+      'tsc · 12m',
+      'vitest · Run the e2e suite · 12m',
+      'npm run test:e2e · Run the e2e suite · completed (exit 0) 2 min ago',
+    ]);
+  });
+
+  it('leads with a serving command when nothing running counts: a hollow mark and serving', () => {
+    const parts = commandLineParts(s, [command({ commandHead: 'npm run dev', startedAt: ago(180 * MIN) })], NOW);
+    expect(parts).toMatchObject({ mark: '◦', label: 'npm run dev', when: 'serving 3h', serving: true, ended: false });
+  });
+
+  it('reads a check when every command completed, a bang when any did not, and has no time', () => {
+    const done = commandLineParts(s, [ended(), ended({ taskId: 'b2', commandHead: 'tsc' })], NOW);
+    expect(done).toMatchObject({ mark: '✓', label: 'npm run test:e2e +1', when: '', ended: true, serving: false });
+    for (const outcome of ['failed', 'killed', 'unknown', 'session'] as const) {
+      expect(commandLineParts(s, [ended(), ended({ taskId: 'b2', outcome })], NOW).mark, outcome).toBe('!');
+    }
+  });
+
+  it('names a head-less command by its description with a leading #id dropped, and does not repeat it in the title', () => {
+    const parts = commandLineParts(s, [command({ commandHead: null, description: '#57 Run the suite' })], NOW);
+    expect(parts.label).toBe('Run the suite');
+    expect(parts.title).toBe('Run the suite · 12m');
   });
 });

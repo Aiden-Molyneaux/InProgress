@@ -131,6 +131,18 @@ export function useInProgress(): InProgressState {
     void loadProjects();
   }, [loadProjects]);
 
+  // A command crossing 30 minutes stops counting as work with no event to say so: while any tab's dot is lit, re-ask for
+  // the summaries every 30 s (the window's clock) so the dot clears on a quiet machine.
+  const anyBusy = projects.some((p) => p.busySessions > 0);
+  useEffect(() => {
+    if (!anyBusy) return;
+    // A hidden tab skips the tick: the next one after it shows again catches up.
+    const timer = window.setInterval(() => {
+      if (!document.hidden) void loadProjects();
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [anyBusy, loadProjects]);
+
   useEffect(() => {
     // The switch away from a project the window deleted has rendered: slugRef no longer names it.
     for (const [s, state] of deletes.current) if (state === 'done' && s !== slug) deletes.current.delete(s);

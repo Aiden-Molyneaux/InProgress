@@ -1,4 +1,4 @@
-import { commandShown, countsAsWork, sessionActivity } from './activity';
+import { commandShown, countsAsWork, orderCommands, sessionActivity } from './activity';
 import { buildIndex, computeVisible, countDone, isNeedsYou, progress, type FoldOverrides } from './tree';
 import { ENDED_AGENT_MS, glyphTitle, isReader, ownerTag, sessionTag, type CommandInfo, type EventRow, type PastSession, type QueueEntry, type ResourceMeta, type Session, type SubagentInfo, type TrailAgent, type TreeNode, type WorkItem } from './types';
 
@@ -597,8 +597,7 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
       }
       if (commands.length) {
         // Running ones first, each part by start, so the line's first name is the oldest running command.
-        const byStart = (a: CommandInfo, b: CommandInfo) => a.startedAt.localeCompare(b.startedAt) || a.taskId.localeCompare(b.taskId);
-        const taskIds = [...commands.filter((c) => c.endedAt === null).sort(byStart), ...commands.filter((c) => c.endedAt !== null).sort(byStart)].map((c) => c.taskId);
+        const taskIds = orderCommands(commands).map((c) => c.taskId);
         items.push({ kind: 'commands', id: `c${session.id}:${node.id}`, sessionId: session.id, nodeId: node.id, taskIds, x, y: ly });
         last = { y: ly, kin: false };
         ly += COMMAND_LINE;

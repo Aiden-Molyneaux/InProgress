@@ -60,9 +60,10 @@ export function stepTab(tabs: Pick<ProjectSummary, 'slug'>[], current: string | 
 }
 
 /**
- * A tab's or a ⋯ row's accessible name: the full name, then what its badges show. Working stands for the dot, which
- * shows while a session works there or waits on a running worker of its own.
+ * A tab's or a ⋯ row's accessible name: the full name, then what its badges show. The dot shows while a session works
+ * there (`working`, a pulsing dot) or is busy on a running worker or command of its own (`busy`, a still dot).
  */
-export function projectLabel(p: Pick<ProjectSummary, 'name' | 'needsYou' | 'busySessions'>): string {
-  return [p.name, p.needsYou > 0 && `${p.needsYou} need you`, p.busySessions > 0 && 'working'].filter(Boolean).join(', ');
+export function projectLabel(p: Pick<ProjectSummary, 'name' | 'needsYou' | 'workingSessions' | 'busySessions'>): string {
+  const activity = p.workingSessions > 0 ? 'working' : p.busySessions > 0 ? 'busy' : null;
+  return [p.name, p.needsYou > 0 && `${p.needsYou} need you`, activity].filter(Boolean).join(', ');
 }

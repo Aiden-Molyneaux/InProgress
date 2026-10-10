@@ -1,4 +1,4 @@
-import { AGENT_LINE, CARD_GAP, CARD_PAD, DONE_LINE, FOLD_ROW, INDENT, NODE_H, READERS_LINE, ROW, STACK_HEAD, TASK_ROW } from '../../../src/core/layout';
+import { AGENT_LINE, CARD_GAP, CARD_PAD, COMMAND_LINE, DONE_LINE, FOLD_ROW, INDENT, NODE_H, READERS_LINE, ROW, STACK_HEAD, TASK_ROW } from '../../../src/core/layout';
 
 /**
  * Layout's pitch as CSS custom properties, one per exported constant. Canvas writes them once, on `div.ip-canvas`,
@@ -12,6 +12,7 @@ export const PITCH: Record<string, string> = {
   '--fold-row': `${FOLD_ROW}px`,
   '--agent-line': `${AGENT_LINE}px`,
   '--readers-line': `${READERS_LINE}px`,
+  '--command-line': `${COMMAND_LINE}px`,
   '--done-line': `${DONE_LINE}px`,
   '--task-row': `${TASK_ROW}px`,
   '--card-pad': `${CARD_PAD}px`,
