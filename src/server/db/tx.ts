@@ -19,6 +19,9 @@ export function createCtx(db: DB, now: () => string = () => new Date().toISOStri
   return { db, bus: new EventBus(), now };
 }
 
+/** The ISO time `ms` before the context's clock: the cutoff for "stopped less than this long ago". */
+export const msAgo = (ctx: Ctx, ms: number): string => new Date(Date.parse(ctx.now()) - ms).toISOString();
+
 export interface EventInput {
   projectId: number | null;
   type: string;

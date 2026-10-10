@@ -26,7 +26,7 @@ describe('breadcrumbFor', () => {
     // An idle session on Android signing gives its card an agent line, so the card is taller than its header.
     const session: Session = {
       id: 's1', projectId: 1, title: 'S1', cwd: null, branch: null, transcriptPath: null, state: 'idle', focusNodeId: 3,
-      promptsSinceUpdate: 0, startedAt: 't', lastSeenAt: 't', endedAt: null, slot: 0, subagents: [],
+      promptsSinceUpdate: 0, startedAt: 't', lastSeenAt: 't', endedAt: null, slot: 0, subagents: [], commands: [],
     };
     const tall = layoutOutline({ nodes, resources: [], sessions: [session] });
     const card = tall.nodeItems.get(3)!;

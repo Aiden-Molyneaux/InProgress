@@ -144,7 +144,7 @@ describe('built artifacts', () => {
     const snapshot = await client.get<ProjectSnapshot>('/api/projects/smoke');
     const session = snapshot.sessions.find((s) => s.id === 'smoke-1')!;
     expect(session.subagents).toEqual([
-      { agentId: 'a0smoke0agent0001', agentType: 'Explore', startedAt: expect.any(String), description: `#${step.id} Map the smoke run`, model: 'haiku', nodeId: step.id, endedAt: null, ordinal: 1, purpose: 'Map the smoke run.', endReason: null, lastActiveAt: null },
+      { agentId: 'a0smoke0agent0001', agentType: 'Explore', startedAt: expect.any(String), runStartedAt: expect.any(String), description: `#${step.id} Map the smoke run`, model: 'haiku', nodeId: step.id, endedAt: null, ordinal: 1, purpose: 'Map the smoke run.', endReason: null, lastActiveAt: null },
     ]);
     const stored = JSON.stringify({ dispatched, now: storedRows('subagent_dispatches', 'session_subagents', 'events') });
     for (const text of kept) {

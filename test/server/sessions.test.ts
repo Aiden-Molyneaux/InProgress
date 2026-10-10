@@ -41,6 +41,16 @@ function setup(ctx: Ctx = makeCtx()) {
 
 const start = (cwd = 'C:\\personal\\InGame\\docs', extra = {}) => ({ event: 'start' as const, source: 'startup', cwd, ...extra });
 
+describe('findSession commands', () => {
+  it('returns the session\'s background commands, and none for a session without', () => {
+    const { ctx } = setup();
+    handleHookEvent(ctx, 's1', start());
+    expect(findSession(ctx, 's1')!.commands).toEqual([]);
+    ctx.db.prepare("INSERT INTO session_commands (session_id, task_id, kind, started_at) VALUES ('s1', 'b1', 'shell', ?)").run(ctx.now());
+    expect(findSession(ctx, 's1')!.commands).toMatchObject([{ taskId: 'b1', kind: 'shell', endedAt: null }]);
+  });
+});
+
 describe('handleHookEvent', () => {
   it('stores nothing for an untracked session', () => {
     const { ctx } = setup();

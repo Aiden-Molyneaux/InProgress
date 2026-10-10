@@ -25,7 +25,7 @@ describe('chipOrder', () => {
 describe('chipKin', () => {
   const ENDED = '2026-10-07T12:00:00Z';
   const agent = (agentId: string, extra: Partial<SubagentInfo> = {}): SubagentInfo => ({
-    agentId, agentType: 'general-purpose', startedAt: '2026-10-07T11:00:00Z', description: null, model: null, nodeId: null, endedAt: null,
+    agentId, agentType: 'general-purpose', startedAt: '2026-10-07T11:00:00Z', runStartedAt: '2026-10-07T11:00:00Z', description: null, model: null, nodeId: null, endedAt: null,
     ordinal: null, purpose: null, endReason: null, lastActiveAt: null, ...extra,
   });
   const agentIds = (kin: { shown: SubagentInfo[] }) => kin.shown.map((a) => a.agentId);

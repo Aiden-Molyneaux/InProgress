@@ -1,5 +1,5 @@
 import { ENDED_AGENT_MS, READER_AGENT_TYPES, TRAIL_MS, type EndReason, type SubagentInfo, type TrailAgent } from '../../core/types';
-import type { Ctx } from '../db/tx';
+import { msAgo, type Ctx } from '../db/tx';
 
 /** How long a dispatch waits for its subagent to start; an older one (a launch that was denied, say) never pairs. */
 export const DISPATCH_TTL_MS = 10 * 60 * 1000;
@@ -19,6 +19,7 @@ interface SubagentRow {
   start_focus_id: number | null;
   end_reason: EndReason | null;
   last_active_at: string | null;
+  run_started_at: string | null;
 }
 
 interface DispatchRow {
@@ -57,8 +58,6 @@ export const NOT_READER_SQL = `a.agent_type NOT IN (${READER_AGENT_TYPES.map((t)
  */
 export const ENDED_THIS_LIFE_SQL = "a.ended_at >= COALESCE(s.revived_at, '')";
 
-const before = (ctx: Ctx, ms: number) => new Date(Date.parse(ctx.now()) - ms).toISOString();
-
 /**
  * One row as the UI has it: the live list and the trail share this, so a field added to one reaches both. Its node is
  * its dispatch's (the `#id`, else the focus at dispatch), else the focus at its start: the window, Details and task
@@ -68,6 +67,7 @@ const toInfo = (r: SubagentRow): SubagentInfo => ({
   agentId: r.agent_id,
   agentType: r.agent_type,
   startedAt: r.started_at,
+  runStartedAt: r.run_started_at ?? r.started_at,
   description: r.description,
   model: r.model,
   nodeId: r.node_id ?? r.start_focus_id,
@@ -91,7 +91,7 @@ export function listSubagents(ctx: Ctx, sessionId: string): SubagentInfo[] {
        WHERE a.session_id = ? AND (a.ended_at IS NULL OR a.ended_at >= ? OR (a.end_reason = 'limit' AND ${ENDED_THIS_LIFE_SQL}))
        ORDER BY a.started_at, a.agent_id`,
     )
-    .all(sessionId, before(ctx, ENDED_AGENT_MS)) as SubagentRow[])
+    .all(sessionId, msAgo(ctx, ENDED_AGENT_MS)) as SubagentRow[])
     .map(toInfo);
 }
 
@@ -107,7 +107,7 @@ export function listTrailAgents(ctx: Ctx, projectId: number): TrailAgent[] {
        WHERE s.project_id = ? AND a.ended_at IS NOT NULL AND a.ended_at >= ? AND ${NOT_READER_SQL}
        ORDER BY a.started_at, a.session_id, a.agent_id`,
     )
-    .all(projectId, before(ctx, TRAIL_MS)) as SubagentRow[])
+    .all(projectId, msAgo(ctx, TRAIL_MS)) as SubagentRow[])
     .map((r) => ({ ...toInfo(r), sessionId: r.session_id }));
 }
 
@@ -144,7 +144,7 @@ const forget = (ctx: Ctx, d: DispatchRow) => ctx.db.prepare('DELETE FROM subagen
 function pairFifo(ctx: Ctx, sessionId: string, agentId: string, agentType: string): void {
   const d = ctx.db
     .prepare('SELECT * FROM subagent_dispatches WHERE session_id = ? AND agent_type = ? AND agent_id IS NULL AND created_at >= ? ORDER BY created_at, rowid LIMIT 1')
-    .get(sessionId, agentType, before(ctx, DISPATCH_TTL_MS)) as DispatchRow | undefined;
+    .get(sessionId, agentType, msAgo(ctx, DISPATCH_TTL_MS)) as DispatchRow | undefined;
   if (d) assign(ctx, d, agentId);
   show(ctx, sessionId, agentId, d);
 }
@@ -285,12 +285,12 @@ export function endSubagents(ctx: Ctx, sessionId: string, at: string): void {
  * a foreground agent's launch, which may correct it, only arrives when that agent finishes.
  */
 export function pruneSubagents(ctx: Ctx): { dispatches: number; subagents: number } {
-  const subagents = ctx.db.prepare('DELETE FROM session_subagents WHERE ended_at IS NOT NULL AND ended_at < ?').run(before(ctx, TRAIL_MS)).changes;
+  const subagents = ctx.db.prepare('DELETE FROM session_subagents WHERE ended_at IS NOT NULL AND ended_at < ?').run(msAgo(ctx, TRAIL_MS)).changes;
   const dispatches = ctx.db
     .prepare(
       `DELETE FROM subagent_dispatches WHERE created_at < ? AND (agent_id IS NULL OR NOT EXISTS (
          SELECT 1 FROM session_subagents s WHERE s.session_id = subagent_dispatches.session_id AND s.agent_id = subagent_dispatches.agent_id))`,
     )
-    .run(before(ctx, DISPATCH_TTL_MS)).changes;
+    .run(msAgo(ctx, DISPATCH_TTL_MS)).changes;
   return { dispatches, subagents };
 }

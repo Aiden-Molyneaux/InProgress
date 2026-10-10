@@ -36,13 +36,26 @@ const purposed = (input: HookEventInput, purpose: string): HookEventInput => ({ 
 const purposes = (ctx: Ctx) => Object.fromEntries(subagents(ctx).map((s) => [s.agentId, s.purpose]));
 const descriptions = (ctx: Ctx) => Object.fromEntries(subagents(ctx).map((s) => [s.agentId, s.description]));
 
+describe('runStartedAt', () => {
+  it('is the start time while run_started_at is null, and run_started_at once it is set', () => {
+    const { ctx, hook, tick } = setup();
+    hook(start('a1'));
+    const startedAt = subagents(ctx)[0].startedAt;
+    expect(subagents(ctx)[0].runStartedAt).toBe(startedAt);
+    tick(MIN);
+    const later = new Date(Date.parse(startedAt) + MIN).toISOString();
+    ctx.db.prepare("UPDATE session_subagents SET run_started_at = ? WHERE agent_id = 'a1'").run(later);
+    expect(subagents(ctx)[0]).toMatchObject({ startedAt, runStartedAt: later });
+  });
+});
+
 describe('subagent dispatches', () => {
   it('pairs a dispatch with the next SubagentStart of its type, with its description, model and the focus node', () => {
     const { ctx, play, hook } = setup();
     expect(hook(dispatch('toolu_1', 'Map the hook payloads', 'Explore', 'sonnet'))).toEqual({ tracked: true });
     hook(start('a1'));
     expect(subagents(ctx)).toEqual([
-      { agentId: 'a1', agentType: 'Explore', startedAt: expect.any(String), description: 'Map the hook payloads', model: 'sonnet', nodeId: play.id, endedAt: null, ordinal: 1, purpose: null, endReason: null, lastActiveAt: null },
+      { agentId: 'a1', agentType: 'Explore', startedAt: expect.any(String), runStartedAt: expect.any(String), description: 'Map the hook payloads', model: 'sonnet', nodeId: play.id, endedAt: null, ordinal: 1, purpose: null, endReason: null, lastActiveAt: null },
     ]);
   });
 
@@ -544,7 +557,7 @@ describe('the trail of ended subagents in the snapshot', () => {
     hook({ event: 'subagent-stop', agentId: 'a1' });
     // The layout, not the server, decides when a live session's stopped subagent leaves its greyed badge for the trail.
     expect(getProjectSnapshot(ctx, project.slug).trailAgents).toEqual([
-      { sessionId: 's1', agentId: 'a1', agentType: 'general-purpose', startedAt: '2026-10-02T09:00:00.000Z', description: 'Map the hooks', model: 'sonnet', nodeId: play.id, endedAt: '2026-10-02T09:01:00.000Z', ordinal: 1, purpose: null, endReason: null, lastActiveAt: null },
+      { sessionId: 's1', agentId: 'a1', agentType: 'general-purpose', startedAt: '2026-10-02T09:00:00.000Z', runStartedAt: '2026-10-02T09:00:00.000Z', description: 'Map the hooks', model: 'sonnet', nodeId: play.id, endedAt: '2026-10-02T09:01:00.000Z', ordinal: 1, purpose: null, endReason: null, lastActiveAt: null },
     ]);
     expect(getProjectSnapshot(ctx, other.slug).trailAgents.map((a) => a.agentId)).toEqual(['c1']);
   });

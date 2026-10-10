@@ -7,11 +7,11 @@ const ago = (ms: number) => new Date(NOW - ms).toISOString();
 const MIN = 60_000;
 
 const agent = (extra: Partial<SubagentInfo> = {}): SubagentInfo => ({
-  agentId: 'a1', agentType: 'Explore', startedAt: ago(12 * MIN), description: 'Wire up RevenueCat', model: 'sonnet', nodeId: 57, endedAt: null, ordinal: 1, purpose: null, endReason: null, lastActiveAt: null, ...extra,
+  agentId: 'a1', agentType: 'Explore', startedAt: ago(12 * MIN), runStartedAt: ago(12 * MIN), description: 'Wire up RevenueCat', model: 'sonnet', nodeId: 57, endedAt: null, ordinal: 1, purpose: null, endReason: null, lastActiveAt: null, ...extra,
 });
 const session = (extra: Partial<Session> = {}): Session => ({
   id: 's1abcdef', projectId: 1, title: 'E2E session', cwd: null, branch: null, transcriptPath: null, state: 'working', focusNodeId: 57,
-  promptsSinceUpdate: 0, startedAt: 't', lastSeenAt: 't', endedAt: null, slot: 0, subagents: [], ...extra,
+  promptsSinceUpdate: 0, startedAt: 't', lastSeenAt: 't', endedAt: null, slot: 0, subagents: [], commands: [], ...extra,
 });
 const task = (id: number, extra: Partial<WorkItem> = {}): WorkItem => ({
   id, nodeId: 57, sessionId: 's1abcdef', agentId: '', subject: `Task ${id}`, status: 'pending', blocks: [], position: id, updatedAt: 't', endedAt: null, ...extra,

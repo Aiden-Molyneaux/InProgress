@@ -192,4 +192,28 @@ export const MIGRATIONS: string[] = [
   -- Only a nullable column: v1 to v7 builds can still read and write this schema, so a rollback across it works.
   INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
   `,
+  // 9: background commands, and when a resumed subagent's current run started (#228, design r79 section 2). A command is
+  // a Bash, PowerShell or Monitor run in the background that a session or one of its subagents started.
+  `
+  CREATE TABLE session_commands (
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    task_id TEXT NOT NULL,
+    tool_use_id TEXT,
+    agent_id TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL CHECK (kind IN ('shell','monitor')),
+    persistent INTEGER NOT NULL DEFAULT 0,
+    description TEXT,
+    command_head TEXT,
+    node_id INTEGER REFERENCES nodes(id) ON DELETE SET NULL,
+    started_at TEXT NOT NULL,
+    ended_at TEXT,
+    outcome TEXT CHECK (outcome IS NULL OR outcome IN ('completed','failed','killed','session','unknown')),
+    exit_code INTEGER,
+    PRIMARY KEY (session_id, task_id)
+  );
+  CREATE INDEX session_commands_live ON session_commands (session_id, ended_at);
+  ALTER TABLE session_subagents ADD COLUMN run_started_at TEXT;
+  -- A new table and a nullable column: v1 to v8 builds can still read and write this schema, so a rollback across it works.
+  INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+  `,
 ];

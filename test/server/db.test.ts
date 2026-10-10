@@ -43,7 +43,7 @@ describe('database', () => {
       expect(db.prepare('SELECT id, title FROM nodes ORDER BY id').all()).toEqual([{ id: 1, title: 'InGame' }, { id: 2, title: 'Play app signing' }]);
       expect(db.prepare('SELECT id, focus_node_id FROM sessions').all()).toEqual([{ id: 's1', focus_node_id: 2 }]);
       expect(db.prepare('SELECT * FROM session_subagents').all()).toEqual([
-        { session_id: 's1', agent_id: 'a1', agent_type: 'Explore', started_at: 't', description: null, model: null, node_id: null, tool_use_id: null, ended_at: null, ordinal: null, purpose: null, start_focus_id: null, end_reason: null, last_active_at: null },
+        { session_id: 's1', agent_id: 'a1', agent_type: 'Explore', started_at: 't', description: null, model: null, node_id: null, tool_use_id: null, ended_at: null, ordinal: null, purpose: null, start_focus_id: null, end_reason: null, last_active_at: null, run_started_at: null },
       ]);
       expect((db.prepare('SELECT COUNT(*) AS c FROM events').get() as { c: number }).c).toBe(1);
       // The new tables take rows, and their foreign keys follow the node: work items go with it, a subagent forgets it.
@@ -420,7 +420,6 @@ describe('database', () => {
     v7.close();
     const db = openDb(file);
     try {
-      expect(SOFT_DELETE).toBe(MIGRATIONS.length - 1);
       expect(schemaVersion(db)).toBe(MIGRATIONS.length);
       expect(db.prepare('SELECT id, status, deleted_at FROM projects ORDER BY id').all()).toEqual([
         { id: 1, status: 'active', deleted_at: null },
@@ -495,6 +494,78 @@ describe('database', () => {
     } finally {
       MIGRATIONS.push(...shipped);
     }
+  });
+
+  /** Where migration 9 (background commands) sits. */
+  const COMMANDS = MIGRATIONS.findIndex((m) => m.includes('CREATE TABLE session_commands'));
+
+  it('migrates a database at v8 with data to v9', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ip-migrate-v8-'));
+    const file = join(dir, 'inprogress.db');
+    const v8 = new Database(file);
+    v8.exec('CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+    for (const m of MIGRATIONS.slice(0, COMMANDS)) v8.exec(m);
+    v8.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', ?)").run(String(COMMANDS));
+    v8.prepare("INSERT INTO projects (id, slug, name, status, root_node_id, created_at, updated_at) VALUES (1, 'p', 'P', 'active', 0, 't', 't')").run();
+    v8.prepare("INSERT INTO nodes (id, project_id, parent_id, position, kind, title, created_at, updated_at) VALUES (1, 1, NULL, 1, 'goal', 'P', 't', 't')").run();
+    v8.prepare("INSERT INTO sessions (id, project_id, state, started_at, last_seen_at, slot) VALUES ('s1', 1, 'working', 't', 't', 0)").run();
+    v8.prepare("INSERT INTO session_subagents (session_id, agent_id, agent_type, started_at, ordinal, description, node_id) VALUES ('s1', 'a1', 'general-purpose', 't1', 1, 'Work', 1)").run();
+    const before = v8.prepare('SELECT * FROM session_subagents').all();
+    v8.close();
+    const db = openDb(file);
+    try {
+      expect(COMMANDS).toBeGreaterThan(0);
+      expect(schemaVersion(db)).toBe(MIGRATIONS.length);
+      expect(db.prepare('SELECT * FROM session_commands').all()).toEqual([]);
+      expect(db.prepare('SELECT * FROM session_subagents').all()).toEqual(before.map((r) => ({ ...(r as object), run_started_at: null })));
+      expect(db.prepare("SELECT value FROM meta WHERE key = 'min_reader_version'").pluck().get()).toBe('1');
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('marks migration 9 readable by v1 builds, so a v8 build still opens a v9 database and its own writes work', () => {
+    const { db } = makeCtx();
+    expect(db.prepare("SELECT value FROM meta WHERE key = 'min_reader_version'").pluck().get()).toBe('1');
+    expect(COMMANDS).toBeGreaterThan(0);
+    // This build as the v8 build sees the schema: every migration before background commands.
+    const shipped = MIGRATIONS.splice(COMMANDS);
+    try {
+      expect(shipped[0]).toContain('session_commands');
+      expect(() => migrate(db)).not.toThrow();
+      expect(schemaVersion(db)).toBe(COMMANDS + shipped.length);
+      db.prepare("INSERT INTO sessions (id, state, started_at, last_seen_at) VALUES ('s1', 'working', 't', 't')").run();
+      // The v8 build's own writes never name run_started_at.
+      db.prepare('INSERT INTO session_subagents (session_id, agent_id, agent_type, started_at) VALUES (?, ?, ?, ?)').run('s1', 'a1', 'general-purpose', 't');
+      db.prepare('UPDATE session_subagents SET ended_at = ? WHERE session_id = ? AND agent_id = ?').run('t2', 's1', 'a1');
+      expect(db.prepare("SELECT ended_at, run_started_at FROM session_subagents WHERE agent_id = 'a1'").get()).toEqual({ ended_at: 't2', run_started_at: null });
+    } finally {
+      MIGRATIONS.push(...shipped);
+    }
+  });
+
+  it("deletes a session's commands with it, and clears a command's step when the step is deleted", () => {
+    const { db } = makeCtx();
+    db.prepare("INSERT INTO projects (id, slug, name, created_at, updated_at) VALUES (1, 'p', 'P', 't', 't')").run();
+    db.prepare("INSERT INTO nodes (id, project_id, parent_id, position, kind, title, created_at, updated_at) VALUES (1, 1, NULL, 1, 'goal', 'P', 't', 't')").run();
+    db.prepare("INSERT INTO sessions (id, project_id, state, started_at, last_seen_at, slot) VALUES ('s1', 1, 'working', 't', 't', 0)").run();
+    db.prepare("INSERT INTO session_commands (session_id, task_id, kind, node_id, started_at) VALUES ('s1', 'b1', 'shell', 1, 't')").run();
+    expect(db.prepare("SELECT node_id FROM session_commands WHERE task_id = 'b1'").pluck().get()).toBe(1);
+    db.prepare('DELETE FROM nodes WHERE id = 1').run();
+    expect(db.prepare("SELECT node_id FROM session_commands WHERE task_id = 'b1'").pluck().get()).toBeNull();
+    db.prepare("DELETE FROM sessions WHERE id = 's1'").run();
+    expect(db.prepare('SELECT COUNT(*) FROM session_commands').pluck().get()).toBe(0);
+  });
+
+  it('takes only a known kind and outcome', () => {
+    const { db } = makeCtx();
+    db.prepare("INSERT INTO sessions (id, state, started_at, last_seen_at) VALUES ('s1', 'working', 't', 't')").run();
+    const insert = db.prepare("INSERT INTO session_commands (session_id, task_id, kind, started_at, ended_at, outcome) VALUES ('s1', ?, ?, 't', ?, ?)");
+    expect(() => insert.run('k1', 'agent', null, null)).toThrow(/CHECK/);
+    expect(() => insert.run('k2', 'shell', 't2', 'done')).toThrow(/CHECK/);
+    expect(() => insert.run('k3', 'shell', null, null)).not.toThrow();
+    for (const [i, o] of ['completed', 'failed', 'killed', 'session', 'unknown'].entries()) expect(() => insert.run(`o${i}`, 'monitor', 't2', o), o).not.toThrow();
   });
 
   it('takes only an end reason from the set, or none', () => {

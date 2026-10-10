@@ -1,5 +1,6 @@
 import { STALE_SESSION_MS, TRAIL_MS, type PastSession, type Session, type SessionState } from '../../core/types';
 import { write, type Ctx } from '../db/tx';
+import { listCommands } from './commands';
 import { releaseQueue } from './projects';
 import { NOT_READER_SQL, endSubagents, listSubagents } from './subagents';
 
@@ -34,6 +35,7 @@ const toSession = (ctx: Ctx, r: SessionRow): Session => ({
   endedAt: r.ended_at,
   slot: r.slot,
   subagents: listSubagents(ctx, r.id),
+  commands: listCommands(ctx, r.id),
 });
 
 export function findSession(ctx: Ctx, id: string): Session | undefined {
