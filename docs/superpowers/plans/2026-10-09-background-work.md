@@ -333,6 +333,36 @@ Design: section 3 (`:254-301`).
 
 **From task 3's review (pilot session 4), unconfirmed:** `agent-ended` (TaskStop on an agent) calls `endAgent(…, 'killed', now, now)`, and `reviveAgent` accepts `killed`; if the stopped agent writes its interrupt line after the async PostToolUse lands, the watcher's next tick sees a line newer than `last_active_at` and revives it, so it reads busy until `SILENT_MS`. Check against a captured TaskStop transcript; if it reproduces, a hook `killed` end is not revived by the watcher (only a SendMessage resume brings it back, per this task's table).
 
+**Expanded by pilot session 4 against the code at 22d8457.**
+
+State found: no `messageAgent`, and `handleHookEvent` has no `agent-messaged` case (only the `HookEventInput` comment, `session-flow.ts:45`); the hook already posts `{ event: 'agent-messaged', agentId, resumed, summary?, purpose? }` (`src/hooks/handlers.ts:283-296`). `toInfo` already sends `runStartedAt: r.run_started_at ?? r.started_at` (`src/server/repo/subagents.ts:70`) and `nodeId: r.node_id ?? r.start_focus_id` (`:73`), but nothing writes `run_started_at`. `startSubagent`'s revival path (`:168-175`) clears `ended_at`, `end_reason`, `last_active_at` and returns. `pinStartFocus` (`:199-204`) already skips rows with `node_id` set. `reviveAgent` (`:232-236`) accepts `limit|error|killed|silent`. The watcher revives an ended row when the transcript's last line is newer than `last_active_at ?? ended_at` (`src/server/agent-watch.ts:136-142`). "Ruling 42" (`docs/superpowers/rulings/2026-10-04-review-actions-rulings.md:122-131`) is the merge order `#id`, focus at dispatch, focus at start: the design's point is that a move writes `node_id`, which then wins over `start_focus_id`, and `start_focus_id` stays.
+
+Rulings (main session, pilot session 4):
+- `messageAgent` acts on a known row only (no row: no-op, false). The scribe never has a row (`subagent-start` skips it), so no separate check is needed. Readers are treated like any agent.
+- Resumed: the step is a leading `#id` (in the project, `leadingNode`) of the summary, else of the purpose, else the session's current focus; with none of these, `node_id` stays. `description` becomes the summary, else the purpose, else stays (trimmed, as `recordDispatch` stores it, leading `#id` kept). `purpose` becomes the new one when sent. `run_started_at = at`. An ended row is revived whatever its `end_reason`, a clean stop and `session` included (`ended_at`, `end_reason`, `last_active_at` cleared): the response says it runs.
+- Reached while running (`resumed` false): only a leading `#id` of the summary, else of the purpose, in the project and different from the row's current `node_id ?? start_focus_id`, moves it; then `description` and `purpose` change as for a resume. Otherwise nothing changes. `run_started_at` never changes, and an ended row is not revived (the design's "n/a"; the watcher and SubagentStart cover a wrong end).
+- `startSubagent`'s revival path also sets `run_started_at = at`.
+- `started_at` and `start_focus_id` are never touched by a message (ruling 33 and ruling 42 hold).
+- `agent-messaged` comes from PostToolUse, so like the other tool events it lifts `permission` to `working`.
+- Killed-agent revival (the note above): a `killed` row is revived by the watcher only when the transcript's last line is more than `MARKER_QUIET_MS` (60 s) newer than `last_active_at ?? ended_at`. An interrupt line written just after the hook's TaskStop end then does not revive it; a real resume is caught by `messageAgent` and SubagentStart anyway. Other end reasons keep today's rule.
+
+Code:
+
+- `src/server/repo/subagents.ts`: `messageAgent(ctx, sessionId, agentId, m: { resumed: boolean; summary?: string; purpose?: string; focusNodeId: number | null; projectId: number | null }, at: string): boolean` per the rulings (true when the row changed); `startSubagent` revival adds `run_started_at = ?` (`at`), and runs whenever the row exists (a running row's SubagentStart is a resume too, so its run time restarts).
+- `src/server/session-flow.ts`: `case 'agent-messaged'`: `if (input.agentId) messageAgent(ctx, sessionId, input.agentId, { resumed: input.resumed === true, summary: clean(input.summary) ?? undefined, purpose: clean(input.purpose) ?? undefined, focusNodeId: before.focusNodeId, projectId: before.projectId }, now)`; `permission` to `working`. The `'subagents'` change detection already covers the event.
+- `src/server/agent-watch.ts`: the killed grace in the revive branch, with a comment naming the TaskStop race.
+
+Tests (failing first, raw output pasted in the report):
+
+- [ ] **Step 0: check the race** (bounded, at most 10 minutes, a node script in your scratchpad, read only): in `~/.claude/projects/**/*.jsonl` main transcripts find TaskStop `tool_use`s whose `tool_result` names a `local_agent`, and for each compare the result's timestamp with the last line timestamp of that agent's `subagents/agent-<id>.jsonl`. Report how many there are and how many agents wrote after the TaskStop result (and by how much: min, median, max). Report only; the ruling stands either way.
+- [ ] **Step 1: `test/server/subagents.test.ts`**, a new `describe('a message re-homes its agent')`: resumed with a leading `#id` summary moves to that step, sets the summary as description, the purpose, `runStartedAt = now`, keeps `startedAt`; resumed with no `#id` takes the session's focus; resumed with no `#id` and no focus keeps the node; a `#id` of another project is ignored (falls to the focus); resumed revives an ended row for each end reason (`null` clean stop, `limit`, `killed`, `silent`, `session`); reached while running with a `#id` naming another step moves it and changes description and purpose; reached while running with no `#id`, or the same step, changes nothing (returns false, `runStartedAt` unchanged); reached while running on an ended row does not revive it; an unknown agent is a no-op; after a move `subagentNode` returns the new node, `startFocusId` is unchanged (ruling 42), and `setFocus` (so `pinStartFocus`) no longer changes its node; `startSubagent` on an existing row sets `runStartedAt`.
+- [ ] **Step 2: `test/server/sessions.test.ts`** or the same file through `handleHookEvent`: `agent-messaged` re-homes and records `session.updated` with `'subagents'` in `changed` and no node target; it lifts `permission` to `working`; a later command started by the agent goes to the new step (`subagentNode`).
+- [ ] **Step 3: `test/server/agent-watch.test.ts`**: a `killed` row whose transcript gains a line 30 s after its end stays ended; one 90 s after is revived; a `silent` row 30 s after is still revived (today's rule).
+- [ ] **Step 4: run them and see them fail**; paste the summary.
+- [ ] **Step 5: build** in `subagents.ts`, `session-flow.ts`, `agent-watch.ts`; suites green.
+- [ ] **Step 6: gates**: `npm run typecheck`, `npm test`, `npm run build`, `npm run test:smoke`; raw tails in the report.
+- [ ] **Step 7: commit** (main session, after review).
+
 ### Task 5: Core activity and layout (label: ui)
 
 Design: section 1 "Derived, not stored" and the window rules (`:58-126`), section 2 "Window" layout bullet (`:235-238`), section 4 (`:303-323`), Aiden's answers (`:443-446`).
