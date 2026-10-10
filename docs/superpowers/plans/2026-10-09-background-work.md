@@ -16,7 +16,7 @@
 
 The full list is in design.md section A, "Capture, 2026-10-07 to 2026-10-09". For the tasks below:
 
-- Task 2: Monitor's id is `tool_response.taskId` (an object, not text). PowerShell's response is an object with `backgroundTaskId` like Bash's. PostToolUse inputs carry no `agent_id`: look for another marker of a subagent's call (compare `transcript_path` with the session's) before building `agentId`; without one, send no `agentId`.
+- Task 2: Monitor's id is `tool_response.taskId` (an object, not text). PowerShell's response is an object with `backgroundTaskId` like Bash's. A subagent's PostToolUse carries `agent_id` (and `agent_type`); a main-thread call carries neither, and `transcript_path` is the parent's in both (session 3 matched 3,043 subagent calls by `tool_use_id`; session 1's "no `agent_id`" was wrong). `command-started` sends `agentId: input.agent_id` when present.
 - Task 3: `background_tasks` is session-wide, so the Stop reconcile covers subagents' shells too (safe to end missing rows of any agent). A shell the reconcile inserts has `agent_id = ''`. Task notices for subagents' commands still only reach the transcript (the watcher's end lines stay).
 - Tasks 1, 4 and 5 are unchanged.
 
@@ -221,6 +221,51 @@ Design: section 2 "Hooks and install" (design.md `:169-201`), section 3 "What mo
 **Files:** `src/cli/claude-config.ts` (`HookDef.async`, `hookEntry` writes `"async": true`, the new `HOOK_DEFS` group `^(Bash|PowerShell|Monitor|SendMessage|TaskStop)$`), the hook script's tool body builder (`buildToolHookBody`) and the `stop` and `prompt-submit` bodies in `src/hooks/`, a `commandHead(command)` helper, `src/server/schemas.ts` (`hookBody` gains the events `command-started`, `command-ended`, `agent-ended`, `agent-messaged` and the fields `taskId`, `kind`, `persistent`, `commandHead`, `durationMs`, `outcome`, `exitCode`, `reason`, `resumed`, `summary`, `tasks`, `background`, all optional and bounded); the server accepts and ignores them until task 3. Tests: `test/hooks/handlers.test.ts`, `test/cli/claude-config.test.ts`, `test/smoke/built.test.ts` (a captured Bash PostToolUse with `backgroundTaskId` and a Stop with `background_tasks`; take real shapes from the capture files, redacted).
 
 **Interfaces produced:** the hook bodies exactly as design `:180-196` and `:259-261` (the capture findings below can change the parsing, not the bodies).
+
+**Expanded by pilot session 3 against the code at 8e0cc7c.**
+
+State found: the install half is already done. `HOOK_DEFS` (`src/cli/claude-config.ts:39-41`) has the async group, `HookDef.async` exists (`:19-26`), `hookEntry` writes `"async": true` (`:70-72`), and `test/cli/claude-config.test.ts:554` covers `kitStatus` for an install from before the group. `src/hooks/capture.ts` stays as is (off by its file flag). What is left is the hook bodies (`src/hooks/handlers.ts`), the server schema (`src/server/schemas.ts:57-86`, `HOOK_EVENTS` in `src/core/types.ts:20-23`) and tests. The server's `handleHookEvent` switch (`src/server/session-flow.ts:108`) has no default, so new events that pass `hookBody` are accepted and ignored until task 3.
+
+Bodies (every optional field is left out when absent, never sent as `null`; every field clipped to its schema bound in the hook, so a post is never rejected for length):
+
+| Hook input | Body |
+|---|---|
+| post-tool, Bash or PowerShell, with a background id | `{ event: 'command-started', taskId, toolUseId?, kind: 'shell', description?, commandHead?, durationMs?, agentId? }` |
+| post-tool, Monitor | `{ event: 'command-started', taskId, toolUseId?, kind: 'monitor', persistent, description?, commandHead?, durationMs?, agentId? }` |
+| post-tool, TaskStop, `task_type` `local_bash` or containing `monitor` | `{ event: 'command-ended', taskId, outcome: 'killed' }` |
+| post-tool, TaskStop, `local_agent` | `{ event: 'agent-ended', agentId: <the stopped task's id>, reason: 'killed' }` |
+| post-tool, SendMessage, `success: true` and an id | `{ event: 'agent-messaged', agentId, resumed, summary?, purpose? }` |
+| prompt-submit, a notice with `<task-notification>` blocks | today's body plus `tasks: [{ taskId, toolUseId?, status, exitCode? }]` (only when non-empty) |
+| stop, input has a `background_tasks` array | today's body plus `background: [{ taskId, type, description?, commandHead? }]` (also when empty) |
+
+Parsing rules:
+- `agentId` on `command-started` is `input.agent_id` (a subagent's call; capture findings), as the task tools already read it (`handlers.ts:214-216`). TaskStop and SendMessage never send the caller's `agent_id`: their `agentId` is the target.
+- Bash and PowerShell id: `tool_response.backgroundTaskId` when the response is an object; when the response is a string, `/\bID:\s*([a-z][a-z0-9]{5,39})\b/`. Either way the id must match `/^[a-z][a-z0-9]{5,39}$/`. No id: return `undefined` (no post).
+- Monitor id: `tool_response.taskId` (object), else from a string response `/Monitor started \(task ([a-z][a-z0-9]{5,39})\b/`. `persistent`: the response's boolean, else `tool_input.persistent === true`.
+- TaskStop id: `tool_response.task_id`, else `tool_input.task_id`; other `task_type`s (`local_workflow`, unknown) post nothing.
+- SendMessage: only when `tool_response.success === true`; `agentId` is `resumedAgentId`, else `pin.id`; `resumed` is whether `resumedAgentId` was there. `summary` is `tool_input.summary` clipped to 200; `purpose` is `purposeOf(tool_input.message)`, falling back to `tool_input.content` when `message` is not a string. Nothing else of the message leaves the hook.
+- `durationMs`: `input.duration_ms` when a finite number from 0 to 7 days, rounded; else left out.
+- Notices: only when `NOTICE` matches (`handlers.ts:62`). From the raw prompt after `stripPasted`, every `<task-notification>…</task-notification>` block, at most 20; from each, `<task-id>` (required, else skip the block), `<tool-use-id>`, `<status>` (one of `completed`, `failed`, `killed`, else skip the block), and `exitCode` from `exit code (-?\d+)` inside `<summary>`. A malformed block (no closing tag) is skipped. The prompt text itself still never leaves.
+- Stop: entries with a string `id` (else skipped), at most 50; `type` clipped to 40 (skip when not a non-blank string); `description` clipped to 200; `command` becomes `commandHead`. The full `command` is never in the body.
+- `commandHead(command: string): string | undefined`, exported from `handlers.ts`:
+  1. Strip leading set-up segments, repeatedly: `cd`, `pushd`, `Set-Location` or `sl` up to and including the next `&&`, `;` or newline; a PowerShell assignment `$name = …` up to and including the next `;` or newline that is outside quotes; `export NAME=…` the same way.
+  2. Cut at the first `'`, `"`, `` ` ``, `|`, `>`, `<`, `;`, `&&`, `(` or newline.
+  3. Split on whitespace. Drop `NAME=value` words. Drop words that start with `-`; when the dropped word is a dash and one letter (`-o`, `-i`, `-C`), drop the next word too unless it starts with `-`.
+  4. Take the first three words, join with one space; longer than 60 is cut to 59 plus `…`. Empty is `undefined`.
+  Examples (tests): `cd /c/x && npm run test:e2e 2>&1 | tail -5` gives `npm run test:e2e`; `ssh -o BatchMode=yes -i ~/.ssh/k vdxiii@cadapp76dev 'cd /x && ls'` gives `ssh vdxiii@cadapp76dev`; `Set-Location C:\x; npm test` gives `npm test`; `$SP = 'C:\a;b'; node "$SP\run.js"` gives `node`; `FOO=1 BAR=2 npm run build -- --watch` gives `npm run build`; `git -C /repo status --short` gives `git status`; a 100-character single word gives 59 characters plus `…`.
+
+Schema (`hookBody`, all optional, `.strict()` kept): `HOOK_EVENTS` gains `command-started`, `command-ended`, `agent-ended`, `agent-messaged`. Fields: `taskId` string 1 to 100; `kind` `z.enum(COMMAND_KINDS)`; `persistent` boolean; `commandHead` string max 60; `durationMs` int 0 to 604,800,000; `outcome` `z.enum(COMMAND_OUTCOMES)`; `exitCode` int; `reason` `z.enum(['killed'])`; `resumed` boolean; `summary` string max 200; `tasks` array max 20 of strict `{ taskId: string 1..100, toolUseId?: string 1..200, status: enum completed|failed|killed, exitCode?: int }`; `background` array max 50 of strict `{ taskId: string 1..100, type: string 1..40, description?: max 200, commandHead?: max 60 }`. Extend the comment at `:71-75` to say what each new event carries. If typecheck shows an exhaustive map over `HookEvent` elsewhere, give the new events a no-op entry.
+
+- [ ] **Step 1: Write the failing hook tests** in `test/hooks/handlers.test.ts`, in its existing describes (`buildHookBody`, `buildToolHookBody post-tool`) plus a new `describe('commandHead')`. Use the redacted capture samples in the dispatch brief for the input shapes. Cases: every row of the bodies table; Bash with no `backgroundTaskId` and plain stdout posts nothing; the string-response id; the timeout response (`timedOutAfterMs`, no `run_in_background`); PowerShell's object without `isImage`; a subagent's call carries `agentId`, a main-thread call has none; Monitor `persistent` from the response; TaskStop for `local_bash`, `local_agent`, `local_workflow` (nothing); SendMessage resumed, queued (`resumed: false`, id from `pin.id`), `success: false` (nothing), name-only `to`; the message body never appears in the posted JSON; `durationMs` absent, negative and huge; notices: one, several, malformed, over 20, exit code 0 and 127, status `killed` without an exit code, a non-notice prompt quoting a `<task-notification>` sends no `tasks`; Stop: no array (no `background`), empty array (`background: []`), 60 entries (50 sent), `command` turned into a head and the full command absent from the JSON; every `commandHead` example above.
+- [ ] **Step 2: Add a `runHandler` case per new body** in the existing `describe('runHandler')` (`:289`), which posts to the real app: each new body is accepted (no throw), so the schema and the builders agree.
+- [ ] **Step 3: Run them and see them fail** (`npx vitest run test/hooks/handlers.test.ts`); record the failure output.
+- [ ] **Step 4: Schema and types**: `HOOK_EVENTS`, `hookBody` as above.
+- [ ] **Step 5: Hook bodies**: `commandHead` and the parsers in `src/hooks/handlers.ts`, next to `purposeOf`; the post-tool branch in `buildToolHookBody` after the TaskUpdate branch; `tasks` in the `prompt-submit` branch and `background` in a `stop` branch of `buildHookBody`. Bounds as named constants beside `DESCRIPTION_MAX`, each with the "mirror the server's hookBody" comment. Update the comment at `claude-config.ts:39-40`, which says the hook posts nothing for these tools.
+- [ ] **Step 6: Run the hook tests** until green.
+- [ ] **Step 7: Install tests**: check `test/cli/claude-config.test.ts` against design section 5 (the async group written with `"async": true`, `kitStatus` reports `settings` until reinstall, uninstall strips the group, another tool's async hook on `PostToolUse` is kept by install and uninstall). Add only the missing cases; they should pass at once (the code exists), so say which were added and that they passed.
+- [ ] **Step 8: Smoke** in `test/smoke/built.test.ts`, next to the TaskCreate case (`:106-123`): the built hook script (`runHook`) fed the captured Bash PostToolUse with `backgroundTaskId` and then the captured Stop with `background_tasks` (session ids swapped for the test's), each exits 0 silently, and the built server accepted both: the Stop's state change lands (`storedRows` or the session's state, as the file already checks for stop), and no rejection is logged for the `command-started` post (read how the hook logs a non-2xx in `src/hooks/main.ts` and assert on that log; if it logs nothing, POST the body the built `buildToolHookBody` returns for the same input and expect 2xx).
+- [ ] **Step 9: Run the gates**: `npm run typecheck`, `npm test`, `npm run build` then `npm run test:smoke` (check `package.json` for whether smoke builds first). Report raw tail output of each.
+- [ ] **Step 10: Commit** (main session, after review).
 
 ### Task 3: Commands server and the watcher's end lines (label: integration)
 
