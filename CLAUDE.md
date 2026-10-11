@@ -40,7 +40,7 @@ Subagent claims are not evidence. After an implementer, rerun its checks and rea
 
 ## Session rhythm
 
-- You can't see your context size. A hook (`scripts/context-nudge.mjs`) tells you when it crosses 120k and 160k, and `.claude/settings.json` compacts at 300k.
+- You can't see your context size. A hook (`scripts/context-nudge.mjs`) tells you when it crosses 150k and 160k, and `.claude/settings.json` compacts at 300k.
 - One thread per session: a feature, or a suite of related features that share code. A clean point is right after a merge, or after a finished plan task with everything committed in your worktree.
 - Cut the session when the thread is done, when the next queued item is unrelated, or when the nudge says so. At a cut: write the handoff, brief the scribe to attach it to its step, print the handoff's path, offer the next session as a chip whose prompt is the handoff prompt when the `spawn_task` tool is available (the desktop app), and stop.
 - A new request mid-session becomes a queued step through the scribe (`later: #id`, or a new step), unless it is a few lines in code that is already open. The InProgress tree is the memory between sessions.

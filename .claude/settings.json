@@ -1,5 +1,15 @@
 {
   "autoCompactWindow": 300000,
+  "disableClaudeAiConnectors": true,
+  "permissions": {
+    "deny": [
+      "mcp__Claude_Browser",
+      "mcp__claude-in-chrome",
+      "mcp__computer-use",
+      "mcp__scheduled-tasks",
+      "mcp__mcp-registry"
+    ]
+  },
   "hooks": {
     "PostToolBatch": [
       {
