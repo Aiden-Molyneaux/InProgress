@@ -21,13 +21,22 @@ export function repoCli(repo: string): string {
 
 const hasSpace = (path: string): boolean => /\s/.test(path);
 
+/** The subcommands a session runs itself, so install allows each (usage is Aiden's and is left out). */
+export const CLI_SUBCOMMANDS = ['tasks', 'claim', 'ask', 'orchestrate', 'digest'] as const;
+export type CliSubcommand = (typeof CLI_SUBCOMMANDS)[number];
+
 /**
- * `node C:/…/dist/cli/main.js tasks`: the start of every tasks command and of its allow rules. A path with a space is
- * quoted so the command still runs; no rule can allow it, so it asks for permission.
+ * `node C:/…/dist/cli/main.js claim`: the start of every command of that subcommand and of its allow rules. A path with
+ * a space is quoted so the command still runs; no rule can allow it, so it asks for permission.
  */
-export function taskPrefix(cli: string): string {
+export function cliPrefix(cli: string, sub: CliSubcommand): string {
   const path = normalizePath(cli);
-  return `node ${hasSpace(path) ? `"${path}"` : path} tasks`;
+  return `node ${hasSpace(path) ? `"${path}"` : path} ${sub}`;
+}
+
+/** `node C:/…/dist/cli/main.js tasks`: cliPrefix for the working-tasks command. */
+export function taskPrefix(cli: string): string {
+  return cliPrefix(cli, 'tasks');
 }
 
 /** The command written out for a session, with its id filled in. The CLI defaults to the one beside the server. */
@@ -35,17 +44,34 @@ export function taskCommand(sessionId: string, o: { cli?: string } = {}): string
   return `${taskPrefix(o.cli ?? cliBesideServer())} <step id> --session ${sessionId} --done "…" --doing "…" --todo "…"`;
 }
 
-/**
- * The allow rules for the tasks command, in the Bash and the PowerShell tool. None for a path with a space: an
- * unquoted path cannot hold one, and a quoted one never matches.
- */
-export function taskAllowRules(cli: string): string[] {
-  if (hasSpace(normalizePath(cli))) return [];
-  const prefix = taskPrefix(cli);
-  return [`Bash(${prefix} *)`, `PowerShell(${prefix} *)`];
+/** `node <cli> claim <id> --session <sid>`: the claim command written out for a session; the step id is left for it to fill. */
+export function claimCommand(sessionId: string, o: { cli?: string } = {}): string {
+  return `${cliPrefix(o.cli ?? cliBesideServer(), 'claim')} <id> --session ${sessionId}`;
 }
 
-/** A tasks allow rule as install writes it, for any repo path: what uninstall removes and install replaces. */
+/**
+ * The allow rules for every subcommand, in the Bash and the PowerShell tool, subcommand by subcommand. None for a path
+ * with a space: an unquoted path cannot hold one, and a quoted one never matches.
+ */
+export function cliAllowRules(cli: string): string[] {
+  if (hasSpace(normalizePath(cli))) return [];
+  return CLI_SUBCOMMANDS.flatMap((sub) => {
+    const prefix = cliPrefix(cli, sub);
+    return [`Bash(${prefix} *)`, `PowerShell(${prefix} *)`];
+  });
+}
+
+/** An allow rule for any subcommand as install writes it, for any repo path: what uninstall removes and install replaces. */
+export function isCliAllowRule(rule: string): boolean {
+  return new RegExp(String.raw`^(Bash|PowerShell)\(node \S+/dist/cli/main\.js (${CLI_SUBCOMMANDS.join('|')}) \*\)$`).test(rule);
+}
+
+/** The tasks rules alone, the first two of cliAllowRules (CLI_SUBCOMMANDS starts with tasks). */
+export function taskAllowRules(cli: string): string[] {
+  return cliAllowRules(cli).slice(0, 2);
+}
+
+/** A tasks allow rule for any repo path. */
 export function isTaskAllowRule(rule: string): boolean {
   return /^(Bash|PowerShell)\(node \S+\/dist\/cli\/main\.js tasks \*\)$/.test(rule);
 }

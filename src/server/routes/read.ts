@@ -7,7 +7,9 @@ import { listBindings, listProjectSummaries, resolveProject } from '../repo/proj
 import { requireResource } from '../repo/resources';
 import { findSteps, search } from '../repo/search';
 import { getNodeDetail, getProjectSnapshot } from '../repo/snapshot';
-import { findQuery, idParam, searchQuery } from '../schemas';
+import { formatCounts, formatDigest, readDigest } from '../digest';
+import { formatUsage, readUsage } from '../usage';
+import { digestQuery, findQuery, idParam, searchQuery, usageQuery } from '../schemas';
 
 export function registerReadRoutes(app: FastifyInstance, ctx: Ctx, version: string, build: BuildInfo | null): void {
   app.get('/api/health', async () => ({ ok: true, app: 'inprogress', version, build, pid: process.pid }));
@@ -27,6 +29,15 @@ export function registerReadRoutes(app: FastifyInstance, ctx: Ctx, version: stri
     if (playbook) header.push('Playbook:', ...playbook.split(/\r?\n/).map((l) => `  ${l}`));
     const body = renderOutline(buildIndex(snap.nodes), snap.sessions, { full, resourcesByNode });
     return reply.type('text/plain; charset=utf-8').send(`${header.join('\n')}\n${body}`);
+  });
+  app.get('/api/projects/:ref/digest', async (req) => {
+    const digest = readDigest(ctx, (req.params as { ref: string }).ref, digestQuery.parse(req.query).since);
+    const now = Date.parse(ctx.now());
+    return { digest, text: formatDigest(digest, now), counts: formatCounts(digest, now) };
+  });
+  app.get('/api/projects/:ref/usage', async (req) => {
+    const usage = readUsage(ctx, (req.params as { ref: string }).ref, usageQuery.parse(req.query).days);
+    return { usage, text: formatUsage(usage) };
   });
   app.get('/api/nodes/:id', async (req) => getNodeDetail(ctx, idParam.parse(req.params).id));
   app.get('/api/resources/:id', async (req) => requireResource(ctx, idParam.parse(req.params).id));

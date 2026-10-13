@@ -2,8 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import { actorOf, type Guard } from '../app';
 import type { Ctx } from '../db/tx';
 import { setTasks } from '../repo/work';
-import { enrollBody, focusBody, hookBody, sessionParam, tasksBody } from '../schemas';
-import { enrollSession, handleHookEvent, setFocus } from '../session-flow';
+import { claimBody, enrollBody, focusBody, hookBody, orchestrateBody, sessionParam, tasksBody } from '../schemas';
+import { claimStep, enrollSession, handleHookEvent, orchestrate, setFocus } from '../session-flow';
 
 export function registerSessionRoutes(app: FastifyInstance, ctx: Ctx, requireToken: Guard): void {
   const guarded = { preHandler: requireToken };
@@ -13,6 +13,8 @@ export function registerSessionRoutes(app: FastifyInstance, ctx: Ctx, requireTok
     return enrollSession(ctx, actorOf(req), sessionParam.parse(req.params).id, body.project, body.title);
   });
   app.post('/api/sessions/:id/focus', guarded, async (req) => setFocus(ctx, actorOf(req), sessionParam.parse(req.params).id, focusBody.parse(req.body).nodeId));
+  app.post('/api/sessions/:id/claim', guarded, async (req) => claimStep(ctx, actorOf(req), sessionParam.parse(req.params).id, claimBody.parse(req.body).nodeId));
+  app.post('/api/sessions/:id/orchestrate', guarded, async (req) => orchestrate(ctx, actorOf(req), sessionParam.parse(req.params).id, { status: orchestrateBody.parse(req.body ?? {}).status === true }));
   app.post('/api/sessions/:id/tasks', guarded, async (req) => {
     const body = tasksBody.parse(req.body);
     return setTasks(ctx, actorOf(req), sessionParam.parse(req.params).id, body.nodeId, body.tasks);

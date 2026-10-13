@@ -48,14 +48,28 @@ export function requireAsk(ctx: Ctx, id: number): Ask {
   return toAsk(row);
 }
 
+/** What a raise tells its caller besides the ask: whether it joined an open one, and whether the raiser can hear back. */
+export interface RaisedAsk {
+  ask: Ask;
+  /** The open ask already existed: nothing was inserted, and its answer goes to whoever raised it first. */
+  joined: boolean;
+  /** A session id was given that InProgress does not track: it is stored as no session, so no answer comes back to it. */
+  untracked: boolean;
+}
+
 /** Idempotent: the open ask with this node, kind and text, inserted if missing. Records ask.raised only when inserted. */
 export function raiseAsk(ctx: Ctx, actor: string, input: RaiseAskInput): Ask {
+  return raiseAskDetailed(ctx, actor, input).ask;
+}
+
+/** raiseAsk, also saying whether the ask joined an existing one and whether the raising session was untracked. */
+export function raiseAskDetailed(ctx: Ctx, actor: string, input: RaiseAskInput): RaisedAsk {
   if (!(ASK_KINDS as readonly string[]).includes(input.kind)) {
     throw badRequest(`Unknown ask kind ${JSON.stringify(input.kind)}. Use one of: ${ASK_KINDS.join(', ')}.`);
   }
   const text = input.text.trim();
   if (!text) throw badRequest('An ask needs text: it is empty', 'Say what Aiden should answer, allow or look at.');
-  return write(ctx, actor, (record) => {
+  return write(ctx, actor, (record): RaisedAsk => {
     const node = requireNode(ctx, input.nodeId);
     if (node.parentId === null) throw badRequest(`#${node.id} is the project root`, 'Raise the ask on the step it concerns.');
     if (node.status === 'dropped') throw badRequest(`#${node.id} is dropped`, 'Reopen it first.');
@@ -67,7 +81,7 @@ export function raiseAsk(ctx: Ctx, actor: string, input: RaiseAskInput): Ask {
     const row = ctx.db.prepare('SELECT * FROM asks WHERE node_id = ? AND kind = ? AND text = ? AND cleared_at IS NULL').get(node.id, input.kind, text) as AskRow;
     const ask = toAsk(row);
     if (info.changes) record({ projectId: node.projectId, type: 'ask.raised', entity: 'ask', entityId: ask.id, data: { ask } });
-    return ask;
+    return { ask, joined: !info.changes, untracked: !!input.sessionId && !tracked };
   });
 }
 
@@ -109,6 +123,16 @@ export function listProjectAsks(ctx: Ctx, projectId: number): Ask[] {
   return (ctx.db
     .prepare('SELECT * FROM asks WHERE project_id = ? AND (cleared_at IS NULL OR cleared_at >= ?) ORDER BY raised_at, id')
     .all(projectId, msAgo(ctx, ASK_TRAIL_MS)) as AskRow[]).map(toAsk);
+}
+
+/** Asks of the project raised at or after `since` (ISO), oldest first, cleared or not: the digest reads the table, not the 7-day snapshot. */
+export function listAsksRaisedSince(ctx: Ctx, projectId: number, since: string): Ask[] {
+  return (ctx.db.prepare('SELECT * FROM asks WHERE project_id = ? AND raised_at >= ? ORDER BY raised_at, id').all(projectId, since) as AskRow[]).map(toAsk);
+}
+
+/** Asks of the project cleared at or after `since` (ISO), oldest cleared first. */
+export function listAsksClearedSince(ctx: Ctx, projectId: number, since: string): Ask[] {
+  return (ctx.db.prepare('SELECT * FROM asks WHERE project_id = ? AND cleared_at >= ? ORDER BY cleared_at, id').all(projectId, since) as AskRow[]).map(toAsk);
 }
 
 /** Cleared asks this session raised whose answer it has not been told yet, oldest cleared first. */

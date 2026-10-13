@@ -48,8 +48,8 @@ export function findSession(ctx: Ctx, id: string): Session | undefined {
 /** Persist every column except subagents (which live in session_subagents). */
 export function saveSession(ctx: Ctx, s: Session): void {
   ctx.db
-    .prepare('UPDATE sessions SET project_id = ?, title = ?, cwd = ?, branch = ?, transcript_path = ?, state = ?, focus_node_id = ?, prompts_since_update = ?, last_seen_at = ?, ended_at = ?, slot = ? WHERE id = ?')
-    .run(s.projectId, s.title, s.cwd, s.branch, s.transcriptPath, s.state, s.focusNodeId, s.promptsSinceUpdate, s.lastSeenAt, s.endedAt, s.slot, s.id);
+    .prepare('UPDATE sessions SET project_id = ?, title = ?, cwd = ?, branch = ?, transcript_path = ?, state = ?, focus_node_id = ?, prompts_since_update = ?, last_seen_at = ?, ended_at = ?, slot = ?, role = ? WHERE id = ?')
+    .run(s.projectId, s.title, s.cwd, s.branch, s.transcriptPath, s.state, s.focusNodeId, s.promptsSinceUpdate, s.lastSeenAt, s.endedAt, s.slot, s.role, s.id);
 }
 
 /*

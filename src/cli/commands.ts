@@ -5,12 +5,14 @@ import { ensureServer, isServerUp } from '../lib/ensure-server';
 import { baseUrl, homeDir, readToken } from '../lib/home';
 import { timestamp } from '../server/backup';
 import { claudeDir, install, kitStatus, repoRoot, uninstall } from './claude-config';
+import { runAsk, runClaim, runOrchestrate } from './claim';
+import { runDigest, runUsage } from './digest';
 import { doctor } from './doctor';
 import { openAppWindow } from './open';
 import { runTasks } from './tasks';
 
 const USAGE =
-  'Usage: inprogress <start | stop | open | status | outline <project> [--full] | tasks [<step id>] --session <session id> [--done|--doing|--todo "<subject>"]... | doctor | claude-install | claude-uninstall | claude-check>';
+  'Usage: inprogress <start | stop | open | status | outline <project> [--full] | tasks [<step id>] --session <session id> [--done|--doing|--todo "<subject>"]... | claim <step id> --session <session id> | ask <step id> --session <session id> --question|--permission|--review "<text>" | orchestrate --session <session id> [--status] | digest <project> [--since <iso>] | usage <project> [--days <n>] | doctor | claude-install | claude-uninstall | claude-check>';
 /**
  * The first health check of a CLI run. A fresh process's first request is slow on a busy machine (fetch sets up its
  * HTTP parser), and 300 ms has called a running server down. Nothing listening still fails at once.
@@ -77,7 +79,7 @@ export async function runCli(args: string[], out: (line: string) => void = conso
       out(`InProgress at ${url}`);
       if (!projects.length) out('  no projects yet');
       for (const p of projects) {
-        out(`  ${p.slug.padEnd(24)} ${p.name}${p.status === 'archived' ? ' (archived)' : ''} · ${p.needsYou} need you · ${p.workingSessions} working / ${p.activeSessions} sessions`);
+        out(`  ${p.slug.padEnd(24)} ${p.name}${p.status === 'archived' ? ' (archived)' : ''} · ${p.openAsks} need you · ${p.workingSessions} working / ${p.activeSessions} sessions`);
       }
       return 0;
     }
@@ -91,6 +93,16 @@ export async function runCli(args: string[], out: (line: string) => void = conso
       out(await createClient({ baseUrl: url }).text(`/api/projects/${encodeURIComponent(project)}/outline${full ? '?full=1' : ''}`));
       return 0;
     }
+    case 'claim':
+      return runClaim(rest, out, { baseUrl: url, token: readToken() });
+    case 'ask':
+      return runAsk(rest, out, { baseUrl: url, token: readToken() });
+    case 'orchestrate':
+      return runOrchestrate(rest, out, { baseUrl: url, token: readToken() });
+    case 'digest':
+      return runDigest(rest, out, { baseUrl: url, probeMs: FIRST_PROBE_MS });
+    case 'usage':
+      return runUsage(rest, out, { baseUrl: url, probeMs: FIRST_PROBE_MS });
     case 'tasks':
       // Run by a main session itself. It never starts the server (see TASKS_NOT_RUNNING_HINT).
       return runTasks(rest, out, { baseUrl: url, token: readToken() });

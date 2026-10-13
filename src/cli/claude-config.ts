@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { HOOK_NAMES, type HookName } from '../hooks/handlers';
 import { homeDir } from '../lib/home';
 import { normalizePath } from '../lib/paths';
-import { isTaskAllowRule, repoCli, taskAllowRules, taskPrefix } from '../lib/task-command';
+import { cliAllowRules, isCliAllowRule, repoCli, taskPrefix } from '../lib/task-command';
 
 /** The allow rules that are the same for every repo: the scribe's tools and its resource snapshots. */
 export const STATIC_ALLOW_RULES = ['mcp__inprogress', 'Edit(~/.inprogress/resources/**)'];
@@ -107,14 +107,14 @@ export function addInProgressHooks(settings: Settings, repo: string): Settings {
 }
 
 /**
- * Every allow rule install writes for a repo: the static ones, then the tasks command in the Bash and the PowerShell
- * tool, built by the same helper as the command the briefing prints. A repo path with a space gets no tasks rules.
+ * Every allow rule install writes for a repo: the static ones, then each CLI command a session runs (tasks, claim, ask, orchestrate, digest) in the Bash and the PowerShell
+ * tool, built by the same helper as the command the briefing prints. A repo path with a space gets none of those rules.
  */
 export function allowRules(repo: string): string[] {
-  return [...STATIC_ALLOW_RULES, ...taskAllowRules(repoCli(repo))];
+  return [...STATIC_ALLOW_RULES, ...cliAllowRules(repoCli(repo))];
 }
 
-const isTaskRule = (rule: unknown): boolean => typeof rule === 'string' && isTaskAllowRule(rule);
+const isCliRule = (rule: unknown): boolean => typeof rule === 'string' && isCliAllowRule(rule);
 
 /**
  * Adds this repo's allow rules once each. Tasks rules for another repo path go first, as addInProgressHooks replaces
@@ -124,19 +124,19 @@ export function addAllowRules(settings: Settings, repo: string): Settings {
   const wanted = allowRules(repo);
   settings.permissions ??= {};
   settings.permissions.allow ??= [];
-  settings.permissions.allow = settings.permissions.allow.filter((r: unknown) => !isTaskRule(r) || wanted.includes(r as string));
+  settings.permissions.allow = settings.permissions.allow.filter((r: unknown) => !isCliRule(r) || wanted.includes(r as string));
   for (const rule of wanted) if (!settings.permissions.allow.includes(rule)) settings.permissions.allow.push(rule);
   return settings;
 }
 
 /**
- * Removes our allow rules: the static ones, and the tasks rules of any repo path, found by their pattern (uninstall
+ * Removes our allow rules: the static ones, and the CLI command rules of any repo path, found by their pattern (uninstall
  * takes no repo). An allow list (and then a permissions object) that this leaves empty goes too.
  */
 export function removeAllowRules(settings: Settings): Settings {
   const permissions = settings.permissions;
   if (!Array.isArray(permissions?.allow)) return settings;
-  const kept = permissions.allow.filter((r: unknown) => !STATIC_ALLOW_RULES.includes(r as string) && !isTaskRule(r));
+  const kept = permissions.allow.filter((r: unknown) => !STATIC_ALLOW_RULES.includes(r as string) && !isCliRule(r));
   if (kept.length === permissions.allow.length) return settings;
   if (kept.length) permissions.allow = kept;
   else {
@@ -298,8 +298,8 @@ export function install(o: { repo: string; claudeDir: string; stamp: string }): 
   writeFileSync(settingsFile, `${JSON.stringify(settings, null, 2)}\n`);
   if (replaced > 0) log.push(`Replaced ${replaced} existing ${hookEntryLabel(replaced)}`);
   log.push(`Hooks: ${[...new Set(HOOK_DEFS.map((d) => d.event))].join(', ')}`, `Allow rules: ${allowRules(repo).join(', ')}`);
-  if (!taskAllowRules(repoCli(repo)).length) {
-    log.push(`Left out the tasks command's allow rules: the repo path ${repo} holds a space, which an unquoted path cannot hold and a quoted one never matches in PowerShell. Sessions are asked before each tasks command; a repo path without spaces avoids that.`);
+  if (!cliAllowRules(repoCli(repo)).length) {
+    log.push(`Left out the allow rules for the tasks, claim, ask, orchestrate and digest commands: the repo path ${repo} holds a space, which an unquoted path cannot hold and a quoted one never matches in PowerShell. Sessions are asked before each of those commands; a repo path without spaces avoids that.`);
   }
 
   const agentsDir = join(o.claudeDir, 'agents');

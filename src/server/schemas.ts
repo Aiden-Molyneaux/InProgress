@@ -23,6 +23,8 @@ export const nodeInput: z.ZodType<NodeInput> = z.lazy(() =>
 
 export const idParam = z.object({ id: z.coerce.number().int().positive() });
 export const sessionParam = z.object({ id: z.string().min(1).max(100) });
+export const digestQuery = z.object({ since: z.string().datetime().optional() });
+export const usageQuery = z.object({ days: z.coerce.number().int().min(1).max(60).default(7) });
 export const searchQuery = z.object({ project: z.string().min(1), q: z.string().min(1).max(200) });
 /** The window's Go to field: an id or words, as parseGoTo reads them (empty answers nothing), and the open project's slug. */
 export const findQuery = z.object({ q: z.string().max(200).default(''), here: z.string().max(100).optional() });
@@ -134,6 +136,8 @@ export const tasksBody = z
   .strict();
 export const enrollBody = z.object({ project: z.union([z.string().min(1), z.number().int().positive()]), title: z.string().max(300).optional() }).strict();
 export const focusBody = z.object({ nodeId: z.number().int().positive().nullable() }).strict();
+export const claimBody = z.object({ nodeId: z.number().int().positive() }).strict();
+export const orchestrateBody = z.object({ status: z.boolean().optional() }).strict();
 export const openBody = z.object({ resourceId: z.number().int().positive() }).strict();
 export const openUrlBody = z.object({ url: z.string().min(1).max(2048) }).strict();
 /**
