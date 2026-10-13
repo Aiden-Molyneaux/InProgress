@@ -80,16 +80,20 @@ export function App() {
   // The tab order Aiden dragged, kept in the window's localStorage. A second window follows a move through `storage`.
   const [order, setOrder] = useState(loadTabOrder);
   const tabs = useMemo(() => projectTabs(projects, state.slug, order), [projects, state.slug, order]);
+  const orderNow = useRef(order);
+  orderNow.current = order;
   // A project that left the active list (archived, deleted or purged) loses its place, so it returns at the end. Only
-  // once the server's list has loaded: the empty list before it would drop every place.
+  // once the server's list has loaded: the empty list before it would drop every place. It runs when this window's list
+  // changes, not when another window's order arrives: that window may already list as active a project this one has
+  // not caught up on, and saving the prune would undo its move.
   useEffect(() => {
     if (!state.loaded) return;
-    const kept = pruneOrder(order, projects);
-    if (kept.length < order.length) {
+    const kept = pruneOrder(orderNow.current, projects);
+    if (kept.length < orderNow.current.length) {
       setOrder(kept);
       saveTabOrder(kept);
     }
-  }, [projects, order, state.loaded]);
+  }, [projects, state.loaded]);
   useEffect(() => {
     const changed = (e: StorageEvent) => {
       if (e.key === TAB_ORDER_KEY) setOrder(loadTabOrder());

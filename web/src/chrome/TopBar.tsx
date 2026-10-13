@@ -85,6 +85,12 @@ const wheelStep = (e: WheelEvent, page: number) => [1, 16, page][e.deltaMode] ??
 /** Shift+F10 or the Menu key: the keyboard's way to a tab's menu, as a right-click is the mouse's. */
 const isMenuKey = (e: KeyboardEvent) => (e.key === 'F10' && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) || e.key === 'ContextMenu';
 
+/** A tab drag's data type. Not text/plain, which a text field would take as typed text. */
+const TAB_DRAG = 'application/x-inprogress-tab';
+
+/** Whether a drag over the strip is one of its tabs, and not a step row or a file from outside. */
+const isTabDrag = (e: DragEvent) => e.dataTransfer.types.includes(TAB_DRAG);
+
 interface TabStripProps {
   strip: RefObject<HTMLDivElement>;
   tabs: ProjectSummary[];
@@ -103,6 +109,10 @@ function TabStrip({ strip, tabs, current, onSelect, onMove, menuFor, onMenu }: T
   const [dragState, setDrag] = useState<{ id: number; slot: number | null } | null>(null);
   // A tab that leaves the strip mid-drag (archived or deleted elsewhere) ends its drag: its dragend never reaches React.
   const drag = dragState && activeIds.includes(dragState.id) ? dragState : null;
+  // Cleared too, not only hidden, so the tab coming back later does not bring the old drag with it.
+  useEffect(() => {
+    if (dragState && !drag) setDrag(null);
+  }, [ids]);
   /** Whether dropping now would change the order: the drop line shows only then. */
   const changes = drag !== null && moveTab(tabs, drag.id, drag.slot).join() !== activeIds.join();
   /** The tab a move carries, by key or by drag: it gets focus back if the reorder took it. */
@@ -166,7 +176,7 @@ function TabStrip({ strip, tabs, current, onSelect, onMove, menuFor, onMenu }: T
   };
   /** Over the strip while one of our tabs drags: the slot under the pointer. The archived tab and the empty strip mean the end. */
   const onDragOver = (e: DragEvent<HTMLDivElement>) => {
-    if (!drag) return;
+    if (!drag || !isTabDrag(e)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
     const over = (e.target as HTMLElement).closest<HTMLElement>('[role="tab"]');
@@ -193,7 +203,7 @@ function TabStrip({ strip, tabs, current, onSelect, onMove, menuFor, onMenu }: T
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={(e) => {
-        if (!drag) return;
+        if (!drag || !isTabDrag(e)) return;
         e.preventDefault();
         // The press focused the dragged tab, and moving it in the DOM can drop that focus.
         if (changes && document.activeElement === strip.current!.querySelector(`[data-tab="${drag.id}"]`)) moved.current = drag.id;
@@ -214,8 +224,7 @@ function TabStrip({ strip, tabs, current, onSelect, onMove, menuFor, onMenu }: T
             draggable={!archived}
             onDragStart={(e) => {
               e.dataTransfer.effectAllowed = 'move';
-              // Not text/plain, which a text field would take as typed text.
-              e.dataTransfer.setData('application/x-inprogress-tab', String(p.id));
+              e.dataTransfer.setData(TAB_DRAG, String(p.id));
               setDrag({ id: p.id, slot: p.id });
             }}
             onDragEnd={() => setDrag(null)}

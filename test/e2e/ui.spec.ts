@@ -431,7 +431,8 @@ test('a tab drags to a new place, Alt+arrows move the focused tab, and the order
   await expect(tabFor(page, names[0])).toBeFocused();
   await expect(tabFor(page, names[1])).toHaveAttribute('aria-selected', 'true');
   await expect(page).toHaveURL(new RegExp(`#/p/${b.slug}$`));
-  // A tab dragged to the right keeps the focus its press gave it, so the keys still reach the strip.
+  // A tab dragged to the right keeps the focus its press gave it, so the keys still reach the strip. Chromium keeps it
+  // even without TabStrip's refocus after a drop, so this checks the outcome, not that guard.
   const last = (await tabFor(page, names[0]).boundingBox())!;
   await tabFor(page, names[2]).dragTo(tabFor(page, names[0]), { targetPosition: { x: last.width - 4, y: 10 } });
   await expect.poll(() => ours()).toEqual([names[1], names[0], names[2]]);
