@@ -276,11 +276,11 @@ describe("a step's working tasks when it is marked done", () => {
     const { ctx, play, tests, hook, items } = setup();
     hook(created('1', 'Sign the bundle'));
     updateNode(ctx, 'scribe:s1', play.id, { status: 'done' });
-    // A task reopened on a done step stays open when the step is saved again: only the move into done ticks.
-    hook(updated('1', { status: 'in_progress' }));
+    // A task added to a done step by name stays open when the step is saved again: only the move into done ticks.
+    hook(created('2', `#${play.id} Archive the old key`));
     let mark = maxEventId(ctx);
     updateNode(ctx, 'scribe:s1', play.id, { status: 'done', outcome: 'Signed' });
-    expect(items().map((i) => i.status)).toEqual(['in_progress']);
+    expect(items().map((i) => i.status)).toEqual(['completed', 'pending']);
     expect(listEventsSince(ctx, mark).map((e) => e.type)).toEqual(['node.updated']);
     mark = maxEventId(ctx);
     updateNode(ctx, 'scribe:s1', tests.id, { status: 'done' });
@@ -296,6 +296,68 @@ describe("a step's working tasks when it is marked done", () => {
     clearAsk(ctx, 'window', ask.id, 'Play');
     expect(items().map((i) => [i.nodeId, i.status])).toEqual([[q.id, 'completed']]);
     expect(listEventsSince(ctx, mark).map((e) => e.type)).toEqual(['ask.cleared', 'work.updated', 'node.updated']);
+  });
+
+  it('keeps a ticked task closed when the task tools move it back to open, until the step reopens', () => {
+    const { ctx, play, hook, items } = setup();
+    hook(created('1', 'Sign the bundle'));
+    hook({ event: 'subagent-start', agentId: 'a1', agentType: 'Explore' });
+    hook(created('1', 'Check the keystore', 'a1'));
+    updateNode(ctx, 'scribe:s1', play.id, { status: 'done' });
+    const mark = maxEventId(ctx);
+    // Claude Code still holds both as open, and a later update sends them back.
+    hook(updated('1', { status: 'in_progress' }));
+    hook(updated('1', { status: 'pending', agentId: 'a1' }));
+    hook(updated('1', { status: 'in_progress' }));
+    expect(items().map((i) => [i.agentId, i.status])).toEqual([['', 'completed'], ['a1', 'completed']]);
+    expect(listEventsSince(ctx, mark)).toEqual([]);
+    // The other changes still land.
+    hook(updated('1', { status: 'in_progress', subject: 'Sign the release bundle' }));
+    expect(items().map((i) => [i.subject, i.status])[0]).toEqual(['Sign the release bundle', 'completed']);
+    updateNode(ctx, 'scribe:s1', play.id, { status: 'active' });
+    hook(updated('1', { status: 'in_progress' }));
+    expect(items().map((i) => i.status)[0]).toEqual('in_progress');
+  });
+
+  it('puts a new task under the root once the focus or the subagent node is done or dropped, unless it names a step', () => {
+    const { ctx, project, signing, play, hook, items } = setup();
+    hook({ event: 'agent-dispatch', toolUseId: 't1', agentType: 'Explore', description: `#${signing.id} Check the keystore` });
+    hook({ event: 'subagent-start', agentId: 'a1', agentType: 'Explore' });
+    updateNode(ctx, 'scribe:s1', play.id, { status: 'done' });
+    updateNode(ctx, 'scribe:s1', signing.id, { status: 'dropped' });
+    hook(created('1', 'Write the closeout'));
+    hook(created('1', 'Read the logs', 'a1'));
+    hook(updated('2', { subject: 'Seen before the hooks', status: 'in_progress' }));
+    hook(created('3', `#${play.id} Archive the old key`));
+    expect(items().map((i) => [i.nodeId, i.agentId, i.subject])).toEqual([
+      [project.rootNodeId, '', 'Write the closeout'],
+      [project.rootNodeId, 'a1', 'Read the logs'],
+      [project.rootNodeId, '', 'Seen before the hooks'],
+      [play.id, '', `#${play.id} Archive the old key`],
+    ]);
+  });
+
+  it("puts a subagent's new task under the root, not the session's open focus, once its own node is done", () => {
+    const { ctx, project, signing, play, hook, items } = setup();
+    hook({ event: 'agent-dispatch', toolUseId: 't1', agentType: 'Explore', description: `#${signing.id} Check the keystore` });
+    hook({ event: 'subagent-start', agentId: 'a1', agentType: 'Explore' });
+    updateNode(ctx, 'scribe:s1', signing.id, { status: 'done' });
+    hook(created('1', 'Read the logs', 'a1'));
+    hook(created('1', 'Sign the bundle'));
+    expect(items().map((i) => [i.nodeId, i.agentId])).toEqual([[project.rootNodeId, 'a1'], [play.id, '']]);
+  });
+
+  it('gives the tasks command the root when no step is named and the focus is done, and still honours a named done step', () => {
+    const { ctx, project, play, hook, items } = setup();
+    hook(created('1', 'Sign the bundle'));
+    updateNode(ctx, 'scribe:s1', play.id, { status: 'done' });
+    expect(setTasks(ctx, 'session:s1', 's1', undefined, [{ subject: 'Write the closeout', status: 'in_progress' }]).nodeId).toBe(project.rootNodeId);
+    setTasks(ctx, 'session:s1', 's1', play.id, [{ subject: 'Sign the bundle', status: 'completed' }, { subject: 'Archive the old key', status: 'pending' }]);
+    expect(items().map((i) => [i.nodeId, i.subject, i.status])).toEqual([
+      [project.rootNodeId, 'Write the closeout', 'in_progress'],
+      [play.id, 'Sign the bundle', 'completed'],
+      [play.id, 'Archive the old key', 'pending'],
+    ]);
   });
 
   it('leaves the open tasks of a dropped step as they are', () => {

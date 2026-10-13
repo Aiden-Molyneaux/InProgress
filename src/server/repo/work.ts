@@ -55,18 +55,24 @@ const findItem = (ctx: Ctx, sessionId: string, agentId: string, taskKey: string)
 const nextPosition = (ctx: Ctx, nodeId: number): number =>
   (ctx.db.prepare('SELECT COALESCE(MAX(position), 0) + 1 AS p FROM work_items WHERE node_id = ?').get(nodeId) as { p: number }).p;
 
+/** A done or dropped step: a session's focus stays on a step it has finished, so new tasks must not follow it there. */
+const isClosed = (node: { status: string }) => node.status === 'done' || node.status === 'dropped';
+
 /**
  * Where a new working task goes, decided once: a leading `#id` in the subject when that node is in the session's
- * project; for a subagent's task, the subagent's node; then the session's focus; then the project root.
+ * project; for a subagent's task, the subagent's node; then the session's focus; then the project root. A done or
+ * dropped subagent node or focus sends the task to the root (not on to the main session's focus, for a subagent).
  */
 function attribute(ctx: Ctx, session: Session, agentId: string, subject: string): { projectId: number; nodeId: number } | undefined {
   const projectId = session.projectId;
   if (projectId === null) return undefined;
-  const inProject = (id: number | null | undefined) => (id != null && findNode(ctx, id)?.projectId === projectId ? id : undefined);
-  const nodeId = leadingNode(ctx, subject, projectId)
-    ?? (agentId ? inProject(subagentNode(ctx, session.id, agentId)) : undefined)
-    ?? inProject(session.focusNodeId)
-    ?? getProjectById(ctx, projectId)?.rootNodeId;
+  const inProject = (id: number | null | undefined) => {
+    const node = id == null ? undefined : findNode(ctx, id);
+    return node?.projectId === projectId ? node : undefined;
+  };
+  const named = leadingNode(ctx, subject, projectId);
+  const home = named === undefined ? ((agentId ? inProject(subagentNode(ctx, session.id, agentId)) : undefined) ?? inProject(session.focusNodeId)) : undefined;
+  const nodeId = named ?? (home && !isClosed(home) ? home.id : getProjectById(ctx, projectId)?.rootNodeId);
   return nodeId === undefined ? undefined : { projectId, nodeId };
 }
 
@@ -123,7 +129,9 @@ export function taskUpdated(ctx: Ctx, session: Session, change: TaskChange): num
     for (const k of keys) if (k !== self && !list.includes(k)) list.push(k);
   };
   addTo(blocks, change.addBlocks ?? [], taskKey);
-  const next = { subject: subject || item.subject, status: change.status ?? item.status, blocks: JSON.stringify(blocks) };
+  // A task ticked on a done step stays ticked: Claude Code still holds it as open and may send it back.
+  const reopensOnDone = item.status === 'completed' && change.status !== undefined && change.status !== 'completed' && findNode(ctx, item.node_id)?.status === 'done';
+  const next = { subject: subject || item.subject, status: reopensOnDone ? item.status : change.status ?? item.status, blocks: JSON.stringify(blocks) };
   if (next.subject !== item.subject || next.status !== item.status || next.blocks !== item.blocks) {
     ctx.db.prepare('UPDATE work_items SET subject = ?, status = ?, blocks = ?, updated_at = ? WHERE id = ?').run(next.subject, next.status, next.blocks, ctx.now(), item.id);
     touched.add(item.node_id);
@@ -186,7 +194,8 @@ const ownList = (ctx: Ctx, sessionId: string, nodeId: number): WorkRowWithEnd[] 
 
 /**
  * The tasks command, run by a main session where the task tools are absent: replaces the session's own working tasks
- * on a node with this list, in order (an empty list clears them). With no node it uses the session's focus. Its
+ * on a node with this list, in order (an empty list clears them). With no node it uses the session's focus, or the
+ * project root once that focus is done or dropped, as the task tools do. Its
  * subagents' lists stay as they are. The hints are for that main session: it has the CLI, none of the scribe's tools,
  * and a shell where an unquoted `#` starts a comment.
  */
@@ -200,7 +209,8 @@ export function setTasks(ctx: Ctx, actor: string, sessionId: string, requested: 
       throw notTracked(ctx, sessionId, session.projectId, 'InProgress stopped tracking this session when its project was archived; there is nothing to keep current, so skip the tasks command.');
     }
     const findStep = () => `Find the right step id with the CLI command: outline ${getProjectById(ctx, session.projectId!)?.slug ?? '<project>'}`;
-    const nodeId = requested ?? session.focusNodeId;
+    const focus = session.focusNodeId === null ? undefined : findNode(ctx, session.focusNodeId);
+    const nodeId = requested ?? (focus && isClosed(focus) ? getProjectById(ctx, session.projectId)?.rootNodeId ?? focus.id : session.focusNodeId);
     if (nodeId === null) throw badRequest('This session has no focus', 'Name the step: tasks <id> …');
     const node = findNode(ctx, nodeId);
     if (!node) throw notFound(`Node #${nodeId} not found`, findStep());
