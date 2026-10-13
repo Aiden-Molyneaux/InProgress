@@ -114,7 +114,6 @@ export type QueueOp = { kind: 'move'; node: number; before: number | null } | { 
 export const PROJECT_NAME_MAX = 120;
 
 export interface ProjectSummary extends Project {
-  needsYou: number;
   /** Open asks. */
   openAsks: number;
   /** Live sessions in state permission. */

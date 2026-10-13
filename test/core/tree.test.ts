@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { NODE_LABELS, type TreeNode } from '../../src/core/types';
-import { NEEDS_YOU_STALE_MS, ancestors, buildIndex, computeVisible, countDone, isNeedsYou, needsYouAge, pinnedIds, progress, renderOutline } from '../../src/core/tree';
+import { ancestors, buildIndex, computeVisible, countDone, isNeedsYou, pinnedIds, progress, renderOutline } from '../../src/core/tree';
 import type { VisibleItem } from '../../src/core/tree';
 
 let nextId = 1;
@@ -53,38 +53,6 @@ describe('derived stats', () => {
     expect(pinned.has(t.s6.id)).toBe(true);
     expect(pinned.has(t.s7.id)).toBe(false);
     expect(pinned.has(t.m.id)).toBe(false);
-  });
-});
-
-describe('needsYouAge', () => {
-  const HOUR = 60 * 60 * 1000;
-  const DAY = 24 * HOUR;
-  const at = '2026-10-01T09:00:00.000Z';
-  const age = (ms: number, updatedAt = at) => needsYouAge({ updatedAt }, Date.parse(at) + ms);
-
-  it('is null under 24 hours, then whole days floored', () => {
-    expect([0, HOUR, DAY - 1].map((ms) => age(ms))).toEqual([null, null, null]);
-    expect(age(DAY)).toBe('1d');
-    expect(age(2 * DAY - 1)).toBe('1d');
-    expect(age(2 * DAY)).toBe('2d');
-    expect(age(5 * DAY + 23 * HOUR)).toBe('5d');
-    expect(age(14 * DAY - 1)).toBe('13d');
-  });
-
-  it('turns to whole weeks floored at 14 days', () => {
-    expect(age(14 * DAY)).toBe('2w');
-    expect(age(21 * DAY - 1)).toBe('2w');
-    expect(age(21 * DAY)).toBe('3w');
-    expect(age(70 * DAY)).toBe('10w');
-  });
-
-  it('is null for a time it cannot read or one ahead of now', () => {
-    expect(age(30 * DAY, 't')).toBeNull();
-    expect(age(-DAY)).toBeNull();
-  });
-
-  it('calls an item stale past three days', () => {
-    expect(NEEDS_YOU_STALE_MS).toBe(3 * DAY);
   });
 });
 

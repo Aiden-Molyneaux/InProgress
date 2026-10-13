@@ -58,9 +58,9 @@ describe('stepTab', () => {
 });
 
 describe('waitingOn', () => {
-  it('is the open asks plus the permission waits, and ignores needsYou', () => {
+  it('is the open asks plus the permission waits', () => {
     expect(waitingOn({ openAsks: 2, permissionWaits: 1 })).toBe(3);
-    expect(waitingOn({ openAsks: 0, permissionWaits: 0, needsYou: 5 } as never)).toBe(0);
+    expect(waitingOn({ openAsks: 0, permissionWaits: 0 })).toBe(0);
   });
 });
 

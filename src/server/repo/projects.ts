@@ -465,7 +465,6 @@ export function listProjectSummaries(ctx: Ctx): ProjectSummary[] {
   const rows = ctx.db
     .prepare(
       `SELECT p.*,
-        (SELECT COUNT(*) FROM nodes n WHERE n.project_id = p.id AND n.assignee = 'me' AND n.status IN ('todo','active','blocked')) AS needs_you,
         (SELECT COUNT(*) FROM asks a WHERE a.project_id = p.id AND a.cleared_at IS NULL) AS open_asks,
         (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.state = 'permission' AND s.last_seen_at >= ?) AS permission_waits,
         (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.state != 'ended' AND s.last_seen_at >= ?) AS active_sessions,
@@ -476,11 +475,10 @@ export function listProjectSummaries(ctx: Ctx): ProjectSummary[] {
         (SELECT ts FROM events e WHERE e.project_id = p.id AND e.type NOT LIKE 'window.%' ORDER BY e.id DESC LIMIT 1) AS last_event_at
        FROM projects p WHERE p.deleted_at IS NULL`,
     )
-    .all(liveSince, liveSince, liveSince, liveSince, msAgo(ctx, COMMAND_WORK_MS)) as (ProjectRow & { needs_you: number; open_asks: number; permission_waits: number; active_sessions: number; working_sessions: number; busy_sessions: number; last_event_at: string | null })[];
+    .all(liveSince, liveSince, liveSince, liveSince, msAgo(ctx, COMMAND_WORK_MS)) as (ProjectRow & { open_asks: number; permission_waits: number; active_sessions: number; working_sessions: number; busy_sessions: number; last_event_at: string | null })[];
   return rows
     .map((r) => ({
       ...readProject(ctx, r),
-      needsYou: r.needs_you,
       openAsks: r.open_asks,
       permissionWaits: r.permission_waits,
       activeSessions: r.active_sessions,
