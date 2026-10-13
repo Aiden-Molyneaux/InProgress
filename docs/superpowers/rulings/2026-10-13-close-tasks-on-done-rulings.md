@@ -14,9 +14,9 @@ rework anything ruled wrongly.
    moves it back to `pending` or `in_progress`; subject and blocks changes still land, and the guard lifts when the
    step reopens. `attribute()` sends a new task to the project root when its subagent node, or else the session's
    focus, is done or dropped; a subagent whose node is closed does not pick up the main session's focus, which may be
-   unrelated work. The `tasks` command with no step id does the same with a closed focus. Each closes a gap the other leaves: the first covers rows that exist, the second new ones. Cost
-   if wrong: a session that really does more work on a done step loses its status changes there until the step is
-   reopened.
+   unrelated work. Each guard closes a gap the other leaves: the first covers rows that exist, the second new ones.
+   The `tasks` command with no step id also uses the root when the focus is closed. Cost if wrong: a session that
+   really does more work on a done step loses its status changes there until the step is reopened.
 4. A leading `#id` still wins even when it names a done or dropped step (session L): naming a step is deliberate,
    and such a task is open on the step until it is next marked done. Cost if wrong: stray open tasks on finished
    steps, which the Orchestrator's reconcile already lists.
