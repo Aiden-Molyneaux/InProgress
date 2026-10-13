@@ -423,8 +423,8 @@ li.ip-orow:hover { background: var(--panel-2); }
 /* In Details the heads sit further from the section above, in --text-2, so the sections read apart. */
 .ip-details > .ip-label { margin: 18px 0 6px; color: var(--text-2); }
 /* Every entry in Details (an ask, a task, a subagent, a command, ended work, a resource, a step, a log line) sits on its
-   own soft row, so the entries read apart. A row that opens something deepens on hover and its title takes full ink,
-   which carries the hover at night, where the two fills are close. */
+   own soft row, so the entries read apart. A row that opens something deepens on hover, and a resource's title takes
+   full ink too, since at night the two fills are close. */
 .ip-details :is(.ip-dasks, .ip-wts, .ip-dagents, .ip-log) > li, .ip-details .ip-res, .ip-details .ip-kids li button { margin: 0 0 3px; padding: 4px 8px; border-radius: var(--radius); background: var(--panel-2); }
 .ip-details .ip-res:hover, .ip-details .ip-kids li button:hover { background: var(--track); }
 .ip-details .ip-res:hover b { color: var(--text); }
