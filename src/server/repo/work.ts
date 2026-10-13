@@ -57,15 +57,19 @@ const nextPosition = (ctx: Ctx, nodeId: number): number =>
 
 /**
  * Where a new working task goes, decided once: a leading `#id` in the subject when that node is in the session's
- * project; for a subagent's task, the subagent's node; then the session's focus; then the project root.
+ * project; for a subagent's task, the subagent's node; then the session's focus; then the project root. The subagent
+ * node and the focus count only while they are open: a session's focus stays on a step it has finished.
  */
 function attribute(ctx: Ctx, session: Session, agentId: string, subject: string): { projectId: number; nodeId: number } | undefined {
   const projectId = session.projectId;
   if (projectId === null) return undefined;
-  const inProject = (id: number | null | undefined) => (id != null && findNode(ctx, id)?.projectId === projectId ? id : undefined);
+  const openInProject = (id: number | null | undefined) => {
+    const node = id == null ? undefined : findNode(ctx, id);
+    return node?.projectId === projectId && node.status !== 'done' && node.status !== 'dropped' ? node.id : undefined;
+  };
   const nodeId = leadingNode(ctx, subject, projectId)
-    ?? (agentId ? inProject(subagentNode(ctx, session.id, agentId)) : undefined)
-    ?? inProject(session.focusNodeId)
+    ?? (agentId ? openInProject(subagentNode(ctx, session.id, agentId)) : undefined)
+    ?? openInProject(session.focusNodeId)
     ?? getProjectById(ctx, projectId)?.rootNodeId;
   return nodeId === undefined ? undefined : { projectId, nodeId };
 }
@@ -123,7 +127,9 @@ export function taskUpdated(ctx: Ctx, session: Session, change: TaskChange): num
     for (const k of keys) if (k !== self && !list.includes(k)) list.push(k);
   };
   addTo(blocks, change.addBlocks ?? [], taskKey);
-  const next = { subject: subject || item.subject, status: change.status ?? item.status, blocks: JSON.stringify(blocks) };
+  // A task ticked on a done step stays ticked: Claude Code still holds it as open and may send it back.
+  const reopensOnDone = item.status === 'completed' && change.status !== undefined && change.status !== 'completed' && findNode(ctx, item.node_id)?.status === 'done';
+  const next = { subject: subject || item.subject, status: reopensOnDone ? item.status : change.status ?? item.status, blocks: JSON.stringify(blocks) };
   if (next.subject !== item.subject || next.status !== item.status || next.blocks !== item.blocks) {
     ctx.db.prepare('UPDATE work_items SET subject = ?, status = ?, blocks = ?, updated_at = ? WHERE id = ?').run(next.subject, next.status, next.blocks, ctx.now(), item.id);
     touched.add(item.node_id);

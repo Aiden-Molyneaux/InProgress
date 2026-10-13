@@ -10,3 +10,12 @@ rework anything ruled wrongly.
 2. Close means set to `completed`, not delete, for every row on the step whoever owns it, and only on the transition
    into done (Orchestrator, session I; recorded here so the ruling lives in one place). Cost if wrong: the trail keeps
    rows Aiden would rather not see.
+3. #398, both guards (session L). `taskUpdated` keeps a `completed` row on a done step `completed` when an update
+   moves it back to `pending` or `in_progress`; subject and blocks changes still land, and the guard lifts when the
+   step reopens. `attribute()` skips a subagent node or focus that is done or dropped, so a new task falls through to
+   the project root. Each closes a gap the other leaves: the first covers rows that exist, the second new ones. Cost
+   if wrong: a session that really does more work on a done step loses its status changes there until the step is
+   reopened.
+4. A leading `#id` still wins even when it names a done or dropped step (session L): naming a step is deliberate,
+   and such a task is open on the step until it is next marked done. Cost if wrong: stray open tasks on finished
+   steps, which the Orchestrator's reconcile already lists.
