@@ -31,27 +31,51 @@ export function Backlog({ rows, snapshot, now, projectId, slug, onStatus, onOpen
 }) {
   /** The row whose Delete confirm is open: one at a time. */
   const [confirming, setConfirming] = useState<number | null>(null);
+  /** Rows deleted and waiting for the answer, or for the snapshot that drops them. */
+  const [pending, setPending] = useState<number[]>([]);
   const root = useRef<HTMLDivElement>(null);
+  /** The band heading, for when the confirm's row leaves and takes focus with it. */
+  const heading = useRef<HTMLElement | null>(null);
+  const ids = rows.map((r) => r.node.id).join(',');
   // Cancel takes focus when a confirm opens.
   useEffect(() => {
-    if (confirming !== null) root.current?.querySelector<HTMLElement>('.ip-confirm [data-cancel]')?.focus();
+    if (confirming === null) return;
+    const home = root.current?.closest<HTMLElement>('.ip-band');
+    heading.current = home?.querySelector<HTMLElement>('h3, header b') ?? null;
+    root.current?.querySelector<HTMLElement>('.ip-confirm [data-cancel]')?.focus();
   }, [confirming]);
-  /** Closes the confirm and puts focus back on that row's Delete button, once it is drawn again. */
+  // A row that left (deleted here or elsewhere) no longer confirms or waits; if it took focus with it, the heading has it.
+  useEffect(() => {
+    const here = new Set(ids ? ids.split(',').map(Number) : []);
+    if (confirming !== null && !here.has(confirming)) {
+      setConfirming(null);
+      if (document.activeElement === document.body) heading.current?.focus();
+    }
+    setPending((p) => (p.some((id) => !here.has(id)) ? p.filter((id) => here.has(id)) : p));
+  }, [ids, confirming]);
+  /** Puts focus back on that row's Delete button, once it is drawn again. */
+  const refocus = (id: number) => window.requestAnimationFrame(() => root.current?.querySelector<HTMLElement>(`li[data-node="${id}"] [data-delete]`)?.focus());
   const cancel = (id: number) => {
     setConfirming(null);
-    window.requestAnimationFrame(() => root.current?.querySelector<HTMLElement>(`li[data-node="${id}"] [data-delete]`)?.focus());
+    refocus(id);
   };
   const remove = async (id: number, li: HTMLElement | null) => {
     noteAction('backlog', 'delete');
     const after = focusTargetAfter(li);
     setConfirming(null);
+    setPending((p) => [...p, id]);
     after?.focus();
     const result = await deleteStep(projectId, slug, id);
     if (result === 'ok') return;
+    setPending((p) => p.filter((x) => x !== id));
+    refocus(id);
     if (result === 'reload') window.location.reload();
     else onStatus?.(result);
   };
   if (rows.length === 0) return <p className="ip-quiet ip-empty-line">Backlog is empty</p>;
+  /** The server refuses a step with any step under it, done or dropped ones too. */
+  const parents = new Set(snapshot.nodes.map((n) => n.parentId));
+  const hasKids = (id: number) => parents.has(id);
   const slotOf = (id: string) => snapshot.sessions.find((s) => s.id === id)?.slot ?? null;
   return (
     <div className="ip-backlog-groups" ref={root}>
@@ -62,20 +86,22 @@ export function Backlog({ rows, snapshot, now, projectId, slug, onStatus, onOpen
             {g.rows.map((row) => {
               const ended = endedLine(row, snapshot.pastSessions, slotOf, now);
               const asking = confirming === row.node.id;
+              const waiting = pending.includes(row.node.id);
               return (
                 <li
                   key={row.node.id}
-                  className="ip-row ip-backlog-row"
+                  className={`ip-row ip-backlog-row${waiting ? ' pending' : ''}`}
+                  aria-busy={waiting || undefined}
                   data-node={row.node.id}
-                  draggable={!asking}
+                  draggable={!asking && !waiting}
                   onDragStart={(e) => {
-                    if (asking) return e.preventDefault();
+                    if (asking || waiting) return e.preventDefault();
                     e.dataTransfer.effectAllowed = 'move';
                     e.dataTransfer.setData('text/plain', String(row.node.id));
                     onDragStart(row.node.id);
                   }}
                   onDragEnd={onDragEnd}
-                  onClick={rowClick('backlog', () => onOpenNode(row.node.id))}
+                  onClick={asking || waiting ? undefined : rowClick('backlog', () => onOpenNode(row.node.id))}
                 >
                   {asking ? (
                     <div
@@ -84,6 +110,7 @@ export function Backlog({ rows, snapshot, now, projectId, slug, onStatus, onOpen
                       aria-modal={false}
                       aria-labelledby={`bl${row.node.id}q`}
                       aria-describedby={`bl${row.node.id}d`}
+                      tabIndex={-1}
                       data-act
                       onKeyDown={(e) => {
                         if (e.key !== 'Escape') return;
@@ -112,7 +139,9 @@ export function Backlog({ rows, snapshot, now, projectId, slug, onStatus, onOpen
                         focusTargetAfter(e.currentTarget.closest('li'))?.focus();
                         onToNext(row.node.id);
                       }}>to Next</button>
-                      <button type="button" className="ip-hover-act" data-act data-delete aria-haspopup="dialog" onClick={() => setConfirming(row.node.id)}>Delete…</button>
+                      {!hasKids(row.node.id) && (
+                        <button type="button" className="ip-hover-act" data-act data-delete aria-haspopup="dialog" onClick={() => setConfirming(row.node.id)}>Delete…</button>
+                      )}
                     </div>
                   )}
                   {ended && <div className="ip-system-line">{ended}</div>}

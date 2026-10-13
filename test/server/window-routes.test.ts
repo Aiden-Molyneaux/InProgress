@@ -165,6 +165,46 @@ describe('node delete route', () => {
     expect(exists(ctx, p.rootNodeId)).toBe(true);
   });
 
+  it('refuses a done or dropped step', async () => {
+    const { ctx, p, post, a, b } = await setup();
+    updateNode(ctx, 'test', a, { status: 'done' });
+    updateNode(ctx, 'test', b, { status: 'dropped' });
+    const done = await post(`/api/ui/projects/${p.id}/nodes/${a}/delete`, { slug: p.slug });
+    expect([done.statusCode, done.json().error]).toEqual([400, `#${a} is done`]);
+    const dropped = await post(`/api/ui/projects/${p.id}/nodes/${b}/delete`, { slug: p.slug });
+    expect([dropped.statusCode, dropped.json().error]).toEqual([400, `#${b} is dropped`]);
+    expect(exists(ctx, a) && exists(ctx, b)).toBe(true);
+  });
+
+  it('refuses a step a live session is focused on, but not one only a stale or ended session held', async () => {
+    const { ctx, p, post, a, b, c } = await setup();
+    ctx.db.prepare('UPDATE sessions SET focus_node_id = ? WHERE id = ?').run(a, 's1');
+    const res = await post(`/api/ui/projects/${p.id}/nodes/${a}/delete`, { slug: p.slug });
+    expect([res.statusCode, res.json().error]).toEqual([400, `#${a} is being worked on`]);
+    expect(exists(ctx, a)).toBe(true);
+    ctx.db.prepare("UPDATE sessions SET last_seen_at = '2000-01-01T00:00:00.000Z' WHERE id = 's1'").run();
+    expect((await post(`/api/ui/projects/${p.id}/nodes/${a}/delete`, { slug: p.slug })).statusCode).toBe(200);
+    ctx.db.prepare("INSERT INTO sessions (id, project_id, state, focus_node_id, started_at, last_seen_at, ended_at) VALUES ('old', ?, 'ended', ?, ?, ?, ?)").run(p.id, b, ctx.now(), ctx.now(), ctx.now());
+    expect((await post(`/api/ui/projects/${p.id}/nodes/${b}/delete`, { slug: p.slug })).statusCode).toBe(200);
+    expect(exists(ctx, c)).toBe(true);
+  });
+
+  it('refuses an active step assigned to me', async () => {
+    const { ctx, p, post, a } = await setup();
+    updateNode(ctx, 'test', a, { status: 'active', assignee: 'me' });
+    const res = await post(`/api/ui/projects/${p.id}/nodes/${a}/delete`, { slug: p.slug });
+    expect([res.statusCode, res.json().error]).toEqual([400, `#${a} is being worked on`]);
+    expect(exists(ctx, a)).toBe(true);
+  });
+
+  it('refuses a step in the queue', async () => {
+    const { ctx, p, post, queue, a } = await setup();
+    await queue({ kind: 'move', node: a, before: null });
+    const res = await post(`/api/ui/projects/${p.id}/nodes/${a}/delete`, { slug: p.slug });
+    expect([res.statusCode, res.json().error]).toEqual([400, `#${a} is in Next`]);
+    expect(exists(ctx, a)).toBe(true);
+  });
+
   it('answers 409 for a wrong slug, 404 for a missing step, and refuses a request not from the window', async () => {
     const { ctx, p, post, a } = await setup();
     const url = `/api/ui/projects/${p.id}/nodes/${a}/delete`;

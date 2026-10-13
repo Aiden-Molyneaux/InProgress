@@ -2031,7 +2031,16 @@ test.describe('Board', () => {
     await expect(dialog).toHaveCount(0);
     await expect(del).toBeFocused();
     await expect(title).toBeVisible();
-    // Ask again and delete: the row goes, Details does not open, and the tree no longer has it.
+    // A click on the question keeps focus in the dialog, so Escape still closes it.
+    await page.keyboard.press('Enter');
+    await dialog.locator('b').click();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(del).toBeFocused();
+    // Details open on the step: deleting it closes Details, and a click on the open confirm does not open one.
+    await title.click();
+    await expect(page.getByRole('complementary')).toHaveCount(1);
+    await del.focus();
     await page.keyboard.press('Enter');
     await expect(dialog).toBeVisible();
     await dialog.getByRole('button', { name: 'Delete', exact: true }).click();

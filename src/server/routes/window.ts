@@ -1,12 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import type { Guard } from '../app';
 import type { Ctx } from '../db/tx';
+import { STALE_SESSION_MS } from '../../core/types';
 import { badRequest, conflict, notFound } from '../errors';
 import { deleteProject, listDeletedProjects, restoreProject } from '../project-lifecycle';
 import { clearAsk } from '../repo/asks';
 import { recordQuiet } from '../repo/events';
 import { addNodes, deleteNode } from '../repo/nodes';
-import { applyQueueOp, changeProject, getProjectById, resolveProject } from '../repo/projects';
+import { applyQueueOp, changeProject, getProjectById, isQueued, resolveProject } from '../repo/projects';
 import { idParam, windowClearBody, windowEventBody, windowNodeBody, windowProjectBody, windowQueueBody, windowNodeParams, windowRenameBody, WINDOW_EVENT_KEYS } from '../schemas';
 
 /** Who the window's writes are recorded as: fixed here, never taken from a header. */
@@ -91,6 +92,12 @@ export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: 
     return deleteNode(ctx, ACTOR, node, false, (n, ids) => {
       if (n.projectId !== projectId) throw badRequest(`#${node} is not in this project`, 'Reload the window.');
       if (ids.length > 1) throw badRequest(`#${node} has steps under it`, 'Move or delete them first.');
+      // The Backlog shows only a step that is open, not worked on and not queued (deriveBoard): refuse any other.
+      if (n.status === 'done' || n.status === 'dropped') throw badRequest(`#${node} is ${n.status}`, 'Reload the window.');
+      const cutoff = new Date(Date.parse(ctx.now()) - STALE_SESSION_MS).toISOString();
+      const focused = ctx.db.prepare("SELECT 1 FROM sessions WHERE focus_node_id = ? AND state != 'ended' AND last_seen_at >= ?").get(node, cutoff) !== undefined;
+      if (focused || (n.assignee === 'me' && n.status === 'active')) throw badRequest(`#${node} is being worked on`, 'Reload the window.');
+      if (isQueued(ctx, projectId, node)) throw badRequest(`#${node} is in Next`, 'Reload the window.');
     });
   });
   // Idempotent (spec 1.2): clearing twice answers the same; a 404 for an ask that does not exist.
