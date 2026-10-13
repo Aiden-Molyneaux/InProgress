@@ -4,7 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { allowRules, claudeDir, HOOK_DEFS, hookEntry, install, isInProgressHook, kitStatus, nodeBinary, renderTemplate, STATIC_ALLOW_RULES, uninstall } from '../../src/cli/claude-config';
 import { homeDir } from '../../src/lib/home';
-import { repoCli, taskPrefix } from '../../src/lib/task-command';
+import { CLI_SUBCOMMANDS, cliAllowRules, isCliAllowRule, repoCli, taskPrefix } from '../../src/lib/task-command';
 
 const temps: string[] = [];
 function tempDir(prefix: string): string {
@@ -71,8 +71,8 @@ const withForeign = {
   hooks: { ...existing.hooks, SessionStart: [{ hooks: [foreignShell] }], PreToolUse: [{ matcher: 'Bash', hooks: [foreignExec] }] },
 };
 
-/** The tasks command's rules for the fixture repo, written out as Claude Code's settings hold them. */
-const taskRules = [`Bash(node ${repo}/dist/cli/main.js tasks *)`, `PowerShell(node ${repo}/dist/cli/main.js tasks *)`];
+/** The CLI commands' rules (tasks, claim, ask, orchestrate, digest) for the fixture repo, written out as Claude Code's settings hold them. */
+const taskRules = CLI_SUBCOMMANDS.flatMap((sub) => [`Bash(node ${repo}/dist/cli/main.js ${sub} *)`, `PowerShell(node ${repo}/dist/cli/main.js ${sub} *)`]);
 /** A tasks rule an older checkout left behind. */
 const staleTaskRules = ['Bash(node D:/old/InProgress/dist/cli/main.js tasks *)', 'PowerShell(node D:/old/InProgress/dist/cli/main.js tasks *)'];
 
@@ -309,7 +309,7 @@ describe('install', () => {
     // Nothing could allow it, and another checkout's rules still go.
     expect(readSettings(dir).permissions.allow).toEqual(['Bash(git status)', ...STATIC_ALLOW_RULES]);
     expect(log).toContain(`Allow rules: ${STATIC_ALLOW_RULES.join(', ')}`);
-    expect(log.join('\n')).toMatch(/Left out the tasks command's allow rules: the repo path .*ip repo-.* holds a space/);
+    expect(log.join('\n')).toMatch(/Left out the allow rules for the tasks, claim, ask, orchestrate and digest commands: the repo path .*ip repo-.* holds a space/);
     expect(kitStatus({ repo: spaced, claudeDir: dir }).differs).not.toContain('settings');
     // The skill quotes the path, as the briefing does, so its command still runs (with a prompt).
     const skill = readFileSync(join(dir, 'skills', 'inprogress', 'SKILL.md'), 'utf8');
@@ -580,5 +580,18 @@ describe('kitStatus', () => {
     expect(kitStatus({ repo, claudeDir: dir })).toEqual({ installed: true, differs: ['settings'] });
     write([...STATIC_ALLOW_RULES, ...taskRules]);
     expect(kitStatus({ repo, claudeDir: dir })).toEqual({ installed: true, differs: [] });
+  });
+});
+
+describe('allow rules for every session command', () => {
+  it('are ten: two tools for each of tasks, claim, ask, orchestrate and digest', () => {
+    expect(cliAllowRules(repoCli(repo))).toEqual(taskRules);
+    expect(taskRules).toHaveLength(10);
+    expect(cliAllowRules(repoCli('C:/My Repos/InProgress'))).toEqual([]);
+  });
+
+  it('are recognised for any repo path and subcommand, and nothing else', () => {
+    for (const rule of [...taskRules, ...cliAllowRules(repoCli('D:/old/checkout'))]) expect(isCliAllowRule(rule), rule).toBe(true);
+    for (const rule of [`Bash(node ${repo}/dist/cli/main.js rm *)`, `Bash(node ${repo}/dist/cli/main.js usage *)`, 'Bash(git status)', 'mcp__inprogress']) expect(isCliAllowRule(rule), rule).toBe(false);
   });
 });

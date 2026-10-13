@@ -67,8 +67,8 @@ describe('scribe MCP tools', () => {
   it('lists exactly the specified tools, without set_tasks: a main session sets its own working tasks with the CLI', async () => {
     const { tools } = await mcp.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
-      'add_log', 'add_nodes', 'add_resource', 'bind_folder', 'create_project', 'delete_node', 'delete_resource',
-      'enroll_session', 'get_node', 'get_outline', 'get_resource', 'list_projects', 'move_node', 'search',
+      'add_log', 'add_nodes', 'add_resource', 'bind_folder', 'clear_ask', 'create_project', 'delete_node', 'delete_resource',
+      'enroll_session', 'get_node', 'get_outline', 'get_resource', 'list_projects', 'move_node', 'raise_ask', 'search',
       'set_focus', 'set_queue', 'unbind_folder', 'update_node', 'update_project', 'update_resource',
     ]);
   });
@@ -164,7 +164,7 @@ describe('scribe MCP tools', () => {
     const node = await call('get_node', { id: road });
     expect(node.text).toContain('Detour: sandbox wedge');
     expect((await call('search', { project: 'ingame', query: 'upload key' })).text).toContain(`r${rid} Signing suite`);
-    expect((await call('list_projects')).text).toMatch(/ingame · InGame \(active\) · root #\d+ · 1 need you/);
+    expect((await call('list_projects')).text).toMatch(/ingame · InGame \(active\) · root #\d+ · 0 need you/);
   });
 
   it('labels steps through add_nodes and update_node, where null clears a label, and shows the glyph', async () => {
@@ -184,6 +184,44 @@ describe('scribe MCP tools', () => {
     expect(await call('update_node', { id: migration, label: 'fix', session: 'l1' })).toEqual({ text: `#${migration} ⚑ Migration 3 · todo.`, isError: false });
     expect(await call('update_node', { id: migration, label: null, session: 'l1' })).toEqual({ text: `#${migration} Migration 3 · todo.`, isError: false });
     expect((await call('get_node', { id: migration })).text.split('\n')[0]).toBe(`#${migration} Migration 3 (task) · todo, Claude`);
+  });
+
+  it('raises and clears asks, saying when the session is untracked or the ask joined an open one', async () => {
+    const rootId = ids((await call('create_project', { name: 'Asks', description: 'x', session: 'k1' })).text)[0];
+    const [step] = lineIds((await call('add_nodes', { parent: rootId, nodes: [{ title: 'Pick a port' }] })).text);
+    await call('enroll_session', { session: 'k1', project: 'asks' });
+    await call('enroll_session', { session: 'k2', project: 'asks' });
+    const first = await call('raise_ask', { node: step, kind: 'question', text: 'Which port?', session: 'k1' });
+    const a1 = Number(/^a(\d+) raised/.exec(first.text)![1]);
+    expect(first).toEqual({ text: `a${a1} raised on #${step}.`, isError: false });
+    // The same open ask from another session joins it; its answer goes to k1 only.
+    const joined = await call('raise_ask', { node: step, kind: 'question', text: 'Which port?', session: 'k2' });
+    expect(joined.text.split('\n')).toEqual([`a${a1} raised on #${step}.`, `Note: a${a1} was already open, raised by another session; its answer goes to that session, not to this one.`]);
+    // A session InProgress does not track gets no answer back.
+    const stray = await call('raise_ask', { node: step, kind: 'review', text: 'Look', session: 'ghost' });
+    const a2 = Number(/^a(\d+) raised/.exec(stray.text)![1]);
+    expect(stray.text.split('\n')).toEqual([`a${a2} raised on #${step}.`, 'Note: session ghost is not tracked in InProgress, so no answer will come back to it.']);
+    expect((await call('raise_ask', { node: step, kind: 'nope', text: 'x' })).isError).toBe(true);
+    expect(await call('clear_ask', { ask: a1, answer: '8080' })).toEqual({ text: `a${a1} answered: "8080"`, isError: false });
+    expect(await call('clear_ask', { ask: a2 })).toEqual({ text: `a${a2} cleared.`, isError: false });
+    expect((await call('list_projects')).text).toContain('Asks (active)');
+    expect((await call('list_projects')).text).toMatch(/asks · Asks \(active\) · root #\d+ · 0 need you/);
+  });
+
+  it('sets purpose on resources and briefing_mode on a project', async () => {
+    const rootId = ids((await call('create_project', { name: 'Purpose', description: 'x' })).text)[0];
+    const [step] = lineIds((await call('add_nodes', { parent: rootId, nodes: [{ title: 'Step' }] })).text);
+    const note = await call('add_resource', { node: rootId, kind: 'doc', title: 'State', content: 'where we are', purpose: 'state' });
+    expect(note.isError).toBe(false);
+    expect((await call('add_resource', { node: step, kind: 'doc', title: 'Bad', content: 'x', purpose: 'state' })).isError).toBe(true);
+    const handoff = await call('add_resource', { node: step, kind: 'doc', title: 'Handoff', content: 'x' });
+    const rid = Number(/^r(\d+)/.exec(handoff.text)![1]);
+    expect((await call('update_resource', { id: rid, purpose: 'handoff' })).isError).toBe(false);
+    expect((await call('get_resource', { id: rid })).isError).toBe(false);
+    expect(await call('update_project', { project: 'purpose', briefing_mode: 'scoped' })).toEqual({ text: 'Updated project purpose (active).', isError: false });
+    const snap = (await (await fetch(`${base}/api/projects/purpose`)).json()) as { project: { briefingMode: string }; resources: { purpose: string | null; title: string }[] };
+    expect(snap.project.briefingMode).toBe('scoped');
+    expect(snap.resources.map((r) => [r.title, r.purpose]).sort()).toEqual([['Handoff', 'handoff'], ['State', 'state']]);
   });
 
   it('refuses an unknown label as a tool error that lists the set, nested steps too', async () => {

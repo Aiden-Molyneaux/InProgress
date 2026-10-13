@@ -237,6 +237,50 @@ describe('runCli', () => {
     expect(s.lines.join('\n')).not.toMatch(/tasks #/);
   });
 
+  describe('digest and usage', () => {
+    it("prints the route's text, with --since and for a project that exists", async () => {
+      const ctx = createCtx(db);
+      const root = db.prepare("SELECT root_node_id AS r FROM projects WHERE slug = 'cli-demo'").get() as { r: number };
+      const [step] = addNodes(ctx, 'test', { parentId: root.r, nodes: [{ title: 'Digest me', status: 'done', outcome: 'shipped it' }] });
+      const s = capture();
+      expect(await runCli(['digest', 'cli-demo', '--since', '2000-01-01T00:00:00.000Z'], s.out)).toBe(0);
+      const text = s.lines.join('\n');
+      expect(text).toContain('Digest for CLI Demo since');
+      expect(text).toContain(`#${step.id} Digest me: "shipped it"`);
+      const viaRoute = await fetch(`${base}/api/projects/cli-demo/digest?since=2000-01-01T00:00:00.000Z`).then((r) => r.json() as Promise<{ text: string }>);
+      expect(text).toBe(viaRoute.text);
+    });
+
+    it('exits 1 with the usage line when the project is missing or the time is not one', async () => {
+      const missing = capture();
+      expect(await runCli(['digest'], missing.out)).toBe(1);
+      expect(missing.lines).toEqual(['Missing <project>', 'Usage: inprogress digest <project> [--since <iso time>] [--all]']);
+      const bad = capture();
+      expect(await runCli(['digest', 'cli-demo', '--since', 'yesterday'], bad.out)).toBe(1);
+      expect(bad.lines[0]).toBe('Not a time: yesterday');
+    });
+
+    it('says the server is not running and exits 1', async () => {
+      process.env.INPROGRESS_PORT = String(await freePort());
+      try {
+        const s = capture();
+        expect(await runCli(['digest', 'cli-demo'], s.out)).toBe(1);
+        expect(s.lines).toEqual(['InProgress is not running.']);
+      } finally {
+        process.env.INPROGRESS_PORT = new URL(base).port;
+      }
+    });
+
+    it('prints the usage table and refuses a bad --days', async () => {
+      const s = capture();
+      expect(await runCli(['usage', 'cli-demo', '--days', '2'], s.out)).toBe(0);
+      expect(s.lines.join('\n')).toContain('Usage for CLI Demo, last 2 days:');
+      const bad = capture();
+      expect(await runCli(['usage', 'cli-demo', '--days', 'x'], bad.out)).toBe(1);
+      expect(bad.lines[1]).toBe('Usage: inprogress usage <project> [--days <n>]');
+    });
+  });
+
   describe('tasks', () => {
     /** A session tracked in CLI Demo with a step, and its stale-update counter at 3. */
     function trackedSession(id: string) {

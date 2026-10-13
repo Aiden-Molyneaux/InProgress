@@ -1,11 +1,16 @@
 import { commandLabel, sessionActivity } from '../core/activity';
 import { SCRIBE_AGENT, type CommandKind, type CommandOutcome, type HookEvent, type Session, type TreeNode, type WorkStatus } from '../core/types';
-import { write, type Ctx } from './db/tx';
+import { write, type Ctx, type RecordEvent } from './db/tx';
 import { badRequest } from './errors';
 import { renderBriefing, renderStatusAnswer, renderStatusLine, untrackedHint } from './briefing';
+import { renderOrchestratorBriefing, stepBlock } from './briefing-scoped';
+import { deriveBoard } from '../core/board';
+import { askTag, sessionTag } from '../core/types';
+import { formatCounts, formatDigest, readDigest } from './digest';
+import { markAnswersDelivered, undeliveredAnswers } from './repo/asks';
 import { endCommand, endSessionCommands, pruneCommands, reconcileCommands, startCommand, type BackgroundEntry } from './repo/commands';
 import { findNode, leadingNode, patchNode, requireNode } from './repo/nodes';
-import { isTracking, notTracked, releaseQueue, resolveBinding, resolveProject } from './repo/projects';
+import { getProjectById, isTracking, notTracked, releaseQueue, resolveBinding, resolveProject } from './repo/projects';
 import { assignSlot, briefingDue, clearBriefingDue, findSession, markBriefingDue, markRevived, saveSession } from './repo/sessions';
 import { getProjectSnapshot } from './repo/snapshot';
 import { endAgent, endSubagents, launchSubagent, messageAgent, pinStartFocus, pruneSubagents, recordDispatch, startSubagent, stopSubagent, subagentNode } from './repo/subagents';
@@ -92,6 +97,12 @@ function markIfRelettered(ctx: Ctx, before: Session, next: Session): void {
   if (next.state !== 'ended' && before.slot !== next.slot) markBriefingDue(ctx, next.id);
 }
 
+/** An answer on one line, at most 300 characters with the ellipsis inside them. */
+function oneLine(text: string): string {
+  const line = text.replace(/\s+/g, ' ').trim();
+  return line.length > 300 ? `${line.slice(0, 299)}…` : line;
+}
+
 const clean = (text: string | undefined): string | null => text?.trim() || null;
 
 export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInput): HookEventResult {
@@ -129,6 +140,8 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
       case 'start':
         // A missing source counts as 'startup'.
         if (RESET_SOURCES.has(input.source ?? 'startup')) next.state = 'idle';
+        // A clear starts a new conversation: an orchestrator that cleared is a worker again. Compaction and resume keep the role.
+        if (input.source === 'clear') next.role = 'worker';
         // A resumed session is a new life: what ran in the old one is gone.
         if (input.source === 'resume') endSessionCommands(ctx, sessionId, now);
         break;
@@ -296,15 +309,27 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
   // old needs-you items: a session first tracked by a prompt (its start was missed), a start with a missing or unknown
   // source, and an owed briefing count as new. An owed briefing is the enroll's even when a compaction's start brings
   // it: the one the enroll returned went to the scribe.
+  const nowMs = Date.parse(ctx.now());
+  let context: string | undefined;
   if (input.event === 'start' || created || briefingOwed) {
     const checkOld = briefingOwed || !(input.event === 'start' && input.source === 'compact');
-    return { tracked: true, context: renderBriefing(getProjectSnapshot(ctx, projectId), sessionId, Date.parse(ctx.now()), { checkOld }) };
+    // The orchestrator's counts line reads the digest, outside any write as the snapshot is.
+    const counts = session.role === 'orchestrator' ? formatCounts(readDigest(ctx, projectId), nowMs) : undefined;
+    context = renderBriefing(getProjectSnapshot(ctx, projectId), sessionId, nowMs, { checkOld, ...(counts === undefined ? {} : { counts }) });
+  } else if (input.event === 'prompt' && !input.notice) {
+    if (input.asksStatus) context = renderStatusAnswer(getProjectSnapshot(ctx, projectId), sessionId, nowMs);
+    else if (session.promptsSinceUpdate >= 2) context = renderStatusLine(getProjectSnapshot(ctx, projectId), session);
   }
+  // The answers line (spec 3.3): once, on the next real prompt after an ask this session raised was cleared.
   if (input.event === 'prompt' && !input.notice) {
-    if (input.asksStatus) return { tracked: true, context: renderStatusAnswer(getProjectSnapshot(ctx, projectId), sessionId, Date.parse(ctx.now())) };
-    if (session.promptsSinceUpdate >= 2) return { tracked: true, context: renderStatusLine(getProjectSnapshot(ctx, projectId), session) };
+    const answers = undeliveredAnswers(ctx, sessionId);
+    if (answers.length) {
+      const lines = answers.map((a) => (a.answer ? `Answered: ${askTag(a.id)} "${oneLine(a.answer)}"` : `Cleared: ${askTag(a.id)}, no answer`));
+      markAnswersDelivered(ctx, answers.map((a) => a.id));
+      context = [...lines, ...(context ? [context] : [])].join('\n');
+    }
   }
-  return { tracked: true };
+  return context === undefined ? { tracked: true } : { tracked: true, context };
 }
 
 export function enrollSession(ctx: Ctx, actor: string, sessionId: string, projectRef: string | number, title?: string): { session: Session; briefing: string } {
@@ -340,34 +365,117 @@ export function enrollSession(ctx: Ctx, actor: string, sessionId: string, projec
   return { session, briefing: renderBriefing(getProjectSnapshot(ctx, session.projectId!), sessionId, Date.parse(ctx.now()), { checkOld: true }) };
 }
 
+/** setFocus's work inside an open write: validates, activates a todo step, saves the session and records the change. */
+function applyFocus(ctx: Ctx, record: RecordEvent, sessionId: string, nodeId: number | null): { existing: Session; projectId: number } {
+  const existing = findSession(ctx, sessionId);
+  if (!existing) throw badRequest(`Session ${sessionId} is not tracked`, 'Use enroll_session first.');
+  const untracked = (id: number) => notTracked(ctx, sessionId, id, 'Unarchive the project with update_project first, or move the session to an active project with enroll_session.');
+  if (existing.projectId !== null && !isTracking(ctx, existing.projectId)) throw untracked(existing.projectId);
+  let projectId = existing.projectId;
+  let node: TreeNode | undefined;
+  if (nodeId !== null) {
+    node = requireNode(ctx, nodeId);
+    if (projectId === null) projectId = node.projectId;
+    else if (node.projectId !== projectId) throw badRequest(`#${nodeId} is not in this session's project`, 'Use enroll_session to move the session to another project first.');
+  }
+  if (projectId === null) throw badRequest(`Session ${sessionId} is not tracked`, 'Use enroll_session first.');
+  // A session with no project takes the step's, which must be tracked too.
+  if (!isTracking(ctx, projectId)) throw untracked(projectId);
+  // Focus on a todo step of Claude's makes it active, in this write and under this actor. Any other status, or a step
+  // assigned to Aiden, stays as it is. Recorded before session.updated, so the activity strip's latest line still
+  // reads "<session> is on #id".
+  if (node && node.status === 'todo' && node.assignee === 'claude') patchNode(ctx, record, node, { status: 'active' });
+  const next: Session = { ...existing, projectId, focusNodeId: nodeId, lastSeenAt: ctx.now() };
+  // Being heard from again can bring a stale session back.
+  placeSlot(ctx, existing, next);
+  saveSession(ctx, next);
+  // A subagent that started while the session had no focus stays on this first one (session.updated below refetches).
+  pinStartFocus(ctx, sessionId, nodeId);
+  markIfRelettered(ctx, existing, next);
+  record({ projectId, type: 'session.updated', entity: 'session', entityId: sessionId, data: { changed: ['focusNodeId'], focusNodeId: nodeId } });
+  return { existing, projectId };
+}
+
 export function setFocus(ctx: Ctx, actor: string, sessionId: string, nodeId: number | null): Session {
   write(ctx, actor, (record) => {
-    const existing = findSession(ctx, sessionId);
-    if (!existing) throw badRequest(`Session ${sessionId} is not tracked`, 'Use enroll_session first.');
-    const untracked = (id: number) => notTracked(ctx, sessionId, id, 'Unarchive the project with update_project first, or move the session to an active project with enroll_session.');
-    if (existing.projectId !== null && !isTracking(ctx, existing.projectId)) throw untracked(existing.projectId);
-    let projectId = existing.projectId;
-    let node: TreeNode | undefined;
-    if (nodeId !== null) {
-      node = requireNode(ctx, nodeId);
-      if (projectId === null) projectId = node.projectId;
-      else if (node.projectId !== projectId) throw badRequest(`#${nodeId} is not in this session's project`, 'Use enroll_session to move the session to another project first.');
-    }
-    if (projectId === null) throw badRequest(`Session ${sessionId} is not tracked`, 'Use enroll_session first.');
-    // A session with no project takes the step's, which must be tracked too.
-    if (!isTracking(ctx, projectId)) throw untracked(projectId);
-    // Focus on a todo step of Claude's makes it active, in this write and under this actor. Any other status, or a step
-    // assigned to Aiden, stays as it is. Recorded before session.updated, so the activity strip's latest line still
-    // reads "<session> is on #id".
-    if (node && node.status === 'todo' && node.assignee === 'claude') patchNode(ctx, record, node, { status: 'active' });
-    const next: Session = { ...existing, projectId, focusNodeId: nodeId, lastSeenAt: ctx.now() };
-    // Being heard from again can bring a stale session back.
-    placeSlot(ctx, existing, next);
-    saveSession(ctx, next);
-    // A subagent that started while the session had no focus stays on this first one (session.updated below refetches).
-    pinStartFocus(ctx, sessionId, nodeId);
-    markIfRelettered(ctx, existing, next);
-    record({ projectId, type: 'session.updated', entity: 'session', entityId: sessionId, data: { changed: ['focusNodeId'], focusNodeId: nodeId } });
+    const { existing, projectId } = applyFocus(ctx, record, sessionId, nodeId);
+    // In a scoped project the scribe's focus change brings the step block on the next prompt (spec 3.1). A claim prints it itself.
+    if (actor.startsWith('scribe') && existing.focusNodeId !== nodeId && getProjectById(ctx, projectId)?.briefingMode === 'scoped') markBriefingDue(ctx, sessionId);
   });
   return findSession(ctx, sessionId)!;
+}
+
+export interface ClaimResult {
+  session: Session;
+  notes: string[];
+  block: string[];
+}
+
+/**
+ * `inprogress claim` (spec 3.1): setFocus, then the role worker, and the step block at once. Readiness is advisory in
+ * stage 1: each reason is a note and the claim goes ahead. Marks no briefing due, because the block is the answer.
+ */
+export function claimStep(ctx: Ctx, actor: string, sessionId: string, nodeId: number): ClaimResult {
+  const notes: string[] = [];
+  const before = findSession(ctx, sessionId);
+  const target = findNode(ctx, nodeId);
+  // A refusal (another project's step, an untracked session) comes from applyFocus below; notes only for a claim that can go ahead.
+  if (before && before.projectId !== null && target && target.projectId === before.projectId) {
+    const nowMs = Date.parse(ctx.now());
+    const row = deriveBoard(getProjectSnapshot(ctx, before.projectId), nowMs).byId.get(nodeId);
+    if (!row || (row.column !== 'next' && row.column !== 'now')) notes.push(`Note: #${nodeId} is not in Next.`);
+    for (const a of row?.asks ?? []) notes.push(`Note: #${nodeId} has open ask ${askTag(a.id)}.`);
+    for (const s of row?.sessions ?? []) {
+      if (s.id !== sessionId) notes.push(`Note: #${nodeId} is also claimed by ${sessionTag(s.slot) || '?'} "${s.title?.trim() || `Session ${s.id.slice(0, 6)}`}" (${sessionActivity(s, nowMs)}).`);
+    }
+  }
+  write(ctx, actor, (record) => {
+    // The role first, so the focus event ("is on #id") is the latest line on the activity strip. A session with no
+    // project takes the step's; applyFocus refuses what cannot be claimed, and the write rolls the role back with it.
+    const existing = findSession(ctx, sessionId);
+    const roleProject = existing?.projectId ?? target?.projectId;
+    if (existing && existing.role !== 'worker' && roleProject !== undefined) {
+      ctx.db.prepare("UPDATE sessions SET role = 'worker' WHERE id = ?").run(sessionId);
+      record({ projectId: roleProject, type: 'session.updated', entity: 'session', entityId: sessionId, data: { changed: ['role'], role: 'worker' } });
+    }
+    applyFocus(ctx, record, sessionId, nodeId);
+    // A claim names a step to work on: not the project root, not a dropped step (as raiseAsk refuses them). Checked after
+    // applyFocus, so an untracked session or another project's step gets that reason first.
+    if (target && target.parentId === null) throw badRequest(`#${nodeId} is the project root`, 'Claim the step you will work on.');
+    if (target && target.status === 'dropped') throw badRequest(`#${nodeId} is dropped`, 'Reopen it first, or claim another step.');
+  });
+  const session = findSession(ctx, sessionId)!;
+  const snapshot = getProjectSnapshot(ctx, session.projectId!);
+  return { session, notes, block: stepBlock(snapshot, nodeId, session, Date.parse(ctx.now())) };
+}
+
+/**
+ * `inprogress orchestrate` (spec 3.2, 4): role orchestrator, no focus, one session.orchestrate event for the week's
+ * count, and the opening: the briefing with the counts offer; with `status` also the digest, the reconcile lines and the
+ * top of Next.
+ */
+export function orchestrate(ctx: Ctx, actor: string, sessionId: string, o: { status: boolean }): { session: Session; opening: string } {
+  const before = findSession(ctx, sessionId);
+  if (!before || before.projectId === null) throw badRequest(`Session ${sessionId} is not tracked`, 'Use enroll_session first.');
+  const projectId = before.projectId;
+  const marks = deriveBoard(getProjectSnapshot(ctx, projectId), Date.parse(ctx.now())).marked.length;
+  write(ctx, actor, (record) => {
+    if (!isTracking(ctx, projectId)) throw notTracked(ctx, sessionId, projectId, 'Unarchive the project with update_project first.');
+    ctx.db.prepare("UPDATE sessions SET role = 'orchestrator', focus_node_id = NULL WHERE id = ?").run(sessionId);
+    // The session line last, so the activity strip's latest event is about the session (it has no session.orchestrate line).
+    record({ projectId, type: 'session.orchestrate', entity: 'session', entityId: sessionId, data: { status: o.status, marks } });
+    record({ projectId, type: 'session.updated', entity: 'session', entityId: sessionId, data: { changed: ['role', 'focusNodeId'], role: 'orchestrator', focusNodeId: null } });
+  });
+  const session = findSession(ctx, sessionId)!;
+  const nowMs = Date.parse(ctx.now());
+  const snapshot = getProjectSnapshot(ctx, projectId);
+  const digest = readDigest(ctx, projectId);
+  const lines = [renderOrchestratorBriefing(snapshot, session, nowMs, formatCounts(digest, nowMs), { checkOld: true })];
+  if (o.status) {
+    const board = deriveBoard(snapshot, nowMs);
+    lines.push('', formatDigest(digest, nowMs));
+    if (board.marked.length) lines.push('Reconcile:', ...board.marked.flatMap((r) => r.marks.map((m) => `  #${r.node.id} ${m}`)));
+    if (board.next.length) lines.push('Next:', ...board.next.slice(0, 3).map((r) => `  #${r.node.id} ${r.node.title}: ${r.ready ? 'ready' : 'not ready'}`));
+  }
+  return { session, opening: lines.join('\n') };
 }

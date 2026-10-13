@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { formatTaskCounts, parseTasksArgs, TASKS_NOT_RUNNING_HINT, TASKS_TIMEOUT_HINT, TASKS_USAGE } from '../../src/cli/tasks';
-import { isTaskAllowRule, repoCli, taskAllowRules, taskCommand, taskPrefix } from '../../src/lib/task-command';
+import { cliAllowRules, isCliAllowRule, repoCli, taskCommand, taskPrefix } from '../../src/lib/task-command';
 
 describe('parseTasksArgs', () => {
   it('keeps list order across mixed flags and maps them to statuses', () => {
@@ -90,7 +90,7 @@ describe('the tasks command a session runs', () => {
   });
 
   it('builds the allow rules from the same prefix, so the printed command matches them byte for byte', () => {
-    const rules = taskAllowRules(repoCli('c:\\personal\\InProgress\\'));
+    const rules = cliAllowRules(repoCli('c:\\personal\\InProgress\\')).slice(0, 2);
     expect(rules).toEqual(['Bash(node C:/personal/InProgress/dist/cli/main.js tasks *)', 'PowerShell(node C:/personal/InProgress/dist/cli/main.js tasks *)']);
     const command = taskCommand('abc', { cli });
     for (const rule of rules) expect(command.startsWith(rule.replace(/^\w+\(/, '').replace(/ \*\)$/, ' '))).toBe(true);
@@ -98,13 +98,13 @@ describe('the tasks command a session runs', () => {
 
   it('quotes a path with a space so it still runs, and allows nothing for it', () => {
     expect(taskPrefix('C:/My Repos/InProgress/dist/cli/main.js')).toBe('node "C:/My Repos/InProgress/dist/cli/main.js" tasks');
-    expect(taskAllowRules(repoCli('C:/My Repos/InProgress'))).toEqual([]);
+    expect(cliAllowRules(repoCli('C:/My Repos/InProgress'))).toEqual([]);
   });
 
-  it('recognises a tasks rule for any repo path, and nothing else', () => {
-    for (const rule of [...taskAllowRules(repoCli('C:/personal/InProgress')), ...taskAllowRules(repoCli('D:/old/checkout'))]) expect(isTaskAllowRule(rule), rule).toBe(true);
+  it('recognises a CLI command rule for any repo path, and nothing else', () => {
+    for (const rule of [...cliAllowRules(repoCli('C:/personal/InProgress')), ...cliAllowRules(repoCli('D:/old/checkout'))]) expect(isCliAllowRule(rule), rule).toBe(true);
     for (const rule of ['mcp__inprogress', 'Bash(git status)', 'Bash(node C:/tools/x.js tasks *)', 'Bash(node C:/x/dist/cli/main.js outline *)', 'Read(node C:/x/dist/cli/main.js tasks *)']) {
-      expect(isTaskAllowRule(rule), rule).toBe(false);
+      expect(isCliAllowRule(rule), rule).toBe(false);
     }
   });
 
