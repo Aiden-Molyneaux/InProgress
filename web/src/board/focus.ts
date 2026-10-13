@@ -10,8 +10,9 @@ export function focusTargetAfter(row: Element | null): HTMLElement | null {
   const home = row?.closest<HTMLElement>('.ip-band, aside');
   if (!row || !home) return null;
   const others = [...home.querySelectorAll(ROWS)].filter((li) => li !== row && !row.contains(li) && !li.contains(row));
-  const after = others.find((li) => row.compareDocumentPosition(li) & Node.DOCUMENT_POSITION_FOLLOWING);
-  const before = [...others].reverse().find((li) => row.compareDocumentPosition(li) & Node.DOCUMENT_POSITION_PRECEDING);
-  const pick = (li: Element | undefined) => li?.querySelector<HTMLElement>('.ip-row-title, button') ?? null;
-  return pick(after) ?? pick(before) ?? home.querySelector<HTMLElement>('h3, header b');
+  const pick = (li: Element) => li.querySelector<HTMLElement>('.ip-row-title, button');
+  // The nearest row each way that has something to focus: a row with no button (a wait on no step) is passed over.
+  const after = others.filter((li) => row.compareDocumentPosition(li) & Node.DOCUMENT_POSITION_FOLLOWING).map(pick).find(Boolean);
+  const before = others.filter((li) => row.compareDocumentPosition(li) & Node.DOCUMENT_POSITION_PRECEDING).reverse().map(pick).find(Boolean);
+  return after ?? before ?? home.querySelector<HTMLElement>('h3, header b');
 }

@@ -37,8 +37,7 @@ export function DocsMenu({ docs, label, onOpenResource }: { docs: ResourceMeta[]
       shut(true);
       return;
     }
-    const items0 = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')];
-    const items = items0;
+    const items = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')];
     // Shift+Tab off the first item lands on the opener, and the menu closes behind it.
     if (e.key === 'Tab' && e.shiftKey && document.activeElement === items[0]) {
       e.preventDefault();

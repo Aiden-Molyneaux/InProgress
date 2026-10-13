@@ -34,8 +34,14 @@ export function AskActions({ ask, area }: { ask: Pick<Ask, 'id' | 'text'>; area:
     setBusy(true);
     const result = await clearAsk(ask.id, answer);
     setBusy(false);
-    if (result === 'reload') window.location.reload();
-    else if (result !== 'ok') {
+    if (result === 'reload') return window.location.reload();
+    // Aiden may have moved on while the request ran: focus moves only if it is still on this ask's row, or fell to the page.
+    const active = document.activeElement;
+    if (active && active !== document.body && !row?.contains(active)) {
+      if (result !== 'ok') setProblem(result);
+      return;
+    }
+    if (result !== 'ok') {
       setProblem(result);
       (field.current ?? clearButton.current)?.focus();
     } else if (target?.isConnected) target.focus();
