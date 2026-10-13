@@ -229,7 +229,7 @@ export function App() {
             </div>
           ) : snapshot ? (
             view === 'board' ? (
-              <Board key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onOpenProject={() => pickView('project')} lastLook={lastLook} onStatus={say} />
+              <Board key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} lastLook={lastLook} onStatus={say} />
             ) : (
               <ProjectView key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onStatus={say} />
             )

@@ -1674,7 +1674,7 @@ test.describe('Board', () => {
     await expect(page.locator('.ip-crumb')).toHaveCount(0);
   });
 
-  test('the header shows the state note as the Orchestrator and opens the Project view, and lists a working session with no step', async ({ page, api, fresh }) => {
+  test('the header shows the state note as the Orchestrator with no Project view button, and lists a working session with no step', async ({ page, api, fresh }) => {
     await write(api, fresh.session, 'post', '/api/resources', { nodeId: fresh.root, kind: 'doc', title: 'State', purpose: 'state', content: '# Where we are\n\nSigning is half done. The tests come next.' });
     const second = `e2e-${randomUUID()}`;
     await write(api, second, 'post', `/api/sessions/${second}/enroll`, { project: fresh.slug, title: 'Second session' });
@@ -1690,8 +1690,7 @@ test.describe('Board', () => {
     await expect(sessions).toContainText('working');
     // The first session is on a Now row, so it is not listed here.
     await expect(sessions.locator('.ip-hdr-session')).toHaveCount(1);
-    await header.getByRole('button', { name: 'Project view ›' }).click();
-    await expect(page.getByRole('region', { name: 'Sections' })).toBeVisible();
+    await expect(header.getByRole('button')).toHaveCount(0);
   });
 
   test('a permission wait is an amber message with the ringed character, the command and the step, and a Now row says needs permission', async ({ page, api, fresh }) => {
