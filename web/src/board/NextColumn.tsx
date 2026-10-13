@@ -11,7 +11,7 @@ import type { BandProps } from './bandProps';
 const hue = (slot: number | null) => `var(--family-${(slot ?? 0) % 6})`;
 const CIRCLED = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳';
 /** ①②③ for the first twenty places, the plain number after. */
-const numeral = (n: number) => (n >= 1 && n <= CIRCLED.length ? CIRCLED[n - 1]! : String(n));
+export const numeral = (n: number) => (n >= 1 && n <= CIRCLED.length ? CIRCLED[n - 1]! : String(n));
 
 /** The order the window shows until the next snapshot lands, and the step it moved (which is no longer in anyone's own queue). */
 interface Pending {

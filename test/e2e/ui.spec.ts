@@ -150,11 +150,11 @@ test('the view switch is remembered', async ({ page, demo }) => {
   expect((await posted).postDataJSON()).toMatchObject({ name: 'view', data: { view: 'project' } });
   await expect(project).toHaveAttribute('aria-pressed', 'true');
   await expect(board).toHaveAttribute('aria-pressed', 'false');
-  await expect(page.getByRole('heading', { name: 'Steps', exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Sections' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Now', exact: true })).toHaveCount(0);
   await page.reload();
   await expect(page.getByRole('button', { name: 'Project', exact: true })).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByRole('heading', { name: 'Steps', exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Sections' })).toBeVisible();
   await page.getByRole('button', { name: 'Board', exact: true }).click();
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Now', exact: true })).toBeVisible();
@@ -1691,7 +1691,7 @@ test.describe('Board', () => {
     // The first session is on a Now row, so it is not listed here.
     await expect(sessions.locator('.ip-hdr-session')).toHaveCount(1);
     await header.getByRole('button', { name: 'Project view ›' }).click();
-    await expect(page.getByRole('heading', { name: 'Steps', exact: true })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Sections' })).toBeVisible();
   });
 
   test('a permission wait is an amber message with the ringed character, the command and the step, and a Now row says needs permission', async ({ page, api, fresh }) => {
@@ -2038,5 +2038,100 @@ test.describe('Board', () => {
     await expect(backlogRow('5 Store listing')).toBeVisible();
     await expect(nextRow('6 Beta').locator('.ip-num')).toHaveText('①');
     await expect(page.getByRole('complementary')).toHaveCount(0);
+  });
+});
+
+test.describe('Project view', () => {
+  const projectView = async (page: Page, project: Seeded) => {
+    await page.setViewportSize(WIDE);
+    await open(page, project);
+    await page.getByRole('button', { name: 'Project', exact: true }).click();
+    await expect(page.getByRole('region', { name: 'Sections' })).toBeVisible();
+  };
+  const section = (page: Page, title: string) => page.getByRole('region', { name: title, exact: true });
+
+  test('sections fold on a click and the choice survives a reload; done children, done groups and the rail follow the spec', async ({ page, api, fresh }) => {
+    await write(api, fresh.session, 'post', '/api/nodes', { parentId: fresh.root, nodes: [{ title: 'Parked', kind: 'phase', children: [{ title: 'Idle thing' }] }] });
+    await projectView(page, fresh);
+    const road = section(page, 'Road to market');
+    const parked = section(page, 'Parked');
+    // A step in Now opens a section; nothing in Now or Next leaves it folded to its header and bar.
+    await expect(road.getByRole('button', { name: /Road to market/, expanded: true })).toBeVisible();
+    await expect(parked.getByRole('button', { name: /Parked/, expanded: false })).toBeVisible();
+    await expect(parked.getByRole('img', { name: '1 backlog' })).toBeVisible();
+    await expect(parked.getByRole('button', { name: 'Idle thing', exact: true })).toHaveCount(0);
+    await parked.getByRole('button', { name: /Parked/ }).click();
+    await expect(parked.getByRole('button', { name: 'Idle thing', exact: true })).toBeVisible();
+    await page.reload();
+    await expect(parked.getByRole('button', { name: /Parked/, expanded: true })).toBeVisible();
+    await expect(parked.getByRole('button', { name: 'Idle thing', exact: true })).toBeVisible();
+    // The rail: a session on it, backlog, and the YOU tag on a step of Aiden's.
+    await expect(road.locator('.ip-orow', { has: page.getByRole('button', { name: 'Play app signing', exact: true }) }).getByRole('img', { name: 'now, a session is on it' })).toBeVisible();
+    await expect(road.locator('.ip-orow', { has: page.getByRole('button', { name: '3 RevenueCat', exact: true }) }).getByRole('img', { name: 'backlog' })).toBeVisible();
+    await expect(road.locator('.ip-orow', { has: page.getByRole('button', { name: 'Run signing tests', exact: true }) }).locator('.ip-you')).toHaveText('YOU');
+    // Done children fold per parent and open on a click.
+    const fold = road.getByRole('button', { name: /^✓ 1 done · latest: #\d+ 1 iOS certificate/ });
+    await expect(fold).toHaveAttribute('aria-expanded', 'false');
+    await expect(road.getByRole('button', { name: '1 iOS certificate', exact: true })).toHaveCount(0);
+    await fold.click();
+    await expect(fold).toHaveAttribute('aria-expanded', 'true');
+    await expect(road.getByRole('button', { name: '1 iOS certificate', exact: true })).toBeVisible();
+    // A fully done group is not a section until it is picked from "Done groups".
+    await expect(section(page, 'Milestones')).toHaveCount(0);
+    const groups = page.getByRole('button', { name: /^Done groups · 1/ });
+    await expect(groups).toHaveAttribute('aria-expanded', 'false');
+    await groups.click();
+    await page.getByRole('button', { name: /Milestones/ }).click();
+    await expect(section(page, 'Milestones').getByRole('button', { name: /Milestones/, expanded: true })).toBeVisible();
+    // A step opens its Details.
+    await road.getByRole('button', { name: '3 RevenueCat', exact: true }).click();
+    await expect(page.getByRole('complementary')).toContainText('3 RevenueCat');
+  });
+
+  test('the resource list opens from "▤ n", closes on Escape and on an outside click, returns focus, and opens the viewer', async ({ page, fresh }) => {
+    await projectView(page, fresh);
+    const road = section(page, 'Road to market');
+    const opener = road.getByRole('button', { name: /resources? in Road to market/ });
+    const menu = page.getByRole('menu', { name: 'Resources in Road to market' });
+    await opener.click();
+    await expect(opener).toHaveAttribute('aria-expanded', 'true');
+    await expect(menu.getByRole('menuitem')).toHaveCount(2);
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    await expect(opener).toBeFocused();
+    await opener.click();
+    await expect(menu).toBeVisible();
+    await page.locator('.ip-view-name').click();
+    await expect(menu).toHaveCount(0);
+    await expect(opener).toHaveAttribute('aria-expanded', 'false');
+    await opener.click();
+    await menu.getByRole('menuitem', { name: /Signing test suite/ }).click();
+    await expect(page.getByRole('dialog')).toContainText('Signing tests');
+  });
+
+  test('"+ Add a step" creates in its group, keeps the field focused for the next one, and Escape returns focus to the button', async ({ page, fresh }) => {
+    await projectView(page, fresh);
+    const road = section(page, 'Road to market');
+    const add = road.getByRole('button', { name: '+ Add a step' });
+    const field = road.getByRole('textbox', { name: 'Add a step to Road to market' });
+    await expect(field).toHaveCount(0);
+    await add.click();
+    await expect(field).toBeFocused();
+    await page.keyboard.type('Quick one');
+    await page.keyboard.press('Enter');
+    await expect(road.getByRole('button', { name: 'Quick one', exact: true })).toBeVisible();
+    await expect(field).toBeFocused();
+    await expect(field).toHaveValue('');
+    await page.keyboard.type('Quick two');
+    await page.keyboard.press('Enter');
+    await expect(road.getByRole('button', { name: 'Quick two', exact: true })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(field).toHaveCount(0);
+    await expect(add).toBeFocused();
+    await expect(page.getByRole('complementary')).toHaveCount(0);
+    // It was written under the group, as a Backlog step.
+    await page.reload();
+    const row = road.locator('.ip-orow', { has: page.getByRole('button', { name: 'Quick one', exact: true }) });
+    await expect(row.getByRole('img', { name: 'backlog' })).toBeVisible();
   });
 });

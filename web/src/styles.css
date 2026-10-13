@@ -193,13 +193,66 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 /* Keyboard focus in the chrome: a 2 px ink ring, never a hue. */
 .ip-archive-btn:focus-visible, .ip-mi:focus-visible, .ip-mi-act:focus-visible, .ip-confirm .ip-btn:focus-visible { outline: 2px solid var(--text-2); outline-offset: 1px; }
 .ip-main { flex: 1; position: relative; min-height: 0; display: flex; }
-/* The Project view, until its own task styles it: a scrolling column of headed lists. */
+/* Region: project. Sections as outlines with a position rail at the left (spec 2.4, 2.8). */
 .ip-project { flex: 1; min-width: 0; overflow-y: auto; padding: 12px; }
 .ip-view-name { margin: 0 0 8px; font-size: var(--fs-l); font-weight: var(--w-heavy); line-height: 20px; }
-.ip-project h3 { margin: 12px 0 4px; font-size: var(--fs-s); font-weight: var(--w-heavy); line-height: 14px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
-.ip-step-row { display: block; max-width: 100%; padding: 2px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; color: var(--text-2); }
-.ip-step-row:hover { color: var(--text); }
-.ip-step-row:focus-visible { outline: 2px solid var(--text-2); outline-offset: 1px; }
+
+.ip-project.wide { display: flex; gap: 16px; padding: 12px 16px; }
+.ip-pside { flex: none; width: 320px; display: flex; flex-direction: column; gap: 10px; }
+.ip-pmain { flex: 1; min-width: 0; }
+.ip-pnote { padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); }
+.ip-pnote .ip-md { font-size: var(--fs-m); line-height: 18px; color: var(--text); }
+.ip-railkey { display: flex; flex-direction: column; gap: 4px; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius); font-size: var(--fs-s); line-height: 18px; color: var(--muted); }
+.ip-railkey .ip-label { margin: 0 0 2px; }
+.ip-railkey > div:not(.ip-label) { display: flex; align-items: center; gap: 10px; }
+.ip-railkey .ip-dot, .ip-railkey .ip-num { flex: none; width: 22px; text-align: center; }
+.ip-donegroups { display: flex; flex-direction: column; gap: 4px; padding: 8px 12px; border: 1px dashed var(--border); border-radius: var(--radius); }
+.ip-donegroups ul { display: flex; flex-direction: column; gap: 2px; }
+.ip-dg-item { padding: 0 0 0 14px; text-align: left; font-size: var(--fs-s); line-height: 18px; color: var(--muted); }
+.ip-dg-item:hover { color: var(--text); }
+.ip-dg-item:focus-visible, .ip-sec-toggle:focus-visible, .ip-done-fold-btn:focus-visible, .ip-add-step:focus-visible, .ip-docs-btn:focus-visible { outline: 2px solid var(--text-2); outline-offset: 1px; }
+.ip-sections { display: flex; flex-direction: column; gap: 10px; }
+.ip-section { background: var(--lane); border: 1px solid var(--border); border-radius: var(--radius); overflow: visible; }
+.ip-sec-head { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 8px 12px 6px; }
+.ip-sec-toggle { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto; text-align: left; font-weight: var(--w-heavy); font-size: var(--fs-m); line-height: 18px; color: var(--text); }
+.ip-sec-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ip-caret { flex: none; width: 12px; text-align: center; color: var(--muted); }
+.ip-legend { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
+.ip-frac { flex: none; font-family: var(--font-mono); font-size: var(--fs-s); color: var(--text-2); }
+.ip-docs-wrap { position: relative; flex: none; }
+.ip-docs-btn { padding: 0 4px; font-size: var(--fs-s); line-height: 18px; border-radius: var(--radius); }
+.ip-docs-btn:hover { color: var(--text); background: var(--panel-2); }
+.ip-docs-menu { width: 300px; }
+.ip-sbar { display: flex; gap: 2px; height: 6px; margin: 0 12px 8px; }
+.ip-sbar i { display: block; height: 100%; border-radius: 2px; }
+.ip-sbar .seg-done { background: var(--track-fill); }
+.ip-sbar .seg-now { background: var(--active); }
+.ip-sbar .seg-next { background: var(--text-2); }
+.ip-sbar .seg-backlog { box-shadow: inset 0 0 0 1.25px var(--muted); }
+.ip-outline { position: relative; border-top: 1px solid var(--border); padding: 2px 0 6px; }
+.ip-orow { position: relative; display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; column-gap: 8px; align-items: center; min-height: 26px; padding: 0 12px 0 0; }
+.ip-orow.wide, .ip-ohead { grid-template-columns: 36px minmax(0, 1fr) 96px minmax(0, 184px) 80px 48px; }
+.ip-ohead { display: grid; align-items: center; column-gap: 8px; min-height: 20px; padding: 0 12px 0 0; font-size: var(--fs-s); line-height: 14px; letter-spacing: .09em; text-transform: uppercase; color: var(--faint); }
+.ip-ohead .right, .ip-ocell.right { text-align: right; justify-content: flex-end; }
+li.ip-orow:hover { background: var(--panel-2); }
+.ip-orail { display: flex; align-items: center; justify-content: center; min-height: 26px; }
+.ip-ostep { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; padding: 2px 0; font-size: var(--fs-m); line-height: 18px; }
+.ip-ostep .ip-row-title.grp { font-weight: var(--w-heavy); }
+.ip-ominor { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
+.ip-ocell { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
+.ip-osess { display: flex; gap: 4px; justify-content: flex-end; font-size: var(--fs-s); }
+.ip-orow.is-done .ip-row-title { color: var(--muted); }
+.ip-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; }
+.ip-dot.live { background: var(--active); }
+.ip-dot.idle { background: var(--muted); }
+.ip-dot.ring { box-sizing: border-box; border: 1.5px solid var(--muted); }
+.ip-rail-done { font-size: var(--fs-s); color: var(--muted); }
+.ip-done-fold-btn { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; font-size: var(--fs-s); line-height: 18px; color: var(--muted); }
+.ip-done-fold-btn:hover { color: var(--text); }
+.ip-sec-foot { padding: 4px 12px 2px 44px; }
+.ip-add-step { font-size: var(--fs-s); line-height: 18px; color: var(--muted); }
+.ip-add-step:hover { color: var(--text); }
+.ip-sec-foot .ip-quick-add { margin-top: 4px; }
 /* Region: board. Draft C, Inbox, in Quiet (spec 2.8): who and when first, ink for text, amber only for attention. */
 .ip-board { flex: 1; min-width: 0; overflow-y: auto; padding: 12px; }
 .ip-board h3 { margin: 0 0 6px; font-size: var(--fs-s); font-weight: var(--w-heavy); line-height: 14px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
