@@ -59,11 +59,15 @@ export function stepTab(tabs: Pick<ProjectSummary, 'slug'>[], current: string | 
   return tabs[(from + step + tabs.length) % tabs.length].slug;
 }
 
+/** A tab's count (spec 2.1): the project's open asks plus its sessions waiting on a permission. */
+export const waitingOn = (p: Pick<ProjectSummary, 'openAsks' | 'permissionWaits'>): number => p.openAsks + p.permissionWaits;
+
 /**
  * A tab's or a ⋯ row's accessible name: the full name, then what its badges show. The dot shows while a session works
  * there (`working`, a pulsing dot) or is busy on a running worker or command of its own (`busy`, a still dot).
  */
-export function projectLabel(p: Pick<ProjectSummary, 'name' | 'needsYou' | 'workingSessions' | 'busySessions'>): string {
+export function projectLabel(p: Pick<ProjectSummary, 'name' | 'openAsks' | 'permissionWaits' | 'workingSessions' | 'busySessions'>): string {
   const activity = p.workingSessions > 0 ? 'working' : p.busySessions > 0 ? 'busy' : null;
-  return [p.name, p.needsYou > 0 && `${p.needsYou} need you`, activity].filter(Boolean).join(', ');
+  const waiting = waitingOn(p);
+  return [p.name, waiting > 0 && `${waiting} need you`, activity].filter(Boolean).join(', ');
 }

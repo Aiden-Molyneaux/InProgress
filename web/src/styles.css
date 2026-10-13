@@ -124,6 +124,12 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 /* Go to: a magnifier at the bar's right end, ⋯'s size and ink. It takes the free space before it when ⋯ is not there. */
 .ip-goto { position: relative; flex: none; margin-left: auto; display: flex; align-items: center; padding-left: 2px; }
 .ip-archive ~ .ip-goto { margin-left: 0; }
+/* Board | Project: two text buttons before ⋯, taking the bar's free space, so ⋯ and Go to follow it at the right end. */
+.ip-viewswitch { flex: none; margin-left: auto; display: flex; align-items: center; gap: 2px; padding: 0 6px; }
+.ip-viewswitch ~ .ip-archive, .ip-viewswitch ~ .ip-goto { margin-left: 0; }
+.ip-view-btn { height: 26px; padding: 0 10px; border-radius: var(--radius); color: var(--muted); font-size: var(--fs-m); line-height: 18px; }
+.ip-view-btn:hover, .ip-view-btn[aria-pressed='true'] { background: var(--panel-2); color: var(--text); }
+.ip-view-btn:focus-visible { outline: 2px solid var(--text-2); outline-offset: 1px; }
 .ip-goto-btn { display: flex; align-items: center; justify-content: center; width: 30px; height: 26px; border-radius: var(--radius); color: var(--muted); }
 .ip-goto-btn:hover, .ip-goto-btn[aria-expanded='true'] { background: var(--panel-2); color: var(--text); }
 .ip-goto-btn:focus-visible { outline: 2px solid var(--text-2); outline-offset: 1px; }
@@ -180,74 +186,20 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-goto-proj { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
 .ip-goto-proj.archived { font-style: italic; }
 .ip-goto-note:not(:empty) { padding: 7px 8px 3px; font-size: var(--fs-m); line-height: 18px; color: var(--muted); }
-/* The current project's sessions on the left, wrapping onto a second line only when they overflow; the needs-you pill
-   and Follow at the right end of the first line. One line is 4 + 30 + 5 px, plus the rule: 40 px. */
-.ip-sessions { position: relative; flex: none; display: flex; align-items: flex-start; gap: 4px; min-height: 40px; padding: 4px 12px 5px 8px; background: var(--bar); border-bottom: 1px solid var(--border); }
-.ip-chips { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 0 4px; }
-.ip-chip-wrap { flex: none; display: flex; }
-/* A chip: the session's character, then its letter in its family's hue (--fam, set on the wrap). No border and no fill
-   in any state: the character carries working and idle. */
-.ip-chip-s { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; border-radius: var(--radius); color: var(--muted); font-size: var(--fs-m); line-height: 18px; white-space: nowrap; }
-.ip-chip-s .ip-char { flex: none; }
-.ip-chip-s .ip-tag { color: var(--fam, var(--family-0)); }
-/* A chip's kin, after its letter: a 14 px working character per worker that still runs, in the session's hue, each
-   bobbing out of step with the others (phaseDelay). At most three, then a muted +n. No tags or times: those stay in the
-   popover and on the cards. */
-.ip-chip-kin { flex: none; display: inline-flex; align-items: center; gap: 3px; }
-/* The count of commands that count as work, after the kin: muted DM Mono, `▸3`. */
-.ip-chip-count { flex: none; font-family: var(--font-mono); font-size: var(--fs-s); font-weight: var(--w-text); line-height: 14px; color: var(--muted); }
-.ip-chip-more { margin-left: 1px; font-family: var(--font-mono); font-size: var(--fs-s); font-weight: var(--w-text); line-height: 14px; color: var(--muted); }
-/* Waiting for permission, the chip adds "· needs permission", and its character wears the amber ring (character.css). */
-.ip-chip-word { color: var(--amber-ink); }
-/* A session's letter: on its chip, and on its agent and readers lines on the canvas. */
-.ip-tag { font-weight: var(--w-heavy); }
-/* A chip's popover, under the row while the chip is hovered or focused from the keyboard: the session's line and where
-   it is, then its subagents. It floats with a hairline and no shadow. A pointer on it keeps its wrap hovered, so it
-   stays open, as today's does. */
-.ip-chip-pop { display: none; position: absolute; top: calc(100% + 2px); left: 8px; z-index: 25; max-width: min(400px, calc(100% - 20px)); padding: 6px 10px; background: var(--float); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-2); font-size: var(--fs-m); line-height: 20px; }
-.ip-chip-wrap:hover .ip-chip-pop, .ip-chip-s:focus-visible + .ip-chip-pop { display: block; }
-.ip-chip-pop-head { color: var(--muted); font-size: var(--fs-s); line-height: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ip-chip-pop ul { list-style: none; margin: 4px 0 0; padding: 0; }
-.ip-chip-pop li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* A subagent's tag in the popover: DM Mono in its session's hue. An ended row goes grey, tag and all. */
-.ip-chip-pop .ip-agent-tag { font-family: var(--font-mono); font-size: var(--fs-s); font-weight: var(--w-text); color: var(--fam, var(--family-0)); }
-.ip-chip-pop li.ended, .ip-chip-pop li.ended .ip-agent-tag { color: var(--muted); }
-/* A command in the popover: its mark and tag, then its label and time. A serving one goes faint. */
-.ip-chip-pop li.serving, .ip-chip-pop li.serving .ip-agent-tag { color: var(--faint); }
-.ip-chip-pop .ip-cmd-mark { color: var(--muted); }
 /* A command's mark in a fixed 12 px centred box, as .ip-work-mark: `!`, `✓` and `▸` all sit the same distance from the tag. */
 .ip-cmd-mark { display: inline-block; width: 12px; text-align: center; }
-/* One that hit the usage limit waits for Aiden: its tag and its words go amber. */
-.ip-chip-pop li.limit .ip-agent-tag, .ip-chip-pop .ip-limit-words { color: var(--amber-ink); }
 /* A reader's ◇ in a list (the popover, Details): neutral, as only the letter wears the hue. */
 .ip-reader-mark { color: var(--muted); }
-/* The needs-you pill and Follow: 26 px hairline buttons, centred on the row's first line. */
-.ip-need, .ip-follow { flex: none; display: inline-flex; align-items: center; height: 26px; margin-top: 2px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius); font-size: var(--fs-m); line-height: 18px; white-space: nowrap; }
-.ip-need { gap: 6px; color: var(--amber-ink); }
-.ip-need-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--amber); }
-.ip-follow { gap: 5px; margin-left: 6px; color: var(--muted); }
-.ip-follow.on { color: var(--text-2); border-color: var(--text); }
-.ip-need:hover, .ip-follow:hover { background: var(--panel-2); }
 /* Keyboard focus in the chrome: a 2 px ink ring, never a hue. */
-.ip-chip-s:focus-visible, .ip-need:focus-visible, .ip-follow:focus-visible, .ip-archive-btn:focus-visible, .ip-mi:focus-visible, .ip-mi-act:focus-visible, .ip-confirm .ip-btn:focus-visible { outline: 2px solid var(--text-2); outline-offset: 1px; }
-/* Up next, under the session row: UP NEXT once in an 82 px column, then one line per live session that has steps, led
-   by its letter in its family's hue (--fam), then a neutral "later" line. Each line is one inline run, cut short with
-   an ellipsis at the window's edge: a flex row would never report itself cut. */
-.ip-upnext { flex: none; display: flex; align-items: flex-start; padding: 8px 12px; background: var(--bar); border-bottom: 1px solid var(--border); color: var(--muted); font-size: var(--fs-m); line-height: 20px; }
-.ip-upnext-head { flex: none; display: flex; align-items: center; width: 82px; height: 20px; font-size: var(--fs-s); font-weight: var(--w-heavy); line-height: 14px; letter-spacing: .14em; text-transform: uppercase; white-space: nowrap; }
-.ip-upnext-lines { flex: 1; min-width: 0; }
-.ip-upnext-line { height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ip-upnext-lead { display: inline-block; width: 36px; }
-.ip-upnext-line.owned .ip-upnext-lead { font-weight: var(--w-heavy); color: var(--fam, var(--family-0)); }
-.ip-upnext-item { cursor: pointer; border-radius: var(--radius); }
-.ip-upnext-id { font-family: var(--font-mono); font-size: var(--fs-s); }
-.ip-upnext-title { color: var(--text-2); }
-/* About 8 px each side of the dot, its literal spaces included. */
-.ip-upnext-sep { padding: 0 5px; }
-/* Hover: ink and an underline on the title, never a hue. */
-.ip-upnext-item:hover .ip-upnext-title { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
-.ip-upnext-item:focus-visible { outline: 2px solid var(--text-2); outline-offset: 1px; }
+.ip-archive-btn:focus-visible, .ip-mi:focus-visible, .ip-mi-act:focus-visible, .ip-confirm .ip-btn:focus-visible { outline: 2px solid var(--text-2); outline-offset: 1px; }
 .ip-main { flex: 1; position: relative; min-height: 0; display: flex; }
+/* The Board and the Project view, until their own tasks style them: a scrolling column of headed lists. */
+.ip-board, .ip-project { flex: 1; min-width: 0; overflow-y: auto; padding: 12px; }
+.ip-view-name { margin: 0 0 8px; font-size: var(--fs-l); font-weight: var(--w-heavy); line-height: 20px; }
+.ip-board h3, .ip-project h3 { margin: 12px 0 4px; font-size: var(--fs-s); font-weight: var(--w-heavy); line-height: 14px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.ip-step-row { display: block; max-width: 100%; padding: 2px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; color: var(--text-2); }
+.ip-step-row:hover { color: var(--text); }
+.ip-step-row:focus-visible { outline: 2px solid var(--text-2); outline-offset: 1px; }
 /* The latest change: ↳ actor · time · event, muted, with the actor and the event in ink. Only the event shrinks. */
 .ip-activity { flex: none; display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; background: var(--bar); border-top: 1px solid var(--border); color: var(--muted); font-size: var(--fs-m); line-height: 18px; white-space: nowrap; overflow: hidden; }
 .ip-act-who { flex: none; color: var(--text-2); }
@@ -256,179 +208,24 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 /* Reconnecting: a solid amber band with black text. It is rare and must be seen. */
 .ip-banner { flex: none; padding: 3px 12px; background: var(--amber); color: #000; font-size: var(--fs-m); line-height: 18px; }
 .ip-empty { margin: auto; color: var(--muted); text-align: center; padding: 24px; max-width: 420px; }
-/* Region: canvas. Task 6. */
-.ip-canvas { flex: 1; position: relative; min-width: 0; }
-/* The ground is --bg itself: no dot grid. The zoom row takes its colours through React Flow's variables; without the
-   hover one, a hovered button paints React Flow's own grey. */
-.ip-canvas .react-flow {
-  background: var(--bg);
-  --xy-controls-button-background-color: var(--float);
-  --xy-controls-button-background-color-hover: var(--panel-2);
-  --xy-controls-button-color: var(--muted);
-  --xy-controls-button-color-hover: var(--text);
-  --xy-controls-button-border-color: var(--border);
-  --xy-controls-box-shadow: none;
-}
-/* The zoom row: three 24 px hairline buttons in a row, at the top right. */
-.ip-canvas .react-flow__controls { margin: 8px 12px; gap: 4px; }
-.ip-canvas .react-flow__controls.horizontal .react-flow__controls-button { width: 24px; height: 24px; padding: 0; border: 1px solid var(--border); border-radius: var(--radius); }
-.ip-canvas .react-flow__controls-button:focus-visible { outline: 2px solid var(--text-2); outline-offset: 1px; }
-/* The breadcrumb, at the top left, clear of the zoom row. */
-.ip-crumb { position: absolute; top: 8px; left: 10px; z-index: 5; height: 24px; max-width: calc(100% - 120px); padding: 0 9px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--float); color: var(--muted); font-size: var(--fs-s); line-height: 22px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* A phase's lane: a faint band behind its stack head and its subtree. Canvas turns its pointer events off. */
-.react-flow__node-ipLane { background: var(--lane); border-radius: var(--radius); }
 
-/* A step's node: its frame and, from 720 px, its resource chips. It is the containing block of the queue gutter, the
-   stack head's track and the handles. */
-.ip-row { position: relative; display: flex; align-items: flex-start; gap: 8px; }
-/* The frame: one hairline, one radius, the card fill. NodeCard sizes it from layout. */
-.ip-card { flex: none; padding: 0 12px 0 4px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); cursor: pointer; }
-.ip-card.st-done, .ip-card.st-dropped { background: none; }
-/* The working focus: the one orange hairline on the canvas. */
-.ip-card.focus { border-color: var(--active-line); background: var(--active-fill); }
-/* A live step: work runs on it or under a fold. The hairline and fill of the focus, and its title at ink, but at the
-   normal size: the large title stays on the working focus. */
-.ip-card.live { border-color: var(--active-line); background: var(--active-fill); }
-.ip-card.live .ip-node:not(.st-done):not(.st-dropped) .ip-title { color: var(--text); }
-.ip-card.selected { box-shadow: 0 0 0 2px var(--text-2); }
-.ip-card.flash { animation: ip-flash 1.2s ease-out; }
 @keyframes ip-flash { 0% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--amber) 60%, transparent); } 100% { box-shadow: 0 0 0 0 transparent; } }
-@media (prefers-reduced-motion: reduce) {
-  /* The flash holds a static ring instead of fading one out. */
-  .ip-card.flash { box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 60%, transparent); }
-}
 
-/* The header: the step's own row, 30 px inside the frame's border, so its middle is where the camera aims. */
-.ip-node { display: flex; align-items: center; gap: 8px; min-width: 0; white-space: nowrap; color: var(--text-2); }
-.ip-card > .ip-node { height: calc(var(--node-h) - 2px); }
-.ip-node:focus-visible { outline: 2px solid var(--text-2); outline-offset: -2px; border-radius: var(--radius); }
-/* Every framed card's 22 px left column, its marker right-aligned in it, so all titles align. */
-.ip-node-col { flex: none; display: flex; align-items: center; justify-content: flex-end; width: 22px; }
-.ip-node .ip-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: var(--fs-m); line-height: 18px; }
-.ip-node.root .ip-title { font-weight: var(--w-heavy); }
-.ip-card.focus .ip-title { font-size: var(--fs-l); font-weight: var(--w-heavy); line-height: 20px; letter-spacing: var(--track-l); word-spacing: .05em; color: var(--text); }
-.ip-node.st-done .ip-title { color: var(--muted); }
-.ip-node.st-dropped .ip-title { text-decoration: line-through; color: var(--muted); }
-/* A depth-1 phase: an unframed stack head that opens its lane, centred in a 32 px box, its progress track under it. */
-.ip-card.stack { padding: 0; border: 0; background: none; }
-.ip-node.stack { height: var(--node-h); gap: 9px; }
-.ip-node.stack .ip-title { font-size: var(--fs-l); font-weight: var(--w-heavy); line-height: 20px; letter-spacing: var(--track-l); word-spacing: .05em; color: var(--text); }
-.ip-track { position: absolute; top: calc(var(--node-h) + 1px); left: 18px; width: 466px; height: 2px; background: var(--track); }
-.ip-track-fill { height: 100%; background: var(--track-fill); }
-/* After the title, with no boxes: the type glyph, ▤ n, YOU, blocked, n/m and the chevron. */
-.ip-type { flex: none; color: var(--muted); font-size: var(--fs-m); line-height: 18px; }
 /* Text presentation, so ⚙ and ⚒ never turn into emoji. Details' glyph shares it. */
-.ip-type, .ip-glyph { font-variant-emoji: text; }
+.ip-glyph { font-variant-emoji: text; }
 /* ⛁ draws faint at text size. */
-.ip-type.l-data, .ip-glyph.l-data { font-size: 1.33em; }
-/* A narrow window's single resource count, in the header (shown by the max-width: 719px block below). */
-.ip-res-count { display: none; flex: none; font-family: var(--font-mono); font-size: var(--fs-s); line-height: 14px; color: var(--muted); white-space: nowrap; }
+.ip-glyph.l-data { font-size: 1.33em; }
 /* The YOU tag, on a card and in Details (NEEDS YOU, and YOU in its list of steps): amber ink on the amber tint. */
 .ip-you { flex: none; height: 18px; padding: 0 6px; border-radius: var(--radius); background: var(--amber-fill); color: var(--amber-ink); font-size: var(--fs-s); font-weight: var(--w-heavy); line-height: 18px; letter-spacing: .04em; white-space: nowrap; }
-.ip-blocked { flex: none; color: var(--red); font-size: var(--fs-s); line-height: 14px; }
-.ip-progress { flex: none; font-family: var(--font-mono); font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
-.ip-chevron { flex: none; width: 16px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
-/* Up next place: a fixed gutter column at flow x 6 to 48, whatever the card's indent. NodeCard sets --x, the card's
-   flow x, on .ip-row. Owned: letter and numeral in the session's hue. Unowned: ink. */
-.ip-queue { position: absolute; top: 0; left: calc(6px - var(--x)); width: 42px; height: var(--node-h); display: flex; align-items: center; justify-content: flex-end; font-size: var(--fs-l); font-weight: var(--w-heavy); line-height: 20px; letter-spacing: var(--track-l); white-space: nowrap; color: var(--text-2); }
-.ip-queue.owned { color: var(--fam, var(--family-0)); }
-.ip-queue > span + span { margin-left: 1px; }
-/* From 720 px a card's first two resources sit beside its frame, past the lane's edge: muted mono, no box. */
-.ip-chip { flex: none; margin-top: 9px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
-.ip-chip:hover { color: var(--text-2); }
 
-/* A card's lines, under its header. Each is one fixed-height line, so the frame is exactly layout's h. */
-.ip-lines { min-width: 0; }
-.ip-card .ip-lines { padding-bottom: var(--card-pad); }
-/* A stack head's lines sit under its track at flow x 56, unframed. */
-.ip-card.stack .ip-lines { margin-top: calc(var(--stack-head) - var(--node-h)); padding: 0 0 0 34px; }
-/* One session's agent line: its lead, its kin, then its label. Away from the session's focus the line starts with the
-   letter and has no label. The title is the one part that gives way. */
-.ip-badge { display: flex; align-items: center; height: var(--agent-line); min-width: 0; padding-left: 6px; white-space: nowrap; font-size: var(--fs-m); line-height: 18px; color: var(--text-2); }
-/* Under a stack head there is no frame to clear: the line drops its 6 px, so it starts at flow x 56, as the done row
-   of its own line does. */
-.ip-card.stack .ip-badge { padding-left: 0; }
-.ip-badge .ip-tag, .ip-readers .ip-tag { font-weight: var(--w-heavy); color: var(--fam, var(--family-0)); }
-.ip-badge > .ip-tag { flex: none; }
-/* The lead: 24 px while working, 20 px otherwise, in a 24 px slot, so its kin and label never move on a flip. */
-.ip-badge > .ip-char { flex: none; }
-.ip-badge > .ip-char:not(.c-work) { margin: 0 2px; }
-.ip-agent > .ip-char { flex: none; }
-/* The label's parts sit in the line itself, so its title gives way first, down to nothing, and only then the done
-   row's label. Its letter starts 12 px after the last kin, or the lead. */
-.ip-badge-label { display: contents; }
-.ip-badge-label > :first-child { margin-left: 12px; }
-.ip-badge-label .ip-tag { flex: none; }
-.ip-badge-sep { flex: none; white-space: pre; color: var(--muted); }
-.ip-badge-title { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.ip-badge-word { flex: none; color: var(--muted); }
-.ip-badge.s-permission .ip-badge-word { color: var(--amber-ink); }
-/* A kin: one shown worker, its character, its tag and, while it runs, its run time. Ended, it goes grey. */
-.ip-agent { flex: none; display: inline-flex; align-items: center; gap: 3px; margin-left: 8px; }
-.ip-badge > .ip-agent:first-child { margin-left: 0; }
 /* A subagent's tag, here, in the chip's list and in Details: DM Mono in its session's hue. */
 .ip-agent-tag { font-family: var(--font-mono); font-size: var(--fs-s); font-weight: var(--w-text); line-height: 14px; color: var(--fam, var(--faint)); }
-.ip-agent-time { font-family: var(--font-mono); font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
-.ip-agent.ended, .ip-agent.ended .ip-agent-tag { color: var(--muted); }
-/* A kin that ended without a stop: a one-character mark after its tag, grey. At the usage limit it waits for Aiden, so its
-   tag and mark go amber; amber's ring stays permission's. */
-.ip-agent-mark { font-family: var(--font-mono); font-size: var(--fs-s); font-weight: var(--w-text); line-height: 14px; color: var(--muted); }
-.ip-agent.limit .ip-agent-tag, .ip-agent.limit .ip-agent-mark { color: var(--amber-ink); }
-.ip-agent-more { flex: none; margin-left: 8px; font-family: var(--font-mono); font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
-/* A session's running readers: one muted line, indented past the lead. Only the letter wears the hue. */
-.ip-readers { display: flex; align-items: center; height: var(--readers-line); min-width: 0; padding-left: 38px; white-space: nowrap; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
-.ip-readers-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-/* A session's background commands on one step: one muted line, indented past the lead. The tag wears the hue; a serving
-   or ended line goes faint, tag and all. */
-.ip-commands { display: flex; align-items: center; height: var(--command-line); min-width: 0; padding-left: 38px; white-space: nowrap; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
-.ip-commands-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.ip-commands-mono { font-family: var(--font-mono); }
-.ip-commands .ip-cmd-tag { color: var(--fam, var(--family-0)); }
-.ip-commands.serving, .ip-commands.ended, .ip-commands.serving .ip-cmd-tag, .ip-commands.ended .ip-cmd-tag { color: var(--faint); }
-/* The done row: at the right end of a kin-less last line, else on a 20 px line of its own. Its label cuts last. */
-.ip-work-done { flex: 0 1 auto; display: inline-flex; align-items: center; gap: 4px; min-width: 0; margin-left: auto; padding-left: 6px; white-space: nowrap; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
-.ip-lines > .ip-work-done { display: flex; width: max-content; max-width: 100%; height: var(--done-line); margin-left: 30px; padding-left: 0; }
-.ip-card.stack .ip-lines > .ip-work-done { margin-left: 0; }
-.ip-work-done-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.ip-work-done::after { content: '▸'; }
-.ip-work-done[aria-expanded='true']::after { content: '▾'; }
-.ip-work-done:hover { color: var(--text-2); }
-.ip-work-done:focus-visible { outline: 2px solid var(--text-2); outline-offset: 1px; border-radius: var(--radius); }
 /* Shared with Details' task rows (.ip-wt): the tag, the mark's colour and the hue bar. Details restyles them, and its
    trail rows, under .ip-wt in its own region. */
 .ip-work-tag { font-family: var(--font-mono); font-size: var(--fs-s); font-weight: var(--w-text); line-height: 14px; color: var(--fam, var(--family-0)); }
 .ip-work-mark { color: var(--muted); }
 .w-in_progress .ip-work-mark { color: var(--active-ink); }
 .ip-work-agent { display: inline-block; width: 3px; height: 12px; vertical-align: -1px; background: var(--fam, var(--family-0)); }
-.ip-work.pulse .ip-work-mark { animation: ip-pulse 1.6s ease-in-out infinite; }
-/* A working task in its card: 22 px, no box. The left column holds a subagent's tag; only the session's own rows carry
-   the hue bar, and a row without one keeps its slot, so subjects align. */
-.ip-card .ip-work { display: flex; align-items: center; gap: 8px; height: var(--task-row); min-width: 0; white-space: nowrap; font-size: var(--fs-m); line-height: 18px; color: var(--text-2); }
-.ip-work-col { flex: none; display: flex; justify-content: flex-end; width: 22px; }
-.ip-card .ip-work-mark { flex: none; width: 12px; text-align: center; }
-.ip-card .ip-work-agent { flex: none; margin-left: -3px; }
-.ip-card .ip-work-mark + .ip-work-subject { margin-left: 8px; }
-.ip-work-subject { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.ip-card .ip-work.w-in_progress .ip-work-subject { color: var(--text); }
-.ip-card .ip-work.w-completed .ip-work-subject { color: var(--muted); }
-.ip-work-after { flex: none; max-width: 150px; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
-/* The trail: a task an ended session left open is a hollow ○ in --faint that never pulses; one it completed keeps ✓. */
-.ip-card .ip-work.stale .ip-work-subject { color: var(--muted); }
-.ip-work.stale:not(.w-completed) .ip-work-mark { color: var(--faint); animation: none; }
-/* A subagent in the trail, under its step's open done row: neutral, its ◆ muted. */
-.ip-trail-agent { height: var(--task-row); padding-left: 30px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--fs-m); line-height: var(--task-row); color: var(--muted); }
-/* Except the words of one that hit the usage limit: `ran 22 min · hit the usage limit 10 h ago`, amber, with no letter. */
-.ip-trail-agent .ip-limit-words { color: var(--amber-ink); }
-/* "+n more" and "✓ n done": a fold row, 26 px, a dashed hairline on no fill, as wide as its words. */
-.ip-more { display: flex; align-items: center; gap: 6px; height: calc(var(--fold-row) - var(--card-gap)); padding: 0 12px; border: 1px dashed var(--border); border-radius: var(--radius); background: transparent; white-space: nowrap; font-size: var(--fs-m); line-height: 18px; color: var(--muted); cursor: pointer; }
-.ip-more-mark { color: var(--muted); }
-.ip-more:focus-visible { outline: 2px solid var(--text-2); outline-offset: 1px; }
-.ip-handle { opacity: 0; width: 1px; height: 1px; min-width: 0; min-height: 0; border: 0; }
-@media (max-width: 719px) {
-  /* One resource count inside the card instead of the chips beside it. */
-  .ip-row > .ip-chip { display: none; }
-  .ip-res-count { display: inline-block; }
-}
 /* Region: Details and viewer. Task 5. */
 /* Details: a side panel from 720 px, a bottom sheet over the lower 60 % below it (sheet.ts). Opaque --panel with the
    shadow, body M. Details styles the classes it shares with the canvas and the chrome under its own parents (.ip-wt,
@@ -513,6 +310,6 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-status .ip-toast { bottom: 48px; width: max-content; max-width: calc(100vw - 32px); }
 /* Region: reduced motion. Task 1 only. */
 @media (prefers-reduced-motion: reduce) {
-  /* Nothing moves: no pulse, no flash, no bob, blink or ring. The flash's static ring is in the canvas region. */
+  /* Nothing moves: no pulse, no flash, no bob, blink or ring.  */
   * { animation: none !important; }
 }

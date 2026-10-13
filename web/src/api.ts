@@ -1,6 +1,6 @@
 import type { BuildInfo } from '../../src/core/build';
 import type { StepHit } from '../../src/core/goto';
-import type { DeletedProject, NodeDetail, Project, ProjectSnapshot, ProjectSummary, Resource } from '../../src/core/types';
+import type { DeletedProject, NodeDetail, Project, ProjectSnapshot, ProjectSummary, QueueOp, Resource } from '../../src/core/types';
 import type { ActionTarget, ProjectAction } from './projectActions';
 
 async function getJson<T>(path: string): Promise<T> {
@@ -42,11 +42,32 @@ export const api = {
   renameProject: (p: ActionTarget, name: string) => sendUi<{ project: Project }>(`/api/ui/projects/${p.id}/rename`, { slug: p.slug, name }),
 };
 
+/** What a window write answers: 'ok' when it was done, 'reload' after a server restart, else a message for the user. */
+export type UiResult = 'ok' | 'reload' | string;
+
+/** The window's measurement events (spec 2.6). */
+export type WindowEventName = 'view' | 'shown' | 'first_action' | 'backlog_open' | 'details_open';
+
+/** One change to the project's Next queue (spec 2.5), applied on the server to the queue as it stands. */
+export const queueOp = (projectId: number, slug: string, op: QueueOp): Promise<UiResult> => postUi(`/api/ui/projects/${projectId}/queue`, { slug, op });
+
+/** Quick-add: a todo step under `parent`, or under the root when null. */
+export const createStep = (projectId: number, slug: string, title: string, parent: number | null): Promise<UiResult> =>
+  postUi(`/api/ui/projects/${projectId}/nodes`, { slug, title, parent });
+
+/** Clears an ask, with an answer when Aiden typed one. */
+export const clearAsk = (askId: number, answer?: string): Promise<UiResult> => postUi(`/api/ui/asks/${askId}/clear`, answer === undefined ? {} : { answer });
+
+/** A measurement: fire and forget, so a failure never reaches the user. */
+export function postEvent(name: WindowEventName, projectId: number | null, data?: Record<string, string | number | boolean | null>): void {
+  void postUi('/api/ui/events', { name, projectId, ...(data ? { data } : {}) });
+}
+
 /**
  * Never rejects. 'ok' means it was done; 'reload' means the server restarted with a new UI token; any other string is a
  * message for the user.
  */
-async function postUi(path: string, body: unknown): Promise<'ok' | 'reload' | string> {
+async function postUi(path: string, body: unknown): Promise<UiResult> {
   const answer = await sendUi(path, body);
   return typeof answer === 'string' ? answer : 'ok';
 }
