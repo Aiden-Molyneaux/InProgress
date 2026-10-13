@@ -197,6 +197,16 @@ describe('install', () => {
     expect(skill).not.toMatch(/\{\{\w+\}\}/);
   });
 
+  it('writes the mip-orc skill beside the inprogress skill, with the CLI path filled in', () => {
+    const dir = claudeDirWithSettings(existing);
+    const { log } = install({ repo, claudeDir: dir, stamp: 'orc' });
+    const skill = readFileSync(join(dir, 'skills', 'mip-orc', 'SKILL.md'), 'utf8');
+    expect(skill).toMatch(/^name: mip-orc$/m);
+    expect(skill).toContain(`node ${repo}/dist/cli/main.js orchestrate --session`);
+    expect(skill).not.toMatch(/\{\{\w+\}\}/);
+    expect(log).toContain(`Skill: ${join(dir, 'skills', 'mip-orc')}`);
+  });
+
   it('writes the full brief template into the skill, which points at the briefing for the rules, and the live-work rules into the scribe', () => {
     const dir = claudeDirWithSettings(existing);
     install({ repo, claudeDir: dir, stamp: 'lw' });
@@ -215,8 +225,11 @@ describe('install', () => {
     const template = /Brief template:\n\n```\n([\s\S]*?)```/.exec(skill)?.[1] ?? '';
     expect(template).toMatch(/^Session: <session id> · Project: <slug>\nChanges:\n/);
     expect(template).toContain('- #57 → done; outcome "Play app signing configured"');
-    // The question, then its answer, which marks it done with the answer as the outcome; no guidance inside the template.
-    expect(template).toMatch(/- add under #55: "[^"]+\?" \(question, assignee me\)\n- #\d+ → done; outcome "[^"]+"\n/);
+    // An ask, then its answer; no question step, and no guidance inside the template.
+    expect(template).toMatch(/- ask on #55: question, [^\n]+\?\n- a\d+ answered: [^\n]+\n/);
+    expect(template).not.toMatch(/\(question/);
+    expect(template).toMatch(/- handoff on #55: "[^"]+", path [^\n]+, snapshot_file\n- state on #\d+: /);
+    expect(skill).not.toMatch(/needs.you/i);
     expect(template).not.toMatch(/\(the answer/);
     expect(template).toMatch(/- #\d+ label → fix\n/);
     expect(template).toMatch(/- #\d+ → dropped; outcome "[^"]+"\n- move #\d+ under #55 after #57\n/);
@@ -484,6 +497,7 @@ describe('uninstall', () => {
     expect(s).toEqual(existing);
     expect(existsSync(join(dir, 'agents', 'inprogress-scribe.md'))).toBe(false);
     expect(existsSync(join(dir, 'skills', 'inprogress'))).toBe(false);
+    expect(existsSync(join(dir, 'skills', 'mip-orc'))).toBe(false);
   });
 
   it("round-trips settings that hold other tools' hooks and counts what it removed", () => {
@@ -549,6 +563,21 @@ describe('kitStatus', () => {
     settings.permissions.allow = settings.permissions.allow.filter((r: string) => r !== 'mcp__inprogress');
     writeFileSync(join(dir, 'settings.json'), JSON.stringify(settings, null, 2));
     expect(kitStatus({ repo: changed, claudeDir: dir })).toEqual({ installed: true, differs: ['settings', 'agent', 'skill'] });
+  });
+
+  it('reports a changed, missing or extra file in the mip-orc skill as a skill difference', () => {
+    const dir = claudeDirWithSettings({ theme: 'dark' });
+    install({ repo, claudeDir: dir, stamp: 'ko1' });
+    const file = join(dir, 'skills', 'mip-orc', 'SKILL.md');
+    writeFileSync(file, 'edited by hand');
+    expect(kitStatus({ repo, claudeDir: dir })).toEqual({ installed: true, differs: ['skill'] });
+    install({ repo, claudeDir: dir, stamp: 'ko2' });
+    expect(kitStatus({ repo, claudeDir: dir })).toEqual({ installed: true, differs: [] });
+    rmSync(join(dir, 'skills', 'mip-orc'), { recursive: true });
+    expect(kitStatus({ repo, claudeDir: dir })).toEqual({ installed: true, differs: ['skill'] });
+    install({ repo, claudeDir: dir, stamp: 'ko3' });
+    writeFileSync(join(dir, 'skills', 'mip-orc', 'extra.md'), 'x');
+    expect(kitStatus({ repo, claudeDir: dir })).toEqual({ installed: true, differs: ['skill'] });
   });
 
   it('reports the settings as different for an install from before the async command-tools group, until install runs again', () => {

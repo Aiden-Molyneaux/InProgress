@@ -244,12 +244,17 @@ function backup(file: string, stamp: string, log: string[]): void {
   if (pruned) log.push(`Removed ${pruned} older settings ${pruned === 1 ? 'backup' : 'backups'} (keeping the newest ${BACKUPS_KEPT})`);
 }
 
-/** The agent file and the skill folder exactly as install writes them for this repo. */
-function renderKit(repo: string): { agent: string; skill: (readonly [string, string])[] } {
+/** The skill folders the kit installs, each from `claude/skills/<name>/` to `<claudeDir>/skills/<name>/`. */
+export const SKILL_NAMES = ['inprogress', 'mip-orc'] as const;
+
+/** The agent file and the skill folders exactly as install writes them for this repo. */
+function renderKit(repo: string): { agent: string; skills: { name: string; files: (readonly [string, string])[] }[] } {
   const agent = renderTemplate(readFileSync(join(repo, 'claude', 'agents', 'inprogress-scribe.md'), 'utf8'), repo);
-  const skillSrc = join(repo, 'claude', 'skills', 'inprogress');
-  const skill = readdirSync(skillSrc).map((f) => [f, renderTemplate(readFileSync(join(skillSrc, f), 'utf8'), repo)] as const);
-  return { agent, skill };
+  const skills = SKILL_NAMES.map((name) => {
+    const src = join(repo, 'claude', 'skills', name);
+    return { name, files: readdirSync(src).map((f) => [f, renderTemplate(readFileSync(join(src, f), 'utf8'), repo)] as const) };
+  });
+  return { agent, skills };
 }
 
 const readText = (file: string): string | undefined => (existsSync(file) ? readFileSync(file, 'utf8') : undefined);
@@ -265,17 +270,20 @@ const canonical = (value: unknown): string =>
 export function kitStatus(o: { repo: string; claudeDir: string }): { installed: boolean; differs: ('settings' | 'agent' | 'skill')[] } {
   const repo = normalizePath(o.repo);
   const current = readSettings(join(o.claudeDir, 'settings.json'));
-  const { agent, skill } = renderKit(repo);
+  const { agent, skills } = renderKit(repo);
   const agentFile = join(o.claudeDir, 'agents', 'inprogress-scribe.md');
-  const skillDir = join(o.claudeDir, 'skills', 'inprogress');
   const installed = countInProgressHooks(current) > 0 || existsSync(agentFile);
   const differs: ('settings' | 'agent' | 'skill')[] = [];
   // The merge helpers edit in place, so they get a copy; key order is not a difference (a re-merge appends keys).
   if (canonical(addAllowRules(addInProgressHooks(structuredClone(current), repo), repo)) !== canonical(current)) differs.push('settings');
   if (readText(agentFile) !== agent) differs.push('agent');
-  const installedSkill = existsSync(skillDir) ? readdirSync(skillDir).sort() : [];
-  const skillSame = installedSkill.join('\n') === skill.map(([f]) => f).sort().join('\n') && skill.every(([f, text]) => readText(join(skillDir, f)) === text);
-  if (!skillSame) differs.push('skill');
+  // Every skill folder of the kit counts as 'skill': a changed, missing or extra file in any of them.
+  const skillsSame = skills.every(({ name, files }) => {
+    const skillDir = join(o.claudeDir, 'skills', name);
+    const installedSkill = existsSync(skillDir) ? readdirSync(skillDir).sort() : [];
+    return installedSkill.join('\n') === files.map(([f]) => f).sort().join('\n') && files.every(([f, text]) => readText(join(skillDir, f)) === text);
+  });
+  if (!skillsSame) differs.push('skill');
   return { installed, differs };
 }
 
@@ -288,7 +296,7 @@ export function install(o: { repo: string; claudeDir: string; stamp: string }): 
   if (unbuilt) throw new Error(`Build InProgress first: npm run deploy (${repo}/${unbuilt} is missing)`);
   const settingsFile = join(o.claudeDir, 'settings.json');
   const current = readSettings(settingsFile);
-  const { agent, skill } = renderKit(repo);
+  const { agent, skills } = renderKit(repo);
   const replaced = countInProgressHooks(current);
   const settings = addAllowRules(addInProgressHooks(current, repo), repo);
 
@@ -309,11 +317,13 @@ export function install(o: { repo: string; claudeDir: string; stamp: string }): 
   writeFileSync(agentFile, agent);
   log.push(`Agent: ${agentFile}`);
 
-  const skillDst = join(o.claudeDir, 'skills', 'inprogress');
-  rmSync(skillDst, { recursive: true, force: true });
-  mkdirSync(skillDst, { recursive: true });
-  for (const [f, text] of skill) writeFileSync(join(skillDst, f), text);
-  log.push(`Skill: ${skillDst}`);
+  for (const { name, files } of skills) {
+    const skillDst = join(o.claudeDir, 'skills', name);
+    rmSync(skillDst, { recursive: true, force: true });
+    mkdirSync(skillDst, { recursive: true });
+    for (const [f, text] of files) writeFileSync(join(skillDst, f), text);
+    log.push(`Skill: ${skillDst}`);
+  }
 
   if (agentsDirCreated) log.push('The agents folder is new: restart any open Claude sessions so they can see the scribe.');
   return { log, agentsDirCreated };
@@ -332,7 +342,7 @@ export function uninstall(o: { claudeDir: string; stamp: string }): string[] {
     log.push(`Removed ${removed} ${hookEntryLabel(removed)} and the allow rules`);
   }
   rmSync(join(o.claudeDir, 'agents', 'inprogress-scribe.md'), { force: true });
-  rmSync(join(o.claudeDir, 'skills', 'inprogress'), { recursive: true, force: true });
-  log.push('Removed the scribe agent and the inprogress skill');
+  for (const name of SKILL_NAMES) rmSync(join(o.claudeDir, 'skills', name), { recursive: true, force: true });
+  log.push('Removed the scribe agent and the inprogress and mip-orc skills');
   return log;
 }
