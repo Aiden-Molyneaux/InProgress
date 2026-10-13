@@ -55,6 +55,10 @@ export const queueOp = (projectId: number, slug: string, op: QueueOp): Promise<U
 export const createStep = (projectId: number, slug: string, title: string, parent: number | null): Promise<UiResult> =>
   postUi(`/api/ui/projects/${projectId}/nodes`, { slug, title, parent });
 
+/** Deletes a step from the tree, by id; the server refuses one with steps under it. */
+export const deleteStep = (projectId: number, slug: string, nodeId: number): Promise<UiResult> =>
+  postUi(`/api/ui/projects/${projectId}/nodes/${nodeId}/delete`, { slug });
+
 /** Clears an ask, with an answer when Aiden typed one. */
 export const clearAsk = (askId: number, answer?: string): Promise<UiResult> => postUi(`/api/ui/asks/${askId}/clear`, answer === undefined ? {} : { answer });
 

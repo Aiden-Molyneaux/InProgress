@@ -130,6 +130,53 @@ describe('nodes route (quick-add)', () => {
   });
 });
 
+describe('node delete route', () => {
+  const exists = (ctx: { db: { prepare: (sql: string) => { pluck: () => { get: (...a: unknown[]) => unknown } } } }, id: number) =>
+    ctx.db.prepare('SELECT COUNT(*) FROM nodes WHERE id = ?').pluck().get(id) === 1;
+
+  it('deletes a leaf and answers its ids', async () => {
+    const { ctx, p, post, a, b } = await setup();
+    const res = await post(`/api/ui/projects/${p.id}/nodes/${a}/delete`, { slug: p.slug });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ ids: [a] });
+    expect(exists(ctx, a)).toBe(false);
+    expect(exists(ctx, b)).toBe(true);
+  });
+
+  it('refuses a step with steps under it', async () => {
+    const { ctx, p, post, a } = await setup();
+    const [child] = addNodes(ctx, 'test', { parentId: a, nodes: [{ title: 'Child' }] });
+    const res = await post(`/api/ui/projects/${p.id}/nodes/${a}/delete`, { slug: p.slug });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe(`#${a} has steps under it`);
+    expect(exists(ctx, a)).toBe(true);
+    expect(exists(ctx, child.id)).toBe(true);
+  });
+
+  it('refuses a step of another project, and the root', async () => {
+    const { ctx, app, p, post } = await setup();
+    const other = (await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'Other' } })).json();
+    const [foreign] = addNodes(ctx, 'test', { parentId: other.rootNodeId, nodes: [{ title: 'Foreign' }] });
+    const res = await post(`/api/ui/projects/${p.id}/nodes/${foreign.id}/delete`, { slug: p.slug });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe(`#${foreign.id} is not in this project`);
+    expect(exists(ctx, foreign.id)).toBe(true);
+    expect((await post(`/api/ui/projects/${p.id}/nodes/${p.rootNodeId}/delete`, { slug: p.slug })).statusCode).toBe(400);
+    expect(exists(ctx, p.rootNodeId)).toBe(true);
+  });
+
+  it('answers 409 for a wrong slug, 404 for a missing step, and refuses a request not from the window', async () => {
+    const { ctx, p, post, a } = await setup();
+    const url = `/api/ui/projects/${p.id}/nodes/${a}/delete`;
+    expect((await post(url, { slug: 'nope' })).statusCode).toBe(409);
+    expect((await post(`/api/ui/projects/${p.id}/nodes/999999/delete`, { slug: p.slug })).statusCode).toBe(404);
+    for (const headers of [{} as Record<string, string>, { origin: 'http://evil.example', 'x-ip-ui-token': 'ui-token' }, { origin: 'http://localhost:80', 'x-ip-ui-token': 'wrong' }, auth]) {
+      expect([401, 403]).toContain((await post(url, { slug: p.slug }, headers)).statusCode);
+    }
+    expect(exists(ctx, a)).toBe(true);
+  });
+});
+
 describe('ask clear route', () => {
   it('clears with and without an answer, and twice', async () => {
     const { ctx, post, a, b } = await setup();

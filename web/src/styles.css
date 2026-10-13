@@ -361,6 +361,7 @@ li.ip-orow:hover { background: var(--panel-2); }
 /* The row's own buttons show on hover and whenever focus is inside the row, so Tab reaches them and shows them. */
 .ip-hover-act { margin-left: auto; height: 18px; padding: 0 6px; border: 1px solid var(--border); border-radius: var(--radius); font-size: var(--fs-s); line-height: 14px; color: var(--muted); background: var(--bg); opacity: 0; }
 .ip-row:hover .ip-hover-act, .ip-row:focus-within .ip-hover-act, .ip-hover-act:focus-visible { opacity: 1; }
+.ip-hover-act + .ip-hover-act { margin-left: 4px; }
 .ip-hover-act:hover { color: var(--text); background: var(--panel-2); }
 .ip-hover-act:focus-visible, .ip-fold:focus-visible, .ip-quick-add:focus { outline: 2px solid var(--text-2); outline-offset: 1px; }
 .ip-backlog { margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border); border-radius: var(--radius); }

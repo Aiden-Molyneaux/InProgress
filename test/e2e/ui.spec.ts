@@ -2007,6 +2007,42 @@ test.describe('Board', () => {
     await expect(next.getByRole('button', { name: /^Backlog · \d+ [▸▾]$/ })).toBeVisible();
   });
 
+  test('Backlog "Delete…" asks first, Escape and Cancel keep the step, Delete removes it from the tree', async ({ page, fresh }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const next = band(page, 'next');
+    const fold = next.getByRole('button', { name: /^Backlog · \d+ [▸▾]$/ });
+    await fold.click();
+    const id = fresh.ids['6 Beta'];
+    const title = next.getByRole('button', { name: '6 Beta', exact: true });
+    const row = next.locator('.ip-backlog-row', { has: page.getByRole('button', { name: '6 Beta', exact: true }) });
+    const del = row.getByRole('button', { name: 'Delete…' });
+    const dialog = page.getByRole('dialog', { name: `Delete #${id} 6 Beta?` });
+    await expect(del).toHaveCSS('opacity', '0');
+    await title.focus();
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Tab');
+    await expect(del).toBeFocused();
+    await expect(del).toHaveCSS('opacity', '1');
+    await page.keyboard.press('Enter');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(del).toBeFocused();
+    await expect(title).toBeVisible();
+    // Ask again and delete: the row goes, Details does not open, and the tree no longer has it.
+    await page.keyboard.press('Enter');
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(next.getByRole('button', { name: '6 Beta', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('complementary')).toHaveCount(0);
+    await page.reload();
+    if ((await fold.getAttribute('aria-expanded')) !== 'true') await fold.click();
+    await expect(next.getByRole('button', { name: '7 Launch', exact: true })).toBeVisible();
+    await expect(next.getByRole('button', { name: '6 Beta', exact: true })).toHaveCount(0);
+  });
+
   test('drag: Backlog into Next, within Next, and Next back to Backlog, without opening Details', async ({ page, fresh }) => {
     await page.setViewportSize(WIDE);
     await open(page, fresh);

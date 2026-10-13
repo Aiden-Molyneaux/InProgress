@@ -5,9 +5,9 @@ import { badRequest, conflict, notFound } from '../errors';
 import { deleteProject, listDeletedProjects, restoreProject } from '../project-lifecycle';
 import { clearAsk } from '../repo/asks';
 import { recordQuiet } from '../repo/events';
-import { addNodes } from '../repo/nodes';
+import { addNodes, deleteNode } from '../repo/nodes';
 import { applyQueueOp, changeProject, getProjectById, resolveProject } from '../repo/projects';
-import { idParam, windowClearBody, windowEventBody, windowNodeBody, windowProjectBody, windowQueueBody, windowRenameBody, WINDOW_EVENT_KEYS } from '../schemas';
+import { idParam, windowClearBody, windowEventBody, windowNodeBody, windowProjectBody, windowQueueBody, windowNodeParams, windowRenameBody, WINDOW_EVENT_KEYS } from '../schemas';
 
 /** Who the window's writes are recorded as: fixed here, never taken from a header. */
 const ACTOR = 'window';
@@ -79,6 +79,19 @@ export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: 
       },
     });
     return { node };
+  });
+  // Delete a step from the tree (the Backlog's Delete). Never one with steps under it: those may be done, and deleting
+  // them would lose their history. Asks, resources and logs go with it (FK cascade); the queue drops it on read.
+  app.post('/api/ui/projects/:id/nodes/:node/delete', guarded, async (req) => {
+    const { node } = windowNodeParams.parse(req.params);
+    const projectId = target(req.params, req.body);
+    // A deleted project is not found (404), as for the queue route.
+    resolveProject(ctx, projectId);
+    // Checked inside deleteNode's own write, so a step moved or given children in between cannot slip through.
+    return deleteNode(ctx, ACTOR, node, false, (n, ids) => {
+      if (n.projectId !== projectId) throw badRequest(`#${node} is not in this project`, 'Reload the window.');
+      if (ids.length > 1) throw badRequest(`#${node} has steps under it`, 'Move or delete them first.');
+    });
   });
   // Idempotent (spec 1.2): clearing twice answers the same; a 404 for an ask that does not exist.
   app.post('/api/ui/asks/:id/clear', guarded, async (req) => {

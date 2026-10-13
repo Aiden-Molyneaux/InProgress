@@ -234,7 +234,7 @@ export function NextColumn({ snapshot, board, now, wide, onOpenNode, onOpenResou
         </div>
         {open && (
           <>
-            <Backlog rows={backlog} snapshot={snapshot} now={now} onOpenNode={onOpenNode} onOpenResource={onOpenResource} onDragStart={setDragging} onDragEnd={endDrag} onToNext={toNext} />
+            <Backlog rows={backlog} snapshot={snapshot} now={now} projectId={project.id} slug={project.slug} onStatus={onStatus} onOpenNode={onOpenNode} onOpenResource={onOpenResource} onDragStart={setDragging} onDragEnd={endDrag} onToNext={toNext} />
             {adding && <QuickAdd projectId={project.id} slug={project.slug} inputRef={field} onStatus={onStatus} onClose={closeAdd} />}
           </>
         )}

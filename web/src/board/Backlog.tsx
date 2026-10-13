@@ -1,5 +1,7 @@
 import type { BoardRow } from '../../../src/core/board';
 import type { TreeNode } from '../../../src/core/types';
+import { useEffect, useRef, useState } from 'react';
+import { deleteStep } from '../api';
 import { noteAction } from '../measure';
 import { focusTargetAfter } from './focus';
 import { endedLine, LabelChip, rowClick, StepMarks } from './Marks';
@@ -19,29 +21,55 @@ export function groupByParent(rows: BoardRow[]): { parent: TreeNode | null; rows
 }
 
 /** The open Backlog: one-line rows under their parent's title, each draggable, with "to Next" shown on hover and on focus. */
-export function Backlog({ rows, snapshot, now, onOpenNode, onOpenResource, onDragStart, onDragEnd, onToNext }: Pick<BandProps, 'snapshot' | 'now' | 'onOpenNode' | 'onOpenResource'> & {
+export function Backlog({ rows, snapshot, now, projectId, slug, onStatus, onOpenNode, onOpenResource, onDragStart, onDragEnd, onToNext }: Pick<BandProps, 'snapshot' | 'now' | 'onOpenNode' | 'onOpenResource' | 'onStatus'> & {
   rows: BoardRow[];
+  projectId: number;
+  slug: string;
   onDragStart: (id: number) => void;
   onDragEnd: () => void;
   onToNext: (id: number) => void;
 }) {
+  /** The row whose Delete confirm is open: one at a time. */
+  const [confirming, setConfirming] = useState<number | null>(null);
+  const root = useRef<HTMLDivElement>(null);
+  // Cancel takes focus when a confirm opens.
+  useEffect(() => {
+    if (confirming !== null) root.current?.querySelector<HTMLElement>('.ip-confirm [data-cancel]')?.focus();
+  }, [confirming]);
+  /** Closes the confirm and puts focus back on that row's Delete button, once it is drawn again. */
+  const cancel = (id: number) => {
+    setConfirming(null);
+    window.requestAnimationFrame(() => root.current?.querySelector<HTMLElement>(`li[data-node="${id}"] [data-delete]`)?.focus());
+  };
+  const remove = async (id: number, li: HTMLElement | null) => {
+    noteAction('backlog', 'delete');
+    const after = focusTargetAfter(li);
+    setConfirming(null);
+    after?.focus();
+    const result = await deleteStep(projectId, slug, id);
+    if (result === 'ok') return;
+    if (result === 'reload') window.location.reload();
+    else onStatus?.(result);
+  };
   if (rows.length === 0) return <p className="ip-quiet ip-empty-line">Backlog is empty</p>;
   const slotOf = (id: string) => snapshot.sessions.find((s) => s.id === id)?.slot ?? null;
   return (
-    <div className="ip-backlog-groups">
+    <div className="ip-backlog-groups" ref={root}>
       {groupByParent(rows).map((g) => (
         <section key={g.parent?.id ?? 0} className="ip-backlog-group" aria-label={g.parent ? `Backlog under ${g.parent.title}` : 'Backlog at the top level'}>
           {g.parent && <div className="ip-group-line" title={g.parent.title}>{g.parent.title}</div>}
           <ul>
             {g.rows.map((row) => {
               const ended = endedLine(row, snapshot.pastSessions, slotOf, now);
+              const asking = confirming === row.node.id;
               return (
                 <li
                   key={row.node.id}
                   className="ip-row ip-backlog-row"
                   data-node={row.node.id}
-                  draggable
+                  draggable={!asking}
                   onDragStart={(e) => {
+                    if (asking) return e.preventDefault();
                     e.dataTransfer.effectAllowed = 'move';
                     e.dataTransfer.setData('text/plain', String(row.node.id));
                     onDragStart(row.node.id);
@@ -49,16 +77,44 @@ export function Backlog({ rows, snapshot, now, onOpenNode, onOpenResource, onDra
                   onDragEnd={onDragEnd}
                   onClick={rowClick('backlog', () => onOpenNode(row.node.id))}
                 >
-                  <div className="ip-line">
-                    <button type="button" className="ip-row-title">{row.node.title}</button>
-                    <LabelChip label={row.node.label} />
-                    <StepMarks row={row} now={now} onOpenResource={onOpenResource} />
-                    <button type="button" className="ip-hover-act" data-act onClick={(e) => {
-                      noteAction('backlog', 'to_next');
-                      focusTargetAfter(e.currentTarget.closest('li'))?.focus();
-                      onToNext(row.node.id);
-                    }}>to Next</button>
-                  </div>
+                  {asking ? (
+                    <div
+                      className="ip-confirm"
+                      role="dialog"
+                      aria-modal={false}
+                      aria-labelledby={`bl${row.node.id}q`}
+                      aria-describedby={`bl${row.node.id}d`}
+                      data-act
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Escape') return;
+                        e.stopPropagation();
+                        cancel(row.node.id);
+                      }}
+                    >
+                      <b id={`bl${row.node.id}q`}>Delete #{row.node.id} {row.node.title}?</b>
+                      <p id={`bl${row.node.id}d`}>It can't be undone.</p>
+                      <div>
+                        <button type="button" className="ip-btn go" onClick={(e) => void remove(row.node.id, e.currentTarget.closest('li'))}>
+                          Delete
+                        </button>
+                        <button type="button" className="ip-btn" data-cancel onClick={() => cancel(row.node.id)}>
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="ip-line">
+                      <button type="button" className="ip-row-title">{row.node.title}</button>
+                      <LabelChip label={row.node.label} />
+                      <StepMarks row={row} now={now} onOpenResource={onOpenResource} />
+                      <button type="button" className="ip-hover-act" data-act onClick={(e) => {
+                        noteAction('backlog', 'to_next');
+                        focusTargetAfter(e.currentTarget.closest('li'))?.focus();
+                        onToNext(row.node.id);
+                      }}>to Next</button>
+                      <button type="button" className="ip-hover-act" data-act data-delete aria-haspopup="dialog" onClick={() => setConfirming(row.node.id)}>Delete…</button>
+                    </div>
+                  )}
                   {ended && <div className="ip-system-line">{ended}</div>}
                 </li>
               );
