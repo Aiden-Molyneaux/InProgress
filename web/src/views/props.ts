@@ -13,4 +13,6 @@ export interface ViewProps {
   onOpenProject?: () => void;
   /** Where the Board's "new since you looked" divider sits (spec 1.7); null when there is none. */
   lastLook?: string | null;
+  /** A line for the window's toast: why a write was refused. */
+  onStatus?: (text: string) => void;
 }

@@ -285,6 +285,36 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-divider::before { content: ''; position: absolute; left: -9px; right: 0; top: 7px; height: 1px; background: var(--active-line); }
 .ip-divider span { position: relative; padding: 0 6px 0 0; background: var(--bg); }
 .ip-done-fold { margin-left: 52px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
+/* Next: a numbered rail, own-queue entries under their session's letter, and the Backlog fold at its foot. */
+.ip-next { min-height: 48px; }
+.ip-rail { display: flex; flex-direction: column; gap: 2px; }
+.ip-next-row, .ip-backlog-row { position: relative; border-radius: var(--radius); }
+.ip-next-row { display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: 8px; align-items: start; padding: 4px 6px; }
+.ip-next-row:hover, .ip-backlog-row:hover { background: var(--panel-2); }
+.ip-next-row.dragging, .ip-backlog-row.dragging { opacity: .5; }
+.ip-next-row.drop-before { box-shadow: 0 -2px 0 var(--text-2); }
+.ip-rail.drop-end > .ip-next-row:last-child { box-shadow: 0 2px 0 var(--text-2); }
+.ip-num { font-size: var(--fs-l); line-height: 24px; text-align: center; color: var(--text-2); }
+.ip-num.ip-letter { font-family: var(--font-mono); font-size: var(--fs-m); font-weight: var(--w-heavy); }
+.ip-next-body { min-width: 0; }
+.ip-line { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; min-width: 0; }
+.ip-next-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
+.ip-own-queue { margin-top: 10px; }
+.ip-own-head { margin: 0 0 2px 6px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
+/* The row's own buttons show on hover and whenever focus is inside the row, so Tab reaches them and shows them. */
+.ip-hover-act { margin-left: auto; height: 18px; padding: 0 6px; border: 1px solid var(--border); border-radius: var(--radius); font-size: var(--fs-s); line-height: 14px; color: var(--muted); background: var(--bg); opacity: 0; }
+.ip-row:hover .ip-hover-act, .ip-row:focus-within .ip-hover-act, .ip-hover-act:focus-visible { opacity: 1; }
+.ip-hover-act:hover { color: var(--text); background: var(--panel-2); }
+.ip-hover-act:focus-visible, .ip-fold:focus-visible, .ip-quick-add:focus { outline: 2px solid var(--text-2); outline-offset: 1px; }
+.ip-backlog { margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border); border-radius: var(--radius); }
+.ip-backlog.drop-here { background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--text-2); }
+.ip-rail-foot { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.ip-fold { padding: 0; font-size: var(--fs-s); line-height: 14px; letter-spacing: .04em; color: var(--muted); }
+.ip-fold:hover { color: var(--text); }
+.ip-backlog-groups { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+.ip-group-line { margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-s); line-height: 14px; color: var(--faint); }
+.ip-backlog-row { padding: 2px 6px; }
+.ip-quick-add { display: block; width: 100%; margin-top: 8px; padding: 4px 8px; font: inherit; font-size: var(--fs-m); line-height: 18px; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); }
 /* The latest change: ↳ actor · time · event, muted, with the actor and the event in ink. Only the event shrinks. */
 .ip-activity { flex: none; display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; background: var(--bar); border-top: 1px solid var(--border); color: var(--muted); font-size: var(--fs-m); line-height: 18px; white-space: nowrap; overflow: hidden; }
 .ip-act-who { flex: none; color: var(--text-2); }

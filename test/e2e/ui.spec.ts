@@ -118,8 +118,17 @@ const open = (page: Page, project: Seeded) => page.goto(`/#/p/${project.slug}`);
 /** A step's row on the Board, by its title. Details lists the same steps as "#id title", so the exact name is the Board's. */
 const stepRow = (page: Page, title: string) => page.getByRole('main').getByRole('button', { name: title, exact: true });
 
-/** Opens a step's Details from its row and answers the panel. */
+/** The Backlog fold at the foot of Next. */
+const backlogFold = (page: Page) => page.getByRole('button', { name: /^Backlog · \d+ [▸▾]$/ });
+
+/** Opens the Backlog fold if it is closed: its steps are rows only while it is open. */
+async function openBacklog(page: Page): Promise<void> {
+  if ((await backlogFold(page).getAttribute('aria-expanded')) === 'false') await backlogFold(page).click();
+}
+
+/** Opens a step's Details from its row and answers the panel. Backlog steps need the fold open, so it opens first. */
 async function openDetails(page: Page, title: string): Promise<Locator> {
+  await openBacklog(page);
   await stepRow(page, title).click();
   const details = page.getByRole('complementary');
   await expect(details).toContainText(title);
@@ -168,6 +177,7 @@ test('Details keeps the last good detail when a refresh fails', async ({ page, a
 test('Details closes when its node is deleted, and stays open when another node goes', async ({ page, api, fresh }) => {
   await open(page, fresh);
   const id = fresh.ids['3 RevenueCat'];
+  await openBacklog(page);
   await expect(stepRow(page, '7 Launch')).toBeVisible();
   const details = await openDetails(page, '3 RevenueCat');
   await expect(details).toContainText(`#${id} 3 RevenueCat`);
@@ -297,6 +307,7 @@ test('the first stream starts at the snapshot, and a batch still follows its tar
   // Untargeted and right behind it: the two replay in one chunk, and React renders them as one batch.
   await write(api, fresh.session, 'post', `/api/sessions/${fresh.session}/hook`, { event: 'stop' });
   release();
+  await openBacklog(page);
   await expect(stepRow(page, 'Hotfix')).toBeVisible({ timeout: 6000 });
   expect(streams[0]).toMatch(/\/api\/events\/stream\?since=\d+$/);
 });
@@ -1929,5 +1940,103 @@ test.describe('Board', () => {
     await expect(you).toHaveCSS('background-color', 'rgba(251, 191, 36, 0.18)');
     await expect(you).toHaveCSS('height', '18px');
     await expect(you).toHaveCSS('font-weight', '900');
+  });
+
+  test('the Backlog fold opens, groups by parent, and quick-add keeps its field open until Escape', async ({ page, fresh }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const next = band(page, 'next');
+    const fold = next.getByRole('button', { name: /^Backlog · \d+ [▸▾]$/ });
+    await expect(fold).toHaveAttribute('aria-expanded', 'false');
+    await expect(next.getByRole('button', { name: '3 RevenueCat', exact: true })).toHaveCount(0);
+    const opened = page.waitForRequest((r) => r.url().endsWith('/api/ui/events') && (r.postDataJSON() as { name: string }).name === 'backlog_open');
+    await fold.click();
+    await opened;
+    await expect(fold).toHaveAttribute('aria-expanded', 'true');
+    // The steps of Road to market sit under its title.
+    const group = next.getByRole('region', { name: 'Backlog under Road to market' });
+    await expect(group.locator('.ip-group-line')).toHaveText('Road to market');
+    await expect(group.getByRole('button', { name: '3 RevenueCat', exact: true })).toBeVisible();
+    const field = next.getByRole('textbox', { name: 'Add a step to the backlog' });
+    await expect(field).toBeVisible();
+    // "+ add" focuses the field; Enter creates under the root and leaves the field open, empty and focused.
+    await next.getByRole('button', { name: '+ add' }).click();
+    await expect(field).toBeFocused();
+    await page.keyboard.type('First quick step');
+    await page.keyboard.press('Enter');
+    await expect(next.getByRole('region', { name: 'Backlog at the top level' }).getByRole('button', { name: 'First quick step', exact: true })).toBeVisible();
+    await expect(field).toBeFocused();
+    await expect(field).toHaveValue('');
+    await page.keyboard.type('Second quick step');
+    await page.keyboard.press('Enter');
+    await expect(next.getByRole('button', { name: 'Second quick step', exact: true })).toBeVisible();
+    await expect(field).toBeFocused();
+    await expect(page.getByRole('complementary')).toHaveCount(0);
+    // Escape closes the field and puts focus back on "+ add".
+    await page.keyboard.press('Escape');
+    await expect(field).toHaveCount(0);
+    await expect(next.getByRole('button', { name: '+ add' })).toBeFocused();
+    await expect(fold).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  test('"to Next" and "back to Backlog" are buttons Tab reaches and shows, and write the queue', async ({ page, fresh }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const next = band(page, 'next');
+    await next.getByRole('button', { name: /^Backlog · \d+ [▸▾]$/ }).click();
+    const title = page.getByRole('button', { name: '4 Build to GitHub', exact: true });
+    const toNext = next.locator('.ip-backlog-row', { has: title }).getByRole('button', { name: 'to Next' });
+    await expect(toNext).toHaveCSS('opacity', '0');
+    await title.focus();
+    await page.keyboard.press('Tab');
+    await expect(toNext).toBeFocused();
+    await expect(toNext).toHaveCSS('opacity', '1');
+    await page.keyboard.press('Enter');
+    const row = next.locator('.ip-next-row', { has: page.getByRole('button', { name: '4 Build to GitHub', exact: true }) });
+    await expect(row.locator('.ip-num')).toHaveText('①');
+    // A button of the row's own does not open Details.
+    await expect(page.getByRole('complementary')).toHaveCount(0);
+    // The queue was written: the step is ① after a reload, with "back to Backlog" on it.
+    await page.reload();
+    await expect(row.locator('.ip-num')).toHaveText('①');
+    await row.getByRole('button', { name: 'back to Backlog' }).focus();
+    await expect(row.getByRole('button', { name: 'back to Backlog' })).toHaveCSS('opacity', '1');
+    await page.keyboard.press('Enter');
+    await expect(next.locator('.ip-next-row')).toHaveCount(0);
+    await page.reload();
+    await expect(next.locator('.ip-next-row')).toHaveCount(0);
+    await expect(next.getByRole('button', { name: /^Backlog · \d+ [▸▾]$/ })).toBeVisible();
+  });
+
+  test('drag: Backlog into Next, within Next, and Next back to Backlog, without opening Details', async ({ page, fresh }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const next = band(page, 'next');
+    await next.getByRole('button', { name: /^Backlog · \d+ [▸▾]$/ }).click();
+    const backlogRow = (t: string) => next.locator('.ip-backlog-row', { has: page.getByRole('button', { name: t, exact: true }) });
+    const nextRow = (t: string) => next.locator('.ip-next-row', { has: page.getByRole('button', { name: t, exact: true }) });
+    // Into an empty rail.
+    await backlogRow('5 Store listing').dragTo(next.getByText('Nothing is queued'));
+    await expect(nextRow('5 Store listing').locator('.ip-num')).toHaveText('①');
+    // Onto the top half of a Next row: before it.
+    await backlogRow('6 Beta').dragTo(nextRow('5 Store listing'), { targetPosition: { x: 40, y: 2 } });
+    await expect(nextRow('6 Beta').locator('.ip-num')).toHaveText('①');
+    await expect(nextRow('5 Store listing').locator('.ip-num')).toHaveText('②');
+    // Within Next: the bottom half of the last row puts it last.
+    await nextRow('6 Beta').dragTo(nextRow('5 Store listing'), { targetPosition: { x: 40, y: 30 } });
+    await expect(nextRow('5 Store listing').locator('.ip-num')).toHaveText('①');
+    await expect(nextRow('6 Beta').locator('.ip-num')).toHaveText('②');
+    await expect(page.getByRole('complementary')).toHaveCount(0);
+    // The queue was written.
+    await page.reload();
+    await expect(nextRow('5 Store listing').locator('.ip-num')).toHaveText('①');
+    await expect(nextRow('6 Beta').locator('.ip-num')).toHaveText('②');
+    // Back onto Backlog.
+    await next.getByRole('button', { name: /^Backlog · \d+ [▸▾]$/ }).click();
+    await nextRow('5 Store listing').dragTo(next.locator('.ip-fold'));
+    await expect(next.locator('.ip-next-row')).toHaveCount(1);
+    await expect(backlogRow('5 Store listing')).toBeVisible();
+    await expect(nextRow('6 Beta').locator('.ip-num')).toHaveText('①');
+    await expect(page.getByRole('complementary')).toHaveCount(0);
   });
 });
