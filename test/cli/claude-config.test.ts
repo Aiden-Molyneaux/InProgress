@@ -234,7 +234,7 @@ describe('install', () => {
     // An ask, then its answer; no question step, and no guidance inside the template.
     expect(template).toMatch(/- ask on #55: question, [^\n]+\?\n- a\d+ answered: [^\n]+\n/);
     expect(template).not.toMatch(/\(question/);
-    expect(template).toMatch(/- handoff on #55: "[^"]+", path [^\n]+, snapshot_file\n- clear focus of [^\n]+\n- state on #\d+: /);
+    expect(template).toMatch(/- handoff on #55: "[^"]+", path [^\n]+, snapshot_file\n- state on #\d+: /);
     expect(skill).not.toMatch(/needs.you/i);
     expect(template).not.toMatch(/\(the answer/);
     expect(template).toMatch(/- #\d+ label → fix\n/);

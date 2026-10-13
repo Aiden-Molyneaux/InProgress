@@ -40,15 +40,15 @@ Summarize it for Aiden in a few lines. Sessions that the stale-session sweep end
 
 ## Reconcile
 
-Work from the marks, `#id mark`. You cannot read a step's log, so you propose from what you can read: the step's handoff file if it has one, and `git log --oneline --grep "#<id>"` in the project's repo.
+Work from the marks, `#id mark`. You cannot read a step's log, so you propose from what you can read: the step's handoff file if it has one, and `git log --oneline -E --grep "#<id>([^0-9]|$)"` in the project's repo.
 
 - `no_outcome`: a done step with an empty outcome. Propose an outcome from the handoff file or the git log, and put it in the batch for Aiden to approve. When nothing there says what was done, ask Aiden. Never make one up from the title.
-- `done_focus`: a done step that a session still has focus on. The fix clears that other session's focus, so list the session (letter and id prefix) and the step. It goes in the mechanical batch only when that session is idle. When it is working right now, it is a question to Aiden, because clearing the focus changes that worker's next briefing. The batch line for the scribe is `clear focus of <full session id>`.
+- `done_focus`: a done step that a live session still has focus on. List the session (its letter) and the step; do not try to clear the focus. Nothing you read gives that session's full id, and a focus write would keep an idle session live and change its next briefing. The mark goes when that session claims its next step, ends, or goes stale.
 - `ended_open`: a session ended on a step that is not done, within the last 7 days, with no handoff on the step since. The mechanical fix is for a step left `active` with no live session on it: set it back to `todo` (`#id → todo`). Closing the step (marking it done) is never mechanical; it is a question to Aiden. The mark stays until a handoff lands on the step, the step is done, or a session claims it, so mention it once per opening and do not ask again.
 - `stale_ask`: an ask open for more than 7 days. Judgment: whether to drop it or put it to Aiden again is his call.
 - `deep`: the step has three or more parents below the project root, so it sits four or more levels down. Not an error; mention it only if it helps.
 
-Mechanical fixes go to the scribe in one batch, after Aiden says yes to the list. Judgment calls (dropping a stale ask, closing a step, clearing a working session's focus) go to him as questions in chat, each with the step and your reason.
+Mechanical fixes go to the scribe in one batch, after Aiden says yes to the list. Judgment calls (dropping a stale ask, closing a step) go to him as questions in chat, each with the step and your reason.
 
 Open tasks of ended sessions are listed in the digest. List them to Aiden; do not clear them. That is stage 2.
 
