@@ -112,7 +112,7 @@ function TabStrip({ strip, tabs, current, onSelect, onMove, menuFor, onMenu }: T
   // Cleared too, not only hidden, so the tab coming back later does not bring the old drag with it.
   useEffect(() => {
     if (dragState && !drag) setDrag(null);
-  }, [ids]);
+  }, [ids, activeIds.join()]);
   /** Whether dropping now would change the order: the drop line shows only then. */
   const changes = drag !== null && moveTab(tabs, drag.id, drag.slot).join() !== activeIds.join();
   /** The tab a move carries, by key or by drag: it gets focus back if the reorder took it. */

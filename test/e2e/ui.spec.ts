@@ -444,6 +444,28 @@ test('a tab drags to a new place, Alt+arrows move the focused tab, and the order
   expect(await ours([fourth])).toEqual([names[1], names[0], names[2], fourth]);
 });
 
+test('a tab dragged near the edge of a narrow strip scrolls it', async ({ page, api }) => {
+  await page.setViewportSize({ width: 420, height: 900 });
+  const names = [1, 2, 3, 4, 5].map((n) => unique(`Tabs edge ${n}`));
+  for (const name of names) await bare(api, name);
+  await page.goto('/');
+  await expect(tabFor(page, names[4])).toBeAttached();
+  expect(await page.evaluate<boolean>(`${STRIP}.scrollWidth > ${STRIP}.clientWidth`), 'the tabs overflow').toBe(true);
+  await page.evaluate(`${STRIP}.scrollLeft = 0`);
+  const box = (await page.locator('.ip-tabs').boundingBox())!;
+  const first = (await page.getByRole('tab').first().boundingBox())!;
+  await page.mouse.move(first.x + first.width / 2, first.y + first.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 4 });
+  for (let i = 0; i < 10; i++) await page.mouse.move(box.x + box.width / 2 - (i % 2), box.y + box.height / 2);
+  expect(await stripScroll(page), 'the middle of the strip does not scroll it').toBe(0);
+  // Held a few pixels inside the right edge. Chromium (Edge hosts the window) scrolls a scroll box under a drag near its
+  // edge, so the strip has no code of its own for this. The test guards that the strip stays such a box.
+  for (let i = 0; i < 10; i++) await page.mouse.move(box.x + box.width - 4 - (i % 2), box.y + box.height / 2);
+  await expect.poll(() => stripScroll(page)).toBeGreaterThan(0);
+  await page.mouse.up();
+});
+
 test('a tab shows how many items need you and, while a session works there, a pulsing dot', async ({ page, api }) => {
   const busyName = unique('Tabs busy');
   const quietName = unique('Tabs quiet');

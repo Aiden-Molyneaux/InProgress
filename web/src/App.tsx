@@ -81,7 +81,9 @@ export function App() {
   const [order, setOrder] = useState(loadTabOrder);
   const tabs = useMemo(() => projectTabs(projects, state.slug, order), [projects, state.slug, order]);
   const orderNow = useRef(order);
-  orderNow.current = order;
+  useLayoutEffect(() => {
+    orderNow.current = order;
+  }, [order]);
   // A project that left the active list (archived, deleted or purged) loses its place, so it returns at the end. Only
   // once the server's list has loaded: the empty list before it would drop every place. It runs when this window's list
   // changes, not when another window's order arrives: that window may already list as active a project this one has
