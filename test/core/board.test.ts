@@ -87,6 +87,16 @@ describe('deriveBoard', () => {
     expect(c.byId.get(2)?.marks).toEqual(['stale_ask']);
   });
 
+  it('stale_ask also marks a Done row with an old open review ask', () => {
+    const b = deriveBoard(input({ nodes: [n(1, null), n(2, 1, { status: 'done', completedAt: T, outcome: 'ok' })], asks: [ask(1, 2, { kind: 'review', raisedAt: DAYS(10) })] }), NOW);
+    expect(b.byId.get(2)).toMatchObject({ column: 'done', marks: ['stale_ask'] });
+  });
+
+  it('a session not heard from within 12 hours is not live', () => {
+    const b = deriveBoard(input({ nodes: [n(1, null), n(2, 1)], sessions: [s('old', { focusNodeId: 2, lastSeenAt: new Date(NOW - 13 * 3_600_000).toISOString() })] }), NOW);
+    expect(b.byId.get(2)).toMatchObject({ column: 'backlog', sessions: [] });
+  });
+
   it('a group with all children done falls to Backlog; a queued group is a Next row', () => {
     const b = deriveBoard(input({ nodes: [n(1, null), n(2, 1), n(3, 2, { status: 'done', completedAt: T }), n(4, 1), n(5, 4)], queue: [{ nodeId: 4, sessionId: null }] }), NOW);
     expect(col(b, 2)).toBe('backlog');

@@ -23,6 +23,7 @@ function agentLabel(sessionId: string, agentId: string, snapshot: ProjectSnapsho
 
 export function describeEvent(e: EventRow, snapshot: ProjectSnapshot | null): string {
   const d = (e.data ?? {}) as {
+    ask?: { nodeId: number };
     ids?: number[]; parentId?: number; nodeId?: number; title?: string; path?: string;
     changes?: { status?: { to: string }; queue?: unknown; name?: unknown }; changed?: string[]; state?: string; focusNodeId?: number | null;
     ended?: { agentId: string; reason: EndReason }[];
@@ -43,6 +44,10 @@ export function describeEvent(e: EventRow, snapshot: ProjectSnapshot | null): st
       return `updated r${e.entityId}`;
     case 'resource.deleted':
       return `removed r${e.entityId}`;
+    case 'ask.raised':
+      return `asked on ${nodeLabel(d.ask?.nodeId, snapshot)}`;
+    case 'ask.cleared':
+      return `cleared an ask on ${nodeLabel(d.ask?.nodeId, snapshot)}`;
     case 'log.created':
       return `note on ${nodeLabel(d.nodeId, snapshot)}`;
     case 'session.updated': {

@@ -137,10 +137,15 @@ export interface NodePatch {
 export function updateNode(ctx: Ctx, actor: string, id: number, patch: NodePatch): TreeNode {
   return write(ctx, actor, (record) => {
     const before = requireNode(ctx, id);
-    const after = patchNode(ctx, record, before, patch);
-    // A dropped step's asks are moot (spec 1.2); a finished one's stay, a review ask most of all.
-    if (after.status === 'dropped' && before.status !== 'dropped') clearNodeAsks(ctx, record, actor, id);
-    return after;
+    // Before patchNode, so node.updated stays the project's newest event (the activity strip shows it).
+    if (patch.status === 'dropped' && before.status !== 'dropped') {
+      // A dropped step's asks are moot (spec 1.2); a finished one's stay, a review ask most of all.
+      clearNodeAsks(ctx, record, actor, id);
+    } else if ((patch.kind ?? before.kind) === 'question' && patch.status === 'done' && before.status !== 'done') {
+      // A question node and its migrated ask are one question: finishing the node answers the ask.
+      clearNodeAsks(ctx, record, actor, id, (patch.outcome ?? before.outcome).trim());
+    }
+    return patchNode(ctx, record, before, patch);
   });
 }
 

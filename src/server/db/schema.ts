@@ -244,7 +244,7 @@ export const MIGRATIONS: string[] = [
     SELECT project_id, id, 'question', title, updated_at FROM nodes
     WHERE assignee = 'me' AND status IN ('todo', 'active', 'blocked') AND kind = 'question';
   INSERT INTO asks (project_id, node_id, kind, text, raised_at)
-    SELECT project_id, id, 'permission', substr(t, i + 1, instr(substr(t, i + 1), char(10)) - 1), updated_at
+    SELECT project_id, id, 'permission', trim(substr(t, i + 1, instr(substr(t, i + 1), char(10)) - 1)), updated_at
     FROM (
       SELECT project_id, id, updated_at, t, instr(t, char(10) || 'Needs you:') AS i
       FROM (

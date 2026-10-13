@@ -34,6 +34,21 @@ describe('resources: purpose', () => {
     expect(listEventsSince(ctx, 0).filter((e) => e.type === 'resource.deleted' && e.entityId === String(first.id))).toHaveLength(1);
   });
 
+  it('a patch that sets purpose state on a root resource replaces the previous note', () => {
+    const { ctx, project } = setup();
+    const first = addResource(ctx, 't', { nodeId: project.rootNodeId, kind: 'doc', title: 'S1', content: 'one', purpose: 'state' });
+    const plain = addResource(ctx, 't', { nodeId: project.rootNodeId, kind: 'doc', title: 'S2', content: 'two' });
+    updateResource(ctx, 't', plain.id, { purpose: 'state' });
+    expect(listResourceMeta(ctx, project.id).map((r) => r.id)).toEqual([plain.id]);
+    expect(listEventsSince(ctx, 0).filter((e) => e.type === 'resource.deleted' && e.entityId === String(first.id))).toHaveLength(1);
+  });
+
+  it('refuses moving a state note to a non-root node', () => {
+    const { ctx, project, step } = setup();
+    const note = addResource(ctx, 't', { nodeId: project.rootNodeId, kind: 'doc', title: 'S', content: 'x', purpose: 'state' });
+    expect(() => updateResource(ctx, 't', note.id, { nodeId: step.id })).toThrow('The state note goes on the project root');
+  });
+
   it('refuses a state note off the project root', () => {
     const { ctx, step } = setup();
     expect(() => addResource(ctx, 't', { nodeId: step.id, kind: 'doc', title: 'S', content: 'x', purpose: 'state' })).toThrow('The state note goes on the project root');

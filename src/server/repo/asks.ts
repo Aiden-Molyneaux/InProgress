@@ -2,6 +2,7 @@ import { ASK_KINDS, ASK_TRAIL_MS, type Ask, type AskKind } from '../../core/type
 import { msAgo, write, type Ctx, type RecordEvent } from '../db/tx';
 import { badRequest, notFound } from '../errors';
 import { patchNode, requireNode } from './nodes';
+import { inLiveProject } from './projects';
 
 export interface RaiseAskInput {
   nodeId: number;
@@ -38,7 +39,8 @@ const toAsk = (r: AskRow): Ask => ({
   answerDeliveredAt: r.answer_delivered_at,
 });
 
-const getRow = (ctx: Ctx, id: number) => ctx.db.prepare('SELECT * FROM asks WHERE id = ?').get(id) as AskRow | undefined;
+const getRow = (ctx: Ctx, id: number) =>
+  ctx.db.prepare(`SELECT * FROM asks WHERE id = ? AND ${inLiveProject('asks.project_id')}`).get(id) as AskRow | undefined;
 
 export function requireAsk(ctx: Ctx, id: number): Ask {
   const row = getRow(ctx, id);
@@ -56,6 +58,7 @@ export function raiseAsk(ctx: Ctx, actor: string, input: RaiseAskInput): Ask {
   return write(ctx, actor, (record) => {
     const node = requireNode(ctx, input.nodeId);
     if (node.parentId === null) throw badRequest(`#${node.id} is the project root`, 'Raise the ask on the step it concerns.');
+    if (node.status === 'dropped') throw badRequest(`#${node.id} is dropped`, 'Reopen it first.');
     // The column references sessions(id): a session id InProgress does not track is stored as no session.
     const tracked = input.sessionId ? ctx.db.prepare('SELECT 1 FROM sessions WHERE id = ?').get(input.sessionId) !== undefined : false;
     const info = ctx.db
@@ -69,7 +72,7 @@ export function raiseAsk(ctx: Ctx, actor: string, input: RaiseAskInput): Ask {
 }
 
 /** Inside an open write: the idempotent clear of spec 1.2. */
-function clearInWrite(ctx: Ctx, record: RecordEvent, actor: string, before: Ask, answer: string): Ask {
+function clearInWrite(ctx: Ctx, record: RecordEvent, actor: string, before: Ask, answer: string, completeQuestion = true): Ask {
   const first = before.clearedAt === null;
   const takesAnswer = before.answer === '' && answer !== '';
   if (!first && !takesAnswer) return before;
@@ -80,7 +83,7 @@ function clearInWrite(ctx: Ctx, record: RecordEvent, actor: string, before: Ask,
   if (first) {
     record({ projectId: ask.projectId, type: 'ask.cleared', entity: 'ask', entityId: ask.id, data: { ask } });
     const node = requireNode(ctx, ask.nodeId);
-    if (node.kind === 'question' && node.status !== 'done' && node.status !== 'dropped') {
+    if (completeQuestion && node.kind === 'question' && node.status !== 'done' && node.status !== 'dropped') {
       patchNode(ctx, record, node, { status: 'done', outcome: ask.answer || 'Answered' });
     }
   }
@@ -92,10 +95,13 @@ export function clearAsk(ctx: Ctx, actor: string, askId: number, answer = ''): A
   return write(ctx, actor, (record) => clearInWrite(ctx, record, actor, requireAsk(ctx, askId), answer.trim()));
 }
 
-/** clearAsk's work for every open ask on a node, inside an open write (a drop). */
-export function clearNodeAsks(ctx: Ctx, record: RecordEvent, actor: string, nodeId: number): void {
+/**
+ * clearAsk's work for every open ask on a node, inside an open write (a drop, or a question node being finished).
+ * The caller is changing the node itself, so the question-node completion is left out.
+ */
+export function clearNodeAsks(ctx: Ctx, record: RecordEvent, actor: string, nodeId: number, answer = ''): void {
   const open = ctx.db.prepare('SELECT * FROM asks WHERE node_id = ? AND cleared_at IS NULL').all(nodeId) as AskRow[];
-  for (const row of open) clearInWrite(ctx, record, actor, toAsk(row), '');
+  for (const row of open) clearInWrite(ctx, record, actor, toAsk(row), answer, false);
 }
 
 /** Open asks of the project and those cleared within ASK_TRAIL_MS, oldest raised first. */
@@ -108,7 +114,7 @@ export function listProjectAsks(ctx: Ctx, projectId: number): Ask[] {
 /** Cleared asks this session raised whose answer it has not been told yet, oldest cleared first. */
 export function undeliveredAnswers(ctx: Ctx, sessionId: string): Ask[] {
   return (ctx.db
-    .prepare('SELECT * FROM asks WHERE session_id = ? AND cleared_at IS NOT NULL AND answer_delivered_at IS NULL ORDER BY cleared_at, id')
+    .prepare(`SELECT * FROM asks WHERE session_id = ? AND cleared_at IS NOT NULL AND answer_delivered_at IS NULL AND ${inLiveProject('asks.project_id')} ORDER BY cleared_at, id`)
     .all(sessionId) as AskRow[]).map(toAsk);
 }
 

@@ -55,7 +55,7 @@ export const resourceBody = z
   .strict();
 export const resourcePatchBody = resourceBody.omit({ sessionId: true }).partial().strict();
 export const askBody = z
-  .object({ kind: z.enum(ASK_KINDS), text: z.string().trim().min(1).max(2000), sessionId: z.string().min(1).nullish() })
+  .object({ kind: z.enum(ASK_KINDS), text: z.string().trim().min(1).max(2000), sessionId: z.string().min(1).max(100).nullish() })
   .strict();
 export const clearAskBody = z.object({ answer: z.string().max(2000).optional() }).strict();
 export const logBody = z.object({ text: z.string().trim().min(1).max(2_000), sessionId: z.string().max(100).nullish() }).strict();

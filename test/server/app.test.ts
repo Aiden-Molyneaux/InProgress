@@ -752,6 +752,14 @@ describe('ask routes', () => {
     expect(res.json().clearedAt).not.toBeNull();
   });
 
+  it('clears an ask with no body at all', async () => {
+    const { app, step } = await withStep();
+    const ask = (await raise(app, step.id, { kind: 'review', text: 'Look' })).json();
+    const res = await app.inject({ method: 'POST', url: `/api/asks/${ask.id}/clear`, headers: auth });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().clearedAt).not.toBeNull();
+  });
+
   it('answers 404 for an unknown ask', async () => {
     const { app } = await withStep();
     const res = await app.inject({ method: 'POST', url: '/api/asks/999/clear', headers: auth, payload: {} });

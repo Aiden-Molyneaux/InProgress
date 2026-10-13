@@ -23,6 +23,11 @@ describe('describeEvent', () => {
     expect(describeEvent(ev('session.updated', 's1', { changed: ['focusNodeId'], focusNodeId: 58 }), snapshot)).toBe('InGame launch status is on #58 Run signing tests');
   });
 
+  it('describes an ask raised and cleared', () => {
+    expect(describeEvent(ev('ask.raised', '4', { ask: { nodeId: 58 } }), snapshot)).toBe('asked on #58 Run signing tests');
+    expect(describeEvent(ev('ask.cleared', '4', { ask: { nodeId: 55 } }), snapshot)).toBe('cleared an ask on #55 2 Android signing');
+  });
+
   it("names the subagents the transcript watcher ended after their session's title, by tag, and why", () => {
     const withAgents = {
       ...snapshot,

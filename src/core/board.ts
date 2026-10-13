@@ -1,5 +1,5 @@
 import { ancestors, buildIndex, dfsOrder, kids } from './tree';
-import { ASK_TRAIL_MS, TRAIL_MS, type Ask, type ProjectSnapshot, type ResourceMeta, type Session, type TreeNode } from './types';
+import { ASK_TRAIL_MS, STALE_SESSION_MS, TRAIL_MS, type Ask, type ProjectSnapshot, type ResourceMeta, type Session, type TreeNode } from './types';
 
 export type Column = 'now' | 'next' | 'backlog' | 'done';
 export const MARKS = ['ended_open', 'no_outcome', 'stale_ask', 'done_focus', 'deep'] as const;
@@ -54,7 +54,8 @@ export function deriveBoard(input: BoardInput, now: number): Board {
   const index = buildIndex(input.nodes);
   const order = dfsOrder(index);
   const rootId = index.root?.id ?? null;
-  const live = input.sessions.filter(isLive);
+  // Live (spec 1.5): not ended and heard from within STALE_SESSION_MS; the snapshot's read expires stale ones only lazily.
+  const live = input.sessions.filter((s) => isLive(s) && now - Date.parse(s.lastSeenAt) <= STALE_SESSION_MS);
   const liveIds = new Set(live.map((s) => s.id));
   const focusOf = new Map<number, Session[]>();
   for (const s of live) if (s.focusNodeId !== null) focusOf.set(s.focusNodeId, [...(focusOf.get(s.focusNodeId) ?? []), s]);
@@ -104,14 +105,13 @@ export function deriveBoard(input: BoardInput, now: number): Board {
     if (column === 'done') {
       if (!node.outcome.trim()) marks.push('no_outcome');
       if (sessions.length) marks.push('done_focus');
-    } else {
-      if (column !== 'now') {
-        const past = lastPast.get(node.id);
-        const handoff = handoffOf.get(node.id);
-        if (past && now - Date.parse(past.endedAt) <= TRAIL_MS && !(handoff && handoff.createdAt > past.startedAt)) marks.push('ended_open');
-      }
-      if (asks.some((a) => now - Date.parse(a.raisedAt) > ASK_TRAIL_MS)) marks.push('stale_ask');
+    } else if (column !== 'now') {
+      const past = lastPast.get(node.id);
+      const handoff = handoffOf.get(node.id);
+      if (past && now - Date.parse(past.endedAt) <= TRAIL_MS && !(handoff && handoff.createdAt > past.startedAt)) marks.push('ended_open');
     }
+    // Any row: a review ask may sit on a done step (spec 1.2).
+    if (asks.some((a) => now - Date.parse(a.raisedAt) > ASK_TRAIL_MS)) marks.push('stale_ask');
     if (crumb.length >= 3) marks.push('deep');
     byId.set(node.id, {
       node, column, crumb, sessions, asks, marks,

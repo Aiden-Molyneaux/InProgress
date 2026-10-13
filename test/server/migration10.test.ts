@@ -52,6 +52,11 @@ describe('migration 10', () => {
     ]);
   });
 
+  it('trims trailing spaces off the Needs you line', () => {
+    const db = at9((d) => { seedProject(d); node(d, 3, 'task', 'T', 'Needs you: say yes   \nmore', 'todo', 'me'); });
+    expect(db.prepare('SELECT text FROM asks').pluck().all()).toEqual(['Needs you: say yes']);
+  });
+
   it('leaves Aiden-owned steps without such a line, done steps and Claude steps alone', () => {
     const db = at9((d) => {
       seedProject(d);

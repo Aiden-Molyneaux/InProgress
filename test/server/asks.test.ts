@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { clearAsk, listProjectAsks, markAnswersDelivered, raiseAsk, undeliveredAnswers } from '../../src/server/repo/asks';
-import { listEventsSince } from '../../src/server/repo/events';
+import { clearAsk, listProjectAsks, markAnswersDelivered, raiseAsk, requireAsk, undeliveredAnswers } from '../../src/server/repo/asks';
+import { lastProjectEvent, listEventsSince } from '../../src/server/repo/events';
 import { addNodes, requireNode, updateNode } from '../../src/server/repo/nodes';
 import { createProject } from '../../src/server/repo/projects';
 import { getProjectSnapshot } from '../../src/server/repo/snapshot';
@@ -87,6 +87,45 @@ describe('asks', () => {
     expect(undeliveredAnswers(ctx, 's1').map((x) => x.id)).toEqual([b.id]);
     markAnswersDelivered(ctx, [b.id]);
     expect(undeliveredAnswers(ctx, 's1')).toEqual([]);
+  });
+
+  it('refuses an ask on a dropped step', () => {
+    const { ctx, step } = setup();
+    updateNode(ctx, 't', step.id, { status: 'dropped' });
+    expect(() => raiseAsk(ctx, 'w', { nodeId: step.id, kind: 'question', text: 'Q' })).toThrow(/is dropped/);
+  });
+
+  it('dropping a step with an open ask leaves node.updated as the newest event', () => {
+    const { ctx, project, step } = setup();
+    raiseAsk(ctx, 'w', { nodeId: step.id, kind: 'question', text: 'Q' });
+    updateNode(ctx, 't', step.id, { status: 'dropped' });
+    expect(lastProjectEvent(ctx, project.id)?.type).toBe('node.updated');
+    expect(listProjectAsks(ctx, project.id)[0].clearedAt).not.toBeNull();
+  });
+
+  it('finishing a question node with updateNode clears its ask with the outcome as the answer', () => {
+    const { ctx, project } = setup();
+    const [q] = addNodes(ctx, 't', { parentId: project.rootNodeId, nodes: [{ title: 'Pick?', kind: 'question', assignee: 'me' }] });
+    raiseAsk(ctx, 'w', { nodeId: q.id, kind: 'question', text: 'Pick?' });
+    updateNode(ctx, 't', q.id, { status: 'done', outcome: 'Blue' });
+    expect(listProjectAsks(ctx, project.id)[0]).toMatchObject({ answer: 'Blue', clearedBy: 't' });
+    expect(requireNode(ctx, q.id)).toMatchObject({ status: 'done', outcome: 'Blue' });
+  });
+
+  it('dropping a question node clears its ask and leaves the node dropped', () => {
+    const { ctx, project } = setup();
+    const [q] = addNodes(ctx, 't', { parentId: project.rootNodeId, nodes: [{ title: 'Pick?', kind: 'question', assignee: 'me' }] });
+    raiseAsk(ctx, 'w', { nodeId: q.id, kind: 'question', text: 'Pick?' });
+    updateNode(ctx, 't', q.id, { status: 'dropped' });
+    expect(listProjectAsks(ctx, project.id)[0].clearedAt).not.toBeNull();
+    expect(requireNode(ctx, q.id).status).toBe('dropped');
+  });
+
+  it('does not find the asks of a deleted project', () => {
+    const { ctx, project, step } = setup();
+    const a = raiseAsk(ctx, 'w', { nodeId: step.id, kind: 'question', text: 'Q', sessionId: null });
+    ctx.db.prepare("UPDATE projects SET status = 'archived', deleted_at = ? WHERE id = ?").run(ctx.now(), project.id);
+    expect(() => requireAsk(ctx, a.id)).toThrow(/not found/);
   });
 
   it('stores an untracked session id as no session instead of failing the foreign key', () => {
