@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../../src/server/db/connection';
 import { createCtx, type Ctx } from '../../src/server/db/tx';
+import { clearAsk, raiseAsk } from '../../src/server/repo/asks';
 import { listEventsSince, maxEventId } from '../../src/server/repo/events';
 import { addNodes, deleteNode, updateNode } from '../../src/server/repo/nodes';
 import { STALE_SESSION_MS, type QueueEntry } from '../../src/core/types';
@@ -272,15 +273,29 @@ describe("a step's working tasks when it is marked done", () => {
   });
 
   it('records nothing for the tasks when the step was already done, or none were open', () => {
-    const { ctx, play, tests, hook } = setup();
+    const { ctx, play, tests, hook, items } = setup();
     hook(created('1', 'Sign the bundle'));
     updateNode(ctx, 'scribe:s1', play.id, { status: 'done' });
+    // A task reopened on a done step stays open when the step is saved again: only the move into done ticks.
+    hook(updated('1', { status: 'in_progress' }));
     let mark = maxEventId(ctx);
     updateNode(ctx, 'scribe:s1', play.id, { status: 'done', outcome: 'Signed' });
+    expect(items().map((i) => i.status)).toEqual(['in_progress']);
     expect(listEventsSince(ctx, mark).map((e) => e.type)).toEqual(['node.updated']);
     mark = maxEventId(ctx);
     updateNode(ctx, 'scribe:s1', tests.id, { status: 'done' });
     expect(listEventsSince(ctx, mark).map((e) => e.type)).toEqual(['node.updated']);
+  });
+
+  it("ticks a question node's open tasks when answering its ask marks it done", () => {
+    const { ctx, project, hook, items } = setup();
+    const [q] = addNodes(ctx, 'scribe:s1', { parentId: project.rootNodeId, nodes: [{ title: 'Which store?', kind: 'question', assignee: 'me' }] });
+    hook(created('1', `#${q.id} Compare the stores`));
+    const ask = raiseAsk(ctx, 'session:s1', { nodeId: q.id, kind: 'question', text: 'Which store?' });
+    const mark = maxEventId(ctx);
+    clearAsk(ctx, 'window', ask.id, 'Play');
+    expect(items().map((i) => [i.nodeId, i.status])).toEqual([[q.id, 'completed']]);
+    expect(listEventsSince(ctx, mark).map((e) => e.type)).toEqual(['ask.cleared', 'work.updated', 'node.updated']);
   });
 
   it('leaves the open tasks of a dropped step as they are', () => {
