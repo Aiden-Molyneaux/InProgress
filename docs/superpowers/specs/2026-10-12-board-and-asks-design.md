@@ -1,7 +1,7 @@
 # Board and asks: InProgress stage 1
 
-Date: 2026-10-12. Status: approved by Aiden section by section on 2026-10-12; the look (section 2.8) waits on his pick from
-the UI drafts. Tracked in the `inprogress` project as #303.
+Date: 2026-10-12. Status: approved by Aiden section by section on 2026-10-12, and whole on 2026-10-13; the look
+(section 2.8) is his pick from the UI drafts, draft C. Tracked in the `inprogress` project as #303.
 
 This note extends the InProgress design spec (`2026-09-27-inprogress-design.md`). It amends rulings D5 and D6 of that spec
 (section 5 below) and reopens the Quiet restyle's non-goal "No dashboard" (`2026-10-05-quiet-restyle-design.md`, Non-goals):
@@ -47,6 +47,7 @@ lists asks, never steps.
 7. Section 4 (worker briefings), keeping the per-project briefing switch with full as the default.
 8. Section 5 (the Orchestrator skill), named `mip-orc`, offering its digest instead of printing it.
 9. Section 6 (delivery), keeping the window's usage counts.
+10. The look: draft C, "Inbox", on every screen, in Quiet; InThink's look is not adopted (section 2.8).
 
 ## 1. Data
 
@@ -193,14 +194,16 @@ tests. Details, the resource viewer and go-to stay; go-to opens the step's Detai
   right.
 - **Columns, left to right: Needs me, Next, Now, Done.**
 - **Needs me.** Live permission waits first (section 1.4), then open asks oldest first: kind glyph, text clamped to two
-  lines, the step (#id and title), who raised it, age, and Clear. Clear opens a one-line optional answer and confirms.
+  lines, the step (#id and title), who raised it, age, and two buttons. Answer… opens a one-line field, and sending it
+  clears the ask with that answer; Clear clears it with no answer. A permission wait has no buttons: it ends when the
+  session goes on.
 - **Next.** The unowned queue numbered ①②③, then own-queue entries tagged with the session's letter. A step with an open
   ask has the amber mark and reads "not ready". Aiden's own steps carry "you". On hover a row shows "back to Backlog".
 - **Backlog** folds at the foot of the Next column: "Backlog · 14". Open, it lists one-line rows grouped by parent, each
   with "to Next" on hover, and a quick-add field at its foot (section 2.5).
-- **Now.** Step rows: crumb, title, label chip, parent, resource count `▤ n`, marks (amber ask, "you", handoff chip,
-  hygiene). Under the step, one line per session, working before idle: letter, state, current task (its in-progress
-  working task), running subagents with elapsed time.
+- **Now.** One row per step, arranged session first (section 2.8). Each session, working before idle: letter, state,
+  current task (its in-progress working task), running subagents with elapsed time. The step: crumb, title, label chip,
+  resource count `▤ n`, marks (amber ask, "you", handoff chip, hygiene).
 - **Done.** The last five done steps by `completed_at` (dropped excluded): title, label, age, outcome clamped to two lines,
   marks (`no_outcome`, `done_focus`, and the amber mark for an open review ask), the "new since you looked" divider.
 - **A click on any row** opens Details for the step, in place.
@@ -211,7 +214,9 @@ tests. Details, the resource viewer and go-to stay; go-to opens the step's Detai
 
 One scroll of stacked bands: Needs me, Now, Next, Done. The order is one constant, to revisit after the week. The header
 lines sit on top. An empty band shrinks to one line ("Nothing needs you"). Backlog folds at the foot of Next. Rows, drag,
-hover buttons and quick-add are the wide layout's components at full width.
+hover buttons and quick-add are the wide layout's components at full width, with two density rules: Now and Next rows
+drop the parent crumb, and Done folds the rows completed before the last look (section 1.7) to one line, so only new
+rows keep their outcome.
 
 Wide and narrow differ only in order: wide reads left to right as a flow (asked, queued, in flight, done); narrow puts Now
 second because the top of a narrow window is where the glance lands.
@@ -220,7 +225,7 @@ second because the top of a narrow window is where the glance lands.
 
 - **Header.** The project name and the state note in full, with its age, or "No state note yet".
 - **Sections.** One per top-level group (a child of the root with children). Top-level steps without children gather in
-  a last section, "Other steps". A section's header line: title, progress (done of all steps below it), a position
+  a last section, "Top level". A section's header line: title, progress (done of all steps below it), a position
   summary ("1 now · 2 next · 9 backlog"), and its document count `▤ n`, which opens a list of its resources.
 - **Body.** An outline of open steps, indented under their open parents, one line each: position chip (Now, Next with its
   number, Backlog), #id, title, label glyph, marks. A click opens Details. Done children fold per parent to one line,
@@ -247,7 +252,8 @@ All under `/api/ui/` with the `guarded` middleware, actor `window`, slug-checked
   `parent`, or the root. Entry points: the Board's Backlog fold (root), a Project view section's foot (that group), and
   Details ("Add a step under this one"). A line to any session ("add X to the backlog") still works: the scribe adds the
   step without queueing it. Labels and refinement come later from a session or `mip-orc`.
-- **Clear.** `POST /api/ui/asks/:id/clear` with `{ answer?: string }`, idempotent as section 1.2.
+- **Clear.** `POST /api/ui/asks/:id/clear` with `{ answer?: string }`, idempotent as section 1.2. Answer… and Clear
+  (section 2.2) both post here; only Answer… sends `answer`.
 
 ### 2.6 Measuring the week
 
@@ -277,10 +283,41 @@ one". Everything else stays.
 
 ### 2.8 Look
 
-The look (density, row anatomy, how an ask and a session line read, the fold treatments) is set by Aiden's pick from the
-UI drafts canvas (r149): three drafts per screen in Quiet, and the same screens in InThink's aesthetic. His pick is
-recorded here before the plan's window tasks start; the data and server branches do not depend on it. Until then,
-Quiet's tokens, fonts and family hues stand, and the label chip is glyph plus word in muted ink.
+Aiden's pick (2026-10-12): draft C, "Inbox", on every screen (Board wide, Board narrow, Project view), in Quiet.
+InThink's look is not adopted, so Quiet's tokens, fonts and family hues stand, and the label chip is glyph plus word in
+muted ink. The reference for spacing and type is the artboards in `.superpowers/iter/2026-10-12/stage1-drafts/project/`:
+`BoardWideC`, `BoardNarrowC`, `ProjectC` and `ProjectWideC` (`.dc.html`; PNGs in `../render/shots/`; canvas r152,
+comparison r153). Where an artboard and this spec differ on behaviour, the spec wins. The drafts' state note, asks,
+permission wait, sessions' steps and Next order are invented.
+
+C puts who and when first:
+
+- **Where we are.** The state note is pinned at the top as a message from the Orchestrator's character: "Orchestrator ·
+  2h", the note's first sentence, and a "Project view ›" button. The sessions not on a Now row sit beside it (wide) or
+  under it (narrow), headed "No claimed step".
+- **Needs me is an inbox.** A permission wait is an amber message: the session's character with the amber ring, "D is
+  waiting · ⚿ permission · 2m · LIVE", the tool and command head on a code line, and "on #id title". Each ask has a
+  header line ("B asks · ◎ review · 3h"; a dashed avatar and "migrated" when it has no session), its text clamped to two
+  lines, "on #id title", and Answer… and Clear.
+- **Now leads with the session.** Each session is a message: character, letter, state word, its current task as the
+  main line, and subagent chips with elapsed time at the right. The step is quoted under its sessions: "on #id title",
+  label chip, crumb, `▤ n`, marks. A Now step with no session (Aiden's own) reads "No session · YOU · Your step: nobody
+  is on it".
+- **Hygiene marks** read as a grey system line on the step ("B ended 3h ago without closing"). An `ended_open` step has
+  no live session, so section 1.5 puts it in Next or Backlog, never Now; the drafts show it in Now only because another
+  session still held the step.
+- **Next is a numbered rail.** Large numerals for the unowned queue; own-queue entries take the session's letter in the
+  rail, under "C's own queue". "not ready" and "you" sit on the row. The rail's foot reads "Backlog · n ▸" and "+ add";
+  open, Backlog groups its rows by parent and ends with the quick-add field.
+- **Done is a timeline.** Ages in a left column, ✓ dots on a vertical rule, outcomes clamped to two lines, and "New since
+  you looked" as a marker across the rule.
+- **Project view.** The state note is a message at the head. Each section header carries a segmented bar (done, now,
+  next, backlog) with its legend ("22 done · 2 now · 2 next · 2 backlog"), the progress count and `▤ n`; a folded
+  section shows only its header and bar. The outline puts position in a left rail: a filled orange dot for Now with a
+  session, a grey dot for Now without one, the queue number for Next, the session letter for an own-queue entry, a
+  hollow ring for Backlog. Session letters sit at the right. Done children fold per parent, then "+ Add a step". The
+  "Top level" section and "Done groups · n" come last. At 960 px and up, a left column holds the project name, the
+  state note, a key to the rail and the Done groups, and the sections gain Label, Marks, Sessions and Docs columns.
 
 ## 3. Sessions
 
@@ -310,7 +347,7 @@ resets to worker; compaction and resume keep the role.
 - The scribe gains MCP tools `raise_ask(project, node, kind, text, session?)` and `clear_ask(ask, answer?)`. Its rules:
   "ask on #id: <kind>, <text>" when a session needs Aiden; "a7 answered: <answer>" when he answers in chat.
 - The session that raised an ask gets one line on its next prompt after the ask is cleared, `Answered: a7 "<answer>"`,
-  once: the line sets `answer_delivered_at`.
+  or `Cleared: a7, no answer` when it has none, once: the line sets `answer_delivered_at`.
 - **Handoffs and the state note.** The scribe's resource tool gains `purpose`. Brief lines: "handoff on #id: "<title>",
   path <file>, snapshot_file" records a doc resource with `purpose = 'handoff'`; `mip-orc` records the state note on the
   root the same way with `purpose = 'state'`, replacing the previous one.
