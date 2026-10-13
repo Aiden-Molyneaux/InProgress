@@ -1796,6 +1796,32 @@ test.describe('Board', () => {
     await expect(band(page, 'done').locator('.ip-done-fold')).toHaveText('✓ 4 earlier');
   });
 
+  test('All done opens the full list by time or by phase, a row opens Details, and Back returns to the Done column', async ({ page, api, fresh }) => {
+    const titles = Array.from({ length: 7 }, (_, i) => `Listed step ${i + 1}`);
+    await write(api, fresh.session, 'post', '/api/nodes', {
+      parentId: fresh.root,
+      nodes: [{ title: 'Release prep', children: titles.map((title) => ({ title, status: 'done' as const })) }],
+    });
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    await expect(band(page, 'done').locator('.ip-done-row')).toHaveCount(5);
+    await band(page, 'done').getByRole('button', { name: /^All done · [0-9]+ ›$/ }).click();
+    await expect(page.getByRole('button', { name: '‹ Board' })).toBeFocused();
+    await expect(page.locator('.ip-board')).toHaveCount(0);
+    for (const title of titles) await expect(page.getByRole('button', { name: title, exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible();
+    await page.getByRole('button', { name: 'Phase', exact: true }).click();
+    await expect(page.getByRole('heading', { name: /^Release prep · 7$/ })).toBeVisible();
+    await page.getByRole('button', { name: 'Listed step 3', exact: true }).click();
+    const details = page.getByRole('complementary');
+    await expect(details).toContainText('Listed step 3');
+    await page.keyboard.press('Escape');
+    await expect(details).toHaveCount(0);
+    await page.getByRole('button', { name: '‹ Board' }).click();
+    await expect(band(page, 'done')).toBeVisible();
+    await expect(band(page, 'done').getByRole('button', { name: /^All done · [0-9]+ ›$/ })).toBeFocused();
+  });
+
   test('leaving the window stamps the last look under ip.look.<id>', async ({ page, api, fresh }) => {
     await open(page, fresh);
     const id = ((await (await api.get(`/api/projects/${fresh.slug}`)).json()) as { project: { id: number } }).project.id;

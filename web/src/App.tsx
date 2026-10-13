@@ -10,6 +10,7 @@ import { ActivityStrip } from './chrome/ActivityStrip';
 import type { GoToHandle } from './chrome/GoTo';
 import { archivedProjects, neighbourTab, projectTabs, stepTab } from './chrome/tabs';
 import { TopBar } from './chrome/TopBar';
+import { DoneList } from './done/DoneList';
 import { Details } from './panels/Details';
 import { ResourceViewer } from './panels/ResourceViewer';
 import { ProjectView } from './project/ProjectView';
@@ -69,7 +70,20 @@ export function App() {
     () => (snapshot ? snapshot.asks.filter((a) => a.clearedAt === null).length + snapshot.sessions.filter((s) => s.state === 'permission' && isLive(s, now)).length : 0),
     [snapshot, now],
   );
+  // The full done list stands in for the Board while open; going back focuses the Board's All done button.
+  const [doneOpen, setDoneOpen] = useState(false);
+  const doneBack = useRef(false);
+  const closeDone = () => {
+    doneBack.current = true;
+    setDoneOpen(false);
+  };
+  useEffect(() => {
+    if (doneOpen || !doneBack.current) return;
+    doneBack.current = false;
+    document.querySelector<HTMLElement>('.ip-done-all')?.focus();
+  }, [doneOpen]);
   const pickView = (v: View) => {
+    setDoneOpen(false);
     if (v === view) return;
     noteAction('header', 'view');
     setView(v);
@@ -228,8 +242,10 @@ export function App() {
                 : 'No projects yet. In a Claude session, say "track this in InProgress".'}
             </div>
           ) : snapshot ? (
-            view === 'board' ? (
-              <Board key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onOpenProject={() => pickView('project')} lastLook={lastLook} onStatus={say} />
+            view === 'board' && doneOpen ? (
+              <DoneList key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onBack={closeDone} />
+            ) : view === 'board' ? (
+              <Board key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onOpenProject={() => pickView('project')} onOpenDone={() => setDoneOpen(true)} lastLook={lastLook} onStatus={say} />
             ) : (
               <ProjectView key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onStatus={say} />
             )
