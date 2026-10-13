@@ -5,7 +5,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import Database from 'better-sqlite3';
 import { readToken } from '../lib/home';
 import { buildLabel, readBuild, sameBuild, VERSION, type BuildInfo } from '../lib/version';
-import { allowRules, HOOK_DEFS, isInProgressHook, nodeBinary, settingsShapeError } from './claude-config';
+import { allowRules, HOOK_DEFS, isInProgressHook, nodeBinary, settingsShapeError, SKILL_NAMES } from './claude-config';
 import { findEdge } from './open';
 
 export interface Check {
@@ -155,9 +155,9 @@ export async function runChecks(o: DoctorOptions): Promise<Check[]> {
   const settings = readJson(settingsFile);
   checks.push(hooksCheck(settingsFile, settings));
   checks.push(agentCheck(join(o.claudeDir, 'agents', 'inprogress-scribe.md')));
-  const skill = join(o.claudeDir, 'skills', 'inprogress', 'SKILL.md');
-  const hasSkill = existsSync(skill);
-  checks.push({ name: 'Skill', ok: hasSkill, detail: hasSkill ? skill : `${skill} is missing: run npm run claude:install` });
+  const skills = SKILL_NAMES.map((name) => join(o.claudeDir, 'skills', name, 'SKILL.md'));
+  const missingSkill = skills.find((f) => !existsSync(f));
+  checks.push({ name: 'Skill', ok: !missingSkill, detail: missingSkill ? `${missingSkill} is missing: run npm run claude:install` : skills.join(', ') });
   // The rules install writes for this repo, the tasks command's among them: another checkout's tasks rules never match.
   const rules = allowRules(o.repo);
   const allow: string[] = settings.value?.permissions?.allow ?? [];

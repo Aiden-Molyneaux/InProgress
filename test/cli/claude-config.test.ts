@@ -4,7 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { allowRules, claudeDir, HOOK_DEFS, hookEntry, install, isInProgressHook, kitStatus, nodeBinary, renderTemplate, STATIC_ALLOW_RULES, uninstall } from '../../src/cli/claude-config';
 import { homeDir } from '../../src/lib/home';
-import { CLI_SUBCOMMANDS, cliAllowRules, isCliAllowRule, repoCli, taskPrefix } from '../../src/lib/task-command';
+import { CLI_SUBCOMMANDS, cliAllowRules, cliPrefix, isCliAllowRule, repoCli, taskPrefix } from '../../src/lib/task-command';
 
 const temps: string[] = [];
 function tempDir(prefix: string): string {
@@ -202,7 +202,13 @@ describe('install', () => {
     const { log } = install({ repo, claudeDir: dir, stamp: 'orc' });
     const skill = readFileSync(join(dir, 'skills', 'mip-orc', 'SKILL.md'), 'utf8');
     expect(skill).toMatch(/^name: mip-orc$/m);
-    expect(skill).toContain(`node ${repo}/dist/cli/main.js orchestrate --session`);
+    // The commands start with the prefix the installed allow rules use, so none asks for permission.
+    const allowed = readSettings(dir).permissions.allow as string[];
+    for (const sub of ['orchestrate', 'digest'] as const) {
+      const prefix = cliPrefix(repoCli(repo), sub);
+      expect(skill).toContain(`${prefix} `);
+      expect(allowed).toContain(`Bash(${prefix} *)`);
+    }
     expect(skill).not.toMatch(/\{\{\w+\}\}/);
     expect(log).toContain(`Skill: ${join(dir, 'skills', 'mip-orc')}`);
   });
@@ -228,7 +234,7 @@ describe('install', () => {
     // An ask, then its answer; no question step, and no guidance inside the template.
     expect(template).toMatch(/- ask on #55: question, [^\n]+\?\n- a\d+ answered: [^\n]+\n/);
     expect(template).not.toMatch(/\(question/);
-    expect(template).toMatch(/- handoff on #55: "[^"]+", path [^\n]+, snapshot_file\n- state on #\d+: /);
+    expect(template).toMatch(/- handoff on #55: "[^"]+", path [^\n]+, snapshot_file\n- clear focus of [^\n]+\n- state on #\d+: /);
     expect(skill).not.toMatch(/needs.you/i);
     expect(template).not.toMatch(/\(the answer/);
     expect(template).toMatch(/- #\d+ label → fix\n/);

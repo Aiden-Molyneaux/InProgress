@@ -369,7 +369,7 @@ node dist\cli\main.js open</code></pre>
 <p>The scribe runs <code>list_projects</code>, then <code>create_project</code> (with <code>bind_path</code> and <code>branch_pattern</code> if asked), then <code>enroll_session</code>, and replies with the first line of the briefing.</p>
 </dd>
 <dt>You see</dt>
-<dd><p>Chat: one line from Claude, in the shape <code>↳ InProgress: tracking this session in &lt;project&gt;</code>. Window: the project appears in the switcher with its root node, your session's chip appears in the session row, and the activity strip walks through <code>project created</code>, <code>folder bound: C:/personal/…</code> and <code>&lt;session title&gt; is working</code>.</p></dd>
+<dd><p>Chat: one line from Claude, in the shape <code>↳ InProgress: tracking this session in &lt;project&gt;</code>. Window: the project appears as a tab with its root step, your session shows in the Board's header under "No claimed step" once it is working, and the activity strip walks through <code>project created</code>, <code>folder bound: C:/personal/…</code> and <code>&lt;session title&gt; is working</code>.</p></dd>
 </dl>
 <h4>How a binding matches</h4>
 <p>Paths are normalised before storage and comparison: backslashes become slashes, the Git Bash form <code>/c/x</code> becomes <code>C:/x</code>, the drive letter is upper-cased, a trailing slash is dropped, and comparison ignores case. A session matches a binding when its working directory is the bound path or sits under it and, if the binding has a branch pattern, the current branch matches that glob (<code>*</code> any run, <code>?</code> one character, case-insensitive). Among several matches the longest path wins; on equal paths, the binding with a pattern beats the one without. The branch is read from <code>.git/HEAD</code> by walking up from the folder (worktrees included) without spawning git. Bindings of archived projects are ignored.</p>
@@ -449,7 +449,7 @@ Other sessions here: "QA drill" (idle, on #70)</code></pre>
 <p>"Where things stand" is the ancestor chain of every active, asked-about and focused node, with up to two upcoming todo siblings at each level, capped at 25 lines. The "Needs you" line is the open asks, oldest first, then live permission waits, up to eight items; recent resources are the newest five. This is the <code>full</code> briefing. A project set to <code>scoped</code> briefings sends workers something smaller (see <a href="#asks">asks, claims and scoped briefings</a>).</p>
 </dd>
 <dt>You see</dt>
-<dd><p>The briefing goes into Claude's context, not into the visible chat; you only notice it when Claude refers to a step by number without being told it. In the window your session shows under "No claimed step" in the Board's header until it claims a step, and in Now once it has.</p></dd>
+<dd><p>The briefing goes into Claude's context, not into the visible chat; you only notice it when Claude refers to a step by number without being told it. In the window a session that is working but has not claimed a step shows under "No claimed step" in the Board's header (an idle one with no step is left out), and in Now once it has claimed one.</p></dd>
 </dl>
 
 <h4>Checkpoints</h4>
@@ -627,7 +627,7 @@ Changes:
 <p>A session that starts with <code>clear</code> becomes a worker again; compaction and resume keep the role. A claim also makes the session a worker.</p>
 </dd>
 <dt>You see</dt>
-<dd><p>On the Board, the header's "Where we are" line shows the first sentence of the state note and its age, and the Orchestrator appears under "No claimed step" while it is live. The Project view shows the whole note.</p></dd>
+<dd><p>On the Board, the header shows the state note as a message from "Orchestrator" with its age and the note's first sentence, and the Orchestrator appears under "No claimed step" while it is live. The Project view shows the whole note.</p></dd>
 </dl>
 </div>
 <div class="rail">
@@ -684,7 +684,7 @@ Playbook:
 <p>From top to bottom: a top bar with the project tabs and a Board | Project switch, the view itself, and a one-line activity strip. The Board is the default; the window remembers your last pick. The theme follows Windows. The tree canvas, the session row, the Up next strip, the needs-you pill and Follow are gone. Each project tab shows its open asks plus its live permission waits, and its working dot.</p>
 
 <h4>The Board</h4>
-<p>At 960 px and up the Board is four columns, left to right: <strong>Needs me</strong>, <strong>Next</strong>, <strong>Now</strong> and <strong>Done</strong>. Below 960 px, including the 520 px app window, the same four are stacked bands in the order Needs me, Now, Next, Done, and an empty band shrinks to one line ("Nothing needs you"). A line at the top, "Where we are", shows the first sentence of the state note and its age, with a button to the Project view, or "No state note yet". Beside it, "No claimed step" lists the sessions that are live but not on a Now row: the orchestrator, and working sessions with no step. At the right, "n to tidy" counts the steps with hygiene marks; hover it for their names.</p>
+<p>At 960 px and up the Board is four columns, left to right: <strong>Needs me</strong>, <strong>Next</strong>, <strong>Now</strong> and <strong>Done</strong>. Below 960 px, including the 520 px app window, the same four are stacked bands in the order Needs me, Now, Next, Done, and an empty band shrinks to one line ("Nothing needs you"). At the top, the state note shows as a message headed "Orchestrator" and its age (for example "3d"), with the note's first sentence and a "Project view ›" button, or "No state note yet". Beside it, "No claimed step" lists the live sessions that are not on a Now row and are either the orchestrator or working; an idle worker with no step is left out. At the right, "n to tidy" counts the steps with hygiene marks; hover it for their names.</p>
 <div class="scroll">
 <table>
 <thead><tr><th>Column</th><th>What it holds</th></tr></thead>
@@ -759,14 +759,14 @@ Playbook:
 <h3 id="projects">Several projects and switching between them</h3>
 <div class="wf">
 <div class="main">
-<p>The switcher in the top bar lists active projects sorted by working sessions first, then by last activity. Each row has a dot (clay for a working session, amber when an ask is open, grey otherwise) and a summary such as <code>◆ 1 working · 2 need you</code>, where "need you" counts open asks and live permission waits. Archived projects sit in a sub-list under Archived (n). When another project has a working session, a clay dot appears on the switcher button itself. The selection is remembered by the browser and mirrored in the URL as <code>#/p/&lt;slug&gt;</code>, so a second window or a bookmark can open straight on a project.</p>
-<p>Each session belongs to one project at a time; several sessions on one project show as several messages in Now and in the header. The briefing's "Other sessions here" line tells each session about the others. To move a session, tell Claude ("this session is for the InThink redesign, not InProgress"); the scribe's <code>enroll_session</code> repoints it and clears its focus. Tabs for one-click switching are planned (<a href="#inflight">#44</a>); today it is the dropdown.</p>
+<p>The top bar has one tab per active project. A tab shows the project's name, a working dot while one of its sessions is working, and its count of open asks plus live permission waits. Archived and recently deleted projects sit in the ⋯ menu at the end of the tabs. The selection is remembered by the browser and mirrored in the URL as <code>#/p/&lt;slug&gt;</code>, so a second window or a bookmark can open straight on a project.</p>
+<p>Each session belongs to one project at a time; several sessions on one project show as several messages in Now and in the header. The briefing's "Other sessions here" line tells each session about the others. To move a session, tell Claude ("this session is for the InThink redesign, not InProgress"); the scribe's <code>enroll_session</code> repoints it and clears its focus. Switch with a click, or with the keys <kbd>[</kbd>, <kbd>]</kbd> and <kbd>1</kbd> to <kbd>9</kbd>.</p>
 </div>
 <div class="rail">
 <aside class="spec">
   <span class="eyebrow">From your spec</span>
   <blockquote>"The UI allows you to switch between projects, etc."</blockquote>
-  <p>The dropdown, with its per-project state dots and counts, and the URL hash. The window title carries the project name too: <code>InProgress · InGame</code>, or <code>(2) InProgress · InGame</code> while two asks wait on you.</p>
+  <p>The tabs, with their per-project working dots and counts, and the URL hash. The window title carries the project name too: <code>InProgress · InGame</code>, or <code>(2) InProgress · InGame</code> while two asks wait on you.</p>
   <p class="where">web/src/chrome/TopBar.tsx · web/src/useInProgress.ts</p>
 </aside>
 </div>

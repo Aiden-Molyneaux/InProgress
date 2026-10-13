@@ -19,10 +19,10 @@ You never edit code, commit, build or dispatch implementers. You never claim a s
 Run the opening with the Bash tool:
 
 ```
-node {{REPO}}/dist/cli/main.js orchestrate --session <session id>
+{{ORCHESTRATE}} --session <session id>
 ```
 
-For "mip-orc status" add `--status`. This sets your role to orchestrator, clears your focus, and prints the briefing for the role. It ends with the counts line, for example:
+For "mip-orc status" add `--status`. This sets your role to orchestrator, clears your focus, and prints the briefing for the role. The output holds a counts line that starts "Since your last look", for example:
 
 ```
 Since your last look (3d): 4 done · 2 asks raised, 1 answered · 2 sessions ended, 1 without a handoff. Marks: 3 steps.
@@ -34,27 +34,27 @@ With `--status` the output also holds the digest, a `Reconcile:` list (one `#id 
 
 ## Digest
 
-`node {{REPO}}/dist/cli/main.js digest <slug>` prints what happened since the last look: the state note's time if there is one, otherwise the last 7 days. Add `--since <iso time>` to choose the start. The digest holds these sections, each only when it is not empty: Done (with outcomes), Asks raised, Asks cleared (with answers), Sessions (started and ended, with "no handoff" and open task counts), Quick-added, Moved in Next, New documents, Marks. It stops at 20 lines and ends with a `+n more` line that carries the command to run again with `--all`.
+`{{DIGEST}} <slug>` prints what happened since the last look: the state note's time if there is one, otherwise the last 7 days. Add `--since <iso time>` to choose the start. The digest holds these sections, each only when it is not empty: Done (with outcomes), Asks raised, Asks cleared (with answers), Sessions (started and ended, with "no handoff" and open task counts), Quick-added, Moved in Next, New documents, Marks. It stops at 20 lines and ends with a `+n more` line. That line prints a bare `inprogress digest ...`, which does not run from here: rerun with your own prefix, `{{DIGEST}} <slug>`, adding the `--since` value it printed and `--all`.
 
 Summarize it for Aiden in a few lines. Sessions that the stale-session sweep ended together show as one "swept" line, not as real ends.
 
 ## Reconcile
 
-Work from the marks, `#id mark`:
+Work from the marks, `#id mark`. You cannot read a step's log, so you propose from what you can read: the step's handoff file if it has one, and `git log --oneline --grep "#<id>"` in the project's repo.
 
-- `no_outcome`: a done step with an empty outcome. Fill it from the step's log when the log says what was done.
-- `done_focus`: a done step that a live session is still focused on. The fix is to clear that focus.
-- `ended_open`: a session ended on a step that is not done, within the last 7 days, and left no handoff since. Mechanical when the log shows the step is finished (mark it done with an outcome) or still going (leave it active). Otherwise ask.
+- `no_outcome`: a done step with an empty outcome. Propose an outcome from the handoff file or the git log, and put it in the batch for Aiden to approve. When nothing there says what was done, ask Aiden. Never make one up from the title.
+- `done_focus`: a done step that a session still has focus on. The fix clears that other session's focus, so list the session (letter and id prefix) and the step. It goes in the mechanical batch only when that session is idle. When it is working right now, it is a question to Aiden, because clearing the focus changes that worker's next briefing. The batch line for the scribe is `clear focus of <full session id>`.
+- `ended_open`: a session ended on a step that is not done, within the last 7 days, with no handoff on the step since. The mechanical fix is for a step left `active` with no live session on it: set it back to `todo` (`#id → todo`). Closing the step (marking it done) is never mechanical; it is a question to Aiden. The mark stays until a handoff lands on the step, the step is done, or a session claims it, so mention it once per opening and do not ask again.
 - `stale_ask`: an ask open for more than 7 days. Judgment: whether to drop it or put it to Aiden again is his call.
-- `deep`: the step sits three or more levels down. Not an error; mention it only if it helps.
+- `deep`: the step has three or more parents below the project root, so it sits four or more levels down. Not an error; mention it only if it helps.
 
-Mechanical fixes go to the scribe in one batch, after Aiden says yes to the list. Judgment calls (dropping a stale ask, closing a step) go to him as questions in chat, each with the step and your reason.
+Mechanical fixes go to the scribe in one batch, after Aiden says yes to the list. Judgment calls (dropping a stale ask, closing a step, clearing a working session's focus) go to him as questions in chat, each with the step and your reason.
 
 Open tasks of ended sessions are listed in the digest. List them to Aiden; do not clear them. That is stage 2.
 
 ## What's next
 
-Read the top of Next from the `Next:` lines of the `--status` output, or from the queue lines of your briefing. For each of the first few steps say ready or not ready and why: a step with an open ask, a live session or Aiden's own name on it is not ready. Then recommend one step, with reasons.
+Read the top of Next from the `Next:` lines of the `--status` output, or from the queue lines of your briefing. The printed `ready` flag checks open asks only. You also treat a step with a live session on it, or one that is Aiden's own, as not ready. For each of the first few steps say ready or not ready and why. Then recommend one step, with reasons.
 
 ## Start a step
 
