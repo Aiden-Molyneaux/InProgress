@@ -1820,6 +1820,10 @@ test.describe('Board', () => {
     await page.getByRole('button', { name: '‹ Board' }).click();
     await expect(band(page, 'done')).toBeVisible();
     await expect(band(page, 'done').getByRole('button', { name: /^All done · [0-9]+ ›$/ })).toBeFocused();
+    // A reload lands on the Board, and the list opens again in the order picked last.
+    await page.reload();
+    await band(page, 'done').getByRole('button', { name: /^All done · [0-9]+ ›$/ }).click();
+    await expect(page.getByRole('button', { name: 'Phase', exact: true })).toHaveAttribute('aria-pressed', 'true');
   });
 
   test('leaving the window stamps the last look under ip.look.<id>', async ({ page, api, fresh }) => {

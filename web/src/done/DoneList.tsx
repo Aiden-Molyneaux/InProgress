@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { deriveBoard, type BoardRow } from '../../../src/core/board';
 import { LabelChip, rowClick } from '../board/Marks';
 import { load, save } from '../storage';
@@ -18,12 +18,10 @@ export function DoneList({ snapshot, now, onOpenNode, onBack }: ViewProps & { on
     setOrder(o);
     save(KEY, o);
   };
-  const back = useRef<HTMLButtonElement>(null);
-  useEffect(() => back.current?.focus(), []);
   const done = useMemo(() => deriveBoard(snapshot, now).done, [snapshot, now]);
 
   const item = (row: BoardRow, left: string, suffix: string | null) => (
-    <li key={row.node.id} className="ip-donelist-row" data-node={row.node.id} onClick={rowClick('done', () => onOpenNode(row.node.id))}>
+    <li key={row.node.id} className="ip-donelist-row" data-node={row.node.id} onClick={rowClick('done_list', () => onOpenNode(row.node.id))}>
       <span className="ip-donelist-when">{left}</span>
       <span className="ip-done-dot" aria-hidden="true">✓</span>
       <div className="ip-donelist-body">
@@ -41,7 +39,7 @@ export function DoneList({ snapshot, now, onOpenNode, onBack }: ViewProps & { on
   return (
     <div className="ip-donelist">
       <div className="ip-donelist-head">
-        <button type="button" ref={back} className="ip-donelist-back" onClick={onBack}>‹ Board</button>
+        <button type="button" className="ip-donelist-back" onClick={onBack}>‹ Board</button>
         <span className="ip-quiet">{`${done.length} done`}</span>
         <div className="ip-donelist-toggle" role="group" aria-label="Order">
           <button type="button" aria-pressed={order === 'time'} onClick={() => pick('time')}>Time</button>

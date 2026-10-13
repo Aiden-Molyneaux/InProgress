@@ -495,7 +495,9 @@ li.ip-orow:hover { background: var(--panel-2); }
 .ip-done-all { display: block; margin: 8px 0 0 52px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); text-align: left; }
 .ip-done-all:hover { color: var(--text); }
 .ip-done-all:focus-visible, .ip-donelist-back:focus-visible, .ip-donelist-toggle button:focus-visible { outline: 2px solid var(--text-2); outline-offset: 1px; }
-.ip-donelist { display: flex; flex-direction: column; gap: 14px; max-width: 100%; }
+.ip-donelist { flex: 1; min-width: 0; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 14px; }
+.ip-donelist ol { list-style: none; margin: 0; padding: 0; }
+.ip-donelist p { margin: 0; }
 .ip-donelist-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .ip-donelist-back { font-size: var(--fs-m); color: var(--text-2); }
 .ip-donelist-back:hover { color: var(--text); }
@@ -509,5 +511,5 @@ li.ip-orow:hover { background: var(--panel-2); }
 .ip-donelist-when { font-family: var(--font-mono); font-size: var(--fs-s); line-height: 18px; color: var(--muted); text-align: right; white-space: nowrap; }
 .ip-donelist-body { min-width: 0; }
 .ip-donelist-body .ip-quote { margin-top: 0; padding-left: 0; border-left: 0; }
-.ip-donelist-parent { margin-left: 6px; font-size: var(--fs-s); }
+.ip-donelist-parent { font-size: var(--fs-s); }
 .ip-donelist-outcome { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
