@@ -1368,6 +1368,11 @@ test.describe('Live work', () => {
     const details = await openDetails(page, 'Play app signing');
     // The live work reads before the step's resources.
     await expect(details.locator('.ip-label')).toHaveText(['Working tasks', 'Subagents', 'Resources']);
+    // Each entry sits on its own soft row, and the heads read in --text-2, so sections and entries read apart.
+    for (const entry of [details.locator('.ip-wt').first(), details.locator('.ip-dagent'), details.locator('.ip-res')]) {
+      await expect(entry).toHaveCSS('background-color', 'rgba(15, 23, 42, 0.05)');
+    }
+    await expect(details.locator('.ip-label').first()).toHaveCSS('color', 'rgb(30, 41, 59)');
     // Anchored: the next row's "after Upload the key" names it too.
     await expect(details.locator('.ip-wt', { hasText: /^◐ Upload the key/ })).toHaveText('◐ Upload the key · E2E session');
     await expect(details.locator('.ip-wt', { hasText: 'Check the release track' })).toHaveText('○ Check the release track · E2E session · after Upload the key');
