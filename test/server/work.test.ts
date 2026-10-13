@@ -337,6 +337,29 @@ describe("a step's working tasks when it is marked done", () => {
     ]);
   });
 
+  it("puts a subagent's new task under the root, not the session's open focus, once its own node is done", () => {
+    const { ctx, project, signing, play, hook, items } = setup();
+    hook({ event: 'agent-dispatch', toolUseId: 't1', agentType: 'Explore', description: `#${signing.id} Check the keystore` });
+    hook({ event: 'subagent-start', agentId: 'a1', agentType: 'Explore' });
+    updateNode(ctx, 'scribe:s1', signing.id, { status: 'done' });
+    hook(created('1', 'Read the logs', 'a1'));
+    hook(created('1', 'Sign the bundle'));
+    expect(items().map((i) => [i.nodeId, i.agentId])).toEqual([[project.rootNodeId, 'a1'], [play.id, '']]);
+  });
+
+  it('gives the tasks command the root when no step is named and the focus is done, and still honours a named done step', () => {
+    const { ctx, project, play, hook, items } = setup();
+    hook(created('1', 'Sign the bundle'));
+    updateNode(ctx, 'scribe:s1', play.id, { status: 'done' });
+    expect(setTasks(ctx, 'session:s1', 's1', undefined, [{ subject: 'Write the closeout', status: 'in_progress' }]).nodeId).toBe(project.rootNodeId);
+    setTasks(ctx, 'session:s1', 's1', play.id, [{ subject: 'Sign the bundle', status: 'completed' }, { subject: 'Archive the old key', status: 'pending' }]);
+    expect(items().map((i) => [i.nodeId, i.subject, i.status])).toEqual([
+      [project.rootNodeId, 'Write the closeout', 'in_progress'],
+      [play.id, 'Sign the bundle', 'completed'],
+      [play.id, 'Archive the old key', 'pending'],
+    ]);
+  });
+
   it('leaves the open tasks of a dropped step as they are', () => {
     const { ctx, play, hook, items } = setup();
     hook(created('1', 'Sign the bundle'));
