@@ -78,9 +78,9 @@ describe('tabDropSlot', () => {
 });
 
 describe('pruneOrder', () => {
-  it('drops ids listed as archived or deleted and keeps the rest', () => {
+  it('keeps only the ids of active projects: archived, deleted and purged ones lose their place', () => {
     const projects = [project(1), project(2, 'archived'), project(3)];
-    expect(pruneOrder([3, 2, 1, 4, 5], projects, [{ id: 4 }])).toEqual([3, 1, 5]);
+    expect(pruneOrder([3, 2, 1, 4, 5], projects)).toEqual([3, 1]);
   });
 });
 

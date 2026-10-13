@@ -48,13 +48,17 @@ export function tabDropSlot(activeIds: number[], overId: number, leftHalf: boole
   return activeIds[activeIds.indexOf(dragging) + 1] ?? null;
 }
 
-/** The stored order without the projects that left the active list (archived or deleted), so they return at the end. */
-export function pruneOrder(order: number[], projects: Listed[], deleted: Pick<DeletedProject, 'id'>[]): number[] {
-  const gone = new Set([...projects.filter((p) => p.status !== 'active').map((p) => p.id), ...deleted.map((d) => d.id)]);
-  return order.filter((id) => !gone.has(id));
+/**
+ * The stored order with only the active projects in it. One that left the list (archived, deleted or purged) loses its
+ * place and returns at the end, and a purged project's id, which the server reuses, never hands its place on.
+ */
+export function pruneOrder(order: number[], projects: Listed[]): number[] {
+  const active = new Set(projects.filter((p) => p.status === 'active').map((p) => p.id));
+  return order.filter((id) => active.has(id));
 }
 
-const TAB_ORDER_KEY = 'ip.tabOrder';
+/** The localStorage key the tab order lives under. */
+export const TAB_ORDER_KEY = 'ip.tabOrder';
 
 /** The stored tab order: the positive whole numbers in it, first occurrence of each. Anything else gives []. */
 export function loadTabOrder(): number[] {

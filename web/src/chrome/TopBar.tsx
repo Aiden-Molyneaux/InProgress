@@ -7,7 +7,7 @@ import { useNow } from '../useNow';
 import { GoTo, type GoToHandle } from './GoTo';
 import type { View } from '../views/view';
 import { menuStep } from './menu';
-import { projectLabel, recentlyDeleted, tabDropSlot, waitingOn } from './tabs';
+import { moveTab, projectLabel, recentlyDeleted, tabDropSlot, waitingOn } from './tabs';
 import { ViewSwitch } from './ViewSwitch';
 
 interface TopBarProps {
@@ -100,10 +100,12 @@ function TabStrip({ strip, tabs, current, onSelect, onMove, menuFor, onMenu }: T
   const ids = tabs.map((p) => p.id).join(',');
   const activeIds = tabs.filter((p) => p.status === 'active').map((p) => p.id);
   /** The tab being dragged, and where it would drop: before this tab, or null for the end. Null while nothing drags. */
-  const [drag, setDrag] = useState<{ id: number; slot: number | null } | null>(null);
-  /** Set while a drag runs and a moment after, so the tab that was dragged does not also fire its click. */
-  const dragged = useRef(false);
-  /** The tab a keyboard move carries: it gets focus back if the reorder took it. */
+  const [dragState, setDrag] = useState<{ id: number; slot: number | null } | null>(null);
+  // A tab that leaves the strip mid-drag (archived or deleted elsewhere) ends its drag: its dragend never reaches React.
+  const drag = dragState && activeIds.includes(dragState.id) ? dragState : null;
+  /** Whether dropping now would change the order: the drop line shows only then. */
+  const changes = drag !== null && moveTab(tabs, drag.id, drag.slot).join() !== activeIds.join();
+  /** The tab a move carries, by key or by drag: it gets focus back if the reorder took it. */
   const moved = useRef<number | null>(null);
   useLayoutEffect(() => {
     if (moved.current === null) return;
@@ -176,9 +178,9 @@ function TabStrip({ strip, tabs, current, onSelect, onMove, menuFor, onMenu }: T
     }
     if (slot !== drag.slot) setDrag({ id: drag.id, slot });
   };
-  const endDrag = () => {
-    setDrag(null);
-    window.setTimeout(() => (dragged.current = false), 50);
+  /** Out of the strip mid-drag: no line, as a drop there does nothing. */
+  const onDragLeave = (e: DragEvent<HTMLDivElement>) => {
+    if (drag && !strip.current!.contains(e.relatedTarget as Node | null)) setDrag({ id: drag.id, slot: drag.id });
   };
   const lastActive = activeIds[activeIds.length - 1];
   return (
@@ -189,11 +191,14 @@ function TabStrip({ strip, tabs, current, onSelect, onMove, menuFor, onMenu }: T
       ref={strip}
       onKeyDown={onKeyDown}
       onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
       onDrop={(e) => {
         if (!drag) return;
         e.preventDefault();
-        onMove(drag.id, drag.slot);
-        endDrag();
+        // The press focused the dragged tab, and moving it in the DOM can drop that focus.
+        if (changes && document.activeElement === strip.current!.querySelector(`[data-tab="${drag.id}"]`)) moved.current = drag.id;
+        if (changes) onMove(drag.id, drag.slot);
+        setDrag(null);
       }}
     >
       {tabs.map((p) => {
@@ -205,18 +210,18 @@ function TabStrip({ strip, tabs, current, onSelect, onMove, menuFor, onMenu }: T
             aria-selected={p.slug === current}
             tabIndex={p.slug === stop ? 0 : -1}
             data-tab={p.id}
-            className={`ip-tab${archived ? ' archived' : ''}${p.id === menuFor ? ' menu-open' : ''}${drag?.id === p.id ? ' dragging' : ''}${drag && drag.slot === p.id && drag.id !== p.id ? ' drop-before' : ''}${drag && drag.slot === null && p.id === lastActive ? ' drop-after' : ''}`}
+            className={`ip-tab${archived ? ' archived' : ''}${p.id === menuFor ? ' menu-open' : ''}${drag?.id === p.id ? ' dragging' : ''}${changes && drag.slot === p.id ? ' drop-before' : ''}${changes && drag.slot === null && p.id === lastActive ? ' drop-after' : ''}`}
             draggable={!archived}
             onDragStart={(e) => {
               e.dataTransfer.effectAllowed = 'move';
-              e.dataTransfer.setData('text/plain', String(p.id));
-              dragged.current = true;
+              // Not text/plain, which a text field would take as typed text.
+              e.dataTransfer.setData('application/x-inprogress-tab', String(p.id));
               setDrag({ id: p.id, slot: p.id });
             }}
-            onDragEnd={endDrag}
+            onDragEnd={() => setDrag(null)}
             title={archived ? `${p.name} (archived)` : p.name}
             aria-label={archived ? `${projectLabel(p)}, archived` : projectLabel(p)}
-            onClick={() => !dragged.current && onSelect(p.slug)}
+            onClick={() => onSelect(p.slug)}
             // A right-click opens the tab's menu without opening the tab, and never the browser's own menu.
             onContextMenu={(e) => {
               e.preventDefault();

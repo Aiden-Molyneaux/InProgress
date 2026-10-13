@@ -431,11 +431,16 @@ test('a tab drags to a new place, Alt+arrows move the focused tab, and the order
   await expect(tabFor(page, names[0])).toBeFocused();
   await expect(tabFor(page, names[1])).toHaveAttribute('aria-selected', 'true');
   await expect(page).toHaveURL(new RegExp(`#/p/${b.slug}$`));
+  // A tab dragged to the right keeps the focus its press gave it, so the keys still reach the strip.
+  const last = (await tabFor(page, names[0]).boundingBox())!;
+  await tabFor(page, names[2]).dragTo(tabFor(page, names[0]), { targetPosition: { x: last.width - 4, y: 10 } });
+  await expect.poll(() => ours()).toEqual([names[1], names[0], names[2]]);
+  await expect(tabFor(page, names[2])).toBeFocused();
   // A project made after the move joins at the end.
   const fourth = unique('Tabs drag d');
   await bare(api, fourth);
   await expect(tabFor(page, fourth)).toBeVisible();
-  expect(await ours([fourth])).toEqual([names[2], names[1], names[0], fourth]);
+  expect(await ours([fourth])).toEqual([names[1], names[0], names[2], fourth]);
 });
 
 test('a tab shows how many items need you and, while a session works there, a pulsing dot', async ({ page, api }) => {

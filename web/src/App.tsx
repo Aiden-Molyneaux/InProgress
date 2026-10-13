@@ -8,7 +8,7 @@ import { useLastLook } from './board/lastLook';
 import { noteAction, noteHidden, noteShown, setPoster } from './measure';
 import { ActivityStrip } from './chrome/ActivityStrip';
 import type { GoToHandle } from './chrome/GoTo';
-import { archivedProjects, loadTabOrder, moveTab, neighbourTab, projectTabs, pruneOrder, saveTabOrder, stepTab } from './chrome/tabs';
+import { archivedProjects, loadTabOrder, moveTab, neighbourTab, projectTabs, pruneOrder, saveTabOrder, stepTab, TAB_ORDER_KEY } from './chrome/tabs';
 import { TopBar } from './chrome/TopBar';
 import { Details } from './panels/Details';
 import { ResourceViewer } from './panels/ResourceViewer';
@@ -80,17 +80,19 @@ export function App() {
   // The tab order Aiden dragged, kept in the window's localStorage. A second window follows a move through `storage`.
   const [order, setOrder] = useState(loadTabOrder);
   const tabs = useMemo(() => projectTabs(projects, state.slug, order), [projects, state.slug, order]);
-  // A project that left the active list (archived or deleted) loses its place, so it returns at the end.
+  // A project that left the active list (archived, deleted or purged) loses its place, so it returns at the end. Only
+  // once the server's list has loaded: the empty list before it would drop every place.
   useEffect(() => {
-    const kept = pruneOrder(order, projects, state.deleted);
+    if (!state.loaded) return;
+    const kept = pruneOrder(order, projects);
     if (kept.length < order.length) {
       setOrder(kept);
       saveTabOrder(kept);
     }
-  }, [projects, state.deleted]);
+  }, [projects, order, state.loaded]);
   useEffect(() => {
     const changed = (e: StorageEvent) => {
-      if (e.key === 'ip.tabOrder') setOrder(loadTabOrder());
+      if (e.key === TAB_ORDER_KEY) setOrder(loadTabOrder());
     };
     window.addEventListener('storage', changed);
     return () => window.removeEventListener('storage', changed);
