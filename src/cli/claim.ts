@@ -2,11 +2,16 @@ import type { Ask, AskKind } from '../core/types';
 import { askTag } from '../core/types';
 import { ApiClientError, createClient } from '../lib/client';
 import { raiseNotes, type RaiseReply } from '../lib/ask-notes';
-import { TASKS_NOT_RUNNING_HINT, TASKS_TIMEOUT_HINT } from './tasks';
+import { TASKS_NOT_RUNNING_HINT } from './tasks';
 
 export const CLAIM_USAGE = 'Usage: inprogress claim <step id> --session <session id>';
 export const ORCHESTRATE_USAGE = 'Usage: inprogress orchestrate --session <session id> [--status]';
 export const ASK_USAGE = 'Usage: inprogress ask <step id> --session <session id> --question|--permission|--review "<text>"';
+
+/** The server is up but answered too slowly; whether a rerun is safe depends on the command. */
+export const CLAIM_TIMEOUT_HINT = 'InProgress was too slow to answer. Running this command again is safe: a claim of the same step changes nothing more.';
+export const ASK_TIMEOUT_HINT = 'InProgress was too slow to answer. Running this command again is safe: the same open ask is joined, not raised twice.';
+export const ORCHESTRATE_TIMEOUT_HINT = 'InProgress was too slow to answer. It may have recorded this open, and running it again records another: check the window or `inprogress digest <project>` first.';
 
 interface Conn {
   baseUrl: string;
@@ -78,6 +83,8 @@ export function parseOrchestrateArgs(args: string[]): { session: string; status:
   return { session, status };
 }
 
+const OWN_FLAGS = new Set(['--session', ...ASK_FLAGS.keys()]);
+
 export function parseAskArgs(args: string[]): { session: string; nodeId: number; kind: AskKind; text: string } | { error: string } {
   let session: string | undefined;
   let kind: AskKind | undefined;
@@ -92,7 +99,8 @@ export function parseAskArgs(args: string[]): { session: string; nodeId: number;
     const k = ASK_FLAGS.get(flag);
     if (!k) return undefined;
     if (kind !== undefined) return { error: 'Give exactly one of --question, --permission, --review' };
-    if (!next?.trim() || next.startsWith('--')) return { error: `${flag} needs the text` };
+    // Only this command's own flags mean the text was left out: "--force push ok?" is a question.
+    if (!next?.trim() || OWN_FLAGS.has(next)) return { error: `${flag} needs the text` };
     kind = k;
     text = next.trim();
     return 1;
@@ -110,12 +118,12 @@ export function parseAskArgs(args: string[]): { session: string; nodeId: number;
  * These commands never start the server (as tasks does). A refusal (status 400 and the like) prints its error and hint
  * and exits 1; nothing answering is rethrown with the hint a session can act on, for main.ts to print.
  */
-async function call<T>(out: (line: string) => void, run: () => Promise<T>): Promise<T | undefined> {
+async function call<T>(out: (line: string) => void, timeoutHint: string, run: () => Promise<T>): Promise<T | undefined> {
   try {
     return await run();
   } catch (err) {
     if (err instanceof ApiClientError && err.status === 0) {
-      throw new ApiClientError(0, err.message, err.code === 'TIMEOUT' ? TASKS_TIMEOUT_HINT : TASKS_NOT_RUNNING_HINT, err.code);
+      throw new ApiClientError(0, err.message, err.code === 'TIMEOUT' ? timeoutHint : TASKS_NOT_RUNNING_HINT, err.code);
     }
     if (err instanceof ApiClientError) {
       out(err.message);
@@ -134,7 +142,7 @@ export async function runClaim(args: string[], out: (line: string) => void, o: C
     out(CLAIM_USAGE);
     return 1;
   }
-  const res = await call(out, () =>
+  const res = await call(out, CLAIM_TIMEOUT_HINT, () =>
     createClient(o).post<{ notes: string[]; block: string[] }>(`/api/sessions/${encodeURIComponent(parsed.session)}/claim`, { nodeId: parsed.nodeId }, { actor: `session:${parsed.session}` }),
   );
   if (!res) return 1;
@@ -150,7 +158,7 @@ export async function runOrchestrate(args: string[], out: (line: string) => void
     out(ORCHESTRATE_USAGE);
     return 1;
   }
-  const res = await call(out, () =>
+  const res = await call(out, ORCHESTRATE_TIMEOUT_HINT, () =>
     createClient(o).post<{ opening: string }>(`/api/sessions/${encodeURIComponent(parsed.session)}/orchestrate`, { status: parsed.status }, { actor: `session:${parsed.session}` }),
   );
   if (!res) return 1;
@@ -166,7 +174,7 @@ export async function runAsk(args: string[], out: (line: string) => void, o: Con
     out(ASK_USAGE);
     return 1;
   }
-  const res = await call(out, () =>
+  const res = await call(out, ASK_TIMEOUT_HINT, () =>
     createClient(o).post<RaiseReply & Ask>(
       `/api/nodes/${parsed.nodeId}/asks`,
       { kind: parsed.kind, text: parsed.text, sessionId: parsed.session },

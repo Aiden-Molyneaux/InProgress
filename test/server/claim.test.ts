@@ -35,7 +35,7 @@ describe('claimStep', () => {
     expect(ctx.db.prepare('SELECT status FROM nodes WHERE id = ?').get(step.id)).toEqual({ status: 'active' });
     expect(briefingDue(ctx, 's1')).toBe(false);
     const changed = listEventsSince(ctx, mark).filter((e) => e.type === 'session.updated').map((e) => (e.data as { changed: string[] }).changed);
-    expect(changed).toEqual([['focusNodeId'], ['role']]);
+    expect(changed).toEqual([['role'], ['focusNodeId']]);
   });
 
   it('records no role change for a worker that stays a worker', () => {
@@ -187,5 +187,41 @@ describe('the answers line', () => {
     clearAsk(ctx, 'window', ask.id, 'yes');
     expect(handleHookEvent(ctx, 's2', prompt()).context).toBeUndefined();
     expect(handleHookEvent(ctx, 's1', prompt()).context).toBe(`Answered: a${ask.id} "yes"`);
+  });
+});
+
+describe('review fixes', () => {
+  it('claim refuses the project root and a dropped step, with a hint, and changes nothing', () => {
+    const { ctx, project, step, join } = setup();
+    join('s1');
+    ctx.db.prepare("UPDATE sessions SET role = 'orchestrator' WHERE id = 's1'").run();
+    expect(() => claimStep(ctx, 'session:s1', 's1', project.rootNodeId)).toThrow(/is the project root/);
+    updateNode(ctx, 'test', step.id, { status: 'dropped' });
+    expect(() => claimStep(ctx, 'session:s1', 's1', step.id)).toThrow(/is dropped/);
+    expect(findSession(ctx, 's1')).toMatchObject({ role: 'orchestrator', focusNodeId: null });
+  });
+
+  it('the activity strip ends on the session line: orchestrate records its event first, claim its role first', () => {
+    const { ctx, step, join } = setup();
+    join('s1');
+    const mark = maxEventId(ctx);
+    orchestrate(ctx, 'session:s1', 's1', { status: false });
+    expect(listEventsSince(ctx, mark).map((e) => e.type)).toEqual(['session.orchestrate', 'session.updated']);
+    const mark2 = maxEventId(ctx);
+    claimStep(ctx, 'session:s1', 's1', step.id);
+    const events = listEventsSince(ctx, mark2).filter((e) => e.type === 'session.updated');
+    expect(events.map((e) => (e.data as { changed: string[] }).changed)).toEqual([['role'], ['focusNodeId']]);
+  });
+
+  it('the answers line is one line of at most 300 characters', () => {
+    const { ctx, step, join } = setup();
+    join('s1');
+    const ask = raiseAsk(ctx, 'session:s1', { nodeId: step.id, kind: 'question', text: 'Q', sessionId: 's1' });
+    clearAsk(ctx, 'window', ask.id, `Yes.\n\n  Then   ${'x'.repeat(400)}`);
+    const line = handleHookEvent(ctx, 's1', { event: 'prompt', cwd: 'C:/personal/InGame' }).context!.split('\n')[0];
+    expect(line.startsWith(`Answered: a${ask.id} "Yes. Then xxx`)).toBe(true);
+    const answer = /"(.*)"$/.exec(line)![1];
+    expect(answer).toHaveLength(300);
+    expect(answer.endsWith('…')).toBe(true);
   });
 });

@@ -97,6 +97,12 @@ function markIfRelettered(ctx: Ctx, before: Session, next: Session): void {
   if (next.state !== 'ended' && before.slot !== next.slot) markBriefingDue(ctx, next.id);
 }
 
+/** An answer on one line, at most 300 characters with the ellipsis inside them. */
+function oneLine(text: string): string {
+  const line = text.replace(/\s+/g, ' ').trim();
+  return line.length > 300 ? `${line.slice(0, 299)}…` : line;
+}
+
 const clean = (text: string | undefined): string | null => text?.trim() || null;
 
 export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInput): HookEventResult {
@@ -318,7 +324,7 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
   if (input.event === 'prompt' && !input.notice) {
     const answers = undeliveredAnswers(ctx, sessionId);
     if (answers.length) {
-      const lines = answers.map((a) => (a.answer ? `Answered: ${askTag(a.id)} "${a.answer}"` : `Cleared: ${askTag(a.id)}, no answer`));
+      const lines = answers.map((a) => (a.answer ? `Answered: ${askTag(a.id)} "${oneLine(a.answer)}"` : `Cleared: ${askTag(a.id)}, no answer`));
       markAnswersDelivered(ctx, answers.map((a) => a.id));
       context = [...lines, ...(context ? [context] : [])].join('\n');
     }
@@ -424,11 +430,16 @@ export function claimStep(ctx: Ctx, actor: string, sessionId: string, nodeId: nu
     }
   }
   write(ctx, actor, (record) => {
-    const { existing, projectId } = applyFocus(ctx, record, sessionId, nodeId);
-    if (existing.role !== 'worker') {
+    // A claim names a step to work on: not the project root, not a dropped step (as raiseAsk refuses them).
+    if (target && target.parentId === null) throw badRequest(`#${nodeId} is the project root`, 'Claim the step you will work on.');
+    if (target && target.status === 'dropped') throw badRequest(`#${nodeId} is dropped`, 'Reopen it first, or claim another step.');
+    // The role first, so the focus event ("is on #id") is the latest line on the activity strip.
+    const existing = findSession(ctx, sessionId);
+    if (existing && existing.role !== 'worker' && existing.projectId !== null && isTracking(ctx, existing.projectId)) {
       ctx.db.prepare("UPDATE sessions SET role = 'worker' WHERE id = ?").run(sessionId);
-      record({ projectId, type: 'session.updated', entity: 'session', entityId: sessionId, data: { changed: ['role'], role: 'worker' } });
+      record({ projectId: existing.projectId, type: 'session.updated', entity: 'session', entityId: sessionId, data: { changed: ['role'], role: 'worker' } });
     }
+    applyFocus(ctx, record, sessionId, nodeId);
   });
   const session = findSession(ctx, sessionId)!;
   const snapshot = getProjectSnapshot(ctx, session.projectId!);
@@ -448,8 +459,9 @@ export function orchestrate(ctx: Ctx, actor: string, sessionId: string, o: { sta
   write(ctx, actor, (record) => {
     if (!isTracking(ctx, projectId)) throw notTracked(ctx, sessionId, projectId, 'Unarchive the project with update_project first.');
     ctx.db.prepare("UPDATE sessions SET role = 'orchestrator', focus_node_id = NULL WHERE id = ?").run(sessionId);
-    record({ projectId, type: 'session.updated', entity: 'session', entityId: sessionId, data: { changed: ['role', 'focusNodeId'], role: 'orchestrator', focusNodeId: null } });
+    // The session line last, so the activity strip's latest event is about the session (it has no session.orchestrate line).
     record({ projectId, type: 'session.orchestrate', entity: 'session', entityId: sessionId, data: { status: o.status, marks } });
+    record({ projectId, type: 'session.updated', entity: 'session', entityId: sessionId, data: { changed: ['role', 'focusNodeId'], role: 'orchestrator', focusNodeId: null } });
   });
   const session = findSession(ctx, sessionId)!;
   const nowMs = Date.parse(ctx.now());

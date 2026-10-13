@@ -154,7 +154,7 @@ describe('readDigest: sessions', () => {
     const { ctx, project, t0 } = setup();
     setClock(ctx, t0 + 3 * DAY);
     const endAt = t0 + 2 * DAY;
-    for (let i = 0; i < 5; i++) insertSession(ctx, project.id, `sw-${i}`, { slot: i, startedAt: iso(t0 + 1 * DAY), endedAt: iso(endAt + i * 5000) });
+    for (let i = 0; i < 5; i++) insertSession(ctx, project.id, `sw-${i}`, { slot: i, startedAt: iso(t0 + 1 * DAY), lastSeenAt: iso(endAt - 13 * HOUR), endedAt: iso(endAt + i * 5000) });
     insertSession(ctx, project.id, 'single', { slot: 7, startedAt: iso(t0 + 1 * DAY), endedAt: iso(endAt + 2 * HOUR), title: 'Single' });
     const d = readDigest(ctx, project.slug, iso(t0 + 1 * DAY));
     const text = formatDigest(d, Date.parse(ctx.now()));
@@ -177,7 +177,7 @@ describe('formatDigest and formatCounts', () => {
     expect(lines[0]).toBe(`Digest for InProgress since ${stamp(d.since)} (given):`);
     expect(lines[1]).toBe('Done (25):');
     expect(lines.filter((l) => l.startsWith('  #'))).toHaveLength(20);
-    expect(lines[lines.length - 1]).toBe(`+5 more (inprogress digest ${project.slug} --since ${d.since})`);
+    expect(lines[lines.length - 1]).toBe(`+5 more (inprogress digest ${project.slug} --since ${d.since} --all)`);
   });
 
   it('prints a section of three or fewer on one line, and nothing at all as "Nothing since"', () => {
@@ -205,5 +205,43 @@ describe('formatDigest and formatCounts', () => {
     addResource(ctx, 'scribe', { nodeId: group.id, kind: 'doc', title: 'H', content: 'x', purpose: 'handoff', sessionId: 's-2' });
     const text = formatCounts(readDigest(ctx, project.slug, iso(t0)), now);
     expect(text).toBe('Since your last look (3d): 4 done · 2 asks raised, 1 answered · 2 sessions ended, 1 without a handoff.');
+  });
+});
+
+describe('swept versus ordinary ends', () => {
+  it('keeps three ordinary ends in one minute as separate lines: only a sweep (12 hours or more unheard) groups', () => {
+    const { ctx, project, t0 } = setup();
+    setClock(ctx, t0 + 3 * DAY);
+    const endAt = t0 + 2 * DAY;
+    for (let i = 0; i < 3; i++) insertSession(ctx, project.id, `ord-${i}`, { slot: i, startedAt: iso(t0 + 1 * DAY), lastSeenAt: iso(endAt + i * 5000 - HOUR), endedAt: iso(endAt + i * 5000), title: `Ordinary ${i}` });
+    const d = readDigest(ctx, project.slug, iso(t0 + 1 * DAY));
+    expect(d.sessions.every((s) => s.sweptAt === null)).toBe(true);
+    const text = formatDigest(d, Date.parse(ctx.now()));
+    expect(text).not.toContain('swept');
+    expect(text).toContain('Sessions (3):');
+    for (let i = 0; i < 3; i++) expect(text).toContain(`"Ordinary ${i}"`);
+  });
+
+  it('groups only the swept ones when sweeps and ordinary ends share a minute', () => {
+    const { ctx, project, t0 } = setup();
+    setClock(ctx, t0 + 3 * DAY);
+    const endAt = t0 + 2 * DAY;
+    for (let i = 0; i < 3; i++) insertSession(ctx, project.id, `sw-${i}`, { slot: i, startedAt: iso(t0 + 1 * DAY), lastSeenAt: iso(endAt - 13 * HOUR), endedAt: iso(endAt + i * 1000) });
+    insertSession(ctx, project.id, 'plain', { slot: 5, startedAt: iso(t0 + 1 * DAY), lastSeenAt: iso(endAt - 60_000), endedAt: iso(endAt + 2000), title: 'Plain end' });
+    const text = formatDigest(readDigest(ctx, project.slug, iso(t0 + 1 * DAY)), Date.parse(ctx.now()));
+    expect(text).toContain('3 sessions swept as ended at');
+    expect(text).toContain('"Plain end"');
+  });
+
+  it('--all lifts the 20-line cap, and the cap hint names it', () => {
+    const { ctx, project, group, t0 } = setup();
+    addNodes(ctx, 'test', { parentId: group.id, nodes: Array.from({ length: 25 }, (_, i) => ({ title: `Step ${i + 1}`, status: 'done' as const, outcome: 'ok' })) });
+    setClock(ctx, t0 + 1 * DAY);
+    const d = readDigest(ctx, project.slug, iso(t0 - DAY));
+    const now = Date.parse(ctx.now());
+    expect(formatDigest(d, now).split('\n').pop()).toBe(`+5 more (inprogress digest ${project.slug} --since ${d.since} --all)`);
+    const all = formatDigest(d, now, { all: true }).split('\n');
+    expect(all.filter((l) => l.startsWith('  #'))).toHaveLength(25);
+    expect(all.join('\n')).not.toContain('more (');
   });
 });

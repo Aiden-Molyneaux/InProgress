@@ -23,7 +23,7 @@ export const nodeInput: z.ZodType<NodeInput> = z.lazy(() =>
 
 export const idParam = z.object({ id: z.coerce.number().int().positive() });
 export const sessionParam = z.object({ id: z.string().min(1).max(100) });
-export const digestQuery = z.object({ since: z.string().datetime().optional() });
+export const digestQuery = z.object({ since: z.string().datetime().optional(), all: z.enum(['1', 'true']).optional() });
 export const usageQuery = z.object({ days: z.coerce.number().int().min(1).max(60).default(7) });
 export const searchQuery = z.object({ project: z.string().min(1), q: z.string().min(1).max(200) });
 /** The window's Go to field: an id or words, as parseGoTo reads them (empty answers nothing), and the open project's slug. */

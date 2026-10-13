@@ -82,6 +82,9 @@ describe('argument parsing', () => {
     expect(parseAskArgs(['42', '--session', 's1'])).toEqual({ error: 'Give exactly one of --question, --permission, --review' });
     expect(parseAskArgs(['42', '--session', 's1', '--question', 'a', '--review', 'b'])).toEqual({ error: 'Give exactly one of --question, --permission, --review' });
     expect(parseAskArgs(['42', '--session', 's1', '--question'])).toEqual({ error: '--question needs the text' });
+    expect(parseAskArgs(['42', '--session', 's1', '--question', '--review'])).toEqual({ error: '--question needs the text' });
+    // Text that merely starts with -- is text.
+    expect(parseAskArgs(['42', '--session', 's1', '--question', '--force push ok?'])).toMatchObject({ kind: 'question', text: '--force push ok?' });
   });
 });
 
@@ -162,5 +165,25 @@ describe('claim, orchestrate and ask through runCli', () => {
     const s = capture();
     expect(await runAsk(['999999', '--session', 'a4', '--question', 'x'], s.out, conn)).toBe(1);
     expect(s.lines[0]).toMatch(/not found/i);
+  });
+});
+
+describe('a server too slow to answer', () => {
+  it('gets each command its own timeout hint, saying whether a rerun is safe', async () => {
+    const { createServer } = await import('node:http');
+    const slow = createServer((req) => req.resume());
+    await new Promise<void>((r) => slow.listen(0, '127.0.0.1', r));
+    try {
+      const slowConn = { baseUrl: `http://127.0.0.1:${(slow.address() as AddressInfo).port}`, token: 't', timeoutMs: 200 };
+      const { ASK_TIMEOUT_HINT, CLAIM_TIMEOUT_HINT, ORCHESTRATE_TIMEOUT_HINT } = await import('../../src/cli/claim');
+      await expect(runClaim(['4', '--session', 's1'], () => {}, slowConn)).rejects.toMatchObject({ code: 'TIMEOUT', hint: CLAIM_TIMEOUT_HINT });
+      await expect(runAsk(['4', '--session', 's1', '--question', 'x'], () => {}, slowConn)).rejects.toMatchObject({ code: 'TIMEOUT', hint: ASK_TIMEOUT_HINT });
+      await expect(runOrchestrate(['--session', 's1'], () => {}, slowConn)).rejects.toMatchObject({ code: 'TIMEOUT', hint: ORCHESTRATE_TIMEOUT_HINT });
+      expect(ORCHESTRATE_TIMEOUT_HINT).toContain('records another');
+      expect(CLAIM_TIMEOUT_HINT + ASK_TIMEOUT_HINT).not.toContain('replaced whole');
+    } finally {
+      slow.closeAllConnections();
+      slow.close();
+    }
   });
 });

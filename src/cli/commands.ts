@@ -12,7 +12,7 @@ import { openAppWindow } from './open';
 import { runTasks } from './tasks';
 
 const USAGE =
-  'Usage: inprogress <start | stop | open | status | outline <project> [--full] | tasks [<step id>] --session <session id> [--done|--doing|--todo "<subject>"]... | claim <step id> --session <session id> | ask <step id> --session <session id> --question|--permission|--review "<text>" | orchestrate --session <session id> [--status] | digest <project> [--since <iso>] | usage <project> [--days <n>] | doctor | claude-install | claude-uninstall | claude-check>';
+  'Usage: inprogress <start | stop | open | status | outline <project> [--full] | tasks [<step id>] --session <session id> [--done|--doing|--todo "<subject>"]... | claim <step id> --session <session id> | ask <step id> --session <session id> --question|--permission|--review "<text>" | orchestrate --session <session id> [--status] | digest <project> [--since <iso>] [--all] | usage <project> [--days <n>] | doctor | claude-install | claude-uninstall | claude-check>';
 /**
  * The first health check of a CLI run. A fresh process's first request is slow on a busy machine (fetch sets up its
  * HTTP parser), and 300 ms has called a running server down. Nothing listening still fails at once.

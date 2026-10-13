@@ -1,5 +1,5 @@
 import { deriveBoard, type Mark } from '../core/board';
-import { ASK_GLYPHS, TRAIL_MS, askTag, sessionTag, type Ask, type ProjectSnapshot } from '../core/types';
+import { ASK_GLYPHS, STALE_SESSION_MS, TRAIL_MS, askTag, sessionTag, type Ask, type ProjectSnapshot } from '../core/types';
 import type { Ctx } from './db/tx';
 import { listAsksClearedSince, listAsksRaisedSince } from './repo/asks';
 import { resolveProject } from './repo/projects';
@@ -23,6 +23,8 @@ export interface DigestSession {
   startedAt: string;
   /** MIN(ended_at, last_seen_at) for an ended session, else null. */
   endedAt: string | null;
+  /** The sweep's time (raw ended_at) when the stale-session sweep ended it: ended_at is 12 hours or more after last_seen_at. */
+  sweptAt: string | null;
   focusNodeId: number | null;
   handoff: boolean;
   openTasks: number;
@@ -92,7 +94,7 @@ export function readDigest(ctx: Ctx, ref: string | number, since?: string): Dige
   const rows = ctx.db
     .prepare(
       `SELECT id, title, slot, started_at, state, focus_node_id,
-              CASE WHEN state = 'ended' THEN MIN(ended_at, last_seen_at) END AS end_at,
+              CASE WHEN state = 'ended' THEN MIN(ended_at, last_seen_at) END AS end_at, ended_at AS raw_end, last_seen_at AS seen_at,
               (SELECT COUNT(*) FROM work_items w WHERE w.session_id = sessions.id AND w.status IN ('pending', 'in_progress')) AS open_tasks
          FROM sessions
         WHERE project_id = :project
@@ -107,6 +109,8 @@ export function readDigest(ctx: Ctx, ref: string | number, since?: string): Dige
     state: string;
     focus_node_id: number | null;
     end_at: string | null;
+    raw_end: string | null;
+    seen_at: string;
     open_tasks: number;
   }[];
   const sessions: DigestSession[] = rows.map((r) => ({
@@ -115,6 +119,7 @@ export function readDigest(ctx: Ctx, ref: string | number, since?: string): Dige
     title: r.title?.trim() || `Session ${r.id.slice(0, 6)}`,
     startedAt: r.started_at,
     endedAt: r.end_at,
+    sweptAt: r.state === 'ended' && r.raw_end !== null && Date.parse(r.raw_end) - Date.parse(r.seen_at) >= STALE_SESSION_MS ? r.raw_end : null,
     focusNodeId: r.focus_node_id,
     handoff: handoffSessions.has(r.id),
     openTasks: r.open_tasks,
@@ -218,8 +223,9 @@ interface Section {
 }
 
 function sessionItems(d: Digest, now: number): string[] {
-  // A run of SWEPT_RUN or more ends in the same minute is the sweep of stale sessions, not work: one line for the run.
-  const minuteOf = (s: DigestSession) => (s.endedAt === null ? null : s.endedAt.slice(0, 16));
+  // The sweep ends stale sessions together: ended_at is the sweep's time, 12 hours or more after they were last heard from.
+  // A run of SWEPT_RUN or more swept sessions in one minute is one line; ordinary ends in one minute stay separate.
+  const minuteOf = (s: DigestSession) => (s.sweptAt === null ? null : s.sweptAt.slice(0, 16));
   const runs = new Map<string, DigestSession[]>();
   for (const s of d.sessions) {
     const key = minuteOf(s);
@@ -233,7 +239,7 @@ function sessionItems(d: Digest, now: number): string[] {
       const key = minuteOf(s)!;
       if (announced.has(key)) continue;
       announced.add(key);
-      items.push(`${runs.get(key)!.length} sessions swept as ended at ${clock(s.endedAt!)}`);
+      items.push(`${runs.get(key)!.length} sessions swept as ended at ${clock(s.sweptAt!)}`);
       continue;
     }
     const notes = [
@@ -281,14 +287,14 @@ function sections(d: Digest, now: number): Section[] {
 /**
  * The digest as text: a header, then each non-empty section. A section of three items or fewer is one line joined by
  * " · "; a longer one has a line per item, indented two spaces. At most MAX_DIGEST_LINES items in all, then
- * `+n more (inprogress digest <slug> --since <iso>)`. Nothing at all prints `Nothing since <time>.`
+ * `+n more (inprogress digest <slug> --since <iso> --all)`; `all` lifts the cap. Nothing at all prints `Nothing since <time>.`
  */
-export function formatDigest(d: Digest, now: number): string {
+export function formatDigest(d: Digest, now: number, o: { all?: boolean } = {}): string {
   const sourceText = { given: 'given', state_note: 'state note', default: 'last 7 days' }[d.sinceSource];
   const all = sections(d, now).filter((s) => s.items.length);
   if (!all.length) return `Nothing since ${stamp(d.since)}.`;
   const lines = [`Digest for ${d.project.name} since ${stamp(d.since)} (${sourceText}):`];
-  let room = MAX_DIGEST_LINES;
+  let room = o.all ? Infinity : MAX_DIGEST_LINES;
   let omitted = 0;
   for (const s of all) {
     const shown = s.items.slice(0, Math.max(0, room));
@@ -299,6 +305,6 @@ export function formatDigest(d: Digest, now: number): string {
     if (s.items.length <= COMPACT_MAX) lines.push(`${head} ${shown.join(s.joiner ?? ' · ')}`);
     else lines.push(head, ...shown.map((i) => `  ${i}`));
   }
-  if (omitted) lines.push(`+${omitted} more (inprogress digest ${d.project.slug} --since ${d.since})`);
+  if (omitted) lines.push(`+${omitted} more (inprogress digest ${d.project.slug} --since ${d.since} --all)`);
   return lines.join('\n');
 }

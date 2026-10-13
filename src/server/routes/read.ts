@@ -31,9 +31,10 @@ export function registerReadRoutes(app: FastifyInstance, ctx: Ctx, version: stri
     return reply.type('text/plain; charset=utf-8').send(`${header.join('\n')}\n${body}`);
   });
   app.get('/api/projects/:ref/digest', async (req) => {
-    const digest = readDigest(ctx, (req.params as { ref: string }).ref, digestQuery.parse(req.query).since);
+    const query = digestQuery.parse(req.query);
+    const digest = readDigest(ctx, (req.params as { ref: string }).ref, query.since);
     const now = Date.parse(ctx.now());
-    return { digest, text: formatDigest(digest, now), counts: formatCounts(digest, now) };
+    return { digest, text: formatDigest(digest, now, { all: query.all !== undefined }), counts: formatCounts(digest, now) };
   });
   app.get('/api/projects/:ref/usage', async (req) => {
     const usage = readUsage(ctx, (req.params as { ref: string }).ref, usageQuery.parse(req.query).days);

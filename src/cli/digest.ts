@@ -1,7 +1,7 @@
 import { createClient } from '../lib/client';
 import { isServerUp } from '../lib/ensure-server';
 
-export const DIGEST_USAGE = 'Usage: inprogress digest <project> [--since <iso time>]';
+export const DIGEST_USAGE = 'Usage: inprogress digest <project> [--since <iso time>] [--all]';
 export const USAGE_USAGE = 'Usage: inprogress usage <project> [--days <n>]';
 
 /** `<project> [<flag> <value>]`: the project is the one argument that is not a flag or a flag's value. */
@@ -32,7 +32,8 @@ async function run(path: string, out: (line: string) => void, baseUrl: string, p
 
 /** `inprogress digest <project> [--since <iso>]`: prints the route's text. A bad time is refused here, before the server is asked. */
 export async function runDigest(args: string[], out: (line: string) => void, o: { baseUrl: string; probeMs: number }): Promise<number> {
-  const parsed = parseReport(args, '--since');
+  const all = args.includes('--all');
+  const parsed = parseReport(args.filter((a) => a !== '--all'), '--since');
   if ('error' in parsed) {
     out(parsed.error);
     out(DIGEST_USAGE);
@@ -43,7 +44,8 @@ export async function runDigest(args: string[], out: (line: string) => void, o: 
     out(DIGEST_USAGE);
     return 1;
   }
-  const query = parsed.value === undefined ? '' : `?since=${encodeURIComponent(new Date(Date.parse(parsed.value)).toISOString())}`;
+  const params = [...(parsed.value === undefined ? [] : [`since=${encodeURIComponent(new Date(Date.parse(parsed.value)).toISOString())}`]), ...(all ? ['all=1'] : [])];
+  const query = params.length ? `?${params.join('&')}` : '';
   const text = await run(`/api/projects/${encodeURIComponent(parsed.project)}/digest${query}`, out, o.baseUrl, o.probeMs);
   if (text === undefined) return 1;
   out(text);

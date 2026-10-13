@@ -65,13 +65,3 @@ export function cliAllowRules(cli: string): string[] {
 export function isCliAllowRule(rule: string): boolean {
   return new RegExp(String.raw`^(Bash|PowerShell)\(node \S+/dist/cli/main\.js (${CLI_SUBCOMMANDS.join('|')}) \*\)$`).test(rule);
 }
-
-/** The tasks rules alone, the first two of cliAllowRules (CLI_SUBCOMMANDS starts with tasks). */
-export function taskAllowRules(cli: string): string[] {
-  return cliAllowRules(cli).slice(0, 2);
-}
-
-/** A tasks allow rule for any repo path. */
-export function isTaskAllowRule(rule: string): boolean {
-  return /^(Bash|PowerShell)\(node \S+\/dist\/cli\/main\.js tasks \*\)$/.test(rule);
-}

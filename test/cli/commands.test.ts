@@ -254,7 +254,7 @@ describe('runCli', () => {
     it('exits 1 with the usage line when the project is missing or the time is not one', async () => {
       const missing = capture();
       expect(await runCli(['digest'], missing.out)).toBe(1);
-      expect(missing.lines).toEqual(['Missing <project>', 'Usage: inprogress digest <project> [--since <iso time>]']);
+      expect(missing.lines).toEqual(['Missing <project>', 'Usage: inprogress digest <project> [--since <iso time>] [--all]']);
       const bad = capture();
       expect(await runCli(['digest', 'cli-demo', '--since', 'yesterday'], bad.out)).toBe(1);
       expect(bad.lines[0]).toBe('Not a time: yesterday');
