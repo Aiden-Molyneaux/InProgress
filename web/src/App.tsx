@@ -4,6 +4,7 @@ import type { StepHit } from '../../src/core/goto';
 import type { ProjectSnapshot } from '../../src/core/types';
 import { api, postEvent } from './api';
 import { Board } from './board/Board';
+import { useLastLook } from './board/lastLook';
 import { ActivityStrip } from './chrome/ActivityStrip';
 import type { GoToHandle } from './chrome/GoTo';
 import { archivedProjects, neighbourTab, projectTabs, stepTab } from './chrome/tabs';
@@ -24,6 +25,7 @@ export function App() {
   const { snapshot, projects } = state;
   const [view, setView] = useState<View>(loadView);
   const now = useNow(30_000);
+  const lastLook = useLastLook(snapshot?.project.id ?? null);
   const [selectedNode, setSelectedNode] = useState<number | null>(null);
   // A node deleted while Details shows it closes Details: the snapshot before held it, the new one doesn't. A node picked
   // from Details' own lists can be newer than the snapshot on screen, so missing from one snapshot alone doesn't count.
@@ -179,7 +181,7 @@ export function App() {
             </div>
           ) : snapshot ? (
             view === 'board' ? (
-              <Board key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onOpenProject={() => pickView('project')} />
+              <Board key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onOpenProject={() => pickView('project')} lastLook={lastLook} />
             ) : (
               <ProjectView key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} />
             )

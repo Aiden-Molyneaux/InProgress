@@ -1606,3 +1606,328 @@ test.describe('Go to', () => {
     await expect(goToButton(page)).toBeFocused();
   });
 });
+
+// The Board (spec 2.2, 2.3, 2.8): header lines, Needs me, Now and Done, at both widths.
+
+const WIDE = { width: 1200, height: 900 };
+const NARROW = { width: 800, height: 900 };
+const band = (page: Page, name: 'needs' | 'now' | 'next' | 'done') => page.locator(`section.ip-band-${name}`);
+const nowRow = (page: Page, title: string) => page.locator('.ip-now-row', { has: page.getByRole('button', { name: title, exact: true }) });
+
+/** A background command started for the session, as the PostToolUse hook reports one. */
+const startCommand = (api: APIRequestContext, session: string, taskId: string, commandHead: string, extra: Record<string, unknown> = {}) =>
+  hook(api, session, { event: 'command-started', taskId, toolUseId: `toolu-${taskId}`, kind: 'shell', commandHead, description: 'Run the e2e suite', ...extra });
+
+/** A stop that lists the session's running background tasks, as the Stop hook reads them. */
+const stopWith = (api: APIRequestContext, session: string, running: { taskId: string; commandHead?: string }[]) =>
+  hook(api, session, { event: 'stop', background: running.map((r) => ({ type: 'shell', ...r })) });
+
+test.describe('Board', () => {
+  test('wide: Needs me, Next, Now and Done run left to right and show an ask, a session with its step, and a done outcome', async ({ page, api, fresh }) => {
+    await write(api, fresh.session, 'patch', `/api/nodes/${fresh.ids['Upload keystore']}`, { outcome: 'The upload key was accepted by Play' });
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const xs = await Promise.all((['needs', 'next', 'now', 'done'] as const).map(async (b) => (await band(page, b).boundingBox())!.x));
+    expect(xs).toEqual([...xs].sort((a, b) => a - b));
+    expect(new Set(xs).size, 'four columns side by side').toBe(4);
+    const needs = band(page, 'needs');
+    await expect(needs).toContainText('Which keystore signs the release?');
+    await expect(needs).toContainText(/migrated · \? question · (now|\d+m)/);
+    await expect(needs.getByRole('button', { name: `on #${fresh.ids['Run signing tests']} Run signing tests` })).toBeVisible();
+    await expect(needs.getByRole('button', { name: 'Answer…' })).toBeVisible();
+    await expect(needs.getByRole('button', { name: 'Clear' })).toBeVisible();
+    const now = nowRow(page, 'Play app signing');
+    await expect(now.locator('.ip-session')).toContainText('A');
+    await expect(now.locator('.ip-session .ip-char')).toHaveAttribute('data-state', 'work');
+    await expect(now.locator('.ip-state-word')).toHaveText('working');
+    await expect(now.locator('.ip-quote')).toContainText(`#${fresh.ids['Play app signing']}`);
+    // The crumb (the steps above it) shows on a wide row only.
+    await expect(now.locator('.ip-crumb')).toHaveText('Road to market › 2 Android signing');
+    const done = band(page, 'done').locator('.ip-done-row', { hasText: 'Upload keystore' });
+    await expect(done).toContainText('The upload key was accepted by Play');
+    await expect(done.locator('.ip-done-dot')).toHaveText('✓');
+    expect(await band(page, 'done').locator('.ip-done-row').count()).toBe(5);
+    // Done steps with no outcome carry a mark, and the header counts the marked steps and names them.
+    await expect(band(page, 'done').locator('.ip-done-row', { hasText: '1 iOS certificate' }).locator('.ip-mark')).toHaveText('no outcome');
+    await expect(page.locator('.ip-hygiene')).toHaveAttribute('title', new RegExp(`#${fresh.ids['1 iOS certificate']} no_outcome`));
+    await expect(page.locator('.ip-hdr')).toContainText('No state note yet');
+  });
+
+  test('narrow: the bands stack as Needs me, Now, Next, Done, and Now drops the crumb', async ({ page, fresh }) => {
+    await page.setViewportSize(NARROW);
+    await open(page, fresh);
+    await expect(page.locator('.ip-band > h3:first-child')).toHaveText(['Needs me', 'Now', 'Next', 'Done']);
+    const tops = await Promise.all((['needs', 'now', 'next', 'done'] as const).map(async (b) => (await band(page, b).boundingBox())!.y));
+    expect(tops).toEqual([...tops].sort((a, b) => a - b));
+    await expect(nowRow(page, 'Play app signing')).toBeVisible();
+    await expect(page.locator('.ip-crumb')).toHaveCount(0);
+  });
+
+  test('the header shows the state note as the Orchestrator and opens the Project view, and lists a working session with no step', async ({ page, api, fresh }) => {
+    await write(api, fresh.session, 'post', '/api/resources', { nodeId: fresh.root, kind: 'doc', title: 'State', purpose: 'state', content: '# Where we are\n\nSigning is half done. The tests come next.' });
+    const second = `e2e-${randomUUID()}`;
+    await write(api, second, 'post', `/api/sessions/${second}/enroll`, { project: fresh.slug, title: 'Second session' });
+    await hook(api, second, { event: 'prompt' });
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const header = page.locator('.ip-hdr');
+    await expect(header.locator('.ip-msg-head')).toContainText(/Orchestrator · (now|\d+m)/);
+    await expect(header).toContainText('Signing is half done.');
+    await expect(header).not.toContainText('The tests come next');
+    const sessions = header.getByRole('group', { name: 'No claimed step' });
+    await expect(sessions).toContainText('B');
+    await expect(sessions).toContainText('working');
+    // The first session is on a Now row, so it is not listed here.
+    await expect(sessions.locator('.ip-hdr-session')).toHaveCount(1);
+    await header.getByRole('button', { name: 'Project view ›' }).click();
+    await expect(page.getByRole('heading', { name: 'Steps', exact: true })).toBeVisible();
+  });
+
+  test('a permission wait is an amber message with the ringed character, the command and the step, and a Now row says needs permission', async ({ page, api, fresh }) => {
+    await startCommand(api, fresh.session, 'b1', 'npm run build');
+    await hook(api, fresh.session, { event: 'permission' });
+    await open(page, fresh);
+    const wait = band(page, 'needs').locator('.ip-wait');
+    await expect(wait).toContainText(/A is waiting · ⚿ permission · (<1m|\d+m) · LIVE/);
+    await expect(wait.locator('.ip-code')).toHaveText('Shell npm run build');
+    await expect(wait.getByRole('button', { name: `on #${fresh.ids['Play app signing']} Play app signing` })).toBeVisible();
+    await expect(wait.locator('.ip-char')).toHaveAttribute('data-state', 'wait');
+    await expect(wait.locator('.ip-char-ring2')).toHaveCSS('animation-name', 'ip-ring');
+    await expect(wait).toHaveCSS('background-color', 'rgba(251, 191, 36, 0.18)');
+    // Permission waits come before asks, and have no buttons of their own.
+    await expect(band(page, 'needs').locator('.ip-inbox > li').first()).toHaveClass(/ip-wait/);
+    await expect(wait.getByRole('button', { name: /Answer|Clear/ })).toHaveCount(0);
+    // On the Now row the session's word is amber, and its character wears the ring.
+    const session = nowRow(page, 'Play app signing').locator('.ip-session');
+    await expect(session.locator('.ip-state-word')).toHaveText('needs permission');
+    await expect(session.locator('.ip-state-word')).toHaveCSS('color', 'rgb(146, 64, 14)');
+    await expect(session.locator('.ip-char')).toHaveAttribute('data-state', 'wait');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await expect(session.locator('.ip-char-ring2')).toHaveCSS('animation-name', 'none');
+    await expect(session.locator('.ip-char-ring')).toBeVisible();
+    // Going on ends the wait.
+    await hook(api, fresh.session, { event: 'prompt' });
+    await expect(wait).toHaveCount(0);
+  });
+
+  test('Answer… opens a field that takes focus, Escape returns to the button, and Enter clears the ask with the answer', async ({ page, api, fresh }) => {
+    await open(page, fresh);
+    const row = band(page, 'needs').locator('.ip-ask');
+    const answer = row.getByRole('button', { name: 'Answer…' });
+    await answer.click();
+    const field = row.getByRole('textbox');
+    await expect(field).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(field).toHaveCount(0);
+    await expect(answer).toBeFocused();
+    await answer.click();
+    await field.fill('Use the upload key');
+    await page.keyboard.press('Enter');
+    await expect(band(page, 'needs')).toContainText('Nothing needs you');
+    await expect(row).toHaveCount(0);
+    // The ask is cleared with the answer, by the window.
+    const snapshot = (await (await api.get(`/api/projects/${fresh.slug}`)).json()) as { asks: { id: number; answer: string; clearedBy: string | null }[] };
+    expect(snapshot.asks.find((a) => a.id === fresh.ask)).toMatchObject({ answer: 'Use the upload key', clearedBy: 'window' });
+  });
+
+  test('Clear removes an ask with no answer, and an ask raised with no session reads migrated with its kind', async ({ page, api, fresh }) => {
+    await write(api, fresh.session, 'post', `/api/nodes/${fresh.ids['Play app signing']}/asks`, { kind: 'review', text: 'Is the keystore setup right?' });
+    await open(page, fresh);
+    const row = band(page, 'needs').locator('.ip-ask', { hasText: 'Is the keystore setup right?' });
+    await expect(row.locator('.ip-msg-head')).toContainText(/migrated · ◎ review · (now|\d+m)/);
+    await row.getByRole('button', { name: 'Clear' }).click();
+    await expect(row).toHaveCount(0);
+    const snapshot = (await (await api.get(`/api/projects/${fresh.slug}`)).json()) as { asks: { text: string; answer: string; clearedAt: string | null }[] };
+    expect(snapshot.asks.find((a) => a.text === 'Is the keystore setup right?')).toMatchObject({ answer: '' });
+    expect(snapshot.asks.find((a) => a.text === 'Is the keystore setup right?')?.clearedAt).not.toBeNull();
+    // Clearing did not open Details.
+    await expect(page.getByRole('complementary')).toHaveCount(0);
+  });
+
+  test('a click on a row opens its Details, and the row buttons do not', async ({ page, fresh }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const details = page.getByRole('complementary');
+    await nowRow(page, 'Play app signing').locator('.ip-quote').click({ position: { x: 4, y: 4 } });
+    await expect(details).toContainText(`#${fresh.ids['Play app signing']} Play app signing`);
+    await page.keyboard.press('Escape');
+    await expect(details).toHaveCount(0);
+    await band(page, 'done').locator('.ip-done-row', { hasText: 'Upload keystore' }).locator('.ip-done-age').click();
+    await expect(details).toContainText(`#${fresh.ids['Upload keystore']} Upload keystore`);
+    await page.keyboard.press('Escape');
+    await band(page, 'needs').getByRole('button', { name: `on #${fresh.ids['Run signing tests']} Run signing tests` }).click();
+    await expect(details).toContainText(`#${fresh.ids['Run signing tests']} Run signing tests`);
+    await page.keyboard.press('Escape');
+    // Answer… is the row's own button: it opens its field, not Details.
+    await band(page, 'needs').getByRole('button', { name: 'Answer…' }).click();
+    await expect(details).toHaveCount(0);
+  });
+
+  test('"New since you looked" crosses Done at the last look, and narrow folds what is older into one line', async ({ page, api, fresh }) => {
+    const project = (await (await api.get(`/api/projects/${fresh.slug}`)).json()) as { project: { id: number } };
+    const done = (title: string) => write(api, fresh.session, 'post', '/api/nodes', { parentId: fresh.root, nodes: [{ title, status: 'done' }] });
+    await done('Older step');
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const look = new Date().toISOString();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    await done('Newer step');
+    await page.addInitScript(`localStorage.setItem('ip.look.${project.project.id}', '${look}')`);
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const rows = band(page, 'done').locator('.ip-timeline > li');
+    await expect(rows.nth(0)).toContainText('Newer step');
+    await expect(rows.nth(1)).toHaveAttribute('role', 'separator');
+    await expect(rows.nth(1)).toHaveText('New since you looked');
+    await expect(rows.nth(2)).toContainText('Older step');
+    await page.setViewportSize(NARROW);
+    await expect(band(page, 'done').getByRole('button', { name: 'Newer step', exact: true })).toBeVisible();
+    await expect(band(page, 'done').getByRole('button', { name: 'Older step', exact: true })).toHaveCount(0);
+    await expect(band(page, 'done').locator('.ip-done-fold')).toHaveText('✓ 4 earlier');
+  });
+
+  test('leaving the window stamps the last look under ip.look.<id>', async ({ page, api, fresh }) => {
+    await open(page, fresh);
+    const id = ((await (await api.get(`/api/projects/${fresh.slug}`)).json()) as { project: { id: number } }).project.id;
+    await expect(page.getByRole('heading', { name: 'Now', exact: true })).toBeVisible();
+    expect(await page.evaluate<string | null>(`localStorage.getItem('ip.look.${id}')`)).toBeNull();
+    await page.evaluate(`window.dispatchEvent(new Event('blur'))`);
+    const stamped = await page.evaluate<string | null>(`localStorage.getItem('ip.look.${id}')`);
+    expect(Date.now() - Date.parse(stamped!)).toBeLessThan(10_000);
+  });
+
+  test('a running subagent is a chip on its session with its time; readers get none, and an idle session with a worker reads busy', async ({ page, api, fresh }) => {
+    await subagent(api, fresh, 'agent-1', 'Wire up RevenueCat', 'sonnet');
+    await subagent(api, fresh, 'agent-2', 'Check the paywall', 'haiku');
+    await hook(api, fresh.session, { event: 'subagent-stop', agentId: 'agent-2' });
+    await subagent(api, fresh, 'reader-1', 'Map the signing config', 'haiku', { agentType: 'Explore' });
+    await open(page, fresh);
+    const session = nowRow(page, 'Play app signing').locator('.ip-session');
+    const kin = session.getByRole('group', { name: '1 subagent' });
+    await expect(kin).toBeVisible();
+    await expect(kin.locator('.ip-kin-chip')).toHaveCount(1);
+    await expect(kin.getByRole('img', { name: new RegExp(`^a1 · Wire up RevenueCat · sonnet · ${RUNNING}$`) })).toBeVisible();
+    await expect(kin.locator('.ip-kin-chip .ip-time')).toHaveText(/^(<1m|\d+m)$/);
+    await expect(kin.locator('.ip-kin-chip .ip-char')).toHaveAttribute('data-state', 'work');
+    await expect(kin.locator('.ip-agent-tag')).toHaveCSS('color', 'rgb(11, 107, 125)');
+    // The session stops with its workers still running: idle with work is busy.
+    await hook(api, fresh.session, { event: 'stop' });
+    await expect(session.locator('.ip-char').first()).toHaveAttribute('data-state', 'busy');
+    await expect(session.locator('.ip-state-word')).toHaveText('busy');
+  });
+
+  test('a session busy on a command reads busy with a commands line, which ends with a check and then a bang when the Stop drops it', async ({ page, api, fresh }) => {
+    await startCommand(api, fresh.session, 'b1', 'npm run test:e2e');
+    await stopWith(api, fresh.session, [{ taskId: 'b1', commandHead: 'npm run test:e2e' }]);
+    await open(page, fresh);
+    const session = nowRow(page, 'Play app signing').locator('.ip-session');
+    const line = session.locator('.ip-commands');
+    await expect(session.locator('.ip-char').first()).toHaveAttribute('data-state', 'busy');
+    await expect(session.locator('.ip-state-word')).toHaveText('busy');
+    await expect(line).toHaveText(/^▸ A · npm run test:e2e · <1m$/);
+    await expect(line).toHaveAttribute('title', /^npm run test:e2e · Run the e2e suite · <1m$/);
+    await expect(line).toHaveRole('group');
+    await hook(api, fresh.session, { event: 'prompt', notice: true, tasks: [{ taskId: 'b1', status: 'completed', exitCode: 0 }] });
+    await stopWith(api, fresh.session, []);
+    await expect(line).toHaveText(/^✓ A · npm run test:e2e$/);
+    await expect(line).toHaveAttribute('title', /completed \(exit 0\)/);
+    // A command the next Stop no longer lists greys with a bang.
+    await startCommand(api, fresh.session, 'b4', 'npm run lint', { durationMs: 60_000 });
+    await stopWith(api, fresh.session, [{ taskId: 'b4', commandHead: 'npm run lint' }]);
+    await expect(line).toHaveText(/^▸ A · npm run lint · (<1m|1m)$/);
+    await hook(api, fresh.session, { event: 'prompt' });
+    await stopWith(api, fresh.session, []);
+    await expect(line).toHaveText(/^! A · npm run lint( \+1)?$/);
+    await expect(session.locator('.ip-char').first()).toHaveAttribute('data-state', 'idle');
+  });
+
+  test("a subagent's command wears the subagent's tag, and a server command reads serving", async ({ page, api, fresh }) => {
+    await subagent(api, fresh, 'agent-1', `#${fresh.ids['Play app signing']} Build the app`, 'sonnet');
+    await startCommand(api, fresh.session, 'b7', 'npm run build', { agentId: 'agent-1', description: 'Build the app' });
+    await open(page, fresh);
+    const line = nowRow(page, 'Play app signing').locator('.ip-commands');
+    await expect(line).toHaveText(/^▸ a1 · npm run build · <1m$/);
+    const served = await seed(api, unique('Serving'));
+    await startCommand(api, served.session, 'b9', 'npm run dev', { description: 'Dev server', durationMs: 3 * 3_600_000 });
+    await stopWith(api, served.session, [{ taskId: 'b9', commandHead: 'npm run dev' }]);
+    await open(page, served);
+    const serving = nowRow(page, 'Play app signing').locator('.ip-commands');
+    await expect(serving).toHaveText(/^◦ A · npm run dev · serving (3h|2h59m)$/);
+    await expect(serving).toHaveClass(/\bserving\b/);
+  });
+
+  test('a Now step with no session reads No session, YOU, Your step: nobody is on it', async ({ page, api, fresh }) => {
+    await write(api, fresh.session, 'patch', `/api/nodes/${fresh.ids['Run signing tests']}`, { status: 'active' });
+    await open(page, fresh);
+    const row = nowRow(page, 'Run signing tests');
+    await expect(row.locator('.ip-nosession')).toContainText('No session · YOU');
+    await expect(row.locator('.ip-nosession')).toContainText('Your step: nobody is on it');
+    await expect(row.locator('.ip-nosession .ip-you')).toHaveCSS('color', 'rgb(146, 64, 14)');
+  });
+
+  test('a label is a glyph and its word in muted ink on the row, and Details names it in its meta line; its log entries wear Quiet', async ({ page, api, fresh }) => {
+    await write(api, fresh.session, 'patch', `/api/nodes/${fresh.ids['Play app signing']}`, { label: 'ui' });
+    await open(page, fresh);
+    const row = nowRow(page, 'Play app signing');
+    const chip = row.getByRole('img', { name: 'ui' });
+    await expect(chip).toHaveText('⧉ ui');
+    await expect(chip).toHaveAttribute('title', 'ui');
+    await expect(chip).toHaveCSS('color', 'rgb(71, 85, 105)');
+    await expect(chip).toHaveCSS('font-variant-emoji', 'text');
+    await row.getByRole('button', { name: 'Play app signing', exact: true }).click();
+    // Beside kind and status: "active task · ⧉ ui · Claude".
+    const meta = page.getByRole('complementary').locator('.ip-meta');
+    await expect(meta.locator('.ip-meta-label')).toHaveText('· ⧉ ui');
+    await expect(meta).toHaveText(/^active\s*task\s*· ⧉ ui\s*· Claude/);
+    await expect(meta.locator('.ip-glyph')).toHaveCSS('font-variant-emoji', 'text');
+    await expect(meta.locator('.ip-marker.m-active')).toHaveCount(1);
+    await expect(meta.locator('.ip-pill')).toHaveCount(0);
+    await expect(meta).toHaveCSS('font-size', '11px');
+    await expect(meta).toHaveCSS('color', 'rgb(71, 85, 105)');
+    // The log: the time in DM Mono, the text in ink, the session muted and upright. The entry arrives live.
+    await write(api, fresh.session, 'post', `/api/nodes/${fresh.ids['Play app signing']}/log`, { text: 'Uploaded the key', sessionId: fresh.session });
+    const entry = page.getByRole('complementary').locator('.ip-log li');
+    await expect(entry).toHaveText('just now · Uploaded the key · E2E session');
+    await expect(entry.locator('.ip-log-time')).toHaveCSS('font-family', /DM Mono/);
+    await expect(entry.locator('.ip-log-text')).toHaveCSS('color', 'rgb(30, 41, 59)');
+    await expect(entry.locator('i')).toHaveCount(0);
+  });
+
+  test('a row opens Details, which copies a reference, wears Quiet, and lists its steps with their markers and YOU tag', async ({ page, demo }) => {
+    await open(page, demo);
+    const id = demo.ids['Run signing tests'];
+    const details = await openDetails(page, 'Run signing tests');
+    await expect(details).toContainText(`#${id} Run signing tests`);
+    await details.getByRole('button', { name: `Copy #${id}` }).click();
+    // The clipboard write has finished once the button says so.
+    await expect(details.getByRole('button', { name: 'Copied' })).toBeVisible();
+    // String form: the root tsconfig has no DOM lib, so `navigator` must not appear in test code.
+    expect(await page.evaluate<string>('navigator.clipboard.readText()')).toBe(`#${id} Run signing tests`);
+    // Quiet: an opaque sheet with an 8 px top radius, the title in L ink, 24 px hairline buttons.
+    await expect(details).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+    await expect(details).toHaveCSS('border-top-left-radius', '8px');
+    const title = details.locator('header b');
+    await expect(title).toHaveCSS('font-size', '15px');
+    await expect(title).toHaveCSS('font-weight', '900');
+    await expect(title).toHaveCSS('color', 'rgb(15, 23, 42)');
+    await expect(details.getByRole('button', { name: 'Close' })).toHaveCSS('height', '24px');
+    // Its steps draw the marker: a check when done, a still orange dot when active, the needs-you mark and YOU.
+    await details.getByRole('button', { name: /2 Android signing/ }).click();
+    await expect(details).toContainText(`#${demo.ids['2 Android signing']} 2 Android signing`);
+    const steps = details.locator('.ip-kids li');
+    await expect(steps).toHaveText([/Upload keystore$/, /Play app signing$/, /Run signing tests\s*YOU$/]);
+    // The stylesheet draws the check, so the marker holds no text and the step's name starts with its #id.
+    await expect(steps.nth(0).locator('.ip-marker.m-done')).toHaveText('');
+    expect(await page.evaluate<string>(`getComputedStyle(document.querySelector('.ip-kids .ip-marker.m-done'), '::before').content`)).toMatch(/^"✓"/);
+    await expect(steps.nth(0).getByRole('button')).toHaveAccessibleName(`#${demo.ids['Upload keystore']} Upload keystore`);
+    const active = steps.nth(1).locator('.ip-marker.m-active');
+    await expect(active).toHaveCSS('background-color', 'rgb(194, 65, 12)');
+    await expect(active).toHaveCSS('animation-name', 'none');
+    await expect(steps.nth(2).locator('.ip-marker.m-you')).toHaveCount(1);
+    // Its YOU is the tag: amber ink on the amber tint, 18 px tall, S at 900.
+    const you = steps.nth(2).locator('.ip-you');
+    await expect(you).toHaveCSS('color', 'rgb(146, 64, 14)');
+    await expect(you).toHaveCSS('background-color', 'rgba(251, 191, 36, 0.18)');
+    await expect(you).toHaveCSS('height', '18px');
+    await expect(you).toHaveCSS('font-weight', '900');
+  });
+});

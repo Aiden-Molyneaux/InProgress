@@ -11,4 +11,6 @@ export interface ViewProps {
   onOpenResource: (id: number) => void;
   /** The Board's "Where we are" line opens the Project view. */
   onOpenProject?: () => void;
+  /** Where the Board's "new since you looked" divider sits (spec 1.7); null when there is none. */
+  lastLook?: string | null;
 }
