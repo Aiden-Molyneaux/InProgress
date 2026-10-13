@@ -423,16 +423,18 @@ li.ip-orow:hover { background: var(--panel-2); }
 /* In Details the heads sit further from the section above, in --text-2, so the sections read apart. */
 .ip-details > .ip-label { margin: 18px 0 6px; color: var(--text-2); }
 /* Every entry in Details (an ask, a task, a subagent, a command, ended work, a resource, a step, a log line) sits on its
-   own soft row, so the entries read apart. A row that opens something deepens on hover. */
-.ip-details :is(.ip-dasks, .ip-wts, .ip-dagents, .ip-log) > li, .ip-res, .ip-kids li button { margin: 0 0 3px; padding: 4px 8px; border-radius: var(--radius); line-height: 18px; background: var(--panel-2); }
-.ip-res:hover, .ip-kids li button:hover { background: var(--track); }
+   own soft row, so the entries read apart. A row that opens something deepens on hover and its title takes full ink,
+   which carries the hover at night, where the two fills are close. */
+.ip-details :is(.ip-dasks, .ip-wts, .ip-dagents, .ip-log) > li, .ip-details .ip-res, .ip-details .ip-kids li button { margin: 0 0 3px; padding: 4px 8px; border-radius: var(--radius); background: var(--panel-2); }
+.ip-details .ip-res:hover, .ip-details .ip-kids li button:hover { background: var(--track); }
+.ip-details .ip-res:hover b { color: var(--text); }
 .ip-outcome { margin: 8px 0; }
 .ip-outcome b { font-weight: var(--w-heavy); }
 /* A resource: a muted row, its title in ink at 500, its summary in DM Mono. */
 .ip-res { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; color: var(--muted); }
 .ip-res b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--w-text); color: var(--text-2); }
 .ip-res .sub { flex: none; margin-left: auto; font-family: var(--font-mono); font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
-/* Working tasks, subagents and ended work: text lines with the canvas rows' marks. The tag in DM Mono in the hue, ◐ in
+/* Working tasks, subagents and ended work: rows with the canvas rows' marks. The tag in DM Mono in the hue, ◐ in
    the active ink and still, ○ and ✓ muted, a stale ○ faint, the hue bar on the session's own tasks only. */
 .ip-wts, .ip-dagents { list-style: none; margin: 0; padding: 0; }
 .ip-wt, .ip-dagent { color: var(--text-2); }
