@@ -8,7 +8,7 @@ import { useLastLook } from './board/lastLook';
 import { noteAction, noteHidden, noteShown, setPoster } from './measure';
 import { ActivityStrip } from './chrome/ActivityStrip';
 import type { GoToHandle } from './chrome/GoTo';
-import { archivedProjects, neighbourTab, projectTabs, stepTab } from './chrome/tabs';
+import { archivedProjects, loadTabOrder, moveTab, neighbourTab, projectTabs, pruneOrder, saveTabOrder, stepTab, TAB_ORDER_KEY } from './chrome/tabs';
 import { TopBar } from './chrome/TopBar';
 import { DoneList } from './done/DoneList';
 import { Details } from './panels/Details';
@@ -98,7 +98,40 @@ export function App() {
     postEvent('view', snapshot?.project.id ?? null, { view: v });
   };
   // The tabs follow the picked slug, not the loaded snapshot, so a tab lights up on the click and [ ] step on from it.
-  const tabs = useMemo(() => projectTabs(projects, state.slug), [projects, state.slug]);
+  // The tab order Aiden dragged, kept in the window's localStorage. A second window follows a move through `storage`.
+  const [order, setOrder] = useState(loadTabOrder);
+  const tabs = useMemo(() => projectTabs(projects, state.slug, order), [projects, state.slug, order]);
+  const orderNow = useRef(order);
+  useLayoutEffect(() => {
+    orderNow.current = order;
+  }, [order]);
+  // A project that left the active list (archived, deleted or purged) loses its place, so it returns at the end. Only
+  // once the server's list has loaded: the empty list before it would drop every place. It runs when this window's list
+  // changes, not when another window's order arrives: that window may already list as active a project this one has
+  // not caught up on, and saving the prune would undo its move.
+  useEffect(() => {
+    if (!state.loaded) return;
+    const kept = pruneOrder(orderNow.current, projects);
+    if (kept.length < orderNow.current.length) {
+      setOrder(kept);
+      saveTabOrder(kept);
+    }
+  }, [projects, state.loaded]);
+  useEffect(() => {
+    const changed = (e: StorageEvent) => {
+      if (e.key === TAB_ORDER_KEY) setOrder(loadTabOrder());
+    };
+    window.addEventListener('storage', changed);
+    return () => window.removeEventListener('storage', changed);
+  }, []);
+  const onMoveTab = (id: number, before: number | null) => {
+    const next = moveTab(tabs, id, before);
+    const shown = tabs.filter((t) => t.status === 'active').map((t) => t.id);
+    if (next.join() === shown.join()) return;
+    setOrder(next);
+    saveTabOrder(next);
+    noteAction('header', 'tab_move');
+  };
   const archived = useMemo(() => archivedProjects(projects), [projects]);
   const stepProject = (step: 1 | -1) => {
     const slug = stepTab(tabs, state.slug, step);
@@ -239,7 +272,7 @@ export function App() {
   return (
     <>
       <div className="ip-app" ref={app}>
-        <TopBar tabs={tabs} archived={archived} deleted={state.deleted} current={state.slug} onSelect={state.selectProject} onAction={onAction} onRename={onRename} goTo={goToField} onGoTo={goTo} view={view} onView={pickView} />
+        <TopBar tabs={tabs} archived={archived} deleted={state.deleted} current={state.slug} onSelect={state.selectProject} onAction={onAction} onRename={onRename} onMove={onMoveTab} goTo={goToField} onGoTo={goTo} view={view} onView={pickView} />
         {state.connection === 'reconnecting' && <div className="ip-banner">Reconnecting to InProgress…</div>}
         <main className="ip-main">
           {projects.length === 0 ? (

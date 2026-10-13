@@ -405,6 +405,70 @@ test('the tabs hold every active project, oldest first, mark the current one and
   await expect(page).toHaveURL(new RegExp(`#/p/${newer.slug}$`));
 });
 
+test('a tab drags to a new place, Alt+arrows move the focused tab, and the order holds across a reload', async ({ page, api }) => {
+  await widen(page);
+  const names = [unique('Tabs drag a'), unique('Tabs drag b'), unique('Tabs drag c')];
+  await bare(api, names[0]);
+  const b = await bare(api, names[1]);
+  await bare(api, names[2]);
+  /** Our projects' titles, in strip order, among whatever other tests left. */
+  const ours = async (extra: string[] = []) => (await tabTitles(page)).filter((t) => [...names, ...extra].includes(t ?? ''));
+  await page.goto(`/#/p/${b.slug}`);
+  await expect(tabFor(page, names[2])).toBeVisible();
+  expect(await ours()).toEqual(names);
+  // The newest tab dragged onto the left half of the oldest lands before it.
+  await tabFor(page, names[2]).dragTo(tabFor(page, names[0]), { targetPosition: { x: 4, y: 10 } });
+  await expect.poll(() => ours()).toEqual([names[2], names[0], names[1]]);
+  // The drag did not open the tab: the selection stayed on b.
+  await expect(tabFor(page, names[1])).toHaveAttribute('aria-selected', 'true');
+  await page.reload();
+  await expect(tabFor(page, names[2])).toBeVisible();
+  expect(await ours()).toEqual([names[2], names[0], names[1]]);
+  // Alt+Right moves the focused tab one place right and leaves focus on it. It neither selects a tab nor goes back.
+  await tabFor(page, names[0]).focus();
+  await page.keyboard.press('Alt+ArrowRight');
+  await expect.poll(() => ours()).toEqual([names[2], names[1], names[0]]);
+  await expect(tabFor(page, names[0])).toBeFocused();
+  await expect(tabFor(page, names[1])).toHaveAttribute('aria-selected', 'true');
+  await expect(page).toHaveURL(new RegExp(`#/p/${b.slug}$`));
+  // A tab dragged to the right keeps the focus its press gave it, so the keys still reach the strip. Chromium keeps it
+  // even without TabStrip's refocus after a drop, so this checks the outcome, not that guard.
+  const last = (await tabFor(page, names[0]).boundingBox())!;
+  await tabFor(page, names[2]).dragTo(tabFor(page, names[0]), { targetPosition: { x: last.width - 4, y: 10 } });
+  await expect.poll(() => ours()).toEqual([names[1], names[0], names[2]]);
+  await expect(tabFor(page, names[2])).toBeFocused();
+  // A project made after the move joins at the end.
+  const fourth = unique('Tabs drag d');
+  await bare(api, fourth);
+  await expect(tabFor(page, fourth)).toBeVisible();
+  expect(await ours([fourth])).toEqual([names[1], names[0], names[2], fourth]);
+});
+
+test('a tab dragged near the edge of a narrow strip scrolls it', async ({ page, api }) => {
+  await page.setViewportSize({ width: 420, height: 900 });
+  const names = [1, 2, 3, 4, 5].map((n) => unique(`Tabs edge ${n}`));
+  for (const name of names) await bare(api, name);
+  await page.goto('/');
+  await expect(tabFor(page, names[4])).toBeAttached();
+  // The window has opened a project and revealed its tab, so nothing else scrolls the strip from here.
+  await expect(page.getByRole('tab', { selected: true })).toHaveCount(1);
+  expect(await page.evaluate<boolean>(`${STRIP}.scrollWidth > ${STRIP}.clientWidth`), 'the tabs overflow').toBe(true);
+  await page.evaluate(`${STRIP}.scrollLeft = 0`);
+  const box = (await page.locator('.ip-tabs').boundingBox())!;
+  expect(box.x + box.width, 'the strip ends inside the window').toBeLessThanOrEqual(420);
+  const first = (await page.getByRole('tab').first().boundingBox())!;
+  await page.mouse.move(first.x + first.width / 2, first.y + first.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 4 });
+  for (let i = 0; i < 10; i++) await page.mouse.move(box.x + box.width / 2 - (i % 2), box.y + box.height / 2);
+  expect(await stripScroll(page), 'the middle of the strip does not scroll it').toBe(0);
+  // Held a few pixels inside the right edge. Chromium (Edge hosts the window) scrolls a scroll box under a drag near its
+  // edge, so the strip has no code of its own for this. The test guards that the strip stays such a box.
+  for (let i = 0; i < 10; i++) await page.mouse.move(box.x + box.width - 4 - (i % 2), box.y + box.height / 2);
+  await expect.poll(() => stripScroll(page)).toBeGreaterThan(0);
+  await page.mouse.up();
+});
+
 test('a tab shows how many items need you and, while a session works there, a pulsing dot', async ({ page, api }) => {
   const busyName = unique('Tabs busy');
   const quietName = unique('Tabs quiet');

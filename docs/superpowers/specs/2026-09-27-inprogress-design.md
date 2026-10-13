@@ -503,8 +503,9 @@ of any checkout by pattern.
 
 ### 7.1 Shell (see approved mockups, `.superpowers/brainstorm/`)
 
-- **Tab strip** (replaced the dropdown on 2026-10-02, #44): one tab per active project in a fixed
-  order (oldest first), each with an amber needs-you count and a clay dot while a session works
+- **Tab strip** (replaced the dropdown on 2026-10-02, #44): one tab per active project, oldest
+  first until Aiden drags a tab or moves it with Alt+Left / Alt+Right (the order is stored in `localStorage`;
+  new or unarchived projects join at the end), each with an amber needs-you count and a clay dot while a session works
   there; archived projects in a `⋯` menu; scrolls sideways and keeps the current tab in view. Keys
   `[` / `]` and `1`-`9`; `role="tablist"`. The selection is stored in `localStorage` and the URL
   hash `#/p/<slug>`.
