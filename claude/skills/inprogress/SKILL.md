@@ -19,19 +19,21 @@ Changes:
 - #57 → done; outcome "Play app signing configured"
 - add under #55 after #57: "Run signing tests" (task, assignee me); body: run on a device build, report failures
 - add under #55: "Fix the upload-key check" (task, fix)
-- add under #55: "Which store regions at launch?" (question, assignee me)
-- #62 → done; outcome "EU and UK first"
+- ask on #55: question, Which store regions at launch?
+- a7 answered: EU and UK first
 - #56 label → fix
 - #63 → dropped; outcome "Replaced by the upload-key check"
 - move #64 under #55 after #57
 - resource on the new "Run signing tests" node: test-suite "Signing test suite", path {{RESOURCES}}/ingame/2026-09-27-signing-test-suite.md, snapshot_file
+- handoff on #55: "Signing tests, next steps", path {{RESOURCES}}/ingame/2026-09-27-signing-handoff.md, snapshot_file
+- state on #50: (root only, from the Orchestrator) the project's state note, one paragraph and a line per top-level group
 - log on #55: "Detour: sandbox network wedge, fixed by restarting VMware NAT"
 - focus → the new "Run signing tests" node
 - queue: #59, #60
 - later: #61
 ```
 
-An open question is a step with `kind: question`, usually assigned to Aiden; its answer marks it `done` with the answer in `outcome`. Backtracking marks steps `dropped` or moves them; it never deletes them.
+When a session needs Aiden to answer, allow or look at something, brief `ask on #id: <kind>, <text>` (kind `question`, `permission` or `review`) and name the asking session; the answer comes back to that session on its next prompt. When he answers in chat, brief `a7 answered: <answer>`. Do not add a question step for it. `assignee me` is only for a step Aiden does himself. A handoff line attaches the handoff doc to its step; a state line is the Orchestrator's note on the root and replaces the previous one. `briefing mode <slug>: scoped|full` switches what a project's sessions see in their briefings. Backtracking marks steps `dropped` or moves them; it never deletes them.
 
 Never write an em dash in a brief or a task subject: use a comma, a colon, a period or " · ".
 

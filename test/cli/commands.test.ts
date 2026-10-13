@@ -477,6 +477,13 @@ describe('doctor checks', () => {
     expect(named(checks, 'MCP server')).toMatchObject({ ok: false, detail: expect.stringContaining('run npm run deploy') });
   });
 
+  it('fails Skill when the mip-orc skill is missing, and passes once it is back', async () => {
+    const { repo, claude } = installedClaudeDir();
+    expect(named(await checksFor(repo, claude), 'Skill')).toMatchObject({ ok: true });
+    rmSync(join(claude, 'skills', 'mip-orc'), { recursive: true });
+    expect(named(await checksFor(repo, claude), 'Skill')).toMatchObject({ ok: false, detail: expect.stringContaining(join('mip-orc', 'SKILL.md')) });
+  });
+
   it('fails Hooks for an install from before the tool hooks, until install runs again', async () => {
     const { repo, claude, settingsFile } = installedClaudeDir();
     const settings = JSON.parse(readFileSync(settingsFile, 'utf8'));
