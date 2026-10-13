@@ -32,7 +32,7 @@ lists asks, never steps.
   with gating and override, landing policy presets, run modes and headless runs, the data reshape, removing per-session
   queues, focus and `assignee`, the landing chip and the `release` ask kind. Section 7 names each seam.
 - Work projects. Aiden scoped the redesign to InProgress, InThink and InGame. Work projects share the server and keep
-  today's briefing (section 3.6).
+  today's briefing lines (section 3.6).
 - Keyboard shortcuts for the Board (Aiden, 2026-10-12). Undo after a drag: dragging back does the same.
 
 ## Aiden's decisions (2026-10-12)
@@ -65,7 +65,8 @@ CREATE TABLE asks (
   raised_at TEXT NOT NULL,
   cleared_at TEXT,
   cleared_by TEXT,               -- the actor string write() records
-  answer TEXT NOT NULL DEFAULT ''
+  answer TEXT NOT NULL DEFAULT '',
+  answer_delivered_at TEXT      -- set when the raising session's answers line carried the answer (section 3.3)
 );
 CREATE INDEX asks_open ON asks (project_id, cleared_at, raised_at);
 CREATE INDEX asks_node ON asks (node_id, raised_at);
@@ -85,9 +86,10 @@ The same migration converts the open needs-you steps that already are asks. For 
 - otherwise, when `body` has a line starting `Needs you:`: an open ask of kind permission, text = that line.
 - `raised_at` = the node's `updated_at`; `session_id` null.
 
-Nothing else changes. `assignee` stays on every row. On the live data this converts three questions and #279; "Merge PR
-#514" and the Finances content pass become Aiden's own steps; the step waiting on Vince stays blocked. The text
-extraction is tested on a copy of the live database before the branch merges.
+Nothing else changes. `assignee` stays on every row. The conversion covers every project, archived ones included. In
+the active projects it converts two questions and #279; "Merge PR #514" and the Finances content pass become Aiden's
+own steps; the step waiting on Vince stays blocked. The text extraction is tested on a copy of the live database before
+the branch merges.
 
 ### 1.2 Asks
 
@@ -104,8 +106,9 @@ extraction is tested on a copy of the live database before the branch merges.
   creating question nodes.
 - **Events.** `ask.raised` and `ask.cleared`, each carrying the row. `ProjectSnapshot` gains `asks`: every open ask, and
   those cleared in the last 7 days.
-- **Needs you** means "has an open ask" everywhere it is counted: the tab counts, `inprogress list`, the orchestrator
-  briefing and its status line. `isNeedsYou` on nodes is retired; ages count from `raised_at`.
+- **Needs you** means "has an open ask" everywhere it is counted: `inprogress list`, the orchestrator briefing and its
+  status line. The window's tab count adds the project's live permission waits (section 2.1).
+  `isNeedsYou` on nodes is retired; ages count from `raised_at`.
 
 ### 1.3 Aiden's own steps
 
@@ -128,9 +131,10 @@ One pure function in `src/core` derives every open step's position from the snap
 4. In the unowned queue: Next, in queue order. Then entries of a live session's own queue, tagged with its letter.
 5. Any other open step with no open children: Backlog.
 
-A step with open children is a group: it is not a row, and shows as the crumb on its children's rows. A group whose
-children are all done falls to rule 5. A live session is one that has not ended and was heard from within
-`STALE_SESSION_MS`. **Ready** (stage 1) means in Next with no open ask.
+Rules 1 to 4 apply to every node except the project root. Rule 5 applies only to a node with no open children: a node
+with open children that no session is on and no queue holds is a group, not a row, and shows as the crumb on its
+children's rows. A group whose children are all done falls to rule 5. A live session is one that has not ended and was
+heard from within `STALE_SESSION_MS` (12 hours). **Ready** (stage 1) means in Next with no open ask.
 
 Edge cases, each a unit test:
 
@@ -147,19 +151,22 @@ The same function returns marks on each row, which the Board, the Project view a
 
 | Mark | When |
 |---|---|
-| `ended_open` | an open step holds open tasks of an ended session, and no handoff was added after it ended |
-| `stale_active` | status active, not Aiden's own, and no live session on it |
+| `ended_open` | an open step with no live session, whose last session ended within the trail (7 days) without a handoff on the step newer than that session's start |
 | `no_outcome` | done with an empty outcome |
 | `stale_ask` | an open ask older than 7 days |
 | `done_focus` | a live session's focus is on a done step |
 | `deep` | more than three levels below the project root (stage 2's depth rule, shown, not enforced) |
 
-The Board's header shows the count of marks.
+The Board's header shows the count of marks; its tooltip names the marked steps. A step left cleanly between sessions
+(a handoff newer than its last session's start) carries no mark: that is the normal hand-over, not a gap. A step left
+active by a session that ended more than 7 days ago carries no mark either; `mip-orc`'s reconcile lists open steps
+with status active and no live session at any age.
 
 ### 1.7 Last looks
 
-- **The window** keeps one time per project in local storage, set when Aiden leaves the project's tab or the window hides.
-  Done's "new since you looked" divider sits at that time until the next leave.
+- **The window** keeps one time per project in local storage, set when Aiden leaves the project's tab, the window loses
+  focus, or it hides. Done's "new since you looked" divider sits at that time until the next leave. A window he only
+  glances at without focusing keeps the older time, so the divider shows everything since he last used it.
 - **`mip-orc`'s** last look is the `updated_at` of the project's state note (the resource with `purpose = 'state'` on the
   root node), which it rewrites only after showing the full digest. No state note: the last 7 days.
 - **The digest reads the tables, not the events:** `completed_at`, `raised_at`, `cleared_at`, `started_at`, `ended_at`,
@@ -180,8 +187,9 @@ tests. Details, the resource viewer and go-to stay; go-to opens the step's Detai
 ### 2.2 Board, wide (960 px and up)
 
 - **Header lines.** "Where we are": the state note's first sentence and its age ("looked 3d ago"); a click opens the
-  Project view; none reads "No state note yet". Then the sessions not on a Now row: the orchestrator ("A orchestrator"),
-  and working sessions with no claimed step. Idle sessions with no step leave the board. The hygiene count sits at the
+  Project view; none reads "No state note yet". Then the sessions not on a Now row: the orchestrator while it is live,
+  working or idle ("A orchestrator"), and working sessions with no claimed step. Idle workers with no step leave the
+  board. The hygiene count sits at the
   right.
 - **Columns, left to right: Needs me, Next, Now, Done.**
 - **Needs me.** Live permission waits first (section 1.4), then open asks oldest first: kind glyph, text clamped to two
@@ -194,10 +202,10 @@ tests. Details, the resource viewer and go-to stay; go-to opens the step's Detai
   hygiene). Under the step, one line per session, working before idle: letter, state, current task (its in-progress
   working task), running subagents with elapsed time.
 - **Done.** The last five done steps by `completed_at` (dropped excluded): title, label, age, outcome clamped to two lines,
-  the "new since you looked" divider.
+  marks (`no_outcome`, `done_focus`, and the amber mark for an open review ask), the "new since you looked" divider.
 - **A click on any row** opens Details for the step, in place.
-- **Handoff chip.** A step whose newest resource with `purpose = 'handoff'` exists shows "handoff · 2d"; a click opens it
-  in the resource viewer.
+- **Handoff chip.** A step with a handoff (a resource with `purpose = 'handoff'`) shows "handoff · 2d" for its newest one; a
+  click opens it in the resource viewer.
 
 ### 2.3 Board, narrow (below 960 px)
 
@@ -237,23 +245,27 @@ All under `/api/ui/` with the `guarded` middleware, actor `window`, slug-checked
 - **Drop targets.** Within Next, Backlog into Next, Next back to Backlog. Now, Done and Needs me are not drop targets.
 - **Create.** `POST /api/ui/projects/:id/nodes` with `{ title, parent: number | null }` creates a todo step (no label) under
   `parent`, or the root. Entry points: the Board's Backlog fold (root), a Project view section's foot (that group), and
-  Details ("Add a step under this one"). Labels and refinement come later from a session or `mip-orc`.
+  Details ("Add a step under this one"). A line to any session ("add X to the backlog") still works: the scribe adds the
+  step without queueing it. Labels and refinement come later from a session or `mip-orc`.
 - **Clear.** `POST /api/ui/asks/:id/clear` with `{ answer?: string }`, idempotent as section 1.2.
 
 ### 2.6 Measuring the week
 
 The window posts named actions to `POST /api/ui/events`; the server stores each as an event with actor `window` and type
-`window.<name>`, which the SSE stream does not send back. Only the action and its time are stored, never content; they are
-pruned with every other event after 30 days, and nothing leaves the machine.
+`window.<name>`. The route writes the row without the bus notice other writes send, and the stream's reconnect replay
+(`listEventsSince`) skips `window.` types, so the window never receives its own measurements. Only the action and its
+time are stored, never content; they are pruned with every other event after 30 days, and nothing leaves the machine.
 
 | Event | Data |
 |---|---|
 | `window.view` | the view switched to |
-| `window.first_band` | the first band or view opened after the window was hidden an hour or more, and the gap |
+| `window.shown` | the view showing when the window is shown or focused after an hour or more without, and the gap |
+| `window.first_action` | the first click after such a gap: the band or section it was in, and what it did |
 | `window.backlog_open` | none |
 | `window.details_open` | the node |
 
-`inprogress usage <project> [--days 7]` prints a short table: views by switches and by time open, first band after a gap,
+`inprogress usage <project> [--days 7]` prints a short table: which view is showing when Aiden comes back, view
+switches, the first band he acts in after a gap,
 Backlog opens, Details opens, quick-adds, asks raised per day by kind with the median time to clear, `mip-orc` opens and
 how many asked for the full status, and the hygiene count per day. Quick-adds, asks and opens come from their own tables
 and events.
@@ -281,8 +293,9 @@ prints the step block (section 3.4) at once. Actor `session:<sid>`.
 Readiness is advisory in stage 1. The output notes each reason and claims anyway: "Note: #42 is not in Next", "has open
 ask a7", "is also claimed by A "title" (working)". Stage 2 turns these into exit 1 unless `--override "<reason>"`.
 
-Every handoff opens with "Claim #id". The scribe's "focus → #id" still works; a focus change marks a briefing due, so the
-step block arrives on the next prompt.
+Every handoff opens with "Claim #id". The scribe's "focus → #id" still works: in a scoped project a focus change through
+the scribe marks a briefing due, so the step block arrives on the next prompt. A claim prints the block itself and marks
+nothing.
 
 ### 3.2 Role
 
@@ -296,20 +309,26 @@ resets to worker; compaction and resume keep the role.
   `a7 raised on #42`, so a worker that stops to wait can quote it.
 - The scribe gains MCP tools `raise_ask(project, node, kind, text, session?)` and `clear_ask(ask, answer?)`. Its rules:
   "ask on #id: <kind>, <text>" when a session needs Aiden; "a7 answered: <answer>" when he answers in chat.
-- A worker whose ask was cleared since its previous prompt gets one line on its next prompt:
-  `Answered: a7 "<answer>"`.
-- Install adds allow rules for `claim`, `ask` and `orchestrate`, from the same prefix helper as `tasks`, so none asks for
-  permission. One `claude:install` rerun.
+- The session that raised an ask gets one line on its next prompt after the ask is cleared, `Answered: a7 "<answer>"`,
+  once: the line sets `answer_delivered_at`.
+- **Handoffs and the state note.** The scribe's resource tool gains `purpose`. Brief lines: "handoff on #id: "<title>",
+  path <file>, snapshot_file" records a doc resource with `purpose = 'handoff'`; `mip-orc` records the state note on the
+  root the same way with `purpose = 'state'`, replacing the previous one.
+- Install adds allow rules for `claim`, `ask`, `orchestrate` and `digest`, from the same prefix helper as `tasks`, so none
+  asks for permission. One `claude:install` rerun.
 
 ### 3.4 Briefings
 
 `renderBriefing`, `renderStatusAnswer` and `renderStatusLine` choose by the project's `briefing_mode`, then the session's
-role. `full` keeps today's line set for every session; its Needs you and check lines read open asks, as everywhere
-(section 1.2). `scoped`:
+role. In both modes the update rules say "ask on #id: <kind>, <text>" where they said "something goes to Aiden
+(assignee me)", and keep "assignee me" only for a step Aiden does himself. `full` keeps today's line set for every
+session; its Needs you and check lines read open asks, as everywhere (section 1.2). `scoped`:
 
 **Worker with a claimed step.**
 1. Header, with `Role: worker on #42`.
-2. The plan-edit line, the playbook, the update rules (naming claim and ask; "assignee me" only for Aiden's own steps).
+2. The plan-edit line, the playbook, the update rules: claim replaces "focus → #id", ask replaces "assignee me" (kept
+   only for Aiden's own steps), and the queue lines ("queue:", "later:") go, since choosing what is next is the
+   orchestrator's job.
 3. `Your step:` its parent chain, the step with status and progress, its open children, its own open tasks (at most 5).
 4. `Handoff:` the newest handoff resource on the step.
 5. `Resources on #42:` newest first, at most 5.
@@ -318,11 +337,11 @@ role. `full` keeps today's line set for every session; its Needs you and check l
 8. `Other sessions here:` letters and steps, against collisions.
 
 **Worker with no step.** Header (`no step claimed`), the rules, the playbook, `Ready to claim:` up to three Next steps with
-no open ask and no live session (own entries first), the claim command; when none is ready, "Nothing is ready. Planning
-is the Orchestrator's job (mip-orc)." Then `Other sessions here`.
+no open ask, no live session and not Aiden's own (own entries first), and the claim command. When none is ready:
+"Nothing is ready. Planning is the Orchestrator's job (mip-orc)." Then `Other sessions here`.
 
-**Orchestrator.** Header, the rules plus "you never implement", the playbook, the counts offer (section 4), then every line
-of today's briefing. Needs you lists open asks oldest first and permission waits.
+**Orchestrator.** Header, the rules plus "you never implement" (it keeps "later:" for the unowned queue), the playbook, the
+counts offer (section 4), then every line of today's briefing. Needs you lists open asks oldest first and permission waits.
 
 **Status line** (every second prompt without a scribe update): a worker reads `on #42 (a7 open)` or `no step claimed`,
 without a project count; the orchestrator keeps the count. The status answer (a prompt asking for status) gives a worker
@@ -336,8 +355,9 @@ digest, usage. Installer: allow rules.
 
 ### 3.6 The briefing switch
 
-`projects.briefing_mode` defaults to `full`, so work projects keep today's lines (their Needs you line reads asks). At rollout the scribe sets InProgress
-and InThink to `scoped`, and InGame when #311 adopts it. Setting a project back to `full` is the rollback, with no code
+`projects.briefing_mode` defaults to `full`, so work projects keep today's lines (their Needs you line reads asks). The
+scribe's project tool gains `briefing_mode`. At rollout the scribe sets InProgress and InThink to `scoped`, and InGame
+when #311 adopts it. Setting a project back to `full` is the rollback, with no code
 change or redeploy.
 
 ### 3.7 Failure modes
@@ -358,11 +378,13 @@ memory.
 
 On open:
 
-1. **Role and counts.** It runs `inprogress orchestrate --session <sid>` and shows one short offer: "Since your last look
+1. **Role and counts.** It runs `inprogress orchestrate --session <sid>` (with `--status` for "mip-orc status"), which
+   records an event with `data.status` for the week's count, and shows one short offer: "Since your last look
    (3d): 4 done · 2 asks raised, 1 answered · 2 sessions ended, 1 without a handoff. Reconcile: 3 fixes ready, 1 needs
    you." Then it offers the digest, the reconcile and what's next. With "status", it shows all three at once.
 2. **Digest** (on request; also `inprogress digest <project> [--since <iso>]`): steps done with outcomes; asks raised and
-   cleared with answers; sessions started and ended, flagging those without a handoff or with open tasks; steps Aiden
+   cleared with answers; sessions started and ended, flagging those without a handoff or with open tasks (session lines
+   reach back as far as the 7-day trail keeps sessions; the rest has no age limit); steps Aiden
    quick-added; his moves in Next; new documents. At most 20 lines, then "+n more".
 3. **Reconcile** (on request): from the hygiene marks. Mechanical fixes (stale focus, an empty outcome it can fill from the
    log, a step left active) go to the scribe in one batch after Aiden's yes; judgment calls (dropping a stale ask, closing
@@ -386,8 +408,8 @@ state note).
 ## 5. Rulings and specs amended
 
 - **D6** (`2026-09-27-inprogress-design.md`), new wording: "Claude edits the plan only through the `inprogress-scribe`
-  subagent, never by main-session tool calls. Exceptions: working tasks, claims and asks go through the CLI (2026-10-04
-  spec section 1; this spec section 3); Aiden edits from the window under `/api/ui/`, as actor `window`: project archive,
+  subagent, never by main-session tool calls. Exceptions: working tasks, claims, roles and asks go through the
+  CLI (2026-10-04 spec section 1; this spec section 3); Aiden edits from the window under `/api/ui/`, as actor `window`: project archive,
   unarchive, rename, delete and restore, the order of Next, quick-added steps, and clearing asks. A window write is an
   operation the server applies to the current row inside one transaction, never a replacement of what the window last
   saw."
@@ -402,7 +424,7 @@ state note).
 | Branch | Holds | Label | Reviewer |
 |---|---|---|---|
 | data | Migration 10 and its conversion; the asks repo (raise, clear, drop); the position function with marks; asks in the snapshot | data | Opus |
-| server | Claim, ask, orchestrate, digest, usage (CLI and routes); MCP raise_ask, clear_ask; briefings by mode and role; the answers line; window queue, create, clear and event routes; install allow rules | integration | Opus |
+| server | Claim, ask, orchestrate, digest, usage (CLI and routes); MCP raise_ask, clear_ask, `purpose` on the resource tool and `briefing_mode` on the project tool; briefings by mode and role; the answers line; Needs you counts from asks (tabs, `inprogress list`, status line); window queue, create, clear and event routes; install allow rules | integration | Opus |
 | window | The Board (both widths), the Project view, Details additions, drag, quick-add, Clear; removal of the canvas, session row and Up next | ui | Opus, and the screen-reviewer |
 | skill-docs | `mip-orc`; the scribe agent and inprogress skill texts; the guide; D5 and D6 | docs | Opus (`claude/` runs in every session) |
 
@@ -416,14 +438,15 @@ own `INPROGRESS_E2E_PORT` from 4410 to 4419.
   database; each briefing's line list by mode and role, and the status line; the digest from tables; queue operations,
   refusals and `takenFrom`; the CLIs' parse and output.
 - **Smoke** (scratch home): claim, briefing, ask, clear, the answers line on the next prompt.
-- **e2e, one per visible feature:** the wide columns; the narrow bands; a drag into Next writes the queue; the Backlog fold
-  and quick-add; Clear on an ask; a row click opens Details; Project view sections and folds; the "new since you looked"
+- **e2e, one per visible feature:** the wide columns; the narrow bands; a drag into Next, and the "to Next" button, write the
+  queue; the Backlog fold and quick-add; a permission wait row; Clear on an ask with an answer; a row click opens Details,
+  which shows the step's asks and handoff; Project view sections and folds; the "new since you looked"
   divider; the view switch is remembered.
 
 ### 6.3 Rollout
 
 1. Back up the database; deploy from the main checkout; `npm run claude:install`.
-2. The scribe sets InProgress and InThink to `scoped`; InGame joins with #311.
+2. The scribe sets InProgress and InThink to `scoped`. #311 adopts InGame, set to `scoped`, before the week starts.
 3. Restart open sessions: briefings change only for new ones.
 4. Open `mip-orc` once to write the first state note. The week starts there.
 
@@ -431,7 +454,8 @@ Rollback: revert the window merge and redeploy; set the switch back to `full`. T
 
 ### 6.4 The week's evidence for stage 2
 
-From `inprogress usage`: which band or view comes first after a gap; Board against Project view; Backlog opens and
+From `inprogress usage`: the view showing when Aiden comes back and the first band he acts in; switches between Board
+and Project view; Backlog opens and
 quick-adds per day; asks per day by kind and time to clear; Details opens; `mip-orc` opens and full-status requests; the
 hygiene count over the week. By hand: the time to get going on InGame after returning cold, and Aiden's end-of-week note.
 
