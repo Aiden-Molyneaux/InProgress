@@ -169,8 +169,8 @@ footer p { max-width: 80ch; }
 <header>
   <span class="eyebrow">Guide · live build 7927611 · 2 October 2026</span>
   <h1>InProgress</h1>
-  <p class="lede">A local window beside Claude Code that shows each project as a live tree: what it is for, the plan as steps, which steps are done, active or waiting on you, where each resource was produced, and which Claude session is working where. Claude keeps the tree current. You read it.</p>
-  <p class="meta">Written for Aiden, who built InProgress and uses it every day, and for anyone he hands it to. Every claim here was checked against the code in <code>C:\personal\InProgress</code> at build 7927611. Where the September design spec and the code disagree, the code wins and this guide follows the code. Work that is still being built is marked as coming.</p>
+  <p class="lede">A local window beside Claude Code that shows each project as a live tree: what it is for, the plan as steps, which steps are done, active or queued, which asks wait on you, where each resource was produced, and which Claude session is working where. Claude keeps the tree current. You read it, answer its asks, and arrange what comes next.</p>
+  <p class="meta">Written for Aiden, who built InProgress and uses it every day, and for anyone he hands it to. Every claim here was checked against the code in <code>C:\personal\InProgress</code> at build 7927611. Where the September design spec and the code disagree, the code wins and this guide follows the code. Work that is still being built is marked as coming. The Board, Project view, asks, claims, scoped briefings and <code>mip-orc</code> are stage 1 (spec 2026-10-12); the sections that describe them are accurate once that stage is deployed, and the "In flight" list below predates it.</p>
   <nav class="toc" aria-label="Contents">
     <a href="#ideal">The ideal</a>
     <a href="#parts">How it fits together</a>
@@ -179,6 +179,7 @@ footer p { max-width: 80ch; }
     <a href="#track">Track a project</a>
     <a href="#adopt">Adopt mid-flight</a>
     <a href="#session">A working session</a>
+    <a href="#asks">Asks, claims, mip-orc</a>
     <a href="#status">Where are we?</a>
     <a href="#window">Reading the window</a>
     <a href="#projects">Several projects</a>
@@ -194,23 +195,23 @@ footer p { max-width: 80ch; }
 <div class="wf">
 <div class="main">
 <p>Long projects with Claude lose their thread in the chat. A plan gets stated once and is then buried under a sandbox detour. The test suite Claude wrote five messages ago is still up there somewhere. Three sessions and their subagents are each working on something, and the only way to find out what is to read all of them. On a project that has run for three months, the state of play is split between the chat, the disk and your head, and the three do not agree.</p>
-<p>InProgress keeps one tree per project in a window beside Claude. The root says what the project is for. Under it sit phases and steps, each with a status (todo, active, done, blocked or dropped) and an owner (Claude or you). A resource such as a test suite, runbook or diagram is attached to the step where it was produced, so you find it by walking the tree instead of the scrollback. Each live Claude session appears as a chip, and as a badge on the step it is working on once the scribe has set its focus, with its state and the number of subagents it is running.</p>
+<p>InProgress keeps one tree per project in a window beside Claude. The root says what the project is for. Under it sit phases and steps, each with a status (todo, active, done, blocked or dropped) and an owner (Claude or you). A resource such as a test suite, runbook or diagram is attached to the step where it was produced, so you find it by walking the tree instead of the scrollback. Each live Claude session appears in the window with its state and the number of subagents it is running, on the step it is working on once it has claimed the step or the scribe has set its focus.</p>
 <p>The tree is a filtered view, not a transcript. It records that the signing tests need running and, later, that they ran green. It does not record the VMware wedge you fixed on the way; that goes into the step's log as a one-line note. Steps are plan-level and have outcomes. Single actions (edit a file, run grep) never become nodes.</p>
-<p>Claude owns every edit and makes them through a background scribe, so the main session spends about one line of chat per update. The window has no edit controls: you read, navigate, copy a reference like <code>#58</code>, and open files.</p>
-<p>Concretely, in the kit's own example: step <code>#58 Run signing tests</code> is assigned to you and carries an amber <span class="you">YOU</span> tag until you report it done. The test suite Claude wrote is resource <code>r12</code> on that step. The network wedge is a log line on <code>#55</code>. When you ask "where are we?", the answer names those ids, and the window is already centred on them.</p>
+<p>Claude owns the content and makes every edit to it through a background scribe, so the main session spends about one line of chat per update. The window is where you place and answer: you put steps in the order of Next, add a step to the backlog, and clear the asks that sessions raise. You also read, copy a reference like <code>#58</code>, and open files.</p>
+<p>Concretely, in the kit's own example: step <code>#58 Run signing tests</code> is a step you do yourself, so it carries a <span class="you">YOU</span> badge until you report it done. The test suite Claude wrote is resource <code>r12</code> on that step. The network wedge is a log line on <code>#55</code>. When you ask "where are we?", the answer names those ids, and the window is already centred on them.</p>
 </div>
 <div class="rail">
 <aside class="spec">
   <span class="eyebrow">From your spec</span>
   <blockquote>"a branch of the tree that cares about whether I have run those tests, but doesn't care about whether I got lost in sandbox work"</blockquote>
-  <p>Built as a step assigned to you (<code>assignee: me</code>) that stays visible and counted until it is done, plus a log entry for the detour on that step, written with <code>add_log</code>. The skill rule reads "Detours go in the log of the step they interrupted".</p>
-  <p class="where">src/core/tree.ts isNeedsYou · src/mcp/server.ts add_log · ~/.claude/skills/inprogress/SKILL.md</p>
+  <p>Built as a step you do yourself (<code>assignee: me</code>), with a log entry for the detour on that step, written with <code>add_log</code>. Anything a session needs you to answer, allow or look at is an ask instead (see <a href="#asks">asks</a>). The skill rule reads "Detours go in the log of the step they interrupted".</p>
+  <p class="where">src/core/board.ts · src/mcp/server.ts add_log · ~/.claude/skills/inprogress/SKILL.md</p>
 </aside>
 <aside class="spec">
   <span class="eyebrow">From your spec</span>
   <blockquote>"which of those have been actioned, which of those need action, and which of those are currently being actioned"</blockquote>
-  <p>Five statuses and an assignee per node. Done is a green dot, active a blue one, a step waiting on you gets the amber YOU tag and is never folded away.</p>
-  <p class="where">src/core/types.ts NODE_STATUSES · web/src/canvas/NodeCard.tsx</p>
+  <p>Five statuses, an assignee per node, and a position derived from them: Now, Next, Backlog or Done. The Board shows the position, the Project view shows every step with its position chip, and an open ask shows an amber mark.</p>
+  <p class="where">src/core/types.ts NODE_STATUSES · src/core/board.ts deriveBoard · web/src/board/</p>
 </aside>
 </div>
 </div>
@@ -275,25 +276,25 @@ footer p { max-width: 80ch; }
 
   <rect x="96" y="486" width="368" height="84" rx="8" class="dg-box"/>
   <text x="108" y="508" class="dg-h">Web UI, Edge app window 520 × 1000</text>
-  <text x="108" y="526" class="dg-t">read-only outline on React Flow</text>
-  <text x="108" y="540" class="dg-t">one action, Open file, guarded by a per-process UI token</text>
+  <text x="108" y="526" class="dg-t">Board and Project view, no canvas</text>
+  <text x="108" y="540" class="dg-t">a few guarded writes, behind a per-process UI token</text>
   <text x="108" y="554" class="dg-t">reloads itself when a deploy changes the build</text>
 
   <line x1="200" y1="412" x2="200" y2="482" class="dg-a" marker-end="url(#arr)"/>
   <text x="206" y="440" class="dg-l">SSE event stream and GET snapshots</text>
   <text x="206" y="454" class="dg-l">reads need no token</text>
   <line x1="416" y1="486" x2="416" y2="416" class="dg-a" marker-end="url(#arr)"/>
-  <text x="422" y="440" class="dg-l">POST /api/ui/open</text>
+  <text x="422" y="440" class="dg-l">POST /api/ui/...</text>
 
   <rect x="16" y="606" width="252" height="80" rx="6" class="dg-box"/>
   <text x="28" y="626" class="dg-h">inprogress CLI</text>
-  <text x="28" y="644" class="dg-t">status and outline: reads, no token</text>
-  <text x="28" y="658" class="dg-t">start, stop, doctor, claude-install</text>
+  <text x="28" y="644" class="dg-t">status, outline, digest: reads, no token</text>
+  <text x="28" y="658" class="dg-t">claim, ask, orchestrate, tasks: writes</text>
   <text x="28" y="672" class="dg-t">open launches the window</text>
   <polyline points="60,606 60,360 92,360" class="dg-a" marker-end="url(#arr)"/>
   <text x="66" y="596" class="dg-l">GET, no token</text>
 </svg>
-<figcaption>Two writers reach the server, both with the bearer token from the data dir: the hooks, which only report session presence, and the scribe's MCP server, which carries every change to the tree. The UI and the CLI read without a token. The scribe box is the one place where plan, status, resource and log edits happen.</figcaption>
+<figcaption>Writers reach the server with the bearer token from the data dir: the hooks, which report session presence, the scribe's MCP server, which carries every change to the plan, and the session commands (<code>tasks</code>, <code>claim</code>, <code>ask</code>, <code>orchestrate</code>), which a session runs itself. The window writes only the few things listed under <a href="#window">Reading the window</a>, with its own token. The scribe box is the one place where plan, status, resource and log edits happen.</figcaption>
 </figure>
 
 <h3>What each part is allowed to do</h3>
@@ -306,8 +307,8 @@ footer p { max-width: 80ch; }
 <tr><td>Scribe<br><span class="muted"><code>inprogress-scribe</code></span></td><td>Resolves every reference in the brief to a real <code>#id</code> with <code>get_outline</code> or <code>search</code>, then applies the changes in as few calls as it can. Returns one line.</td><td>Guess an id or invent progress. Its only tools are the <code>inprogress</code> MCP tools; it cannot read or edit files.</td></tr>
 <tr><td>MCP server<br><span class="muted"><code>dist/mcp/main.js</code></span></td><td>Turns tool calls into HTTP calls with the token. Reads a file into a resource snapshot (text up to 200 KB). Starts the server at launch and retries once if a call finds nothing listening.</td><td>Appear in the main session: it is declared inline in the agent file, so only the scribe loads it.</td></tr>
 <tr><td>Server<br><span class="muted"><code>dist/server/main.js</code></span></td><td>Owns <code>inprogress.db</code>. Validates every request with zod. Writes each change and its event in one transaction, then broadcasts the event over SSE. Serves the UI. Backs up the database on each start.</td><td>Listen beyond 127.0.0.1, accept a foreign <code>Host</code> header, or accept a write without the token.</td></tr>
-<tr><td>Web UI</td><td>Loads a project snapshot, listens to the event stream, re-fetches on each event, follows Claude with the camera.</td><td>Edit anything. Its one action, Open file, opens a stored resource path in VS Code or reveals it in Explorer, and needs a token minted per server process.</td></tr>
-<tr><td>CLI<br><span class="muted"><code>inprogress</code></span></td><td><code>status</code> and <code>outline</code> read without a token. <code>start</code>, <code>stop</code>, <code>open</code>, <code>doctor</code> and the install commands manage the setup.</td><td>Edit the tree. There is no CLI write path on purpose.</td></tr>
+<tr><td>Web UI</td><td>Loads a project snapshot, listens to the event stream, re-fetches on each event, and draws the Board or the Project view from it.</td><td>Edit the plan's content. Its writes are placement and housekeeping: the order of Next, a quick-added step, clearing an ask, archive, rename, delete and restore of a project, and Open file. Each needs a token minted per server process.</td></tr>
+<tr><td>CLI<br><span class="muted"><code>inprogress</code></span></td><td><code>status</code>, <code>outline</code>, <code>digest</code> and <code>usage</code> read without a token. <code>start</code>, <code>stop</code>, <code>open</code>, <code>doctor</code> and the install commands manage the setup. A session runs <code>tasks</code>, <code>claim</code>, <code>ask</code> and <code>orchestrate</code> itself, for its own tasks, focus, role and asks.</td><td>Edit the plan. Steps, statuses, outcomes and resources go through the scribe on purpose.</td></tr>
 </tbody>
 </table>
 </div>
@@ -402,7 +403,7 @@ node dist\cli\main.js open</code></pre>
 <p>Nothing older is reconstructed. Transcript mining was rejected in the design (the format is undocumented and inference is unreliable), so history before adoption lives in the done phase nodes' outcomes and nowhere else.</p>
 </dd>
 <dt>You see</dt>
-<dd><p>Done phases render folded as one row each, for example <span class="ip-node"><span class="m done"></span><span class="t">M1 to M6 build · 6 done</span></span>, and the camera lands on the step in progress. Then correct what is stale in plain words ("#12 is actually done", "drop #15, we went another way"); each correction is a checkpoint and goes to the scribe.</p></dd>
+<dd><p>Done phases fold to one line each in the Project view, for example <code>✓ 6 done · latest: M6 build</code>, and the step in progress shows in Now. Then correct what is stale in plain words ("#12 is actually done", "drop #15, we went another way"); each correction is a checkpoint and goes to the scribe.</p></dd>
 </dl>
 </div>
 <div class="rail">
@@ -440,15 +441,15 @@ Where things stand:
   #53 Road to market · active (2/7)
     #55 2 Android signing · active (1/3)
       #57 Play app signing · active  ◆ this session
-      #58 Run signing tests · NEEDS YOU
+      #58 Run signing tests · YOU
     Next: #59 3 RevenueCat · #60 4 Build → GitHub (+3 more)
-Needs you (2): #58 Run signing tests · #61 Which RevenueCat plan? (question)
+Needs you (2): a7 ? on #61 "Which RevenueCat plan?" (3d) · D waiting for permission on #58 (2m)
 Recent resources: r12 Signing test suite (on #58) · r11 Signing runbook (on #54)
 Other sessions here: "QA drill" (idle, on #70)</code></pre>
-<p>"Where things stand" is the ancestor chain of every active, needs-you and focused node, with up to two upcoming todo siblings at each level, capped at 25 lines. The needs-you line lists up to eight items, recent resources the newest five.</p>
+<p>"Where things stand" is the ancestor chain of every active, asked-about and focused node, with up to two upcoming todo siblings at each level, capped at 25 lines. The "Needs you" line is the open asks, oldest first, then live permission waits, up to eight items; recent resources are the newest five. This is the <code>full</code> briefing. A project set to <code>scoped</code> briefings sends workers something smaller (see <a href="#asks">asks, claims and scoped briefings</a>).</p>
 </dd>
 <dt>You see</dt>
-<dd><p>The briefing goes into Claude's context, not into the visible chat; you only notice it when Claude refers to a step by number without being told it. In the window your session's chip appears in the session row, outlined (idle) until your first prompt turns it solid.</p></dd>
+<dd><p>The briefing goes into Claude's context, not into the visible chat; you only notice it when Claude refers to a step by number without being told it. In the window your session shows under "No claimed step" in the Board's header until it claims a step, and in Now once it has.</p></dd>
 </dl>
 
 <h4>Checkpoints</h4>
@@ -457,11 +458,12 @@ Other sessions here: "QA drill" (idle, on #70)</code></pre>
 <dd><p>Work as usual. The checkpoints are Claude's to notice, not yours to call.</p></dd>
 <dt>Claude</dt>
 <dd>
-<p>Five things trigger a brief: a plan is made or changed; a step starts, finishes or is blocked; something worth finding again is produced (a test suite, runbook, walkthrough, roadmap, diagram, handoff); something is handed to you or you report doing it; an open question appears or is answered. At most one brief per turn, with every change of that turn batched into it:</p>
+<p>Five things trigger a brief: a plan is made or changed; a step starts, finishes or is blocked; something worth finding again is produced (a test suite, runbook, walkthrough, roadmap, diagram, handoff); a session needs you to answer, allow or look at something, or you answer it; you do a step of your own, or report doing it. At most one brief per turn, with every change of that turn batched into it:</p>
 <pre><code>Session: 3fa9c1f0-… · Project: ingame
 Changes:
 - #57 → done; outcome "Play app signing configured"
 - add under #55 after #57: "Run signing tests" (task, assignee me); body: run on a device build, report failures
+- ask on #55: question, Which store regions at launch?
 - resource on the new "Run signing tests" node: test-suite "Signing test suite",
   path C:/Users/aiden.molyneaux/.inprogress/resources/ingame/2026-09-27-signing-test-suite.md, snapshot_file
 - log on #55: "Detour: sandbox network wedge, fixed by restarting VMware NAT"
@@ -469,7 +471,7 @@ Changes:
 <p>The brief goes to the Agent tool with <code>subagent_type: "inprogress-scribe"</code> in the background. The main session does not wait for it. The scribe starts with <code>get_outline</code>, resolves every reference to a real id, applies the changes (one nested <code>add_nodes</code> for new steps, <code>update_node</code> with an outcome for finished ones, <code>add_resource</code>, <code>add_log</code>, <code>set_focus</code>), and returns one line such as <code>#57 done · added #58 (you) · r12 on #58 · focus #58</code>. If a reference does not resolve after one search, it reports that instead of writing.</p>
 </dd>
 <dt>You see</dt>
-<dd><p>Chat: one line, <code>↳ InProgress: #57 done, test suite attached to #58</code>. A little later the scribe's one-line report arrives as a background task notification; Claude does not reply to it. Window: within seconds of the scribe's write, <code>#57</code> turns green, <code>#58</code> appears with the YOU tag and a purple resource chip, the badge <span class="badge">◆ InGame launch status · working</span> moves under it, and the camera glides there if Follow is on. The activity strip reads <code>↳ scribe (InGame launch status) · just now · "Signing test suite" attached to #58 Run signing tests</code>. The spec's budget is about 30 s from Claude stating a plan to it appearing, with the scribe's spin-up taking most of that; the server-to-window hop is a 150 ms debounce plus the event stream.</p></dd>
+<dd><p>Chat: one line, <code>↳ InProgress: #57 done, test suite attached to #58</code>. A little later the scribe's one-line report arrives as a background task notification; Claude does not reply to it. Window: within seconds of the scribe's write, <code>#57</code> moves to Done, <code>#58</code> appears with the YOU badge, the session's message in Now moves to the new step, and the ask shows in Needs me. The activity strip reads <code>↳ scribe (InGame launch status) · just now · "Signing test suite" attached to #58 Run signing tests</code>. The spec's budget is about 30 s from Claude stating a plan to it appearing, with the scribe's spin-up taking most of that; the server-to-window hop is a 150 ms debounce plus the event stream.</p></dd>
 </dl>
 
 <h4>Plan changes and backtracking</h4>
@@ -482,14 +484,14 @@ Changes:
 <dd><p>A dropped step keeps its row with a struck-through title, <span class="ip-node dropped"><span class="m dropped"></span><span class="t">3 RevenueCat</span></span>, until the fold rules hide it, and it leaves the progress count: a parent shows <code>done / (children minus dropped)</code>, direct children only. The strip reports <code>moved #60 4 Build → GitHub</code> or <code>#59 3 RevenueCat → dropped</code>.</p></dd>
 </dl>
 
-<h4>Needs-you items</h4>
+<h4>Your own steps</h4>
 <dl class="trio">
 <dt>You</dt>
-<dd><p>Claude hands you something ("run the signing tests on a device build and tell me what fails"). Later: "ran them, all green".</p></dd>
+<dd><p>Claude hands you something to do yourself ("run the signing tests on a device build and tell me what fails"). Later: "ran them, all green".</p></dd>
 <dt>Claude</dt>
-<dd><p>Anything handed to you becomes a node with <code>assignee: me</code>. Needs-you means assigned to you and not yet done (todo, active or blocked). When you report it done, the brief says <code>#58 → done; outcome "…"</code>. A question for you is a <code>question</code> node assigned to you; answering it sets <code>done</code> with the answer in <code>outcome</code>.</p></dd>
+<dd><p>A step you do yourself is a node with <code>assignee: me</code>. That is all the assignee means now: a session that needs you to answer, allow or look at something raises an ask instead, and never adds a question node. When you report the step done, the brief says <code>#58 → done; outcome "…"</code>.</p></dd>
 <dt>You see</dt>
-<dd><p>An amber border and tag: <span class="ip-node needs"><span class="m you"></span><span class="t">Run signing tests</span> <span class="you">YOU</span></span>. The top bar shows <span class="pill">● 2 need you</span>, the window title becomes <code>(2) InProgress · InGame</code> so the count shows on the taskbar, and the briefing's "Needs you" line lists it. Needs-you rows are never folded away. Press <kbd>N</kbd> or click the pill to cycle through them; each one flashes amber as the camera lands on it. A question carries a question-mark marker coloured by its status, amber while it waits on you: <span class="ip-node needs"><span class="m you q">?</span><span class="t">Which RevenueCat plan?</span> <span class="you">YOU</span></span>. Once it is done, the Details panel shows the answer as the outcome. A blocked step shows a red dot and the word blocked.</p></dd>
+<dd><p>A <span class="you">YOU</span> badge on the step. It takes its place like any other step: in Now when it is active, otherwise in Next or Backlog. Details shows the outcome once it is done.</p></dd>
 </dl>
 
 <h4>Resources</h4>
@@ -499,7 +501,7 @@ Changes:
 <dt>Claude</dt>
 <dd><p>A resource always reaches the scribe as a file path with <code>snapshot_file</code>, never as pasted text, so nothing is typed out twice by two models. The MCP server reads the file (text up to 200 KB) into the database; larger files are attached by path only. Content that only exists in chat is first written by the main session to <code>C:\Users\aiden.molyneaux\.inprogress\resources\&lt;slug&gt;\&lt;yyyy-mm-dd&gt;-&lt;kebab-title&gt;.md</code>, outside the project repo so work repos stay clean; the allow rule from install means no permission prompt. A real one from this week is <code>resources\inthink-marathon-v3\2026-10-02-foundations-pr-30.md</code>. Kinds are doc, test-suite, runbook, roadmap, diagram, link and other; a link must be http or https. Changing a resource's path does not re-read the file: to refresh a snapshot, Claude adds a new resource and deletes the old one.</p></dd>
 <dt>You see</dt>
-<dd><p>Up to two purple chips on the row, <span class="chip">▤ Signing test suite</span>, then <span class="chip">+1</span>. Clicking one opens a full-window viewer with the rendered Markdown and the buttons Copy (raw text), Open file (VS Code, or Explorer with the file selected), Copy path, and Open link for a URL. <kbd>Esc</kbd> closes it. The Details panel lists the same resources with their kind and size.</p></dd>
+<dd><p>A document count on the step's row (<span class="chip">▤ 2</span>) and the list in Details. Clicking a resource opens a full-window viewer with the rendered Markdown and the buttons Copy (raw text), Open file (VS Code, or Explorer with the file selected), Copy path, and Open link for a URL. <kbd>Esc</kbd> closes it. Details lists the resources with their kind and size.</p></dd>
 </dl>
 
 <h4>Detours</h4>
@@ -509,7 +511,7 @@ Changes:
 <dt>Claude</dt>
 <dd><p>The detour never becomes a node. It becomes <code>add_log</code> on the step it interrupted: "Detour: sandbox network wedge, fixed by restarting VMware NAT". Decisions made along the way go there too.</p></dd>
 <dt>You see</dt>
-<dd><p>The strip says <code>note on #55 2 Android signing</code>. Click the row and the Details panel shows the log, newest last, with a relative time and the session's title. The tree itself is unchanged, which is the point.</p></dd>
+<dd><p>The strip says <code>note on #55 2 Android signing</code>. Click the step and Details shows the log, newest last, with a relative time and the session's title. The plan itself is unchanged, which is the point.</p></dd>
 </dl>
 
 <h4>Background work</h4>
@@ -522,7 +524,7 @@ Changes:
 <p>A message to a subagent that has finished resumes it. A SendMessage hook moves the agent to the step the message names (<code>#168 fix round 2</code>), or the session's current step, restarts its running time (a message within a minute of the run's start only moves it) and takes the message's summary as its description. A message sent from inside a subagent is ignored.</p>
 </dd>
 <dt>You see</dt>
-<dd><p>The session's chip stops being outlined-idle and reads <strong>busy</strong>: the character breathes with its eyes open, and a muted <code>▸1</code> follows the letter. Under the step, a line reads <code>▸ a · npm run test:e2e · 4m</code>. The step's card is framed in orange, like a working step. When the notice arrives the line shows <code>✓</code> for 5 minutes and goes, and the chip goes back to idle. A command that has run 30 minutes, or is a <code>dev</code>, <code>serve</code>, <code>preview</code>, <code>start</code> or <code>watch</code> command, is <em>serving</em>: <code>◦ a · npm run dev · serving 3h</code>, faint, and it does not make the session busy.</p></dd>
+<dd><p>The session's message in Now reads <strong>busy</strong>: the character breathes with its eyes open. Under its current task, a line reads <code>▸ a · npm run test:e2e · 4m</code>. When the notice arrives the line shows <code>✓</code> for 5 minutes and goes, and the session goes back to idle. A command that has run 30 minutes, or is a <code>dev</code>, <code>serve</code>, <code>preview</code>, <code>start</code> or <code>watch</code> command, is <em>serving</em>: <code>◦ a · npm run dev · serving 3h</code>, faint, and it does not make the session busy.</p></dd>
 </dl>
 </div>
 <div class="rail">
@@ -535,20 +537,20 @@ Changes:
 <aside class="spec">
   <span class="eyebrow">From your spec</span>
   <blockquote>"so many little resources created throughout the process: walk documents, test suites, roadmaps, open questions … stored vertically in the Claude chat"</blockquote>
-  <p>Each one is a resource on the step that produced it, snapshotted into the database so it survives the chat, with <code>r12</code>-style ids you can quote back to Claude. Open questions are question nodes.</p>
+  <p>Each one is a resource on the step that produced it, snapshotted into the database so it survives the chat, with <code>r12</code>-style ids you can quote back to Claude. Open questions are asks on the step they concern.</p>
   <p class="where">resources table (content, path, url) · add_resource snapshot_file · web/src/panels/ResourceViewer.tsx</p>
 </aside>
 <aside class="spec">
   <span class="eyebrow">From your spec</span>
   <blockquote>"a little Claude indicator saying, 'This session with name blah blah blah is actively working on this task'"</blockquote>
-  <p>The session badge under a node. Hooks supply the state (working, idle, needs permission) and the subagent count; the scribe's <code>set_focus</code> supplies the node. The name is Claude Code's session title: the hook's own <code>session_title</code> field when it is present, else the transcript's newest <code>custom-title</code> line, with <code>Session 3fa9c1</code> as the fallback.</p>
-  <p class="where">src/hooks/handlers.ts · src/lib/transcript.ts · src/core/layout.ts (badges) · web/src/canvas/BadgeNode.tsx</p>
+  <p>The session's message in Now. Hooks supply the state (working, idle, needs permission) and the subagent count; the scribe's <code>set_focus</code> supplies the node. The name is Claude Code's session title: the hook's own <code>session_title</code> field when it is present, else the transcript's newest <code>custom-title</code> line, with <code>Session 3fa9c1</code> as the fallback.</p>
+  <p class="where">src/hooks/handlers.ts · src/lib/transcript.ts · src/core/board.ts · web/src/board/NowColumn.tsx</p>
 </aside>
 <aside class="spec">
   <span class="eyebrow">From your spec</span>
   <blockquote>"you don't know what task they're knocking off the list without explicitly reading all the Claude chats and going into the subagents"</blockquote>
-  <p>SubagentStart and SubagentStop hooks keep a row per running subagent, so the count on a chip or badge cannot drift; the scribe itself is excluded by the hook matcher so it costs no process spawn.</p>
-  <p>Claude Code sends no SubagentStop when a subagent hits the usage limit, hits an API error or is stopped. Once a minute the server reads the last line of each running subagent's own transcript: an interrupt or an API error ends it with that reason, and 20 minutes with nothing new ends it as "stopped responding" until it writes again. Its badge greys with a <code>!</code> and says why. One at the usage limit stays on its line in amber until it is resumed or its session ends.</p>
+  <p>SubagentStart and SubagentStop hooks keep a row per running subagent, so the count on a session's message cannot drift; the scribe itself is excluded by the hook matcher so it costs no process spawn.</p>
+  <p>Claude Code sends no SubagentStop when a subagent hits the usage limit, hits an API error or is stopped. Once a minute the server reads the last line of each running subagent's own transcript: an interrupt or an API error ends it with that reason, and 20 minutes with nothing new ends it as "stopped responding" until it writes again. Its chip greys with a <code>!</code> and says why. One at the usage limit stays on its line in amber until it is resumed or its session ends.</p>
   <p class="where">session_subagents table · HOOK_DEFS matcher ^(?!inprogress-scribe$).*</p>
 </aside>
 <aside class="spec">
@@ -560,6 +562,83 @@ Changes:
 </div>
 </div>
 
+<h3 id="asks">Asks, claims and scoped briefings</h3>
+<div class="wf">
+<div class="main">
+<h4>Asks</h4>
+<dl class="trio">
+<dt>You</dt>
+<dd><p>A session needs you: "which store regions at launch?", "may I force-push this branch?", "the signing change is ready to look at". You answer in chat, or in the window.</p></dd>
+<dt>Claude</dt>
+<dd>
+<p>The session briefs the scribe with <code>ask on #55: question, Which store regions at launch?</code>. The kinds are <code>question</code>, <code>permission</code> (you must allow or do something before the session can go on) and <code>review</code> (finished work to look at; the step may already be done). The scribe calls <code>raise_ask</code> with the step, the kind, the text and the briefing session, so the answer reaches the session that asked. Raising the same open ask again joins it instead of adding a second. A session that has to stop and wait can also run <code>inprogress ask 55 --session &lt;id&gt; --question "…"</code> (or <code>--permission</code>, <code>--review</code>) itself, which raises the ask at once and prints <code>a7 raised on #55</code>.</p>
+<p>When you answer in chat, the brief says <code>a7 answered: EU and UK first</code> and the scribe calls <code>clear_ask</code>. The session that raised the ask gets one line on its next prompt, <code>Answered: a7 "EU and UK first"</code>, or <code>Cleared: a7, no answer</code> when you gave none. Dropping a step clears its open asks; finishing a step does not.</p>
+</dd>
+<dt>You see</dt>
+<dd><p>The ask sits in the Needs me column, oldest first: its kind, the text, the step, who raised it and how old it is. <strong>Answer…</strong> opens a one-line field, and sending it clears the ask with your words as the answer. <strong>Clear</strong> clears it with none. Either way the asking session hears about it as above. A session that is waiting on a tool permission shows above the stored asks as a live row; it has no buttons and goes away when the session goes on. An ask older than 7 days gets a tidy mark. The tab's count is the project's open asks plus its live permission waits.</p></dd>
+</dl>
+
+<h4>Claim</h4>
+<dl class="trio">
+<dt>You</dt>
+<dd><p>Start a session on a step by pasting a handoff. Every handoff opens with "Claim #62".</p></dd>
+<dt>Claude</dt>
+<dd><p>The session runs <code>inprogress claim 62 --session &lt;id&gt;</code>. That sets its focus on the step (a <code>todo</code> step becomes <code>active</code>), makes the session a worker, and prints the step block at once: the parent chain, the step with its progress, its open children and the session's own open tasks, the newest handoff, the resources, the asks, what an earlier session left unfinished, and the other sessions in the project. A step of another project, the project root and a dropped step are refused with a hint.</p>
+<p>Readiness is advisory in this stage. The command prints a note for each reason and claims anyway: <code>Note: #62 is not in Next</code>, "has open ask a7", "is also claimed by A "title" (working)". The scribe's <code>focus → #id</code> still works as before.</p></dd>
+<dt>You see</dt>
+<dd><p>The step moves to Now with the session's message above it.</p></dd>
+</dl>
+
+<h4>Scoped briefings</h4>
+<dl class="trio">
+<dt>You</dt>
+<dd><p>Say "set InProgress to scoped briefings" to make a project's workers see only their own step. Say "back to full" to undo it.</p></dd>
+<dt>Claude</dt>
+<dd>
+<p>The brief says <code>briefing mode inprogress: scoped</code> (or <code>full</code>) and the scribe calls <code>update_project</code> with <code>briefing_mode</code>. Every project starts on <code>full</code>, which keeps the briefing described under <a href="#session">a working session</a> for every session. On <code>scoped</code>:</p>
+<ul>
+<li>A worker that has claimed a step gets its role, the rules, <code>Your step:</code> (the parent chain, the step, its open children and its own open tasks, at most five), the newest handoff, up to five resources, the asks on the step, what an earlier session left unfinished on it, and the other sessions. The rules drop <code>queue:</code> and <code>later:</code>, since choosing what is next is the Orchestrator's job.</li>
+<li>A worker with no step gets <code>Ready to claim:</code>, up to three steps from Next with no open ask, no live session and not your own, and the claim command. When none is ready it reads "Nothing is ready. Planning is the Orchestrator's job (mip-orc)."</li>
+<li>The Orchestrator gets the full briefing plus the counts line.</li>
+<li>The status line a worker sees reads <code>on #42 (a7 open)</code> or <code>no step claimed</code>, with no project count.</li>
+</ul>
+<p>In both modes a session that needs you uses <code>ask on #id: …</code> where it used to hand you a step, and <code>assignee me</code> stays for a step you do yourself. Setting the project back to <code>full</code> is the whole rollback; nothing is redeployed.</p>
+</dd>
+<dt>You see</dt>
+<dd><p>Smaller briefings, and sessions that stay on their own step. Work projects keep <code>full</code>.</p></dd>
+</dl>
+
+<h4>mip-orc, the Orchestrator</h4>
+<dl class="trio">
+<dt>You</dt>
+<dd><p>Type <code>/mip-orc</code> at the start and at the end of a working block, in a fresh session of the project. <code>mip-orc status</code> prints everything on the first reply.</p></dd>
+<dt>Claude</dt>
+<dd>
+<p>The <code>mip-orc</code> skill is installed with the kit, next to the <code>inprogress</code> skill, in every tracked project. It never edits code, commits, builds or dispatches implementers, and it never claims a step. It changes the plan only through the scribe. It works like this:</p>
+<ol>
+<li>If the session is not on Opus 5.5, it says so and asks you to pick it in the model menu.</li>
+<li>It runs <code>inprogress orchestrate --session &lt;id&gt;</code> (with <code>--status</code> for "mip-orc status"). That makes the session the project's Orchestrator, clears its focus and prints the briefing and a counts line such as <code>Since your last look (3d): 4 done · 2 asks raised, 1 answered · 2 sessions ended, 1 without a handoff. Marks: 3 steps.</code> It then offers a digest, a reconcile and what's next. With <code>--status</code> it also prints the digest, the reconcile list and the top of Next, and shows all three at once.</li>
+<li><strong>Digest.</strong> <code>inprogress digest &lt;project&gt; [--since &lt;iso time&gt;] [--all]</code>: steps done with their outcomes, asks raised and cleared with the answers, sessions started and ended (flagging those with no handoff or open tasks), steps you quick-added, your moves in Next, new documents and marks. At most 20 lines, then a <code>+n more</code> line; <code>--all</code> lifts the cap. It counts from the last look. It never repeats an ask the last digest showed.</li>
+<li><strong>Reconcile.</strong> From the marks. A done step with no outcome, a done step a session still has focus on, or a step a session left open are mechanical fixes: the Orchestrator lists them and, after your yes, sends them to the scribe in one batch. Dropping a stale ask or closing a step are questions to you. Open tasks of ended sessions are listed, not cleared.</li>
+<li><strong>What's next.</strong> The top of Next, each ready or not ready, and one recommended step with its reasons.</li>
+<li><strong>Start.</strong> On your go it writes a handoff that opens with "Claim #id", attaches it to the step through the scribe (<code>handoff on #id: "…", path …, snapshot_file</code>, stored with purpose <code>handoff</code>), and offers a chip that starts the worker. The chip prompt names the model and effort to pick, because the chip cannot set them. Where the chip tool is missing, it prints the handoff path and a one-line prompt to paste. A step that is not ready needs your reason first, which it logs on the step.</li>
+<li><strong>State note.</strong> After a full digest it writes the project's state note (<code>state on #&lt;root&gt;: …</code>, purpose <code>state</code>): one paragraph of where the project is, one line per top-level group, and what waits on you. The server keeps one state note per project. Adding a new one deletes the old, so the note's resource id changes each time. The note's update time is the last look for the next digest.</li>
+</ol>
+<p>A session that starts with <code>clear</code> becomes a worker again; compaction and resume keep the role. A claim also makes the session a worker.</p>
+</dd>
+<dt>You see</dt>
+<dd><p>On the Board, the header's "Where we are" line shows the first sentence of the state note and its age, and the Orchestrator appears under "No claimed step" while it is live. The Project view shows the whole note.</p></dd>
+</dl>
+</div>
+<div class="rail">
+<aside class="spec">
+  <span class="eyebrow">Beyond the spec</span>
+  <p>Asks, claims, scoped briefings and mip-orc came out of the stage 1 design, written after the first months of daily use. Two things hurt most: the tree canvas was too long to read at a glance, and small focused sessions kept asking you about items outside their scope. Stage 1 is a week of real use before stage 2 is designed.</p>
+  <p class="where">docs/superpowers/specs/2026-10-12-board-and-asks-design.md · src/server/session-flow.ts · src/server/briefing-scoped.ts · claude/skills/mip-orc/SKILL.md</p>
+</aside>
+</div>
+</div>
+
 <h3 id="status">Asking "where are we?" and the stale nudge</h3>
 <div class="wf">
 <div class="main">
@@ -567,7 +646,7 @@ Changes:
 <dt>You</dt>
 <dd><p>"Where are we?", "what's next", "what's left", "what's the status", "status update", "status check", "project status", "progress so far", or a bare "status?". The word status inside a sentence does not count, so "git status" is safe.</p></dd>
 <dt>Claude</dt>
-<dd><p>The prompt hook flags the question and the server answers it in the same hook call with a live block: <code>[InProgress] Where things stand in InGame (live):</code> followed by the same frontier lines as the briefing and the needs-you line. Claude answers from that and never dispatches the scribe to read. For the whole tree it runs the read-only outline command by absolute path:</p>
+<dd><p>The prompt hook flags the question and the server answers it in the same hook call with a live block: <code>[InProgress] Where things stand in InGame (live):</code> followed by the same frontier lines as the briefing and its Needs you line. Claude answers from that and never dispatches the scribe to read. For the whole tree it runs the read-only outline command by absolute path:</p>
 <pre><code>&amp; "C:/Users/aiden.molyneaux/AppData/Local/nvm/v20.19.6/node.exe" "C:/personal/InProgress/dist/cli/main.js" outline ingame</code></pre>
 <p>You can run the same thing in a terminal. <code>--full</code> unfolds the done branches. Today's output for the InProgress project itself, abridged:</p>
 <pre><code>Project InProgress (slug inprogress)
@@ -587,7 +666,7 @@ Playbook:
 </dl>
 <h4>The stale nudge</h4>
 <p>Each typed prompt in a tracked session adds one to a counter; any write by the scribe for that session resets it to zero. Once the counter reaches two, every prompt carries one extra line into Claude's context until the next scribe write:</p>
-<pre><code>[InProgress] InGame · focus #57 Play app signing · 2 need you · last scribe update 3 prompts ago. If a checkpoint happened, brief the inprogress-scribe; otherwise ignore this line.</code></pre>
+<pre><code>[InProgress] InGame · focus #57 Play app signing · 2 need you (open asks) · last scribe update 3 prompts ago. If a checkpoint happened, brief the inprogress-scribe; otherwise ignore this line.</code></pre>
 <p>You do not see the line. You see its effect: Claude either briefs the scribe (and writes its one chat line) or carries on. If the tree looks behind to you, "where are we?" plus a sentence about what changed is enough to get it corrected. Background-task notices that arrive as prompts (the scribe finishing, a subagent hand-back) are not counted on the live build; see <a href="#inflight">in flight</a> for the remaining formats.</p>
 </div>
 <div class="rail">
@@ -602,86 +681,62 @@ Playbook:
 <h3 id="window">Reading the window</h3>
 <div class="wf">
 <div class="main">
-<p>From top to bottom: a top bar with the project switcher, the needs-you pill and the Follow toggle; a row of session chips; the canvas; and a one-line activity strip. The theme follows Windows. Nothing on it is editable.</p>
+<p>From top to bottom: a top bar with the project tabs and a Board | Project switch, the view itself, and a one-line activity strip. The Board is the default; the window remembers your last pick. The theme follows Windows. The tree canvas, the session row, the Up next strip, the needs-you pill and Follow are gone. Each project tab shows its open asks plus its live permission waits, and its working dot.</p>
 
-<h4>Rows and markers</h4>
-<div class="mock">
-  <span class="ip-node root"><span class="m active"></span><span class="t">InGame</span> <span class="prog">2/7</span> <span class="chev">▾</span></span>
-  <span class="ip-node"><span class="m done"></span><span class="t">1 iOS certificate</span></span>
-  <span class="ip-node active"><span class="m active"></span><span class="t">2 Android signing</span> <span class="prog">1/3</span> <span class="chev">▾</span> </span><span class="chip">▤ Signing runbook</span>
-  <span class="ip-node needs"><span class="m you"></span><span class="t">Run signing tests</span> <span class="you">YOU</span></span>
-  <span class="ip-node todo"><span class="m todo"></span><span class="t">3 RevenueCat</span></span>
-  <span class="ip-node"><span class="m blocked"></span><span class="t">Store listing</span> <span class="blk">blocked</span></span>
-  <span class="ip-node dropped"><span class="m dropped"></span><span class="t">Beta via TestFlight</span></span>
-  <span class="ip-node"><span class="m done"></span><span class="t">M1 to M6 build · 6 done</span> <span class="chev">▸</span></span>
-  <span class="more">+3 more</span>
-  <span class="cap">The window's own row styles, reproduced here. Done is a green dot; active a blue dot with a blue border (the dot pulses while a working session is on that step or below it); todo a hollow ring, dimmed; blocked a red dot with a tag; dropped is struck through; a folded done branch reads "· n done" with a closed chevron. Hover any row for its <code>#id</code>.</span>
+<h4>The Board</h4>
+<p>At 960 px and up the Board is four columns, left to right: <strong>Needs me</strong>, <strong>Next</strong>, <strong>Now</strong> and <strong>Done</strong>. Below 960 px, including the 520 px app window, the same four are stacked bands in the order Needs me, Now, Next, Done, and an empty band shrinks to one line ("Nothing needs you"). A line at the top, "Where we are", shows the first sentence of the state note and its age, with a button to the Project view, or "No state note yet". Beside it, "No claimed step" lists the sessions that are live but not on a Now row: the orchestrator, and working sessions with no step. At the right, "n to tidy" counts the steps with hygiene marks; hover it for their names.</p>
+<div class="scroll">
+<table>
+<thead><tr><th>Column</th><th>What it holds</th></tr></thead>
+<tbody>
+<tr><td>Needs me</td><td>Live permission waits first (the session, its step, the tool and the head of the command, how long it has waited), then open asks oldest first. An ask shows its kind, its text clamped to two lines, the step, who raised it, its age, and the buttons Answer… and Clear.</td></tr>
+<tr><td>Next</td><td>The queue, numbered ①②③, then the entries of a live session's own queue, tagged with its letter. A step with an open ask has the amber mark and reads "not ready". A step you do yourself carries "you". Drag a row to reorder it; hover one for "back to Backlog". Backlog folds at the foot as "Backlog · n": open, it lists the other open steps without children, grouped by parent, each with "to Next" on hover and a field to add a step.</td></tr>
+<tr><td>Now</td><td>One entry per active step. Each session on it is a message: its character, letter and state word, its current task as the main line, its commands, and its running subagents with elapsed time. The step is quoted under its sessions: title, label, crumb, document count, marks. A step of yours that nobody is on reads "No session · YOU · Your step: nobody is on it".</td></tr>
+<tr><td>Done</td><td>The last five done steps with their age and outcome clamped to two lines. "New since you looked" crosses the list where you last left the project's tab.</td></tr>
+</tbody>
+</table>
 </div>
-<div class="mock">
-  <span class="badge"><span class="pulse"></span>◆ InGame launch status · working · 2 subagents</span>
-  <span class="badge idle">◆ QA drill · idle</span>
-  <span class="badge perm">◆ Ticket VCAD-978 · needs permission</span>
-  <span class="badge idle">◆ InThink redesign · busy · 1 subagent · 2 commands</span>
-  <span class="cap">Session badges sit on their own row directly under the step the session is focused on. Busy means the session has stopped but a subagent or a background command it started still runs. Hover one to see which subagent types are running. If a manual fold hides the focused step, the badge moves up to the nearest visible ancestor rather than disappearing.</span>
-</div>
+<p>A click on any row opens Details. A step with a handoff shows "handoff · 2d"; click it to read the handoff. The marks are: a session ended without closing the step, a done step with no outcome, an open ask older than 7 days, a done step a session still has focus on, and a step more than three levels deep. The position of a step comes from its state: dropped steps are off the Board; done steps are in Done; a step a live session is on, or one of yours that is active, is in Now; a queued step is in Next; any other open step with no open children is in Backlog; a step with open children is a group, shown as the crumb on its children.</p>
 
-<h4>The outline flow and the fold rules</h4>
-<p>Order runs downward and depth indents to the right, 28 px per level, with a rail from each parent to its children. That keeps the tree narrow enough for a side window and puts the current work near the bottom. Folding keeps it short:</p>
+<h4>What you can change from the window</h4>
 <ul>
-<li>A done or dropped node with children folds into one summary row (<code>title · n done</code>) unless something inside it is still active, waiting on you, or focused by a session.</li>
-<li>Under any parent, after the last done or active child, only the next two todo or blocked children show. Needs-you and active rows always show and do not take one of those two slots. Dropped rows show until the two slots are filled, then hide.</li>
-<li>Everything past that collapses into a <code>+n more</code> row per contiguous hidden run, and only when at least two rows are hidden.</li>
-<li>Clicking a chevron or a <code>+n more</code> overrides the rule for that node. Overrides are remembered per project in the browser; folding a parent again re-collapses its tail.</li>
+<li><strong>Place.</strong> Drag a step inside Next, from Backlog into Next, or from Next back to Backlog. The server applies each move to the queue as it stands, so a session's own queue changes are never overwritten by an older view.</li>
+<li><strong>Add a step.</strong> The field at the foot of Backlog adds a todo step at the root; a section's "+ Add a step" in the Project view adds one in that group; Details has "Add a step under this one". A line to a session ("add X to the backlog") still works through the scribe.</li>
+<li><strong>Clear an ask.</strong> Answer… or Clear, from Needs me or from the step's Details.</li>
+<li><strong>Projects.</strong> Archive, unarchive, rename, delete and restore, from a tab's menu, as before.</li>
 </ul>
+<p>The window also posts a few measurements of its own use (which view is showing, view switches, the first area you click after a long gap, Backlog and Details opens). They are stored without content, kept 30 days like other events, and never leave the machine. <code>inprogress usage &lt;project&gt; [--days n]</code> prints them as a table with asks raised per day and <code>mip-orc</code> opens.</p>
 
-<h4>Follow and the keys</h4>
-<p>On load the camera centres on the frontier at zoom 1: the focus node of the most recently active working session, else the most recently updated active node, else the last row. With Follow on (the default), every event that names a node glides the camera to it, at most once per 1.5 s, and the first move waits a moment for the new row to be laid out. Dragging the canvas, scrolling the wheel, dragging or scrolling the minimap, or pressing a zoom button turns Follow off; a plain click does not. <span class="follow">⌖ Follow</span> turns it back on and recentres on the frontier.</p>
+<h4>The Project view</h4>
+<p>The state note in full with its age, then one section per top-level group of the plan; top-level steps without children gather in "Top level". A section header shows its title, a bar and legend (done, now, next, backlog), the progress count and its document count, which opens a list of its resources. The body is an outline of the open steps, one line each: a position chip (Now, Next with its number, or Backlog), the id, the title, the label and the marks. Done children fold per parent to one line ("✓ 22 done · latest: …"), which opens on a click. A section with a step in Now or Next, or with an open ask, starts open; the rest start folded, and your fold choices are remembered per project. Fully done groups gather at the bottom as "Done groups · n". A click on a step opens Details.</p>
+
+<h4>The keys</h4>
 <div class="scroll">
 <table>
 <thead><tr><th>Key</th><th>Does</th></tr></thead>
 <tbody>
-<tr><td><kbd>N</kbd></td><td>Centres the next needs-you row in outline order and flashes it; the pill does the same. A row hidden by a manual fold lands on its nearest visible ancestor.</td></tr>
-<tr><td><kbd>F</kbd></td><td>Toggles Follow. Turning it on recentres on the frontier.</td></tr>
-<tr><td><kbd>Home</kbd></td><td>Centres the project root.</td></tr>
-<tr><td><kbd>End</kbd></td><td>Centres the frontier.</td></tr>
-<tr><td><kbd>Esc</kbd></td><td>Closes the Details panel, or the resource viewer when it is open.</td></tr>
-<tr><td><kbd>Tab</kbd>, <kbd>Enter</kbd></td><td>Rows, chevrons and chips are tab stops; Enter or Space on a row opens its Details, and a row focused outside the view is brought to the middle.</td></tr>
+<tr><td><kbd>[</kbd>, <kbd>]</kbd></td><td>The previous and the next project tab.</td></tr>
+<tr><td><kbd>1</kbd> to <kbd>9</kbd></td><td>The nth project tab.</td></tr>
+<tr><td><kbd>/</kbd>, <kbd>Ctrl</kbd>+<kbd>K</kbd></td><td>Go to: opens a field to find a step; choosing one opens its Details.</td></tr>
+<tr><td><kbd>Esc</kbd></td><td>Closes Details, or the resource viewer when it is open.</td></tr>
 <tr><td><kbd>Shift</kbd>+<kbd>F10</kbd>, <kbd>Menu</kbd></td><td>On a tab, opens its menu (Archive, Rename… and Delete…, or Unarchive, Rename… and Delete… on an open archived project), as a right-click does.</td></tr>
 </tbody>
 </table>
 </div>
-<p>Keys are ignored while a modifier is held or an input has focus. While the viewer is open, only <kbd>Esc</kbd> is handled, so Home and End scroll the document. While a tab's menu or ⋯ is open, only the menu's keys work: the arrows, Home and End move between its items, Enter or Space picks one, and <kbd>Esc</kbd> closes it and nothing else. Zoom runs from 0.15 to 2; the wheel pans, the bottom-left controls zoom and fit, and the bottom-right minimap colours needs-you rows amber, done green, active blue and badges clay.</p>
+<p>The Board has no shortcuts of its own. Keys are ignored while a modifier is held (Ctrl+K excepted) or an input has focus. While a tab's menu or ⋯ is open, only the menu's keys work: the arrows, Home and End move between its items, Enter or Space picks one, and <kbd>Esc</kbd> closes it and nothing else.</p>
 
-<h4>Breadcrumb, chips and the activity strip</h4>
+<h4>The activity strip</h4>
 <div class="mock">
-  <span class="crumb">InGame › Road to market › 2 Android signing</span>
-  <span class="schip working"><span class="pulse"></span>InGame launch status · 2 subagents</span>
-  <span class="schip">QA drill · idle</span>
-  <span class="schip">InThink redesign · 2 commands · busy <code>▸2</code></span>
-  <span class="schip perm">Ticket VCAD-978 · needs permission</span>
   <span class="strip">↳ scribe (InGame launch status) · 2 min ago · "Signing test suite" attached to #58 Run signing tests</span>
-  <span class="cap">The breadcrumb at the top-left names the ancestors of the topmost row still on screen, so a deep tree never loses its place. Chips: solid clay with a pulsing dot is working, an outline is idle, an outline with a breathing character and a muted <code>▸n</code> is busy (n counts the commands that count as work), a red outline is waiting for a permission (Claude Code raises that notification after a few seconds of waiting; the next prompt, stop or subagent event clears it). Click a chip to jump to that session's focus. Sessions drop off the row when they end or after 12 hours without a hook event.</span>
+  <span class="cap">The strip is the newest event in plain words, at the foot of both views.</span>
 </div>
-<p>The strip is the newest event in plain words: who (<code>scribe (session title)</code> for scribe writes, <code>Claude</code> for hook events, <code>system</code> otherwise), when, and what: added a step, added 5 steps under a parent, a step → done, moved, removed, a resource attached, a note on a step, a session is on a step, is working, is idle, is waiting for a permission, ended, a folder bound. Hover it for the exact timestamp.</p>
+<p>The strip says who (<code>scribe (session title)</code> for scribe writes, <code>Claude</code> for hook events, <code>you</code> for the window, <code>system</code> otherwise), when, and what: added a step, a step → done, moved, removed, a resource attached, a note on a step, a session is on a step, is working, is idle, is waiting for a permission, ended, a folder bound. Hover it for the exact timestamp.</p>
 
-<h4>Background work on the canvas</h4>
-<div class="mock">
-  <span class="ip-node active"><span class="m active"></span><span class="t">2 Android signing</span> <span class="prog">1/3</span></span>
-  <span class="badge idle">◆ InThink redesign · busy</span>
-  <span class="badge idle">▸ a · npm run test:e2e +1 · 12m</span>
-  <span class="badge idle">◦ a3 · npm run dev · serving 3h</span>
-  <span class="badge idle">✓ a · npm run test:e2e</span>
-  <span class="cap">The commands line sits under a session's badge, once per session and step. The lead is the oldest running command that counts as work, <code>+1</code> counts the others, and the time is the lead's. <code>◦ … serving</code> is a command that ran 30 minutes or more, a server (<code>dev</code>, <code>serve</code>, <code>preview</code>, <code>start</code>, <code>watch</code>) or a persistent Monitor: faint, not busy. When every command on the line has ended it reads <code>✓</code>, or <code>!</code> if any failed, was stopped, ended with its session or went missing from a Stop (<code>unknown</code>), for 5 minutes, then goes. The tag is the subagent's when a subagent started it. Hover the line for each command's description and result.</span>
-</div>
-<ul>
-<li>A step holding running work is <em>live</em>: it takes the orange frame a working session's step has, without the large title. A running subagent, a reader, a command that counts as work and a pulsing task all light their step, and the markers up its chain pulse. A busy session's step alone does not light until something runs on it.</li>
-<li>A command's step is its description's leading <code>#id</code>, else the starting subagent's step, else the session's. A running command also keeps its step from folding away, and one that counts as work stops it drawing as paused.</li>
-<li>A resumed subagent moves to the step its message names, and its running time restarts: <code>a1 &lt;1m</code> on the new step. The step it left keeps its tasks but no agent row, and the agent's one trail row follows it.</li>
-<li>The tab's dot pulses only while a session of that project is working. With sessions only busy it stays still, and the tab's name reads <code>busy</code>.</li>
-</ul>
+<h4>Background work on a Now row</h4>
+<p>The commands line sits under a session's task, once per session. Its lead is the oldest running command that counts as work, <code>+1</code> counts the others, and the time is the lead's: <code>▸ a · npm run test:e2e +1 · 12m</code>. <code>◦ a3 · npm run dev · serving 3h</code> is a command that ran 30 minutes or more, a server (<code>dev</code>, <code>serve</code>, <code>preview</code>, <code>start</code>, <code>watch</code>) or a persistent Monitor: faint, and not busy. When every command on the line has ended it reads <code>✓</code>, or <code>!</code> if any failed, was stopped, ended with its session or went missing from a Stop (<code>unknown</code>), for 5 minutes, then goes. Hover the line for each command's description and result. A resumed subagent moves to the step its message names, and its running time restarts.</p>
 
 <h4>Details and the resource viewer</h4>
-<p>Clicking a row opens Details: the id and title, <code>Copy #58</code> (which copies <code>#58 Run signing tests</code>, ready to paste into chat), the status or NEEDS YOU pill, kind, owner, a link to the parent, the body as Markdown, the outcome, the resources, the child steps, the subagents and a Background section for the step's commands (running ones, and those ended in the last 5 minutes), and the log. It refreshes itself whenever the tree changes, and keeps the last good view with a "Couldn't refresh" line if a fetch fails. In a window 720 px or wider it is a 380 px right-hand panel; narrower, including the 520 px app window, it is a bottom sheet over the lower 60 % with a grab bar, and camera moves land their target a quarter of the way down the view, above the sheet. The row you clicked may itself end up under the sheet for now; lifting it is <a href="#inflight">in flight</a>.</p>
+<p>Clicking a row opens Details: the id and title, <code>Copy #58</code> (which copies <code>#58 Run signing tests</code>, ready to paste into chat), the status, kind, owner, a link to the parent, the body as Markdown, the outcome, the step's asks (open ones with Answer… and Clear, then those cleared in the last 7 days with their answers), its handoff, its marks, the resources, the child steps, the subagents and a Background section for the step's commands (running ones, and those ended in the last 5 minutes), the log, and "Add a step under this one". It refreshes itself whenever the plan changes, and keeps the last good view with a "Couldn't refresh" line if a fetch fails. In a window 720 px or wider it is a 380 px right-hand panel; narrower, including the 520 px app window, it is a bottom sheet over the lower 60 % with a grab bar.</p>
 <p>The viewer is full-window and modal. Markdown is rendered by marked and cleaned by DOMPurify: no scripts, styles, forms, classes or inline styles survive, links open in a new tab with <code>noopener noreferrer</code>, and task-list checkboxes are kept but disabled. Remote images do not load, by the page's Content-Security-Policy. If Open file answers 401 the server has restarted with a new UI token, and the page reloads itself.</p>
 
 <h4>When the connection drops</h4>
@@ -689,28 +744,14 @@ Playbook:
 </div>
 <div class="rail">
 <aside class="spec">
-  <span class="eyebrow">From your spec</span>
-  <blockquote>"B, the outline flow"</blockquote>
-  <p>Your pick from the three layout mockups. Steps run down the page and sub-steps indent right, so the tree stays narrow and fits a side window. The layout is a pure, unit-tested function shared by the window and the text outline.</p>
-  <p class="where">src/core/layout.ts layoutOutline · src/core/tree.ts computeVisible · spec D3</p>
+  <span class="eyebrow">Beyond the spec</span>
+  <p>The Board answers "what is happening now, and what waits on me": asks, the queue, the sessions in flight and what finished, without folding or panning. The Project view answers "where does the whole project stand". Both read one pure function, so the Board, the Project view and the Orchestrator's reconcile agree on where a step is and which marks it carries.</p>
+  <p class="where">src/core/board.ts deriveBoard · web/src/board/ · web/src/project/</p>
 </aside>
 <aside class="spec">
-  <span class="eyebrow">From your spec</span>
-  <blockquote>"mostly the bottom, or where things are currently at, will be where the emphasis is"</blockquote>
-  <p>The frontier is where the camera opens and where End and ⌖ return; Follow keeps it there as Claude works. Done branches fold out of the way on their own.</p>
-  <p class="where">src/core/layout.ts findFrontier · web/src/canvas/useCamera.ts · web/src/canvas/followThrottle.ts</p>
-</aside>
-<aside class="spec">
-  <span class="eyebrow">From your spec</span>
-  <blockquote>"You can zoom in and out of the different steps because eventually that tree could be huge."</blockquote>
-  <p>React Flow's canvas with zoom 0.15 to 2, a minimap, and the fold rules so a thousand-row tree still shows a screenful. Fit view and the zoom buttons sit at the bottom-left.</p>
-  <p class="where">web/src/canvas/Canvas.tsx</p>
-</aside>
-<aside class="spec">
-  <span class="eyebrow">From your spec</span>
-  <blockquote>"The application should have a minimal UI … with the main emphasized pane being a whiteboard-type component"</blockquote>
-  <p>The whole chrome is the top bar, the chip row and the strip. There are no checkboxes, no new-project button and no text fields anywhere.</p>
-  <p class="where">web/src/App.tsx · web/src/chrome/*</p>
+  <span class="eyebrow">Design rule</span>
+  <p>A window write is an operation the server applies to the current row inside one transaction, never a replacement of what the window last saw. That is why you can drag Next while a session reorders its own queue.</p>
+  <p class="where">src/server/routes/window.ts · docs/superpowers/specs/2026-09-27-inprogress-design.md D6</p>
 </aside>
 </div>
 </div>
@@ -718,14 +759,14 @@ Playbook:
 <h3 id="projects">Several projects and switching between them</h3>
 <div class="wf">
 <div class="main">
-<p>The switcher in the top bar lists active projects sorted by working sessions first, then by last activity. Each row has a dot (clay for a working session, amber when something needs you, grey otherwise) and a summary such as <code>◆ 1 working · 2 need you</code>. Archived projects sit in a sub-list under Archived (n). When another project has a working session, a clay dot appears on the switcher button itself. The selection is remembered by the browser and mirrored in the URL as <code>#/p/&lt;slug&gt;</code>, so a second window or a bookmark can open straight on a project.</p>
-<p>Each session belongs to one project at a time; several sessions on one project show as several chips and badges. The briefing's "Other sessions here" line tells each session about the others. To move a session, tell Claude ("this session is for the InThink redesign, not InProgress"); the scribe's <code>enroll_session</code> repoints it and clears its focus. Tabs for one-click switching are planned (<a href="#inflight">#44</a>); today it is the dropdown.</p>
+<p>The switcher in the top bar lists active projects sorted by working sessions first, then by last activity. Each row has a dot (clay for a working session, amber when an ask is open, grey otherwise) and a summary such as <code>◆ 1 working · 2 need you</code>, where "need you" counts open asks and live permission waits. Archived projects sit in a sub-list under Archived (n). When another project has a working session, a clay dot appears on the switcher button itself. The selection is remembered by the browser and mirrored in the URL as <code>#/p/&lt;slug&gt;</code>, so a second window or a bookmark can open straight on a project.</p>
+<p>Each session belongs to one project at a time; several sessions on one project show as several messages in Now and in the header. The briefing's "Other sessions here" line tells each session about the others. To move a session, tell Claude ("this session is for the InThink redesign, not InProgress"); the scribe's <code>enroll_session</code> repoints it and clears its focus. Tabs for one-click switching are planned (<a href="#inflight">#44</a>); today it is the dropdown.</p>
 </div>
 <div class="rail">
 <aside class="spec">
   <span class="eyebrow">From your spec</span>
   <blockquote>"The UI allows you to switch between projects, etc."</blockquote>
-  <p>The dropdown, with its per-project state dots and counts, and the URL hash. The window title carries the project name too: <code>InProgress · InGame</code>, or <code>(2) InProgress · InGame</code> while two things wait on you.</p>
+  <p>The dropdown, with its per-project state dots and counts, and the URL hash. The window title carries the project name too: <code>InProgress · InGame</code>, or <code>(2) InProgress · InGame</code> while two asks wait on you.</p>
   <p class="where">web/src/chrome/TopBar.tsx · web/src/useInProgress.ts</p>
 </aside>
 </div>
@@ -835,10 +876,10 @@ Playbook:
 
 <article class="extra">
 <h3>Archive, delete and restore</h3>
-<p>To archive a project, right-click its tab (or press Shift+F10 or the Menu key on it) and choose Archive, or tell a session "archive the live-check project in InProgress" and the scribe does it through <code>update_project</code>. The menu does not open the tab, and Archive asks nothing, since Unarchive undoes it; when sessions are live in the project, its second line says how many it stops tracking. Any session still running there keeps running in Claude Code, but InProgress stops tracking it: the session ends on the canvas, its own Up next entries are dropped (unowned ones stay), and nothing it does afterwards is recorded. The project's bindings stop matching and it moves into the ⋯ menu at the end of the tabs, where you can still open and read it. Unarchive it from ⋯, or through the scribe; a session that is still running there is tracked again the next time it is heard from.</p>
+<p>To archive a project, right-click its tab (or press Shift+F10 or the Menu key on it) and choose Archive, or tell a session "archive the live-check project in InProgress" and the scribe does it through <code>update_project</code>. The menu does not open the tab, and Archive asks nothing, since Unarchive undoes it; when sessions are live in the project, its second line says how many it stops tracking. Any session still running there keeps running in Claude Code, but InProgress stops tracking it: the session ends in the window, its own Next entries are dropped (unowned ones stay), and nothing it does afterwards is recorded. The project's bindings stop matching and it moves into the ⋯ menu at the end of the tabs, where you can still open and read it. Unarchive it from ⋯, or through the scribe; a session that is still running there is tracked again the next time it is heard from.</p>
 <p>Archiving the open project from its tab opens the tab to its right (to its left for the last tab), as a browser does when you close a tab. An archive by the scribe leaves the project open instead, in italic as the last tab, until you move away. An active project's tab menu has Rename… and Delete… under Archive; while an archived project is open, its tab's menu has Unarchive, Rename… and Delete…. After each of these actions a line at the bottom of the window says what happened and where the project went, for three seconds; if the server refuses, the line gives its reason and nothing moves.</p>
 <p>Rename… turns the tab's menu into a field holding the project's name, all of it selected. Type the new name and press Enter to save it, or Escape to go back to the menu; tabbing or clicking away cancels. A name is 1 to 120 characters once trimmed, and an empty one does nothing. Only the name changes: the slug stays, so <code>#/p/&lt;slug&gt;</code> links, folder bindings and briefings keep working. The tab, the window title, ⋯ and the root step show the new name at once, the activity strip reads "you renamed the project", and the line at the bottom says "Renamed to" the new name. The scribe can rename too, through <code>update_project</code>.</p>
-<p>Delete… is in every tab's menu and beside Unarchive in ⋯. It asks once, with Delete or Cancel in place of the menu, then hides the project from the tabs, <code>list_projects</code>, <code>status</code>, <code>outline</code> and search; a link to it opens another project. An active project is archived and deleted in one step, so its live sessions stop being tracked and their own Up next entries go, as with Archive; when sessions are live there, the confirm says how many it stops tracking. Deleting the open project opens the tab beside it, as archiving it does. For 30 days it waits under Recently deleted in ⋯ with the days it has left, and Restore brings it back as an archived project, even one that was active when you deleted it, with its name, slug and bindings (a folder you have bound to another project meanwhile stays with that project). Unarchive then puts its tab back. After 30 days the server removes it for good: its steps, logs, resources, sessions and events, and the copies of its files that InProgress keeps under <code>~\.inprogress\resources\</code> when no other project's resource names them. Files in your repos are never touched. Delete and Restore are only in the window; the scribe can archive and unarchive, nothing more. The root node still cannot be deleted on its own.</p>
+<p>Delete… is in every tab's menu and beside Unarchive in ⋯. It asks once, with Delete or Cancel in place of the menu, then hides the project from the tabs, <code>list_projects</code>, <code>status</code>, <code>outline</code> and search; a link to it opens another project. An active project is archived and deleted in one step, so its live sessions stop being tracked and their own Next entries go, as with Archive; when sessions are live there, the confirm says how many it stops tracking. Deleting the open project opens the tab beside it, as archiving it does. For 30 days it waits under Recently deleted in ⋯ with the days it has left, and Restore brings it back as an archived project, even one that was active when you deleted it, with its name, slug and bindings (a folder you have bound to another project meanwhile stays with that project). Unarchive then puts its tab back. After 30 days the server removes it for good: its steps, logs, resources, sessions and events, and the copies of its files that InProgress keeps under <code>~\.inprogress\resources\</code> when no other project's resource names them. Files in your repos are never touched. Delete and Restore are only in the window; the scribe can archive and unarchive, nothing more. The root node still cannot be deleted on its own.</p>
 <p class="where">update_project status · src/server/project-lifecycle.ts · src/server/routes/window.ts · TopBar</p>
 </article>
 
@@ -849,9 +890,9 @@ Playbook:
 </article>
 
 <article class="extra">
-<h3>Keyboard, breadcrumb, strip, auto-reload</h3>
-<p>The window can be driven without a mouse (<kbd>N</kbd>, <kbd>F</kbd>, <kbd>Home</kbd>, <kbd>End</kbd>, <kbd>Esc</kbd>, <kbd>Tab</kbd>), the breadcrumb keeps the context of a deep tree, the strip says what just happened in words, and the page keeps itself on the current build. Keep the window at 520 px beside Claude and use <kbd>N</kbd> to step through what is waiting on you before you reply.</p>
-<p class="where">web/src/useKeyboard.ts · web/src/canvas/breadcrumb.ts · web/src/chrome/ActivityStrip.tsx · web/src/useInProgress.ts checkBuild</p>
+<h3>Keyboard, strip, auto-reload</h3>
+<p>Tabs switch with <kbd>[</kbd>, <kbd>]</kbd> and <kbd>1</kbd> to <kbd>9</kbd>, Go to opens with <kbd>/</kbd> or <kbd>Ctrl</kbd>+<kbd>K</kbd>, the strip says what just happened in words, and the page keeps itself on the current build. Keep the window at 520 px beside Claude and read the Needs me band before you reply.</p>
+<p class="where">web/src/useKeyboard.ts · web/src/chrome/ActivityStrip.tsx · web/src/useInProgress.ts checkBuild</p>
 </article>
 
 <article class="extra">
@@ -862,13 +903,13 @@ Playbook:
 
 <article class="extra">
 <h3>The outline and status CLI</h3>
-<p><code>inprogress outline &lt;project&gt; [--full]</code> prints the same folded text the briefing uses, with ids and resource ids; <code>inprogress status</code> lists projects with need-you counts and live sessions. Both read without a token, so they are safe from any terminal and are how Claude reads the whole tree without the scribe.</p>
-<p class="where">src/cli/commands.ts · GET /api/projects/:ref/outline</p>
+<p><code>inprogress outline &lt;project&gt; [--full]</code> prints the same folded text the briefing uses, with ids and resource ids; <code>inprogress status</code> lists projects with open-ask counts and live sessions; <code>inprogress digest &lt;project&gt;</code> lists what changed since the last look. All read without a token, so they are safe from any terminal and are how Claude reads the whole tree without the scribe.</p>
+<p class="where">src/cli/commands.ts · src/cli/digest.ts · GET /api/projects/:ref/outline</p>
 </article>
 
 <article class="extra">
 <h3>Session titles and permission state</h3>
-<p>Chips and badges carry the name you gave the session in the desktop sidebar, read from the transcript's newest <code>custom-title</code> line at each hook, so renaming a session renames its chip at the next prompt. A session waiting on a permission prompt turns red so you can see from the window which of three sessions needs a click.</p>
+<p>Session messages and the header carry the name you gave the session in the desktop sidebar, read from the transcript's newest <code>custom-title</code> line at each hook, so renaming a session renames it in the window at the next prompt. A session waiting on a permission prompt appears as a live row in Needs me, so you can see from the window which of three sessions needs a click.</p>
 <p class="where">src/lib/transcript.ts · Notification hook (permission_prompt)</p>
 </article>
 
@@ -904,10 +945,16 @@ Playbook:
 <tr><td><code>inprogress start</code></td><td>Starts the server detached if it is not answering; waits up to 5 s.</td></tr>
 <tr><td><code>inprogress stop</code></td><td>POST <code>/api/admin/shutdown</code>; waits up to 3 s for it to stop answering.</td></tr>
 <tr><td><code>inprogress open</code></td><td>Starts if needed, then <code>msedge --app=http://127.0.0.1:4317 --window-size=520,1000</code>, else the default browser.</td></tr>
-<tr><td><code>inprogress status</code></td><td>Projects with need-you counts and working / live session counts. No token.</td></tr>
+<tr><td><code>inprogress status</code></td><td>Projects with open-ask counts ("need you") and working / live session counts. No token.</td></tr>
 <tr><td><code>inprogress outline &lt;project&gt; [--full]</code></td><td>The text outline by slug, name or id. No token.</td></tr>
+<tr><td><code>inprogress tasks [&lt;step id&gt;] --session &lt;id&gt; [--done|--doing|--todo "…"]...</code></td><td>A session's own working tasks, where the task tools are absent. Run by the session, with an allow rule from install.</td></tr>
+<tr><td><code>inprogress claim &lt;step id&gt; --session &lt;id&gt;</code></td><td>Focus the step, make the session a worker, print the step block and any readiness notes.</td></tr>
+<tr><td><code>inprogress ask &lt;step id&gt; --session &lt;id&gt; --question|--permission|--review "&lt;text&gt;"</code></td><td>Raise an ask at once; prints <code>a7 raised on #42</code>.</td></tr>
+<tr><td><code>inprogress orchestrate --session &lt;id&gt; [--status]</code></td><td>Make the session the Orchestrator and print its opening: the briefing and the counts line, plus with <code>--status</code> the digest, the reconcile list and the top of Next.</td></tr>
+<tr><td><code>inprogress digest &lt;project&gt; [--since &lt;iso&gt;] [--all]</code></td><td>What changed since the state note's time, else 7 days. Capped at 20 lines unless <code>--all</code>. No token.</td></tr>
+<tr><td><code>inprogress usage &lt;project&gt; [--days n]</code></td><td>The week's window measurements as a table. No token.</td></tr>
 <tr><td><code>inprogress doctor</code></td><td>Starts the server if down, then the nine checks. Exit 1 on any non-warning failure.</td></tr>
-<tr><td><code>inprogress claude-install</code></td><td>Stops a running server, then writes hooks, allow rules, agent and skill. Refuses without a built <code>dist\</code>.</td></tr>
+<tr><td><code>inprogress claude-install</code></td><td>Stops a running server, then writes hooks, allow rules, agent and the <code>inprogress</code> and <code>mip-orc</code> skills. Refuses without a built <code>dist\</code>.</td></tr>
 <tr><td><code>inprogress claude-uninstall</code></td><td>Removes exactly those, after the same settings backup. Leaves the data dir.</td></tr>
 <tr><td><code>inprogress claude-check</code></td><td>Exit 0 kit matches, 2 differs, 3 not installed.</td></tr>
 <tr><td><code>npm run deploy</code> / <code>rollback</code></td><td>The deploy loop described above.</td></tr>
@@ -925,9 +972,10 @@ Playbook:
 <thead><tr><th>Path</th><th>Holds</th></tr></thead>
 <tbody>
 <tr><td><code>%USERPROFILE%\.inprogress\</code></td><td>The data dir (override: <code>INPROGRESS_HOME</code>). <code>inprogress.db</code> with its <code>-wal</code> and <code>-shm</code>, <code>token</code>, <code>server.log</code>, <code>hooks.log</code> (and <code>.1</code>), <code>server.pid</code>, <code>backups\</code>, <code>resources\&lt;slug&gt;\</code>.</td></tr>
-<tr><td><code>~\.claude\settings.json</code></td><td>The seven hook entries and two allow rules; backups beside it as <code>settings.json.inprogress-backup-&lt;stamp&gt;</code>.</td></tr>
+<tr><td><code>~\.claude\settings.json</code></td><td>The seven hook entries and the allow rules (the scribe's tools, its resource folder, and the <code>tasks</code>, <code>claim</code>, <code>ask</code>, <code>orchestrate</code> and <code>digest</code> commands); backups beside it as <code>settings.json.inprogress-backup-&lt;stamp&gt;</code>.</td></tr>
 <tr><td><code>~\.claude\agents\inprogress-scribe.md</code></td><td>The scribe: model sonnet, effort low, 15 turns, background, tools <code>mcp__inprogress</code>, inline stdio MCP server.</td></tr>
 <tr><td><code>~\.claude\skills\inprogress\SKILL.md</code></td><td>The skill the main session follows.</td></tr>
+<tr><td><code>~\.claude\skills\mip-orc\SKILL.md</code></td><td>The Orchestrator skill, started with <code>/mip-orc</code>.</td></tr>
 <tr><td><code>C:\personal\InProgress\dist\</code>, <code>web\dist\</code></td><td>The live build; <code>dist\build.json</code> is its identity.</td></tr>
 <tr><td><code>.build\</code>, <code>.deploy\prev\</code>, <code>.dev-home\</code></td><td>Test builds, the previous live build, the dev loop's data dir and build.</td></tr>
 <tr><td>Port 4317</td><td>Override with <code>INPROGRESS_PORT</code>. Dev uses 4318 and 5183. <code>CLAUDE_CONFIG_DIR</code> moves the Claude dir for install and doctor.</td></tr>
@@ -957,19 +1005,20 @@ Playbook:
 <table>
 <thead><tr><th>Tool</th><th>Purpose</th></tr></thead>
 <tbody>
-<tr><td><code>list_projects</code></td><td>Slugs, names, status, need-you counts, live sessions, binding ids.</td></tr>
+<tr><td><code>list_projects</code></td><td>Slugs, names, status, open-ask counts, live sessions, binding ids.</td></tr>
 <tr><td><code>get_outline(project, full?)</code></td><td>The folded text outline with ids; the playbook at its head.</td></tr>
 <tr><td><code>get_node(id)</code>, <code>get_resource(id)</code>, <code>search(project, query)</code></td><td>Read one node, one resource with content, or find nodes and resources by text (20 results).</td></tr>
 <tr><td><code>create_project(name, description, playbook?, slug?, bind_path?, branch_pattern?)</code></td><td>Project plus root, optionally bound.</td></tr>
-<tr><td><code>update_project(project, name?, description?, playbook?, status?)</code></td><td>Rename, re-describe, change the playbook, archive or unarchive. Archiving stops tracking the project's live sessions.</td></tr>
+<tr><td><code>update_project(project, name?, description?, playbook?, status?, briefing_mode?)</code></td><td>Rename, re-describe, change the playbook, archive or unarchive, or set <code>full</code> or <code>scoped</code> briefings. Archiving stops tracking the project's live sessions.</td></tr>
 <tr><td><code>bind_folder</code>, <code>unbind_folder</code></td><td>Manage bindings.</td></tr>
 <tr><td><code>add_nodes(parent, nodes, after?)</code></td><td>One node or a nested plan. Defaults: task, todo, claude.</td></tr>
 <tr><td><code>update_node(id, …)</code>, <code>move_node(id, parent, after?)</code>, <code>delete_node(id, cascade?)</code></td><td>Status and fields, restructure, remove a mistake.</td></tr>
-<tr><td><code>add_resource(node, kind, title, content? | path? | url?, snapshot_file?)</code></td><td>Attach where it was produced; <code>snapshot_file</code> reads the path, up to 200 KB.</td></tr>
+<tr><td><code>add_resource(node, kind, title, content? | path? | url?, snapshot_file?, purpose?)</code></td><td>Attach where it was produced; <code>snapshot_file</code> reads the path, up to 200 KB. <code>purpose</code> is <code>handoff</code> (a session's handoff on its step) or <code>state</code> (the project state note, on the root; it replaces the previous one).</td></tr>
 <tr><td><code>update_resource</code>, <code>delete_resource</code></td><td>Edit or move to another node in the same project; remove.</td></tr>
 <tr><td><code>add_log(node, text)</code></td><td>A timeline note: detours, context, decisions.</td></tr>
+<tr><td><code>raise_ask(node, kind, text, session?)</code>, <code>clear_ask(ask, answer?)</code></td><td>Raise an ask (<code>question</code>, <code>permission</code> or <code>review</code>) on a step, naming the asking session; clear one with Aiden's words as the answer.</td></tr>
 <tr><td><code>enroll_session(session, project, title?)</code></td><td>Track or repoint a session; returns the briefing.</td></tr>
-<tr><td><code>set_focus(session, node | null)</code></td><td>Which node the session is on; drives the badge.</td></tr>
+<tr><td><code>set_focus(session, node | null)</code></td><td>Which node the session is on; drives the Now row.</td></tr>
 </tbody>
 </table>
 </div>
@@ -982,13 +1031,18 @@ Playbook:
 <tbody>
 <tr><td>Node kind</td><td><code>goal</code> (the root only), <code>phase</code>, <code>task</code>, <code>question</code></td></tr>
 <tr><td>Node status</td><td><code>todo</code>, <code>active</code>, <code>done</code> (sets <code>completed_at</code>), <code>blocked</code>, <code>dropped</code></td></tr>
-<tr><td>Assignee</td><td><code>claude</code>, <code>me</code>. Needs you = <code>me</code> and not done.</td></tr>
+<tr><td>Assignee</td><td><code>claude</code>, <code>me</code>. <code>me</code> means a step Aiden does himself.</td></tr>
+<tr><td>Ask</td><td>Something a session needs Aiden for, attached to a step. Kind <code>question</code>, <code>permission</code> or <code>review</code>. Open until cleared; shown as <code>a7</code>. A clear can carry an answer.</td></tr>
+<tr><td>Position</td><td>Where a step sits: Now, Next, Backlog or Done. Derived, never stored; dropped steps have none.</td></tr>
+<tr><td>Marks</td><td><code>ended_open</code>, <code>no_outcome</code>, <code>stale_ask</code>, <code>done_focus</code>, <code>deep</code>: gaps the Board shows and the Orchestrator's reconcile reads.</td></tr>
+<tr><td>Session role</td><td><code>worker</code> (default) or <code>orchestrator</code>.</td></tr>
+<tr><td>Briefing mode</td><td><code>full</code> (default) or <code>scoped</code>, per project.</td></tr>
+<tr><td>Resource purpose</td><td>None, <code>handoff</code> or <code>state</code>.</td></tr>
 <tr><td>Resource kind</td><td><code>doc</code>, <code>test-suite</code>, <code>runbook</code>, <code>roadmap</code>, <code>diagram</code>, <code>link</code>, <code>other</code></td></tr>
 <tr><td>Session state</td><td><code>working</code>, <code>idle</code>, <code>permission</code>, <code>ended</code>. Not seen for 12 h means ended. The window also draws <code>busy</code>, which is never stored.</td></tr>
 <tr><td>Busy</td><td>An idle session with a subagent (not a reader) running, or a background command that counts as work. Worked out when the window draws; it ends when the last one ends.</td></tr>
 <tr><td>Background command</td><td>A Bash, PowerShell or Monitor call that went to the background. Shows its first three words and its description; the full command is never posted to the server. Ends as <code>completed</code>, <code>failed</code>, <code>killed</code>, <code>session</code> (its session ended) or <code>unknown</code> (a Stop found it missing, and a later notice can still replace that). A Stop does not end a command that started within 10 s of it.</td></tr>
 <tr><td>Serving</td><td>A background command that has run 30 minutes or more, whose first words are <code>dev</code>, <code>serve</code>, <code>preview</code>, <code>start</code> or <code>watch</code>, or that is a persistent Monitor. Drawn faint with <code>◦</code>; it never makes a session busy or a step live.</td></tr>
-<tr><td>Live step</td><td>A step with running work anchored to it: a subagent, a reader, a command that counts as work, a pulsing task or a working session's focus. Drawn with the orange frame.</td></tr>
 <tr><td>Project status</td><td><code>active</code>, <code>archived</code></td></tr>
 <tr><td>References</td><td><code>#58</code> is a node, <code>r12</code> a resource, both global across projects and never reused.</td></tr>
 </tbody>
@@ -1007,12 +1061,13 @@ Playbook:
 <tr><td>Nodes per <code>add_nodes</code></td><td>200 per level</td></tr>
 <tr><td>Binding path / branch pattern</td><td>500 / 200 chars; patterns longer than 200 never match</td></tr>
 <tr><td>Search</td><td>Query 200 chars, 20 results</td></tr>
-<tr><td>Briefing</td><td>Frontier 25 lines, 8 needs-you items, 5 recent resources, 15 playbook lines</td></tr>
+<tr><td>Briefing</td><td>Frontier 25 lines, 8 Needs you items, 5 recent resources, 15 playbook lines</td></tr>
+<tr><td>Digest</td><td>20 item lines, then <code>+n more</code> (<code>--all</code> lifts it); 7 days back when there is no state note</td></tr>
 <tr><td>Event stream</td><td>Replays up to 5,000 missed events; heartbeat every 25 s; a client with 1 MiB unsent is dropped</td></tr>
 <tr><td>Request body</td><td>8 MiB</td></tr>
 <tr><td>Retention</td><td>7 database backups, 5 settings backups, 30 days of events (each project keeps its newest), 1 MiB per hooks.log, 5 MB server.log</td></tr>
 <tr><td>Hook budgets</td><td>Session start 3 s (2 s to spawn the server, 1 s to post); others 0.5 s; stdin 1 s</td></tr>
-<tr><td>Camera</td><td>Follow moves at most once per 1.5 s; zoom 0.15 to 2; Details becomes a sheet under 720 px</td></tr>
+<tr><td>Window</td><td>Board in four columns at 960 px and up, stacked bands below; Done shows the last 5; Details becomes a sheet under 720 px</td></tr>
 </tbody>
 </table>
 </div>

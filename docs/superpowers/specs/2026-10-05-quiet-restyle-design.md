@@ -32,7 +32,7 @@ coloured, moving things. A step's agents and tasks draw inside its card. Phases 
 ## Non-goals
 
 - No switch between looks. A rollback brings today's look back.
-- No dashboard, and nothing else from the Now or Whiteboard takes.
+- No dashboard, and nothing else from the Now or Whiteboard takes. (Reopened by the stage 1 spec, 2026-10-12-board-and-asks-design.md: it adds a Board and a Project view.)
 - No characters in Details this round. Details lists agents as text lines.
 - No change to the server, the briefing, the hooks or the data model. Only the window changes, and no session
   restarts.
