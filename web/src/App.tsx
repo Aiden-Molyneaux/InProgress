@@ -1,29 +1,38 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { deriveBoard, isLive } from '../../src/core/board';
 import type { StepHit } from '../../src/core/goto';
-import { isNeedsYou } from '../../src/core/tree';
 import type { ProjectSnapshot } from '../../src/core/types';
-import { api } from './api';
-import { Canvas, type CanvasHandle } from './canvas/Canvas';
+import { api, postEvent } from './api';
+import { Board } from './board/Board';
+import { useLastLook } from './board/lastLook';
+import { noteAction, noteHidden, noteShown, setPoster } from './measure';
 import { ActivityStrip } from './chrome/ActivityStrip';
 import type { GoToHandle } from './chrome/GoTo';
-import { SessionRow } from './chrome/SessionRow';
 import { archivedProjects, neighbourTab, projectTabs, stepTab } from './chrome/tabs';
 import { TopBar } from './chrome/TopBar';
-import { UpNext } from './chrome/UpNext';
 import { Details } from './panels/Details';
 import { ResourceViewer } from './panels/ResourceViewer';
+import { ProjectView } from './project/ProjectView';
 import { actionMessage, renameMessage, type ActionTarget, type ProjectAction } from './projectActions';
-import { useFoldOverrides } from './useFoldOverrides';
 import { useInProgress } from './useInProgress';
 import { useKeyboard } from './useKeyboard';
+import { useNow } from './useNow';
+import { loadView, saveView, type View } from './views/view';
+
+// The measurements go out through the window's own event post.
+setPoster(postEvent);
 
 const holds = (snapshot: ProjectSnapshot, id: number) => snapshot.nodes.some((n) => n.id === id);
 
 export function App() {
   const state = useInProgress();
   const { snapshot, projects } = state;
-  const [follow, setFollow] = useState(true);
+  const [view, setView] = useState<View>(loadView);
+  const now = useNow(30_000);
+  const lastLook = useLastLook(snapshot?.project.id ?? null);
   const [selectedNode, setSelectedNode] = useState<number | null>(null);
+  const selectedNodeRef = useRef(selectedNode);
+  selectedNodeRef.current = selectedNode;
   // A node deleted while Details shows it closes Details: the snapshot before held it, the new one doesn't. A node picked
   // from Details' own lists can be newer than the snapshot on screen, so missing from one snapshot alone doesn't count.
   // Cleared during render, so Details never refetches a node that is gone.
@@ -32,15 +41,41 @@ export function App() {
     setLastSnapshot(snapshot);
     if (selectedNode !== null && snapshot && lastSnapshot && holds(lastSnapshot, selectedNode) && !holds(snapshot, selectedNode)) setSelectedNode(null);
   }
+  // Details gives focus back to what opened it, as the viewer does: the element that had focus when it opened, else the
+  // title button of the row that opened it.
+  const detailsOpener = useRef<{ element: HTMLElement | null; node: number } | null>(null);
+  const detailsOpen = selectedNode !== null;
+  useLayoutEffect(() => {
+    if (detailsOpen) {
+      const active = document.activeElement;
+      detailsOpener.current = { element: active instanceof HTMLElement && active !== document.body ? active : null, node: selectedNodeRef.current! };
+      return;
+    }
+    const from = detailsOpener.current;
+    detailsOpener.current = null;
+    // Only when focus went down with Details: a close Aiden did not cause (its step deleted) leaves his focus alone.
+    if (!from || (document.activeElement && document.activeElement !== document.body)) return;
+    const target = from.element?.isConnected ? from.element : document.querySelector<HTMLElement>(`[data-node="${from.node}"] .ip-row-title`);
+    target?.focus();
+  }, [detailsOpen]);
   const [viewerResource, setViewerResource] = useState<number | null>(null);
   const viewerOpen = viewerResource !== null;
-  const [overrides, setOverride] = useFoldOverrides(snapshot?.project.id);
-  const canvas = useRef<CanvasHandle>(null);
   const goToField = useRef<GoToHandle>(null);
   const app = useRef<HTMLDivElement>(null);
   /** Whatever had focus when the viewer opened. It gets focus back when the viewer closes. */
   const opener = useRef<HTMLElement | null>(null);
-  const needsYou = useMemo(() => (snapshot ? snapshot.nodes.filter(isNeedsYou).length : 0), [snapshot]);
+  /** Open asks plus live sessions waiting on a permission: the title's count, as a tab's is (spec 2.1). */
+  const waiting = useMemo(
+    () => (snapshot ? snapshot.asks.filter((a) => a.clearedAt === null).length + snapshot.sessions.filter((s) => s.state === 'permission' && isLive(s, now)).length : 0),
+    [snapshot, now],
+  );
+  const pickView = (v: View) => {
+    if (v === view) return;
+    noteAction('header', 'view');
+    setView(v);
+    saveView(v);
+    postEvent('view', snapshot?.project.id ?? null, { view: v });
+  };
   // The tabs follow the picked slug, not the loaded snapshot, so a tab lights up on the click and [ ] step on from it.
   const tabs = useMemo(() => projectTabs(projects, state.slug), [projects, state.slug]);
   const archived = useMemo(() => archivedProjects(projects), [projects]);
@@ -88,9 +123,32 @@ export function App() {
     opener.current = null;
   }, [viewerOpen]);
 
+  // Coming back to the window (spec 2.6): shown or focused again. The handler reads the latest state through a ref.
+  const shownNow = useRef({ snapshot, view });
+  shownNow.current = { snapshot, view };
   useEffect(() => {
-    document.title = `${needsYou ? `(${needsYou}) ` : ''}InProgress${snapshot ? ` · ${snapshot.project.name}` : ''}`;
-  }, [needsYou, snapshot]);
+    const shown = () => {
+      const { snapshot: s, view: v } = shownNow.current;
+      if (!s) return;
+      noteShown(s.project.id, v, deriveBoard(s, Date.now()).marked.length);
+    };
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') shown();
+      else noteHidden();
+    };
+    const hidden = () => noteHidden();
+    window.addEventListener('focus', shown);
+    window.addEventListener('blur', hidden);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('focus', shown);
+      window.removeEventListener('blur', hidden);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
+  useEffect(() => {
+    document.title = `${waiting ? `(${waiting}) ` : ''}InProgress${snapshot ? ` · ${snapshot.project.name}` : ''}`;
+  }, [waiting, snapshot]);
   useEffect(() => {
     setSelectedNode(null);
     setViewerResource(null);
@@ -123,7 +181,7 @@ export function App() {
       if (!projects.some((p) => p.slug === going.slug)) drop();
       return;
     }
-    if (snapshot?.project.id !== going.projectId || !canvas.current) return;
+    if (snapshot?.project.id !== going.projectId) return;
     if (!holds(snapshot, going.id)) {
       // Gone since the search, or newer than this snapshot: the server knows which. A newer one waits for the next.
       if (checked.current === going) return;
@@ -135,26 +193,15 @@ export function App() {
       return;
     }
     setGoingTo(null);
-    // A jump is a move of Aiden's own, as a pan is: Follow would take the camera straight back.
-    setFollow(false);
+    // The step's Details open over whichever view is showing.
     setSelectedNode(going.id);
-    canvas.current.goTo(going.id);
   }, [goingTo, snapshot, state.slug, projects]);
 
-  const followOn = useCallback(() => {
-    setFollow(true);
-    canvas.current?.goFrontier();
-  }, []);
-
-  // The viewer covers the canvas, so while it is open only Escape is ours: F/N/Home/End, [ ] and 1-9 go to the browser.
+  // The viewer covers the window, so while it is open only Escape is ours: [ ] and 1-9 go to the browser.
   useKeyboard(
     viewerOpen
       ? { onEscape: () => setViewerResource(null) }
       : {
-          onFollow: () => (follow ? setFollow(false) : followOn()),
-          onNext: () => canvas.current?.nextNeedsYou(),
-          onHome: () => canvas.current?.goRoot(),
-          onEnd: () => canvas.current?.goFrontier(),
           onPrevTab: () => stepProject(-1),
           onNextTab: () => stepProject(1),
           onTab: (n) => {
@@ -171,17 +218,7 @@ export function App() {
   return (
     <>
       <div className="ip-app" ref={app}>
-        <TopBar tabs={tabs} archived={archived} deleted={state.deleted} current={state.slug} onSelect={state.selectProject} onAction={onAction} onRename={onRename} goTo={goToField} onGoTo={goTo} />
-        {/* Always there, so the canvas doesn't jump while a project loads: it holds the needs-you pill and Follow. */}
-        <SessionRow
-          sessions={snapshot?.sessions ?? []}
-          onPick={(s) => s.focusNodeId !== null && canvas.current?.focusNode(s.focusNodeId)}
-          needsYou={needsYou}
-          onNeedsYou={() => canvas.current?.nextNeedsYou()}
-          follow={follow}
-          onFollow={followOn}
-        />
-        {snapshot && <UpNext queue={snapshot.project.queue} nodes={snapshot.nodes} sessions={snapshot.sessions} onJump={(id) => canvas.current?.focusNode(id)} />}
+        <TopBar tabs={tabs} archived={archived} deleted={state.deleted} current={state.slug} onSelect={state.selectProject} onAction={onAction} onRename={onRename} goTo={goToField} onGoTo={goTo} view={view} onView={pickView} />
         {state.connection === 'reconnecting' && <div className="ip-banner">Reconnecting to InProgress…</div>}
         <main className="ip-main">
           {projects.length === 0 ? (
@@ -191,19 +228,11 @@ export function App() {
                 : 'No projects yet. In a Claude session, say "track this in InProgress".'}
             </div>
           ) : snapshot ? (
-            <Canvas
-              key={snapshot.project.id}
-              ref={canvas}
-              snapshot={snapshot}
-              lastEvent={state.liveEvent}
-              follow={follow}
-              onFollowChange={setFollow}
-              overrides={overrides}
-              onToggleFold={setOverride}
-              selectedNode={selectedNode}
-              onSelectNode={setSelectedNode}
-              onOpenResource={openViewer}
-            />
+            view === 'board' ? (
+              <Board key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onOpenProject={() => pickView('project')} lastLook={lastLook} onStatus={say} />
+            ) : (
+              <ProjectView key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onStatus={say} />
+            )
           ) : (
             <div className="ip-empty">Loading project…</div>
           )}
@@ -213,11 +242,9 @@ export function App() {
               nodeId={selectedNode}
               snapshot={snapshot}
               onClose={() => setSelectedNode(null)}
-              onSelectNode={(id) => {
-                setSelectedNode(id);
-                canvas.current?.focusNode(id);
-              }}
+              onSelectNode={setSelectedNode}
               onOpenResource={openViewer}
+              onStatus={say}
             />
           )}
         </main>

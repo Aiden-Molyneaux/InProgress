@@ -303,14 +303,14 @@ describe('projects', () => {
     expect(listProjectSummaries(ctx).find((x) => x.id === p.id)).toMatchObject({ openAsks: 0 });
   });
 
-  it('summarizes needs-you counts and live sessions', () => {
+  it('summarizes live sessions', () => {
     const ctx = makeCtx();
     const p = createProject(ctx, 'test', { name: 'P' });
     const ts = ctx.now();
     ctx.db.prepare("INSERT INTO nodes (project_id, parent_id, position, kind, title, status, assignee, created_at, updated_at) VALUES (?, ?, 1, 'task', 'Run tests', 'todo', 'me', ?, ?)").run(p.id, p.rootNodeId, ts, ts);
     ctx.db.prepare("INSERT INTO sessions (id, project_id, state, started_at, last_seen_at) VALUES ('s1', ?, 'working', ?, ?)").run(p.id, ts, ts);
     const [s] = listProjectSummaries(ctx);
-    expect(s).toMatchObject({ slug: 'p', needsYou: 1, activeSessions: 1, workingSessions: 1, busySessions: 1 });
+    expect(s).toMatchObject({ slug: 'p', activeSessions: 1, workingSessions: 1, busySessions: 1 });
     expect(s.lastEventAt).not.toBeNull();
   });
 

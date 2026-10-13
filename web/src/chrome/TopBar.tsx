@@ -5,8 +5,10 @@ import { archiveNote, renamedTo, type ActionTarget, type ProjectAction } from '.
 import { daysLeftLabel } from '../time';
 import { useNow } from '../useNow';
 import { GoTo, type GoToHandle } from './GoTo';
+import type { View } from '../views/view';
 import { menuStep } from './menu';
-import { projectLabel, recentlyDeleted } from './tabs';
+import { projectLabel, recentlyDeleted, waitingOn } from './tabs';
+import { ViewSwitch } from './ViewSwitch';
 
 interface TopBarProps {
   /** One per tab, in strip order (projectTabs). */
@@ -26,6 +28,9 @@ interface TopBarProps {
   goTo: RefObject<GoToHandle>;
   /** A step picked in the Go to field. */
   onGoTo: (hit: StepHit) => void;
+  /** The view shown, and the pick of another. */
+  view: View;
+  onView: (v: View) => void;
 }
 
 /**
@@ -41,14 +46,14 @@ type RunRename = (target: ActionTarget, name: string, opener: HTMLElement | null
 type Confirming = ActionTarget & Pick<ProjectSummary, 'activeSessions'>;
 
 /**
- * How many items wait on Aiden, as a muted numeral, and an ink dot while a session works in the project or waits on a
+ * How many asks and permission waits wait on Aiden (waitingOn), as a muted numeral, and an ink dot while a session works in the project or waits on a
  * running worker or command of its own (busySessions). The dot pulses while a session works and is still when sessions
  * are only busy.
  */
 function Badges({ p }: { p: ProjectSummary }) {
   return (
     <>
-      {p.needsYou > 0 && <span className="ip-tab-count">{p.needsYou}</span>}
+      {waitingOn(p) > 0 && <span className="ip-tab-count">{waitingOn(p)}</span>}
       {p.busySessions > 0 && <span className={p.workingSessions > 0 ? 'ip-tab-dot' : 'ip-tab-dot still'} />}
     </>
   );
@@ -216,7 +221,7 @@ function RenameField({ rename, onCancel }: { rename: Renaming; onCancel: () => v
 /**
  * What a tab's menu and the ⋯ menu share: roving focus over the menuitems (Down and Up wrap, Home and End), Escape
  * back to the opener, closing when focus leaves, and the delete confirm or the rename field in place of the items.
- * Every key stays here: [ ] 1-9 f n Home End and Escape are the app's own keys otherwise, and would act under the open
+ * Every key stays here: [ ] 1-9 and Escape are the app's own keys otherwise, and would act under the open
  * menu (or, in the rename field, take the typing).
  */
 function MenuSurface(props: MenuSurfaceProps) {
@@ -569,7 +574,7 @@ function ArchiveMenu({ archived, deleted, current, onSelect, run }: ArchiveMenuP
 }
 
 /** One tab per active project, then ⋯ with the archived and recently deleted ones, then the Go to field's button. */
-export function TopBar({ tabs, archived, deleted: listed, current, onSelect, onAction, onRename, goTo, onGoTo }: TopBarProps) {
+export function TopBar({ tabs, archived, deleted: listed, current, onSelect, onAction, onRename, goTo, onGoTo, view, onView }: TopBarProps) {
   const header = useRef<HTMLElement>(null);
   // A row past its purge time drops out even if the purge has not run yet; the clock is the bar's, not the app's.
   const now = useNow(60_000);
@@ -620,6 +625,7 @@ export function TopBar({ tabs, archived, deleted: listed, current, onSelect, onA
           onMenu={(p, tab) => setTabMenu({ id: p.id, tab })}
         />
       )}
+      {tabs.length > 0 && <ViewSwitch view={view} onPick={onView} />}
       {tabMenu && menuProject && !menuGone && (
         <TabMenu key={tabMenu.id} project={menuProject} tab={tabMenu.tab} strip={strip.current} onClose={closeTabMenu} run={run} runRename={runRename} />
       )}

@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../../src/server/db/connection';
 import { createCtx, write } from '../../src/server/db/tx';
-import { EVENTS_RETENTION_DAYS, lastProjectEvent, listEventsSince, maxEventId, pruneEvents, toEvent } from '../../src/server/repo/events';
+import { EVENTS_RETENTION_DAYS, lastProjectEvent, listEventsSince, maxEventId, pruneEvents, recordQuiet, toEvent } from '../../src/server/repo/events';
 import { addLog } from '../../src/server/repo/logs';
 import { addNodes } from '../../src/server/repo/nodes';
-import { createProject } from '../../src/server/repo/projects';
+import { createProject, listProjectSummaries } from '../../src/server/repo/projects';
 import { addResource, deleteResource, updateResource } from '../../src/server/repo/resources';
 import { makeCtx } from '../helpers';
 
@@ -59,5 +59,21 @@ describe('event retention', () => {
     ]);
     expect(lastProjectEvent(ctx, quiet.id)).toEqual(quietNewest);
     expect(pruneEvents(ctx)).toBe(0);
+  });
+
+  it('never counts a window measurement as the newest event, and prunes old ones', () => {
+    let now = Date.parse('2026-01-01T00:00:00.000Z');
+    const ctx = createCtx(openDb(':memory:'), () => new Date(now).toISOString());
+    const p = createProject(ctx, 'test', { name: 'Quiet' });
+    const real = lastProjectEvent(ctx, p.id)!;
+    now += 1000;
+    recordQuiet(ctx, 'window', { projectId: p.id, type: 'window.view', entity: 'window', entityId: 'view', data: { view: 'board' } });
+    expect(lastProjectEvent(ctx, p.id)).toEqual(real);
+    expect(listProjectSummaries(ctx).find((x) => x.id === p.id)!.lastEventAt).toBe(real.ts);
+    now += 40 * DAY;
+    // The window row is newer and past the cutoff: it goes, and the real event stays as the project's newest.
+    expect(pruneEvents(ctx)).toBe(2); // the window row and the project's older creation event
+    expect(lastProjectEvent(ctx, p.id)).toEqual(real);
+    expect(ctx.db.prepare("SELECT COUNT(*) FROM events WHERE type LIKE 'window.%'").pluck().get()).toBe(0);
   });
 });

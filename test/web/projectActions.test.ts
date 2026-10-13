@@ -112,7 +112,7 @@ describe('patchProjects', () => {
 describe('summaryOf', () => {
   it('lists a project the server answered with, its counts at nothing until the reload brings them', () => {
     const project = { id: 3, slug: 'c', name: 'C', description: '', playbook: '', status: 'archived' as const, rootNodeId: 9, createdAt: 'x', updatedAt: 'y', queue: [], briefingMode: 'full' as const };
-    expect(summaryOf(project)).toEqual({ ...project, needsYou: 0, openAsks: 0, permissionWaits: 0, activeSessions: 0, workingSessions: 0, busySessions: 0, lastEventAt: null });
+    expect(summaryOf(project)).toEqual({ ...project, openAsks: 0, permissionWaits: 0, activeSessions: 0, workingSessions: 0, busySessions: 0, lastEventAt: null });
   });
 });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { archivedProjects, neighbourTab, pickSlug, projectLabel, projectTabs, recentlyDeleted, stepTab } from '../../web/src/chrome/tabs';
+import { archivedProjects, neighbourTab, pickSlug, projectLabel, projectTabs, recentlyDeleted, stepTab, waitingOn } from '../../web/src/chrome/tabs';
 
 const project = (id: number, status: 'active' | 'archived' = 'active') => ({ id, slug: `p${id}`, status });
 const slugs = (list: { slug: string }[]) => list.map((p) => p.slug);
@@ -57,22 +57,29 @@ describe('stepTab', () => {
   });
 });
 
+describe('waitingOn', () => {
+  it('is the open asks plus the permission waits', () => {
+    expect(waitingOn({ openAsks: 2, permissionWaits: 1 })).toBe(3);
+    expect(waitingOn({ openAsks: 0, permissionWaits: 0 })).toBe(0);
+  });
+});
+
 describe('projectLabel', () => {
-  const summary = { name: 'InThink: Marathon v3', needsYou: 0, workingSessions: 0, busySessions: 0 };
+  const summary = { name: 'InThink: Marathon v3', openAsks: 0, permissionWaits: 0, workingSessions: 0, busySessions: 0 };
 
   it('is the full name when nothing needs you and nothing works', () => {
     expect(projectLabel(summary)).toBe('InThink: Marathon v3');
   });
 
   it('says what the badges show', () => {
-    expect(projectLabel({ ...summary, needsYou: 3 })).toBe('InThink: Marathon v3, 3 need you');
+    expect(projectLabel({ ...summary, openAsks: 3 })).toBe('InThink: Marathon v3, 3 need you');
     expect(projectLabel({ ...summary, workingSessions: 2, busySessions: 2 })).toBe('InThink: Marathon v3, working');
-    expect(projectLabel({ ...summary, needsYou: 1, workingSessions: 1, busySessions: 1 })).toBe('InThink: Marathon v3, 1 need you, working');
+    expect(projectLabel({ ...summary, openAsks: 1, workingSessions: 1, busySessions: 1 })).toBe('InThink: Marathon v3, 1 need you, working');
   });
 
   it('says busy, not working, while only a command or a worker keeps a session going', () => {
     expect(projectLabel({ ...summary, busySessions: 1 })).toBe('InThink: Marathon v3, busy');
-    expect(projectLabel({ ...summary, needsYou: 2, busySessions: 1 })).toBe('InThink: Marathon v3, 2 need you, busy');
+    expect(projectLabel({ ...summary, openAsks: 1, permissionWaits: 1, busySessions: 1 })).toBe('InThink: Marathon v3, 2 need you, busy');
     // Working wins when a session works and another is busy.
     expect(projectLabel({ ...summary, workingSessions: 1, busySessions: 2 })).toBe('InThink: Marathon v3, working');
   });

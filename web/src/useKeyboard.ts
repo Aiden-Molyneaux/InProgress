@@ -1,12 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { isGoToChord } from './chrome/goToText';
 
-/** A key without a handler is left to the browser, so Home/End can scroll whatever has focus. */
+/** A key without a handler is left to the browser. */
 export interface KeyHandlers {
-  onFollow?: () => void;
-  onNext?: () => void;
-  onHome?: () => void;
-  onEnd?: () => void;
   /** `[` and `]`: the previous and the next project tab. */
   onPrevTab?: () => void;
   onNextTab?: () => void;
@@ -33,7 +29,7 @@ export function useKeyboard(handlers: KeyHandlers): void {
       }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       const { onTab } = h;
-      const map: Record<string, (() => void) | undefined> = { f: h.onFollow, F: h.onFollow, n: h.onNext, N: h.onNext, Home: h.onHome, End: h.onEnd, Escape: h.onEscape, '[': h.onPrevTab, ']': h.onNextTab, '/': h.onGoTo };
+      const map: Record<string, (() => void) | undefined> = { Escape: h.onEscape, '[': h.onPrevTab, ']': h.onNextTab, '/': h.onGoTo };
       const fn = /^[1-9]$/.test(e.key) ? onTab && (() => onTab(Number(e.key))) : map[e.key];
       if (!fn) return;
       e.preventDefault();
