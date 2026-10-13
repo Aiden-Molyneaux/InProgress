@@ -1,5 +1,5 @@
 import { TRAIL_MS, type Session, type WorkItem, type WorkStatus } from '../../core/types';
-import { write, type Ctx } from '../db/tx';
+import { write, type Ctx, type RecordEvent } from '../db/tx';
 import { badRequest, notFound } from '../errors';
 import { findNode, leadingNode } from './nodes';
 import { getProjectById, isTracking, notTracked } from './projects';
@@ -222,6 +222,18 @@ export function setTasks(ctx: Ctx, actor: string, sessionId: string, requested: 
     }
     return { nodeId, tasks: toItems(ownList(ctx, sessionId, nodeId)) };
   });
+}
+
+/**
+ * Ticks every open working task on a node, whoever owns it (a main session or a subagent, live or ended), inside a
+ * write already open: patchNode calls it when a step goes to done, so a done step shows no open tasks. Records
+ * work.updated when any changed.
+ */
+export function closeNodeTasks(ctx: Ctx, record: RecordEvent, projectId: number, nodeId: number): void {
+  const { changes } = ctx.db
+    .prepare("UPDATE work_items SET status = 'completed', updated_at = ? WHERE node_id = ? AND status != 'completed'")
+    .run(ctx.now(), nodeId);
+  if (changes > 0) record({ projectId, type: 'work.updated', entity: 'node', entityId: nodeId, data: { nodeId } });
 }
 
 /** Drops the working tasks of sessions that ended more than a week ago: they have left the trail. Returns how many went. */
