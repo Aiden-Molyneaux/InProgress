@@ -26,3 +26,16 @@ export function optimisticNext(rows: NextRow[], op: QueueOp): number[] {
   else unowned.splice(at, 0, op.node);
   return [...unowned, ...owned];
 }
+
+/**
+ * Where a drop over a row lands: before the row when the pointer is in its top half, else before the unowned step after
+ * it (null: the end). A slot that is the dragged step itself would append it, so it reads as the step after the dragged
+ * one and the drop changes nothing. `unowned` is the unowned Next order.
+ */
+export function dropSlot(unowned: number[], overId: number, upper: boolean, dragging: number): number | null {
+  const at = unowned.indexOf(overId);
+  if (at < 0) return null;
+  const slot = upper ? overId : (unowned[at + 1] ?? null);
+  if (slot !== dragging) return slot;
+  return unowned[unowned.indexOf(dragging) + 1] ?? null;
+}

@@ -207,7 +207,7 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-railkey > div:not(.ip-label) { display: flex; align-items: center; gap: 10px; }
 .ip-railkey .ip-dot, .ip-railkey .ip-num { flex: none; width: 22px; text-align: center; }
 .ip-donegroups { display: flex; flex-direction: column; gap: 4px; padding: 8px 12px; border: 1px dashed var(--border); border-radius: var(--radius); }
-.ip-donegroups ul { display: flex; flex-direction: column; gap: 2px; }
+.ip-donegroups ul { display: flex; flex-direction: column; gap: 2px; list-style: none; margin: 0; padding: 0; }
 .ip-dg-item { padding: 0 0 0 14px; text-align: left; font-size: var(--fs-s); line-height: 18px; color: var(--muted); }
 .ip-dg-item:hover { color: var(--text); }
 .ip-dg-item:focus-visible, .ip-sec-toggle:focus-visible, .ip-done-fold-btn:focus-visible, .ip-add-step:focus-visible, .ip-docs-btn:focus-visible { outline: 2px solid var(--text-2); outline-offset: 1px; }
@@ -237,6 +237,7 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 li.ip-orow:hover { background: var(--panel-2); }
 .ip-orail { display: flex; align-items: center; justify-content: center; min-height: 26px; }
 .ip-ostep { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; padding: 2px 0; font-size: var(--fs-m); line-height: 18px; }
+.ip-ostep .ip-row-title { flex: 1 1 10em; min-width: 0; }
 .ip-ostep .ip-row-title.grp { font-weight: var(--w-heavy); }
 .ip-ominor { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
 .ip-ocell { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }

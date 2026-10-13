@@ -97,10 +97,12 @@ function renormalize(ctx: Ctx, parentId: number): void {
   sibs.forEach((s, i) => update.run(i + 1, s.id));
 }
 
-export function addNodes(ctx: Ctx, actor: string, input: { parentId: number; after?: After; nodes: NodeInput[] }): TreeNode[] {
+export function addNodes(ctx: Ctx, actor: string, input: { parentId: number; after?: After; nodes: NodeInput[]; check?: (parent: TreeNode) => void }): TreeNode[] {
   if (input.nodes.length === 0) throw badRequest('nodes is empty');
   return write(ctx, actor, (record) => {
     const parent = requireNode(ctx, input.parentId);
+    // The caller's own test of the parent, run in this write so it cannot go stale before the insert.
+    input.check?.(parent);
     const positions = insertPositions(siblings(ctx, parent.id), input.after ?? 'end', input.nodes.length);
     const ts = ctx.now();
     const insert = ctx.db.prepare(

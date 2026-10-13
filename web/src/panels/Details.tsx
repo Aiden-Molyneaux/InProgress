@@ -232,7 +232,7 @@ function AsksSection({ nodeId, snapshot, now }: { nodeId: number; snapshot: Proj
               <span className="ip-id">{`a${a.id}`}</span> {KIND_MARK[a.kind]} {a.kind} · {raiser(a.sessionId)} · <span className="ip-time">{ageShort(a.raisedAt, now)}</span>
             </div>
             <p>{a.text}</p>
-            <AskActions ask={a} />
+            <AskActions ask={a} area="details" />
           </li>
         ))}
         {answered.map((a) => (
@@ -325,7 +325,7 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
     <aside className="ip-details" aria-label="Node details">
       <div className="ip-grab" />
       <header>
-        <b>#{node.id} {node.title}</b>
+        <b tabIndex={-1}>#{node.id} {node.title}</b>
         <button className="ip-btn" onClick={() => void copy()}>{copied ? 'Copied' : `Copy #${node.id}`}</button>
         <button className="ip-btn" onClick={onClose} aria-label="Close">×</button>
       </header>

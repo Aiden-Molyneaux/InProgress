@@ -74,3 +74,12 @@ describe('noteAction', () => {
     expect(postEvent).not.toHaveBeenCalled();
   });
 });
+
+describe('areas', () => {
+  it('passes the Details area through to first_action', () => {
+    noteShown(2, 'board', 0, T0 + GAP_MS);
+    vi.setSystemTime(T0 + GAP_MS + 1000);
+    noteAction('details', 'clear');
+    expect(postEvent).toHaveBeenLastCalledWith('first_action', 2, { area: 'details', action: 'clear' });
+  });
+});

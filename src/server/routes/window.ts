@@ -6,7 +6,7 @@ import { deleteProject, listDeletedProjects, restoreProject } from '../project-l
 import { clearAsk } from '../repo/asks';
 import { recordQuiet } from '../repo/events';
 import { addNodes } from '../repo/nodes';
-import { applyQueueOp, changeProject, getProjectById } from '../repo/projects';
+import { applyQueueOp, changeProject, getProjectById, resolveProject } from '../repo/projects';
 import { idParam, windowClearBody, windowEventBody, windowNodeBody, windowProjectBody, windowQueueBody, windowRenameBody, WINDOW_EVENT_KEYS } from '../schemas';
 
 /** Who the window's writes are recorded as: fixed here, never taken from a header. */
@@ -56,18 +56,28 @@ export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: 
   // One queue operation applied to the stored queue (spec 2.5), never the list the window last saw.
   app.post('/api/ui/projects/:id/queue', guarded, async (req) => {
     const { slug, op } = windowQueueBody.parse(req.body);
-    return { project: applyQueueOp(ctx, ACTOR, targetBySlug(req.params, slug), op) };
+    const projectId = targetBySlug(req.params, slug);
+    // A deleted project is not found (404), as for rename.
+    resolveProject(ctx, projectId);
+    return { project: applyQueueOp(ctx, ACTOR, projectId, op) };
   });
   // Quick-add: a todo step with no label under `parent`, or the root.
   app.post('/api/ui/projects/:id/nodes', guarded, async (req) => {
     const { slug, title, parent } = windowNodeBody.parse(req.body);
     const projectId = targetBySlug(req.params, slug);
-    if (parent !== null) {
-      const home = ctx.db.prepare('SELECT project_id, status FROM nodes WHERE id = ?').get(parent) as { project_id: number; status: string } | undefined;
-      if (home?.project_id !== projectId) throw badRequest(`#${parent} is not in this project`, 'Reload the window.');
-      if (home.status === 'dropped') throw badRequest(`#${parent} is dropped`, 'Reload the window.');
-    }
-    const [node] = addNodes(ctx, ACTOR, { parentId: parent ?? getProjectById(ctx, projectId)!.rootNodeId, nodes: [{ title }] });
+    const project = resolveProject(ctx, projectId);
+    // A parent that does not exist reads as one outside this project; the rest is checked inside the write.
+    if (parent !== null && ctx.db.prepare('SELECT 1 FROM nodes WHERE id = ?').get(parent) === undefined) throw badRequest(`#${parent} is not in this project`, 'Reload the window.');
+    // The parent is checked inside addNodes' own write, so a parent dropped or moved in between cannot slip through.
+    const [node] = addNodes(ctx, ACTOR, {
+      parentId: parent ?? project.rootNodeId,
+      nodes: [{ title }],
+      check: (home) => {
+        if (parent === null) return;
+        if (home.projectId !== projectId) throw badRequest(`#${parent} is not in this project`, 'Reload the window.');
+        if (home.status === 'dropped') throw badRequest(`#${parent} is dropped`, 'Reload the window.');
+      },
+    });
     return { node };
   });
   // Idempotent (spec 1.2): clearing twice answers the same; a 404 for an ask that does not exist.

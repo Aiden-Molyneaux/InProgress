@@ -2198,3 +2198,57 @@ test.describe('Details: asks, handoff, add a step', () => {
     expect(detail.children.map((c) => c.title)).toEqual(expect.arrayContaining(['Check the upload key', 'Second child']));
   });
 });
+
+test.describe('Fix round 1', () => {
+  test('dropping a Next row on itself, or on the half of the row above it, leaves the order alone', async ({ page, fresh }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const next = band(page, 'next');
+    await next.getByRole('button', { name: /^Backlog · \d+ [▸▾]$/ }).click();
+    const backlogRow = (t: string) => next.locator('.ip-backlog-row', { has: page.getByRole('button', { name: t, exact: true }) });
+    const nextRow = (t: string) => next.locator('.ip-next-row', { has: page.getByRole('button', { name: t, exact: true }) });
+    const order = async () => (await next.locator('.ip-next-row .ip-row-title').allTextContents()).join('|');
+    await backlogRow('4 Build to GitHub').dragTo(next.getByText('Nothing is queued'));
+    await backlogRow('5 Store listing').dragTo(nextRow('4 Build to GitHub'), { targetPosition: { x: 40, y: 30 } });
+    await backlogRow('6 Beta').dragTo(nextRow('5 Store listing'), { targetPosition: { x: 40, y: 30 } });
+    const expected = '4 Build to GitHub|5 Store listing|6 Beta';
+    await expect.poll(order).toBe(expected);
+    // The middle row on its own top half, then on the bottom half of the row above it.
+    await nextRow('5 Store listing').dragTo(nextRow('5 Store listing'), { targetPosition: { x: 40, y: 2 } });
+    await nextRow('5 Store listing').dragTo(nextRow('4 Build to GitHub'), { targetPosition: { x: 40, y: 30 } });
+    await expect.poll(order).toBe(expected);
+    await page.reload();
+    await expect.poll(order).toBe(expected);
+  });
+
+  test('Escape closes Details and returns focus to the row title that opened it', async ({ page, fresh }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const title = band(page, 'needs').getByRole('button', { name: `on #${fresh.ids['Run signing tests']} Run signing tests` });
+    await title.click();
+    await expect(page.getByRole('complementary')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('complementary')).toHaveCount(0);
+    await expect(title).toBeFocused();
+  });
+
+  test('"to Next" moves focus to the next Backlog row, and an empty Answer… does not clear', async ({ page, api, fresh }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const next = band(page, 'next');
+    await next.getByRole('button', { name: /^Backlog · \d+ [▸▾]$/ }).click();
+    const titles = next.locator('.ip-backlog-row .ip-row-title');
+    const first = await titles.nth(0).textContent();
+    const second = await titles.nth(1).textContent();
+    expect(first).not.toBe(second);
+    await next.locator('.ip-backlog-row').first().getByRole('button', { name: 'to Next' }).click();
+    await expect(next.getByRole('button', { name: second!, exact: true }).first()).toBeFocused();
+    // Enter on an empty answer field does nothing.
+    const row = band(page, 'needs').locator('.ip-ask');
+    await row.getByRole('button', { name: 'Answer…' }).click();
+    await page.keyboard.press('Enter');
+    await expect(row.getByRole('textbox')).toBeFocused();
+    const snapshot = (await (await api.get(`/api/projects/${fresh.slug}`)).json()) as { asks: { id: number; clearedAt: string | null }[] };
+    expect(snapshot.asks.find((a) => a.id === fresh.ask)?.clearedAt).toBeNull();
+  });
+});

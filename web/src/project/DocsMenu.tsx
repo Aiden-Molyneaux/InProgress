@@ -37,7 +37,14 @@ export function DocsMenu({ docs, label, onOpenResource }: { docs: ResourceMeta[]
       shut(true);
       return;
     }
-    const items = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    const items0 = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    const items = items0;
+    // Shift+Tab off the first item lands on the opener, and the menu closes behind it.
+    if (e.key === 'Tab' && e.shiftKey && document.activeElement === items[0]) {
+      e.preventDefault();
+      shut(true);
+      return;
+    }
     const next = menuStep(e.key, items.indexOf(document.activeElement as HTMLElement), items.length);
     if (next === null) return;
     e.preventDefault();
@@ -58,6 +65,14 @@ export function DocsMenu({ docs, label, onOpenResource }: { docs: ResourceMeta[]
         aria-expanded={open}
         aria-label={`${docs.length} resource${docs.length > 1 ? 's' : ''} in ${label}`}
         onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => {
+          // Escape on the opener closes the menu and stops there: it must not also close Details.
+          if (e.key === 'Escape' && open) {
+            e.preventDefault();
+            e.stopPropagation();
+            shut(true);
+          }
+        }}
       >
         {`▤ ${docs.length}`}
       </button>

@@ -199,3 +199,16 @@ describe('requireUi on the new routes', () => {
     expect(ctx.db.prepare('SELECT COUNT(*) FROM events').pluck().get()).toBe(before);
   });
 });
+
+describe('a deleted project', () => {
+  it('is not found (404) by the queue and create routes, and nothing is written', async () => {
+    const { ctx, p, post, queue, a, stored } = await setup();
+    const gone = await post(`/api/ui/projects/${p.id}/delete`, { slug: p.slug });
+    expect(gone.statusCode).toBe(200);
+    expect((await queue({ kind: 'move', node: a, before: null })).statusCode).toBe(404);
+    expect(stored()).toEqual([]);
+    const before = ctx.db.prepare('SELECT COUNT(*) FROM nodes WHERE project_id = ?').pluck().get(p.id);
+    expect((await post(`/api/ui/projects/${p.id}/nodes`, { slug: p.slug, title: 'Late', parent: null })).statusCode).toBe(404);
+    expect(ctx.db.prepare('SELECT COUNT(*) FROM nodes WHERE project_id = ?').pluck().get(p.id)).toBe(before);
+  });
+});

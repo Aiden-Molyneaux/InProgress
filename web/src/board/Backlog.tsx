@@ -1,5 +1,7 @@
 import type { BoardRow } from '../../../src/core/board';
 import type { TreeNode } from '../../../src/core/types';
+import { noteAction } from '../measure';
+import { focusTargetAfter } from './focus';
 import { endedLine, LabelChip, rowClick, StepMarks } from './Marks';
 import type { BandProps } from './bandProps';
 
@@ -51,7 +53,11 @@ export function Backlog({ rows, snapshot, now, onOpenNode, onOpenResource, onDra
                     <button type="button" className="ip-row-title">{row.node.title}</button>
                     <LabelChip label={row.node.label} />
                     <StepMarks row={row} now={now} onOpenResource={onOpenResource} />
-                    <button type="button" className="ip-hover-act" data-act onClick={() => onToNext(row.node.id)}>to Next</button>
+                    <button type="button" className="ip-hover-act" data-act onClick={(e) => {
+                      noteAction('backlog', 'to_next');
+                      focusTargetAfter(e.currentTarget.closest('li'))?.focus();
+                      onToNext(row.node.id);
+                    }}>to Next</button>
                   </div>
                   {ended && <div className="ip-system-line">{ended}</div>}
                 </li>

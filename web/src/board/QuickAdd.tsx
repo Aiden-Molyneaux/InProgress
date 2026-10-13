@@ -27,7 +27,8 @@ export function QuickAdd({ projectId, slug, inputRef, onStatus, onClose, parent 
     if (result === 'ok') {
       field.value = '';
       field.focus();
-    } else if (result !== 'reload') onStatus?.(result);
+    } else if (result === 'reload') window.location.reload();
+    else onStatus?.(result);
   };
   return <input ref={inputRef} className="ip-quick-add" type="text" aria-label={label} placeholder="Add a step…" onKeyDown={onKeyDown} />;
 }

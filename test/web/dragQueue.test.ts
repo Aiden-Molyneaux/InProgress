@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dropToOp, optimisticNext } from '../../web/src/board/dragQueue';
+import { dropSlot, dropToOp, optimisticNext } from '../../web/src/board/dragQueue';
 
 const row = (id: number, owned = false) => ({ node: { id }, owner: owned ? ({ id: 's' } as never) : null });
 
@@ -35,5 +35,25 @@ describe('optimisticNext', () => {
   it('remove drops the step from the order', () => {
     expect(optimisticNext(rows, { kind: 'remove', node: 2 })).toEqual([1, 3, 9]);
     expect(optimisticNext(rows, { kind: 'remove', node: 9 })).toEqual([1, 2, 3]);
+  });
+});
+
+describe('dropSlot', () => {
+  const unowned = [1, 2, 3];
+  it('is the row itself over its top half, and the step after it over its bottom half', () => {
+    expect(dropSlot(unowned, 2, true, 9)).toBe(2);
+    expect(dropSlot(unowned, 2, false, 9)).toBe(3);
+    expect(dropSlot(unowned, 3, false, 9)).toBeNull();
+  });
+  it('never names the dragged step: that would append it, so it reads as the step after it', () => {
+    // Top half of the dragged row, and bottom half of the row above it.
+    expect(dropSlot(unowned, 2, true, 2)).toBe(3);
+    expect(dropSlot(unowned, 1, false, 2)).toBe(3);
+    // The last row dragged: the end, where it already is.
+    expect(dropSlot(unowned, 3, true, 3)).toBeNull();
+    expect(optimisticNext([row(1), row(2), row(3)], dropToOp(2, { zone: 'next', before: dropSlot(unowned, 2, true, 2) }))).toEqual([1, 2, 3]);
+  });
+  it('is the end over a row that is not unowned', () => {
+    expect(dropSlot(unowned, 77, true, 2)).toBeNull();
   });
 });

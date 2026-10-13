@@ -3,8 +3,10 @@ import type { BoardRow } from '../../../src/core/board';
 import { sessionTag, type QueueOp } from '../../../src/core/types';
 import { postEvent, queueOp } from '../api';
 import { Backlog } from './Backlog';
-import { dropToOp, optimisticNext } from './dragQueue';
+import { dropSlot, dropToOp, optimisticNext } from './dragQueue';
+import { focusTargetAfter } from './focus';
 import { endedLine, LabelChip, rowClick, StepMarks } from './Marks';
+import { noteAction } from '../measure';
 import { QuickAdd } from './QuickAdd';
 import type { BandProps } from './bandProps';
 
@@ -34,9 +36,11 @@ export function NextColumn({ snapshot, board, now, wide, onOpenNode, onOpenResou
   const addButton = useRef<HTMLButtonElement>(null);
   const clearTimer = useRef(0);
 
-  // The server's event brings a new snapshot, and that replaces what the window guessed.
+  // The server's event brings a new snapshot; it replaces what the window guessed once it shows the order the guess was of.
+  // Until then (an event for something else, say) the guess stays; the timer after a write is the fallback.
   useEffect(() => {
-    setPending(null);
+    const order = board.next.map((r) => r.node.id).join();
+    setPending((p) => (p && p.ids.join() === order ? null : p));
   }, [snapshot]);
   useEffect(() => () => window.clearTimeout(clearTimer.current), []);
   useEffect(() => {
@@ -65,7 +69,8 @@ export function NextColumn({ snapshot, board, now, wide, onOpenNode, onOpenResou
       return;
     }
     setPending(null);
-    if (result !== 'reload') onStatus?.(result);
+    if (result === 'reload') window.location.reload();
+    else onStatus?.(result);
   };
   const toNext = (id: number) => write(dropToOp(id, { zone: 'next', before: null }));
   const toBacklog = (id: number) => write(dropToOp(id, { zone: 'backlog' }));
@@ -85,10 +90,9 @@ export function NextColumn({ snapshot, board, now, wide, onOpenNode, onOpenResou
     if (dragging === null) return;
     e.preventDefault();
     e.stopPropagation();
-    const at = unowned.findIndex((r) => r.node.id === row.node.id);
-    if (at < 0) return setSlot(null);
+    if (!unowned.some((r) => r.node.id === row.node.id)) return setSlot(null);
     const box = e.currentTarget.getBoundingClientRect();
-    setSlot(e.clientY < box.top + box.height / 2 ? row.node.id : (unowned[at + 1]?.node.id ?? null));
+    setSlot(dropSlot(unowned.map((r) => r.node.id), row.node.id, e.clientY < box.top + box.height / 2, dragging));
   };
   const dropInNext = (e: DragEvent) => {
     if (dragging === null) return;
@@ -98,6 +102,7 @@ export function NextColumn({ snapshot, board, now, wide, onOpenNode, onOpenResou
     // A drop that leaves the order as it is writes nothing.
     const same = optimisticNext(shown, op).join() === nextIds.join();
     endDrag();
+    noteAction('next', 'drop');
     if (!same) void write(op);
   };
   const dropOnBacklog = (e: DragEvent) => {
@@ -107,6 +112,7 @@ export function NextColumn({ snapshot, board, now, wide, onOpenNode, onOpenResou
     e.preventDefault();
     const id = dragging;
     endDrag();
+    noteAction('backlog', 'drop');
     void toBacklog(id);
   };
 
@@ -115,6 +121,7 @@ export function NextColumn({ snapshot, board, now, wide, onOpenNode, onOpenResou
     postEvent('backlog_open', project.id);
   };
   const toggleFold = () => {
+    noteAction('backlog', 'fold');
     if (open) {
       setOpen(false);
       setAdding(false);
@@ -124,6 +131,7 @@ export function NextColumn({ snapshot, board, now, wide, onOpenNode, onOpenResou
     }
   };
   const addClick = () => {
+    noteAction('backlog', 'add');
     if (!open) openFold();
     setAdding(true);
     setFocusTick((t) => t + 1);
@@ -154,7 +162,11 @@ export function NextColumn({ snapshot, board, now, wide, onOpenNode, onOpenResou
         <div className="ip-next-body">
           <div className="ip-line">
             <button type="button" className="ip-row-title">{row.node.title}</button>
-            <button type="button" className="ip-hover-act" data-act onClick={() => toBacklog(row.node.id)}>back to Backlog</button>
+            <button type="button" className="ip-hover-act" data-act onClick={(e) => {
+                noteAction('next', 'to_backlog');
+                focusTargetAfter(e.currentTarget.closest('li'))?.focus();
+                void toBacklog(row.node.id);
+              }}>back to Backlog</button>
           </div>
           <div className="ip-next-meta">
             <LabelChip label={row.node.label} />

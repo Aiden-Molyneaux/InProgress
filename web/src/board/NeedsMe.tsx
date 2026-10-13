@@ -72,7 +72,7 @@ function AskRow({ ask, snapshot, now, step, onOpenNode }: { ask: Ask; snapshot: 
             {`on #${step.id} ${step.title}`}
           </button>
         )}
-        <AskActions ask={ask} />
+        <AskActions ask={ask} area="needs_me" />
       </div>
     </li>
   );

@@ -1,0 +1,17 @@
+/** The rows a band or a panel lists, as a focus walk sees them. */
+const ROWS = 'li.ip-row, li.ip-msg, li.ip-dask:not(.cleared)';
+
+/**
+ * Where focus goes when `row` is about to leave (spec 2.2): the title button of the next row in its band or panel, else
+ * the previous one, else the band's heading (or the panel's title). Null when the row has no band. Call it before the
+ * row goes; focus the answer at once when the row leaves in this event, or once the request is done.
+ */
+export function focusTargetAfter(row: Element | null): HTMLElement | null {
+  const home = row?.closest<HTMLElement>('.ip-band, aside');
+  if (!row || !home) return null;
+  const others = [...home.querySelectorAll(ROWS)].filter((li) => li !== row && !row.contains(li) && !li.contains(row));
+  const after = others.find((li) => row.compareDocumentPosition(li) & Node.DOCUMENT_POSITION_FOLLOWING);
+  const before = [...others].reverse().find((li) => row.compareDocumentPosition(li) & Node.DOCUMENT_POSITION_PRECEDING);
+  const pick = (li: Element | undefined) => li?.querySelector<HTMLElement>('.ip-row-title, button') ?? null;
+  return pick(after) ?? pick(before) ?? home.querySelector<HTMLElement>('h3, header b');
+}

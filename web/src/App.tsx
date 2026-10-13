@@ -5,7 +5,7 @@ import type { ProjectSnapshot } from '../../src/core/types';
 import { api, postEvent } from './api';
 import { Board } from './board/Board';
 import { useLastLook } from './board/lastLook';
-import { noteHidden, noteShown, setPoster } from './measure';
+import { noteAction, noteHidden, noteShown, setPoster } from './measure';
 import { ActivityStrip } from './chrome/ActivityStrip';
 import type { GoToHandle } from './chrome/GoTo';
 import { archivedProjects, neighbourTab, projectTabs, stepTab } from './chrome/tabs';
@@ -31,6 +31,8 @@ export function App() {
   const now = useNow(30_000);
   const lastLook = useLastLook(snapshot?.project.id ?? null);
   const [selectedNode, setSelectedNode] = useState<number | null>(null);
+  const selectedNodeRef = useRef(selectedNode);
+  selectedNodeRef.current = selectedNode;
   // A node deleted while Details shows it closes Details: the snapshot before held it, the new one doesn't. A node picked
   // from Details' own lists can be newer than the snapshot on screen, so missing from one snapshot alone doesn't count.
   // Cleared during render, so Details never refetches a node that is gone.
@@ -39,6 +41,23 @@ export function App() {
     setLastSnapshot(snapshot);
     if (selectedNode !== null && snapshot && lastSnapshot && holds(lastSnapshot, selectedNode) && !holds(snapshot, selectedNode)) setSelectedNode(null);
   }
+  // Details gives focus back to what opened it, as the viewer does: the element that had focus when it opened, else the
+  // title button of the row that opened it.
+  const detailsOpener = useRef<{ element: HTMLElement | null; node: number } | null>(null);
+  const detailsOpen = selectedNode !== null;
+  useLayoutEffect(() => {
+    if (detailsOpen) {
+      const active = document.activeElement;
+      detailsOpener.current = { element: active instanceof HTMLElement && active !== document.body ? active : null, node: selectedNodeRef.current! };
+      return;
+    }
+    const from = detailsOpener.current;
+    detailsOpener.current = null;
+    // Only when focus went down with Details: a close Aiden did not cause (its step deleted) leaves his focus alone.
+    if (!from || (document.activeElement && document.activeElement !== document.body)) return;
+    const target = from.element?.isConnected ? from.element : document.querySelector<HTMLElement>(`[data-node="${from.node}"] .ip-row-title`);
+    target?.focus();
+  }, [detailsOpen]);
   const [viewerResource, setViewerResource] = useState<number | null>(null);
   const viewerOpen = viewerResource !== null;
   const goToField = useRef<GoToHandle>(null);
@@ -51,6 +70,8 @@ export function App() {
     [snapshot, now],
   );
   const pickView = (v: View) => {
+    if (v === view) return;
+    noteAction('header', 'view');
     setView(v);
     saveView(v);
     postEvent('view', snapshot?.project.id ?? null, { view: v });

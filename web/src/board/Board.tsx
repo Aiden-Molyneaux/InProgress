@@ -37,7 +37,7 @@ export function Board(props: ViewProps) {
       <div className="ip-bands">
         {order.map((b) => (
           <section key={b} className={`ip-band ip-band-${b}`} aria-label={BAND_LABEL[b]}>
-            <h3>{BAND_LABEL[b]}</h3>
+            <h3 tabIndex={-1}>{BAND_LABEL[b]}</h3>
             {body[b]}
           </section>
         ))}

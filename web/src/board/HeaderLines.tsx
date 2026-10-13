@@ -5,6 +5,7 @@ import { sessionActivity } from '../../../src/core/activity';
 import { sessionTag } from '../../../src/core/types';
 import type { BandProps } from './bandProps';
 import { headerSessions } from './headerSessions';
+import { noteAction } from '../measure';
 import { ageShort, firstSentence, hygieneTitle } from './text';
 
 export { headerSessions };
@@ -25,7 +26,10 @@ export function HeaderLines({ snapshot, board, now, wide, onOpenProject }: BandP
                 <b>Orchestrator</b> · <span className="ip-time">{ageShort(note.updatedAt, now)}</span>
               </div>
               <p className="ip-clamp-2">{firstSentence(note.content)}</p>
-              <button type="button" className="ip-link-btn" onClick={onOpenProject}>
+              <button type="button" className="ip-link-btn" onClick={() => {
+                  noteAction('header', 'project_view');
+                  onOpenProject?.();
+                }}>
                 Project view ›
               </button>
             </div>
