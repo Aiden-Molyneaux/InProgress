@@ -423,16 +423,23 @@ li.ip-orow:hover { background: var(--panel-2); }
 /* Section heads, as Up next's: S at 900, uppercase, spaced, muted. The archived menu's head shares this rule. */
 .ip-label { margin: 12px 0 4px; font-size: var(--fs-s); font-weight: var(--w-heavy); line-height: 14px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
 .ip-link { color: var(--link); text-decoration: underline; }
+/* In Details the heads sit further from the section above, in --text-2, so the sections read apart. */
+.ip-details > .ip-label { margin: 18px 0 6px; color: var(--text-2); }
+/* Every entry in Details (an ask, a task, a subagent, a command, ended work, a resource, a step, a log line) sits on its
+   own soft row, so the entries read apart. A row that opens something deepens on hover, and a resource's title takes
+   full ink too, since at night the two fills are close. */
+.ip-details :is(.ip-dasks, .ip-wts, .ip-dagents, .ip-log) > li, .ip-details .ip-res, .ip-details .ip-kids li button { margin: 0 0 3px; padding: 4px 8px; border-radius: var(--radius); background: var(--panel-2); }
+.ip-details .ip-res:hover, .ip-details .ip-kids li button:hover { background: var(--track); }
+.ip-details .ip-res:hover b { color: var(--text); }
 .ip-outcome { margin: 8px 0; }
 .ip-outcome b { font-weight: var(--w-heavy); }
-/* A resource: a muted row with a faint tint on hover, its title in ink at 500, its summary in DM Mono. */
-.ip-res { display: flex; align-items: center; gap: 6px; width: calc(100% + 12px); margin: 0 -6px 2px; padding: 3px 6px; border-radius: var(--radius); text-align: left; color: var(--muted); }
-.ip-res:hover { background: var(--panel-2); }
+/* A resource: a muted row, its title in ink at 500, its summary in DM Mono. */
+.ip-res { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; color: var(--muted); }
 .ip-res b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--w-text); color: var(--text-2); }
 .ip-res .sub { flex: none; margin-left: auto; font-family: var(--font-mono); font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
-/* Working tasks, subagents and ended work: text lines with the canvas rows' marks. The tag in DM Mono in the hue, ◐ in
+/* Working tasks, subagents and ended work: rows with the canvas rows' marks. The tag in DM Mono in the hue, ◐ in
    the active ink and still, ○ and ✓ muted, a stale ○ faint, the hue bar on the session's own tasks only. */
-.ip-wts, .ip-dagents { list-style: none; margin: 0; padding: 0; line-height: 1.7; }
+.ip-wts, .ip-dagents { list-style: none; margin: 0; padding: 0; }
 .ip-wt, .ip-dagent { color: var(--text-2); }
 .ip-wt.w-in_progress { color: var(--text); }
 .ip-wt.w-completed, .ip-wt.stale, .ip-dagent.ended, .ip-dtrail { color: var(--muted); }
@@ -451,14 +458,14 @@ li.ip-orow:hover { background: var(--panel-2); }
 .ip-dpurpose { padding-left: 12px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
 /* Ended work: one group per session, under its title. */
 .ip-trail + .ip-trail { margin-top: 4px; }
-.ip-trail-head { font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
+.ip-trail-head { margin-bottom: 3px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
 /* Steps: the shared Marker in a 13 px column, so the titles align, then #id and title. */
 .ip-kids { list-style: none; margin: 0; padding: 0; }
-.ip-kids li button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 2px 0; text-align: left; color: var(--text-2); }
+.ip-kids li button { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; color: var(--text-2); }
 .ip-kids li button:hover { color: var(--text); }
 .ip-kid-mark { flex: none; display: inline-flex; justify-content: center; width: 13px; }
 /* The log: the time in DM Mono, the text in ink, the session muted and upright (no italic face ships). */
-.ip-log { list-style: none; margin: 0; padding: 0; line-height: 1.7; color: var(--muted); }
+.ip-log { list-style: none; margin: 0; padding: 0; color: var(--muted); }
 .ip-log-time { font-family: var(--font-mono); font-size: var(--fs-s); }
 .ip-log-text { color: var(--text-2); }
 /* Markdown, in Details and the viewer: headings at L, M and S in 900, code in DM Mono, links in --link. */
@@ -488,9 +495,29 @@ li.ip-orow:hover { background: var(--panel-2); }
 
 /* Details: asks, handoff and marks, and the add-a-step foot (spec 2.7). */
 .ip-dasks { list-style: none; margin: 0; padding: 0; }
-.ip-dask { margin: 0 0 8px; }
 .ip-dask p { margin: 2px 0 0; }
 .ip-dask-head, .ip-dask.cleared { font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
-.ip-dask.cleared { margin-bottom: 4px; }
 .ip-dmarks { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0; }
 .ip-dadd { margin-top: 12px; }
+/* Done list (#406): every done step, by day or by phase, opened from the foot of the Done column. */
+.ip-done-all { display: block; margin: 8px 0 0 52px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); text-align: left; }
+.ip-done-all:hover { color: var(--text); }
+.ip-done-all:focus-visible, .ip-donelist-back:focus-visible, .ip-donelist-toggle button:focus-visible { outline: 2px solid var(--text-2); outline-offset: 1px; }
+.ip-donelist { flex: 1; min-width: 0; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 14px; }
+.ip-donelist ol { list-style: none; margin: 0; padding: 0; }
+.ip-donelist p { margin: 0; }
+.ip-donelist-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.ip-donelist-back { font-size: var(--fs-m); color: var(--text-2); }
+.ip-donelist-back:hover { color: var(--text); }
+.ip-donelist-toggle { display: flex; margin-left: auto; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.ip-donelist-toggle button { padding: 2px 10px; font-size: var(--fs-s); line-height: 16px; color: var(--muted); }
+.ip-donelist-toggle button[aria-pressed='true'] { background: var(--panel-2); color: var(--text); }
+.ip-donelist-group h3 { margin: 0 0 6px; font-size: var(--fs-m); color: var(--text-2); overflow-wrap: anywhere; }
+.ip-donelist-group ol { display: flex; flex-direction: column; gap: 6px; }
+.ip-donelist-row { display: grid; grid-template-columns: 64px 18px minmax(0, 1fr); column-gap: 10px; align-items: start; padding: 2px 0; border-radius: var(--radius); }
+.ip-donelist-row:hover { background: var(--panel-2); }
+.ip-donelist-when { font-family: var(--font-mono); font-size: var(--fs-s); line-height: 18px; color: var(--muted); text-align: right; white-space: nowrap; }
+.ip-donelist-body { min-width: 0; }
+.ip-donelist-body .ip-quote { margin-top: 0; padding-left: 0; border-left: 0; }
+.ip-donelist-parent { font-size: var(--fs-s); }
+.ip-donelist-outcome { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

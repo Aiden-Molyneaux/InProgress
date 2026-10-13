@@ -1421,14 +1421,26 @@ test("a tab's dot also shows while an idle session has a running worker, but not
 const RUNNING = '(<1 min|\\d+ min)';
 
 test.describe('Live work', () => {
-  test("Details lists the node's working tasks with who is on each, and the subagents on it", async ({ page, api, fresh }) => {
+  test("Details lists the node's working tasks with who is on each, and the subagents on it, before its resources, each on its own row", async ({ page, api, fresh }) => {
     await subagent(api, fresh, 'agent-1', 'Draft the store notes', 'sonnet');
     await task(api, fresh, '1', 'Upload the key', 'in_progress');
     await task(api, fresh, '2', 'Check the release track');
     await hook(api, fresh.session, { event: 'task-updated', taskKey: '1', addBlocks: ['2'] });
     await task(api, fresh, '1', 'Collect the screenshots', 'pending', 'agent-1');
+    await write(api, fresh.session, 'post', '/api/resources', { nodeId: fresh.ids['Play app signing'], kind: 'doc', title: 'Signing notes', content: '# Notes' });
     await open(page, fresh);
     const details = await openDetails(page, 'Play app signing');
+    // The live work reads before the step's resources.
+    await expect(details.locator('.ip-label')).toHaveText(['Working tasks', 'Subagents', 'Resources']);
+    // Each entry sits on its own soft row, and the heads read in --text-2, so sections and entries read apart.
+    for (const entry of [details.locator('.ip-wt').first(), details.locator('.ip-dagent'), details.locator('.ip-res')]) {
+      await expect(entry).toHaveCSS('background-color', 'rgba(15, 23, 42, 0.05)');
+    }
+    await expect(details.locator('.ip-label').first()).toHaveCSS('color', 'rgb(30, 41, 59)');
+    // A resource's row deepens on hover and its title takes full ink.
+    await details.locator('.ip-res').hover();
+    await expect(details.locator('.ip-res')).toHaveCSS('background-color', 'rgba(15, 23, 42, 0.08)');
+    await expect(details.locator('.ip-res b')).toHaveCSS('color', 'rgb(15, 23, 42)');
     // Anchored: the next row's "after Upload the key" names it too.
     await expect(details.locator('.ip-wt', { hasText: /^◐ Upload the key/ })).toHaveText('◐ Upload the key · E2E session');
     await expect(details.locator('.ip-wt', { hasText: 'Check the release track' })).toHaveText('○ Check the release track · E2E session · after Upload the key');
@@ -1858,6 +1870,36 @@ test.describe('Board', () => {
     await expect(band(page, 'done').getByRole('button', { name: 'Newer step', exact: true })).toBeVisible();
     await expect(band(page, 'done').getByRole('button', { name: 'Older step', exact: true })).toHaveCount(0);
     await expect(band(page, 'done').locator('.ip-done-fold')).toHaveText('✓ 4 earlier');
+  });
+
+  test('All done opens the full list by time or by phase, a row opens Details, and Back returns to the Done column', async ({ page, api, fresh }) => {
+    const titles = Array.from({ length: 7 }, (_, i) => `Listed step ${i + 1}`);
+    await write(api, fresh.session, 'post', '/api/nodes', {
+      parentId: fresh.root,
+      nodes: [{ title: 'Release prep', children: titles.map((title) => ({ title, status: 'done' as const })) }],
+    });
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    await expect(band(page, 'done').locator('.ip-done-row')).toHaveCount(5);
+    await band(page, 'done').getByRole('button', { name: /^All done · [0-9]+ ›$/ }).click();
+    await expect(page.getByRole('button', { name: '‹ Board' })).toBeFocused();
+    await expect(page.locator('.ip-board')).toHaveCount(0);
+    for (const title of titles) await expect(page.getByRole('button', { name: title, exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible();
+    await page.getByRole('button', { name: 'Phase', exact: true }).click();
+    await expect(page.getByRole('heading', { name: /^Release prep · 7$/ })).toBeVisible();
+    await page.getByRole('button', { name: 'Listed step 3', exact: true }).click();
+    const details = page.getByRole('complementary');
+    await expect(details).toContainText('Listed step 3');
+    await page.keyboard.press('Escape');
+    await expect(details).toHaveCount(0);
+    await page.getByRole('button', { name: '‹ Board' }).click();
+    await expect(band(page, 'done')).toBeVisible();
+    await expect(band(page, 'done').getByRole('button', { name: /^All done · [0-9]+ ›$/ })).toBeFocused();
+    // A reload lands on the Board, and the list opens again in the order picked last.
+    await page.reload();
+    await band(page, 'done').getByRole('button', { name: /^All done · [0-9]+ ›$/ }).click();
+    await expect(page.getByRole('button', { name: 'Phase', exact: true })).toHaveAttribute('aria-pressed', 'true');
   });
 
   test('leaving the window stamps the last look under ip.look.<id>', async ({ page, api, fresh }) => {

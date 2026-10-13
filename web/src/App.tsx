@@ -10,6 +10,7 @@ import { ActivityStrip } from './chrome/ActivityStrip';
 import type { GoToHandle } from './chrome/GoTo';
 import { archivedProjects, loadTabOrder, moveTab, neighbourTab, projectTabs, pruneOrder, saveTabOrder, stepTab, TAB_ORDER_KEY } from './chrome/tabs';
 import { TopBar } from './chrome/TopBar';
+import { DoneList } from './done/DoneList';
 import { Details } from './panels/Details';
 import { ResourceViewer } from './panels/ResourceViewer';
 import { ProjectView } from './project/ProjectView';
@@ -69,7 +70,27 @@ export function App() {
     () => (snapshot ? snapshot.asks.filter((a) => a.clearedAt === null).length + snapshot.sessions.filter((s) => s.state === 'permission' && isLive(s, now)).length : 0),
     [snapshot, now],
   );
+  // The full done list stands in for the Board while open. Opening it focuses its ‹ Board; going back focuses the Board's
+  // All done button, or the Done heading when nothing is done. Only these two moves take focus: a project switch leaves it.
+  const [doneOpen, setDoneOpen] = useState(false);
+  const doneMoved = useRef(false);
+  const openDone = () => {
+    noteAction('done', 'all');
+    doneMoved.current = true;
+    setDoneOpen(true);
+  };
+  const closeDone = () => {
+    doneMoved.current = true;
+    setDoneOpen(false);
+  };
+  useEffect(() => {
+    if (!doneMoved.current) return;
+    doneMoved.current = false;
+    const to = doneOpen ? ['.ip-donelist-back'] : ['.ip-done-all', '.ip-band-done h3'];
+    to.map((sel) => document.querySelector<HTMLElement>(sel)).find(Boolean)?.focus();
+  }, [doneOpen]);
   const pickView = (v: View) => {
+    setDoneOpen(false);
     if (v === view) return;
     noteAction('header', 'view');
     setView(v);
@@ -261,8 +282,10 @@ export function App() {
                 : 'No projects yet. In a Claude session, say "track this in InProgress".'}
             </div>
           ) : snapshot ? (
-            view === 'board' ? (
-              <Board key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onOpenProject={() => pickView('project')} lastLook={lastLook} onStatus={say} />
+            view === 'board' && doneOpen ? (
+              <DoneList key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onBack={closeDone} />
+            ) : view === 'board' ? (
+              <Board key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onOpenProject={() => pickView('project')} onOpenDone={openDone} lastLook={lastLook} onStatus={say} />
             ) : (
               <ProjectView key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onStatus={say} />
             )
