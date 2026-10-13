@@ -10,7 +10,7 @@ export function setPoster(post: Poster): void {
 }
 
 /** The band or section a click happened in. */
-export type MeasureArea = 'needs_me' | 'now' | 'next' | 'backlog' | 'done' | 'header' | 'project' | 'details';
+export type MeasureArea = 'needs_me' | 'now' | 'next' | 'backlog' | 'done' | 'header' | 'project' | 'details' | 'done_list';
 
 /** How long the window must have been unseen for a return to count (spec 2.6): one hour. */
 export const GAP_MS = 60 * 60 * 1000;
