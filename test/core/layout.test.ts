@@ -8,12 +8,12 @@ function n(parentId: number | null, title: string, extra: Partial<TreeNode> = {}
   return { id, projectId: 1, parentId, position: id, kind: parentId === null ? 'goal' : 'task', title, body: '', status: 'todo', assignee: 'claude', outcome: '', label: null, createdAt: 't', updatedAt: `2026-09-27T00:00:${String(id).padStart(2, '0')}Z`, completedAt: null, ...extra };
 }
 function session(id: string, focusNodeId: number | null, state: Session['state'], lastSeenAt = '2026-09-27T01:00:00Z'): Session {
-  return { id, projectId: 1, title: id, cwd: null, branch: null, transcriptPath: null, state, focusNodeId, promptsSinceUpdate: 0, startedAt: 't', lastSeenAt, endedAt: null, slot: 0, subagents: [], commands: [] };
+  return { id, projectId: 1, title: id, cwd: null, branch: null, transcriptPath: null, state, focusNodeId, promptsSinceUpdate: 0, startedAt: 't', lastSeenAt, endedAt: null, slot: 0, role: 'worker', subagents: [], commands: [] };
 }
 /** Unowned queue entries. */
 const later = (...ids: number[]): QueueEntry[] => ids.map((nodeId) => ({ nodeId, sessionId: null }));
 const entry = (nodeId: number, sessionId: string | null = null): QueueEntry => ({ nodeId, sessionId });
-const resource = (id: number, nodeId: number): ResourceMeta => ({ id, projectId: 1, nodeId, kind: 'doc', title: `R${id}`, path: null, url: null, contentLength: 1, sessionId: null, createdAt: 't', updatedAt: 't' });
+const resource = (id: number, nodeId: number): ResourceMeta => ({ id, projectId: 1, nodeId, kind: 'doc', title: `R${id}`, path: null, url: null, contentLength: 1, sessionId: null, createdAt: 't', updatedAt: 't', purpose: null });
 
 function sample() {
   nextId = 1;
@@ -249,7 +249,7 @@ function work(nodeId: number, status: WorkStatus, extra: Partial<WorkItem> = {})
 const withAgents = (s: Session, subagents: SubagentInfo[]): Session => ({ ...s, subagents });
 /** A stopped subagent as the snapshot's trail lists it; of the ended session s0 unless it says otherwise. */
 const trailAgent = (agentId: string, extra: Partial<TrailAgent> = {}): TrailAgent => ({ ...agent(agentId, { endedAt: ago(10 * 60_000) }), sessionId: 's0', ...extra });
-const past = (id: string, focusNodeId: number | null): PastSession => ({ id, title: `Past ${id}`, focusNodeId, endedAt: ago(60_000) });
+const past = (id: string, focusNodeId: number | null): PastSession => ({ id, title: `Past ${id}`, focusNodeId, startedAt: ago(120_000), endedAt: ago(60_000) });
 /** The layout's rows of these kinds, as [kind, id, nodeId, x, y]. */
 const rowsOf = (l: LayoutResult, ...kinds: LayoutItem['kind'][]) =>
   l.items.filter((i) => kinds.includes(i.kind)).map((i) => [i.kind, i.id, 'nodeId' in i ? i.nodeId : null, i.x, i.y]);

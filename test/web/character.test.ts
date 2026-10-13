@@ -4,7 +4,7 @@ import { characterState, phaseDelay } from '../../web/src/characterState';
 
 const session = (extra: Partial<Session> = {}): Session => ({
   id: 's1abcdef', projectId: 1, title: '#5 UI Session post-Fable', cwd: null, branch: null, transcriptPath: null, state: 'working',
-  focusNodeId: 127, promptsSinceUpdate: 0, startedAt: 't', lastSeenAt: 't', endedAt: null, slot: 2, subagents: [], commands: [], ...extra,
+  focusNodeId: 127, promptsSinceUpdate: 0, startedAt: 't', lastSeenAt: 't', endedAt: null, slot: 2, role: 'worker', subagents: [], commands: [], ...extra,
 });
 const agent = (extra: Partial<SubagentInfo> = {}): SubagentInfo => ({
   agentId: 'a1', agentType: 'general-purpose', startedAt: 't', runStartedAt: 't', description: 'Draft the whiteboard take', model: 'opus-5-5', nodeId: 127,

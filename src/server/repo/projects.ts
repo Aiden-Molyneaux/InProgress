@@ -1,5 +1,5 @@
 import { COMMAND_WORK_MS } from '../../core/activity';
-import { DELETED_RETENTION_MS, STALE_SESSION_MS, type Binding, type Project, type ProjectSummary, type QueueEntry } from '../../core/types';
+import { BRIEFING_MODES, DELETED_RETENTION_MS, STALE_SESSION_MS, type Binding, type BriefingMode, type Project, type ProjectSummary, type QueueEntry } from '../../core/types';
 import { globMatch } from '../../lib/glob';
 import { isUnder, normalizePath } from '../../lib/paths';
 import { msAgo, write, type Ctx, type RecordEvent } from '../db/tx';
@@ -18,6 +18,7 @@ interface ProjectRow {
   created_at: string;
   updated_at: string;
   queue: string;
+  briefing_mode: string;
   /** When it was deleted (it is archived then); null while it is not. Migration 8. */
   deleted_at: string | null;
 }
@@ -147,6 +148,7 @@ export const toProject = (r: ProjectRow, queue: QueueEntry[] = parseQueue(r.queu
   createdAt: r.created_at,
   updatedAt: r.updated_at,
   queue,
+  briefingMode: r.briefing_mode === 'scoped' ? 'scoped' : 'full',
 });
 
 const readProject = (ctx: Ctx, r: ProjectRow): Project => toProject(r, liveQueue(ctx, r.id, r.queue));
@@ -259,6 +261,7 @@ export interface UpdateProjectInput {
   description?: string;
   playbook?: string;
   status?: 'active' | 'archived';
+  briefingMode?: BriefingMode;
 }
 
 /** Whether InProgress tracks the sessions of project `projectId`: it exists, is active and is not deleted. */
@@ -325,23 +328,27 @@ export function changeProject(ctx: Ctx, actor: string, ref: string | number, pat
  * project archives it this way, in the delete's own write, so the archive and the delete land together or not at all.
  */
 export function applyProjectChange(ctx: Ctx, record: RecordEvent, before: Project, patch: UpdateProjectInput): ProjectChange {
+  if (patch.briefingMode !== undefined && !(BRIEFING_MODES as readonly string[]).includes(patch.briefingMode)) {
+    throw badRequest(`Unknown briefing mode ${JSON.stringify(patch.briefingMode)}. Use one of: ${BRIEFING_MODES.join(', ')}.`);
+  }
   const next = {
     name: patch.name?.trim() || before.name,
     description: patch.description ?? before.description,
     playbook: patch.playbook ?? before.playbook,
     status: patch.status ?? before.status,
+    briefingMode: patch.briefingMode ?? before.briefingMode,
   };
   // Before the status change and its event, so the activity strip's newest line is the archive.
   const endedSessions = before.status === 'active' && next.status === 'archived' ? endProjectSessions(ctx, record, before.id) : [];
   const ts = ctx.now();
   ctx.db
-    .prepare('UPDATE projects SET name = ?, description = ?, playbook = ?, status = ?, updated_at = ? WHERE id = ?')
-    .run(next.name, next.description, next.playbook, next.status, ts, before.id);
+    .prepare('UPDATE projects SET name = ?, description = ?, playbook = ?, status = ?, briefing_mode = ?, updated_at = ? WHERE id = ?')
+    .run(next.name, next.description, next.playbook, next.status, next.briefingMode, ts, before.id);
   if (patch.name !== undefined || patch.description !== undefined) {
     ctx.db.prepare('UPDATE nodes SET title = ?, body = ?, updated_at = ? WHERE id = ?').run(next.name, next.description, ts, before.rootNodeId);
   }
   const changes: Record<string, { from: unknown; to: unknown }> = {};
-  for (const key of ['name', 'description', 'playbook', 'status'] as const) {
+  for (const key of ['name', 'description', 'playbook', 'status', 'briefingMode'] as const) {
     if (patch[key] !== undefined && before[key] !== next[key]) changes[key] = { from: before[key], to: next[key] };
   }
   // The root step's change first, so the activity strip's newest line is the project's own (renamed the project).
@@ -434,6 +441,8 @@ export function listProjectSummaries(ctx: Ctx): ProjectSummary[] {
     .prepare(
       `SELECT p.*,
         (SELECT COUNT(*) FROM nodes n WHERE n.project_id = p.id AND n.assignee = 'me' AND n.status IN ('todo','active','blocked')) AS needs_you,
+        (SELECT COUNT(*) FROM asks a WHERE a.project_id = p.id AND a.cleared_at IS NULL) AS open_asks,
+        (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.state = 'permission' AND s.last_seen_at >= ?) AS permission_waits,
         (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.state != 'ended' AND s.last_seen_at >= ?) AS active_sessions,
         (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.state = 'working' AND s.last_seen_at >= ?) AS working_sessions,
         (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.state != 'ended' AND s.last_seen_at >= ? AND (s.state = 'working'
@@ -442,11 +451,13 @@ export function listProjectSummaries(ctx: Ctx): ProjectSummary[] {
         (SELECT ts FROM events e WHERE e.project_id = p.id ORDER BY e.id DESC LIMIT 1) AS last_event_at
        FROM projects p WHERE p.deleted_at IS NULL`,
     )
-    .all(liveSince, liveSince, liveSince, msAgo(ctx, COMMAND_WORK_MS)) as (ProjectRow & { needs_you: number; active_sessions: number; working_sessions: number; busy_sessions: number; last_event_at: string | null })[];
+    .all(liveSince, liveSince, liveSince, liveSince, msAgo(ctx, COMMAND_WORK_MS)) as (ProjectRow & { needs_you: number; open_asks: number; permission_waits: number; active_sessions: number; working_sessions: number; busy_sessions: number; last_event_at: string | null })[];
   return rows
     .map((r) => ({
       ...readProject(ctx, r),
       needsYou: r.needs_you,
+      openAsks: r.open_asks,
+      permissionWaits: r.permission_waits,
       activeSessions: r.active_sessions,
       workingSessions: r.working_sessions,
       busySessions: r.busy_sessions,

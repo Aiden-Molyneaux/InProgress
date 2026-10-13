@@ -11,7 +11,7 @@ const agent = (extra: Partial<SubagentInfo> = {}): SubagentInfo => ({
 });
 const session = (extra: Partial<Session> = {}): Session => ({
   id: 's1abcdef', projectId: 1, title: 'E2E session', cwd: null, branch: null, transcriptPath: null, state: 'working', focusNodeId: 57,
-  promptsSinceUpdate: 0, startedAt: 't', lastSeenAt: 't', endedAt: null, slot: 0, subagents: [], commands: [], ...extra,
+  promptsSinceUpdate: 0, startedAt: 't', lastSeenAt: 't', endedAt: null, slot: 0, role: 'worker', subagents: [], commands: [], ...extra,
 });
 const task = (id: number, extra: Partial<WorkItem> = {}): WorkItem => ({
   id, nodeId: 57, sessionId: 's1abcdef', agentId: '', subject: `Task ${id}`, status: 'pending', blocks: [], position: id, updatedAt: 't', endedAt: null, ...extra,
@@ -132,8 +132,8 @@ describe('taskOwner', () => {
 
   it("names an ended session's task by that session's title, and a subagent's task by the trail once it has left the session's list", () => {
     const pastSessions: PastSession[] = [
-      { id: 'old', title: 'Review actions', focusNodeId: 57, endedAt: ago(MIN) },
-      { id: 'untitled', title: null, focusNodeId: null, endedAt: ago(MIN) },
+      { id: 'old', title: 'Review actions', focusNodeId: 57, startedAt: ago(2 * MIN), endedAt: ago(MIN) },
+      { id: 'untitled', title: null, focusNodeId: null, startedAt: ago(2 * MIN), endedAt: ago(MIN) },
     ];
     const trailAgents: TrailAgent[] = [
       { ...agent({ agentId: 'p2', agentType: 'general-purpose', description: '#57 P2 canvas implementer', endedAt: ago(MIN) }), sessionId: 'old' },

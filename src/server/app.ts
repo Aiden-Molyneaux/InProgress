@@ -4,6 +4,7 @@ import { ZodError } from 'zod';
 import type { BuildInfo } from '../lib/version';
 import type { Ctx } from './db/tx';
 import { ApiError } from './errors';
+import { registerAskRoutes } from './routes/asks';
 import { registerReadRoutes } from './routes/read';
 import { registerSessionRoutes } from './routes/sessions';
 import { registerSse } from './routes/sse';
@@ -104,6 +105,7 @@ export function buildApp(opts: AppOptions): FastifyInstance {
   registerReadRoutes(app, opts.ctx, opts.version, opts.build ?? null);
   registerWriteRoutes(app, opts.ctx, requireToken);
   registerSessionRoutes(app, opts.ctx, requireToken);
+  registerAskRoutes(app, opts.ctx, requireToken);
   registerSse(app, opts.ctx);
   registerWindowRoutes(app, opts.ctx, requireUi);
   registerUi(app, opts, requireToken, requireUi);

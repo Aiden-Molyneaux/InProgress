@@ -18,6 +18,7 @@ interface SessionRow {
   last_seen_at: string;
   ended_at: string | null;
   slot: number | null;
+  role: string;
 }
 
 const toSession = (ctx: Ctx, r: SessionRow): Session => ({
@@ -34,6 +35,7 @@ const toSession = (ctx: Ctx, r: SessionRow): Session => ({
   lastSeenAt: r.last_seen_at,
   endedAt: r.ended_at,
   slot: r.slot,
+  role: r.role === 'orchestrator' ? 'orchestrator' : 'worker',
   subagents: listSubagents(ctx, r.id),
   commands: listCommands(ctx, r.id),
 });
@@ -151,13 +153,15 @@ export function listPastSessions(ctx: Ctx, projectId: number): PastSession[] {
   const cutoff = new Date(Date.parse(ctx.now()) - TRAIL_MS).toISOString();
   const rows = ctx.db
     .prepare(
-      `SELECT id, title, focus_node_id, MIN(s.ended_at, s.last_seen_at) AS shown_end FROM sessions s
+      `SELECT id, title, focus_node_id, s.started_at, MIN(s.ended_at, s.last_seen_at) AS shown_end FROM sessions s
        WHERE s.project_id = ? AND s.state = 'ended' AND s.ended_at IS NOT NULL AND (
          (s.ended_at >= ? AND EXISTS (SELECT 1 FROM work_items w WHERE w.session_id = s.id AND w.project_id = s.project_id))
+         -- A session that focused a step and ended within the trail is listed even with no work items (the Board's ended_open mark).
+         OR (s.ended_at >= ? AND s.focus_node_id IS NOT NULL)
          -- The same agents as listTrailAgents (readers leave no trail): a filter added there belongs here too.
          OR EXISTS (SELECT 1 FROM session_subagents a WHERE a.session_id = s.id AND a.ended_at IS NOT NULL AND a.ended_at >= ? AND ${NOT_READER_SQL}))
        ORDER BY shown_end DESC, s.id`,
     )
-    .all(projectId, cutoff, cutoff) as { id: string; title: string | null; focus_node_id: number | null; shown_end: string }[];
-  return rows.map((r) => ({ id: r.id, title: r.title, focusNodeId: r.focus_node_id, endedAt: r.shown_end }));
+    .all(projectId, cutoff, cutoff, cutoff) as { id: string; title: string | null; focus_node_id: number | null; started_at: string; shown_end: string }[];
+  return rows.map((r) => ({ id: r.id, title: r.title, focusNodeId: r.focus_node_id, startedAt: r.started_at, endedAt: r.shown_end }));
 }

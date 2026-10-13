@@ -723,3 +723,53 @@ describe('requireUi: every UI write', () => {
     expect(res.json()).toMatchObject({ status: 'archived' });
   });
 });
+
+describe('ask routes', () => {
+  async function withStep() {
+    const { app, ctx } = setup();
+    const project = (await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'Asks' } })).json();
+    const [step] = (await app.inject({ method: 'POST', url: '/api/nodes', headers: auth, payload: { parentId: project.rootNodeId, nodes: [{ title: 'Step' }] } })).json();
+    return { app, ctx, step };
+  }
+  const raise = (app: FastifyInstance, nodeId: number, payload: unknown, headers: Record<string, string> = auth) =>
+    app.inject({ method: 'POST', url: `/api/nodes/${nodeId}/asks`, headers, payload: payload as Record<string, unknown> });
+
+  it('raises an ask and returns it, and raising it twice returns the same id', async () => {
+    const { app, step } = await withStep();
+    const first = await raise(app, step.id, { kind: 'question', text: 'Which port?' });
+    expect(first.statusCode).toBe(200);
+    expect(first.json()).toMatchObject({ nodeId: step.id, kind: 'question', text: 'Which port?', clearedAt: null });
+    const second = await raise(app, step.id, { kind: 'question', text: 'Which port?' });
+    expect(second.json().id).toBe(first.json().id);
+  });
+
+  it('clears an ask and returns the cleared ask', async () => {
+    const { app, step } = await withStep();
+    const ask = (await raise(app, step.id, { kind: 'review', text: 'Look' })).json();
+    const res = await app.inject({ method: 'POST', url: `/api/asks/${ask.id}/clear`, headers: auth, payload: { answer: 'Fine' } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ id: ask.id, answer: 'Fine', clearedBy: 'scribe:s1' });
+    expect(res.json().clearedAt).not.toBeNull();
+  });
+
+  it('answers 404 for an unknown ask', async () => {
+    const { app } = await withStep();
+    const res = await app.inject({ method: 'POST', url: '/api/asks/999/clear', headers: auth, payload: {} });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('answers 401 without a token', async () => {
+    const { app, step } = await withStep();
+    expect((await raise(app, step.id, { kind: 'question', text: 'Q' }, {})).statusCode).toBe(401);
+    expect((await app.inject({ method: 'POST', url: '/api/asks/1/clear', payload: {} })).statusCode).toBe(401);
+  });
+
+  it('answers 400 for a bad body', async () => {
+    const { app, step } = await withStep();
+    expect((await raise(app, step.id, { kind: 'release', text: 'Q' })).statusCode).toBe(400);
+    expect((await raise(app, step.id, { kind: 'question', text: '  ' })).statusCode).toBe(400);
+    expect((await raise(app, step.id, { kind: 'question', text: 'Q', extra: 1 })).statusCode).toBe(400);
+    const ask = (await raise(app, step.id, { kind: 'question', text: 'Q' })).json();
+    expect((await app.inject({ method: 'POST', url: `/api/asks/${ask.id}/clear`, headers: auth, payload: { answer: 5 } })).statusCode).toBe(400);
+  });
+});

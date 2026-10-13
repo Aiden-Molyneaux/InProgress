@@ -9,7 +9,7 @@ import { addLog } from '../../src/server/repo/logs';
 import { addNodes, listNodes, updateNode } from '../../src/server/repo/nodes';
 import { addBinding, createProject, setQueue, updateProject } from '../../src/server/repo/projects';
 import { addResource } from '../../src/server/repo/resources';
-import { briefingDue, expireStaleSessions, findSession, listProjectSessions } from '../../src/server/repo/sessions';
+import { briefingDue, expireStaleSessions, findSession, listPastSessions, listProjectSessions } from '../../src/server/repo/sessions';
 import { getNodeDetail, getProjectSnapshot } from '../../src/server/repo/snapshot';
 import { renderBriefing } from '../../src/server/briefing';
 import { setTasks } from '../../src/server/repo/work';
@@ -40,6 +40,26 @@ function setup(ctx: Ctx = makeCtx()) {
 }
 
 const start = (cwd = 'C:\\personal\\InGame\\docs', extra = {}) => ({ event: 'start' as const, source: 'startup', cwd, ...extra });
+
+describe('session role and past sessions', () => {
+  it('a new session has role worker', () => {
+    const { ctx } = setup();
+    handleHookEvent(ctx, 's1', start());
+    expect(findSession(ctx, 's1')?.role).toBe('worker');
+    ctx.db.prepare("UPDATE sessions SET role = 'orchestrator' WHERE id = 's1'").run();
+    expect(findSession(ctx, 's1')?.role).toBe('orchestrator');
+  });
+
+  it('listPastSessions lists an ended session that had a focus and no work items, with startedAt', () => {
+    const { ctx, project, a1 } = setup();
+    const ts = ctx.now();
+    const begun = new Date(Date.parse(ts) - 60_000).toISOString();
+    const insert = ctx.db.prepare("INSERT INTO sessions (id, project_id, state, focus_node_id, started_at, last_seen_at, ended_at) VALUES (?, ?, 'ended', ?, ?, ?, ?)");
+    insert.run('focused', project.id, a1.id, begun, ts, ts);
+    insert.run('bare', project.id, null, begun, ts, ts);
+    expect(listPastSessions(ctx, project.id)).toEqual([{ id: 'focused', title: null, focusNodeId: a1.id, startedAt: begun, endedAt: ts }]);
+  });
+});
 
 describe('findSession commands', () => {
   it('returns the session\'s background commands, and none for a session without', () => {
