@@ -2034,6 +2034,9 @@ test.describe('Board', () => {
     // A click on the question keeps focus in the dialog, so Escape still closes it.
     await page.keyboard.press('Enter');
     await dialog.locator('b').click();
+    // Nor does a click on the confirming row's own padding open Details.
+    await next.locator(`li[data-node="${id}"]`).click({ position: { x: 2, y: 2 } });
+    await expect(page.getByRole('complementary')).toHaveCount(0);
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
     await expect(del).toBeFocused();

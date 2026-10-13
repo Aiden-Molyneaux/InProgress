@@ -1,6 +1,7 @@
 import type { BoardRow } from '../../../src/core/board';
 import type { TreeNode } from '../../../src/core/types';
 import { useEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { deleteStep } from '../api';
 import { noteAction } from '../measure';
 import { focusTargetAfter } from './focus';
@@ -67,8 +68,9 @@ export function Backlog({ rows, snapshot, now, projectId, slug, onStatus, onOpen
     after?.focus();
     const result = await deleteStep(projectId, slug, id);
     if (result === 'ok') return;
-    setPending((p) => p.filter((x) => x !== id));
-    refocus(id);
+    // Drawn at once, so the row's Delete button is there to focus; and only when focus has not moved on meanwhile.
+    flushSync(() => setPending((p) => p.filter((x) => x !== id)));
+    if (!after || document.activeElement === after) root.current?.querySelector<HTMLElement>(`li[data-node="${id}"] [data-delete]`)?.focus();
     if (result === 'reload') window.location.reload();
     else onStatus?.(result);
   };
@@ -102,6 +104,8 @@ export function Backlog({ rows, snapshot, now, projectId, slug, onStatus, onOpen
                   }}
                   onDragEnd={onDragEnd}
                   onClick={asking || waiting ? undefined : rowClick('backlog', () => onOpenNode(row.node.id))}
+                  // A press on the confirming row outside its buttons keeps focus in the confirm, so Escape still closes it.
+                  onMouseDown={asking ? (e) => { if (!(e.target as HTMLElement).closest('button')) e.preventDefault(); } : undefined}
                 >
                   {asking ? (
                     <div
