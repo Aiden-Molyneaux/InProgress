@@ -2007,7 +2007,8 @@ test.describe('Board', () => {
     await expect(next.getByRole('button', { name: /^Backlog · \d+ [▸▾]$/ })).toBeVisible();
   });
 
-  test('Backlog "Delete…" asks first, Escape and Cancel keep the step, Delete removes it from the tree', async ({ page, fresh }) => {
+  test('Backlog "Delete…" asks first, Escape and Cancel keep the step, Delete removes it from the tree', async ({ page, fresh, consoleErrors }) => {
+    consoleErrors.allow(/status of 400/);
     await page.setViewportSize(WIDE);
     await open(page, fresh);
     const next = band(page, 'next');
@@ -2040,6 +2041,15 @@ test.describe('Board', () => {
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
     await expect(del).toBeFocused();
+    // A refused delete keeps the row, says why, and puts focus back on its Delete button.
+    const nodeDelete = '**/api/ui/projects/*/nodes/*/delete';
+    await page.route(nodeDelete, (route) => route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'Refused for the test', hint: 'Reload the window.' }) }));
+    await page.keyboard.press('Enter');
+    await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(page.getByText('Refused for the test').first()).toBeVisible();
+    await expect(del).toBeFocused();
+    await expect(next.locator(`li[data-node="${id}"]`)).not.toHaveClass(/pending/);
+    await page.unroute(nodeDelete);
     // Details open on the step: deleting it closes Details, and a click on the open confirm does not open one.
     await title.click();
     await expect(page.getByRole('complementary')).toHaveCount(1);

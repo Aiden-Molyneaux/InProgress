@@ -104,8 +104,14 @@ export function Backlog({ rows, snapshot, now, projectId, slug, onStatus, onOpen
                   }}
                   onDragEnd={onDragEnd}
                   onClick={asking || waiting ? undefined : rowClick('backlog', () => onOpenNode(row.node.id))}
-                  // A press on the confirming row outside its buttons keeps focus in the confirm, so Escape still closes it.
-                  onMouseDown={asking ? (e) => { if (!(e.target as HTMLElement).closest('button')) e.preventDefault(); } : undefined}
+                  // A press on the confirming row outside its buttons puts focus in the confirm (or keeps it there), so Escape
+                  // still closes it.
+                  onMouseDown={asking ? (e) => {
+                    if ((e.target as HTMLElement).closest('button')) return;
+                    e.preventDefault();
+                    const confirm = e.currentTarget.querySelector<HTMLElement>('.ip-confirm');
+                    if (confirm && !confirm.contains(document.activeElement)) confirm.focus();
+                  } : undefined}
                 >
                   {asking ? (
                     <div
