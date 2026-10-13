@@ -107,6 +107,9 @@ export interface QueueEntry {
   sessionId: string | null;
 }
 
+/** One window change to the queue (spec 2.5): applied to the stored queue on the server, never a replacement list. */
+export type QueueOp = { kind: 'move'; node: number; before: number | null } | { kind: 'remove'; node: number };
+
 /** The longest a project's name may be, once trimmed: the server's rule, and the window's rename field. */
 export const PROJECT_NAME_MAX = 120;
 

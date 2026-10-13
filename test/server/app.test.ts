@@ -638,6 +638,10 @@ describe('requireUi: every UI write', () => {
   const routes = (id: number) => [
     ...['archive', 'unarchive', 'delete', 'restore'].map((a) => ({ url: `/api/ui/projects/${id}/${a}`, payload: { slug: 'ingame' } })),
     { url: `/api/ui/projects/${id}/rename`, payload: { slug: 'ingame', name: 'Renamed' } },
+    { url: `/api/ui/projects/${id}/queue`, payload: { slug: 'ingame', op: { kind: 'remove', node: 1 } } },
+    { url: `/api/ui/projects/${id}/nodes`, payload: { slug: 'ingame', title: 'X', parent: null } },
+    { url: '/api/ui/asks/1/clear', payload: {} },
+    { url: '/api/ui/events', payload: { name: 'view', projectId: null } },
     { url: '/api/ui/open', payload: { resourceId: 1 } },
     { url: '/api/ui/open-url', payload: { url: 'https://example.com' } },
   ];

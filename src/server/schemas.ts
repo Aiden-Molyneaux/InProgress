@@ -143,3 +143,28 @@ export const openUrlBody = z.object({ url: z.string().min(1).max(2048) }).strict
 export const windowProjectBody = z.object({ slug: z.string().min(1).max(200) }).strict();
 /** The window's rename: the slug it shows, as windowProjectBody, and the new name under the project name rule. */
 export const windowRenameBody = z.object({ slug: windowProjectBody.shape.slug, name: projectName }).strict();
+/** The window's queue change (spec 2.5): one operation, applied to the queue as stored. */
+export const windowQueueBody = z
+  .object({
+    slug: windowProjectBody.shape.slug,
+    op: z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('move'), node: z.number().int().positive(), before: z.number().int().positive().nullable() }).strict(),
+      z.object({ kind: z.literal('remove'), node: z.number().int().positive() }).strict(),
+    ]),
+  })
+  .strict();
+/** The window's quick-add: a todo step under `parent`, or the root when null. */
+export const windowNodeBody = z
+  .object({ slug: windowProjectBody.shape.slug, title: z.string().trim().min(1).max(200), parent: z.number().int().positive().nullable() })
+  .strict();
+/** The window's clear of an ask; only Answer... sends an answer. */
+export const windowClearBody = z.object({ answer: z.string().max(2000).optional() }).strict();
+/** The window's measurements (spec 2.6): a name and a little data; keys outside WINDOW_EVENT_KEYS are dropped by the route. */
+export const WINDOW_EVENT_KEYS = ['view', 'gapMs', 'marks', 'area', 'action', 'node'] as const;
+export const windowEventBody = z
+  .object({
+    name: z.enum(['view', 'shown', 'first_action', 'backlog_open', 'details_open']),
+    projectId: z.number().int().positive().nullable(),
+    data: z.record(z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
+  })
+  .strict();

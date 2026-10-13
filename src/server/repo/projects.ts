@@ -1,5 +1,5 @@
 import { COMMAND_WORK_MS } from '../../core/activity';
-import { BRIEFING_MODES, DELETED_RETENTION_MS, STALE_SESSION_MS, type Binding, type BriefingMode, type Project, type ProjectSummary, type QueueEntry } from '../../core/types';
+import { BRIEFING_MODES, DELETED_RETENTION_MS, STALE_SESSION_MS, type Binding, type BriefingMode, type Project, type ProjectSummary, type QueueEntry, type QueueOp } from '../../core/types';
 import { globMatch } from '../../lib/glob';
 import { isUnder, normalizePath } from '../../lib/paths';
 import { msAgo, write, type Ctx, type RecordEvent } from '../db/tx';
@@ -129,12 +129,12 @@ function releaseEntries(queue: QueueEntry[], released: ReadonlySet<string>, open
  * Stores `next` as the project's queue when its JSON differs from the stored `before`, recording project.updated with
  * the queue as read before and after.
  */
-function storeQueue(ctx: Ctx, record: RecordEvent, projectId: number, before: string, next: QueueEntry[]): void {
+function storeQueue(ctx: Ctx, record: RecordEvent, projectId: number, before: string, next: QueueEntry[], extra: Record<string, unknown> = {}): void {
   const json = queueJson(next);
   if (json === before) return;
   const from = liveQueue(ctx, projectId, before);
   ctx.db.prepare('UPDATE projects SET queue = ?, updated_at = ? WHERE id = ?').run(json, ctx.now(), projectId);
-  record({ projectId, type: 'project.updated', entity: 'project', entityId: projectId, data: { changes: { queue: { from, to: liveQueue(ctx, projectId, json) } } } });
+  record({ projectId, type: 'project.updated', entity: 'project', entityId: projectId, data: { changes: { queue: { from, to: liveQueue(ctx, projectId, json) } }, ...extra } });
 }
 
 export const toProject = (r: ProjectRow, queue: QueueEntry[] = parseQueue(r.queue)): Project => ({
@@ -361,6 +361,31 @@ export function applyProjectChange(ctx: Ctx, record: RecordEvent, before: Projec
   return { project: getProjectById(ctx, before.id)!, endedSessions };
 }
 
+/**
+ * Spec 2.5: one window change applied to the queue as stored, inside one write. A move takes the node out wherever it
+ * sits and places it in the unowned part before `before`; null, or a `before` no longer unowned, appends. A remove takes
+ * it out. A node taken from a session's own queue records `takenFrom`. Done and dropped nodes are refused.
+ */
+export function applyQueueOp(ctx: Ctx, actor: string, projectId: number, op: QueueOp): Project {
+  return write(ctx, actor, (record) => {
+    const node = ctx.db.prepare('SELECT project_id, status FROM nodes WHERE id = ?').get(op.node) as { project_id: number; status: string } | undefined;
+    if (node?.project_id !== projectId) throw badRequest(`#${op.node} is not in this project`, 'Reload the window.');
+    if (node.status === 'done' || node.status === 'dropped') throw badRequest('not open', `#${op.node} is ${node.status}.`);
+    const row = ctx.db.prepare('SELECT queue FROM projects WHERE id = ?').get(projectId) as { queue: string };
+    const stored = parseQueue(row.queue);
+    const taken = stored.find((e) => e.nodeId === op.node);
+    const rest = stored.filter((e) => e.nodeId !== op.node);
+    let next = rest;
+    if (op.kind === 'move') {
+      const entry = { nodeId: op.node, sessionId: null };
+      const at = op.before === null ? -1 : rest.findIndex((e) => e.nodeId === op.before && e.sessionId === null);
+      next = at < 0 ? [...rest, entry] : [...rest.slice(0, at), entry, ...rest.slice(at)];
+    }
+    storeQueue(ctx, record, projectId, row.queue, next, { op: op.kind, node: op.node, ...(taken?.sessionId ? { takenFrom: taken.sessionId } : {}) });
+    return getProjectById(ctx, projectId)!;
+  });
+}
+
 /** Whose entries a set_queue write replaces: a session's own order (`queue:`), or the unowned one (`later:`). */
 export type QueueOwner = { sessionId: string } | 'unowned';
 
@@ -448,7 +473,7 @@ export function listProjectSummaries(ctx: Ctx): ProjectSummary[] {
         (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.state != 'ended' AND s.last_seen_at >= ? AND (s.state = 'working'
           OR EXISTS (SELECT 1 FROM session_subagents a WHERE a.session_id = s.id AND a.ended_at IS NULL AND ${NOT_READER_SQL})
           OR EXISTS (SELECT 1 FROM session_commands c WHERE c.session_id = s.id AND ${countsAsWorkSql('c')}))) AS busy_sessions,
-        (SELECT ts FROM events e WHERE e.project_id = p.id ORDER BY e.id DESC LIMIT 1) AS last_event_at
+        (SELECT ts FROM events e WHERE e.project_id = p.id AND e.type NOT LIKE 'window.%' ORDER BY e.id DESC LIMIT 1) AS last_event_at
        FROM projects p WHERE p.deleted_at IS NULL`,
     )
     .all(liveSince, liveSince, liveSince, liveSince, msAgo(ctx, COMMAND_WORK_MS)) as (ProjectRow & { needs_you: number; open_asks: number; permission_waits: number; active_sessions: number; working_sessions: number; busy_sessions: number; last_event_at: string | null })[];

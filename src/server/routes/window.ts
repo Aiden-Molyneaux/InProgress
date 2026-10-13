@@ -1,10 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import type { Guard } from '../app';
 import type { Ctx } from '../db/tx';
-import { conflict, notFound } from '../errors';
+import { badRequest, conflict, notFound } from '../errors';
 import { deleteProject, listDeletedProjects, restoreProject } from '../project-lifecycle';
-import { changeProject, getProjectById } from '../repo/projects';
-import { idParam, windowProjectBody, windowRenameBody } from '../schemas';
+import { clearAsk } from '../repo/asks';
+import { recordQuiet } from '../repo/events';
+import { addNodes } from '../repo/nodes';
+import { applyQueueOp, changeProject, getProjectById } from '../repo/projects';
+import { idParam, windowClearBody, windowEventBody, windowNodeBody, windowProjectBody, windowQueueBody, windowRenameBody, WINDOW_EVENT_KEYS } from '../schemas';
 
 /** Who the window's writes are recorded as: fixed here, never taken from a header. */
 const ACTOR = 'window';
@@ -49,6 +52,40 @@ export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: 
   app.post('/api/ui/projects/:id/rename', guarded, async (req) => {
     const { slug, name } = windowRenameBody.parse(req.body);
     return { project: changeProject(ctx, ACTOR, targetBySlug(req.params, slug), { name }).project };
+  });
+  // One queue operation applied to the stored queue (spec 2.5), never the list the window last saw.
+  app.post('/api/ui/projects/:id/queue', guarded, async (req) => {
+    const { slug, op } = windowQueueBody.parse(req.body);
+    return { project: applyQueueOp(ctx, ACTOR, targetBySlug(req.params, slug), op) };
+  });
+  // Quick-add: a todo step with no label under `parent`, or the root.
+  app.post('/api/ui/projects/:id/nodes', guarded, async (req) => {
+    const { slug, title, parent } = windowNodeBody.parse(req.body);
+    const projectId = targetBySlug(req.params, slug);
+    if (parent !== null) {
+      const home = ctx.db.prepare('SELECT project_id, status FROM nodes WHERE id = ?').get(parent) as { project_id: number; status: string } | undefined;
+      if (home?.project_id !== projectId) throw badRequest(`#${parent} is not in this project`, 'Reload the window.');
+      if (home.status === 'dropped') throw badRequest(`#${parent} is dropped`, 'Reload the window.');
+    }
+    const [node] = addNodes(ctx, ACTOR, { parentId: parent ?? getProjectById(ctx, projectId)!.rootNodeId, nodes: [{ title }] });
+    return { node };
+  });
+  // Idempotent (spec 1.2): clearing twice answers the same; a 404 for an ask that does not exist.
+  app.post('/api/ui/asks/:id/clear', guarded, async (req) => {
+    const { id } = idParam.parse(req.params);
+    const { answer } = windowClearBody.parse(req.body ?? {});
+    return { ask: clearAsk(ctx, ACTOR, id, answer) };
+  });
+  // The window's measurements (spec 2.6): stored quietly, only the named keys, and strings cut short: never content.
+  app.post('/api/ui/events', guarded, async (req, reply) => {
+    const { name, projectId, data } = windowEventBody.parse(req.body);
+    const kept: Record<string, string | number | boolean | null> = {};
+    for (const key of WINDOW_EVENT_KEYS) {
+      const value = data?.[key];
+      if (value !== undefined) kept[key] = typeof value === 'string' ? value.slice(0, 200) : value;
+    }
+    recordQuiet(ctx, ACTOR, { projectId, type: `window.${name}`, entity: 'window', entityId: name, data: kept });
+    return reply.code(204).send();
   });
   app.post('/api/ui/projects/:id/delete', guarded, async (req) => deleteProject(ctx, ACTOR, target(req.params, req.body)));
   app.post('/api/ui/projects/:id/restore', guarded, async (req) => ({ project: restoreProject(ctx, ACTOR, target(req.params, req.body)) }));
