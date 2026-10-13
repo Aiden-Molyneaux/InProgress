@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ASSIGNEES, COMMAND_KINDS, COMMAND_OUTCOMES, HOOK_EVENTS, NODE_KINDS, NODE_LABELS, NODE_STATUSES, PROJECT_NAME_MAX, RESOURCE_KINDS, WORK_STATUSES, unknownLabel, type NodeInput } from '../core/types';
+import { ASK_KINDS, ASSIGNEES, BRIEFING_MODES, COMMAND_KINDS, COMMAND_OUTCOMES, HOOK_EVENTS, NODE_KINDS, NODE_LABELS, NODE_STATUSES, PROJECT_NAME_MAX, RESOURCE_KINDS, RESOURCE_PURPOSES, WORK_STATUSES, unknownLabel, type NodeInput } from '../core/types';
 
 const title = z.string().trim().min(1, 'title is empty').max(200);
 /** A step's type label; null leaves it unlabelled (or clears it on a patch). */
@@ -33,7 +33,7 @@ export const createProjectBody = z
   .object({ name: projectName, description: z.string().max(5_000).optional(), playbook: z.string().max(10_000).optional(), slug: z.string().max(60).optional() })
   .strict();
 export const updateProjectBody = z
-  .object({ name: z.string().trim().min(1).max(PROJECT_NAME_MAX).optional(), description: z.string().max(5_000).optional(), playbook: z.string().max(10_000).optional(), status: z.enum(['active', 'archived']).optional() })
+  .object({ name: z.string().trim().min(1).max(PROJECT_NAME_MAX).optional(), description: z.string().max(5_000).optional(), playbook: z.string().max(10_000).optional(), status: z.enum(['active', 'archived']).optional(), briefingMode: z.enum(BRIEFING_MODES).optional() })
   .strict();
 export const bindingBody = z.object({ path: z.string().trim().min(1).max(500), branchPattern: z.string().trim().max(200).nullish() }).strict();
 export const addNodesBody = z.object({ parentId: z.number().int().positive(), after, nodes: z.array(nodeInput).min(1).max(200) }).strict();
@@ -50,9 +50,14 @@ export const resourceBody = z
     path: z.string().max(1_000).nullish(),
     url: z.string().url().max(2_000).refine((u) => /^https?:\/\//i.test(u), 'url must start with http:// or https://').nullish(),
     sessionId: z.string().max(100).nullish(),
+    purpose: z.enum(RESOURCE_PURPOSES).nullish(),
   })
   .strict();
 export const resourcePatchBody = resourceBody.omit({ sessionId: true }).partial().strict();
+export const askBody = z
+  .object({ kind: z.enum(ASK_KINDS), text: z.string().trim().min(1).max(2000), sessionId: z.string().min(1).max(100).nullish() })
+  .strict();
+export const clearAskBody = z.object({ answer: z.string().max(2000).optional() }).strict();
 export const logBody = z.object({ text: z.string().trim().min(1).max(2_000), sessionId: z.string().max(100).nullish() }).strict();
 export const hookBody = z
   .object({

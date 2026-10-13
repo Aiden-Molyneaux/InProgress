@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { Ctx } from '../../src/server/db/tx';
 import { listEventsSince, maxEventId } from '../../src/server/repo/events';
+import { clearAsk, raiseAsk } from '../../src/server/repo/asks';
 import { addLog } from '../../src/server/repo/logs';
 import { addNodes, findNode, requireNode, updateNode } from '../../src/server/repo/nodes';
 import {
-  addBinding, createProject, getProjectById, listBindings, listProjectSummaries, removeBinding,
+  addBinding, changeProject, createProject, getProjectById, listBindings, listProjectSummaries, removeBinding,
   resolveBinding, resolveProject, slugify, updateProject,
 } from '../../src/server/repo/projects';
 import { addResource, requireResource } from '../../src/server/repo/resources';
@@ -271,6 +272,35 @@ describe('projects', () => {
     // With statistics SQLite scans projects first, so rows arrive in project order unless the query orders them.
     ctx.db.exec('ANALYZE');
     expect(resolveBinding(ctx, 'C:/work/repo/src', 'feature/VCAD-978-x')?.slug).toBe('first');
+  });
+
+  it('briefingMode defaults to full, changes through changeProject with an event, and refuses an unknown mode', () => {
+    const ctx = makeCtx();
+    const p = createProject(ctx, 'test', { name: 'P' });
+    expect(p.briefingMode).toBe('full');
+    const since = maxEventId(ctx);
+    expect(changeProject(ctx, 'scribe:s1', p.slug, { briefingMode: 'scoped' }).project.briefingMode).toBe('scoped');
+    expect(getProjectById(ctx, p.id)?.briefingMode).toBe('scoped');
+    const event = listEventsSince(ctx, since).find((e) => e.type === 'project.updated');
+    expect(event?.data).toMatchObject({ changes: { briefingMode: { from: 'full', to: 'scoped' } } });
+    expect(() => changeProject(ctx, 'scribe:s1', p.slug, { briefingMode: 'half' as never })).toThrow(/Unknown briefing mode/);
+  });
+
+  it('summaries count open asks and live sessions waiting on a permission', () => {
+    const ctx = makeCtx();
+    const p = createProject(ctx, 'test', { name: 'P' });
+    const [step] = addNodes(ctx, 'test', { parentId: p.rootNodeId, nodes: [{ title: 'Step' }] });
+    const ts = ctx.now();
+    const old = new Date(Date.parse(ts) - 13 * 60 * 60 * 1000).toISOString();
+    const session = ctx.db.prepare('INSERT INTO sessions (id, project_id, state, started_at, last_seen_at) VALUES (?, ?, ?, ?, ?)');
+    session.run('perm', p.id, 'permission', ts, ts);
+    session.run('stale', p.id, 'permission', old, old);
+    session.run('work', p.id, 'working', ts, ts);
+    const open = raiseAsk(ctx, 'w', { nodeId: step.id, kind: 'question', text: 'Open' });
+    clearAsk(ctx, 'w', raiseAsk(ctx, 'w', { nodeId: step.id, kind: 'review', text: 'Cleared' }).id);
+    expect(listProjectSummaries(ctx).find((x) => x.id === p.id)).toMatchObject({ openAsks: 1, permissionWaits: 1 });
+    clearAsk(ctx, 'w', open.id);
+    expect(listProjectSummaries(ctx).find((x) => x.id === p.id)).toMatchObject({ openAsks: 0 });
   });
 
   it('summarizes needs-you counts and live sessions', () => {

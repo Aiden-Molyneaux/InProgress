@@ -30,6 +30,44 @@ export const SCRIBE_AGENT = 'inprogress-scribe';
 export const STALE_SESSION_MS = 12 * 60 * 60 * 1000;
 /** How long ended work stays on its step as the trail: an ended session's working tasks, and a subagent after it stopped. */
 export const TRAIL_MS = 7 * 24 * 60 * 60 * 1000;
+export const ASK_KINDS = ['question', 'permission', 'review'] as const;
+export type AskKind = (typeof ASK_KINDS)[number];
+export const SESSION_ROLES = ['worker', 'orchestrator'] as const;
+export type SessionRole = (typeof SESSION_ROLES)[number];
+export const BRIEFING_MODES = ['full', 'scoped'] as const;
+export type BriefingMode = (typeof BRIEFING_MODES)[number];
+export const RESOURCE_PURPOSES = ['handoff', 'state'] as const;
+export type ResourcePurpose = (typeof RESOURCE_PURPOSES)[number];
+/** How long a cleared ask stays in the snapshot, and how old an open one is before it is stale. */
+export const ASK_TRAIL_MS = 7 * 24 * 60 * 60 * 1000;
+/** An ask's glyph by kind, for the window and the briefing. */
+export const ASK_GLYPHS: Record<AskKind, string> = { question: '?', permission: '⚿', review: '◎' };
+
+export interface Ask {
+  id: number;
+  projectId: number;
+  nodeId: number;
+  kind: AskKind;
+  text: string;
+  /** The session that raised it; null for migrated and window rows. */
+  sessionId: string | null;
+  raisedAt: string;
+  clearedAt: string | null;
+  /** The actor string write() recorded for the first clear. */
+  clearedBy: string | null;
+  answer: string;
+  answerDeliveredAt: string | null;
+}
+/** "a7": how sessions, the briefing and the window name an ask. */
+export const askTag = (id: number): string => `a${id}`;
+
+/** The project's state note (the resource with purpose 'state' on the root), with its text. */
+export interface StateNote {
+  resourceId: number;
+  updatedAt: string;
+  content: string;
+}
+
 /** How long a deleted project waits under Recently deleted, restorable, before it is purged for good. */
 export const DELETED_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 /**
@@ -56,6 +94,7 @@ export interface Project {
    * nodes are left out as it is read.
    */
   queue: QueueEntry[];
+  briefingMode: BriefingMode;
 }
 
 /**
@@ -73,6 +112,10 @@ export const PROJECT_NAME_MAX = 120;
 
 export interface ProjectSummary extends Project {
   needsYou: number;
+  /** Open asks. */
+  openAsks: number;
+  /** Live sessions in state permission. */
+  permissionWaits: number;
   activeSessions: number;
   /** Live sessions in state working. */
   workingSessions: number;
@@ -151,6 +194,7 @@ export interface ResourceMeta {
   sessionId: string | null;
   createdAt: string;
   updatedAt: string;
+  purpose: ResourcePurpose | null;
 }
 
 export interface Resource extends ResourceMeta {
@@ -252,6 +296,7 @@ export interface PastSession {
   id: string;
   title: string | null;
   focusNodeId: number | null;
+  startedAt: string;
   endedAt: string;
 }
 
@@ -292,6 +337,7 @@ export interface Session {
    * next hook event fills it.
    */
   slot: number | null;
+  role: SessionRole;
   subagents: SubagentInfo[];
   /** Its background commands: running ones and those that ended in the last five minutes, at most 30. */
   commands: CommandInfo[];
@@ -319,6 +365,9 @@ export interface ProjectSnapshot {
   trailAgents: TrailAgent[];
   /** The project's ended sessions that `workItems` or `trailAgents` name. */
   pastSessions: PastSession[];
+  /** Open asks, and those cleared in the last 7 days, oldest raised first. */
+  asks: Ask[];
+  stateNote: StateNote | null;
   lastEventId: number;
   lastEvent: EventRow | null;
 }

@@ -2,6 +2,7 @@ import type { After, Assignee, NodeInput, NodeKind, NodeLabel, NodeStatus, TreeN
 import { write, type Ctx, type RecordEvent } from '../db/tx';
 import { badRequest, notFound } from '../errors';
 import { definedOnly } from '../util';
+import { clearNodeAsks } from './asks';
 import { inLiveProject } from './projects';
 
 interface NodeRow {
@@ -134,7 +135,18 @@ export interface NodePatch {
 }
 
 export function updateNode(ctx: Ctx, actor: string, id: number, patch: NodePatch): TreeNode {
-  return write(ctx, actor, (record) => patchNode(ctx, record, requireNode(ctx, id), patch));
+  return write(ctx, actor, (record) => {
+    const before = requireNode(ctx, id);
+    // Before patchNode, so node.updated stays the project's newest event (the activity strip shows it).
+    if (patch.status === 'dropped' && before.status !== 'dropped') {
+      // A dropped step's asks are moot (spec 1.2); a finished one's stay, a review ask most of all.
+      clearNodeAsks(ctx, record, actor, id);
+    } else if ((patch.kind ?? before.kind) === 'question' && patch.status === 'done' && before.status !== 'done') {
+      // A question node and its migrated ask are one question: finishing the node answers the ask.
+      clearNodeAsks(ctx, record, actor, id, (patch.outcome ?? before.outcome).trim());
+    }
+    return patchNode(ctx, record, before, patch);
+  });
 }
 
 /**

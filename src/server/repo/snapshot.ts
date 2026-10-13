@@ -1,10 +1,11 @@
 import type { NodeDetail, ProjectSnapshot } from '../../core/types';
 import type { Ctx } from '../db/tx';
+import { listProjectAsks } from './asks';
 import { lastProjectEvent, maxEventId } from './events';
 import { listLogs } from './logs';
 import { listNodes, requireNode } from './nodes';
 import { getProjectById, resolveProject } from './projects';
-import { listNodeResources, listResourceMeta } from './resources';
+import { listNodeResources, listResourceMeta, readStateNote } from './resources';
 import { listPastSessions, listProjectSessions } from './sessions';
 import { listTrailAgents } from './subagents';
 import { listWorkItems } from './work';
@@ -28,6 +29,8 @@ export function getProjectSnapshot(ctx: Ctx, ref: string | number): ProjectSnaps
     workItems: listWorkItems(ctx, project.id),
     trailAgents: listTrailAgents(ctx, project.id),
     pastSessions: listPastSessions(ctx, project.id),
+    asks: listProjectAsks(ctx, project.id),
+    stateNote: readStateNote(ctx, project.id),
     lastEventId: maxEventId(ctx),
     lastEvent: lastProjectEvent(ctx, project.id),
   };

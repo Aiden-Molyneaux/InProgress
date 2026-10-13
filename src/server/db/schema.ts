@@ -216,4 +216,44 @@ export const MIGRATIONS: string[] = [
   -- A new table and a nullable column: v1 to v8 builds can still read and write this schema, so a rollback across it works.
   INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
   `,
+  // 10: asks, roles, scoped briefings and resource purposes (stage 1, spec 2026-10-12-board-and-asks-design.md section 1).
+  // asks.kind, sessions.role, projects.briefing_mode and resources.purpose carry no CHECK, unlike the older enums: each
+  // is expected to grow in stage 2, and SQLite cannot change a CHECK without rebuilding the table. Code validates them.
+  // The open needs-you steps that already are asks become asks: a question node's title, or a body's "Needs you:" line.
+  `
+  CREATE TABLE asks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    node_id INTEGER NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    text TEXT NOT NULL,
+    session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+    raised_at TEXT NOT NULL,
+    cleared_at TEXT,
+    cleared_by TEXT,
+    answer TEXT NOT NULL DEFAULT '',
+    answer_delivered_at TEXT
+  );
+  CREATE INDEX asks_open ON asks (project_id, cleared_at, raised_at);
+  CREATE INDEX asks_node ON asks (node_id, raised_at);
+  CREATE UNIQUE INDEX asks_open_once ON asks (node_id, kind, text) WHERE cleared_at IS NULL;
+  ALTER TABLE sessions ADD COLUMN role TEXT NOT NULL DEFAULT 'worker';
+  ALTER TABLE projects ADD COLUMN briefing_mode TEXT NOT NULL DEFAULT 'full';
+  ALTER TABLE resources ADD COLUMN purpose TEXT;
+  INSERT INTO asks (project_id, node_id, kind, text, raised_at)
+    SELECT project_id, id, 'question', title, updated_at FROM nodes
+    WHERE assignee = 'me' AND status IN ('todo', 'active', 'blocked') AND kind = 'question';
+  INSERT INTO asks (project_id, node_id, kind, text, raised_at)
+    SELECT project_id, id, 'permission', trim(substr(t, i + 1, instr(substr(t, i + 1), char(10)) - 1)), updated_at
+    FROM (
+      SELECT project_id, id, updated_at, t, instr(t, char(10) || 'Needs you:') AS i
+      FROM (
+        SELECT project_id, id, updated_at, char(10) || replace(body, char(13), '') || char(10) AS t FROM nodes
+        WHERE assignee = 'me' AND status IN ('todo', 'active', 'blocked') AND kind != 'question'
+      )
+    )
+    WHERE i > 0;
+  -- A new table and defaulted or nullable columns: v1 to v9 builds can still read and write this schema.
+  INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+  `,
 ];

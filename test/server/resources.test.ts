@@ -14,6 +14,47 @@ function setup() {
   return { ctx, project, step, other };
 }
 
+describe('resources: purpose', () => {
+  it('round-trips a purpose, refuses an unknown one, and lets a patch clear it', () => {
+    const { ctx, step } = setup();
+    const r = addResource(ctx, 't', { nodeId: step.id, kind: 'doc', title: 'H', content: 'x', purpose: 'handoff' });
+    expect(r.purpose).toBe('handoff');
+    expect(requireResource(ctx, r.id).purpose).toBe('handoff');
+    expect(addResource(ctx, 't', { nodeId: step.id, kind: 'doc', title: 'Plain', content: 'x' }).purpose).toBeNull();
+    expect(() => addResource(ctx, 't', { nodeId: step.id, kind: 'doc', title: 'Bad', content: 'x', purpose: 'release' as never })).toThrow(/Unknown resource purpose/);
+    expect(() => updateResource(ctx, 't', r.id, { purpose: 'release' as never })).toThrow(/Unknown resource purpose/);
+    expect(updateResource(ctx, 't', r.id, { purpose: null }).purpose).toBeNull();
+  });
+
+  it('a state note on the root replaces the previous one and records resource.deleted for it', () => {
+    const { ctx, project } = setup();
+    const first = addResource(ctx, 't', { nodeId: project.rootNodeId, kind: 'doc', title: 'State 1', content: 'one', purpose: 'state' });
+    const second = addResource(ctx, 't', { nodeId: project.rootNodeId, kind: 'doc', title: 'State 2', content: 'two', purpose: 'state' });
+    expect(listResourceMeta(ctx, project.id).map((r) => r.id)).toEqual([second.id]);
+    expect(listEventsSince(ctx, 0).filter((e) => e.type === 'resource.deleted' && e.entityId === String(first.id))).toHaveLength(1);
+  });
+
+  it('a patch that sets purpose state on a root resource replaces the previous note', () => {
+    const { ctx, project } = setup();
+    const first = addResource(ctx, 't', { nodeId: project.rootNodeId, kind: 'doc', title: 'S1', content: 'one', purpose: 'state' });
+    const plain = addResource(ctx, 't', { nodeId: project.rootNodeId, kind: 'doc', title: 'S2', content: 'two' });
+    updateResource(ctx, 't', plain.id, { purpose: 'state' });
+    expect(listResourceMeta(ctx, project.id).map((r) => r.id)).toEqual([plain.id]);
+    expect(listEventsSince(ctx, 0).filter((e) => e.type === 'resource.deleted' && e.entityId === String(first.id))).toHaveLength(1);
+  });
+
+  it('refuses moving a state note to a non-root node', () => {
+    const { ctx, project, step } = setup();
+    const note = addResource(ctx, 't', { nodeId: project.rootNodeId, kind: 'doc', title: 'S', content: 'x', purpose: 'state' });
+    expect(() => updateResource(ctx, 't', note.id, { nodeId: step.id })).toThrow('The state note goes on the project root');
+  });
+
+  it('refuses a state note off the project root', () => {
+    const { ctx, step } = setup();
+    expect(() => addResource(ctx, 't', { nodeId: step.id, kind: 'doc', title: 'S', content: 'x', purpose: 'state' })).toThrow('The state note goes on the project root');
+  });
+});
+
 describe('resources', () => {
   it('requires content, a path, or a url', () => {
     const { ctx, step } = setup();

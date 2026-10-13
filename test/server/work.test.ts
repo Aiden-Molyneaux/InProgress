@@ -185,7 +185,7 @@ describe('the trail of ended work in the snapshot', () => {
     tick(30 * MIN);
     hook({ event: 'stop' });
     tick(16 * 60 * MIN);
-    expect(getProjectSnapshot(ctx, project.slug).pastSessions).toEqual([{ id: 's1', title: null, focusNodeId: play.id, endedAt: '2026-10-02T09:30:00.000Z' }]);
+    expect(getProjectSnapshot(ctx, project.slug).pastSessions).toEqual([{ id: 's1', title: null, focusNodeId: play.id, startedAt: '2026-10-02T09:00:00.000Z', endedAt: '2026-10-02T09:30:00.000Z' }]);
     // The trail itself still lasts 7 days from the expiry, as the prune counts it.
     tick(7 * DAY - MIN);
     expect(getProjectSnapshot(ctx, project.slug).pastSessions.map((s) => s.id)).toEqual(['s1']);
@@ -218,8 +218,8 @@ describe('the trail of ended work in the snapshot', () => {
     const past = () => getProjectSnapshot(ctx, project.slug).pastSessions;
     // Newest first. s3 left nothing behind, and s4 is still live.
     expect(past()).toEqual([
-      { id: 's2', title: 'Session s2', focusNodeId: null, endedAt: '2026-10-02T09:01:00.000Z' },
-      { id: 's1', title: null, focusNodeId: play.id, endedAt: '2026-10-02T09:00:00.000Z' },
+      { id: 's2', title: 'Session s2', focusNodeId: null, startedAt: '2026-10-02T09:00:00.000Z', endedAt: '2026-10-02T09:01:00.000Z' },
+      { id: 's1', title: null, focusNodeId: play.id, startedAt: '2026-10-02T09:00:00.000Z', endedAt: '2026-10-02T09:00:00.000Z' },
     ]);
     // s4 keeps working meanwhile, so it never goes stale.
     tick(7 * DAY - MIN + 1000);
