@@ -11,7 +11,7 @@ export const ASK_USAGE = 'Usage: inprogress ask <step id> --session <session id>
 /** The server is up but answered too slowly; whether a rerun is safe depends on the command. */
 export const CLAIM_TIMEOUT_HINT = 'InProgress was too slow to answer. Running this command again is safe: a claim of the same step changes nothing more.';
 export const ASK_TIMEOUT_HINT = 'InProgress was too slow to answer. Running this command again is safe: the same open ask is joined, not raised twice.';
-export const ORCHESTRATE_TIMEOUT_HINT = 'InProgress was too slow to answer. It may have recorded this open, and running it again records another: check the window or `inprogress digest <project>` first.';
+export const ORCHESTRATE_TIMEOUT_HINT = 'InProgress was too slow to answer. It may have recorded this open, and running it again records another: its count shows in the mip-orc column of `inprogress usage <project>`.';
 
 interface Conn {
   baseUrl: string;

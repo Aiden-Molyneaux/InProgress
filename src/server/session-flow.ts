@@ -430,16 +430,19 @@ export function claimStep(ctx: Ctx, actor: string, sessionId: string, nodeId: nu
     }
   }
   write(ctx, actor, (record) => {
-    // A claim names a step to work on: not the project root, not a dropped step (as raiseAsk refuses them).
-    if (target && target.parentId === null) throw badRequest(`#${nodeId} is the project root`, 'Claim the step you will work on.');
-    if (target && target.status === 'dropped') throw badRequest(`#${nodeId} is dropped`, 'Reopen it first, or claim another step.');
-    // The role first, so the focus event ("is on #id") is the latest line on the activity strip.
+    // The role first, so the focus event ("is on #id") is the latest line on the activity strip. A session with no
+    // project takes the step's; applyFocus refuses what cannot be claimed, and the write rolls the role back with it.
     const existing = findSession(ctx, sessionId);
-    if (existing && existing.role !== 'worker' && existing.projectId !== null && isTracking(ctx, existing.projectId)) {
+    const roleProject = existing?.projectId ?? target?.projectId;
+    if (existing && existing.role !== 'worker' && roleProject !== undefined) {
       ctx.db.prepare("UPDATE sessions SET role = 'worker' WHERE id = ?").run(sessionId);
-      record({ projectId: existing.projectId, type: 'session.updated', entity: 'session', entityId: sessionId, data: { changed: ['role'], role: 'worker' } });
+      record({ projectId: roleProject, type: 'session.updated', entity: 'session', entityId: sessionId, data: { changed: ['role'], role: 'worker' } });
     }
     applyFocus(ctx, record, sessionId, nodeId);
+    // A claim names a step to work on: not the project root, not a dropped step (as raiseAsk refuses them). Checked after
+    // applyFocus, so an untracked session or another project's step gets that reason first.
+    if (target && target.parentId === null) throw badRequest(`#${nodeId} is the project root`, 'Claim the step you will work on.');
+    if (target && target.status === 'dropped') throw badRequest(`#${nodeId} is dropped`, 'Reopen it first, or claim another step.');
   });
   const session = findSession(ctx, sessionId)!;
   const snapshot = getProjectSnapshot(ctx, session.projectId!);
