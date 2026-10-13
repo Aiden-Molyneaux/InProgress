@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { isLive } from '../../src/core/board';
+import { deriveBoard, isLive } from '../../src/core/board';
 import type { StepHit } from '../../src/core/goto';
 import type { ProjectSnapshot } from '../../src/core/types';
 import { api, postEvent } from './api';
 import { Board } from './board/Board';
 import { useLastLook } from './board/lastLook';
+import { noteHidden, noteShown, setPoster } from './measure';
 import { ActivityStrip } from './chrome/ActivityStrip';
 import type { GoToHandle } from './chrome/GoTo';
 import { archivedProjects, neighbourTab, projectTabs, stepTab } from './chrome/tabs';
@@ -17,6 +18,9 @@ import { useInProgress } from './useInProgress';
 import { useKeyboard } from './useKeyboard';
 import { useNow } from './useNow';
 import { loadView, saveView, type View } from './views/view';
+
+// The measurements go out through the window's own event post.
+setPoster(postEvent);
 
 const holds = (snapshot: ProjectSnapshot, id: number) => snapshot.nodes.some((n) => n.id === id);
 
@@ -98,6 +102,29 @@ export function App() {
     opener.current = null;
   }, [viewerOpen]);
 
+  // Coming back to the window (spec 2.6): shown or focused again. The handler reads the latest state through a ref.
+  const shownNow = useRef({ snapshot, view });
+  shownNow.current = { snapshot, view };
+  useEffect(() => {
+    const shown = () => {
+      const { snapshot: s, view: v } = shownNow.current;
+      if (!s) return;
+      noteShown(s.project.id, v, deriveBoard(s, Date.now()).marked.length);
+    };
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') shown();
+      else noteHidden();
+    };
+    const hidden = () => noteHidden();
+    window.addEventListener('focus', shown);
+    window.addEventListener('blur', hidden);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('focus', shown);
+      window.removeEventListener('blur', hidden);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
   useEffect(() => {
     document.title = `${waiting ? `(${waiting}) ` : ''}InProgress${snapshot ? ` · ${snapshot.project.name}` : ''}`;
   }, [waiting, snapshot]);
@@ -196,6 +223,7 @@ export function App() {
               onClose={() => setSelectedNode(null)}
               onSelectNode={setSelectedNode}
               onOpenResource={openViewer}
+              onStatus={say}
             />
           )}
         </main>

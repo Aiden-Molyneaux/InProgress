@@ -481,3 +481,12 @@ li.ip-orow:hover { background: var(--panel-2); }
   /* Nothing moves: no pulse, no flash, no bob, blink or ring.  */
   * { animation: none !important; }
 }
+
+/* Details: asks, handoff and marks, and the add-a-step foot (spec 2.7). */
+.ip-dasks { list-style: none; margin: 0; padding: 0; }
+.ip-dask { margin: 0 0 8px; }
+.ip-dask p { margin: 2px 0 0; }
+.ip-dask-head, .ip-dask.cleared { font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
+.ip-dask.cleared { margin-bottom: 4px; }
+.ip-dmarks { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0; }
+.ip-dadd { margin-top: 12px; }

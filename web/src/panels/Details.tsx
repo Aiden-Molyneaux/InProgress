@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { commandShown } from '../../../src/core/activity';
+import { deriveBoard } from '../../../src/core/board';
 import { agentHome, agentVisible, atLimit, homedTrailAgents, isPaused, occupiedSteps } from '../../../src/core/layout';
-import { isNeedsYou } from '../../../src/core/tree';
 import { LABEL_GLYPHS, agentTag, isReader, sessionDisplayTitle, sessionTag, type NodeDetail, type ProjectSnapshot, type TrailAgent, type TreeNode, type WorkItem } from '../../../src/core/types';
 import { AgentWords } from '../AgentWords';
-import { api } from '../api';
+import { api, postEvent } from '../api';
+import { AskActions } from '../board/AskActions';
+import { MARK_WORDS } from '../board/Marks';
+import { KIND_MARK } from '../board/NeedsMe';
+import { QuickAdd } from '../board/QuickAdd';
+import { ageShort } from '../board/text';
 import { familyVar } from '../family';
 import { TASK_MARK, agentLineParts, commandDescription, commandLabel, commandMark, commandTag, commandWhen, taskFamily, taskOwner, trailAgentParts, waitsFor, withTag, withoutOwnId, workMark } from '../live';
 import { Marker } from '../Marker';
@@ -19,6 +24,8 @@ interface DetailsProps {
   onClose: () => void;
   onSelectNode: (id: number) => void;
   onOpenResource: (id: number) => void;
+  /** A line for the window's toast: why adding a step was refused. */
+  onStatus?: (text: string) => void;
 }
 
 /** One session's part of a node's trail: what it left there, under its title. */
@@ -202,7 +209,43 @@ function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'
   );
 }
 
-export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResource }: DetailsProps) {
+/**
+ * The step's asks (spec 2.7): the open ones with Answer… and Clear as on the Board, then the cleared ones that were
+ * answered, as `a5 ◎ "text" · answered "yes" · 2d`. Nothing when there are none.
+ */
+function AsksSection({ nodeId, snapshot, now }: { nodeId: number; snapshot: ProjectSnapshot; now: number }) {
+  const here = snapshot.asks.filter((a) => a.nodeId === nodeId);
+  const open = here.filter((a) => a.clearedAt === null);
+  const answered = here.filter((a) => a.clearedAt !== null && a.answer !== '').sort((a, b) => b.clearedAt!.localeCompare(a.clearedAt!));
+  if (open.length === 0 && answered.length === 0) return null;
+  const raiser = (sessionId: string | null) => {
+    const s = sessionId === null ? undefined : snapshot.sessions.find((x) => x.id === sessionId);
+    return s ? sessionTag(s.slot) || '?' : 'migrated';
+  };
+  return (
+    <>
+      <div className="ip-label">Asks</div>
+      <ul className="ip-dasks">
+        {open.map((a) => (
+          <li key={a.id} className="ip-dask" data-ask={a.id}>
+            <div className="ip-dask-head">
+              <span className="ip-id">{`a${a.id}`}</span> {KIND_MARK[a.kind]} {a.kind} · {raiser(a.sessionId)} · <span className="ip-time">{ageShort(a.raisedAt, now)}</span>
+            </div>
+            <p>{a.text}</p>
+            <AskActions ask={a} />
+          </li>
+        ))}
+        {answered.map((a) => (
+          <li key={a.id} className="ip-dask cleared" data-ask={a.id}>
+            <span className="ip-id">{`a${a.id}`}</span> {KIND_MARK[a.kind]} {`"${a.text}"`} · answered {`"${a.answer}"`} · {ageShort(a.clearedAt!, now)}
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+}
+
+export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResource, onStatus }: DetailsProps) {
   const [detail, setDetail] = useState<NodeDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -211,6 +254,18 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
   // Paused as the canvas draws it: the layout's own test, run on the snapshot's copy of each step.
   const byId = useMemo(() => new Map(snapshot.nodes.map((n) => [n.id, n] as const)), [snapshot.nodes]);
   const now = useNow(30_000);
+  const [adding, setAdding] = useState(false);
+  const addField = useRef<HTMLInputElement>(null);
+  const addButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (adding) addField.current?.focus();
+  }, [adding]);
+  // Details is keyed by its step, so a mount is an open (spec 2.6).
+  const projectId = snapshot.project.id;
+  useEffect(() => {
+    postEvent('details_open', projectId, { node: nodeId });
+  }, [projectId, nodeId]);
+  const board = useMemo(() => deriveBoard(snapshot, now), [snapshot, now]);
   const occupied = useMemo(() => occupiedSteps(byId, snapshot.sessions, snapshot.workItems, now), [byId, snapshot.sessions, snapshot.workItems, now]);
 
   // Refetch whenever the snapshot changes, so the panel follows Claude's edits. A failed refetch keeps the last good detail.
@@ -242,6 +297,8 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
   }
 
   const { node } = detail;
+  const marks = board.byId.get(node.id)?.marks ?? [];
+  const handoff = snapshot.resources.filter((r) => r.nodeId === node.id && r.purpose === 'handoff').sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null;
   /** A step's marker as its card draws it, the sky ring and its tooltip too when paused, but never pulsing. */
   const marker = (n: Pick<TreeNode, 'id' | 'status' | 'kind' | 'assignee'>) => {
     const step = byId.get(n.id);
@@ -251,7 +308,7 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
         status={n.status}
         question={n.kind === 'question'}
         paused={paused}
-        needsYou={isNeedsYou(n)}
+        needsYou={n.assignee === 'me' && n.status !== 'done'}
         pulse={false}
         title={paused ? `Nobody is on this. Last change ${relativeTime(step.updatedAt)}` : undefined}
       />
@@ -273,10 +330,10 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
         <button className="ip-btn" onClick={onClose} aria-label="Close">×</button>
       </header>
       <div className="ip-meta">
-        {/* The canvas's marker, then the status as a muted word, or NEEDS YOU in the YOU tag's look. A paused step
-            draws the sky ring here too; nothing pulses here. */}
+        {/* The canvas's marker, then the status as a muted word. A paused step draws the sky ring here too; nothing
+            pulses here. */}
         {marker(node)}
-        {isNeedsYou(node) ? <span className="ip-you">NEEDS YOU</span> : <span>{node.status}</span>}
+        <span>{node.status}</span>
         <span>{node.kind}</span>
         {node.label && (
           <span className="ip-meta-label">
@@ -293,6 +350,21 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
           </span>
         )}
       </div>
+      <AsksSection nodeId={node.id} snapshot={snapshot} now={now} />
+      {(handoff || marks.length > 0) && (
+        <div className="ip-dmarks">
+          {handoff && (
+            <button type="button" className="ip-chip-handoff" onClick={() => onOpenResource(handoff.id)}>
+              {`handoff · ${ageShort(handoff.createdAt, now)}`}
+            </button>
+          )}
+          {marks.map((m) => (
+            <span key={m} className="ip-mark hygiene">
+              {MARK_WORDS[m]}
+            </span>
+          ))}
+        </div>
+      )}
       {node.body && <Markdown text={node.body} />}
       {node.outcome && (
         <p className="ip-outcome">
@@ -340,6 +412,27 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
           </ul>
         </>
       )}
+      <div className="ip-dadd">
+        {adding ? (
+          <QuickAdd
+            projectId={snapshot.project.id}
+            slug={snapshot.project.slug}
+            inputRef={addField}
+            onStatus={onStatus}
+            parent={node.id}
+            label={`Add a step under #${node.id}`}
+            onClose={() => {
+              setAdding(false);
+              // The button is not mounted until the field is gone, so focus waits for the next frame.
+              requestAnimationFrame(() => addButton.current?.focus());
+            }}
+          />
+        ) : (
+          <button type="button" ref={addButton} className="ip-btn" onClick={() => setAdding(true)}>
+            Add a step under this one
+          </button>
+        )}
+      </div>
       <p className="muted" style={{ marginTop: 12 }}>
         Updated {relativeTime(node.updatedAt)} · {snapshot.project.name}
       </p>

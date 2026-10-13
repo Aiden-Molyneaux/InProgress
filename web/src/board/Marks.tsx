@@ -1,7 +1,7 @@
 import type { MouseEvent } from 'react';
 import type { BoardRow, Mark } from '../../../src/core/board';
 import { LABEL_GLYPHS, type NodeLabel, type TreeNode } from '../../../src/core/types';
-import { noteAction } from '../measure';
+import { noteAction, type MeasureArea } from '../measure';
 import { ageShort } from './text';
 
 export { endedLine } from './text';
@@ -26,7 +26,7 @@ export function LabelChip({ label }: { label: NodeLabel | null }) {
 }
 
 /** The marks on a step's quote: the amber ask, "you", the handoff chip and the grey hygiene marks. */
-export function StepMarks({ row, now, onOpenResource, skip = [] }: { row: BoardRow; now: number; onOpenResource: (id: number) => void; skip?: Mark[] }) {
+export function StepMarks({ row, now, onOpenResource, skip = [], area }: { row: BoardRow; now: number; onOpenResource: (id: number) => void; skip?: Mark[]; area?: MeasureArea }) {
   const hygiene = row.marks.filter((m) => !skip.includes(m) && m !== 'ended_open');
   return (
     <>
@@ -43,7 +43,7 @@ export function StepMarks({ row, now, onOpenResource, skip = [] }: { row: BoardR
           data-act
           onClick={(e: MouseEvent) => {
             e.stopPropagation();
-            noteAction('board', 'open_handoff');
+            noteAction(area ?? row.column, 'open_handoff');
             onOpenResource(row.handoff!.id);
           }}
         >
@@ -73,7 +73,7 @@ export function StepLine({ node }: { node: Pick<TreeNode, 'id' | 'title'> }) {
 }
 
 /** A click on a row opens Details, unless it landed on a button of the row's own (marked data-act). */
-export function rowClick(area: string, open: () => void) {
+export function rowClick(area: MeasureArea, open: () => void) {
   return (e: MouseEvent) => {
     if ((e.target as HTMLElement).closest('[data-act], input, textarea')) return;
     noteAction(area, 'open');

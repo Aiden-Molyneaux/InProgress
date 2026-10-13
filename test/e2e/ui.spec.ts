@@ -2135,3 +2135,66 @@ test.describe('Project view', () => {
     await expect(row.getByRole('img', { name: 'backlog' })).toBeVisible();
   });
 });
+
+test.describe('Details: asks, handoff, add a step', () => {
+  test("a row opens Details with the step's asks, answered ones too, and its handoff chip; opening posts details_open", async ({ page, api, fresh }) => {
+    const id = fresh.ids['Run signing tests'];
+    await write(api, fresh.session, 'post', '/api/resources', { nodeId: id, kind: 'doc', title: 'Session handoff', purpose: 'handoff', content: '# Handoff\n\nPick up at the upload step.' });
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const posted = page.waitForRequest((r) => r.url().endsWith('/api/ui/events') && (r.postDataJSON() as { name: string }).name === 'details_open');
+    const details = await openDetails(page, 'Run signing tests');
+    expect((await posted).postDataJSON()).toMatchObject({ name: 'details_open', data: { node: id } });
+    // The open ask, as on the Board: kind, text, who raised it and Answer… with Clear.
+    const asks = details.locator('.ip-dasks');
+    const open1 = asks.locator('.ip-dask', { hasText: 'Which keystore signs the release?' });
+    await expect(open1).toContainText(`a${fresh.ask}`);
+    await expect(open1).toContainText(/\? question · migrated · (now|\d+m)/);
+    await expect(open1.getByRole('button', { name: 'Clear' })).toBeVisible();
+    // Answer… takes focus; Escape closes the field only, returns focus to the button, and leaves Details open.
+    const answer = open1.getByRole('button', { name: 'Answer…' });
+    await answer.click();
+    const field = open1.getByRole('textbox');
+    await expect(field).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(field).toHaveCount(0);
+    await expect(answer).toBeFocused();
+    await expect(details).toBeVisible();
+    await answer.click();
+    await field.fill('Use the upload key');
+    await page.keyboard.press('Enter');
+    // Cleared with its answer, it moves to the answered lines.
+    const cleared = asks.locator('.ip-dask.cleared');
+    await expect(cleared).toContainText(`a${fresh.ask} ? "Which keystore signs the release?" · answered "Use the upload key"`);
+    await expect(asks.getByRole('button', { name: 'Answer…' })).toHaveCount(0);
+    // The handoff chip opens the handoff in the viewer.
+    await details.getByRole('button', { name: /^handoff · / }).click();
+    await expect(page.getByRole('dialog', { name: 'Resource' })).toContainText('Pick up at the upload step.');
+  });
+
+  test('Add a step under this one creates a child, keeps its field focused for the next, and Escape returns focus to the button without closing Details', async ({ page, api, fresh }) => {
+    const id = fresh.ids['Play app signing'];
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const details = await openDetails(page, 'Play app signing');
+    const add = details.getByRole('button', { name: 'Add a step under this one' });
+    await add.click();
+    const field = details.getByRole('textbox', { name: `Add a step under #${id}` });
+    await expect(field).toBeFocused();
+    await field.fill('Check the upload key');
+    await page.keyboard.press('Enter');
+    await expect(details.locator('.ip-kids')).toContainText('Check the upload key');
+    await expect(field).toBeFocused();
+    await expect(field).toHaveValue('');
+    await page.keyboard.press('Enter');
+    await field.fill('Second child');
+    await page.keyboard.press('Enter');
+    await expect(details.locator('.ip-kids')).toContainText('Second child');
+    await page.keyboard.press('Escape');
+    await expect(field).toHaveCount(0);
+    await expect(add).toBeFocused();
+    await expect(details).toBeVisible();
+    const detail = (await (await api.get(`/api/nodes/${id}`)).json()) as { children: { title: string }[] };
+    expect(detail.children.map((c) => c.title)).toEqual(expect.arrayContaining(['Check the upload key', 'Second child']));
+  });
+});

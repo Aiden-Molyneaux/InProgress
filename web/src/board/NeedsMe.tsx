@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { isLive } from '../../../src/core/board';
 import { sessionTag, type Ask, type AskKind, type Session } from '../../../src/core/types';
-import { clearAsk } from '../api';
+import { AskActions } from './AskActions';
 import { Character } from '../Character';
 import { characterState } from '../characterState';
 import { commandLabel, runTime } from '../live';
@@ -9,7 +8,7 @@ import { rowClick } from './Marks';
 import type { BandProps } from './bandProps';
 import { ageShort } from './text';
 
-const KIND_MARK: Record<AskKind, string> = { question: '?', permission: '⚿', review: '◎' };
+export const KIND_MARK: Record<AskKind, string> = { question: '?', permission: '⚿', review: '◎' };
 
 /** The newest running command of a session, as "Shell npm run build": what a permission wait is probably about. */
 function newestRunning(s: Session): string | null {
@@ -54,40 +53,6 @@ export function NeedsMe({ snapshot, board, now, onOpenNode }: BandProps) {
 
 function AskRow({ ask, snapshot, now, step, onOpenNode }: { ask: Ask; snapshot: BandProps['snapshot']; now: number; step: { id: number; title: string } | undefined; onOpenNode: (id: number) => void }) {
   const raiser = ask.sessionId === null ? undefined : snapshot.sessions.find((s) => s.id === ask.sessionId);
-  const [answering, setAnswering] = useState(false);
-  const [text, setText] = useState('');
-  const [problem, setProblem] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const field = useRef<HTMLInputElement>(null);
-  const opener = useRef<HTMLButtonElement>(null);
-  /** Set by Escape: once the field has gone, focus returns to the button that opened it. */
-  const restore = useRef(false);
-  useEffect(() => {
-    if (answering) field.current?.focus();
-    else if (restore.current) {
-      restore.current = false;
-      opener.current?.focus();
-    }
-  }, [answering]);
-  const send = async (answer?: string) => {
-    setBusy(true);
-    const result = await clearAsk(ask.id, answer);
-    setBusy(false);
-    if (result === 'reload') window.location.reload();
-    else if (result !== 'ok') setProblem(result);
-    // On 'ok' the stream brings a snapshot without this ask, and the row goes.
-  };
-  const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      void send(text.trim() || undefined);
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      restore.current = true;
-      setAnswering(false);
-      setText('');
-    }
-  };
   const who = raiser ? sessionTag(raiser.slot) || '?' : null;
   return (
     <li className="ip-msg ip-ask" data-ask={ask.id} onClick={step ? rowClick('needs_me', () => onOpenNode(step.id)) : undefined}>
@@ -107,29 +72,7 @@ function AskRow({ ask, snapshot, now, step, onOpenNode }: { ask: Ask; snapshot: 
             {`on #${step.id} ${step.title}`}
           </button>
         )}
-        {answering ? (
-          <input
-            ref={field}
-            data-act
-            className="ip-answer"
-            aria-label={`Answer to ${ask.text}`}
-            value={text}
-            disabled={busy}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={onKey}
-            placeholder="Your answer, then Enter"
-          />
-        ) : (
-          <div className="ip-ask-actions">
-            <button type="button" ref={opener} data-act className="ip-btn" onClick={() => setAnswering(true)}>
-              Answer…
-            </button>
-            <button type="button" data-act className="ip-btn" disabled={busy} onClick={() => void send()}>
-              Clear
-            </button>
-          </div>
-        )}
-        {problem && <div className="ip-problem" role="alert">{problem}</div>}
+        <AskActions ask={ask} />
       </div>
     </li>
   );

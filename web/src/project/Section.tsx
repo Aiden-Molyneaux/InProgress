@@ -66,7 +66,7 @@ export interface OutlineProps extends Pick<ViewProps, 'now' | 'onOpenNode' | 'on
 function StepRow({ node, row, depth, snapshot, now, wide, onOpenNode, onOpenResource }: Pick<OutlineProps, 'snapshot' | 'now' | 'wide' | 'onOpenNode' | 'onOpenResource'> & { node: TreeNode; row: BoardRow | null; depth: number }) {
   const docs = snapshot.resources.filter((r) => r.nodeId === node.id).length;
   const letters = row ? [...row.sessions, ...(row.owner ? [row.owner] : [])] : [];
-  const marks = row ? <StepMarks row={row} now={now} onOpenResource={onOpenResource} /> : null;
+  const marks = row ? <StepMarks row={row} now={now} onOpenResource={onOpenResource} area="project" /> : null;
   return (
     <li className={`ip-orow${wide ? ' wide' : ''}${row?.column === 'done' ? ' is-done' : ''}`} data-node={node.id} onClick={rowClick('project', () => onOpenNode(node.id))}>
       <span className="ip-orail">
