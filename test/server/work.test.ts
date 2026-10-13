@@ -248,6 +248,49 @@ describe('pruneWorkItems', () => {
   });
 });
 
+describe("a step's working tasks when it is marked done", () => {
+  it('ticks its open tasks, a subagent\'s too, records work.updated before node.updated, and leaves other steps alone', () => {
+    const { ctx, play, tests, hook, items } = setup();
+    hook(created('1', 'Sign the bundle'));
+    hook(created('2', 'Upload the key'));
+    hook(updated('2', { status: 'in_progress' }));
+    hook({ event: 'subagent-start', agentId: 'a1', agentType: 'Explore' });
+    hook(created('1', `#${play.id} Check the keystore`, 'a1'));
+    hook(created('3', `#${tests.id} Run the suite`));
+    const mark = maxEventId(ctx);
+    updateNode(ctx, 'scribe:s1', play.id, { status: 'done', outcome: 'Signed' });
+    expect(items().map((i) => [i.nodeId, i.agentId, i.status])).toEqual([
+      [play.id, '', 'completed'],
+      [play.id, '', 'completed'],
+      [play.id, 'a1', 'completed'],
+      [tests.id, '', 'pending'],
+    ]);
+    expect(listEventsSince(ctx, mark).map((e) => [e.type, e.entityId, e.actor])).toEqual([
+      ['work.updated', String(play.id), 'scribe:s1'],
+      ['node.updated', String(play.id), 'scribe:s1'],
+    ]);
+  });
+
+  it('records nothing for the tasks when the step was already done, or none were open', () => {
+    const { ctx, play, tests, hook } = setup();
+    hook(created('1', 'Sign the bundle'));
+    updateNode(ctx, 'scribe:s1', play.id, { status: 'done' });
+    let mark = maxEventId(ctx);
+    updateNode(ctx, 'scribe:s1', play.id, { status: 'done', outcome: 'Signed' });
+    expect(listEventsSince(ctx, mark).map((e) => e.type)).toEqual(['node.updated']);
+    mark = maxEventId(ctx);
+    updateNode(ctx, 'scribe:s1', tests.id, { status: 'done' });
+    expect(listEventsSince(ctx, mark).map((e) => e.type)).toEqual(['node.updated']);
+  });
+
+  it('leaves the open tasks of a dropped step as they are', () => {
+    const { ctx, play, hook, items } = setup();
+    hook(created('1', 'Sign the bundle'));
+    updateNode(ctx, 'scribe:s1', play.id, { status: 'dropped' });
+    expect(items().map((i) => i.status)).toEqual(['pending']);
+  });
+});
+
 describe('setTasks (the tasks command, where the task tools are absent)', () => {
   it("replaces the session's list on a node, in order, and leaves other lists alone", () => {
     const { ctx, play, tests, hook, items } = setup();

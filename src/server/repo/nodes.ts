@@ -4,6 +4,7 @@ import { badRequest, notFound } from '../errors';
 import { definedOnly } from '../util';
 import { clearNodeAsks } from './asks';
 import { inLiveProject } from './projects';
+import { closeNodeTasks } from './work';
 
 interface NodeRow {
   id: number;
@@ -171,6 +172,8 @@ export function patchNode(ctx: Ctx, record: RecordEvent, before: TreeNode, patch
   ctx.db
     .prepare('UPDATE nodes SET title = ?, kind = ?, status = ?, assignee = ?, body = ?, outcome = ?, label = ?, updated_at = ?, completed_at = ? WHERE id = ?')
     .run(next.title, next.kind, next.status, next.assignee, next.body, next.outcome, next.label, ts, completedAt, id);
+  // Before node.updated, which stays the project's newest event. Every path to done comes through here.
+  if (next.status === 'done' && before.status !== 'done') closeNodeTasks(ctx, record, before.projectId, id);
   const diff: Record<string, { from: unknown; to: unknown }> = {};
   for (const key of Object.keys(changes) as (keyof NodePatch)[]) {
     if (before[key] !== next[key]) diff[key] = { from: before[key], to: next[key] };
