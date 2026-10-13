@@ -43,8 +43,9 @@ export interface Board {
   marked: BoardRow[];
 }
 
-/** A live session: not ended. The snapshot's read already expired stale ones. */
-export const isLive = (s: Pick<Session, 'state'>): boolean => s.state !== 'ended';
+/** A live session (spec 1.5): not ended and heard from within STALE_SESSION_MS. The snapshot's read expires stale ones only lazily. */
+export const isLive = (s: Pick<Session, 'state' | 'lastSeenAt'>, now: number): boolean =>
+  s.state !== 'ended' && now - Date.parse(s.lastSeenAt) <= STALE_SESSION_MS;
 const OPEN = new Set(['todo', 'active', 'blocked']);
 const isOpen = (n: TreeNode) => OPEN.has(n.status);
 const STATE_ORDER: Record<string, number> = { working: 0, permission: 1, idle: 2 };
@@ -54,8 +55,7 @@ export function deriveBoard(input: BoardInput, now: number): Board {
   const index = buildIndex(input.nodes);
   const order = dfsOrder(index);
   const rootId = index.root?.id ?? null;
-  // Live (spec 1.5): not ended and heard from within STALE_SESSION_MS; the snapshot's read expires stale ones only lazily.
-  const live = input.sessions.filter((s) => isLive(s) && now - Date.parse(s.lastSeenAt) <= STALE_SESSION_MS);
+  const live = input.sessions.filter((s) => isLive(s, now));
   const liveIds = new Set(live.map((s) => s.id));
   const focusOf = new Map<number, Session[]>();
   for (const s of live) if (s.focusNodeId !== null) focusOf.set(s.focusNodeId, [...(focusOf.get(s.focusNodeId) ?? []), s]);
