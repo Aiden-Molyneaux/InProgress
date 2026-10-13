@@ -2021,10 +2021,15 @@ test.describe('Board', () => {
     await backlogRow('6 Beta').dragTo(nextRow('5 Store listing'), { targetPosition: { x: 40, y: 2 } });
     await expect(nextRow('6 Beta').locator('.ip-num')).toHaveText('①');
     await expect(nextRow('5 Store listing').locator('.ip-num')).toHaveText('②');
-    // Within Next: the bottom half of the last row puts it last.
-    await nextRow('6 Beta').dragTo(nextRow('5 Store listing'), { targetPosition: { x: 40, y: 30 } });
+    // Within Next: the bottom half of the last row puts it last. Measured, since the row's height follows its padding.
+    const last = (await nextRow('5 Store listing').boundingBox())!;
+    await nextRow('6 Beta').dragTo(nextRow('5 Store listing'), { targetPosition: { x: 40, y: last.height - 6 } });
     await expect(nextRow('5 Store listing').locator('.ip-num')).toHaveText('①');
     await expect(nextRow('6 Beta').locator('.ip-num')).toHaveText('②');
+    // Each row shows its step id, and a hairline sits between neighbouring rows (#400).
+    await expect(nextRow('6 Beta').locator('.ip-step-id')).toHaveText(`#${fresh.ids['6 Beta']}`);
+    await expect(nextRow('6 Beta')).toHaveCSS('border-top-style', 'solid');
+    await expect(nextRow('5 Store listing')).toHaveCSS('border-top-style', 'none');
     await expect(page.getByRole('complementary')).toHaveCount(0);
     // The queue was written.
     await page.reload();
@@ -2207,14 +2212,16 @@ test.describe('Fix round 1', () => {
     const backlogRow = (t: string) => next.locator('.ip-backlog-row', { has: page.getByRole('button', { name: t, exact: true }) });
     const nextRow = (t: string) => next.locator('.ip-next-row', { has: page.getByRole('button', { name: t, exact: true }) });
     const order = async () => (await next.locator('.ip-next-row .ip-row-title').allTextContents()).join('|');
+    // Near the foot of a row: its bottom half, measured since the row's height follows its padding.
+    const bottom = async (t: string) => ({ x: 40, y: (await nextRow(t).boundingBox())!.height - 6 });
     await backlogRow('4 Build to GitHub').dragTo(next.getByText('Nothing is queued'));
-    await backlogRow('5 Store listing').dragTo(nextRow('4 Build to GitHub'), { targetPosition: { x: 40, y: 30 } });
-    await backlogRow('6 Beta').dragTo(nextRow('5 Store listing'), { targetPosition: { x: 40, y: 30 } });
+    await backlogRow('5 Store listing').dragTo(nextRow('4 Build to GitHub'), { targetPosition: await bottom('4 Build to GitHub') });
+    await backlogRow('6 Beta').dragTo(nextRow('5 Store listing'), { targetPosition: await bottom('5 Store listing') });
     const expected = '4 Build to GitHub|5 Store listing|6 Beta';
     await expect.poll(order).toBe(expected);
     // The middle row on its own top half, then on the bottom half of the row above it.
     await nextRow('5 Store listing').dragTo(nextRow('5 Store listing'), { targetPosition: { x: 40, y: 2 } });
-    await nextRow('5 Store listing').dragTo(nextRow('4 Build to GitHub'), { targetPosition: { x: 40, y: 30 } });
+    await nextRow('5 Store listing').dragTo(nextRow('4 Build to GitHub'), { targetPosition: await bottom('4 Build to GitHub') });
     await expect.poll(order).toBe(expected);
     await page.reload();
     await expect.poll(order).toBe(expected);

@@ -161,6 +161,7 @@ export function NextColumn({ snapshot, board, now, wide, onOpenNode, onOpenResou
         </span>
         <div className="ip-next-body">
           <div className="ip-line">
+            <span className="ip-step-id">#{row.node.id}</span>
             <button type="button" className="ip-row-title">{row.node.title}</button>
             <button type="button" className="ip-hover-act" data-act onClick={(e) => {
                 noteAction('next', 'to_backlog');

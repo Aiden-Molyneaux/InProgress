@@ -339,11 +339,14 @@ li.ip-orow:hover { background: var(--panel-2); }
 .ip-divider::before { content: ''; position: absolute; left: -9px; right: 0; top: 7px; height: 1px; background: var(--active-line); }
 .ip-divider span { position: relative; padding: 0 6px 0 0; background: var(--bg); }
 .ip-done-fold { margin-left: 52px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
-/* Next: a numbered rail, own-queue entries under their session's letter, and the Backlog fold at its foot. */
+/* Next: a numbered rail, own-queue entries under their session's letter, and the Backlog fold at its foot. A hairline
+   between rows and the step id before each title keep neighbouring entries apart (#400). */
 .ip-next { min-height: 48px; }
-.ip-rail { display: flex; flex-direction: column; gap: 2px; }
+.ip-rail { display: flex; flex-direction: column; }
 .ip-next-row, .ip-backlog-row { position: relative; border-radius: var(--radius); }
-.ip-next-row { display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: 8px; align-items: start; padding: 4px 6px; }
+.ip-next-row { display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: 8px; align-items: start; padding: 8px 6px; }
+.ip-next-row + .ip-next-row { border-top: 1px solid var(--border); border-top-left-radius: 0; border-top-right-radius: 0; }
+.ip-step-id { flex: none; font-family: var(--font-mono); font-size: var(--fs-s); line-height: 18px; color: var(--muted); }
 .ip-next-row:hover, .ip-backlog-row:hover { background: var(--panel-2); }
 .ip-next-row.dragging, .ip-backlog-row.dragging { opacity: .5; }
 .ip-next-row.drop-before { box-shadow: 0 -2px 0 var(--text-2); }
