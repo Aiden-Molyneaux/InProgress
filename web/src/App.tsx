@@ -8,7 +8,7 @@ import { useLastLook } from './board/lastLook';
 import { noteAction, noteHidden, noteShown, setPoster } from './measure';
 import { ActivityStrip } from './chrome/ActivityStrip';
 import type { GoToHandle } from './chrome/GoTo';
-import { archivedProjects, neighbourTab, projectTabs, stepTab } from './chrome/tabs';
+import { archivedProjects, loadTabOrder, moveTab, neighbourTab, projectTabs, pruneOrder, saveTabOrder, stepTab } from './chrome/tabs';
 import { TopBar } from './chrome/TopBar';
 import { Details } from './panels/Details';
 import { ResourceViewer } from './panels/ResourceViewer';
@@ -77,7 +77,32 @@ export function App() {
     postEvent('view', snapshot?.project.id ?? null, { view: v });
   };
   // The tabs follow the picked slug, not the loaded snapshot, so a tab lights up on the click and [ ] step on from it.
-  const tabs = useMemo(() => projectTabs(projects, state.slug), [projects, state.slug]);
+  // The tab order Aiden dragged, kept in the window's localStorage. A second window follows a move through `storage`.
+  const [order, setOrder] = useState(loadTabOrder);
+  const tabs = useMemo(() => projectTabs(projects, state.slug, order), [projects, state.slug, order]);
+  // A project that left the active list (archived or deleted) loses its place, so it returns at the end.
+  useEffect(() => {
+    const kept = pruneOrder(order, projects, state.deleted);
+    if (kept.length < order.length) {
+      setOrder(kept);
+      saveTabOrder(kept);
+    }
+  }, [projects, state.deleted]);
+  useEffect(() => {
+    const changed = (e: StorageEvent) => {
+      if (e.key === 'ip.tabOrder') setOrder(loadTabOrder());
+    };
+    window.addEventListener('storage', changed);
+    return () => window.removeEventListener('storage', changed);
+  }, []);
+  const onMoveTab = (id: number, before: number | null) => {
+    const next = moveTab(tabs, id, before);
+    const shown = tabs.filter((t) => t.status === 'active').map((t) => t.id);
+    if (next.join() === shown.join()) return;
+    setOrder(next);
+    saveTabOrder(next);
+    noteAction('header', 'tab_move');
+  };
   const archived = useMemo(() => archivedProjects(projects), [projects]);
   const stepProject = (step: 1 | -1) => {
     const slug = stepTab(tabs, state.slug, step);
@@ -218,7 +243,7 @@ export function App() {
   return (
     <>
       <div className="ip-app" ref={app}>
-        <TopBar tabs={tabs} archived={archived} deleted={state.deleted} current={state.slug} onSelect={state.selectProject} onAction={onAction} onRename={onRename} goTo={goToField} onGoTo={goTo} view={view} onView={pickView} />
+        <TopBar tabs={tabs} archived={archived} deleted={state.deleted} current={state.slug} onSelect={state.selectProject} onAction={onAction} onRename={onRename} onMove={onMoveTab} goTo={goToField} onGoTo={goTo} view={view} onView={pickView} />
         {state.connection === 'reconnecting' && <div className="ip-banner">Reconnecting to InProgress…</div>}
         <main className="ip-main">
           {projects.length === 0 ? (

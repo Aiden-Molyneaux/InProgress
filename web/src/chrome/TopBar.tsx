@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type FocusEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import type { StepHit } from '../../../src/core/goto';
 import { PROJECT_NAME_MAX, type DeletedProject, type ProjectSummary } from '../../../src/core/types';
 import { archiveNote, renamedTo, type ActionTarget, type ProjectAction } from '../projectActions';
@@ -7,7 +7,7 @@ import { useNow } from '../useNow';
 import { GoTo, type GoToHandle } from './GoTo';
 import type { View } from '../views/view';
 import { menuStep } from './menu';
-import { projectLabel, recentlyDeleted, waitingOn } from './tabs';
+import { projectLabel, recentlyDeleted, tabDropSlot, waitingOn } from './tabs';
 import { ViewSwitch } from './ViewSwitch';
 
 interface TopBarProps {
@@ -20,6 +20,8 @@ interface TopBarProps {
   /** The open project's slug. */
   current: string | null;
   onSelect: (slug: string) => void;
+  /** Moves an active tab before another (null: to the end), by drag or Alt+Left and Alt+Right. */
+  onMove: (id: number, before: number | null) => void;
   /** Archive, unarchive, delete or restore. Resolves true when it went through. */
   onAction: (action: ProjectAction, target: ActionTarget) => Promise<boolean>;
   /** Renames a project (its name only: the slug stays). Resolves true when it went through. */
@@ -88,13 +90,27 @@ interface TabStripProps {
   tabs: ProjectSummary[];
   current: string | null;
   onSelect: (slug: string) => void;
+  onMove: (id: number, before: number | null) => void;
   /** The project whose menu is open, if any: its tab shows it. */
   menuFor: number | null;
   onMenu: (p: ProjectSummary, tab: HTMLButtonElement) => void;
 }
 
-function TabStrip({ strip, tabs, current, onSelect, menuFor, onMenu }: TabStripProps) {
+function TabStrip({ strip, tabs, current, onSelect, onMove, menuFor, onMenu }: TabStripProps) {
   const ids = tabs.map((p) => p.id).join(',');
+  const activeIds = tabs.filter((p) => p.status === 'active').map((p) => p.id);
+  /** The tab being dragged, and where it would drop: before this tab, or null for the end. Null while nothing drags. */
+  const [drag, setDrag] = useState<{ id: number; slot: number | null } | null>(null);
+  /** Set while a drag runs and a moment after, so the tab that was dragged does not also fire its click. */
+  const dragged = useRef(false);
+  /** The tab a keyboard move carries: it gets focus back if the reorder took it. */
+  const moved = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    if (moved.current === null) return;
+    const tab = strip.current!.querySelector<HTMLButtonElement>(`[data-tab="${moved.current}"]`);
+    moved.current = null;
+    if (tab && document.activeElement !== tab) tab.focus();
+  }, [ids]);
   // A switch (click, key or link) brings the current tab into view, and so does a tab coming or going.
   useLayoutEffect(() => revealCurrent(strip.current!), [current, ids]);
   useEffect(() => {
@@ -126,6 +142,19 @@ function TabStrip({ strip, tabs, current, onSelect, menuFor, onMenu }: TabStripP
       onMenu(tabs[at], buttons[at]);
       return;
     }
+    // Alt+Left and Alt+Right move an active tab along the strip, without opening it. Always taken: Alt+Left is the
+    // browser's Back, and the window routes by hash.
+    if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+      e.preventDefault();
+      const p = tabs[at];
+      if (p.status !== 'active') return;
+      const left = e.key === 'ArrowLeft';
+      if (left ? at > 0 : at + 1 < activeIds.length) {
+        moved.current = p.id;
+        onMove(p.id, left ? activeIds[at - 1] : (activeIds[at + 2] ?? null));
+      }
+      return;
+    }
     // Left and Right move along the strip, opening each tab they reach.
     if ((e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') || e.altKey || e.ctrlKey || e.metaKey) return;
     e.preventDefault();
@@ -133,8 +162,40 @@ function TabStrip({ strip, tabs, current, onSelect, menuFor, onMenu }: TabStripP
     buttons[next].focus();
     onSelect(tabs[next].slug);
   };
+  /** Over the strip while one of our tabs drags: the slot under the pointer. The archived tab and the empty strip mean the end. */
+  const onDragOver = (e: DragEvent<HTMLDivElement>) => {
+    if (!drag) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const over = (e.target as HTMLElement).closest<HTMLElement>('[role="tab"]');
+    const id = over ? Number(over.dataset.tab) : NaN;
+    let slot: number | null = null;
+    if (over && activeIds.includes(id)) {
+      const r = over.getBoundingClientRect();
+      slot = tabDropSlot(activeIds, id, e.clientX < r.left + r.width / 2, drag.id);
+    }
+    if (slot !== drag.slot) setDrag({ id: drag.id, slot });
+  };
+  const endDrag = () => {
+    setDrag(null);
+    window.setTimeout(() => (dragged.current = false), 50);
+  };
+  const lastActive = activeIds[activeIds.length - 1];
   return (
-    <div className="ip-tabs" role="tablist" aria-label="Projects" ref={strip} onKeyDown={onKeyDown}>
+    <div
+      className="ip-tabs"
+      role="tablist"
+      aria-label="Projects"
+      ref={strip}
+      onKeyDown={onKeyDown}
+      onDragOver={onDragOver}
+      onDrop={(e) => {
+        if (!drag) return;
+        e.preventDefault();
+        onMove(drag.id, drag.slot);
+        endDrag();
+      }}
+    >
       {tabs.map((p) => {
         const archived = p.status === 'archived';
         return (
@@ -143,10 +204,19 @@ function TabStrip({ strip, tabs, current, onSelect, menuFor, onMenu }: TabStripP
             role="tab"
             aria-selected={p.slug === current}
             tabIndex={p.slug === stop ? 0 : -1}
-            className={`ip-tab${archived ? ' archived' : ''}${p.id === menuFor ? ' menu-open' : ''}`}
+            data-tab={p.id}
+            className={`ip-tab${archived ? ' archived' : ''}${p.id === menuFor ? ' menu-open' : ''}${drag?.id === p.id ? ' dragging' : ''}${drag && drag.slot === p.id && drag.id !== p.id ? ' drop-before' : ''}${drag && drag.slot === null && p.id === lastActive ? ' drop-after' : ''}`}
+            draggable={!archived}
+            onDragStart={(e) => {
+              e.dataTransfer.effectAllowed = 'move';
+              e.dataTransfer.setData('text/plain', String(p.id));
+              dragged.current = true;
+              setDrag({ id: p.id, slot: p.id });
+            }}
+            onDragEnd={endDrag}
             title={archived ? `${p.name} (archived)` : p.name}
             aria-label={archived ? `${projectLabel(p)}, archived` : projectLabel(p)}
-            onClick={() => onSelect(p.slug)}
+            onClick={() => !dragged.current && onSelect(p.slug)}
             // A right-click opens the tab's menu without opening the tab, and never the browser's own menu.
             onContextMenu={(e) => {
               e.preventDefault();
@@ -574,7 +644,7 @@ function ArchiveMenu({ archived, deleted, current, onSelect, run }: ArchiveMenuP
 }
 
 /** One tab per active project, then ⋯ with the archived and recently deleted ones, then the Go to field's button. */
-export function TopBar({ tabs, archived, deleted: listed, current, onSelect, onAction, onRename, goTo, onGoTo, view, onView }: TopBarProps) {
+export function TopBar({ tabs, archived, deleted: listed, current, onSelect, onMove, onAction, onRename, goTo, onGoTo, view, onView }: TopBarProps) {
   const header = useRef<HTMLElement>(null);
   // A row past its purge time drops out even if the purge has not run yet; the clock is the bar's, not the app's.
   const now = useNow(60_000);
@@ -621,6 +691,7 @@ export function TopBar({ tabs, archived, deleted: listed, current, onSelect, onA
           tabs={tabs}
           current={current}
           onSelect={onSelect}
+          onMove={onMove}
           menuFor={menuProject && !menuGone ? menuProject.id : null}
           onMenu={(p, tab) => setTabMenu({ id: p.id, tab })}
         />

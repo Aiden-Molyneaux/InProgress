@@ -110,6 +110,9 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 /* The current tab's ink underline, over the bar's rule. The strip's overflow clips its lower pixel, as in the artboard. */
 .ip-tab[aria-selected='true']::after { content: ''; position: absolute; left: 12px; right: 12px; bottom: -1px; height: 2px; background: var(--text); }
 .ip-tab:focus-visible { outline: 2px solid var(--text-2); outline-offset: -2px; border-radius: var(--radius); }
+.ip-tab.dragging { opacity: .5; }
+.ip-tab.drop-before { box-shadow: inset 2px 0 0 var(--text-2); }
+.ip-tab.drop-after { box-shadow: inset -2px 0 0 var(--text-2); }
 .ip-tab.archived .ip-tab-name { font-style: italic; }
 .ip-tab-name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
 /* How many items wait on Aiden there: a muted numeral, no pill. */

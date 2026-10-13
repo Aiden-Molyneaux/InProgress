@@ -405,6 +405,39 @@ test('the tabs hold every active project, oldest first, mark the current one and
   await expect(page).toHaveURL(new RegExp(`#/p/${newer.slug}$`));
 });
 
+test('a tab drags to a new place, Alt+arrows move the focused tab, and the order holds across a reload', async ({ page, api }) => {
+  await widen(page);
+  const names = [unique('Tabs drag a'), unique('Tabs drag b'), unique('Tabs drag c')];
+  await bare(api, names[0]);
+  const b = await bare(api, names[1]);
+  await bare(api, names[2]);
+  /** Our projects' titles, in strip order, among whatever other tests left. */
+  const ours = async (extra: string[] = []) => (await tabTitles(page)).filter((t) => [...names, ...extra].includes(t ?? ''));
+  await page.goto(`/#/p/${b.slug}`);
+  await expect(tabFor(page, names[2])).toBeVisible();
+  expect(await ours()).toEqual(names);
+  // The newest tab dragged onto the left half of the oldest lands before it.
+  await tabFor(page, names[2]).dragTo(tabFor(page, names[0]), { targetPosition: { x: 4, y: 10 } });
+  await expect.poll(() => ours()).toEqual([names[2], names[0], names[1]]);
+  // The drag did not open the tab: the selection stayed on b.
+  await expect(tabFor(page, names[1])).toHaveAttribute('aria-selected', 'true');
+  await page.reload();
+  await expect(tabFor(page, names[2])).toBeVisible();
+  expect(await ours()).toEqual([names[2], names[0], names[1]]);
+  // Alt+Right moves the focused tab one place right and leaves focus on it. It neither selects a tab nor goes back.
+  await tabFor(page, names[0]).focus();
+  await page.keyboard.press('Alt+ArrowRight');
+  await expect.poll(() => ours()).toEqual([names[2], names[1], names[0]]);
+  await expect(tabFor(page, names[0])).toBeFocused();
+  await expect(tabFor(page, names[1])).toHaveAttribute('aria-selected', 'true');
+  await expect(page).toHaveURL(new RegExp(`#/p/${b.slug}$`));
+  // A project made after the move joins at the end.
+  const fourth = unique('Tabs drag d');
+  await bare(api, fourth);
+  await expect(tabFor(page, fourth)).toBeVisible();
+  expect(await ours([fourth])).toEqual([names[2], names[1], names[0], fourth]);
+});
+
 test('a tab shows how many items need you and, while a session works there, a pulsing dot', async ({ page, api }) => {
   const busyName = unique('Tabs busy');
   const quietName = unique('Tabs quiet');
