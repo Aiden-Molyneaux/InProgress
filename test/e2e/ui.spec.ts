@@ -1363,8 +1363,11 @@ test.describe('Live work', () => {
     await task(api, fresh, '2', 'Check the release track');
     await hook(api, fresh.session, { event: 'task-updated', taskKey: '1', addBlocks: ['2'] });
     await task(api, fresh, '1', 'Collect the screenshots', 'pending', 'agent-1');
+    await write(api, fresh.session, 'post', '/api/resources', { nodeId: fresh.ids['Play app signing'], kind: 'doc', title: 'Signing notes', content: '# Notes' });
     await open(page, fresh);
     const details = await openDetails(page, 'Play app signing');
+    // The live work reads before the step's resources.
+    await expect(details.locator('.ip-label')).toHaveText(['Working tasks', 'Subagents', 'Resources']);
     // Anchored: the next row's "after Upload the key" names it too.
     await expect(details.locator('.ip-wt', { hasText: /^◐ Upload the key/ })).toHaveText('◐ Upload the key · E2E session');
     await expect(details.locator('.ip-wt', { hasText: 'Check the release track' })).toHaveText('○ Check the release track · E2E session · after Upload the key');
