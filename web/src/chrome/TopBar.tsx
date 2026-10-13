@@ -105,6 +105,7 @@ interface TabStripProps {
 function TabStrip({ strip, tabs, current, onSelect, onMove, menuFor, onMenu }: TabStripProps) {
   const ids = tabs.map((p) => p.id).join(',');
   const activeIds = tabs.filter((p) => p.status === 'active').map((p) => p.id);
+  const activeKey = activeIds.join();
   /** The tab being dragged, and where it would drop: before this tab, or null for the end. Null while nothing drags. */
   const [dragState, setDrag] = useState<{ id: number; slot: number | null } | null>(null);
   // A tab that leaves the strip mid-drag (archived or deleted elsewhere) ends its drag: its dragend never reaches React.
@@ -112,9 +113,9 @@ function TabStrip({ strip, tabs, current, onSelect, onMove, menuFor, onMenu }: T
   // Cleared too, not only hidden, so the tab coming back later does not bring the old drag with it.
   useEffect(() => {
     if (dragState && !drag) setDrag(null);
-  }, [ids, activeIds.join()]);
+  }, [activeKey]);
   /** Whether dropping now would change the order: the drop line shows only then. */
-  const changes = drag !== null && moveTab(tabs, drag.id, drag.slot).join() !== activeIds.join();
+  const changes = drag !== null && moveTab(tabs, drag.id, drag.slot).join() !== activeKey;
   /** The tab a move carries, by key or by drag: it gets focus back if the reorder took it. */
   const moved = useRef<number | null>(null);
   useLayoutEffect(() => {

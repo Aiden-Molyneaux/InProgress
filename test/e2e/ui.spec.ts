@@ -450,9 +450,12 @@ test('a tab dragged near the edge of a narrow strip scrolls it', async ({ page, 
   for (const name of names) await bare(api, name);
   await page.goto('/');
   await expect(tabFor(page, names[4])).toBeAttached();
+  // The window has opened a project and revealed its tab, so nothing else scrolls the strip from here.
+  await expect(page.getByRole('tab', { selected: true })).toHaveCount(1);
   expect(await page.evaluate<boolean>(`${STRIP}.scrollWidth > ${STRIP}.clientWidth`), 'the tabs overflow').toBe(true);
   await page.evaluate(`${STRIP}.scrollLeft = 0`);
   const box = (await page.locator('.ip-tabs').boundingBox())!;
+  expect(box.x + box.width, 'the strip ends inside the window').toBeLessThanOrEqual(420);
   const first = (await page.getByRole('tab').first().boundingBox())!;
   await page.mouse.move(first.x + first.width / 2, first.y + first.height / 2);
   await page.mouse.down();
