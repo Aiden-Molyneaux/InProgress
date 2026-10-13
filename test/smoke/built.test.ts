@@ -167,6 +167,31 @@ describe('built artifacts', () => {
     ]);
   });
 
+  it('claim, ask and a clear from the window come back as an Answered line on the next prompt', async () => {
+    const client = createClient({ baseUrl: base, token: readToken(home) });
+    const step = (await client.get<ProjectSnapshot>('/api/projects/smoke')).nodes.find((n) => n.title === 'Smoke the hooks')!;
+    const cli = (...args: string[]) => spawnSync(process.execPath, [bin('cli/main.js'), ...args], { env, encoding: 'utf8' });
+    const claim = cli('claim', String(step.id), '--session', 'smoke-1');
+    expect(claim).toMatchObject({ status: 0, stderr: '' });
+    expect(lines(claim.stdout).find((l) => l.startsWith('  #'))).toContain(`#${step.id} Smoke the hooks`);
+    const asked = cli('ask', String(step.id), '--session', 'smoke-1', '--question', 'Which port does the smoke use?');
+    expect(asked).toMatchObject({ status: 0, stderr: '' });
+    const id = Number(/^a(\d+) raised on #/.exec(lines(asked.stdout)[0])![1]);
+    // A raise from a session InProgress does not track is told so, over the built binary too.
+    const stray = cli('ask', String(step.id), '--session', 'smoke-nobody', '--review', 'Look at the smoke run');
+    expect(lines(stray.stdout)[1]).toBe('Note: session smoke-nobody is not tracked in InProgress, so no answer will come back to it.');
+    const cleared = await client.post<{ answer: string }>(`/api/asks/${id}/clear`, { answer: '4390' }, { actor: 'window' });
+    expect(cleared.answer).toBe('4390');
+    const prompt = runHook('prompt-submit', { session_id: 'smoke-1', prompt: 'carry on' });
+    expect(prompt).toMatchObject({ status: 0, stderr: '' });
+    expect(briefing(prompt.stdout).additionalContext.split('\n')[0]).toBe(`Answered: a${id} "4390"`);
+    // Once only.
+    const next = runHook('prompt-submit', { session_id: 'smoke-1', prompt: 'and now' });
+    expect(next.stdout).not.toContain('Answered');
+    // The next test needs a session with no focus.
+    await client.post('/api/sessions/smoke-1/focus', { nodeId: null }, { actor: 'scribe:smoke-1' });
+  });
+
   it("the tasks command passes on the server's refusal and its hint when the session has no focus", () => {
     const r = runTasks(['--session', 'smoke-1', '--todo', 'Unplaced']);
     expect(r.status).toBe(1);

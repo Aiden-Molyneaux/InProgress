@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clearAsk, listProjectAsks, markAnswersDelivered, raiseAsk, requireAsk, undeliveredAnswers } from '../../src/server/repo/asks';
+import { clearAsk, listProjectAsks, markAnswersDelivered, raiseAsk, raiseAskDetailed, requireAsk, undeliveredAnswers } from '../../src/server/repo/asks';
 import { lastProjectEvent, listEventsSince } from '../../src/server/repo/events';
 import { addNodes, requireNode, updateNode } from '../../src/server/repo/nodes';
 import { createProject } from '../../src/server/repo/projects';
@@ -131,5 +131,23 @@ describe('asks', () => {
   it('stores an untracked session id as no session instead of failing the foreign key', () => {
     const { ctx, step } = setup();
     expect(raiseAsk(ctx, 'session:ghost', { nodeId: step.id, kind: 'question', text: 'Q', sessionId: 'ghost' }).sessionId).toBeNull();
+  });
+});
+
+describe('raiseAskDetailed: what a raise tells its caller', () => {
+  it('says when the session is not tracked (stored as no session) and when it joined an open ask', () => {
+    const { ctx, step } = setup();
+    ctx.db.prepare("INSERT INTO sessions (id, project_id, state, started_at, last_seen_at) VALUES ('s1', 1, 'idle', ?, ?)").run(ctx.now(), ctx.now());
+    const fresh = raiseAskDetailed(ctx, 'session:s1', { nodeId: step.id, kind: 'question', text: 'Which port?', sessionId: 's1' });
+    expect(fresh).toMatchObject({ joined: false, untracked: false, ask: { sessionId: 's1' } });
+    const joined = raiseAskDetailed(ctx, 'session:s2', { nodeId: step.id, kind: 'question', text: 'Which port?', sessionId: 's2' });
+    // Joined: the row is the first raiser's, and s2 is not tracked either.
+    expect(joined).toMatchObject({ joined: true, untracked: true, ask: { id: fresh.ask.id, sessionId: 's1' } });
+    const stray = raiseAskDetailed(ctx, 'session:ghost', { nodeId: step.id, kind: 'review', text: 'Look', sessionId: 'ghost' });
+    expect(stray).toMatchObject({ joined: false, untracked: true, ask: { sessionId: null } });
+    // No session given at all (the window, the scribe): not "untracked", it never claimed to be a session.
+    expect(raiseAskDetailed(ctx, 'window', { nodeId: step.id, kind: 'permission', text: 'Allow' })).toMatchObject({ joined: false, untracked: false });
+    // The plain raise keeps returning the ask alone.
+    expect(raiseAsk(ctx, 'window', { nodeId: step.id, kind: 'permission', text: 'Allow' })).not.toHaveProperty('joined');
   });
 });

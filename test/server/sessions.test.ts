@@ -4,6 +4,7 @@ import { LABEL_GLYPHS, NODE_LABELS, STALE_SESSION_MS } from '../../src/core/type
 import { homeDir } from '../../src/lib/home';
 import { normalizePath } from '../../src/lib/paths';
 import { updateRules } from '../../src/server/briefing';
+import { raiseAsk } from '../../src/server/repo/asks';
 import { listEventsSince, maxEventId } from '../../src/server/repo/events';
 import { addLog } from '../../src/server/repo/logs';
 import { addNodes, listNodes, updateNode } from '../../src/server/repo/nodes';
@@ -36,6 +37,8 @@ function setup(ctx: Ctx = makeCtx()) {
       ],
     }],
   });
+  // Aiden has to allow the signing tests: the one open ask the briefings name. a1 is its id.
+  raiseAsk(ctx, 'test', { nodeId: a3.id, kind: 'permission', text: 'Run the signing tests' });
   return { ctx, project, road, s1, s2, a1, a2, a3 };
 }
 
@@ -97,9 +100,9 @@ describe('handleHookEvent', () => {
     expect(text).toContain('inprogress-scribe');
     expect(text).toContain('at most once per turn, every change batched');
     expect(text).toContain(`#${a2.id} Play app signing · active`);
-    expect(text).toContain(`#${a3.id} Run signing tests · NEEDS YOU`);
+    expect(text).toContain(`#${a3.id} Run signing tests · todo`);
     expect(text).toMatch(/Next: #\d+ 3 RevenueCat · #\d+ 4 Build to GitHub \(\+3 more\)/);
-    expect(text).toContain(`Needs you (1): #${a3.id} Run signing tests`);
+    expect(text).toContain(`Needs you (1): a1 ⚿ on #${a3.id} "Run the signing tests"`);
     expect(text).toContain(`Signing suite (on #${a3.id})`);
     expect(findSession(ctx, 's1')).toMatchObject({ title: 'InGame launch status', state: 'idle', cwd: 'C:\\personal\\InGame\\docs' });
   });
@@ -142,7 +145,7 @@ describe('handleHookEvent', () => {
     handleHookEvent(ctx, 's1', start());
     const r = handleHookEvent(ctx, 's1', { event: 'prompt', asksStatus: true });
     expect(r.context).toContain('[InProgress] Where things stand in InGame');
-    expect(r.context).toContain(`#${a3.id} Run signing tests · NEEDS YOU`);
+    expect(r.context).toContain(`#${a3.id} Run signing tests · todo`);
   });
 
   it('leaves state alone on a compact restart but still re-briefs', () => {
@@ -195,7 +198,8 @@ describe('briefing: live work', () => {
     expect(text.indexOf('Where things stand:')).toBeLessThan(text.indexOf('Up next'));
     expect(text.indexOf('Up next')).toBeLessThan(text.indexOf('Needs you (1)'));
     updateNode(ctx, 'test', a3.id, { status: 'done' });
-    expect(handleHookEvent(ctx, 's1', { event: 'prompt', asksStatus: true }).context).toMatch(new RegExp(`\\nUp next \\(you, A\\): #${a2.id} Play app signing$`));
+    // Finishing a step does not clear its ask, so the Needs you line stays after it.
+    expect(handleHookEvent(ctx, 's1', { event: 'prompt', asksStatus: true }).context!.split('\n')).toContain(`Up next (you, A): #${a2.id} Play app signing`);
   });
 
   it("puts this session's own steps first, then other sessions' by letter and the unowned ones, in the briefing and the status answer", () => {
@@ -255,7 +259,7 @@ describe('briefing: live work', () => {
       '        ○ Task 1',
       '        ○ Task 4',
       '        ○ Task 5',
-      `      #${a3.id} Run signing tests · NEEDS YOU`,
+      `      #${a3.id} Run signing tests · todo`,
     ]);
   });
 
@@ -370,9 +374,9 @@ describe('briefing: type labels', () => {
     updateNode(ctx, 'test', s3.id, { label: 'integration' });
     const lines = handleHookEvent(ctx, 's1', start()).context!.split('\n');
     expect(lines).toContain(`      #${a2.id} ⧉ Play app signing · active`);
-    expect(lines).toContain(`      #${a3.id} ⚒ Run signing tests · NEEDS YOU`);
+    expect(lines).toContain(`      #${a3.id} ⚒ Run signing tests · todo`);
     expect(lines.find((l) => l.trim().startsWith('Next:'))?.trim()).toMatch(new RegExp(`^Next: #${s3.id} ⇄ 3 RevenueCat · #\\d+ 4 Build to GitHub`));
-    expect(lines).toContain(`Needs you (1): #${a3.id} ⚒ Run signing tests`);
+    expect(lines).toContain(`Needs you (1): a1 ⚿ on #${a3.id} "Run the signing tests"`);
   });
 
   it('prints the glyph before the title on the Up next line', () => {
@@ -396,10 +400,11 @@ describe('briefing: the rules block', () => {
   /** Real-length values: a Claude Code session id (a UUID), the deployed CLI and Aiden's data dir. */
   const real = { home: 'C:/Users/aiden.molyneaux/.inprogress', sessionId: '0f8c2a4e-5b7d-4c1e-9a3f-6d2b8e1c7a90', cli: 'C:/personal/InProgress/dist/cli/main.js' };
 
-  it('fits in 1,600 characters with real-length values and the tasks command written out in full', () => {
+  it('fits in 1,750 characters with real-length values and the tasks command written out in full', () => {
     expect(real.sessionId).toHaveLength(36);
     const text = updateRules(real).join('\n');
-    expect(text.length).toBeLessThanOrEqual(1600);
+    // Was 1,600 before the ask clause (spec 3.4) replaced "something goes to Aiden (assignee me)" with its longer wording.
+    expect(text.length).toBeLessThanOrEqual(1750);
     expect(text).toContain(`\`node C:/personal/InProgress/dist/cli/main.js tasks <step id> --session ${real.sessionId} --done "…" --doing "…" --todo "…"\``);
   });
 
@@ -417,7 +422,7 @@ describe('briefing: the rules block', () => {
       'a request with a deliverable arrives (a new step with one label:',
       'the plan or an order changes ("queue: #a, #b" is yours, "later: #c, #d" unowned)',
       'a step starts ("focus → #id"), finishes ("#id → done; outcome …") or blocks',
-      'something goes to Aiden (assignee me) or he answers',
+      'Aiden must answer, allow or look at something ("ask on #id: <question|permission|review>, <text>"; "assignee me" only for a step Aiden does himself) or he answers ("a7 answered: <answer>")',
       'Steps are plan-level with outcomes. Detours go in "log on #id: …".',
       'Something worth finding again is a resource: "resource on #id: <kind> "<title>", path <file>, snapshot_file".',
       'Chat-only content is first written to C:/Users/aiden.molyneaux/.inprogress/resources/<slug>/<yyyy-mm-dd>-<kebab-title>.md.',
@@ -438,9 +443,10 @@ describe('briefing: the rules block', () => {
     for (const clause of clauses) expect(text, clause).toContain(clause);
   });
 
-  it('leaves questions, relabelling and backtracking to the skill', () => {
+  it('leaves relabelling and backtracking to the skill', () => {
     const text = updateRules(real).join('\n');
-    expect(text).not.toMatch(/question|relabel|dropped|backtrack/i);
+    // Asks are in the rules now (spec 3.4), so "question" is no longer left out.
+    expect(text).not.toMatch(/relabel|dropped|backtrack/i);
   });
 
   it('says on line 2 that plan edits go through the scribe, the rules below are complete, and what the skill is for', () => {
@@ -452,10 +458,10 @@ describe('briefing: the rules block', () => {
   });
 });
 
-describe('briefing: needs-you ages and the check line', () => {
+describe('briefing: ask ages and the check line', () => {
   const HOUR = 60 * 60 * 1000;
   const DAY = 24 * HOUR;
-  const CHECK = 'Check with Aiden whether these are already done, then brief the answer (a "not yet" goes in "log on #id: …"): ';
+  const CHECK = 'Check with Aiden whether these asks are already answered, then brief the answer ("a7 answered: <answer>"; a "not yet" goes in "log on #id: …"): ';
 
   /** setup()'s project on a clock the test moves by hand: nothing ages unless it does. */
   function clocked() {
@@ -467,57 +473,59 @@ describe('briefing: needs-you ages and the check line', () => {
   const briefing = (ctx: Ctx, session = 's1') => handleHookEvent(ctx, session, start()).context!;
   const statusAnswer = (ctx: Ctx) => handleHookEvent(ctx, 's1', { event: 'prompt', asksStatus: true }).context!;
 
-  it('gives each needs-you entry its age from its last update, in the briefing and the status answer', () => {
+  it('gives each open ask its age from when it was raised, in the briefing and the status answer', () => {
     const { ctx, road, a3, tick } = clocked();
-    const [q] = addNodes(ctx, 'test', { parentId: road.id, nodes: [{ title: 'Pick a price', kind: 'question', assignee: 'me' }] });
+    const [q] = addNodes(ctx, 'test', { parentId: road.id, nodes: [{ title: 'Pick a price' }] });
     handleHookEvent(ctx, 's1', start());
     tick(DAY - HOUR);
-    expect(lineOf(briefing(ctx), 'Needs you')).toBe(`Needs you (2): #${a3.id} Run signing tests · #${q.id} Pick a price (question)`);
-    tick(5 * DAY);
-    expect(lineOf(briefing(ctx), 'Needs you')).toBe(`Needs you (2): #${a3.id} Run signing tests (5d) · #${q.id} Pick a price (question) (5d)`);
-    // A log entry leaves the age counting; a patch starts it again.
+    raiseAsk(ctx, 'test', { nodeId: q.id, kind: 'question', text: 'Monthly or yearly?' });
+    const first = `a1 ⚿ on #${a3.id} "Run the signing tests"`;
+    const second = `a2 ? on #${q.id} "Monthly or yearly?"`;
+    // 23 hours old is not a day old: no age.
+    expect(lineOf(briefing(ctx), 'Needs you')).toBe(`Needs you (2): ${first} · ${second}`);
+    tick(5 * DAY + HOUR);
+    expect(lineOf(briefing(ctx), 'Needs you')).toBe(`Needs you (2): ${first} (6d) · ${second} (5d)`);
+    // Neither a log entry nor an edit to the step moves an ask's age: it counts from when it was raised.
     addLog(ctx, 'scribe:s1', a3.id, 'Not yet: Aiden runs them on Monday.');
     updateNode(ctx, 'scribe:s1', q.id, { body: 'Monthly or yearly?' });
-    const expected = `Needs you (2): #${a3.id} Run signing tests (5d) · #${q.id} Pick a price (question)`;
-    expect(lineOf(briefing(ctx), 'Needs you')).toBe(expected);
-    tick(9 * DAY);
-    expect(lineOf(statusAnswer(ctx), 'Needs you')).toBe(`Needs you (2): #${a3.id} Run signing tests (2w) · #${q.id} Pick a price (question) (9d)`);
+    expect(lineOf(briefing(ctx), 'Needs you')).toBe(`Needs you (2): ${first} (6d) · ${second} (5d)`);
+    tick(8 * DAY);
+    expect(lineOf(statusAnswer(ctx), 'Needs you')).toBe(`Needs you (2): ${first} (2w) · ${second} (13d)`);
   });
 
-  it('asks, on the line after Needs you, to check every item older than three days, in needs-you order', () => {
-    const { ctx, road, a3, tick } = clocked();
-    const [fresh, q] = addNodes(ctx, 'test', { parentId: road.id, nodes: [{ title: 'Sign the contract', assignee: 'me' }, { title: 'Pick a price', kind: 'question', assignee: 'me' }] });
+  it('asks, on the line after Needs you, to check every ask older than three days, oldest first', () => {
+    const { ctx, road, tick } = clocked();
+    const [old, fresh] = addNodes(ctx, 'test', { parentId: road.id, nodes: [{ title: 'Pick a price' }, { title: 'Sign the contract' }] });
+    raiseAsk(ctx, 'test', { nodeId: old.id, kind: 'question', text: 'Monthly or yearly?' });
     handleHookEvent(ctx, 's1', start());
     tick(3 * DAY);
     // Three days to the millisecond is not older than three days.
     expect(briefing(ctx)).not.toContain('Check with Aiden');
     tick(1);
-    updateNode(ctx, 'test', fresh.id, { status: 'blocked' });
+    raiseAsk(ctx, 'test', { nodeId: fresh.id, kind: 'review', text: 'Look at the contract' });
     const lines = briefing(ctx).split('\n');
     const at = lines.findIndex((l) => l.startsWith('Needs you (3)'));
-    expect(lines[at + 1]).toBe(`${CHECK}#${a3.id}, #${q.id}.`);
+    expect(lines[at + 1]).toBe(`${CHECK}a1, a2.`);
     expect(lines.filter((l) => l.startsWith('Check with Aiden'))).toHaveLength(1);
   });
 
-  it('names at most eight, then +n more, drawing from every needs-you item, not only the eight the line shows', () => {
-    const { ctx, road, a3, tick } = clocked();
-    const more = addNodes(ctx, 'test', { parentId: road.id, nodes: Array.from({ length: 10 }, (_, i) => ({ title: `Ask ${i + 1}`, assignee: 'me' as const })) });
+  it('names at most eight asks, then +n more, on the Needs you line and on the check line', () => {
+    const { ctx, road, tick } = clocked();
+    const [step] = addNodes(ctx, 'test', { parentId: road.id, nodes: [{ title: 'Many questions' }] });
+    for (let i = 1; i <= 10; i++) raiseAsk(ctx, 'test', { nodeId: step.id, kind: 'question', text: `Question ${i}` });
     handleHookEvent(ctx, 's1', start());
     tick(4 * DAY);
-    const needs = [a3, ...more];
-    expect(lineOf(briefing(ctx), 'Check with Aiden')).toBe(`${CHECK}${needs.slice(0, 8).map((n) => `#${n.id}`).join(', ')}, +3 more.`);
-    // The first eight change today: the line names the three the needs-you line leaves out.
-    for (const n of needs.slice(0, 8)) updateNode(ctx, 'test', n.id, { outcome: 'Asked again' });
+    // a1 is setup's ask, a2 to a11 are these ten.
     const text = briefing(ctx);
-    expect(lineOf(text, 'Needs you')).toMatch(/ · \+3 more$/);
-    expect(lineOf(text, 'Check with Aiden')).toBe(`${CHECK}${needs.slice(8).map((n) => `#${n.id}`).join(', ')}.`);
+    expect(lineOf(text, 'Needs you (11)')).toMatch(/ · \+3 more$/);
+    expect(lineOf(text, 'Check with Aiden')).toBe(`${CHECK}${Array.from({ length: 8 }, (_, i) => `a${i + 1}`).join(', ')}, +3 more.`);
   });
 
   it('leaves the check line out only after a compaction: startup, resume, clear, no source, another source, a missed start and enroll print it', () => {
     const { ctx, project, a3, tick } = clocked();
     handleHookEvent(ctx, 's1', start());
     tick(4 * DAY);
-    const line = `${CHECK}#${a3.id}.`;
+    const line = `${CHECK}a1.`;
     for (const source of ['startup', 'resume', 'clear', undefined, 'mystery']) {
       expect(handleHookEvent(ctx, 's1', { event: 'start', source, cwd: 'C:/personal/InGame' }).context!.split('\n'), `source ${source}`).toContain(line);
     }
@@ -527,7 +535,7 @@ describe('briefing: needs-you ages and the check line', () => {
     expect(enrollSession(ctx, 'scribe:e1', 'e1', project.slug).briefing.split('\n')).toContain(line);
     // The status answer shows the ages, never the line.
     const answer = statusAnswer(ctx);
-    expect(answer).toContain(`Needs you (1): #${a3.id} Run signing tests (4d)`);
+    expect(answer).toContain(`Needs you (1): a1 ⚿ on #${a3.id} "Run the signing tests" (4d)`);
     expect(answer).not.toContain('Check with Aiden');
   });
 });
@@ -725,7 +733,7 @@ describe('first prompt of a session the server has not seen (a missed start)', (
     expect(r.tracked).toBe(true);
     expect(r.context).toContain('[InProgress] This session is tracked in project "InGame" (slug ingame). Session id: p1.');
     expect(r.context).toContain('Where things stand:');
-    expect(r.context).toContain(`Needs you (1): #${a3.id} Run signing tests`);
+    expect(r.context).toContain(`Needs you (1): a1 ⚿ on #${a3.id} "Run the signing tests"`);
     expect(findSession(ctx, 'p1')).toMatchObject({ projectId: project.id, state: 'working', promptsSinceUpdate: 1, cwd: 'C:\\personal\\InGame\\src', branch: 'main', title: 'Missed start' });
     // From then on it is an ordinary tracked session: no second briefing, the usual nudge.
     expect(handleHookEvent(ctx, 'p1', prompt('C:\\personal\\InGame\\src')).context).toMatch(/^\[InProgress\] InGame · no focus set · 1 need you · last scribe update 2 prompts ago/);
@@ -890,7 +898,7 @@ describe('the full briefing on the first tracked prompt after an enroll', () => 
     const { ctx, project, a3, tick } = projects();
     enrollSession(ctx, 'scribe:e1', 'e1', project.slug);
     tick(4 * 24 * 60 * 60 * 1000);
-    expect(handleHookEvent(ctx, 'e1', prompt()).context!.split('\n')).toContain(`Check with Aiden whether these are already done, then brief the answer (a "not yet" goes in "log on #id: …"): #${a3.id}.`);
+    expect(handleHookEvent(ctx, 'e1', prompt()).context!.split('\n')).toContain(`Check with Aiden whether these asks are already answered, then brief the answer ("a7 answered: <answer>"; a "not yet" goes in "log on #id: …"): a1.`);
   });
 
   it('neither delivers nor clears it on a background-task notice: the next real prompt brings it', () => {
@@ -912,7 +920,7 @@ describe('the full briefing on the first tracked prompt after an enroll', () => 
 
   it("asks about old needs-you items in a compaction's briefing when it is the one that clears an enroll's marker", () => {
     const { ctx, project, a3, tick } = projects();
-    const check = `Check with Aiden whether these are already done, then brief the answer (a "not yet" goes in "log on #id: …"): #${a3.id}.`;
+    const check = `Check with Aiden whether these asks are already answered, then brief the answer ("a7 answered: <answer>"; a "not yet" goes in "log on #id: …"): a1.`;
     enrollSession(ctx, 'scribe:e1', 'e1', project.slug);
     tick(4 * 24 * 60 * 60 * 1000);
     // The enroll's briefing went to the scribe, so this is the session's only full one: it counts as the enroll's.

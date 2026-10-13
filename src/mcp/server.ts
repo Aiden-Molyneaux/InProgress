@@ -2,10 +2,11 @@ import { readFileSync, statSync } from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import {
-  ASSIGNEES, NODE_KINDS, NODE_LABELS, NODE_STATUSES, RESOURCE_KINDS, glyphTitle, unknownLabel,
-  type Binding, type LogEntry, type NodeDetail, type NodeInput, type Project, type ProjectSnapshot, type ProjectSummary, type Resource, type SearchResult, type TreeNode,
+  ASK_KINDS, ASSIGNEES, BRIEFING_MODES, NODE_KINDS, NODE_LABELS, NODE_STATUSES, RESOURCE_KINDS, RESOURCE_PURPOSES, askTag, glyphTitle, unknownLabel,
+  type Ask, type Binding, type LogEntry, type NodeDetail, type NodeInput, type Project, type ProjectSnapshot, type ProjectSummary, type Resource, type SearchResult, type TreeNode,
 } from '../core/types';
 import { ApiClientError, type Client } from '../lib/client';
+import { raiseNotes, type RaiseReply } from '../lib/ask-notes';
 import { VERSION } from '../lib/version';
 import { formatCreated, formatNodeDetail, formatQueue, formatResource, formatSearch } from './format';
 
@@ -84,7 +85,7 @@ export function createMcpServer(client: Client, o: McpOptions = {}): McpServer {
     return projects
       .map((p) => {
         const own = bindings.filter((b) => b.projectId === p.id).map((b) => `  binding ${b.id}: ${b.path}${b.branchPattern ? ` [branch ${b.branchPattern}]` : ''}`);
-        return [`${p.slug} · ${p.name} (${p.status}) · root #${p.rootNodeId} · ${p.needsYou} need you · ${p.activeSessions} session(s)`, ...own].join('\n');
+        return [`${p.slug} · ${p.name} (${p.status}) · root #${p.rootNodeId} · ${p.openAsks} need you · ${p.activeSessions} session(s)`, ...own].join('\n');
       })
       .join('\n');
   });
@@ -119,8 +120,9 @@ export function createMcpServer(client: Client, o: McpOptions = {}): McpServer {
     });
 
   tool('update_project', "Rename a project, change its description or playbook, or archive / unarchive it. Archiving stops tracking the project's live sessions (they keep running) and drops their Up next entries.",
-    { project, name: z.string().optional(), description: z.string().optional(), playbook: z.string().optional(), status: z.enum(['active', 'archived']).optional(), session },
-    async ({ project, session: s, ...patch }: { project: string; session?: string; name?: string; description?: string; playbook?: string; status?: 'active' | 'archived' }) => {
+    { project, name: z.string().optional(), description: z.string().optional(), playbook: z.string().optional(), status: z.enum(['active', 'archived']).optional(), briefing_mode: z.enum(BRIEFING_MODES).optional().describe('full: every session gets the whole briefing. scoped: a worker gets its claimed step; the orchestrator the whole'), session },
+    async ({ project, session: s, briefing_mode, ...rest }: { project: string; session?: string; name?: string; description?: string; playbook?: string; status?: 'active' | 'archived'; briefing_mode?: 'full' | 'scoped' }) => {
+      const patch = { ...rest, ...(briefing_mode === undefined ? {} : { briefingMode: briefing_mode }) };
       const p = await client.patch<Project>(`/api/projects/${enc(project)}`, patch, { actor: actor(s) });
       return `Updated project ${p.slug} (${p.status}).`;
     });
@@ -162,8 +164,8 @@ export function createMcpServer(client: Client, o: McpOptions = {}): McpServer {
     });
 
   tool('add_resource', 'Attach a resource to the node where it was produced. Give a path (with snapshot_file=true for text files up to 200 KB), a url, or content.',
-    { node: id, kind: z.enum(RESOURCE_KINDS), title: z.string().min(1), content: z.string().optional(), path: z.string().optional().describe('Absolute path of the file; with snapshot_file its text is read and saved'), url: z.string().optional(), snapshot_file: z.boolean().optional(), session },
-    async (a: { node: number; kind: string; title: string; content?: string; path?: string; url?: string; snapshot_file?: boolean; session?: string }) => {
+    { node: id, kind: z.enum(RESOURCE_KINDS), title: z.string().min(1), content: z.string().optional(), path: z.string().optional().describe('Absolute path of the file; with snapshot_file its text is read and saved'), url: z.string().optional(), snapshot_file: z.boolean().optional(), purpose: z.enum(RESOURCE_PURPOSES).optional().describe('handoff: the handoff a session leaves on its step. state: the project state note, on the root; it replaces the previous one'), session },
+    async (a: { node: number; kind: string; title: string; content?: string; path?: string; url?: string; snapshot_file?: boolean; purpose?: string; session?: string }) => {
       let content = a.content;
       if (a.snapshot_file) {
         if (!a.path) throw new Error('snapshot_file needs a path');
@@ -171,15 +173,29 @@ export function createMcpServer(client: Client, o: McpOptions = {}): McpServer {
         if (size > SNAPSHOT_LIMIT) throw new Error(`${a.path} is ${Math.round(size / 1024)} KB; the snapshot limit is 200 KB. Attach it by path only.`);
         content = readFileSync(a.path, 'utf8');
       }
-      const r = await client.post<Resource>('/api/resources', { nodeId: a.node, kind: a.kind, title: a.title, content: content ?? null, path: a.path ?? null, url: a.url ?? null, sessionId: a.session ?? null }, { actor: actor(a.session) });
+      const r = await client.post<Resource>('/api/resources', { nodeId: a.node, kind: a.kind, title: a.title, content: content ?? null, path: a.path ?? null, url: a.url ?? null, sessionId: a.session ?? null, purpose: a.purpose ?? null }, { actor: actor(a.session) });
       return `r${r.id} "${r.title}" (${r.kind}) attached to #${r.nodeId}${r.contentLength ? ` · ${r.contentLength} chars saved` : ''}.`;
     });
 
   tool('update_resource', 'Edit a resource or move it to another node in the same project. Changing path does not re-read the file: to refresh a snapshot, add a new resource with snapshot_file and delete this one.',
-    { id: resourceId, node: id.optional(), kind: z.enum(RESOURCE_KINDS).optional(), title: z.string().optional(), content: z.string().optional(), path: z.string().optional().describe('Absolute path of the file (the saved content stays as it is)'), url: z.string().optional(), session },
+    { id: resourceId, node: id.optional(), kind: z.enum(RESOURCE_KINDS).optional(), title: z.string().optional(), content: z.string().optional(), path: z.string().optional().describe('Absolute path of the file (the saved content stays as it is)'), url: z.string().optional(), purpose: z.enum(RESOURCE_PURPOSES).nullable().optional().describe('handoff or state; null clears it'), session },
     async ({ id: rid, node, session: s, ...patch }: { id: number; node?: number; session?: string } & Record<string, unknown>) => {
       const r = await client.patch<Resource>(`/api/resources/${rid}`, { ...patch, nodeId: node }, { actor: actor(s) });
       return `r${r.id} "${r.title}" on #${r.nodeId}.`;
+    });
+
+  tool('raise_ask', 'Raise an ask when a session needs Aiden to answer, allow or look at something, on the step it concerns. Kinds: question, permission, review. Raising the same open ask again joins it. Pass the asking session so its answer comes back to it.',
+    { node: id, kind: z.enum(ASK_KINDS), text: z.string().min(1), session },
+    async (a: { node: number; kind: string; text: string; session?: string }) => {
+      const r = await client.post<RaiseReply & Ask>(`/api/nodes/${a.node}/asks`, { kind: a.kind, text: a.text, sessionId: a.session ?? null }, { actor: actor(a.session) });
+      return [`${askTag(r.id)} raised on #${r.nodeId}.`, ...raiseNotes(r, a.session)].join('\n');
+    });
+
+  tool('clear_ask', 'Clear an ask when Aiden answers in chat. Give his words as the answer; the asking session is told once on its next prompt.',
+    { ask: z.number().int().positive(), answer: z.string().optional(), session },
+    async (a: { ask: number; answer?: string; session?: string }) => {
+      const r = await client.post<Ask>(`/api/asks/${a.ask}/clear`, a.answer ? { answer: a.answer } : {}, { actor: actor(a.session) });
+      return r.answer ? `${askTag(r.id)} answered: "${r.answer}"` : `${askTag(r.id)} cleared.`;
     });
 
   tool('delete_resource', 'Delete a resource.', { id: resourceId, session }, async (a: { id: number; session?: string }) => {
