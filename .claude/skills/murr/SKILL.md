@@ -158,7 +158,7 @@ The code that sends Murr to Opus and into thorough mode (Sigmund's overrides hol
 - several sessions writing at once: `src/server/repo/`, `src/lib/ensure-server.ts`, `web/src/stream.ts`, `scripts/deploy*.mjs`;
 - focus and keyboard: `web/src/useKeyboard.ts`, `web/src/chrome/menu.ts`, `web/src/chrome/GoTo.tsx`, or any diff that adds a menu, popover, confirm or focus move.
 
-The house rules this project holds code to, cited like CONVENTIONS.md: `CLAUDE.md` (its House rules section)
+The house rules this project holds code to, cited like CONVENTIONS.md: `CLAUDE.md` (its House rules section).
 
 What to probe on this codebase, whatever the diff: hooks (`src/hooks/`, `src/server/session-flow.ts`, `src/cli/claude-config.ts`) run in every session of every project, so a slow or failing hook must never block a session and what it injects must stay small; migrations in `src/server/db/schema.ts` are append-only, and an additive one keeps `min_reader_version` at 1 so a rollback across it still works; several sessions, the scribe and the window write at once (`src/server/repo/`, `src/server/db/tx.ts`, `src/mcp/`), so look for transactions, ordering, idempotence and lost updates; Windows paths with backslashes and spaces, shells, process spawning, and files locked during a rename; errors that name their cause and are never swallowed; tests that can fail; and no em dashes in tracked text.
 

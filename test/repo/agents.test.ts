@@ -30,6 +30,8 @@ describe('.claude/agents', () => {
       const fm = frontmatter(file);
       expect(fm.get('name')).toBe(file.replace(/\.md$/, ''));
       expect(fm.get('description')?.length).toBeGreaterThan(40);
+      // A plain YAML scalar cannot hold ': ', and an agent whose frontmatter fails to parse never loads.
+      expect(fm.get('description'), 'quote a description that holds ": "').not.toMatch(/^[^"'>|].*: /);
       expect(fm.get('model')).toMatch(/^claude-[a-z]+-\d+(-\d+)?$/);
       expect(['low', 'medium', 'high', 'xhigh', 'max']).toContain(fm.get('effort'));
       expect(fm.get('tools')).toBeTruthy();
