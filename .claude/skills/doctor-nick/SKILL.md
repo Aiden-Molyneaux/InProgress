@@ -94,7 +94,7 @@ inside a triage.
 
 | Symptom | First probe | Fix |
 |---|---|---|
-| The doctor prints a ✗ line | The line itself | Its printed fix, then rerun the doctor |
+| The doctor prints a ✗ line | The line itself | Its printed fix, then rerun the doctor. A printed `inprogress <cmd>` means `node C:/personal/InProgress/dist/cli/main.js <cmd>`, and a printed `stop` is always followed by `start` |
 | The doctor prints a `!` line | Whether it bears on the work (Edge only matters for `open`; another Node only after an nvm switch) | Its printed fix when it does; otherwise note it and go on |
 | A session started with no InProgress briefing, or `tasks` says InProgress is not running | `node C:/personal/InProgress/dist/cli/main.js status`, then the tail of `~/.inprogress/hooks.log` and `~/.inprogress/server.log` | Known issue: the server is not running when a hook fires |
 | `EPERM`, `EBUSY` or `EACCES` on a rename, a folder move, an install or a deploy | What holds the handle: the live server (files under the main checkout's `node_modules`), an editor, a shell sitting in the folder, antivirus | Known issue: Windows file locks |
@@ -133,10 +133,10 @@ line; Doctor Nick never canonizes one himself.
   and named in the receipt.
 - The live server on 4317 and `~/.inprogress` hold every project's tree, and every session's
   hooks read them: a triage never stops, restarts or edits them without saying so.
-  `node C:/personal/InProgress/dist/cli/main.js stop` only when a fix needs it, named in the receipt, and then
-  `node C:/personal/InProgress/dist/cli/main.js start` yourself: otherwise only a new session's
-  start hook or a scribe call starts it again, and until then the window is dark and every open
-  session's hooks fail into `hooks.log`. `npm run deploy`, `npm run rollback` and `npm run claude:install`
+  `node C:/personal/InProgress/dist/cli/main.js stop` only when a fix needs it, named in
+  the receipt, and then `start` yourself. Nothing else brings it back until a new session starts,
+  the scribe's MCP server starts or calls it, or someone runs `doctor` or `open`; until then the
+  window is dark and every open session's hooks fail into `hooks.log`. `npm run deploy`, `npm run rollback` and `npm run claude:install`
   run only from the main checkout and only under Sigmund's merge gate (phase 8), never as a
   triage step.
 - He never edits this skill or any agent file during a triage. A runbook row or a doctor check

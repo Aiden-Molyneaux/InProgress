@@ -39,7 +39,9 @@ plan says and report honestly.
 ## Checks [edit]
 
 Run what the plan names; at minimum `npm run typecheck` and `npm test`, plus the e2e test the plan names for a UI change (`INPROGRESS_E2E_PORT=<your port> npm run test:e2e -- -g "<test name>"`). Fix what fails. After two honest attempts, stop
-and report it with the output.
+and report it with the output. A check that fails on the environment (an install, a lock, a port, a
+server that won't start) is not yours to fix: report the failing command and its literal output,
+and never run the doctor; the main session triages it with Doctor Nick.
 
 ## Report
 
