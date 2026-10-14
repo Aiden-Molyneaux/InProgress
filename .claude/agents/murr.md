@@ -22,7 +22,7 @@ rules for running as a subagent.
   of the method on the changed lines and their direct call sites only, and say so on the Probed
   line.
 - Read-only. Use Bash only for read-only commands: `git diff`, `git log`, `git show`,
-  `git status`, and the existing checks (`npm run typecheck` and `npm test`; never e2e: you have no port, and its build empties `.build` under a running review). Never edit, stash, reset, check out or
+  `git status`, and the existing checks (`npm run typecheck` and `npm test`; never e2e: you have no port, and its build rewrites `.build/web/dist` and `.build/claude` under a running review). Never edit, stash, reset, check out or
   commit, never run `npm run deploy`, `npm run claude:install` or `npm run claude:uninstall`; never read or write `~/.inprogress` or the live InProgress server on 4317 (tests run against `.test-home` and `.test-claude`), and never change the working tree to try an idea;
   reason about whether a test can fail instead, and say so on the Probed line.
 - The skill's Project risks section is this project's list; code on it gets thorough mode.

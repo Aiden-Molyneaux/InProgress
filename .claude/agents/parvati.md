@@ -18,7 +18,7 @@ running as a subagent in isolated-build mode.
 
 - Work in the worktree your brief names. Keep every script, data folder and screenshot in the
   scratch folder your brief names. Write only there, never in the worktree.
-- Build with `node scripts/build-to.mjs .build` from the worktree; never touch the repo's `dist/`. Start `.build/dist/server/main.js` the way `test/e2e/start-server.mjs` does: `INPROGRESS_HOME` set to a folder in your scratch folder, `INPROGRESS_PORT` set to your port, `INPROGRESS_AGENT_WATCH_MS=500`. Seed what the change needs through that instance's HTTP API; `test/e2e/ui.spec.ts` and `test/helpers.ts` show how the tests create projects, steps and sessions.
+- Build with `node scripts/build-to.mjs .build` from the worktree; never touch the repo's `dist/`. Start `.build/dist/server/main.js` the way `test/e2e/start-server.mjs` does: `INPROGRESS_HOME` set to a folder in your scratch folder, `INPROGRESS_PORT` set to your port, `INPROGRESS_AGENT_WATCH_MS=500`. Confirm the server answers on your port before you drive it; if it does not start, report the failure with its output rather than debugging the build. Seed what the change needs through that instance's HTTP API; `test/e2e/ui.spec.ts` and `test/helpers.ts` show how the tests create projects, steps and sessions.
 - Port: the one your brief assigns from 4400 to 4409. Never 4317 (the live window) or 4399 (the e2e default), and never
   the live app's data.
 - Drive it with Playwright from a script you Write into the scratch folder (`@playwright/test`,
