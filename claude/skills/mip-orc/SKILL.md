@@ -60,9 +60,9 @@ Read the top of Next from the `Next:` lines of the `--status` output, or from th
 
 Only on Aiden's go.
 
-1. Write the handoff to a file under `{{RESOURCES}}/<slug>/`, named `<yyyy-mm-dd>-<kebab-title>.md`. It opens with `Claim #<id>`, then holds: the goal, where things are (branch, commit, worktree), decisions made and by whom, what to read as slices (`file:lines`), and the next concrete step. For a branch already in flight, name the worktree to work in and say that the fresh worktree the chip creates stays empty.
+1. Write the handoff to a file under `{{RESOURCES}}/<slug>/`, named `<yyyy-mm-dd>-<kebab-title>.md`. It opens with `Claim #<id>`, then holds: the goal, where things are (branch, commit, worktree), decisions made and by whom, what to read as slices (`file:lines`), and the next concrete step. For a branch already in flight, name the worktree to work in and say that the fresh worktree the chip creates stays empty. For change work in a repo that has `.claude/skills/sigmund/SKILL.md`, the line after `Claim #<id>` reads `Run this through Sigmund.`
 2. Brief the scribe: `handoff on #<id>: "<title>", path <file>, snapshot_file`. It becomes a `doc` resource with purpose `handoff`, and the worker sees it in its briefing.
-3. Offer the chip with the `spawn_task` tool. Its prompt names the model and effort to pick (`spawn_task` has no field for them, so the prompt can only ask) and points at the handoff. Where `spawn_task` is missing, print the handoff path and a one-line prompt for Aiden to paste.
+3. Offer the chip with the `spawn_task` tool. Its prompt names the model and effort to pick (`spawn_task` has no field for them, so the prompt can only ask), then, for change work in a repo that has `.claude/skills/sigmund/SKILL.md`, says `Run this through Sigmund.`, and points at the handoff. Where `spawn_task` is missing, print the handoff path and a one-line prompt for Aiden to paste.
 4. A step that is not ready needs Aiden's reason first. Log it on the step through the scribe before you hand it out.
 
 ## State note
