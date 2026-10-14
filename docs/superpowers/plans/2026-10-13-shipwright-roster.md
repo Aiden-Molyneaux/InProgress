@@ -413,7 +413,7 @@ In `.claude/agents/murr.md`, `## Running as a subagent [edit]`, after the bullet
 - [ ] **Step 6: Strip the em dashes from the two skills.** A spaced em dash becomes a colon, any other a comma:
 
 ```bash
-EMDASH=$(printf '—'); sed -i "s/ $EMDASH /: /g; s/$EMDASH/, /g" .claude/skills/murr/SKILL.md .claude/skills/parvati/SKILL.md
+EMDASH=$(printf '\xe2\x80\x94'); sed -i "s/ $EMDASH /: /g; s/$EMDASH/, /g" .claude/skills/murr/SKILL.md .claude/skills/parvati/SKILL.md
 ```
 
 Then read both files once, end to end. Where the colon made a sentence wrong (two colons in one sentence, a colon before a capitalised clause that needs a period), reword that sentence by hand and list every such line in your report. Headings read `## The authority: read in this order`, `## Report format: ALWAYS use this`, `## 🧹 Debt (refactorability: not runtime)`, `## ✅ Expected (deferred: proceed)`; the report template lines read `- <surface>: <what was attacked and how it held>`.
