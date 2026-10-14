@@ -14,7 +14,7 @@ work. A re-hit bumps **Hits** and **Verified**. Entries seeded from the code and
   `~/.inprogress/hooks.log` (src/hooks/main.ts:57-61), and a server that failed to start writes
   its output to `~/.inprogress/server.log` (src/lib/ensure-server.ts:30). The scribe's MCP server
   also starts it, when it launches and on a refused call (src/mcp/main.ts:13-17,
-  src/mcp/server.ts:71-72); so do the CLI's `doctor` and `open` (src/cli/commands.ts:67, 112). So a server that stops mid-session
+  src/mcp/server.ts:71-72); so do the CLI's `doctor` and `open` (src/cli/commands.ts:65, 112). So a server that stops mid-session
   stays down until a new session starts, a scribe brief goes out, or someone starts it.
 - **Fix:** `node C:/personal/InProgress/dist/cli/main.js start`, or the doctor (it starts the
   server first), or a brief to the scribe. If it will not start, read the tail of
