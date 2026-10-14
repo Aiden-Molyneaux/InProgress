@@ -6,16 +6,18 @@ work. A re-hit bumps **Hits** and **Verified**. Entries seeded from the code and
 
 ## The server is not running when a hook fires
 - **Symptom:** a session starts with no InProgress briefing, the window shows nothing new, or
-  `node dist/cli/main.js tasks ...` prints "InProgress is not running. A brief to the
+  `node C:/personal/InProgress/dist/cli/main.js tasks ...` prints "InProgress is not running. A brief to the
   inprogress-scribe starts it; run this command again after that." No hook ever prints an error.
 - **Diagnosis:** only the session-start hook starts the server (src/hooks/handlers.ts:400), and it
   waits up to 5 s for it (src/hooks/budget.ts:28-30). Every other hook makes one 500 ms POST and
   gives up after 750 ms. Hooks always exit 0; their errors and timeouts go to
   `~/.inprogress/hooks.log` (src/hooks/main.ts:57-61), and a server that failed to start writes
-  its output to `~/.inprogress/server.log` (src/lib/ensure-server.ts:30). So a server that stops
-  mid-session stays down until the next session starts or someone starts it.
-- **Fix:** from the main checkout, `node dist/cli/main.js doctor` (it starts the server first) or
-  `node dist/cli/main.js start`. If it will not start, read the tail of `~/.inprogress/server.log`.
+  its output to `~/.inprogress/server.log` (src/lib/ensure-server.ts:30). The scribe's MCP server
+  also starts it, on a refused call (src/mcp/server.ts:68-72). So a server that stops mid-session
+  stays down until a new session starts, a scribe brief goes out, or someone starts it.
+- **Fix:** `node C:/personal/InProgress/dist/cli/main.js start`, or the doctor (it starts the
+  server first), or a brief to the scribe. If it will not start, read the tail of
+  `~/.inprogress/server.log`.
 - **Verified:** 2026-10-14, seeded from the code, not yet hit · **Hits:** 0
 
 ## Windows file locks on a rename, a deploy or an install
@@ -44,8 +46,9 @@ work. A re-hit bumps **Hits** and **Verified**. Entries seeded from the code and
   asks for it, and restarts the server (scripts/deploy.mjs:70-110). A red before the promote
   leaves the live build untouched. A red restart swaps the previous build back and restarts it.
 - **Fix:** red before the promote: fix on the branch, merge, and deploy again (Sigmund, phase 8).
-  Red restart: the old build is live again; read `~/.inprogress/server.log` for why the new one
-  did not start. Red rollback: run `npm run rollback` once more to return to the newer build,
+  Red restart: the deploy swapped the old build back but does not check that it started
+  (scripts/deploy.mjs:104-108), so run `node C:/personal/InProgress/dist/cli/main.js status`,
+  and `start` if it is down; then read `~/.inprogress/server.log` for why the new one did not. Red rollback: run `npm run rollback` once more to return to the newer build,
   then read `server.log`. All of these run from the main checkout, under the merge gate.
 - **Verified:** 2026-10-14, seeded from the code, not yet hit · **Hits:** 0
 
@@ -54,11 +57,13 @@ work. A re-hit bumps **Hits** and **Verified**. Entries seeded from the code and
   once that worktree is removed, the doctor prints `✗ Hooks: hook script <path> no longer exists`
   and the hooks stop working in every session.
 - **Diagnosis:** install writes the absolute path of the checkout it ran from, and the Node binary
-  that ran it, into each hook entry in `~/.claude/settings.json` (src/cli/claude-config.ts:58-72).
+  that ran it, into each hook entry in `~/.claude/settings.json` (src/cli/claude-config.ts:58-72;
+  the script is the entry's `args[0]`, `command` is the Node binary), and the same path into the
+  scribe's MCP server in `~/.claude/agents/inprogress-scribe.md`.
   The doctor's Hooks check fails only once the script is gone (src/cli/doctor.ts:135-137), so a
   hook pointing at a live worktree passes.
-- **Fix:** `npm run claude:install` from C:/personal/InProgress. It also stops the server, so the
-  next hook starts the main checkout's build. Candidate doctor check (proposed, not built): Hooks
+- **Fix:** `npm run claude:install` from C:/personal/InProgress. It also stops the server: start it
+  again with `node C:/personal/InProgress/dist/cli/main.js start`, which runs the main build. Candidate doctor check (proposed, not built): Hooks
   warns when a hook script sits outside the checkout the doctor runs from.
 - **Verified:** 2026-10-14, seeded from the code, not yet hit · **Hits:** 0
 

@@ -49,7 +49,7 @@ Parvati inline, not as a spawned subagent (a subagent can't see them). The `parv
 (Shipwright `agents/`) is the exception: it captures its own screenshots in one of the modes below.
 Capturing them yourself? **Preflight first, and never debug the preview from scratch:** run the
 Preflight section of the **doctor-nick** skill (`.claude/skills/doctor-nick/SKILL.md`), which
-names the project's commands. If it stays red, stop and report the doctor's output as a blocker:
+names the project's commands. If it stays red, stop and report the failing command and its literal output as a blocker:
 Doctor Nick's triage runs in the main session, not inside a review.
 
 ## Modes [edit]

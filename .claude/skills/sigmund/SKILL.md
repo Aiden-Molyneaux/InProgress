@@ -189,7 +189,7 @@ git -c credential.helper= -c 'credential.helper=!f() { echo username=x-access-to
 
 A PR only when Aiden asks. Deploy and `claude:install` never run from a worktree: the installed hooks bake in the main checkout's absolute path.
 
-A red deploy or rollback goes to Doctor Nick before anything is retried. A retry that is itself a
+A deploy or rollback that goes red on the environment (a lock, a restart, the runner) goes to Doctor Nick before anything is retried; a red typecheck or test is the work, fixed on the branch. A retry that is itself a
 gated action (another deploy, a rollback, an installer) follows the gate above.
 
 ## Across the session [edit]
