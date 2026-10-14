@@ -28,6 +28,12 @@ their reasoning stays out of the main context: Sev builds, Moh looks things up, 
 code, Parvati reviews screens. Small fixes stay in the main session: a dispatch costs more than it
 saves.
 
+Doctor Nick (`.claude/skills/doctor-nick/`) is the roster's one member with no agent: when the
+environment breaks (a server that won't start, a red deploy or rollback, a check that fails
+before it reaches the code), Sigmund loads him in the main session, which already holds the error
+text. He triages by symptom, logs what he solved, and hands back a green environment; the change
+then carries on from the phase it stopped in.
+
 ## Model routing
 
 | Member | Default | Dispatch when |
@@ -113,7 +119,7 @@ it is not, and name the judgment calls in the receipt.
 Check the tree first: `git status`. Work Sigmund did not create stays out of his commits; surface
 it and ask rather than sweeping it in.
 
-One worktree per session under `.claude/worktrees/`, one branch per change off `main`. A session spawned from a chip starts in one; otherwise create it with `git worktree add .claude/worktrees/<topic> -b <topic> main`. Work only there: the main checkout takes only merges, deploys and `claude:install`. `node_modules` resolves from the main checkout. Uncommitted changes outside your worktree belong to another session: don't stage them, ask about them or mention them. Stage explicit paths only. The branch's label (ui, server, data, integration, ops, docs, fix, refactor, research) picks its gates in phase 4.
+One worktree per session under `.claude/worktrees/`, one branch per change off `main`. A session spawned from a chip starts in one; otherwise create it with `git worktree add .claude/worktrees/<topic> -b <topic> main`. Work only there: the main checkout takes only merges, deploys and `claude:install`. A worktree without its own `node_modules` resolves packages from the main checkout's, which follows main's `package.json`: when the branch's dependencies differ, run `npm install` in the worktree. Uncommitted changes outside your worktree belong to another session: don't stage them, ask about them or mention them. Stage explicit paths only. The branch's label (ui, server, data, integration, ops, docs, fix, refactor, research) picks its gates in phase 4.
 
 ## Phase 2: plan
 
@@ -141,6 +147,10 @@ Sigmund reruns the checks himself and reads the whole diff, whoever built it. Th
 UI verification runs only on a port from 4400 to 4419 that the session picks (Parvati's lane is 4400 to 4409, Sev's e2e lane 4410 to 4419), never on 4317 (the live window) or 4399 (the e2e default, which the deploy's own run uses). Keep it proportional:
 small UI changes ship on check evidence and the owner's eye; do not build harnesses unasked.
 
+UI verification starts with Doctor Nick's preflight. A check that fails on the environment rather
+than the code (an install, a lock, a port, a server that won't start, a runner that reports
+nonsense) goes to Doctor Nick before anyone investigates it.
+
 ## Phase 5: review
 
 - **Murr on every diff**, before any push or merge. Pass the scope and the request. Fix his red
@@ -159,7 +169,8 @@ InProgress has no integration branch, and nothing is pushed before the merge. Th
 The receipt, leading with the outcome:
 
 1. What changed, in plain sentences, with files as clickable links.
-2. Evidence: each check's result, Murr's verdict line, Parvati's verdict line if she ran.
+2. Evidence: each check's result, Murr's verdict line, Parvati's verdict line if she ran, and
+   Doctor Nick's note if he ran.
 3. Judgment calls made without asking, and the debt, owner-call and polish notes worth the
    owner's attention.
 4. Any model override and its reason.
@@ -177,6 +188,9 @@ git -c credential.helper= -c 'credential.helper=!f() { echo username=x-access-to
 ```
 
 A PR only when Aiden asks. Deploy and `claude:install` never run from a worktree: the installed hooks bake in the main checkout's absolute path.
+
+A red deploy or rollback goes to Doctor Nick before anything is retried. A retry that is itself a
+gated action (another deploy, a rollback, an installer) follows the gate above.
 
 ## Across the session [edit]
 

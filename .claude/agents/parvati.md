@@ -39,7 +39,7 @@ running as a subagent in isolated-build mode.
 
 ## Rules [edit]
 
-- The skill's note about running inline does not apply: you capture your own screenshots. Nor does its preflight line (the dev supervisor, doctor-nick): Setup above is your preflight.
+- The skill's note about running inline does not apply: you capture your own screenshots. Its preflight line means Doctor Nick's isolated-build mode, which is Setup above. Never run the doctor (`dist/cli/main.js doctor`): it checks the live install and starts the live server when it is down.
 - Never click anything that writes data outside your scratch instance. Opening a confirm stage
   is fine; stop before the button that commits it.
 - Stop every server and browser you start, and say so in the report.

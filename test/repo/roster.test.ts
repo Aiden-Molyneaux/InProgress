@@ -1,5 +1,5 @@
 // The roster (CLAUDE.md's one Sigmund line; Shipwright docs/roster-spec.md): the copied templates are filled, every
-// wrapper's skill exists, Sigmund exists, and CLAUDE.md no longer carries the routing sections that moved into him.
+// wrapper's skill exists, Sigmund and Doctor Nick exist, and CLAUDE.md no longer carries the routing sections that moved into him.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -34,6 +34,11 @@ describe('the roster', () => {
 
   it('has Sigmund', () => {
     expect(existsSync(join(skillsDir, 'sigmund', 'SKILL.md'))).toBe(true);
+  });
+
+  it('has Doctor Nick and his known-issues log', () => {
+    expect(existsSync(join(skillsDir, 'doctor-nick', 'SKILL.md'))).toBe(true);
+    expect(read(join(repo, 'docs', 'known-issues.md'))).toMatch(/^# Active$[\s\S]*^# Promoted$[\s\S]*^# Canonized$/m);
   });
 
   it('keeps one Sigmund line in CLAUDE.md and no routing sections', () => {
