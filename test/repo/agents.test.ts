@@ -1,4 +1,4 @@
-// The routed agents (CLAUDE.md, Routing): each pins a full model id so a model change is deliberate, and sets an effort.
+// The roster's agents (.claude/skills/sigmund/SKILL.md, Model routing): each pins a full model id so a model change is deliberate, and sets an effort.
 // Overrides at dispatch pass aliases; the files never do.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -22,7 +22,7 @@ function frontmatter(file: string): Map<string, string> {
 
 describe('.claude/agents', () => {
   it('holds exactly the routed agents', () => {
-    expect(files).toEqual(['code-reviewer.md', 'explorer.md', 'implementer.md', 'screen-reviewer.md']);
+    expect(files).toEqual(['moh.md', 'murr.md', 'parvati.md', 'sev.md']);
   });
 
   for (const file of files) {
