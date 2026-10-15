@@ -102,8 +102,8 @@ describe('handleHookEvent', () => {
     expect(text).toContain(`#${a2.id} Play app signing · active`);
     expect(text).toContain(`#${a3.id} Run signing tests · todo`);
     expect(text).toMatch(/Next: #\d+ 3 RevenueCat · #\d+ 4 Build to GitHub \(\+3 more\)/);
-    expect(text).toContain(`Needs you (1): a1 ⚿ on #${a3.id} "Run the signing tests"`);
-    expect(text).toContain(`Signing suite (on #${a3.id})`);
+    expect(text).toContain(`Needs you (1): a1 ⚿ on #${a3.id} Run signing tests: "Run the signing tests"`);
+    expect(text).toContain(`Signing suite (on #${a3.id} Run signing tests)`);
     expect(findSession(ctx, 's1')).toMatchObject({ title: 'InGame launch status', state: 'idle', cwd: 'C:\\personal\\InGame\\docs' });
   });
 
@@ -338,7 +338,7 @@ describe('briefing: session identity', () => {
     handleHookEvent(ctx, 's2', start(undefined, { title: 'Store listing' }));
     handleHookEvent(ctx, 's2', { event: 'prompt' });
     const lines = handleHookEvent(ctx, 's3', start()).context!.split('\n');
-    expect(lines).toContain(`Other sessions here: B "Store listing" (working) · A "Launch status" (idle, on #${a2.id})`);
+    expect(lines).toContain(`Other sessions here: B "Store listing" (working) · A "Launch status" (idle, on #${a2.id} Play app signing)`);
   });
 
   it('reads busy for another idle session with a running worker, and idle for one with nothing running', () => {
@@ -348,10 +348,10 @@ describe('briefing: session identity', () => {
     handleHookEvent(ctx, 's2', start(undefined, { title: 'Store listing' }));
     setFocus(ctx, 'scribe:s2', 's2', a2.id);
     const others = () => handleHookEvent(ctx, 's3', start()).context!.split('\n').find((l) => l.startsWith('Other sessions here:'))!;
-    expect(others()).toContain(`"Launch status" (idle, on #${a2.id})`);
+    expect(others()).toContain(`"Launch status" (idle, on #${a2.id} Play app signing)`);
     ctx.db.prepare("INSERT INTO session_subagents (session_id, agent_id, agent_type, started_at) VALUES ('s1', 'w1', 'general-purpose', ?)").run(ctx.now());
-    expect(others()).toContain(`"Launch status" (busy, on #${a2.id})`);
-    expect(others()).toContain(`"Store listing" (idle, on #${a2.id})`);
+    expect(others()).toContain(`"Launch status" (busy, on #${a2.id} Play app signing)`);
+    expect(others()).toContain(`"Store listing" (idle, on #${a2.id} Play app signing)`);
   });
 
   it('prints no letter for a session whose slot is still empty (it predates migration 4)', () => {
@@ -376,7 +376,7 @@ describe('briefing: type labels', () => {
     expect(lines).toContain(`      #${a2.id} ⧉ Play app signing · active`);
     expect(lines).toContain(`      #${a3.id} ⚒ Run signing tests · todo`);
     expect(lines.find((l) => l.trim().startsWith('Next:'))?.trim()).toMatch(new RegExp(`^Next: #${s3.id} ⇄ 3 RevenueCat · #\\d+ 4 Build to GitHub`));
-    expect(lines).toContain(`Needs you (1): a1 ⚿ on #${a3.id} "Run the signing tests"`);
+    expect(lines).toContain(`Needs you (1): a1 ⚿ on #${a3.id} Run signing tests: "Run the signing tests"`);
   });
 
   it('prints the glyph before the title on the Up next line', () => {
@@ -482,8 +482,8 @@ describe('briefing: ask ages and the check line', () => {
     handleHookEvent(ctx, 's1', start());
     tick(DAY - HOUR);
     raiseAsk(ctx, 'test', { nodeId: q.id, kind: 'question', text: 'Monthly or yearly?' });
-    const first = `a1 ⚿ on #${a3.id} "Run the signing tests"`;
-    const second = `a2 ? on #${q.id} "Monthly or yearly?"`;
+    const first = `a1 ⚿ on #${a3.id} Run signing tests: "Run the signing tests"`;
+    const second = `a2 ? on #${q.id} Pick a price: "Monthly or yearly?"`;
     // 23 hours old is not a day old: no age.
     expect(lineOf(briefing(ctx), 'Needs you')).toBe(`Needs you (2): ${first} · ${second}`);
     tick(5 * DAY + HOUR);
@@ -538,7 +538,7 @@ describe('briefing: ask ages and the check line', () => {
     expect(enrollSession(ctx, 'scribe:e1', 'e1', project.slug).briefing.split('\n')).toContain(line);
     // The status answer shows the ages, never the line.
     const answer = statusAnswer(ctx);
-    expect(answer).toContain(`Needs you (1): a1 ⚿ on #${a3.id} "Run the signing tests" (4d)`);
+    expect(answer).toContain(`Needs you (1): a1 ⚿ on #${a3.id} Run signing tests: "Run the signing tests" (4d)`);
     expect(answer).not.toContain('Check with Aiden');
   });
 });
@@ -736,7 +736,7 @@ describe('first prompt of a session the server has not seen (a missed start)', (
     expect(r.tracked).toBe(true);
     expect(r.context).toContain('[InProgress] This session is tracked in project "InGame" (slug ingame). Session id: p1.');
     expect(r.context).toContain('Where things stand:');
-    expect(r.context).toContain(`Needs you (1): a1 ⚿ on #${a3.id} "Run the signing tests"`);
+    expect(r.context).toContain(`Needs you (1): a1 ⚿ on #${a3.id} Run signing tests: "Run the signing tests"`);
     expect(findSession(ctx, 'p1')).toMatchObject({ projectId: project.id, state: 'working', promptsSinceUpdate: 1, cwd: 'C:\\personal\\InGame\\src', branch: 'main', title: 'Missed start' });
     // From then on it is an ordinary tracked session: no second briefing, the usual nudge.
     expect(handleHookEvent(ctx, 'p1', prompt('C:\\personal\\InGame\\src')).context).toMatch(/^\[InProgress\] InGame · no focus set · 1 need you · last scribe update 2 prompts ago/);

@@ -94,8 +94,19 @@ describe('readDigest: done, asks, documents', () => {
     expect(d.documents.map((r) => [r.id, r.purpose])).toEqual([[doc.id, 'handoff']]);
     const text = formatDigest(d, Date.parse(ctx.now()));
     expect(text).toContain(`Quick-added (1): #${quick.id} Quick one`);
-    expect(text).toContain(`Moved in Next (2): #${quick.id} Quick one moved, #${quick.id} Quick one removed`);
+    expect(text).toContain(`Moved in Next (2): #${quick.id} Quick one moved · #${quick.id} Quick one removed`);
     expect(text).toContain(`New documents (1): r${doc.id} "Handoff" on #${group.id} Group (handoff)`);
+  });
+
+  it('names a moved step by its title on one clipped line, and a since-deleted one by its id alone', () => {
+    const { ctx, project, group, t0 } = setup();
+    setClock(ctx, t0 + 3 * DAY);
+    const [long] = addNodes(ctx, 'scribe', { parentId: group.id, nodes: [{ title: 'A long title\nthat runs over two lines and well past the fifty characters a digest keeps' }] });
+    const move = (node: number) => write(ctx, 'window', (record) => record({ projectId: project.id, type: 'project.updated', entity: 'project', entityId: project.id, data: { op: 'move', node, changes: { queue: { from: [], to: [] } } } }));
+    move(long.id);
+    move(999);
+    const text = formatDigest(readDigest(ctx, project.slug, iso(t0 + 2 * DAY)), Date.parse(ctx.now()));
+    expect(text).toContain(`Moved in Next (2): #${long.id} A long title that runs over two lines and well pa… moved · #999 moved`);
   });
 
   it('puts a done step with no outcome in the marks', () => {
