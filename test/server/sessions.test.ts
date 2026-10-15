@@ -400,11 +400,12 @@ describe('briefing: the rules block', () => {
   /** Real-length values: a Claude Code session id (a UUID), the deployed CLI and Aiden's data dir. */
   const real = { home: 'C:/Users/aiden.molyneaux/.inprogress', sessionId: '0f8c2a4e-5b7d-4c1e-9a3f-6d2b8e1c7a90', cli: 'C:/personal/InProgress/dist/cli/main.js' };
 
-  it('fits in 1,750 characters with real-length values and the tasks command written out in full', () => {
+  it('fits in 1,800 characters with real-length values and the tasks command written out in full', () => {
     expect(real.sessionId).toHaveLength(36);
     const text = updateRules(real).join('\n');
-    // Was 1,600 before the ask clause (spec 3.4) replaced "something goes to Aiden (assignee me)" with its longer wording.
-    expect(text.length).toBeLessThanOrEqual(1750);
+    // Was 1,600 before the ask clause (spec 3.4) replaced "something goes to Aiden (assignee me)" with its longer wording,
+    // and 1,750 before the rule that a step is named to Aiden with its title (#440).
+    expect(text.length).toBeLessThanOrEqual(1800);
     expect(text).toContain(`\`node C:/personal/InProgress/dist/cli/main.js tasks <step id> --session ${real.sessionId} --done "…" --doing "…" --todo "…"\``);
   });
 
@@ -436,7 +437,9 @@ describe('briefing: the rules block', () => {
       'No double quotes in subjects',
       "Start an Agent description with its step's #id.",
       // After a brief.
-      'After a brief, one line in chat ("↳ InProgress: #57 done").',
+      'After a brief, one line in chat ("↳ InProgress: #57 Fix export → done").',
+      // Aiden reads steps by title (#440).
+      'Name a step to Aiden by id and title, never a bare id.',
       "The scribe's notice needs no reply.",
       'Brief header: "Session: <id> · Project: <slug>". Full format: the inprogress skill.',
     ];

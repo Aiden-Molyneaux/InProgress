@@ -57,7 +57,7 @@ export function updateRules(o: UpdateRulesOptions & { mode?: RulesMode }): strin
     '- Steps are plan-level with outcomes. Detours go in "log on #id: …".',
     `- Something worth finding again is a resource: "resource on #id: <kind> "<title>", path <file>, snapshot_file". Chat-only content is first written to ${resources}/<slug>/<yyyy-mm-dd>-<kebab-title>.md.`,
     `- Working tasks: TaskCreate/TaskUpdate mirror on their own (start a task's subject with #id when its step is not your focus); else, after each change, run in the Bash tool: \`${taskCommand(o.sessionId, { cli: o.cli })}\` (flags repeat in list order; no flags clears the list; no step id uses your focus). No double quotes in subjects; single-quote one with $ or a backtick. Start an Agent description with its step's #id.`,
-    '- After a brief, one line in chat ("↳ InProgress: #57 done"). The scribe\'s notice needs no reply. Brief header: "Session: <id> · Project: <slug>". Full format: the inprogress skill.',
+    '- After a brief, one line in chat ("↳ InProgress: #57 Fix export → done"). Name a step to Aiden by id and title, never a bare id. The scribe\'s notice needs no reply. Brief header: "Session: <id> · Project: <slug>". Full format: the inprogress skill.',
   ];
 }
 

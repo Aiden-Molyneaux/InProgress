@@ -75,7 +75,8 @@ describe('readDigest: done, asks, documents', () => {
     expect(d.asksRaised.map((x) => x.id)).toEqual([a.id, b.id]);
     expect(d.asksCleared.map((x) => [x.id, x.answer, x.clearedBy])).toEqual([[b.id, 'looks good', 'window']]);
     expect(d.asksRaised.map((x) => x.id)).not.toContain(old.id);
-    expect(formatDigest(d, Date.parse(ctx.now()))).toContain(`Asks cleared (1): a${b.id} on #${step.id}: "looks good" (window)`);
+    expect(formatDigest(d, Date.parse(ctx.now()))).toContain(`Asks cleared (1): a${b.id} on #${step.id} Pick a port: "looks good" (window)`);
+    expect(formatDigest(d, Date.parse(ctx.now()))).toContain(`on #${step.id} Pick a port: "Which port?"`);
   });
 
   it('lists a quick-add by the window, a window move, and a new document', () => {
@@ -93,8 +94,8 @@ describe('readDigest: done, asks, documents', () => {
     expect(d.documents.map((r) => [r.id, r.purpose])).toEqual([[doc.id, 'handoff']]);
     const text = formatDigest(d, Date.parse(ctx.now()));
     expect(text).toContain(`Quick-added (1): #${quick.id} Quick one`);
-    expect(text).toContain(`Moved in Next (2): #${quick.id} moved, #${quick.id} removed`);
-    expect(text).toContain(`New documents (1): r${doc.id} "Handoff" on #${group.id} (handoff)`);
+    expect(text).toContain(`Moved in Next (2): #${quick.id} Quick one moved, #${quick.id} Quick one removed`);
+    expect(text).toContain(`New documents (1): r${doc.id} "Handoff" on #${group.id} Group (handoff)`);
   });
 
   it('puts a done step with no outcome in the marks', () => {
@@ -103,7 +104,7 @@ describe('readDigest: done, asks, documents', () => {
     setClock(ctx, t0 + 1 * DAY);
     const d = readDigest(ctx, project.slug);
     expect(d.marked).toEqual([{ id: step.id, title: 'Bare', marks: ['no_outcome'] }]);
-    expect(formatDigest(d, Date.parse(ctx.now()))).toContain(`Marks (1): #${step.id} no_outcome`);
+    expect(formatDigest(d, Date.parse(ctx.now()))).toContain(`Marks (1): #${step.id} Bare: no_outcome`);
   });
 });
 
