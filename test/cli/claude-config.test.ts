@@ -71,7 +71,7 @@ const withForeign = {
   hooks: { ...existing.hooks, SessionStart: [{ hooks: [foreignShell] }], PreToolUse: [{ matcher: 'Bash', hooks: [foreignExec] }] },
 };
 
-/** The CLI commands' rules (tasks, claim, ask, orchestrate, digest) for the fixture repo, written out as Claude Code's settings hold them. */
+/** The rules for each of CLI_SUBCOMMANDS for the fixture repo, written out as Claude Code's settings hold them. */
 const taskRules = CLI_SUBCOMMANDS.flatMap((sub) => [`Bash(node ${repo}/dist/cli/main.js ${sub} *)`, `PowerShell(node ${repo}/dist/cli/main.js ${sub} *)`]);
 /** A tasks rule an older checkout left behind. */
 const staleTaskRules = ['Bash(node D:/old/InProgress/dist/cli/main.js tasks *)', 'PowerShell(node D:/old/InProgress/dist/cli/main.js tasks *)'];
@@ -328,7 +328,7 @@ describe('install', () => {
     // Nothing could allow it, and another checkout's rules still go.
     expect(readSettings(dir).permissions.allow).toEqual(['Bash(git status)', ...STATIC_ALLOW_RULES]);
     expect(log).toContain(`Allow rules: ${STATIC_ALLOW_RULES.join(', ')}`);
-    expect(log.join('\n')).toMatch(/Left out the allow rules for the tasks, claim, ask, orchestrate and digest commands: the repo path .*ip repo-.* holds a space/);
+    expect(log.join('\n')).toMatch(/Left out the allow rules for the tasks, claim, ask, orchestrate, digest and outline commands: the repo path .*ip repo-.* holds a space/);
     expect(kitStatus({ repo: spaced, claudeDir: dir }).differs).not.toContain('settings');
     // The skill quotes the path, as the briefing does, so its command still runs (with a prompt).
     const skill = readFileSync(join(dir, 'skills', 'inprogress', 'SKILL.md'), 'utf8');
