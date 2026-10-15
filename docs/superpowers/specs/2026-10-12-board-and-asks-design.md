@@ -340,7 +340,7 @@ Board cell shows the same box.
   A change that only time makes (a session going stale) writes nothing, so a box whose stored state differs from the one
   it shows takes its age from `completed_at`, the oldest open ask's `raised_at`, or `updated_at`.
 - **Session line.** The session's title and "Open session ↗": the server runs `claude --desktop --resume <session id>`
-  (`POST /api/sessions/:id/open-desktop`); if that fails, the line shows the command on a code line with Copy.
+  (`POST /api/ui/sessions/:id/open-desktop`); if that fails, the line shows the command on a code line with Copy.
 
 ## 3. Sessions
 

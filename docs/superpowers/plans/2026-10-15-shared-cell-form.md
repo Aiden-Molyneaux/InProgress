@@ -58,7 +58,7 @@ Reference: the round-3 mock, `~/.inprogress/resources/inprogress/2026-10-15-shar
 
 ## Task 3: open a session in the desktop app [Sev, Sonnet]
 
-- Route in `src/server/routes/window.ts`, following that file's existing POST pattern (origin checks and schema validation as its other routes do): `POST /api/sessions/:id/open-desktop`. 400 unless the id matches a UUID; 404 unless the session exists. Spawn `claude` with `['--desktop', '--resume', id]` via `child_process.spawn`, `shell: false`, `windowsHide: true`; wait for exit up to 10 s. Exit 0 gives `{ ok: true }`; a spawn error, non-zero exit or timeout gives `{ ok: false, command: 'claude --desktop --resume <id>' }` (status 200). On Windows resolve `claude` the way the other spawned commands in `src/` do (grep `spawn(`); if none, `claude.exe` from PATH.
+- Route in `src/server/routes/window.ts`, following that file's existing POST pattern (origin checks and schema validation as its other routes do): `POST /api/ui/sessions/:id/open-desktop`. 400 unless the id matches a UUID; 404 unless the session exists. Spawn `claude` with `['--desktop', '--resume', id]` via `child_process.spawn`, `shell: false`, `windowsHide: true`; wait for exit up to 10 s. Exit 0 gives `{ ok: true }`; a spawn error, non-zero exit or timeout gives `{ ok: false, command: 'claude --desktop --resume <id>' }` (status 200). On Windows resolve `claude` the way the other spawned commands in `src/` do (grep `spawn(`); if none, `claude.exe` from PATH.
 - `web/src/api.ts`: `openDesktop(sessionId)`.
 - Tests: route test with the spawn injected (ok, non-zero, bad id, unknown id).
 
