@@ -38,6 +38,9 @@ export const toNode = (r: NodeRow): TreeNode => ({
   createdAt: r.created_at,
   updatedAt: r.updated_at,
   completedAt: r.completed_at,
+  boardState: null,
+  stateSince: null,
+  hue: null,
 });
 
 /** A step by id. A deleted project's steps are not found, so every read and write by id refuses them. */

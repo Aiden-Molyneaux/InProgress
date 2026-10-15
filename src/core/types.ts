@@ -1,3 +1,5 @@
+import type { TaskState } from './taskState';
+
 export const NODE_KINDS = ['goal', 'phase', 'task', 'question'] as const;
 export type NodeKind = (typeof NODE_KINDS)[number];
 /** A step's type label: what kind of work it is. Pick by purpose first (fix, refactor, research), else by where the work lands. */
@@ -167,6 +169,12 @@ export interface TreeNode {
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
+  /** The state the server's reconcile last stored (a TaskState); null until it first runs for the step. */
+  boardState: TaskState | null;
+  /** When `boardState` last changed. */
+  stateSince: string | null;
+  /** The task hue (0-6) held while the step is in a coloured state; null otherwise. */
+  hue: number | null;
 }
 
 export interface NodeInput {
