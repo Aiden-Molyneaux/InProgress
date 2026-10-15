@@ -681,7 +681,7 @@ describe('briefing: recently done and left unfinished', () => {
     expect(brief(ctx)).not.toContain('Left unfinished');
     handleHookEvent(ctx, 's2', { event: 'end' });
     // In progress first within a step, as under the focus. The step's own #id leaves the subject: the line names it once.
-    const expected = `Left unfinished by an earlier session: on #${a2.id}: "Check the upload key" · on #${s3.id}: "Price the tiers", "Wire the paywall"`;
+    const expected = `Left unfinished by an earlier session: on #${a2.id} ${a2.title}: "Check the upload key" · on #${s3.id} ${s3.title}: "Price the tiers", "Wire the paywall"`;
     expect(lineOf(brief(ctx), 'Left unfinished')).toBe(expected);
     expect(statusAnswer(ctx)).not.toContain('Left unfinished');
   });
@@ -695,7 +695,7 @@ describe('briefing: recently done and left unfinished', () => {
       handleHookEvent(ctx, 's2', { event: 'task-created', taskKey: key, subject });
     }
     handleHookEvent(ctx, 's2', { event: 'end' });
-    expect(lineOf(brief(ctx, 's1'), 'Left unfinished')).toBe(`Left unfinished by an earlier session: on #${a2.id}: "Review it", "#999 Not a step", "#${a2.id}"`);
+    expect(lineOf(brief(ctx, 's1'), 'Left unfinished')).toBe(`Left unfinished by an earlier session: on #${a2.id} ${a2.title}: "Review it", "#999 Not a step", "#${a2.id}"`);
   });
 
   it('leaves the line out when no ended session left work, and once the 7-day trail has passed', () => {
@@ -707,7 +707,7 @@ describe('briefing: recently done and left unfinished', () => {
     handleHookEvent(ctx, 's2', { event: 'task-created', taskKey: '1', subject: 'Review it' });
     handleHookEvent(ctx, 's2', { event: 'end' });
     tick(7 * DAY - 1);
-    expect(lineOf(brief(ctx), 'Left unfinished')).toBe(`Left unfinished by an earlier session: on #${a2.id}: "Review it"`);
+    expect(lineOf(brief(ctx), 'Left unfinished')).toBe(`Left unfinished by an earlier session: on #${a2.id} ${a2.title}: "Review it"`);
     tick(2);
     expect(brief(ctx)).not.toContain('Left unfinished');
   });

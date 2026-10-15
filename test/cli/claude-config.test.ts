@@ -204,7 +204,7 @@ describe('install', () => {
     expect(skill).toMatch(/^name: mip-orc$/m);
     // The commands start with the prefix the installed allow rules use, so none asks for permission.
     const allowed = readSettings(dir).permissions.allow as string[];
-    for (const sub of ['orchestrate', 'digest'] as const) {
+    for (const sub of ['orchestrate', 'digest', 'outline'] as const) {
       const prefix = cliPrefix(repoCli(repo), sub);
       expect(skill).toContain(`${prefix} `);
       expect(allowed).toContain(`Bash(${prefix} *)`);
@@ -528,7 +528,7 @@ describe('uninstall', () => {
   });
 
   it("removes the tasks rules of any checkout by their pattern, and leaves every other allow rule", () => {
-    const others = ['Bash(git status)', 'Bash(npm test:*)', 'Bash(node C:/tools/x.js tasks *)', 'Bash(node C:/x/dist/cli/main.js outline *)'];
+    const others = ['Bash(git status)', 'Bash(npm test:*)', 'Bash(node C:/tools/x.js tasks *)', 'Bash(node C:/x/dist/cli/main.js usage *)'];
     const dir = claudeDirWithSettings({ ...existing, permissions: { allow: others } });
     install({ repo, claudeDir: dir, stamp: 'ua' });
     // A rule left by another checkout, which uninstall (it takes no repo) must find too.
@@ -619,9 +619,9 @@ describe('kitStatus', () => {
 });
 
 describe('allow rules for every session command', () => {
-  it('are ten: two tools for each of tasks, claim, ask, orchestrate and digest', () => {
+  it('are twelve: two tools for each of tasks, claim, ask, orchestrate, digest and outline', () => {
     expect(cliAllowRules(repoCli(repo))).toEqual(taskRules);
-    expect(taskRules).toHaveLength(10);
+    expect(taskRules).toHaveLength(12);
     expect(cliAllowRules(repoCli('C:/My Repos/InProgress'))).toEqual([]);
   });
 

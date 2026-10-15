@@ -197,7 +197,7 @@ const NAMED_STEP_MAX = 40;
 const titleOf = (snapshot: ProjectSnapshot, id: number): string | undefined => snapshot.nodes.find((n) => n.id === id)?.title;
 
 /**
- * `Needs you (2): a7 ? on #42 "Which port?" (3d) · D waiting for permission on #45 (2m)`: open asks oldest first, then
+ * `Needs you (2): a7 ? on #42 Pick a port: "Which port?" (3d) · D waiting for permission on #45 Run the tests (2m)`: open asks oldest first, then
  * live permission waits (spec 1.4). `now` is the server's clock (ms).
  */
 export function needsYouLine(snapshot: ProjectSnapshot, now: number): string | undefined {
@@ -276,7 +276,7 @@ function leftUnfinished(snapshot: ProjectSnapshot, only?: number): { nodeId: num
 }
 
 /**
- * `Left unfinished by an earlier session: on #86: "Review it", "Write tests" · on #90: "Check the hint"`: the open tasks
+ * `Left unfinished by an earlier session: on #86 Ship the export: "Review it", "Write tests" · on #90 Hints: "Check the hint"`: the open tasks
  * of ended sessions (their subagents' too) on steps still open, by step in tree order, in progress first within a step,
  * MAX_LEFT_UNFINISHED subjects in all. The snapshot holds only sessions that ended within the 7-day trail. Undefined when
  * there are none.
@@ -287,7 +287,7 @@ function leftUnfinishedLine(snapshot: ProjectSnapshot): string | undefined {
   for (const { nodeId, items } of leftUnfinished(snapshot)) {
     const subjects = items.slice(0, room);
     if (!subjects.length) continue;
-    parts.push(`on #${nodeId}: ${subjects.map((i) => `"${withoutStepId(i.subject, nodeId)}"`).join(', ')}`);
+    parts.push(`on ${stepRef(nodeId, titleOf(snapshot, nodeId), NAMED_STEP_MAX)}: ${subjects.map((i) => `"${withoutStepId(i.subject, nodeId)}"`).join(', ')}`);
     room -= subjects.length;
     if (room === 0) break;
   }
@@ -300,7 +300,7 @@ export function leftUnfinishedOn(snapshot: ProjectSnapshot, nodeId: number): str
   return items.length ? `Left unfinished on #${nodeId} by an earlier session: ${items.map((i) => `"${withoutStepId(i.subject, nodeId)}"`).join(', ')}` : undefined;
 }
 
-/** `Other sessions here: A "title" (working, on #42) · ...`, or undefined when no other session is live. */
+/** `Other sessions here: A "title" (working, on #42 Pick a port) · ...`, or undefined when no other session is live. */
 export function othersLine(snapshot: ProjectSnapshot, sessionId: string, now: number): string | undefined {
   const others = snapshot.sessions.filter((s) => s.id !== sessionId && s.state !== 'ended');
   if (!others.length) return undefined;

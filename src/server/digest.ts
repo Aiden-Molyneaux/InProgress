@@ -230,8 +230,6 @@ export function formatCounts(d: Digest, now: number): string {
 interface Section {
   title: string;
   items: string[];
-  /** The separator between items on the compact, single-line form. */
-  joiner?: string;
 }
 
 function sessionItems(d: Digest, now: number): string[] {
@@ -315,7 +313,7 @@ export function formatDigest(d: Digest, now: number, o: { all?: boolean } = {}):
     omitted += s.items.length - shown.length;
     if (!shown.length) continue;
     const head = `${s.title} (${s.items.length}):`;
-    if (s.items.length <= COMPACT_MAX) lines.push(`${head} ${shown.join(s.joiner ?? ' · ')}`);
+    if (s.items.length <= COMPACT_MAX) lines.push(`${head} ${shown.join(' · ')}`);
     else lines.push(head, ...shown.map((i) => `  ${i}`));
   }
   if (omitted) lines.push(`+${omitted} more (inprogress digest ${d.project.slug} --since ${d.since} --all)`);

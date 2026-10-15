@@ -148,11 +148,11 @@ export function removeAllowRules(settings: Settings): Settings {
 
 /**
  * Fills a kit template. Replacer functions keep `$&`-style sequences in a path literal; every path gets forward slashes.
- * `{{TASKS}}`, `{{ORCHESTRATE}}` and `{{DIGEST}}` are those commands' prefixes from the helper the allow rules and the briefing use, so all three match (a repo path with a space is quoted the same way in each).
+ * `{{TASKS}}`, `{{ORCHESTRATE}}`, `{{DIGEST}}` and `{{OUTLINE}}` are those commands' prefixes from the helper the allow rules and the briefing use, so they all match (a repo path with a space is quoted the same way in each).
  */
 export function renderTemplate(text: string, repo: string): string {
-  const values: Record<string, string> = { REPO: repo, NODE: nodeBinary(), RESOURCES: `${homeDir()}/resources`, TASKS: taskPrefix(repoCli(repo)), ORCHESTRATE: cliPrefix(repoCli(repo), 'orchestrate'), DIGEST: cliPrefix(repoCli(repo), 'digest') };
-  return text.replace(/\{\{(REPO|NODE|RESOURCES|TASKS|ORCHESTRATE|DIGEST)\}\}/g, (_match, key: string) => values[key].replace(/\\/g, '/'));
+  const values: Record<string, string> = { REPO: repo, NODE: nodeBinary(), RESOURCES: `${homeDir()}/resources`, TASKS: taskPrefix(repoCli(repo)), ORCHESTRATE: cliPrefix(repoCli(repo), 'orchestrate'), DIGEST: cliPrefix(repoCli(repo), 'digest'), OUTLINE: cliPrefix(repoCli(repo), 'outline') };
+  return text.replace(/\{\{(REPO|NODE|RESOURCES|TASKS|ORCHESTRATE|DIGEST|OUTLINE)\}\}/g, (_match, key: string) => values[key].replace(/\\/g, '/'));
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
