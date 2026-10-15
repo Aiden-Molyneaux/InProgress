@@ -1,4 +1,5 @@
 import { deriveBoard, type Mark } from '../core/board';
+import { stepRef } from '../core/step-ref';
 import { ASK_GLYPHS, STALE_SESSION_MS, TRAIL_MS, askTag, sessionTag, type Ask, type ProjectSnapshot } from '../core/types';
 import type { Ctx } from './db/tx';
 import { listAsksClearedSince, listAsksRaisedSince } from './repo/asks';
@@ -201,8 +202,6 @@ const clip = (text: string, max = TEXT_MAX): string => {
   const line = text.replace(/\s+/g, ' ').trim();
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 };
-/** How much of a step's title a digest line keeps where the title only names the step. */
-const STEP_TITLE_MAX = 50;
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
 /** Sessions that ended without a handoff. */
@@ -267,8 +266,7 @@ function sessionItems(d: Digest, now: number): string[] {
 
 function sections(d: Digest, now: number): Section[] {
   const letterOf = new Map(d.sessions.map((s) => [s.id, s.letter]));
-  // `#42 Fix the export`: a bare id means nothing to Aiden, so every step named here carries its title.
-  const step = (id: number): string => (d.stepTitles[id] === undefined ? `#${id}` : `#${id} ${clip(d.stepTitles[id], STEP_TITLE_MAX)}`);
+  const step = (id: number): string => stepRef(id, d.stepTitles[id]);
   return [
     {
       title: 'Done',
@@ -290,12 +288,12 @@ function sections(d: Digest, now: number): Section[] {
     },
     { title: 'Sessions', items: sessionItems(d, now) },
     { title: 'Quick-added', items: d.quickAdds.map((n) => `#${n.id} ${clip(n.title, 60)}`) },
-    { title: 'Moved in Next', items: d.moves.map((m) => `${step(m.nodeId)} ${m.op === 'move' ? 'moved' : 'removed'}`), joiner: ', ' },
+    { title: 'Moved in Next', items: d.moves.map((m) => `${step(m.nodeId)} ${m.op === 'move' ? 'moved' : 'removed'}`) },
     {
       title: 'New documents',
       items: d.documents.map((r) => `r${r.id} "${clip(r.title, 60)}" on ${step(r.nodeId)}${r.purpose ? ` (${r.purpose})` : ''}`),
     },
-    { title: 'Marks', items: d.marked.map((m) => `#${m.id} ${clip(m.title, STEP_TITLE_MAX)}: ${m.marks.join(', ')}`) },
+    { title: 'Marks', items: d.marked.map((m) => `${stepRef(m.id, m.title)}: ${m.marks.join(', ')}`) },
   ];
 }
 
