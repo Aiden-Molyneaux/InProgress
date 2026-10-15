@@ -119,8 +119,8 @@ position like any other and carries a "you" badge.
 ### 1.4 Live permission waits
 
 A session in state `permission` (the Notification hook's live tool prompt) is not stored as an ask. Needs me shows it as a
-live row above the stored asks, built from session state: the session's letter, its step, "waiting for permission", the
-tool and the command head (from `session_commands`), and the wait's age.
+Permission box (section 2.9), built from session state: the session's title, its step, the command head (from
+`session_commands`), and the wait's age.
 
 ### 1.5 Position
 
@@ -142,9 +142,10 @@ Edge cases, each a unit test:
 - Done but still queued: Done. The queue entry stays stored and is filtered at read, as today, so a reopened step takes
   its old place.
 - Two sessions on one step: one Now row, two session lines, working before idle.
-- An open ask and no session: Next or Backlog, with the amber mark; "not ready" in Next.
+- An open ask and no session: Next or Backlog by position; the Board shows it in Needs me (section 2.9).
 - A live session's focus on a done step: Done; the step carries the `done_focus` mark.
-- A session that ended without closing its step: the step falls back to Next or Backlog with the `ended_open` mark.
+- A session that ended without closing its step: the step falls back to Next or Backlog with the `ended_open` mark; the
+  Board shows it in Now as Unattended while that session ended within the trail (section 2.9).
 
 ### 1.6 Hygiene marks
 
@@ -193,19 +194,25 @@ tests. Details, the resource viewer and go-to stay; go-to opens the step's Detai
   board. The hygiene count sits at the
   right.
 - **Columns, left to right: Needs me, Next, Now, Done.**
-- **Needs me.** Live permission waits first (section 1.4), then open asks oldest first: kind glyph, text clamped to two
-  lines, the step (#id and title), who raised it, age, and two buttons. Answer… opens a one-line field, and sending it
-  clears the ask with that answer; Clear clears it with no answer. A permission wait has no buttons: it ends when the
-  session goes on.
-- **Next.** The unowned queue numbered ①②③, then own-queue entries tagged with the session's letter. A step with an open
-  ask has the amber mark and reads "not ready". Aiden's own steps carry "you". On hover a row shows "back to Backlog".
+- **Needs me.** A task box (section 2.9) for each step waiting on Aiden, oldest wait first: a live permission wait
+  (section 1.4), an open question or an open review. A permission box shows its session line, "Allow a shell command",
+  the newest running command on a code line, and "Open session to allow"; it ends when the session goes on. An ask box
+  shows each open ask's text clamped to two lines with Answer… and Clear. Answer… opens a one-line field, and sending it
+  clears the ask with that answer; Clear clears it with no answer. A permission wait from a session with no claimed step
+  is a box with no id, titled by the session.
+- **Next.** Task boxes in queue order: the unowned queue, then each live session's own queue under "Queued by <session
+  title>". The pill reads Ready, or Blocked for a blocked step (Not ready with a reason is a later step). Aiden's own
+  steps carry "YOU". On hover a box shows "back to Backlog".
 - **Backlog** folds at the foot of the Next column: "Backlog · 14". Open, it lists one-line rows grouped by parent, each
   with "to Next" on hover, and a quick-add field at its foot (section 2.5).
-- **Now.** One row per step, arranged session first (section 2.8). Each session, working before idle: letter, state,
-  current task (its in-progress working task), running subagents with elapsed time. The step: crumb, title, label chip,
-  resource count `▤ n`, marks (amber ask, "you", handoff chip, hygiene).
-- **Done.** The last five done steps by `completed_at` (dropped excluded): title, label, age, outcome clamped to two lines,
-  marks (`no_outcome`, `done_focus`, and the amber mark for an open review ask), the "new since you looked" divider.
+- **Now.** One task box per step. Each live session on it, working before idle, is a session line and a block: its
+  in-progress working task, its newest command as "▸ label · when", and "n subagents", whose tooltip lists each running
+  subagent with its run time. An active step with no live session is Unattended: "No session is on it", and a system
+  line "Its last session ended 40m ago without closing it". It shows in Now while it is Aiden's own or its last session
+  ended within the trail (7 days); an older one stays in Next or Backlog.
+- **Done.** Task boxes for the last five done steps by `completed_at` (dropped excluded), with no session area: the
+  outcome clamped to two lines, marks (`no_outcome`, `done_focus`), and the "new since you looked" divider. A done step
+  with an open review ask is in Needs me instead.
 - **A click on any row** opens Details for the step, in place.
 - **Handoff chip.** A step with a handoff (a resource with `purpose = 'handoff'`) shows "handoff · 2d" for its newest one; a
   click opens it in the resource viewer.
@@ -295,22 +302,9 @@ C puts who and when first:
 - **Where we are.** The state note is pinned at the top as a message from the Orchestrator's character: "Orchestrator ·
   2h", the note's first sentence, and a "Project view ›" button. The sessions not on a Now row sit beside it (wide) or
   under it (narrow), headed "No claimed step".
-- **Needs me is an inbox.** A permission wait is an amber message: the session's character with the amber ring, "D is
-  waiting · ⚿ permission · 2m · LIVE", the tool and command head on a code line, and "on #id title". Each ask has a
-  header line ("B asks · ◎ review · 3h"; a dashed avatar and "migrated" when it has no session), its text clamped to two
-  lines, "on #id title", and Answer… and Clear.
-- **Now leads with the session.** Each session is a message: character, letter, state word, its current task as the
-  main line, and subagent chips with elapsed time at the right. The step is quoted under its sessions: "on #id title",
-  label chip, crumb, `▤ n`, marks. A Now step with no session (Aiden's own) reads "No session · YOU · Your step: nobody
-  is on it".
-- **Hygiene marks** read as a grey system line on the step ("B ended 3h ago without closing"). An `ended_open` step has
-  no live session, so section 1.5 puts it in Next or Backlog, never Now; the drafts show it in Now only because another
-  session still held the step.
-- **Next is a numbered rail.** Large numerals for the unowned queue; own-queue entries take the session's letter in the
-  rail, under "C's own queue". "not ready" and "you" sit on the row. The rail's foot reads "Backlog · n ▸" and "+ add";
-  open, Backlog groups its rows by parent and ends with the quick-add field.
-- **Done is a timeline.** Ages in a left column, ✓ dots on a vertical rule, outcomes clamped to two lines, and "New since
-  you looked" as a marker across the rule.
+- **The Board's four cells use the task box** of section 2.9 (#422), which replaced draft C's inbox messages, the
+  session-first Now messages, the numbered Next rail and the Done timeline. The Next column's foot still reads
+  "Backlog · n ▸" and "+ add"; open, Backlog groups its rows by parent and ends with the quick-add field.
 - **Project view.** The state note is a message at the head. Each section header carries a segmented bar (done, now,
   next, backlog) with its legend ("22 done · 2 now · 2 next · 2 backlog"), the progress count and `▤ n`; a folded
   section shows only its header and bar. The outline puts position in a left rail: a filled orange dot for Now with a
@@ -318,6 +312,35 @@ C puts who and when first:
   hollow ring for Backlog. Session letters sit at the right. Done children fold per parent, then "+ Add a step". The
   "Top level" section and "Done groups · n" come last. At 960 px and up, a left column holds the project name, the
   state note, a key to the rail and the Done groups, and the sections gain Label, Marks, Sessions and Docs columns.
+
+### 2.9 The task box (#422)
+
+Aiden's pick (2026-10-15): round 3 of the shared cell form mock (`2026-10-15-shared-cell-form-round-3.html`, r245). Every
+Board cell shows the same box.
+
+- **Skeleton.** A top line: `#id`, and at the right the cell's action when it has one ("back to Backlog" in Next), the
+  state pill, and the time in that state. The title, whose click opens Details. The cell's body. An optional grey system
+  line. A foot: marks ("YOU", the handoff chip), `▤ n`, and the label chip at the right. Board boxes carry no
+  characters, session letters, kind icons or crumb; when the step was created is in Details.
+- **One cell per task.** `src/core/taskState.ts` gives each step one state over its position (section 1.5), first match
+  wins: Permission (a live session waits for permission, or an open permission ask), Question or Review (the oldest
+  open ask's kind), Done, Working, Blocked, Idle (live sessions, none working), Unattended (active, no live session, and
+  Aiden's own or its last session ended within the trail), Ready (in Next), Backlog. Permission, Question and Review go
+  to Needs me; Done to Done; Working, Idle and Unattended to Now; Ready to Next; Backlog to Backlog; Blocked stays where
+  its position puts it.
+- **Pills.** Working is orange with a pulse; Question, Permission and Review are amber, and so is their box; Blocked is
+  red; Ready, Idle, Unattended, Done and Backlog are muted (Unattended dashed).
+- **Hue.** A step in any state but Backlog and Done wears one of seven hues on its box's left edge. It takes the hue the
+  fewest steps in the project hold when it first enters such a state, keeps it while it moves between them, and frees
+  it at Done or Backlog.
+- **Stored state.** Migration 11 adds nullable `board_state`, `state_since` and `hue` to `nodes` (`min_reader_version`
+  stays 1). Every write that records an event for a project reconciles that project's steps inside the same
+  transaction, in a savepoint: a step whose state changed gets the new state, `state_since` now, and its hue. The
+  reconcile records no events and never touches `updated_at`, and a failure in it is logged and never undoes the write.
+  A change that only time makes (a session going stale) writes nothing, so a box whose stored state differs from the one
+  it shows takes its age from `completed_at`, the oldest open ask's `raised_at`, or `updated_at`.
+- **Session line.** The session's title and "Open session ↗": the server runs `claude --desktop --resume <session id>`
+  (`POST /api/sessions/:id/open-desktop`); if that fails, the line shows the command on a code line with Copy.
 
 ## 3. Sessions
 
