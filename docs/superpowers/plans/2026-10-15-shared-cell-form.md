@@ -25,6 +25,20 @@ Reference: the round-3 mock, `~/.inprogress/resources/inprogress/2026-10-15-shar
 - `export interface TaskBox { row: BoardRow | null; session: Session | null; cell: TaskCell; state: TaskState }` (row null only for a focusless permission wait, whose `session` is set).
 - `export function taskBoxes(board: Board, input: BoardInput, now: number): Record<TaskCell, TaskBox[]>` applying the precedence above. Order: needs by the oldest open need (ask raisedAt, or the waiting session's lastSeenAt), then id; next in `board.next` order; now in `board.now` order, then the unattended rows that came from Next/Backlog in tree order; done in `board.done` order; backlog in `board.backlog` order.
 - `export function taskStateOf(row, input, now)`: the per-row state the reconcile stores (the same rule; one function both call).
+- State rules for `taskStateOf(row, input, now)`, first match wins (`row.sessions` are the live sessions focused on it, `row.asks` its open asks, oldest first):
+  1. permission: a session in `row.sessions` has state `permission`, or an open ask has kind `permission`.
+  2. question or review: `row.asks` is not empty; the oldest open ask's kind.
+  3. done: `node.status === 'done'`.
+  4. working: a session in `row.sessions` has state `working`.
+  5. blocked: `node.status === 'blocked'`.
+  6. idle: `row.sessions` is not empty.
+  7. unattended: `node.status === 'active'`, and its assignee is `me` or the newest past session focused on it (`input.pastSessions`, by `endedAt`) ended within `TRAIL_MS` of `now`.
+  8. ready: `row.column === 'next'`.
+  9. backlog: anything else.
+- Cell from state: permission, question and review go to needs; done to done; working, idle and unattended to now; ready to next; backlog to backlog; blocked stays in the column `deriveBoard` gave the row (now, next or backlog).
+- `TaskBox.session`: for permission, the session in `permission` state (null when only an ask raised it); otherwise `row.sessions[0] ?? null`.
+- A focusless permission wait: a live session (`isLive`) with state `permission` and `focusNodeId` null gives `{ row: null, session, cell: 'needs', state: 'permission' }`; its need time is the session's `lastSeenAt`. Among equal need times rows come before focusless boxes (rows by id, focusless by session id).
+- "Tree order" for the unattended rows that came from Next or Backlog: `dfsOrder(buildIndex(input.nodes))` from `src/core/tree.ts`.
 - Add `boardState: TaskState | null; stateSince: string | null; hue: number | null` to `TreeNode` (`src/core/types.ts:154`).
 - Tests: `test/core/taskState.test.ts`, a table over the precedence, the unattended rule (me / within TRAIL_MS / older), the focusless permission box, one cell per task.
 
@@ -35,8 +49,10 @@ Reference: the round-3 mock, `~/.inprogress/resources/inprogress/2026-10-15-shar
 - `src/server/repo/taskState.ts`, new: `reconcileProjects(ctx, projectIds: number[])`. Per project: read nodes, live sessions (no stale-expiry write; read the rows as `listProjectSessions` does without calling `expireStaleSessions`), past sessions, asks and resources; `deriveBoard` with `Date.parse(ctx.now())`; `taskStateOf` per row. For each node whose state differs from `board_state`:
   - `state_since` = `ctx.now()`, except on the first set (stored `board_state` null): done gives `completed_at`, an ask state gives the oldest open ask's `raised_at`, anything else `updated_at`.
   - hue: entering a coloured state with hue null takes the hue fewest coloured nodes in the project hold (ties: the lowest index); entering backlog or done sets hue null; moving between coloured states keeps it.
-  - Dropped nodes and the root: set all three to null if not already.
-- `src/server/db/tx.ts`: `Ctx` gains `reconcile?: (ctx: Ctx, projectIds: number[]) => void`. In `write()`, after `fn` returns and before the scribe counter reset, inside the transaction: collect distinct non-null `projectId`s from `pending`; if any and `ctx.reconcile` is set, call it in try/catch; on catch `console.error('[reconcile]', err)` and carry on.
+  - Dropped nodes, the root and groups (any node with no row in `board.byId`): set all three to null if not already.
+  - Process nodes in id order; the hue counts include the hues this reconcile has already given.
+  - The UPDATE sets only `board_state`, `state_since` and `hue`. It never touches `updated_at` and records no event.
+- `src/server/db/tx.ts`: `Ctx` gains `reconcile?: (ctx: Ctx, projectIds: number[]) => void`. In `write()`, after `fn` returns and before the scribe counter reset, inside the transaction: collect distinct non-null `projectId`s from `pending`; if any and `ctx.reconcile` is set, call it inside its own nested `ctx.db.transaction(...)` (better-sqlite3 makes that a SAVEPOINT, so a throw rolls back the reconcile's partial updates and nothing else), wrapped in try/catch; on catch `console.error('[reconcile]', err)` and carry on.
 - Set `ctx.reconcile = reconcileProjects` where the server creates its ctx (find `createCtx(` in `src/server/`), not in `createCtx` itself, so unrelated tests stay as they are.
 - Tests: `test/server/task-state.test.ts`: the migration adds the columns and a v10 reader rule still holds (follow the existing migration tests); state_since changes only on a change; first-set fallbacks; hue fewest-holders, kept between coloured states, freed at done and backlog; a reconcile that throws leaves the write committed; no events recorded by the reconcile.
 
@@ -49,7 +65,7 @@ Reference: the round-3 mock, `~/.inprogress/resources/inprogress/2026-10-15-shar
 ## Task 4: the box and the four cells [Sev, Sonnet]
 
 - `web/src/styles.css`: hue tokens `--hue-0` to `--hue-6` day and night from the mock; port the mock's task-box CSS (lines 100-142) with `ip-` prefixes: `ip-card` (and `st-working`, `st-needs`, `st-done`), `ip-card-top`, `ip-sid`, `ip-card-title`, `ip-sess`, `ip-block`, `ip-main`, `ip-cmd`, `ip-kin-count`, `ip-outcome`, `ip-sys`, `ip-foot`, `ip-st` with the state modifiers. Map the mock's `--active-fill`, `--active-line`, `--amber-fill`, `--red-fill` onto the window's existing tokens where they exist, adding only the missing ones. Remove the board-only rules the cells no longer use (`ip-msg`, `ip-quote`, `ip-crumb`, `ip-num`, `ip-rail` styling, `ip-timeline` dots), checking each with grep first.
-- `web/src/board/TaskBox.tsx`, new: the skeleton from the mock's `box()`: top (`#id`, right: `extra`, state pill, `ageShort(stateSince ?? fallback)`), the title button, the cell's body, an optional system line, the foot (`StepMarks` without the ask mark, the docs count, `LabelChip` pushed right). `style={{ '--hue': hue == null ? undefined : 'var(--hue-N)' }}`, none for done and backlog. Keeps `data-node` and `rowClick`.
+- `web/src/board/TaskBox.tsx`, new: the skeleton from the mock's `box()`: top (`#id`, right: `extra`, state pill, `ageShort(stateSince ?? fallback)`), the title button, the cell's body, an optional system line, the foot (`StepMarks` without the ask mark, the docs count, `LabelChip` pushed right). `style={{ '--hue': hue == null ? undefined : 'var(--hue-N)' }}`, none for done and backlog. The pill shows the state `taskBoxes` computed; the age uses `node.stateSince` only when `node.boardState` equals that state, else the fallback (`completedAt` for done, the oldest open ask's `raisedAt` for an ask state, `updatedAt` otherwise), since a time-only change (a session going stale) writes nothing. Keeps `data-node` and `rowClick`.
 - `SessionLine`: the session's display title and "Open session ↗" (`data-act`), which calls `openDesktop`; on `{ ok: false }` the line shows the command in `ip-code` with a Copy button (`navigator.clipboard.writeText`).
 - `NeedsMe.tsx`: boxes from `taskBoxes(...).needs`; body: the session line, then a permission block ("Allow a shell command", the newest running command in `ip-code`, "Open session to allow") or one ask block per open ask (text clamped to 2 lines, `AskActions`). No characters, letters or `KIND_MARK` (keep the export only if something outside the board imports it).
 - `NowColumn.tsx`: per session the session line and a block: the session's in-progress task, the command line as `▸ label · when` (from `commandLineParts`, without the tag), and "N subagents" whose `title` lists each running subagent's description and run time, one per line. Unattended: "No session is on it" and a system line "Its last session ended 40m ago without closing it" (rewrite `endedLine` in `text.ts` without the letter; check its other callers).
