@@ -59,6 +59,16 @@ export const createStep = (projectId: number, slug: string, title: string, paren
 export const deleteStep = (projectId: number, slug: string, nodeId: number): Promise<UiResult> =>
   postUi(`/api/ui/projects/${projectId}/nodes/${nodeId}/delete`, { slug });
 
+/**
+ * Opens a session in the Claude desktop app. When the server could not, the answer holds the command to copy. Never
+ * rejects: a refusal or an unreachable server gives the same command, built here.
+ */
+export async function openDesktop(sessionId: string): Promise<{ ok: true } | { ok: false; command: string }> {
+  const answer = await sendUi<{ ok: boolean; command?: string }>(`/api/ui/sessions/${encodeURIComponent(sessionId)}/open-desktop`, {});
+  if (typeof answer !== 'string' && answer.ok) return { ok: true };
+  return { ok: false, command: typeof answer !== 'string' && answer.command ? answer.command : `claude --desktop --resume ${sessionId}` };
+}
+
 /** Clears an ask, with an answer when Aiden typed one. */
 export const clearAsk = (askId: number, answer?: string): Promise<UiResult> => postUi(`/api/ui/asks/${askId}/clear`, answer === undefined ? {} : { answer });
 

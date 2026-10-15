@@ -3,12 +3,14 @@ import type { Guard } from '../app';
 import type { Ctx } from '../db/tx';
 import { STALE_SESSION_MS, type TreeNode } from '../../core/types';
 import { badRequest, conflict, notFound } from '../errors';
+import { desktopCommand, openInDesktop } from '../open-desktop';
+import { findSession } from '../repo/sessions';
 import { deleteProject, listDeletedProjects, restoreProject } from '../project-lifecycle';
 import { clearAsk } from '../repo/asks';
 import { recordQuiet } from '../repo/events';
 import { addNodes, deleteNode } from '../repo/nodes';
 import { applyQueueOp, changeProject, getProjectById, isQueued, resolveProject } from '../repo/projects';
-import { idParam, windowClearBody, windowEventBody, windowNodeBody, windowProjectBody, windowQueueBody, windowNodeParams, windowRenameBody, WINDOW_EVENT_KEYS } from '../schemas';
+import { idParam, sessionIdParam, windowClearBody, windowEventBody, windowNodeBody, windowProjectBody, windowQueueBody, windowNodeParams, windowRenameBody, WINDOW_EVENT_KEYS } from '../schemas';
 
 /** Who the window's writes are recorded as: fixed here, never taken from a header. */
 const ACTOR = 'window';
@@ -34,8 +36,16 @@ function notInBacklog(ctx: Ctx, projectId: number, n: TreeNode): string | null {
  * active project or an archived one (an active one is archived in the same write); delete and restore answer 409 on the
  * wrong state: already deleted, or not deleted.
  */
-export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: Guard): void {
+export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: Guard, openDesktop: (sessionId: string) => Promise<boolean> = openInDesktop): void {
   const guarded = { onRequest: requireUi };
+
+  // "Open session" on the Board: the Claude desktop app opens the session. When that fails the answer carries the command
+  // for the window to show (status 200: the request was fine, the launch was not).
+  app.post('/api/ui/sessions/:id/open-desktop', guarded, async (req) => {
+    const { id } = sessionIdParam.parse(req.params);
+    if (!findSession(ctx, id)) throw notFound(`Session ${id} not found`, 'Reload the window.');
+    return (await openDesktop(id)) ? { ok: true } : { ok: false, command: desktopCommand(id) };
+  });
 
   /**
    * The project the window means: the id it holds, checked against the slug it shows, since a purge frees the newest
