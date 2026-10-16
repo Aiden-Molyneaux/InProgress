@@ -371,6 +371,7 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
           <b>Outcome:</b> {node.outcome}
         </p>
       )}
+      <LiveWork nodeId={node.id} snapshot={snapshot} />
       {detail.resources.length > 0 && (
         <>
           <div className="ip-label">Resources</div>
@@ -382,7 +383,6 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
           ))}
         </>
       )}
-      <LiveWork nodeId={node.id} snapshot={snapshot} />
       {detail.children.length > 0 && (
         <>
           <div className="ip-label">Steps</div>

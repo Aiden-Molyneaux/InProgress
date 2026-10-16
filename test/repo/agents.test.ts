@@ -1,4 +1,4 @@
-// The routed agents (CLAUDE.md, Routing): each pins a full model id so a model change is deliberate, and sets an effort.
+// The roster's agents (.claude/skills/sigmund/SKILL.md, Model routing): each pins a full model id so a model change is deliberate, and sets an effort.
 // Overrides at dispatch pass aliases; the files never do.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -22,7 +22,7 @@ function frontmatter(file: string): Map<string, string> {
 
 describe('.claude/agents', () => {
   it('holds exactly the routed agents', () => {
-    expect(files).toEqual(['code-reviewer.md', 'explorer.md', 'implementer.md', 'screen-reviewer.md']);
+    expect(files).toEqual(['moh.md', 'murr.md', 'parvati.md', 'sev.md']);
   });
 
   for (const file of files) {
@@ -30,6 +30,8 @@ describe('.claude/agents', () => {
       const fm = frontmatter(file);
       expect(fm.get('name')).toBe(file.replace(/\.md$/, ''));
       expect(fm.get('description')?.length).toBeGreaterThan(40);
+      // A plain YAML scalar cannot hold ': ', and an agent whose frontmatter fails to parse never loads.
+      expect(fm.get('description'), 'quote a description that holds ": "').not.toMatch(/^[^"'>|].*: /);
       expect(fm.get('model')).toMatch(/^claude-[a-z]+-\d+(-\d+)?$/);
       expect(['low', 'medium', 'high', 'xhigh', 'max']).toContain(fm.get('effort'));
       expect(fm.get('tools')).toBeTruthy();

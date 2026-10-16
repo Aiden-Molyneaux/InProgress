@@ -405,6 +405,70 @@ test('the tabs hold every active project, oldest first, mark the current one and
   await expect(page).toHaveURL(new RegExp(`#/p/${newer.slug}$`));
 });
 
+test('a tab drags to a new place, Alt+arrows move the focused tab, and the order holds across a reload', async ({ page, api }) => {
+  await widen(page);
+  const names = [unique('Tabs drag a'), unique('Tabs drag b'), unique('Tabs drag c')];
+  await bare(api, names[0]);
+  const b = await bare(api, names[1]);
+  await bare(api, names[2]);
+  /** Our projects' titles, in strip order, among whatever other tests left. */
+  const ours = async (extra: string[] = []) => (await tabTitles(page)).filter((t) => [...names, ...extra].includes(t ?? ''));
+  await page.goto(`/#/p/${b.slug}`);
+  await expect(tabFor(page, names[2])).toBeVisible();
+  expect(await ours()).toEqual(names);
+  // The newest tab dragged onto the left half of the oldest lands before it.
+  await tabFor(page, names[2]).dragTo(tabFor(page, names[0]), { targetPosition: { x: 4, y: 10 } });
+  await expect.poll(() => ours()).toEqual([names[2], names[0], names[1]]);
+  // The drag did not open the tab: the selection stayed on b.
+  await expect(tabFor(page, names[1])).toHaveAttribute('aria-selected', 'true');
+  await page.reload();
+  await expect(tabFor(page, names[2])).toBeVisible();
+  expect(await ours()).toEqual([names[2], names[0], names[1]]);
+  // Alt+Right moves the focused tab one place right and leaves focus on it. It neither selects a tab nor goes back.
+  await tabFor(page, names[0]).focus();
+  await page.keyboard.press('Alt+ArrowRight');
+  await expect.poll(() => ours()).toEqual([names[2], names[1], names[0]]);
+  await expect(tabFor(page, names[0])).toBeFocused();
+  await expect(tabFor(page, names[1])).toHaveAttribute('aria-selected', 'true');
+  await expect(page).toHaveURL(new RegExp(`#/p/${b.slug}$`));
+  // A tab dragged to the right keeps the focus its press gave it, so the keys still reach the strip. Chromium keeps it
+  // even without TabStrip's refocus after a drop, so this checks the outcome, not that guard.
+  const last = (await tabFor(page, names[0]).boundingBox())!;
+  await tabFor(page, names[2]).dragTo(tabFor(page, names[0]), { targetPosition: { x: last.width - 4, y: 10 } });
+  await expect.poll(() => ours()).toEqual([names[1], names[0], names[2]]);
+  await expect(tabFor(page, names[2])).toBeFocused();
+  // A project made after the move joins at the end.
+  const fourth = unique('Tabs drag d');
+  await bare(api, fourth);
+  await expect(tabFor(page, fourth)).toBeVisible();
+  expect(await ours([fourth])).toEqual([names[1], names[0], names[2], fourth]);
+});
+
+test('a tab dragged near the edge of a narrow strip scrolls it', async ({ page, api }) => {
+  await page.setViewportSize({ width: 420, height: 900 });
+  const names = [1, 2, 3, 4, 5].map((n) => unique(`Tabs edge ${n}`));
+  for (const name of names) await bare(api, name);
+  await page.goto('/');
+  await expect(tabFor(page, names[4])).toBeAttached();
+  // The window has opened a project and revealed its tab, so nothing else scrolls the strip from here.
+  await expect(page.getByRole('tab', { selected: true })).toHaveCount(1);
+  expect(await page.evaluate<boolean>(`${STRIP}.scrollWidth > ${STRIP}.clientWidth`), 'the tabs overflow').toBe(true);
+  await page.evaluate(`${STRIP}.scrollLeft = 0`);
+  const box = (await page.locator('.ip-tabs').boundingBox())!;
+  expect(box.x + box.width, 'the strip ends inside the window').toBeLessThanOrEqual(420);
+  const first = (await page.getByRole('tab').first().boundingBox())!;
+  await page.mouse.move(first.x + first.width / 2, first.y + first.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 4 });
+  for (let i = 0; i < 10; i++) await page.mouse.move(box.x + box.width / 2 - (i % 2), box.y + box.height / 2);
+  expect(await stripScroll(page), 'the middle of the strip does not scroll it').toBe(0);
+  // Held a few pixels inside the right edge. Chromium (Edge hosts the window) scrolls a scroll box under a drag near its
+  // edge, so the strip has no code of its own for this. The test guards that the strip stays such a box.
+  for (let i = 0; i < 10; i++) await page.mouse.move(box.x + box.width - 4 - (i % 2), box.y + box.height / 2);
+  await expect.poll(() => stripScroll(page)).toBeGreaterThan(0);
+  await page.mouse.up();
+});
+
 test('a tab shows how many items need you and, while a session works there, a pulsing dot', async ({ page, api }) => {
   const busyName = unique('Tabs busy');
   const quietName = unique('Tabs quiet');
@@ -1357,14 +1421,26 @@ test("a tab's dot also shows while an idle session has a running worker, but not
 const RUNNING = '(<1 min|\\d+ min)';
 
 test.describe('Live work', () => {
-  test("Details lists the node's working tasks with who is on each, and the subagents on it", async ({ page, api, fresh }) => {
+  test("Details lists the node's working tasks with who is on each, and the subagents on it, before its resources, each on its own row", async ({ page, api, fresh }) => {
     await subagent(api, fresh, 'agent-1', 'Draft the store notes', 'sonnet');
     await task(api, fresh, '1', 'Upload the key', 'in_progress');
     await task(api, fresh, '2', 'Check the release track');
     await hook(api, fresh.session, { event: 'task-updated', taskKey: '1', addBlocks: ['2'] });
     await task(api, fresh, '1', 'Collect the screenshots', 'pending', 'agent-1');
+    await write(api, fresh.session, 'post', '/api/resources', { nodeId: fresh.ids['Play app signing'], kind: 'doc', title: 'Signing notes', content: '# Notes' });
     await open(page, fresh);
     const details = await openDetails(page, 'Play app signing');
+    // The live work reads before the step's resources.
+    await expect(details.locator('.ip-label')).toHaveText(['Working tasks', 'Subagents', 'Resources']);
+    // Each entry sits on its own soft row, and the heads read in --text-2, so sections and entries read apart.
+    for (const entry of [details.locator('.ip-wt').first(), details.locator('.ip-dagent'), details.locator('.ip-res')]) {
+      await expect(entry).toHaveCSS('background-color', 'rgba(15, 23, 42, 0.05)');
+    }
+    await expect(details.locator('.ip-label').first()).toHaveCSS('color', 'rgb(30, 41, 59)');
+    // A resource's row deepens on hover and its title takes full ink.
+    await details.locator('.ip-res').hover();
+    await expect(details.locator('.ip-res')).toHaveCSS('background-color', 'rgba(15, 23, 42, 0.08)');
+    await expect(details.locator('.ip-res b')).toHaveCSS('color', 'rgb(15, 23, 42)');
     // Anchored: the next row's "after Upload the key" names it too.
     await expect(details.locator('.ip-wt', { hasText: /^◐ Upload the key/ })).toHaveText('◐ Upload the key · E2E session');
     await expect(details.locator('.ip-wt', { hasText: 'Check the release track' })).toHaveText('○ Check the release track · E2E session · after Upload the key');
@@ -1793,6 +1869,36 @@ test.describe('Board', () => {
     await expect(band(page, 'done').getByRole('button', { name: 'Newer step', exact: true })).toBeVisible();
     await expect(band(page, 'done').getByRole('button', { name: 'Older step', exact: true })).toHaveCount(0);
     await expect(band(page, 'done').locator('.ip-done-fold')).toHaveText('✓ 4 earlier');
+  });
+
+  test('All done opens the full list by time or by phase, a row opens Details, and Back returns to the Done column', async ({ page, api, fresh }) => {
+    const titles = Array.from({ length: 7 }, (_, i) => `Listed step ${i + 1}`);
+    await write(api, fresh.session, 'post', '/api/nodes', {
+      parentId: fresh.root,
+      nodes: [{ title: 'Release prep', children: titles.map((title) => ({ title, status: 'done' as const })) }],
+    });
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    await expect(band(page, 'done').locator('.ip-done-row')).toHaveCount(5);
+    await band(page, 'done').getByRole('button', { name: /^All done · [0-9]+ ›$/ }).click();
+    await expect(page.getByRole('button', { name: '‹ Board' })).toBeFocused();
+    await expect(page.locator('.ip-board')).toHaveCount(0);
+    for (const title of titles) await expect(page.getByRole('button', { name: title, exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible();
+    await page.getByRole('button', { name: 'Phase', exact: true }).click();
+    await expect(page.getByRole('heading', { name: /^Release prep · 7$/ })).toBeVisible();
+    await page.getByRole('button', { name: 'Listed step 3', exact: true }).click();
+    const details = page.getByRole('complementary');
+    await expect(details).toContainText('Listed step 3');
+    await page.keyboard.press('Escape');
+    await expect(details).toHaveCount(0);
+    await page.getByRole('button', { name: '‹ Board' }).click();
+    await expect(band(page, 'done')).toBeVisible();
+    await expect(band(page, 'done').getByRole('button', { name: /^All done · [0-9]+ ›$/ })).toBeFocused();
+    // A reload lands on the Board, and the list opens again in the order picked last.
+    await page.reload();
+    await band(page, 'done').getByRole('button', { name: /^All done · [0-9]+ ›$/ }).click();
+    await expect(page.getByRole('button', { name: 'Phase', exact: true })).toHaveAttribute('aria-pressed', 'true');
   });
 
   test('leaving the window stamps the last look under ip.look.<id>', async ({ page, api, fresh }) => {

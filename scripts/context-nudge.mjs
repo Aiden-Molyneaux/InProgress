@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // PostToolBatch hook, registered in .claude/settings.json. Claude cannot see its own context size, so this tells
-// the main session when it crosses 150k and again at 160k, the points where CLAUDE.md asks it to cut at the next
+// the main session when it crosses 150k and again at 160k, the points where Sigmund (Across the session) asks it to cut at the next
 // clean point. It keeps the highest level it has announced for each session in a small file, so a level is said once
 // and a turn that ended without a tool call cannot hide a crossing; a fall below 150k (a compaction) re-arms it. A
 // session's first run writes that file too, which is how a pilot checks the hook runs. Silent otherwise, silent
@@ -11,8 +11,8 @@ import path from 'node:path';
 
 /** Highest level first: the first one the context has reached is the one due. */
 const LINES = [
-  [160_000, 'Context is about 160k tokens. Cut the session at the next clean point: write the handoff, offer the next session, and stop. On an unattended overnight run, write the handoff and carry on with the next queued item instead. (CLAUDE.md, Session rhythm)'],
-  [150_000, "Context is about 150k tokens. Finish what you're on, then at the next clean point (a merge, or a finished plan task with everything committed) write the handoff and cut the session. On an unattended overnight run, write the handoff and carry on instead. (CLAUDE.md, Session rhythm)"],
+  [160_000, 'Context is about 160k tokens. Cut the session at the next clean point: write the handoff, offer the next session, and stop. On an unattended overnight run, write the handoff and carry on with the next queued item instead. (.claude/skills/sigmund/SKILL.md, Across the session)'],
+  [150_000, "Context is about 150k tokens. Finish what you're on, then at the next clean point (a merge, or a finished plan task with everything committed) write the handoff and cut the session. On an unattended overnight run, write the handoff and carry on instead. (.claude/skills/sigmund/SKILL.md, Across the session)"],
 ];
 const STATE_DIR = process.env.CONTEXT_NUDGE_STATE_DIR || path.join(os.tmpdir(), 'claude-context-nudge');
 const TAIL = 512 * 1024;
