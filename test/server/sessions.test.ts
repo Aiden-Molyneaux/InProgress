@@ -1037,7 +1037,7 @@ describe('the full briefing on the first tracked prompt after an enroll', () => 
     const { ctx, project, tick } = projects();
     handleHookEvent(ctx, 's1', start());
     handleHookEvent(ctx, 's2', start());
-    // s2 as from before migration 4. Past the stale limit its stop takes the lowest free slot, s1's A: s1 is stale, and
+    // s2 as from before migration 4. Past the stale limit its stop takes the lowest free slot, slot 0, s1's: s1 is stale, and
     // no snapshot read has marked it ended (a stop renders nothing).
     ctx.db.prepare("UPDATE sessions SET slot = NULL WHERE id = 's2'").run();
     tick(12 * 60 * 60 * 1000 + 60_000);
