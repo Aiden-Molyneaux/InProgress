@@ -144,7 +144,7 @@ export const MIGRATIONS: string[] = [
   -- Only a nullable column: v1 and v2 builds can still read and write this schema, so a rollback across it works.
   INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
   `,
-  // 4: session identity. A session's slot (its letter and hue: 0 is A) and a subagent's number within its session (the
+  // 4: session identity. A session's slot (its place in sort ties: 0 first) and a subagent's number within its session (the
   // 1 in a1). NULL for rows from before this migration. No unique index on (project_id, slot): a rolled-back v3 build
   // reviving a session would hit it, so the code keeps two live sessions of a project off one slot.
   `
@@ -162,7 +162,7 @@ export const MIGRATIONS: string[] = [
   INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
   `,
   // 6: briefing due. 1 while a session owes its next prompt the full briefing: it joined a project through an enroll (a
-  // new session, a repoint, an ended session) or came back into another letter. NULL otherwise, and for rows
+  // new session, a repoint, an ended session) or, in a scoped project, the scribe moved its focus. NULL otherwise, and for rows
   // from before this migration.
   `
   ALTER TABLE sessions ADD COLUMN briefing_due INTEGER;

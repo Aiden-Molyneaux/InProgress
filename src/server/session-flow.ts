@@ -89,15 +89,6 @@ function placeSlot(ctx: Ctx, before: Session, next: Session): void {
   else if (next.state !== 'ended') next.slot = assignSlot(ctx, next.id, next.projectId, before.slot);
 }
 
-/**
- * After placeSlot, for a flow that is not a hook event (setFocus, enrollSession): a session live after it in another
- * slot holds a briefing that names its old letter or none, so its next real prompt brings a fresh one, as the hook path
- * marks it (review-actions ruling 40). markBriefingDue is idempotent.
- */
-function markIfRelettered(ctx: Ctx, before: Session, next: Session): void {
-  if (next.state !== 'ended' && before.slot !== next.slot) markBriefingDue(ctx, next.id);
-}
-
 /** An answer on one line, at most 300 characters with the ellipsis inside them. */
 function oneLine(text: string): string {
   const line = text.replace(/\s+/g, ' ').trim();
@@ -284,10 +275,6 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
       const node = findNode(ctx, nodeId);
       if (node) record({ projectId: node.projectId, type: 'work.updated', entity: 'node', entityId: nodeId, data: { nodeId } });
     }
-    // A session live after this event in another letter (back from ended, or from past the stale limit before expiry
-    // marked it ended, or given its first slot) holds a briefing that names the old letter or none: its next prompt
-    // brings a fresh one (review-actions ruling 35). A start carries the full briefing already.
-    if (input.event !== 'start' && after.state !== 'ended' && before.slot !== after.slot) markBriefingDue(ctx, sessionId);
     // Decided here, rendered after commit: the snapshot read may open its own write (stale expiry). Any response that
     // carries the full briefing clears the marker, so it arrives once; a background-task notice is not a prompt Aiden
     // typed, and leaves it for the next one (ruling 27). Nothing is decided for a project that is not active, which gets
@@ -306,7 +293,7 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
   const projectId = session.projectId!;
   // Needs-you ages count to the server's clock (ctx.now), never the wall clock behind it.
   // A session that has just begun tracking gets the full briefing, whichever event brought it in, and so does the first
-  // real prompt after an enroll or a revival into another letter. Every one but a compaction's is fresh, and asks about
+  // real prompt after an enroll. Every one but a compaction's is fresh, and asks about
   // old needs-you items: a session first tracked by a prompt (its start was missed), a start with a missing or unknown
   // source, and an owed briefing count as new. An owed briefing is the enroll's even when a compaction's start brings
   // it: the one the enroll returned went to the scribe.
@@ -352,9 +339,8 @@ export function enrollSession(ctx: Ctx, actor: string, sessionId: string, projec
     saveSession(ctx, next);
     // The briefing returned below goes to the scribe, which passes on its first line only: the session's next real
     // prompt brings the full one. A live session re-enrolled where it already is keeps what it has, due or not (ruling
-    // 29), unless placeSlot just gave it another letter (ruling 40).
+    // 29), even when placeSlot gives it another slot: the briefing names no slot (#450).
     if (isNew || before.projectId !== project.id || before.state === 'ended') markBriefingDue(ctx, sessionId);
-    markIfRelettered(ctx, before, next);
     // Tell the old project's viewers too, so they drop this session's badge.
     if (before.projectId !== null && before.projectId !== project.id) {
       record({ projectId: before.projectId, type: 'session.updated', entity: 'session', entityId: sessionId, data: { changed: ['projectId'], state: next.state } });
@@ -445,7 +431,6 @@ function applyFocus(ctx: Ctx, record: RecordEvent, sessionId: string, nodeId: nu
   saveSession(ctx, next);
   // A subagent that started while the session had no focus stays on this first one (session.updated below refetches).
   pinStartFocus(ctx, sessionId, nodeId);
-  markIfRelettered(ctx, existing, next);
   record({ projectId, type: 'session.updated', entity: 'session', entityId: sessionId, data: { changed: ['focusNodeId'], focusNodeId: nodeId } });
   return { existing, projectId, drive, from };
 }
