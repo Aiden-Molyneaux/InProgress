@@ -342,11 +342,20 @@ li.ip-orow:hover { background: var(--panel-2); }
 .ip-divider::before { content: ''; position: absolute; left: -9px; right: 0; top: 7px; height: 1px; background: var(--active-line); }
 .ip-divider span { position: relative; padding: 0 6px 0 0; background: var(--bg); }
 .ip-done-fold { margin-left: 52px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
-/* Next: a numbered rail, own-queue entries under their session's letter, and the Backlog fold at its foot. */
+/* Next: a numbered rail, own-queue entries under their session's letter, and the Backlog fold at its foot. A hairline
+   between rows and the step id before each title keep neighbouring entries apart (#400). */
 .ip-next { min-height: 48px; }
-.ip-rail { display: flex; flex-direction: column; gap: 2px; }
+.ip-rail { display: flex; flex-direction: column; }
 .ip-next-row, .ip-backlog-row { position: relative; border-radius: var(--radius); }
-.ip-next-row { display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: 8px; align-items: start; padding: 4px 6px; }
+.ip-next-row { display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: 8px; align-items: start; padding: 8px 6px; }
+.ip-next-row + .ip-next-row { border-top: 1px solid var(--border); border-top-left-radius: 0; border-top-right-radius: 0; }
+.ip-title-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; max-width: 100%; }
+.ip-title-line .ip-row-title { min-width: 0; }
+.ip-backlog-row .ip-confirm { max-width: none; }
+.ip-confirm:focus { outline: none; }
+.ip-backlog-row.pending { opacity: .5; }
+.ip-backlog-row.pending .ip-hover-act { display: none; }
+.ip-step-id { flex: none; font-family: var(--font-mono); font-size: var(--fs-s); line-height: 18px; color: var(--muted); }
 .ip-next-row:hover, .ip-backlog-row:hover { background: var(--panel-2); }
 .ip-next-row.dragging, .ip-backlog-row.dragging { opacity: .5; }
 .ip-next-row.drop-before { box-shadow: 0 -2px 0 var(--text-2); }
@@ -361,6 +370,7 @@ li.ip-orow:hover { background: var(--panel-2); }
 /* The row's own buttons show on hover and whenever focus is inside the row, so Tab reaches them and shows them. */
 .ip-hover-act { margin-left: auto; height: 18px; padding: 0 6px; border: 1px solid var(--border); border-radius: var(--radius); font-size: var(--fs-s); line-height: 14px; color: var(--muted); background: var(--bg); opacity: 0; }
 .ip-row:hover .ip-hover-act, .ip-row:focus-within .ip-hover-act, .ip-hover-act:focus-visible { opacity: 1; }
+.ip-hover-act + .ip-hover-act { margin-left: 4px; }
 .ip-hover-act:hover { color: var(--text); background: var(--panel-2); }
 .ip-hover-act:focus-visible, .ip-fold:focus-visible, .ip-quick-add:focus { outline: 2px solid var(--text-2); outline-offset: 1px; }
 .ip-backlog { margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border); border-radius: var(--radius); }

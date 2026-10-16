@@ -1,16 +1,31 @@
 import type { FastifyInstance } from 'fastify';
 import type { Guard } from '../app';
 import type { Ctx } from '../db/tx';
+import { STALE_SESSION_MS, type TreeNode } from '../../core/types';
 import { badRequest, conflict, notFound } from '../errors';
 import { deleteProject, listDeletedProjects, restoreProject } from '../project-lifecycle';
 import { clearAsk } from '../repo/asks';
 import { recordQuiet } from '../repo/events';
-import { addNodes } from '../repo/nodes';
-import { applyQueueOp, changeProject, getProjectById, resolveProject } from '../repo/projects';
-import { idParam, windowClearBody, windowEventBody, windowNodeBody, windowProjectBody, windowQueueBody, windowRenameBody, WINDOW_EVENT_KEYS } from '../schemas';
+import { addNodes, deleteNode } from '../repo/nodes';
+import { applyQueueOp, changeProject, getProjectById, isQueued, resolveProject } from '../repo/projects';
+import { idParam, windowClearBody, windowEventBody, windowNodeBody, windowProjectBody, windowQueueBody, windowNodeParams, windowRenameBody, WINDOW_EVENT_KEYS } from '../schemas';
 
 /** Who the window's writes are recorded as: fixed here, never taken from a header. */
 const ACTOR = 'window';
+
+/**
+ * Why a step is not one the Backlog shows, or null when it is: done or dropped, worked on (a live session's focus, or
+ * Aiden's own active step), or queued. The same rule as deriveBoard's Backlog column (src/core/board.ts): change both
+ * together.
+ */
+function notInBacklog(ctx: Ctx, projectId: number, n: TreeNode): string | null {
+  if (n.status === 'done' || n.status === 'dropped') return `is ${n.status}`;
+  const cutoff = new Date(Date.parse(ctx.now()) - STALE_SESSION_MS).toISOString();
+  const focused = ctx.db.prepare("SELECT 1 FROM sessions WHERE focus_node_id = ? AND state != 'ended' AND last_seen_at >= ?").get(n.id, cutoff) !== undefined;
+  if (focused || (n.assignee === 'me' && n.status === 'active')) return 'is being worked on';
+  if (isQueued(ctx, projectId, n.id)) return 'is in Next';
+  return null;
+}
 
 /**
  * The window's own writes: archive, unarchive, rename, delete and restore, behind requireUi (the window has no bearer
@@ -79,6 +94,21 @@ export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: 
       },
     });
     return { node };
+  });
+  // Delete a step from the tree (the Backlog's Delete). Never one with steps under it: those may be done, and deleting
+  // them would lose their history. Asks, resources and logs go with it (FK cascade); the queue drops it on read.
+  app.post('/api/ui/projects/:id/nodes/:node/delete', guarded, async (req) => {
+    const { node } = windowNodeParams.parse(req.params);
+    const projectId = target(req.params, req.body);
+    // A deleted project is not found (404), as for the queue route.
+    resolveProject(ctx, projectId);
+    // Checked inside deleteNode's own write, so a step moved or given children in between cannot slip through.
+    return deleteNode(ctx, ACTOR, node, false, (n, ids) => {
+      if (n.projectId !== projectId) throw badRequest(`#${node} is not in this project`, 'Reload the window.');
+      if (ids.length > 1) throw badRequest(`#${node} has steps under it`, 'Move or delete them first.');
+      const why = notInBacklog(ctx, projectId, n);
+      if (why) throw badRequest(`#${node} ${why}`, 'Reload the window.');
+    });
   });
   // Idempotent (spec 1.2): clearing twice answers the same; a 404 for an ask that does not exist.
   app.post('/api/ui/asks/:id/clear', guarded, async (req) => {

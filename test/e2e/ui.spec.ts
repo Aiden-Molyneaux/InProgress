@@ -1750,7 +1750,7 @@ test.describe('Board', () => {
     await expect(page.locator('.ip-crumb')).toHaveCount(0);
   });
 
-  test('the header shows the state note as the Orchestrator and opens the Project view, and lists a working session with no step', async ({ page, api, fresh }) => {
+  test('the header shows the state note as the Orchestrator with no Project view button, and lists a working session with no step', async ({ page, api, fresh }) => {
     await write(api, fresh.session, 'post', '/api/resources', { nodeId: fresh.root, kind: 'doc', title: 'State', purpose: 'state', content: '# Where we are\n\nSigning is half done. The tests come next.' });
     const second = `e2e-${randomUUID()}`;
     await write(api, second, 'post', `/api/sessions/${second}/enroll`, { project: fresh.slug, title: 'Second session' });
@@ -1766,8 +1766,7 @@ test.describe('Board', () => {
     await expect(sessions).toContainText('working');
     // The first session is on a Now row, so it is not listed here.
     await expect(sessions.locator('.ip-hdr-session')).toHaveCount(1);
-    await header.getByRole('button', { name: 'Project view ›' }).click();
-    await expect(page.getByRole('region', { name: 'Sections' })).toBeVisible();
+    await expect(header.getByRole('button')).toHaveCount(0);
   });
 
   test('a permission wait is an amber message with the ringed character, the command and the step, and a Now row says needs permission', async ({ page, api, fresh }) => {
@@ -2114,6 +2113,64 @@ test.describe('Board', () => {
     await expect(next.getByRole('button', { name: /^Backlog · \d+ [▸▾]$/ })).toBeVisible();
   });
 
+  test('Backlog "Delete…" asks first, Escape and Cancel keep the step, Delete removes it from the tree', async ({ page, fresh, consoleErrors }) => {
+    consoleErrors.allow(/status of 400/);
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const next = band(page, 'next');
+    const fold = next.getByRole('button', { name: /^Backlog · \d+ [▸▾]$/ });
+    await fold.click();
+    const id = fresh.ids['6 Beta'];
+    const title = next.getByRole('button', { name: '6 Beta', exact: true });
+    const row = next.locator('.ip-backlog-row', { has: page.getByRole('button', { name: '6 Beta', exact: true }) });
+    const del = row.getByRole('button', { name: 'Delete…' });
+    const dialog = page.getByRole('dialog', { name: `Delete #${id} 6 Beta?` });
+    await expect(del).toHaveCSS('opacity', '0');
+    await title.focus();
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Tab');
+    await expect(del).toBeFocused();
+    await expect(del).toHaveCSS('opacity', '1');
+    await page.keyboard.press('Enter');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(del).toBeFocused();
+    await expect(title).toBeVisible();
+    // A click on the question keeps focus in the dialog, so Escape still closes it.
+    await page.keyboard.press('Enter');
+    await dialog.locator('b').click();
+    // Nor does a click on the confirming row's own padding open Details.
+    await next.locator(`li[data-node="${id}"]`).click({ position: { x: 2, y: 2 } });
+    await expect(page.getByRole('complementary')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(del).toBeFocused();
+    // A refused delete keeps the row, says why, and puts focus back on its Delete button.
+    const nodeDelete = '**/api/ui/projects/*/nodes/*/delete';
+    await page.route(nodeDelete, (route) => route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'Refused for the test', hint: 'Reload the window.' }) }));
+    await page.keyboard.press('Enter');
+    await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(page.getByText('Refused for the test').first()).toBeVisible();
+    await expect(del).toBeFocused();
+    await expect(next.locator(`li[data-node="${id}"]`)).not.toHaveClass(/pending/);
+    await page.unroute(nodeDelete);
+    // Details open on the step: deleting it closes Details, and a click on the open confirm does not open one.
+    await title.click();
+    await expect(page.getByRole('complementary')).toHaveCount(1);
+    await del.focus();
+    await page.keyboard.press('Enter');
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(next.getByRole('button', { name: '6 Beta', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('complementary')).toHaveCount(0);
+    await page.reload();
+    if ((await fold.getAttribute('aria-expanded')) !== 'true') await fold.click();
+    await expect(next.getByRole('button', { name: '7 Launch', exact: true })).toBeVisible();
+    await expect(next.getByRole('button', { name: '6 Beta', exact: true })).toHaveCount(0);
+  });
+
   test('drag: Backlog into Next, within Next, and Next back to Backlog, without opening Details', async ({ page, fresh }) => {
     await page.setViewportSize(WIDE);
     await open(page, fresh);
@@ -2128,10 +2185,15 @@ test.describe('Board', () => {
     await backlogRow('6 Beta').dragTo(nextRow('5 Store listing'), { targetPosition: { x: 40, y: 2 } });
     await expect(nextRow('6 Beta').locator('.ip-num')).toHaveText('①');
     await expect(nextRow('5 Store listing').locator('.ip-num')).toHaveText('②');
-    // Within Next: the bottom half of the last row puts it last.
-    await nextRow('6 Beta').dragTo(nextRow('5 Store listing'), { targetPosition: { x: 40, y: 30 } });
+    // Within Next: the bottom half of the last row puts it last. Measured, since the row's height follows its padding.
+    const last = (await nextRow('5 Store listing').boundingBox())!;
+    await nextRow('6 Beta').dragTo(nextRow('5 Store listing'), { targetPosition: { x: 40, y: last.height - 6 } });
     await expect(nextRow('5 Store listing').locator('.ip-num')).toHaveText('①');
     await expect(nextRow('6 Beta').locator('.ip-num')).toHaveText('②');
+    // Each row shows its step id, and a hairline sits between neighbouring rows (#400).
+    await expect(nextRow('6 Beta').locator('.ip-step-id')).toHaveText(`#${fresh.ids['6 Beta']}`);
+    await expect(nextRow('6 Beta')).toHaveCSS('border-top-style', 'solid');
+    await expect(nextRow('5 Store listing')).toHaveCSS('border-top-style', 'none');
     await expect(page.getByRole('complementary')).toHaveCount(0);
     // The queue was written.
     await page.reload();
@@ -2314,14 +2376,16 @@ test.describe('Fix round 1', () => {
     const backlogRow = (t: string) => next.locator('.ip-backlog-row', { has: page.getByRole('button', { name: t, exact: true }) });
     const nextRow = (t: string) => next.locator('.ip-next-row', { has: page.getByRole('button', { name: t, exact: true }) });
     const order = async () => (await next.locator('.ip-next-row .ip-row-title').allTextContents()).join('|');
+    // Near the foot of a row: its bottom half, measured since the row's height follows its padding.
+    const bottom = async (t: string) => ({ x: 40, y: (await nextRow(t).boundingBox())!.height - 6 });
     await backlogRow('4 Build to GitHub').dragTo(next.getByText('Nothing is queued'));
-    await backlogRow('5 Store listing').dragTo(nextRow('4 Build to GitHub'), { targetPosition: { x: 40, y: 30 } });
-    await backlogRow('6 Beta').dragTo(nextRow('5 Store listing'), { targetPosition: { x: 40, y: 30 } });
+    await backlogRow('5 Store listing').dragTo(nextRow('4 Build to GitHub'), { targetPosition: await bottom('4 Build to GitHub') });
+    await backlogRow('6 Beta').dragTo(nextRow('5 Store listing'), { targetPosition: await bottom('5 Store listing') });
     const expected = '4 Build to GitHub|5 Store listing|6 Beta';
     await expect.poll(order).toBe(expected);
     // The middle row on its own top half, then on the bottom half of the row above it.
     await nextRow('5 Store listing').dragTo(nextRow('5 Store listing'), { targetPosition: { x: 40, y: 2 } });
-    await nextRow('5 Store listing').dragTo(nextRow('4 Build to GitHub'), { targetPosition: { x: 40, y: 30 } });
+    await nextRow('5 Store listing').dragTo(nextRow('4 Build to GitHub'), { targetPosition: await bottom('4 Build to GitHub') });
     await expect.poll(order).toBe(expected);
     await page.reload();
     await expect.poll(order).toBe(expected);

@@ -161,7 +161,10 @@ export function NextColumn({ snapshot, board, now, wide, onOpenNode, onOpenResou
         </span>
         <div className="ip-next-body">
           <div className="ip-line">
-            <button type="button" className="ip-row-title">{row.node.title}</button>
+            <span className="ip-title-line">
+              <span className="ip-step-id">#{row.node.id}</span>
+              <button type="button" className="ip-row-title">{row.node.title}</button>
+            </span>
             <button type="button" className="ip-hover-act" data-act onClick={(e) => {
                 noteAction('next', 'to_backlog');
                 focusTargetAfter(e.currentTarget.closest('li'))?.focus();
@@ -233,7 +236,7 @@ export function NextColumn({ snapshot, board, now, wide, onOpenNode, onOpenResou
         </div>
         {open && (
           <>
-            <Backlog rows={backlog} snapshot={snapshot} now={now} onOpenNode={onOpenNode} onOpenResource={onOpenResource} onDragStart={setDragging} onDragEnd={endDrag} onToNext={toNext} />
+            <Backlog rows={backlog} snapshot={snapshot} now={now} projectId={project.id} slug={project.slug} onStatus={onStatus} onOpenNode={onOpenNode} onOpenResource={onOpenResource} onDragStart={setDragging} onDragEnd={endDrag} onToNext={toNext} />
             {adding && <QuickAdd projectId={project.id} slug={project.slug} inputRef={field} onStatus={onStatus} onClose={closeAdd} />}
           </>
         )}

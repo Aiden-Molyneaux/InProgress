@@ -130,6 +130,93 @@ describe('nodes route (quick-add)', () => {
   });
 });
 
+describe('node delete route', () => {
+  const exists = (ctx: { db: { prepare: (sql: string) => { pluck: () => { get: (...a: unknown[]) => unknown } } } }, id: number) =>
+    ctx.db.prepare('SELECT COUNT(*) FROM nodes WHERE id = ?').pluck().get(id) === 1;
+
+  it('deletes a leaf and answers its ids', async () => {
+    const { ctx, p, post, a, b } = await setup();
+    const res = await post(`/api/ui/projects/${p.id}/nodes/${a}/delete`, { slug: p.slug });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ ids: [a] });
+    expect(exists(ctx, a)).toBe(false);
+    expect(exists(ctx, b)).toBe(true);
+  });
+
+  it('refuses a step with steps under it', async () => {
+    const { ctx, p, post, a } = await setup();
+    const [child] = addNodes(ctx, 'test', { parentId: a, nodes: [{ title: 'Child' }] });
+    const res = await post(`/api/ui/projects/${p.id}/nodes/${a}/delete`, { slug: p.slug });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe(`#${a} has steps under it`);
+    expect(exists(ctx, a)).toBe(true);
+    expect(exists(ctx, child.id)).toBe(true);
+  });
+
+  it('refuses a step of another project, and the root', async () => {
+    const { ctx, app, p, post } = await setup();
+    const other = (await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'Other' } })).json();
+    const [foreign] = addNodes(ctx, 'test', { parentId: other.rootNodeId, nodes: [{ title: 'Foreign' }] });
+    const res = await post(`/api/ui/projects/${p.id}/nodes/${foreign.id}/delete`, { slug: p.slug });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe(`#${foreign.id} is not in this project`);
+    expect(exists(ctx, foreign.id)).toBe(true);
+    expect((await post(`/api/ui/projects/${p.id}/nodes/${p.rootNodeId}/delete`, { slug: p.slug })).statusCode).toBe(400);
+    expect(exists(ctx, p.rootNodeId)).toBe(true);
+  });
+
+  it('refuses a done or dropped step', async () => {
+    const { ctx, p, post, a, b } = await setup();
+    updateNode(ctx, 'test', a, { status: 'done' });
+    updateNode(ctx, 'test', b, { status: 'dropped' });
+    const done = await post(`/api/ui/projects/${p.id}/nodes/${a}/delete`, { slug: p.slug });
+    expect([done.statusCode, done.json().error]).toEqual([400, `#${a} is done`]);
+    const dropped = await post(`/api/ui/projects/${p.id}/nodes/${b}/delete`, { slug: p.slug });
+    expect([dropped.statusCode, dropped.json().error]).toEqual([400, `#${b} is dropped`]);
+    expect(exists(ctx, a) && exists(ctx, b)).toBe(true);
+  });
+
+  it('refuses a step a live session is focused on, but not one only a stale or ended session held', async () => {
+    const { ctx, p, post, a, b, c } = await setup();
+    ctx.db.prepare('UPDATE sessions SET focus_node_id = ? WHERE id = ?').run(a, 's1');
+    const res = await post(`/api/ui/projects/${p.id}/nodes/${a}/delete`, { slug: p.slug });
+    expect([res.statusCode, res.json().error]).toEqual([400, `#${a} is being worked on`]);
+    expect(exists(ctx, a)).toBe(true);
+    ctx.db.prepare("UPDATE sessions SET last_seen_at = '2000-01-01T00:00:00.000Z' WHERE id = 's1'").run();
+    expect((await post(`/api/ui/projects/${p.id}/nodes/${a}/delete`, { slug: p.slug })).statusCode).toBe(200);
+    ctx.db.prepare("INSERT INTO sessions (id, project_id, state, focus_node_id, started_at, last_seen_at, ended_at) VALUES ('old', ?, 'ended', ?, ?, ?, ?)").run(p.id, b, ctx.now(), ctx.now(), ctx.now());
+    expect((await post(`/api/ui/projects/${p.id}/nodes/${b}/delete`, { slug: p.slug })).statusCode).toBe(200);
+    expect(exists(ctx, c)).toBe(true);
+  });
+
+  it('refuses an active step assigned to me', async () => {
+    const { ctx, p, post, a } = await setup();
+    updateNode(ctx, 'test', a, { status: 'active', assignee: 'me' });
+    const res = await post(`/api/ui/projects/${p.id}/nodes/${a}/delete`, { slug: p.slug });
+    expect([res.statusCode, res.json().error]).toEqual([400, `#${a} is being worked on`]);
+    expect(exists(ctx, a)).toBe(true);
+  });
+
+  it('refuses a step in the queue', async () => {
+    const { ctx, p, post, queue, a } = await setup();
+    await queue({ kind: 'move', node: a, before: null });
+    const res = await post(`/api/ui/projects/${p.id}/nodes/${a}/delete`, { slug: p.slug });
+    expect([res.statusCode, res.json().error]).toEqual([400, `#${a} is in Next`]);
+    expect(exists(ctx, a)).toBe(true);
+  });
+
+  it('answers 409 for a wrong slug, 404 for a missing step, and refuses a request not from the window', async () => {
+    const { ctx, p, post, a } = await setup();
+    const url = `/api/ui/projects/${p.id}/nodes/${a}/delete`;
+    expect((await post(url, { slug: 'nope' })).statusCode).toBe(409);
+    expect((await post(`/api/ui/projects/${p.id}/nodes/999999/delete`, { slug: p.slug })).statusCode).toBe(404);
+    for (const headers of [{} as Record<string, string>, { origin: 'http://evil.example', 'x-ip-ui-token': 'ui-token' }, { origin: 'http://localhost:80', 'x-ip-ui-token': 'wrong' }, auth]) {
+      expect([401, 403]).toContain((await post(url, { slug: p.slug }, headers)).statusCode);
+    }
+    expect(exists(ctx, a)).toBe(true);
+  });
+});
+
 describe('ask clear route', () => {
   it('clears with and without an answer, and twice', async () => {
     const { ctx, post, a, b } = await setup();

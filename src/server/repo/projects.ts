@@ -88,6 +88,12 @@ function liveQueue(ctx: Ctx, projectId: number, json: string | undefined): Queue
   return entries.filter((e) => open.has(e.nodeId));
 }
 
+/** Whether the project's queue, as it is read, holds `nodeId`. A plain read, so it can run inside another write. */
+export function isQueued(ctx: Ctx, projectId: number, nodeId: number): boolean {
+  const json = ctx.db.prepare('SELECT queue FROM projects WHERE id = ?').pluck().get(projectId) as string | undefined;
+  return liveQueue(ctx, projectId, json).some((e) => e.nodeId === nodeId);
+}
+
 const isOwned = (e: QueueEntry) => e.sessionId !== null;
 
 /** Owned entries first, then the unowned ones, each part keeping its order. */
