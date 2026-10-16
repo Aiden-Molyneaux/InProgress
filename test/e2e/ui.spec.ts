@@ -1964,7 +1964,7 @@ test.describe('Board', () => {
     });
     await page.setViewportSize(WIDE);
     await open(page, fresh);
-    await expect(band(page, 'done').locator('.ip-done-row')).toHaveCount(5);
+    await expect(band(page, 'done').locator('li.ip-card')).toHaveCount(5);
     await band(page, 'done').getByRole('button', { name: /^All done · [0-9]+ ›$/ }).click();
     await expect(page.getByRole('button', { name: '‹ Board' })).toBeFocused();
     await expect(page.locator('.ip-board')).toHaveCount(0);
