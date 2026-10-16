@@ -1247,12 +1247,12 @@ describe('archiving a project stops tracking its sessions', () => {
     handleHookEvent(ctx, 's2', start());
     updateProject(ctx, 'test', project.slug, { status: 'archived' });
     updateProject(ctx, 'test', project.slug, { status: 'active' });
-    // A new session takes A, the slot s1 had.
+    // A new session takes slot 0, the slot s1 had.
     handleHookEvent(ctx, 's3', start());
-    // s2 keeps B: no briefing, as for any revival in its own slot.
+    // s2 keeps slot 1: no briefing, as for any revival in its own slot.
     expect(handleHookEvent(ctx, 's2', { event: 'prompt' })).toEqual({ tracked: true });
     expect(findSession(ctx, 's2')).toMatchObject({ state: 'working', endedAt: null, slot: 1 });
-    // s1 comes back as C, and that prompt brings the briefing that names it.
+    // s1 comes back in slot 2, and that prompt brings a full briefing.
     const text = handleHookEvent(ctx, 's1', { event: 'prompt' }).context!;
     expect(text.split('\n')[0]).toContain(`${FULL} "InGame"`);
     expect(findSession(ctx, 's1')).toMatchObject({ state: 'working', endedAt: null, slot: 2 });

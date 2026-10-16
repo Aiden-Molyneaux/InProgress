@@ -45,7 +45,7 @@ export function agentName(a: Pick<SubagentInfo, 'description' | 'agentType'>, un
   return description ? withoutOwnId(description, underNode) : a.agentType;
 }
 
-/** Why a subagent ended without a clean stop, as the window says it: `a3 hit the usage limit`, `… 3 min ago`. */
+/** Why a subagent ended without a clean stop, as the window says it: `Draft the notes hit the usage limit`, `… 3 min ago`. */
 export const END_WORDS: Record<EndReason, string> = {
   limit: 'hit the usage limit',
   error: 'hit an API error',

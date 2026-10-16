@@ -187,9 +187,11 @@ function AsksSection({ nodeId, snapshot, now }: { nodeId: number; snapshot: Proj
   const open = here.filter((a) => a.clearedAt === null);
   const answered = here.filter((a) => a.clearedAt !== null && a.answer !== '').sort((a, b) => b.clearedAt!.localeCompare(a.clearedAt!));
   if (open.length === 0 && answered.length === 0) return null;
+  // An ask from before sessions were recorded has no session; one whose session ended names it from the past sessions.
   const raiser = (sessionId: string | null) => {
-    const s = sessionId === null ? undefined : snapshot.sessions.find((x) => x.id === sessionId);
-    return s ? sessionDisplayTitle(s) : 'migrated';
+    if (sessionId === null) return 'migrated';
+    const s = snapshot.sessions.find((x) => x.id === sessionId) ?? snapshot.pastSessions.find((x) => x.id === sessionId);
+    return s ? sessionDisplayTitle(s) : 'an ended session';
   };
   return (
     <>
@@ -198,7 +200,7 @@ function AsksSection({ nodeId, snapshot, now }: { nodeId: number; snapshot: Proj
         {open.map((a) => (
           <li key={a.id} className="ip-dask" data-ask={a.id}>
             <div className="ip-dask-head">
-              <span className="ip-id">{`a${a.id}`}</span> {KIND_MARK[a.kind]} {a.kind} · {raiser(a.sessionId)} · <span className="ip-time">{ageShort(a.raisedAt, now)}</span>
+              <span className="ip-id">{`a${a.id}`}</span> {KIND_MARK[a.kind]} {a.kind} · <span className="ip-dask-who" title={raiser(a.sessionId)}>{raiser(a.sessionId)}</span> · <span className="ip-time">{ageShort(a.raisedAt, now)}</span>
             </div>
             <p>{a.text}</p>
             <AskActions ask={a} area="details" />

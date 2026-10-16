@@ -141,7 +141,7 @@ export function frontierLines(snapshot: ProjectSnapshot, sessionId?: string, opt
 
 /**
  * The planned order, read from the Board's position function so the queue numbers agree with the window: this session's
- * own steps first, with titles, then the other live sessions' by letter and the unowned ones. An ended or stale owner's
+ * own steps first, with titles, then the other live sessions' by title and the unowned ones. An ended or stale owner's
  * entries are not in Next (spec 1.5 rule 4), and a session's focus is Now, so neither is listed. Undefined when no step
  * is up next (formatUpNext's guarantee), which is when the frontier keeps its sibling Next: lines.
  */
@@ -189,6 +189,8 @@ export function askItem(a: Ask, now: number, stepTitle?: string): string {
 
 /** A step's title where a briefing line only names it: shorter than the digest's, since a briefing reaches every prompt. */
 const NAMED_STEP_MAX = 40;
+/** A session's title where a line names it, as formatUpNext clips it: one line, at most 30 characters. */
+const TITLE_MAX = 30;
 const titleOf = (snapshot: ProjectSnapshot, id: number): string | undefined => snapshot.nodes.find((n) => n.id === id)?.title;
 
 /**
@@ -199,7 +201,7 @@ export function needsYouLine(snapshot: ProjectSnapshot, now: number): string | u
   const items = openAsks(snapshot).map((a) => askItem(a, now, titleOf(snapshot, a.nodeId)));
   for (const s of snapshot.sessions) {
     if (s.state !== 'permission' || !isLive(s, now)) continue;
-    items.push(`"${sessionDisplayTitle(s)}" waiting for permission${s.focusNodeId !== null ? ` on ${stepRef(s.focusNodeId, titleOf(snapshot, s.focusNodeId), NAMED_STEP_MAX)}` : ''} (${spanAgo(s.lastSeenAt, now)})`);
+    items.push(`"${clipLine(sessionDisplayTitle(s), TITLE_MAX)}" waiting for permission${s.focusNodeId !== null ? ` on ${stepRef(s.focusNodeId, titleOf(snapshot, s.focusNodeId), NAMED_STEP_MAX)}` : ''} (${spanAgo(s.lastSeenAt, now)})`);
   }
   if (!items.length) return undefined;
   return `Needs you (${items.length}): ${items.slice(0, MAX_NEEDS_YOU).join(' · ')}${items.length > MAX_NEEDS_YOU ? ` · +${items.length - MAX_NEEDS_YOU} more` : ''}`;
@@ -300,7 +302,7 @@ export function othersLine(snapshot: ProjectSnapshot, sessionId: string, now: nu
   const others = snapshot.sessions.filter((s) => s.id !== sessionId && s.state !== 'ended');
   if (!others.length) return undefined;
   const named = (s: Session) => {
-    return `"${sessionDisplayTitle(s)}" (${sessionActivity(s, now)}${s.focusNodeId ? `, on ${stepRef(s.focusNodeId, titleOf(snapshot, s.focusNodeId), NAMED_STEP_MAX)}` : ''})`;
+    return `"${clipLine(sessionDisplayTitle(s), TITLE_MAX)}" (${sessionActivity(s, now)}${s.focusNodeId ? `, on ${stepRef(s.focusNodeId, titleOf(snapshot, s.focusNodeId), NAMED_STEP_MAX)}` : ''})`;
   };
   return `Other sessions here: ${others.map(named).join(' · ')}`;
 }

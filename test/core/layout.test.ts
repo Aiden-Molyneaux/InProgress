@@ -648,6 +648,13 @@ describe('formatUpNext', () => {
     expect(formatUpNext(view, sessions, { sessionId: 's3', nodes: t.nodes })).toBe(`Up next (you): #${t.c.id} C · later: #${t.d.id}`);
   });
 
+  it('tells apart two owners whose titles clip alike by their ids, and leaves a lone title bare', () => {
+    const { t, sessions } = owners();
+    const twins = sessions.map((x) => (x.id === 's3' ? { ...x, title: 'Docs pass' } : x));
+    const view = queueView([entry(t.c.id, 's2'), entry(t.d.id, 's3'), entry(t.e.id, 's1')], t.nodes, twins);
+    expect(formatUpNext(view, twins)).toBe(`Up next: "Docs pass" (s2): #${t.c.id} | "Docs pass" (s3): #${t.d.id} | "Store listing": #${t.e.id}`);
+  });
+
   it("prints nothing when no step is up next, as when the only entry is a session's own focus", () => {
     const { t, sessions } = owners();
     expect(formatUpNext(queueView([], t.nodes, sessions), sessions)).toBeUndefined();

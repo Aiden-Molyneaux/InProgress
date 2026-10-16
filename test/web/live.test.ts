@@ -317,6 +317,30 @@ describe('a resumed subagent', () => {
   });
 });
 
+describe('commandEnded', () => {
+  it('says how each outcome ended, with the exit code for completed and failed, then how long ago', () => {
+    expect(commandEnded(ended(), NOW)).toBe('completed (exit 0) 2 min ago');
+    expect(commandEnded(ended({ outcome: 'failed', exitCode: 2 }), NOW)).toBe('failed (exit 2) 2 min ago');
+    expect(commandEnded(ended({ exitCode: null }), NOW)).toBe('completed 2 min ago');
+    expect(commandEnded(ended({ outcome: 'killed', exitCode: 137 }), NOW)).toBe('was stopped 2 min ago');
+    expect(commandEnded(ended({ outcome: 'session', exitCode: null }), NOW)).toBe('ended with its session 2 min ago');
+    expect(commandEnded(ended({ outcome: 'unknown', exitCode: null }), NOW)).toBe('ended 2 min ago');
+    expect(commandEnded(ended({ outcome: null, exitCode: null }), NOW)).toBe('ended 2 min ago');
+  });
+});
+
+describe('commandWhen and commandMark', () => {
+  it('reads the run time of a counting command, serving and the time of a server, and the end of an ended one', () => {
+    expect(commandWhen(command(), NOW)).toBe('12m');
+    expect(commandMark(command(), NOW)).toBe('▸');
+    expect(commandWhen(command({ commandHead: 'npm run dev', startedAt: ago(180 * MIN) }), NOW)).toBe('serving 3h');
+    expect(commandMark(command({ commandHead: 'npm run dev' }), NOW)).toBe('◦');
+    expect(commandWhen(ended(), NOW)).toBe('completed (exit 0) 2 min ago');
+    expect(commandMark(ended(), NOW)).toBe('✓');
+    expect(commandMark(ended({ outcome: 'failed', exitCode: 1 }), NOW)).toBe('!');
+  });
+});
+
 describe('commandLineParts', () => {
   it('reads one running command: mark, head and run time', () => {
     const parts = commandLineParts([command()], NOW);

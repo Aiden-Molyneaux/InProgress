@@ -1,6 +1,6 @@
 import { deriveBoard, type Mark } from '../core/board';
 import { clipLine, stepRef } from '../core/step-ref';
-import { ASK_GLYPHS, STALE_SESSION_MS, TRAIL_MS, askTag, type Ask, type ProjectSnapshot } from '../core/types';
+import { ASK_GLYPHS, STALE_SESSION_MS, TRAIL_MS, askTag, sessionDisplayTitle, type Ask, type ProjectSnapshot } from '../core/types';
 import type { Ctx } from './db/tx';
 import { listAsksClearedSince, listAsksRaisedSince } from './repo/asks';
 import { resolveProject } from './repo/projects';
@@ -116,7 +116,7 @@ export function readDigest(ctx: Ctx, ref: string | number, since?: string): Dige
   }[];
   const sessions: DigestSession[] = rows.map((r) => ({
     id: r.id,
-    title: r.title?.trim() || `Session ${r.id.slice(0, 6)}`,
+    title: sessionDisplayTitle(r),
     startedAt: r.started_at,
     endedAt: r.end_at,
     sweptAt: r.state === 'ended' && r.raw_end !== null && Date.parse(r.raw_end) - Date.parse(r.seen_at) >= STALE_SESSION_MS ? r.raw_end : null,

@@ -53,7 +53,7 @@ export function describeEvent(e: EventRow, snapshot: ProjectSnapshot | null): st
     case 'session.updated': {
       const who = sessionLabel(e.entityId, snapshot);
       if (d.changed?.includes('focusNodeId')) return d.focusNodeId ? `${who} is on ${nodeLabel(d.focusNodeId, snapshot)}` : `${who} cleared its focus`;
-      // The transcript watcher ended subagents that died without a stop: `<session> · a3 hit the usage limit`.
+      // The transcript watcher ended subagents that died without a stop: `<session> · <subagent> hit the usage limit`.
       if (d.ended?.length) return `${who} · ${d.ended.map((x) => `${agentLabel(e.entityId, x.agentId, snapshot)} ${END_WORDS[x.reason] ?? 'ended'}`).join(', ')}`;
       // A session's end is its end, whatever commands it took along.
       if (d.state === 'ended') return `${who} ended`;

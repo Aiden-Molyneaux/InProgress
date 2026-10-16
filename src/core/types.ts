@@ -272,7 +272,7 @@ export interface SubagentInfo {
   nodeId: number | null;
   /** Set when it stopped, or when its session ended. A session's list keeps an ended subagent for 5 minutes. */
   endedAt: string | null;
-  /** Its number within its session, given at its start (the 1 in `a1`); null for a subagent from before migration 4. */
+  /** Its number within its session, given at its start; null for a subagent from before migration 4. No longer shown. */
   ordinal: number | null;
   /**
    * What it was asked to do: the first sentence of its Agent prompt, at most 200 characters. Null until it is paired

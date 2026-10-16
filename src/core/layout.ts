@@ -99,14 +99,14 @@ export interface LayoutMoreItem {
   variant: 'tail' | 'done';
 }
 
-/** One session's line on one card, one per session per card: its character where its focus anchors, then its kin. */
+/** One session's line on one card, one per session per card: its lead where its focus anchors, then its kin. */
 export interface LayoutLineItem {
   kind: 'line';
   /** `l<sessionId>:<nodeId>` */
   id: string;
   sessionId: string;
   nodeId: number;
-  /** The session's focus anchors on this card: the line draws the session's character and label. */
+  /** The session's focus anchors on this card: the line draws the session's label. */
   lead: boolean;
   /**
    * The session's shown non-reader subagents homed on this card (agentVisible: running, at the usage limit, or stopped
@@ -382,7 +382,8 @@ export interface UpNextReader {
 
 /**
  * The Up next line as text, or undefined when no step is up next. Each owner is named by its title in quotes, clipped
- * to 30 characters (`a session` when it is not among `sessions`), in the view's order, and a part with no steps is left
+ * to 30 characters (`a session` when it is not among `sessions`; two that clip alike add their ids' first six
+ * characters), in the view's order, and a part with no steps is left
  * out. Without a reader (the outline, set_queue's result): `Up next: "Store listing": #82 → #78 | "Docs pass": #90 |
  * later: #79`. With one (the briefing, the status answer), its own part comes first, as `#id glyph Title` up to
  * MAX_UP_NEXT, and the rest keep bare ids:
@@ -392,9 +393,20 @@ export interface UpNextReader {
 export function formatUpNext(view: QueueView, sessions: Pick<Session, 'id' | 'title'>[], reader?: UpNextReader): string | undefined {
   const byOwner = new Map(sessions.map((s) => [s.id, s]));
   const ids = (list: number[]) => list.map((id) => `#${id}`).join(' → ');
-  const named = (id: string) => {
+  const clipped = (id: string) => {
     const s = byOwner.get(id);
-    return s ? `"${clipLine(sessionDisplayTitle(s), 30)}"` : 'a session';
+    return s ? clipLine(sessionDisplayTitle(s), 30) : null;
+  };
+  // Two owners whose titles clip alike are told apart by their ids' first six characters.
+  const counts = new Map<string, number>();
+  for (const id of view.bySession.keys()) {
+    const c = clipped(id);
+    if (c !== null) counts.set(c, (counts.get(c) ?? 0) + 1);
+  }
+  const named = (id: string) => {
+    const c = clipped(id);
+    if (c === null) return 'a session';
+    return (counts.get(c) ?? 0) > 1 ? `"${c}" (${id.slice(0, 6)})` : `"${c}"`;
   };
   const parts = [
     ...[...view.bySession].filter(([id]) => id !== reader?.sessionId).map(([id, list]) => `${named(id)}: ${ids(list)}`),
