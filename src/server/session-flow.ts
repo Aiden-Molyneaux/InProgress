@@ -320,8 +320,8 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
     if (input.asksStatus) context = renderStatusAnswer(getProjectSnapshot(ctx, projectId), sessionId, nowMs);
     else if (session.promptsSinceUpdate >= 2) context = renderStatusLine(getProjectSnapshot(ctx, projectId), session);
   }
-  // The answers line (spec 2, 3.3): once, on the next real prompt after an ask this session raised was cleared, or an
-  // answered one on a step it drives whose asker is gone.
+  // The answers line (spec 2, 3.3): once, on the next real prompt after an ask this session holds was cleared, or an
+  // answered one on a step it drives whose asker no longer holds it (undeliveredAnswers says which route applies).
   if (input.event === 'prompt' && !input.notice) {
     const answers = undeliveredAnswers(ctx, sessionId);
     if (answers.length) {
