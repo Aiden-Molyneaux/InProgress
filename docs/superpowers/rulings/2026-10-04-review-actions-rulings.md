@@ -113,6 +113,10 @@ decision, why, what it costs if wrong. Review these and rework anything ruled wr
     a different slot, and so is a `set_focus` that does, matching ruling 40 (final review fix wave). A re-enroll that
     keeps the slot still leaves the marker alone. Cost if wrong: one extra briefing.
 
+Rulings 35, 40 and 41 are retired (#450, 2026-10-16). #438 took letters out of the briefing, so a slot change leaves
+nothing in a session's context out of date, and a fresh briefing would repeat text it already holds. Slots still
+break sort ties.
+
 Aiden's answers to the overnight questions (2026-10-05): ruling 32 is confirmed. A subagent that dies without a stop
 should be represented in the window, and workflow agents should carry a representative label. Both are new
 research steps under "Feedback from daily use".

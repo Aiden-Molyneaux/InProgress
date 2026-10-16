@@ -55,8 +55,8 @@ export function saveSession(ctx: Ctx, s: Session): void {
 /*
  * The "briefing due" marker (migration 6, review-actions spec §8): set when a session's next prompt owes it the full
  * briefing, because it joined a project through an enroll (whose briefing goes to the scribe, which passes on only its
- * first line) or came back into another letter; cleared by the response that carries the full briefing. It
- * stays out of the Session type, which reaches the window: only session-flow sets, reads and clears it.
+ * first line) or, in a scoped project, the scribe moved its focus; cleared by the response that carries the full
+ * briefing. It stays out of the Session type, which reaches the window: only session-flow sets, reads and clears it.
  */
 
 export function markBriefingDue(ctx: Ctx, id: string): void {
