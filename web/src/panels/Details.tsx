@@ -191,7 +191,7 @@ function AsksSection({ nodeId, snapshot, now }: { nodeId: number; snapshot: Proj
   const raiser = (sessionId: string | null) => {
     if (sessionId === null) return 'migrated';
     const s = snapshot.sessions.find((x) => x.id === sessionId) ?? snapshot.pastSessions.find((x) => x.id === sessionId);
-    return s ? sessionDisplayTitle(s) : 'an ended session';
+    return sessionDisplayTitle(s ?? { id: sessionId, title: null });
   };
   return (
     <>

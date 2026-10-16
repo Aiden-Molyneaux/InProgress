@@ -653,6 +653,8 @@ describe('formatUpNext', () => {
     const twins = sessions.map((x) => (x.id === 's3' ? { ...x, title: 'Docs pass' } : x));
     const view = queueView([entry(t.c.id, 's2'), entry(t.d.id, 's3'), entry(t.e.id, 's1')], t.nodes, twins);
     expect(formatUpNext(view, twins)).toBe(`Up next: "Docs pass" (s2): #${t.c.id} | "Docs pass" (s3): #${t.d.id} | "Store listing": #${t.e.id}`);
+    // The reader's own part names nobody, so its twin reads bare.
+    expect(formatUpNext(view, twins, { sessionId: 's3', nodes: t.nodes })).toBe(`Up next (you): #${t.d.id} D · "Docs pass": #${t.c.id} · "Store listing": #${t.e.id}`);
   });
 
   it("prints nothing when no step is up next, as when the only entry is a session's own focus", () => {

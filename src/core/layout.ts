@@ -397,9 +397,10 @@ export function formatUpNext(view: QueueView, sessions: Pick<Session, 'id' | 'ti
     const s = byOwner.get(id);
     return s ? clipLine(sessionDisplayTitle(s), 30) : null;
   };
-  // Two owners whose titles clip alike are told apart by their ids' first six characters.
+  // Two owners whose titles clip alike (the reader's own part names none) are told apart by their ids' first six characters.
   const counts = new Map<string, number>();
   for (const id of view.bySession.keys()) {
+    if (id === reader?.sessionId) continue;
     const c = clipped(id);
     if (c !== null) counts.set(c, (counts.get(c) ?? 0) + 1);
   }
