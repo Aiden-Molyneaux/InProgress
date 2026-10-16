@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { BoardRow } from '../../src/core/board';
 import type { TaskBox, TaskState } from '../../src/core/taskState';
-import { TASK_STATES } from '../../src/core/taskState';
 import { boxSince, hueStyle, PILLS } from '../../web/src/board/boxState';
 
 const node = (over: Record<string, unknown> = {}) => ({ id: 7, boardState: null, stateSince: null, hue: null, completedAt: null, updatedAt: '2026-10-10T00:00:00Z', ...over });
@@ -9,11 +8,9 @@ const box = (state: TaskState, nodeOver: Record<string, unknown> = {}, asks: { r
   ({ row: { node: node(nodeOver), asks } as unknown as BoardRow, session: null, cell: 'now', state });
 
 describe('PILLS', () => {
-  it('has a label and class for every state', () => {
-    for (const s of TASK_STATES) {
-      expect(PILLS[s].label, s).toBeTruthy();
-      expect(PILLS[s].cls, s).toBeTruthy();
-    }
+  it('puts question, permission and review in the needs class, and working in its own', () => {
+    for (const s of ['question', 'permission', 'review'] as const) expect(PILLS[s].cls, s).toBe('needs');
+    expect(PILLS.working.cls).toBe('working');
   });
 });
 

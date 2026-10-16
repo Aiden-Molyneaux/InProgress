@@ -87,16 +87,19 @@ export interface OpenDesktopOptions {
   timeoutMs?: number;
 }
 
+/** What a launch came to: done, or why not, in words for the window. */
+export type OpenDesktopResult = { ok: true } | { ok: false; reason: string };
+
 /** Launches in flight by session id: a second click while one runs gets the same answer instead of a second launch. */
-const inFlight = new Map<string, Promise<boolean>>();
+const inFlight = new Map<string, Promise<OpenDesktopResult>>();
 
 /**
  * Runs `claude --desktop --resume <id>` in the session's folder (the home folder when that is not a folder here) and
- * answers whether it exited 0 within the timeout. No claude found, a spawn error, a non-zero exit and a timeout all
- * answer false (the child is killed on a timeout). No shell is involved, so the id is one argument. The caller has
- * checked the id is a UUID.
+ * answers whether it exited 0 within the timeout. No claude found, a spawn error, a non-zero exit and a timeout each
+ * answer not ok with their reason (the child is killed on a timeout). No shell is involved, so the id is one argument.
+ * The caller has checked the id is a UUID.
  */
-export function openInDesktop(session: DesktopSession, o: OpenDesktopOptions = {}): Promise<boolean> {
+export function openInDesktop(session: DesktopSession, o: OpenDesktopOptions = {}): Promise<OpenDesktopResult> {
   const pending = inFlight.get(session.id);
   if (pending) return pending;
   const launch = run(session, o).finally(() => inFlight.delete(session.id));
@@ -104,32 +107,40 @@ export function openInDesktop(session: DesktopSession, o: OpenDesktopOptions = {
   return launch;
 }
 
-function run(session: DesktopSession, o: OpenDesktopOptions): Promise<boolean> {
+const failed = (reason: string): OpenDesktopResult => ({ ok: false, reason });
+
+/** Why a spawn failed, in the error's own code when it has one. */
+const spawnReason = (err: unknown): string => {
+  const code = (err as NodeJS.ErrnoException | null)?.code;
+  return `Claude Code could not start: ${code ?? (err instanceof Error ? err.message : String(err))}`;
+};
+
+function run(session: DesktopSession, o: OpenDesktopOptions): Promise<OpenDesktopResult> {
   const spawn = o.spawn ?? nodeSpawn;
   const file = (o.findClaude ?? findClaude)();
-  if (!file) return Promise.resolve(false);
+  if (!file) return Promise.resolve(failed('Claude Code was not found on this computer'));
   const cwd = usableCwd(session.cwd) ?? homedir();
   return new Promise((resolve) => {
     let child: ChildProcess;
     try {
       child = spawn(file, ['--desktop', '--resume', session.id], { shell: false, windowsHide: true, stdio: 'ignore', cwd });
-    } catch {
+    } catch (err) {
       // A synchronous spawn failure is the same answer as an asynchronous one: the window shows the command.
-      resolve(false);
+      resolve(failed(spawnReason(err)));
       return;
     }
     let settled = false;
-    const finish = (ok: boolean): void => {
+    const finish = (result: OpenDesktopResult): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve(ok);
+      resolve(result);
     };
     const timer = setTimeout(() => {
       child.kill();
-      finish(false);
+      finish(failed(`Claude Code did not answer within ${o.timeoutMs === undefined ? OPEN_DESKTOP_TIMEOUT_MS / 1000 : o.timeoutMs / 1000} s`));
     }, o.timeoutMs ?? OPEN_DESKTOP_TIMEOUT_MS);
-    child.on('error', () => finish(false));
-    child.on('exit', (code) => finish(code === 0));
+    child.on('error', (err) => finish(failed(spawnReason(err))));
+    child.on('exit', (code) => finish(code === 0 ? { ok: true } : failed(`claude exited with code ${code}`)));
   });
 }

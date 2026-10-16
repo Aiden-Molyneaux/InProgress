@@ -3,7 +3,7 @@ import type { Guard } from '../app';
 import type { Ctx } from '../db/tx';
 import { STALE_SESSION_MS, type TreeNode } from '../../core/types';
 import { badRequest, conflict, notFound } from '../errors';
-import { desktopCommand, openInDesktop, usableCwd, type DesktopSession } from '../open-desktop';
+import { desktopCommand, openInDesktop, usableCwd, type DesktopSession, type OpenDesktopResult } from '../open-desktop';
 import { findSession } from '../repo/sessions';
 import { deleteProject, listDeletedProjects, restoreProject } from '../project-lifecycle';
 import { clearAsk } from '../repo/asks';
@@ -36,7 +36,7 @@ function notInBacklog(ctx: Ctx, projectId: number, n: TreeNode): string | null {
  * active project or an archived one (an active one is archived in the same write); delete and restore answer 409 on the
  * wrong state: already deleted, or not deleted.
  */
-export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: Guard, openDesktop: (session: DesktopSession) => Promise<boolean> = openInDesktop): void {
+export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: Guard, openDesktop: (session: DesktopSession) => Promise<OpenDesktopResult> = openInDesktop): void {
   const guarded = { onRequest: requireUi };
 
   // "Open session" on the Board: the Claude desktop app opens the session. When that fails the answer carries the command
@@ -46,7 +46,8 @@ export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: 
     const session = findSession(ctx, id);
     if (!session) throw notFound(`Session ${id} not found`, 'Reload the window.');
     // Resume is scoped to the folder the session ran in, so the launch and the copied command both start there.
-    return (await openDesktop({ id, cwd: session.cwd })) ? { ok: true } : { ok: false, command: desktopCommand(id, usableCwd(session.cwd)) };
+    const result = await openDesktop({ id, cwd: session.cwd });
+    return result.ok ? { ok: true } : { ok: false, command: desktopCommand(id, usableCwd(session.cwd)), reason: result.reason };
   });
 
   /**

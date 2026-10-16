@@ -4,7 +4,7 @@ import { ZodError } from 'zod';
 import type { BuildInfo } from '../lib/version';
 import type { Ctx } from './db/tx';
 import { ApiError } from './errors';
-import type { DesktopSession } from './open-desktop';
+import type { DesktopSession, OpenDesktopResult } from './open-desktop';
 import { registerAskRoutes } from './routes/asks';
 import { registerReadRoutes } from './routes/read';
 import { registerSessionRoutes } from './routes/sessions';
@@ -26,7 +26,7 @@ export interface AppOptions {
   openPath?: (path: string) => Promise<void>;
   openUrl?: (url: string) => Promise<void>;
   /** Runs `claude --desktop --resume <id>`; true when it exited 0 in time. Replaceable so tests never run `claude`. */
-  openDesktop?: (session: DesktopSession) => Promise<boolean>;
+  openDesktop?: (session: DesktopSession) => Promise<OpenDesktopResult>;
 }
 
 export type Guard = (req: FastifyRequest, reply: FastifyReply) => Promise<unknown>;

@@ -365,7 +365,7 @@ button.ip-card-title:hover { color: var(--text); text-decoration: underline; }
 .ip-sess-name::before { content: '◇ '; color: var(--faint); }
 .st-working .ip-sess-name::before { content: '◆ '; color: var(--active); }
 .ip-sess-cmd { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.ip-sess-cmd .ip-code { flex: 1; min-width: 0; }
+.ip-sess-cmd .ip-code { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: normal; }
 .ip-block { display: flex; flex-direction: column; gap: 3px; padding-left: 10px; border-left: 2px solid var(--border); }
 .st-needs .ip-block { border-left-color: color-mix(in srgb, var(--amber) 60%, transparent); }
 .st-working .ip-block { border-left-color: var(--active-line); }
@@ -530,7 +530,7 @@ button.ip-card-title:hover { color: var(--text); text-decoration: underline; }
 .ip-dmarks { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0; }
 .ip-dadd { margin-top: 12px; }
 /* Done list (#406): every done step, by day or by phase, opened from the foot of the Done column. */
-.ip-done-all { display: block; margin: 8px 0 0 52px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); text-align: left; }
+.ip-done-all { display: block; margin: 8px 0 0 4px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); text-align: left; }
 .ip-done-all:hover { color: var(--text); }
 .ip-done-all:focus-visible, .ip-donelist-back:focus-visible, .ip-donelist-toggle button:focus-visible { outline: 2px solid var(--text-2); outline-offset: 1px; }
 .ip-donelist { flex: 1; min-width: 0; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 14px; }

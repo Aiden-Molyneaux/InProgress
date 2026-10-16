@@ -15,6 +15,12 @@ export interface SessionRef {
 
 /** The command that resumes a session in the desktop app, shown when the server could not run it; with why, when it is known. */
 export function CopyCommand({ command, reason }: { command: string; reason?: string }) {
+  // Keyed, so a new command or reason starts with the Copy label again.
+  return <CopyCommandBody key={`${command}
+${reason ?? ''}`} command={command} reason={reason} />;
+}
+
+function CopyCommandBody({ command, reason }: { command: string; reason?: string }) {
   const [copied, setCopied] = useState<'no' | 'yes' | 'failed'>('no');
   const copy = async () => {
     try {
@@ -40,66 +46,80 @@ export function CopyCommand({ command, reason }: { command: string; reason?: str
   );
 }
 
-/** One session's Open session: a click while a request is out is ignored, and only the latest call's answer is applied. */
-function useOpenSession(sessionId: string, area: MeasureArea) {
-  const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState<{ command: string; reason?: string } | null>(null);
-  const calls = useRef(0);
-  const inFlight = useRef(false);
-  const open = async () => {
-    if (inFlight.current) return;
-    inFlight.current = true;
-    setBusy(true);
-    noteAction(area, 'open_session');
-    const call = ++calls.current;
-    const result = await openDesktop(sessionId);
-    if (call !== calls.current) return;
-    inFlight.current = false;
-    setBusy(false);
-    if (result === 'reload') return window.location.reload();
-    setFailure(result.ok ? null : { command: result.command, reason: result.reason });
-  };
-  return { busy, failure, open };
+interface OpenState {
+  busy: boolean;
+  failure: { command: string; reason?: string } | null;
 }
-type OpenState = ReturnType<typeof useOpenSession>;
-const OpenContext = createContext<OpenState | null>(null);
+const IDLE: OpenState = { busy: false, failure: null };
+interface OpenScopeValue {
+  stateOf: (sessionId: string) => OpenState;
+  open: (sessionId: string) => Promise<void>;
+}
+const OpenContext = createContext<OpenScopeValue | null>(null);
 
-/** One Open session state for everything in a box that opens this session (its line and a permission block share it). Key it by session id. */
-export function OpenScope({ session, area, children }: { session: SessionRef; area: MeasureArea; children: ReactNode }) {
-  return <OpenContext.Provider value={useOpenSession(session.id, area)}>{children}</OpenContext.Provider>;
+/**
+ * The Open session of every session a box shows: one state per session id however many places show it (its line, a
+ * permission block), so one session cannot launch twice from two buttons. A click while that session's request is out is
+ * ignored.
+ */
+export function OpenScope({ area, children }: { area: MeasureArea; children: ReactNode }) {
+  const [states, setStates] = useState<Readonly<Record<string, OpenState>>>({});
+  const inFlight = useRef(new Set<string>());
+  const patch = (id: string, state: OpenState) => setStates((prev) => ({ ...prev, [id]: state }));
+  const open = async (id: string) => {
+    if (inFlight.current.has(id)) return;
+    inFlight.current.add(id);
+    patch(id, { busy: true, failure: null });
+    noteAction(area, 'open_session');
+    let next: OpenState = IDLE;
+    try {
+      const result = await openDesktop(id);
+      if (result === 'reload') return window.location.reload();
+      if (!result.ok) next = { busy: false, failure: { command: result.command, reason: result.reason } };
+    } catch (err) {
+      // openDesktop never rejects by contract; if it does, say so rather than leave the button stuck.
+      console.error('[open session]', err);
+      next = { busy: false, failure: { command: `claude --desktop --resume ${id}`, reason: "Could not reach the server. Run it in the session's folder." } };
+    } finally {
+      inFlight.current.delete(id);
+    }
+    patch(id, next);
+  };
+  return <OpenContext.Provider value={{ stateOf: (id) => states[id] ?? IDLE, open }}>{children}</OpenContext.Provider>;
 }
 
 /** A button that opens the session in its scope; it reads "Opening…" while the request is out. */
-export function OpenButton({ className, children }: { className: string; children: string }) {
-  const state = useContext(OpenContext);
-  if (!state) throw new Error('OpenButton needs an OpenScope');
+export function OpenButton({ sessionId, className, children }: { sessionId: string; className: string; children: string }) {
+  const scope = useContext(OpenContext);
+  if (!scope) throw new Error('OpenButton needs an OpenScope');
+  const { busy } = scope.stateOf(sessionId);
   return (
-    <button type="button" className={className} data-act aria-busy={state.busy} onClick={() => void state.open()}>
-      {state.busy ? 'Opening…' : children}
+    <button type="button" className={className} data-act aria-busy={busy} onClick={() => void scope.open(sessionId)}>
+      {busy ? 'Opening…' : children}
     </button>
   );
 }
 
 /** The command to run by hand, once the scope's open has failed. */
-export function OpenFailure() {
-  const state = useContext(OpenContext);
-  return state?.failure ? <CopyCommand command={state.failure.command} reason={state.failure.reason} /> : null;
+export function OpenFailure({ sessionId }: { sessionId: string }) {
+  const failure = useContext(OpenContext)?.stateOf(sessionId).failure;
+  return failure ? <CopyCommand command={failure.command} reason={failure.reason} /> : null;
 }
 
-function LineBody({ session }: { session: SessionRef }) {
+function LineBody({ session, nameless }: { session: SessionRef; nameless?: boolean }) {
   return (
     <>
       <div className="ip-sess">
-        <span className="ip-sess-name" title={sessionDisplayTitle(session)}>{sessionDisplayTitle(session)}</span>
-        <OpenButton className="ip-link-btn">Open session ↗</OpenButton>
+        {!nameless && <span className="ip-sess-name" title={sessionDisplayTitle(session)}>{sessionDisplayTitle(session)}</span>}
+        <OpenButton sessionId={session.id} className="ip-link-btn">Open session ↗</OpenButton>
       </div>
-      <OpenFailure />
+      <OpenFailure sessionId={session.id} />
     </>
   );
 }
 
-/** The session's display title and "Open session ↗"; when the server could not open it, the command to run by hand shows under the line. */
-export function SessionLine({ session, area }: { session: SessionRef | null; area: MeasureArea }) {
+/** The session's display title (unless `nameless`: the box's title already is it) and "Open session ↗"; when the server could not open it, the command to run by hand shows under the line. */
+export function SessionLine({ session, area, nameless }: { session: SessionRef | null; area: MeasureArea; nameless?: boolean }) {
   const shared = useContext(OpenContext);
   if (!session) {
     return (
@@ -108,10 +128,10 @@ export function SessionLine({ session, area }: { session: SessionRef | null; are
       </div>
     );
   }
-  if (shared) return <LineBody session={session} />;
+  if (shared) return <LineBody session={session} nameless={nameless} />;
   return (
-    <OpenScope key={session.id} session={session} area={area}>
-      <LineBody session={session} />
+    <OpenScope key={session.id} area={area}>
+      <LineBody session={session} nameless={nameless} />
     </OpenScope>
   );
 }

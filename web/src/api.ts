@@ -68,12 +68,15 @@ export type OpenDesktopResult = { ok: true } | { ok: false; command: string; rea
  * rejects.
  */
 export async function openDesktop(sessionId: string): Promise<OpenDesktopResult> {
-  const answer = await sendUi<{ ok: boolean; command?: string }>(`/api/ui/sessions/${encodeURIComponent(sessionId)}/open-desktop`, {});
+  const answer = await sendUi<{ ok: boolean; command?: string; reason?: string }>(`/api/ui/sessions/${encodeURIComponent(sessionId)}/open-desktop`, {});
   if (answer === 'reload') return 'reload';
-  const fallback = `claude --desktop --resume ${sessionId}`;
-  if (typeof answer === 'string') return { ok: false, command: fallback, reason: answer };
+  // The command the window builds itself has no folder in it, so the reason says where to run it.
+  const own = (reason: string): OpenDesktopResult => ({ ok: false, command: `claude --desktop --resume ${sessionId}`, reason: `${/[.!?]$/.test(reason) ? reason : `${reason}.`} Run it in the session's folder.` });
+  if (typeof answer === 'string') return own(answer);
+  if (answer === null || typeof answer !== 'object') return own('The InProgress server gave an answer the window could not read.');
   if (answer.ok) return { ok: true };
-  return { ok: false, command: answer.command || fallback };
+  if (answer.command) return { ok: false, command: answer.command, reason: answer.reason };
+  return own(answer.reason ?? 'Claude Code could not be opened.');
 }
 
 /** Clears an ask, with an answer when Aiden typed one. */

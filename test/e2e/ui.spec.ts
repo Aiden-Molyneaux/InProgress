@@ -1859,7 +1859,7 @@ test.describe('Board', () => {
     const box = nowRow(page, 'Play app signing');
     await box.getByRole('button', { name: 'Open session ↗' }).dblclick();
     await expect(box.locator('.ip-sess-cmd .ip-code')).toHaveText(`claude --desktop --resume ${fresh.session}`);
-    await expect(box.locator('.ip-sys')).toHaveText('Launcher unavailable');
+    await expect(box.locator('.ip-sys')).toHaveText("Launcher unavailable. Run it in the session's folder.");
     expect(calls).toBe(1);
     await expect(page.getByRole('complementary')).toHaveCount(0);
     refuse = false;
@@ -1867,6 +1867,28 @@ test.describe('Board', () => {
     await expect(box.getByRole('button', { name: 'Opening…' })).toHaveAttribute('aria-busy', 'true');
     await expect(box.locator('.ip-sess-cmd')).toHaveCount(0);
     expect(calls).toBe(2);
+  });
+
+  test('Open session: the server reason shows with its command, a null answer is a failure, and a 401 reloads the window', async ({ page, fresh, consoleErrors }) => {
+    consoleErrors.allow(/status of 401/);
+    let mode: 'reason' | 'null' | 'stale' = 'reason';
+    await page.route('**/api/ui/sessions/*/open-desktop', async (route) => {
+      if (mode === 'reason') await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: false, command: `claude --desktop --resume ${fresh.session}`, reason: 'Claude Code was not found on this computer' }) });
+      else if (mode === 'null') await route.fulfill({ status: 200, contentType: 'application/json', body: 'null' });
+      else await route.fulfill({ status: 401, contentType: 'application/json', body: '{}' });
+    });
+    await open(page, fresh);
+    const box = nowRow(page, 'Play app signing');
+    await box.getByRole('button', { name: 'Open session ↗' }).click();
+    await expect(box.locator('.ip-sys')).toHaveText('Claude Code was not found on this computer');
+    mode = 'null';
+    await box.getByRole('button', { name: 'Open session ↗' }).click();
+    await expect(box.locator('.ip-sys')).toContainText("Run it in the session's folder.");
+    await expect(box.locator('.ip-sess-cmd .ip-code')).toHaveText(`claude --desktop --resume ${fresh.session}`);
+    mode = 'stale';
+    const reloaded = page.waitForEvent('load');
+    await box.getByRole('button', { name: 'Open session ↗' }).click();
+    await reloaded;
   });
 
   test('Clear on a box with two asks moves focus to the remaining ask', async ({ page, api, fresh }) => {
@@ -1877,6 +1899,44 @@ test.describe('Board', () => {
     await box.locator('[data-ask]').first().getByRole('button', { name: 'Clear' }).click();
     await expect(box.locator('[data-ask]')).toHaveCount(1);
     await expect(box.locator('[data-ask]').getByRole('button', { name: 'Answer…' })).toBeFocused();
+  });
+
+  test('Clear in Details with two asks moves focus to the other ask, not to the page', async ({ page, api, fresh }) => {
+    await write(api, fresh.session, 'post', `/api/nodes/${fresh.ids['Run signing tests']}/asks`, { kind: 'question', text: 'And which store account?' });
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const details = await openDetails(page, 'Run signing tests');
+    const asks = details.locator('.ip-dask:not(.cleared)');
+    await expect(asks).toHaveCount(2);
+    await asks.first().getByRole('button', { name: 'Clear' }).click();
+    await expect(asks).toHaveCount(1);
+    await expect(asks.getByRole('button', { name: 'Answer…' })).toBeFocused();
+  });
+
+  test('a box with two waiting sessions shows a permission block for each, and Open session shares one launch per session', async ({ page, api, fresh }) => {
+    const second = `e2e-${randomUUID()}`;
+    await write(api, second, 'post', `/api/sessions/${second}/enroll`, { project: fresh.slug, title: 'Second session' });
+    await write(api, second, 'post', `/api/sessions/${second}/focus`, { nodeId: fresh.ids['Play app signing'] });
+    await hook(api, fresh.session, { event: 'permission' });
+    await hook(api, second, { event: 'permission' });
+    await write(api, fresh.session, 'post', `/api/nodes/${fresh.ids['Play app signing']}/asks`, { kind: 'question', text: 'Same session, one launch?' });
+    await write(api, second, 'post', `/api/nodes/${fresh.ids['Play app signing']}/asks`, { kind: 'question', text: 'Other session, own launch?' });
+    const calls: string[] = [];
+    await page.route('**/api/ui/sessions/*/open-desktop', async (route) => {
+      calls.push(route.request().url());
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+    });
+    await open(page, fresh);
+    const box = boxIn(page, 'needs', 'Play app signing');
+    await expect(box.locator('.ip-block').filter({ hasText: 'Waiting for permission' })).toHaveCount(2);
+    await expect(box.getByRole('button', { name: 'Open session to allow' })).toHaveCount(2);
+    // A session shows in its line and its permission block, and again over an ask of its own when another session's block comes between: one launch, so every button of it reads Opening… and one request goes.
+    await box.getByRole('button', { name: 'Open session to allow' }).first().click();
+    await expect.poll(() => box.getByRole('button', { name: 'Opening…' }).count()).toBeGreaterThanOrEqual(2);
+    for (const button of await box.getByRole('button', { name: 'Opening…' }).all()) await button.click();
+    await expect(box.getByRole('button', { name: 'Opening…' })).toHaveCount(0);
+    expect(calls).toHaveLength(1);
   });
 
   test('Answer… opens a field that takes focus, Escape returns to the button, and Enter clears the ask with the answer', async ({ page, api, fresh }) => {

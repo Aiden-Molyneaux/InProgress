@@ -12,7 +12,7 @@ export const DONE_SHOWN = 5;
  */
 export function DoneColumn({ board, boxes, snapshot, now, wide, lastLook, onOpenNode, onOpenResource, onOpenDone }: BandProps & { lastLook: string | null }) {
   const rows = boxes.done.slice(0, DONE_SHOWN);
-  if (rows.length === 0) return <p className="ip-quiet ip-empty-line">Nothing done yet</p>;
+  if (board.done.length === 0) return <p className="ip-quiet ip-empty-line">Nothing done yet</p>;
   const completedAt = (b: BoxData) => b.row!.node.completedAt;
   const isNew = (b: BoxData) => lastLook !== null && (completedAt(b) ?? '') > lastLook;
   const fresh = rows.filter(isNew);
@@ -23,28 +23,28 @@ export function DoneColumn({ board, boxes, snapshot, now, wide, lastLook, onOpen
   return (
     <>
       <ol className="ip-list">
-      {shown.map((box) => {
-        const node = box.row!.node;
-        return (
-          <Fragment key={node.id}>
-            <TaskBox
-              box={box}
-              now={now}
-              area="done"
-              docs={snapshot.resources.filter((r) => r.nodeId === node.id).length}
-              onOpenNode={onOpenNode}
-              onOpenResource={onOpenResource}
-            >
-              {node.outcome.trim() && <p className="ip-card-outcome ip-clamp-2">{node.outcome}</p>}
-            </TaskBox>
-            {node.id === dividerAfter && (
-              <li className="ip-divider" role="separator">
-                <span>New since you looked</span>
-              </li>
-            )}
-          </Fragment>
-        );
-      })}
+        {shown.map((box) => {
+          const node = box.row!.node;
+          return (
+            <Fragment key={node.id}>
+              <TaskBox
+                box={box}
+                now={now}
+                area="done"
+                docs={snapshot.resources.filter((r) => r.nodeId === node.id).length}
+                onOpenNode={onOpenNode}
+                onOpenResource={onOpenResource}
+              >
+                {node.outcome.trim() && <p className="ip-card-outcome ip-clamp-2">{node.outcome}</p>}
+              </TaskBox>
+              {node.id === dividerAfter && (
+                <li className="ip-divider" role="separator">
+                  <span>New since you looked</span>
+                </li>
+              )}
+            </Fragment>
+          );
+        })}
         {folded.length > 0 && <li className="ip-done-fold">{`✓ ${folded.length} earlier`}</li>}
       </ol>
       {onOpenDone && (

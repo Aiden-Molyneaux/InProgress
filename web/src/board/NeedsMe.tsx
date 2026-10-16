@@ -23,7 +23,7 @@ function PermissionBlock({ session }: { session: Session }) {
       <p className="ip-card-main">{command ? 'Allow a shell command' : 'Waiting for permission'}</p>
       {command && <code className="ip-code">{command}</code>}
       <div className="ip-ask-actions">
-        <OpenButton className="ip-btn">Open session to allow</OpenButton>
+        <OpenButton sessionId={session.id} className="ip-btn">Open session to allow</OpenButton>
       </div>
     </div>
   );
@@ -43,12 +43,14 @@ export function NeedsMe({ snapshot, boxes, now, onOpenNode, onOpenResource }: Ba
     const asks = box.row?.asks ?? [];
     // One session line per run of asks from the same session; a permission wait leads with its own session's line.
     const parts = [] as { key: string; node: ReactNode }[];
+    // A focusless box is titled with its session's name, so its line does not repeat it.
+    const nameless = !box.row;
     for (const w of waiting) {
       parts.push({ key: `wait${w.id}`, node: (
-        <OpenScope key={w.id} session={w} area="needs_me">
-          <SessionLine session={w} area="needs_me" />
+        <>
+          <SessionLine session={w} area="needs_me" nameless={nameless} />
           <PermissionBlock session={w} />
-        </OpenScope>
+        </>
       ) });
     }
     let last: string | null | undefined = waiting.length ? waiting[waiting.length - 1].id : undefined;
@@ -66,7 +68,8 @@ export function NeedsMe({ snapshot, boxes, now, onOpenNode, onOpenResource }: Ba
         </>
       ) });
     }
-    return parts.map((p) => <Fragment key={p.key}>{p.node}</Fragment>);
+    // One OpenScope for the box, holding one Open session state per session id.
+    return <OpenScope area="needs_me">{parts.map((p) => <Fragment key={p.key}>{p.node}</Fragment>)}</OpenScope>;
   };
   return (
     <ul className="ip-list">

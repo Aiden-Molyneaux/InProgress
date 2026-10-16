@@ -5,7 +5,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../../src/server/app';
-import { desktopCommand, findClaude, firstClaudeExe, forgetClaude, openInDesktop, usableCwd, type DesktopSession } from '../../src/server/open-desktop';
+import { desktopCommand, findClaude, firstClaudeExe, forgetClaude, openInDesktop, usableCwd, type DesktopSession, type OpenDesktopResult } from '../../src/server/open-desktop';
 import { makeCtx } from '../helpers';
 
 const TOKEN = 'test-token';
@@ -21,7 +21,7 @@ afterAll(() => rmSync(DIR, { recursive: true, force: true }));
 /** A folder that does not exist on this machine (C:/personal/InGame may). */
 const GONE = join(DIR, 'gone-project');
 
-async function setup(openDesktop: (session: DesktopSession) => Promise<boolean>, cwd = GONE) {
+async function setup(openDesktop: (session: DesktopSession) => Promise<OpenDesktopResult>, cwd = GONE) {
   const ctx = makeCtx();
   const app = buildApp({ ctx, token: TOKEN, uiToken: 'ui-token', version: 'test', openDesktop });
   await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'InGame' } });
@@ -33,7 +33,7 @@ async function setup(openDesktop: (session: DesktopSession) => Promise<boolean>,
 
 describe('POST /api/ui/sessions/:id/open-desktop', () => {
   it('answers ok when the launch worked, and passes the session id and its cwd', async () => {
-    const open = vi.fn(async () => true);
+    const open = vi.fn(async (): Promise<OpenDesktopResult> => ({ ok: true }));
     const { post } = await setup(open);
     const res = await post(ID);
     expect(res.statusCode).toBe(200);
@@ -42,19 +42,19 @@ describe('POST /api/ui/sessions/:id/open-desktop', () => {
   });
 
   it('answers ok false with the bare command when the launch failed and the cwd is not a folder here', async () => {
-    const { post } = await setup(async () => false);
+    const { post } = await setup(async () => ({ ok: false, reason: 'claude exited with code 1' }));
     const res = await post(ID);
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ ok: false, command: `claude --desktop --resume ${ID}` });
+    expect(res.json()).toEqual({ ok: false, command: `claude --desktop --resume ${ID}`, reason: 'claude exited with code 1' });
   });
 
   it('answers ok false with a cd into the session folder first when that folder exists', async () => {
-    const { post } = await setup(async () => false, DIR);
-    expect((await post(ID)).json()).toEqual({ ok: false, command: `cd "${DIR}"; claude --desktop --resume ${ID}` });
+    const { post } = await setup(async () => ({ ok: false, reason: 'why' }), DIR);
+    expect((await post(ID)).json()).toEqual({ ok: false, command: `cd "${DIR}"; claude --desktop --resume ${ID}`, reason: 'why' });
   });
 
   it('answers 400 for an id that is not a UUID, without launching', async () => {
-    const open = vi.fn(async () => true);
+    const open = vi.fn(async (): Promise<OpenDesktopResult> => ({ ok: true }));
     const { post } = await setup(open);
     expect((await post('s1')).statusCode).toBe(400);
     expect((await post('not%20a%20uuid')).statusCode).toBe(400);
@@ -62,14 +62,14 @@ describe('POST /api/ui/sessions/:id/open-desktop', () => {
   });
 
   it('answers 404 for a session that does not exist, without launching', async () => {
-    const open = vi.fn(async () => true);
+    const open = vi.fn(async (): Promise<OpenDesktopResult> => ({ ok: true }));
     const { post } = await setup(open);
     expect((await post('11111111-2222-4333-8444-555555555555')).statusCode).toBe(404);
     expect(open).not.toHaveBeenCalled();
   });
 
   it('refuses a request from another origin, one without the UI token, and one with a bearer token only', async () => {
-    const open = vi.fn(async () => true);
+    const open = vi.fn(async (): Promise<OpenDesktopResult> => ({ ok: true }));
     const { post } = await setup(open);
     expect((await post(ID, { ...UI, origin: 'http://evil.example' })).statusCode).toBe(403);
     expect((await post(ID, { origin: UI.origin })).statusCode).toBe(401);
@@ -90,42 +90,44 @@ function fakeChild(): ChildProcess & { killed: boolean } {
 }
 
 describe('openInDesktop', () => {
-  it('runs claude --desktop --resume <id> without a shell, and is true on exit 0', async () => {
+  it('runs claude --desktop --resume <id> without a shell, and is ok on exit 0', async () => {
     const child = fakeChild();
     const spawn = vi.fn(() => child);
     const result = openInDesktop({ id: ID, cwd: null }, { spawn, findClaude: () => 'claude', timeoutMs: 1000 });
     child.emit('exit', 0);
-    expect(await result).toBe(true);
+    expect(await result).toEqual({ ok: true });
     const [file, args, options] = spawn.mock.calls[0] as unknown as [string, string[], { shell: boolean; windowsHide: boolean }];
     expect(file).toBe('claude');
     expect(args).toEqual(['--desktop', '--resume', ID]);
     expect(options).toMatchObject({ shell: false, windowsHide: true });
   });
 
-  it('is false on a non-zero exit', async () => {
+  it('says the exit code on a non-zero exit', async () => {
     const child = fakeChild();
     const result = openInDesktop({ id: ID, cwd: null }, { spawn: () => child, findClaude: () => 'claude', timeoutMs: 1000 });
     child.emit('exit', 1);
-    expect(await result).toBe(false);
+    expect(await result).toEqual({ ok: false, reason: 'claude exited with code 1' });
   });
 
-  it('is false on a spawn error, whether it is thrown or emitted', async () => {
+  it('says why on a spawn error, whether it is emitted (with a code) or thrown (a message)', async () => {
     const child = fakeChild();
     const emitted = openInDesktop({ id: ID, cwd: null }, { spawn: () => child, findClaude: () => 'claude', timeoutMs: 1000 });
-    child.emit('error', new Error('ENOENT'));
-    expect(await emitted).toBe(false);
+    child.emit('error', Object.assign(new Error('spawn claude ENOENT'), { code: 'ENOENT' }));
+    expect(await emitted).toEqual({ ok: false, reason: 'Claude Code could not start: ENOENT' });
     const thrown = openInDesktop({ id: ID, cwd: null }, {
       findClaude: () => 'claude',
       spawn: () => {
         throw new Error('EINVAL');
       },
     });
-    expect(await thrown).toBe(false);
+    expect(await thrown).toEqual({ ok: false, reason: 'Claude Code could not start: EINVAL' });
   });
 
-  it('is false on a timeout, and kills the child', async () => {
+  it('says it did not answer on a timeout, and kills the child', async () => {
     const child = fakeChild();
-    expect(await openInDesktop({ id: ID, cwd: null }, { spawn: () => child, findClaude: () => 'claude', timeoutMs: 20 })).toBe(false);
+    const result = await openInDesktop({ id: ID, cwd: null }, { spawn: () => child, findClaude: () => 'claude', timeoutMs: 20 });
+    expect(result).toMatchObject({ ok: false });
+    expect((result as { reason: string }).reason).toMatch(/^Claude Code did not answer within /);
     expect(child.killed).toBe(true);
   });
 });
@@ -154,9 +156,9 @@ describe('openInDesktop: where it runs and what it runs', () => {
     }
   });
 
-  it('answers false without spawning when claude.exe cannot be found', async () => {
+  it('says claude was not found, without spawning, when claude.exe cannot be found', async () => {
     const spawn = vi.fn(() => fakeChild());
-    expect(await openInDesktop({ id: ID, cwd: DIR }, { spawn, findClaude: () => undefined, timeoutMs: 1000 })).toBe(false);
+    expect(await openInDesktop({ id: ID, cwd: DIR }, { spawn, findClaude: () => undefined, timeoutMs: 1000 })).toEqual({ ok: false, reason: 'Claude Code was not found on this computer' });
     expect(spawn).not.toHaveBeenCalled();
   });
 
@@ -169,14 +171,14 @@ describe('openInDesktop: where it runs and what it runs', () => {
     expect(b).toBe(a);
     expect(spawn).toHaveBeenCalledTimes(1);
     first.emit('exit', 0);
-    expect(await a).toBe(true);
+    expect(await a).toEqual({ ok: true });
     const second = fakeChild();
     spawn.mockImplementation(() => second);
     const c = openInDesktop({ id: ID, cwd: null }, o);
     expect(c).not.toBe(a);
     expect(spawn).toHaveBeenCalledTimes(2);
     second.emit('exit', 1);
-    expect(await c).toBe(false);
+    expect(await c).toEqual({ ok: false, reason: 'claude exited with code 1' });
   });
 });
 
