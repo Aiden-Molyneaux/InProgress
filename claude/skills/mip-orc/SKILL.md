@@ -42,7 +42,7 @@ Summarize it for Aiden in a few lines. Sessions that the stale-session sweep end
 
 ## Reconcile
 
-Work from the marks, `#id Title: mark` (the mark follows the last `: `). You cannot read a step's log, so you propose from what you can read: the step's handoff file if it has one, and `git log --oneline -E --grep "#<id>([^0-9]|$)"` in the project's repo.
+Work from the marks, `#id Title: mark` (the mark is the word after the title's colon; `stalled` is followed by its facts after another `: `). You cannot read a step's log, so you propose from what you can read: the step's handoff file if it has one, and `git log --oneline -E --grep "#<id>([^0-9]|$)"` in the project's repo.
 
 - `no_outcome`: a done step with an empty outcome. Propose an outcome from the handoff file or the git log, and put it in the batch for Aiden to approve. When nothing there says what was done, ask Aiden. Never make one up from the title.
 - `done_focus`: a done step that a live session still has focus on. List the session (its title) and the step; do not try to clear the focus. Nothing you read gives that session's full id, and a focus write would keep an idle session live and change its next briefing. The mark goes when that session claims its next step, ends, or goes stale.
