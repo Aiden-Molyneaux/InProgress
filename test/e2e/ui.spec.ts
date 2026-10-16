@@ -1444,20 +1444,12 @@ test.describe('Live work', () => {
     // Anchored: the next row's "after Upload the key" names it too.
     await expect(details.locator('.ip-wt', { hasText: /^◐ Upload the key/ })).toHaveText('◐ Upload the key · E2E session');
     await expect(details.locator('.ip-wt', { hasText: 'Check the release track' })).toHaveText('○ Check the release track · E2E session · after Upload the key');
-    await expect(details.locator('.ip-wt', { hasText: 'Collect the screenshots' })).toHaveText('a1 ○ Collect the screenshots · Draft the store notes');
-    await expect(details.locator('.ip-dagent')).toHaveText(new RegExp(`^a1 · Draft the store notes · sonnet · ${RUNNING}$`));
-    // Quiet: the rows read as the canvas's. ◐ in the active ink and still, the hue bar on the session's own task only,
-    // the tags in DM Mono in the session's hue.
+    await expect(details.locator('.ip-wt', { hasText: 'Collect the screenshots' })).toHaveText('○ Collect the screenshots · Draft the store notes');
+    await expect(details.locator('.ip-dagent')).toHaveText(new RegExp(`^Draft the store notes · sonnet · ${RUNNING}$`));
+    // Quiet: the rows read as the canvas's. ◐ in the active ink and still.
     const upload = details.locator('.ip-wt', { hasText: /^◐ Upload the key/ });
-    const screenshots = details.locator('.ip-wt', { hasText: 'Collect the screenshots' });
     await expect(upload.locator('.ip-work-mark')).toHaveCSS('color', 'rgb(194, 65, 12)');
     await expect(upload.locator('.ip-work-mark')).toHaveCSS('animation-name', 'none');
-    await expect(upload.locator('.ip-work-agent')).toHaveCSS('background-color', 'rgb(11, 107, 125)');
-    await expect(screenshots.locator('.ip-work-agent')).toHaveCount(0);
-    for (const tag of [screenshots.locator('.ip-work-tag'), details.locator('.ip-dagent .ip-agent-tag')]) {
-      await expect(tag).toHaveCSS('font-family', /DM Mono/);
-      await expect(tag).toHaveCSS('color', 'rgb(11, 107, 125)');
-    }
   });
 
 });
@@ -1797,11 +1789,30 @@ test.describe('Board', () => {
     await expect(header).toContainText('Signing is half done.');
     await expect(header).not.toContainText('The tests come next');
     const sessions = header.getByRole('group', { name: 'No claimed step' });
-    await expect(sessions).toContainText('B');
+    await expect(sessions).toContainText('Second session');
     await expect(sessions).toContainText('working');
     // The first session is on a Now row, so it is not listed here.
     await expect(sessions.locator('.ip-hdr-session')).toHaveCount(1);
     await expect(header.getByRole('button')).toHaveCount(0);
+  });
+
+  test('no session letter, character or session hue shows anywhere in the window', async ({ page, api, fresh }) => {
+    const second = `e2e-${randomUUID()}`;
+    await write(api, second, 'post', `/api/sessions/${second}/enroll`, { project: fresh.slug, title: 'Docs pass' });
+    await hook(api, second, { event: 'prompt' });
+    await write(api, second, 'post', `/api/projects/${fresh.slug}/queue`, { nodes: [fresh.ids['3 RevenueCat']], session: second });
+    const retired = '.ip-char, .ip-tag, .ip-letter, .ip-work-tag, .ip-agent-tag';
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    await expect(page.locator(retired)).toHaveCount(0);
+    await expect(page.getByRole('group', { name: 'No claimed step' })).toContainText('Docs pass');
+    await page.getByRole('button', { name: 'Project', exact: true }).click();
+    await expect(page.getByRole('region', { name: 'Sections' })).toBeVisible();
+    const row = page.locator('.ip-orow', { has: page.getByRole('button', { name: '3 RevenueCat', exact: true }) });
+    const mark = row.getByRole('img', { name: 'next, in the own queue of "Docs pass"' });
+    await expect(mark).toHaveText('◆');
+    await expect(row.locator('.ip-osess')).toContainText('Docs pass');
+    await expect(page.locator(retired)).toHaveCount(0);
   });
 
   test('a permission wait is an amber box with the command and a way to open the session, and the step leaves Now while it waits', async ({ page, api, fresh }) => {

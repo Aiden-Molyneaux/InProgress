@@ -1,6 +1,6 @@
 import { deriveBoard, type Mark } from '../core/board';
 import { clipLine, stepRef } from '../core/step-ref';
-import { ASK_GLYPHS, STALE_SESSION_MS, TRAIL_MS, askTag, sessionTag, type Ask, type ProjectSnapshot } from '../core/types';
+import { ASK_GLYPHS, STALE_SESSION_MS, TRAIL_MS, askTag, type Ask, type ProjectSnapshot } from '../core/types';
 import type { Ctx } from './db/tx';
 import { listAsksClearedSince, listAsksRaisedSince } from './repo/asks';
 import { resolveProject } from './repo/projects';
@@ -19,7 +19,6 @@ const TEXT_MAX = 80;
 
 export interface DigestSession {
   id: string;
-  letter: string;
   title: string;
   startedAt: string;
   /** MIN(ended_at, last_seen_at) for an ended session, else null. */
@@ -96,7 +95,7 @@ export function readDigest(ctx: Ctx, ref: string | number, since?: string): Dige
   const handoffSessions = new Set(snapshot.resources.filter((r) => r.purpose === 'handoff' && r.sessionId !== null).map((r) => r.sessionId as string));
   const rows = ctx.db
     .prepare(
-      `SELECT id, title, slot, started_at, state, focus_node_id,
+      `SELECT id, title, started_at, state, focus_node_id,
               CASE WHEN state = 'ended' THEN MIN(ended_at, last_seen_at) END AS end_at, ended_at AS raw_end, last_seen_at AS seen_at,
               (SELECT COUNT(*) FROM work_items w WHERE w.session_id = sessions.id AND w.status IN ('pending', 'in_progress')) AS open_tasks
          FROM sessions
@@ -107,7 +106,6 @@ export function readDigest(ctx: Ctx, ref: string | number, since?: string): Dige
     .all({ project: project.id, since: from, trail: trailCutoff }) as {
     id: string;
     title: string | null;
-    slot: number | null;
     started_at: string;
     state: string;
     focus_node_id: number | null;
@@ -118,7 +116,6 @@ export function readDigest(ctx: Ctx, ref: string | number, since?: string): Dige
   }[];
   const sessions: DigestSession[] = rows.map((r) => ({
     id: r.id,
-    letter: sessionTag(r.slot) || '?',
     title: r.title?.trim() || `Session ${r.id.slice(0, 6)}`,
     startedAt: r.started_at,
     endedAt: r.end_at,
@@ -254,13 +251,13 @@ function sessionItems(d: Digest, now: number): string[] {
       ...(s.endedAt !== null && !s.handoff ? ['no handoff'] : []),
       ...(s.openTasks ? [plural(s.openTasks, 'open task', 'open tasks')] : []),
     ];
-    items.push(`${s.letter} ${s.id.slice(0, 8)} "${clip(s.title, 40)}" ${notes.join(', ')}`);
+    items.push(`${s.id.slice(0, 8)} "${clip(s.title, 40)}" ${notes.join(', ')}`);
   }
   return items;
 }
 
 function sections(d: Digest, now: number): Section[] {
-  const letterOf = new Map(d.sessions.map((s) => [s.id, s.letter]));
+  const titleOf = new Map(d.sessions.map((s) => [s.id, s.title]));
   const step = (id: number): string => stepRef(id, d.stepTitles[id]);
   return [
     {
@@ -270,8 +267,8 @@ function sections(d: Digest, now: number): Section[] {
     {
       title: 'Asks raised',
       items: d.asksRaised.map((a) => {
-        const who = a.sessionId ? letterOf.get(a.sessionId) : undefined;
-        return `${askTag(a.id)} ${ASK_GLYPHS[a.kind]} on ${step(a.nodeId)}: "${clip(a.text)}" (${who ? `${who}, ` : ''}${ago(a.raisedAt, now)})`;
+        const who = a.sessionId ? titleOf.get(a.sessionId) : undefined;
+        return `${askTag(a.id)} ${ASK_GLYPHS[a.kind]} on ${step(a.nodeId)}: "${clip(a.text)}" (${who ? `"${clip(who, 30)}", ` : ''}${ago(a.raisedAt, now)})`;
       }),
     },
     {

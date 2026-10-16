@@ -56,7 +56,7 @@ describe('scoped worker with a claimed step', () => {
     handleHookEvent(ctx, 's1', { event: 'task-updated', taskKey: '2', status: 'in_progress' });
 
     const lines = t.brief('s1');
-    expect(lines[0]).toMatch(/^\[InProgress\] This session is tracked in project "InGame" \(slug ingame\)\. Session id: s1\. You are session A\.$/);
+    expect(lines[0]).toMatch(/^\[InProgress\] This session is tracked in project "InGame" \(slug ingame\)\. Session id: s1\.$/);
     expect(lines[1]).toBe(`Role: worker on #${step.id}.`);
     expect(lines[2]).toMatch(/^Plan edits go through the inprogress-scribe agent/);
     expect(lines.slice(3, 5)).toEqual(['Playbook:', '  Docs live in docs/planning.']);
@@ -78,7 +78,7 @@ describe('scoped worker with a claimed step', () => {
       `Resources on #${step.id}: r${note.id} Notes · r${handoff.id} Handoff for tabs`,
       `Asks on #${step.id}: a${open.id} ? "Which port?" (open, <1m) · a${answered.id} ◎ "Look at the tabs" (answered: "looks good")`,
       `Left unfinished on #${step.id} by an earlier session: "Wire the tabs"`,
-      'Other sessions here: B "Store listing" (working)',
+      'Other sessions here: "Store listing" (working)',
     ]);
   });
 
@@ -118,7 +118,7 @@ describe('scoped worker with no step', () => {
   it('offers up to three ready Next steps, its own queue first, and the claim command', () => {
     const t = setup();
     t.join('s1');
-    t.join('s2');
+    t.join('s2', 'Docs pass');
     setQueue(t.ctx, 'scribe:s1', t.project.slug, [t.ready1.id, t.ready2.id, t.ready3.id, t.askedStep.id, t.mine.id], 'unowned');
     setQueue(t.ctx, 'scribe:s2', t.project.slug, [t.ready3.id], { sessionId: 's2' });
     raiseAsk(t.ctx, 'test', { nodeId: t.askedStep.id, kind: 'question', text: 'Hold on' });
@@ -127,7 +127,7 @@ describe('scoped worker with no step', () => {
     expect(lines.slice(-3)).toEqual([
       `Ready to claim: #${t.ready1.id} Ready one · #${t.ready2.id} Ready two · #${t.ready3.id} Ready three`,
       `Claim one: ${CLAIM} s1`,
-      expect.stringMatching(/^Other sessions here: B /),
+      expect.stringMatching(/^Other sessions here: "Docs pass" /),
     ].map((x) => x));
     // s2's own queue puts #ready3 first for s2.
     expect(t.brief('s2').find((l) => l.startsWith('Ready to claim:'))).toBe(`Ready to claim: #${t.ready3.id} Ready three · #${t.ready1.id} Ready one · #${t.ready2.id} Ready two`);
@@ -209,13 +209,13 @@ describe('the Needs you line', () => {
   it('lists open asks oldest first, then live permission waits', () => {
     const t = setup('full');
     t.join('s1');
-    t.join('s2');
+    t.join('s2', 'Docs pass');
     const first = raiseAsk(t.ctx, 'test', { nodeId: t.askedStep.id, kind: 'question', text: 'Which port?' });
     const second = raiseAsk(t.ctx, 'test', { nodeId: t.step.id, kind: 'review', text: 'Look' });
     setFocus(t.ctx, 'scribe:s2', 's2', t.step.id);
     handleHookEvent(t.ctx, 's2', { event: 'permission' });
     const line = t.brief('s1').find((l) => l.startsWith('Needs you'));
-    expect(line).toBe(`Needs you (3): a${first.id} ? on #${t.askedStep.id} Asked: "Which port?" · a${second.id} ◎ on #${t.step.id} Build tabs: "Look" · B waiting for permission on #${t.step.id} Build tabs (<1m)`);
+    expect(line).toBe(`Needs you (3): a${first.id} ? on #${t.askedStep.id} Asked: "Which port?" · a${second.id} ◎ on #${t.step.id} Build tabs: "Look" · "Docs pass" waiting for permission on #${t.step.id} Build tabs (<1m)`);
   });
 });
 
@@ -223,15 +223,15 @@ describe('Up next reads the Board', () => {
   it('leaves an ended-but-unreleased owner\'s entries out of Next, as the window does, and orders owners by slot', () => {
     const t = setup('full');
     t.join('s1');
-    t.join('s2');
-    t.join('s3');
+    t.join('s2', 'Docs pass');
+    t.join('s3', 'Release notes');
     // Stored in this order, s3 appears before s2; the Board orders owners by slot.
     setQueue(t.ctx, 'scribe:s3', t.project.slug, [t.ready3.id], { sessionId: 's3' });
     setQueue(t.ctx, 'scribe:s2', t.project.slug, [t.ready2.id], { sessionId: 's2' });
     setQueue(t.ctx, 'scribe:s1', t.project.slug, [t.ready1.id], 'unowned');
-    expect(t.brief('s1').find((l) => l.startsWith('Up next'))).toBe(`Up next: B: #${t.ready2.id} · C: #${t.ready3.id} · later: #${t.ready1.id}`);
+    expect(t.brief('s1').find((l) => l.startsWith('Up next'))).toBe(`Up next: "Docs pass": #${t.ready2.id} · "Release notes": #${t.ready3.id} · later: #${t.ready1.id}`);
     // s2 ends without its queue being released (a row edited behind the server's back): its entry is out of Next, not unowned.
     t.ctx.db.prepare("UPDATE sessions SET state = 'ended', ended_at = ? WHERE id = 's2'").run(t.ctx.now());
-    expect(t.brief('s1').find((l) => l.startsWith('Up next'))).toBe(`Up next: C: #${t.ready3.id} · later: #${t.ready1.id}`);
+    expect(t.brief('s1').find((l) => l.startsWith('Up next'))).toBe(`Up next: "Release notes": #${t.ready3.id} · later: #${t.ready1.id}`);
   });
 });

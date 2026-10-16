@@ -90,7 +90,7 @@ export function createMcpServer(client: Client, o: McpOptions = {}): McpServer {
       .join('\n');
   });
 
-  tool('get_outline', 'Outline of a project tree with #ids, statuses, assignees and resource ids, and the queue as "Up next: A: #a → #b | later: #c": each live session\'s own order under its letter, then the unowned order. Finished branches are folded unless full is true.', { project, full: z.boolean().optional() },
+  tool('get_outline', 'Outline of a project tree with #ids, statuses, assignees and resource ids, and the queue as "Up next: \"Session title\": #a → #b | later: #c": each live session\'s own order under its title, then the unowned order. Finished branches are folded unless full is true.', { project, full: z.boolean().optional() },
     async (a: { project: string; full?: boolean }) => client.text(`/api/projects/${enc(a.project)}/outline${a.full ? '?full=1' : ''}`));
 
   tool('get_node', 'One node with its parent, children, resources and recent log.', { id },

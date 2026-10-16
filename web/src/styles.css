@@ -31,7 +31,6 @@
   --amber-fill: rgba(251,191,36,.18);
   --red: #b91c1c;
   --red-fill: rgba(185,28,28,.08);
-  --gone: #64748b;
   /* Task hues (a Board box's left edge): none orange, yellow, red or grey, which states own. */
   --hue-0: #0e7490;
   --hue-1: #2563eb;
@@ -40,14 +39,6 @@
   --hue-4: #db2777;
   --hue-5: #15803d;
   --hue-6: #8b5e34;
-  /* Session families, by slot (familyVar in family.ts). Slot 0 is teal, and a session with no slot wears it too. Past
-     six they repeat and the letter tells them apart. */
-  --family-0: #0b6b7d;
-  --family-1: #b4532f;
-  --family-2: #287a3a;
-  --family-3: #b0204f;
-  --family-4: #85593a;
-  --family-5: #4f4dc4;
   /* Theme-free: one value for day and night. Only Inter 500 and 900 ship, so every weight is one of the two. */
   --radius: 8px;
   --hairline: linear-gradient(97deg, #6366f1, #ff6600);
@@ -88,7 +79,6 @@
     --amber-fill: rgba(251,191,36,.12);
     --red: #f87171;
     --red-fill: rgba(248,113,113,.1);
-    --gone: #94a3b8;
     --hue-0: #22d3ee;
     --hue-1: #60a5fa;
     --hue-2: #818cf8;
@@ -96,12 +86,6 @@
     --hue-4: #f472b6;
     --hue-5: #4ade80;
     --hue-6: #d4a574;
-    --family-0: #3cc3d6;
-    --family-1: #e8956f;
-    --family-2: #7ad68f;
-    --family-3: #f27aa5;
-    --family-4: #d4a574;
-    --family-5: #9a98ff;
   }
 }
 * { box-sizing: border-box; }
@@ -208,7 +192,7 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-goto-note:not(:empty) { padding: 7px 8px 3px; font-size: var(--fs-m); line-height: 18px; color: var(--muted); }
 /* A command's mark in a fixed 12 px centred box, as .ip-work-mark: `!`, `✓` and `▸` all sit the same distance from the tag. */
 .ip-cmd-mark { display: inline-block; width: 12px; text-align: center; }
-/* A reader's ◇ in a list (the popover, Details): neutral, as only the letter wears the hue. */
+/* A reader's ◇ in a list (the popover, Details): neutral. */
 .ip-reader-mark { color: var(--muted); }
 /* Keyboard focus in the chrome: a 2 px ink ring, never a hue. */
 .ip-archive-btn:focus-visible, .ip-mi:focus-visible, .ip-mi-act:focus-visible, .ip-confirm .ip-btn:focus-visible { outline: 2px solid var(--text-2); outline-offset: 1px; }
@@ -261,7 +245,9 @@ li.ip-orow:hover { background: var(--panel-2); }
 .ip-ostep .ip-row-title.grp { font-weight: var(--w-heavy); }
 .ip-ominor { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
 .ip-ocell { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
-.ip-osess { display: flex; gap: 4px; justify-content: flex-end; font-size: var(--fs-s); }
+.ip-osess { display: flex; flex-direction: column; align-items: flex-end; min-width: 0; max-width: 184px; }
+.ip-osess-title { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-s); color: var(--text-2); }
+.ip-orow:not(.wide) .ip-osess { max-width: 112px; }
 .ip-orow.is-done .ip-row-title { color: var(--muted); }
 .ip-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; }
 .ip-dot.live { background: var(--active); }
@@ -294,13 +280,13 @@ li.ip-orow:hover { background: var(--panel-2); }
 .ip-hdr.wide .ip-hdr-note { flex: 2 1 0; }
 .ip-hdr-sessions { flex: 1 1 200px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .ip-hdr-sessions .ip-label { margin: 0 0 2px; }
-.ip-hdr-session { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-m); line-height: 18px; }
+.ip-hdr-session { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; font-size: var(--fs-m); line-height: 18px; }
+.ip-hdr-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ip-hygiene { margin-left: auto; align-self: center; padding: 2px 8px; border: 1px solid var(--border); border-radius: var(--radius); font-size: var(--fs-s); line-height: 14px; color: var(--muted); cursor: default; }
 .ip-link-btn { padding: 0; font-size: var(--fs-s); line-height: 14px; color: var(--link); }
 .ip-link-btn:hover { text-decoration: underline; }
 .ip-link-btn:focus-visible, .ip-row-title:focus-visible, .ip-chip-handoff:focus-visible, .ip-btn:focus-visible { outline: 2px solid var(--text-2); outline-offset: 1px; }
-.ip-tag { font-family: var(--font-mono); font-weight: var(--w-heavy); }
-/* A message: the character at the left, then who and when, the text and the step (the header's note, the Project view's). */
+/* A message: who and when, the text and the step (the header's note, the Project view's). */
 .ip-msg { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
 .ip-msg-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-m); line-height: 18px; }
 .ip-msg-head { color: var(--muted); font-size: var(--fs-s); line-height: 14px; }
@@ -340,7 +326,7 @@ li.ip-orow:hover { background: var(--panel-2); }
 .ip-backlog-row.pending { opacity: .5; }
 .ip-backlog-row.pending .ip-hover-act { display: none; }
 .ip-num { font-size: var(--fs-l); line-height: 24px; text-align: center; color: var(--text-2); }
-.ip-num.ip-letter { font-family: var(--font-mono); font-size: var(--fs-m); font-weight: var(--w-heavy); }
+.ip-own { color: var(--text-2); font-size: var(--fs-s); }
 .ip-line { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; min-width: 0; }
 .ip-own-queue { margin-top: 10px; }
 .ip-own-head { margin: 0 0 6px 2px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
@@ -420,14 +406,10 @@ button.ip-card-title:hover { color: var(--text); text-decoration: underline; }
 /* The YOU tag, on a card and in Details (NEEDS YOU, and YOU in its list of steps): amber ink on the amber tint. */
 .ip-you { flex: none; height: 18px; padding: 0 6px; border-radius: var(--radius); background: var(--amber-fill); color: var(--amber-ink); font-size: var(--fs-s); font-weight: var(--w-heavy); line-height: 18px; letter-spacing: .04em; white-space: nowrap; }
 
-/* A subagent's tag, here, in the chip's list and in Details: DM Mono in its session's hue. */
-.ip-agent-tag { font-family: var(--font-mono); font-size: var(--fs-s); font-weight: var(--w-text); line-height: 14px; color: var(--fam, var(--faint)); }
-/* Shared with Details' task rows (.ip-wt): the tag, the mark's colour and the hue bar. Details restyles them, and its
-   trail rows, under .ip-wt in its own region. */
-.ip-work-tag { font-family: var(--font-mono); font-size: var(--fs-s); font-weight: var(--w-text); line-height: 14px; color: var(--fam, var(--family-0)); }
+/* Shared with Details' task rows (.ip-wt): the mark's colour. Details restyles it, and its trail rows, under .ip-wt in
+   its own region. */
 .ip-work-mark { color: var(--muted); }
 .w-in_progress .ip-work-mark { color: var(--active-ink); }
-.ip-work-agent { display: inline-block; width: 3px; height: 12px; vertical-align: -1px; background: var(--fam, var(--family-0)); }
 /* Region: Details and viewer. Task 5. */
 /* Details: a side panel from 720 px, a bottom sheet over the lower 60 % below it (sheet.ts). Opaque --panel with the
    shadow, body M. Details styles the classes it shares with the canvas and the chrome under its own parents (.ip-wt,
@@ -467,21 +449,18 @@ button.ip-card-title:hover { color: var(--text); text-decoration: underline; }
 .ip-res { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; color: var(--muted); }
 .ip-res b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--w-text); color: var(--text-2); }
 .ip-res .sub { flex: none; margin-left: auto; font-family: var(--font-mono); font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
-/* Working tasks, subagents and ended work: rows with the canvas rows' marks. The tag in DM Mono in the hue, ◐ in
-   the active ink and still, ○ and ✓ muted, a stale ○ faint, the hue bar on the session's own tasks only. */
+/* Working tasks, subagents and ended work: rows with the canvas rows' marks: ◐ in the active
+   ink and still, ○ and ✓ muted, a stale ○ faint. */
 .ip-wts, .ip-dagents { list-style: none; margin: 0; padding: 0; }
 .ip-wt, .ip-dagent { color: var(--text-2); }
 .ip-wt.w-in_progress { color: var(--text); }
 .ip-wt.w-completed, .ip-wt.stale, .ip-dagent.ended, .ip-dtrail { color: var(--muted); }
-.ip-wt .ip-work-tag, .ip-dagent .ip-agent-tag { font-family: var(--font-mono); font-size: var(--fs-s); font-weight: var(--w-text); color: var(--fam); }
-.ip-dagent.ended .ip-agent-tag { color: inherit; }
-.ip-dagent.serving, .ip-dagent.serving .ip-agent-tag { color: var(--faint); }
-/* A subagent at the usage limit, and its trail entry: its tag and its words amber, as on the canvas. */
-.ip-dagent.limit .ip-agent-tag, .ip-dagent .ip-limit-words, .ip-dtrail .ip-limit-words { color: var(--amber-ink); }
+.ip-dagent.serving { color: var(--faint); }
+/* A subagent at the usage limit, and its trail entry: its words amber, as on the canvas. */
+.ip-dagent .ip-limit-words, .ip-dtrail .ip-limit-words { color: var(--amber-ink); }
 .ip-wt .ip-work-mark { display: inline-block; width: 12px; text-align: center; color: var(--muted); }
 .ip-wt.w-in_progress .ip-work-mark { color: var(--active-ink); }
 .ip-wt.stale:not(.w-completed) .ip-work-mark { color: var(--faint); }
-.ip-wt .ip-work-agent { display: inline-block; width: 3px; height: 12px; margin-right: 4px; border-radius: var(--radius); vertical-align: -1px; background: var(--fam); }
 /* A reader's ◇ and the trail's ◆, muted. */
 .ip-dagent .ip-reader-mark, .ip-agent-dot { color: var(--muted); }
 /* A subagent's purpose, under its line. */

@@ -1,6 +1,7 @@
 import { commandShown, countsAsWork, orderCommands, sessionActivity } from './activity';
+import { clipLine } from './step-ref';
 import { buildIndex, computeVisible, countDone, isNeedsYou, progress, type FoldOverrides } from './tree';
-import { ENDED_AGENT_MS, glyphTitle, isReader, ownerTag, sessionTag, type CommandInfo, type EventRow, type PastSession, type QueueEntry, type ResourceMeta, type Session, type SubagentInfo, type TrailAgent, type TreeNode, type WorkItem } from './types';
+import { ENDED_AGENT_MS, glyphTitle, isReader, sessionDisplayTitle, type CommandInfo, type EventRow, type PastSession, type QueueEntry, type ResourceMeta, type Session, type SubagentInfo, type TrailAgent, type TreeNode, type WorkItem } from './types';
 
 /** A card's header box and a one-line card: a 30 px header inside the frame's 1 px border. The camera aims at y + NODE_H / 2. */
 export const NODE_H = 32;
@@ -380,18 +381,23 @@ export interface UpNextReader {
 }
 
 /**
- * The Up next line as text, or undefined when no step is up next. Each owner is named by its letter (`?` while its slot
- * is empty), in the view's order, and a part with no steps is left out. Without a reader (the outline, set_queue's
- * result): `Up next: A: #82 → #78 | B: #90 | later: #79`. With one (the briefing, the status answer), its own part comes
- * first, as `#id glyph Title` up to MAX_UP_NEXT, and the rest keep bare ids:
- * `Up next (you, A): #82 ⚙ Trail → #78 ⧉ Guide · B: #90 · later: #79`. A reader with no steps of its own reads
- * `Up next: B: #90 · later: #79`.
+ * The Up next line as text, or undefined when no step is up next. Each owner is named by its title in quotes, clipped
+ * to 30 characters (`a session` when it is not among `sessions`), in the view's order, and a part with no steps is left
+ * out. Without a reader (the outline, set_queue's result): `Up next: "Store listing": #82 → #78 | "Docs pass": #90 |
+ * later: #79`. With one (the briefing, the status answer), its own part comes first, as `#id glyph Title` up to
+ * MAX_UP_NEXT, and the rest keep bare ids:
+ * `Up next (you): #82 ⚙ Trail → #78 ⧉ Guide · "Docs pass": #90 · later: #79`. A reader with no steps of its own reads
+ * `Up next: "Docs pass": #90 · later: #79`.
  */
-export function formatUpNext(view: QueueView, sessions: Pick<Session, 'id' | 'slot'>[], reader?: UpNextReader): string | undefined {
-  const slotOf = new Map(sessions.map((s) => [s.id, s.slot]));
+export function formatUpNext(view: QueueView, sessions: Pick<Session, 'id' | 'title'>[], reader?: UpNextReader): string | undefined {
+  const byOwner = new Map(sessions.map((s) => [s.id, s]));
   const ids = (list: number[]) => list.map((id) => `#${id}`).join(' → ');
+  const named = (id: string) => {
+    const s = byOwner.get(id);
+    return s ? `"${clipLine(sessionDisplayTitle(s), 30)}"` : 'a session';
+  };
   const parts = [
-    ...[...view.bySession].filter(([id]) => id !== reader?.sessionId).map(([id, list]) => `${ownerTag(slotOf.get(id) ?? null)}: ${ids(list)}`),
+    ...[...view.bySession].filter(([id]) => id !== reader?.sessionId).map(([id, list]) => `${named(id)}: ${ids(list)}`),
     ...(view.unowned.length ? [`later: ${ids(view.unowned)}`] : []),
   ];
   const own = reader ? (view.bySession.get(reader.sessionId) ?? []) : [];
@@ -402,9 +408,7 @@ export function formatUpNext(view: QueueView, sessions: Pick<Session, 'id' | 'sl
     return n ? `#${id} ${glyphTitle(n)}` : `#${id}`;
   });
   const more = own.length > MAX_UP_NEXT ? ` (+${own.length - MAX_UP_NEXT} more)` : '';
-  // Its own letter, as the briefing's first line gives it; left out while its slot is empty.
-  const letter = sessionTag(slotOf.get(reader.sessionId) ?? null);
-  return [`Up next (you${letter ? `, ${letter}` : ''}): ${titled.join(' → ')}${more}`, ...parts].join(' · ');
+  return [`Up next (you): ${titled.join(' → ')}${more}`, ...parts].join(' · ');
 }
 
 export function layoutOutline(input: LayoutInput): LayoutResult {

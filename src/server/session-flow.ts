@@ -6,7 +6,7 @@ import { badRequest } from './errors';
 import { renderBriefing, renderStatusAnswer, renderStatusLine, untrackedHint } from './briefing';
 import { renderOrchestratorBriefing, stepBlock } from './briefing-scoped';
 import { deriveBoard } from '../core/board';
-import { askTag, sessionTag } from '../core/types';
+import { askTag } from '../core/types';
 import { formatCounts, formatDigest, readDigest } from './digest';
 import { markAnswersDelivered, undeliveredAnswers } from './repo/asks';
 import { endCommand, endSessionCommands, pruneCommands, reconcileCommands, startCommand, type BackgroundEntry } from './repo/commands';
@@ -427,7 +427,7 @@ export function claimStep(ctx: Ctx, actor: string, sessionId: string, nodeId: nu
     if (!row || (row.column !== 'next' && row.column !== 'now')) notes.push(`Note: #${nodeId} is not in Next.`);
     for (const a of row?.asks ?? []) notes.push(`Note: #${nodeId} has open ask ${askTag(a.id)}.`);
     for (const s of row?.sessions ?? []) {
-      if (s.id !== sessionId) notes.push(`Note: #${nodeId} is also claimed by ${sessionTag(s.slot) || '?'} "${s.title?.trim() || `Session ${s.id.slice(0, 6)}`}" (${sessionActivity(s, nowMs)}).`);
+      if (s.id !== sessionId) notes.push(`Note: #${nodeId} is also claimed by "${s.title?.trim() || `Session ${s.id.slice(0, 6)}`}" (${sessionActivity(s, nowMs)}).`);
     }
   }
   write(ctx, actor, (record) => {

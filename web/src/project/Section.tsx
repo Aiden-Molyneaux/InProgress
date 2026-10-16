@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Board, BoardRow } from '../../../src/core/board';
-import { sessionTag, type ProjectSnapshot, type TreeNode } from '../../../src/core/types';
+import { sessionDisplayTitle, type ProjectSnapshot, type TreeNode } from '../../../src/core/types';
 import { LabelChip, rowClick, StepMarks } from '../board/Marks';
 import { numeral } from '../board/NextColumn';
 import { QuickAdd } from '../board/QuickAdd';
@@ -8,8 +8,6 @@ import { ageShort } from '../board/text';
 import type { ViewProps } from '../views/props';
 import { DocsMenu } from './DocsMenu';
 import type { OutlineLine, Section as SectionData } from './projectOutline';
-
-const hue = (slot: number | null) => `var(--family-${(slot ?? 0) % 6})`;
 
 /** "22 done · 2 now · 2 next · 2 backlog", with the zero counts left out. */
 export function legendText(c: SectionData['counts']): string {
@@ -31,7 +29,7 @@ function SegmentedBar({ counts }: { counts: SectionData['counts'] }) {
   );
 }
 
-/** The left rail's mark for a step: dot, number, letter or ring (spec 2.8). */
+/** The left rail's mark for a step: dot, number, ◆ or ring (spec 2.8). */
 function RailMark({ row }: { row: BoardRow | null }) {
   if (!row) return null;
   switch (row.column) {
@@ -40,8 +38,8 @@ function RailMark({ row }: { row: BoardRow | null }) {
     case 'next': {
       const owner = row.owner;
       return owner ? (
-        <span className="ip-num ip-letter" role="img" aria-label={`next, in the own queue of ${sessionTag(owner.slot) || '?'}`} style={{ color: hue(owner.slot) }}>
-          {sessionTag(owner.slot) || '?'}
+        <span className="ip-num ip-own" role="img" aria-label={`next, in the own queue of "${sessionDisplayTitle(owner)}"`} title={sessionDisplayTitle(owner)}>
+          ◆
         </span>
       ) : (
         <span className="ip-num" role="img" aria-label={`next, number ${row.queueNumber ?? 0}`}>{numeral(row.queueNumber ?? 0)}</span>
@@ -65,7 +63,7 @@ export interface OutlineProps extends Pick<ViewProps, 'now' | 'onOpenNode' | 'on
 
 function StepRow({ node, row, depth, snapshot, now, wide, onOpenNode, onOpenResource }: Pick<OutlineProps, 'snapshot' | 'now' | 'wide' | 'onOpenNode' | 'onOpenResource'> & { node: TreeNode; row: BoardRow | null; depth: number }) {
   const docs = snapshot.resources.filter((r) => r.nodeId === node.id).length;
-  const letters = row ? [...row.sessions, ...(row.owner ? [row.owner] : [])] : [];
+  const onIt = row ? [...row.sessions, ...(row.owner ? [row.owner] : [])] : [];
   const marks = row ? <StepMarks row={row} now={now} onOpenResource={onOpenResource} area="project" /> : null;
   return (
     <li className={`ip-orow${wide ? ' wide' : ''}${row?.column === 'done' ? ' is-done' : ''}`} data-node={node.id} onClick={rowClick('project', () => onOpenNode(node.id))}>
@@ -89,8 +87,8 @@ function StepRow({ node, row, depth, snapshot, now, wide, onOpenNode, onOpenReso
         </>
       )}
       <span className="ip-osess">
-        {letters.map((s) => (
-          <b key={s.id} className="ip-tag" style={{ color: hue(s.slot) }}>{sessionTag(s.slot) || '?'}</b>
+        {onIt.map((s) => (
+          <span key={s.id} className="ip-osess-title" title={sessionDisplayTitle(s)}>{sessionDisplayTitle(s)}</span>
         ))}
       </span>
       {wide && <span className="ip-ocell right">{docs > 0 && <span className="ip-docs" title={`${docs} resource${docs > 1 ? 's' : ''}`}>{`▤ ${docs}`}</span>}</span>}
