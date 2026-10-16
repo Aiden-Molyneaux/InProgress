@@ -57,7 +57,7 @@ describe('claimStep', () => {
     ctx.db.prepare("UPDATE sessions SET title = 'Guide writer' WHERE id = 's2'").run();
     const r = claimStep(ctx, 'session:s1', 's1', other.id);
     // s2's set_focus made it the driver, so the driver note names it and the "also claimed" note for it is skipped.
-    expect(r.notes).toEqual([`Note: #${other.id} has open ask a1.`, `B drives #${other.id}; you are helping. Pass --take-over to drive.`]);
+    expect(r.notes).toEqual([`Note: #${other.id} has open ask a1.`, `"Guide writer" drives #${other.id}; you are helping. Pass --take-over to drive.`]);
     expect(findSession(ctx, 's1')?.focusNodeId).toBe(other.id);
     // A step that is not in Next at all, and not on any session.
     expect(claimStep(ctx, 'session:s1', 's1', step.id).notes).toEqual([`Note: #${step.id} is not in Next.`, `You drive #${step.id}.`]);
@@ -65,8 +65,8 @@ describe('claimStep', () => {
     join('s3');
     claimStep(ctx, 'session:s2', 's2', step.id);
     expect(claimStep(ctx, 'session:s3', 's3', step.id).notes).toEqual([
-      `Note: #${step.id} is also claimed by B "Guide writer" (working).`,
-      `A drives #${step.id}; you are helping. Pass --take-over to drive.`,
+      `Note: #${step.id} is also claimed by "Guide writer" (working).`,
+      `"Session s1" drives #${step.id}; you are helping. Pass --take-over to drive.`,
     ]);
     // Once it is queued, the note goes.
     setQueue(ctx, 'scribe:s1', project.slug, [other.id], 'unowned');
@@ -109,8 +109,8 @@ describe('the driver', () => {
     const r = claimStep(ctx, 'session:s2', 's2', step.id);
     expect(driver(ctx, step.id)).toBe('s1');
     expect(findSession(ctx, 's2')?.focusNodeId).toBe(step.id);
-    expect(r.notes).toContain(`A drives #${step.id}; you are helping. Pass --take-over to drive.`);
-    expect(r.notes.some((n) => n.includes('also claimed by A'))).toBe(false);
+    expect(r.notes).toContain(`"Session s1" drives #${step.id}; you are helping. Pass --take-over to drive.`);
+    expect(r.notes.some((n) => n.includes('also claimed by "Session s1"'))).toBe(false);
   });
 
   it("--take-over moves the driver and clears the old driver's focus", () => {
@@ -126,7 +126,7 @@ describe('the driver', () => {
     expect(findSession(ctx, 's1')).toMatchObject({ focusNodeId: null, lastSeenAt: seen });
     expect(briefingDue(ctx, 's1')).toBe(true);
     expect(briefingDue(ctx, 's2')).toBe(false);
-    expect(r.notes).toContain(`You drive #${step.id}; took over from A.`);
+    expect(r.notes).toContain(`You drive #${step.id}; took over from "Session s1".`);
     expect(r.notes.some((n) => n.includes('also claimed by'))).toBe(false);
     const events = listEventsSince(ctx, mark);
     expect(events.find((e) => e.type === 'session.updated' && e.entityId === 's1')?.data).toMatchObject({ changed: ['focusNodeId'], focusNodeId: null });
@@ -431,7 +431,7 @@ describe('orchestrate', () => {
     expect(events.find((e) => e.type === 'session.updated')?.data).toMatchObject({ changed: ['role', 'focusNodeId'] });
     const full = orchestrate(ctx, 'session:s1', 's1', { status: true });
     expect(full.opening).toContain('Digest for InGame since');
-    expect(full.opening).toContain(`Reconcile:\n  #${step.id} no_outcome`);
+    expect(full.opening).toContain(`Reconcile:\n  #${step.id} Build tabs: no_outcome`);
     expect(listEventsSince(ctx, mark).filter((e) => e.type === 'session.orchestrate').map((e) => (e.data as { status: boolean }).status)).toEqual([false, true]);
   });
 
@@ -445,16 +445,14 @@ describe('orchestrate', () => {
     ctx.db.prepare("UPDATE sessions SET state = 'idle', last_seen_at = ?, branch = 'cell-form', cwd = 'C:/w/cell-form' WHERE id = 's2'").run(idleSince);
     ctx.db.prepare('UPDATE nodes SET driver_session_id = NULL WHERE id = ?').run(other.id);
     updateNode(ctx, 'test', third.id, { status: 'done' });
-    const s2 = findSession(ctx, 's2')!;
     const s3 = findSession(ctx, 's3')!;
-    const tag = (slot: number | null) => String.fromCharCode(65 + (slot ?? 0));
     const lines = orchestrate(ctx, 'session:s1', 's1', { status: true }).opening.split('\n');
     const at = lines.indexOf('Reconcile:');
     expect(lines.slice(at, at + 4)).toEqual([
       'Reconcile:',
-      `  #${step.id} stalled: ${tag(s2.slot)} idle 45m · branch cell-form · cwd C:/w/cell-form`,
-      `  #${other.id} stalled: no live driver · on it: ${tag(s3.slot)} branch ${s3.branch ?? '?'} · cwd ${s3.cwd ?? '?'}`,
-      `  #${third.id} no_outcome`,
+      `  #${step.id} Build tabs: stalled: "Session s2" idle 45m · branch cell-form · cwd C:/w/cell-form`,
+      `  #${other.id} Write guide: stalled: no live driver · on it: "Session s3" branch ${s3.branch ?? '?'} · cwd ${s3.cwd ?? '?'}`,
+      `  #${third.id} Third: no_outcome`,
     ]);
   });
 

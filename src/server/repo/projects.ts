@@ -415,7 +415,7 @@ export function setQueue(ctx: Ctx, actor: string, ref: string | number, nodes: n
     let sessionId: string | null = null;
     let gone = false;
     if (owner !== 'unowned') {
-      // A direct read: listProjectSessions would expire stale sessions in a write of its own, inside this one.
+      // A direct read: expireStaleSessions would expire stale sessions in a write of its own, inside this one.
       const s = ctx.db.prepare('SELECT project_id, state, last_seen_at FROM sessions WHERE id = ?').get(owner.sessionId) as
         | { project_id: number | null; state: string; last_seen_at: string }
         | undefined;

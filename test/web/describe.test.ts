@@ -24,17 +24,17 @@ describe('describeEvent', () => {
   });
 
   it('names the session that starts driving a step, and leaves a cleared driver out of the strip', () => {
-    const withSlot = { ...snapshot, sessions: [{ id: 's1', title: 'InGame launch status', slot: 7 }] } as unknown as ProjectSnapshot;
+    const withSession = { ...snapshot, sessions: [{ id: 's1', title: 'InGame launch status' }] } as unknown as ProjectSnapshot;
     const set = ev('node.updated', '58', { changes: { driverSessionId: { from: null, to: 's1' } } });
-    expect(describeEvent(set, withSlot)).toBe('H drives #58 Run signing tests');
-    // A session the snapshot no longer has: its tag reads "?".
-    expect(describeEvent(set, snapshot)).toBe('? drives #58 Run signing tests');
+    expect(describeEvent(set, withSession)).toBe('InGame launch status drives #58 Run signing tests');
+    // A session the snapshot no longer has reads as "a session", as the strip's other session lines do.
+    expect(describeEvent(ev('node.updated', '58', { changes: { driverSessionId: { from: null, to: 'gone' } } }), snapshot)).toBe('a session drives #58 Run signing tests');
     expect(stripSkips(set)).toBe(false);
     expect(stripSkips(ev('node.updated', '58', { changes: { driverSessionId: { from: 's1', to: null } } }))).toBe(true);
     // Not driver-only: a status change that also clears the driver reads as the status change, and stays on the strip.
     const done = ev('node.updated', '58', { changes: { status: { from: 'active', to: 'done' }, driverSessionId: { from: 's1', to: null } } });
     expect(stripSkips(done)).toBe(false);
-    expect(describeEvent(done, withSlot)).toBe('#58 Run signing tests → done');
+    expect(describeEvent(done, withSession)).toBe('#58 Run signing tests → done');
   });
 
   it('describes an ask raised and cleared', () => {
@@ -42,16 +42,16 @@ describe('describeEvent', () => {
     expect(describeEvent(ev('ask.cleared', '4', { ask: { nodeId: 55 } }), snapshot)).toBe('cleared an ask on #55 2 Android signing');
   });
 
-  it("names the subagents the transcript watcher ended after their session's title, by tag, and why", () => {
+  it("names the subagents the transcript watcher ended after their session's title, by name, and why", () => {
     const withAgents = {
       ...snapshot,
-      sessions: [{ id: 's1', title: 'InGame launch status', slot: 0, subagents: [{ agentId: 'x3', ordinal: 3 }] }],
-      trailAgents: [{ sessionId: 's1', agentId: 'x4', ordinal: 4 }],
+      sessions: [{ id: 's1', title: 'InGame launch status', slot: 0, subagents: [{ agentId: 'x3', agentType: 'Explore', description: 'Map the signing flow' }] }],
+      trailAgents: [{ sessionId: 's1', agentId: 'x4', agentType: 'general-purpose', description: null }],
     } as unknown as ProjectSnapshot;
     const ended = (...list: [string, string][]) => ev('session.updated', 's1', { changed: ['subagents'], state: 'working', ended: list.map(([agentId, reason]) => ({ agentId, reason })) }, 'system');
-    expect(describeEvent(ended(['x3', 'limit']), withAgents)).toBe('InGame launch status · a3 hit the usage limit');
-    expect(describeEvent(ended(['x3', 'killed'], ['x4', 'silent']), withAgents)).toBe('InGame launch status · a3 was stopped, a4 stopped responding');
-    // One it cannot find, or a session with no letter, reads as "a subagent".
+    expect(describeEvent(ended(['x3', 'limit']), withAgents)).toBe('InGame launch status · Map the signing flow hit the usage limit');
+    expect(describeEvent(ended(['x3', 'killed'], ['x4', 'silent']), withAgents)).toBe('InGame launch status · Map the signing flow was stopped, general-purpose stopped responding');
+    // One it cannot find, reads as "a subagent".
     expect(describeEvent(ended(['zz', 'error']), withAgents)).toBe('InGame launch status · a subagent hit an API error');
     expect(describeEvent(ended(['x3', 'error']), snapshot)).toBe('InGame launch status · a subagent hit an API error');
   });

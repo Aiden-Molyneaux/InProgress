@@ -86,10 +86,10 @@ describe('endedLine', () => {
     { id: 'b', title: null, focusNodeId: 5, startedAt: '2026-10-13T06:00:00Z', endedAt: '2026-10-13T09:00:00Z' },
   ];
   const row = (marks: string[]) => ({ node: { id: 5 }, marks }) as unknown as BoardRow;
-  it('says which session ended how long ago without closing, for the newest past session', () => {
-    expect(endedLine(row(['ended_open']), past, (id) => (id === 'b' ? 1 : 0), NOW)).toBe('B ended 3h ago without closing');
+  it('says how long ago the newest past session ended without closing', () => {
+    expect(endedLine(row(['ended_open']), past, NOW)).toBe('Its last session ended 3h ago without closing it');
   });
   it('is null for a row without the mark', () => {
-    expect(endedLine(row(['deep']), past, () => 0, NOW)).toBeNull();
+    expect(endedLine(row(['deep']), past, NOW)).toBeNull();
   });
 });

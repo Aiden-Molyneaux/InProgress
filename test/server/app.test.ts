@@ -231,6 +231,21 @@ describe('session routes', () => {
     const elsewhere = await app.inject({ method: 'POST', url: '/api/sessions/p2/hook', headers: auth, payload: { ...body, cwd: 'C:/elsewhere', branch: 'main' } });
     expect(elsewhere.json()).toEqual({ tracked: false });
   });
+
+  it("reads a session's claimed step for the status line, without a token, and null for no step or no session", async () => {
+    const { app } = setup();
+    const step = (id: string) => app.inject({ url: `/api/sessions/${id}/step` });
+    expect((await step('nobody')).statusCode).toBe(200);
+    expect((await step('nobody')).json()).toEqual({ step: null });
+    const p = (await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'InGame' } })).json();
+    await app.inject({ method: 'POST', url: '/api/sessions/s1/enroll', headers: auth, payload: { project: 'ingame' } });
+    expect((await step('s1')).json()).toEqual({ step: null });
+    const [node] = (await app.inject({ method: 'POST', url: '/api/nodes', headers: auth, payload: { parentId: p.rootNodeId, nodes: [{ title: 'Show titles next to ids' }] } })).json();
+    await app.inject({ method: 'POST', url: '/api/sessions/s1/claim', headers: auth, payload: { nodeId: node.id } });
+    expect((await step('s1')).json()).toEqual({ step: { id: node.id, title: 'Show titles next to ids', status: 'active' } });
+    await app.inject({ method: 'DELETE', url: `/api/nodes/${node.id}`, headers: auth });
+    expect((await step('s1')).json()).toEqual({ step: null });
+  });
 });
 
 describe('live work routes', () => {
@@ -251,9 +266,9 @@ describe('live work routes', () => {
     expect((await app.inject({ url: '/api/projects/ingame' })).json().project.queue).toEqual(unowned);
     const lines = (await app.inject({ url: '/api/projects/ingame/outline' })).body.split('\n');
     expect(lines.slice(0, 2)).toEqual(['Project InGame (slug ingame)', `Up next: later: #${guide} → #${tabs}`]);
-    // A session's own steps lead, under its letter.
+    // A session's own steps lead, under its title.
     await app.inject({ method: 'POST', url: '/api/projects/ingame/queue', headers: auth, payload: { nodes: [tabs], session: 's1' } });
-    expect((await app.inject({ url: '/api/projects/ingame/outline' })).body.split('\n')[1]).toBe(`Up next: A: #${tabs} | later: #${guide}`);
+    expect((await app.inject({ url: '/api/projects/ingame/outline' })).body.split('\n')[1]).toBe(`Up next: "Session s1": #${tabs} | later: #${guide}`);
     await app.inject({ method: 'POST', url: '/api/projects/ingame/queue', headers: auth, payload: { nodes: [], session: 's1' } });
     await app.inject({ method: 'POST', url: '/api/projects/ingame/queue', headers: auth, payload: { nodes: [] } });
     expect((await app.inject({ url: '/api/projects/ingame/outline' })).body).not.toContain('Up next');

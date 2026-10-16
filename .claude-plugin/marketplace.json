@@ -1,0 +1,5 @@
+{
+  "name": "inprogress",
+  "owner": { "name": "Aiden Molyneaux" },
+  "plugins": [{ "name": "inprogress-step", "source": "./claude/mods/inprogress-step" }]
+}

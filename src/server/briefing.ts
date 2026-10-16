@@ -1,8 +1,9 @@
 import { sessionActivity } from '../core/activity';
+import { clipLine, stepRef } from '../core/step-ref';
 import { deriveBoard, isLive } from '../core/board';
 import { formatUpNext, type QueueView } from '../core/layout';
 import { ancestors, buildIndex, dfsOrder, kids, progress, type TreeIndex } from '../core/tree';
-import { ASK_GLYPHS, NODE_LABELS, askTag, glyphTitle, sessionDisplayTitle, sessionTag, type Ask, type ProjectSnapshot, type Session, type TreeNode, type WorkItem } from '../core/types';
+import { ASK_GLYPHS, NODE_LABELS, askTag, glyphTitle, sessionDisplayTitle, type Ask, type ProjectSnapshot, type Session, type TreeNode, type WorkItem } from '../core/types';
 import { homeDir } from '../lib/home';
 import { claimCommand, taskCommand } from '../lib/task-command';
 import { renderOrchestratorBriefing, renderUnclaimedBriefing, renderWorkerBriefing, stepBlock, unclaimedLines } from './briefing-scoped';
@@ -57,7 +58,7 @@ export function updateRules(o: UpdateRulesOptions & { mode?: RulesMode }): strin
     '- Steps are plan-level with outcomes. Detours go in "log on #id: …".',
     `- Something worth finding again is a resource: "resource on #id: <kind> "<title>", path <file>, snapshot_file". Chat-only content is first written to ${resources}/<slug>/<yyyy-mm-dd>-<kebab-title>.md.`,
     `- Working tasks: TaskCreate/TaskUpdate mirror on their own (start a task's subject with #id when its step is not your focus); else, after each change, run in the Bash tool: \`${taskCommand(o.sessionId, { cli: o.cli })}\` (flags repeat in list order; no flags clears the list; no step id uses your focus). No double quotes in subjects; single-quote one with $ or a backtick. Start an Agent description with its step's #id.`,
-    '- After a brief, one line in chat ("↳ InProgress: #57 done"). The scribe\'s notice needs no reply. Brief header: "Session: <id> · Project: <slug>". Full format: the inprogress skill.',
+    '- After a brief, one line in chat ("↳ InProgress: #57 Fix export → done"). Name a step to Aiden by id and title, never a bare id. The scribe\'s notice needs no reply. Brief header: "Session: <id> · Project: <slug>". Full format: the inprogress skill.',
   ];
 }
 
@@ -140,7 +141,7 @@ export function frontierLines(snapshot: ProjectSnapshot, sessionId?: string, opt
 
 /**
  * The planned order, read from the Board's position function so the queue numbers agree with the window: this session's
- * own steps first, with titles, then the other live sessions' by letter and the unowned ones. An ended or stale owner's
+ * own steps first, with titles, then the other live sessions' by title and the unowned ones. An ended or stale owner's
  * entries are not in Next (spec 1.5 rule 4), and a session's focus is Now, so neither is listed. Undefined when no step
  * is up next (formatUpNext's guarantee), which is when the frontier keeps its sibling Next: lines.
  */
@@ -180,26 +181,27 @@ export function spanAgo(iso: string, now: number): string {
   return `${Math.floor(age / DAY_MS)}d`;
 }
 
-const clipText = (text: string, max = 60): string => {
-  const line = text.replace(/\s+/g, ' ').trim();
-  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
-};
-
-/** `a7 ? on #42 "Which port?" (3d)`: an open ask as the Needs you line names it, with its age once it is a day old. */
-export function askItem(a: Ask, now: number): string {
+/** `a7 ? on #42 Pick a port: "Which port?" (3d)`: an open ask as the Needs you line names it, with its age once it is a day old. */
+export function askItem(a: Ask, now: number, stepTitle?: string): string {
   const age = askAge(a.raisedAt, now);
-  return `${askTag(a.id)} ${ASK_GLYPHS[a.kind]} on #${a.nodeId} "${clipText(a.text)}"${age ? ` (${age})` : ''}`;
+  return `${askTag(a.id)} ${ASK_GLYPHS[a.kind]} on ${stepRef(a.nodeId, stepTitle, NAMED_STEP_MAX)}: "${clipLine(a.text, 60)}"${age ? ` (${age})` : ''}`;
 }
 
+/** A step's title where a briefing line only names it: shorter than the digest's, since a briefing reaches every prompt. */
+const NAMED_STEP_MAX = 40;
+/** A session's title where a line names it, as formatUpNext clips it: one line, at most 30 characters. */
+const TITLE_MAX = 30;
+const titleOf = (snapshot: ProjectSnapshot, id: number): string | undefined => snapshot.nodes.find((n) => n.id === id)?.title;
+
 /**
- * `Needs you (2): a7 ? on #42 "Which port?" (3d) · D waiting for permission on #45 (2m)`: open asks oldest first, then
+ * `Needs you (2): a7 ? on #42 Pick a port: "Which port?" (3d) · "Docs pass" waiting for permission on #45 Run the tests (2m)`: open asks oldest first, then
  * live permission waits (spec 1.4). `now` is the server's clock (ms).
  */
 export function needsYouLine(snapshot: ProjectSnapshot, now: number): string | undefined {
-  const items = openAsks(snapshot).map((a) => askItem(a, now));
+  const items = openAsks(snapshot).map((a) => askItem(a, now, titleOf(snapshot, a.nodeId)));
   for (const s of snapshot.sessions) {
     if (s.state !== 'permission' || !isLive(s, now)) continue;
-    items.push(`${sessionTag(s.slot) || '?'} waiting for permission${s.focusNodeId !== null ? ` on #${s.focusNodeId}` : ''} (${spanAgo(s.lastSeenAt, now)})`);
+    items.push(`"${clipLine(sessionDisplayTitle(s), TITLE_MAX)}" waiting for permission${s.focusNodeId !== null ? ` on ${stepRef(s.focusNodeId, titleOf(snapshot, s.focusNodeId), NAMED_STEP_MAX)}` : ''} (${spanAgo(s.lastSeenAt, now)})`);
   }
   if (!items.length) return undefined;
   return `Needs you (${items.length}): ${items.slice(0, MAX_NEEDS_YOU).join(' · ')}${items.length > MAX_NEEDS_YOU ? ` · +${items.length - MAX_NEEDS_YOU} more` : ''}`;
@@ -271,7 +273,7 @@ function leftUnfinished(snapshot: ProjectSnapshot, only?: number): { nodeId: num
 }
 
 /**
- * `Left unfinished by an earlier session: on #86: "Review it", "Write tests" · on #90: "Check the hint"`: the open tasks
+ * `Left unfinished by an earlier session: on #86 Ship the export: "Review it", "Write tests" · on #90 Hints: "Check the hint"`: the open tasks
  * of ended sessions (their subagents' too) on steps still open, by step in tree order, in progress first within a step,
  * MAX_LEFT_UNFINISHED subjects in all. The snapshot holds only sessions that ended within the 7-day trail. Undefined when
  * there are none.
@@ -282,7 +284,7 @@ function leftUnfinishedLine(snapshot: ProjectSnapshot): string | undefined {
   for (const { nodeId, items } of leftUnfinished(snapshot)) {
     const subjects = items.slice(0, room);
     if (!subjects.length) continue;
-    parts.push(`on #${nodeId}: ${subjects.map((i) => `"${withoutStepId(i.subject, nodeId)}"`).join(', ')}`);
+    parts.push(`on ${stepRef(nodeId, titleOf(snapshot, nodeId), NAMED_STEP_MAX)}: ${subjects.map((i) => `"${withoutStepId(i.subject, nodeId)}"`).join(', ')}`);
     room -= subjects.length;
     if (room === 0) break;
   }
@@ -295,13 +297,12 @@ export function leftUnfinishedOn(snapshot: ProjectSnapshot, nodeId: number): str
   return items.length ? `Left unfinished on #${nodeId} by an earlier session: ${items.map((i) => `"${withoutStepId(i.subject, nodeId)}"`).join(', ')}` : undefined;
 }
 
-/** `Other sessions here: A "title" (working, on #42) · ...`, or undefined when no other session is live. */
+/** `Other sessions here: "title" (working, on #42 Pick a port) · ...`, or undefined when no other session is live. */
 export function othersLine(snapshot: ProjectSnapshot, sessionId: string, now: number): string | undefined {
   const others = snapshot.sessions.filter((s) => s.id !== sessionId && s.state !== 'ended');
   if (!others.length) return undefined;
   const named = (s: Session) => {
-    const tag = sessionTag(s.slot);
-    return `${tag ? `${tag} ` : ''}"${sessionDisplayTitle(s)}" (${sessionActivity(s, now)}${s.focusNodeId ? `, on #${s.focusNodeId}` : ''})`;
+    return `"${clipLine(sessionDisplayTitle(s), TITLE_MAX)}" (${sessionActivity(s, now)}${s.focusNodeId ? `, on ${stepRef(s.focusNodeId, titleOf(snapshot, s.focusNodeId), NAMED_STEP_MAX)}` : ''})`;
   };
   return `Other sessions here: ${others.map(named).join(' · ')}`;
 }
@@ -318,12 +319,10 @@ export interface BriefingOptions {
 export const PLAN_EDIT_LINE =
   'Plan edits go through the inprogress-scribe agent in the background (working tasks excepted, below). The rules below are complete; the inprogress skill is for opt-in, adoption and the full brief format.';
 
-/** `[InProgress] This session is tracked in project "X" (slug x). Session id: ID. You are session A.` */
+/** `[InProgress] This session is tracked in project "X" (slug x). Session id: ID.` */
 export function headerLine(snapshot: ProjectSnapshot, sessionId: string): string {
-  const { project, sessions } = snapshot;
-  // Its letter, as the window shows it on its chip and badge; none while its slot is empty.
-  const letter = sessionTag(sessions.find((s) => s.id === sessionId)?.slot ?? null);
-  return `[InProgress] This session is tracked in project "${project.name}" (slug ${project.slug}). Session id: ${sessionId}.${letter ? ` You are session ${letter}.` : ''}`;
+  const { project } = snapshot;
+  return `[InProgress] This session is tracked in project "${project.name}" (slug ${project.slug}). Session id: ${sessionId}.`;
 }
 
 /** The playbook block: up to 15 lines under `Playbook:`, or nothing for an empty one. */
@@ -350,7 +349,7 @@ export function bodyLines(snapshot: ProjectSnapshot, sessionId: string, now: num
   const leftUnfinished = leftUnfinishedLine(snapshot);
   if (leftUnfinished) lines.push(leftUnfinished);
   const recent = [...snapshot.resources].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id - a.id).slice(0, 5);
-  if (recent.length) lines.push(`Recent resources: ${recent.map((r) => `r${r.id} ${r.title} (on #${r.nodeId})`).join(' · ')}`);
+  if (recent.length) lines.push(`Recent resources: ${recent.map((r) => `r${r.id} ${r.title} (on ${stepRef(r.nodeId, titleOf(snapshot, r.nodeId), NAMED_STEP_MAX)})`).join(' · ')}`);
   const others = othersLine(snapshot, sessionId, now);
   if (others) lines.push(others);
   return lines;

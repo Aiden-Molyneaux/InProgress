@@ -256,13 +256,23 @@ export const MIGRATIONS: string[] = [
   -- A new table and defaulted or nullable columns: v1 to v9 builds can still read and write this schema.
   INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
   `,
-  // 11: the step's driver (spec 2026-10-15-keep-the-thread-design.md section 1.1): the one session that works an active
+  // 11: the Board's task box (#422). board_state: the TaskState the reconcile last stored for the step; state_since: when
+  // it last changed; hue: the task hue (0-6) held while the step is in a coloured state. All NULL until the reconcile
+  // first runs for a step, and for the root, groups and dropped steps. Written only by the reconcile inside each write.
+  `
+  ALTER TABLE nodes ADD COLUMN board_state TEXT;
+  ALTER TABLE nodes ADD COLUMN state_since TEXT;
+  ALTER TABLE nodes ADD COLUMN hue INTEGER;
+  -- Only nullable columns: v1 to v10 builds can still read and write this schema, so a rollback across it works.
+  INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+  `,
+  // 12: the step's driver (spec 2026-10-15-keep-the-thread-design.md section 1.1): the one session that works an active
   // step. NULL when no session drives it, and cleared when the step goes done or dropped. An active step takes the
   // non-ended session focused on it that was seen last (the higher id on a tie); the project root never gets one.
   `
   ALTER TABLE nodes ADD COLUMN driver_session_id TEXT;
   UPDATE nodes SET driver_session_id = (SELECT s.id FROM sessions s WHERE s.focus_node_id = nodes.id AND s.state != 'ended' ORDER BY s.last_seen_at DESC, s.id DESC LIMIT 1) WHERE status = 'active' AND nodes.parent_id IS NOT NULL;
-  -- Only a nullable column: v1 to v10 builds can still read and write this schema, so a rollback across it works.
+  -- Only a nullable column: v1 to v11 builds can still read and write this schema, so a rollback across it works.
   INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
   `,
 ];

@@ -1,5 +1,5 @@
-import { agentTag, ownerTag, sessionDisplayTitle, type CommandOutcome, type EndReason, type EventRow, type ProjectSnapshot } from '../../src/core/types';
-import { COMMAND_OUTCOME_WORDS, END_WORDS } from './live';
+import { sessionDisplayTitle, type CommandOutcome, type EndReason, type EventRow, type ProjectSnapshot } from '../../src/core/types';
+import { COMMAND_OUTCOME_WORDS, END_WORDS, agentName } from './live';
 
 const STATE_WORDS: Record<string, string> = { working: 'working', idle: 'idle', permission: 'waiting for a permission' };
 
@@ -14,11 +14,11 @@ function sessionLabel(id: string, snapshot: ProjectSnapshot | null): string {
   return s ? sessionDisplayTitle(s) : 'a session';
 }
 
-/** A subagent the watcher ended, by its tag (`a3`), found in its session's list or the trail; else "a subagent". */
+/** A subagent the watcher ended, by its name, found in its session's list or the trail; else "a subagent". */
 function agentLabel(sessionId: string, agentId: string, snapshot: ProjectSnapshot | null): string {
   const s = snapshot?.sessions.find((x) => x.id === sessionId);
   const a = s?.subagents?.find((x) => x.agentId === agentId) ?? snapshot?.trailAgents?.find((x) => x.sessionId === sessionId && x.agentId === agentId);
-  return agentTag(s?.slot ?? null, a?.ordinal ?? null) || 'a subagent';
+  return a ? agentName(a) : 'a subagent';
 }
 
 /** The driver change of a node.updated whose only change is its driver (setDriver's event); else undefined. */
@@ -41,7 +41,7 @@ export function stripSkips(e: EventRow): boolean {
 
 export function describeEvent(e: EventRow, snapshot: ProjectSnapshot | null): string {
   const driver = driverOnlyChange(e);
-  if (driver?.to) return `${ownerTag(snapshot?.sessions.find((s) => s.id === driver.to)?.slot ?? null)} drives ${nodeLabel(Number(e.entityId), snapshot)}`;
+  if (driver?.to) return `${sessionLabel(driver.to, snapshot)} drives ${nodeLabel(Number(e.entityId), snapshot)}`;
   const d = (e.data ?? {}) as {
     ask?: { nodeId: number };
     ids?: number[]; parentId?: number; nodeId?: number; title?: string; path?: string;
@@ -73,7 +73,7 @@ export function describeEvent(e: EventRow, snapshot: ProjectSnapshot | null): st
     case 'session.updated': {
       const who = sessionLabel(e.entityId, snapshot);
       if (d.changed?.includes('focusNodeId')) return d.focusNodeId ? `${who} is on ${nodeLabel(d.focusNodeId, snapshot)}` : `${who} cleared its focus`;
-      // The transcript watcher ended subagents that died without a stop: `<session> · a3 hit the usage limit`.
+      // The transcript watcher ended subagents that died without a stop: `<session> · <subagent> hit the usage limit`.
       if (d.ended?.length) return `${who} · ${d.ended.map((x) => `${agentLabel(e.entityId, x.agentId, snapshot)} ${END_WORDS[x.reason] ?? 'ended'}`).join(', ')}`;
       // A session's end is its end, whatever commands it took along.
       if (d.state === 'ended') return `${who} ended`;

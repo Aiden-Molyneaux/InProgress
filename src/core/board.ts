@@ -1,6 +1,7 @@
 import { sessionActivity } from './activity';
+import { clipLine, stepRef } from './step-ref';
 import { ancestors, buildIndex, dfsOrder, kids } from './tree';
-import { ASK_TRAIL_MS, STALE_SESSION_MS, STALL_MS, TRAIL_MS, ownerTag, type Ask, type ProjectSnapshot, type ResourceMeta, type Session, type TreeNode } from './types';
+import { ASK_TRAIL_MS, STALE_SESSION_MS, STALL_MS, TRAIL_MS, sessionDisplayTitle, type Ask, type ProjectSnapshot, type ResourceMeta, type Session, type TreeNode } from './types';
 
 export type Column = 'now' | 'next' | 'backlog' | 'done';
 export const MARKS = ['ended_open', 'no_outcome', 'stale_ask', 'done_focus', 'deep', 'stalled', 'answer_waiting'] as const;
@@ -70,18 +71,20 @@ function idleSpan(iso: string, now: number): string {
 
 /**
  * One line of `orchestrate --status`'s Reconcile list (spec 3.2), without its indent: the facts Mip needs for a stalled
- * row (the idle driver's tag, idle time, branch and cwd, then each live helper's; or that no live session drives it,
- * and each session on it with its branch and cwd), else the mark's name.
+ * row (the idle driver's name, idle time, branch and cwd, then each live helper's; or that no live session drives it,
+ * and each session on it with its branch and cwd), else the step and the mark's name. Steps are named by stepRef and
+ * sessions by their clipped, quoted title, as the rest of the session text does (#440, #438).
  */
 export function reconcileLine(row: Pick<BoardRow, 'node' | 'driver' | 'sessions'>, mark: Mark, now: number): string {
-  const head = `#${row.node.id} ${mark}`;
+  const head = `${stepRef(row.node.id, row.node.title)}: ${mark}`;
   if (mark !== 'stalled') return head;
+  const name = (s: Session) => `"${clipLine(sessionDisplayTitle(s), 30)}"`;
   const where = (s: Session) => `branch ${s.branch ?? '?'} · cwd ${s.cwd ?? '?'}`;
-  const entry = (s: Session) => `${ownerTag(s.slot)} ${where(s)}`;
+  const entry = (s: Session) => `${name(s)} ${where(s)}`;
   const d = row.driver;
   if (d === null) return `${head}: no live driver · on it: ${row.sessions.map(entry).join('; ')}`;
   const helpers = row.sessions.filter((s) => s.id !== d.id);
-  return `${head}: ${ownerTag(d.slot)} idle ${idleSpan(d.lastSeenAt, now)} · ${where(d)}${helpers.length ? `; helping: ${helpers.map(entry).join('; ')}` : ''}`;
+  return `${head}: ${name(d)} idle ${idleSpan(d.lastSeenAt, now)} · ${where(d)}${helpers.length ? `; helping: ${helpers.map(entry).join('; ')}` : ''}`;
 }
 
 /** Places every step of the snapshot (spec 1.5) and marks the ones that need tidying (spec 1.6). */

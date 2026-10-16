@@ -7,7 +7,7 @@ const T = '2026-10-13T11:00:00.000Z';
 const DAYS = (n: number) => new Date(NOW - n * 86_400_000).toISOString();
 
 function n(id: number, parentId: number | null, o: Partial<TreeNode> = {}): TreeNode {
-  return { id, projectId: 1, parentId, position: id, kind: 'task', title: `S${id}`, body: '', status: 'todo', assignee: 'claude', outcome: '', label: null, createdAt: T, updatedAt: T, completedAt: null, driverSessionId: null, ...o };
+  return { id, projectId: 1, parentId, position: id, kind: 'task', title: `S${id}`, body: '', status: 'todo', assignee: 'claude', outcome: '', label: null, createdAt: T, updatedAt: T, completedAt: null, driverSessionId: null, boardState: null, stateSince: null, hue: null, ...o };
 }
 function s(id: string, o: Partial<Session> = {}): Session {
   return { id, projectId: 1, title: id, cwd: null, branch: null, transcriptPath: null, state: 'working', focusNodeId: null, promptsSinceUpdate: 0, startedAt: T, lastSeenAt: T, endedAt: null, slot: 0, subagents: [], commands: [], role: 'worker', ...o };
@@ -193,11 +193,14 @@ describe('reconcileLine', () => {
       nodes: [n(1, null), n(2, 1, { status: 'active', driverSessionId: 'd', outcome: '' })],
       sessions: [s('d', { focusNodeId: 2, state: 'idle', slot: 7, lastSeenAt: MINS(m), branch: 'cell-form', cwd: 'C:/w/cell-form' })],
     }), NOW).byId.get(2)!;
-    expect(reconcileLine(at(45), 'stalled', NOW)).toBe('#2 stalled: H idle 45m · branch cell-form · cwd C:/w/cell-form');
-    expect(reconcileLine(at(119), 'stalled', NOW)).toBe('#2 stalled: H idle 119m · branch cell-form · cwd C:/w/cell-form');
-    expect(reconcileLine(at(150), 'stalled', NOW)).toBe('#2 stalled: H idle 2h · branch cell-form · cwd C:/w/cell-form');
-    const bare = deriveBoard(input({ nodes: [n(1, null), n(2, 1, { status: 'active', driverSessionId: 'd' })], sessions: [s('d', { focusNodeId: 2, state: 'idle', slot: null, lastSeenAt: MINS(40) })] }), NOW).byId.get(2)!;
-    expect(reconcileLine(bare, 'stalled', NOW)).toBe('#2 stalled: ? idle 40m · branch ? · cwd ?');
+    expect(reconcileLine(at(45), 'stalled', NOW)).toBe('#2 S2: stalled: "d" idle 45m · branch cell-form · cwd C:/w/cell-form');
+    expect(reconcileLine(at(119), 'stalled', NOW)).toBe('#2 S2: stalled: "d" idle 119m · branch cell-form · cwd C:/w/cell-form');
+    expect(reconcileLine(at(150), 'stalled', NOW)).toBe('#2 S2: stalled: "d" idle 2h · branch cell-form · cwd C:/w/cell-form');
+    const bare = deriveBoard(input({ nodes: [n(1, null), n(2, 1, { status: 'active', driverSessionId: 'd' })], sessions: [s('d', { focusNodeId: 2, state: 'idle', title: null, lastSeenAt: MINS(40) })] }), NOW).byId.get(2)!;
+    expect(reconcileLine(bare, 'stalled', NOW)).toBe('#2 S2: stalled: "Session d" idle 40m · branch ? · cwd ?');
+    // A long session title is clipped to 30, as the briefing's session lines clip it.
+    const long = deriveBoard(input({ nodes: [n(1, null), n(2, 1, { status: 'active', driverSessionId: 'd' })], sessions: [s('d', { focusNodeId: 2, state: 'idle', title: 'A very long session title that runs on', lastSeenAt: MINS(40) })] }), NOW).byId.get(2)!;
+    expect(reconcileLine(long, 'stalled', NOW)).toBe('#2 S2: stalled: "A very long session title tha…" idle 40m · branch ? · cwd ?');
     // An idle driver with live helpers: each helper follows with its branch and cwd.
     const helped = deriveBoard(input({
       nodes: [n(1, null), n(2, 1, { status: 'active', driverSessionId: 'd', outcome: '' })],
@@ -207,9 +210,9 @@ describe('reconcileLine', () => {
         s('m', { focusNodeId: 2, slot: 12 }),
       ],
     }), NOW).byId.get(2)!;
-    expect(reconcileLine(helped, 'stalled', NOW)).toBe('#2 stalled: H idle 45m · branch cell-form · cwd C:/w/cell-form; helping: K branch k-br · cwd C:/w/k; M branch ? · cwd ?');
+    expect(reconcileLine(helped, 'stalled', NOW)).toBe('#2 S2: stalled: "d" idle 45m · branch cell-form · cwd C:/w/cell-form; helping: "k" branch k-br · cwd C:/w/k; "m" branch ? · cwd ?');
     const helpers = deriveBoard(input({ nodes: [n(1, null), n(2, 1, { status: 'active' })], sessions: [s('h', { focusNodeId: 2, slot: 7, branch: 'h-br', cwd: 'C:/w/h' }), s('k', { focusNodeId: 2, slot: 10, state: 'idle' })] }), NOW).byId.get(2)!;
-    expect(reconcileLine(helpers, 'stalled', NOW)).toBe('#2 stalled: no live driver · on it: H branch h-br · cwd C:/w/h; K branch ? · cwd ?');
-    expect(reconcileLine(helpers, 'deep', NOW)).toBe('#2 deep');
+    expect(reconcileLine(helpers, 'stalled', NOW)).toBe('#2 S2: stalled: no live driver · on it: "h" branch h-br · cwd C:/w/h; "k" branch ? · cwd ?');
+    expect(reconcileLine(helpers, 'deep', NOW)).toBe('#2 S2: deep');
   });
 });

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { deriveBoard } from '../../../src/core/board';
+import { taskBoxes } from '../../../src/core/taskState';
 import type { ViewProps } from '../views/props';
 import type { BandProps } from './bandProps';
 import { DoneColumn } from './DoneColumn';
@@ -22,7 +23,7 @@ export function Board(props: ViewProps) {
   const { snapshot, now } = props;
   const wide = useWide();
   const board = deriveBoard(snapshot, now);
-  const band: BandProps = { ...props, board, wide };
+  const band: BandProps = { ...props, board, boxes: taskBoxes(board, snapshot, now), wide };
   const body: Record<Band, ReactNode> = {
     needs: <NeedsMe {...band} />,
     now: <NowColumn {...band} />,

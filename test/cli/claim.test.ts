@@ -107,7 +107,7 @@ describe('claim, orchestrate and ask through runCli', () => {
     expect(await runClaim([String(step.id), '--session', 't1'], capture().out, conn)).toBe(0);
     const s = capture();
     expect(await runClaim([String(step.id), '--take-over', '--session', 't2'], s.out, conn)).toBe(0);
-    expect(s.lines.some((l) => /^You drive #\d+; took over from \S+\.$/.test(l))).toBe(true);
+    expect(s.lines.some((l) => /^You drive #\d+; took over from "Session t1"\.$/.test(l))).toBe(true);
   });
 
   it('claim of another project\'s step prints the error and the hint, exit 1', async () => {

@@ -1,7 +1,8 @@
 import { ancestors, buildIndex, kids } from '../core/tree';
 import { sessionActivity } from '../core/activity';
 import { deriveBoard } from '../core/board';
-import { ASK_GLYPHS, askTag, glyphTitle, ownerTag, sessionDisplayTitle, type ProjectSnapshot, type Session, type TreeNode } from '../core/types';
+import { clipLine } from '../core/step-ref';
+import { ASK_GLYPHS, askTag, glyphTitle, sessionDisplayTitle, type ProjectSnapshot, type Session, type TreeNode } from '../core/types';
 import { claimCommand } from '../lib/task-command';
 import { PLAN_EDIT_LINE, bodyLines, headerLine, leftUnfinishedOn, lineFor, openTasks, othersLine, playbookLines, spanAgo, updateRules, type BriefingOptions } from './briefing';
 
@@ -40,7 +41,7 @@ export function stepBlock(snapshot: ProjectSnapshot, nodeId: number, session: Se
   const row = deriveBoard(snapshot, now).byId.get(nodeId);
   // Who drives the step (spec 1.4): none when no live session does.
   const driver = row?.driver;
-  if (driver) lines.push(`Driver: ${driver.id === session.id ? 'you' : `${ownerTag(driver.slot)} "${sessionDisplayTitle(driver)}" (${sessionActivity(driver, now)})`}`);
+  if (driver) lines.push(`Driver: ${driver.id === session.id ? 'you' : `"${clipLine(sessionDisplayTitle(driver), 30)}" (${sessionActivity(driver, now)})`}`);
   const handoff = row?.handoff;
   if (handoff) lines.push(`Handoff: r${handoff.id} "${handoff.title}" (${spanAgo(handoff.createdAt, now)})`);
 

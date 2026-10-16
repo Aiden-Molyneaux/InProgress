@@ -2,7 +2,7 @@ import { formatUpNext, queueView } from '../core/layout';
 import { glyphTitle, type NodeDetail, type ProjectSnapshot, type Resource, type SearchResult, type TreeNode } from '../core/types';
 
 /**
- * The queue after a set_queue, as the outline prints it: `Up next: A: #82 → #78 | later: #79`. With no step up next it
+ * The queue after a set_queue, as the outline prints it: `Up next: "Store listing": #82 → #78 | later: #79`. With no step up next it
  * says the queue is empty (an empty write clears only its owner's entries, so that is worth saying), unless open steps
  * are still queued: then they are sessions' own focuses, which are "now", not "next".
  */

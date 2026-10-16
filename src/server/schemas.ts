@@ -21,6 +21,8 @@ export const nodeInput: z.ZodType<NodeInput> = z.lazy(() =>
     .strict(),
 );
 
+/** A session id as Claude Code issues it: a UUID. The desktop launch passes it to a program, so nothing else gets through. */
+export const sessionIdParam = z.object({ id: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i) });
 export const idParam = z.object({ id: z.coerce.number().int().positive() });
 /** The window's step routes: a project id and a step id in the path. */
 export const windowNodeParams = z.object({ id: idParam.shape.id, node: idParam.shape.id });

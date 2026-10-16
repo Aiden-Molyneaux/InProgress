@@ -38,7 +38,7 @@ Success means the #422 story cannot repeat:
 
 ### 1.1 Data
 
-Migration 11 adds one nullable column:
+Migration 12 adds one nullable column (entry 11 is the Board's task box, #422):
 
 ```sql
 ALTER TABLE nodes ADD COLUMN driver_session_id TEXT;
@@ -59,10 +59,11 @@ the first deploy.
   project root never has a driver): the claimer becomes the driver.
   Note: `You drive #442.`
 - **A live driver, no `--take-over`**: the claimer focuses on the step as a helper; the driver is unchanged. Note:
-  `H drives #442; you are helping. Pass --take-over to drive.`
+  `"Docs pass" drives #442; you are helping. Pass --take-over to drive.` A session is named by its title, clipped to
+  30 and quoted, as the briefing's session lines name it (#438).
 - **A live driver, `--take-over`**: the claimer becomes the driver. The previous driver's focus is cleared directly (not
   through `applyFocus`, so its `lastSeenAt` does not move and it is not kept live), it gets a `session.updated` event, and
-  its next prompt owes it a briefing (`markBriefingDue`). Note: `You drive #442; took over from H.`
+  its next prompt owes it a briefing (`markBriefingDue`). Note: `You drive #442; took over from "Docs pass".`
 - **The claimer is already the driver**: no change, no note.
 
 The driver is written inside the claim's `write()`, after `applyFocus`, so a refused claim leaves it as it was.
@@ -79,7 +80,7 @@ driver. It never takes over.
 
 ### 1.4 What sessions see
 
-- **Step block** (`stepBlock`, briefing-scoped): a `Driver:` line, `you` or `H "<title>" (<activity>)`.
+- **Step block** (`stepBlock`, briefing-scoped): a `Driver:` line, `you` or `"<title>" (<activity>)`.
 - **Previous driver's next briefing**: it is the unclaimed one (it has no focus), and the activity strip shows the
   take-over. Nothing stores who took over, and this plan does not add it.
 - **Briefing rules** (the "Claim one:" lines and the session-start hook text): mention `--take-over` for a successor that
@@ -89,10 +90,10 @@ driver. It never takes over.
 
 - `BoardRow` gains `driver: Session | null` (the live driver). `row.sessions` puts the driver first, then the helpers in
   the current order.
-- The Now row's session line (`NowColumn.tsx` `SessionMessage`) shows a role word after the state word: `drives` for the
-  driver, `helping` for the others. A row whose step has no live driver shows no role word.
+- The Now row's session line (`TaskBox.tsx` `SessionLine`, from `NowColumn.tsx`) shows a role word after the session's
+  title: `drives` for the driver, `helping` for the others. A row whose step has no live driver shows no role word.
 - A session that lost the driver role to a take-over has no focus, so it leaves the row. The activity strip records the
-  take-over (`N took over #442 from H`).
+  take-over (`<title> drives #442 <step title>`).
 
 ## 2. Answers become owed work
 
@@ -161,22 +162,24 @@ open steps that no live session is on. Label: `stalled`.
 The `--status` Reconcile list prints the facts Mip needs for a stalled row:
 
 ```
-#422 stalled: H idle 45m · branch cell-form · cwd C:/personal/InProgress/.claude/worktrees/cell-form; helping: K branch docs · cwd C:/personal/InProgress/.claude/worktrees/docs
+#422 Shared task box: stalled: "Cell form" idle 45m · branch cell-form · cwd C:/personal/InProgress/.claude/worktrees/cell-form; helping: "Docs pass" branch docs · cwd C:/personal/InProgress/.claude/worktrees/docs
 ```
 
-The `; helping:` part lists each live helper on the step, entries joined by `; `, and is left out when there are none.
-For (b), `#422 stalled: no live driver · on it: K branch docs · cwd C:/personal/InProgress/.claude/worktrees/docs`,
-with every live session on the step, entries joined by `; `. A missing branch or cwd prints as `?`.
+The line starts with main's Reconcile form, `stepRef` then `: <mark>` (#440), and the stalled facts follow it. Each
+session is its title, clipped to 30 and quoted (#438). The `; helping:` part lists each live helper on the step, entries
+joined by `; `, and is left out when there are none. For (b), `#422 Shared task box: stalled: no live driver · on it:
+"Docs pass" branch docs · cwd C:/personal/InProgress/.claude/worktrees/docs`, with every live session on the step,
+entries joined by `; `. A missing branch or cwd prints as `?`.
 
 ### 3.3 Mip (`claude/skills/mip-orc/SKILL.md`)
 
 - **Reconcile:** `stalled` and `answer_waiting` join the mark list.
   - `stalled`: before calling a step stalled, or saying no session is working on it, run
     `git -C <cwd> status --porcelain` and `git -C <cwd> log -1 --format=%cr` for each live session on the step.
-    Uncommitted or recent work is a status ("H has uncommitted work in cell-form, idle 45m: talk to H"), not a stall.
+    Uncommitted or recent work is a status (for example: "Cell form" has uncommitted work in cell-form, idle 45m; talk to that session), not a stall.
     Mip never takes over. When the driver is not live, Mip offers a successor handoff whose first line is
     `Claim #<id>`: with no live driver, that plain claim drives the step.
-  - `answer_waiting`: name the step's driver if it is live ("a12 waits for H's next prompt"), else offer to start a
+  - `answer_waiting`: name the step's driver if it is live (for example: a12 waits for the next prompt in "Cell form"), else offer to start a
     session on the step; the claim delivers the answer.
 - **What's next:** a step with a live driver is not ready (already true for any live session).
 - **Start a step:** the handoff names a stable worktree, `.claude/worktrees/<topic>` on the topic branch, never a chip's
@@ -247,7 +250,7 @@ Labels: data, integration and ui. Gates: typecheck, unit, smoke, the full strict
   owed.
 - **Unit, marks:** `stalled` (a) at 29 and 31 minutes, with a running subagent, a counted command, `permission`, an open
   ask, an Aiden-owned step; (b) with a live helper and an ended driver.
-- **Unit, migration:** 11 adds the column, keeps `min_reader_version` at 1, and backfills the driver of an active step.
+- **Unit, migration:** 12 adds the column, keeps `min_reader_version` at 1, and backfills the driver of an active step.
 - **Unit, nudge:** the new 150k and 200k lines, and the post-compaction line once per compaction.
 - **Smoke:** the claim CLI with `--take-over` through the installed hook path.
 - **e2e:** a Now row shows `drives` on its driver and `helping` on a helper.
@@ -255,4 +258,4 @@ Labels: data, integration and ui. Gates: typecheck, unit, smoke, the full strict
 Murr runs on Opus: the diff touches `src/server/db/`, `src/server/session-flow.ts`, `src/server/briefing.ts` and
 `claude/`. Parvati is skipped: the window change is a word on an existing line.
 
-The merge gate: a full deploy (migration 11), then `npm run claude:install` for the mip-orc skill and the hook text.
+The merge gate: a full deploy (migrations 11 and 12), then `npm run claude:install` for the mip-orc skill and the hook text.

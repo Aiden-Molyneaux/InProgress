@@ -1,0 +1,5 @@
+{
+  "name": "inprogress-step",
+  "version": "0.1.0",
+  "description": "Shows the InProgress step this session has claimed, as #id and title, in the status line."
+}

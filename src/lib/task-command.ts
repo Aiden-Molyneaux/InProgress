@@ -22,7 +22,7 @@ export function repoCli(repo: string): string {
 const hasSpace = (path: string): boolean => /\s/.test(path);
 
 /** The subcommands a session runs itself, so install allows each (usage is Aiden's and is left out). */
-export const CLI_SUBCOMMANDS = ['tasks', 'claim', 'ask', 'orchestrate', 'digest'] as const;
+export const CLI_SUBCOMMANDS = ['tasks', 'claim', 'ask', 'orchestrate', 'digest', 'outline'] as const;
 export type CliSubcommand = (typeof CLI_SUBCOMMANDS)[number];
 
 /**

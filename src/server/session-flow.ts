@@ -1,11 +1,12 @@
 import { commandLabel, sessionActivity } from '../core/activity';
+import { clipLine, stepRef } from '../core/step-ref';
 import { SCRIBE_AGENT, type CommandKind, type CommandOutcome, type HookEvent, type Session, type TreeNode, type WorkStatus } from '../core/types';
 import { write, type Ctx, type RecordEvent } from './db/tx';
 import { badRequest } from './errors';
 import { renderBriefing, renderStatusAnswer, renderStatusLine, untrackedHint } from './briefing';
 import { renderOrchestratorBriefing, stepBlock } from './briefing-scoped';
 import { deriveBoard, isLive, reconcileLine } from '../core/board';
-import { askTag, sessionTag } from '../core/types';
+import { askTag, sessionDisplayTitle } from '../core/types';
 import { formatCounts, formatDigest, readDigest } from './digest';
 import { markAnswersDelivered, owedAnswers, undeliveredAnswers } from './repo/asks';
 import { endCommand, endSessionCommands, pruneCommands, reconcileCommands, startCommand, type BackgroundEntry } from './repo/commands';
@@ -369,12 +370,17 @@ export function enrollSession(ctx: Ctx, actor: string, sessionId: string, projec
 /** How a focus change left the step's driver (spec 1.2): null for no step. */
 type Drive = 'drives' | 'helping' | 'took_over' | 'same' | null;
 
+/** A session as a claim's notes name it: its title, clipped and quoted, as the briefing's session lines do (#438). */
+function sessionName(s: Session): string {
+  return `"${clipLine(sessionDisplayTitle(s), 30)}"`;
+}
+
 /** The note a claim prints for `drive`, or none. */
 function driveNote(drive: Drive, nodeId: number, from: Session | null): string | null {
-  const tag = sessionTag(from?.slot ?? null) || '?';
+  const name = from ? sessionName(from) : '?';
   if (drive === 'drives') return `You drive #${nodeId}.`;
-  if (drive === 'helping') return `${tag} drives #${nodeId}; you are helping. Pass --take-over to drive.`;
-  if (drive === 'took_over') return `You drive #${nodeId}; took over from ${tag}.`;
+  if (drive === 'helping') return `${name} drives #${nodeId}; you are helping. Pass --take-over to drive.`;
+  if (drive === 'took_over') return `You drive #${nodeId}; took over from ${name}.`;
   return null;
 }
 
@@ -477,7 +483,7 @@ export function claimStep(ctx: Ctx, actor: string, sessionId: string, nodeId: nu
     if (!row || (row.column !== 'next' && row.column !== 'now')) notes.push(`Note: #${nodeId} is not in Next.`);
     for (const a of row?.asks ?? []) notes.push(`Note: #${nodeId} has open ask ${askTag(a.id)}.`);
     for (const s of row?.sessions ?? []) {
-      if (s.id !== sessionId) alsoClaimed.push({ sessionId: s.id, note: `Note: #${nodeId} is also claimed by ${sessionTag(s.slot) || '?'} "${s.title?.trim() || `Session ${s.id.slice(0, 6)}`}" (${sessionActivity(s, nowMs)}).` });
+      if (s.id !== sessionId) alsoClaimed.push({ sessionId: s.id, note: `Note: #${nodeId} is also claimed by ${sessionName(s)} (${sessionActivity(s, nowMs)}).` });
     }
   }
   let drove: { drive: Drive; from: Session | null } = { drive: null, from: null };
@@ -543,7 +549,7 @@ export function orchestrate(ctx: Ctx, actor: string, sessionId: string, o: { sta
     const board = deriveBoard(snapshot, nowMs);
     lines.push('', formatDigest(digest, nowMs));
     if (board.marked.length) lines.push('Reconcile:', ...board.marked.flatMap((r) => r.marks.map((m) => `  ${reconcileLine(r, m, nowMs)}`)));
-    if (board.next.length) lines.push('Next:', ...board.next.slice(0, 3).map((r) => `  #${r.node.id} ${r.node.title}: ${r.ready ? 'ready' : 'not ready'}`));
+    if (board.next.length) lines.push('Next:', ...board.next.slice(0, 3).map((r) => `  ${stepRef(r.node.id, r.node.title)}: ${r.ready ? 'ready' : 'not ready'}`));
   }
   return { session, opening: lines.join('\n') };
 }

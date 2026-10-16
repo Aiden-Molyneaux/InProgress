@@ -103,7 +103,7 @@ describe('the tasks command a session runs', () => {
 
   it('recognises a CLI command rule for any repo path, and nothing else', () => {
     for (const rule of [...cliAllowRules(repoCli('C:/personal/InProgress')), ...cliAllowRules(repoCli('D:/old/checkout'))]) expect(isCliAllowRule(rule), rule).toBe(true);
-    for (const rule of ['mcp__inprogress', 'Bash(git status)', 'Bash(node C:/tools/x.js tasks *)', 'Bash(node C:/x/dist/cli/main.js outline *)', 'Read(node C:/x/dist/cli/main.js tasks *)']) {
+    for (const rule of ['mcp__inprogress', 'Bash(git status)', 'Bash(node C:/tools/x.js tasks *)', 'Bash(node C:/x/dist/cli/main.js usage *)', 'Read(node C:/x/dist/cli/main.js tasks *)']) {
       expect(isCliAllowRule(rule), rule).toBe(false);
     }
   });

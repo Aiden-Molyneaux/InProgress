@@ -1,0 +1,48 @@
+/* The status marker (Marker.tsx), which imports this file, so it loads after styles.css. Tokens come from styles.css;
+   the keyframes ip-pulse and ip-flash stay there; reduced motion is styles.css's blanket rule. Every rule names two
+   classes or more (the base lists every status to get there), so it outranks any .ip-marker rule of one class in
+   styles.css, and wins a tie of two because this file loads later. */
+.ip-marker.m-todo, .ip-marker.m-active, .ip-marker.m-done, .ip-marker.m-blocked, .ip-marker.m-dropped {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 8px;
+  height: 8px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--fs-s);
+  font-weight: var(--w-text);
+  line-height: 14px;
+}
+.ip-marker.m-todo { width: 9px; height: 9px; border: 1.5px solid var(--faint); }
+.ip-marker.m-active { background: var(--active); }
+.ip-marker.m-blocked { background: var(--red); }
+.ip-marker.m-dropped { background: var(--faint); }
+/* Done: a muted ✓, no dot. The ✓ and a question's ? are drawn here, not written into the DOM, so a step's name and
+   Details' status word stay the first text; the empty alternative text after the slash keeps them out of accessible
+   names. The plain content line is the fallback for an engine without that syntax. */
+.ip-marker.m-done { width: 9px; height: auto; }
+.ip-marker.m-done::before { content: '✓'; content: '✓' / ''; }
+/* A question: a 13 px muted disc with its ? in the ground colour, whatever its status. A done question keeps the ?. */
+.ip-marker.q {
+  width: 13px;
+  height: 13px;
+  border: 0;
+  background: var(--muted);
+  color: var(--bg);
+  font-weight: var(--w-heavy);
+  line-height: 13px;
+}
+/* After the done ✓, so a done question keeps its ?. */
+.ip-marker.q::before { content: '?'; content: '?' / ''; }
+/* Paused: an active step nobody is on. A hollow sky ring; a question's ? takes the sky. */
+.ip-marker.m-paused { width: 9px; height: 9px; border: 1.5px solid var(--sky); background: transparent; color: var(--sky); }
+/* Needs you: an amber dot, whatever the status; a question's disc turns amber and keeps its ? in the ground colour. */
+.ip-marker.m-you { width: 8px; height: 8px; border: 0; background: var(--amber); }
+.ip-marker.q.m-paused, .ip-marker.q.m-you { width: 13px; height: 13px; }
+/* On a working card an active marker pulses. */
+.ip-marker.m-active.m-pulse { animation: ip-pulse 1.6s ease-in-out infinite; }

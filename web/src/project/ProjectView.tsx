@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { deriveBoard } from '../../../src/core/board';
-import { Character } from '../Character';
 import { useWide } from '../board/useWide';
 import { ageShort } from '../board/text';
 import { Markdown } from '../panels/Markdown';
@@ -19,7 +18,7 @@ function RailKey() {
       <div><span className="ip-dot live" aria-hidden="true" /> now, a session is on it</div>
       <div><span className="ip-dot idle" aria-hidden="true" /> now, no session</div>
       <div><span className="ip-num" aria-hidden="true">①</span> next, in queue order</div>
-      <div><span className="ip-num ip-letter" aria-hidden="true">C</span> next, in a session's own queue</div>
+      <div><span className="ip-num ip-own" aria-hidden="true">◆</span> next, in a session's own queue</div>
       <div><span className="ip-dot ring" aria-hidden="true" /> backlog</div>
     </div>
   );
@@ -43,12 +42,10 @@ export function ProjectView({ snapshot, now, onOpenNode, onOpenResource, onStatu
   // A fully done group shows as a section only once it is picked from "Done groups".
   const shown = sections.filter((s) => !s.allDone || folds[key(s)] === true);
   const note = snapshot.stateNote;
-  const orchestrator = snapshot.sessions.find((s) => s.role === 'orchestrator' && s.state !== 'ended');
   const outline = { snapshot, board, now, wide, doneOpen: (parentId: number) => folds[`done:${parentId}`] ?? false, onToggleDone: (parentId: number) => flip(`done:${parentId}`, folds[`done:${parentId}`] ?? false), onOpenNode, onOpenResource };
 
   const noteBlock = note ? (
     <div className="ip-msg ip-pnote">
-      <Character size={24} state="idle" slot={orchestrator?.slot ?? null} seed={`orchestrator:${projectId}`} />
       <div className="ip-msg-body">
         <div className="ip-msg-head">
           <b>Orchestrator</b> · <span className="ip-time">{ageShort(note.updatedAt, now)}</span>
