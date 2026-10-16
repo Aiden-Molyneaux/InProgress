@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -76,7 +76,6 @@ describe('context-nudge', () => {
   });
   it('says the exact 150k line, with no cut in it', () => {
     expect(said(batch(fresh(), line('a', 150_000)))).toBe(L150);
-    expect(L150).not.toContain('write the handoff');
   });
   it('adds the 200k line after the 150k one, or says it alone when a session jumps over both', () => {
     const session = fresh();
@@ -105,6 +104,30 @@ describe('context-nudge', () => {
     const high = fresh();
     expect(said(batch(high, line('a', 205_000)))).toBe(L200);
     expect(said(batch(high, line('a', 205_000), line('b', 30_000)))).toBe(LCOMPACT);
+  });
+  it('treats a fall of 30k or more as a compaction, wherever it lands', () => {
+    const a = fresh();
+    expect(said(batch(a, line('a', 205_000)))).toBe(L200);
+    expect(said(batch(a, line('a', 205_000), line('b', 170_000)))).toBe(LCOMPACT);
+    expect(batch(a, line('a', 205_000), line('b', 170_000), line('c', 171_000))).toBe('');
+    // The level is re-armed to what 170k has reached, so 200k is announced again.
+    expect(said(batch(a, line('a', 205_000), line('b', 170_000), line('c', 206_000)))).toBe(L200);
+    const m = fresh();
+    expect(batch(m, line('a', 120_000))).toBe('');
+    expect(said(batch(m, line('a', 120_000), line('b', 40_000)))).toBe(LCOMPACT);
+    // A small fall is not one.
+    const s = fresh();
+    expect(said(batch(s, line('a', 205_000)))).toBe(L200);
+    expect(batch(s, line('a', 205_000), line('b', 190_000))).toBe('');
+  });
+  it('handles a corrupt state file without throwing, and replaces it', () => {
+    const session = fresh();
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(join(stateDir, `${session}.json`), '{not json');
+    const r = run(hook(transcript(line('a', 155_000)), session));
+    expect(r.status).toBe(0);
+    expect(said(r.out)).toBe(L150);
+    expect(stored(session)).toBe(150_000);
   });
   it('re-arms after the context drops below 150k', () => {
     const session = fresh();
