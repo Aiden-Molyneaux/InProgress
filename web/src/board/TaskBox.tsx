@@ -15,12 +15,6 @@ export interface SessionRef {
 
 /** The command that resumes a session in the desktop app, shown when the server could not run it; with why, when it is known. */
 export function CopyCommand({ command, reason }: { command: string; reason?: string }) {
-  // Keyed, so a new command or reason starts with the Copy label again.
-  return <CopyCommandBody key={`${command}
-${reason ?? ''}`} command={command} reason={reason} />;
-}
-
-function CopyCommandBody({ command, reason }: { command: string; reason?: string }) {
   const [copied, setCopied] = useState<'no' | 'yes' | 'failed'>('no');
   const copy = async () => {
     try {

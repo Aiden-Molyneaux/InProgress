@@ -109,6 +109,13 @@ describe('openInDesktop', () => {
     expect(await result).toEqual({ ok: false, reason: 'claude exited with code 1' });
   });
 
+  it('says it was stopped when a signal ends it', async () => {
+    const child = fakeChild();
+    const result = openInDesktop({ id: ID, cwd: null }, { spawn: () => child, findClaude: () => 'claude', timeoutMs: 1000 });
+    child.emit('exit', null, 'SIGTERM');
+    expect(await result).toEqual({ ok: false, reason: 'claude was stopped (SIGTERM)' });
+  });
+
   it('says why on a spawn error, whether it is emitted (with a code) or thrown (a message)', async () => {
     const child = fakeChild();
     const emitted = openInDesktop({ id: ID, cwd: null }, { spawn: () => child, findClaude: () => 'claude', timeoutMs: 1000 });

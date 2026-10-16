@@ -64,8 +64,8 @@ export type OpenDesktopResult = { ok: true } | { ok: false; command: string; rea
 
 /**
  * Opens a session in the Claude desktop app. When the server could not, the answer holds the command to copy, and the
- * reason when the failure was a refusal or an unreachable server (the server's own "could not launch" has none). Never
- * rejects.
+ * reason: the server's own when it could not launch, else why the request failed (with a hint to run the command in the
+ * session's folder, since the window builds that command without one). Never rejects.
  */
 export async function openDesktop(sessionId: string): Promise<OpenDesktopResult> {
   const answer = await sendUi<{ ok: boolean; command?: string; reason?: string }>(`/api/ui/sessions/${encodeURIComponent(sessionId)}/open-desktop`, {});

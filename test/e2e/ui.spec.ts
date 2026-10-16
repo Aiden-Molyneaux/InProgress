@@ -1851,7 +1851,7 @@ test.describe('Board', () => {
     let refuse = true;
     await page.route('**/api/ui/sessions/*/open-desktop', async (route) => {
       calls += 1;
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      await new Promise((resolve) => setTimeout(resolve, 1500));
       if (refuse) await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'Launcher unavailable' }) });
       else await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
     });
@@ -1924,7 +1924,7 @@ test.describe('Board', () => {
     const calls: string[] = [];
     await page.route('**/api/ui/sessions/*/open-desktop', async (route) => {
       calls.push(route.request().url());
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      await new Promise((resolve) => setTimeout(resolve, 1500));
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
     });
     await open(page, fresh);
@@ -1934,9 +1934,14 @@ test.describe('Board', () => {
     // A session shows in its line and its permission block, and again over an ask of its own when another session's block comes between: one launch, so every button of it reads Opening… and one request goes.
     await box.getByRole('button', { name: 'Open session to allow' }).first().click();
     await expect.poll(() => box.getByRole('button', { name: 'Opening…' }).count()).toBeGreaterThanOrEqual(2);
-    for (const button of await box.getByRole('button', { name: 'Opening…' }).all()) await button.click();
-    await expect(box.getByRole('button', { name: 'Opening…' })).toHaveCount(0);
+    // The other session's own button stays idle while the first launches.
+    await expect(box.locator('.ip-block').filter({ hasText: 'Waiting for permission' }).nth(1).getByRole('button', { name: 'Open session to allow' })).toBeVisible();
+    await box.getByRole('button', { name: 'Opening…' }).last().click({ force: true });
     expect(calls).toHaveLength(1);
+    await expect(box.getByRole('button', { name: 'Opening…' })).toHaveCount(0);
+    // The other session launches on its own.
+    await box.locator('.ip-block').filter({ hasText: 'Waiting for permission' }).nth(1).getByRole('button', { name: 'Open session to allow' }).click();
+    await expect.poll(() => calls.length).toBe(2);
   });
 
   test('Answer… opens a field that takes focus, Escape returns to the button, and Enter clears the ask with the answer', async ({ page, api, fresh }) => {

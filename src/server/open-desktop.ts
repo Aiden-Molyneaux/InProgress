@@ -141,6 +141,6 @@ function run(session: DesktopSession, o: OpenDesktopOptions): Promise<OpenDeskto
       finish(failed(`Claude Code did not answer within ${o.timeoutMs === undefined ? OPEN_DESKTOP_TIMEOUT_MS / 1000 : o.timeoutMs / 1000} s`));
     }, o.timeoutMs ?? OPEN_DESKTOP_TIMEOUT_MS);
     child.on('error', (err) => finish(failed(spawnReason(err))));
-    child.on('exit', (code) => finish(code === 0 ? { ok: true } : failed(`claude exited with code ${code}`)));
+    child.on('exit', (code, signal) => finish(code === 0 ? { ok: true } : failed(code === null ? `claude was stopped (${signal ?? 'no signal'})` : `claude exited with code ${code}`)));
   });
 }
