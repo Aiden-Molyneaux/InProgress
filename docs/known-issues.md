@@ -48,7 +48,7 @@ work. A re-hit bumps **Hits** and **Verified**. Entries seeded from the code and
   asks for it, and restarts the server (scripts/deploy.mjs:75-118). A red before the promote
   leaves the live build untouched. A red restart swaps the previous build back and restarts it.
   The restart check passes when `/api/health` reports the sha and builtAt in `dist/build.json`
-  (scripts/deploy-lib.mjs:80-103). Its "Restart check:" line gives the build expected, the status,
+  (scripts/deploy-lib.mjs:81-108). Its "Restart check:" line gives the build expected, the status,
   build and body health answered, or the error when it did not answer, or the exit of `start`.
 - **Fix:** red before the promote: fix on the branch, merge, and deploy again (Sigmund, phase 8).
   Red restart: read the "Restart check:" line first. The deploy swaps the old build back and

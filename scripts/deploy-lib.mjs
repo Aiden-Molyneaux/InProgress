@@ -86,7 +86,12 @@ const BODY_MAX = 500;
 export function restartCheck(live, seen) {
   if (seen.error) {
     const { name, message, cause } = seen.error;
-    const said = cause && (cause.message || cause.errors?.map((e) => e.message).join('; ') || String(cause));
+    let said = '';
+    try {
+      said = cause && (cause.message || (Array.isArray(cause.errors) ? cause.errors.map((e) => e?.message).filter(Boolean).join('; ') : '') || String(cause));
+    } catch {
+      // A cause that can't be printed must not stop the rollback that follows.
+    }
     const why = cause ? ` (${cause.code ? `${cause.code}: ` : ''}${said})` : '';
     return `/api/health did not answer: ${name}: ${message}${why}`;
   }
