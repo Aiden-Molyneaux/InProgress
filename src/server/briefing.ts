@@ -3,7 +3,7 @@ import { clipLine, stepRef } from '../core/step-ref';
 import { deriveBoard, isLive } from '../core/board';
 import { formatUpNext, type QueueView } from '../core/layout';
 import { ancestors, buildIndex, dfsOrder, kids, progress, type TreeIndex } from '../core/tree';
-import { ASK_GLYPHS, NODE_LABELS, askTag, glyphTitle, sessionDisplayTitle, sessionTag, type Ask, type ProjectSnapshot, type Session, type TreeNode, type WorkItem } from '../core/types';
+import { ASK_GLYPHS, NODE_LABELS, askTag, glyphTitle, sessionDisplayTitle, type Ask, type ProjectSnapshot, type Session, type TreeNode, type WorkItem } from '../core/types';
 import { homeDir } from '../lib/home';
 import { claimCommand, taskCommand } from '../lib/task-command';
 import { renderOrchestratorBriefing, renderUnclaimedBriefing, renderWorkerBriefing, stepBlock, unclaimedLines } from './briefing-scoped';
@@ -141,7 +141,7 @@ export function frontierLines(snapshot: ProjectSnapshot, sessionId?: string, opt
 
 /**
  * The planned order, read from the Board's position function so the queue numbers agree with the window: this session's
- * own steps first, with titles, then the other live sessions' by letter and the unowned ones. An ended or stale owner's
+ * own steps first, with titles, then the other live sessions' by title and the unowned ones. An ended or stale owner's
  * entries are not in Next (spec 1.5 rule 4), and a session's focus is Now, so neither is listed. Undefined when no step
  * is up next (formatUpNext's guarantee), which is when the frontier keeps its sibling Next: lines.
  */
@@ -189,17 +189,19 @@ export function askItem(a: Ask, now: number, stepTitle?: string): string {
 
 /** A step's title where a briefing line only names it: shorter than the digest's, since a briefing reaches every prompt. */
 const NAMED_STEP_MAX = 40;
+/** A session's title where a line names it, as formatUpNext clips it: one line, at most 30 characters. */
+const TITLE_MAX = 30;
 const titleOf = (snapshot: ProjectSnapshot, id: number): string | undefined => snapshot.nodes.find((n) => n.id === id)?.title;
 
 /**
- * `Needs you (2): a7 ? on #42 Pick a port: "Which port?" (3d) · D waiting for permission on #45 Run the tests (2m)`: open asks oldest first, then
+ * `Needs you (2): a7 ? on #42 Pick a port: "Which port?" (3d) · "Docs pass" waiting for permission on #45 Run the tests (2m)`: open asks oldest first, then
  * live permission waits (spec 1.4). `now` is the server's clock (ms).
  */
 export function needsYouLine(snapshot: ProjectSnapshot, now: number): string | undefined {
   const items = openAsks(snapshot).map((a) => askItem(a, now, titleOf(snapshot, a.nodeId)));
   for (const s of snapshot.sessions) {
     if (s.state !== 'permission' || !isLive(s, now)) continue;
-    items.push(`${sessionTag(s.slot) || '?'} waiting for permission${s.focusNodeId !== null ? ` on ${stepRef(s.focusNodeId, titleOf(snapshot, s.focusNodeId), NAMED_STEP_MAX)}` : ''} (${spanAgo(s.lastSeenAt, now)})`);
+    items.push(`"${clipLine(sessionDisplayTitle(s), TITLE_MAX)}" waiting for permission${s.focusNodeId !== null ? ` on ${stepRef(s.focusNodeId, titleOf(snapshot, s.focusNodeId), NAMED_STEP_MAX)}` : ''} (${spanAgo(s.lastSeenAt, now)})`);
   }
   if (!items.length) return undefined;
   return `Needs you (${items.length}): ${items.slice(0, MAX_NEEDS_YOU).join(' · ')}${items.length > MAX_NEEDS_YOU ? ` · +${items.length - MAX_NEEDS_YOU} more` : ''}`;
@@ -295,13 +297,12 @@ export function leftUnfinishedOn(snapshot: ProjectSnapshot, nodeId: number): str
   return items.length ? `Left unfinished on #${nodeId} by an earlier session: ${items.map((i) => `"${withoutStepId(i.subject, nodeId)}"`).join(', ')}` : undefined;
 }
 
-/** `Other sessions here: A "title" (working, on #42 Pick a port) · ...`, or undefined when no other session is live. */
+/** `Other sessions here: "title" (working, on #42 Pick a port) · ...`, or undefined when no other session is live. */
 export function othersLine(snapshot: ProjectSnapshot, sessionId: string, now: number): string | undefined {
   const others = snapshot.sessions.filter((s) => s.id !== sessionId && s.state !== 'ended');
   if (!others.length) return undefined;
   const named = (s: Session) => {
-    const tag = sessionTag(s.slot);
-    return `${tag ? `${tag} ` : ''}"${sessionDisplayTitle(s)}" (${sessionActivity(s, now)}${s.focusNodeId ? `, on ${stepRef(s.focusNodeId, titleOf(snapshot, s.focusNodeId), NAMED_STEP_MAX)}` : ''})`;
+    return `"${clipLine(sessionDisplayTitle(s), TITLE_MAX)}" (${sessionActivity(s, now)}${s.focusNodeId ? `, on ${stepRef(s.focusNodeId, titleOf(snapshot, s.focusNodeId), NAMED_STEP_MAX)}` : ''})`;
   };
   return `Other sessions here: ${others.map(named).join(' · ')}`;
 }
@@ -318,12 +319,10 @@ export interface BriefingOptions {
 export const PLAN_EDIT_LINE =
   'Plan edits go through the inprogress-scribe agent in the background (working tasks excepted, below). The rules below are complete; the inprogress skill is for opt-in, adoption and the full brief format.';
 
-/** `[InProgress] This session is tracked in project "X" (slug x). Session id: ID. You are session A.` */
+/** `[InProgress] This session is tracked in project "X" (slug x). Session id: ID.` */
 export function headerLine(snapshot: ProjectSnapshot, sessionId: string): string {
-  const { project, sessions } = snapshot;
-  // Its letter, as the window shows it on its chip and badge; none while its slot is empty.
-  const letter = sessionTag(sessions.find((s) => s.id === sessionId)?.slot ?? null);
-  return `[InProgress] This session is tracked in project "${project.name}" (slug ${project.slug}). Session id: ${sessionId}.${letter ? ` You are session ${letter}.` : ''}`;
+  const { project } = snapshot;
+  return `[InProgress] This session is tracked in project "${project.name}" (slug ${project.slug}). Session id: ${sessionId}.`;
 }
 
 /** The playbook block: up to 15 lines under `Playbook:`, or nothing for an empty one. */

@@ -13,7 +13,7 @@ function SessionPart({ session, row, snapshot, now }: { session: Session; row: B
     .sort((a, b) => (a.nodeId === row.node.id ? 0 : 1) - (b.nodeId === row.node.id ? 0 : 1) || a.position - b.position)[0];
   const kin = session.subagents.filter((a) => a.endedAt === null && !isReader(a.agentType));
   const commands = orderCommands(session.commands.filter((c) => commandShown(c, now)));
-  const line = commands.length ? commandLineParts(session, commands, now) : null;
+  const line = commands.length ? commandLineParts(commands, now) : null;
   return (
     <>
       <SessionLine session={session} area="now" />

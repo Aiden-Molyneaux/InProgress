@@ -29,7 +29,7 @@ const THEME_FREE: Record<string, string> = {
   'track-l': '-0.05em',
 };
 
-/** Quiet's colour tokens as [day, night]. The family hues are pinned in family.test.ts. */
+/** Quiet's colour tokens as [day, night]. */
 const QUIET: Record<string, [string, string]> = {
   bg: ['#f8fafc', '#080d1c'],
   text: ['#0f172a', '#f1f5f9'],
@@ -56,7 +56,6 @@ const QUIET: Record<string, [string, string]> = {
   'amber-ink': ['#92400e', '#fcd34d'],
   'amber-fill': ['rgba(251,191,36,.18)', 'rgba(251,191,36,.12)'],
   red: ['#b91c1c', '#f87171'],
-  gone: ['#64748b', '#94a3b8'],
   'red-fill': ['rgba(185,28,28,.08)', 'rgba(248,113,113,.1)'],
 };
 
@@ -70,8 +69,6 @@ const TASK_HUES: Record<string, [string, string]> = {
   'hue-5': ['#15803d', '#4ade80'],
   'hue-6': ['#8b5e34', '#d4a574'],
 };
-
-const isFamily = (name: string) => /^family-\d$/.test(name);
 
 describe('theme tokens', () => {
   it('follows the system theme: day in :root, night in the one dark block', () => {
@@ -91,7 +88,7 @@ describe('theme tokens', () => {
     expect(Object.keys(THEME_FREE).filter((name) => name in night)).toEqual([]);
   });
 
-  it("holds Quiet's values, and no colour token beyond them, the six family hues and the seven task hues", () => {
+  it("holds Quiet's values, and no colour token beyond them and the seven task hues", () => {
     for (const [name, [d, n]] of Object.entries(QUIET)) {
       expect(day[name], `--${name} by day`).toBe(d);
       expect(night[name], `--${name} by night`).toBe(n);
@@ -100,7 +97,7 @@ describe('theme tokens', () => {
       expect(day[name], `--${name} by day`).toBe(d);
       expect(night[name], `--${name} by night`).toBe(n);
     }
-    const unknown = Object.keys(day).filter((name) => !(name in QUIET) && !(name in TASK_HUES) && !(name in THEME_FREE) && !isFamily(name));
+    const unknown = Object.keys(day).filter((name) => !(name in QUIET) && !(name in TASK_HUES) && !(name in THEME_FREE));
     expect(unknown).toEqual([]);
   });
 

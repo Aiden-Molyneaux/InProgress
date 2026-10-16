@@ -129,7 +129,7 @@ One pure function in `src/core` derives every open step's position from the snap
 1. `dropped`: off the board.
 2. `done`: Done.
 3. A live session's focus is on it, or it is Aiden's own (`assignee = 'me'`) and `active`: Now.
-4. In the unowned queue: Next, in queue order. Then entries of a live session's own queue, tagged with its letter.
+4. In the unowned queue: Next, in queue order. Then entries of a live session's own queue, named by its session's title.
 5. Any other open step with no open children: Backlog.
 
 Rules 1 to 4 apply to every node except the project root. Rule 5 applies only to a node with no open children: a node
@@ -297,19 +297,22 @@ muted ink. The reference for spacing and type is the artboards in `.superpowers/
 comparison r153). Where an artboard and this spec differ on behaviour, the spec wins. The drafts' state note, asks,
 permission wait, sessions' steps and Next order are invented.
 
+Sessions wear no character, letter or hue anywhere in the window or the session text (#438, Aiden 2026-10-16): a
+session is named by its title, a subagent by its type, and the task hue of section 2.9 is the window's only hue.
+
 C puts who and when first:
 
-- **Where we are.** The state note is pinned at the top as a message from the Orchestrator's character: "Orchestrator ·
+- **Where we are.** The state note is pinned at the top as a message from the Orchestrator: "Orchestrator ·
   2h", the note's first sentence, and a "Project view ›" button. The sessions not on a Now row sit beside it (wide) or
-  under it (narrow), headed "No claimed step".
+  under it (narrow), headed "No claimed step", each by its title and activity word.
 - **The Board's four cells use the task box** of section 2.9 (#422), which replaced draft C's inbox messages, the
   session-first Now messages, the numbered Next rail and the Done timeline. The Next column's foot still reads
   "Backlog · n ▸" and "+ add"; open, Backlog groups its rows by parent and ends with the quick-add field.
 - **Project view.** The state note is a message at the head. Each section header carries a segmented bar (done, now,
   next, backlog) with its legend ("22 done · 2 now · 2 next · 2 backlog"), the progress count and `▤ n`; a folded
   section shows only its header and bar. The outline puts position in a left rail: a filled orange dot for Now with a
-  session, a grey dot for Now without one, the queue number for Next, the session letter for an own-queue entry, a
-  hollow ring for Backlog. Session letters sit at the right. Done children fold per parent, then "+ Add a step". The
+  session, a grey dot for Now without one, the queue number for Next, a neutral `◆` for an own-queue entry (its session's title on hover), a
+  hollow ring for Backlog. The titles of the sessions on a step sit at the right, one line each. Done children fold per parent, then "+ Add a step". The
   "Top level" section and "Done groups · n" come last. At 960 px and up, a left column holds the project name, the
   state note, a key to the rail and the Done groups, and the sections gain Label, Marks, Sessions and Docs columns.
 
@@ -394,7 +397,7 @@ session; its Needs you and check lines read open asks, as everywhere (section 1.
 5. `Resources on #42:` newest first, at most 5.
 6. `Asks on #42:` open ones with ages; those cleared since the session started, with answers.
 7. `Left unfinished on #42 by an earlier session:` this step only.
-8. `Other sessions here:` letters and steps, against collisions.
+8. `Other sessions here:` titles and steps, against collisions.
 
 **Worker with no step.** Header (`no step claimed`), the rules, the playbook, `Ready to claim:` up to three Next steps with
 no open ask, no live session and not Aiden's own (own entries first), and the claim command. When none is ready:

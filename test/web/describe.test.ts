@@ -28,16 +28,16 @@ describe('describeEvent', () => {
     expect(describeEvent(ev('ask.cleared', '4', { ask: { nodeId: 55 } }), snapshot)).toBe('cleared an ask on #55 2 Android signing');
   });
 
-  it("names the subagents the transcript watcher ended after their session's title, by tag, and why", () => {
+  it("names the subagents the transcript watcher ended after their session's title, by name, and why", () => {
     const withAgents = {
       ...snapshot,
-      sessions: [{ id: 's1', title: 'InGame launch status', slot: 0, subagents: [{ agentId: 'x3', ordinal: 3 }] }],
-      trailAgents: [{ sessionId: 's1', agentId: 'x4', ordinal: 4 }],
+      sessions: [{ id: 's1', title: 'InGame launch status', slot: 0, subagents: [{ agentId: 'x3', agentType: 'Explore', description: 'Map the signing flow' }] }],
+      trailAgents: [{ sessionId: 's1', agentId: 'x4', agentType: 'general-purpose', description: null }],
     } as unknown as ProjectSnapshot;
     const ended = (...list: [string, string][]) => ev('session.updated', 's1', { changed: ['subagents'], state: 'working', ended: list.map(([agentId, reason]) => ({ agentId, reason })) }, 'system');
-    expect(describeEvent(ended(['x3', 'limit']), withAgents)).toBe('InGame launch status · a3 hit the usage limit');
-    expect(describeEvent(ended(['x3', 'killed'], ['x4', 'silent']), withAgents)).toBe('InGame launch status · a3 was stopped, a4 stopped responding');
-    // One it cannot find, or a session with no letter, reads as "a subagent".
+    expect(describeEvent(ended(['x3', 'limit']), withAgents)).toBe('InGame launch status · Map the signing flow hit the usage limit');
+    expect(describeEvent(ended(['x3', 'killed'], ['x4', 'silent']), withAgents)).toBe('InGame launch status · Map the signing flow was stopped, general-purpose stopped responding');
+    // One it cannot find, reads as "a subagent".
     expect(describeEvent(ended(['zz', 'error']), withAgents)).toBe('InGame launch status · a subagent hit an API error');
     expect(describeEvent(ended(['x3', 'error']), snapshot)).toBe('InGame launch status · a subagent hit an API error');
   });

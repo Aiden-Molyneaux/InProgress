@@ -266,9 +266,9 @@ describe('live work routes', () => {
     expect((await app.inject({ url: '/api/projects/ingame' })).json().project.queue).toEqual(unowned);
     const lines = (await app.inject({ url: '/api/projects/ingame/outline' })).body.split('\n');
     expect(lines.slice(0, 2)).toEqual(['Project InGame (slug ingame)', `Up next: later: #${guide} → #${tabs}`]);
-    // A session's own steps lead, under its letter.
+    // A session's own steps lead, under its title.
     await app.inject({ method: 'POST', url: '/api/projects/ingame/queue', headers: auth, payload: { nodes: [tabs], session: 's1' } });
-    expect((await app.inject({ url: '/api/projects/ingame/outline' })).body.split('\n')[1]).toBe(`Up next: A: #${tabs} | later: #${guide}`);
+    expect((await app.inject({ url: '/api/projects/ingame/outline' })).body.split('\n')[1]).toBe(`Up next: "Session s1": #${tabs} | later: #${guide}`);
     await app.inject({ method: 'POST', url: '/api/projects/ingame/queue', headers: auth, payload: { nodes: [], session: 's1' } });
     await app.inject({ method: 'POST', url: '/api/projects/ingame/queue', headers: auth, payload: { nodes: [] } });
     expect((await app.inject({ url: '/api/projects/ingame/outline' })).body).not.toContain('Up next');

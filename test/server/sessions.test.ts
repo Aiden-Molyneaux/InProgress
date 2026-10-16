@@ -194,44 +194,44 @@ describe('briefing: live work', () => {
     handleHookEvent(ctx, 's1', start());
     setQueue(ctx, 'scribe:s1', project.slug, [a3.id, a2.id], { sessionId: 's1' });
     const text = handleHookEvent(ctx, 's1', start()).context!;
-    expect(text).toContain(`\nUp next (you, A): #${a3.id} Run signing tests → #${a2.id} Play app signing\n`);
+    expect(text).toContain(`\nUp next (you): #${a3.id} Run signing tests → #${a2.id} Play app signing\n`);
     expect(text.indexOf('Where things stand:')).toBeLessThan(text.indexOf('Up next'));
     expect(text.indexOf('Up next')).toBeLessThan(text.indexOf('Needs you (1)'));
     updateNode(ctx, 'test', a3.id, { status: 'done' });
     // Finishing a step does not clear its ask, so the Needs you line stays after it.
-    expect(handleHookEvent(ctx, 's1', { event: 'prompt', asksStatus: true }).context!.split('\n')).toContain(`Up next (you, A): #${a2.id} Play app signing`);
+    expect(handleHookEvent(ctx, 's1', { event: 'prompt', asksStatus: true }).context!.split('\n')).toContain(`Up next (you): #${a2.id} Play app signing`);
   });
 
-  it("puts this session's own steps first, then other sessions' by letter and the unowned ones, in the briefing and the status answer", () => {
+  it("puts this session's own steps first, then other sessions' by title and the unowned ones, in the briefing and the status answer", () => {
     const { ctx, project, a1, a2, a3, road } = setup();
     const [s3, s4] = addNodes(ctx, 'test', { parentId: road.id, nodes: [{ title: 'Later one' }, { title: 'Later two' }] });
-    handleHookEvent(ctx, 's1', start());
-    handleHookEvent(ctx, 's2', start());
+    handleHookEvent(ctx, 's1', start(undefined, { title: 'Launch status' }));
+    handleHookEvent(ctx, 's2', start(undefined, { title: 'Store listing' }));
     setQueue(ctx, 'scribe:s2', project.slug, [a2.id], { sessionId: 's2' });
     setQueue(ctx, 'scribe:s1', project.slug, [a3.id, a1.id], { sessionId: 's1' });
     setQueue(ctx, 'scribe:s1', project.slug, [s3.id, s4.id], 'unowned');
     const line = (text: string) => text.split('\n').find((l) => l.startsWith('Up next'));
-    const expected = `Up next (you, A): #${a3.id} Run signing tests · B: #${a2.id} · later: #${s3.id} → #${s4.id}`;
+    const expected = `Up next (you): #${a3.id} Run signing tests · "Store listing": #${a2.id} · later: #${s3.id} → #${s4.id}`;
     // a1 is done, so it is left out.
     expect(line(handleHookEvent(ctx, 's1', start()).context!)).toBe(expected);
     expect(line(handleHookEvent(ctx, 's1', { event: 'prompt', asksStatus: true }).context!)).toBe(expected);
-    expect(line(handleHookEvent(ctx, 's2', start()).context!)).toBe(`Up next (you, B): #${a2.id} Play app signing · A: #${a3.id} · later: #${s3.id} → #${s4.id}`);
+    expect(line(handleHookEvent(ctx, 's2', start()).context!)).toBe(`Up next (you): #${a2.id} Play app signing · "Launch status": #${a3.id} · later: #${s3.id} → #${s4.id}`);
     // A session with nothing of its own queued reads the others' parts only; one that ended leaves its steps under later.
     setQueue(ctx, 'scribe:s2', project.slug, [], { sessionId: 's2' });
     handleHookEvent(ctx, 's1', { event: 'end' });
     expect(line(handleHookEvent(ctx, 's2', start()).context!)).toBe(`Up next: later: #${a3.id} → #${s3.id} → #${s4.id}`);
   });
 
-  it('leaves the letter out of its own part while the session has no slot, and prints ? for another owner without one', () => {
+  it('names another owner by its title whether or not it has a slot, and its own part carries no name', () => {
     const { ctx, project, a2, a3 } = setup();
     handleHookEvent(ctx, 's1', start());
-    handleHookEvent(ctx, 's2', start());
+    handleHookEvent(ctx, 's2', start(undefined, { title: 'Store listing' }));
     setQueue(ctx, 'scribe:s1', project.slug, [a3.id], { sessionId: 's1' });
     setQueue(ctx, 'scribe:s2', project.slug, [a2.id], { sessionId: 's2' });
     // As from before migration 4: the next hook event gives each a slot.
     ctx.db.prepare('UPDATE sessions SET slot = NULL').run();
     const lines = renderBriefing(getProjectSnapshot(ctx, project.slug), 's1', Date.parse(ctx.now()), { checkOld: true }).split('\n');
-    expect(lines).toContain(`Up next (you): #${a3.id} Run signing tests · ?: #${a2.id}`);
+    expect(lines).toContain(`Up next (you): #${a3.id} Run signing tests · "Store listing": #${a2.id}`);
   });
 
   it('caps the Up next line at five steps', () => {
@@ -240,7 +240,7 @@ describe('briefing: live work', () => {
     handleHookEvent(ctx, 's1', start());
     setQueue(ctx, 'scribe:s1', project.slug, steps.map((n) => n.id), { sessionId: 's1' });
     const line = handleHookEvent(ctx, 's1', start()).context!.split('\n').find((l) => l.startsWith('Up next'));
-    expect(line).toBe(`Up next (you, A): ${steps.slice(0, 5).map((n) => `#${n.id} ${n.title}`).join(' → ')} (+2 more)`);
+    expect(line).toBe(`Up next (you): ${steps.slice(0, 5).map((n) => `#${n.id} ${n.title}`).join(' → ')} (+2 more)`);
   });
 
   it("lists the focused step's working tasks under it: in progress first, then pending, at most 5", () => {
@@ -324,21 +324,21 @@ describe('briefing: live work', () => {
 });
 
 describe('briefing: session identity', () => {
-  it('ends the first line with the session\'s letter, in one sentence', () => {
+  it('ends the first line with the session id, in one sentence', () => {
     const { ctx } = setup();
     const first = handleHookEvent(ctx, 's1', start()).context!.split('\n')[0];
-    expect(first).toBe('[InProgress] This session is tracked in project "InGame" (slug ingame). Session id: s1. You are session A.');
-    expect(handleHookEvent(ctx, 's2', start()).context!.split('\n')[0]).toMatch(/Session id: s2\. You are session B\.$/);
+    expect(first).toBe('[InProgress] This session is tracked in project "InGame" (slug ingame). Session id: s1.');
+    expect(handleHookEvent(ctx, 's2', start()).context!.split('\n')[0]).toMatch(/Session id: s2\.$/);
   });
 
-  it('leads each of the other sessions with its letter', () => {
+  it('leads each of the other sessions with its title', () => {
     const { ctx, a2 } = setup();
     handleHookEvent(ctx, 's1', start(undefined, { title: 'Launch status' }));
     setFocus(ctx, 'scribe:s1', 's1', a2.id);
     handleHookEvent(ctx, 's2', start(undefined, { title: 'Store listing' }));
     handleHookEvent(ctx, 's2', { event: 'prompt' });
     const lines = handleHookEvent(ctx, 's3', start()).context!.split('\n');
-    expect(lines).toContain(`Other sessions here: B "Store listing" (working) · A "Launch status" (idle, on #${a2.id} Play app signing)`);
+    expect(lines).toContain(`Other sessions here: "Store listing" (working) · "Launch status" (idle, on #${a2.id} Play app signing)`);
   });
 
   it('reads busy for another idle session with a running worker, and idle for one with nothing running', () => {
@@ -354,7 +354,7 @@ describe('briefing: session identity', () => {
     expect(others()).toContain(`"Store listing" (idle, on #${a2.id} Play app signing)`);
   });
 
-  it('prints no letter for a session whose slot is still empty (it predates migration 4)', () => {
+  it('names a session by its title when its slot is still empty (it predates migration 4)', () => {
     const { ctx, project } = setup();
     handleHookEvent(ctx, 's1', start(undefined, { title: 'Launch status' }));
     handleHookEvent(ctx, 's2', start());
@@ -384,7 +384,7 @@ describe('briefing: type labels', () => {
     updateNode(ctx, 'test', a3.id, { label: 'ops' });
     handleHookEvent(ctx, 's1', start());
     setQueue(ctx, 'scribe:s1', project.slug, [a3.id], { sessionId: 's1' });
-    expect(handleHookEvent(ctx, 's1', start()).context!.split('\n')).toContain(`Up next (you, A): #${a3.id} ⚒ Run signing tests`);
+    expect(handleHookEvent(ctx, 's1', start()).context!.split('\n')).toContain(`Up next (you): #${a3.id} ⚒ Run signing tests`);
   });
 
   it('names the labels as words, once, inside the checkpoint bullet, with no glyph list', () => {
@@ -557,7 +557,7 @@ describe('briefing: one answer to "what\'s next"', () => {
     const s4 = step(ctx, project.id, '4 Build to GitHub');
     setQueue(ctx, 'scribe:s1', project.slug, [s4.id], { sessionId: 's1' });
     for (const text of [brief(ctx), statusAnswer(ctx)]) {
-      expect(text).toContain(`\nUp next (you, A): #${s4.id} 4 Build to GitHub`);
+      expect(text).toContain(`\nUp next (you): #${s4.id} 4 Build to GitHub`);
       expect(nextLines(text)).toEqual([]);
     }
   });
@@ -565,11 +565,11 @@ describe('briefing: one answer to "what\'s next"', () => {
   it("no Next: line either when the Up next line holds only another session's steps or unowned ones", () => {
     const { ctx, project } = setup();
     handleHookEvent(ctx, 's1', start());
-    handleHookEvent(ctx, 's2', start());
+    handleHookEvent(ctx, 's2', start(undefined, { title: 'Store listing' }));
     const [s4, s5] = [step(ctx, project.id, '4 Build to GitHub'), step(ctx, project.id, '5 Store listing')];
     setQueue(ctx, 'scribe:s2', project.slug, [s4.id], { sessionId: 's2' });
     let text = brief(ctx);
-    expect(text).toContain(`\nUp next: B: #${s4.id}\n`);
+    expect(text).toContain(`\nUp next: "Store listing": #${s4.id}\n`);
     expect(nextLines(text)).toEqual([]);
     setQueue(ctx, 'scribe:s2', project.slug, [], { sessionId: 's2' });
     setQueue(ctx, 'scribe:s1', project.slug, [s5.id], 'unowned');
@@ -878,7 +878,7 @@ describe('the full briefing on the first tracked prompt after an enroll', () => 
     expect(enrollSession(ctx, 'scribe:e1', 'e1', project.slug).briefing).toContain(`${FULL} "InGame"`);
     expect(briefingDue(ctx, 'e1')).toBe(true);
     const first = handleHookEvent(ctx, 'e1', prompt()).context!;
-    expect(first.split('\n')[0]).toBe('[InProgress] This session is tracked in project "InGame" (slug ingame). Session id: e1. You are session A.');
+    expect(first.split('\n')[0]).toBe('[InProgress] This session is tracked in project "InGame" (slug ingame). Session id: e1.');
     expect(first).toContain('Keeping InProgress current');
     expect(first).toContain('`node ');
     expect(briefingDue(ctx, 'e1')).toBe(false);
@@ -949,7 +949,7 @@ describe('the full briefing on the first tracked prompt after an enroll', () => 
     expect(briefingDue(ctx, 's2')).toBe(false);
     enrollSession(ctx, 'scribe:s2', 's2', other.slug);
     expect(briefingDue(ctx, 's2')).toBe(true);
-    expect(handleHookEvent(ctx, 's2', prompt()).context!.split('\n')[0]).toMatch(/project "Other" \(slug other\)\. Session id: s2\. You are session B\.$/);
+    expect(handleHookEvent(ctx, 's2', prompt()).context!.split('\n')[0]).toMatch(/project "Other" \(slug other\)\. Session id: s2\.$/);
   });
 
   it('sets it when an enroll names an ended session, whose next prompt revives it with the briefing', () => {
@@ -974,19 +974,19 @@ describe('the full briefing on the first tracked prompt after an enroll', () => 
     expect(briefingDue(ctx, 'e1')).toBe(true);
   });
 
-  it('sets it when a revival gives the session another letter, so the prompt brings "You are session B."', () => {
+  it('sets it when a revival gives the session another slot, so that prompt brings the briefing', () => {
     const { ctx } = projects();
     handleHookEvent(ctx, 's1', start());
     handleHookEvent(ctx, 's1', { event: 'end' });
     handleHookEvent(ctx, 's2', start());
     // Revived by a prompt into B, since s2 holds A: that prompt carries the briefing.
     const text = handleHookEvent(ctx, 's1', prompt()).context!;
-    expect(text.split('\n')[0]).toMatch(/Session id: s1\. You are session B\.$/);
+    expect(text.split('\n')[0]).toMatch(/Session id: s1\.$/);
     expect(briefingDue(ctx, 's1')).toBe(false);
     expect(handleHookEvent(ctx, 's1', prompt()).context).not.toContain(FULL);
   });
 
-  it('sets it on a revival into another letter by another event, for the next real prompt; keeping its letter sets nothing', () => {
+  it('sets it on a revival into another slot by another event, for the next real prompt; keeping its slot sets nothing', () => {
     const { ctx } = projects();
     handleHookEvent(ctx, 's1', start());
     handleHookEvent(ctx, 's1', { event: 'end' });
@@ -994,15 +994,15 @@ describe('the full briefing on the first tracked prompt after an enroll', () => 
     handleHookEvent(ctx, 's1', { event: 'stop' });
     expect(briefingDue(ctx, 's1')).toBe(true);
     expect(handleHookEvent(ctx, 's1', prompt({ notice: true })).context).toBeUndefined();
-    expect(handleHookEvent(ctx, 's1', prompt()).context).toMatch(/You are session B\.\n/);
-    // s2 ends and comes back into its own free letter: no briefing owed.
+    expect(handleHookEvent(ctx, 's1', prompt()).context).toContain(FULL);
+    // s2 ends and comes back into its own free slot: no briefing owed.
     handleHookEvent(ctx, 's2', { event: 'end' });
     expect(handleHookEvent(ctx, 's2', prompt()).context).toBeUndefined();
     expect(findSession(ctx, 's2')?.slot).toBe(0);
     expect(briefingDue(ctx, 's2')).toBe(false);
   });
 
-  it('sets it when a session idle past the stale limit, not yet marked ended, comes back into another letter', () => {
+  it('sets it when a session idle past the stale limit, not yet marked ended, comes back into another slot', () => {
     const { ctx, tick } = projects();
     handleHookEvent(ctx, 's1', start());
     handleHookEvent(ctx, 's2', start());
@@ -1013,16 +1013,16 @@ describe('the full briefing on the first tracked prompt after an enroll', () => 
     handleHookEvent(ctx, 's2', { event: 'stop' });
     expect(findSession(ctx, 's2')?.slot).toBe(0);
     expect(findSession(ctx, 's1')).toMatchObject({ state: 'idle', endedAt: null, slot: 0 });
-    // Back with a prompt, s1 finds A taken and becomes B: that prompt carries the briefing that says so.
+    // Back with a prompt, s1 finds slot 0 taken and takes slot 1: that prompt carries the briefing.
     const text = handleHookEvent(ctx, 's1', prompt()).context!;
-    expect(text.split('\n')[0]).toMatch(/Session id: s1\. You are session B\.$/);
+    expect(text.split('\n')[0]).toMatch(/Session id: s1\.$/);
     expect(findSession(ctx, 's1')).toMatchObject({ state: 'working', endedAt: null, slot: 1 });
     expect(briefingDue(ctx, 's1')).toBe(false);
-    // s2's slot went from none to A, so its next prompt brings a briefing that names its letter.
+    // s2's slot went from none to A, so its next prompt brings a briefing.
     expect(briefingDue(ctx, 's2')).toBe(true);
   });
 
-  it('sets it when a focus gives a live session its first letter, so the next prompt says "You are session A."; keeping it sets nothing', () => {
+  it('sets it when a focus gives a live session its first slot, so the next prompt brings the briefing; keeping it sets nothing', () => {
     const { ctx, a1, a2 } = projects();
     handleHookEvent(ctx, 's1', start());
     // s1 as from before migration 4: the scribe's set_focus is the first write to give it a slot.
@@ -1031,13 +1031,13 @@ describe('the full briefing on the first tracked prompt after an enroll', () => 
     expect(findSession(ctx, 's1')?.slot).toBe(0);
     expect(briefingDue(ctx, 's1')).toBe(true);
     const text = handleHookEvent(ctx, 's1', prompt()).context!;
-    expect(text.split('\n')[0]).toMatch(/Session id: s1\. You are session A\.$/);
+    expect(text.split('\n')[0]).toMatch(/Session id: s1\.$/);
     expect(briefingDue(ctx, 's1')).toBe(false);
     setFocus(ctx, 'scribe:s1', 's1', a2.id);
     expect(briefingDue(ctx, 's1')).toBe(false);
   });
 
-  it('sets it when a same-project re-enroll moves a live session to another letter, so the next prompt says "You are session B."', () => {
+  it('sets it when a same-project re-enroll moves a live session to another slot, so the next prompt brings the briefing', () => {
     const { ctx, project, tick } = projects();
     handleHookEvent(ctx, 's1', start());
     handleHookEvent(ctx, 's2', start());
@@ -1052,16 +1052,16 @@ describe('the full briefing on the first tracked prompt after an enroll', () => 
     expect(findSession(ctx, 's1')).toMatchObject({ state: 'idle', slot: 1 });
     expect(briefingDue(ctx, 's1')).toBe(true);
     const text = handleHookEvent(ctx, 's1', prompt()).context!;
-    expect(text.split('\n')[0]).toMatch(/Session id: s1\. You are session B\.$/);
+    expect(text.split('\n')[0]).toMatch(/Session id: s1\.$/);
     expect(briefingDue(ctx, 's1')).toBe(false);
   });
 
-  it('leaves it unset on a revival by a start into another letter: the start carries the briefing', () => {
+  it('leaves it unset on a revival by a start into another slot: the start carries the briefing', () => {
     const { ctx } = projects();
     handleHookEvent(ctx, 's1', start());
     handleHookEvent(ctx, 's1', { event: 'end' });
     handleHookEvent(ctx, 's2', start());
-    expect(handleHookEvent(ctx, 's1', { event: 'start', source: 'resume', cwd: 'C:/personal/InGame' }).context).toMatch(/You are session B\.\n/);
+    expect(handleHookEvent(ctx, 's1', { event: 'start', source: 'resume', cwd: 'C:/personal/InGame' }).context).toContain(FULL);
     expect(briefingDue(ctx, 's1')).toBe(false);
     expect(handleHookEvent(ctx, 's1', prompt()).context).toBeUndefined();
   });
@@ -1241,21 +1241,20 @@ describe('archiving a project stops tracking its sessions', () => {
     expect(findSession(ctx, 'loose')?.projectId).toBeNull();
   });
 
-  it('tracks it again after an unarchive, on its next hook event, with a briefing when it comes back in another letter', () => {
+  it('tracks it again after an unarchive, on its next hook event, with a briefing when it comes back in another slot', () => {
     const { ctx, project } = archiving();
     handleHookEvent(ctx, 's1', start());
     handleHookEvent(ctx, 's2', start());
     updateProject(ctx, 'test', project.slug, { status: 'archived' });
     updateProject(ctx, 'test', project.slug, { status: 'active' });
-    // A new session takes A, the letter s1 had.
+    // A new session takes slot 0, the slot s1 had.
     handleHookEvent(ctx, 's3', start());
-    // s2 keeps B: no briefing, as for any revival in its own letter.
+    // s2 keeps slot 1: no briefing, as for any revival in its own slot.
     expect(handleHookEvent(ctx, 's2', { event: 'prompt' })).toEqual({ tracked: true });
     expect(findSession(ctx, 's2')).toMatchObject({ state: 'working', endedAt: null, slot: 1 });
-    // s1 comes back as C, and that prompt brings the briefing that names it.
+    // s1 comes back in slot 2, and that prompt brings a full briefing.
     const text = handleHookEvent(ctx, 's1', { event: 'prompt' }).context!;
     expect(text.split('\n')[0]).toContain(`${FULL} "InGame"`);
-    expect(text.split('\n')[0]).toContain('You are session C.');
     expect(findSession(ctx, 's1')).toMatchObject({ state: 'working', endedAt: null, slot: 2 });
   });
 

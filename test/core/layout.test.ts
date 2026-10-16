@@ -618,28 +618,43 @@ describe('queued steps', () => {
 });
 
 describe('formatUpNext', () => {
-  /** s1 is A and s2 is B; s3 has no slot yet. */
+  /** s1 is "Store listing", s2 is "Docs pass"; s3 has a title past 30 characters and no slot yet. */
   function owners() {
     const t = sample();
-    const sessions = [session('s1', t.b.id, 'idle'), { ...session('s2', null, 'idle'), slot: 1 }, { ...session('s3', null, 'idle'), slot: null }];
+    const sessions = [
+      { ...session('s1', t.b.id, 'idle'), title: 'Store listing' },
+      { ...session('s2', null, 'idle'), slot: 1, title: 'Docs pass' },
+      { ...session('s3', null, 'idle'), slot: null, title: 'Wire the release notes into the store page' },
+    ];
     return { t, sessions };
   }
 
-  it('prints each owner by its letter, then later, with bare ids: the outline and set_queue form', () => {
+  it('names each owner by its title, then later, with bare ids: the outline and set_queue form', () => {
     const { t, sessions } = owners();
     const view = queueView([entry(t.c.id, 's1'), entry(t.a1.id, 's1'), entry(t.d.id, 's2'), entry(t.e.id)], t.nodes, sessions);
-    expect(formatUpNext(view, sessions)).toBe(`Up next: A: #${t.c.id} → #${t.a1.id} | B: #${t.d.id} | later: #${t.e.id}`);
+    expect(formatUpNext(view, sessions)).toBe(`Up next: "Store listing": #${t.c.id} → #${t.a1.id} | "Docs pass": #${t.d.id} | later: #${t.e.id}`);
     expect(formatUpNext(queueView(later(t.e.id, t.d.id), t.nodes, sessions), sessions)).toBe(`Up next: later: #${t.e.id} → #${t.d.id}`);
-    expect(formatUpNext(queueView([entry(t.c.id, 's2')], t.nodes, sessions), sessions)).toBe(`Up next: B: #${t.c.id}`);
+    expect(formatUpNext(queueView([entry(t.c.id, 's2')], t.nodes, sessions), sessions)).toBe(`Up next: "Docs pass": #${t.c.id}`);
+    // An owner that is not among the sessions reads "a session".
+    expect(formatUpNext(queueView([entry(t.c.id, 's2')], t.nodes, sessions), [])).toBe(`Up next: a session: #${t.c.id}`);
   });
 
-  it('prints ? for an owner whose slot is still empty, never an empty letter', () => {
+  it('clips a long title to 30 characters, and never needs a slot', () => {
     const { t, sessions } = owners();
     const view = queueView([entry(t.c.id, 's3'), entry(t.d.id)], t.nodes, sessions);
-    expect(formatUpNext(view, sessions)).toBe(`Up next: ?: #${t.c.id} | later: #${t.d.id}`);
-    expect(formatUpNext(view, sessions, { sessionId: 's1', nodes: t.nodes })).toBe(`Up next: ?: #${t.c.id} · later: #${t.d.id}`);
-    // The reader's own part leaves the letter out instead.
+    expect(formatUpNext(view, sessions)).toBe(`Up next: "Wire the release notes into t…": #${t.c.id} | later: #${t.d.id}`);
+    expect(formatUpNext(view, sessions, { sessionId: 's1', nodes: t.nodes })).toBe(`Up next: "Wire the release notes into t…": #${t.c.id} · later: #${t.d.id}`);
+    // The reader's own part carries no name.
     expect(formatUpNext(view, sessions, { sessionId: 's3', nodes: t.nodes })).toBe(`Up next (you): #${t.c.id} C · later: #${t.d.id}`);
+  });
+
+  it('tells apart two owners whose titles clip alike by their ids, and leaves a lone title bare', () => {
+    const { t, sessions } = owners();
+    const twins = sessions.map((x) => (x.id === 's3' ? { ...x, title: 'Docs pass' } : x));
+    const view = queueView([entry(t.c.id, 's2'), entry(t.d.id, 's3'), entry(t.e.id, 's1')], t.nodes, twins);
+    expect(formatUpNext(view, twins)).toBe(`Up next: "Docs pass" (s2): #${t.c.id} | "Docs pass" (s3): #${t.d.id} | "Store listing": #${t.e.id}`);
+    // The reader's own part names nobody, so its twin reads bare.
+    expect(formatUpNext(view, twins, { sessionId: 's3', nodes: t.nodes })).toBe(`Up next (you): #${t.d.id} D · "Docs pass": #${t.c.id} · "Store listing": #${t.e.id}`);
   });
 
   it("prints nothing when no step is up next, as when the only entry is a session's own focus", () => {
@@ -654,12 +669,12 @@ describe('formatUpNext', () => {
     const { t, sessions } = owners();
     const glyphed = t.nodes.map((x) => (x.id === t.c.id ? { ...x, label: 'server' as const } : x));
     const view = queueView([entry(t.d.id, 's2'), entry(t.c.id, 's1'), entry(t.a1.id, 's1'), entry(t.e.id)], glyphed, sessions);
-    expect(formatUpNext(view, sessions, { sessionId: 's1', nodes: glyphed })).toBe(`Up next (you, A): #${t.c.id} ⚙ C → #${t.a1.id} A1 · B: #${t.d.id} · later: #${t.e.id}`);
+    expect(formatUpNext(view, sessions, { sessionId: 's1', nodes: glyphed })).toBe(`Up next (you): #${t.c.id} ⚙ C → #${t.a1.id} A1 · "Docs pass": #${t.d.id} · later: #${t.e.id}`);
     // With none of its own, the reader's part is left out, and the owners keep their stored order.
-    expect(formatUpNext(view, sessions, { sessionId: 's3', nodes: glyphed })).toBe(`Up next: B: #${t.d.id} · A: #${t.c.id} → #${t.a1.id} · later: #${t.e.id}`);
+    expect(formatUpNext(view, sessions, { sessionId: 's3', nodes: glyphed })).toBe(`Up next: "Docs pass": #${t.d.id} · "Store listing": #${t.c.id} → #${t.a1.id} · later: #${t.e.id}`);
     const many = [t.a.id, t.a1.id, t.a2.id, t.c.id, t.d.id, t.e.id, t.root.id];
     const long = queueView(many.map((id) => entry(id, 's2')), t.nodes, sessions);
-    expect(formatUpNext(long, sessions, { sessionId: 's2', nodes: t.nodes })).toBe(`Up next (you, B): ${['A', 'A1', 'A2', 'C', 'D'].map((title, i) => `#${many[i]} ${title}`).join(' → ')} (+2 more)`);
+    expect(formatUpNext(long, sessions, { sessionId: 's2', nodes: t.nodes })).toBe(`Up next (you): ${['A', 'A1', 'A2', 'C', 'D'].map((title, i) => `#${many[i]} ${title}`).join(' → ')} (+2 more)`);
   });
 });
 

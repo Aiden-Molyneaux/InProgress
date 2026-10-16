@@ -89,7 +89,7 @@ describe('scribe MCP tools', () => {
     expect(tool('set_queue').description).toMatch(/this session's own entries/);
     expect(tool('set_queue').description).not.toMatch(/whole queue/);
     expect(param('set_queue', 'unowned')).toMatch(/later:/);
-    expect(tool('get_outline').description).toMatch(/Up next: A: #a → #b \| later: #c/);
+    expect(tool('get_outline').description).toMatch(/Up next: "Session title": #a → #b \| later: #c/);
     expect(tool('set_focus').description).toMatch(/Focusing a todo step assigned to Claude also sets it active, in the same write\./);
     expect(tool('update_project').description).toMatch(/Archiving stops tracking the project's live sessions \(they keep running\) and drops their Up next entries\./);
   });
@@ -99,9 +99,9 @@ describe('scribe MCP tools', () => {
     const rootId = ids(created.text)[0];
     const [tabs, guide, polish] = lineIds((await call('add_nodes', { parent: rootId, nodes: [{ title: 'Tab strip' }, { title: 'Guide' }, { title: 'Polish' }], session: 'q1' })).text);
     await call('enroll_session', { session: 'q1', project: 'tabs' });
-    expect(await call('set_queue', { project: 'tabs', nodes: [guide, tabs], session: 'q1' })).toEqual({ text: `Up next: A: #${guide} → #${tabs}`, isError: false });
-    expect(await call('set_queue', { project: 'tabs', nodes: [polish], session: 'q1', unowned: true })).toEqual({ text: `Up next: A: #${guide} → #${tabs} | later: #${polish}`, isError: false });
-    expect((await call('get_outline', { project: 'tabs' })).text.split('\n')[1]).toBe(`Up next: A: #${guide} → #${tabs} | later: #${polish}`);
+    expect(await call('set_queue', { project: 'tabs', nodes: [guide, tabs], session: 'q1' })).toEqual({ text: `Up next: "Session q1": #${guide} → #${tabs}`, isError: false });
+    expect(await call('set_queue', { project: 'tabs', nodes: [polish], session: 'q1', unowned: true })).toEqual({ text: `Up next: "Session q1": #${guide} → #${tabs} | later: #${polish}`, isError: false });
+    expect((await call('get_outline', { project: 'tabs' })).text.split('\n')[1]).toBe(`Up next: "Session q1": #${guide} → #${tabs} | later: #${polish}`);
     // An empty queue: clears only this session's entries.
     expect(await call('set_queue', { project: 'tabs', nodes: [], session: 'q1' })).toEqual({ text: `Up next: later: #${polish}`, isError: false });
     expect(await call('set_queue', { project: 'tabs', nodes: [], session: 'q1', unowned: true })).toEqual({ text: 'Up next in tabs is empty.', isError: false });

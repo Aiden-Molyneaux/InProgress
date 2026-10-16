@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { commandShown } from '../../../src/core/activity';
 import { deriveBoard } from '../../../src/core/board';
 import { agentHome, agentVisible, atLimit, homedTrailAgents, isPaused, occupiedSteps } from '../../../src/core/layout';
-import { LABEL_GLYPHS, agentTag, isReader, sessionDisplayTitle, sessionTag, type NodeDetail, type ProjectSnapshot, type TrailAgent, type TreeNode, type WorkItem } from '../../../src/core/types';
+import { LABEL_GLYPHS, isReader, sessionDisplayTitle, type NodeDetail, type ProjectSnapshot, type TrailAgent, type TreeNode, type WorkItem } from '../../../src/core/types';
 import { AgentWords } from '../AgentWords';
 import { api, postEvent } from '../api';
 import { AskActions } from '../board/AskActions';
@@ -10,8 +10,7 @@ import { MARK_WORDS } from '../board/Marks';
 import { KIND_MARK } from '../board/NeedsMe';
 import { QuickAdd } from '../board/QuickAdd';
 import { ageShort } from '../board/text';
-import { familyVar } from '../family';
-import { TASK_MARK, agentLineParts, commandDescription, commandLabel, commandMark, commandTag, commandWhen, taskFamily, taskOwner, trailAgentParts, waitsFor, withTag, withoutOwnId, workMark } from '../live';
+import { TASK_MARK, agentLineParts, commandDescription, commandLabel, commandMark, commandWhen, taskOwner, trailAgentParts, waitsFor, withoutOwnId, workMark } from '../live';
 import { Marker } from '../Marker';
 import { relativeTime } from '../time';
 import { useNow } from '../useNow';
@@ -65,9 +64,8 @@ function PurposeLine({ purpose }: { purpose: string | null }) {
 
 /**
  * The node's working tasks, with who is on each, the subagents working on it, and its trail of ended work (tasks an
- * ended session left here and subagents that stopped), under each session's title: live, from the snapshot. Live tasks
- * and subagents wear their session's hue and a subagent's tag (`a1`); the trail stays neutral. A running reader is
- * listed marked `◇`; an ended one is not. Each subagent's purpose, when known, is a second line under it. The commands
+ * ended session left here and subagents that stopped), under each session's title: live, from the snapshot. A running
+ * reader is listed marked `◇`; an ended one is not. Each subagent's purpose, when known, is a second line under it. The commands
  * homed here (running, or ended under five minutes ago) are listed under Background.
  */
 function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'>) {
@@ -94,23 +92,10 @@ function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'
           <ul className="ip-wts">
             {tasks.map((w) => {
               const waits = waitsFor(w, snapshot.workItems);
-              const family = taskFamily(w, snapshot.sessions, trailAgents);
               const owner = taskOwner(w, snapshot.sessions, pastSessions, trailAgents);
               return (
-                <li
-                  key={w.id}
-                  className={`ip-wt w-${w.status}`}
-                  style={family ? ({ '--fam': familyVar(family.slot) } as CSSProperties) : undefined}
-                  // The session's own task names its letter here and wears the hue bar; a subagent's shows its tag on the row.
-                  title={family ? withTag(w.agentId ? family.tag : sessionTag(family.slot), owner) : undefined}
-                >
-                  {family?.tag && (
-                    <>
-                      <span className="ip-work-tag">{family.tag}</span>{' '}
-                    </>
-                  )}
-                  <span className="ip-work-mark">{TASK_MARK[w.status]}</span> {family && !w.agentId && <span className="ip-work-agent" />}
-                  {withoutOwnId(w.subject, w.nodeId)}{' '}
+                <li key={w.id} className={`ip-wt w-${w.status}`}>
+                  <span className="ip-work-mark">{TASK_MARK[w.status]}</span> {withoutOwnId(w.subject, w.nodeId)}{' '}
                   <span className="muted">
                     · {owner}
                     {waits.length ? ` · after ${waits.join(', ')}` : ''}
@@ -126,21 +111,13 @@ function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'
           <div className="ip-label">Subagents</div>
           <ul className="ip-dagents">
             {agents.map(({ session, agent }) => {
-              const tag = agentTag(session.slot, agent.ordinal);
               return (
                 <li
                   key={`${session.id}:${agent.agentId}`}
                   className={`ip-dagent${agent.endedAt ? ' ended' : ''}${atLimit(agent) ? ' limit' : ''}`}
-                  style={{ '--fam': familyVar(session.slot) } as CSSProperties}
-                  title={`${agent.agentType}, for ${withTag(sessionTag(session.slot), sessionDisplayTitle(session))}`}
+                  title={`${agent.agentType}, for ${sessionDisplayTitle(session)}`}
                 >
                   {isReader(agent.agentType) && <span className="ip-reader-mark">◇ </span>}
-                  {tag && (
-                    <>
-                      <span className="ip-agent-tag">{tag}</span>
-                      {' · '}
-                    </>
-                  )}
                   <AgentWords parts={agentLineParts(agent, now, nodeId)} limit={atLimit(agent)} />
                   <PurposeLine purpose={agent.purpose} />
                 </li>
@@ -154,22 +131,14 @@ function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'
           <div className="ip-label">Background</div>
           <ul className="ip-dagents">
             {commands.map(({ session, command }) => {
-              const tag = commandTag(session, command);
               const description = commandDescription(command);
               return (
                 <li
                   key={`${session.id}:${command.taskId}`}
                   className={`ip-dagent${command.endedAt ? ' ended' : ''}${command.endedAt === null && commandMark(command, now) === '◦' ? ' serving' : ''}`}
-                  style={{ '--fam': familyVar(session.slot) } as CSSProperties}
-                  title={`Background command, for ${withTag(sessionTag(session.slot), sessionDisplayTitle(session))}`}
+                  title={`Background command, for ${sessionDisplayTitle(session)}`}
                 >
                   <span className="ip-cmd-mark">{commandMark(command, now)}</span>{' '}
-                  {tag && (
-                    <>
-                      <span className="ip-agent-tag">{tag}</span>
-                      {' · '}
-                    </>
-                  )}
                   {description && `${description} · `}
                   {commandLabel(command)} · {commandWhen(command, now)}
                 </li>
@@ -218,9 +187,11 @@ function AsksSection({ nodeId, snapshot, now }: { nodeId: number; snapshot: Proj
   const open = here.filter((a) => a.clearedAt === null);
   const answered = here.filter((a) => a.clearedAt !== null && a.answer !== '').sort((a, b) => b.clearedAt!.localeCompare(a.clearedAt!));
   if (open.length === 0 && answered.length === 0) return null;
+  // An ask from before sessions were recorded has no session; one whose session ended names it from the past sessions.
   const raiser = (sessionId: string | null) => {
-    const s = sessionId === null ? undefined : snapshot.sessions.find((x) => x.id === sessionId);
-    return s ? sessionTag(s.slot) || '?' : 'migrated';
+    if (sessionId === null) return 'migrated';
+    const s = snapshot.sessions.find((x) => x.id === sessionId) ?? snapshot.pastSessions.find((x) => x.id === sessionId);
+    return sessionDisplayTitle(s ?? { id: sessionId, title: null });
   };
   return (
     <>
@@ -229,7 +200,7 @@ function AsksSection({ nodeId, snapshot, now }: { nodeId: number; snapshot: Proj
         {open.map((a) => (
           <li key={a.id} className="ip-dask" data-ask={a.id}>
             <div className="ip-dask-head">
-              <span className="ip-id">{`a${a.id}`}</span> {KIND_MARK[a.kind]} {a.kind} · {raiser(a.sessionId)} · <span className="ip-time">{ageShort(a.raisedAt, now)}</span>
+              <span className="ip-id">{`a${a.id}`}</span> {KIND_MARK[a.kind]} {a.kind} · <span className="ip-dask-who" title={raiser(a.sessionId)}>{raiser(a.sessionId)}</span> · <span className="ip-time">{ageShort(a.raisedAt, now)}</span>
             </div>
             <p>{a.text}</p>
             <AskActions ask={a} area="details" />

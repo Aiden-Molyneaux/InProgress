@@ -79,6 +79,16 @@ describe('readDigest: done, asks, documents', () => {
     expect(formatDigest(d, Date.parse(ctx.now()))).toContain(`on #${step.id} Pick a port: "Which port?"`);
   });
 
+  it('names the session that raised an ask by its title, clipped to 30 characters', () => {
+    const { ctx, project, group, t0 } = setup();
+    const [step] = addNodes(ctx, 'test', { parentId: group.id, nodes: [{ title: 'Pick a port' }] });
+    setClock(ctx, t0 + 3 * DAY);
+    insertSession(ctx, project.id, 'cccccccc-3333', { startedAt: iso(t0 + 2 * DAY), state: 'working', lastSeenAt: iso(t0 + 3 * DAY), title: 'Wire the release notes into the store page' });
+    raiseAsk(ctx, 'scribe', { nodeId: step.id, kind: 'question', text: 'Which port?', sessionId: 'cccccccc-3333' });
+    const text = formatDigest(readDigest(ctx, project.slug, iso(t0 + 2 * DAY)), Date.parse(ctx.now()));
+    expect(text).toMatch(/: "Which port\?" \("Wire the release notes into t…", \d+[a-z]+( ago)?\)/);
+  });
+
   it('lists a quick-add by the window, a window move, and a new document', () => {
     const { ctx, project, group, t0 } = setup();
     setClock(ctx, t0 + 3 * DAY);
@@ -134,12 +144,12 @@ describe('readDigest: sessions', () => {
     const d = readDigest(ctx, project.slug, iso(t0 + 1 * DAY));
     const bare = d.sessions.find((s) => s.id === 'aaaaaaaa-1111')!;
     const clean = d.sessions.find((s) => s.id === 'bbbbbbbb-2222')!;
-    expect(bare).toMatchObject({ letter: 'B', handoff: false, openTasks: 2, endedAt: iso(t0 + 2 * DAY + 5 * HOUR) });
-    expect(clean).toMatchObject({ letter: 'A', handoff: true, openTasks: 0 });
+    expect(bare).toMatchObject({ title: 'Bare end', handoff: false, openTasks: 2, endedAt: iso(t0 + 2 * DAY + 5 * HOUR) });
+    expect(clean).toMatchObject({ title: 'Clean end', handoff: true, openTasks: 0 });
     const now = Date.parse(ctx.now());
     const text = formatDigest(d, now);
-    expect(text).toContain('B aaaaaaaa "Bare end" ended 19h ago, no handoff, 2 open tasks');
-    expect(text).toContain('A bbbbbbbb "Clean end" ended 21h ago');
+    expect(text).toContain('aaaaaaaa "Bare end" ended 19h ago, no handoff, 2 open tasks');
+    expect(text).toContain('bbbbbbbb "Clean end" ended 21h ago');
     expect(text).not.toContain('Clean end" ended 21h ago, no handoff');
     expect(formatCounts(d, now)).toBe('Since your last look (2d): 2 sessions ended, 1 without a handoff.');
   });

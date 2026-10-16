@@ -54,7 +54,7 @@ describe('claimStep', () => {
     raiseAsk(ctx, 'test', { nodeId: other.id, kind: 'question', text: 'Which tool?' });
     ctx.db.prepare("UPDATE sessions SET title = 'Guide writer' WHERE id = 's2'").run();
     const r = claimStep(ctx, 'session:s1', 's1', other.id);
-    expect(r.notes).toEqual([`Note: #${other.id} has open ask a1.`, `Note: #${other.id} is also claimed by B "Guide writer" (working).`]);
+    expect(r.notes).toEqual([`Note: #${other.id} has open ask a1.`, `Note: #${other.id} is also claimed by "Guide writer" (working).`]);
     expect(findSession(ctx, 's1')?.focusNodeId).toBe(other.id);
     // A step that is not in Next at all, and not on any session.
     expect(claimStep(ctx, 'session:s1', 's1', step.id).notes).toEqual([`Note: #${step.id} is not in Next.`]);
