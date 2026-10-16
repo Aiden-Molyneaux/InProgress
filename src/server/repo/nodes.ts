@@ -200,7 +200,7 @@ export function moveNode(ctx: Ctx, actor: string, id: number, input: { parentId:
   });
 }
 
-export function deleteNode(ctx: Ctx, actor: string, id: number, cascade = false): { ids: number[] } {
+export function deleteNode(ctx: Ctx, actor: string, id: number, cascade = false, check?: (node: TreeNode, ids: number[]) => void): { ids: number[] } {
   return write(ctx, actor, (record) => {
     const node = requireNode(ctx, id);
     if (node.parentId === null) throw badRequest(`#${id} is the project root; archive the project instead`);
@@ -209,6 +209,8 @@ export function deleteNode(ctx: Ctx, actor: string, id: number, cascade = false)
         .prepare('WITH RECURSIVE sub(id) AS (SELECT ? UNION ALL SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id) SELECT id FROM sub')
         .all(id) as { id: number }[]
     ).map((r) => r.id);
+    // The caller's own test of the node and its subtree, run in this write so it cannot go stale before the delete.
+    check?.(node, ids);
     if (ids.length > 1 && !cascade) {
       throw badRequest(`#${id} has ${ids.length - 1} descendant(s)`, 'Pass cascade: true to delete them too, or move them first.');
     }

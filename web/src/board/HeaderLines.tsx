@@ -5,13 +5,12 @@ import { sessionActivity } from '../../../src/core/activity';
 import { sessionTag } from '../../../src/core/types';
 import type { BandProps } from './bandProps';
 import { headerSessions } from './headerSessions';
-import { noteAction } from '../measure';
 import { ageShort, firstSentence, hygieneTitle } from './text';
 
 export { headerSessions };
 
 /** The Board's top: the state note as the Orchestrator's message, the sessions on no step, and the hygiene count. */
-export function HeaderLines({ snapshot, board, now, wide, onOpenProject }: BandProps) {
+export function HeaderLines({ snapshot, board, now, wide }: BandProps) {
   const note = snapshot.stateNote;
   const orchestrator = snapshot.sessions.find((s) => s.role === 'orchestrator' && s.state !== 'ended');
   const idle = headerSessions(board, snapshot.sessions, now);
@@ -26,12 +25,6 @@ export function HeaderLines({ snapshot, board, now, wide, onOpenProject }: BandP
                 <b>Orchestrator</b> · <span className="ip-time">{ageShort(note.updatedAt, now)}</span>
               </div>
               <p className="ip-clamp-2">{firstSentence(note.content)}</p>
-              <button type="button" className="ip-link-btn" onClick={() => {
-                  noteAction('header', 'project_view');
-                  onOpenProject?.();
-                }}>
-                Project view ›
-              </button>
             </div>
           </div>
         ) : (

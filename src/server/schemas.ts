@@ -22,6 +22,8 @@ export const nodeInput: z.ZodType<NodeInput> = z.lazy(() =>
 );
 
 export const idParam = z.object({ id: z.coerce.number().int().positive() });
+/** The window's step routes: a project id and a step id in the path. */
+export const windowNodeParams = z.object({ id: idParam.shape.id, node: idParam.shape.id });
 export const sessionParam = z.object({ id: z.string().min(1).max(100) });
 export const digestQuery = z.object({ since: z.string().datetime().optional(), all: z.enum(['1', 'true']).optional() });
 export const usageQuery = z.object({ days: z.coerce.number().int().min(1).max(60).default(7) });
