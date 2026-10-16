@@ -117,11 +117,14 @@ describe('the restart check after a deploy or rollback', () => {
     const said = restartCheck(live, { status: 503, text: 'Service Unavailable' });
     expect(said).toContain('answered 503 with no build');
     expect(said).toContain('Service Unavailable');
+    expect(restartCheck(live, { status: 502, text: '' })).toMatch(/answered 502 with no build\. Body: \(empty\)$/);
   });
 
   it('reports the error when health did not answer', () => {
     const refused = Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:4317'), { code: 'ECONNREFUSED' }) });
     expect(restartCheck(live, { error: refused })).toBe('/api/health did not answer: TypeError: fetch failed (ECONNREFUSED: connect ECONNREFUSED 127.0.0.1:4317)');
+    const aggregate = Object.assign(new AggregateError([new Error('connect ECONNREFUSED ::1:4317'), new Error('connect ECONNREFUSED 127.0.0.1:4317')], ''), { code: 'ECONNREFUSED' });
+    expect(restartCheck(live, { error: Object.assign(new TypeError('fetch failed'), { cause: aggregate }) })).toContain('(ECONNREFUSED: connect ECONNREFUSED ::1:4317; connect ECONNREFUSED 127.0.0.1:4317)');
     const timedOut = new DOMException('The operation was aborted due to timeout', 'TimeoutError');
     expect(restartCheck(live, { error: timedOut })).toContain('TimeoutError: The operation was aborted due to timeout');
   });

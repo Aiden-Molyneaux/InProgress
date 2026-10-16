@@ -73,7 +73,7 @@ export function suitesFor(changed) {
   return { smoke: any(SMOKE_PATHS), e2e: any(E2E_PATHS) };
 }
 
-/** A build.json as one line: `8b796d9+dirty (2026-10-16T19:31:58.000Z)`. */
+/** A build.json as one line: `8b796d9+dirty (2026-10-16T19:31:58.000Z)`. Twin of src/core/build.ts buildLabel, which scripts/ can't import before a build. */
 export const buildLabel = (b) => (b ? `${b.sha}${b.dirty ? '+dirty' : ''} (${b.builtAt})` : 'unknown build');
 
 const BODY_MAX = 500;
@@ -86,7 +86,8 @@ const BODY_MAX = 500;
 export function restartCheck(live, seen) {
   if (seen.error) {
     const { name, message, cause } = seen.error;
-    const why = cause ? ` (${cause.code ? `${cause.code}: ` : ''}${cause.message ?? cause})` : '';
+    const said = cause && (cause.message || cause.errors?.map((e) => e.message).join('; ') || String(cause));
+    const why = cause ? ` (${cause.code ? `${cause.code}: ` : ''}${said})` : '';
     return `/api/health did not answer: ${name}: ${message}${why}`;
   }
   let running = null;
@@ -96,7 +97,7 @@ export function restartCheck(live, seen) {
     // Not JSON: the body below says what it was.
   }
   if (live && running && running.sha === live.sha && running.builtAt === live.builtAt) return null;
-  const body = seen.text.length > BODY_MAX ? `${seen.text.slice(0, BODY_MAX)}... (${seen.text.length} chars)` : seen.text;
+  const body = !seen.text ? '(empty)' : seen.text.length > BODY_MAX ? `${seen.text.slice(0, BODY_MAX)}... (${seen.text.length} chars)` : seen.text;
   const expected = live ? `expected ${buildLabel(live)}` : 'dist/build.json is missing or unreadable';
   return `${expected}; /api/health answered ${seen.status} with ${running ? buildLabel(running) : 'no build'}. Body: ${body}`;
 }
