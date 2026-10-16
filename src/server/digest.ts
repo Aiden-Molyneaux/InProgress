@@ -1,4 +1,5 @@
 import { deriveBoard, type Mark } from '../core/board';
+import { clipLine, stepRef } from '../core/step-ref';
 import { ASK_GLYPHS, STALE_SESSION_MS, TRAIL_MS, askTag, sessionTag, type Ask, type ProjectSnapshot } from '../core/types';
 import type { Ctx } from './db/tx';
 import { listAsksClearedSince, listAsksRaisedSince } from './repo/asks';
@@ -48,6 +49,8 @@ export interface Digest {
   documents: { id: number; title: string; nodeId: number; purpose: string | null; createdAt: string }[];
   /** deriveBoard(...).marked, as id, title and marks. */
   marked: { id: number; title: string; marks: Mark[] }[];
+  /** The title of each step the asks, moves and documents name, so the text never shows a bare id. */
+  stepTitles: Record<number, string>;
 }
 
 interface EventRowLite {
@@ -149,19 +152,28 @@ export function readDigest(ctx: Ctx, ref: string | number, since?: string): Dige
     .filter((r) => r.createdAt >= from)
     .map((r) => ({ id: r.id, title: r.title, nodeId: r.nodeId, purpose: r.purpose, createdAt: r.createdAt }));
 
+  const asksRaised = listAsksRaisedSince(ctx, project.id, from);
+  const asksCleared = listAsksClearedSince(ctx, project.id, from);
+  const stepTitles: Digest['stepTitles'] = {};
+  for (const id of [...asksRaised, ...asksCleared, ...moves, ...documents].map((x) => x.nodeId)) {
+    const n = byId.get(id);
+    if (n) stepTitles[id] = n.title;
+  }
+
   const board = deriveBoard(snapshot, nowMs);
   return {
     project: { slug: project.slug, name: project.name },
     since: from,
     sinceSource,
     done,
-    asksRaised: listAsksRaisedSince(ctx, project.id, from),
-    asksCleared: listAsksClearedSince(ctx, project.id, from),
+    asksRaised,
+    asksCleared,
     sessions,
     quickAdds,
     moves,
     documents,
     marked: board.marked.map((r) => ({ id: r.node.id, title: r.node.title, marks: r.marks })),
+    stepTitles,
   };
 }
 
@@ -186,10 +198,7 @@ const clock = (iso: string): string => {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 
-const clip = (text: string, max = TEXT_MAX): string => {
-  const line = text.replace(/\s+/g, ' ').trim();
-  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
-};
+const clip = (text: string, max = TEXT_MAX): string => clipLine(text, max);
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
 /** Sessions that ended without a handoff. */
@@ -218,8 +227,6 @@ export function formatCounts(d: Digest, now: number): string {
 interface Section {
   title: string;
   items: string[];
-  /** The separator between items on the compact, single-line form. */
-  joiner?: string;
 }
 
 function sessionItems(d: Digest, now: number): string[] {
@@ -254,6 +261,7 @@ function sessionItems(d: Digest, now: number): string[] {
 
 function sections(d: Digest, now: number): Section[] {
   const letterOf = new Map(d.sessions.map((s) => [s.id, s.letter]));
+  const step = (id: number): string => stepRef(id, d.stepTitles[id]);
   return [
     {
       title: 'Done',
@@ -263,24 +271,24 @@ function sections(d: Digest, now: number): Section[] {
       title: 'Asks raised',
       items: d.asksRaised.map((a) => {
         const who = a.sessionId ? letterOf.get(a.sessionId) : undefined;
-        return `${askTag(a.id)} ${ASK_GLYPHS[a.kind]} on #${a.nodeId} "${clip(a.text)}" (${who ? `${who}, ` : ''}${ago(a.raisedAt, now)})`;
+        return `${askTag(a.id)} ${ASK_GLYPHS[a.kind]} on ${step(a.nodeId)}: "${clip(a.text)}" (${who ? `${who}, ` : ''}${ago(a.raisedAt, now)})`;
       }),
     },
     {
       title: 'Asks cleared',
       items: d.asksCleared.map((a) => {
         const by = (a.clearedBy ?? 'unknown').replace(/^(scribe|session):.*$/, '$1');
-        return `${askTag(a.id)} on #${a.nodeId}: ${a.answer ? `"${clip(a.answer)}"` : 'no answer'} (${by})`;
+        return `${askTag(a.id)} on ${step(a.nodeId)}: ${a.answer ? `"${clip(a.answer)}"` : 'no answer'} (${by})`;
       }),
     },
     { title: 'Sessions', items: sessionItems(d, now) },
     { title: 'Quick-added', items: d.quickAdds.map((n) => `#${n.id} ${clip(n.title, 60)}`) },
-    { title: 'Moved in Next', items: d.moves.map((m) => `#${m.nodeId} ${m.op === 'move' ? 'moved' : 'removed'}`), joiner: ', ' },
+    { title: 'Moved in Next', items: d.moves.map((m) => `${step(m.nodeId)} ${m.op === 'move' ? 'moved' : 'removed'}`) },
     {
       title: 'New documents',
-      items: d.documents.map((r) => `r${r.id} "${clip(r.title, 60)}" on #${r.nodeId}${r.purpose ? ` (${r.purpose})` : ''}`),
+      items: d.documents.map((r) => `r${r.id} "${clip(r.title, 60)}" on ${step(r.nodeId)}${r.purpose ? ` (${r.purpose})` : ''}`),
     },
-    { title: 'Marks', items: d.marked.map((m) => `#${m.id} ${m.marks.join(', ')}`) },
+    { title: 'Marks', items: d.marked.map((m) => `${stepRef(m.id, m.title)}: ${m.marks.join(', ')}`) },
   ];
 }
 
@@ -302,7 +310,7 @@ export function formatDigest(d: Digest, now: number, o: { all?: boolean } = {}):
     omitted += s.items.length - shown.length;
     if (!shown.length) continue;
     const head = `${s.title} (${s.items.length}):`;
-    if (s.items.length <= COMPACT_MAX) lines.push(`${head} ${shown.join(s.joiner ?? ' · ')}`);
+    if (s.items.length <= COMPACT_MAX) lines.push(`${head} ${shown.join(' · ')}`);
     else lines.push(head, ...shown.map((i) => `  ${i}`));
   }
   if (omitted) lines.push(`+${omitted} more (inprogress digest ${d.project.slug} --since ${d.since} --all)`);

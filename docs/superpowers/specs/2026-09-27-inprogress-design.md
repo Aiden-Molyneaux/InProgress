@@ -248,6 +248,8 @@ Reads:
 - `GET /api/nodes/:id` → node, children summary, resources (metadata), last 20 log entries
 - `GET /api/resources/:id` → resource including content
 - `GET /api/bindings` → all bindings (the scribe needs ids for `unbind_folder`)
+- `GET /api/sessions/:id/step` → `{ step: { id, title, status } | null }`: the session's claimed step, or null for an
+  unknown session, no claim, or a deleted step (the `inprogress-step` status line mod reads it, #440)
 - `GET /api/search?project=&q=` → matching nodes and resources (case-insensitive substring over
   title/body/outcome/content), max 20
 - `GET /api/events/stream?since=<eventId>` → SSE; replays events after `since`, then live;

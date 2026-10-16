@@ -1,4 +1,5 @@
 import { commandLabel, sessionActivity } from '../core/activity';
+import { stepRef } from '../core/step-ref';
 import { SCRIBE_AGENT, type CommandKind, type CommandOutcome, type HookEvent, type Session, type TreeNode, type WorkStatus } from '../core/types';
 import { write, type Ctx, type RecordEvent } from './db/tx';
 import { badRequest } from './errors';
@@ -474,8 +475,8 @@ export function orchestrate(ctx: Ctx, actor: string, sessionId: string, o: { sta
   if (o.status) {
     const board = deriveBoard(snapshot, nowMs);
     lines.push('', formatDigest(digest, nowMs));
-    if (board.marked.length) lines.push('Reconcile:', ...board.marked.flatMap((r) => r.marks.map((m) => `  #${r.node.id} ${m}`)));
-    if (board.next.length) lines.push('Next:', ...board.next.slice(0, 3).map((r) => `  #${r.node.id} ${r.node.title}: ${r.ready ? 'ready' : 'not ready'}`));
+    if (board.marked.length) lines.push('Reconcile:', ...board.marked.flatMap((r) => r.marks.map((m) => `  ${stepRef(r.node.id, r.node.title)}: ${m}`)));
+    if (board.next.length) lines.push('Next:', ...board.next.slice(0, 3).map((r) => `  ${stepRef(r.node.id, r.node.title)}: ${r.ready ? 'ready' : 'not ready'}`));
   }
   return { session, opening: lines.join('\n') };
 }

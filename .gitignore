@@ -13,3 +13,6 @@ playwright-report/
 .live-check/
 .build/
 .deploy/
+
+# Types the Claude engine writes beside a mod it loads from a folder
+claude/mods/*/.claude-plugin/types/
