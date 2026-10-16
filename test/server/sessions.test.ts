@@ -974,35 +974,34 @@ describe('the full briefing on the first tracked prompt after an enroll', () => 
     expect(briefingDue(ctx, 'e1')).toBe(true);
   });
 
-  it('sets it when a revival gives the session another slot, so that prompt brings the briefing', () => {
+  it('leaves it unset when a revival by a prompt gives the session another slot: the briefing names no slot (#450)', () => {
     const { ctx } = projects();
     handleHookEvent(ctx, 's1', start());
     handleHookEvent(ctx, 's1', { event: 'end' });
     handleHookEvent(ctx, 's2', start());
-    // Revived by a prompt into B, since s2 holds A: that prompt carries the briefing.
-    const text = handleHookEvent(ctx, 's1', prompt()).context!;
-    expect(text.split('\n')[0]).toMatch(/Session id: s1\.$/);
+    // Revived by a prompt into slot 1, since s2 holds slot 0: that prompt brings no briefing.
+    expect(handleHookEvent(ctx, 's1', prompt()).context).toBeUndefined();
+    expect(findSession(ctx, 's1')?.slot).toBe(1);
     expect(briefingDue(ctx, 's1')).toBe(false);
-    expect(handleHookEvent(ctx, 's1', prompt()).context).not.toContain(FULL);
   });
 
-  it('sets it on a revival into another slot by another event, for the next real prompt; keeping its slot sets nothing', () => {
+  it('leaves it unset on a revival into another slot by another event, as on one that keeps its slot', () => {
     const { ctx } = projects();
     handleHookEvent(ctx, 's1', start());
     handleHookEvent(ctx, 's1', { event: 'end' });
     handleHookEvent(ctx, 's2', start());
     handleHookEvent(ctx, 's1', { event: 'stop' });
-    expect(briefingDue(ctx, 's1')).toBe(true);
-    expect(handleHookEvent(ctx, 's1', prompt({ notice: true })).context).toBeUndefined();
-    expect(handleHookEvent(ctx, 's1', prompt()).context).toContain(FULL);
-    // s2 ends and comes back into its own free slot: no briefing owed.
+    expect(findSession(ctx, 's1')?.slot).toBe(1);
+    expect(briefingDue(ctx, 's1')).toBe(false);
+    expect(handleHookEvent(ctx, 's1', prompt()).context).toBeUndefined();
+    // s2 ends and comes back into its own free slot: no briefing owed either.
     handleHookEvent(ctx, 's2', { event: 'end' });
     expect(handleHookEvent(ctx, 's2', prompt()).context).toBeUndefined();
     expect(findSession(ctx, 's2')?.slot).toBe(0);
     expect(briefingDue(ctx, 's2')).toBe(false);
   });
 
-  it('sets it when a session idle past the stale limit, not yet marked ended, comes back into another slot', () => {
+  it('leaves it unset when a session idle past the stale limit, not yet marked ended, comes back into another slot', () => {
     const { ctx, tick } = projects();
     handleHookEvent(ctx, 's1', start());
     handleHookEvent(ctx, 's2', start());
@@ -1013,31 +1012,28 @@ describe('the full briefing on the first tracked prompt after an enroll', () => 
     handleHookEvent(ctx, 's2', { event: 'stop' });
     expect(findSession(ctx, 's2')?.slot).toBe(0);
     expect(findSession(ctx, 's1')).toMatchObject({ state: 'idle', endedAt: null, slot: 0 });
-    // Back with a prompt, s1 finds slot 0 taken and takes slot 1: that prompt carries the briefing.
-    const text = handleHookEvent(ctx, 's1', prompt()).context!;
-    expect(text.split('\n')[0]).toMatch(/Session id: s1\.$/);
+    // Back with a prompt, s1 finds slot 0 taken and takes slot 1: that prompt brings no briefing.
+    expect(handleHookEvent(ctx, 's1', prompt()).context).toBeUndefined();
     expect(findSession(ctx, 's1')).toMatchObject({ state: 'working', endedAt: null, slot: 1 });
     expect(briefingDue(ctx, 's1')).toBe(false);
-    // s2's slot went from none to A, so its next prompt brings a briefing.
-    expect(briefingDue(ctx, 's2')).toBe(true);
+    // s2's slot went from none to 0, which owes it nothing either.
+    expect(briefingDue(ctx, 's2')).toBe(false);
   });
 
-  it('sets it when a focus gives a live session its first slot, so the next prompt brings the briefing; keeping it sets nothing', () => {
+  it('leaves it unset when a focus gives a live session its first slot, as when it keeps one', () => {
     const { ctx, a1, a2 } = projects();
     handleHookEvent(ctx, 's1', start());
     // s1 as from before migration 4: the scribe's set_focus is the first write to give it a slot.
     ctx.db.prepare("UPDATE sessions SET slot = NULL WHERE id = 's1'").run();
     setFocus(ctx, 'scribe:s1', 's1', a1.id);
     expect(findSession(ctx, 's1')?.slot).toBe(0);
-    expect(briefingDue(ctx, 's1')).toBe(true);
-    const text = handleHookEvent(ctx, 's1', prompt()).context!;
-    expect(text.split('\n')[0]).toMatch(/Session id: s1\.$/);
     expect(briefingDue(ctx, 's1')).toBe(false);
+    expect(handleHookEvent(ctx, 's1', prompt()).context).toBeUndefined();
     setFocus(ctx, 'scribe:s1', 's1', a2.id);
     expect(briefingDue(ctx, 's1')).toBe(false);
   });
 
-  it('sets it when a same-project re-enroll moves a live session to another slot, so the next prompt brings the briefing', () => {
+  it('leaves it unset when a same-project re-enroll moves a live session to another slot', () => {
     const { ctx, project, tick } = projects();
     handleHookEvent(ctx, 's1', start());
     handleHookEvent(ctx, 's2', start());
@@ -1047,13 +1043,11 @@ describe('the full briefing on the first tracked prompt after an enroll', () => 
     tick(12 * 60 * 60 * 1000 + 60_000);
     handleHookEvent(ctx, 's2', { event: 'stop' });
     expect(findSession(ctx, 's1')).toMatchObject({ state: 'idle', slot: 0 });
-    // The scribe re-enrolls s1 where it already is: A is s2's now, so s1 becomes B.
+    // The scribe re-enrolls s1 where it already is: slot 0 is s2's now, so s1 takes slot 1.
     enrollSession(ctx, 'scribe:s1', 's1', project.slug);
     expect(findSession(ctx, 's1')).toMatchObject({ state: 'idle', slot: 1 });
-    expect(briefingDue(ctx, 's1')).toBe(true);
-    const text = handleHookEvent(ctx, 's1', prompt()).context!;
-    expect(text.split('\n')[0]).toMatch(/Session id: s1\.$/);
     expect(briefingDue(ctx, 's1')).toBe(false);
+    expect(handleHookEvent(ctx, 's1', prompt()).context).toBeUndefined();
   });
 
   it('leaves it unset on a revival by a start into another slot: the start carries the briefing', () => {
@@ -1094,7 +1088,6 @@ describe('the full briefing on the first tracked prompt after an enroll', () => 
 
 describe('archiving a project stops tracking its sessions', () => {
   const HOUR = 60 * 60 * 1000;
-  const FULL = 'This session is tracked in project';
 
   /** InGame bound to C:/personal/InGame and Other to C:/personal/Other, with a clock the test moves by hand. */
   function archiving() {
@@ -1241,7 +1234,7 @@ describe('archiving a project stops tracking its sessions', () => {
     expect(findSession(ctx, 'loose')?.projectId).toBeNull();
   });
 
-  it('tracks it again after an unarchive, on its next hook event, with a briefing when it comes back in another slot', () => {
+  it('tracks it again after an unarchive, on its next hook event, with no briefing whichever slot it comes back in', () => {
     const { ctx, project } = archiving();
     handleHookEvent(ctx, 's1', start());
     handleHookEvent(ctx, 's2', start());
@@ -1252,9 +1245,8 @@ describe('archiving a project stops tracking its sessions', () => {
     // s2 keeps slot 1: no briefing, as for any revival in its own slot.
     expect(handleHookEvent(ctx, 's2', { event: 'prompt' })).toEqual({ tracked: true });
     expect(findSession(ctx, 's2')).toMatchObject({ state: 'working', endedAt: null, slot: 1 });
-    // s1 comes back in slot 2, and that prompt brings a full briefing.
-    const text = handleHookEvent(ctx, 's1', { event: 'prompt' }).context!;
-    expect(text.split('\n')[0]).toContain(`${FULL} "InGame"`);
+    // s1 comes back in slot 2, with no briefing either (#450).
+    expect(handleHookEvent(ctx, 's1', { event: 'prompt' })).toEqual({ tracked: true });
     expect(findSession(ctx, 's1')).toMatchObject({ state: 'working', endedAt: null, slot: 2 });
   });
 
