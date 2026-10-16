@@ -30,7 +30,12 @@ export function AskActions({ ask, area }: { ask: Pick<Ask, 'id' | 'text'>; area:
   const send = async (answer?: string) => {
     if (busy) return;
     const row = (field.current ?? opener.current)?.closest('li') ?? null;
-    const target = focusTargetAfter(row);
+    // A box holding another open ask hands focus to that ask's controls; otherwise the walk to the next row.
+    const own = (field.current ?? opener.current)?.closest('[data-ask]') ?? null;
+    // Details' row is itself the ask (li.ip-dask): its siblings are under its parent.
+    const scope = row && row === own ? row.parentElement : row;
+    const sibling = scope ? [...scope.querySelectorAll<HTMLElement>('[data-ask]')].find((b) => b !== own && !b.classList.contains('cleared')) : undefined;
+    const target = sibling?.querySelector<HTMLElement>('input, button') ?? focusTargetAfter(row);
     setBusy(true);
     const result = await clearAsk(ask.id, answer);
     setBusy(false);

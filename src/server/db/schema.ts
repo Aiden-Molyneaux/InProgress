@@ -256,4 +256,14 @@ export const MIGRATIONS: string[] = [
   -- A new table and defaulted or nullable columns: v1 to v9 builds can still read and write this schema.
   INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
   `,
+  // 11: the Board's task box (#422). board_state: the TaskState the reconcile last stored for the step; state_since: when
+  // it last changed; hue: the task hue (0-6) held while the step is in a coloured state. All NULL until the reconcile
+  // first runs for a step, and for the root, groups and dropped steps. Written only by the reconcile inside each write.
+  `
+  ALTER TABLE nodes ADD COLUMN board_state TEXT;
+  ALTER TABLE nodes ADD COLUMN state_since TEXT;
+  ALTER TABLE nodes ADD COLUMN hue INTEGER;
+  -- Only nullable columns: v1 to v10 builds can still read and write this schema, so a rollback across it works.
+  INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+  `,
 ];

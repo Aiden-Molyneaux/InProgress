@@ -10,7 +10,7 @@ import { addLog } from '../../src/server/repo/logs';
 import { addNodes, listNodes, updateNode } from '../../src/server/repo/nodes';
 import { addBinding, createProject, setQueue, updateProject } from '../../src/server/repo/projects';
 import { addResource } from '../../src/server/repo/resources';
-import { briefingDue, expireStaleSessions, findSession, listPastSessions, listProjectSessions } from '../../src/server/repo/sessions';
+import { briefingDue, expireStaleSessions, findSession, listPastSessions, readProjectSessions } from '../../src/server/repo/sessions';
 import { getNodeDetail, getProjectSnapshot } from '../../src/server/repo/snapshot';
 import { renderBriefing } from '../../src/server/briefing';
 import { setTasks } from '../../src/server/repo/work';
@@ -1397,7 +1397,8 @@ describe('snapshots', () => {
     addBinding(ctx, 'test', p.slug, 'C:/p');
     handleHookEvent(ctx, 's1', start('C:/p'));
     now += 13 * 60 * 60 * 1000;
-    expect(listProjectSessions(ctx, p.id)).toEqual([]);
+    expireStaleSessions(ctx);
+    expect(readProjectSessions(ctx, p.id)).toEqual([]);
     expect(findSession(ctx, 's1')?.state).toBe('ended');
   });
 
@@ -1409,7 +1410,7 @@ describe('snapshots', () => {
     addBinding(ctx, 'test', p.slug, 'C:/p');
     handleHookEvent(ctx, 's1', start('C:/p'));
     now += 13 * 60 * 60 * 1000;
-    listProjectSessions(ctx, p.id);
+    expireStaleSessions(ctx);
     expect(findSession(ctx, 's1')?.endedAt).not.toBeNull();
     handleHookEvent(ctx, 's1', { event: 'prompt' });
     expect(findSession(ctx, 's1')).toMatchObject({ state: 'working', endedAt: null });

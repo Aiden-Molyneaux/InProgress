@@ -1,5 +1,5 @@
 /** The rows a band or a panel lists, as a focus walk sees them. A pending row (a Backlog delete waiting for its answer) is about to leave too, so it is passed over. */
-const ROWS = 'li.ip-row:not(.pending), li.ip-msg, li.ip-dask:not(.cleared)';
+const ROWS = 'li.ip-row:not(.pending), li.ip-card, li.ip-dask:not(.cleared)';
 
 /**
  * Where focus goes when `row` is about to leave (spec 2.2): the title button of the next row in its band or panel, else
@@ -10,8 +10,8 @@ export function focusTargetAfter(row: Element | null): HTMLElement | null {
   const home = row?.closest<HTMLElement>('.ip-band, aside');
   if (!row || !home) return null;
   const others = [...home.querySelectorAll(ROWS)].filter((li) => li !== row && !row.contains(li) && !li.contains(row));
-  const pick = (li: Element) => li.querySelector<HTMLElement>('.ip-row-title, button');
-  // The nearest row each way that has something to focus: a row with no button (a wait on no step) is passed over.
+  const pick = (li: Element) => li.querySelector<HTMLElement>('.ip-row-title');
+  // The nearest row each way that has a title button to focus: a row without one (a permission wait on no step) is passed over, and a row's own buttons (data-act) never take focus from a walk.
   const after = others.filter((li) => row.compareDocumentPosition(li) & Node.DOCUMENT_POSITION_FOLLOWING).map(pick).find(Boolean);
   const before = others.filter((li) => row.compareDocumentPosition(li) & Node.DOCUMENT_POSITION_PRECEDING).reverse().map(pick).find(Boolean);
   return after ?? before ?? home.querySelector<HTMLElement>('h3, header b');

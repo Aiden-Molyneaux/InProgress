@@ -78,7 +78,6 @@ export function Backlog({ rows, snapshot, now, projectId, slug, onStatus, onOpen
   /** The server refuses a step with any step under it, done or dropped ones too. */
   const parents = new Set(snapshot.nodes.map((n) => n.parentId));
   const hasKids = (id: number) => parents.has(id);
-  const slotOf = (id: string) => snapshot.sessions.find((s) => s.id === id)?.slot ?? null;
   return (
     <div className="ip-backlog-groups" ref={root}>
       {groupByParent(rows).map((g) => (
@@ -86,7 +85,7 @@ export function Backlog({ rows, snapshot, now, projectId, slug, onStatus, onOpen
           {g.parent && <div className="ip-group-line" title={g.parent.title}>{g.parent.title}</div>}
           <ul>
             {g.rows.map((row) => {
-              const ended = endedLine(row, snapshot.pastSessions, slotOf, now);
+              const ended = endedLine(row, snapshot.pastSessions, now);
               const asking = confirming === row.node.id;
               const waiting = pending.includes(row.node.id);
               return (

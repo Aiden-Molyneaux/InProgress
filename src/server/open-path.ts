@@ -7,7 +7,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
  * its working directory first. So system tools run by absolute path, and where.exe runs with
  * SystemRoot as its working directory.
  */
-const systemRoot = () => process.env.SystemRoot || 'C:\\Windows';
+export const systemRoot = (): string => process.env.SystemRoot || 'C:\\Windows';
 
 let vsCode: { path: string | undefined } | undefined;
 

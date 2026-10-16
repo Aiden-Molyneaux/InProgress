@@ -59,6 +59,26 @@ export const createStep = (projectId: number, slug: string, title: string, paren
 export const deleteStep = (projectId: number, slug: string, nodeId: number): Promise<UiResult> =>
   postUi(`/api/ui/projects/${projectId}/nodes/${nodeId}/delete`, { slug });
 
+/** What Open session answers: done; the command to run by hand (with why the server could not, when it says); or 'reload' after a server restart. */
+export type OpenDesktopResult = { ok: true } | { ok: false; command: string; reason?: string } | 'reload';
+
+/**
+ * Opens a session in the Claude desktop app. When the server could not, the answer holds the command to copy, and the
+ * reason: the server's own when it could not launch, else why the request failed (with a hint to run the command in the
+ * session's folder, since the window builds that command without one). Never rejects.
+ */
+export async function openDesktop(sessionId: string): Promise<OpenDesktopResult> {
+  const answer = await sendUi<{ ok: boolean; command?: string; reason?: string }>(`/api/ui/sessions/${encodeURIComponent(sessionId)}/open-desktop`, {});
+  if (answer === 'reload') return 'reload';
+  // The command the window builds itself has no folder in it, so the reason says where to run it.
+  const own = (reason: string): OpenDesktopResult => ({ ok: false, command: `claude --desktop --resume ${sessionId}`, reason: `${/[.!?]$/.test(reason) ? reason : `${reason}.`} Run it in the session's folder.` });
+  if (typeof answer === 'string') return own(answer);
+  if (answer === null || typeof answer !== 'object') return own('The InProgress server gave an answer the window could not read.');
+  if (answer.ok) return { ok: true };
+  if (answer.command) return { ok: false, command: answer.command, reason: answer.reason };
+  return own(answer.reason ?? 'Claude Code could not be opened.');
+}
+
 /** Clears an ask, with an answer when Aiden typed one. */
 export const clearAsk = (askId: number, answer?: string): Promise<UiResult> => postUi(`/api/ui/asks/${askId}/clear`, answer === undefined ? {} : { answer });
 

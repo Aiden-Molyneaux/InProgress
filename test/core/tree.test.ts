@@ -6,7 +6,7 @@ import type { VisibleItem } from '../../src/core/tree';
 let nextId = 1;
 function n(parentId: number | null, title: string, extra: Partial<TreeNode> = {}): TreeNode {
   const id = extra.id ?? nextId++;
-  return { id, projectId: 1, parentId, position: id, kind: parentId === null ? 'goal' : 'task', title, body: '', status: 'todo', assignee: 'claude', outcome: '', label: null, createdAt: 't', updatedAt: 't', completedAt: null, ...extra };
+  return { id, projectId: 1, parentId, position: id, kind: parentId === null ? 'goal' : 'task', title, body: '', status: 'todo', assignee: 'claude', outcome: '', label: null, createdAt: 't', updatedAt: 't', completedAt: null, boardState: null, stateSince: null, hue: null, ...extra };
 }
 
 function sample() {

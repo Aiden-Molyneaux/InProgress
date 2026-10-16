@@ -26,7 +26,7 @@ const node = (db: Database.Database, id: number, kind: string, title: string, bo
 describe('migration 10', () => {
   it('adds asks, role, briefing_mode and purpose, and keeps min_reader_version 1', () => {
     const db = at9(seedProject);
-    expect(schemaVersion(db)).toBe(10);
+    expect(schemaVersion(db)).toBe(MIGRATIONS.length);
     expect(db.prepare("SELECT value FROM meta WHERE key = 'min_reader_version'").pluck().get()).toBe('1');
     expect(db.prepare('SELECT briefing_mode FROM projects WHERE id = 1').pluck().get()).toBe('full');
     expect(db.prepare("SELECT name FROM pragma_table_info('sessions') WHERE name = 'role'").pluck().get()).toBe('role');

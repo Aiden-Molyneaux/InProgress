@@ -105,8 +105,8 @@ export function assignSlot(ctx: Ctx, sessionId: string, projectId: number, prefe
 
 /**
  * Mark sessions not seen for 12 hours as ended, recording an event for each so the UI drops
- * their badges. Opens its own write(): never call this (or listProjectSessions /
- * getProjectSnapshot, which call it) from inside another write().
+ * their badges. Opens its own write(): never call this (or getProjectSnapshot, which calls it)
+ * from inside another write(). readProjectSessions is the plain read that can run there.
  */
 export function expireStaleSessions(ctx: Ctx): void {
   const cutoff = new Date(Date.parse(ctx.now()) - STALE_SESSION_MS).toISOString();
@@ -132,11 +132,10 @@ export function expireStaleSessions(ctx: Ctx): void {
 }
 
 /**
- * Non-ended sessions of a project, newest first. Expires stale sessions first, which opens its
- * own write(): never call this from inside another write().
+ * Non-ended sessions of a project, newest first, without expiring stale ones first: a plain read, so it can run inside
+ * another write (the Board reconcile). A stale session it returns is not live (isLive), so the Board ignores it.
  */
-export function listProjectSessions(ctx: Ctx, projectId: number): Session[] {
-  expireStaleSessions(ctx);
+export function readProjectSessions(ctx: Ctx, projectId: number): Session[] {
   return (ctx.db.prepare("SELECT * FROM sessions WHERE project_id = ? AND state != 'ended' ORDER BY last_seen_at DESC").all(projectId) as SessionRow[])
     .map((r) => toSession(ctx, r));
 }

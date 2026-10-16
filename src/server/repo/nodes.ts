@@ -1,3 +1,4 @@
+import type { TaskState } from '../../core/taskState';
 import type { After, Assignee, NodeInput, NodeKind, NodeLabel, NodeStatus, TreeNode } from '../../core/types';
 import { write, type Ctx, type RecordEvent } from '../db/tx';
 import { badRequest, notFound } from '../errors';
@@ -21,6 +22,9 @@ interface NodeRow {
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+  board_state: TaskState | null;
+  state_since: string | null;
+  hue: number | null;
 }
 
 export const toNode = (r: NodeRow): TreeNode => ({
@@ -38,6 +42,9 @@ export const toNode = (r: NodeRow): TreeNode => ({
   createdAt: r.created_at,
   updatedAt: r.updated_at,
   completedAt: r.completed_at,
+  boardState: r.board_state,
+  stateSince: r.state_since,
+  hue: r.hue,
 });
 
 /** A step by id. A deleted project's steps are not found, so every read and write by id refuses them. */
@@ -98,6 +105,11 @@ function renormalize(ctx: Ctx, parentId: number): void {
   sibs.forEach((s, i) => update.run(i + 1, s.id));
 }
 
+/**
+ * Adds `nodes` (with their children) under `parentId`.
+ * The nodes it returns are read inside the write, before write() runs the Board reconcile: their boardState, stateSince
+ * and hue predate this write. Only a snapshot (or a read after the write) carries the current values.
+ */
 export function addNodes(ctx: Ctx, actor: string, input: { parentId: number; after?: After; nodes: NodeInput[]; check?: (parent: TreeNode) => void }): TreeNode[] {
   if (input.nodes.length === 0) throw badRequest('nodes is empty');
   return write(ctx, actor, (record) => {
@@ -137,6 +149,11 @@ export interface NodePatch {
   label?: NodeLabel | null;
 }
 
+/**
+ * Applies `patch` to step `id`, clearing its asks when it is dropped or a question node is finished.
+ * The node it returns is read inside the write, before write() runs the Board reconcile: its boardState, stateSince
+ * and hue predate this write. Only a snapshot (or a read after the write) carries the current values.
+ */
 export function updateNode(ctx: Ctx, actor: string, id: number, patch: NodePatch): TreeNode {
   return write(ctx, actor, (record) => {
     const before = requireNode(ctx, id);
