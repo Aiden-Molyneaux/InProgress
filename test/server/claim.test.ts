@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { listEventsSince, maxEventId } from '../../src/server/repo/events';
-import { clearAsk, raiseAsk, requireAsk } from '../../src/server/repo/asks';
+import { clearAsk, raiseAsk, requireAsk, undeliveredAnswers } from '../../src/server/repo/asks';
 import { addNodes, findNode, updateNode } from '../../src/server/repo/nodes';
 import { addBinding, changeProject, createProject, setQueue } from '../../src/server/repo/projects';
 import { briefingDue, clearBriefingDue, findSession } from '../../src/server/repo/sessions';
@@ -331,6 +331,46 @@ describe('answers reach the driver', () => {
     expect(claimStep(ctx, 'session:s3', 's3', step.id).block.some((l) => l.startsWith('Owed:'))).toBe(false);
     expect(requireAsk(ctx, second.id).answerDeliveredAt).toBeNull();
     expect(handleHookEvent(ctx, 's2', prompt).context!.split('\n')).toContain(yours(second.id, 'ship it'));
+  });
+
+  it('an asker silent past the stale limit is not live: a driving claim prints the Owed line', () => {
+    let now = Date.parse('2026-10-01T09:00:00.000Z');
+    const { ctx, step, join } = setup(createCtx(openDb(':memory:'), () => new Date(now).toISOString()));
+    join('s1');
+    const ask = raiseAsk(ctx, 'session:s1', { nodeId: step.id, kind: 'question', text: 'Land it?', sessionId: 's1' });
+    now += STALE_SESSION_MS + 60_000;
+    clearAsk(ctx, 'window', ask.id, 'land it');
+    join('s2');
+    // The enroll's and the claim's snapshot reads expire s1 to ended first, so this holds by expiry as well as by the
+    // stale clause; the prompt test below reads no snapshot and reaches the clause itself.
+    const r = claimStep(ctx, 'session:s2', 's2', step.id);
+    expect(r.block[r.block.length - 1]).toBe(`Owed: a${ask.id} answered "land it"`);
+  });
+
+  it('an asker silent past the stale limit, not yet expired, is not live: the driver gets the answer on its prompt', () => {
+    let now = Date.parse('2026-10-01T09:00:00.000Z');
+    const { ctx, step, join } = setup(createCtx(openDb(':memory:'), () => new Date(now).toISOString()));
+    join('s1');
+    join('s2');
+    claimStep(ctx, 'session:s1', 's1', step.id);
+    claimStep(ctx, 'session:s2', 's2', step.id);
+    const ask = raiseAsk(ctx, 'session:s2', { nodeId: step.id, kind: 'question', text: 'Land it?', sessionId: 's2' });
+    now += STALE_SESSION_MS + 60_000;
+    clearAsk(ctx, 'window', ask.id, 'land it');
+    // No snapshot read has expired s2: it still reads working.
+    expect(findSession(ctx, 's2')?.state).not.toBe('ended');
+    expect(handleHookEvent(ctx, 's1', prompt).context!.split('\n')).toContain(yours(ask.id, 'land it'));
+  });
+
+  it('a session enrolled into another project gets no driver-routed answer from the column it left behind', () => {
+    const { ctx, step, ask } = asked();
+    handleHookEvent(ctx, 's2', end);
+    const elsewhere = createProject(ctx, 'test', { name: 'Elsewhere' });
+    enrollSession(ctx, 'scribe:s1', 's1', elsewhere.slug);
+    expect(findNode(ctx, step.id)!.driverSessionId).toBe('s1');
+    expect(findSession(ctx, 's1')?.focusNodeId).toBeNull();
+    clearAsk(ctx, 'window', ask.id, 'land it');
+    expect(undeliveredAnswers(ctx, 's1')).toEqual([]);
   });
 
   it('a take-over prints the owed answers too', () => {

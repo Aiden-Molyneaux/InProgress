@@ -499,7 +499,7 @@ export function claimStep(ctx: Ctx, actor: string, sessionId: string, nodeId: nu
     if (target && target.status === 'dropped') throw badRequest(`#${nodeId} is dropped`, 'Reopen it first, or claim another step.');
     // A session that starts driving is told the answers no live asker will hear (spec 2), once: marked in this write.
     if (drive === 'drives' || drive === 'took_over') {
-      const owed = owedAnswers(ctx, nodeId, sessionId);
+      const owed = owedAnswers(ctx, nodeId);
       markAnswersDelivered(ctx, owed.map((a) => a.id));
       owedLines = owed.map((a) => `Owed: ${askTag(a.id)} answered "${oneLine(a.answer)}"`);
     }

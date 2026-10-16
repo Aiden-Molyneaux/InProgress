@@ -4,6 +4,7 @@ import { lastProjectEvent, listEventsSince } from '../../src/server/repo/events'
 import { addNodes, requireNode, updateNode } from '../../src/server/repo/nodes';
 import { createProject } from '../../src/server/repo/projects';
 import { getProjectSnapshot } from '../../src/server/repo/snapshot';
+import { STALE_SESSION_MS } from '../../src/core/types';
 import { makeCtx } from '../helpers';
 
 function setup() {
@@ -92,24 +93,31 @@ describe('asks', () => {
   it('routes an answered ask to the step driver only when no live session raised it, and owedAnswers lists the same', () => {
     const { ctx, project, step } = setup();
     const ts = ctx.now();
-    const add = (id: string, state: string) =>
-      ctx.db.prepare('INSERT INTO sessions (id, project_id, state, started_at, last_seen_at) VALUES (?, ?, ?, ?, ?)').run(id, project.id, state, ts, ts);
+    const add = (id: string, state: string, seen = ts) =>
+      ctx.db.prepare('INSERT INTO sessions (id, project_id, state, started_at, last_seen_at) VALUES (?, ?, ?, ?, ?)').run(id, project.id, state, ts, seen);
     add('drv', 'working');
     add('live', 'working');
     add('gone', 'ended');
+    // Not ended, but silent one millisecond past the stale limit: not live.
+    add('quiet', 'working', new Date(Date.parse(ts) - STALE_SESSION_MS - 1).toISOString());
     ctx.db.prepare("UPDATE nodes SET driver_session_id = 'drv' WHERE id = ?").run(step.id);
+    ctx.db.prepare("UPDATE sessions SET focus_node_id = ? WHERE id = 'drv'").run(step.id);
     const raise = (text: string, sessionId: string | null, answer: string) => {
       const a = raiseAsk(ctx, 'w', { nodeId: step.id, kind: 'question', text, sessionId });
       return clearAsk(ctx, 'window', a.id, answer).id;
     };
     const fromGone = raise('gone', 'gone', 'yes');
     const fromNobody = raise('nobody', null, 'yes');
+    const fromQuiet = raise('quiet', 'quiet', 'yes');
     raise('live', 'live', 'yes');
     raise('blank', 'gone', '');
-    expect(undeliveredAnswers(ctx, 'drv').map((a) => a.id)).toEqual([fromGone, fromNobody]);
-    expect(owedAnswers(ctx, step.id, 'drv').map((a) => a.id)).toEqual([fromGone, fromNobody]);
+    expect(undeliveredAnswers(ctx, 'drv').map((a) => a.id)).toEqual([fromGone, fromNobody, fromQuiet]);
+    expect(owedAnswers(ctx, step.id).map((a) => a.id)).toEqual([fromGone, fromNobody, fromQuiet]);
     markAnswersDelivered(ctx, [fromGone]);
-    expect(owedAnswers(ctx, step.id, 'drv').map((a) => a.id)).toEqual([fromNobody]);
+    expect(owedAnswers(ctx, step.id).map((a) => a.id)).toEqual([fromNobody, fromQuiet]);
+    // A driver column left behind on a step that is no longer the session's focus routes nothing.
+    ctx.db.prepare("UPDATE sessions SET focus_node_id = NULL WHERE id = 'drv'").run();
+    expect(undeliveredAnswers(ctx, 'drv')).toEqual([]);
   });
 
   it('refuses an ask on a dropped step', () => {

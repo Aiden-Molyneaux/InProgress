@@ -143,24 +143,24 @@ const NO_LIVE_ASKER = "answer != '' AND cleared_at >= ? AND NOT EXISTS (SELECT 1
 
 /**
  * Cleared asks this session is owed and has not been told yet, oldest cleared first: those it raised (answered or not),
- * and the answered ones on a step it drives whose asker is not live.
+ * and the answered ones on a step it drives whose asker is not live. It drives a step as the live-driver rule reads it
+ * (spec 1.2): the driver column names it and the step is its focus, so a column left behind routes nothing.
  */
 export function undeliveredAnswers(ctx: Ctx, sessionId: string): Ask[] {
   return (ctx.db
     .prepare(
       `SELECT * FROM asks WHERE cleared_at IS NOT NULL AND answer_delivered_at IS NULL AND ${inLiveProject('asks.project_id')}` +
-        ` AND (session_id = ? OR (node_id IN (SELECT id FROM nodes WHERE driver_session_id = ?) AND ${NO_LIVE_ASKER})) ORDER BY cleared_at, id`,
+        ` AND (session_id = ? OR (node_id IN (SELECT id FROM nodes WHERE driver_session_id = ?) AND node_id = (SELECT focus_node_id FROM sessions WHERE id = ?) AND ${NO_LIVE_ASKER})) ORDER BY cleared_at, id`,
     )
-    .all(sessionId, sessionId, msAgo(ctx, ASK_TRAIL_MS), msAgo(ctx, STALE_SESSION_MS)) as AskRow[]).map(toAsk);
+    .all(sessionId, sessionId, sessionId, msAgo(ctx, ASK_TRAIL_MS), msAgo(ctx, STALE_SESSION_MS)) as AskRow[]).map(toAsk);
 }
 
 /**
  * The answers owed on this step that nobody has been told, oldest cleared first: the driver route's asks for one step,
- * which a driving claim prints. `sessionId` is the claimer; it is live, so its own asks fall out here and keep arriving
- * through undeliveredAnswers.
+ * which a driving claim prints. The claimer is live, so its own asks fall out here and keep arriving through
+ * undeliveredAnswers.
  */
-export function owedAnswers(ctx: Ctx, nodeId: number, sessionId: string): Ask[] {
-  void sessionId;
+export function owedAnswers(ctx: Ctx, nodeId: number): Ask[] {
   return (ctx.db
     .prepare(
       `SELECT * FROM asks WHERE node_id = ? AND cleared_at IS NOT NULL AND answer_delivered_at IS NULL AND ${inLiveProject('asks.project_id')}` +
