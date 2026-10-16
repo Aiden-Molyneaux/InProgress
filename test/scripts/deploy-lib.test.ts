@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, w
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { promote, suitesFor, swapWithPrev } from '../../scripts/deploy-lib.mjs';
+import { promote, restartCheck, suitesFor, swapWithPrev } from '../../scripts/deploy-lib.mjs';
 
 const temps: string[] = [];
 afterAll(() => {
@@ -89,5 +89,52 @@ describe('which test suites a deploy runs', () => {
 
   it('runs everything when the deployed build is unknown', () => {
     expect(suitesFor(null)).toMatchObject({ smoke: true, e2e: true });
+  });
+});
+
+describe('the restart check after a deploy or rollback', () => {
+  const live = { sha: '8b796d9', dirty: false, builtAt: '2026-10-16T19:31:58.000Z' };
+  const answer = (build: unknown, status = 200) => ({ status, text: JSON.stringify({ ok: true, app: 'inprogress', build, pid: 39988 }) });
+
+  it('passes when health reports the live build', () => {
+    expect(restartCheck(live, answer({ ...live }))).toBeNull();
+  });
+
+  it('says which build health reported against the one expected, with the status and body', () => {
+    const seen = answer({ sha: '27f1190', dirty: false, builtAt: '2026-10-16T18:02:11.000Z' });
+    const said = restartCheck(live, seen);
+    expect(said).toContain('expected 8b796d9 (2026-10-16T19:31:58.000Z)');
+    expect(said).toContain('answered 200 with 27f1190 (2026-10-16T18:02:11.000Z)');
+    expect(said).toContain(seen.text);
+  });
+
+  it('fails a build that matches on sha but not on builtAt', () => {
+    expect(restartCheck(live, answer({ ...live, builtAt: '2026-10-16T19:00:00.000Z' }))).toContain('with 8b796d9 (2026-10-16T19:00:00.000Z)');
+  });
+
+  it('reports a health answer with no build, or one that is not JSON', () => {
+    expect(restartCheck(live, answer(null))).toContain('answered 200 with no build');
+    const said = restartCheck(live, { status: 503, text: 'Service Unavailable' });
+    expect(said).toContain('answered 503 with no build');
+    expect(said).toContain('Service Unavailable');
+  });
+
+  it('reports the error when health did not answer', () => {
+    const refused = Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:4317'), { code: 'ECONNREFUSED' }) });
+    expect(restartCheck(live, { error: refused })).toBe('/api/health did not answer: TypeError: fetch failed (ECONNREFUSED: connect ECONNREFUSED 127.0.0.1:4317)');
+    const timedOut = new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    expect(restartCheck(live, { error: timedOut })).toContain('TimeoutError: The operation was aborted due to timeout');
+  });
+
+  it('reports a live build.json it could not read, with what health said', () => {
+    const said = restartCheck(null, answer({ ...live }));
+    expect(said).toContain('dist/build.json is missing or unreadable');
+    expect(said).toContain('answered 200 with 8b796d9');
+  });
+
+  it('cuts a long body short', () => {
+    const said = restartCheck(live, { status: 500, text: 'x'.repeat(5000) }) ?? '';
+    expect(said.length).toBeLessThan(700);
+    expect(said).toContain('(5000 chars)');
   });
 });

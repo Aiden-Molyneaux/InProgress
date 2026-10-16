@@ -7,7 +7,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { promote, suitesFor, swapWithPrev } from './deploy-lib.mjs';
+import { buildLabel as label, promote, restartCheck, suitesFor, swapWithPrev } from './deploy-lib.mjs';
 
 const repo = fileURLToPath(new URL('..', import.meta.url));
 const buildRoot = join(repo, '.build');
@@ -24,7 +24,6 @@ const readJson = (file) => {
     return null;
   }
 };
-const label = (b) => (b ? `${b.sha}${b.dirty ? '+dirty' : ''} (${b.builtAt})` : 'unknown build');
 
 /** Paths changed (committed, staged, unstaged or untracked) since a commit, or null if git can't tell. */
 function changedSince(sha) {
@@ -37,30 +36,36 @@ function changedSince(sha) {
   }
 }
 
-async function runningBuild() {
+/** What GET /api/health gave: `{ status, text }` when it answered, `{ error }` when it did not. */
+async function health() {
   const port = Number(process.env.INPROGRESS_PORT) || 4317;
   try {
     const res = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(2000) });
-    return ((await res.json()) ?? {}).build ?? null;
-  } catch {
-    return undefined;
+    return { status: res.status, text: await res.text() };
+  } catch (error) {
+    return { error };
   }
 }
 
-/** Stops the old server and starts one on the live build; true when it answers with that build. */
+/**
+ * Stops the old server and starts one on the live build. `ok` when it answers with that build; otherwise `saw` says
+ * what the check got instead.
+ */
 async function restart() {
   if (existsSync(join(repo, 'dist', 'cli', 'main.js'))) cli(['stop']);
-  if (cli(['start']).status !== 0) return false;
-  const live = readJson(join(repo, 'dist', 'build.json'));
-  const running = await runningBuild();
-  return !!live && !!running && running.sha === live.sha && running.builtAt === live.builtAt;
+  const started = cli(['start']);
+  if (started.status !== 0) return { ok: false, saw: `\`start\` exited with ${started.status ?? started.signal ?? started.error?.message}` };
+  const saw = restartCheck(readJson(join(repo, 'dist', 'build.json')), await health());
+  return { ok: !saw, saw };
 }
 
 if (rollback) {
   step('Rolling back to the previous build');
   swapWithPrev({ repo, prev });
-  if (!(await restart())) {
+  const back = await restart();
+  if (!back.ok) {
     console.error('The previous build did not start cleanly: run `npm run rollback` again to return to the newer one.');
+    console.error(`Restart check: ${back.saw}`);
     process.exit(1);
   }
   console.log(`\nRolled back. Live: ${label(readJson(join(repo, 'dist', 'build.json')))}. Run \`npm run rollback\` again to return.`);
@@ -101,10 +106,13 @@ if (check.status === 2) {
 }
 
 step('Restarting the server on the new build');
-if (!(await restart())) {
+const restarted = await restart();
+if (!restarted.ok) {
   console.error('\nThe new build did not start cleanly: rolling back.');
+  console.error(`Restart check: ${restarted.saw}`);
   swapWithPrev({ repo, prev });
-  await restart();
+  const back = await restart();
+  if (!back.ok) console.error(`The previous build did not start cleanly either. Restart check: ${back.saw}`);
   process.exit(1);
 }
 console.log(`\nDeployed ${label(candidate)}. The previous build is kept: \`npm run rollback\` swaps back.`);
