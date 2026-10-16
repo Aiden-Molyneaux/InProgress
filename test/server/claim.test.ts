@@ -409,6 +409,29 @@ describe('orchestrate', () => {
     expect(listEventsSince(ctx, mark).filter((e) => e.type === 'session.orchestrate').map((e) => (e.data as { status: boolean }).status)).toEqual([false, true]);
   });
 
+  it('prints the stalled facts in Reconcile: an idle driver, and a step whose driver is not live', () => {
+    const { ctx, step, other, third, join } = setup();
+    for (const id of ['s1', 's2', 's3']) join(id);
+    claimStep(ctx, 'session:s2', 's2', step.id);
+    claimStep(ctx, 'session:s3', 's3', other.id);
+    // s2 drives #step and went idle 45 minutes ago; #other's driver is gone, so s3 is only on it.
+    const idleSince = new Date(Date.parse(ctx.now()) - 45 * 60_000).toISOString();
+    ctx.db.prepare("UPDATE sessions SET state = 'idle', last_seen_at = ?, branch = 'cell-form', cwd = 'C:/w/cell-form' WHERE id = 's2'").run(idleSince);
+    ctx.db.prepare('UPDATE nodes SET driver_session_id = NULL WHERE id = ?').run(other.id);
+    updateNode(ctx, 'test', third.id, { status: 'done' });
+    const s2 = findSession(ctx, 's2')!;
+    const s3 = findSession(ctx, 's3')!;
+    const tag = (slot: number | null) => String.fromCharCode(65 + (slot ?? 0));
+    const lines = orchestrate(ctx, 'session:s1', 's1', { status: true }).opening.split('\n');
+    const at = lines.indexOf('Reconcile:');
+    expect(lines.slice(at, at + 4)).toEqual([
+      'Reconcile:',
+      `  #${step.id} stalled: ${tag(s2.slot)} idle 45m · branch cell-form · cwd C:/w/cell-form`,
+      `  #${other.id} stalled: driver not live · on it: ${tag(s3.slot)}`,
+      `  #${third.id} no_outcome`,
+    ]);
+  });
+
   it('lists the top three of Next with ready or not ready', () => {
     const { ctx, project, step, other, third, join } = setup();
     join('s1');

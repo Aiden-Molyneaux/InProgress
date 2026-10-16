@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { deriveBoard, type BoardInput } from '../../src/core/board';
-import type { Ask, PastSession, ResourceMeta, Session, TreeNode } from '../../src/core/types';
+import { deriveBoard, reconcileLine, type BoardInput } from '../../src/core/board';
+import { STALL_MS, type Ask, type PastSession, type ResourceMeta, type Session, type SubagentInfo, type TreeNode } from '../../src/core/types';
 
 const NOW = Date.parse('2026-10-13T12:00:00.000Z');
 const T = '2026-10-13T11:00:00.000Z';
@@ -21,6 +21,11 @@ function input(o: Partial<BoardInput> & { queue?: { nodeId: number; sessionId: s
     nodes: o.nodes ?? [n(1, null)], sessions: o.sessions ?? [], pastSessions: o.pastSessions ?? [], resources: o.resources ?? [], asks: o.asks ?? [],
   };
 }
+const MINS = (m: number) => new Date(NOW - m * 60_000).toISOString();
+const running = (o: Partial<SubagentInfo> = {}): SubagentInfo => ({
+  agentId: 'x1', agentType: 'general-purpose', startedAt: MINS(1), runStartedAt: MINS(1), description: null, model: null, nodeId: null,
+  endedAt: null, ordinal: 1, purpose: null, endReason: null, lastActiveAt: null, ...o,
+});
 const col = (b: ReturnType<typeof deriveBoard>, id: number) => b.byId.get(id)?.column;
 
 describe('deriveBoard', () => {
@@ -117,5 +122,82 @@ describe('deriveBoard', () => {
     const b = deriveBoard(input({ nodes: [n(1, null), n(2, 1), n(3, 2, { status: 'done', completedAt: DAYS(2) }), n(4, 2, { status: 'done', completedAt: DAYS(1) }), n(5, 2)] }), NOW);
     expect(b.done.map((r) => r.node.id)).toEqual([4, 3]);
     expect(b.byId.get(5)?.crumb.map((c) => c.id)).toEqual([2]);
+  });
+
+  it('stalled: an idle driver past 30 minutes with nothing running and no open ask', () => {
+    expect(STALL_MS).toBe(30 * 60_000);
+    const marksFor = (o: { driver?: Partial<Session>; node?: Partial<TreeNode>; asks?: Ask[] } = {}) => deriveBoard(input({
+      nodes: [n(1, null), n(2, 1, { status: 'active', driverSessionId: 'd', ...o.node })],
+      sessions: [s('d', { focusNodeId: 2, state: 'idle', lastSeenAt: MINS(31), ...o.driver })],
+      asks: o.asks ?? [],
+    }), NOW).byId.get(2)?.marks;
+    expect(marksFor()).toContain('stalled');
+    expect(marksFor({ driver: { lastSeenAt: new Date(NOW - STALL_MS).toISOString() } })).toContain('stalled');
+    expect(marksFor({ driver: { lastSeenAt: MINS(29) } })).not.toContain('stalled');
+    expect(marksFor({ driver: { subagents: [running()] } })).not.toContain('stalled');
+    // A reader subagent is not work: still stalled.
+    expect(marksFor({ driver: { subagents: [running({ agentType: 'Explore' })] } })).toContain('stalled');
+    expect(marksFor({ driver: { state: 'permission' } })).not.toContain('stalled');
+    expect(marksFor({ asks: [ask(1, 2)] })).not.toContain('stalled');
+    expect(marksFor({ node: { assignee: 'me' } })).not.toContain('stalled');
+    expect(marksFor({ node: { status: 'todo' } })).not.toContain('stalled');
+  });
+
+  it('stalled: helpers on a step whose driver is not live', () => {
+    const b = deriveBoard(input({
+      nodes: [n(1, null), n(2, 1, { status: 'active', driverSessionId: 'gone' }), n(3, 1, { status: 'active' }), n(4, 1, { status: 'active', driverSessionId: 'gone' })],
+      sessions: [s('gone', { state: 'ended', endedAt: T, focusNodeId: 2 }), s('h', { focusNodeId: 2, slot: 1 }), s('k', { focusNodeId: 3, slot: 2 })],
+    }), NOW);
+    expect(b.byId.get(2)).toMatchObject({ driver: null, marks: ['stalled'] });
+    expect(b.byId.get(3)).toMatchObject({ driver: null, marks: ['stalled'] }); // driverless
+    expect(b.byId.get(4)?.marks).not.toContain('stalled'); // nobody on it
+  });
+
+  it('answer_waiting: an answered, undelivered ask', () => {
+    const marksFor = (o: Partial<Ask>, kind: TreeNode['kind'] = 'task') => deriveBoard(input({
+      nodes: [n(1, null), n(2, 1, { kind })],
+      asks: [ask(1, 2, { clearedAt: T, clearedBy: 'window', answer: 'land it', ...o })],
+    }), NOW).byId.get(2)?.marks;
+    expect(marksFor({})).toEqual(['answer_waiting']);
+    expect(marksFor({ answer: '' })).toEqual([]);
+    expect(marksFor({ answerDeliveredAt: T })).toEqual([]);
+    expect(marksFor({}, 'question')).toEqual([]);
+    // row.asks stays the open asks only.
+    expect(deriveBoard(input({ nodes: [n(1, null), n(2, 1)], asks: [ask(1, 2, { clearedAt: T, answer: 'x' })] }), NOW).byId.get(2)?.asks).toEqual([]);
+  });
+
+  it('the driver leads row.sessions and is row.driver', () => {
+    const b = deriveBoard(input({
+      nodes: [n(1, null), n(2, 1, { status: 'active', driverSessionId: 'd' })],
+      sessions: [s('w', { focusNodeId: 2, slot: 0 }), s('d', { focusNodeId: 2, state: 'idle', slot: 1, lastSeenAt: MINS(5) }), s('p', { focusNodeId: 2, state: 'permission', slot: 2 })],
+    }), NOW);
+    const row = b.byId.get(2)!;
+    expect(row.driver?.id).toBe('d');
+    expect(row.sessions.map((x) => x.id)).toEqual(['d', 'w', 'p']);
+    expect(row.marks).not.toContain('stalled');
+    // A driver not heard from within 12 hours is not live: no driver, and the row's helper is stalled.
+    const c = deriveBoard(input({
+      nodes: [n(1, null), n(2, 1, { status: 'active', driverSessionId: 'd' })],
+      sessions: [s('d', { focusNodeId: 2, lastSeenAt: new Date(NOW - 13 * 3_600_000).toISOString() }), s('w', { focusNodeId: 2 })],
+    }), NOW).byId.get(2)!;
+    expect(c.driver).toBeNull();
+    expect(c.sessions.map((x) => x.id)).toEqual(['w']);
+  });
+});
+
+describe('reconcileLine', () => {
+  it('prints the stalled facts, and other marks as their name', () => {
+    const at = (m: number) => deriveBoard(input({
+      nodes: [n(1, null), n(2, 1, { status: 'active', driverSessionId: 'd', outcome: '' })],
+      sessions: [s('d', { focusNodeId: 2, state: 'idle', slot: 7, lastSeenAt: MINS(m), branch: 'cell-form', cwd: 'C:/w/cell-form' })],
+    }), NOW).byId.get(2)!;
+    expect(reconcileLine(at(45), 'stalled', NOW)).toBe('#2 stalled: H idle 45m · branch cell-form · cwd C:/w/cell-form');
+    expect(reconcileLine(at(119), 'stalled', NOW)).toBe('#2 stalled: H idle 119m · branch cell-form · cwd C:/w/cell-form');
+    expect(reconcileLine(at(150), 'stalled', NOW)).toBe('#2 stalled: H idle 2h · branch cell-form · cwd C:/w/cell-form');
+    const bare = deriveBoard(input({ nodes: [n(1, null), n(2, 1, { status: 'active', driverSessionId: 'd' })], sessions: [s('d', { focusNodeId: 2, state: 'idle', slot: null, lastSeenAt: MINS(40) })] }), NOW).byId.get(2)!;
+    expect(reconcileLine(bare, 'stalled', NOW)).toBe('#2 stalled: ? idle 40m · branch ? · cwd ?');
+    const helpers = deriveBoard(input({ nodes: [n(1, null), n(2, 1, { status: 'active' })], sessions: [s('h', { focusNodeId: 2, slot: 7 }), s('k', { focusNodeId: 2, slot: 10, state: 'idle' })] }), NOW).byId.get(2)!;
+    expect(reconcileLine(helpers, 'stalled', NOW)).toBe('#2 stalled: driver not live · on it: H, K');
+    expect(reconcileLine(helpers, 'deep', NOW)).toBe('#2 deep');
   });
 });

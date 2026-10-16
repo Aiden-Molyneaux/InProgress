@@ -13,6 +13,8 @@ export const MARK_WORDS: Record<Mark, string> = {
   stale_ask: 'ask open over 7 days',
   done_focus: 'a session is still on it',
   deep: 'deep',
+  stalled: 'stalled',
+  answer_waiting: 'answer waiting',
 };
 
 /** The label chip: glyph plus word in muted ink. Its accessible name is the word. */

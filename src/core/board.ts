@@ -1,8 +1,9 @@
+import { sessionActivity } from './activity';
 import { ancestors, buildIndex, dfsOrder, kids } from './tree';
-import { ASK_TRAIL_MS, STALE_SESSION_MS, TRAIL_MS, type Ask, type ProjectSnapshot, type ResourceMeta, type Session, type TreeNode } from './types';
+import { ASK_TRAIL_MS, STALE_SESSION_MS, STALL_MS, TRAIL_MS, sessionTag, type Ask, type ProjectSnapshot, type ResourceMeta, type Session, type TreeNode } from './types';
 
 export type Column = 'now' | 'next' | 'backlog' | 'done';
-export const MARKS = ['ended_open', 'no_outcome', 'stale_ask', 'done_focus', 'deep'] as const;
+export const MARKS = ['ended_open', 'no_outcome', 'stale_ask', 'done_focus', 'deep', 'stalled', 'answer_waiting'] as const;
 export type Mark = (typeof MARKS)[number];
 export type BoardInput = Pick<ProjectSnapshot, 'project' | 'nodes' | 'sessions' | 'pastSessions' | 'resources' | 'asks'>;
 
@@ -13,8 +14,10 @@ export interface BoardRow {
   queueNumber: number | null;
   /** The live session whose own queue holds it (Next only); null otherwise. */
   owner: Session | null;
-  /** Live sessions focused on it: working, then permission, then idle; ties by slot. */
+  /** Live sessions focused on it: the driver first, then working, then permission, then idle; ties by slot. */
   sessions: Session[];
+  /** The live session that drives it (spec 1.5); null when its driver is ended, stale, elsewhere or none. */
+  driver: Session | null;
   /** Its open asks, oldest first. */
   asks: Ask[];
   marks: Mark[];
@@ -50,6 +53,35 @@ const OPEN = new Set(['todo', 'active', 'blocked']);
 const isOpen = (n: TreeNode) => OPEN.has(n.status);
 const STATE_ORDER: Record<string, number> = { working: 0, permission: 1, idle: 2 };
 
+/**
+ * Spec 3.1: (a) the live driver is idle (nothing running, not waiting on a permission) for STALL_MS with no open ask on
+ * the step, or (b) live sessions are on the step but none of them drives it.
+ */
+function isStalled(driver: Session | null, sessions: Session[], asks: Ask[], now: number): boolean {
+  if (driver === null) return sessions.length > 0;
+  return sessionActivity(driver, now) === 'idle' && now - Date.parse(driver.lastSeenAt) >= STALL_MS && asks.length === 0;
+}
+
+/** Whole minutes under two hours (`45m`), else whole hours (`2h`). */
+function idleSpan(iso: string, now: number): string {
+  const minutes = Math.floor((now - Date.parse(iso)) / 60_000);
+  return minutes < 120 ? `${minutes}m` : `${Math.floor(minutes / 60)}h`;
+}
+
+/**
+ * One line of `orchestrate --status`'s Reconcile list (spec 3.2), without its indent: the facts Mip needs for a stalled
+ * row (the idle driver's tag, idle time, branch and cwd; or that no live session drives it, and who is on it), else the
+ * mark's name.
+ */
+export function reconcileLine(row: Pick<BoardRow, 'node' | 'driver' | 'sessions'>, mark: Mark, now: number): string {
+  const head = `#${row.node.id} ${mark}`;
+  if (mark !== 'stalled') return head;
+  const tag = (s: Session) => sessionTag(s.slot) || '?';
+  const d = row.driver;
+  if (d === null) return `${head}: driver not live · on it: ${row.sessions.map(tag).join(', ')}`;
+  return `${head}: ${tag(d)} idle ${idleSpan(d.lastSeenAt, now)} · branch ${d.branch ?? '?'} · cwd ${d.cwd ?? '?'}`;
+}
+
 /** Places every step of the snapshot (spec 1.5) and marks the ones that need tidying (spec 1.6). */
 export function deriveBoard(input: BoardInput, now: number): Board {
   const index = buildIndex(input.nodes);
@@ -63,6 +95,9 @@ export function deriveBoard(input: BoardInput, now: number): Board {
   const openAsks = new Map<number, Ask[]>();
   for (const a of input.asks) if (a.clearedAt === null) openAsks.set(a.nodeId, [...(openAsks.get(a.nodeId) ?? []), a]);
   for (const list of openAsks.values()) list.sort((a, b) => a.raisedAt.localeCompare(b.raisedAt) || a.id - b.id);
+  // Steps with an answer no session has been handed yet (spec 2.4); the snapshot keeps cleared asks for ASK_TRAIL_MS.
+  const answerWaiting = new Set<number>();
+  for (const a of input.asks) if (a.clearedAt !== null && a.answer.trim() && a.answerDeliveredAt === null) answerWaiting.add(a.nodeId);
   const handoffOf = new Map<number, ResourceMeta>();
   for (const r of input.resources) {
     if (r.purpose !== 'handoff') continue;
@@ -91,7 +126,10 @@ export function deriveBoard(input: BoardInput, now: number): Board {
   for (const node of input.nodes) {
     if (node.id === rootId || node.status === 'dropped') continue;
     const crumb = ancestors(index, node.id).filter((a) => a.id !== rootId);
-    const sessions = focusOf.get(node.id) ?? [];
+    const focused = focusOf.get(node.id) ?? [];
+    // The focused sessions are already live, so a driver found among them is the live driver.
+    const driver = focused.find((x) => x.id === node.driverSessionId) ?? null;
+    const sessions = driver ? [driver, ...focused.filter((x) => x !== driver)] : focused;
     const asks = openAsks.get(node.id) ?? [];
     let column: Column;
     if (node.status === 'done') column = 'done';
@@ -113,8 +151,11 @@ export function deriveBoard(input: BoardInput, now: number): Board {
     // Any row: a review ask may sit on a done step (spec 1.2).
     if (asks.some((a) => now - Date.parse(a.raisedAt) > ASK_TRAIL_MS)) marks.push('stale_ask');
     if (crumb.length >= 3) marks.push('deep');
+    if (node.status === 'active' && node.assignee !== 'me' && isStalled(driver, sessions, asks, now)) marks.push('stalled');
+    // A question's answer is its outcome, not owed work (Review Focus 5).
+    if (node.kind !== 'question' && answerWaiting.has(node.id)) marks.push('answer_waiting');
     byId.set(node.id, {
-      node, column, crumb, sessions, asks, marks,
+      node, column, crumb, sessions, driver, asks, marks,
       queueNumber: column === 'next' ? (queueNumber.get(node.id) ?? null) : null,
       owner: column === 'next' ? (ownerOf.get(node.id) ?? null) : null,
       ready: column === 'next' && asks.length === 0,

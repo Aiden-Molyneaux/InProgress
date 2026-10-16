@@ -4,7 +4,7 @@ import { write, type Ctx, type RecordEvent } from './db/tx';
 import { badRequest } from './errors';
 import { renderBriefing, renderStatusAnswer, renderStatusLine, untrackedHint } from './briefing';
 import { renderOrchestratorBriefing, stepBlock } from './briefing-scoped';
-import { deriveBoard, isLive } from '../core/board';
+import { deriveBoard, isLive, reconcileLine } from '../core/board';
 import { askTag, sessionTag } from '../core/types';
 import { formatCounts, formatDigest, readDigest } from './digest';
 import { markAnswersDelivered, owedAnswers, undeliveredAnswers } from './repo/asks';
@@ -542,7 +542,7 @@ export function orchestrate(ctx: Ctx, actor: string, sessionId: string, o: { sta
   if (o.status) {
     const board = deriveBoard(snapshot, nowMs);
     lines.push('', formatDigest(digest, nowMs));
-    if (board.marked.length) lines.push('Reconcile:', ...board.marked.flatMap((r) => r.marks.map((m) => `  #${r.node.id} ${m}`)));
+    if (board.marked.length) lines.push('Reconcile:', ...board.marked.flatMap((r) => r.marks.map((m) => `  ${reconcileLine(r, m, nowMs)}`)));
     if (board.next.length) lines.push('Next:', ...board.next.slice(0, 3).map((r) => `  #${r.node.id} ${r.node.title}: ${r.ready ? 'ready' : 'not ready'}`));
   }
   return { session, opening: lines.join('\n') };

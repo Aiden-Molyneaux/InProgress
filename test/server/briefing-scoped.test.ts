@@ -61,7 +61,7 @@ describe('scoped worker with a claimed step', () => {
     expect(lines[2]).toMatch(/^Plan edits go through the inprogress-scribe agent/);
     expect(lines.slice(3, 5)).toEqual(['Playbook:', '  Docs live in docs/planning.']);
     const rules = lines.find((l) => l.startsWith('- Brief when:'))!;
-    expect(rules).toContain(`a step starts ("${CLAIM} s1")`);
+    expect(rules).toContain(`a step starts ("${CLAIM} s1" (add --take-over when you inherit the step))`);
     expect(rules).not.toContain('queue:');
     expect(rules).not.toContain('later:');
     expect(rules).not.toContain('the plan or an order changes');
@@ -74,6 +74,7 @@ describe('scoped worker with a claimed step', () => {
       `    #${childB.id} Child B · todo`,
       '    ◐ Mine doing',
       '    ○ Mine pending',
+      'Driver: you',
       `Handoff: r${handoff.id} "Handoff for tabs" (<1m)`,
       `Resources on #${step.id}: r${note.id} Notes · r${handoff.id} Handoff for tabs`,
       `Asks on #${step.id}: a${open.id} ? "Which port?" (open, <1m) · a${answered.id} ◎ "Look at the tabs" (answered: "looks good")`,
@@ -112,6 +113,22 @@ describe('scoped worker with a claimed step', () => {
     expect(block).toContain('    +3 more open');
     expect(block.filter((l) => /^ {4}[○◐] /.test(l))).toHaveLength(5);
   });
+
+  it('names the driver: you for the driver, its tag, title and activity for a helper, nothing when driverless', () => {
+    const t = setup();
+    t.join('s1', 'Tabs work');
+    t.join('s2');
+    claimStep(t.ctx, 'session:s1', 's1', t.step.id);
+    claimStep(t.ctx, 'session:s2', 's2', t.step.id);
+    const block = (id: string) => stepBlock(t.snap(), t.step.id, findSession(t.ctx, id)!, Date.parse(t.ctx.now()));
+    const driverLines = (id: string) => block(id).filter((l) => l.startsWith('Driver:'));
+    expect(driverLines('s1')).toEqual(['Driver: you']);
+    expect(driverLines('s2')).toEqual(['Driver: A "Tabs work" (working)']);
+    // The Driver line sits after the step's children and tasks, before the handoff and asks.
+    expect(block('s1').slice(0, 5)).toEqual([expect.stringMatching(/^Your step:/), `  #${t.step.id} ⧉ Build tabs · active (1/3)`, expect.stringMatching(/Child A/), expect.stringMatching(/Child B/), 'Driver: you']);
+    t.ctx.db.prepare('UPDATE nodes SET driver_session_id = NULL WHERE id = ?').run(t.step.id);
+    expect(driverLines('s2')).toEqual([]);
+  });
 });
 
 describe('scoped worker with no step', () => {
@@ -124,9 +141,10 @@ describe('scoped worker with no step', () => {
     raiseAsk(t.ctx, 'test', { nodeId: t.askedStep.id, kind: 'question', text: 'Hold on' });
     const lines = t.brief('s1');
     expect(lines[1]).toBe('Role: worker, no step claimed.');
-    expect(lines.slice(-3)).toEqual([
+    expect(lines.slice(-4)).toEqual([
       `Ready to claim: #${t.ready1.id} Ready one · #${t.ready2.id} Ready two · #${t.ready3.id} Ready three`,
       `Claim one: ${CLAIM} s1`,
+      'Inheriting a step from a session that handed it to you: add --take-over.',
       expect.stringMatching(/^Other sessions here: B /),
     ].map((x) => x));
     // s2's own queue puts #ready3 first for s2.

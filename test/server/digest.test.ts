@@ -200,6 +200,8 @@ describe('formatDigest and formatCounts', () => {
     const a1 = raiseAsk(ctx, 'scribe', { nodeId: q.id, kind: 'question', text: 'one' });
     raiseAsk(ctx, 'scribe', { nodeId: q.id, kind: 'question', text: 'two' });
     clearAsk(ctx, 'window', a1.id, 'yes');
+    // Delivered, so it is not an answer_waiting mark: this test wants no Marks clause.
+    ctx.db.prepare('UPDATE asks SET answer_delivered_at = ? WHERE id = ?').run(ctx.now(), a1.id);
     insertSession(ctx, project.id, 's-1', { startedAt: iso(t0 + 2 * DAY), endedAt: iso(t0 + 2 * DAY + HOUR) });
     insertSession(ctx, project.id, 's-2', { startedAt: iso(t0 + 2 * DAY), endedAt: iso(t0 + 2 * DAY + 2 * HOUR) });
     addResource(ctx, 'scribe', { nodeId: group.id, kind: 'doc', title: 'H', content: 'x', purpose: 'handoff', sessionId: 's-2' });
