@@ -140,7 +140,7 @@ export const tasksBody = z
   .strict();
 export const enrollBody = z.object({ project: z.union([z.string().min(1), z.number().int().positive()]), title: z.string().max(300).optional() }).strict();
 export const focusBody = z.object({ nodeId: z.number().int().positive().nullable() }).strict();
-export const claimBody = z.object({ nodeId: z.number().int().positive() }).strict();
+export const claimBody = z.object({ nodeId: z.number().int().positive(), takeOver: z.boolean().optional() }).strict();
 export const orchestrateBody = z.object({ status: z.boolean().optional() }).strict();
 export const openBody = z.object({ resourceId: z.number().int().positive() }).strict();
 export const openUrlBody = z.object({ url: z.string().min(1).max(2048) }).strict();

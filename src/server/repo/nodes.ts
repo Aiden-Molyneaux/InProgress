@@ -22,6 +22,7 @@ interface NodeRow {
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+  driver_session_id: string | null;
   board_state: TaskState | null;
   state_since: string | null;
   hue: number | null;
@@ -42,6 +43,7 @@ export const toNode = (r: NodeRow): TreeNode => ({
   createdAt: r.created_at,
   updatedAt: r.updated_at,
   completedAt: r.completed_at,
+  driverSessionId: r.driver_session_id,
   boardState: r.board_state,
   stateSince: r.state_since,
   hue: r.hue,
@@ -186,9 +188,13 @@ export function patchNode(ctx: Ctx, record: RecordEvent, before: TreeNode, patch
   if (before.parentId === null && next.kind !== 'goal') throw badRequest(`#${id} is the project root; its kind stays "goal"`);
   const ts = ctx.now();
   const completedAt = next.status === 'done' ? (before.status === 'done' ? before.completedAt : ts) : null;
+  // A done or dropped step has no driver (spec 1.1), cleared in the same UPDATE.
+  const driver = next.status === 'done' || next.status === 'dropped' ? null : before.driverSessionId;
   ctx.db
-    .prepare('UPDATE nodes SET title = ?, kind = ?, status = ?, assignee = ?, body = ?, outcome = ?, label = ?, updated_at = ?, completed_at = ? WHERE id = ?')
-    .run(next.title, next.kind, next.status, next.assignee, next.body, next.outcome, next.label, ts, completedAt, id);
+    .prepare(
+      'UPDATE nodes SET title = ?, kind = ?, status = ?, assignee = ?, body = ?, outcome = ?, label = ?, updated_at = ?, completed_at = ?, driver_session_id = ? WHERE id = ?',
+    )
+    .run(next.title, next.kind, next.status, next.assignee, next.body, next.outcome, next.label, ts, completedAt, driver, id);
   // Before node.updated, which stays the project's newest event. Every path to done comes through here.
   if (next.status === 'done' && before.status !== 'done') closeNodeTasks(ctx, record, before.projectId, id);
   const diff: Record<string, { from: unknown; to: unknown }> = {};
@@ -197,6 +203,23 @@ export function patchNode(ctx: Ctx, record: RecordEvent, before: TreeNode, patch
   }
   record({ projectId: before.projectId, type: 'node.updated', entity: 'node', entityId: id, data: { changes: diff } });
   return requireNode(ctx, id);
+}
+
+/**
+ * Sets or clears the session that drives `node`, inside a write() already open, and records node.updated with the
+ * change. A driver change is not an edit of the step, so updatedAt (where the needs-you age counts from) stays. No-op
+ * when the driver is already `sessionId`.
+ */
+export function setDriver(ctx: Ctx, record: RecordEvent, node: TreeNode, sessionId: string | null): void {
+  if (node.driverSessionId === sessionId) return;
+  ctx.db.prepare('UPDATE nodes SET driver_session_id = ? WHERE id = ?').run(sessionId, node.id);
+  record({
+    projectId: node.projectId,
+    type: 'node.updated',
+    entity: 'node',
+    entityId: node.id,
+    data: { changes: { driverSessionId: { from: node.driverSessionId, to: sessionId } } },
+  });
 }
 
 export function moveNode(ctx: Ctx, actor: string, id: number, input: { parentId: number; after?: After }): TreeNode {

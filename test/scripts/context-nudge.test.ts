@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -51,6 +51,10 @@ function stored(session: string): number | null {
   return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')).level : null;
 }
 
+const L150 = "Context is about 150k tokens. Finish what you're on, commit, and at the next clean point ask Aiden to run /compact with a line naming your plan, branch and open findings. Do not cut the session. Unattended, carry on: the 250k autocompact is the reset.";
+const L200 = 'Context is about 200k tokens. If Aiden has not compacted, carry on; the autocompact at 250k is the backstop.';
+const LCOMPACT = 'Context was compacted. If you are running Sigmund, reload him (.claude/skills/sigmund/SKILL.md) and reread your plan file and the step block before you go on.';
+
 describe('context-nudge', () => {
   it('nudges once when the context crosses 150k', () => {
     const session = fresh();
@@ -70,21 +74,73 @@ describe('context-nudge', () => {
     expect(said(batch(session, line('a', 140_000), line('b', 155_000), line('c', 156_000)))).toContain('about 150k');
     expect(said(batch(fresh(), line('a', 140_000), line('b', 155_000), line('c', 156_000)))).toContain('about 150k');
   });
-  it('adds the 160k line after the 150k one, or says it alone when a session jumps over both', () => {
+  it('says the exact 150k line, with no cut in it', () => {
+    expect(said(batch(fresh(), line('a', 150_000)))).toBe(L150);
+  });
+  it('adds the 200k line after the 150k one, or says it alone when a session jumps over both', () => {
     const session = fresh();
     expect(said(batch(session, line('a', 155_000)))).toContain('about 150k');
-    expect(said(batch(session, line('a', 155_000), line('b', 165_000)))).toContain('about 160k');
-    expect(stored(session)).toBe(160_000);
+    expect(said(batch(session, line('a', 155_000), line('b', 205_000)))).toBe(L200);
+    expect(stored(session)).toBe(200_000);
     // Falling back between the lines repeats neither.
-    expect(batch(session, line('a', 155_000), line('b', 165_000), line('c', 130_000))).toBe('');
-    const jump = said(batch(fresh(), line('a', 100_000), line('b', 170_000)));
-    expect(jump).toContain('about 160k');
+    expect(batch(session, line('a', 155_000), line('b', 205_000), line('c', 180_000))).toBe('');
+    const jump = said(batch(fresh(), line('a', 100_000), line('b', 210_000)));
+    expect(jump).toBe(L200);
     expect(jump).not.toContain('150k');
+  });
+  it('says nothing more at 160k after the 150k line', () => {
+    const session = fresh();
+    expect(said(batch(session, line('a', 155_000)))).toBe(L150);
+    expect(batch(session, line('a', 155_000), line('b', 160_000))).toBe('');
+  });
+  it('prints the post-compaction line once when the context falls below 150k, and not on a first run', () => {
+    const session = fresh();
+    expect(said(batch(session, line('a', 155_000)))).toBe(L150);
+    expect(said(batch(session, line('a', 155_000), line('b', 60_000)))).toBe(LCOMPACT);
+    expect(stored(session)).toBe(0);
+    expect(batch(session, line('a', 155_000), line('b', 60_000), line('c', 61_000))).toBe('');
+    expect(batch(fresh(), line('a', 60_000))).toBe('');
+    // From the 200k level too.
+    const high = fresh();
+    expect(said(batch(high, line('a', 205_000)))).toBe(L200);
+    expect(said(batch(high, line('a', 205_000), line('b', 30_000)))).toBe(LCOMPACT);
+  });
+  it('treats a fall of 30k or more as a compaction, wherever it lands', () => {
+    const a = fresh();
+    expect(said(batch(a, line('a', 205_000)))).toBe(L200);
+    expect(said(batch(a, line('a', 205_000), line('b', 170_000)))).toBe(LCOMPACT);
+    expect(batch(a, line('a', 205_000), line('b', 170_000), line('c', 171_000))).toBe('');
+    // The level is re-armed to what 170k has reached, so 200k is announced again.
+    expect(said(batch(a, line('a', 205_000), line('b', 170_000), line('c', 206_000)))).toBe(L200);
+    const m = fresh();
+    expect(batch(m, line('a', 120_000))).toBe('');
+    expect(said(batch(m, line('a', 120_000), line('b', 40_000)))).toBe(LCOMPACT);
+    // A small fall is not one.
+    const s = fresh();
+    expect(said(batch(s, line('a', 205_000)))).toBe(L200);
+    expect(batch(s, line('a', 205_000), line('b', 190_000))).toBe('');
+  });
+  it('handles a corrupt state file without throwing, and replaces it', () => {
+    const session = fresh();
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(join(stateDir, `${session}.json`), '{not json');
+    const r = run(hook(transcript(line('a', 155_000)), session));
+    expect(r.status).toBe(0);
+    expect(said(r.out)).toBe(L150);
+    expect(stored(session)).toBe(150_000);
+  });
+  it('removes its temp file and stays silent when the state file cannot be replaced', () => {
+    const session = fresh();
+    // A folder where the state file goes: the rename onto it fails.
+    mkdirSync(join(stateDir, `${session}.json`), { recursive: true });
+    const r = run(hook(transcript(line('a', 155_000)), session));
+    expect(r).toEqual({ status: 0, out: '' });
+    expect(readdirSync(stateDir).filter((f) => f.startsWith(session) && f.endsWith('.tmp'))).toEqual([]);
   });
   it('re-arms after the context drops below 150k', () => {
     const session = fresh();
     expect(said(batch(session, line('a', 155_000)))).toContain('about 150k');
-    expect(batch(session, line('a', 155_000), line('b', 40_000))).toBe('');
+    expect(said(batch(session, line('a', 155_000), line('b', 40_000)))).toBe(LCOMPACT);
     expect(stored(session)).toBe(0);
     expect(said(batch(session, line('a', 155_000), line('b', 40_000), line('c', 155_000)))).toContain('about 150k');
   });

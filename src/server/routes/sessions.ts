@@ -22,7 +22,10 @@ export function registerSessionRoutes(app: FastifyInstance, ctx: Ctx, requireTok
     return enrollSession(ctx, actorOf(req), sessionParam.parse(req.params).id, body.project, body.title);
   });
   app.post('/api/sessions/:id/focus', guarded, async (req) => setFocus(ctx, actorOf(req), sessionParam.parse(req.params).id, focusBody.parse(req.body).nodeId));
-  app.post('/api/sessions/:id/claim', guarded, async (req) => claimStep(ctx, actorOf(req), sessionParam.parse(req.params).id, claimBody.parse(req.body).nodeId));
+  app.post('/api/sessions/:id/claim', guarded, async (req) => {
+    const { nodeId, takeOver } = claimBody.parse(req.body);
+    return claimStep(ctx, actorOf(req), sessionParam.parse(req.params).id, nodeId, { takeOver });
+  });
   app.post('/api/sessions/:id/orchestrate', guarded, async (req) => orchestrate(ctx, actorOf(req), sessionParam.parse(req.params).id, { status: orchestrateBody.parse(req.body ?? {}).status === true }));
   app.post('/api/sessions/:id/tasks', guarded, async (req) => {
     const body = tasksBody.parse(req.body);

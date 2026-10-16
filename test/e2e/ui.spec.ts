@@ -1796,6 +1796,24 @@ test.describe('Board', () => {
     await expect(header.getByRole('button')).toHaveCount(0);
   });
 
+  test('the Now row names its driver and its helper', async ({ page, api, fresh }) => {
+    // The fixture session's focus on the step is its claim, so it drives; the session that claims next helps.
+    const helper = `e2e-${randomUUID()}`;
+    const nodeId = fresh.ids['Play app signing'];
+    await write(api, helper, 'post', `/api/sessions/${helper}/enroll`, { project: fresh.slug, title: 'Helper session' });
+    await hook(api, helper, { event: 'prompt' });
+    await write(api, helper, 'post', `/api/sessions/${helper}/claim`, { nodeId });
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    // Each session's line names it and its role on the step, the driver's first.
+    const lines = nowRow(page, 'Play app signing').locator('.ip-sess');
+    await expect(lines).toHaveCount(2);
+    await expect(lines.first().locator('.ip-sess-name')).toHaveText('E2E session');
+    await expect(lines.first().locator('.ip-role')).toHaveText('· drives');
+    await expect(lines.nth(1).locator('.ip-sess-name')).toHaveText('Helper session');
+    await expect(lines.nth(1).locator('.ip-role')).toHaveText('· helping');
+  });
+
   test('no session letter, character or session hue shows anywhere in the window', async ({ page, api, fresh }) => {
     const second = `e2e-${randomUUID()}`;
     await write(api, second, 'post', `/api/sessions/${second}/enroll`, { project: fresh.slug, title: 'Docs pass' });

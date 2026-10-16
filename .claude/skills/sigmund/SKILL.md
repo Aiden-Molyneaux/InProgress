@@ -176,6 +176,8 @@ The receipt, leading with the outcome:
 4. Any model override and its reason.
 5. **The risk statement, present even when "none" [edit]:** does this change touch `~/.inprogress`, the live window, the installed hooks (`src/hooks/`, `claude/`) or the deploy? If yes, say plainly what the merge gate will require: a full deploy, `claude:install`, a migration check.
 
+Before you stop, brief the scribe `ask on #<id>: review, <one line on what is ready>`. Aiden's "ship it" answers it, and the answer reaches you on your next prompt; the open ask keeps the step from reading as stalled.
+
 Then stop. The merge or deploy waits for the owner's explicit go-ahead ("ship it", "merge it",
 "go ahead"). Silence, or approval of the integration push, is never merge approval.
 
@@ -194,11 +196,21 @@ gated action (another deploy, a rollback, an installer) follows the gate above.
 
 ## Across the session [edit]
 
-- You can't see your context size. A hook (`scripts/context-nudge.mjs`) tells you when it crosses 150k and 160k, and `.claude/settings.json` compacts at 300k.
-- One thread per session: a feature, or a suite of related features that share code. A clean point is right after a merge, or after a finished plan task with everything committed in your worktree.
-- Cut the session when the thread is done, when the next queued item is unrelated, or when the nudge says so. At a cut: write the handoff, brief the scribe to attach it to its step, print the handoff's path, offer the next session as a chip whose prompt is the handoff prompt when the `spawn_task` tool is available (the desktop app), and stop.
+- You can't see your context size. A hook (`scripts/context-nudge.mjs`) tells you when it crosses 150k and 200k, and `.claude/settings.json` autocompacts at 250k.
+- One step, one session: you drive a step from claim to done. A clean point is right after a merge, or after a finished plan task with everything committed in your worktree.
+- At the 150k nudge, finish the task you are on, commit, and ask Aiden to run `/compact` with a line naming the plan file, the branch and any open findings. Do not cut the session. Unattended overnight, the same rhythm without stopping: carry on, and the autocompact is the reset. Provisional rulings and open questions go to the rulings file in `docs/superpowers/rulings/`.
+- After a compaction the hook says so. Reload this skill, then reread your plan file and the step block before you go on.
+- Start or hand to another session only for one of these:
+  - The thread is done: the step is done with its outcome, and the session ends. No handoff.
+  - Independent parallel pieces on separate files: helper sessions on the same step, which claim without `--take-over`. Sev subagents in the same session stay preferred for mechanical work.
+  - Another repo, machine or cloud environment.
+  - Scope that splits into a new step: add it through the scribe; it gets its own Sigmund later.
+  - A broken session (compaction lost the plan, a loop, a harness crash): a handoff from the plan file.
+  - A long wait with a large context (days, over 200k): a handoff costs about what the cold wake would.
+
+  The context nudge, a review wait and a subagent run are never reasons to hand off. A handoff to a successor on the same step opens `Claim #<id> --take-over`, names the worktree (`.claude/worktrees/<topic>`), and lists the step's undelivered answers. Write it, brief the scribe to attach it to its step, print its path, offer the next session as a chip whose prompt is the handoff prompt when the `spawn_task` tool is available (the desktop app), and stop.
 - A new request mid-session becomes a queued step through the scribe (`later: #id`, or a new step), unless it is a few lines in code that is already open. The InProgress tree is the memory between sessions.
-- Unattended overnight run: the same rhythm without stopping. At each clean point write the handoff, then take the next queued item; compaction is the reset. Provisional rulings and open questions go to the rulings file in `docs/superpowers/rulings/`.
+- Report to Mip through InProgress only: the step's status and outcome, new steps, asks, and the working tasks. Mip reads them at its next opening. Do not message Mip.
 
 A handoff is a prompt a fresh session can start from, saved as `~/.inprogress/resources/inprogress/<yyyy-mm-dd>-<kebab-title>.md` and attached to its step as a resource. The standing rules live here and in `CLAUDE.md`, so a handoff never repeats them. It holds:
 

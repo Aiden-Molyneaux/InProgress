@@ -5,7 +5,7 @@ import { ENDED_AGENT_MS, READER_AGENT_TYPES, isReader, type CommandInfo, type Ev
 let nextId = 1;
 function n(parentId: number | null, title: string, extra: Partial<TreeNode> = {}): TreeNode {
   const id = nextId++;
-  return { id, projectId: 1, parentId, position: id, kind: parentId === null ? 'goal' : 'task', title, body: '', status: 'todo', assignee: 'claude', outcome: '', label: null, createdAt: 't', updatedAt: `2026-09-27T00:00:${String(id).padStart(2, '0')}Z`, completedAt: null, boardState: null, stateSince: null, hue: null, ...extra };
+  return { id, projectId: 1, parentId, position: id, kind: parentId === null ? 'goal' : 'task', title, body: '', status: 'todo', assignee: 'claude', outcome: '', label: null, createdAt: 't', updatedAt: `2026-09-27T00:00:${String(id).padStart(2, '0')}Z`, completedAt: null, driverSessionId: null, boardState: null, stateSince: null, hue: null, ...extra };
 }
 function session(id: string, focusNodeId: number | null, state: Session['state'], lastSeenAt = '2026-09-27T01:00:00Z'): Session {
   return { id, projectId: 1, title: id, cwd: null, branch: null, transcriptPath: null, state, focusNodeId, promptsSinceUpdate: 0, startedAt: 't', lastSeenAt, endedAt: null, slot: 0, role: 'worker', subagents: [], commands: [] };
@@ -587,6 +587,10 @@ describe('camera helpers', () => {
     const ev = (type: string, entityId: string, data: unknown): EventRow => ({ id: 1, ts: 't', projectId: 1, actor: 'x', type, entity: 'x', entityId, data });
     expect(eventTarget(ev('node.created', '5', { ids: [5, 6, 7] }))).toBe(7);
     expect(eventTarget(ev('node.updated', '4', {}))).toBe(4);
+    // A driver cleared and nothing else does not move the camera; a driver set, or a clear with a status change, does.
+    expect(eventTarget(ev('node.updated', '4', { changes: { driverSessionId: { from: 's1', to: null } } }))).toBeUndefined();
+    expect(eventTarget(ev('node.updated', '4', { changes: { driverSessionId: { from: null, to: 's1' } } }))).toBe(4);
+    expect(eventTarget(ev('node.updated', '4', { changes: { status: { from: 'active', to: 'done' }, driverSessionId: { from: 's1', to: null } } }))).toBe(4);
     expect(eventTarget(ev('node.moved', '6', { fromParentId: 1, toParentId: 2 }))).toBe(6);
     expect(eventTarget(ev('resource.created', '9', { nodeId: 3 }))).toBe(3);
     expect(eventTarget(ev('resource.updated', '9', { nodeId: 4, fromNodeId: 3 }))).toBe(4);

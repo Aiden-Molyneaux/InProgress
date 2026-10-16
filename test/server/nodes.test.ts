@@ -3,7 +3,7 @@ import { createProject } from '../../src/server/repo/projects';
 import { write } from '../../src/server/db/tx';
 import { listEventsSince, maxEventId } from '../../src/server/repo/events';
 import { addLog } from '../../src/server/repo/logs';
-import { addNodes, deleteNode, insertPositions, listNodes, moveNode, patchNode, requireNode, updateNode } from '../../src/server/repo/nodes';
+import { addNodes, deleteNode, insertPositions, listNodes, moveNode, patchNode, requireNode, setDriver, updateNode } from '../../src/server/repo/nodes';
 import { addResource } from '../../src/server/repo/resources';
 import { makeCtx } from '../helpers';
 
@@ -156,5 +156,38 @@ describe('patchNode, the update inside an open write', () => {
     addLog(ctx, 'scribe:s1', n.id, 'Not yet: Aiden reviews them tomorrow.');
     addResource(ctx, 't', { nodeId: n.id, kind: 'doc', title: 'PR list', content: 'x' });
     expect(requireNode(ctx, n.id).updatedAt).toBe(n.updatedAt);
+  });
+
+  it('clears the driver when a step goes done or dropped', () => {
+    const { ctx, root } = setup();
+    const [a, b] = addNodes(ctx, 't', { parentId: root, nodes: [{ title: 'A', status: 'active' }, { title: 'B', status: 'active' }] });
+    write(ctx, 't', (record) => setDriver(ctx, record, requireNode(ctx, a.id), 's1'));
+    write(ctx, 't', (record) => setDriver(ctx, record, requireNode(ctx, b.id), 's2'));
+    expect(requireNode(ctx, a.id).driverSessionId).toBe('s1');
+    expect(updateNode(ctx, 't', a.id, { status: 'done' }).driverSessionId).toBeNull();
+    expect(updateNode(ctx, 't', b.id, { status: 'dropped' }).driverSessionId).toBeNull();
+  });
+
+  it('keeps the driver on a status change that is not done or dropped', () => {
+    const { ctx, root } = setup();
+    const [n] = addNodes(ctx, 't', { parentId: root, nodes: [{ title: 'A', status: 'active' }] });
+    write(ctx, 't', (record) => setDriver(ctx, record, requireNode(ctx, n.id), 's1'));
+    expect(updateNode(ctx, 't', n.id, { status: 'blocked' }).driverSessionId).toBe('s1');
+  });
+
+  it('setDriver records node.updated and leaves updatedAt alone', () => {
+    const { ctx, root } = setup();
+    const [n] = addNodes(ctx, 't', { parentId: root, nodes: [{ title: 'A', status: 'active' }] });
+    const mark = maxEventId(ctx);
+    write(ctx, 'scribe:s1', (record) => setDriver(ctx, record, requireNode(ctx, n.id), 's1'));
+    const after = requireNode(ctx, n.id);
+    expect(after.driverSessionId).toBe('s1');
+    expect(after.updatedAt).toBe(n.updatedAt);
+    expect(listEventsSince(ctx, mark)).toMatchObject([
+      { type: 'node.updated', entity: 'node', entityId: String(n.id), data: { changes: { driverSessionId: { from: null, to: 's1' } } } },
+    ]);
+    const unchanged = maxEventId(ctx);
+    write(ctx, 't', (record) => setDriver(ctx, record, requireNode(ctx, n.id), 's1'));
+    expect(listEventsSince(ctx, unchanged)).toEqual([]);
   });
 });

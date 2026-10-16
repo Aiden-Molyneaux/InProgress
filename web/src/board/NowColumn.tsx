@@ -16,7 +16,7 @@ function SessionPart({ session, row, snapshot, now }: { session: Session; row: B
   const line = commands.length ? commandLineParts(commands, now) : null;
   return (
     <>
-      <SessionLine session={session} area="now" />
+      <SessionLine session={session} area="now" role={row.driver ? (row.driver.id === session.id ? 'drives' : 'helping') : undefined} />
       {(task || line || kin.length > 0) && (
         <div className="ip-block" data-session={session.id}>
           {task && <p className="ip-card-main">{withoutOwnId(task.subject, row.node.id)}</p>}

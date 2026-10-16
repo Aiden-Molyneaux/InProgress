@@ -30,6 +30,8 @@ export const WORK_STATUSES = ['pending', 'in_progress', 'completed'] as const;
 export type WorkStatus = (typeof WORK_STATUSES)[number];
 export const SCRIBE_AGENT = 'inprogress-scribe';
 export const STALE_SESSION_MS = 12 * 60 * 60 * 1000;
+/** How long a step's live driver may sit idle, with nothing running and no open ask, before the step is marked stalled. */
+export const STALL_MS = 30 * 60 * 1000;
 /** How long ended work stays on its step as the trail: an ended session's working tasks, and a subagent after it stopped. */
 export const TRAIL_MS = 7 * 24 * 60 * 60 * 1000;
 export const ASK_KINDS = ['question', 'permission', 'review'] as const;
@@ -169,6 +171,8 @@ export interface TreeNode {
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
+  /** The session that drives the step while it is active; null when none does, and always once done or dropped. */
+  driverSessionId: string | null;
   /** The state the server's reconcile last stored (a TaskState); null until it first runs for the step. */
   boardState: TaskState | null;
   /** When `boardState` last changed. */

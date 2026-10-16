@@ -266,7 +266,7 @@ li.ip-orow:hover { background: var(--panel-2); }
 .ip-board h3.ip-sub-head { margin-top: 14px; }
 .ip-board ul, .ip-board ol { list-style: none; margin: 0; padding: 0; }
 .ip-board p { margin: 0; }
-.ip-quiet { color: var(--muted); }
+.ip-quiet, .ip-role { color: var(--muted); }
 .ip-empty-line { font-size: var(--fs-m); line-height: 18px; }
 .ip-time { font-family: var(--font-mono); font-size: var(--fs-s); color: var(--muted); }
 .ip-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }

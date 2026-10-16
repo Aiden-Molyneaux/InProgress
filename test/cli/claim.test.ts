@@ -58,8 +58,10 @@ function scenario(name: string, session: string) {
 
 describe('argument parsing', () => {
   it('claim: a step and --session, the step with or without #', () => {
-    expect(parseClaimArgs(['42', '--session', 's1'])).toEqual({ session: 's1', nodeId: 42 });
-    expect(parseClaimArgs(['--session', 's1', '#42'])).toEqual({ session: 's1', nodeId: 42 });
+    expect(parseClaimArgs(['42', '--session', 's1'])).toEqual({ session: 's1', nodeId: 42, takeOver: false });
+    expect(parseClaimArgs(['--session', 's1', '#42'])).toEqual({ session: 's1', nodeId: 42, takeOver: false });
+    expect(parseClaimArgs(['12', '--take-over', '--session', 's'])).toEqual({ session: 's', nodeId: 12, takeOver: true });
+    expect(parseClaimArgs(['12', '--session', 's'])).toEqual({ session: 's', nodeId: 12, takeOver: false });
     expect(parseClaimArgs(['--session', 's1'])).toEqual({ error: 'Missing the step id' });
     expect(parseClaimArgs(['42'])).toEqual({ error: 'Missing --session <session id>' });
     expect(parseClaimArgs(['x', '--session', 's1'])).toEqual({ error: 'Not a step id: x' });
@@ -94,8 +96,18 @@ describe('claim, orchestrate and ask through runCli', () => {
     const s = capture();
     expect(await runCli(['claim', String(step.id), '--session', 'c1'], s.out)).toBe(0);
     expect(s.lines[0]).toBe(`Note: #${step.id} is not in Next.`);
-    expect(s.lines[1]).toMatch(/^Your step: #\d+ Claim Demo$/);
-    expect(s.lines[2]).toBe(`  #${step.id} The step · active`);
+    expect(s.lines[1]).toBe(`You drive #${step.id}.`);
+    expect(s.lines[2]).toMatch(/^Your step: #\d+ Claim Demo$/);
+    expect(s.lines[3]).toBe(`  #${step.id} The step · active`);
+  });
+
+  it('claim --take-over sends the flag and prints whom it took over from', async () => {
+    const { ctx, project, step } = scenario('Take Demo', 't1');
+    enrollSession(ctx, 'scribe:t2', 't2', project.slug);
+    expect(await runClaim([String(step.id), '--session', 't1'], capture().out, conn)).toBe(0);
+    const s = capture();
+    expect(await runClaim([String(step.id), '--take-over', '--session', 't2'], s.out, conn)).toBe(0);
+    expect(s.lines.some((l) => /^You drive #\d+; took over from "Session t1"\.$/.test(l))).toBe(true);
   });
 
   it('claim of another project\'s step prints the error and the hint, exit 1', async () => {

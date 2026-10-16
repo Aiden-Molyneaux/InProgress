@@ -21,7 +21,27 @@ function agentLabel(sessionId: string, agentId: string, snapshot: ProjectSnapsho
   return a ? agentName(a) : 'a subagent';
 }
 
+/** The driver change of a node.updated whose only change is its driver (setDriver's event); else undefined. */
+function driverOnlyChange(e: EventRow): { to: string | null } | undefined {
+  if (e.type !== 'node.updated') return undefined;
+  const changes = ((e.data ?? {}) as { changes?: Record<string, { to: unknown }> }).changes ?? {};
+  const keys = Object.keys(changes);
+  if (keys.length !== 1 || keys[0] !== 'driverSessionId') return undefined;
+  const to = changes.driverSessionId.to;
+  return { to: typeof to === 'string' ? to : null };
+}
+
+/**
+ * Events the activity strip leaves out: a driver cleared, which says nothing on its own (the focus change recorded in
+ * the same write says it).
+ */
+export function stripSkips(e: EventRow): boolean {
+  return driverOnlyChange(e)?.to === null;
+}
+
 export function describeEvent(e: EventRow, snapshot: ProjectSnapshot | null): string {
+  const driver = driverOnlyChange(e);
+  if (driver?.to) return `${sessionLabel(driver.to, snapshot)} drives ${nodeLabel(Number(e.entityId), snapshot)}`;
   const d = (e.data ?? {}) as {
     ask?: { nodeId: number };
     ids?: number[]; parentId?: number; nodeId?: number; title?: string; path?: string;

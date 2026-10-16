@@ -100,11 +100,15 @@ export function OpenFailure({ sessionId }: { sessionId: string }) {
   return failure ? <CopyCommand command={failure.command} reason={failure.reason} /> : null;
 }
 
-function LineBody({ session, nameless }: { session: SessionRef; nameless?: boolean }) {
+/** A session's role on a step with a driver (spec 1.4): the driver drives, every other session on it is helping. */
+export type SessionRole = 'drives' | 'helping';
+
+function LineBody({ session, nameless, role }: { session: SessionRef; nameless?: boolean; role?: SessionRole }) {
   return (
     <>
       <div className="ip-sess">
         {!nameless && <span className="ip-sess-name" title={sessionDisplayTitle(session)}>{sessionDisplayTitle(session)}</span>}
+        {role && <span className="ip-role">· {role}</span>}
         <OpenButton sessionId={session.id} className="ip-link-btn">Open session ↗</OpenButton>
       </div>
       <OpenFailure sessionId={session.id} />
@@ -112,8 +116,8 @@ function LineBody({ session, nameless }: { session: SessionRef; nameless?: boole
   );
 }
 
-/** The session's display title (unless `nameless`: the box's title already is it) and "Open session ↗"; when the server could not open it, the command to run by hand shows under the line. */
-export function SessionLine({ session, area, nameless }: { session: SessionRef | null; area: MeasureArea; nameless?: boolean }) {
+/** The session's display title (unless `nameless`: the box's title already is it), its `role` on the step when given, and "Open session ↗"; when the server could not open it, the command to run by hand shows under the line. */
+export function SessionLine({ session, area, nameless, role }: { session: SessionRef | null; area: MeasureArea; nameless?: boolean; role?: SessionRole }) {
   const shared = useContext(OpenContext);
   if (!session) {
     return (
@@ -122,10 +126,10 @@ export function SessionLine({ session, area, nameless }: { session: SessionRef |
       </div>
     );
   }
-  if (shared) return <LineBody session={session} nameless={nameless} />;
+  if (shared) return <LineBody session={session} nameless={nameless} role={role} />;
   return (
     <OpenScope key={session.id} area={area}>
-      <LineBody session={session} nameless={nameless} />
+      <LineBody session={session} nameless={nameless} role={role} />
     </OpenScope>
   );
 }

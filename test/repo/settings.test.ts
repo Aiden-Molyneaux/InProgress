@@ -10,8 +10,8 @@ type Settings = { autoCompactWindow?: number; hooks?: Record<string, { matcher?:
 const settings: Settings = JSON.parse(readFileSync(join(repo, '.claude', 'settings.json'), 'utf8'));
 
 describe('.claude/settings.json', () => {
-  it('compacts at 300000 tokens', () => {
-    expect(settings.autoCompactWindow).toBe(300000);
+  it('compacts at 250000 tokens', () => {
+    expect(settings.autoCompactWindow).toBe(250000);
   });
   it('registers the context nudge on PostToolBatch, and its script exists', () => {
     const handlers = (settings.hooks?.PostToolBatch ?? []).flatMap((group) => group.hooks ?? []);

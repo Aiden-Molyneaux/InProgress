@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { EventRow, ProjectSnapshot } from '../../src/core/types';
-import { actorLabel, describeEvent } from '../../web/src/describe';
+import { actorLabel, describeEvent, stripSkips } from '../../web/src/describe';
 import { relativeTime } from '../../web/src/time';
 
 const snapshot = {
@@ -21,6 +21,20 @@ describe('describeEvent', () => {
     expect(describeEvent(ev('log.created', '3', { nodeId: 55 }), snapshot)).toBe('note on #55 2 Android signing');
     expect(describeEvent(ev('session.updated', 's1', { changed: ['state'], state: 'permission' }), snapshot)).toBe('InGame launch status is waiting for a permission');
     expect(describeEvent(ev('session.updated', 's1', { changed: ['focusNodeId'], focusNodeId: 58 }), snapshot)).toBe('InGame launch status is on #58 Run signing tests');
+  });
+
+  it('names the session that starts driving a step, and leaves a cleared driver out of the strip', () => {
+    const withSession = { ...snapshot, sessions: [{ id: 's1', title: 'InGame launch status' }] } as unknown as ProjectSnapshot;
+    const set = ev('node.updated', '58', { changes: { driverSessionId: { from: null, to: 's1' } } });
+    expect(describeEvent(set, withSession)).toBe('InGame launch status drives #58 Run signing tests');
+    // A session the snapshot no longer has reads as "a session", as the strip's other session lines do.
+    expect(describeEvent(ev('node.updated', '58', { changes: { driverSessionId: { from: null, to: 'gone' } } }), snapshot)).toBe('a session drives #58 Run signing tests');
+    expect(stripSkips(set)).toBe(false);
+    expect(stripSkips(ev('node.updated', '58', { changes: { driverSessionId: { from: 's1', to: null } } }))).toBe(true);
+    // Not driver-only: a status change that also clears the driver reads as the status change, and stays on the strip.
+    const done = ev('node.updated', '58', { changes: { status: { from: 'active', to: 'done' }, driverSessionId: { from: 's1', to: null } } });
+    expect(stripSkips(done)).toBe(false);
+    expect(describeEvent(done, withSession)).toBe('#58 Run signing tests → done');
   });
 
   it('describes an ask raised and cleared', () => {
