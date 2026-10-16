@@ -39,19 +39,30 @@ work. A re-hit bumps **Hits** and **Verified**. Entries seeded from the code and
 ## A red deploy or rollback
 - **Symptom:** `npm run deploy` exits non-zero. Before the "▸ Making ... live" step, the last
   thing printed is the failing step's own npm output. After it: "The new build did not start
-  cleanly: rolling back." A red `npm run rollback` prints "The previous build did not start
-  cleanly: run `npm run rollback` again to return to the newer one."
+  cleanly: rolling back." and a "Restart check:" line. A red `npm run rollback` prints "The
+  previous build did not start cleanly: run `npm run rollback` again to return to the newer
+  one." and the same line.
 - **Diagnosis:** the deploy runs type checks, unit tests, smoke when hook, CLI, MCP, server or kit
   files changed, e2e (or only the build) when UI, core or server files changed, then promotes the
   new build (the old one moves to `.deploy/prev`), reinstalls the Claude kit when `claude-check`
-  asks for it, and restarts the server (scripts/deploy.mjs:70-110). A red before the promote
+  asks for it, and restarts the server (scripts/deploy.mjs:75-118). A red before the promote
   leaves the live build untouched. A red restart swaps the previous build back and restarts it.
+  The restart check passes when `/api/health` reports the sha and builtAt in `dist/build.json`
+  (scripts/deploy-lib.mjs:81-108). Its "Restart check:" line gives the build expected, the status,
+  build and body health answered, or the error when it did not answer, or the exit of `start`.
 - **Fix:** red before the promote: fix on the branch, merge, and deploy again (Sigmund, phase 8).
-  Red restart: the deploy swapped the old build back but does not check that it started
-  (scripts/deploy.mjs:104-108), so run `node C:/personal/InProgress/dist/cli/main.js status`,
-  and `start` if it is down; then read `~/.inprogress/server.log` for why the new one did not. Red rollback: run `npm run rollback` once more to return to the newer build,
-  then read `server.log`. All of these run from the main checkout, under the merge gate.
-- **Verified:** 2026-10-14, seeded from the code, not yet hit · **Hits:** 0
+  Red restart: read the "Restart check:" line first. The deploy swaps the old build back and
+  prints a second line if that one did not start either (scripts/deploy.mjs:108-117); then run
+  `node C:/personal/InProgress/dist/cli/main.js status`, and `start` if it is down, and read
+  `~/.inprogress/server.log` for why the new one did not. Red rollback: run `npm run rollback`
+  once more to return to the newer build, then read `server.log`. All of these run from the main
+  checkout, under the merge gate.
+- **Hit 2026-10-16 (#442, 8b796d9):** red restart after every gate passed. The new server logged
+  Ready and was still answering, and health came back inside its 2 s timeout, but the check
+  failed; the deploy then printed nothing on why. That build ran fine on a scratch copy, and
+  `npm run rollback` swapped it back in and passed the check. Cause not proven; the "Restart
+  check:" line was added so the next one says what health returned.
+- **Verified:** 2026-10-16 · **Hits:** 1
 
 ## claude:install from the wrong checkout
 - **Symptom:** every session's hooks run a worktree's build (unmerged behaviour everywhere), or,

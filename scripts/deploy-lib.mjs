@@ -1,5 +1,6 @@
 // Directory moves for `npm run deploy` / `npm run rollback`. Each live tree (dist/, web/dist/) is swapped by renames on
-// one volume, so hooks firing during a deploy see the old or the new build, never a half-written one.
+// one volume, so hooks firing during a deploy see the old or the new build, never a half-written one. Also the check
+// that the restarted server runs the live build, and which test suites a deploy runs.
 import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -70,4 +71,38 @@ export function suitesFor(changed) {
   const paths = changed.map((p) => p.replace(/\\/g, '/'));
   const any = (patterns) => paths.some((p) => patterns.some((re) => re.test(p)));
   return { smoke: any(SMOKE_PATHS), e2e: any(E2E_PATHS) };
+}
+
+/** A build.json as one line: `8b796d9+dirty (2026-10-16T19:31:58.000Z)`. Twin of src/core/build.ts buildLabel, which scripts/ can't import before a build. */
+export const buildLabel = (b) => (b ? `${b.sha}${b.dirty ? '+dirty' : ''} (${b.builtAt})` : 'unknown build');
+
+const BODY_MAX = 500;
+
+/**
+ * Whether the restarted server runs the live build. `live` is dist/build.json (null when unreadable); `seen` is what
+ * GET /api/health gave: `{ status, text }` when it answered, `{ error }` when it did not. Null when the builds match
+ * (same sha and builtAt), else one line saying what health returned against what was expected (#442's red deploy).
+ */
+export function restartCheck(live, seen) {
+  if (seen.error) {
+    // An error that can't be printed must not stop the rollback that follows.
+    try {
+      const { name, message, cause } = seen.error;
+      const said = cause && (cause.message || (Array.isArray(cause.errors) ? cause.errors.map((e) => e?.message).filter(Boolean).join('; ') : '') || String(cause));
+      const why = cause ? ` (${cause.code ? `${cause.code}: ` : ''}${said})` : '';
+      return `/api/health did not answer: ${name}: ${message}${why}`;
+    } catch {
+      return '/api/health did not answer, with an error that could not be printed';
+    }
+  }
+  let running = null;
+  try {
+    running = JSON.parse(seen.text)?.build ?? null;
+  } catch {
+    // Not JSON: the body below says what it was.
+  }
+  if (live && running && running.sha === live.sha && running.builtAt === live.builtAt) return null;
+  const body = !seen.text ? '(empty)' : seen.text.length > BODY_MAX ? `${seen.text.slice(0, BODY_MAX)}... (${seen.text.length} chars)` : seen.text;
+  const expected = live ? `expected ${buildLabel(live)}` : 'dist/build.json is missing or unreadable';
+  return `${expected}; /api/health answered ${seen.status} with ${running ? buildLabel(running) : 'no build'}. Body: ${body}`;
 }
