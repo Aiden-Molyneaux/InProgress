@@ -91,7 +91,7 @@ describe('orchestrate', () => {
     expect(events.find((e) => e.type === 'session.updated')?.data).toMatchObject({ changed: ['role', 'focusNodeId'] });
     const full = orchestrate(ctx, 'session:s1', 's1', { status: true });
     expect(full.opening).toContain('Digest for InGame since');
-    expect(full.opening).toContain(`Reconcile:\n  #${step.id} no_outcome`);
+    expect(full.opening).toContain(`Reconcile:\n  #${step.id} Build tabs: no_outcome`);
     expect(listEventsSince(ctx, mark).filter((e) => e.type === 'session.orchestrate').map((e) => (e.data as { status: boolean }).status)).toEqual([false, true]);
   });
 

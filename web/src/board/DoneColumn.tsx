@@ -10,7 +10,7 @@ export const DONE_SHOWN = 5;
  * Done as a list of boxes (spec 2.2): the title, the outcome clamped to two lines and the marks. "New since you looked"
  * crosses the list where `lastLook` falls. Narrow folds the boxes done before it to one line.
  */
-export function DoneColumn({ boxes, snapshot, now, wide, lastLook, onOpenNode, onOpenResource }: BandProps & { lastLook: string | null }) {
+export function DoneColumn({ board, boxes, snapshot, now, wide, lastLook, onOpenNode, onOpenResource, onOpenDone }: BandProps & { lastLook: string | null }) {
   const rows = boxes.done.slice(0, DONE_SHOWN);
   if (rows.length === 0) return <p className="ip-quiet ip-empty-line">Nothing done yet</p>;
   const completedAt = (b: BoxData) => b.row!.node.completedAt;
@@ -21,7 +21,8 @@ export function DoneColumn({ boxes, snapshot, now, wide, lastLook, onOpenNode, o
   const shown = rows.filter((b) => !folded.includes(b));
   const dividerAfter = fresh.length > 0 ? fresh[fresh.length - 1].row!.node.id : null;
   return (
-    <ol className="ip-list">
+    <>
+      <ol className="ip-list">
       {shown.map((box) => {
         const node = box.row!.node;
         return (
@@ -44,7 +45,11 @@ export function DoneColumn({ boxes, snapshot, now, wide, lastLook, onOpenNode, o
           </Fragment>
         );
       })}
-      {folded.length > 0 && <li className="ip-done-fold">{`✓ ${folded.length} earlier`}</li>}
-    </ol>
+        {folded.length > 0 && <li className="ip-done-fold">{`✓ ${folded.length} earlier`}</li>}
+      </ol>
+      {onOpenDone && (
+        <button type="button" className="ip-done-all" onClick={onOpenDone}>{`All done · ${board.done.length} ›`}</button>
+      )}
+    </>
   );
 }

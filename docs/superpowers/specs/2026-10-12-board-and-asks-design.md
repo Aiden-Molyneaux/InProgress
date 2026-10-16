@@ -374,7 +374,7 @@ resets to worker; compaction and resume keep the role.
 - **Handoffs and the state note.** The scribe's resource tool gains `purpose`. Brief lines: "handoff on #id: "<title>",
   path <file>, snapshot_file" records a doc resource with `purpose = 'handoff'`; `mip-orc` records the state note on the
   root the same way with `purpose = 'state'`, replacing the previous one.
-- Install adds allow rules for `claim`, `ask`, `orchestrate` and `digest`, from the same prefix helper as `tasks`, so none
+- Install adds allow rules for `claim`, `ask`, `orchestrate`, `digest` and (#440) `outline`, from the same prefix helper as `tasks`, so none
   asks for permission. One `claude:install` rerun.
 
 ### 3.4 Briefings

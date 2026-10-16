@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { HOOK_NAMES, type HookName } from '../hooks/handlers';
 import { homeDir } from '../lib/home';
 import { normalizePath } from '../lib/paths';
-import { cliAllowRules, cliPrefix, isCliAllowRule, repoCli, taskPrefix } from '../lib/task-command';
+import { CLI_SUBCOMMANDS, cliAllowRules, cliPrefix, isCliAllowRule, repoCli, taskPrefix } from '../lib/task-command';
 
 /** The allow rules that are the same for every repo: the scribe's tools and its resource snapshots. */
 export const STATIC_ALLOW_RULES = ['mcp__inprogress', 'Edit(~/.inprogress/resources/**)'];
@@ -107,7 +107,7 @@ export function addInProgressHooks(settings: Settings, repo: string): Settings {
 }
 
 /**
- * Every allow rule install writes for a repo: the static ones, then each CLI command a session runs (tasks, claim, ask, orchestrate, digest) in the Bash and the PowerShell
+ * Every allow rule install writes for a repo: the static ones, then each of CLI_SUBCOMMANDS in the Bash and the PowerShell
  * tool, built by the same helper as the command the briefing prints. A repo path with a space gets none of those rules.
  */
 export function allowRules(repo: string): string[] {
@@ -148,11 +148,11 @@ export function removeAllowRules(settings: Settings): Settings {
 
 /**
  * Fills a kit template. Replacer functions keep `$&`-style sequences in a path literal; every path gets forward slashes.
- * `{{TASKS}}`, `{{ORCHESTRATE}}` and `{{DIGEST}}` are those commands' prefixes from the helper the allow rules and the briefing use, so all three match (a repo path with a space is quoted the same way in each).
+ * `{{TASKS}}`, `{{ORCHESTRATE}}`, `{{DIGEST}}` and `{{OUTLINE}}` are those commands' prefixes from the helper the allow rules and the briefing use, so they all match (a repo path with a space is quoted the same way in each).
  */
 export function renderTemplate(text: string, repo: string): string {
-  const values: Record<string, string> = { REPO: repo, NODE: nodeBinary(), RESOURCES: `${homeDir()}/resources`, TASKS: taskPrefix(repoCli(repo)), ORCHESTRATE: cliPrefix(repoCli(repo), 'orchestrate'), DIGEST: cliPrefix(repoCli(repo), 'digest') };
-  return text.replace(/\{\{(REPO|NODE|RESOURCES|TASKS|ORCHESTRATE|DIGEST)\}\}/g, (_match, key: string) => values[key].replace(/\\/g, '/'));
+  const values: Record<string, string> = { REPO: repo, NODE: nodeBinary(), RESOURCES: `${homeDir()}/resources`, TASKS: taskPrefix(repoCli(repo)), ORCHESTRATE: cliPrefix(repoCli(repo), 'orchestrate'), DIGEST: cliPrefix(repoCli(repo), 'digest'), OUTLINE: cliPrefix(repoCli(repo), 'outline') };
+  return text.replace(/\{\{(REPO|NODE|RESOURCES|TASKS|ORCHESTRATE|DIGEST|OUTLINE)\}\}/g, (_match, key: string) => values[key].replace(/\\/g, '/'));
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -307,7 +307,7 @@ export function install(o: { repo: string; claudeDir: string; stamp: string }): 
   if (replaced > 0) log.push(`Replaced ${replaced} existing ${hookEntryLabel(replaced)}`);
   log.push(`Hooks: ${[...new Set(HOOK_DEFS.map((d) => d.event))].join(', ')}`, `Allow rules: ${allowRules(repo).join(', ')}`);
   if (!cliAllowRules(repoCli(repo)).length) {
-    log.push(`Left out the allow rules for the tasks, claim, ask, orchestrate and digest commands: the repo path ${repo} holds a space, which an unquoted path cannot hold and a quoted one never matches in PowerShell. Sessions are asked before each of those commands; a repo path without spaces avoids that.`);
+    log.push(`Left out the allow rules for the ${CLI_SUBCOMMANDS.slice(0, -1).join(', ')} and ${CLI_SUBCOMMANDS[CLI_SUBCOMMANDS.length - 1]} commands: the repo path ${repo} holds a space, which an unquoted path cannot hold and a quoted one never matches in PowerShell. Sessions are asked before each of those commands; a repo path without spaces avoids that.`);
   }
 
   const agentsDir = join(o.claudeDir, 'agents');

@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { archivedProjects, neighbourTab, pickSlug, projectLabel, projectTabs, recentlyDeleted, stepTab, waitingOn } from '../../web/src/chrome/tabs';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { archivedProjects, loadTabOrder, moveTab, neighbourTab, pickSlug, projectLabel, projectTabs, pruneOrder, recentlyDeleted, saveTabOrder, stepTab, tabDropSlot, waitingOn } from '../../web/src/chrome/tabs';
 
 const project = (id: number, status: 'active' | 'archived' = 'active') => ({ id, slug: `p${id}`, status });
 const slugs = (list: { slug: string }[]) => list.map((p) => p.slug);
@@ -24,6 +24,94 @@ describe('projectTabs', () => {
   it('leaves the list it was given alone', () => {
     projectTabs(listed, 'p1');
     expect(slugs(listed)).toEqual(['p3', 'p1', 'p4', 'p2']);
+  });
+
+  it('puts the stored order first and the rest oldest first', () => {
+    expect(slugs(projectTabs(listed, null, [3, 1]))).toEqual(['p3', 'p1', 'p2']);
+    expect(slugs(projectTabs(listed, null, [2]))).toEqual(['p2', 'p1', 'p3']);
+  });
+
+  it('keeps an open archived project last and ignores ids that are not active projects', () => {
+    expect(slugs(projectTabs(listed, 'p4', [4, 99, 3, 2]))).toEqual(['p3', 'p2', 'p1', 'p4']);
+  });
+});
+
+describe('moveTab', () => {
+  const tabs = [project(1), project(2), project(3), project(4, 'archived')];
+
+  it('moves a tab before another, to the front or to the end', () => {
+    expect(moveTab(tabs, 3, 1)).toEqual([3, 1, 2]);
+    expect(moveTab(tabs, 1, 3)).toEqual([2, 1, 3]);
+    expect(moveTab(tabs, 1, null)).toEqual([2, 3, 1]);
+  });
+
+  it('leaves the order as it is for a move before itself', () => {
+    expect(moveTab(tabs, 2, 2)).toEqual([1, 2, 3]);
+  });
+
+  it('ignores the archived tab', () => {
+    expect(moveTab(tabs, 4, 1)).toEqual([1, 2, 3]);
+  });
+});
+
+describe('tabDropSlot', () => {
+  const ids = [1, 2, 3];
+
+  it('drops before the tab in its left half, and before the next one in its right half', () => {
+    expect(tabDropSlot(ids, 2, true, 1)).toBe(2);
+    expect(tabDropSlot(ids, 2, false, 1)).toBe(3);
+  });
+
+  it('drops at the end from the right half of the last tab', () => {
+    expect(tabDropSlot(ids, 3, false, 1)).toBeNull();
+  });
+
+  it('reads a slot that is the dragged tab as the tab after it', () => {
+    expect(tabDropSlot(ids, 2, true, 2)).toBe(3);
+    expect(tabDropSlot(ids, 1, false, 2)).toBe(3);
+    expect(tabDropSlot(ids, 3, true, 3)).toBeNull();
+  });
+
+  it('drops at the end over a tab that is not active', () => {
+    expect(tabDropSlot(ids, 9, true, 1)).toBeNull();
+  });
+});
+
+describe('pruneOrder', () => {
+  it('keeps only the ids of active projects: archived, deleted and purged ones lose their place', () => {
+    const projects = [project(1), project(2, 'archived'), project(3)];
+    expect(pruneOrder([3, 2, 1, 4, 5], projects)).toEqual([3, 1]);
+  });
+});
+
+describe('the stored tab order', () => {
+  const held = new Map<string, string>();
+  beforeEach(() => {
+    held.clear();
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => held.get(k) ?? null,
+      setItem: (k: string, v: string) => void held.set(k, v),
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('round-trips under ip.tabOrder', () => {
+    saveTabOrder([3, 1, 2]);
+    expect(held.get('ip.tabOrder')).toBe('[3,1,2]');
+    expect(loadTabOrder()).toEqual([3, 1, 2]);
+  });
+
+  it('is empty when nothing is stored', () => {
+    expect(loadTabOrder()).toEqual([]);
+  });
+
+  it('rejects junk', () => {
+    held.set('ip.tabOrder', '{"a":1}');
+    expect(loadTabOrder()).toEqual([]);
+    held.set('ip.tabOrder', 'not json');
+    expect(loadTabOrder()).toEqual([]);
+    held.set('ip.tabOrder', '[2,"x",0,-1,1.5,null,2,5]');
+    expect(loadTabOrder()).toEqual([2, 5]);
   });
 });
 

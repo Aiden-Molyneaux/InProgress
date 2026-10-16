@@ -2,6 +2,8 @@
 
 2026-10-09 · step #290 (under #288) · brought over from InThink's routing pilot (inthink-marathon-v3 #273)
 
+**Status (2026-10-14, #421):** the four agents (section 1) and the CLAUDE.md routing are superseded by the Shipwright roster: Sigmund in `.claude/skills/sigmund/`, and Sev, Moh, Murr and Parvati in `.claude/agents/` (Shipwright `docs/roster-spec.md`; the adoption plan is `docs/superpowers/plans/2026-10-13-shipwright-roster.md`). The context nudge hook, the 300k compaction window, `scripts/session-cost.mjs` and the worktree rule stand. The #291 pilot log ends with the switch; #292 reports on the sessions up to it.
+
 ## Goal
 
 Cut the cost of InProgress dev sessions without losing quality, with a setup every session follows without being told. The main session (Opus) keeps the plan and the judgment calls. Work whose output can be checked mechanically goes to cheaper subagents, so their reasoning stays out of the main context. Sessions stay small and hand over to fresh ones.

@@ -231,6 +231,21 @@ describe('session routes', () => {
     const elsewhere = await app.inject({ method: 'POST', url: '/api/sessions/p2/hook', headers: auth, payload: { ...body, cwd: 'C:/elsewhere', branch: 'main' } });
     expect(elsewhere.json()).toEqual({ tracked: false });
   });
+
+  it("reads a session's claimed step for the status line, without a token, and null for no step or no session", async () => {
+    const { app } = setup();
+    const step = (id: string) => app.inject({ url: `/api/sessions/${id}/step` });
+    expect((await step('nobody')).statusCode).toBe(200);
+    expect((await step('nobody')).json()).toEqual({ step: null });
+    const p = (await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'InGame' } })).json();
+    await app.inject({ method: 'POST', url: '/api/sessions/s1/enroll', headers: auth, payload: { project: 'ingame' } });
+    expect((await step('s1')).json()).toEqual({ step: null });
+    const [node] = (await app.inject({ method: 'POST', url: '/api/nodes', headers: auth, payload: { parentId: p.rootNodeId, nodes: [{ title: 'Show titles next to ids' }] } })).json();
+    await app.inject({ method: 'POST', url: '/api/sessions/s1/claim', headers: auth, payload: { nodeId: node.id } });
+    expect((await step('s1')).json()).toEqual({ step: { id: node.id, title: 'Show titles next to ids', status: 'active' } });
+    await app.inject({ method: 'DELETE', url: `/api/nodes/${node.id}`, headers: auth });
+    expect((await step('s1')).json()).toEqual({ step: null });
+  });
 });
 
 describe('live work routes', () => {

@@ -62,7 +62,7 @@ Do not reconstruct history beyond that. As after opting in, the full briefing ar
 
 ## Status questions
 
-When a tracked prompt asks where things stand, the prompt hook injects a live `[InProgress] Where things stand …` block: answer from it. For the whole tree, run `"{{NODE}}" "{{REPO}}/dist/cli/main.js" outline <slug>` (read-only; from PowerShell, start the command with `& `). Never dispatch the scribe just to read.
+When a tracked prompt asks where things stand, the prompt hook injects a live `[InProgress] Where things stand …` block: answer from it. For the whole tree, run `{{OUTLINE}} <slug>` (read-only). Never dispatch the scribe just to read.
 
 ## Stale nudges
 

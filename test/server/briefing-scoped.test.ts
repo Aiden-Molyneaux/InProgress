@@ -161,7 +161,7 @@ describe('orchestrator', () => {
       expect(rules).toContain('a step starts ("focus → #id")');
       const counts = lines.indexOf('Since your last look (3d): 4 done.');
       expect(lines[counts + 1]).toBe('Where things stand:');
-      expect(lines.some((l) => l.startsWith(`Needs you (1): a1 ⚿ on #${t.askedStep.id} "Allow it"`))).toBe(true);
+      expect(lines.some((l) => l.startsWith(`Needs you (1): a1 ⚿ on #${t.askedStep.id} Asked: "Allow it"`))).toBe(true);
       expect(lines.some((l) => l.startsWith('Other sessions here') || l.startsWith('Recent resources') || l.startsWith('Needs you'))).toBe(true);
     }
   });
@@ -215,7 +215,7 @@ describe('the Needs you line', () => {
     setFocus(t.ctx, 'scribe:s2', 's2', t.step.id);
     handleHookEvent(t.ctx, 's2', { event: 'permission' });
     const line = t.brief('s1').find((l) => l.startsWith('Needs you'));
-    expect(line).toBe(`Needs you (3): a${first.id} ? on #${t.askedStep.id} "Which port?" · a${second.id} ◎ on #${t.step.id} "Look" · B waiting for permission on #${t.step.id} (<1m)`);
+    expect(line).toBe(`Needs you (3): a${first.id} ? on #${t.askedStep.id} Asked: "Which port?" · a${second.id} ◎ on #${t.step.id} Build tabs: "Look" · B waiting for permission on #${t.step.id} Build tabs (<1m)`);
   });
 });
 

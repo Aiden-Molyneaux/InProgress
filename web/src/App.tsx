@@ -8,8 +8,9 @@ import { useLastLook } from './board/lastLook';
 import { noteAction, noteHidden, noteShown, setPoster } from './measure';
 import { ActivityStrip } from './chrome/ActivityStrip';
 import type { GoToHandle } from './chrome/GoTo';
-import { archivedProjects, neighbourTab, projectTabs, stepTab } from './chrome/tabs';
+import { archivedProjects, loadTabOrder, moveTab, neighbourTab, projectTabs, pruneOrder, saveTabOrder, stepTab, TAB_ORDER_KEY } from './chrome/tabs';
 import { TopBar } from './chrome/TopBar';
+import { DoneList } from './done/DoneList';
 import { Details } from './panels/Details';
 import { ResourceViewer } from './panels/ResourceViewer';
 import { ProjectView } from './project/ProjectView';
@@ -69,7 +70,27 @@ export function App() {
     () => (snapshot ? snapshot.asks.filter((a) => a.clearedAt === null).length + snapshot.sessions.filter((s) => s.state === 'permission' && isLive(s, now)).length : 0),
     [snapshot, now],
   );
+  // The full done list stands in for the Board while open. Opening it focuses its ‹ Board; going back focuses the Board's
+  // All done button, or the Done heading when nothing is done. Only these two moves take focus: a project switch leaves it.
+  const [doneOpen, setDoneOpen] = useState(false);
+  const doneMoved = useRef(false);
+  const openDone = () => {
+    noteAction('done', 'all');
+    doneMoved.current = true;
+    setDoneOpen(true);
+  };
+  const closeDone = () => {
+    doneMoved.current = true;
+    setDoneOpen(false);
+  };
+  useEffect(() => {
+    if (!doneMoved.current) return;
+    doneMoved.current = false;
+    const to = doneOpen ? ['.ip-donelist-back'] : ['.ip-done-all', '.ip-band-done h3'];
+    to.map((sel) => document.querySelector<HTMLElement>(sel)).find(Boolean)?.focus();
+  }, [doneOpen]);
   const pickView = (v: View) => {
+    setDoneOpen(false);
     if (v === view) return;
     noteAction('header', 'view');
     setView(v);
@@ -77,7 +98,40 @@ export function App() {
     postEvent('view', snapshot?.project.id ?? null, { view: v });
   };
   // The tabs follow the picked slug, not the loaded snapshot, so a tab lights up on the click and [ ] step on from it.
-  const tabs = useMemo(() => projectTabs(projects, state.slug), [projects, state.slug]);
+  // The tab order Aiden dragged, kept in the window's localStorage. A second window follows a move through `storage`.
+  const [order, setOrder] = useState(loadTabOrder);
+  const tabs = useMemo(() => projectTabs(projects, state.slug, order), [projects, state.slug, order]);
+  const orderNow = useRef(order);
+  useLayoutEffect(() => {
+    orderNow.current = order;
+  }, [order]);
+  // A project that left the active list (archived, deleted or purged) loses its place, so it returns at the end. Only
+  // once the server's list has loaded: the empty list before it would drop every place. It runs when this window's list
+  // changes, not when another window's order arrives: that window may already list as active a project this one has
+  // not caught up on, and saving the prune would undo its move.
+  useEffect(() => {
+    if (!state.loaded) return;
+    const kept = pruneOrder(orderNow.current, projects);
+    if (kept.length < orderNow.current.length) {
+      setOrder(kept);
+      saveTabOrder(kept);
+    }
+  }, [projects, state.loaded]);
+  useEffect(() => {
+    const changed = (e: StorageEvent) => {
+      if (e.key === TAB_ORDER_KEY) setOrder(loadTabOrder());
+    };
+    window.addEventListener('storage', changed);
+    return () => window.removeEventListener('storage', changed);
+  }, []);
+  const onMoveTab = (id: number, before: number | null) => {
+    const next = moveTab(tabs, id, before);
+    const shown = tabs.filter((t) => t.status === 'active').map((t) => t.id);
+    if (next.join() === shown.join()) return;
+    setOrder(next);
+    saveTabOrder(next);
+    noteAction('header', 'tab_move');
+  };
   const archived = useMemo(() => archivedProjects(projects), [projects]);
   const stepProject = (step: 1 | -1) => {
     const slug = stepTab(tabs, state.slug, step);
@@ -218,7 +272,7 @@ export function App() {
   return (
     <>
       <div className="ip-app" ref={app}>
-        <TopBar tabs={tabs} archived={archived} deleted={state.deleted} current={state.slug} onSelect={state.selectProject} onAction={onAction} onRename={onRename} goTo={goToField} onGoTo={goTo} view={view} onView={pickView} />
+        <TopBar tabs={tabs} archived={archived} deleted={state.deleted} current={state.slug} onSelect={state.selectProject} onAction={onAction} onRename={onRename} onMove={onMoveTab} goTo={goToField} onGoTo={goTo} view={view} onView={pickView} />
         {state.connection === 'reconnecting' && <div className="ip-banner">Reconnecting to InProgress…</div>}
         <main className="ip-main">
           {projects.length === 0 ? (
@@ -228,8 +282,10 @@ export function App() {
                 : 'No projects yet. In a Claude session, say "track this in InProgress".'}
             </div>
           ) : snapshot ? (
-            view === 'board' ? (
-              <Board key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} lastLook={lastLook} onStatus={say} />
+            view === 'board' && doneOpen ? (
+              <DoneList key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onBack={closeDone} />
+            ) : view === 'board' ? (
+              <Board key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onOpenDone={openDone} lastLook={lastLook} onStatus={say} />
             ) : (
               <ProjectView key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onStatus={say} />
             )
