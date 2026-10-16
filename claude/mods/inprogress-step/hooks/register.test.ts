@@ -5,30 +5,40 @@ const TITLE = "Show each task's title next to its id, in agent text and a status
 
 /**
  * The engine beneath the mod: session `s-1`, a server whose answer `reply` sets (a thrown Error stands for one that is
- * down), and every status line the mod pins, in order. Returns the fetched URLs and the lines.
+ * down; while `hold` has set a gate, each fetch answers only once that gate opens), and every status line the mod pins,
+ * in order. Returns the fetched URLs and the lines.
  */
 function world(on: On, env: Record<string, string> = {}) {
   const urls: string[] = []
   const lines: (string | undefined)[] = []
   let reply: { status: number; text: string } | Error = { status: 200, text: JSON.stringify({ step: null }) }
+  let gate: Promise<void> | undefined
   mock.env(on, env)
   const clock = mock.clock(on)
-  on('session.id', () => 's-1')
+  on('session.id', () => ({ value: 's-1' }))
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('turn.complete', () => ({ text: '' }))
-  on('http.fetch', ($, e) => {
+  on('http.fetch', async ($, e) => {
     urls.push(e.url)
-    if (reply instanceof Error) throw reply
-    return { status: reply.status, ok: reply.status >= 200 && reply.status < 300, headers: {}, text: reply.text }
+    // The answer as it stood when asked, so a fetch held at the gate answers what the server said then.
+    const r = reply
+    const held = gate
+    if (held) await held
+    if (r instanceof Error) throw r
+    return { value: { status: r.status, ok: r.status >= 200 && r.status < 300, headers: {}, text: r.text } }
   })
   on('ui.status', ($, e) => {
     lines.push(e.text)
+    return { value: undefined }
   })
   const answer = (r: typeof reply) => {
     reply = r
   }
   const step = (id: number, title: string, status = 'active') => answer({ status: 200, text: JSON.stringify({ step: { id, title, status } }) })
-  return { urls, lines, clock, answer, step }
+  const hold = (g: Promise<void> | undefined) => {
+    gate = g
+  }
+  return { urls, lines, clock, answer, step, hold }
 }
 
 const START = { cwd: 'C:/work', surface: null, isInteractive: false } as const
@@ -90,4 +100,27 @@ test("rereads at the end of the main loop's turn, not a subagent's", async ($, o
   await $.turn.complete(TURN)
   expect(w.urls).toHaveLength(2)
   expect(w.lines).toEqual(['#441 Claimed mid-turn'])
+})
+
+test("a hung server holds the turn's end two seconds at most, and its late answer never overwrites a newer one", async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  let open!: () => void
+  w.hold(new Promise<void>((resolve) => (open = resolve)))
+  w.step(440, TITLE)
+  let ended = false
+  const turn = $.turn.complete(TURN).then(() => (ended = true))
+  await w.clock.advance(1_999)
+  expect(ended).toBe(false)
+  await w.clock.advance(1)
+  await turn
+  expect(w.lines).toEqual([])
+  // The server is back: the next turn reads the newer claim, then the hung fetch answers with the older one.
+  w.hold(undefined)
+  w.step(441, 'Newer')
+  await $.turn.complete(TURN)
+  open()
+  await w.clock.settle()
+  expect(w.urls).toHaveLength(3)
+  expect(w.lines).toEqual(['#441 Newer'])
 })
