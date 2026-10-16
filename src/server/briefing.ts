@@ -49,7 +49,7 @@ export function updateRules(o: UpdateRulesOptions & { mode?: RulesMode }): strin
     : mode.orchestrator
       ? 'the plan or an order changes ("later: #c, #d" is the unowned order); '
       : 'the plan or an order changes ("queue: #a, #b" is yours, "later: #c, #d" unowned); ';
-  const startClause = mode.scoped ? `a step starts ("${claimCommand(o.sessionId, { cli: o.cli })}" (add --take-over when you inherit the step))` : 'a step starts ("focus → #id")';
+  const startClause = mode.scoped ? `a step starts ("${claimCommand(o.sessionId, { cli: o.cli })}"; add --take-over when you inherit the step)` : 'a step starts ("focus → #id")';
   return [
     'Keeping InProgress current:',
     '- Brief the inprogress-scribe agent (Agent tool, subagent_type "inprogress-scribe", background), at most once per turn, every change batched. Never edit the tree another way, except tasks below.',

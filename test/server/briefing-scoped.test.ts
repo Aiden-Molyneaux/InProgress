@@ -61,7 +61,7 @@ describe('scoped worker with a claimed step', () => {
     expect(lines[2]).toMatch(/^Plan edits go through the inprogress-scribe agent/);
     expect(lines.slice(3, 5)).toEqual(['Playbook:', '  Docs live in docs/planning.']);
     const rules = lines.find((l) => l.startsWith('- Brief when:'))!;
-    expect(rules).toContain(`a step starts ("${CLAIM} s1" (add --take-over when you inherit the step))`);
+    expect(rules).toContain(`a step starts ("${CLAIM} s1"; add --take-over when you inherit the step)`);
     expect(rules).not.toContain('queue:');
     expect(rules).not.toContain('later:');
     expect(rules).not.toContain('the plan or an order changes');

@@ -162,6 +162,8 @@ describe('deriveBoard', () => {
     expect(marksFor({ answer: '' })).toEqual([]);
     expect(marksFor({ answerDeliveredAt: T })).toEqual([]);
     expect(marksFor({}, 'question')).toEqual([]);
+    // A done step has no driver to deliver to, so the mark would only sit there.
+    expect(deriveBoard(input({ nodes: [n(1, null), n(2, 1, { status: 'done', completedAt: T, outcome: 'ok' })], asks: [ask(1, 2, { clearedAt: T, answer: 'land it' })] }), NOW).byId.get(2)?.marks).toEqual([]);
     // row.asks stays the open asks only.
     expect(deriveBoard(input({ nodes: [n(1, null), n(2, 1)], asks: [ask(1, 2, { clearedAt: T, answer: 'x' })] }), NOW).byId.get(2)?.asks).toEqual([]);
   });

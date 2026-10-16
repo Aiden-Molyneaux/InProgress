@@ -1,6 +1,6 @@
 import { sessionActivity } from './activity';
 import { ancestors, buildIndex, dfsOrder, kids } from './tree';
-import { ASK_TRAIL_MS, STALE_SESSION_MS, STALL_MS, TRAIL_MS, sessionTag, type Ask, type ProjectSnapshot, type ResourceMeta, type Session, type TreeNode } from './types';
+import { ASK_TRAIL_MS, STALE_SESSION_MS, STALL_MS, TRAIL_MS, ownerTag, type Ask, type ProjectSnapshot, type ResourceMeta, type Session, type TreeNode } from './types';
 
 export type Column = 'now' | 'next' | 'backlog' | 'done';
 export const MARKS = ['ended_open', 'no_outcome', 'stale_ask', 'done_focus', 'deep', 'stalled', 'answer_waiting'] as const;
@@ -76,10 +76,9 @@ function idleSpan(iso: string, now: number): string {
 export function reconcileLine(row: Pick<BoardRow, 'node' | 'driver' | 'sessions'>, mark: Mark, now: number): string {
   const head = `#${row.node.id} ${mark}`;
   if (mark !== 'stalled') return head;
-  const tag = (s: Session) => sessionTag(s.slot) || '?';
   const d = row.driver;
-  if (d === null) return `${head}: driver not live · on it: ${row.sessions.map(tag).join(', ')}`;
-  return `${head}: ${tag(d)} idle ${idleSpan(d.lastSeenAt, now)} · branch ${d.branch ?? '?'} · cwd ${d.cwd ?? '?'}`;
+  if (d === null) return `${head}: driver not live · on it: ${row.sessions.map((s) => ownerTag(s.slot)).join(', ')}`;
+  return `${head}: ${ownerTag(d.slot)} idle ${idleSpan(d.lastSeenAt, now)} · branch ${d.branch ?? '?'} · cwd ${d.cwd ?? '?'}`;
 }
 
 /** Places every step of the snapshot (spec 1.5) and marks the ones that need tidying (spec 1.6). */
@@ -152,8 +151,8 @@ export function deriveBoard(input: BoardInput, now: number): Board {
     if (asks.some((a) => now - Date.parse(a.raisedAt) > ASK_TRAIL_MS)) marks.push('stale_ask');
     if (crumb.length >= 3) marks.push('deep');
     if (node.status === 'active' && node.assignee !== 'me' && isStalled(driver, sessions, asks, now)) marks.push('stalled');
-    // A question's answer is its outcome, not owed work (Review Focus 5).
-    if (node.kind !== 'question' && answerWaiting.has(node.id)) marks.push('answer_waiting');
+    // A question's answer is its outcome, not owed work (Review Focus 5). A done step has no driver to deliver to.
+    if (node.kind !== 'question' && node.status !== 'done' && answerWaiting.has(node.id)) marks.push('answer_waiting');
     byId.set(node.id, {
       node, column, crumb, sessions, driver, asks, marks,
       queueNumber: column === 'next' ? (queueNumber.get(node.id) ?? null) : null,
