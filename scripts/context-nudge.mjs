@@ -1,19 +1,21 @@
 #!/usr/bin/env node
 // PostToolBatch hook, registered in .claude/settings.json. Claude cannot see its own context size, so this tells
-// the main session when it crosses 150k and again at 160k, the points where Sigmund (Across the session) asks it to cut at the next
-// clean point. It keeps the highest level it has announced for each session in a small file, so a level is said once
-// and a turn that ended without a tool call cannot hide a crossing; a fall below 150k (a compaction) re-arms it. A
-// session's first run writes that file too, which is how a pilot checks the hook runs. Silent otherwise, silent
-// inside subagents, and it exits 0 whatever happens: a nudge must never block.
+// the main session when it crosses 150k (ask Aiden for /compact at the next clean point) and again at 200k (carry on;
+// the autocompact at 250k is the backstop). It keeps the highest level it has announced for each session in a small
+// file, so a level is said once and a turn that ended without a tool call cannot hide a crossing. A fall below 150k
+// with a level stored is a compaction: it says the post-compaction line once and re-arms. A session's first run writes
+// that file too, which is how a pilot checks the hook runs. Silent otherwise, silent inside subagents, and it exits 0
+// whatever happens: a nudge must never block.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 /** Highest level first: the first one the context has reached is the one due. */
 const LINES = [
-  [160_000, 'Context is about 160k tokens. Cut the session at the next clean point: write the handoff, offer the next session, and stop. On an unattended overnight run, write the handoff and carry on with the next queued item instead. (.claude/skills/sigmund/SKILL.md, Across the session)'],
-  [150_000, "Context is about 150k tokens. Finish what you're on, then at the next clean point (a merge, or a finished plan task with everything committed) write the handoff and cut the session. On an unattended overnight run, write the handoff and carry on instead. (.claude/skills/sigmund/SKILL.md, Across the session)"],
+  [200_000, 'Context is about 200k tokens. If Aiden has not compacted, carry on; the autocompact at 250k is the backstop.'],
+  [150_000, "Context is about 150k tokens. Finish what you're on, commit, and at the next clean point ask Aiden to run /compact with a line naming your plan, branch and open findings. Do not cut the session. Unattended, carry on: the 250k autocompact is the reset."],
 ];
+const COMPACTED = 'Context was compacted. If you are running Sigmund, reload him (.claude/skills/sigmund/SKILL.md) and reread your plan file and the step block before you go on.';
 const STATE_DIR = process.env.CONTEXT_NUDGE_STATE_DIR || path.join(os.tmpdir(), 'claude-context-nudge');
 const TAIL = 512 * 1024;
 const MAX_TAIL = 8 * 1024 * 1024;
@@ -61,7 +63,7 @@ function newestContext(file) {
   }
 }
 
-/** The level last announced for a session (0, 150000 or 160000); undefined if its state file is missing or unreadable. */
+/** The level last announced for a session (0, 150000 or 200000); undefined if its state file is missing or unreadable. */
 function readLevel(file) {
   try {
     const { level } = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -74,6 +76,10 @@ function readLevel(file) {
 function writeLevel(file, level) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify({ level }));
+}
+
+function say(input, additionalContext) {
+  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: input.hook_event_name ?? 'PostToolBatch', additionalContext } }));
 }
 
 try {
@@ -89,12 +95,14 @@ try {
       if (due[0] > (level ?? 0)) {
         // Recorded before it is said: if the state cannot be written, say nothing rather than repeat it every batch.
         writeLevel(file, due[0]);
-        process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: input.hook_event_name ?? 'PostToolBatch', additionalContext: due[1] } }));
+        say(input, due[1]);
       }
     } else if (cur === undefined ? level === undefined : level !== 0) {
       // Below 150k: a level still set means a compaction, and a missing file is the session's first run. With no
       // usage line in reach (a huge tool result), keep what was announced: only a real reading can re-arm it.
       writeLevel(file, 0);
+      // A stored level above 0 that is now below 150k is a compaction; a first run (no level) says nothing.
+      if (cur !== undefined && level > 0) say(input, COMPACTED);
     }
   }
 } catch {
