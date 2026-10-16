@@ -297,8 +297,7 @@ li.ip-orow:hover { background: var(--panel-2); }
 .ip-answer { display: block; width: 100%; margin-top: 3px; padding: 4px 8px; font: inherit; font-size: var(--fs-m); line-height: 18px; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); }
 .ip-answer:focus { outline: 2px solid var(--text-2); outline-offset: 1px; }
 .ip-problem { font-size: var(--fs-s); line-height: 14px; color: var(--amber-ink); }
-/* Rows: a hairline-bound block that opens Details on a click. */
-.ip-row { cursor: pointer; }
+/* Row parts: the title that opens Details, the id, docs and marks. */
 .ip-id { color: var(--muted); font-family: var(--font-mono); }
 .ip-row-title { max-width: 100%; text-align: left; font-size: var(--fs-m); line-height: 18px; font-weight: var(--w-text); color: var(--text-2); overflow-wrap: anywhere; }
 .ip-row-title:hover { color: var(--text); text-decoration: underline; }
@@ -372,7 +371,7 @@ button.ip-card-title:hover { color: var(--text); text-decoration: underline; }
 .ip-st.backlog { color: var(--faint); }
 /* The row's own buttons show on hover and whenever focus is inside the row, so Tab reaches them and shows them. */
 .ip-hover-act { margin-left: auto; height: 18px; padding: 0 6px; border: 1px solid var(--border); border-radius: var(--radius); font-size: var(--fs-s); line-height: 14px; color: var(--muted); background: var(--bg); opacity: 0; }
-.ip-row:hover .ip-hover-act, .ip-row:focus-within .ip-hover-act, .ip-card:hover .ip-hover-act, .ip-card:focus-within .ip-hover-act, .ip-hover-act:focus-visible { opacity: 1; }
+.ip-card:hover .ip-hover-act, .ip-card:focus-within .ip-hover-act, .ip-hover-act:focus-visible { opacity: 1; }
 .ip-hover-act + .ip-hover-act { margin-left: 4px; }
 .ip-hover-act:hover { color: var(--text); background: var(--panel-2); }
 .ip-hover-act:focus-visible, .ip-fold:focus-visible, .ip-quick-add:focus { outline: 2px solid var(--text-2); outline-offset: 1px; }

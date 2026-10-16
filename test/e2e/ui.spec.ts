@@ -2344,6 +2344,10 @@ test.describe('Board', () => {
     await page.keyboard.press('Enter');
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeFocused();
+    // While the confirm is open the box's title is out of the Tab order, and Escape anywhere in the box closes the confirm.
+    await expect(title).toHaveAttribute('tabindex', '-1');
+    await page.keyboard.press('Shift+Tab');
+    await expect(dialog.getByRole('button', { name: 'Delete', exact: true })).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
     await expect(del).toBeFocused();

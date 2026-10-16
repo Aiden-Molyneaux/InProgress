@@ -134,8 +134,8 @@ export function SessionLine({ session, area, nameless, role }: { session: Sessio
   );
 }
 
-/** What a cell sets on the box's `li` itself: drag and drop, and the Backlog confirm's press and busy state. */
-type LiProps = Pick<LiHTMLAttributes<HTMLLIElement>, 'draggable' | 'onDragStart' | 'onDragEnd' | 'onDragOver' | 'onDrop' | 'onMouseDown' | 'aria-busy'>;
+/** What a cell sets on the box's `li` itself: drag and drop, and the Backlog confirm's press, Escape and busy state. */
+type LiProps = Pick<LiHTMLAttributes<HTMLLIElement>, 'draggable' | 'onDragStart' | 'onDragEnd' | 'onDragOver' | 'onDrop' | 'onMouseDown' | 'onKeyDown' | 'aria-busy'>;
 
 /**
  * The one box every Board cell shares (the round-3 mock's `box()`): the top (id, the cell's extra, the state pill and its
@@ -157,7 +157,7 @@ export function TaskBox({ box, now, area, docs = 0, extra, system, children, cla
   li?: LiProps;
   /** No hue on the left edge, whatever the state. */
   noHue?: boolean;
-  /** A click does not open Details: a confirm is open in the box, or it waits on a delete. */
+  /** A click does not open Details and Tab passes the title by: a confirm is open in the box, or it waits on a delete. */
   still?: boolean;
   onOpenNode: (id: number) => void;
   onOpenResource: (id: number) => void;
@@ -184,7 +184,7 @@ export function TaskBox({ box, now, area, docs = 0, extra, system, children, cla
         </span>
       </div>
       {node ? (
-        <button type="button" className="ip-row-title ip-card-title">{node.title}</button>
+        <button type="button" className="ip-row-title ip-card-title" tabIndex={still ? -1 : undefined}>{node.title}</button>
       ) : (
         <span className="ip-card-title">{session ? sessionDisplayTitle(session) : ''}</span>
       )}

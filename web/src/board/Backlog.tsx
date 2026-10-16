@@ -101,7 +101,7 @@ export function Backlog({ boxes, snapshot, now, projectId, slug, onStatus, onOpe
                   area="backlog"
                   docs={snapshot.resources.filter((r) => r.nodeId === row.node.id).length}
                   system={endedLine(row, snapshot.pastSessions, now)}
-                  className={`ip-backlog-row${waiting ? ' pending' : ''}`}
+                  className={`ip-backlog-row${waiting ? ' pending' : ''}${asking ? ' confirming' : ''}`}
                   noHue
                   still={asking || waiting}
                   li={{
@@ -121,6 +121,12 @@ export function Backlog({ boxes, snapshot, now, projectId, slug, onStatus, onOpe
                       e.preventDefault();
                       const confirm = e.currentTarget.querySelector<HTMLElement>('.ip-confirm');
                       if (confirm && !confirm.contains(document.activeElement)) confirm.focus();
+                    } : undefined,
+                    // Escape anywhere in the confirming box closes the confirm.
+                    onKeyDown: asking ? (e) => {
+                      if (e.key !== 'Escape') return;
+                      e.stopPropagation();
+                      cancel(row.node.id);
                     } : undefined,
                   }}
                   extra={asking ? undefined : (
@@ -147,11 +153,6 @@ export function Backlog({ boxes, snapshot, now, projectId, slug, onStatus, onOpe
                       aria-describedby={`bl${row.node.id}d`}
                       tabIndex={-1}
                       data-act
-                      onKeyDown={(e) => {
-                        if (e.key !== 'Escape') return;
-                        e.stopPropagation();
-                        cancel(row.node.id);
-                      }}
                     >
                       <b id={`bl${row.node.id}q`}>Delete #{row.node.id} {row.node.title}?</b>
                       <p id={`bl${row.node.id}d`}>It can't be undone.</p>
