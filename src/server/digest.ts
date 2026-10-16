@@ -1,5 +1,5 @@
 import { deriveBoard, type Mark } from '../core/board';
-import { stepRef } from '../core/step-ref';
+import { clipLine, stepRef } from '../core/step-ref';
 import { ASK_GLYPHS, STALE_SESSION_MS, TRAIL_MS, askTag, sessionTag, type Ask, type ProjectSnapshot } from '../core/types';
 import type { Ctx } from './db/tx';
 import { listAsksClearedSince, listAsksRaisedSince } from './repo/asks';
@@ -198,10 +198,7 @@ const clock = (iso: string): string => {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 
-const clip = (text: string, max = TEXT_MAX): string => {
-  const line = text.replace(/\s+/g, ' ').trim();
-  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
-};
+const clip = (text: string, max = TEXT_MAX): string => clipLine(text, max);
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
 /** Sessions that ended without a handoff. */

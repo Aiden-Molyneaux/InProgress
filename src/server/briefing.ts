@@ -1,5 +1,5 @@
 import { sessionActivity } from '../core/activity';
-import { stepRef } from '../core/step-ref';
+import { clipLine, stepRef } from '../core/step-ref';
 import { deriveBoard, isLive } from '../core/board';
 import { formatUpNext, type QueueView } from '../core/layout';
 import { ancestors, buildIndex, dfsOrder, kids, progress, type TreeIndex } from '../core/tree';
@@ -181,15 +181,10 @@ export function spanAgo(iso: string, now: number): string {
   return `${Math.floor(age / DAY_MS)}d`;
 }
 
-const clipText = (text: string, max = 60): string => {
-  const line = text.replace(/\s+/g, ' ').trim();
-  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
-};
-
 /** `a7 ? on #42 Pick a port: "Which port?" (3d)`: an open ask as the Needs you line names it, with its age once it is a day old. */
 export function askItem(a: Ask, now: number, stepTitle?: string): string {
   const age = askAge(a.raisedAt, now);
-  return `${askTag(a.id)} ${ASK_GLYPHS[a.kind]} on ${stepRef(a.nodeId, stepTitle, NAMED_STEP_MAX)}: "${clipText(a.text)}"${age ? ` (${age})` : ''}`;
+  return `${askTag(a.id)} ${ASK_GLYPHS[a.kind]} on ${stepRef(a.nodeId, stepTitle, NAMED_STEP_MAX)}: "${clipLine(a.text, 60)}"${age ? ` (${age})` : ''}`;
 }
 
 /** A step's title where a briefing line only names it: shorter than the digest's, since a briefing reaches every prompt. */

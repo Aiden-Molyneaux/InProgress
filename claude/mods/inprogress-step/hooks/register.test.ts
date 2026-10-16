@@ -65,18 +65,18 @@ test('reads INPROGRESS_PORT when it names a port, as the CLI and hooks do', asyn
   expect(w.urls).toEqual(['http://127.0.0.1:4405/api/sessions/s-1/step'])
 })
 
-test('shows nothing for no claim, and clears quietly when the server is down, errs or answers something else', async ($, on) => {
+test('clears at start for no claim, and clears quietly when the server is down, errs or answers something else', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
-  // No claim at start: the line was never set, so nothing is pinned.
-  expect(w.lines).toEqual([])
+  // No claim at start: the first reread after a load always sets the line, so one a reload left pinned is cleared.
+  expect(w.lines).toEqual([undefined])
   for (const bad of [new Error('connect ECONNREFUSED'), { status: 500, text: '{}' }, { status: 200, text: '<html>' }, { status: 200, text: '{"step":{"id":"x"}}' }]) {
     w.step(440, TITLE)
     await w.clock.advance(30_000)
     w.answer(bad)
     await w.clock.advance(30_000)
   }
-  expect(w.lines).toEqual(Array.from({ length: 4 }, () => ["#440 Show each task's title next to its id, in agent t…", undefined]).flat())
+  expect(w.lines).toEqual([undefined, ...Array.from({ length: 4 }, () => ["#440 Show each task's title next to its id, in agent t…", undefined]).flat()])
 })
 
 test('rereads every half minute, and pins the line again only when it changed', async ($, on) => {
@@ -99,7 +99,7 @@ test("rereads at the end of the main loop's turn, not a subagent's", async ($, o
   expect(w.urls).toHaveLength(1)
   await $.turn.complete(TURN)
   expect(w.urls).toHaveLength(2)
-  expect(w.lines).toEqual(['#441 Claimed mid-turn'])
+  expect(w.lines).toEqual([undefined, '#441 Claimed mid-turn'])
 })
 
 test("a hung server holds the turn's end two seconds at most, and its late answer never overwrites a newer one", async ($, on) => {
@@ -114,7 +114,7 @@ test("a hung server holds the turn's end two seconds at most, and its late answe
   expect(ended).toBe(false)
   await w.clock.advance(1)
   await turn
-  expect(w.lines).toEqual([])
+  expect(w.lines).toEqual([undefined])
   // The server is back: the next turn reads the newer claim, then the hung fetch answers with the older one.
   w.hold(undefined)
   w.step(441, 'Newer')
@@ -122,5 +122,54 @@ test("a hung server holds the turn's end two seconds at most, and its late answe
   open()
   await w.clock.settle()
   expect(w.urls).toHaveLength(3)
-  expect(w.lines).toEqual(['#441 Newer'])
+  expect(w.lines).toEqual([undefined, '#441 Newer'])
+})
+
+test('a hung server holds the start two seconds at most, and the timer skips while its last reread hangs', async ($, on) => {
+  const w = world(on)
+  let open!: () => void
+  w.hold(new Promise<void>((resolve) => (open = resolve)))
+  w.step(440, TITLE)
+  let started = false
+  const start = $.session.start(START).then(() => (started = true))
+  await w.clock.advance(1_999)
+  expect(started).toBe(false)
+  await w.clock.advance(1)
+  await start
+  // The first tick's reread hangs too, so the next two ticks start none.
+  await w.clock.advance(30_000)
+  await w.clock.advance(30_000)
+  await w.clock.advance(30_000)
+  expect(w.urls).toHaveLength(2)
+  // The server answers: the tick's reread is the newest, and once it is done the timer rereads again.
+  open()
+  await w.clock.settle()
+  expect(w.lines).toEqual(["#440 Show each task's title next to its id, in agent t…"])
+  await w.clock.advance(30_000)
+  expect(w.urls).toHaveLength(3)
+})
+
+test("while the server is failing, a turn's end rereads without waiting, and shows the claim once it answers", async ($, on) => {
+  const w = world(on)
+  w.answer(new Error('connect ECONNREFUSED'))
+  await $.session.start(START)
+  let open!: () => void
+  w.hold(new Promise<void>((resolve) => (open = resolve)))
+  w.step(440, TITLE)
+  let ended = false
+  void $.turn.complete(TURN).then(() => (ended = true))
+  // The clock never moves: a turn's end that waited on the reread would still be held.
+  await w.clock.settle()
+  expect(ended).toBe(true)
+  expect(w.urls).toHaveLength(2)
+  open()
+  await w.clock.settle()
+  expect(w.lines).toEqual([undefined, "#440 Show each task's title next to its id, in agent t…"])
+})
+
+test('never splits an emoji that straddles the clip, so no lone surrogate reaches the line', async ($, on) => {
+  const w = world(on)
+  w.step(1, `${'x'.repeat(48)}\u{1F600} and more`)
+  await $.session.start(START)
+  expect(w.lines).toEqual([`#1 ${'x'.repeat(48)}…`])
 })
