@@ -1767,6 +1767,35 @@ test.describe('Board', () => {
     await expect(page.locator('.ip-bands li.ip-card', { has: page.getByRole('button', { name: 'Run signing tests', exact: true }) })).toHaveCount(1);
   });
 
+  test('Backlog boxes share the task box with no hue, under their parent line', async ({ page, api, fresh }) => {
+    // A Blocked step that sits in Backlog holds a hue by the state rule; the fold still shows none.
+    await write(api, fresh.session, 'patch', `/api/nodes/${fresh.ids['5 Store listing']}`, { status: 'blocked' });
+    const snapshot = (await (await api.get(`/api/projects/${fresh.slug}`)).json()) as { nodes: { id: number; hue: number | null }[] };
+    expect(snapshot.nodes.find((n) => n.id === fresh.ids['5 Store listing'])?.hue).not.toBeNull();
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const next = band(page, 'next');
+    await next.getByRole('button', { name: /^Backlog · \d+ [▸▾]$/ }).click();
+    const group = next.getByRole('region', { name: 'Backlog under Road to market' });
+    await expect(group.locator('.ip-group-line')).toHaveText('Road to market');
+    const boxes = next.locator('.ip-backlog li.ip-card');
+    expect(await boxes.count()).toBeGreaterThan(1);
+    const box = group.locator('li.ip-card', { has: page.getByRole('button', { name: '4 Build to GitHub', exact: true }) });
+    await expect(box.locator('.ip-sid')).toHaveText(`#${fresh.ids['4 Build to GitHub']}`);
+    await expect(box.locator('.ip-st')).toHaveText('Backlog');
+    await expect(box.locator('.ip-card-top .ip-time')).toBeVisible();
+    await expect(box.locator('.ip-foot')).toBeVisible();
+    await expect(box.locator('.ip-sess')).toHaveCount(0);
+    const blocked = group.locator('li.ip-card', { has: page.getByRole('button', { name: '5 Store listing', exact: true }) });
+    await expect(blocked.locator('.ip-st')).toHaveText('Blocked');
+    for (const b of await boxes.all()) expect(await b.getAttribute('style')).toBeNull();
+    // A click on the box opens Details; its own buttons do not.
+    await box.getByRole('button', { name: 'to Next' }).focus();
+    await expect(box.getByRole('button', { name: 'to Next' })).toHaveCSS('opacity', '1');
+    await box.click({ position: { x: 4, y: 4 } });
+    await expect(page.getByRole('complementary')).toHaveCount(1);
+  });
+
   test('narrow: the bands stack as Needs me, Now, Next, Done, and a Now box has no breadcrumb', async ({ page, fresh }) => {
     await page.setViewportSize(NARROW);
     await open(page, fresh);
@@ -2272,8 +2301,10 @@ test.describe('Board', () => {
     const title = page.getByRole('button', { name: '4 Build to GitHub', exact: true });
     const toNext = next.locator('.ip-backlog-row', { has: title }).getByRole('button', { name: 'to Next' });
     await expect(toNext).toHaveCSS('opacity', '0');
+    // The box's own buttons sit in its top line, before the title.
     await title.focus();
-    await page.keyboard.press('Tab');
+    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Shift+Tab');
     await expect(toNext).toBeFocused();
     await expect(toNext).toHaveCSS('opacity', '1');
     await page.keyboard.press('Enter');
@@ -2307,8 +2338,7 @@ test.describe('Board', () => {
     const dialog = page.getByRole('dialog', { name: `Delete #${id} 6 Beta?` });
     await expect(del).toHaveCSS('opacity', '0');
     await title.focus();
-    await page.keyboard.press('Tab');
-    await page.keyboard.press('Tab');
+    await page.keyboard.press('Shift+Tab');
     await expect(del).toBeFocused();
     await expect(del).toHaveCSS('opacity', '1');
     await page.keyboard.press('Enter');

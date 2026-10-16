@@ -1,5 +1,5 @@
 /** The rows a band or a panel lists, as a focus walk sees them. A pending row (a Backlog delete waiting for its answer) is about to leave too, so it is passed over. */
-const ROWS = 'li.ip-row:not(.pending), li.ip-card, li.ip-dask:not(.cleared)';
+const ROWS = 'li.ip-row, li.ip-card:not(.pending), li.ip-dask:not(.cleared)';
 
 /**
  * Where focus goes when `row` is about to leave (spec 2.2): the title button of the next row in its band or panel, else

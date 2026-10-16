@@ -134,14 +134,16 @@ export function SessionLine({ session, area, nameless, role }: { session: Sessio
   );
 }
 
-type DragProps = Pick<LiHTMLAttributes<HTMLLIElement>, 'draggable' | 'onDragStart' | 'onDragEnd' | 'onDragOver' | 'onDrop'>;
+/** What a cell sets on the box's `li` itself: drag and drop, and the Backlog confirm's press and busy state. */
+type LiProps = Pick<LiHTMLAttributes<HTMLLIElement>, 'draggable' | 'onDragStart' | 'onDragEnd' | 'onDragOver' | 'onDrop' | 'onMouseDown' | 'aria-busy'>;
 
 /**
  * The one box every Board cell shares (the round-3 mock's `box()`): the top (id, the cell's extra, the state pill and its
  * age), the title, the cell's body, an optional system line, and the foot (marks, documents, label). The task hue sits on
- * the left edge. A box with no step (a permission wait on no step) has no id and a plain title.
+ * the left edge, unless `noHue` (the Backlog fold wears none). A box with no step (a permission wait on no step) has no
+ * id and a plain title.
  */
-export function TaskBox({ box, now, area, docs = 0, extra, system, children, className = '', drag, onOpenNode, onOpenResource }: {
+export function TaskBox({ box, now, area, docs = 0, extra, system, children, className = '', li, noHue = false, still = false, onOpenNode, onOpenResource }: {
   box: BoxData;
   now: number;
   area: MeasureArea;
@@ -152,7 +154,11 @@ export function TaskBox({ box, now, area, docs = 0, extra, system, children, cla
   system?: string | null;
   children?: ReactNode;
   className?: string;
-  drag?: DragProps;
+  li?: LiProps;
+  /** No hue on the left edge, whatever the state. */
+  noHue?: boolean;
+  /** A click does not open Details: a confirm is open in the box, or it waits on a delete. */
+  still?: boolean;
   onOpenNode: (id: number) => void;
   onOpenResource: (id: number) => void;
 }) {
@@ -165,9 +171,9 @@ export function TaskBox({ box, now, area, docs = 0, extra, system, children, cla
       className={`ip-card st-${pill.cls}${className ? ` ${className}` : ''}`}
       data-node={node?.id}
       data-state={state}
-      style={hueStyle(box)}
-      onClick={node ? rowClick(area, () => onOpenNode(node.id)) : undefined}
-      {...drag}
+      style={noHue ? undefined : hueStyle(box)}
+      onClick={node && !still ? rowClick(area, () => onOpenNode(node.id)) : undefined}
+      {...li}
     >
       <div className="ip-card-top">
         {node && <span className="ip-sid">#{node.id}</span>}

@@ -1,29 +1,34 @@
-import type { BoardRow } from '../../../src/core/board';
 import type { TreeNode } from '../../../src/core/types';
+import type { TaskBox as BoxData } from '../../../src/core/taskState';
 import { useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { deleteStep } from '../api';
 import { noteAction } from '../measure';
 import { focusTargetAfter } from './focus';
-import { endedLine, LabelChip, rowClick, StepMarks } from './Marks';
+import { endedLine } from './Marks';
 import type { BandProps } from './bandProps';
+import { TaskBox } from './TaskBox';
 
-/** Backlog rows grouped by parent, in the order the parents first appear; rows at the top level come first with no line. */
-export function groupByParent(rows: BoardRow[]): { parent: TreeNode | null; rows: BoardRow[] }[] {
-  const groups = new Map<number, { parent: TreeNode | null; rows: BoardRow[] }>();
-  for (const row of rows) {
-    const parent = row.crumb[row.crumb.length - 1] ?? null;
+/** Backlog boxes grouped by parent, in the order the parents first appear; boxes at the top level come first with no line. */
+export function groupByParent(boxes: BoxData[]): { parent: TreeNode | null; boxes: BoxData[] }[] {
+  const groups = new Map<number, { parent: TreeNode | null; boxes: BoxData[] }>();
+  for (const box of boxes) {
+    const crumb = box.row!.crumb;
+    const parent = crumb[crumb.length - 1] ?? null;
     const key = parent?.id ?? 0;
-    const group = groups.get(key) ?? { parent, rows: [] };
-    group.rows.push(row);
+    const group = groups.get(key) ?? { parent, boxes: [] };
+    group.boxes.push(box);
     groups.set(key, group);
   }
   return [...groups.entries()].sort(([a], [b]) => (a === 0 ? 0 : 1) - (b === 0 ? 0 : 1)).map(([, g]) => g);
 }
 
-/** The open Backlog: one-line rows under their parent's title, each draggable, with "to Next" shown on hover and on focus. */
-export function Backlog({ rows, snapshot, now, projectId, slug, onStatus, onOpenNode, onOpenResource, onDragStart, onDragEnd, onToNext }: Pick<BandProps, 'snapshot' | 'now' | 'onOpenNode' | 'onOpenResource' | 'onStatus'> & {
-  rows: BoardRow[];
+/**
+ * The open Backlog: task boxes with no hue under their parent's title, each draggable, with "to Next" and "Delete…" shown
+ * on hover and on focus. "Delete…" opens its confirm inside the box.
+ */
+export function Backlog({ boxes, snapshot, now, projectId, slug, onStatus, onOpenNode, onOpenResource, onDragStart, onDragEnd, onToNext }: Pick<BandProps, 'snapshot' | 'now' | 'onOpenNode' | 'onOpenResource' | 'onStatus'> & {
+  boxes: BoxData[];
   projectId: number;
   slug: string;
   onDragStart: (id: number) => void;
@@ -37,7 +42,7 @@ export function Backlog({ rows, snapshot, now, projectId, slug, onStatus, onOpen
   const root = useRef<HTMLDivElement>(null);
   /** The band heading, for when the confirm's row leaves and takes focus with it. */
   const heading = useRef<HTMLElement | null>(null);
-  const ids = rows.map((r) => r.node.id).join(',');
+  const ids = boxes.map((b) => b.row!.node.id).join(',');
   // Cancel takes focus when a confirm opens.
   useEffect(() => {
     if (confirming === null) return;
@@ -74,45 +79,66 @@ export function Backlog({ rows, snapshot, now, projectId, slug, onStatus, onOpen
     if (result === 'reload') window.location.reload();
     else onStatus?.(result);
   };
-  if (rows.length === 0) return <p className="ip-quiet ip-empty-line">Backlog is empty</p>;
+  if (boxes.length === 0) return <p className="ip-quiet ip-empty-line">Backlog is empty</p>;
   /** The server refuses a step with any step under it, done or dropped ones too. */
   const parents = new Set(snapshot.nodes.map((n) => n.parentId));
   const hasKids = (id: number) => parents.has(id);
   return (
     <div className="ip-backlog-groups" ref={root}>
-      {groupByParent(rows).map((g) => (
+      {groupByParent(boxes).map((g) => (
         <section key={g.parent?.id ?? 0} className="ip-backlog-group" aria-label={g.parent ? `Backlog under ${g.parent.title}` : 'Backlog at the top level'}>
           {g.parent && <div className="ip-group-line" title={g.parent.title}>{g.parent.title}</div>}
-          <ul>
-            {g.rows.map((row) => {
-              const ended = endedLine(row, snapshot.pastSessions, now);
+          <ul className="ip-list">
+            {g.boxes.map((box) => {
+              const row = box.row!;
               const asking = confirming === row.node.id;
               const waiting = pending.includes(row.node.id);
               return (
-                <li
+                <TaskBox
                   key={row.node.id}
-                  className={`ip-row ip-backlog-row${waiting ? ' pending' : ''}`}
-                  aria-busy={waiting || undefined}
-                  data-node={row.node.id}
-                  draggable={!asking && !waiting}
-                  onDragStart={(e) => {
-                    if (asking || waiting) return e.preventDefault();
-                    e.dataTransfer.effectAllowed = 'move';
-                    e.dataTransfer.setData('text/plain', String(row.node.id));
-                    onDragStart(row.node.id);
+                  box={box}
+                  now={now}
+                  area="backlog"
+                  docs={snapshot.resources.filter((r) => r.nodeId === row.node.id).length}
+                  system={endedLine(row, snapshot.pastSessions, now)}
+                  className={`ip-backlog-row${waiting ? ' pending' : ''}`}
+                  noHue
+                  still={asking || waiting}
+                  li={{
+                    'aria-busy': waiting || undefined,
+                    draggable: !asking && !waiting,
+                    onDragStart: (e) => {
+                      if (asking || waiting) return e.preventDefault();
+                      e.dataTransfer.effectAllowed = 'move';
+                      e.dataTransfer.setData('text/plain', String(row.node.id));
+                      onDragStart(row.node.id);
+                    },
+                    onDragEnd,
+                    // A press on the confirming box outside the confirm's buttons puts focus in the confirm (or keeps it
+                    // there), so Escape still closes it.
+                    onMouseDown: asking ? (e) => {
+                      if ((e.target as HTMLElement).closest('.ip-confirm button')) return;
+                      e.preventDefault();
+                      const confirm = e.currentTarget.querySelector<HTMLElement>('.ip-confirm');
+                      if (confirm && !confirm.contains(document.activeElement)) confirm.focus();
+                    } : undefined,
                   }}
-                  onDragEnd={onDragEnd}
-                  onClick={asking || waiting ? undefined : rowClick('backlog', () => onOpenNode(row.node.id))}
-                  // A press on the confirming row outside its buttons puts focus in the confirm (or keeps it there), so Escape
-                  // still closes it.
-                  onMouseDown={asking ? (e) => {
-                    if ((e.target as HTMLElement).closest('button')) return;
-                    e.preventDefault();
-                    const confirm = e.currentTarget.querySelector<HTMLElement>('.ip-confirm');
-                    if (confirm && !confirm.contains(document.activeElement)) confirm.focus();
-                  } : undefined}
+                  extra={asking ? undefined : (
+                    <>
+                      <button type="button" className="ip-hover-act" data-act onClick={(e) => {
+                        noteAction('backlog', 'to_next');
+                        focusTargetAfter(e.currentTarget.closest('li'))?.focus();
+                        onToNext(row.node.id);
+                      }}>to Next</button>
+                      {!hasKids(row.node.id) && (
+                        <button type="button" className="ip-hover-act" data-act data-delete aria-haspopup="dialog" onClick={() => setConfirming(row.node.id)}>Delete…</button>
+                      )}
+                    </>
+                  )}
+                  onOpenNode={onOpenNode}
+                  onOpenResource={onOpenResource}
                 >
-                  {asking ? (
+                  {asking && (
                     <div
                       className="ip-confirm"
                       role="dialog"
@@ -138,23 +164,8 @@ export function Backlog({ rows, snapshot, now, projectId, slug, onStatus, onOpen
                         </button>
                       </div>
                     </div>
-                  ) : (
-                    <div className="ip-line">
-                      <button type="button" className="ip-row-title">{row.node.title}</button>
-                      <LabelChip label={row.node.label} />
-                      <StepMarks row={row} now={now} onOpenResource={onOpenResource} />
-                      <button type="button" className="ip-hover-act" data-act onClick={(e) => {
-                        noteAction('backlog', 'to_next');
-                        focusTargetAfter(e.currentTarget.closest('li'))?.focus();
-                        onToNext(row.node.id);
-                      }}>to Next</button>
-                      {!hasKids(row.node.id) && (
-                        <button type="button" className="ip-hover-act" data-act data-delete aria-haspopup="dialog" onClick={() => setConfirming(row.node.id)}>Delete…</button>
-                      )}
-                    </div>
                   )}
-                  {ended && <div className="ip-system-line">{ended}</div>}
-                </li>
+                </TaskBox>
               );
             })}
           </ul>

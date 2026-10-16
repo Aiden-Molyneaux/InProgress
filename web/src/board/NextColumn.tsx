@@ -63,7 +63,9 @@ export function NextColumn({ snapshot, board, boxes, now, onOpenNode, onOpenReso
   const inNext = new Set(nextIds);
   // A step sent back shows in Backlog at once; one pulled into Next leaves it.
   const backlogIds = pending ? [...board.backlog, ...board.next].map((r) => r.node.id).filter((id) => !inNext.has(id) && boxOf.has(id)) : boxes.backlog.map((b) => b.row!.node.id);
-  const backlog = backlogIds.map((id) => boxOf.get(id)!.row!);
+  /** Sent back from Next and not yet confirmed, a ready box reads as Backlog. */
+  const asBacklog = (b: BoxData): BoxData => (b.state === 'ready' ? { ...b, cell: 'backlog', state: 'backlog' } : b);
+  const backlog = backlogIds.map((id) => asBacklog(boxOf.get(id)!));
 
   const write = async (op: QueueOp) => {
     window.clearTimeout(clearTimer.current);
@@ -158,7 +160,7 @@ export function NextColumn({ snapshot, board, boxes, now, onOpenNode, onOpenReso
         docs={snapshot.resources.filter((r) => r.nodeId === row.node.id).length}
         system={endedLine(row, snapshot.pastSessions, now)}
         className={`ip-next-row${slot === row.node.id ? ' drop-before' : ''}${dragging === row.node.id ? ' dragging' : ''}`}
-        drag={{
+        li={{
           draggable: true,
           onDragStart: (e) => startDrag(e, row.node.id),
           onDragEnd: endDrag,
@@ -231,7 +233,7 @@ export function NextColumn({ snapshot, board, boxes, now, onOpenNode, onOpenReso
         </div>
         {open && (
           <>
-            <Backlog rows={backlog} snapshot={snapshot} now={now} projectId={project.id} slug={project.slug} onStatus={onStatus} onOpenNode={onOpenNode} onOpenResource={onOpenResource} onDragStart={setDragging} onDragEnd={endDrag} onToNext={toNext} />
+            <Backlog boxes={backlog} snapshot={snapshot} now={now} projectId={project.id} slug={project.slug} onStatus={onStatus} onOpenNode={onOpenNode} onOpenResource={onOpenResource} onDragStart={setDragging} onDragEnd={endDrag} onToNext={toNext} />
             {adding && <QuickAdd projectId={project.id} slug={project.slug} inputRef={field} onStatus={onStatus} onClose={closeAdd} />}
           </>
         )}
