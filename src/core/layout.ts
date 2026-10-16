@@ -662,11 +662,16 @@ export function findFrontier(nodes: TreeNode[], sessions: Session[], layout: Lay
 }
 
 export function eventTarget(e: EventRow): number | undefined {
-  const d = (e.data ?? {}) as { ids?: number[]; nodeId?: number; changed?: string[]; focusNodeId?: number | null };
+  const d = (e.data ?? {}) as { ids?: number[]; nodeId?: number; changed?: string[]; focusNodeId?: number | null; changes?: Record<string, { to?: unknown }> };
   switch (e.type) {
     case 'node.created':
       return d.ids?.length ? d.ids[d.ids.length - 1] : Number(e.entityId);
-    case 'node.updated':
+    case 'node.updated': {
+      // A driver cleared and nothing else (a session left the step): the focus change that caused it moves the camera.
+      const keys = Object.keys(d.changes ?? {});
+      if (keys.length === 1 && keys[0] === 'driverSessionId' && (d.changes!.driverSessionId.to ?? null) === null) return undefined;
+      return Number(e.entityId);
+    }
     case 'node.moved':
       return Number(e.entityId);
     case 'resource.created':

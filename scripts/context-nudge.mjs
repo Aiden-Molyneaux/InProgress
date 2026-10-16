@@ -91,7 +91,16 @@ function writeState(file, level, last) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(last === undefined ? { level } : { level, last }));
-  fs.renameSync(tmp, file);
+  try {
+    fs.renameSync(tmp, file);
+  } catch (e) {
+    try {
+      fs.unlinkSync(tmp);
+    } catch {
+      // Best effort: a temp file that cannot be removed either is left behind, and the rename's error is the one to keep.
+    }
+    throw e;
+  }
 }
 
 function say(input, additionalContext) {

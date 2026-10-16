@@ -41,4 +41,18 @@ describe('migration 11', () => {
     expect(driver.get(4)).toBeNull();
     expect(db.prepare("SELECT value FROM meta WHERE key = 'min_reader_version'").pluck().get()).toBe('1');
   });
+
+  it('gives the active root no driver even with a session focused on it, and breaks a last-seen tie by the higher id', () => {
+    const db = at10((d) => {
+      d.prepare("INSERT INTO projects (id, slug, name, description, playbook, status, root_node_id, created_at, updated_at) VALUES (1, 'p', 'P', '', '', 'active', 1, ?, ?)").run(T, T);
+      d.prepare("INSERT INTO nodes (id, project_id, parent_id, position, kind, title, body, status, assignee, outcome, created_at, updated_at) VALUES (1, 1, NULL, 1, 'goal', 'P', '', 'active', 'claude', '', ?, ?)").run(T, T);
+      session(d, 's-root', 1, 'working', '2026-10-01T10:00:00.000Z');
+      node(d, 2, 'active');
+      session(d, 's-a', 2, 'working', '2026-10-01T11:00:00.000Z');
+      session(d, 's-b', 2, 'working', '2026-10-01T11:00:00.000Z');
+    });
+    const driver = db.prepare('SELECT driver_session_id FROM nodes WHERE id = ?').pluck();
+    expect(driver.get(1)).toBeNull();
+    expect(driver.get(2)).toBe('s-b');
+  });
 });

@@ -104,11 +104,22 @@ session had ended.
 
 An answered ask (cleared with a non-empty answer, `answer_delivered_at` null) is delivered on the next real prompt of:
 
-1. the session that raised it, when that session is live; otherwise
+1. the session that raised it, when that session holds it; otherwise
 2. the step's driver, when the driver is live.
 
-`undeliveredAnswers(ctx, sessionId)` returns both: asks this session raised, and asks on steps this session drives whose
-asker is not live. Delivery sets `answer_delivered_at` as today. The line for an answer reads
+An asker holds its ask while it is live and its focus is the ask's step. An answer follows the step's work, not a
+session that moved off it: a driver displaced by `--take-over`, or a helper that moved to another step, no longer holds
+its asks on the step, and the live driver gets them. An asker with no live driver on the step keeps its own answers
+wherever its focus is (Mip's asks on a driverless step, say).
+
+`undeliveredAnswers(ctx, sessionId)` returns both routes, which never both deliver one ask. The asker route: asks this
+session raised, except an answered one cleared within `ASK_TRAIL_MS` on a step with a live driver other than this
+session while this session is not focused on the step (the driver route takes that one). A clear with no answer, or one
+older than the trail, stays the asker's, so every cleared ask has exactly one route.
+The driver route: answered asks on a step this session drives (the driver column names it and the step is its focus),
+raised by another session or none, whose asker does not hold them. A driving claim's `owedAnswers` uses the same
+"asker does not hold it" test; a take-over clears the old driver's focus in the same write first, so the old driver's
+answered asks on the step are owed to the new one. Delivery sets `answer_delivered_at` as today. The line for an answer reads
 `Answered: a12 "land it" (yours: act on it, or add it to your tasks)`. A clear with no answer keeps today's
 `Cleared: a12, no answer` and is never owed.
 
@@ -150,10 +161,12 @@ open steps that no live session is on. Label: `stalled`.
 The `--status` Reconcile list prints the facts Mip needs for a stalled row:
 
 ```
-#422 stalled: H idle 45m · branch cell-form · cwd C:/personal/InProgress/.claude/worktrees/cell-form
+#422 stalled: H idle 45m · branch cell-form · cwd C:/personal/InProgress/.claude/worktrees/cell-form; helping: K branch docs · cwd C:/personal/InProgress/.claude/worktrees/docs
 ```
 
-and for (b), `#422 stalled: driver not live · on it: K`.
+The `; helping:` part lists each live helper on the step, entries joined by `; `, and is left out when there are none.
+For (b), `#422 stalled: no live driver · on it: K branch docs · cwd C:/personal/InProgress/.claude/worktrees/docs`,
+with every live session on the step, entries joined by `; `. A missing branch or cwd prints as `?`.
 
 ### 3.3 Mip (`claude/skills/mip-orc/SKILL.md`)
 
@@ -162,7 +175,7 @@ and for (b), `#422 stalled: driver not live · on it: K`.
     `git -C <cwd> status --porcelain` and `git -C <cwd> log -1 --format=%cr` for each live session on the step.
     Uncommitted or recent work is a status ("H has uncommitted work in cell-form, idle 45m: talk to H"), not a stall.
     Mip never takes over. When the driver is not live, Mip offers a successor handoff whose first line is
-    `Claim #<id> --take-over`.
+    `Claim #<id>`: with no live driver, that plain claim drives the step.
   - `answer_waiting`: name the step's driver if it is live ("a12 waits for H's next prompt"), else offer to start a
     session on the step; the claim delivers the answer.
 - **What's next:** a step with a live driver is not ready (already true for any live session).

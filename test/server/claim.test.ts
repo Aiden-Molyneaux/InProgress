@@ -386,6 +386,32 @@ describe('answers reach the driver', () => {
     expect(r.block[r.block.length - 1]).toBe(`Owed: a${ask.id} answered "land it"`);
     expect(handleHookEvent(ctx, 's1', prompt).context ?? '').not.toContain('Answered');
   });
+
+  it("after a take-over the displaced driver's answered ask goes to the new driver's prompt, not to it", () => {
+    const { ctx, step, join } = setup();
+    join('h');
+    join('n');
+    claimStep(ctx, 'session:h', 'h', step.id);
+    const ask = raiseAsk(ctx, 'session:h', { nodeId: step.id, kind: 'question', text: 'Ship?', sessionId: 'h' });
+    claimStep(ctx, 'session:n', 'n', step.id, { takeOver: true });
+    clearAsk(ctx, 'window', ask.id, 'ship it');
+    expect(handleHookEvent(ctx, 'h', prompt).context ?? '').not.toContain(`a${ask.id}`);
+    expect(handleHookEvent(ctx, 'n', prompt).context!.split('\n')).toContain(yours(ask.id, 'ship it'));
+    expect(requireAsk(ctx, ask.id).answerDeliveredAt).not.toBeNull();
+  });
+
+  it("a take-over after the clear prints the displaced driver's answered ask as Owed, and the old driver never gets it", () => {
+    const { ctx, step, join } = setup();
+    join('h');
+    join('n');
+    claimStep(ctx, 'session:h', 'h', step.id);
+    const ask = raiseAsk(ctx, 'session:h', { nodeId: step.id, kind: 'question', text: 'Ship?', sessionId: 'h' });
+    clearAsk(ctx, 'window', ask.id, 'ship it');
+    const r = claimStep(ctx, 'session:n', 'n', step.id, { takeOver: true });
+    expect(r.block[r.block.length - 1]).toBe(`Owed: a${ask.id} answered "ship it"`);
+    expect(handleHookEvent(ctx, 'h', prompt).context ?? '').not.toContain(`a${ask.id}`);
+    expect(handleHookEvent(ctx, 'n', prompt).context ?? '').not.toContain(`a${ask.id}`);
+  });
 });
 
 describe('orchestrate', () => {
@@ -427,7 +453,7 @@ describe('orchestrate', () => {
     expect(lines.slice(at, at + 4)).toEqual([
       'Reconcile:',
       `  #${step.id} stalled: ${tag(s2.slot)} idle 45m · branch cell-form · cwd C:/w/cell-form`,
-      `  #${other.id} stalled: driver not live · on it: ${tag(s3.slot)}`,
+      `  #${other.id} stalled: no live driver · on it: ${tag(s3.slot)} branch ${s3.branch ?? '?'} · cwd ${s3.cwd ?? '?'}`,
       `  #${third.id} no_outcome`,
     ]);
   });

@@ -129,6 +129,14 @@ describe('context-nudge', () => {
     expect(said(r.out)).toBe(L150);
     expect(stored(session)).toBe(150_000);
   });
+  it('removes its temp file and stays silent when the state file cannot be replaced', () => {
+    const session = fresh();
+    // A folder where the state file goes: the rename onto it fails.
+    mkdirSync(join(stateDir, `${session}.json`), { recursive: true });
+    const r = run(hook(transcript(line('a', 155_000)), session));
+    expect(r).toEqual({ status: 0, out: '' });
+    expect(readdirSync(stateDir).filter((f) => f.startsWith(session) && f.endsWith('.tmp'))).toEqual([]);
+  });
   it('re-arms after the context drops below 150k', () => {
     const session = fresh();
     expect(said(batch(session, line('a', 155_000)))).toContain('about 150k');

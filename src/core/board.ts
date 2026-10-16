@@ -70,15 +70,18 @@ function idleSpan(iso: string, now: number): string {
 
 /**
  * One line of `orchestrate --status`'s Reconcile list (spec 3.2), without its indent: the facts Mip needs for a stalled
- * row (the idle driver's tag, idle time, branch and cwd; or that no live session drives it, and who is on it), else the
- * mark's name.
+ * row (the idle driver's tag, idle time, branch and cwd, then each live helper's; or that no live session drives it,
+ * and each session on it with its branch and cwd), else the mark's name.
  */
 export function reconcileLine(row: Pick<BoardRow, 'node' | 'driver' | 'sessions'>, mark: Mark, now: number): string {
   const head = `#${row.node.id} ${mark}`;
   if (mark !== 'stalled') return head;
+  const where = (s: Session) => `branch ${s.branch ?? '?'} · cwd ${s.cwd ?? '?'}`;
+  const entry = (s: Session) => `${ownerTag(s.slot)} ${where(s)}`;
   const d = row.driver;
-  if (d === null) return `${head}: driver not live · on it: ${row.sessions.map((s) => ownerTag(s.slot)).join(', ')}`;
-  return `${head}: ${ownerTag(d.slot)} idle ${idleSpan(d.lastSeenAt, now)} · branch ${d.branch ?? '?'} · cwd ${d.cwd ?? '?'}`;
+  if (d === null) return `${head}: no live driver · on it: ${row.sessions.map(entry).join('; ')}`;
+  const helpers = row.sessions.filter((s) => s.id !== d.id);
+  return `${head}: ${ownerTag(d.slot)} idle ${idleSpan(d.lastSeenAt, now)} · ${where(d)}${helpers.length ? `; helping: ${helpers.map(entry).join('; ')}` : ''}`;
 }
 
 /** Places every step of the snapshot (spec 1.5) and marks the ones that need tidying (spec 1.6). */

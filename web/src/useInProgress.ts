@@ -4,6 +4,7 @@ import { eventTarget } from '../../src/core/layout';
 import type { DeletedProject, EventRow, ProjectSnapshot, ProjectSummary } from '../../src/core/types';
 import { api } from './api';
 import { pickSlug } from './chrome/tabs';
+import { stripSkips } from './describe';
 import { patchDeleted, patchName, patchProjects, renamedSnapshot, summaryOf, type ActionTarget, type ProjectAction } from './projectActions';
 import { load, save } from './storage';
 import { subscribe } from './stream';
@@ -191,7 +192,7 @@ export function useInProgress(): InProgressState {
       (e) => {
         refreshProjects();
         if (e.projectId !== null && e.projectId === projectIdRef.current) {
-          setLastEvent(e);
+          if (!stripSkips(e)) setLastEvent(e);
           // React can render several events as one batch. Skipping untargeted ones here means one batched after
           // a targeted event can't take the camera's move away.
           if (eventTarget(e) !== undefined) setLiveEvent(e);

@@ -198,8 +198,18 @@ describe('reconcileLine', () => {
     expect(reconcileLine(at(150), 'stalled', NOW)).toBe('#2 stalled: H idle 2h · branch cell-form · cwd C:/w/cell-form');
     const bare = deriveBoard(input({ nodes: [n(1, null), n(2, 1, { status: 'active', driverSessionId: 'd' })], sessions: [s('d', { focusNodeId: 2, state: 'idle', slot: null, lastSeenAt: MINS(40) })] }), NOW).byId.get(2)!;
     expect(reconcileLine(bare, 'stalled', NOW)).toBe('#2 stalled: ? idle 40m · branch ? · cwd ?');
-    const helpers = deriveBoard(input({ nodes: [n(1, null), n(2, 1, { status: 'active' })], sessions: [s('h', { focusNodeId: 2, slot: 7 }), s('k', { focusNodeId: 2, slot: 10, state: 'idle' })] }), NOW).byId.get(2)!;
-    expect(reconcileLine(helpers, 'stalled', NOW)).toBe('#2 stalled: driver not live · on it: H, K');
+    // An idle driver with live helpers: each helper follows with its branch and cwd.
+    const helped = deriveBoard(input({
+      nodes: [n(1, null), n(2, 1, { status: 'active', driverSessionId: 'd', outcome: '' })],
+      sessions: [
+        s('d', { focusNodeId: 2, state: 'idle', slot: 7, lastSeenAt: MINS(45), branch: 'cell-form', cwd: 'C:/w/cell-form' }),
+        s('k', { focusNodeId: 2, slot: 10, branch: 'k-br', cwd: 'C:/w/k' }),
+        s('m', { focusNodeId: 2, slot: 12 }),
+      ],
+    }), NOW).byId.get(2)!;
+    expect(reconcileLine(helped, 'stalled', NOW)).toBe('#2 stalled: H idle 45m · branch cell-form · cwd C:/w/cell-form; helping: K branch k-br · cwd C:/w/k; M branch ? · cwd ?');
+    const helpers = deriveBoard(input({ nodes: [n(1, null), n(2, 1, { status: 'active' })], sessions: [s('h', { focusNodeId: 2, slot: 7, branch: 'h-br', cwd: 'C:/w/h' }), s('k', { focusNodeId: 2, slot: 10, state: 'idle' })] }), NOW).byId.get(2)!;
+    expect(reconcileLine(helpers, 'stalled', NOW)).toBe('#2 stalled: no live driver · on it: H branch h-br · cwd C:/w/h; K branch ? · cwd ?');
     expect(reconcileLine(helpers, 'deep', NOW)).toBe('#2 deep');
   });
 });

@@ -587,6 +587,10 @@ describe('camera helpers', () => {
     const ev = (type: string, entityId: string, data: unknown): EventRow => ({ id: 1, ts: 't', projectId: 1, actor: 'x', type, entity: 'x', entityId, data });
     expect(eventTarget(ev('node.created', '5', { ids: [5, 6, 7] }))).toBe(7);
     expect(eventTarget(ev('node.updated', '4', {}))).toBe(4);
+    // A driver cleared and nothing else does not move the camera; a driver set, or a clear with a status change, does.
+    expect(eventTarget(ev('node.updated', '4', { changes: { driverSessionId: { from: 's1', to: null } } }))).toBeUndefined();
+    expect(eventTarget(ev('node.updated', '4', { changes: { driverSessionId: { from: null, to: 's1' } } }))).toBe(4);
+    expect(eventTarget(ev('node.updated', '4', { changes: { status: { from: 'active', to: 'done' }, driverSessionId: { from: 's1', to: null } } }))).toBe(4);
     expect(eventTarget(ev('node.moved', '6', { fromParentId: 1, toParentId: 2 }))).toBe(6);
     expect(eventTarget(ev('resource.created', '9', { nodeId: 3 }))).toBe(3);
     expect(eventTarget(ev('resource.updated', '9', { nodeId: 4, fromNodeId: 3 }))).toBe(4);

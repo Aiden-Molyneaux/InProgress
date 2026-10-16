@@ -136,35 +136,59 @@ export function listAsksClearedSince(ctx: Ctx, projectId: number, since: string)
 }
 
 /**
- * The driver route's conditions (spec 2): an answer, cleared within ASK_TRAIL_MS, whose asker is not live (ended, or
- * not heard from within STALE_SESSION_MS) or names no session. Binds the two cutoffs, in that order.
+ * The asker does not hold the ask (spec 2.1): the ask names no session, or its session is not live (ended, or not
+ * heard from within STALE_SESSION_MS), or it is live with its focus on another step. Binds the stale cutoff.
  */
-const NO_LIVE_ASKER = "answer != '' AND cleared_at >= ? AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.id = asks.session_id AND s.state != 'ended' AND s.last_seen_at >= ?)";
+const ASKER_NOT_HOLDING =
+  "NOT EXISTS (SELECT 1 FROM sessions s WHERE s.id = asks.session_id AND s.state != 'ended' AND s.last_seen_at >= ? AND s.focus_node_id = asks.node_id)";
 
 /**
- * Cleared asks this session is owed and has not been told yet, oldest cleared first: those it raised (answered or not),
- * and the answered ones on a step it drives whose asker is not live. It drives a step as the live-driver rule reads it
- * (spec 1.2): the driver column names it and the step is its focus, so a column left behind routes nothing.
+ * The driver route's conditions (spec 2): an answer, cleared within ASK_TRAIL_MS, whose asker does not hold it. Binds
+ * the two cutoffs, in that order.
+ */
+const OWED_TO_DRIVER = `answer != '' AND cleared_at >= ? AND ${ASKER_NOT_HOLDING}`;
+
+/**
+ * A live session other than the bound one drives the ask's step (the live-driver rule of spec 1.2). Binds the session
+ * id, then the stale cutoff.
+ */
+const OTHER_LIVE_DRIVER =
+  "EXISTS (SELECT 1 FROM nodes n JOIN sessions d ON d.id = n.driver_session_id WHERE n.id = asks.node_id AND d.id != ? AND d.focus_node_id = n.id AND d.state != 'ended' AND d.last_seen_at >= ?)";
+
+/**
+ * Cleared asks this session is owed and has not been told yet, oldest cleared first.
+ * The asker route: those it raised (answered or not), except the ones the driver route hands to another session: an
+ * answer cleared within ASK_TRAIL_MS on a step another live session drives, while this one is not focused on it (it
+ * moved off the work, so the answer follows the work to the driver). A clear with no answer, or one older than the
+ * trail, stays the asker's.
+ * The driver route: the answered ones on a step it drives, raised by another session that does not hold them. It
+ * drives a step as the live-driver rule reads it (spec 1.2): the driver column names it and the step is its focus, so a
+ * column left behind routes nothing. Exactly one route delivers each cleared ask.
  */
 export function undeliveredAnswers(ctx: Ctx, sessionId: string): Ask[] {
+  const stale = msAgo(ctx, STALE_SESSION_MS);
+  const trail = msAgo(ctx, ASK_TRAIL_MS);
   return (ctx.db
     .prepare(
       `SELECT * FROM asks WHERE cleared_at IS NOT NULL AND answer_delivered_at IS NULL AND ${inLiveProject('asks.project_id')}` +
-        ` AND (session_id = ? OR (node_id IN (SELECT id FROM nodes WHERE driver_session_id = ?) AND node_id = (SELECT focus_node_id FROM sessions WHERE id = ?) AND ${NO_LIVE_ASKER})) ORDER BY cleared_at, id`,
+        ` AND ((session_id = ? AND NOT (answer != '' AND cleared_at >= ? AND COALESCE((SELECT focus_node_id FROM sessions WHERE id = ?), -1) != node_id AND ${OTHER_LIVE_DRIVER}))` +
+        ` OR (node_id IN (SELECT id FROM nodes WHERE driver_session_id = ?) AND node_id = (SELECT focus_node_id FROM sessions WHERE id = ?)` +
+        ` AND (session_id IS NULL OR session_id != ?) AND ${OWED_TO_DRIVER})) ORDER BY cleared_at, id`,
     )
-    .all(sessionId, sessionId, sessionId, msAgo(ctx, ASK_TRAIL_MS), msAgo(ctx, STALE_SESSION_MS)) as AskRow[]).map(toAsk);
+    .all(sessionId, trail, sessionId, sessionId, stale, sessionId, sessionId, sessionId, trail, stale) as AskRow[]).map(toAsk);
 }
 
 /**
  * The answers owed on this step that nobody has been told, oldest cleared first: the driver route's asks for one step,
- * which a driving claim prints. The claimer is live, so its own asks fall out here and keep arriving through
- * undeliveredAnswers.
+ * which a driving claim prints. It runs after the claim saves the claimer's focus, so the claimer holds its own asks
+ * and they keep arriving through undeliveredAnswers; a take-over has cleared the old driver's focus in the same write,
+ * so the old driver's answered asks on the step are owed here.
  */
 export function owedAnswers(ctx: Ctx, nodeId: number): Ask[] {
   return (ctx.db
     .prepare(
       `SELECT * FROM asks WHERE node_id = ? AND cleared_at IS NOT NULL AND answer_delivered_at IS NULL AND ${inLiveProject('asks.project_id')}` +
-        ` AND ${NO_LIVE_ASKER} ORDER BY cleared_at, id`,
+        ` AND ${OWED_TO_DRIVER} ORDER BY cleared_at, id`,
     )
     .all(nodeId, msAgo(ctx, ASK_TRAIL_MS), msAgo(ctx, STALE_SESSION_MS)) as AskRow[]).map(toAsk);
 }
