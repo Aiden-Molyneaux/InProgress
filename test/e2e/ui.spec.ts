@@ -2348,6 +2348,10 @@ test.describe('Board', () => {
     await expect(title).toHaveAttribute('tabindex', '-1');
     await page.keyboard.press('Shift+Tab');
     await expect(dialog.getByRole('button', { name: 'Delete', exact: true })).toBeFocused();
+    await page.keyboard.press('Shift+Tab');
+    await expect(title).not.toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(dialog.getByRole('button', { name: 'Delete', exact: true })).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
     await expect(del).toBeFocused();

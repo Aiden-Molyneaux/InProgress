@@ -1,4 +1,4 @@
-/** The rows a band or a panel lists, as a focus walk sees them. A pending box (a Backlog delete waiting for its answer) is about to leave too, and a confirming one has no title to take focus, so both are passed over. */
+/** The rows a band or a panel lists, as a focus walk sees them. A pending box (a Backlog delete waiting for its answer) is about to leave too, and a confirming one keeps its title out of the Tab order (a walk's script focus would still reach it), so both are passed over. */
 const ROWS = 'li.ip-card:not(.pending):not(.confirming), li.ip-dask:not(.cleared)';
 
 /**
