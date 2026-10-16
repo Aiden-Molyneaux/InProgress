@@ -126,7 +126,8 @@ describe('the restart check after a deploy or rollback', () => {
     const aggregate = Object.assign(new AggregateError([new Error('connect ECONNREFUSED ::1:4317'), new Error('connect ECONNREFUSED 127.0.0.1:4317')], ''), { code: 'ECONNREFUSED' });
     expect(restartCheck(live, { error: Object.assign(new TypeError('fetch failed'), { cause: aggregate }) })).toContain('(ECONNREFUSED: connect ECONNREFUSED ::1:4317; connect ECONNREFUSED 127.0.0.1:4317)');
     expect(restartCheck(live, { error: Object.assign(new TypeError('fetch failed'), { cause: new Error('') }) })).toContain('fetch failed (Error)');
-    expect(() => restartCheck(live, { error: Object.assign(new TypeError('fetch failed'), { cause: Object.assign(Object.create(null), { errors: [null] }) }) })).not.toThrow();
+    expect(restartCheck(live, { error: Object.assign(new TypeError('fetch failed'), { cause: Object.assign(Object.create(null), { errors: [null] }) }) })).toBe('/api/health did not answer, with an error that could not be printed');
+    expect(restartCheck(live, { error: { name: 'Error', message: Symbol('m') as unknown as string } })).toBe('/api/health did not answer, with an error that could not be printed');
     const timedOut = new DOMException('The operation was aborted due to timeout', 'TimeoutError');
     expect(restartCheck(live, { error: timedOut })).toContain('TimeoutError: The operation was aborted due to timeout');
   });

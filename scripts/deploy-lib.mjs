@@ -85,15 +85,15 @@ const BODY_MAX = 500;
  */
 export function restartCheck(live, seen) {
   if (seen.error) {
-    const { name, message, cause } = seen.error;
-    let said = '';
+    // An error that can't be printed must not stop the rollback that follows.
     try {
-      said = cause && (cause.message || (Array.isArray(cause.errors) ? cause.errors.map((e) => e?.message).filter(Boolean).join('; ') : '') || String(cause));
+      const { name, message, cause } = seen.error;
+      const said = cause && (cause.message || (Array.isArray(cause.errors) ? cause.errors.map((e) => e?.message).filter(Boolean).join('; ') : '') || String(cause));
+      const why = cause ? ` (${cause.code ? `${cause.code}: ` : ''}${said})` : '';
+      return `/api/health did not answer: ${name}: ${message}${why}`;
     } catch {
-      // A cause that can't be printed must not stop the rollback that follows.
+      return '/api/health did not answer, with an error that could not be printed';
     }
-    const why = cause ? ` (${cause.code ? `${cause.code}: ` : ''}${said})` : '';
-    return `/api/health did not answer: ${name}: ${message}${why}`;
   }
   let running = null;
   try {
