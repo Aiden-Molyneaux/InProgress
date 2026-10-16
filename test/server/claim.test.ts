@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { listEventsSince, maxEventId } from '../../src/server/repo/events';
-import { clearAsk, raiseAsk } from '../../src/server/repo/asks';
+import { clearAsk, raiseAsk, requireAsk } from '../../src/server/repo/asks';
 import { addNodes, findNode, updateNode } from '../../src/server/repo/nodes';
 import { addBinding, changeProject, createProject, setQueue } from '../../src/server/repo/projects';
 import { briefingDue, clearBriefingDue, findSession } from '../../src/server/repo/sessions';
 import { claimStep, enrollSession, handleHookEvent, orchestrate, setFocus } from '../../src/server/session-flow';
 import { createCtx, type Ctx } from '../../src/server/db/tx';
 import { openDb } from '../../src/server/db/connection';
-import { STALE_SESSION_MS } from '../../src/core/types';
+import { ASK_TRAIL_MS, STALE_SESSION_MS } from '../../src/core/types';
 import { makeCtx } from '../helpers';
 
 function setup(ctx: Ctx = makeCtx()) {
@@ -240,6 +240,112 @@ describe('the driver', () => {
     orchestrate(ctx, 'session:s2', 's2', { status: false });
     expect(driver(ctx, step.id)).toBe('s1');
   });
+
+  it('the project root never gets a driver', () => {
+    const { ctx, project, join } = setup();
+    join('s1');
+    setFocus(ctx, 'scribe:s1', 's1', project.rootNodeId);
+    expect(findSession(ctx, 's1')?.focusNodeId).toBe(project.rootNodeId);
+    expect(driver(ctx, project.rootNodeId)).toBeNull();
+  });
+});
+
+describe('answers reach the driver', () => {
+  const prompt = { event: 'prompt' as const, cwd: 'C:/personal/InGame' };
+  const end = { event: 'end' as const, cwd: 'C:/personal/InGame' };
+  const yours = (id: number, answer: string) => `Answered: a${id} "${answer}" (yours: act on it, or add it to your tasks)`;
+  /** s1 drives the step; s2 helps on it and raises an ask. */
+  function asked() {
+    const t = setup();
+    t.join('s1');
+    t.join('s2');
+    claimStep(t.ctx, 'session:s1', 's1', t.step.id);
+    claimStep(t.ctx, 'session:s2', 's2', t.step.id);
+    const ask = raiseAsk(t.ctx, 'session:s2', { nodeId: t.step.id, kind: 'question', text: 'Land it?', sessionId: 's2' });
+    return { ...t, ask };
+  }
+
+  it('the driver gets an answer whose asker ended', () => {
+    const { ctx, ask } = asked();
+    handleHookEvent(ctx, 's2', end);
+    clearAsk(ctx, 'window', ask.id, 'land it');
+    expect(handleHookEvent(ctx, 's1', prompt).context!.split('\n')).toContain(yours(ask.id, 'land it'));
+    expect(requireAsk(ctx, ask.id).answerDeliveredAt).not.toBeNull();
+    expect(handleHookEvent(ctx, 's1', prompt).context ?? '').not.toContain('Answered');
+  });
+
+  it('a live asker gets its answer, the driver does not', () => {
+    const { ctx, ask } = asked();
+    clearAsk(ctx, 'window', ask.id, 'land it');
+    expect(handleHookEvent(ctx, 's1', prompt).context ?? '').not.toContain('Answered');
+    expect(requireAsk(ctx, ask.id).answerDeliveredAt).toBeNull();
+    expect(handleHookEvent(ctx, 's2', prompt).context!.split('\n')).toContain(yours(ask.id, 'land it'));
+  });
+
+  it('neither live: the answer stays undelivered', () => {
+    const { ctx, step, ask, join } = asked();
+    handleHookEvent(ctx, 's2', end);
+    handleHookEvent(ctx, 's1', end);
+    clearAsk(ctx, 'window', ask.id, 'land it');
+    join('s3');
+    expect(handleHookEvent(ctx, 's3', prompt).context ?? '').not.toContain('Answered');
+    expect(requireAsk(ctx, ask.id).answerDeliveredAt).toBeNull();
+    // It waits for the next session that drives the step.
+    expect(claimStep(ctx, 'session:s3', 's3', step.id).block).toContain(`Owed: a${ask.id} answered "land it"`);
+  });
+
+  it('the driver route skips answers cleared over 7 days ago', () => {
+    const { ctx, ask } = asked();
+    handleHookEvent(ctx, 's2', end);
+    clearAsk(ctx, 'window', ask.id, 'land it');
+    ctx.db.prepare('UPDATE asks SET cleared_at = ? WHERE id = ?').run(new Date(Date.parse(ctx.now()) - ASK_TRAIL_MS - 60_000).toISOString(), ask.id);
+    expect(handleHookEvent(ctx, 's1', prompt).context ?? '').not.toContain('Answered');
+    expect(requireAsk(ctx, ask.id).answerDeliveredAt).toBeNull();
+  });
+
+  it('a clear with no answer is never routed to the driver', () => {
+    const { ctx, ask } = asked();
+    handleHookEvent(ctx, 's2', end);
+    clearAsk(ctx, 'window', ask.id);
+    expect(handleHookEvent(ctx, 's1', prompt).context ?? '').not.toContain('Cleared');
+    expect(requireAsk(ctx, ask.id).answerDeliveredAt).toBeNull();
+  });
+
+  it('a claim that drives prints owed answers once', () => {
+    const { ctx, step, join } = setup();
+    join('s1');
+    const ask = raiseAsk(ctx, 'session:s1', { nodeId: step.id, kind: 'question', text: 'Land it?', sessionId: 's1' });
+    handleHookEvent(ctx, 's1', end);
+    clearAsk(ctx, 'window', ask.id, 'land it');
+    join('s2');
+    const r = claimStep(ctx, 'session:s2', 's2', step.id);
+    expect(r.block[r.block.length - 1]).toBe(`Owed: a${ask.id} answered "land it"`);
+    expect(requireAsk(ctx, ask.id).answerDeliveredAt).not.toBeNull();
+    expect(claimStep(ctx, 'session:s2', 's2', step.id).block.some((l) => l.startsWith('Owed:'))).toBe(false);
+    // A helper's claim prints no owed line, even with an answer owed: the driver hears it on its next prompt.
+    join('s4');
+    const second = raiseAsk(ctx, 'session:s4', { nodeId: step.id, kind: 'question', text: 'Ship it?', sessionId: 's4' });
+    handleHookEvent(ctx, 's4', end);
+    clearAsk(ctx, 'window', second.id, 'ship it');
+    join('s3');
+    expect(claimStep(ctx, 'session:s3', 's3', step.id).block.some((l) => l.startsWith('Owed:'))).toBe(false);
+    expect(requireAsk(ctx, second.id).answerDeliveredAt).toBeNull();
+    expect(handleHookEvent(ctx, 's2', prompt).context!.split('\n')).toContain(yours(second.id, 'ship it'));
+  });
+
+  it('a take-over prints the owed answers too', () => {
+    const { ctx, step, join } = setup();
+    join('s1');
+    join('s2');
+    claimStep(ctx, 'session:s1', 's1', step.id);
+    join('s4');
+    const ask = raiseAsk(ctx, 'session:s4', { nodeId: step.id, kind: 'question', text: 'Land it?', sessionId: 's4' });
+    handleHookEvent(ctx, 's4', end);
+    clearAsk(ctx, 'window', ask.id, 'land it');
+    const r = claimStep(ctx, 'session:s2', 's2', step.id, { takeOver: true });
+    expect(r.block[r.block.length - 1]).toBe(`Owed: a${ask.id} answered "land it"`);
+    expect(handleHookEvent(ctx, 's1', prompt).context ?? '').not.toContain('Answered');
+  });
 });
 
 describe('orchestrate', () => {
@@ -333,7 +439,7 @@ describe('the answers line', () => {
     expect(handleHookEvent(ctx, 's1', prompt()).context).toBeUndefined();
     clearAsk(ctx, 'window', ask.id, '8080');
     expect(handleHookEvent(ctx, 's1', prompt({ notice: true })).context).toBeUndefined();
-    expect(handleHookEvent(ctx, 's1', prompt()).context).toMatch(new RegExp(`^Answered: a${ask.id} "8080"(\n|$)`));
+    expect(handleHookEvent(ctx, 's1', prompt()).context).toMatch(new RegExp(`^Answered: a${ask.id} "8080" \\(yours: act on it, or add it to your tasks\\)(\n|$)`));
     expect(handleHookEvent(ctx, 's1', prompt()).context).toMatch(/^\[InProgress\] InGame/);
   });
 
@@ -354,7 +460,7 @@ describe('the answers line', () => {
     const ask = raiseAsk(ctx, 'session:s1', { nodeId: step.id, kind: 'question', text: 'Q', sessionId: 's1' });
     clearAsk(ctx, 'window', ask.id, 'yes');
     expect(handleHookEvent(ctx, 's2', prompt()).context).toBeUndefined();
-    expect(handleHookEvent(ctx, 's1', prompt()).context).toBe(`Answered: a${ask.id} "yes"`);
+    expect(handleHookEvent(ctx, 's1', prompt()).context).toBe(`Answered: a${ask.id} "yes" (yours: act on it, or add it to your tasks)`);
   });
 });
 
@@ -388,7 +494,7 @@ describe('review fixes', () => {
     clearAsk(ctx, 'window', ask.id, `Yes.\n\n  Then   ${'x'.repeat(400)}`);
     const line = handleHookEvent(ctx, 's1', { event: 'prompt', cwd: 'C:/personal/InGame' }).context!.split('\n')[0];
     expect(line.startsWith(`Answered: a${ask.id} "Yes. Then xxx`)).toBe(true);
-    const answer = /"(.*)"$/.exec(line)![1];
+    const answer = /"(.*)" \(yours: act on it, or add it to your tasks\)$/.exec(line)![1];
     expect(answer).toHaveLength(300);
     expect(answer.endsWith('…')).toBe(true);
   });

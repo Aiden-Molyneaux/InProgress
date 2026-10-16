@@ -184,7 +184,7 @@ describe('built artifacts', () => {
     expect(cleared.answer).toBe('4390');
     const prompt = runHook('prompt-submit', { session_id: 'smoke-1', prompt: 'carry on' });
     expect(prompt).toMatchObject({ status: 0, stderr: '' });
-    expect(briefing(prompt.stdout).additionalContext.split('\n')[0]).toBe(`Answered: a${id} "4390"`);
+    expect(briefing(prompt.stdout).additionalContext.split('\n')[0]).toBe(`Answered: a${id} "4390" (yours: act on it, or add it to your tasks)`);
     // Once only.
     const next = runHook('prompt-submit', { session_id: 'smoke-1', prompt: 'and now' });
     expect(next.stdout).not.toContain('Answered');

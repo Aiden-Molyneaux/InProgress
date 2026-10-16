@@ -1,4 +1,4 @@
-import { ASK_KINDS, ASK_TRAIL_MS, type Ask, type AskKind } from '../../core/types';
+import { ASK_KINDS, ASK_TRAIL_MS, STALE_SESSION_MS, type Ask, type AskKind } from '../../core/types';
 import { msAgo, write, type Ctx, type RecordEvent } from '../db/tx';
 import { badRequest, notFound } from '../errors';
 import { patchNode, requireNode } from './nodes';
@@ -135,11 +135,38 @@ export function listAsksClearedSince(ctx: Ctx, projectId: number, since: string)
   return (ctx.db.prepare('SELECT * FROM asks WHERE project_id = ? AND cleared_at >= ? ORDER BY cleared_at, id').all(projectId, since) as AskRow[]).map(toAsk);
 }
 
-/** Cleared asks this session raised whose answer it has not been told yet, oldest cleared first. */
+/**
+ * The driver route's conditions (spec 2): an answer, cleared within ASK_TRAIL_MS, whose asker is not live (ended, or
+ * not heard from within STALE_SESSION_MS) or names no session. Binds the two cutoffs, in that order.
+ */
+const NO_LIVE_ASKER = "answer != '' AND cleared_at >= ? AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.id = asks.session_id AND s.state != 'ended' AND s.last_seen_at >= ?)";
+
+/**
+ * Cleared asks this session is owed and has not been told yet, oldest cleared first: those it raised (answered or not),
+ * and the answered ones on a step it drives whose asker is not live.
+ */
 export function undeliveredAnswers(ctx: Ctx, sessionId: string): Ask[] {
   return (ctx.db
-    .prepare(`SELECT * FROM asks WHERE session_id = ? AND cleared_at IS NOT NULL AND answer_delivered_at IS NULL AND ${inLiveProject('asks.project_id')} ORDER BY cleared_at, id`)
-    .all(sessionId) as AskRow[]).map(toAsk);
+    .prepare(
+      `SELECT * FROM asks WHERE cleared_at IS NOT NULL AND answer_delivered_at IS NULL AND ${inLiveProject('asks.project_id')}` +
+        ` AND (session_id = ? OR (node_id IN (SELECT id FROM nodes WHERE driver_session_id = ?) AND ${NO_LIVE_ASKER})) ORDER BY cleared_at, id`,
+    )
+    .all(sessionId, sessionId, msAgo(ctx, ASK_TRAIL_MS), msAgo(ctx, STALE_SESSION_MS)) as AskRow[]).map(toAsk);
+}
+
+/**
+ * The answers owed on this step that nobody has been told, oldest cleared first: the driver route's asks for one step,
+ * which a driving claim prints. `sessionId` is the claimer; it is live, so its own asks fall out here and keep arriving
+ * through undeliveredAnswers.
+ */
+export function owedAnswers(ctx: Ctx, nodeId: number, sessionId: string): Ask[] {
+  void sessionId;
+  return (ctx.db
+    .prepare(
+      `SELECT * FROM asks WHERE node_id = ? AND cleared_at IS NOT NULL AND answer_delivered_at IS NULL AND ${inLiveProject('asks.project_id')}` +
+        ` AND ${NO_LIVE_ASKER} ORDER BY cleared_at, id`,
+    )
+    .all(nodeId, msAgo(ctx, ASK_TRAIL_MS), msAgo(ctx, STALE_SESSION_MS)) as AskRow[]).map(toAsk);
 }
 
 /** Sets answer_delivered_at on these asks. Not an event: nobody watches it. */

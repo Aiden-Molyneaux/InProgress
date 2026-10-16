@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clearAsk, listProjectAsks, markAnswersDelivered, raiseAsk, raiseAskDetailed, requireAsk, undeliveredAnswers } from '../../src/server/repo/asks';
+import { clearAsk, listProjectAsks, markAnswersDelivered, owedAnswers, raiseAsk, raiseAskDetailed, requireAsk, undeliveredAnswers } from '../../src/server/repo/asks';
 import { lastProjectEvent, listEventsSince } from '../../src/server/repo/events';
 import { addNodes, requireNode, updateNode } from '../../src/server/repo/nodes';
 import { createProject } from '../../src/server/repo/projects';
@@ -87,6 +87,29 @@ describe('asks', () => {
     expect(undeliveredAnswers(ctx, 's1').map((x) => x.id)).toEqual([b.id]);
     markAnswersDelivered(ctx, [b.id]);
     expect(undeliveredAnswers(ctx, 's1')).toEqual([]);
+  });
+
+  it('routes an answered ask to the step driver only when no live session raised it, and owedAnswers lists the same', () => {
+    const { ctx, project, step } = setup();
+    const ts = ctx.now();
+    const add = (id: string, state: string) =>
+      ctx.db.prepare('INSERT INTO sessions (id, project_id, state, started_at, last_seen_at) VALUES (?, ?, ?, ?, ?)').run(id, project.id, state, ts, ts);
+    add('drv', 'working');
+    add('live', 'working');
+    add('gone', 'ended');
+    ctx.db.prepare("UPDATE nodes SET driver_session_id = 'drv' WHERE id = ?").run(step.id);
+    const raise = (text: string, sessionId: string | null, answer: string) => {
+      const a = raiseAsk(ctx, 'w', { nodeId: step.id, kind: 'question', text, sessionId });
+      return clearAsk(ctx, 'window', a.id, answer).id;
+    };
+    const fromGone = raise('gone', 'gone', 'yes');
+    const fromNobody = raise('nobody', null, 'yes');
+    raise('live', 'live', 'yes');
+    raise('blank', 'gone', '');
+    expect(undeliveredAnswers(ctx, 'drv').map((a) => a.id)).toEqual([fromGone, fromNobody]);
+    expect(owedAnswers(ctx, step.id, 'drv').map((a) => a.id)).toEqual([fromGone, fromNobody]);
+    markAnswersDelivered(ctx, [fromGone]);
+    expect(owedAnswers(ctx, step.id, 'drv').map((a) => a.id)).toEqual([fromNobody]);
   });
 
   it('refuses an ask on a dropped step', () => {

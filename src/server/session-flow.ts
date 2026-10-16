@@ -7,7 +7,7 @@ import { renderOrchestratorBriefing, stepBlock } from './briefing-scoped';
 import { deriveBoard, isLive } from '../core/board';
 import { askTag, sessionTag } from '../core/types';
 import { formatCounts, formatDigest, readDigest } from './digest';
-import { markAnswersDelivered, undeliveredAnswers } from './repo/asks';
+import { markAnswersDelivered, owedAnswers, undeliveredAnswers } from './repo/asks';
 import { endCommand, endSessionCommands, pruneCommands, reconcileCommands, startCommand, type BackgroundEntry } from './repo/commands';
 import { findNode, leadingNode, patchNode, requireNode, setDriver } from './repo/nodes';
 import { getProjectById, isTracking, notTracked, releaseQueue, resolveBinding, resolveProject } from './repo/projects';
@@ -320,11 +320,12 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
     if (input.asksStatus) context = renderStatusAnswer(getProjectSnapshot(ctx, projectId), sessionId, nowMs);
     else if (session.promptsSinceUpdate >= 2) context = renderStatusLine(getProjectSnapshot(ctx, projectId), session);
   }
-  // The answers line (spec 3.3): once, on the next real prompt after an ask this session raised was cleared.
+  // The answers line (spec 2, 3.3): once, on the next real prompt after an ask this session raised was cleared, or an
+  // answered one on a step it drives whose asker is gone.
   if (input.event === 'prompt' && !input.notice) {
     const answers = undeliveredAnswers(ctx, sessionId);
     if (answers.length) {
-      const lines = answers.map((a) => (a.answer ? `Answered: ${askTag(a.id)} "${oneLine(a.answer)}"` : `Cleared: ${askTag(a.id)}, no answer`));
+      const lines = answers.map((a) => (a.answer ? `Answered: ${askTag(a.id)} "${oneLine(a.answer)}" (yours: act on it, or add it to your tasks)` : `Cleared: ${askTag(a.id)}, no answer`));
       markAnswersDelivered(ctx, answers.map((a) => a.id));
       context = [...lines, ...(context ? [context] : [])].join('\n');
     }
@@ -409,8 +410,8 @@ function applyFocus(ctx: Ctx, record: RecordEvent, sessionId: string, nodeId: nu
   }
   let drive: Drive = null;
   let from: Session | null = null;
-  // Only an open step gets a driver: a done or dropped one keeps none (spec 1.3).
-  if (node && node.status !== 'done' && node.status !== 'dropped') {
+  // Only an open step gets a driver: a done or dropped one keeps none (spec 1.3), and the project root never has one.
+  if (node && node.parentId !== null && node.status !== 'done' && node.status !== 'dropped') {
     // A driver id that names no session row counts as no driver, and so does a session no longer focused on the step
     // (an enrollSession repoint, or any other drift that left the column behind).
     const current = node.driverSessionId === null ? undefined : findSession(ctx, node.driverSessionId);
@@ -480,6 +481,7 @@ export function claimStep(ctx: Ctx, actor: string, sessionId: string, nodeId: nu
     }
   }
   let drove: { drive: Drive; from: Session | null } = { drive: null, from: null };
+  let owedLines: string[] = [];
   write(ctx, actor, (record) => {
     // The role first, so the focus event ("is on #id") is the latest line on the activity strip. A session with no
     // project takes the step's; applyFocus refuses what cannot be claimed, and the write rolls the role back with it.
@@ -495,6 +497,12 @@ export function claimStep(ctx: Ctx, actor: string, sessionId: string, nodeId: nu
     // applyFocus, so an untracked session or another project's step gets that reason first.
     if (target && target.parentId === null) throw badRequest(`#${nodeId} is the project root`, 'Claim the step you will work on.');
     if (target && target.status === 'dropped') throw badRequest(`#${nodeId} is dropped`, 'Reopen it first, or claim another step.');
+    // A session that starts driving is told the answers no live asker will hear (spec 2), once: marked in this write.
+    if (drive === 'drives' || drive === 'took_over') {
+      const owed = owedAnswers(ctx, nodeId, sessionId);
+      markAnswersDelivered(ctx, owed.map((a) => a.id));
+      owedLines = owed.map((a) => `Owed: ${askTag(a.id)} answered "${oneLine(a.answer)}"`);
+    }
   });
   // The driver note names its session, so that session's "also claimed" note would say it twice.
   for (const a of alsoClaimed) if (a.sessionId !== drove.from?.id) notes.push(a.note);
@@ -502,7 +510,7 @@ export function claimStep(ctx: Ctx, actor: string, sessionId: string, nodeId: nu
   if (driveLine) notes.push(driveLine);
   const session = findSession(ctx, sessionId)!;
   const snapshot = getProjectSnapshot(ctx, session.projectId!);
-  return { session, notes, block: stepBlock(snapshot, nodeId, session, Date.parse(ctx.now())) };
+  return { session, notes, block: [...stepBlock(snapshot, nodeId, session, Date.parse(ctx.now())), ...owedLines] };
 }
 
 /**
