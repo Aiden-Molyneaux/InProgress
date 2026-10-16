@@ -1769,7 +1769,24 @@ test.describe('Board', () => {
     await expect(header.getByRole('button')).toHaveCount(0);
   });
 
-  test('a permission wait is an amber message with the ringed character, the command and the step, and a Now row says needs permission', async ({ page, api, fresh }) => {
+  test('the Now row names its driver and its helper', async ({ page, api, fresh }) => {
+    // The fixture session's focus on the step is its claim, so it drives; the session that claims next helps.
+    const helper = `e2e-${randomUUID()}`;
+    const nodeId = fresh.ids['Play app signing'];
+    await write(api, helper, 'post', `/api/sessions/${helper}/enroll`, { project: fresh.slug, title: 'Helper session' });
+    await hook(api, helper, { event: 'prompt' });
+    await write(api, helper, 'post', `/api/sessions/${helper}/claim`, { nodeId });
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const sessions = nowRow(page, 'Play app signing').locator('.ip-session');
+    await expect(sessions).toHaveCount(2);
+    await expect(sessions.first()).toHaveAttribute('data-session', fresh.session);
+    await expect(sessions.first().locator('.ip-role')).toHaveText(' · drives');
+    await expect(sessions.nth(1)).toHaveAttribute('data-session', helper);
+    await expect(sessions.nth(1).locator('.ip-role')).toHaveText(' · helping');
+  });
+
+  test('a permission wait is an amber message with the ringed character, the command and the step, and a Now row says needs permission',async ({ page, api, fresh }) => {
     await startCommand(api, fresh.session, 'b1', 'npm run build');
     await hook(api, fresh.session, { event: 'permission' });
     await open(page, fresh);

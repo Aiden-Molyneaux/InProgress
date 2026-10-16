@@ -27,6 +27,7 @@ function SessionMessage({ session, row, snapshot, now }: { session: Session; row
         <div className="ip-msg-head">
           <b className="ip-tag" style={{ color: hue(session.slot) }}>{sessionTag(session.slot) || '?'}</b>{' '}
           <span className={`ip-state-word ${activity}`}>{WORDS[activity]}</span>
+          {row.driver && <span className="ip-role"> · {row.driver.id === session.id ? 'drives' : 'helping'}</span>}
           <span className="ip-quiet"> · {sessionDisplayTitle(session)}</span>
         </div>
         {task && <p className="ip-main-line">{withoutOwnId(task.subject, row.node.id)}</p>}
