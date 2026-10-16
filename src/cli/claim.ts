@@ -4,7 +4,7 @@ import { ApiClientError, createClient } from '../lib/client';
 import { raiseNotes, type RaiseReply } from '../lib/ask-notes';
 import { TASKS_NOT_RUNNING_HINT } from './tasks';
 
-export const CLAIM_USAGE = 'Usage: inprogress claim <step id> --session <session id>';
+export const CLAIM_USAGE = 'Usage: inprogress claim <step id> [--take-over] --session <session id>';
 export const ORCHESTRATE_USAGE = 'Usage: inprogress orchestrate --session <session id> [--status]';
 export const ASK_USAGE = 'Usage: inprogress ask <step id> --session <session id> --question|--permission|--review "<text>"';
 
@@ -46,9 +46,14 @@ function walk(args: string[], onFlag: (flag: string, next: string | undefined) =
   return { rest };
 }
 
-export function parseClaimArgs(args: string[]): { session: string; nodeId: number } | { error: string } {
+export function parseClaimArgs(args: string[]): { session: string; nodeId: number; takeOver: boolean } | { error: string } {
   let session: string | undefined;
+  let takeOver = false;
   const walked = walk(args, (flag, next) => {
+    if (flag === '--take-over') {
+      takeOver = true;
+      return 0;
+    }
     if (flag !== '--session') return undefined;
     if (!next?.trim() || next.startsWith('--')) return { error: '--session needs the session id' };
     if (session !== undefined) return { error: '--session is given twice' };
@@ -60,7 +65,7 @@ export function parseClaimArgs(args: string[]): { session: string; nodeId: numbe
   const nodeId = stepId(walked.rest[0]);
   if (nodeId === undefined) return { error: `Not a step id: ${walked.rest[0]}` };
   if (session === undefined) return { error: 'Missing --session <session id>' };
-  return { session, nodeId };
+  return { session, nodeId, takeOver };
 }
 
 export function parseOrchestrateArgs(args: string[]): { session: string; status: boolean } | { error: string } {
@@ -134,7 +139,7 @@ async function call<T>(out: (line: string) => void, timeoutHint: string, run: ()
   }
 }
 
-/** `inprogress claim <id> --session <sid>`: prints the notes, then the step block. */
+/** `inprogress claim <id> [--take-over] --session <sid>`: prints the notes, then the step block. */
 export async function runClaim(args: string[], out: (line: string) => void, o: Conn): Promise<number> {
   const parsed = parseClaimArgs(args);
   if ('error' in parsed) {
@@ -143,7 +148,7 @@ export async function runClaim(args: string[], out: (line: string) => void, o: C
     return 1;
   }
   const res = await call(out, CLAIM_TIMEOUT_HINT, () =>
-    createClient(o).post<{ notes: string[]; block: string[] }>(`/api/sessions/${encodeURIComponent(parsed.session)}/claim`, { nodeId: parsed.nodeId }, { actor: `session:${parsed.session}` }),
+    createClient(o).post<{ notes: string[]; block: string[] }>(`/api/sessions/${encodeURIComponent(parsed.session)}/claim`, parsed.takeOver ? { nodeId: parsed.nodeId, takeOver: true } : { nodeId: parsed.nodeId }, { actor: `session:${parsed.session}` }),
   );
   if (!res) return 1;
   for (const line of [...res.notes, ...res.block]) out(line);

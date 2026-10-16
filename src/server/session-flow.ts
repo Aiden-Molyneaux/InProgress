@@ -4,12 +4,12 @@ import { write, type Ctx, type RecordEvent } from './db/tx';
 import { badRequest } from './errors';
 import { renderBriefing, renderStatusAnswer, renderStatusLine, untrackedHint } from './briefing';
 import { renderOrchestratorBriefing, stepBlock } from './briefing-scoped';
-import { deriveBoard } from '../core/board';
+import { deriveBoard, isLive } from '../core/board';
 import { askTag, sessionTag } from '../core/types';
 import { formatCounts, formatDigest, readDigest } from './digest';
 import { markAnswersDelivered, undeliveredAnswers } from './repo/asks';
 import { endCommand, endSessionCommands, pruneCommands, reconcileCommands, startCommand, type BackgroundEntry } from './repo/commands';
-import { findNode, leadingNode, patchNode, requireNode } from './repo/nodes';
+import { findNode, leadingNode, patchNode, requireNode, setDriver } from './repo/nodes';
 import { getProjectById, isTracking, notTracked, releaseQueue, resolveBinding, resolveProject } from './repo/projects';
 import { assignSlot, briefingDue, clearBriefingDue, findSession, markBriefingDue, markRevived, saveSession } from './repo/sessions';
 import { getProjectSnapshot } from './repo/snapshot';
@@ -365,8 +365,23 @@ export function enrollSession(ctx: Ctx, actor: string, sessionId: string, projec
   return { session, briefing: renderBriefing(getProjectSnapshot(ctx, session.projectId!), sessionId, Date.parse(ctx.now()), { checkOld: true }) };
 }
 
-/** setFocus's work inside an open write: validates, activates a todo step, saves the session and records the change. */
-function applyFocus(ctx: Ctx, record: RecordEvent, sessionId: string, nodeId: number | null): { existing: Session; projectId: number } {
+/** How a focus change left the step's driver (spec 1.2): null for no step. */
+type Drive = 'drives' | 'helping' | 'took_over' | 'same' | null;
+
+/** The note a claim prints for `drive`, or none. */
+function driveNote(drive: Drive, nodeId: number, from: Session | null): string | null {
+  const tag = sessionTag(from?.slot ?? null) || '?';
+  if (drive === 'drives') return `You drive #${nodeId}.`;
+  if (drive === 'helping') return `${tag} drives #${nodeId}; you are helping. Pass --take-over to drive.`;
+  if (drive === 'took_over') return `You drive #${nodeId}; took over from ${tag}.`;
+  return null;
+}
+
+/**
+ * setFocus's work inside an open write: validates, activates a todo step, moves the driver (spec 1.2, 1.3), saves the
+ * session and records the change.
+ */
+function applyFocus(ctx: Ctx, record: RecordEvent, sessionId: string, nodeId: number | null, o: { takeOver: boolean }): { existing: Session; projectId: number; drive: Drive; from: Session | null } {
   const existing = findSession(ctx, sessionId);
   if (!existing) throw badRequest(`Session ${sessionId} is not tracked`, 'Use enroll_session first.');
   const untracked = (id: number) => notTracked(ctx, sessionId, id, 'Unarchive the project with update_project first, or move the session to an active project with enroll_session.');
@@ -384,7 +399,39 @@ function applyFocus(ctx: Ctx, record: RecordEvent, sessionId: string, nodeId: nu
   // Focus on a todo step of Claude's makes it active, in this write and under this actor. Any other status, or a step
   // assigned to Aiden, stays as it is. Recorded before session.updated, so the activity strip's latest line still
   // reads "<session> is on #id".
-  if (node && node.status === 'todo' && node.assignee === 'claude') patchNode(ctx, record, node, { status: 'active' });
+  // patchNode writes the node's driver back as it read it, so it runs before any setDriver here, and the driver checks
+  // below use the node it returns.
+  if (node && node.status === 'todo' && node.assignee === 'claude') node = patchNode(ctx, record, node, { status: 'active' });
+  // Focus that leaves a step this session drives stops the driving (spec 1.3).
+  if (existing.focusNodeId !== null && existing.focusNodeId !== nodeId) {
+    const old = findNode(ctx, existing.focusNodeId);
+    if (old && old.driverSessionId === sessionId) setDriver(ctx, record, old, null);
+  }
+  let drive: Drive = null;
+  let from: Session | null = null;
+  // Only an open step gets a driver: a done or dropped one keeps none (spec 1.3).
+  if (node && node.status !== 'done' && node.status !== 'dropped') {
+    // A driver id that names no session row counts as no driver, and so does a session no longer focused on the step
+    // (an enrollSession repoint, or any other drift that left the column behind).
+    const current = node.driverSessionId === null ? undefined : findSession(ctx, node.driverSessionId);
+    if (node.driverSessionId === sessionId) drive = 'same';
+    else if (!current || !isLive(current, Date.parse(ctx.now())) || current.focusNodeId !== node.id) {
+      setDriver(ctx, record, node, sessionId);
+      drive = 'drives';
+    } else if (o.takeOver) {
+      // Cleared directly, not through applyFocus, so the old driver's lastSeenAt does not move and keep it live.
+      // Never clears a focus on another step (the live check above means it is on this one).
+      ctx.db.prepare('UPDATE sessions SET focus_node_id = NULL WHERE id = ? AND focus_node_id = ?').run(current.id, node.id);
+      record({ projectId: current.projectId ?? projectId, type: 'session.updated', entity: 'session', entityId: current.id, data: { changed: ['focusNodeId'], focusNodeId: null } });
+      markBriefingDue(ctx, current.id);
+      setDriver(ctx, record, node, sessionId);
+      drive = 'took_over';
+      from = current;
+    } else {
+      drive = 'helping';
+      from = current;
+    }
+  }
   const next: Session = { ...existing, projectId, focusNodeId: nodeId, lastSeenAt: ctx.now() };
   // Being heard from again can bring a stale session back.
   placeSlot(ctx, existing, next);
@@ -393,12 +440,13 @@ function applyFocus(ctx: Ctx, record: RecordEvent, sessionId: string, nodeId: nu
   pinStartFocus(ctx, sessionId, nodeId);
   markIfRelettered(ctx, existing, next);
   record({ projectId, type: 'session.updated', entity: 'session', entityId: sessionId, data: { changed: ['focusNodeId'], focusNodeId: nodeId } });
-  return { existing, projectId };
+  return { existing, projectId, drive, from };
 }
 
 export function setFocus(ctx: Ctx, actor: string, sessionId: string, nodeId: number | null): Session {
   write(ctx, actor, (record) => {
-    const { existing, projectId } = applyFocus(ctx, record, sessionId, nodeId);
+    // A scribe's set_focus never takes over (spec 1.2): it drives only a step with no live driver.
+    const { existing, projectId } = applyFocus(ctx, record, sessionId, nodeId, { takeOver: false });
     // In a scoped project the scribe's focus change brings the step block on the next prompt (spec 3.1). A claim prints it itself.
     if (actor.startsWith('scribe') && existing.focusNodeId !== nodeId && getProjectById(ctx, projectId)?.briefingMode === 'scoped') markBriefingDue(ctx, sessionId);
   });
@@ -415,8 +463,10 @@ export interface ClaimResult {
  * `inprogress claim` (spec 3.1): setFocus, then the role worker, and the step block at once. Readiness is advisory in
  * stage 1: each reason is a note and the claim goes ahead. Marks no briefing due, because the block is the answer.
  */
-export function claimStep(ctx: Ctx, actor: string, sessionId: string, nodeId: number): ClaimResult {
+export function claimStep(ctx: Ctx, actor: string, sessionId: string, nodeId: number, o: { takeOver?: boolean } = {}): ClaimResult {
   const notes: string[] = [];
+  // "Also claimed by" notes, held back until the write says which session the driver note names.
+  const alsoClaimed: { sessionId: string; note: string }[] = [];
   const before = findSession(ctx, sessionId);
   const target = findNode(ctx, nodeId);
   // A refusal (another project's step, an untracked session) comes from applyFocus below; notes only for a claim that can go ahead.
@@ -426,9 +476,10 @@ export function claimStep(ctx: Ctx, actor: string, sessionId: string, nodeId: nu
     if (!row || (row.column !== 'next' && row.column !== 'now')) notes.push(`Note: #${nodeId} is not in Next.`);
     for (const a of row?.asks ?? []) notes.push(`Note: #${nodeId} has open ask ${askTag(a.id)}.`);
     for (const s of row?.sessions ?? []) {
-      if (s.id !== sessionId) notes.push(`Note: #${nodeId} is also claimed by ${sessionTag(s.slot) || '?'} "${s.title?.trim() || `Session ${s.id.slice(0, 6)}`}" (${sessionActivity(s, nowMs)}).`);
+      if (s.id !== sessionId) alsoClaimed.push({ sessionId: s.id, note: `Note: #${nodeId} is also claimed by ${sessionTag(s.slot) || '?'} "${s.title?.trim() || `Session ${s.id.slice(0, 6)}`}" (${sessionActivity(s, nowMs)}).` });
     }
   }
+  let drove: { drive: Drive; from: Session | null } = { drive: null, from: null };
   write(ctx, actor, (record) => {
     // The role first, so the focus event ("is on #id") is the latest line on the activity strip. A session with no
     // project takes the step's; applyFocus refuses what cannot be claimed, and the write rolls the role back with it.
@@ -438,12 +489,17 @@ export function claimStep(ctx: Ctx, actor: string, sessionId: string, nodeId: nu
       ctx.db.prepare("UPDATE sessions SET role = 'worker' WHERE id = ?").run(sessionId);
       record({ projectId: roleProject, type: 'session.updated', entity: 'session', entityId: sessionId, data: { changed: ['role'], role: 'worker' } });
     }
-    applyFocus(ctx, record, sessionId, nodeId);
+    const { drive, from } = applyFocus(ctx, record, sessionId, nodeId, { takeOver: o.takeOver ?? false });
+    drove = { drive, from };
     // A claim names a step to work on: not the project root, not a dropped step (as raiseAsk refuses them). Checked after
     // applyFocus, so an untracked session or another project's step gets that reason first.
     if (target && target.parentId === null) throw badRequest(`#${nodeId} is the project root`, 'Claim the step you will work on.');
     if (target && target.status === 'dropped') throw badRequest(`#${nodeId} is dropped`, 'Reopen it first, or claim another step.');
   });
+  // The driver note names its session, so that session's "also claimed" note would say it twice.
+  for (const a of alsoClaimed) if (a.sessionId !== drove.from?.id) notes.push(a.note);
+  const driveLine = driveNote(drove.drive, nodeId, drove.from);
+  if (driveLine) notes.push(driveLine);
   const session = findSession(ctx, sessionId)!;
   const snapshot = getProjectSnapshot(ctx, session.projectId!);
   return { session, notes, block: stepBlock(snapshot, nodeId, session, Date.parse(ctx.now())) };
@@ -461,6 +517,10 @@ export function orchestrate(ctx: Ctx, actor: string, sessionId: string, o: { sta
   const marks = deriveBoard(getProjectSnapshot(ctx, projectId), Date.parse(ctx.now())).marked.length;
   write(ctx, actor, (record) => {
     if (!isTracking(ctx, projectId)) throw notTracked(ctx, sessionId, projectId, 'Unarchive the project with update_project first.');
+    // Dropping the focus stops the driving of the step it was on (spec 1.3). Read inside the write, as setDriver needs.
+    const focusId = findSession(ctx, sessionId)?.focusNodeId ?? null;
+    const focused = focusId === null ? undefined : findNode(ctx, focusId);
+    if (focused && focused.driverSessionId === sessionId) setDriver(ctx, record, focused, null);
     ctx.db.prepare("UPDATE sessions SET role = 'orchestrator', focus_node_id = NULL WHERE id = ?").run(sessionId);
     // The session line last, so the activity strip's latest event is about the session (it has no session.orchestrate line).
     record({ projectId, type: 'session.orchestrate', entity: 'session', entityId: sessionId, data: { status: o.status, marks } });

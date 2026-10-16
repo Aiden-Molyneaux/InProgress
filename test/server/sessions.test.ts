@@ -827,9 +827,11 @@ describe('enrollSession and setFocus', () => {
     // node.updated before session.updated, so the activity strip's latest line reads "<session> is on #id".
     expect(listEventsSince(ctx, mark)).toMatchObject([
       { type: 'node.updated', actor: 'scribe:s1', entityId: String(s3.id), data: { changes: { status: { from: 'todo', to: 'active' } } } },
+      // The step had no driver, so the focus makes s1 its driver (#442).
+      { type: 'node.updated', actor: 'scribe:s1', entityId: String(s3.id), data: { changes: { driverSessionId: { from: null, to: 's1' } } } },
       { type: 'session.updated', actor: 'scribe:s1', entityId: 's1', data: { changed: ['focusNodeId'], focusNodeId: s3.id } },
     ]);
-    expect(seen).toEqual([`node.updated focus=${s3.id} status=active`, `session.updated focus=${s3.id} status=active`]);
+    expect(seen).toEqual([`node.updated focus=${s3.id} status=active`, `node.updated focus=${s3.id} status=active`, `session.updated focus=${s3.id} status=active`]);
   });
 
   it('leaves a blocked, done, dropped, active or Aiden-assigned step as it is, with no node.updated', () => {
@@ -843,7 +845,19 @@ describe('enrollSession and setFocus', () => {
     setFocus(ctx, 'scribe:s1', 's1', null);
     expect([blocked, done, dropped, a2, a3].map((n) => [n.id, status(n.id)])).toEqual(before);
     expect(before.map(([, s]) => s)).toEqual(['blocked', 'done', 'dropped', 'active', 'todo']);
-    expect(listEventsSince(ctx, mark).map((e) => e.type)).toEqual(Array(6).fill('session.updated'));
+    // The only node.updated events are the driver moving with the focus on the open steps (#442): set and cleared on
+    // blocked, a2 and a3; done and dropped get none. None changes a status.
+    const events = listEventsSince(ctx, mark);
+    expect(events.filter((e) => e.type === 'session.updated')).toHaveLength(6);
+    const drivers = events.filter((e) => e.type === 'node.updated').map((e) => [e.entityId, (e.data as { changes: { driverSessionId?: { to: string | null } } }).changes.driverSessionId?.to]);
+    expect(drivers).toEqual([
+      [String(blocked.id), 's1'],
+      [String(blocked.id), null],
+      [String(a2.id), 's1'],
+      [String(a2.id), null],
+      [String(a3.id), 's1'],
+      [String(a3.id), null],
+    ]);
   });
 
   it('promotes the step it focuses only once: focusing it again changes nothing more', () => {
