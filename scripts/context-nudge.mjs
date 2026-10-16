@@ -2,8 +2,8 @@
 // PostToolBatch hook, registered in .claude/settings.json. Claude cannot see its own context size, so this tells
 // the main session when it crosses 150k (ask Aiden for /compact at the next clean point) and again at 200k (carry on;
 // the autocompact at 250k is the backstop). It keeps the highest level it has announced for each session in a small
-// file, so a level is said once and a turn that ended without a tool call cannot hide a crossing. A fall below 150k
-// with a level stored is a compaction: it says the post-compaction line once and re-arms. A session's first run writes
+// file (`level` and `last`), so a level is said once and a turn that ended without a tool call cannot hide a crossing.
+// A reading at least 30,000 tokens below the last one stored is a compaction: it says the post-compaction line once and re-arms. A session's first run writes
 // that file too, which is how a pilot checks the hook runs. Silent otherwise, silent inside subagents, and it exits 0
 // whatever happens: a nudge must never block.
 import fs from 'node:fs';

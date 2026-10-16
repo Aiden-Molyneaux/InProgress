@@ -1786,7 +1786,7 @@ test.describe('Board', () => {
     await expect(sessions.nth(1).locator('.ip-role')).toHaveText(' · helping');
   });
 
-  test('a permission wait is an amber message with the ringed character, the command and the step, and a Now row says needs permission',async ({ page, api, fresh }) => {
+  test('a permission wait is an amber message with the ringed character, the command and the step, and a Now row says needs permission', async ({ page, api, fresh }) => {
     await startCommand(api, fresh.session, 'b1', 'npm run build');
     await hook(api, fresh.session, { event: 'permission' });
     await open(page, fresh);

@@ -55,7 +55,8 @@ the first deploy.
 
 `claimStep(ctx, actor, sessionId, nodeId, { takeOver })`, and `inprogress claim <id> [--take-over] --session <id>`:
 
-- **No live driver** (null, or a session that is ended or past `STALE_SESSION_MS`): the claimer becomes the driver.
+- **No live driver** (null, or a session that is ended, past `STALE_SESSION_MS`, or no longer focused on the step; the
+  project root never has a driver): the claimer becomes the driver.
   Note: `You drive #442.`
 - **A live driver, no `--take-over`**: the claimer focuses on the step as a helper; the driver is unchanged. Note:
   `H drives #442; you are helping. Pass --take-over to drive.`
@@ -79,8 +80,8 @@ driver. It never takes over.
 ### 1.4 What sessions see
 
 - **Step block** (`stepBlock`, briefing-scoped): a `Driver:` line, `you` or `H "<title>" (<activity>)`.
-- **Previous driver's next briefing** after a take-over: `N took over #442. Claim another step, or claim #442
-  --take-over to drive it again.`
+- **Previous driver's next briefing**: it is the unclaimed one (it has no focus), and the activity strip shows the
+  take-over. Nothing stores who took over, and this plan does not add it.
 - **Briefing rules** (the "Claim one:" lines and the session-start hook text): mention `--take-over` for a successor that
   inherits a step.
 
@@ -123,9 +124,10 @@ new `stalled` mark catches it. Nothing else is tracked.
 
 ### 2.4 The `answer_waiting` mark
 
-A row is marked `answer_waiting` when one of its asks is cleared with a non-empty answer and not yet delivered. The
+A row is marked `answer_waiting` when its step is not done and one of its asks is cleared with a non-empty answer and not yet delivered. The
 snapshot holds asks cleared within `ASK_TRAIL_MS` (7 days), so the mark covers that window; on the first deploy it shows
-the past week's undelivered answers once, which is the point. Label: `answer waiting`.
+the past week's undelivered answers once, which is the point. A done step never shows it: it has no driver to deliver
+to, and the digest's Asks cleared still shows the answer. Label: `answer waiting`.
 
 ## 3. Stalled, and Mip's checks
 
@@ -134,9 +136,10 @@ the past week's undelivered answers once, which is the point. Label: `answer wai
 `STALL_MS = 30 * 60 * 1000` in `src/core/types.ts`. Derived in `deriveBoard` for a row whose node is `active` and not
 assigned to Aiden, when either:
 
-- (a) its driver is live, `sessionActivity(driver, now)` is `idle`, `now - lastSeenAt >= STALL_MS`, and the step has no
+- (a) its driver is live and focused on the step, `sessionActivity(driver, now)` is `idle`, `now - lastSeenAt >= STALL_MS`, and the step has no
   open ask; or
-- (b) at least one live session is focused on it but its driver is not live (ended, stale, or null).
+- (b) at least one live session is focused on it but its driver is not live and focused on it (ended, stale, moved
+  elsewhere, or null).
 
 `permission` and `busy` (a running subagent, or a command that counts as work) never count. A driver waiting on Aiden
 with an open ask is waiting, not stalled; section 4.3 makes Sigmund raise one. `ended_open` keeps its meaning for
@@ -150,7 +153,7 @@ The `--status` Reconcile list prints the facts Mip needs for a stalled row:
 #422 stalled: H idle 45m · branch cell-form · cwd C:/personal/InProgress/.claude/worktrees/cell-form
 ```
 
-and for (b), `#422 stalled: driver H ended 2h ago · helping: K`.
+and for (b), `#422 stalled: driver not live · on it: K`.
 
 ### 3.3 Mip (`claude/skills/mip-orc/SKILL.md`)
 
@@ -207,7 +210,7 @@ next opening. Sigmund does not message Mip, and Mip keeps `spawn_task` chips.
   250k autocompact is the reset.`
 - **200k** (replaces the 160k line): `Context is about 200k tokens. If Aiden has not compacted, carry on; the autocompact
   at 250k is the backstop.`
-- **After a compaction** (the hook already sees the fall below 150k): one line, `Context was compacted. If you are running
+- **After a compaction** (a reading at least 30,000 tokens below the last one the hook stored; its state file holds `level` and `last`): one line, `Context was compacted. If you are running
   Sigmund, reload him (.claude/skills/sigmund/SKILL.md) and reread your plan file and the step block before you go on.`
   The nudge runs in every main session of this repo, Mip's included, hence the "if".
 
