@@ -256,4 +256,13 @@ export const MIGRATIONS: string[] = [
   -- A new table and defaulted or nullable columns: v1 to v9 builds can still read and write this schema.
   INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
   `,
+  // 11: the step's driver (spec 2026-10-15-keep-the-thread-design.md section 1.1): the one session that works an active
+  // step. NULL when no session drives it, and cleared when the step goes done or dropped. An active step takes the
+  // non-ended session focused on it that was seen last.
+  `
+  ALTER TABLE nodes ADD COLUMN driver_session_id TEXT;
+  UPDATE nodes SET driver_session_id = (SELECT s.id FROM sessions s WHERE s.focus_node_id = nodes.id AND s.state != 'ended' ORDER BY s.last_seen_at DESC LIMIT 1) WHERE status = 'active';
+  -- Only a nullable column: v1 to v10 builds can still read and write this schema, so a rollback across it works.
+  INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+  `,
 ];

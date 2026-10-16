@@ -167,6 +167,8 @@ export interface TreeNode {
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
+  /** The session that drives the step while it is active; null when none does, and always once done or dropped. */
+  driverSessionId: string | null;
 }
 
 export interface NodeInput {
