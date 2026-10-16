@@ -13,6 +13,11 @@ export interface Ctx {
   db: DB;
   bus: EventBus;
   now: () => string;
+  /**
+   * Run by write() inside its transaction, after `fn`, for the projects its events name: the Board reconcile
+   * (repo/taskState.ts). The server sets it in main.ts; unset, writes skip it.
+   */
+  reconcile?: (ctx: Ctx, projectIds: number[]) => void;
 }
 
 export function createCtx(db: DB, now: () => string = () => new Date().toISOString()): Ctx {
@@ -36,7 +41,8 @@ export type RecordEvent = (event: EventInput) => void;
  * Run `fn` in one transaction. Events passed to `record` are inserted in the same
  * transaction and delivered to the `ctx.bus` 'event' listeners only after commit;
  * a listener that throws affects neither the write nor the other listeners. A write by
- * `scribe:<sessionId>` resets that session's stale-update counter.
+ * `scribe:<sessionId>` resets that session's stale-update counter. When `ctx.reconcile` is set, it runs inside the
+ * transaction for the projects the events name; a reconcile that throws is logged and leaves the write committed.
  * Never call write() inside another write(): it throws.
  */
 export function write<T>(ctx: Ctx, actor: string, fn: (record: RecordEvent) => T): T {
@@ -52,6 +58,20 @@ export function write<T>(ctx: Ctx, actor: string, fn: (record: RecordEvent) => T
       const info = insert.run(ts, e.projectId, actor, e.type, e.entity, String(e.entityId), JSON.stringify(data));
       pending.push({ id: Number(info.lastInsertRowid), ts, projectId: e.projectId, actor, type: e.type, entity: e.entity, entityId: String(e.entityId), data });
     });
+    const projectIds = [...new Set(pending.map((e) => e.projectId).filter((id): id is number => id !== null))];
+    if (projectIds.length && ctx.reconcile) {
+      const reconcile = ctx.reconcile;
+      try {
+        // A nested transaction is a SAVEPOINT: a throw rolls back the reconcile's own updates and nothing else.
+        ctx.db.transaction(() => reconcile(ctx, projectIds))();
+      } catch (err) {
+        // Some SQLite errors (a full disk, an I/O error) roll back the whole transaction, not just the savepoint: the
+        // write is already lost, so it must fail and say so rather than log and report success.
+        if (!ctx.db.inTransaction) throw err;
+        // A bug in the reconcile must never stop a write: the Board's stored state catches up on the next one.
+        console.error('[reconcile]', err);
+      }
+    }
     if (actor.startsWith('scribe:')) {
       ctx.db.prepare('UPDATE sessions SET prompts_since_update = 0 WHERE id = ?').run(actor.slice('scribe:'.length));
     }

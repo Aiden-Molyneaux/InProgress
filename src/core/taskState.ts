@@ -1,6 +1,6 @@
 import { isLive, type Board, type BoardInput, type BoardRow, type Column } from './board';
 import { buildIndex, dfsOrder } from './tree';
-import { TRAIL_MS, type Session } from './types';
+import { TRAIL_MS, type Ask, type Session, type TreeNode } from './types';
 
 /** The one state a Board box shows (the shared task box). */
 export const TASK_STATES = ['backlog', 'ready', 'working', 'idle', 'unattended', 'blocked', 'question', 'permission', 'review', 'done'] as const;
@@ -51,6 +51,18 @@ const cellOf = (state: TaskState, column: Column): TaskCell => {
     case 'blocked': return column === 'done' ? 'done' : column;
   }
 };
+
+/**
+ * When a step's state began, as far as its own fields say: done gives completedAt (else updatedAt), an ask state (a
+ * Needs me cell) the oldest open ask's raisedAt (else updatedAt), any other state updatedAt. `asks` are its open asks,
+ * oldest first. The reconcile stores this on a step's first set; the window shows it when the stored state is stale.
+ */
+export function sinceFallback(node: Pick<TreeNode, 'updatedAt' | 'completedAt'>, state: TaskState, asks: readonly Pick<Ask, 'raisedAt'>[]): string {
+  if (state === 'done') return node.completedAt ?? node.updatedAt;
+  // The column is unused for an ask state: only blocked reads it.
+  if (cellOf(state, 'backlog') === 'needs') return asks[0]?.raisedAt ?? node.updatedAt;
+  return node.updatedAt;
+}
 
 /** Every box on the Board by cell, in each cell's order. A task is in exactly one cell. */
 export function taskBoxes(board: Board, input: BoardInput, now: number): Record<TaskCell, TaskBox[]> {

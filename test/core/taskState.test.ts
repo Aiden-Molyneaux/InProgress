@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { deriveBoard, type BoardInput } from '../../src/core/board';
-import { COLOURED, HUES, TASK_STATES, taskBoxes, taskStateOf, type TaskCell, type TaskState } from '../../src/core/taskState';
+import { COLOURED, HUES, sinceFallback, TASK_STATES, taskBoxes, taskStateOf, type TaskCell, type TaskState } from '../../src/core/taskState';
 import { TRAIL_MS, type Ask, type PastSession, type Session, type TreeNode } from '../../src/core/types';
 
 const NOW = Date.parse('2026-10-13T12:00:00.000Z');
@@ -159,5 +159,21 @@ describe('taskBoxes', () => {
     const i = input({ nodes: [n(1, null), n(2, 1, { status: 'done', completedAt: ago(2 * MIN) }), n(3, 1, { status: 'done', completedAt: ago(MIN) })] });
     const b = taskBoxes(deriveBoard(i, NOW), i, NOW);
     expect(cells(b, 'done')).toEqual([3, 2]);
+  });
+});
+
+describe('sinceFallback', () => {
+  const node = n(2, 1, { updatedAt: ago(10 * MIN), completedAt: ago(5 * MIN) });
+  const asks = [ask(1, 2, { raisedAt: ago(30 * MIN) }), ask(2, 2, { raisedAt: ago(20 * MIN) })];
+  it('takes completedAt for done, updatedAt when it has none', () => {
+    expect(sinceFallback(node, 'done', [])).toBe(ago(5 * MIN));
+    expect(sinceFallback({ ...node, completedAt: null }, 'done', [])).toBe(ago(10 * MIN));
+  });
+  it('takes the oldest open ask for an ask state, updatedAt when there is none', () => {
+    for (const st of ['question', 'review', 'permission'] as const) expect(sinceFallback(node, st, asks)).toBe(ago(30 * MIN));
+    expect(sinceFallback(node, 'permission', [])).toBe(ago(10 * MIN));
+  });
+  it('takes updatedAt for every other state, even with asks', () => {
+    for (const st of ['backlog', 'ready', 'working', 'idle', 'unattended', 'blocked'] as const) expect(sinceFallback(node, st, asks)).toBe(ago(10 * MIN));
   });
 });

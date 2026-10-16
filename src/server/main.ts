@@ -10,6 +10,7 @@ import { backupDb, truncateIfLarge } from './backup';
 import { openDb } from './db/connection';
 import { createCtx } from './db/tx';
 import { runMaintenance } from './project-lifecycle';
+import { reconcileProjects } from './repo/taskState';
 import { portState, reportStartupFailure } from './startup';
 
 /** How often a running server purges deleted projects past their 30 days and prunes old rows. */
@@ -32,6 +33,8 @@ async function main(): Promise<void> {
   const token = ensureToken(home);
   const db = openDb(join(home, 'inprogress.db'));
   const ctx = createCtx(db);
+  // The Board reconcile runs inside every write; set here, not in createCtx, so tests opt in.
+  ctx.reconcile = reconcileProjects;
   let closing = false;
   let maintenance: NodeJS.Timeout | undefined;
   let watchTimer: NodeJS.Timeout | undefined;
