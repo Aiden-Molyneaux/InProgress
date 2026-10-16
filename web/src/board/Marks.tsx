@@ -1,6 +1,6 @@
 import type { MouseEvent } from 'react';
 import type { BoardRow, Mark } from '../../../src/core/board';
-import { LABEL_GLYPHS, type NodeLabel, type TreeNode } from '../../../src/core/types';
+import { LABEL_GLYPHS, type NodeLabel } from '../../../src/core/types';
 import { noteAction, type MeasureArea } from '../measure';
 import { ageShort } from './text';
 
@@ -25,12 +25,12 @@ export function LabelChip({ label }: { label: NodeLabel | null }) {
   );
 }
 
-/** The marks on a step's quote: the amber ask, "you", the handoff chip and the grey hygiene marks. */
-export function StepMarks({ row, now, onOpenResource, skip = [], area }: { row: BoardRow; now: number; onOpenResource: (id: number) => void; skip?: Mark[]; area?: MeasureArea }) {
+/** The marks on a step's foot: the amber ask (not in a Board box, whose body holds the ask), "you", the handoff chip and the grey hygiene marks. */
+export function StepMarks({ row, now, onOpenResource, skip = [], area, noAsk = false }: { row: BoardRow; now: number; onOpenResource: (id: number) => void; skip?: Mark[]; area?: MeasureArea; noAsk?: boolean }) {
   const hygiene = row.marks.filter((m) => !skip.includes(m) && m !== 'ended_open');
   return (
     <>
-      {row.asks.length > 0 && (
+      {!noAsk && row.asks.length > 0 && (
         <span className="ip-mark ask" title={row.asks.map((a) => a.text).join('\n')}>
           {row.asks.length === 1 ? 'ask open' : `${row.asks.length} asks open`}
         </span>
@@ -56,19 +56,6 @@ export function StepMarks({ row, now, onOpenResource, skip = [], area }: { row: 
         </span>
       ))}
     </>
-  );
-}
-
-/** "on #id title" for a step, the title being the button that opens its Details. */
-export function StepLine({ node }: { node: Pick<TreeNode, 'id' | 'title'> }) {
-  return (
-    <span className="ip-on">
-      <span className="ip-on-word">on </span>
-      <span className="ip-id">{`#${node.id}`}</span>{' '}
-      <button type="button" className="ip-row-title">
-        {node.title}
-      </button>
-    </span>
   );
 }
 

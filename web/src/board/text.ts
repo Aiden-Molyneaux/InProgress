@@ -1,5 +1,5 @@
 import type { Board, BoardRow } from '../../../src/core/board';
-import { sessionTag, type PastSession } from '../../../src/core/types';
+import type { PastSession } from '../../../src/core/types';
 
 /** A compact age for a Board row: "now", "5m", "3h", "2d". */
 export function ageShort(iso: string, now: number): string {
@@ -24,11 +24,10 @@ export function hygieneTitle(board: Pick<Board, 'marked'>): string {
   return board.marked.map((r: BoardRow) => `#${r.node.id} ${r.marks.join(' ')}`).join(' · ');
 }
 
-/** The grey system line for an `ended_open` step: "B ended 3h ago without closing". Null for any other row. */
-export function endedLine(row: BoardRow, past: PastSession[], slotOf: (sessionId: string) => number | null, now: number): string | null {
+/** The grey system line for an `ended_open` step: "Its last session ended 3h ago without closing it". Null for any other row. */
+export function endedLine(row: BoardRow, past: PastSession[], now: number): string | null {
   if (!row.marks.includes('ended_open')) return null;
   const last = past.filter((p) => p.focusNodeId === row.node.id).sort((a, b) => b.endedAt.localeCompare(a.endedAt))[0];
   if (!last) return null;
-  const tag = sessionTag(slotOf(last.id)) || 'A session';
-  return `${tag} ended ${ageShort(last.endedAt, now)} ago without closing`;
+  return `Its last session ended ${ageShort(last.endedAt, now)} ago without closing it`;
 }

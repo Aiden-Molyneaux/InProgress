@@ -59,14 +59,21 @@ export const createStep = (projectId: number, slug: string, title: string, paren
 export const deleteStep = (projectId: number, slug: string, nodeId: number): Promise<UiResult> =>
   postUi(`/api/ui/projects/${projectId}/nodes/${nodeId}/delete`, { slug });
 
+/** What Open session answers: done; the command to run by hand (with why the server could not, when it says); or 'reload' after a server restart. */
+export type OpenDesktopResult = { ok: true } | { ok: false; command: string; reason?: string } | 'reload';
+
 /**
- * Opens a session in the Claude desktop app. When the server could not, the answer holds the command to copy. Never
- * rejects: a refusal or an unreachable server gives the same command, built here.
+ * Opens a session in the Claude desktop app. When the server could not, the answer holds the command to copy, and the
+ * reason when the failure was a refusal or an unreachable server (the server's own "could not launch" has none). Never
+ * rejects.
  */
-export async function openDesktop(sessionId: string): Promise<{ ok: true } | { ok: false; command: string }> {
+export async function openDesktop(sessionId: string): Promise<OpenDesktopResult> {
   const answer = await sendUi<{ ok: boolean; command?: string }>(`/api/ui/sessions/${encodeURIComponent(sessionId)}/open-desktop`, {});
-  if (typeof answer !== 'string' && answer.ok) return { ok: true };
-  return { ok: false, command: typeof answer !== 'string' && answer.command ? answer.command : `claude --desktop --resume ${sessionId}` };
+  if (answer === 'reload') return 'reload';
+  const fallback = `claude --desktop --resume ${sessionId}`;
+  if (typeof answer === 'string') return { ok: false, command: fallback, reason: answer };
+  if (answer.ok) return { ok: true };
+  return { ok: false, command: answer.command || fallback };
 }
 
 /** Clears an ask, with an answer when Aiden typed one. */

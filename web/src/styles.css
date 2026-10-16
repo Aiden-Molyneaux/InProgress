@@ -30,7 +30,16 @@
   --amber-ink: #92400e;
   --amber-fill: rgba(251,191,36,.18);
   --red: #b91c1c;
+  --red-fill: rgba(185,28,28,.08);
   --gone: #64748b;
+  /* Task hues (a Board box's left edge): none orange, yellow, red or grey, which states own. */
+  --hue-0: #0e7490;
+  --hue-1: #2563eb;
+  --hue-2: #4f46e5;
+  --hue-3: #9333ea;
+  --hue-4: #db2777;
+  --hue-5: #15803d;
+  --hue-6: #8b5e34;
   /* Session families, by slot (familyVar in family.ts). Slot 0 is teal, and a session with no slot wears it too. Past
      six they repeat and the letter tells them apart. */
   --family-0: #0b6b7d;
@@ -78,7 +87,15 @@
     --amber-ink: #fcd34d;
     --amber-fill: rgba(251,191,36,.12);
     --red: #f87171;
+    --red-fill: rgba(248,113,113,.1);
     --gone: #94a3b8;
+    --hue-0: #22d3ee;
+    --hue-1: #60a5fa;
+    --hue-2: #818cf8;
+    --hue-3: #c084fc;
+    --hue-4: #f472b6;
+    --hue-5: #4ade80;
+    --hue-6: #d4a574;
     --family-0: #3cc3d6;
     --family-1: #e8956f;
     --family-2: #7ad68f;
@@ -280,44 +297,22 @@ li.ip-orow:hover { background: var(--panel-2); }
 .ip-link-btn:hover { text-decoration: underline; }
 .ip-link-btn:focus-visible, .ip-row-title:focus-visible, .ip-chip-handoff:focus-visible, .ip-btn:focus-visible { outline: 2px solid var(--text-2); outline-offset: 1px; }
 .ip-tag { font-family: var(--font-mono); font-weight: var(--w-heavy); }
-/* A message: the character (or a dashed avatar) at the left, then who and when, the text and the step. */
+/* A message: the character at the left, then who and when, the text and the step (the header's note, the Project view's). */
 .ip-msg { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
 .ip-msg-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-m); line-height: 18px; }
 .ip-msg-head { color: var(--muted); font-size: var(--fs-s); line-height: 14px; }
 .ip-msg-head b { color: var(--text); font-weight: var(--w-heavy); }
-.ip-avatar-dashed { flex: none; width: 24px; height: 24px; border: 1.5px dashed var(--faint); border-radius: 50%; }
-.ip-inbox { display: flex; flex-direction: column; gap: 8px; }
-.ip-inbox > li { padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); }
-.ip-inbox > .ip-wait { background: var(--amber-fill); border-color: var(--amber); }
-.ip-wait .ip-msg-head { color: var(--amber-ink); }
-.ip-live { font-weight: var(--w-heavy); letter-spacing: .06em; color: var(--amber-ink); }
 .ip-code { display: block; max-width: 100%; padding: 3px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--fs-s); line-height: 14px; background: var(--panel-2); border-radius: var(--radius); }
-.ip-on-btn { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
 .ip-ask-actions { display: flex; gap: 6px; margin-top: 3px; }
 .ip-answer { display: block; width: 100%; margin-top: 3px; padding: 4px 8px; font: inherit; font-size: var(--fs-m); line-height: 18px; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); }
 .ip-answer:focus { outline: 2px solid var(--text-2); outline-offset: 1px; }
 .ip-problem { font-size: var(--fs-s); line-height: 14px; color: var(--amber-ink); }
 /* Rows: a hairline-bound block that opens Details on a click. */
 .ip-row { cursor: pointer; }
-.ip-now-list { display: flex; flex-direction: column; gap: 10px; }
-.ip-now-row { padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); }
-.ip-now-row:hover, .ip-inbox > li:hover { background: var(--panel-2); }
-.ip-now-row .ip-session + .ip-session { margin-top: 8px; }
-.ip-session .ip-main-line, .ip-nosession .ip-main-line { color: var(--text); font-size: var(--fs-m); line-height: 18px; overflow-wrap: anywhere; }
-.ip-state-word.permission { color: var(--amber-ink); }
-.ip-commands { font-family: var(--font-mono); font-size: var(--fs-s); line-height: 14px; color: var(--muted); overflow-wrap: anywhere; }
-.ip-commands.serving { color: var(--faint); }
-.ip-kin { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
-.ip-kin-chip { display: inline-flex; align-items: center; gap: 4px; }
-.ip-quote { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 6px; padding-left: 10px; border-left: 2px solid var(--border); font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
-.ip-session ~ .ip-quote { margin-left: 34px; }
-.ip-on-word, .ip-id { color: var(--muted); }
-.ip-id { font-family: var(--font-mono); }
+.ip-id { color: var(--muted); font-family: var(--font-mono); }
 .ip-row-title { max-width: 100%; text-align: left; font-size: var(--fs-m); line-height: 18px; font-weight: var(--w-text); color: var(--text-2); overflow-wrap: anywhere; }
 .ip-row-title:hover { color: var(--text); text-decoration: underline; }
-.ip-on { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: baseline; }
 .ip-type { color: var(--muted); font-size: var(--fs-s); }
-.ip-crumb { color: var(--faint); }
 .ip-docs { font-family: var(--font-mono); color: var(--muted); }
 .ip-mark { padding: 0 6px; border-radius: var(--radius); font-size: var(--fs-s); line-height: 18px; }
 .ip-mark.ask { background: var(--amber-fill); color: var(--amber-ink); }
@@ -325,48 +320,73 @@ li.ip-orow:hover { background: var(--panel-2); }
 .ip-chip-handoff { height: 18px; padding: 0 6px; border: 1px solid var(--border); border-radius: var(--radius); font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
 .ip-chip-handoff:hover { color: var(--text-2); background: var(--panel-2); }
 .ip-system-line { margin: 4px 0 0 12px; font-size: var(--fs-s); line-height: 14px; color: var(--faint); }
-/* Done: ages in a left column, check dots on a vertical rule, New since you looked across the rule. */
-.ip-timeline { position: relative; display: flex; flex-direction: column; gap: 10px; }
-.ip-timeline::before { content: ''; position: absolute; left: 41px; top: 6px; bottom: 6px; width: 1px; background: var(--border); }
-.ip-done-row { position: relative; display: grid; grid-template-columns: 32px 18px minmax(0, 1fr); column-gap: 10px; align-items: start; padding: 2px 0; border-radius: var(--radius); }
-.ip-done-row:hover { background: var(--panel-2); }
-.ip-done-age { font-family: var(--font-mono); font-size: var(--fs-s); line-height: 18px; color: var(--muted); text-align: right; }
-.ip-done-dot { position: relative; display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: var(--bg); border: 1px solid var(--border); font-size: var(--fs-s); line-height: 1; color: var(--muted); }
-.ip-done-body { min-width: 0; }
-.ip-done-body .ip-quote { margin-top: 0; padding-left: 0; border-left: 0; }
-.ip-outcome-line { margin-top: 2px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
-.ip-divider { position: relative; margin-left: 42px; padding: 0 0 0 10px; font-size: var(--fs-s); line-height: 14px; color: var(--active-ink); }
-.ip-divider::before { content: ''; position: absolute; left: -9px; right: 0; top: 7px; height: 1px; background: var(--active-line); }
+/* Done: New since you looked crosses the list where the last look falls. */
+.ip-divider { position: relative; padding: 0; font-size: var(--fs-s); line-height: 14px; color: var(--active-ink); }
+.ip-divider::before { content: ''; position: absolute; left: 0; right: 0; top: 7px; height: 1px; background: var(--active-line); }
 .ip-divider span { position: relative; padding: 0 6px 0 0; background: var(--bg); }
-.ip-done-fold { margin-left: 52px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
-/* Next: a numbered rail, own-queue entries under their session's letter, and the Backlog fold at its foot. A hairline
-   between rows and the step id before each title keep neighbouring entries apart (#400). */
+.ip-done-fold { margin-left: 4px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
+/* Next: boxes, own-queue boxes under "Queued by <session>", and the Backlog fold at its foot. */
 .ip-next { min-height: 48px; }
-.ip-rail { display: flex; flex-direction: column; }
-.ip-next-row, .ip-backlog-row { position: relative; border-radius: var(--radius); }
-.ip-next-row { display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: 8px; align-items: start; padding: 8px 6px; }
-.ip-next-row + .ip-next-row { border-top: 1px solid var(--border); border-top-left-radius: 0; border-top-right-radius: 0; }
-.ip-title-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; max-width: 100%; }
-.ip-title-line .ip-row-title { min-width: 0; }
+.ip-backlog-row { position: relative; border-radius: var(--radius); }
+.ip-backlog-row:hover { background: var(--panel-2); }
+.ip-backlog-row.dragging, .ip-next-row.dragging { opacity: .5; }
+.ip-next-row.drop-before { box-shadow: 0 -2px 0 var(--text-2); }
+.ip-list.drop-end > .ip-next-row:last-child { box-shadow: 0 2px 0 var(--text-2); }
 .ip-backlog-row .ip-confirm { max-width: none; }
 .ip-confirm:focus { outline: none; }
 .ip-backlog-row.pending { opacity: .5; }
 .ip-backlog-row.pending .ip-hover-act { display: none; }
-.ip-step-id { flex: none; font-family: var(--font-mono); font-size: var(--fs-s); line-height: 18px; color: var(--muted); }
-.ip-next-row:hover, .ip-backlog-row:hover { background: var(--panel-2); }
-.ip-next-row.dragging, .ip-backlog-row.dragging { opacity: .5; }
-.ip-next-row.drop-before { box-shadow: 0 -2px 0 var(--text-2); }
-.ip-rail.drop-end > .ip-next-row:last-child { box-shadow: 0 2px 0 var(--text-2); }
 .ip-num { font-size: var(--fs-l); line-height: 24px; text-align: center; color: var(--text-2); }
 .ip-num.ip-letter { font-family: var(--font-mono); font-size: var(--fs-m); font-weight: var(--w-heavy); }
-.ip-next-body { min-width: 0; }
 .ip-line { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; min-width: 0; }
-.ip-next-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
 .ip-own-queue { margin-top: 10px; }
-.ip-own-head { margin: 0 0 2px 6px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
+.ip-own-head { margin: 0 0 6px 2px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
+/* The task box: one skeleton in every Board cell (Needs me, Next, Now, Done). The hue sits on the left edge of a coloured
+   state; orange marks Working and amber marks Needs you. */
+.ip-list { display: flex; flex-direction: column; gap: 10px; }
+.ip-card { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 8px 10px 8px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); min-width: 0; }
+.ip-card::before { content: ''; position: absolute; left: -1px; top: -1px; bottom: -1px; width: 4px; border-radius: var(--radius) 0 0 var(--radius); background: var(--hue, transparent); }
+.ip-card[data-node] { cursor: pointer; }
+.ip-card:hover { background: var(--panel-2); }
+.ip-card.st-working { background: var(--active-fill); border-color: var(--active-line); }
+.ip-card.st-needs { background: var(--amber-fill); border-color: var(--amber); }
+.ip-card.st-done { padding-left: 10px; }
+.ip-card-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ip-sid { font-family: var(--font-mono); font-size: var(--fs-s); font-weight: var(--w-heavy); line-height: 18px; color: var(--text-2); }
+.ip-card-right { margin-left: auto; display: flex; align-items: center; gap: 6px; flex: none; }
+.ip-card-title { max-width: 100%; text-align: left; font-size: var(--fs-m); line-height: 19px; font-weight: var(--w-text); color: var(--text); overflow-wrap: anywhere; }
+button.ip-card-title:hover { color: var(--text); text-decoration: underline; }
+.st-done .ip-card-title { color: var(--text-2); }
+.ip-sess { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: var(--fs-s); line-height: 16px; color: var(--muted); }
+.ip-sess-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ip-sess-name::before { content: '◇ '; color: var(--faint); }
+.st-working .ip-sess-name::before { content: '◆ '; color: var(--active); }
+.ip-sess-cmd { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ip-sess-cmd .ip-code { flex: 1; min-width: 0; }
+.ip-block { display: flex; flex-direction: column; gap: 3px; padding-left: 10px; border-left: 2px solid var(--border); }
+.st-needs .ip-block { border-left-color: color-mix(in srgb, var(--amber) 60%, transparent); }
+.st-working .ip-block { border-left-color: var(--active-line); }
+.ip-card-main { font-size: var(--fs-m); line-height: 18px; color: var(--text-2); overflow-wrap: anywhere; }
+.ip-cmd, .ip-kin-count { font-family: var(--font-mono); font-size: var(--fs-s); line-height: 14px; color: var(--muted); overflow-wrap: anywhere; }
+.ip-cmd.serving { color: var(--faint); }
+.ip-kin-count { font-family: var(--font-sans); cursor: help; text-decoration: underline dotted; text-underline-offset: 2px; width: fit-content; }
+.ip-card-outcome { font-size: var(--fs-s); line-height: 15px; color: var(--muted); }
+.ip-sys { font-size: var(--fs-s); line-height: 14px; color: var(--faint); }
+.ip-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-height: 18px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
+.ip-foot .ip-type { margin-left: auto; }
+/* The state, top right, with how long it has been in it. */
+.ip-st { display: inline-flex; align-items: center; gap: 5px; height: 18px; padding: 0 7px; border-radius: 9px; font-size: var(--fs-s); line-height: 16px; font-weight: var(--w-heavy); letter-spacing: .02em; white-space: nowrap; border: 1px solid var(--border); color: var(--muted); }
+.ip-st.working { color: var(--active-ink); border-color: var(--active-line); background: var(--active-fill); }
+.ip-st.working::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--active); animation: ip-pulse 2.4s ease-in-out infinite; }
+.ip-st.needs { color: var(--amber-ink); border-color: var(--amber); background: var(--amber-fill); }
+.ip-st.ready { color: var(--text-2); border-color: color-mix(in srgb, var(--text-2) 35%, transparent); }
+.ip-st.idle, .ip-st.unattended, .ip-st.done, .ip-st.backlog { font-weight: var(--w-text); }
+.ip-st.unattended { border-style: dashed; }
+.ip-st.blocked { color: var(--red); border-color: var(--red); background: var(--red-fill); }
+.ip-st.backlog { color: var(--faint); }
 /* The row's own buttons show on hover and whenever focus is inside the row, so Tab reaches them and shows them. */
 .ip-hover-act { margin-left: auto; height: 18px; padding: 0 6px; border: 1px solid var(--border); border-radius: var(--radius); font-size: var(--fs-s); line-height: 14px; color: var(--muted); background: var(--bg); opacity: 0; }
-.ip-row:hover .ip-hover-act, .ip-row:focus-within .ip-hover-act, .ip-hover-act:focus-visible { opacity: 1; }
+.ip-row:hover .ip-hover-act, .ip-row:focus-within .ip-hover-act, .ip-card:hover .ip-hover-act, .ip-card:focus-within .ip-hover-act, .ip-hover-act:focus-visible { opacity: 1; }
 .ip-hover-act + .ip-hover-act { margin-left: 4px; }
 .ip-hover-act:hover { color: var(--text); background: var(--panel-2); }
 .ip-hover-act:focus-visible, .ip-fold:focus-visible, .ip-quick-add:focus { outline: 2px solid var(--text-2); outline-offset: 1px; }

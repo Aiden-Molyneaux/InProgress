@@ -30,7 +30,10 @@ export function AskActions({ ask, area }: { ask: Pick<Ask, 'id' | 'text'>; area:
   const send = async (answer?: string) => {
     if (busy) return;
     const row = (field.current ?? opener.current)?.closest('li') ?? null;
-    const target = focusTargetAfter(row);
+    // A box holding another open ask hands focus to that ask's controls; otherwise the walk to the next row.
+    const own = (field.current ?? opener.current)?.closest('[data-ask]') ?? null;
+    const sibling = row ? [...row.querySelectorAll<HTMLElement>('[data-ask]')].find((b) => b !== own) : undefined;
+    const target = sibling?.querySelector<HTMLElement>('input, button') ?? focusTargetAfter(row);
     setBusy(true);
     const result = await clearAsk(ask.id, answer);
     setBusy(false);

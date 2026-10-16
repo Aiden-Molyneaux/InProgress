@@ -1,79 +1,88 @@
-import { isLive } from '../../../src/core/board';
-import { sessionTag, type Ask, type AskKind, type Session } from '../../../src/core/types';
+import { Fragment, type ReactNode } from 'react';
+import type { AskKind, Ask, Session } from '../../../src/core/types';
+import type { TaskBox as BoxData } from '../../../src/core/taskState';
+import { commandLabel } from '../live';
 import { AskActions } from './AskActions';
-import { Character } from '../Character';
-import { characterState } from '../characterState';
-import { commandLabel, runTime } from '../live';
-import { rowClick } from './Marks';
 import type { BandProps } from './bandProps';
-import { ageShort } from './text';
+import { OpenButton, OpenScope, SessionLine, TaskBox, type SessionRef } from './TaskBox';
 
 export const KIND_MARK: Record<AskKind, string> = { question: '?', permission: '⚿', review: '◎' };
 
-/** The newest running command of a session, as "Shell npm run build": what a permission wait is probably about. */
+/** The newest running command of a session, as "npm run build" (a monitor reads "Monitor ..."): what a permission wait is probably about. */
 function newestRunning(s: Session): string | null {
   const c = s.commands.filter((x) => x.endedAt === null).sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
-  return c ? `${c.kind === 'monitor' ? 'Monitor' : 'Shell'} ${commandLabel(c)}` : null;
+  return c ? `${c.kind === 'monitor' ? 'Monitor ' : ''}${commandLabel(c)}` : null;
 }
 
-/** Needs me: live permission waits, then open asks oldest first (spec 2.2). */
-export function NeedsMe({ snapshot, board, now, onOpenNode }: BandProps) {
-  const waits = snapshot.sessions.filter((s) => s.state === 'permission' && isLive(s, now)).sort((a, b) => (a.slot ?? 99) - (b.slot ?? 99));
-  const asks = snapshot.asks.filter((a) => a.clearedAt === null);
-  if (waits.length === 0 && asks.length === 0) return <p className="ip-quiet ip-empty-line">Nothing needs you</p>;
-  const stepOf = (id: number | null) => (id === null ? undefined : (board.byId.get(id)?.node ?? snapshot.nodes.find((n) => n.id === id)));
+/** A permission wait: what it is probably about, and the way to answer it (in the session, not here). Inside the session's OpenScope. */
+function PermissionBlock({ session }: { session: Session }) {
+  const command = newestRunning(session);
+  // data-act: selecting the command by hand must not open Details.
   return (
-    <ul className="ip-inbox">
-      {waits.map((s) => {
-        const step = stepOf(s.focusNodeId);
-        const command = newestRunning(s);
-        return (
-          <li key={s.id} className="ip-msg ip-wait" onClick={step ? rowClick('needs_me', () => onOpenNode(step.id)) : undefined}>
-            <Character size={24} state="wait" slot={s.slot} seed={s.id} />
-            <div className="ip-msg-body">
-              <div className="ip-msg-head">
-                <b>{sessionTag(s.slot) || '?'}</b> is waiting · ⚿ permission · <span className="ip-time">{runTime(s.lastSeenAt, now)}</span> · <span className="ip-live">LIVE</span>
-              </div>
-              {command && <code className="ip-code">{command}</code>}
-              {step && (
-                <button type="button" className="ip-row-title ip-on-btn">
-                  {`on #${step.id} ${step.title}`}
-                </button>
-              )}
-            </div>
-          </li>
-        );
-      })}
-      {asks.map((a) => (
-        <AskRow key={a.id} ask={a} snapshot={snapshot} now={now} step={stepOf(a.nodeId)} onOpenNode={onOpenNode} />
-      ))}
-    </ul>
+    <div className="ip-block" data-act>
+      <p className="ip-card-main">{command ? 'Allow a shell command' : 'Waiting for permission'}</p>
+      {command && <code className="ip-code">{command}</code>}
+      <div className="ip-ask-actions">
+        <OpenButton className="ip-btn">Open session to allow</OpenButton>
+      </div>
+    </div>
   );
 }
 
-function AskRow({ ask, snapshot, now, step, onOpenNode }: { ask: Ask; snapshot: BandProps['snapshot']; now: number; step: { id: number; title: string } | undefined; onOpenNode: (id: number) => void }) {
-  const raiser = ask.sessionId === null ? undefined : snapshot.sessions.find((s) => s.id === ask.sessionId);
-  const who = raiser ? sessionTag(raiser.slot) || '?' : null;
+/** Needs me: one box per task that waits on Aiden, oldest need first (spec 2.2). */
+export function NeedsMe({ snapshot, boxes, now, onOpenNode, onOpenResource }: BandProps) {
+  if (boxes.needs.length === 0) return <p className="ip-quiet ip-empty-line">Nothing needs you</p>;
+  /** The session an ask was raised from, live or past; one that is gone still names its id. */
+  const raiser = (ask: Ask): SessionRef | null => {
+    if (ask.sessionId === null) return null;
+    return snapshot.sessions.find((s) => s.id === ask.sessionId) ?? snapshot.pastSessions.find((s) => s.id === ask.sessionId) ?? { id: ask.sessionId, title: null };
+  };
+  const body = (box: BoxData) => {
+    // Every session of the step that waits on permission has its own block (a focusless box holds just its session).
+    const waiting = box.row ? box.row.sessions.filter((x) => x.state === 'permission') : box.session ? [box.session] : [];
+    const asks = box.row?.asks ?? [];
+    // One session line per run of asks from the same session; a permission wait leads with its own session's line.
+    const parts = [] as { key: string; node: ReactNode }[];
+    for (const w of waiting) {
+      parts.push({ key: `wait${w.id}`, node: (
+        <OpenScope key={w.id} session={w} area="needs_me">
+          <SessionLine session={w} area="needs_me" />
+          <PermissionBlock session={w} />
+        </OpenScope>
+      ) });
+    }
+    let last: string | null | undefined = waiting.length ? waiting[waiting.length - 1].id : undefined;
+    for (const ask of asks) {
+      const from = raiser(ask);
+      const showLine = (from?.id ?? null) !== last;
+      last = from?.id ?? null;
+      parts.push({ key: `ask${ask.id}`, node: (
+        <>
+          {showLine && <SessionLine session={from} area="needs_me" />}
+          <div className="ip-block" data-ask={ask.id}>
+            <p className="ip-card-main ip-clamp-2">{ask.text}</p>
+            <AskActions ask={ask} area="needs_me" />
+          </div>
+        </>
+      ) });
+    }
+    return parts.map((p) => <Fragment key={p.key}>{p.node}</Fragment>);
+  };
   return (
-    <li className="ip-msg ip-ask" data-ask={ask.id} onClick={step ? rowClick('needs_me', () => onOpenNode(step.id)) : undefined}>
-      {raiser ? (
-        <Character size={24} state={characterState(raiser, now)} slot={raiser.slot} seed={raiser.id} />
-      ) : (
-        <span className="ip-avatar-dashed" aria-hidden="true" />
-      )}
-      <div className="ip-msg-body">
-        <div className="ip-msg-head">
-          {who ? <b>{who}</b> : <b>migrated</b>}
-          {who ? ' asks' : ''} · {KIND_MARK[ask.kind]} {ask.kind} · <span className="ip-time">{ageShort(ask.raisedAt, now)}</span>
-        </div>
-        <p className="ip-clamp-2">{ask.text}</p>
-        {step && (
-          <button type="button" className="ip-row-title ip-on-btn">
-            {`on #${step.id} ${step.title}`}
-          </button>
-        )}
-        <AskActions ask={ask} area="needs_me" />
-      </div>
-    </li>
+    <ul className="ip-list">
+      {boxes.needs.map((box) => (
+        <TaskBox
+          key={box.row ? box.row.node.id : `s${box.session!.id}`}
+          box={box}
+          now={now}
+          area="needs_me"
+          docs={snapshot.resources.filter((r) => r.nodeId === box.row?.node.id).length}
+          onOpenNode={onOpenNode}
+          onOpenResource={onOpenResource}
+        >
+          {body(box)}
+        </TaskBox>
+      ))}
+    </ul>
   );
 }
