@@ -214,7 +214,7 @@ gated action (another deploy, a rollback, an installer) follows the gate above.
 - A new request mid-session becomes a queued step through the scribe (`later: #id`, or a new step), unless it is a few lines in code that is already open. The InProgress tree is the memory between sessions.
 - Report to Mip through InProgress only: the step's status and outcome, new steps, asks, and the working tasks. Mip reads them at its next opening. Do not message Mip.
 - **Session title (Aiden, 2026-10-16, #455).** In the desktop app, keep a status prefix on this session's title so the sidebar shows where it stands:
-  - `REVIEW`: set whenever you end a turn with the phase 7 receipt still open, its `review` ask included. "Ship it" drops it and phase 8 runs with no prefix; a change request drops it until the next receipt.
+  - `REVIEW`: set whenever you end a turn with the phase 7 receipt still open, its `review` ask included. The go-ahead ("ship it", "merge it", "go ahead") drops it and phase 8 runs with no prefix; a change request drops it until the next receipt.
   - `BLOCKED`: set when you end a turn waiting on Aiden for anything but the receipt: a scribe `question` or `permission` ask, or a question in your closing message. Drop it when he answers. If one is open while the receipt waits, `BLOCKED` wins: his answer comes before a ship. A question asked inside a turn (AskUserQuestion) sets nothing.
   - `DONE`: set once the step is merged, deployed and pushed (phase 8). It stays.
   - Otherwise no prefix: while you work, deploy retries included.
