@@ -136,7 +136,8 @@ export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: 
   });
   // Done on a Now box, with an optional outcome. A step with open steps under it is refused, and so is one a live session
   // now drives unless the window named that session (its `driver`); that session keeps its focus. Already done answers
-  // as it stands. Checked inside finishNode's own write, so a step changed in between cannot slip through.
+  // as it stands, but an outcome sent for one with none stored fills it. Checked inside finishNode's own write, so a step
+  // changed in between cannot slip through.
   app.post('/api/ui/projects/:id/nodes/:node/done', guarded, async (req) => {
     const { node } = windowNodeParams.parse(req.params);
     const { slug, outcome, driver } = windowDoneBody.parse(req.body);

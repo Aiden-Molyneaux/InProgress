@@ -46,7 +46,7 @@ function SessionPart({ session, row, snapshot, now }: { session: Session; row: B
  * opens a form inside it: an optional one-line outcome, then Mark done (Enter in the field does the same). A live driver
  * is named in the form; it keeps its focus.
  */
-export function NowColumn({ snapshot, boxes, now, onOpenNode, onOpenResource }: BandProps) {
+export function NowColumn({ snapshot, boxes, now, onStatus, onOpenNode, onOpenResource }: BandProps) {
   /** The box whose Done form is open: one at a time. */
   const [closing, setClosing] = useState<number | null>(null);
   /** Steps marked done and waiting for the answer, or for the snapshot that moves them out of Now. */
@@ -55,6 +55,9 @@ export function NowColumn({ snapshot, boxes, now, onOpenNode, onOpenResource }: 
   const [problem, setProblem] = useState<string | null>(null);
   /** The outcome typed in the open form. */
   const [text, setText] = useState('');
+  /** Which form is open as of the last draw: an answer that comes back after another form opened must not touch it. */
+  const openId = useRef<number | null>(null);
+  openId.current = closing;
   const root = useRef<HTMLUListElement>(null);
   /** The band heading, for when the form's box leaves and takes focus with it. */
   const heading = useRef<HTMLElement | null>(null);
@@ -86,6 +89,8 @@ export function NowColumn({ snapshot, boxes, now, onOpenNode, onOpenResource }: 
     setClosing(id);
   };
   const cancel = (id: number) => {
+    // Not while the request is out: the answer would land on a form that is gone.
+    if (pending.includes(id)) return;
     setClosing(null);
     setProblem(null);
     setText('');
@@ -98,20 +103,25 @@ export function NowColumn({ snapshot, boxes, now, onOpenNode, onOpenResource }: 
     setProblem(null);
     setPending((p) => [...p, id]);
     const result = await markDone(projectId, slug, id, text, row.driver?.id ?? null);
+    const mine = openId.current === id;
+    const here = !li || li.contains(document.activeElement) || document.activeElement === document.body;
     if (result === 'ok') {
-      setClosing(null);
-      setText('');
+      if (mine) {
+        setClosing((c) => (c === id ? null : c));
+        setText('');
+      }
       // Only when focus is still in that box or fell to the body: the user may have moved on while it was out.
-      if (!li || li.contains(document.activeElement) || document.activeElement === document.body) after?.focus();
+      if (here) after?.focus();
       return;
     }
     if (result === 'reload') return window.location.reload();
-    // Drawn at once, so the field is there to focus.
+    // Drawn at once, so the field is there to focus. A refusal shows in its own form; with that form gone it is a status.
     flushSync(() => {
       setPending((p) => p.filter((x) => x !== id));
-      setProblem(result);
+      if (mine) setProblem(result);
     });
-    root.current?.querySelector<HTMLElement>(`li[data-node="${id}"] .ip-done-form input`)?.focus();
+    if (!mine) onStatus?.(result);
+    else if (here) root.current?.querySelector<HTMLElement>(`li[data-node="${id}"] .ip-done-form input`)?.focus();
   };
   if (boxes.now.length === 0) return <p className="ip-quiet ip-empty-line">Nothing is in flight</p>;
   return (
@@ -197,10 +207,12 @@ export function NowColumn({ snapshot, boxes, now, onOpenNode, onOpenResource }: 
                   }}
                 />
                 <div>
-                  <button type="button" className="ip-btn go" disabled={waiting} onClick={(e) => void finish(row, e.currentTarget.closest('li'))}>
-                    Mark done
+                  <button type="button" className="ip-btn go" aria-disabled={waiting || undefined} onClick={(e) => {
+                    if (!waiting) void finish(row, e.currentTarget.closest('li'));
+                  }}>
+                    {waiting ? 'Marking done…' : 'Mark done'}
                   </button>
-                  <button type="button" className="ip-btn" data-cancel onClick={() => cancel(row.node.id)}>
+                  <button type="button" className="ip-btn" data-cancel aria-disabled={waiting || undefined} onClick={() => cancel(row.node.id)}>
                     Cancel
                   </button>
                 </div>

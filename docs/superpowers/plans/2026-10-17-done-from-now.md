@@ -8,7 +8,7 @@ Handoff: `~/.inprogress/resources/inprogress/2026-10-17-done-button-on-now.md` (
 - Sigmund: a step with open child steps (status not done or dropped) is refused, naming them. The control still shows on such a box; the refusal shows in the form.
 - Sigmund: the form is the confirm. One form for every box: a title line, the driver line when there is a live driver, the outcome field, Mark done and Cancel. Enter in the field is Mark done.
 - Sigmund: the window sends the live driver it showed (`driver`, a session id or null). The server refuses (409) when the step now has a different live driver, so a stale window cannot close a step under a session it never named.
-- Sigmund: idempotent. A step already done answers as it stands, its outcome unchanged, whatever the body says (and whatever its driver or children).
+- Sigmund: idempotent. A step already done answers as it stands, whatever the body says (and whatever its driver or children), except that an outcome sent for one whose stored outcome is empty fills it.
 - #461 has not landed; this branch edits `src/server/digest.ts` first.
 
 ## Task 1: server
@@ -16,7 +16,7 @@ Handoff: `~/.inprogress/resources/inprogress/2026-10-17-done-button-on-now.md` (
 1. `src/server/schemas.ts`, next to `windowClearBody`: `windowDoneBody = z.object({ slug: windowProjectBody.shape.slug, outcome: z.string().max(2_000).optional(), driver: z.string().max(100).nullable() }).strict()`, with a one-line doc comment.
 2. `src/server/repo/nodes.ts`:
    - Move the body of `updateNode`'s write callback after `requireNode` into an unexported `patchWithAsks(ctx, record, actor, before, patch)` (the drop and question-node ask clearing, then `patchNode`). `updateNode` calls it; behaviour unchanged.
-   - Add exported `finishNode(ctx, actor, id, outcome: string | undefined, check: (before: TreeNode) => void): TreeNode`. Inside one `write()`: `before = requireNode`, `check(before)`, if `before.status === 'done'` return `before`; else `patchWithAsks` with `{ status: 'done' }` plus `outcome: outcome.trim()` only when the trimmed outcome is non-empty (an empty one leaves any existing outcome as it is). Doc comment says: the window's Done; already done answers the step as it stands and writes nothing.
+   - Add exported `finishNode(ctx, actor, id, outcome: string | undefined, check: (before: TreeNode) => void): TreeNode`. Inside one `write()`: `before = requireNode`, `check(before)`; if `before.status === 'done'`, fill an empty stored outcome from a non-empty trimmed one with `patchNode`, else return `before`; else `patchWithAsks` with `{ status: 'done' }` plus `outcome: outcome.trim()` only when the trimmed outcome is non-empty (an empty one leaves any existing outcome as it is). Doc comment says: the window's Done; already done answers the step as it stands and writes nothing.
 3. `src/server/routes/window.ts`:
    - Helper `liveDriver(ctx, n)`: `n.driverSessionId` when that session has `focus_node_id = n.id`, `state != 'ended'` and `last_seen_at >= now - STALE_SESSION_MS` (the same live rule as `notInBacklog`), else null.
    - Route `POST /api/ui/projects/:id/nodes/:node/done`, guarded. Parse `windowNodeParams` and `windowDoneBody`; `projectId = targetBySlug(req.params, slug)`; `resolveProject(ctx, projectId)` (a deleted project is 404, as for the delete route). Then `finishNode(ctx, ACTOR, node, outcome, check)` where `check(n)`, in this order:

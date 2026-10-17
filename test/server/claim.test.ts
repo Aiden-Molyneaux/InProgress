@@ -435,6 +435,15 @@ describe('orchestrate', () => {
     expect(listEventsSince(ctx, mark).filter((e) => e.type === 'session.orchestrate').map((e) => (e.data as { status: boolean }).status)).toEqual([false, true]);
   });
 
+  it('ends a no_outcome Reconcile line with (you) for a step the window closed', () => {
+    const { ctx, step, join } = setup();
+    join('s1');
+    updateNode(ctx, 'window', step.id, { status: 'done' });
+    const full = orchestrate(ctx, 'session:s1', 's1', { status: true });
+    expect(full.opening).toContain(`Reconcile:
+  #${step.id} Build tabs: no_outcome (you)`);
+  });
+
   it('prints the stalled facts in Reconcile: an idle driver, and a step whose driver is not live', () => {
     const { ctx, step, other, third, join } = setup();
     for (const id of ['s1', 's2', 's3']) join(id);

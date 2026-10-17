@@ -175,14 +175,15 @@ function patchWithAsks(ctx: Ctx, record: RecordEvent, actor: string, before: Tre
 
 /**
  * The window's Done: marks step `id` done, with `outcome` when it has text (an empty one leaves any existing outcome as
- * it is). `check` runs on the step as read inside the write. A step already done answers as it stands and writes nothing.
+ * it is). `check` runs on the step as read inside the write. A step already done answers as it stands and writes nothing,
+ * except that an outcome sent for one whose stored outcome is empty fills it (so a later Done with an outcome is not lost).
  */
 export function finishNode(ctx: Ctx, actor: string, id: number, outcome: string | undefined, check: (before: TreeNode) => void): TreeNode {
   return write(ctx, actor, (record) => {
     const before = requireNode(ctx, id);
     check(before);
-    if (before.status === 'done') return before;
     const text = outcome?.trim() ?? '';
+    if (before.status === 'done') return text && !before.outcome.trim() ? patchNode(ctx, record, before, { outcome: text }) : before;
     return patchWithAsks(ctx, record, actor, before, text ? { status: 'done', outcome: text } : { status: 'done' });
   });
 }

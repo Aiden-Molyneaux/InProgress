@@ -261,6 +261,22 @@ describe('node done route', () => {
     expect(listEventsSince(ctx, mark)).toEqual([]);
   });
 
+  it('fills an empty outcome on an already done step, and keeps one that is stored', async () => {
+    const { ctx, p, post, a, b } = await setup();
+    updateNode(ctx, 'test', a, { status: 'done' });
+    const mark = maxEventId(ctx);
+    const filled = await post(url(p, a), { slug: p.slug, outcome: ' Late word ', driver: null });
+    expect(filled.json().node).toMatchObject({ id: a, status: 'done', outcome: 'Late word' });
+    expect(row(ctx, a).outcome).toBe('Late word');
+    expect(listEventsSince(ctx, mark).filter((e) => e.type === 'node.updated')).toHaveLength(1);
+    // Nothing to fill with, or nothing to fill: the step as it stands, no event.
+    updateNode(ctx, 'test', b, { status: 'done' });
+    const after = maxEventId(ctx);
+    expect((await post(url(p, b), { slug: p.slug, outcome: '  ', driver: null })).json().node.outcome).toBe('');
+    expect((await post(url(p, a), { slug: p.slug, outcome: 'Other', driver: null })).json().node.outcome).toBe('Late word');
+    expect(listEventsSince(ctx, after)).toEqual([]);
+  });
+
   it('refuses a step of another project, a dropped step and the root, and answers 409 for a wrong slug', async () => {
     const { ctx, app, p, post, a, b } = await setup();
     const other = (await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'Other' } })).json();

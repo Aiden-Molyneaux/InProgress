@@ -170,6 +170,7 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-confirm p { margin: 4px 0 0; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
 .ip-confirm p + p { margin-top: 2px; }
 .ip-confirm div { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+.ip-done-form .ip-problem { display: block; margin-top: 6px; }
 .ip-confirm .ip-btn.go { color: var(--text-2); border-color: var(--text); }
 /* Rename's field, on the same surface: an M line of ink on the panel, a hairline round it and the focus ring the
    items' focus-visible draws, since focus is always in it. */

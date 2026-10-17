@@ -173,7 +173,7 @@ with status active and no live session at any age.
   root node), which it rewrites only after showing the full digest. No state note: the last 7 days.
 - **The digest reads the tables, not the events:** `completed_at`, `raised_at`, `cleared_at`, `started_at`, `ended_at`,
   `created_at`. Events are pruned after 30 days and a return after months must still work. Only Aiden's moves in Next
-  come from events, and which done steps he closed from the window (the Done line ends " (you)"); past the pruning
+  come from events, and which done steps he closed from the window (the Done line ends " (you)", and so does the `no_outcome` mark: `no_outcome (you)`); past the pruning
   those read as not his.
 
 ## 2. The window
@@ -456,7 +456,7 @@ On open:
    records an event with `data.status` for the week's count, and shows one short offer: "Since your last look
    (3d): 4 done · 2 asks raised, 1 answered · 2 sessions ended, 1 without a handoff. Reconcile: 3 fixes ready, 1 needs
    you." Then it offers the digest, the reconcile and what's next. With "status", it shows all three at once.
-2. **Digest** (on request; also `inprogress digest <project> [--since <iso>]`): steps done with outcomes, those Aiden closed from the window ending " (you)"; asks raised and
+2. **Digest** (on request; also `inprogress digest <project> [--since <iso>]`): steps done with outcomes, those Aiden closed from the window ending " (you)", and the `no_outcome` mark reading `no_outcome (you)` too; asks raised and
    cleared with answers; sessions started and ended, flagging those without a handoff or with open tasks (session lines
    reach back as far as the 7-day trail keeps sessions; the rest has no age limit); steps Aiden
    quick-added; his moves in Next; new documents. At most 20 lines, then "+n more".
