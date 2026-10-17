@@ -45,7 +45,7 @@ async function setup(openDesktop: (session: DesktopSession) => Promise<OpenDeskt
 }
 
 describe('POST /api/ui/sessions/:id/open-desktop', () => {
-  it('answers ok when the desktop app was asked to open it, and passes the session id and its cwd', async () => {
+  it('answers ok when the desktop app was asked to open it, and passes the session id', async () => {
     const open = vi.fn(async (): Promise<OpenDesktopResult> => ({ ok: true }));
     const { post } = await setup(open);
     const res = await post(ID);
@@ -204,7 +204,8 @@ describe('the helpers', () => {
 describe('openUrl', () => {
   const systemRoot = process.env.SystemRoot;
   afterEach(() => {
-    process.env.SystemRoot = systemRoot;
+    if (systemRoot === undefined) delete process.env.SystemRoot;
+    else process.env.SystemRoot = systemRoot;
   });
 
   it.runIf(process.platform === 'win32')('rejects when the opener cannot start, so the window hears why', async () => {
