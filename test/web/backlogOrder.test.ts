@@ -20,6 +20,9 @@ describe('parseOrder and orderKey', () => {
   it('falls back to phase, forward, for nothing or anything unknown', () => {
     expect(parseOrder(null)).toEqual({ by: 'phase', reverse: false });
     expect(parseOrder('time-up')).toEqual({ by: 'phase', reverse: false });
+    expect(parseOrder('')).toEqual({ by: 'phase', reverse: false });
+    expect(parseOrder('ID')).toEqual({ by: 'phase', reverse: false });
+    expect(parseOrder('id-')).toEqual({ by: 'id', reverse: false });
   });
 });
 

@@ -28,7 +28,9 @@ export function Backlog({ boxes, snapshot, now, projectId, slug, onStatus, onOpe
   /** Rows deleted and waiting for the answer, or for the snapshot that drops them. */
   const [pending, setPending] = useState<number[]>([]);
   const [order, setOrder] = useState<BacklogOrder>(() => parseOrder(load(ORDER_KEY)));
+  /** A reorder closes an open Delete confirm: its row may move away from where the user was looking. */
   const pick = (o: BacklogOrder) => {
+    setConfirming(null);
     setOrder(o);
     save(ORDER_KEY, orderKey(o));
   };
