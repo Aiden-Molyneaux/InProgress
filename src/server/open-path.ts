@@ -48,8 +48,8 @@ function launch(file: string, args: string[], onError?: () => void): void {
  * the scheme; no shell is involved, so the URL is one argument however many `&` it holds.
  */
 export async function openInDefaultBrowser(url: string): Promise<void> {
-  if (process.platform === 'win32') launch(join(systemRoot(), 'explorer.exe'), [url]);
-  else launch(process.platform === 'darwin' ? 'open' : 'xdg-open', [url]);
+  // Fire and forget: a failed start is not reported to the window.
+  openUrl(url).catch(() => {});
 }
 
 /**

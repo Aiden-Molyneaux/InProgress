@@ -45,9 +45,13 @@ export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: 
     const { id } = sessionIdParam.parse(req.params);
     const session = findSession(ctx, id);
     if (!session) throw notFound(`Session ${id} not found`, 'Reload the window.');
-    // Resume is scoped to the folder the session ran in, so the copied command starts there.
-    const result = await openDesktop({ id, cwd: session.cwd });
-    return result.ok ? { ok: true } : { ok: false, command: resumeCommand(id, usableCwd(session.cwd)), reason: result.reason };
+    const result = await openDesktop({ id });
+    if (result.ok) return { ok: true };
+    // Resume is scoped to the folder the session ran in, so the copied command starts there; when it cannot cd there
+    // itself (a folder gone, or one it cannot quote), the reason names the folder.
+    const command = resumeCommand(id, usableCwd(session.cwd));
+    const where = session.cwd && !command.startsWith('cd ') ? ` Start it from ${session.cwd}.` : '';
+    return { ok: false, command, reason: `${result.reason}${where}` };
   });
 
   /**

@@ -1,9 +1,10 @@
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../../src/server/app';
 import { desktopLink, desktopSessionDirs, findAppSession, openInDesktop, resumeCommand, usableCwd, type DesktopSession, type OpenDesktopResult } from '../../src/server/open-desktop';
+import { openUrl } from '../../src/server/open-path';
 import { makeCtx } from '../helpers';
 
 const TOKEN = 'test-token';
@@ -50,14 +51,14 @@ describe('POST /api/ui/sessions/:id/open-desktop', () => {
     const res = await post(ID);
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ ok: true });
-    expect(open).toHaveBeenCalledWith({ id: ID, cwd: GONE });
+    expect(open).toHaveBeenCalledWith({ id: ID });
   });
 
-  it('answers ok false with the bare resume command when it could not open and the cwd is not a folder here', async () => {
+  it('answers ok false with the bare resume command, and names the folder in the reason, when the cwd is not a folder here', async () => {
     const { post } = await setup(async () => ({ ok: false, reason: NOT_IN_APP }));
     const res = await post(ID);
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ ok: false, command: `claude --resume ${ID}`, reason: NOT_IN_APP });
+    expect(res.json()).toEqual({ ok: false, command: `claude --resume ${ID}`, reason: `${NOT_IN_APP} Start it from ${GONE}.` });
   });
 
   it('answers ok false with a cd into the session folder first when that folder exists', async () => {
@@ -96,7 +97,7 @@ describe('openInDesktop', () => {
   it("opens the desktop app's own link for the session, found through the app's session files, without running claude", async () => {
     const openUrl = vi.fn(async () => {});
     const dirs = [sessionsRoot({ [`${APP}.json`]: entry(APP, ID) })];
-    expect(await openInDesktop({ id: ID, cwd: null }, { dirs, openUrl })).toEqual({ ok: true });
+    expect(await openInDesktop({ id: ID }, { dirs, openUrl })).toEqual({ ok: true });
     expect(openUrl).toHaveBeenCalledWith(`claude://claude.ai/epitaxy/${APP}`);
   });
 
@@ -104,7 +105,15 @@ describe('openInDesktop', () => {
     const openUrl = vi.fn(async () => {});
     const other = 'local_11111111-1111-4111-8111-111111111111';
     const dirs = [sessionsRoot({ [`${other}.json`]: entry(other, '22222222-2222-4222-8222-222222222222') }), join(DIR, 'no-such-root')];
-    expect(await openInDesktop({ id: ID, cwd: null }, { dirs, openUrl })).toEqual({ ok: false, reason: NOT_IN_APP });
+    expect(await openInDesktop({ id: ID }, { dirs, openUrl })).toEqual({ ok: false, reason: NOT_IN_APP });
+    expect(openUrl).not.toHaveBeenCalled();
+  });
+
+  it("says it could not find the app's session files when no file reads as one, rather than that the session is not there", async () => {
+    const openUrl = vi.fn(async () => {});
+    const dirs = [sessionsRoot({ 'local_11111111-1111-4111-8111-111111111111.json': '{"format":"changed"}' }), join(DIR, 'no-such-root')];
+    expect(await openInDesktop({ id: ID }, { dirs, openUrl })).toEqual({ ok: false, reason: "InProgress could not find the Claude desktop app's session files, so it can't open the session there. Run this in a terminal to resume it." });
+    expect(await openInDesktop({ id: ID }, { dirs: [], openUrl })).toMatchObject({ ok: false });
     expect(openUrl).not.toHaveBeenCalled();
   });
 
@@ -113,7 +122,7 @@ describe('openInDesktop', () => {
       throw new Error('spawn explorer.exe ENOENT');
     });
     const dirs = [sessionsRoot({ [`${APP}.json`]: entry(APP, ID) })];
-    expect(await openInDesktop({ id: ID, cwd: null }, { dirs, openUrl })).toEqual({ ok: false, reason: 'The Claude desktop app could not be opened: spawn explorer.exe ENOENT' });
+    expect(await openInDesktop({ id: ID }, { dirs, openUrl })).toEqual({ ok: false, reason: 'The Claude desktop app could not be opened: spawn explorer.exe ENOENT' });
   });
 });
 
@@ -189,5 +198,17 @@ describe('the helpers', () => {
     for (const odd of ['/a/$HOME', '/a/`x`', '/a/"q"', 'C:\\work\\[draft]', 'C:\\work\\a]b', 'C:\\work\\', '\\\\server\\share\\app', 'C:\\work\\the \u201cbig\u201d app', 'C:\\work\\a\u201eb', 'C:\\work\\a\u2019b', 'C:\\work\\hi!', 'C:\\work\\a;b']) {
       expect(resumeCommand(ID, odd)).toBe(`claude --resume ${ID}`);
     }
+  });
+});
+
+describe('openUrl', () => {
+  const systemRoot = process.env.SystemRoot;
+  afterEach(() => {
+    process.env.SystemRoot = systemRoot;
+  });
+
+  it.runIf(process.platform === 'win32')('rejects when the opener cannot start, so the window hears why', async () => {
+    process.env.SystemRoot = join(DIR, 'no-windows');
+    await expect(openUrl(desktopLink(APP))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });

@@ -13,10 +13,9 @@ import { openUrl as systemOpenUrl } from './open-path';
  * lastActivityAt, ... }, which maps one to the other. Undocumented, so a file that does not read as that is skipped.
  */
 
-/** What the open needs of a session: its id, and the folder it runs in (resume is scoped to that folder). */
+/** What the open needs of a session: its CLI session id. */
 export interface DesktopSession {
   id: string;
-  cwd: string | null;
 }
 
 /** The session's folder when it is an absolute path to a folder that exists here; null otherwise. */
@@ -119,15 +118,24 @@ async function sessionFiles(dir: string, depth = 2): Promise<string[]> {
   return files.concat(...nested);
 }
 
-/**
- * The desktop app's session id for a CLI session, or undefined when the app has none. Several app sessions can point at
- * one CLI session (a resumed one, say): one that is not archived wins, then the most recently active.
- */
-export async function findAppSession(cliSessionId: string, dirs: string[] = desktopSessionDirs()): Promise<string | undefined> {
+/** Every file under the roots that reads as an app session. */
+async function appSessions(dirs: string[]): Promise<AppSession[]> {
   const files = (await Promise.all(dirs.map((d) => sessionFiles(d)))).flat();
-  const matches = (await Promise.all(files.map(readAppSession))).filter((e): e is AppSession => e?.cliSessionId === cliSessionId);
-  matches.sort((a, b) => Number(a.isArchived) - Number(b.isArchived) || b.lastActivityAt - a.lastActivityAt);
-  return matches[0]?.appSessionId;
+  return (await Promise.all(files.map(readAppSession))).filter((e): e is AppSession => e !== null);
+}
+
+/**
+ * The app session for a CLI session among those read, or undefined when there is none. Several can point at one CLI
+ * session (a resumed one, say): one that is not archived wins, then the most recently active.
+ */
+const pick = (sessions: AppSession[], cliSessionId: string): string | undefined =>
+  sessions
+    .filter((e) => e.cliSessionId === cliSessionId)
+    .sort((a, b) => Number(a.isArchived) - Number(b.isArchived) || b.lastActivityAt - a.lastActivityAt)[0]?.appSessionId;
+
+/** The desktop app's session id for a CLI session, or undefined when the app has none. */
+export async function findAppSession(cliSessionId: string, dirs: string[] = desktopSessionDirs()): Promise<string | undefined> {
+  return pick(await appSessions(dirs), cliSessionId);
 }
 
 export interface OpenDesktopOptions {
@@ -141,10 +149,14 @@ export interface OpenDesktopOptions {
 export type OpenDesktopResult = { ok: true } | { ok: false; reason: string };
 
 const NOT_IN_APP = "This session is not in the Claude desktop app, so it can't open there. Run this in a terminal to resume it.";
+/** No file read as an app session at all: the app is missing, or it keeps its sessions somewhere or some way this does not know. */
+const NO_APP_FILES = "InProgress could not find the Claude desktop app's session files, so it can't open the session there. Run this in a terminal to resume it.";
 
 /** Opens the session in the Claude desktop app through the app's own link, or says why it could not. */
 export async function openInDesktop(session: DesktopSession, o: OpenDesktopOptions = {}): Promise<OpenDesktopResult> {
-  const appSessionId = await findAppSession(session.id, o.dirs);
+  const sessions = await appSessions(o.dirs ?? desktopSessionDirs());
+  if (sessions.length === 0) return { ok: false, reason: NO_APP_FILES };
+  const appSessionId = pick(sessions, session.id);
   if (!appSessionId) return { ok: false, reason: NOT_IN_APP };
   try {
     await (o.openUrl ?? systemOpenUrl)(desktopLink(appSessionId));
