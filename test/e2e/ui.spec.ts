@@ -118,8 +118,8 @@ const open = (page: Page, project: Seeded) => page.goto(`/#/p/${project.slug}`);
 /** A step's row on the Board, by its title. Details lists the same steps as "#id title", so the exact name is the Board's. */
 const stepRow = (page: Page, title: string) => page.getByRole('main').getByRole('button', { name: title, exact: true });
 
-/** The Backlog fold at the foot of Next. */
-const backlogFold = (page: Page) => page.getByRole('button', { name: /^Backlog · \d+ [▸▾]$/ });
+/** The Backlog fold at the foot of Next; "n of total" while a filter narrows it. */
+const backlogFold = (page: Page) => page.getByRole('button', { name: /^Backlog · (\d+ of )?\d+ [▸▾]$/ });
 
 /** Opens the Backlog fold if it is closed: its steps are rows only while it is open. */
 async function openBacklog(page: Page): Promise<void> {
@@ -2390,6 +2390,14 @@ test.describe('Board', () => {
     await page.keyboard.press('Escape');
     await expect(field).toHaveValue('');
     await expect(fold).toHaveAttribute('aria-expanded', 'true');
+    // A new filter closes an open Delete confirm.
+    const beta = next.locator('.ip-backlog-row').filter({ hasText: '6 Beta' });
+    await beta.hover();
+    await beta.getByRole('button', { name: 'Delete…' }).click();
+    await expect(next.getByRole('dialog')).toBeVisible();
+    await field.fill('beta');
+    await expect(next.getByRole('dialog')).toHaveCount(0);
+    await expect.poll(titles).toEqual(['6 Beta']);
     // "to Next" still works on a filtered row, and the count follows.
     await field.fill('revenuecat');
     const row = next.locator('.ip-backlog-row').filter({ hasText: '3 RevenueCat' });

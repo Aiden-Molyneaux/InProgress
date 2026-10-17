@@ -386,6 +386,7 @@ button.ip-card-title:hover { color: var(--text); text-decoration: underline; }
 .ip-backlog-tools { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
 .ip-backlog-filter { flex: 0 1 160px; min-width: 0; height: 18px; padding: 0 6px; font: inherit; font-size: var(--fs-s); line-height: 14px; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); }
 .ip-backlog-filter:focus-visible { outline: 2px solid var(--text-2); outline-offset: -2px; }
+.ip-backlog-none { overflow-wrap: anywhere; }
 .ip-backlog-order { display: flex; flex: none; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .ip-backlog-order button { padding: 1px 8px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
 .ip-backlog-order button + button { border-left: 1px solid var(--border); }

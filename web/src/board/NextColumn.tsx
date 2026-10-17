@@ -71,6 +71,10 @@ export function NextColumn({ snapshot, board, boxes, now, onOpenNode, onOpenReso
   const backlog = backlogIds.map((id) => asBacklog(boxOf.get(id)!));
   /** The fold counts "4 of 14" while a filter narrows a Backlog that has rows; an empty Backlog shows no filter. */
   const filtering = filterWords(filter).length > 0 && backlog.length > 0;
+  // A Backlog that empties takes its filter with it, so a step added or sent back later is not hidden by text no one sees.
+  useEffect(() => {
+    if (backlog.length === 0) setFilter('');
+  }, [backlog.length]);
 
   const write = async (op: QueueOp) => {
     window.clearTimeout(clearTimer.current);
@@ -121,8 +125,10 @@ export function NextColumn({ snapshot, board, boxes, now, onOpenNode, onOpenReso
   const dropOnBacklog = (e: DragEvent) => {
     // Never also a drop into the column around it.
     e.stopPropagation();
-    if (dragging === null || !inNext.has(dragging)) return;
+    if (dragging === null) return;
+    // Nor the filter field's own drop, which would type the dragged id into it.
     e.preventDefault();
+    if (!inNext.has(dragging)) return;
     const id = dragging;
     endDrag();
     noteAction('backlog', 'drop');

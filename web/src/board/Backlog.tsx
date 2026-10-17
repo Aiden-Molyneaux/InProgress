@@ -48,6 +48,8 @@ export function Backlog({ boxes, filter, onFilter, snapshot, now, projectId, slu
   /** The band heading, for when the confirm's row leaves and takes focus with it. */
   const heading = useRef<HTMLElement | null>(null);
   const ids = boxes.map((b) => b.row!.node.id).join(',');
+  const shown = filterBoxes(boxes, filter);
+  const drawn = shown.map((b) => b.row!.node.id).join(',');
   // Cancel takes focus when a confirm opens.
   useEffect(() => {
     if (confirming === null) return;
@@ -55,15 +57,17 @@ export function Backlog({ boxes, filter, onFilter, snapshot, now, projectId, slu
     heading.current = home?.querySelector<HTMLElement>('h3, header b') ?? null;
     root.current?.querySelector<HTMLElement>('.ip-confirm [data-cancel]')?.focus();
   }, [confirming]);
-  // A row that left (deleted here or elsewhere) no longer confirms or waits; if it took focus with it, the heading has it.
+  // A row that left (deleted here or elsewhere) no longer waits. One no longer drawn (it left, or a change elsewhere took it
+  // out of the filter) no longer confirms; if it took focus with it, the heading has it.
   useEffect(() => {
     const here = new Set(ids ? ids.split(',').map(Number) : []);
-    if (confirming !== null && !here.has(confirming)) {
+    const seen = new Set(drawn ? drawn.split(',').map(Number) : []);
+    if (confirming !== null && !seen.has(confirming)) {
       setConfirming(null);
       if (document.activeElement === document.body) heading.current?.focus();
     }
     setPending((p) => (p.some((id) => !here.has(id)) ? p.filter((id) => here.has(id)) : p));
-  }, [ids, confirming]);
+  }, [ids, drawn, confirming]);
   /** Puts focus back on that row's Delete button, once it is drawn again. */
   const refocus = (id: number) => window.requestAnimationFrame(() => root.current?.querySelector<HTMLElement>(`li[data-node="${id}"] [data-delete]`)?.focus());
   const cancel = (id: number) => {
@@ -88,7 +92,6 @@ export function Backlog({ boxes, filter, onFilter, snapshot, now, projectId, slu
   /** The server refuses a step with any step under it, done or dropped ones too. */
   const parents = new Set(snapshot.nodes.map((n) => n.parentId));
   const hasKids = (id: number) => parents.has(id);
-  const shown = filterBoxes(boxes, filter);
   return (
     <div className="ip-backlog-groups" ref={root}>
       <div className="ip-backlog-tools">
@@ -117,7 +120,7 @@ export function Backlog({ boxes, filter, onFilter, snapshot, now, projectId, slu
         </div>
       </div>
       {shown.length === 0 && (
-        <p className="ip-quiet ip-empty-line">
+        <p className="ip-quiet ip-empty-line ip-backlog-none">
           {`Nothing matches “${filter.trim()}” `}
           <button type="button" className="ip-link-btn" onClick={() => {
             narrow('');
