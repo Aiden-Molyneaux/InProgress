@@ -1891,16 +1891,16 @@ test.describe('Board', () => {
   });
 
   test('Open session shows the command to copy when the server cannot open it, and Copy puts it on the clipboard', async ({ page, fresh }) => {
-    await page.route('**/api/ui/sessions/*/open-desktop', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: false, command: `claude --desktop --resume ${fresh.session}` }) }));
+    await page.route('**/api/ui/sessions/*/open-desktop', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: false, command: `claude --resume ${fresh.session}` }) }));
     await open(page, fresh);
     const box = nowRow(page, 'Play app signing');
     await box.getByRole('button', { name: 'Open session ↗' }).click();
-    await expect(box.locator('.ip-sess-cmd .ip-code')).toHaveText(`claude --desktop --resume ${fresh.session}`);
+    await expect(box.locator('.ip-sess-cmd .ip-code')).toHaveText(`claude --resume ${fresh.session}`);
     // Opening the session did not open Details.
     await expect(page.getByRole('complementary')).toHaveCount(0);
     await box.getByRole('button', { name: 'Copy' }).click();
     await expect(box.getByRole('button', { name: 'Copied' })).toBeVisible();
-    expect(await page.evaluate<string>('navigator.clipboard.readText()')).toBe(`claude --desktop --resume ${fresh.session}`);
+    expect(await page.evaluate<string>('navigator.clipboard.readText()')).toBe(`claude --resume ${fresh.session}`);
   });
 
   test('Open session: a refused request shows the command and why, a later success clears it, and a double click sends one request', async ({ page, fresh, consoleErrors }) => {
@@ -1916,7 +1916,7 @@ test.describe('Board', () => {
     await open(page, fresh);
     const box = nowRow(page, 'Play app signing');
     await box.getByRole('button', { name: 'Open session ↗' }).dblclick();
-    await expect(box.locator('.ip-sess-cmd .ip-code')).toHaveText(`claude --desktop --resume ${fresh.session}`);
+    await expect(box.locator('.ip-sess-cmd .ip-code')).toHaveText(`claude --resume ${fresh.session}`);
     await expect(box.locator('.ip-sys')).toHaveText("Launcher unavailable. Run it in the session's folder.");
     expect(calls).toBe(1);
     await expect(page.getByRole('complementary')).toHaveCount(0);
@@ -1931,7 +1931,7 @@ test.describe('Board', () => {
     consoleErrors.allow(/status of 401/);
     let mode: 'reason' | 'null' | 'stale' = 'reason';
     await page.route('**/api/ui/sessions/*/open-desktop', async (route) => {
-      if (mode === 'reason') await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: false, command: `claude --desktop --resume ${fresh.session}`, reason: 'Claude Code was not found on this computer' }) });
+      if (mode === 'reason') await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: false, command: `claude --resume ${fresh.session}`, reason: 'Claude Code was not found on this computer' }) });
       else if (mode === 'null') await route.fulfill({ status: 200, contentType: 'application/json', body: 'null' });
       else await route.fulfill({ status: 401, contentType: 'application/json', body: '{}' });
     });
@@ -1942,7 +1942,7 @@ test.describe('Board', () => {
     mode = 'null';
     await box.getByRole('button', { name: 'Open session ↗' }).click();
     await expect(box.locator('.ip-sys')).toContainText("Run it in the session's folder.");
-    await expect(box.locator('.ip-sess-cmd .ip-code')).toHaveText(`claude --desktop --resume ${fresh.session}`);
+    await expect(box.locator('.ip-sess-cmd .ip-code')).toHaveText(`claude --resume ${fresh.session}`);
     mode = 'stale';
     const reloaded = page.waitForEvent('load');
     await box.getByRole('button', { name: 'Open session ↗' }).click();

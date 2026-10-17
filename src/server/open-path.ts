@@ -48,8 +48,25 @@ function launch(file: string, args: string[], onError?: () => void): void {
  * the scheme; no shell is involved, so the URL is one argument however many `&` it holds.
  */
 export async function openInDefaultBrowser(url: string): Promise<void> {
-  if (process.platform === 'win32') launch(join(systemRoot(), 'explorer.exe'), [url]);
-  else launch(process.platform === 'darwin' ? 'open' : 'xdg-open', [url]);
+  // Fire and forget: a failed start is not reported to the window.
+  openUrl(url).catch(() => {});
+}
+
+/**
+ * Hand a link to the program registered for its scheme (claude:// is the Claude desktop app's). Resolves once the
+ * opener started and rejects when it could not; whether the handler then opened the link is not reported back. The
+ * caller builds the link; no shell is involved, so it is one argument.
+ */
+export function openUrl(url: string): Promise<void> {
+  const [file, args] = process.platform === 'win32' ? [join(systemRoot(), 'explorer.exe'), [url]] : [process.platform === 'darwin' ? 'open' : 'xdg-open', [url]];
+  return new Promise((resolve, reject) => {
+    const child = spawn(file, args, { detached: true, stdio: 'ignore', windowsHide: true });
+    child.once('spawn', () => {
+      child.unref();
+      resolve();
+    });
+    child.once('error', reject);
+  });
 }
 
 /**

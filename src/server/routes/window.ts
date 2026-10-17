@@ -3,7 +3,7 @@ import type { Guard } from '../app';
 import type { Ctx } from '../db/tx';
 import { STALE_SESSION_MS, type TreeNode } from '../../core/types';
 import { badRequest, conflict, notFound } from '../errors';
-import { desktopCommand, openInDesktop, usableCwd, type DesktopSession, type OpenDesktopResult } from '../open-desktop';
+import { openInDesktop, resumeCommand, usableCwd, type DesktopSession, type OpenDesktopResult } from '../open-desktop';
 import { findSession } from '../repo/sessions';
 import { deleteProject, listDeletedProjects, restoreProject } from '../project-lifecycle';
 import { clearAsk } from '../repo/asks';
@@ -50,15 +50,19 @@ function liveDriver(ctx: Ctx, n: TreeNode): string | null {
 export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: Guard, openDesktop: (session: DesktopSession) => Promise<OpenDesktopResult> = openInDesktop): void {
   const guarded = { onRequest: requireUi };
 
-  // "Open session" on the Board: the Claude desktop app opens the session. When that fails the answer carries the command
-  // for the window to show (status 200: the request was fine, the launch was not).
+  // "Open session" on the Board: the Claude desktop app opens the session. When it cannot, the answer carries the command
+  // to resume it in a terminal, for the window to show (status 200: the request was fine, the open was not).
   app.post('/api/ui/sessions/:id/open-desktop', guarded, async (req) => {
     const { id } = sessionIdParam.parse(req.params);
     const session = findSession(ctx, id);
     if (!session) throw notFound(`Session ${id} not found`, 'Reload the window.');
-    // Resume is scoped to the folder the session ran in, so the launch and the copied command both start there.
-    const result = await openDesktop({ id, cwd: session.cwd });
-    return result.ok ? { ok: true } : { ok: false, command: desktopCommand(id, usableCwd(session.cwd)), reason: result.reason };
+    const result = await openDesktop({ id });
+    if (result.ok) return { ok: true };
+    // Resume is scoped to the folder the session ran in, so the copied command starts there; when it cannot cd there
+    // itself (a folder gone, or one it cannot quote), the reason names the folder.
+    const command = resumeCommand(id, usableCwd(session.cwd));
+    const where = session.cwd && !command.startsWith('cd ') ? ` Start it from ${session.cwd}.` : '';
+    return { ok: false, command, reason: `${result.reason}${where}` };
   });
 
   /**
