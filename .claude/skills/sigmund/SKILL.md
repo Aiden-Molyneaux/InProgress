@@ -183,7 +183,7 @@ Then stop. The merge or deploy waits for the owner's explicit go-ahead ("ship it
 
 ## Phase 8: merge or deploy on go-ahead only [edit]
 
-On Aiden's go-ahead only. If `main` moved, merge it into the branch in its worktree first and rerun the checks. Then, from the main checkout: `git merge --no-ff <branch>`, then `npm run deploy` (typecheck and unit always; smoke and e2e when the changed files need them; a red deploy means fix on the branch, merge and deploy again, and `npm run rollback` swaps the previous live build back), then `npm run claude:install` when the branch touched `claude/` or `src/hooks/`. Then push `main` with the personal account's token and leave the active gh account alone:
+On Aiden's go-ahead only; it drops the `REVIEW` prefix. If `main` moved, merge it into the branch in its worktree first and rerun the checks. Then, from the main checkout: `git merge --no-ff <branch>`, then `npm run deploy` (typecheck and unit always; smoke and e2e when the changed files need them; a red deploy means fix on the branch, merge and deploy again, and `npm run rollback` swaps the previous live build back), then `npm run claude:install` when the branch touched `claude/` or `src/hooks/`. Then push `main` with the personal account's token and leave the active gh account alone:
 
 ```bash
 git -c credential.helper= -c 'credential.helper=!f() { echo username=x-access-token; echo password=$(gh auth token --user Aiden-Molyneaux); }; f' push origin main
@@ -191,7 +191,7 @@ git -c credential.helper= -c 'credential.helper=!f() { echo username=x-access-to
 
 A PR only when Aiden asks. Deploy and `claude:install` never run from a worktree: the installed hooks bake in the main checkout's absolute path.
 
-Once `main` is pushed, brief the scribe that the step is done with its outcome, and prefix this session's title with `DONE`.
+Once `main` is pushed, brief the scribe that the step is done with its outcome, and prefix this session's title with `DONE` (Session title, below).
 
 A deploy or rollback that goes red on the environment (a lock, a restart, the runner) goes to Doctor Nick before anything is retried; a red typecheck or test is the work, fixed on the branch. A retry that is itself a
 gated action (another deploy, a rollback, an installer) follows the gate above.
@@ -214,12 +214,12 @@ gated action (another deploy, a rollback, an installer) follows the gate above.
 - A new request mid-session becomes a queued step through the scribe (`later: #id`, or a new step), unless it is a few lines in code that is already open. The InProgress tree is the memory between sessions.
 - Report to Mip through InProgress only: the step's status and outcome, new steps, asks, and the working tasks. Mip reads them at its next opening. Do not message Mip.
 - **Session title (Aiden, 2026-10-16, #455).** In the desktop app, keep a status prefix on this session's title so the sidebar shows where it stands:
-  - `REVIEW` while the receipt waits on "ship it" (phase 7);
-  - `BLOCKED` while any other ask on the step waits on Aiden;
-  - `DONE` once the step is merged, deployed and pushed (phase 8);
-  - no prefix while you work: drop `REVIEW` or `BLOCKED` once Aiden's answer sends you back to work.
+  - `REVIEW`: set when you end the turn on the phase 7 receipt. Drop it as soon as Aiden answers: "ship it" starts phase 8 with no prefix, and a change request sends you back to work.
+  - `BLOCKED`: set when you end any other turn waiting on Aiden, for a scribe `ask on #<id>` (question or permission) or a question in your closing message. Drop it when he answers. A question asked inside a turn (AskUserQuestion) sets nothing: the app already shows that session as waiting. When both apply, `BLOCKED` wins: his answer comes before a ship.
+  - `DONE`: set once the step is merged, deployed and pushed (phase 8). It stays.
+  - Otherwise no prefix: while you work, deploy retries included.
 
-  Read the title with `mcp__ccd_session_mgmt__get_session` on `"self"`, then set it with `mcp__ccd_session_mgmt__set_session_title` on `"self"`: one prefix and a space before the title as it stands, replacing any prefix already there (`REVIEW #453 Filter the Backlog`, then `DONE #453 Filter the Backlog`). Load both through ToolSearch when they are deferred. Only the main session renames: a subagent cannot rename the session it runs in. Where the tools are missing (outside the desktop app) or a rename is declined, skip it without comment.
+  A session that hands off clears its prefix before it stops; the successor sets its own. Read the title with `mcp__ccd_session_mgmt__get_session` on `"self"`, then set it with `mcp__ccd_session_mgmt__set_session_title` on `"self"`: one prefix and a space before the title as it stands, replacing any prefix already there (`REVIEW #453 Filter the Backlog`, then `DONE #453 Filter the Backlog`). Load both through ToolSearch when they are deferred. Only the main session renames: a subagent cannot rename the session it runs in. Where the tools are missing (outside the desktop app) or a rename is declined, skip it without comment.
 
 A handoff is a prompt a fresh session can start from, saved as `~/.inprogress/resources/inprogress/<yyyy-mm-dd>-<kebab-title>.md` and attached to its step as a resource. The standing rules live here and in `CLAUDE.md`, so a handoff never repeats them. It holds:
 
