@@ -183,7 +183,7 @@ Then stop. The merge or deploy waits for the owner's explicit go-ahead ("ship it
 
 ## Phase 8: merge or deploy on go-ahead only [edit]
 
-On Aiden's go-ahead only; it drops the `REVIEW` prefix. If `main` moved, merge it into the branch in its worktree first and rerun the checks. Then, from the main checkout: `git merge --no-ff <branch>`, then `npm run deploy` (typecheck and unit always; smoke and e2e when the changed files need them; a red deploy means fix on the branch, merge and deploy again, and `npm run rollback` swaps the previous live build back), then `npm run claude:install` when the branch touched `claude/` or `src/hooks/`. Then push `main` with the personal account's token and leave the active gh account alone:
+On Aiden's go-ahead only; it drops the `REVIEW` prefix (Session title, below). If `main` moved, merge it into the branch in its worktree first and rerun the checks. Then, from the main checkout: `git merge --no-ff <branch>`, then `npm run deploy` (typecheck and unit always; smoke and e2e when the changed files need them; a red deploy means fix on the branch, merge and deploy again, and `npm run rollback` swaps the previous live build back), then `npm run claude:install` when the branch touched `claude/` or `src/hooks/`. Then push `main` with the personal account's token and leave the active gh account alone:
 
 ```bash
 git -c credential.helper= -c 'credential.helper=!f() { echo username=x-access-token; echo password=$(gh auth token --user Aiden-Molyneaux); }; f' push origin main
@@ -214,8 +214,8 @@ gated action (another deploy, a rollback, an installer) follows the gate above.
 - A new request mid-session becomes a queued step through the scribe (`later: #id`, or a new step), unless it is a few lines in code that is already open. The InProgress tree is the memory between sessions.
 - Report to Mip through InProgress only: the step's status and outcome, new steps, asks, and the working tasks. Mip reads them at its next opening. Do not message Mip.
 - **Session title (Aiden, 2026-10-16, #455).** In the desktop app, keep a status prefix on this session's title so the sidebar shows where it stands:
-  - `REVIEW`: set when you end the turn on the phase 7 receipt. Drop it as soon as Aiden answers: "ship it" starts phase 8 with no prefix, and a change request sends you back to work.
-  - `BLOCKED`: set when you end any other turn waiting on Aiden, for a scribe `ask on #<id>` (question or permission) or a question in your closing message. Drop it when he answers. A question asked inside a turn (AskUserQuestion) sets nothing: the app already shows that session as waiting. When both apply, `BLOCKED` wins: his answer comes before a ship.
+  - `REVIEW`: set whenever you end a turn with the phase 7 receipt still open, its `review` ask included. "Ship it" drops it and phase 8 runs with no prefix; a change request drops it until the next receipt.
+  - `BLOCKED`: set when you end a turn waiting on Aiden for anything but the receipt: a scribe `question` or `permission` ask, or a question in your closing message. Drop it when he answers. If one is open while the receipt waits, `BLOCKED` wins: his answer comes before a ship. A question asked inside a turn (AskUserQuestion) sets nothing.
   - `DONE`: set once the step is merged, deployed and pushed (phase 8). It stays.
   - Otherwise no prefix: while you work, deploy retries included.
 
