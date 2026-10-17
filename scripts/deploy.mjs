@@ -7,7 +7,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildLabel as label, promote, restartCheck, suitesFor, swapWithPrev } from './deploy-lib.mjs';
+import { acquireLock, buildLabel as label, lockHeldMessage, lockTakenOverMessage, promote, restartCheck, suitesFor, swapWithPrev } from './deploy-lib.mjs';
 
 const repo = fileURLToPath(new URL('..', import.meta.url));
 const buildRoot = join(repo, '.build');
@@ -25,15 +25,22 @@ const readJson = (file) => {
   }
 };
 
+/** A git command's trimmed output, or undefined when it fails. */
+const git = (args) => {
+  try {
+    return execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch {
+    return undefined;
+  }
+};
+
 /** Paths changed (committed, staged, unstaged or untracked) since a commit, or null if git can't tell. */
 function changedSince(sha) {
   if (!sha || sha === 'unknown') return null;
-  try {
-    const git = (args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
-    return [...git(['diff', '--name-only', sha]).split('\n'), ...git(['ls-files', '--others', '--exclude-standard']).split('\n')].filter(Boolean);
-  } catch {
-    return null;
-  }
+  const diff = git(['diff', '--name-only', sha]);
+  const untracked = git(['ls-files', '--others', '--exclude-standard']);
+  if (diff === undefined || untracked === undefined) return null;
+  return [...diff.split('\n'), ...untracked.split('\n')].filter(Boolean);
 }
 
 /** What GET /api/health gave: `{ status, text }` when it answered, `{ error }` when it did not. */
@@ -59,6 +66,19 @@ async function restart() {
   return { ok: !saw, saw };
 }
 
+// One deploy or rollback at a time (scripts/deploy-lib.mjs acquireLock): a second one refuses before it touches anything.
+const lockFile = join(repo, '.deploy', 'lock');
+const lock = acquireLock({
+  file: lockFile,
+  info: { kind: rollback ? 'rollback' : 'deploy', sha: git(['rev-parse', '--short', 'HEAD']), branch: git(['rev-parse', '--abbrev-ref', 'HEAD']), startedAt: new Date().toISOString() },
+});
+if (lock.holder) {
+  console.error(lockHeldMessage(lock.holder, lockFile));
+  process.exit(1);
+}
+process.on('exit', lock.release);
+if (lock.tookOver) console.log(lockTakenOverMessage(lock.tookOver));
+
 if (rollback) {
   step('Rolling back to the previous build');
   swapWithPrev({ repo, prev });
@@ -75,6 +95,7 @@ if (rollback) {
 // The slower suites run only for changes they cover (scripts/deploy-lib.mjs suitesFor); --full runs everything.
 const deployed = readJson(join(repo, 'dist', 'build.json'));
 const changed = process.argv.includes('--full') ? null : changedSince(deployed?.sha);
+if (!changed && !process.argv.includes('--full') && deployed?.sha && deployed.sha !== 'unknown') step(`Could not diff against ${deployed.sha}: running every suite`);
 const suites = suitesFor(changed);
 const since = deployed?.sha ? `since ${deployed.sha}` : '';
 
