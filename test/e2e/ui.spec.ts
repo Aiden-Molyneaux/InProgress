@@ -2509,6 +2509,58 @@ test.describe('Board', () => {
     await expect(next.getByRole('button', { name: '6 Beta', exact: true })).toHaveCount(0);
   });
 
+  test('Now "Done…" takes an optional outcome, Escape keeps the step, Enter marks it done', async ({ page, api, fresh, consoleErrors }) => {
+    consoleErrors.allow(/status of 400/);
+    const made = await write<{ id: number; title: string }[]>(api, fresh.session, 'post', '/api/nodes', {
+      parentId: fresh.root,
+      nodes: [{ title: 'Mine to finish', status: 'active', assignee: 'me' }, { title: 'Mine to refuse', status: 'active', assignee: 'me' }],
+    });
+    const id = made.find((n) => n.title === 'Mine to finish')!.id;
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const now = band(page, 'now');
+    const row = nowRow(page, 'Mine to finish');
+    const dialog = page.getByRole('dialog', { name: `Mark #${id} Mine to finish done?` });
+    const field = dialog.getByRole('textbox', { name: 'Outcome (optional)' });
+    const doneButton = row.getByRole('button', { name: 'Done…' });
+    await doneButton.focus();
+    await page.keyboard.press('Enter');
+    await expect(dialog).toBeVisible();
+    await expect(field).toBeFocused();
+    // No live driver: no driver line.
+    await expect(dialog.getByText('drives it')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(row).toBeVisible();
+    await expect(doneButton).toBeFocused();
+    // Reopen, type an outcome, Enter: the box leaves Now and shows in Done, and the step stores the outcome.
+    await page.keyboard.press('Enter');
+    await field.fill('Finished by hand');
+    await page.keyboard.press('Enter');
+    await expect(now.getByRole('button', { name: 'Mine to finish', exact: true })).toHaveCount(0);
+    await expect(band(page, 'done').getByRole('button', { name: 'Mine to finish', exact: true })).toBeVisible();
+    const stored = await api.get(`/api/nodes/${id}`, { headers: headers(fresh.session) });
+    expect(await stored.json()).toMatchObject({ node: { status: 'done', outcome: 'Finished by hand' } });
+    // A step a live session drives: the form names the session, and Cancel keeps the step.
+    const driven = nowRow(page, 'Play app signing');
+    const drivenDialog = page.getByRole('dialog', { name: `Mark #${fresh.ids['Play app signing']} Play app signing done?` });
+    await driven.getByRole('button', { name: 'Done…' }).click();
+    await expect(drivenDialog).toContainText('“E2E session” drives it.');
+    await drivenDialog.getByRole('button', { name: 'Cancel' }).click();
+    await expect(drivenDialog).toHaveCount(0);
+    await expect(driven).toBeVisible();
+    // A refused request keeps the form open, says why, and leaves the step in Now.
+    const nodeDone = '**/api/ui/projects/*/nodes/*/done';
+    await page.route(nodeDone, (route) => route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'Refused for the test', hint: 'Reload the window.' }) }));
+    const refused = nowRow(page, 'Mine to refuse');
+    await refused.getByRole('button', { name: 'Done…' }).click();
+    await page.getByRole('button', { name: 'Mark done', exact: true }).click();
+    await expect(page.getByRole('alert').filter({ hasText: 'Refused for the test' })).toBeVisible();
+    await expect(page.getByRole('textbox', { name: 'Outcome (optional)' })).toBeFocused();
+    await expect(refused).not.toHaveClass(/pending/);
+    await page.unroute(nodeDone);
+  });
+
   test('drag: Backlog into Next, within Next, and Next back to Backlog, without opening Details', async ({ page, fresh }) => {
     await page.setViewportSize(WIDE);
     await open(page, fresh);

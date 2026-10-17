@@ -173,7 +173,8 @@ with status active and no live session at any age.
   root node), which it rewrites only after showing the full digest. No state note: the last 7 days.
 - **The digest reads the tables, not the events:** `completed_at`, `raised_at`, `cleared_at`, `started_at`, `ended_at`,
   `created_at`. Events are pruned after 30 days and a return after months must still work. Only Aiden's moves in Next
-  come from events.
+  come from events, and which done steps he closed from the window (the Done line ends " (you)", and so does the `no_outcome` mark: `no_outcome (you)`); past the pruning
+  those read as not his.
 
 ## 2. The window
 
@@ -217,7 +218,9 @@ tests. Details, the resource viewer and go-to stay; go-to opens the step's Detai
   in-progress working task, its newest command as "▸ label · when", and "n subagents", whose tooltip lists each running
   subagent with its run time. An active step with no live session is Unattended: "No session is on it", and a system
   line "Its last session ended 40m ago without closing it". It shows in Now while it is Aiden's own or its last session
-  ended within the trail (7 days); an older one stays in Next or Backlog.
+  ended within the trail (7 days); an older one stays in Next or Backlog. A box's "Done…" opens a form inside it with an
+  optional outcome, and Mark done marks the step done as the window; it names a live driver, which keeps its focus
+  (`done_focus`), and refuses a step with open steps under it.
 - **Done.** Task boxes for the last five done steps by `completed_at` (dropped excluded), with no session area: the
   outcome clamped to two lines, marks (`no_outcome`, `done_focus`), and the "new since you looked" divider. A done step
   with an open review ask is in Needs me instead.
@@ -453,7 +456,7 @@ On open:
    records an event with `data.status` for the week's count, and shows one short offer: "Since your last look
    (3d): 4 done · 2 asks raised, 1 answered · 2 sessions ended, 1 without a handoff. Reconcile: 3 fixes ready, 1 needs
    you." Then it offers the digest, the reconcile and what's next. With "status", it shows all three at once.
-2. **Digest** (on request; also `inprogress digest <project> [--since <iso>]`): steps done with outcomes; asks raised and
+2. **Digest** (on request; also `inprogress digest <project> [--since <iso>]`): steps done with outcomes, those Aiden closed from the window ending " (you)", and the `no_outcome` mark reading `no_outcome (you)` too; asks raised and
    cleared with answers; sessions started and ended, flagging those without a handoff or with open tasks (session lines
    reach back as far as the 7-day trail keeps sessions; the rest has no age limit); steps Aiden
    quick-added; his moves in Next; new documents. At most 20 lines, then "+n more".
@@ -481,7 +484,7 @@ state note).
 - **D6** (`2026-09-27-inprogress-design.md`), new wording: "Claude edits the plan only through the `inprogress-scribe`
   subagent, never by main-session tool calls. Exceptions: working tasks, claims, roles and asks go through the
   CLI (2026-10-04 spec section 1; this spec section 3); Aiden edits from the window under `/api/ui/`, as actor `window`: project archive,
-  unarchive, rename, delete and restore, the order of Next, quick-added steps, and clearing asks. A window write is an
+  unarchive, rename, delete and restore, the order of Next, quick-added steps, marking a step done from Now, and clearing asks. A window write is an
   operation the server applies to the current row inside one transaction, never a replacement of what the window last
   saw."
 - **D5** ("the window is read-only"): "Claude edits content; Aiden edits placement, adds steps, clears asks and runs
