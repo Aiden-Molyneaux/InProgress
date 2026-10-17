@@ -152,14 +152,17 @@ const NOT_IN_APP = "This session is not in the Claude desktop app, so it can't o
 /** No file read as an app session at all: the app is missing, or it keeps its sessions somewhere or some way this does not know. */
 const NO_APP_FILES = "InProgress could not find the Claude desktop app's session files, so it can't open the session there. Run this in a terminal to resume it.";
 
-/** Whether a lockfile is held open by its program: Chromium holds `<data dir>/lockfile` for as long as the app runs. */
+/**
+ * Whether a lockfile is held open by its program: Chromium holds `<data dir>/lockfile` for as long as the app runs, and
+ * opening it then fails with EBUSY. Any other failure (a read-only file, a denied folder) is not read as running, since
+ * a wrong yes starts the handler as the app itself.
+ */
 function lockHeld(file: string): boolean {
   try {
     closeSync(openSync(file, 'r+'));
     return false;
   } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    return code === 'EBUSY' || code === 'EPERM' || code === 'EACCES';
+    return (err as NodeJS.ErrnoException).code === 'EBUSY';
   }
 }
 

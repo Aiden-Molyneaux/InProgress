@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -181,6 +182,24 @@ describe('desktopAppRunning', () => {
     // The real check: a lockfile nobody holds opens, so the app is not running.
     expect(desktopAppRunning([sessions])).toBe(false);
   });
+
+  it.runIf(process.platform === 'win32')('reads a lockfile another process holds with no sharing, as Chromium does, as running', async () => {
+    const appData = join(DIR, 'held-app-data');
+    const sessions = join(appData, 'claude-code-sessions');
+    mkdirSync(sessions, { recursive: true });
+    const lock = join(appData, 'lockfile');
+    writeFileSync(lock, '');
+    const holder = spawn('powershell.exe', ['-NoProfile', '-Command', `$f = [IO.File]::Open('${lock}', 'Open', 'ReadWrite', 'None'); 'held'; Start-Sleep -Seconds 30`], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        holder.stdout.on('data', (d: Buffer) => d.toString().includes('held') && resolve());
+        holder.once('exit', () => reject(new Error('the holder exited before holding the file')));
+      });
+      expect(desktopAppRunning([sessions])).toBe(true);
+    } finally {
+      holder.kill();
+    }
+  }, 20_000);
 });
 
 describe('the helpers', () => {

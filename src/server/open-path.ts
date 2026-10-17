@@ -133,12 +133,15 @@ export const forgetClaudeHandler = (): void => {
 
 /**
  * The environment the started Claude.exe gets: the server's, less what belongs to the Claude Code session that started
- * the server (CLAUDE_CODE_*, CLAUDECODE), anything named like a credential, InProgress's own variables, and what would
- * change how Electron or node runs. User settings such as CLAUDE_CONFIG_DIR or ANTHROPIC_BASE_URL pass through.
+ * the server (CLAUDE_CODE_*, CLAUDECODE, except the provider switches CLAUDE_CODE_USE_*), anything named like a
+ * credential, InProgress's own variables, and what would change how Electron or node runs. User settings such as
+ * CLAUDE_CONFIG_DIR or ANTHROPIC_BASE_URL pass through. Names only: a secret under a plain name (a URL with a password
+ * in it) passes too. The started program only hands the link to the running app and exits (openClaudeLink).
  */
 export function desktopAppEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const dropped = (key: string): boolean =>
-    /^(CLAUDE_CODE_|CLAUDECODE$|INPROGRESS|ELECTRON_|NODE_OPTIONS$|DISABLE_AUTOUPDATER$)/i.test(key) || /(TOKEN|SECRET|PASSWORD|API_?KEY|CREDENTIAL)/i.test(key);
+    (/^(CLAUDE_CODE_|CLAUDECODE$|INPROGRESS|ELECTRON_|NODE_OPTIONS$|DISABLE_AUTOUPDATER$)/i.test(key) && !/^CLAUDE_CODE_USE_/i.test(key)) ||
+    /(TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|PRIVATE_?KEY|CREDENTIAL|_PAT$)/i.test(key);
   return Object.fromEntries(Object.entries(env).filter(([key]) => !dropped(key)));
 }
 

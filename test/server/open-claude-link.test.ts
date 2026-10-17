@@ -58,8 +58,11 @@ describe('desktopAppEnv', () => {
       ELECTRON_RUN_AS_NODE: '1',
       NODE_OPTIONS: '--inspect',
       DISABLE_AUTOUPDATER: '1',
+      CLAUDE_CODE_USE_BEDROCK: '1',
+      GH_PAT: 'ghp',
+      SSH_PRIVATE_KEY: 'k',
     };
-    expect(desktopAppEnv(env)).toEqual({ PATH: 'C:\\Windows', USERPROFILE: 'C:\\Users\\a', CLAUDE_CONFIG_DIR: 'D:\\claude', ANTHROPIC_BASE_URL: 'https://proxy' });
+    expect(desktopAppEnv(env)).toEqual({ PATH: 'C:\\Windows', USERPROFILE: 'C:\\Users\\a', CLAUDE_CONFIG_DIR: 'D:\\claude', ANTHROPIC_BASE_URL: 'https://proxy', CLAUDE_CODE_USE_BEDROCK: '1' });
   });
 });
 
