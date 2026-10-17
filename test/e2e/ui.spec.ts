@@ -2330,6 +2330,14 @@ test.describe('Board', () => {
     await expect(next.getByRole('region', { name: 'Backlog under Road to market' })).toBeVisible();
     expect(await regions()).toEqual([...phaseRegions].reverse());
     expect(await ids()).toEqual([...phaseIds].reverse());
+    // A reorder closes an open Delete confirm, and focus stays on the control.
+    const victim = next.locator('.ip-backlog-row').filter({ hasText: '3 RevenueCat' });
+    await victim.hover();
+    await victim.getByRole('button', { name: 'Delete…' }).click();
+    await expect(next.getByRole('dialog')).toBeVisible();
+    await order.getByRole('button', { name: 'Reverse' }).click();
+    await expect(next.getByRole('dialog')).toHaveCount(0);
+    await expect(order.getByRole('button', { name: 'Reverse' })).toBeFocused();
   });
 
   test('"to Next" and "back to Backlog" are buttons Tab reaches and shows, and write the queue', async ({ page, fresh }) => {

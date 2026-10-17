@@ -40,9 +40,9 @@ export function groupByParent(boxes: BoxData[]): { parent: TreeNode | null; boxe
 }
 
 /**
- * The Backlog's sections for an order. Phase: the parent groups of `groupByParent`, in the order the boxes arrive (tree
- * order, except a step sent back from Next lands last until the snapshot settles), and reverse flips both the groups and
- * the rows in each. Id: one flat section by id, low to high, or high to low in reverse.
+ * The Backlog's sections for an order. Phase: the parent groups of `groupByParent`, the top level first, then parents in
+ * order of first arrival (tree order, except a step sent back from Next lands last in its group until the snapshot
+ * settles), and reverse flips both the groups and the rows in each. Id: one flat section by id, low to high, or high to low in reverse.
  */
 export function backlogSections(boxes: BoxData[], order: BacklogOrder): { parent: TreeNode | null; flat: boolean; boxes: BoxData[] }[] {
   if (order.by === 'id') {

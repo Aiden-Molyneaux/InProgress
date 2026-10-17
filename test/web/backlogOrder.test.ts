@@ -16,13 +16,13 @@ describe('parseOrder and orderKey', () => {
   it('reads the four stored orders and round-trips them', () => {
     for (const key of ['phase', 'phase-rev', 'id', 'id-rev']) expect(orderKey(parseOrder(key))).toBe(key);
     expect(parseOrder('id-rev')).toEqual({ by: 'id', reverse: true });
+    expect(parseOrder('id-')).toEqual({ by: 'id', reverse: false });
   });
   it('falls back to phase, forward, for nothing or anything unknown', () => {
     expect(parseOrder(null)).toEqual({ by: 'phase', reverse: false });
     expect(parseOrder('time-up')).toEqual({ by: 'phase', reverse: false });
     expect(parseOrder('')).toEqual({ by: 'phase', reverse: false });
     expect(parseOrder('ID')).toEqual({ by: 'phase', reverse: false });
-    expect(parseOrder('id-')).toEqual({ by: 'id', reverse: false });
   });
 });
 
