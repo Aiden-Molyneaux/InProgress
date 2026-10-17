@@ -1,8 +1,10 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
-import { promote, restartCheck, suitesFor, swapWithPrev } from '../../scripts/deploy-lib.mjs';
+import { acquireLock, lockHeldMessage, lockTakenOverMessage, pidAlive, promote, restartCheck, suitesFor, swapWithPrev } from '../../scripts/deploy-lib.mjs';
 
 const temps: string[] = [];
 afterAll(() => {
@@ -142,5 +144,106 @@ describe('the restart check after a deploy or rollback', () => {
     const said = restartCheck(live, { status: 500, text: 'x'.repeat(5000) }) ?? '';
     expect(said.length).toBeLessThan(700);
     expect(said).toContain('(5000 chars)');
+  });
+});
+
+describe('the lock that keeps two deploys apart', () => {
+  const lockFile = () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ip-deploy-lock-'));
+    temps.push(dir);
+    return join(dir, '.deploy', 'lock');
+  };
+  const info = { kind: 'deploy' as const, sha: '31e6b56', branch: 'main', startedAt: '2026-10-16T14:00:00.000Z' };
+
+  it('a second deploy is refused while the first runs, and gets the lock once the first releases it', () => {
+    const file = lockFile();
+    const first = acquireLock({ file, info, pid: 101, isAlive: () => true });
+    expect(first.release).toBeTypeOf('function');
+    const second = acquireLock({ file, info: { ...info, sha: 'bc07b24' }, pid: 202, isAlive: () => true });
+    expect(second.holder).toEqual({ ...info, pid: 101 });
+    first.release!();
+    expect(existsSync(file)).toBe(false);
+    const third = acquireLock({ file, info: { ...info, sha: 'bc07b24' }, pid: 202, isAlive: () => true });
+    expect(third.release).toBeTypeOf('function');
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ sha: 'bc07b24', pid: 202 });
+  });
+
+  it('takes over a lock whose deploy has exited', () => {
+    const file = lockFile();
+    acquireLock({ file, info, pid: 101 });
+    const next = acquireLock({ file, info: { ...info, kind: 'rollback' }, pid: 202, isAlive: (pid) => pid !== 101 });
+    expect(next.release).toBeTypeOf('function');
+    expect(next.tookOver).toEqual({ ...info, pid: 101 });
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ kind: 'rollback', pid: 202 });
+    expect(lockTakenOverMessage(next.tookOver!)).toBe(
+      'Took over the lock of a deploy of 31e6b56 (main), pid 101, started 2026-10-16T14:00:00.000Z, which has exited. If its tests are still running, .build and port 4399 are in use.',
+    );
+  });
+
+  it('a lock holding our own pid is a dead deploy whose pid was reused, and is taken over', () => {
+    const file = lockFile();
+    acquireLock({ file, info, pid: 101 });
+    const next = acquireLock({ file, info, pid: 101, isAlive: () => true });
+    expect(next.release).toBeTypeOf('function');
+    expect(next.tookOver).toMatchObject({ pid: 101 });
+  });
+
+  it('a free lock is taken with nothing taken over', () => {
+    expect(acquireLock({ file: lockFile(), info, pid: 101 }).tookOver).toBeNull();
+  });
+
+  it('release leaves a lock another deploy took over', () => {
+    const file = lockFile();
+    const dead = acquireLock({ file, info, pid: 101 });
+    acquireLock({ file, info, pid: 202, isAlive: (pid) => pid !== 101 });
+    dead.release!();
+    expect(JSON.parse(readFileSync(file, 'utf8')).pid).toBe(202);
+  });
+
+  it('an unreadable lock is held, not taken over', () => {
+    const file = lockFile();
+    mkdirSync(join(file, '..'), { recursive: true });
+    writeFileSync(file, '');
+    expect(acquireLock({ file, info, pid: 202 }).holder).toEqual({});
+    expect(readFileSync(file, 'utf8')).toBe('');
+  });
+
+  it('pidAlive sees this process and not an exited one', () => {
+    expect(pidAlive(process.pid)).toBe(true);
+    expect(pidAlive(2 ** 30)).toBe(false);
+  });
+
+  it('the refusal names the running deploy and says what to do', () => {
+    const msg = lockHeldMessage({ ...info, pid: 101 }, '/repo/.deploy/lock', Date.parse('2026-10-16T14:03:30.000Z'));
+    expect(msg).toBe(
+      [
+        'Another deploy is running: a deploy of 31e6b56 (main), pid 101, started 2026-10-16T14:00:00.000Z (3 min ago).',
+        'Wait for it to finish, then run this again. Two at once share .build and port 4399, so this one stops here and changes nothing.',
+        'If pid 101 is not a deploy, delete /repo/.deploy/lock and run again.',
+      ].join('\n'),
+    );
+    expect(lockHeldMessage({ kind: 'rollback', pid: 7, startedAt: info.startedAt }, 'f', Date.parse(info.startedAt) + 5000)).toContain(
+      'a rollback, pid 7, started 2026-10-16T14:00:00.000Z (under a minute ago).',
+    );
+    expect(lockHeldMessage({}, 'f')).toBe('Another deploy holds f, but its lock could not be read. If no deploy or rollback is running, delete it and run again.');
+  });
+});
+
+describe('deploy.mjs and the lock', () => {
+  it('refuses before touching anything while another deploy holds the lock, and leaves that lock alone', () => {
+    // A copy in a temp folder, run as a rollback: were the refusal broken, it would stop at "no previous build" before
+    // any npm or server step.
+    const repo = mkdtempSync(join(tmpdir(), 'ip-deploy-run-'));
+    temps.push(repo);
+    mkdirSync(join(repo, 'scripts'));
+    for (const name of ['deploy.mjs', 'deploy-lib.mjs']) copyFileSync(fileURLToPath(new URL(`../../scripts/${name}`, import.meta.url)), join(repo, 'scripts', name));
+    mkdirSync(join(repo, '.deploy'));
+    const held = JSON.stringify({ kind: 'deploy', sha: '31e6b56', branch: 'main', startedAt: new Date().toISOString(), pid: process.pid });
+    writeFileSync(join(repo, '.deploy', 'lock'), held);
+    const run = spawnSync(process.execPath, [join(repo, 'scripts', 'deploy.mjs'), '--rollback'], { cwd: repo, encoding: 'utf8' });
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain(`Another deploy is running: a deploy of 31e6b56 (main), pid ${process.pid}, started`);
+    expect(run.stdout).not.toContain('Rolling back');
+    expect(readFileSync(join(repo, '.deploy', 'lock'), 'utf8')).toBe(held);
   });
 });

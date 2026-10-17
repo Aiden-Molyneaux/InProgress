@@ -64,6 +64,21 @@ work. A re-hit bumps **Hits** and **Verified**. Entries seeded from the code and
   check:" line was added so the next one says what health returned.
 - **Verified:** 2026-10-16 · **Hits:** 1
 
+## A deploy refused: another deploy is running
+- **Symptom:** `npm run deploy` or `npm run rollback` exits 1 at once with "Another deploy is
+  running: a deploy of <sha> (<branch>), pid <pid>, started <time>".
+- **Diagnosis:** two deploys at once share `.build`, e2e port 4399 and the live trees. On
+  2026-10-16 the #447 and #452 sessions deployed together and one went red on a port clash. Each
+  deploy or rollback now takes `.deploy/lock` first and releases it on exit; a second one refuses
+  before it touches anything. A lock whose pid has exited (a deploy killed mid-run) is taken over,
+  and the deploy prints "Took over the lock of ..." (scripts/deploy-lib.mjs acquireLock). Killing a
+  deploy's node alone can leave its npm, Playwright and e2e server running, so a red e2e on port
+  4399 right after that line means the old run's tests are still going.
+- **Fix:** wait for the named deploy to finish, then run again: it deploys whatever main holds
+  then. Merging into main while a deploy runs changes the files under it, so wait to merge too.
+  If the pid named is not a deploy (Windows reuses pids), delete `.deploy/lock` and run again.
+- **Verified:** 2026-10-16, #454 · **Hits:** 0
+
 ## claude:install from the wrong checkout
 - **Symptom:** every session's hooks run a worktree's build (unmerged behaviour everywhere), or,
   once that worktree is removed, the doctor prints `✗ Hooks: hook script <path> no longer exists`
