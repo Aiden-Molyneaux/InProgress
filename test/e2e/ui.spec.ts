@@ -2293,6 +2293,45 @@ test.describe('Board', () => {
     await expect(fold).toHaveAttribute('aria-expanded', 'true');
   });
 
+  test('the Backlog orders by phase or by id, forward or reverse, and keeps the choice after a reload', async ({ page, fresh }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const next = band(page, 'next');
+    await openBacklog(page);
+    const order = next.getByRole('group', { name: 'Backlog order' });
+    const attrs = async (selector: string, name: string) => Promise.all((await next.locator(selector).all()).map((l) => l.getAttribute(name)));
+    const ids = async () => (await attrs('.ip-backlog-row', 'data-node')).map(Number);
+    const regions = () => attrs('.ip-backlog-group', 'aria-label');
+    // Phase, forward, is the default: groups under each parent.
+    await expect(order.getByRole('button', { name: 'Phase' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(order.getByRole('button', { name: 'Reverse' })).toHaveAttribute('aria-pressed', 'false');
+    const phaseRegions = await regions();
+    expect(phaseRegions).toContain('Backlog under Road to market');
+    const phaseIds = await ids();
+    // ID: one flat list, low to high, each box naming its parent.
+    await order.getByRole('button', { name: 'ID' }).click();
+    await expect(next.getByRole('region', { name: 'Backlog by id' })).toBeVisible();
+    expect(await regions()).toEqual(['Backlog by id']);
+    const up = await ids();
+    expect(up).toEqual([...phaseIds].sort((a, b) => a - b));
+    await expect(next.locator('.ip-backlog-row').filter({ hasText: '3 RevenueCat' }).locator('.ip-box-parent')).toHaveText('Road to market');
+    // Reverse: high to low.
+    await order.getByRole('button', { name: 'Reverse' }).click();
+    await expect(order.getByRole('button', { name: 'Reverse' })).toHaveAttribute('aria-pressed', 'true');
+    expect(await ids()).toEqual([...up].reverse());
+    // The choice survives a reload.
+    await page.reload();
+    await openBacklog(page);
+    await expect(order.getByRole('button', { name: 'ID' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(order.getByRole('button', { name: 'Reverse' })).toHaveAttribute('aria-pressed', 'true');
+    expect(await ids()).toEqual([...up].reverse());
+    // Phase, reverse: the groups and the rows in each flip.
+    await order.getByRole('button', { name: 'Phase' }).click();
+    await expect(next.getByRole('region', { name: 'Backlog under Road to market' })).toBeVisible();
+    expect(await regions()).toEqual([...phaseRegions].reverse());
+    expect(await ids()).toEqual([...phaseIds].reverse());
+  });
+
   test('"to Next" and "back to Backlog" are buttons Tab reaches and shows, and write the queue', async ({ page, fresh }) => {
     await page.setViewportSize(WIDE);
     await open(page, fresh);
