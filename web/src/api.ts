@@ -64,14 +64,14 @@ export type OpenDesktopResult = { ok: true } | { ok: false; command: string; rea
 
 /**
  * Opens a session in the Claude desktop app. When the server could not, the answer holds the command to copy, and the
- * reason: the server's own when it could not launch, else why the request failed (with a hint to run the command in the
+ * reason: the server's own when it could not open it, else why the request failed (with a hint to run the command in the
  * session's folder, since the window builds that command without one). Never rejects.
  */
 export async function openDesktop(sessionId: string): Promise<OpenDesktopResult> {
   const answer = await sendUi<{ ok: boolean; command?: string; reason?: string }>(`/api/ui/sessions/${encodeURIComponent(sessionId)}/open-desktop`, {});
   if (answer === 'reload') return 'reload';
   // The command the window builds itself has no folder in it, so the reason says where to run it.
-  const own = (reason: string): OpenDesktopResult => ({ ok: false, command: `claude --desktop --resume ${sessionId}`, reason: `${/[.!?]$/.test(reason) ? reason : `${reason}.`} Run it in the session's folder.` });
+  const own = (reason: string): OpenDesktopResult => ({ ok: false, command: `claude --resume ${sessionId}`, reason: `${/[.!?]$/.test(reason) ? reason : `${reason}.`} Run it in the session's folder.` });
   if (typeof answer === 'string') return own(answer);
   if (answer === null || typeof answer !== 'object') return own('The InProgress server gave an answer the window could not read.');
   if (answer.ok) return { ok: true };

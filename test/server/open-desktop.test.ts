@@ -1,17 +1,17 @@
-import { EventEmitter } from 'node:events';
-import type { ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../../src/server/app';
-import { desktopCommand, findClaude, firstClaudeExe, forgetClaude, openInDesktop, usableCwd, type DesktopSession, type OpenDesktopResult } from '../../src/server/open-desktop';
+import { desktopLink, desktopSessionDirs, findAppSession, openInDesktop, resumeCommand, usableCwd, type DesktopSession, type OpenDesktopResult } from '../../src/server/open-desktop';
 import { makeCtx } from '../helpers';
 
 const TOKEN = 'test-token';
 const auth = { authorization: `Bearer ${TOKEN}`, 'x-inprogress-actor': 'scribe:s1' };
 const UI = { origin: 'http://localhost:80', 'x-ip-ui-token': 'ui-token' };
 const ID = '0b9d1a52-3c3e-4a43-9f43-2d7c6e1f8a10';
+const APP = 'local_83cd7f8d-e5cb-414e-a3c9-a6e6e9fd1213';
+const NOT_IN_APP = "This session is not in the Claude desktop app, so it can't open there. Run this in a terminal to resume it.";
 
 const DIR = mkdtempSync(join(tmpdir(), 'ip-open-desktop-'));
 const FILE = join(DIR, 'not-a-dir.txt');
@@ -20,6 +20,18 @@ afterAll(() => rmSync(DIR, { recursive: true, force: true }));
 
 /** A folder that does not exist on this machine (C:/personal/InGame may). */
 const GONE = join(DIR, 'gone-project');
+
+/** A fresh sessions folder laid out as the desktop app keeps it: <root>/<account>/<org>/local_<uuid>.json. */
+let roots = 0;
+function sessionsRoot(files: Record<string, unknown>): string {
+  const root = join(DIR, `sessions-${roots++}`);
+  const org = join(root, 'account-uuid', 'org-uuid');
+  mkdirSync(org, { recursive: true });
+  for (const [name, body] of Object.entries(files)) writeFileSync(join(org, name), typeof body === 'string' ? body : JSON.stringify(body));
+  return root;
+}
+
+const entry = (sessionId: string, cliSessionId: string, extra: Record<string, unknown> = {}) => ({ sessionId, cliSessionId, title: 'A session', cwd: 'C:\\work', ...extra });
 
 async function setup(openDesktop: (session: DesktopSession) => Promise<OpenDesktopResult>, cwd = GONE) {
   const ctx = makeCtx();
@@ -32,7 +44,7 @@ async function setup(openDesktop: (session: DesktopSession) => Promise<OpenDeskt
 }
 
 describe('POST /api/ui/sessions/:id/open-desktop', () => {
-  it('answers ok when the launch worked, and passes the session id and its cwd', async () => {
+  it('answers ok when the desktop app was asked to open it, and passes the session id and its cwd', async () => {
     const open = vi.fn(async (): Promise<OpenDesktopResult> => ({ ok: true }));
     const { post } = await setup(open);
     const res = await post(ID);
@@ -41,19 +53,19 @@ describe('POST /api/ui/sessions/:id/open-desktop', () => {
     expect(open).toHaveBeenCalledWith({ id: ID, cwd: GONE });
   });
 
-  it('answers ok false with the bare command when the launch failed and the cwd is not a folder here', async () => {
-    const { post } = await setup(async () => ({ ok: false, reason: 'claude exited with code 1' }));
+  it('answers ok false with the bare resume command when it could not open and the cwd is not a folder here', async () => {
+    const { post } = await setup(async () => ({ ok: false, reason: NOT_IN_APP }));
     const res = await post(ID);
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ ok: false, command: `claude --desktop --resume ${ID}`, reason: 'claude exited with code 1' });
+    expect(res.json()).toEqual({ ok: false, command: `claude --resume ${ID}`, reason: NOT_IN_APP });
   });
 
   it('answers ok false with a cd into the session folder first when that folder exists', async () => {
     const { post } = await setup(async () => ({ ok: false, reason: 'why' }), DIR);
-    expect((await post(ID)).json()).toEqual({ ok: false, command: `cd "${DIR}"; claude --desktop --resume ${ID}`, reason: 'why' });
+    expect((await post(ID)).json()).toEqual({ ok: false, command: `cd "${DIR}"; claude --resume ${ID}`, reason: 'why' });
   });
 
-  it('answers 400 for an id that is not a UUID, without launching', async () => {
+  it('answers 400 for an id that is not a UUID, without opening anything', async () => {
     const open = vi.fn(async (): Promise<OpenDesktopResult> => ({ ok: true }));
     const { post } = await setup(open);
     expect((await post('s1')).statusCode).toBe(400);
@@ -61,7 +73,7 @@ describe('POST /api/ui/sessions/:id/open-desktop', () => {
     expect(open).not.toHaveBeenCalled();
   });
 
-  it('answers 404 for a session that does not exist, without launching', async () => {
+  it('answers 404 for a session that does not exist, without opening anything', async () => {
     const open = vi.fn(async (): Promise<OpenDesktopResult> => ({ ok: true }));
     const { post } = await setup(open);
     expect((await post('11111111-2222-4333-8444-555555555555')).statusCode).toBe(404);
@@ -78,118 +90,89 @@ describe('POST /api/ui/sessions/:id/open-desktop', () => {
   });
 });
 
-/** A child process that does what the test says, so no real `claude` runs. */
-function fakeChild(): ChildProcess & { killed: boolean } {
-  const child = new EventEmitter() as ChildProcess & { killed: boolean };
-  child.killed = false;
-  child.kill = () => {
-    child.killed = true;
-    return true;
-  };
-  return child;
-}
-
 describe('openInDesktop', () => {
-  it('runs claude --desktop --resume <id> without a shell, and is ok on exit 0', async () => {
-    const child = fakeChild();
-    const spawn = vi.fn(() => child);
-    const result = openInDesktop({ id: ID, cwd: null }, { spawn, findClaude: () => 'claude', timeoutMs: 1000 });
-    child.emit('exit', 0);
-    expect(await result).toEqual({ ok: true });
-    const [file, args, options] = spawn.mock.calls[0] as unknown as [string, string[], { shell: boolean; windowsHide: boolean }];
-    expect(file).toBe('claude');
-    expect(args).toEqual(['--desktop', '--resume', ID]);
-    expect(options).toMatchObject({ shell: false, windowsHide: true });
+  // #473: `claude --desktop --resume` refuses to run without a terminal, and the server has none, so it failed every
+  // time. The desktop app's own link opens the session with no CLI involved.
+  it("opens the desktop app's own link for the session, found through the app's session files, without running claude", async () => {
+    const openUrl = vi.fn(async () => {});
+    const dirs = [sessionsRoot({ [`${APP}.json`]: entry(APP, ID) })];
+    expect(await openInDesktop({ id: ID, cwd: null }, { dirs, openUrl })).toEqual({ ok: true });
+    expect(openUrl).toHaveBeenCalledWith(`claude://claude.ai/epitaxy/${APP}`);
   });
 
-  it('says the exit code on a non-zero exit', async () => {
-    const child = fakeChild();
-    const result = openInDesktop({ id: ID, cwd: null }, { spawn: () => child, findClaude: () => 'claude', timeoutMs: 1000 });
-    child.emit('exit', 1);
-    expect(await result).toEqual({ ok: false, reason: 'claude exited with code 1' });
+  it('says in words why, without opening anything, when the desktop app has no session for it', async () => {
+    const openUrl = vi.fn(async () => {});
+    const other = 'local_11111111-1111-4111-8111-111111111111';
+    const dirs = [sessionsRoot({ [`${other}.json`]: entry(other, '22222222-2222-4222-8222-222222222222') }), join(DIR, 'no-such-root')];
+    expect(await openInDesktop({ id: ID, cwd: null }, { dirs, openUrl })).toEqual({ ok: false, reason: NOT_IN_APP });
+    expect(openUrl).not.toHaveBeenCalled();
   });
 
-  it('says it was stopped when a signal ends it', async () => {
-    const child = fakeChild();
-    const result = openInDesktop({ id: ID, cwd: null }, { spawn: () => child, findClaude: () => 'claude', timeoutMs: 1000 });
-    child.emit('exit', null, 'SIGTERM');
-    expect(await result).toEqual({ ok: false, reason: 'claude was stopped (SIGTERM)' });
-  });
-
-  it('says why on a spawn error, whether it is emitted (with a code) or thrown (a message)', async () => {
-    const child = fakeChild();
-    const emitted = openInDesktop({ id: ID, cwd: null }, { spawn: () => child, findClaude: () => 'claude', timeoutMs: 1000 });
-    child.emit('error', Object.assign(new Error('spawn claude ENOENT'), { code: 'ENOENT' }));
-    expect(await emitted).toEqual({ ok: false, reason: 'Claude Code could not start: ENOENT' });
-    const thrown = openInDesktop({ id: ID, cwd: null }, {
-      findClaude: () => 'claude',
-      spawn: () => {
-        throw new Error('EINVAL');
-      },
+  it('says why when handing the link to the system fails', async () => {
+    const openUrl = vi.fn(async () => {
+      throw new Error('spawn explorer.exe ENOENT');
     });
-    expect(await thrown).toEqual({ ok: false, reason: 'Claude Code could not start: EINVAL' });
-  });
-
-  it('says it did not answer on a timeout, and kills the child', async () => {
-    const child = fakeChild();
-    const result = await openInDesktop({ id: ID, cwd: null }, { spawn: () => child, findClaude: () => 'claude', timeoutMs: 20 });
-    expect(result).toMatchObject({ ok: false });
-    expect((result as { reason: string }).reason).toMatch(/^Claude Code did not answer within /);
-    expect(child.killed).toBe(true);
+    const dirs = [sessionsRoot({ [`${APP}.json`]: entry(APP, ID) })];
+    expect(await openInDesktop({ id: ID, cwd: null }, { dirs, openUrl })).toEqual({ ok: false, reason: 'The Claude desktop app could not be opened: spawn explorer.exe ENOENT' });
   });
 });
 
-describe('openInDesktop: where it runs and what it runs', () => {
-  const optionsOf = (spawn: ReturnType<typeof vi.fn>) => (spawn.mock.calls[0] as unknown as [string, string[], { cwd: string }]);
-
-  it('runs in the session folder when it is an absolute path to a folder that exists', async () => {
-    const child = fakeChild();
-    const spawn = vi.fn(() => child);
-    const result = openInDesktop({ id: ID, cwd: DIR }, { spawn, findClaude: () => 'C:/bin/claude.exe', timeoutMs: 1000 });
-    child.emit('exit', 0);
-    await result;
-    expect(optionsOf(spawn)[0]).toBe('C:/bin/claude.exe');
-    expect(optionsOf(spawn)[2].cwd).toBe(DIR);
+describe('findAppSession', () => {
+  it('takes the most recently active app session when several point at one CLI session, across roots', async () => {
+    const older = 'local_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const newer = 'local_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    const a = sessionsRoot({ [`${older}.json`]: entry(older, ID, { lastActivityAt: 100 }) });
+    const b = sessionsRoot({ [`${newer}.json`]: entry(newer, ID, { lastActivityAt: 200 }) });
+    expect(await findAppSession(ID, [a, b])).toBe(newer);
+    expect(await findAppSession(ID, [b, a])).toBe(newer);
   });
 
-  it('falls back to the home folder for a missing, relative, absent or non-folder cwd', async () => {
-    for (const cwd of [join(DIR, 'gone'), 'relative/dir', null, FILE]) {
-      const child = fakeChild();
-      const spawn = vi.fn(() => child);
-      const result = openInDesktop({ id: ID, cwd }, { spawn, findClaude: () => 'claude', timeoutMs: 1000 });
-      child.emit('exit', 0);
-      await result;
-      expect(optionsOf(spawn)[2].cwd).toBe(homedir());
-    }
+  it('prefers an app session that is not archived', async () => {
+    const live = 'local_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const archived = 'local_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    const root = sessionsRoot({ [`${live}.json`]: entry(live, ID, { lastActivityAt: 100 }), [`${archived}.json`]: entry(archived, ID, { lastActivityAt: 200, isArchived: true }) });
+    expect(await findAppSession(ID, [root])).toBe(live);
   });
 
-  it('says claude was not found, without spawning, when claude.exe cannot be found', async () => {
-    const spawn = vi.fn(() => fakeChild());
-    expect(await openInDesktop({ id: ID, cwd: DIR }, { spawn, findClaude: () => undefined, timeoutMs: 1000 })).toEqual({ ok: false, reason: 'Claude Code was not found on this computer' });
-    expect(spawn).not.toHaveBeenCalled();
+  it('skips files that are not app sessions: bad JSON, another name, a missing or odd id', async () => {
+    const root = sessionsRoot({
+      'local_cccccccc-cccc-4ccc-8ccc-cccccccccccc.json': `{"cliSessionId":"${ID}",`,
+      'notes.json': entry(APP, ID),
+      'local_dddddddd-dddd-4ddd-8ddd-dddddddddddd.json': entry('', ID),
+      'local_eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee.json': entry('local_x"; calc', ID),
+      'local_ffffffff-ffff-4fff-8fff-ffffffffffff.json': { sessionId: 'local_ffffffff-ffff-4fff-8fff-ffffffffffff' },
+    });
+    expect(await findAppSession(ID, [root])).toBeUndefined();
   });
 
-  it('gives a second call for the same session the launch already in flight, and launches again once it settles', async () => {
-    const first = fakeChild();
-    const spawn = vi.fn(() => first);
-    const o = { spawn, findClaude: () => 'claude', timeoutMs: 1000 };
-    const a = openInDesktop({ id: ID, cwd: null }, o);
-    const b = openInDesktop({ id: ID, cwd: null }, o);
-    expect(b).toBe(a);
-    expect(spawn).toHaveBeenCalledTimes(1);
-    first.emit('exit', 0);
-    expect(await a).toEqual({ ok: true });
-    const second = fakeChild();
-    spawn.mockImplementation(() => second);
-    const c = openInDesktop({ id: ID, cwd: null }, o);
-    expect(c).not.toBe(a);
-    expect(spawn).toHaveBeenCalledTimes(2);
-    second.emit('exit', 1);
-    expect(await c).toEqual({ ok: false, reason: 'claude exited with code 1' });
+  it('reads a file again once it changes', async () => {
+    const root = sessionsRoot({ [`${APP}.json`]: entry(APP, '22222222-2222-4222-8222-222222222222') });
+    const file = join(root, 'account-uuid', 'org-uuid', `${APP}.json`);
+    expect(await findAppSession(ID, [root])).toBeUndefined();
+    writeFileSync(file, JSON.stringify(entry(APP, ID)));
+    const later = new Date(Date.now() + 5000);
+    utimesSync(file, later, later);
+    expect(await findAppSession(ID, [root])).toBe(APP);
   });
 });
 
 describe('the helpers', () => {
+  it('desktopLink is the link the desktop app hands out for a session', () => {
+    expect(desktopLink(APP)).toBe(`claude://claude.ai/epitaxy/${APP}`);
+  });
+
+  it("desktopSessionDirs looks where the desktop app keeps its sessions: Roaming, the Store install's cache, or macOS's Application Support", () => {
+    const local = join(DIR, 'local');
+    mkdirSync(join(local, 'Packages', 'Claude_pzs8sxrjxfjjc'), { recursive: true });
+    mkdirSync(join(local, 'Packages', 'Microsoft.Other'), { recursive: true });
+    expect(desktopSessionDirs({ APPDATA: 'C:\\Users\\a\\AppData\\Roaming', LOCALAPPDATA: local }, 'win32', 'C:\\Users\\a')).toEqual([
+      join('C:\\Users\\a\\AppData\\Roaming', 'Claude', 'claude-code-sessions'),
+      join(local, 'Packages', 'Claude_pzs8sxrjxfjjc', 'LocalCache', 'Roaming', 'Claude', 'claude-code-sessions'),
+    ]);
+    expect(desktopSessionDirs({}, 'darwin', '/Users/a')).toEqual([join('/Users/a', 'Library', 'Application Support', 'Claude', 'claude-code-sessions')]);
+    expect(desktopSessionDirs({}, 'linux', '/home/a')).toEqual([]);
+  });
+
   it('usableCwd keeps only an absolute path to a folder that exists', () => {
     expect(usableCwd(DIR)).toBe(DIR);
     expect(usableCwd(null)).toBeNull();
@@ -198,42 +181,13 @@ describe('the helpers', () => {
     expect(usableCwd(FILE)).toBeNull();
   });
 
-  it('desktopCommand cds into a known folder first, and is bare without one or for a folder it cannot quote', () => {
-    expect(desktopCommand(ID, null)).toBe(`claude --desktop --resume ${ID}`);
-    expect(desktopCommand(ID, 'C:\\work\\My App')).toBe(`cd "C:\\work\\My App"; claude --desktop --resume ${ID}`);
-    expect(desktopCommand(ID, 'C:\\personal\\Caf\u00e9 (old)\\.claude\\worktrees\\x-1')).toBe(`cd "C:\\personal\\Caf\u00e9 (old)\\.claude\\worktrees\\x-1"; claude --desktop --resume ${ID}`);
-    expect(desktopCommand(ID, '/home/a/my-app')).toBe(`cd "/home/a/my-app"; claude --desktop --resume ${ID}`);
+  it('resumeCommand cds into a known folder first, and is bare without one or for a folder it cannot quote', () => {
+    expect(resumeCommand(ID, null)).toBe(`claude --resume ${ID}`);
+    expect(resumeCommand(ID, 'C:\\work\\My App')).toBe(`cd "C:\\work\\My App"; claude --resume ${ID}`);
+    expect(resumeCommand(ID, 'C:\\personal\\Caf\u00e9 (old)\\.claude\\worktrees\\x-1')).toBe(`cd "C:\\personal\\Caf\u00e9 (old)\\.claude\\worktrees\\x-1"; claude --resume ${ID}`);
+    expect(resumeCommand(ID, '/home/a/my-app')).toBe(`cd "/home/a/my-app"; claude --resume ${ID}`);
     for (const odd of ['/a/$HOME', '/a/`x`', '/a/"q"', 'C:\\work\\[draft]', 'C:\\work\\a]b', 'C:\\work\\', '\\\\server\\share\\app', 'C:\\work\\the \u201cbig\u201d app', 'C:\\work\\a\u201eb', 'C:\\work\\a\u2019b', 'C:\\work\\hi!', 'C:\\work\\a;b']) {
-      expect(desktopCommand(ID, odd)).toBe(`claude --desktop --resume ${ID}`);
+      expect(resumeCommand(ID, odd)).toBe(`claude --resume ${ID}`);
     }
-  });
-
-  beforeEach(forgetClaude);
-  afterEach(forgetClaude);
-
-  it('findClaude caches a path it found while it exists, and never caches a miss', () => {
-    const exe = join(DIR, 'claude.exe');
-    writeFileSync(exe, '');
-    const missing = vi.fn(() => undefined);
-    expect(findClaude(missing)).toBeUndefined();
-    expect(findClaude(missing)).toBeUndefined();
-    expect(missing).toHaveBeenCalledTimes(2);
-    const found = vi.fn(() => exe);
-    expect(findClaude(found)).toBe(exe);
-    expect(findClaude(found)).toBe(exe);
-    expect(found).toHaveBeenCalledTimes(1);
-    rmSync(exe);
-    const moved = join(DIR, 'moved-claude.exe');
-    writeFileSync(moved, '');
-    const again = vi.fn(() => moved);
-    expect(findClaude(again)).toBe(moved);
-    expect(again).toHaveBeenCalledTimes(1);
-    forgetClaude();
-  });
-
-  it('firstClaudeExe takes the first line of where.exe that ends in claude.exe', () => {
-    expect(firstClaudeExe('C:\\a\\claude\r\nC:\\b\\Claude.EXE\r\nC:\\c\\claude.exe\r\n')).toBe('C:\\b\\Claude.EXE');
-    expect(firstClaudeExe('C:\\a\\claude.cmd\r\n')).toBeUndefined();
-    expect(firstClaudeExe('')).toBeUndefined();
   });
 });

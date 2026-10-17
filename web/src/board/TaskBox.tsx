@@ -73,7 +73,7 @@ export function OpenScope({ area, children }: { area: MeasureArea; children: Rea
     } catch (err) {
       // openDesktop never rejects by contract; if it does, say so rather than leave the button stuck.
       console.error('[open session]', err);
-      next = { busy: false, failure: { command: `claude --desktop --resume ${id}`, reason: "Could not reach the server. Run it in the session's folder." } };
+      next = { busy: false, failure: { command: `claude --resume ${id}`, reason: "Could not reach the server. Run it in the session's folder." } };
     } finally {
       inFlight.current.delete(id);
     }

@@ -25,7 +25,7 @@ export interface AppOptions {
   onShutdown?: () => void;
   openPath?: (path: string) => Promise<void>;
   openUrl?: (url: string) => Promise<void>;
-  /** Runs `claude --desktop --resume <id>`; true when it exited 0 in time. Replaceable so tests never run `claude`. */
+  /** Opens the session in the Claude desktop app, or says why not. Replaceable so tests never open the app. */
   openDesktop?: (session: DesktopSession) => Promise<OpenDesktopResult>;
 }
 

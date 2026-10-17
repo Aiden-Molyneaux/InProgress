@@ -350,8 +350,11 @@ Board cell shows the same box.
   reconcile records no events and never touches `updated_at`, and a failure in it is logged and never undoes the write.
   A change that only time makes (a session going stale) writes nothing, so a box whose stored state differs from the one
   it shows takes its age from `completed_at`, the oldest open ask's `raised_at`, or `updated_at`.
-- **Session line.** The session's title and "Open session ↗": the server runs `claude --desktop --resume <session id>`
-  (`POST /api/ui/sessions/:id/open-desktop`); if that fails, the line shows the command on a code line with Copy.
+- **Session line.** The session's title and "Open session ↗" (`POST /api/ui/sessions/:id/open-desktop`): the server finds
+  the desktop app's own id for the session in the app's session files (`claude-code-sessions/<account>/<org>/local_<uuid>.json`,
+  which map `cliSessionId` to `sessionId`) and opens `claude://claude.ai/epitaxy/<that id>`. It never runs
+  `claude --desktop`, which refuses to run without a terminal (#473). When the app has no such session, the line shows
+  `claude --resume <session id>` (after a cd into the session's folder) on a code line with Copy, and why.
 
 ## 3. Sessions
 
