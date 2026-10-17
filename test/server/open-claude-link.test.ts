@@ -41,29 +41,46 @@ describe('parseHandlerCommand', () => {
 });
 
 describe('desktopAppEnv', () => {
-  it("drops the starting session's Claude Code variables, InProgress's own, and what changes how Electron runs, and keeps the rest", () => {
+  it("drops the starting session's Claude Code variables, credentials, InProgress's own, and what changes how Electron runs, and keeps user settings", () => {
     const env = {
       PATH: 'C:\\Windows',
       USERPROFILE: 'C:\\Users\\a',
+      CLAUDE_CONFIG_DIR: 'D:\\claude',
+      ANTHROPIC_BASE_URL: 'https://proxy',
       CLAUDE_CODE_SESSION_ID: 'fd87c0fc',
       CLAUDE_CODE_MESSAGING_TOKEN: 'secret',
       CLAUDECODE: '1',
-      ANTHROPIC_BASE_URL: 'https://proxy',
+      ANTHROPIC_API_KEY: 'sk-x',
+      INTHINK_TOKEN: 't',
+      GITHUB_TOKEN: 'g',
+      DB_PASSWORD: 'p',
       INPROGRESS_HOME: 'C:\\x',
       ELECTRON_RUN_AS_NODE: '1',
       NODE_OPTIONS: '--inspect',
       DISABLE_AUTOUPDATER: '1',
     };
-    expect(desktopAppEnv(env)).toEqual({ PATH: 'C:\\Windows', USERPROFILE: 'C:\\Users\\a' });
+    expect(desktopAppEnv(env)).toEqual({ PATH: 'C:\\Windows', USERPROFILE: 'C:\\Users\\a', CLAUDE_CONFIG_DIR: 'D:\\claude', ANTHROPIC_BASE_URL: 'https://proxy' });
   });
 });
 
 describe('openClaudeLink', () => {
   // #473: explorer.exe took 4.0 to 6.9 s to switch the session; the handler's own Claude.exe, started directly, 1.8 to 3.5 s.
+  it('goes through explorer.exe when the desktop app is not running, or the caller cannot say, since the started program would become the app itself', async () => {
+    const start = vi.fn(async () => {});
+    const fallback = vi.fn(async () => {});
+    const appRunning = vi.fn(() => false);
+    await openClaudeLink(LINK, { findHandler: () => ({ file: EXE, args: ['%1'] }), appRunning, start, fallback });
+    expect(appRunning).toHaveBeenCalled();
+    await openClaudeLink(LINK, { findHandler: () => ({ file: EXE, args: ['%1'] }), start, fallback });
+    expect(start).not.toHaveBeenCalled();
+    expect(fallback).toHaveBeenCalledTimes(2);
+    expect(fallback).toHaveBeenCalledWith(LINK);
+  });
+
   it("starts the claude: handler's program directly with the link in place of %1, without explorer.exe", async () => {
     const start = vi.fn(async () => {});
     const fallback = vi.fn(async () => {});
-    await openClaudeLink(LINK, { findHandler: () => ({ file: EXE, args: ['--protocol-launcher', '%1'] }), start, fallback });
+    await openClaudeLink(LINK, { findHandler: () => ({ file: EXE, args: ['--protocol-launcher', '%1'] }), appRunning: () => true, start, fallback });
     expect(start).toHaveBeenCalledWith(EXE, ['--protocol-launcher', LINK], expect.anything());
     expect(fallback).not.toHaveBeenCalled();
   });
@@ -72,7 +89,7 @@ describe('openClaudeLink', () => {
     const start = vi.fn(async () => {});
     vi.stubEnv('CLAUDE_CODE_SESSION_ID', 'fd87c0fc');
     try {
-      await openClaudeLink(LINK, { findHandler: () => ({ file: EXE, args: ['%1'] }), start, fallback: vi.fn() });
+      await openClaudeLink(LINK, { findHandler: () => ({ file: EXE, args: ['%1'] }), appRunning: () => true, start, fallback: vi.fn() });
     } finally {
       vi.unstubAllEnvs();
     }
@@ -84,7 +101,7 @@ describe('openClaudeLink', () => {
 
   it('adds the link at the end when the command has no %1', async () => {
     const start = vi.fn(async () => {});
-    await openClaudeLink(LINK, { findHandler: () => ({ file: EXE, args: [] }), start, fallback: vi.fn() });
+    await openClaudeLink(LINK, { findHandler: () => ({ file: EXE, args: [] }), appRunning: () => true, start, fallback: vi.fn() });
     expect(start).toHaveBeenCalledWith(EXE, [LINK], expect.anything());
   });
 
@@ -102,7 +119,7 @@ describe('openClaudeLink', () => {
     const failing = vi.fn(async () => {
       throw Object.assign(new Error('spawn EACCES'), { code: 'EACCES' });
     });
-    await openClaudeLink(LINK, { findHandler: () => findClaudeHandler(lookup), start: failing, fallback });
+    await openClaudeLink(LINK, { findHandler: () => findClaudeHandler(lookup), appRunning: () => true, start: failing, fallback });
     expect(fallback).toHaveBeenCalledTimes(2);
     findClaudeHandler(lookup);
     expect(lookup).toHaveBeenCalledTimes(2);

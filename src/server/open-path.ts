@@ -132,31 +132,36 @@ export const forgetClaudeHandler = (): void => {
 };
 
 /**
- * The environment the desktop app starts with: the server's, less what belongs to the Claude Code session that started
- * the server (its ids, token and settings), InProgress's own, and what would change how Electron runs. When the app is
- * not already running, the started Claude.exe is the app, and every session it starts would inherit these.
+ * The environment the started Claude.exe gets: the server's, less what belongs to the Claude Code session that started
+ * the server (CLAUDE_CODE_*, CLAUDECODE), anything named like a credential, InProgress's own variables, and what would
+ * change how Electron or node runs. User settings such as CLAUDE_CONFIG_DIR or ANTHROPIC_BASE_URL pass through.
  */
 export function desktopAppEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  return Object.fromEntries(Object.entries(env).filter(([key]) => !/^(CLAUDE|ANTHROPIC|INPROGRESS|ELECTRON_|NODE_OPTIONS$|DISABLE_AUTOUPDATER$)/i.test(key)));
+  const dropped = (key: string): boolean =>
+    /^(CLAUDE_CODE_|CLAUDECODE$|INPROGRESS|ELECTRON_|NODE_OPTIONS$|DISABLE_AUTOUPDATER$)/i.test(key) || /(TOKEN|SECRET|PASSWORD|API_?KEY|CREDENTIAL)/i.test(key);
+  return Object.fromEntries(Object.entries(env).filter(([key]) => !dropped(key)));
 }
 
 export interface OpenClaudeLinkOptions {
   findHandler?: () => LinkHandler | undefined;
+  /** Whether the desktop app is running; the caller knows where its data lives. Not said means not known: openUrl. */
+  appRunning?: () => boolean;
   start?: (file: string, args: string[], options: { env: NodeJS.ProcessEnv; cwd: string }) => Promise<void>;
   fallback?: (url: string) => Promise<void>;
 }
 
 /**
- * Open a claude:// link in the Claude desktop app. On Windows the program the claude: key names starts directly with
- * the link, in the home folder and with desktopAppEnv: that switched the session in about half the time explorer.exe
- * took (1.8 to 3.5 s against 4.0 to 6.9 s, measured for #473). Windows may choose a handler by other means too, and a
- * directly started app may not get to bring its window forward, so with no handler, or one that will not start, the
- * link goes to openUrl. The caller builds the link; no shell is involved.
+ * Open a claude:// link in the Claude desktop app. On Windows, while the app runs, the program the claude: key names
+ * starts directly with the link, in the home folder and with desktopAppEnv: it hands the link to the running app and
+ * exits, and that switched the session in about half the time explorer.exe took (1.8 to 3.5 s against 4.0 to 6.9 s,
+ * measured for #473). When the app is not running the started program would become the app itself, outside its Store
+ * package's activation, so the link goes to openUrl, as it does with no handler or one that will not start. Windows may
+ * choose a handler by other means too. The caller builds the link; no shell is involved.
  */
 export async function openClaudeLink(url: string, o: OpenClaudeLinkOptions = {}): Promise<void> {
   const handler = (o.findHandler ?? findClaudeHandler)();
   const fallback = o.fallback ?? openUrl;
-  if (!handler) return fallback(url);
+  if (!handler || !o.appRunning?.()) return fallback(url);
   const args = handler.args.includes('%1') ? handler.args.map((a) => (a === '%1' ? url : a)) : [...handler.args, url];
   try {
     await (o.start ?? start)(handler.file, args, { env: desktopAppEnv(), cwd: homedir() });
