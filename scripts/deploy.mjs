@@ -95,6 +95,7 @@ if (rollback) {
 // The slower suites run only for changes they cover (scripts/deploy-lib.mjs suitesFor); --full runs everything.
 const deployed = readJson(join(repo, 'dist', 'build.json'));
 const changed = process.argv.includes('--full') ? null : changedSince(deployed?.sha);
+if (!changed && !process.argv.includes('--full') && deployed?.sha && deployed.sha !== 'unknown') step(`Could not diff against ${deployed.sha}: running every suite`);
 const suites = suitesFor(changed);
 const since = deployed?.sha ? `since ${deployed.sha}` : '';
 

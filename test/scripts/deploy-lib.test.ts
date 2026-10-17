@@ -231,7 +231,8 @@ describe('the lock that keeps two deploys apart', () => {
 
 describe('deploy.mjs and the lock', () => {
   it('refuses before touching anything while another deploy holds the lock, and leaves that lock alone', () => {
-    // A copy in a temp folder: the refusal exits before any npm, git-changing or server step.
+    // A copy in a temp folder, run as a rollback: were the refusal broken, it would stop at "no previous build" before
+    // any npm or server step.
     const repo = mkdtempSync(join(tmpdir(), 'ip-deploy-run-'));
     temps.push(repo);
     mkdirSync(join(repo, 'scripts'));
@@ -239,10 +240,10 @@ describe('deploy.mjs and the lock', () => {
     mkdirSync(join(repo, '.deploy'));
     const held = JSON.stringify({ kind: 'deploy', sha: '31e6b56', branch: 'main', startedAt: new Date().toISOString(), pid: process.pid });
     writeFileSync(join(repo, '.deploy', 'lock'), held);
-    const run = spawnSync(process.execPath, [join(repo, 'scripts', 'deploy.mjs')], { cwd: repo, encoding: 'utf8' });
+    const run = spawnSync(process.execPath, [join(repo, 'scripts', 'deploy.mjs'), '--rollback'], { cwd: repo, encoding: 'utf8' });
     expect(run.status).toBe(1);
     expect(run.stderr).toContain(`Another deploy is running: a deploy of 31e6b56 (main), pid ${process.pid}, started`);
-    expect(run.stdout).not.toContain('Type checks');
+    expect(run.stdout).not.toContain('Rolling back');
     expect(readFileSync(join(repo, '.deploy', 'lock'), 'utf8')).toBe(held);
   });
 });
