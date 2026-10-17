@@ -204,7 +204,11 @@ tests. Details, the resource viewer and go-to stay; go-to opens the step's Detai
   title>". The pill reads Ready, or Blocked for a blocked step (Not ready with a reason is a later step). Aiden's own
   steps carry "YOU". On hover a box shows "back to Backlog".
 - **Backlog** folds at the foot of the Next column: "Backlog · 14". Open, it lists one-line rows grouped by parent, each
-  with "to Next" on hover, and a quick-add field at its foot (section 2.5).
+  with "to Next" on hover, and a quick-add field at its foot (section 2.5). A Phase | ID toggle and a direction button
+  on top order the rows (#452, Aiden 2026-10-16). Phase is the grouping by immediate parent, as All done's Phase means:
+  forward is tree order with the top level first, and reverse flips the groups and the rows in each. ID is one flat list
+  by id, low to high or high to low, each box naming its parent under its title. The choice is kept per browser in
+  localStorage (`ip.backlogOrder`); the default is Phase, forward. Filtering is a later step (#453).
 - **Now.** One task box per step. Each live session on it, working before idle, is a session line and a block: its
   in-progress working task, its newest command as "▸ label · when", and "n subagents", whose tooltip lists each running
   subagent with its run time. An active step with no live session is Unattended: "No session is on it", and a system
