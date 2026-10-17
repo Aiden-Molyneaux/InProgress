@@ -2,7 +2,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
-import { openUrl as systemOpenUrl } from './open-path';
+import { openClaudeLink } from './open-path';
 
 /*
  * "Open session" hands the Claude desktop app its own link for the session, as the app does in its sidebar. It never
@@ -159,7 +159,7 @@ export async function openInDesktop(session: DesktopSession, o: OpenDesktopOptio
   const appSessionId = pick(sessions, session.id);
   if (!appSessionId) return { ok: false, reason: NOT_IN_APP };
   try {
-    await (o.openUrl ?? systemOpenUrl)(desktopLink(appSessionId));
+    await (o.openUrl ?? openClaudeLink)(desktopLink(appSessionId));
     return { ok: true };
   } catch (err) {
     return { ok: false, reason: `The Claude desktop app could not be opened: ${err instanceof Error ? err.message : String(err)}` };
