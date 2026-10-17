@@ -1,8 +1,8 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
-import { findClaudeHandler, forgetClaudeHandler, openClaudeLink, parseHandlerCommand } from '../../src/server/open-path';
+import { desktopAppEnv, findClaudeHandler, forgetClaudeHandler, openClaudeLink, parseHandlerCommand } from '../../src/server/open-path';
 
 const LINK = 'claude://claude.ai/epitaxy/local_83cd7f8d-e5cb-414e-a3c9-a6e6e9fd1213';
 const EXE = 'C:\\Program Files\\WindowsApps\\Claude_2.42304.0.0_x64__pzs8sxrjxfjjc\\app\\Claude.exe';
@@ -27,6 +27,34 @@ describe('parseHandlerCommand', () => {
     expect(parseHandlerCommand(regOutput('REG_SZ', '"Claude.exe" "%1"'))).toBeUndefined();
     expect(parseHandlerCommand(regOutput('REG_SZ', '"C:\\Apps\\claude.cmd" "%1"'))).toBeUndefined();
     expect(parseHandlerCommand(regOutput('REG_EXPAND_SZ', '"%LOCALAPPDATA%\\AnthropicClaude\\Claude.exe" "%1"'))).toBeUndefined();
+    expect(parseHandlerCommand(regOutput('REG_SZ', '(value not set)'))).toBeUndefined();
+    expect(parseHandlerCommand(regOutput('REG_SZ', 'C:\\Program Files\\Claude\\Claude.exe %1'))).toBeUndefined();
+  });
+
+  it('refuses arguments it would pass on wrongly, so explorer.exe reads the command instead: a quote inside one, a % other than a lone %1', () => {
+    expect(parseHandlerCommand(regOutput('REG_SZ', `"${EXE}" --x="a b" "%1"`))).toBeUndefined();
+    expect(parseHandlerCommand(regOutput('REG_SZ', `"${EXE}" "%1 y"`))).toBeUndefined();
+    expect(parseHandlerCommand(regOutput('REG_SZ', `"${EXE}" --data=%APPDATA% "%1"`))).toBeUndefined();
+    expect(parseHandlerCommand(regOutput('REG_SZ', `"${EXE}" %L`))).toBeUndefined();
+    expect(parseHandlerCommand(regOutput('REG_SZ', `"${EXE}" %10`))).toBeUndefined();
+  });
+});
+
+describe('desktopAppEnv', () => {
+  it("drops the starting session's Claude Code variables, InProgress's own, and what changes how Electron runs, and keeps the rest", () => {
+    const env = {
+      PATH: 'C:\\Windows',
+      USERPROFILE: 'C:\\Users\\a',
+      CLAUDE_CODE_SESSION_ID: 'fd87c0fc',
+      CLAUDE_CODE_MESSAGING_TOKEN: 'secret',
+      CLAUDECODE: '1',
+      ANTHROPIC_BASE_URL: 'https://proxy',
+      INPROGRESS_HOME: 'C:\\x',
+      ELECTRON_RUN_AS_NODE: '1',
+      NODE_OPTIONS: '--inspect',
+      DISABLE_AUTOUPDATER: '1',
+    };
+    expect(desktopAppEnv(env)).toEqual({ PATH: 'C:\\Windows', USERPROFILE: 'C:\\Users\\a' });
   });
 });
 
@@ -36,14 +64,28 @@ describe('openClaudeLink', () => {
     const start = vi.fn(async () => {});
     const fallback = vi.fn(async () => {});
     await openClaudeLink(LINK, { findHandler: () => ({ file: EXE, args: ['--protocol-launcher', '%1'] }), start, fallback });
-    expect(start).toHaveBeenCalledWith(EXE, ['--protocol-launcher', LINK]);
+    expect(start).toHaveBeenCalledWith(EXE, ['--protocol-launcher', LINK], expect.anything());
     expect(fallback).not.toHaveBeenCalled();
+  });
+
+  it("starts it in the home folder with the server's environment less the starting session's variables", async () => {
+    const start = vi.fn(async () => {});
+    vi.stubEnv('CLAUDE_CODE_SESSION_ID', 'fd87c0fc');
+    try {
+      await openClaudeLink(LINK, { findHandler: () => ({ file: EXE, args: ['%1'] }), start, fallback: vi.fn() });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    const [, , options] = start.mock.calls[0] as unknown as [string, string[], { env: NodeJS.ProcessEnv; cwd: string }];
+    expect(options.cwd).toBe(homedir());
+    expect(options.env.CLAUDE_CODE_SESSION_ID).toBeUndefined();
+    expect(options.env.PATH ?? options.env.Path).toBeDefined();
   });
 
   it('adds the link at the end when the command has no %1', async () => {
     const start = vi.fn(async () => {});
     await openClaudeLink(LINK, { findHandler: () => ({ file: EXE, args: [] }), start, fallback: vi.fn() });
-    expect(start).toHaveBeenCalledWith(EXE, [LINK]);
+    expect(start).toHaveBeenCalledWith(EXE, [LINK], expect.anything());
   });
 
   it('hands the link to the system opener when there is no handler to start, or it will not start, and forgets a handler that failed', async () => {
