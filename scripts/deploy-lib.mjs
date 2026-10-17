@@ -1,7 +1,8 @@
 // Directory moves for `npm run deploy` / `npm run rollback`. Each live tree (dist/, web/dist/) is swapped by renames on
 // one volume, so hooks firing during a deploy see the old or the new build, never a half-written one. Also the check
-// that the restarted server runs the live build, and which test suites a deploy runs.
-import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
+// that the restarted server runs the live build, which test suites a deploy runs, and the lock that keeps two deploys
+// from running at once.
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 /** The trees a deploy swaps, relative to the repo (and to the build and prev roots, which mirror its layout). */
@@ -105,4 +106,75 @@ export function restartCheck(live, seen) {
   const body = !seen.text ? '(empty)' : seen.text.length > BODY_MAX ? `${seen.text.slice(0, BODY_MAX)}... (${seen.text.length} chars)` : seen.text;
   const expected = live ? `expected ${buildLabel(live)}` : 'dist/build.json is missing or unreadable';
   return `${expected}; /api/health answered ${seen.status} with ${running ? buildLabel(running) : 'no build'}. Body: ${body}`;
+}
+
+// One deploy or rollback at a time. Two at once share .build, e2e port 4399 and the live trees (#454: the #447 and
+// #452 deploys of 2026-10-16), so the second refuses and names the first.
+
+/** Whether a process is still running: signal 0 checks without sending anything; EPERM means it runs as another user. */
+export function pidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === 'EPERM';
+  }
+}
+
+/** The lock's contents: null when there is no lock, `{}` when it can't be read (being written, or corrupt). */
+function readLock(file) {
+  try {
+    const held = JSON.parse(readFileSync(file, 'utf8'));
+    return held && typeof held === 'object' ? held : {};
+  } catch (err) {
+    return err.code === 'ENOENT' ? null : {};
+  }
+}
+
+/**
+ * Takes the deploy lock at `file` (created only if absent, so two deploys can't both take it), recording `info` and
+ * this process's pid. Returns `{ release }` when taken, else `{ holder }`: what the running deploy recorded. A lock
+ * whose pid has exited (a deploy killed mid-run) is taken over. Two deploys taking over the same dead lock in the same
+ * instant could both get it; that needs a crash and then a tie, so it is left.
+ */
+export function acquireLock({ file, info, pid = process.pid, isAlive = pidAlive }) {
+  const mine = JSON.stringify({ ...info, pid });
+  mkdirSync(dirname(file), { recursive: true });
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      writeFileSync(file, mine, { flag: 'wx' });
+      const release = () => {
+        // Only our own lock is removed: a deploy that took over a lock it thought dead keeps its own.
+        try {
+          if (readFileSync(file, 'utf8') === mine) rmSync(file, { force: true });
+        } catch {
+          // Already gone.
+        }
+      };
+      return { release };
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw err;
+    }
+    const holder = readLock(file);
+    if (holder === null) continue; // released between the two calls
+    if (!Number.isInteger(holder.pid) || isAlive(holder.pid)) return { holder };
+    rmSync(file, { force: true });
+  }
+  return { holder: readLock(file) ?? {} };
+}
+
+/** What a refused deploy prints: which deploy holds the lock, since when, and what to do. */
+export function lockHeldMessage(holder, file, now = Date.now()) {
+  if (!Number.isInteger(holder.pid)) {
+    return `Another deploy holds ${file}, but its lock could not be read. If no deploy or rollback is running, delete it and run again.`;
+  }
+  const what = `${holder.kind === 'rollback' ? 'a rollback' : 'a deploy'}${holder.sha ? ` of ${holder.sha}` : ''}${holder.branch ? ` (${holder.branch})` : ''}`;
+  const started = Date.parse(holder.startedAt);
+  const mins = Math.floor((now - started) / 60000);
+  const when = Number.isNaN(started) ? '' : `, started ${holder.startedAt} (${mins < 1 ? 'under a minute' : `${mins} min`} ago)`;
+  return [
+    `Another deploy is running: ${what}, pid ${holder.pid}${when}.`,
+    'Wait for it to finish, then run this again. Two at once share .build and port 4399, so this one stops here and changes nothing.',
+    `If pid ${holder.pid} is not a deploy, delete ${file} and run again.`,
+  ].join('\n');
 }

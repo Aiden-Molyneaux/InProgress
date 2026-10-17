@@ -7,7 +7,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildLabel as label, promote, restartCheck, suitesFor, swapWithPrev } from './deploy-lib.mjs';
+import { acquireLock, buildLabel as label, lockHeldMessage, promote, restartCheck, suitesFor, swapWithPrev } from './deploy-lib.mjs';
 
 const repo = fileURLToPath(new URL('..', import.meta.url));
 const buildRoot = join(repo, '.build');
@@ -58,6 +58,25 @@ async function restart() {
   const saw = restartCheck(readJson(join(repo, 'dist', 'build.json')), await health());
   return { ok: !saw, saw };
 }
+
+// One deploy or rollback at a time (scripts/deploy-lib.mjs acquireLock): a second one refuses before it touches anything.
+const lockFile = join(repo, '.deploy', 'lock');
+const git = (args) => {
+  try {
+    return execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch {
+    return undefined;
+  }
+};
+const lock = acquireLock({
+  file: lockFile,
+  info: { kind: rollback ? 'rollback' : 'deploy', sha: git(['rev-parse', '--short', 'HEAD']), branch: git(['rev-parse', '--abbrev-ref', 'HEAD']), startedAt: new Date().toISOString() },
+});
+if (lock.holder) {
+  console.error(lockHeldMessage(lock.holder, lockFile));
+  process.exit(1);
+}
+process.on('exit', lock.release);
 
 if (rollback) {
   step('Rolling back to the previous build');
