@@ -26,6 +26,7 @@ export function DoneList({ snapshot, now, onOpenNode, onBack }: ViewProps & { on
       <span className="ip-done-dot" aria-hidden="true">✓</span>
       <div className="ip-donelist-body">
         <div className="ip-quote">
+          <span className="ip-sid">#{row.node.id}</span>
           <button type="button" className="ip-row-title">{row.node.title}</button>
           <LabelChip label={row.node.label} />
           {suffix && <span className="ip-quiet ip-donelist-parent">{suffix}</span>}

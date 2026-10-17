@@ -2097,9 +2097,17 @@ test.describe('Board', () => {
     await expect(page.getByRole('button', { name: '‹ Board' })).toBeFocused();
     await expect(page.locator('.ip-board')).toHaveCount(0);
     for (const title of titles) await expect(page.getByRole('button', { name: title, exact: true })).toBeVisible();
+    // Every row shows its step's #id beside the title, in both orders (#447).
+    const ids = page.locator('.ip-donelist-row').filter({ hasText: 'Listed step' });
+    const idsShown = async () => {
+      await expect(ids).toHaveCount(titles.length);
+      for (const row of await ids.all()) await expect(row.locator('.ip-sid')).toHaveText(`#${await row.getAttribute('data-node')}`);
+    };
+    await idsShown();
     await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible();
     await page.getByRole('button', { name: 'Phase', exact: true }).click();
     await expect(page.getByRole('heading', { name: /^Release prep · 7$/ })).toBeVisible();
+    await idsShown();
     await page.getByRole('button', { name: 'Listed step 3', exact: true }).click();
     const details = page.getByRole('complementary');
     await expect(details).toContainText('Listed step 3');
