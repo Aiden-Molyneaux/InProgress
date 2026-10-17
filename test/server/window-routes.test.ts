@@ -4,6 +4,7 @@ import { raiseAsk } from '../../src/server/repo/asks';
 import { listEventsSince, maxEventId } from '../../src/server/repo/events';
 import { addNodes, updateNode } from '../../src/server/repo/nodes';
 import { setQueue } from '../../src/server/repo/projects';
+import type { Ctx } from '../../src/server/db/tx';
 import { makeCtx } from '../helpers';
 
 const TOKEN = 'test-token';
@@ -214,6 +215,136 @@ describe('node delete route', () => {
       expect([401, 403]).toContain((await post(url, { slug: p.slug }, headers)).statusCode);
     }
     expect(exists(ctx, a)).toBe(true);
+  });
+});
+
+describe('node done route', () => {
+  const row = (ctx: Ctx, id: number) =>
+    ctx.db.prepare('SELECT status, outcome, completed_at AS completedAt, driver_session_id AS driver FROM nodes WHERE id = ?').get(id) as {
+      status: string;
+      outcome: string;
+      completedAt: string | null;
+      driver: string | null;
+    };
+  const url = (p: { id: number }, id: number) => `/api/ui/projects/${p.id}/nodes/${id}/done`;
+
+  it('marks a step done with its outcome, as the window, in one node.updated event', async () => {
+    const { ctx, p, post, a } = await setup();
+    ctx.db.prepare("UPDATE nodes SET status = 'active', driver_session_id = 's1' WHERE id = ?").run(a);
+    const mark = maxEventId(ctx);
+    const res = await post(url(p, a), { slug: p.slug, outcome: ' Shipped it ', driver: null });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().node).toMatchObject({ id: a, status: 'done', outcome: 'Shipped it' });
+    expect(row(ctx, a)).toMatchObject({ status: 'done', outcome: 'Shipped it', driver: null });
+    expect(row(ctx, a).completedAt).not.toBeNull();
+    const events = listEventsSince(ctx, mark).filter((e) => e.type === 'node.updated');
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ actor: 'window', entityId: String(a) });
+  });
+
+  it('leaves the outcome empty for an empty or whitespace one', async () => {
+    const { ctx, p, post, a, b } = await setup();
+    expect((await post(url(p, a), { slug: p.slug, driver: null })).statusCode).toBe(200);
+    expect((await post(url(p, b), { slug: p.slug, outcome: '   ', driver: null })).statusCode).toBe(200);
+    expect(row(ctx, a)).toMatchObject({ status: 'done', outcome: '' });
+    expect(row(ctx, b)).toMatchObject({ status: 'done', outcome: '' });
+  });
+
+  it('answers a step already done as it stands, writing nothing', async () => {
+    const { ctx, p, post, a } = await setup();
+    const first = await post(url(p, a), { slug: p.slug, outcome: 'First', driver: null });
+    const mark = maxEventId(ctx);
+    const again = await post(url(p, a), { slug: p.slug, outcome: 'Second', driver: 'someone' });
+    expect(again.statusCode).toBe(200);
+    expect(again.json().node).toEqual(first.json().node);
+    expect(row(ctx, a).outcome).toBe('First');
+    expect(listEventsSince(ctx, mark)).toEqual([]);
+  });
+
+  it('fills an empty outcome on an already done step, and keeps one that is stored', async () => {
+    const { ctx, p, post, a, b } = await setup();
+    updateNode(ctx, 'test', a, { status: 'done' });
+    const mark = maxEventId(ctx);
+    const filled = await post(url(p, a), { slug: p.slug, outcome: ' Late word ', driver: null });
+    expect(filled.json().node).toMatchObject({ id: a, status: 'done', outcome: 'Late word' });
+    expect(row(ctx, a).outcome).toBe('Late word');
+    expect(listEventsSince(ctx, mark).filter((e) => e.type === 'node.updated')).toHaveLength(1);
+    // Nothing to fill with, or nothing to fill: the step as it stands, no event.
+    updateNode(ctx, 'test', b, { status: 'done' });
+    const after = maxEventId(ctx);
+    expect((await post(url(p, b), { slug: p.slug, outcome: '  ', driver: null })).json().node.outcome).toBe('');
+    expect((await post(url(p, a), { slug: p.slug, outcome: 'Other', driver: null })).json().node.outcome).toBe('Late word');
+    expect(listEventsSince(ctx, after)).toEqual([]);
+  });
+
+  it('refuses a step of another project, a dropped step and the root, and answers 409 for a wrong slug', async () => {
+    const { ctx, app, p, post, a, b } = await setup();
+    const other = (await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'Other' } })).json();
+    const [foreign] = addNodes(ctx, 'test', { parentId: other.rootNodeId, nodes: [{ title: 'Foreign' }] });
+    const away = await post(url(p, foreign.id), { slug: p.slug, driver: null });
+    expect([away.statusCode, away.json().error]).toEqual([400, `#${foreign.id} is not in this project`]);
+    updateNode(ctx, 'test', b, { status: 'dropped' });
+    const dropped = await post(url(p, b), { slug: p.slug, driver: null });
+    expect([dropped.statusCode, dropped.json().error]).toEqual([400, `#${b} is dropped`]);
+    const root = await post(url(p, p.rootNodeId), { slug: p.slug, driver: null });
+    expect([root.statusCode, root.json().error]).toEqual([400, `#${p.rootNodeId} is the project root`]);
+    expect((await post(url(p, a), { slug: 'nope', driver: null })).statusCode).toBe(409);
+    expect(row(ctx, a).status).toBe('todo');
+    expect(row(ctx, foreign.id).status).toBe('todo');
+  });
+
+  it('refuses a step with open steps under it, naming them; a done or dropped one does not block', async () => {
+    const { ctx, p, post, a } = await setup();
+    const [one, two, three] = addNodes(ctx, 'test', { parentId: a, nodes: [{ title: 'One' }, { title: 'Two' }, { title: 'Three' }] });
+    updateNode(ctx, 'test', two.id, { status: 'done' });
+    const refused = await post(url(p, a), { slug: p.slug, driver: null });
+    expect([refused.statusCode, refused.json().error]).toEqual([400, `#${a} has open steps under it: #${one.id}, #${three.id}`]);
+    expect(row(ctx, a).status).toBe('todo');
+    updateNode(ctx, 'test', one.id, { status: 'done' });
+    updateNode(ctx, 'test', three.id, { status: 'dropped' });
+    expect((await post(url(p, a), { slug: p.slug, driver: null })).statusCode).toBe(200);
+    expect(row(ctx, a).status).toBe('done');
+  });
+
+  it('refuses when a live session drives the step and the window did not name it; done with it named, the session keeps its focus', async () => {
+    const { ctx, p, post, a } = await setup();
+    ctx.db.prepare("UPDATE nodes SET status = 'active', driver_session_id = 's1' WHERE id = ?").run(a);
+    ctx.db.prepare('UPDATE sessions SET focus_node_id = ? WHERE id = ?').run(a, 's1');
+    const refused = await post(url(p, a), { slug: p.slug, driver: null });
+    expect([refused.statusCode, refused.json().error]).toEqual([409, `A session is driving #${a} now`]);
+    expect(row(ctx, a).status).toBe('active');
+    expect((await post(url(p, a), { slug: p.slug, driver: 'other' })).statusCode).toBe(409);
+    expect((await post(url(p, a), { slug: p.slug, driver: 's1' })).statusCode).toBe(200);
+    expect(row(ctx, a)).toMatchObject({ status: 'done', driver: null });
+    expect(ctx.db.prepare("SELECT focus_node_id FROM sessions WHERE id = 's1'").pluck().get()).toBe(a);
+  });
+
+  it('does not count a stale driver as live', async () => {
+    const { ctx, p, post, a } = await setup();
+    ctx.db.prepare("UPDATE nodes SET status = 'active', driver_session_id = 's1' WHERE id = ?").run(a);
+    ctx.db.prepare("UPDATE sessions SET focus_node_id = ?, last_seen_at = '2000-01-01T00:00:00.000Z' WHERE id = 's1'").run(a);
+    expect((await post(url(p, a), { slug: p.slug, driver: null })).statusCode).toBe(200);
+  });
+
+  it('answers the open ask of a question step with the outcome', async () => {
+    const { ctx, p, post, a } = await setup();
+    updateNode(ctx, 'test', a, { kind: 'question' });
+    const ask = raiseAsk(ctx, 'scribe:s1', { nodeId: a, kind: 'question', text: 'Which way?' });
+    expect((await post(url(p, a), { slug: p.slug, outcome: 'The left one', driver: null })).statusCode).toBe(200);
+    const cleared = ctx.db.prepare('SELECT answer, cleared_by AS clearedBy FROM asks WHERE id = ?').get(ask.id);
+    expect(cleared).toEqual({ answer: 'The left one', clearedBy: 'window' });
+  });
+
+  it('is refused for a request not from the window, a missing driver field and an unknown step; nothing is written', async () => {
+    const { ctx, p, post, a } = await setup();
+    const before = ctx.db.prepare('SELECT COUNT(*) FROM events').pluck().get();
+    for (const headers of [{} as Record<string, string>, { origin: 'http://evil.example', 'x-ip-ui-token': 'ui-token' }, { origin: 'http://localhost:80', 'x-ip-ui-token': 'wrong' }, auth]) {
+      expect([401, 403]).toContain((await post(url(p, a), { slug: p.slug, driver: null }, headers)).statusCode);
+    }
+    expect((await post(url(p, a), { slug: p.slug })).statusCode).toBe(400);
+    expect((await post(url(p, 999999), { slug: p.slug, driver: null })).statusCode).toBe(404);
+    expect(ctx.db.prepare('SELECT COUNT(*) FROM events').pluck().get()).toBe(before);
+    expect(row(ctx, a).status).toBe('todo');
   });
 });
 

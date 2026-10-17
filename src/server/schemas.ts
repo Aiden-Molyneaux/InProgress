@@ -167,6 +167,10 @@ export const windowNodeBody = z
   .strict();
 /** The window's clear of an ask; only Answer... sends an answer. */
 export const windowClearBody = z.object({ answer: z.string().max(2000).optional() }).strict();
+/** The window's Done on a Now box: the slug it shows, an optional outcome, and the live driver it showed (a session id or null). */
+export const windowDoneBody = z
+  .object({ slug: windowProjectBody.shape.slug, outcome: z.string().max(2_000).optional(), driver: z.string().max(100).nullable() })
+  .strict();
 /** The window's measurements (spec 2.6): a name and a little data; keys outside WINDOW_EVENT_KEYS are dropped by the route. */
 export const WINDOW_EVENT_KEYS = ['view', 'gapMs', 'marks', 'area', 'action', 'node'] as const;
 export const windowEventBody = z

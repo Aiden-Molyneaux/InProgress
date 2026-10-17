@@ -59,6 +59,13 @@ export const createStep = (projectId: number, slug: string, title: string, paren
 export const deleteStep = (projectId: number, slug: string, nodeId: number): Promise<UiResult> =>
   postUi(`/api/ui/projects/${projectId}/nodes/${nodeId}/delete`, { slug });
 
+/**
+ * Marks a step done from its Now box. The outcome goes along only when it has text; `driver` is the live session the box
+ * named (or null), which the server checks is still the one driving it.
+ */
+export const markDone = (projectId: number, slug: string, nodeId: number, outcome: string, driver: string | null): Promise<UiResult> =>
+  postUi(`/api/ui/projects/${projectId}/nodes/${nodeId}/done`, { slug, driver, ...(outcome.trim() ? { outcome } : {}) });
+
 /** What Open session answers: done; the command to run by hand (with why the server could not, when it says); or 'reload' after a server restart. */
 export type OpenDesktopResult = { ok: true } | { ok: false; command: string; reason?: string } | 'reload';
 

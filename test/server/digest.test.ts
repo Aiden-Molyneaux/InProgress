@@ -62,6 +62,58 @@ describe('readDigest: done, asks, documents', () => {
     expect(d.done.map((n) => [n.id, n.outcome])).toEqual([[late.id, 'inside']]);
   });
 
+  it('ends the Done line with (you) for a step the window closed, with and without an outcome, and not for the scribe', () => {
+    const { ctx, project, group, t0 } = setup();
+    const [withOut, bare, scribe] = addNodes(ctx, 'test', { parentId: group.id, nodes: [{ title: 'With' }, { title: 'Bare' }, { title: 'Scribe' }] });
+    setClock(ctx, t0 + 1 * DAY);
+    updateNode(ctx, 'window', withOut.id, { status: 'done', outcome: 'Shipped' });
+    updateNode(ctx, 'window', bare.id, { status: 'done' });
+    updateNode(ctx, 'scribe:x', scribe.id, { status: 'done', outcome: 'Merged' });
+    const d = readDigest(ctx, project.slug, iso(t0));
+    expect(d.done.map((n) => [n.id, n.byYou])).toEqual([[withOut.id, true], [bare.id, true], [scribe.id, false]]);
+    const text = formatDigest(d, t0 + 2 * DAY, { all: true });
+    expect(text).toContain(`#${withOut.id} With: "Shipped" (you)`);
+    expect(text).toContain(`#${bare.id} Bare (you)`);
+    expect(text).toContain(`#${scribe.id} Scribe: "Merged"`);
+    expect(text).not.toContain('"Merged" (you)');
+  });
+
+  it('prints no_outcome (you) in Marks for a window-closed step with no outcome, and plain no_outcome for the scribe', () => {
+    const { ctx, project, group, t0 } = setup();
+    const [mine, theirs] = addNodes(ctx, 'test', { parentId: group.id, nodes: [{ title: 'Mine' }, { title: 'Theirs' }] });
+    setClock(ctx, t0 + 1 * DAY);
+    updateNode(ctx, 'window', mine.id, { status: 'done' });
+    updateNode(ctx, 'scribe:x', theirs.id, { status: 'done' });
+    const d = readDigest(ctx, project.slug, iso(t0));
+    expect(d.marked.map((m) => [m.id, m.byYou])).toEqual([[mine.id, true], [theirs.id, false]]);
+    const text = formatDigest(d, t0 + 2 * DAY, { all: true });
+    expect(text).toContain(`#${mine.id} Mine: no_outcome (you)`);
+    expect(text).toContain(`#${theirs.id} Theirs: no_outcome`);
+    expect(text).not.toContain(`#${theirs.id} Theirs: no_outcome (you)`);
+  });
+
+  it('passes over a node.updated event whose data is not JSON', () => {
+    const { ctx, project, group, t0 } = setup();
+    const [step] = addNodes(ctx, 'test', { parentId: group.id, nodes: [{ title: 'Odd' }] });
+    setClock(ctx, t0 + 1 * DAY);
+    // Written before the real close, so it is not the project's newest event (the snapshot parses that one).
+    ctx.db.prepare("INSERT INTO events (ts, project_id, actor, type, entity, entity_id, data) VALUES (?, ?, 'window', 'node.updated', 'node', '999', 'not json')").run(ctx.now(), project.id);
+    updateNode(ctx, 'window', step.id, { status: 'done' });
+    const d = readDigest(ctx, project.slug, iso(t0));
+    expect(d.done.map((n) => n.byYou)).toEqual([true]);
+  });
+
+  it('reads a step the window closed, reopened and the scribe closed again as not his', () => {
+    const { ctx, project, group, t0 } = setup();
+    const [step] = addNodes(ctx, 'test', { parentId: group.id, nodes: [{ title: 'Again' }] });
+    setClock(ctx, t0 + 1 * DAY);
+    updateNode(ctx, 'window', step.id, { status: 'done' });
+    updateNode(ctx, 'test', step.id, { status: 'active' });
+    updateNode(ctx, 'scribe:x', step.id, { status: 'done', outcome: 'Redone' });
+    const d = readDigest(ctx, project.slug, iso(t0));
+    expect(d.done.map((n) => [n.id, n.byYou])).toEqual([[step.id, false]]);
+  });
+
   it('lists an ask raised and one cleared with an answer, from the table', () => {
     const { ctx, project, group, t0 } = setup();
     const [step] = addNodes(ctx, 'test', { parentId: group.id, nodes: [{ title: 'Pick a port' }] });
@@ -124,7 +176,7 @@ describe('readDigest: done, asks, documents', () => {
     const [step] = addNodes(ctx, 'test', { parentId: group.id, nodes: [{ title: 'Bare', status: 'done' }] });
     setClock(ctx, t0 + 1 * DAY);
     const d = readDigest(ctx, project.slug);
-    expect(d.marked).toEqual([{ id: step.id, title: 'Bare', marks: ['no_outcome'] }]);
+    expect(d.marked).toEqual([{ id: step.id, title: 'Bare', marks: ['no_outcome'], byYou: false }]);
     expect(formatDigest(d, Date.parse(ctx.now()))).toContain(`Marks (1): #${step.id} Bare: no_outcome`);
   });
 });

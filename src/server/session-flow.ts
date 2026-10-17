@@ -533,7 +533,9 @@ export function orchestrate(ctx: Ctx, actor: string, sessionId: string, o: { sta
   if (o.status) {
     const board = deriveBoard(snapshot, nowMs);
     lines.push('', formatDigest(digest, nowMs));
-    if (board.marked.length) lines.push('Reconcile:', ...board.marked.flatMap((r) => r.marks.map((m) => `  ${reconcileLine(r, m, nowMs)}`)));
+    const byYou = new Set(digest.marked.filter((m) => m.byYou).map((m) => m.id));
+    // A no_outcome line on a step Aiden closed from the window ends " (you)", so Mip leaves it empty rather than asks him.
+    if (board.marked.length) lines.push('Reconcile:', ...board.marked.flatMap((r) => r.marks.map((m) => `  ${reconcileLine(r, m, nowMs)}${m === 'no_outcome' && byYou.has(r.node.id) ? ' (you)' : ''}`)));
     if (board.next.length) lines.push('Next:', ...board.next.slice(0, 3).map((r) => `  ${stepRef(r.node.id, r.node.title)}: ${r.ready ? 'ready' : 'not ready'}`));
   }
   return { session, opening: lines.join('\n') };

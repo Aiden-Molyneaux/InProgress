@@ -35,7 +35,8 @@ export interface Digest {
   /** The window start: --since, else the state note's updatedAt, else 7 days ago. */
   since: string;
   sinceSource: 'given' | 'state_note' | 'default';
-  done: { id: number; title: string; outcome: string; completedAt: string }[];
+  /** byYou: the window closed the step (its last move to done was by actor 'window'). */
+  done: { id: number; title: string; outcome: string; completedAt: string; byYou: boolean }[];
   asksRaised: Ask[];
   asksCleared: Ask[];
   /** Sessions started, or ended (by MIN(ended_at, last_seen_at)), in the window; ended ones within the 7-day trail only. */
@@ -47,7 +48,8 @@ export interface Digest {
   /** Resources created in the window. */
   documents: { id: number; title: string; nodeId: number; purpose: string | null; createdAt: string }[];
   /** deriveBoard(...).marked, as id, title and marks. */
-  marked: { id: number; title: string; marks: Mark[] }[];
+  /** byYou: the window closed the step (see windowClosed), so its no_outcome mark reads `no_outcome (you)`. */
+  marked: { id: number; title: string; marks: Mark[]; byYou: boolean }[];
   /** The title of each step the asks, moves and documents name, so the text never shows a bare id. */
   stepTitles: Record<number, string>;
 }
@@ -68,7 +70,26 @@ function parseData(text: string): Record<string, unknown> {
   }
 }
 
-/** The digest of one project since a time. Reads tables, and events only for the window's own moves and quick-adds (spec 1.7). Never call inside a write(): the snapshot read may expire stale sessions. */
+/**
+ * The steps whose last move to done (a node.updated event) was by actor 'window', from `since` on when given. The last
+ * move wins, so a step the window closed, reopened and the scribe closed again is not in it. Events are pruned after 30
+ * days, so older closes read as not Aiden's. A row whose data is not JSON is passed over.
+ */
+export function windowClosed(ctx: Ctx, projectId: number, since?: string): Set<number> {
+  const rows = ctx.db
+    .prepare(
+      `SELECT entity_id, actor FROM events
+        WHERE project_id = ? AND type = 'node.updated' AND (? IS NULL OR ts >= ?)
+          AND CASE WHEN json_valid(data) THEN json_extract(data, '$.changes.status.to') END = 'done'
+        ORDER BY id`,
+    )
+    .all(projectId, since ?? null, since ?? null) as { entity_id: string; actor: string }[];
+  const last = new Map<number, string>();
+  for (const r of rows) last.set(Number(r.entity_id), r.actor);
+  return new Set([...last].filter(([, actor]) => actor === 'window').map(([id]) => id));
+}
+
+/** The digest of one project since a time. Reads tables, and events only for the window's own moves and quick-adds, and for which done steps the window closed (spec 1.7). Never call inside a write(): the snapshot read may expire stale sessions. */
 export function readDigest(ctx: Ctx, ref: string | number, since?: string): Digest {
   const project = resolveProject(ctx, ref);
   const snapshot: ProjectSnapshot = getProjectSnapshot(ctx, project.id);
@@ -87,10 +108,12 @@ export function readDigest(ctx: Ctx, ref: string | number, since?: string): Dige
   }
   const trailCutoff = new Date(nowMs - TRAIL_MS).toISOString();
 
+  const closedByYou = windowClosed(ctx, project.id, from);
+
   const done = snapshot.nodes
     .filter((n): n is typeof n & { completedAt: string } => n.parentId !== null && n.status === 'done' && n.completedAt !== null && n.completedAt >= from)
     .sort((a, b) => a.completedAt.localeCompare(b.completedAt) || a.id - b.id)
-    .map((n) => ({ id: n.id, title: n.title, outcome: n.outcome, completedAt: n.completedAt }));
+    .map((n) => ({ id: n.id, title: n.title, outcome: n.outcome, completedAt: n.completedAt, byYou: closedByYou.has(n.id) }));
 
   const handoffSessions = new Set(snapshot.resources.filter((r) => r.purpose === 'handoff' && r.sessionId !== null).map((r) => r.sessionId as string));
   const rows = ctx.db
@@ -158,6 +181,7 @@ export function readDigest(ctx: Ctx, ref: string | number, since?: string): Dige
   }
 
   const board = deriveBoard(snapshot, nowMs);
+  const closedEver = windowClosed(ctx, project.id);
   return {
     project: { slug: project.slug, name: project.name },
     since: from,
@@ -169,7 +193,7 @@ export function readDigest(ctx: Ctx, ref: string | number, since?: string): Dige
     quickAdds,
     moves,
     documents,
-    marked: board.marked.map((r) => ({ id: r.node.id, title: r.node.title, marks: r.marks })),
+    marked: board.marked.map((r) => ({ id: r.node.id, title: r.node.title, marks: r.marks, byYou: closedEver.has(r.node.id) })),
     stepTitles,
   };
 }
@@ -262,7 +286,7 @@ function sections(d: Digest, now: number): Section[] {
   return [
     {
       title: 'Done',
-      items: d.done.map((n) => `#${n.id} ${clip(n.title, 60)}${n.outcome.trim() ? `: "${clip(n.outcome)}"` : ''}`),
+      items: d.done.map((n) => `#${n.id} ${clip(n.title, 60)}${n.outcome.trim() ? `: "${clip(n.outcome)}"` : ''}${n.byYou ? ' (you)' : ''}`),
     },
     {
       title: 'Asks raised',
@@ -285,7 +309,7 @@ function sections(d: Digest, now: number): Section[] {
       title: 'New documents',
       items: d.documents.map((r) => `r${r.id} "${clip(r.title, 60)}" on ${step(r.nodeId)}${r.purpose ? ` (${r.purpose})` : ''}`),
     },
-    { title: 'Marks', items: d.marked.map((m) => `${stepRef(m.id, m.title)}: ${m.marks.join(', ')}`) },
+    { title: 'Marks', items: d.marked.map((m) => `${stepRef(m.id, m.title)}: ${m.marks.map((k) => (k === 'no_outcome' && m.byYou ? 'no_outcome (you)' : k)).join(', ')}`) },
   ];
 }
 

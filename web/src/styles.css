@@ -170,6 +170,7 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ip-confirm p { margin: 4px 0 0; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
 .ip-confirm p + p { margin-top: 2px; }
 .ip-confirm div { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+.ip-done-form .ip-problem { display: block; margin-top: 6px; }
 .ip-confirm .ip-btn.go { color: var(--text-2); border-color: var(--text); }
 /* Rename's field, on the same surface: an M line of ink on the panel, a hairline round it and the focus ring the
    items' focus-visible draws, since focus is always in it. */
@@ -318,10 +319,10 @@ li.ip-orow:hover { background: var(--panel-2); }
 .ip-backlog-row.dragging, .ip-next-row.dragging { opacity: .5; }
 .ip-next-row.drop-before { box-shadow: 0 -2px 0 var(--text-2); }
 .ip-list.drop-end > .ip-next-row:last-child { box-shadow: 0 2px 0 var(--text-2); }
-.ip-backlog-row .ip-confirm { max-width: none; }
+.ip-backlog-row .ip-confirm, .ip-now-row .ip-confirm { max-width: none; }
 .ip-confirm:focus { outline: none; }
-.ip-backlog-row.pending { opacity: .5; }
-.ip-backlog-row.pending .ip-hover-act { display: none; }
+.ip-backlog-row.pending, .ip-now-row.pending { opacity: .5; }
+.ip-backlog-row.pending .ip-hover-act, .ip-now-row.pending .ip-hover-act { display: none; }
 .ip-num { font-size: var(--fs-l); line-height: 24px; text-align: center; color: var(--text-2); }
 .ip-own { color: var(--text-2); font-size: var(--fs-s); }
 .ip-own-queue { margin-top: 10px; }
