@@ -118,8 +118,8 @@ const open = (page: Page, project: Seeded) => page.goto(`/#/p/${project.slug}`);
 /** A step's row on the Board, by its title. Details lists the same steps as "#id title", so the exact name is the Board's. */
 const stepRow = (page: Page, title: string) => page.getByRole('main').getByRole('button', { name: title, exact: true });
 
-/** The Backlog fold at the foot of Next. */
-const backlogFold = (page: Page) => page.getByRole('button', { name: /^Backlog · \d+ [▸▾]$/ });
+/** The Backlog fold at the foot of Next; "n of total" while a filter narrows it. */
+const backlogFold = (page: Page) => page.getByRole('button', { name: /^Backlog · (\d+ of )?\d+ [▸▾]$/ });
 
 /** Opens the Backlog fold if it is closed: its steps are rows only while it is open. */
 async function openBacklog(page: Page): Promise<void> {
@@ -2346,6 +2346,71 @@ test.describe('Board', () => {
     await order.getByRole('button', { name: 'Reverse' }).click();
     await expect(next.getByRole('dialog')).toHaveCount(0);
     await expect(order.getByRole('button', { name: 'Reverse' })).toBeFocused();
+  });
+
+  test('the Backlog filter narrows the rows under either order, counts "n of total", clears on Escape, Clear filter and close', async ({ page, api, fresh }) => {
+    await write(api, fresh.session, 'patch', `/api/nodes/${fresh.ids['7 Launch']}`, { label: 'fix' });
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const next = band(page, 'next');
+    await openBacklog(page);
+    const fold = next.getByRole('button', { name: /^Backlog · / });
+    const field = next.getByRole('textbox', { name: 'Filter the backlog' });
+    const titles = () => next.locator('.ip-backlog-row .ip-row-title').allInnerTexts();
+    const total = (await titles()).length;
+    expect(total).toBeGreaterThan(1);
+    await expect(fold).toHaveText(`Backlog · ${total} ▾`);
+    // Every word must match: here both in the title.
+    await field.fill('build git');
+    await expect(fold).toHaveText(`Backlog · 1 of ${total} ▾`);
+    expect(await titles()).toEqual(['4 Build to GitHub']);
+    // The ID order filters the same way.
+    await next.getByRole('group', { name: 'Backlog order' }).getByRole('button', { name: 'ID' }).click();
+    await expect(next.getByRole('region', { name: 'Backlog by id' })).toBeVisible();
+    expect(await titles()).toEqual(['4 Build to GitHub']);
+    // "#id", the label, and the parent title with the title.
+    await field.fill(`#${fresh.ids['6 Beta']}`);
+    await expect.poll(titles).toEqual(['6 Beta']);
+    await field.fill('fix');
+    await expect.poll(titles).toEqual(['7 Launch']);
+    await field.fill('ROAD beta');
+    await expect.poll(titles).toEqual(['6 Beta']);
+    // Nothing matching says so; Clear filter empties the field, keeps focus in it and brings every row back.
+    await field.fill('zzz');
+    await expect(next.getByText('Nothing matches “zzz”')).toBeVisible();
+    await expect(fold).toHaveText(`Backlog · 0 of ${total} ▾`);
+    await next.getByRole('button', { name: 'Clear filter' }).click();
+    await expect(field).toBeFocused();
+    await expect(field).toHaveValue('');
+    await expect(fold).toHaveText(`Backlog · ${total} ▾`);
+    await expect.poll(async () => (await titles()).length).toBe(total);
+    // Escape in the field clears it and leaves the fold open.
+    await field.fill('store');
+    await expect.poll(titles).toEqual(['5 Store listing']);
+    await page.keyboard.press('Escape');
+    await expect(field).toHaveValue('');
+    await expect(fold).toHaveAttribute('aria-expanded', 'true');
+    // A new filter closes an open Delete confirm.
+    const beta = next.locator('.ip-backlog-row').filter({ hasText: '6 Beta' });
+    await beta.hover();
+    await beta.getByRole('button', { name: 'Delete…' }).click();
+    await expect(next.getByRole('dialog')).toBeVisible();
+    await field.fill('beta');
+    await expect(next.getByRole('dialog')).toHaveCount(0);
+    await expect.poll(titles).toEqual(['6 Beta']);
+    // "to Next" still works on a filtered row, and the count follows.
+    await field.fill('revenuecat');
+    const row = next.locator('.ip-backlog-row').filter({ hasText: '3 RevenueCat' });
+    await row.hover();
+    await row.getByRole('button', { name: 'to Next' }).click();
+    await expect(next.locator('.ip-next-row', { hasText: '3 RevenueCat' })).toBeVisible();
+    await expect(fold).toHaveText(`Backlog · 0 of ${total - 1} ▾`);
+    // Closing the fold clears the filter.
+    await fold.click();
+    await expect(fold).toHaveText(`Backlog · ${total - 1} ▸`);
+    await fold.click();
+    await expect(field).toHaveValue('');
+    await expect.poll(async () => (await titles()).length).toBe(total - 1);
   });
 
   test('"to Next" and "back to Backlog" are buttons Tab reaches and shows, and write the queue', async ({ page, fresh }) => {

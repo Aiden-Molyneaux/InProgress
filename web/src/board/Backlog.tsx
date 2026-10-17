@@ -4,7 +4,7 @@ import { flushSync } from 'react-dom';
 import { deleteStep } from '../api';
 import { noteAction } from '../measure';
 import { load, save } from '../storage';
-import { backlogSections, type BacklogOrder, ORDER_KEY, orderKey, parentTitle, parseOrder } from './backlogOrder';
+import { backlogSections, filterBoxes, type BacklogOrder, ORDER_KEY, orderKey, parentTitle, parseOrder } from './backlogOrder';
 import { focusTargetAfter } from './focus';
 import { endedLine } from './Marks';
 import type { BandProps } from './bandProps';
@@ -13,10 +13,14 @@ import { TaskBox } from './TaskBox';
 /**
  * The open Backlog: task boxes with no hue under their parent's title, each draggable, with "to Next" and "Delete…" shown
  * on hover and on focus. "Delete…" opens its confirm inside the box. A control on top orders the rows by phase (under
- * each parent) or by id (one flat list, each box naming its parent), forward or reverse (#452).
+ * each parent) or by id (one flat list, each box naming its parent), forward or reverse (#452). A filter field beside it
+ * narrows the rows under either order (#453); the fold holds its text and clears it on close.
  */
-export function Backlog({ boxes, snapshot, now, projectId, slug, onStatus, onOpenNode, onOpenResource, onDragStart, onDragEnd, onToNext }: Pick<BandProps, 'snapshot' | 'now' | 'onOpenNode' | 'onOpenResource' | 'onStatus'> & {
+export function Backlog({ boxes, filter, onFilter, snapshot, now, projectId, slug, onStatus, onOpenNode, onOpenResource, onDragStart, onDragEnd, onToNext }: Pick<BandProps, 'snapshot' | 'now' | 'onOpenNode' | 'onOpenResource' | 'onStatus'> & {
+  /** Every Backlog box; the filter picks the ones drawn. */
   boxes: BoxData[];
+  filter: string;
+  onFilter: (query: string) => void;
   projectId: number;
   slug: string;
   onDragStart: (id: number) => void;
@@ -34,10 +38,18 @@ export function Backlog({ boxes, snapshot, now, projectId, slug, onStatus, onOpe
     setOrder(o);
     save(ORDER_KEY, orderKey(o));
   };
+  /** A new filter closes an open Delete confirm too: its row may be filtered out. */
+  const narrow = (query: string) => {
+    setConfirming(null);
+    onFilter(query);
+  };
   const root = useRef<HTMLDivElement>(null);
+  const filterField = useRef<HTMLInputElement>(null);
   /** The band heading, for when the confirm's row leaves and takes focus with it. */
   const heading = useRef<HTMLElement | null>(null);
   const ids = boxes.map((b) => b.row!.node.id).join(',');
+  const shown = filterBoxes(boxes, filter);
+  const drawn = shown.map((b) => b.row!.node.id).join(',');
   // Cancel takes focus when a confirm opens.
   useEffect(() => {
     if (confirming === null) return;
@@ -45,15 +57,17 @@ export function Backlog({ boxes, snapshot, now, projectId, slug, onStatus, onOpe
     heading.current = home?.querySelector<HTMLElement>('h3, header b') ?? null;
     root.current?.querySelector<HTMLElement>('.ip-confirm [data-cancel]')?.focus();
   }, [confirming]);
-  // A row that left (deleted here or elsewhere) no longer confirms or waits; if it took focus with it, the heading has it.
+  // A row that left (deleted here or elsewhere) no longer waits. One no longer drawn (it left, or a change elsewhere took it
+  // out of the filter) no longer confirms; if it took focus with it, the heading has it.
   useEffect(() => {
     const here = new Set(ids ? ids.split(',').map(Number) : []);
-    if (confirming !== null && !here.has(confirming)) {
+    const seen = new Set(drawn ? drawn.split(',').map(Number) : []);
+    if (confirming !== null && !seen.has(confirming)) {
       setConfirming(null);
       if (document.activeElement === document.body) heading.current?.focus();
     }
     setPending((p) => (p.some((id) => !here.has(id)) ? p.filter((id) => here.has(id)) : p));
-  }, [ids, confirming]);
+  }, [ids, drawn, confirming]);
   /** Puts focus back on that row's Delete button, once it is drawn again. */
   const refocus = (id: number) => window.requestAnimationFrame(() => root.current?.querySelector<HTMLElement>(`li[data-node="${id}"] [data-delete]`)?.focus());
   const cancel = (id: number) => {
@@ -80,14 +94,41 @@ export function Backlog({ boxes, snapshot, now, projectId, slug, onStatus, onOpe
   const hasKids = (id: number) => parents.has(id);
   return (
     <div className="ip-backlog-groups" ref={root}>
-      <div className="ip-backlog-order" role="group" aria-label="Backlog order">
-        <button type="button" aria-pressed={order.by === 'phase'} onClick={() => pick({ ...order, by: 'phase' })}>Phase</button>
-        <button type="button" aria-pressed={order.by === 'id'} onClick={() => pick({ ...order, by: 'id' })}>ID</button>
-        <button type="button" aria-label="Reverse" title={order.reverse ? 'Reverse order' : 'Forward order'} aria-pressed={order.reverse} onClick={() => pick({ ...order, reverse: !order.reverse })}>
-          {order.reverse ? '↓' : '↑'}
-        </button>
+      <div className="ip-backlog-tools">
+        <input
+          ref={filterField}
+          className="ip-backlog-filter"
+          type="text"
+          aria-label="Filter the backlog"
+          placeholder="Filter…"
+          value={filter}
+          onChange={(e) => narrow(e.target.value)}
+          onKeyDown={(e) => {
+            // Escape clears a filter; in an empty field it does nothing here.
+            if (e.key !== 'Escape' || !filter) return;
+            e.preventDefault();
+            e.stopPropagation();
+            narrow('');
+          }}
+        />
+        <div className="ip-backlog-order" role="group" aria-label="Backlog order">
+          <button type="button" aria-pressed={order.by === 'phase'} onClick={() => pick({ ...order, by: 'phase' })}>Phase</button>
+          <button type="button" aria-pressed={order.by === 'id'} onClick={() => pick({ ...order, by: 'id' })}>ID</button>
+          <button type="button" aria-label="Reverse" title={order.reverse ? 'Reverse order' : 'Forward order'} aria-pressed={order.reverse} onClick={() => pick({ ...order, reverse: !order.reverse })}>
+            {order.reverse ? '↓' : '↑'}
+          </button>
+        </div>
       </div>
-      {backlogSections(boxes, order).map((g) => (
+      {shown.length === 0 && (
+        <p className="ip-quiet ip-empty-line ip-backlog-none">
+          {`Nothing matches “${filter.trim()}” `}
+          <button type="button" className="ip-link-btn" onClick={() => {
+            narrow('');
+            filterField.current?.focus();
+          }}>Clear filter</button>
+        </p>
+      )}
+      {backlogSections(shown, order).map((g) => (
         <section
           key={g.flat ? 'id' : (g.parent?.id ?? 0)}
           className="ip-backlog-group"

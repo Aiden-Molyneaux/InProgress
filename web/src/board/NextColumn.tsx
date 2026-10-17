@@ -4,6 +4,7 @@ import type { TaskBox as BoxData } from '../../../src/core/taskState';
 import { sessionDisplayTitle, type QueueOp } from '../../../src/core/types';
 import { postEvent, queueOp } from '../api';
 import { Backlog } from './Backlog';
+import { filterBoxes, filterWords } from './backlogOrder';
 import { dropSlot, dropToOp, optimisticNext } from './dragQueue';
 import { focusTargetAfter } from './focus';
 import { endedLine } from './Marks';
@@ -32,6 +33,8 @@ export function NextColumn({ snapshot, board, boxes, now, onOpenNode, onOpenReso
   const [overBacklog, setOverBacklog] = useState(false);
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
+  /** The Backlog filter (#453): kept while the fold is open, cleared when it closes. */
+  const [filter, setFilter] = useState('');
   const [focusTick, setFocusTick] = useState(0);
   const field = useRef<HTMLInputElement>(null);
   const addButton = useRef<HTMLButtonElement>(null);
@@ -66,6 +69,12 @@ export function NextColumn({ snapshot, board, boxes, now, onOpenNode, onOpenReso
   /** Sent back from Next and not yet confirmed, a ready box reads as Backlog. */
   const asBacklog = (b: BoxData): BoxData => (b.state === 'ready' ? { ...b, cell: 'backlog', state: 'backlog' } : b);
   const backlog = backlogIds.map((id) => asBacklog(boxOf.get(id)!));
+  /** The fold counts "4 of 14" while a filter narrows a Backlog that has rows; an empty Backlog shows no filter. */
+  const filtering = filterWords(filter).length > 0 && backlog.length > 0;
+  // A Backlog that empties takes its filter with it, so a step added or sent back later is not hidden by text no one sees.
+  useEffect(() => {
+    if (backlog.length === 0) setFilter('');
+  }, [backlog.length]);
 
   const write = async (op: QueueOp) => {
     window.clearTimeout(clearTimer.current);
@@ -116,8 +125,10 @@ export function NextColumn({ snapshot, board, boxes, now, onOpenNode, onOpenReso
   const dropOnBacklog = (e: DragEvent) => {
     // Never also a drop into the column around it.
     e.stopPropagation();
-    if (dragging === null || !inNext.has(dragging)) return;
+    if (dragging === null) return;
+    // Nor the filter field's own drop, which would type the dragged id into it.
     e.preventDefault();
+    if (!inNext.has(dragging)) return;
     const id = dragging;
     endDrag();
     noteAction('backlog', 'drop');
@@ -133,6 +144,7 @@ export function NextColumn({ snapshot, board, boxes, now, onOpenNode, onOpenReso
     if (open) {
       setOpen(false);
       setAdding(false);
+      setFilter('');
     } else {
       openFold();
       setAdding(true);
@@ -227,13 +239,13 @@ export function NextColumn({ snapshot, board, boxes, now, onOpenNode, onOpenReso
       >
         <div className="ip-rail-foot">
           <button type="button" className="ip-fold" aria-expanded={open} onClick={toggleFold}>
-            {`Backlog · ${backlog.length} ${open ? '▾' : '▸'}`}
+            {`Backlog · ${filtering ? `${filterBoxes(backlog, filter).length} of ${backlog.length}` : backlog.length} ${open ? '▾' : '▸'}`}
           </button>
           <button type="button" ref={addButton} className="ip-link-btn ip-add" onClick={addClick}>+ add</button>
         </div>
         {open && (
           <>
-            <Backlog boxes={backlog} snapshot={snapshot} now={now} projectId={project.id} slug={project.slug} onStatus={onStatus} onOpenNode={onOpenNode} onOpenResource={onOpenResource} onDragStart={setDragging} onDragEnd={endDrag} onToNext={toNext} />
+            <Backlog boxes={backlog} filter={filter} onFilter={setFilter} snapshot={snapshot} now={now} projectId={project.id} slug={project.slug} onStatus={onStatus} onOpenNode={onOpenNode} onOpenResource={onOpenResource} onDragStart={setDragging} onDragEnd={endDrag} onToNext={toNext} />
             {adding && <QuickAdd projectId={project.id} slug={project.slug} inputRef={field} onStatus={onStatus} onClose={closeAdd} />}
           </>
         )}

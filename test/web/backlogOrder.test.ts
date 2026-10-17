@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { TaskBox } from '../../src/core/taskState';
 import type { TreeNode } from '../../src/core/types';
-import { backlogSections, groupByParent, orderKey, parentTitle, parseOrder } from '../../web/src/board/backlogOrder';
+import { backlogSections, filterBoxes, filterWords, groupByParent, orderKey, parentTitle, parseOrder } from '../../web/src/board/backlogOrder';
 
 const node = (id: number, title = `Step ${id}`) => ({ id, title }) as unknown as TreeNode;
 const box = (id: number, crumb: TreeNode[] = []) => ({ row: { node: node(id), crumb } }) as unknown as TaskBox;
@@ -65,5 +65,42 @@ describe('parentTitle', () => {
   it('is the immediate parent, or null at the top level', () => {
     expect(parentTitle(box(1, [a, b]))).toBe('Phase B');
     expect(parentTitle(box(2))).toBeNull();
+  });
+});
+
+describe('filterWords and filterBoxes', () => {
+  const labelled = (id: number, title: string, label: string | null, crumb: TreeNode[] = []) =>
+    ({ row: { node: { ...node(id, title), label }, crumb } }) as unknown as TaskBox;
+  const list = [
+    labelled(12, 'Wire up RevenueCat', 'integration', [a]),
+    labelled(5, 'Store listing', null),
+    labelled(21, 'Fix the beta crash', 'fix', [b]),
+    labelled(130, 'Launch', 'ui', [a]),
+  ];
+  it('splits on spaces, lowercased, and is empty for a blank field', () => {
+    expect(filterWords('  Beta   CRASH ')).toEqual(['beta', 'crash']);
+    expect(filterWords('   ')).toEqual([]);
+  });
+  it('keeps every box, in order, for a blank filter', () => {
+    expect(filterBoxes(list, ' ')).toBe(list);
+  });
+  it('matches the title, any case', () => {
+    expect(ids(filterBoxes(list, 'revenuecat'))).toEqual([12]);
+  });
+  it('matches "#id" from its start, and a bare number anywhere in the id', () => {
+    expect(ids(filterBoxes(list, '#12'))).toEqual([12]);
+    expect(ids(filterBoxes(list, '#13'))).toEqual([130]);
+    expect(ids(filterBoxes(list, '13'))).toEqual([130]);
+  });
+  it('matches the label and the parent title', () => {
+    expect(ids(filterBoxes(list, 'integration'))).toEqual([12]);
+    expect(ids(filterBoxes(list, 'phase b'))).toEqual([21]);
+  });
+  it('needs every word to match somewhere', () => {
+    expect(ids(filterBoxes(list, 'fix beta'))).toEqual([21]);
+    expect(ids(filterBoxes(list, 'fix launch'))).toEqual([]);
+  });
+  it('keeps the order it was given, so either Backlog order can run after it', () => {
+    expect(ids(filterBoxes(list, 'phase'))).toEqual([12, 21, 130]);
   });
 });
