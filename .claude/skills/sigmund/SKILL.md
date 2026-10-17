@@ -176,7 +176,7 @@ The receipt, leading with the outcome:
 4. Any model override and its reason.
 5. **The risk statement, present even when "none" [edit]:** does this change touch `~/.inprogress`, the live window, the installed hooks (`src/hooks/`, `claude/`) or the deploy? If yes, say plainly what the merge gate will require: a full deploy, `claude:install`, a migration check.
 
-Before you stop, brief the scribe `ask on #<id>: review, <one line on what is ready>`. Aiden's "ship it" answers it, and the answer reaches you on your next prompt; the open ask keeps the step from reading as stalled.
+Before you stop, brief the scribe `ask on #<id>: review, <one line on what is ready>`. Aiden's "ship it" answers it, and the answer reaches you on your next prompt; the open ask keeps the step from reading as stalled. Then prefix this session's title with `REVIEW` (Session title, below).
 
 Then stop. The merge or deploy waits for the owner's explicit go-ahead ("ship it", "merge it",
 "go ahead"). Silence, or approval of the integration push, is never merge approval.
@@ -190,6 +190,8 @@ git -c credential.helper= -c 'credential.helper=!f() { echo username=x-access-to
 ```
 
 A PR only when Aiden asks. Deploy and `claude:install` never run from a worktree: the installed hooks bake in the main checkout's absolute path.
+
+Once `main` is pushed, brief the scribe that the step is done with its outcome, and prefix this session's title with `DONE`.
 
 A deploy or rollback that goes red on the environment (a lock, a restart, the runner) goes to Doctor Nick before anything is retried; a red typecheck or test is the work, fixed on the branch. A retry that is itself a
 gated action (another deploy, a rollback, an installer) follows the gate above.
@@ -211,6 +213,13 @@ gated action (another deploy, a rollback, an installer) follows the gate above.
   The context nudge, a review wait and a subagent run are never reasons to hand off. A handoff to a successor on the same step opens `Claim #<id> --take-over`, names the worktree (`.claude/worktrees/<topic>`), and lists the step's undelivered answers. Write it, brief the scribe to attach it to its step, print its path, offer the next session as a chip whose prompt is the handoff prompt when the `spawn_task` tool is available (the desktop app), and stop.
 - A new request mid-session becomes a queued step through the scribe (`later: #id`, or a new step), unless it is a few lines in code that is already open. The InProgress tree is the memory between sessions.
 - Report to Mip through InProgress only: the step's status and outcome, new steps, asks, and the working tasks. Mip reads them at its next opening. Do not message Mip.
+- **Session title (Aiden, 2026-10-16, #455).** In the desktop app, keep a status prefix on this session's title so the sidebar shows where it stands:
+  - `REVIEW` while the receipt waits on "ship it" (phase 7);
+  - `BLOCKED` while any other ask on the step waits on Aiden;
+  - `DONE` once the step is merged, deployed and pushed (phase 8);
+  - no prefix while you work: drop `REVIEW` or `BLOCKED` once Aiden's answer sends you back to work.
+
+  Read the title with `mcp__ccd_session_mgmt__get_session` on `"self"`, then set it with `mcp__ccd_session_mgmt__set_session_title` on `"self"`: one prefix and a space before the title as it stands, replacing any prefix already there (`REVIEW #453 Filter the Backlog`, then `DONE #453 Filter the Backlog`). Load both through ToolSearch when they are deferred. Only the main session renames: a subagent cannot rename the session it runs in. Where the tools are missing (outside the desktop app) or a rename is declined, skip it without comment.
 
 A handoff is a prompt a fresh session can start from, saved as `~/.inprogress/resources/inprogress/<yyyy-mm-dd>-<kebab-title>.md` and attached to its step as a resource. The standing rules live here and in `CLAUDE.md`, so a handoff never repeats them. It holds:
 
