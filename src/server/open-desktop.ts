@@ -1,8 +1,8 @@
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readdirSync, statSync } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { isAbsolute, join } from 'node:path';
-import { openUrl as systemOpenUrl } from './open-path';
+import { dirname, isAbsolute, join } from 'node:path';
+import { openClaudeLink } from './open-path';
 
 /*
  * "Open session" hands the Claude desktop app its own link for the session, as the app does in its sidebar. It never
@@ -152,14 +152,40 @@ const NOT_IN_APP = "This session is not in the Claude desktop app, so it can't o
 /** No file read as an app session at all: the app is missing, or it keeps its sessions somewhere or some way this does not know. */
 const NO_APP_FILES = "InProgress could not find the Claude desktop app's session files, so it can't open the session there. Run this in a terminal to resume it.";
 
+/**
+ * Whether a lockfile is held open by its program: Chromium holds `<data dir>/lockfile` for as long as the app runs, and
+ * opening it then fails with EBUSY. Any other failure (a read-only file, a denied folder) is not read as running, since
+ * a wrong yes starts the handler as the app itself.
+ */
+function lockHeld(file: string): boolean {
+  try {
+    closeSync(openSync(file, 'r+'));
+    return false;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EBUSY';
+  }
+}
+
+/**
+ * Whether the desktop app is running: its data folder (the parent of a sessions folder) has a lockfile the app holds.
+ * About 10 ms, against a second for tasklist.exe. A lockfile that is missing or openable means it is not running.
+ */
+export function desktopAppRunning(dirs: string[] = desktopSessionDirs(), held: (file: string) => boolean = lockHeld): boolean {
+  return dirs.some((d) => {
+    const lock = join(dirname(d), 'lockfile');
+    return existsSync(lock) && held(lock);
+  });
+}
+
 /** Opens the session in the Claude desktop app through the app's own link, or says why it could not. */
 export async function openInDesktop(session: DesktopSession, o: OpenDesktopOptions = {}): Promise<OpenDesktopResult> {
-  const sessions = await appSessions(o.dirs ?? desktopSessionDirs());
+  const dirs = o.dirs ?? desktopSessionDirs();
+  const sessions = await appSessions(dirs);
   if (sessions.length === 0) return { ok: false, reason: NO_APP_FILES };
   const appSessionId = pick(sessions, session.id);
   if (!appSessionId) return { ok: false, reason: NOT_IN_APP };
   try {
-    await (o.openUrl ?? systemOpenUrl)(desktopLink(appSessionId));
+    await (o.openUrl ?? ((url: string) => openClaudeLink(url, { appRunning: () => desktopAppRunning(dirs) })))(desktopLink(appSessionId));
     return { ok: true };
   } catch (err) {
     return { ok: false, reason: `The Claude desktop app could not be opened: ${err instanceof Error ? err.message : String(err)}` };

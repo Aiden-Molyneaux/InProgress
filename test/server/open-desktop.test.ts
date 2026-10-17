@@ -1,9 +1,10 @@
+import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../../src/server/app';
-import { desktopLink, desktopSessionDirs, findAppSession, openInDesktop, resumeCommand, usableCwd, type DesktopSession, type OpenDesktopResult } from '../../src/server/open-desktop';
+import { desktopAppRunning, desktopLink, desktopSessionDirs, findAppSession, openInDesktop, resumeCommand, usableCwd, type DesktopSession, type OpenDesktopResult } from '../../src/server/open-desktop';
 import { openUrl } from '../../src/server/open-path';
 import { makeCtx } from '../helpers';
 
@@ -163,6 +164,42 @@ describe('findAppSession', () => {
     utimesSync(file, later, later);
     expect(await findAppSession(ID, [root])).toBe(APP);
   });
+});
+
+describe('desktopAppRunning', () => {
+  it("reads the app as running only when a data folder's lockfile is held, and asks no further once one is", () => {
+    const appData = join(DIR, 'app-data');
+    mkdirSync(join(appData, 'claude-code-sessions'), { recursive: true });
+    const sessions = join(appData, 'claude-code-sessions');
+    const lock = join(appData, 'lockfile');
+    const held = vi.fn(() => true);
+    expect(desktopAppRunning([sessions], held)).toBe(false);
+    expect(held).not.toHaveBeenCalled();
+    writeFileSync(lock, '');
+    expect(desktopAppRunning([sessions], held)).toBe(true);
+    expect(held).toHaveBeenCalledWith(lock);
+    expect(desktopAppRunning([sessions], () => false)).toBe(false);
+    // The real check: a lockfile nobody holds opens, so the app is not running.
+    expect(desktopAppRunning([sessions])).toBe(false);
+  });
+
+  it.runIf(process.platform === 'win32')('reads a lockfile another process holds with no sharing, as Chromium does, as running', async () => {
+    const appData = join(DIR, 'held-app-data');
+    const sessions = join(appData, 'claude-code-sessions');
+    mkdirSync(sessions, { recursive: true });
+    const lock = join(appData, 'lockfile');
+    writeFileSync(lock, '');
+    const holder = spawn('powershell.exe', ['-NoProfile', '-Command', `$f = [IO.File]::Open('${lock}', 'Open', 'ReadWrite', 'None'); 'held'; Start-Sleep -Seconds 30`], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        holder.stdout.on('data', (d: Buffer) => d.toString().includes('held') && resolve());
+        holder.once('exit', () => reject(new Error('the holder exited before holding the file')));
+      });
+      expect(desktopAppRunning([sessions])).toBe(true);
+    } finally {
+      holder.kill();
+    }
+  }, 20_000);
 });
 
 describe('the helpers', () => {

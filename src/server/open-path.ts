@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 /**
@@ -58,15 +59,120 @@ export async function openInDefaultBrowser(url: string): Promise<void> {
  * caller builds the link; no shell is involved, so it is one argument.
  */
 export function openUrl(url: string): Promise<void> {
-  const [file, args] = process.platform === 'win32' ? [join(systemRoot(), 'explorer.exe'), [url]] : [process.platform === 'darwin' ? 'open' : 'xdg-open', [url]];
+  if (process.platform === 'win32') return start(join(systemRoot(), 'explorer.exe'), [url]);
+  return start(process.platform === 'darwin' ? 'open' : 'xdg-open', [url]);
+}
+
+/** Start a program detached, resolving once it started and rejecting when it could not. */
+function start(file: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string } = {}): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(file, args, { detached: true, stdio: 'ignore', windowsHide: true });
+    const child = spawn(file, args, { detached: true, stdio: 'ignore', windowsHide: true, ...options });
     child.once('spawn', () => {
       child.unref();
       resolve();
     });
     child.once('error', reject);
   });
+}
+
+/** The program a link scheme opens with, and its arguments with `%1` where the link goes. */
+export interface LinkHandler {
+  file: string;
+  args: string[];
+}
+
+/**
+ * The handler in `reg query <key>\shell\open\command /ve` output: the default value's command, split into a quoted or
+ * bare program and its arguments. Undefined when there is none, or when it cannot be run as it stands: a program that is
+ * not an absolute path to an .exe, a `%` anywhere but a lone `%1` (a variable to expand, or %L, %*), or quoting this
+ * split cannot reproduce (`--x="a b"`): the link then goes through explorer.exe, which reads the command itself. The
+ * value's label is localised ("(Default)", "(Standard)"), so the line is found by its type. reg.exe prints in the OEM
+ * code page, read here as UTF-8: a handler under a non-ASCII path fails the existence check and falls back the same way.
+ */
+export function parseHandlerCommand(regOutput: string): LinkHandler | undefined {
+  const command = /\sREG_(?:EXPAND_)?SZ\s+(.+?)\s*$/m.exec(regOutput)?.[1];
+  if (!command) return undefined;
+  const [file, ...args] = [...command.matchAll(/"([^"]*)"|(\S+)/g)].map((m) => m[1] ?? m[2]);
+  if (!file || !isAbsolute(file) || !/\.exe$/i.test(file) || file.includes('%')) return undefined;
+  if (args.some((arg) => arg.includes('"') || (arg.includes('%') && arg !== '%1'))) return undefined;
+  return { file, args };
+}
+
+/**
+ * The claude: handler on Windows: the current user's when that key exists (it overrides the machine's, and the Store
+ * install registers it), else the machine's. reg.exe runs by absolute path from SystemRoot. Undefined elsewhere, or when
+ * the key that applies has no command this can run, or its program does not exist.
+ */
+function lookUpClaudeHandler(): LinkHandler | undefined {
+  if (process.platform !== 'win32') return undefined;
+  for (const hive of ['HKCU', 'HKLM']) {
+    const reg = spawnSync(join(systemRoot(), 'System32', 'reg.exe'), ['query', `${hive}\\Software\\Classes\\claude\\shell\\open\\command`, '/ve'], { cwd: systemRoot(), encoding: 'utf8', windowsHide: true, timeout: LOOKUP_TIMEOUT_MS });
+    if (reg.status !== 0) continue;
+    const handler = parseHandlerCommand(reg.stdout);
+    return handler && existsSync(handler.file) ? handler : undefined;
+  }
+  return undefined;
+}
+
+let claudeHandler: LinkHandler | undefined;
+
+/**
+ * The claude: handler, kept while its program exists: an app update moves it, and then it is looked up again. A miss is
+ * not kept, so a handler registered later is found; that costs a reg.exe or two per open while there is none.
+ */
+export function findClaudeHandler(lookup: () => LinkHandler | undefined = lookUpClaudeHandler): LinkHandler | undefined {
+  if (claudeHandler && !existsSync(claudeHandler.file)) claudeHandler = undefined;
+  claudeHandler ??= lookup();
+  return claudeHandler;
+}
+
+/** Forgets the kept handler: after one fails to start, and for tests. */
+export const forgetClaudeHandler = (): void => {
+  claudeHandler = undefined;
+};
+
+/**
+ * The environment the started Claude.exe gets: the server's, less what belongs to the Claude Code session that started
+ * the server (CLAUDE_CODE_*, CLAUDECODE, except the provider switches CLAUDE_CODE_USE_*), anything named like a
+ * credential, InProgress's own variables, and what would change how Electron or node runs. User settings such as
+ * CLAUDE_CONFIG_DIR or ANTHROPIC_BASE_URL pass through. Names only: a secret under a plain name (a URL with a password
+ * in it) passes too. The started program only hands the link to the running app and exits (openClaudeLink).
+ */
+export function desktopAppEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const dropped = (key: string): boolean =>
+    (/^(CLAUDE_CODE_|CLAUDECODE$|INPROGRESS|ELECTRON_|NODE_OPTIONS$|DISABLE_AUTOUPDATER$)/i.test(key) && !/^CLAUDE_CODE_USE_/i.test(key)) ||
+    /(TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|PRIVATE_?KEY|CREDENTIAL|_PAT$)/i.test(key);
+  return Object.fromEntries(Object.entries(env).filter(([key]) => !dropped(key)));
+}
+
+export interface OpenClaudeLinkOptions {
+  findHandler?: () => LinkHandler | undefined;
+  /** Whether the desktop app is running; the caller knows where its data lives. Not said means not known: openUrl. */
+  appRunning?: () => boolean;
+  start?: (file: string, args: string[], options: { env: NodeJS.ProcessEnv; cwd: string }) => Promise<void>;
+  fallback?: (url: string) => Promise<void>;
+}
+
+/**
+ * Open a claude:// link in the Claude desktop app. On Windows, while the app runs, the program the claude: key names
+ * starts directly with the link, in the home folder and with desktopAppEnv: it hands the link to the running app and
+ * exits, and that switched the session in about half the time explorer.exe took (1.8 to 3.5 s against 4.0 to 6.9 s,
+ * measured for #473). When the app is not running the started program would become the app itself, outside its Store
+ * package's activation, so the link goes to openUrl, as it does with no handler or one that will not start. Windows may
+ * choose a handler by other means too. The caller builds the link; no shell is involved.
+ */
+export async function openClaudeLink(url: string, o: OpenClaudeLinkOptions = {}): Promise<void> {
+  const handler = (o.findHandler ?? findClaudeHandler)();
+  const fallback = o.fallback ?? openUrl;
+  if (!handler || !o.appRunning?.()) return fallback(url);
+  const args = handler.args.includes('%1') ? handler.args.map((a) => (a === '%1' ? url : a)) : [...handler.args, url];
+  try {
+    await (o.start ?? start)(handler.file, args, { env: desktopAppEnv(), cwd: homedir() });
+  } catch (err) {
+    console.error(`InProgress: ${handler.file} did not start (${(err as NodeJS.ErrnoException).code ?? (err as Error).message}); opening the link through explorer.exe.`);
+    forgetClaudeHandler();
+    await fallback(url);
+  }
 }
 
 /**
