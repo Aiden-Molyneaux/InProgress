@@ -57,3 +57,23 @@ export function backlogSections(boxes: BoxData[], order: BacklogOrder): { parent
 export function parentTitle(box: BoxData): string | null {
   return parentOf(box)?.title ?? null;
 }
+
+/** The words of a Backlog filter (#453), lowercased; none when the field is blank. */
+export function filterWords(query: string): string[] {
+  const q = query.trim().toLowerCase();
+  return q ? q.split(/\s+/) : [];
+}
+
+/**
+ * The boxes a Backlog filter keeps (#453): every word must appear in the box's "#id", title, label or parent title, any
+ * case. A blank filter keeps every box; the order of the boxes is unchanged, so either order can run after it.
+ */
+export function filterBoxes(boxes: BoxData[], query: string): BoxData[] {
+  const words = filterWords(query);
+  if (words.length === 0) return boxes;
+  return boxes.filter((box) => {
+    const { node } = box.row!;
+    const text = `#${node.id} ${node.title} ${node.label ?? ''} ${parentTitle(box) ?? ''}`.toLowerCase();
+    return words.every((w) => text.includes(w));
+  });
+}
