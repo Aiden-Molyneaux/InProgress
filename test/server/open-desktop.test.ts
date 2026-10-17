@@ -197,7 +197,10 @@ describe('desktopAppRunning', () => {
       });
       expect(desktopAppRunning([sessions])).toBe(true);
     } finally {
+      // Wait for the holder to be gone, so the file is released before afterAll removes the folder.
+      const gone = new Promise((resolve) => holder.once('exit', resolve));
       holder.kill();
+      await gone;
     }
   }, 20_000);
 });
