@@ -1,31 +1,19 @@
-import type { TreeNode } from '../../../src/core/types';
 import type { TaskBox as BoxData } from '../../../src/core/taskState';
 import { useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { deleteStep } from '../api';
 import { noteAction } from '../measure';
+import { load, save } from '../storage';
+import { backlogSections, type BacklogOrder, ORDER_KEY, orderKey, parentTitle, parseOrder } from './backlogOrder';
 import { focusTargetAfter } from './focus';
 import { endedLine } from './Marks';
 import type { BandProps } from './bandProps';
 import { TaskBox } from './TaskBox';
 
-/** Backlog boxes grouped by parent, in the order the parents first appear; boxes at the top level come first with no line. */
-export function groupByParent(boxes: BoxData[]): { parent: TreeNode | null; boxes: BoxData[] }[] {
-  const groups = new Map<number, { parent: TreeNode | null; boxes: BoxData[] }>();
-  for (const box of boxes) {
-    const crumb = box.row!.crumb;
-    const parent = crumb[crumb.length - 1] ?? null;
-    const key = parent?.id ?? 0;
-    const group = groups.get(key) ?? { parent, boxes: [] };
-    group.boxes.push(box);
-    groups.set(key, group);
-  }
-  return [...groups.entries()].sort(([a], [b]) => (a === 0 ? 0 : 1) - (b === 0 ? 0 : 1)).map(([, g]) => g);
-}
-
 /**
  * The open Backlog: task boxes with no hue under their parent's title, each draggable, with "to Next" and "Delete…" shown
- * on hover and on focus. "Delete…" opens its confirm inside the box.
+ * on hover and on focus. "Delete…" opens its confirm inside the box. A control on top orders the rows by phase (under
+ * each parent) or by id (one flat list, each box naming its parent), forward or reverse (#452).
  */
 export function Backlog({ boxes, snapshot, now, projectId, slug, onStatus, onOpenNode, onOpenResource, onDragStart, onDragEnd, onToNext }: Pick<BandProps, 'snapshot' | 'now' | 'onOpenNode' | 'onOpenResource' | 'onStatus'> & {
   boxes: BoxData[];
@@ -39,6 +27,13 @@ export function Backlog({ boxes, snapshot, now, projectId, slug, onStatus, onOpe
   const [confirming, setConfirming] = useState<number | null>(null);
   /** Rows deleted and waiting for the answer, or for the snapshot that drops them. */
   const [pending, setPending] = useState<number[]>([]);
+  const [order, setOrder] = useState<BacklogOrder>(() => parseOrder(load(ORDER_KEY)));
+  /** A reorder closes an open Delete confirm: its row may move away from where the user was looking. */
+  const pick = (o: BacklogOrder) => {
+    setConfirming(null);
+    setOrder(o);
+    save(ORDER_KEY, orderKey(o));
+  };
   const root = useRef<HTMLDivElement>(null);
   /** The band heading, for when the confirm's row leaves and takes focus with it. */
   const heading = useRef<HTMLElement | null>(null);
@@ -85,8 +80,19 @@ export function Backlog({ boxes, snapshot, now, projectId, slug, onStatus, onOpe
   const hasKids = (id: number) => parents.has(id);
   return (
     <div className="ip-backlog-groups" ref={root}>
-      {groupByParent(boxes).map((g) => (
-        <section key={g.parent?.id ?? 0} className="ip-backlog-group" aria-label={g.parent ? `Backlog under ${g.parent.title}` : 'Backlog at the top level'}>
+      <div className="ip-backlog-order" role="group" aria-label="Backlog order">
+        <button type="button" aria-pressed={order.by === 'phase'} onClick={() => pick({ ...order, by: 'phase' })}>Phase</button>
+        <button type="button" aria-pressed={order.by === 'id'} onClick={() => pick({ ...order, by: 'id' })}>ID</button>
+        <button type="button" aria-label="Reverse" title={order.reverse ? 'Reverse order' : 'Forward order'} aria-pressed={order.reverse} onClick={() => pick({ ...order, reverse: !order.reverse })}>
+          {order.reverse ? '↓' : '↑'}
+        </button>
+      </div>
+      {backlogSections(boxes, order).map((g) => (
+        <section
+          key={g.flat ? 'id' : (g.parent?.id ?? 0)}
+          className="ip-backlog-group"
+          aria-label={g.flat ? 'Backlog by id' : g.parent ? `Backlog under ${g.parent.title}` : 'Backlog at the top level'}
+        >
           {g.parent && <div className="ip-group-line" title={g.parent.title}>{g.parent.title}</div>}
           <ul className="ip-list">
             {g.boxes.map((box) => {
@@ -144,6 +150,7 @@ export function Backlog({ boxes, snapshot, now, projectId, slug, onStatus, onOpe
                   onOpenNode={onOpenNode}
                   onOpenResource={onOpenResource}
                 >
+                  {g.flat && parentTitle(box) && <div className="ip-group-line ip-box-parent" title={parentTitle(box)!}>{parentTitle(box)}</div>}
                   {asking && (
                     <div
                       className="ip-confirm"

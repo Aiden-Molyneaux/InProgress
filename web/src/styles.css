@@ -382,6 +382,12 @@ button.ip-card-title:hover { color: var(--text); text-decoration: underline; }
 .ip-fold:hover { color: var(--text); }
 .ip-backlog-groups { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
 .ip-group-line { margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-s); line-height: 14px; color: var(--faint); }
+.ip-backlog-order { display: flex; align-self: flex-end; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.ip-backlog-order button { padding: 1px 8px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
+.ip-backlog-order button + button { border-left: 1px solid var(--border); }
+.ip-backlog-order button[aria-pressed='true'] { background: var(--panel-2); color: var(--text); }
+.ip-backlog-order button:focus-visible { outline: 2px solid var(--text-2); outline-offset: -2px; }
+.ip-box-parent { margin: 2px 0 0; }
 .ip-quick-add { display: block; width: 100%; margin-top: 8px; padding: 4px 8px; font: inherit; font-size: var(--fs-m); line-height: 18px; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); }
 /* The latest change: ↳ actor · time · event, muted, with the actor and the event in ink. Only the event shrinks. */
 .ip-activity { flex: none; display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; background: var(--bar); border-top: 1px solid var(--border); color: var(--muted); font-size: var(--fs-m); line-height: 18px; white-space: nowrap; overflow: hidden; }
