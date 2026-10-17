@@ -8,9 +8,9 @@ import { findSession } from '../repo/sessions';
 import { deleteProject, listDeletedProjects, restoreProject } from '../project-lifecycle';
 import { clearAsk } from '../repo/asks';
 import { recordQuiet } from '../repo/events';
-import { addNodes, deleteNode } from '../repo/nodes';
+import { addNodes, deleteNode, finishNode } from '../repo/nodes';
 import { applyQueueOp, changeProject, getProjectById, isQueued, resolveProject } from '../repo/projects';
-import { idParam, sessionIdParam, windowClearBody, windowEventBody, windowNodeBody, windowProjectBody, windowQueueBody, windowNodeParams, windowRenameBody, WINDOW_EVENT_KEYS } from '../schemas';
+import { idParam, sessionIdParam, windowClearBody, windowDoneBody, windowEventBody, windowNodeBody, windowProjectBody, windowQueueBody, windowNodeParams, windowRenameBody, WINDOW_EVENT_KEYS } from '../schemas';
 
 /** Who the window's writes are recorded as: fixed here, never taken from a header. */
 const ACTOR = 'window';
@@ -30,8 +30,19 @@ function notInBacklog(ctx: Ctx, projectId: number, n: TreeNode): string | null {
 }
 
 /**
- * The window's own writes: archive, unarchive, rename, delete and restore, behind requireUi (the window has no bearer
- * token). Delete and restore exist only here, never in MCP or the bearer API. Archive, unarchive and rename are the
+ * The session driving `n` now, or null: the one its driver column names, if it still has `n` as its focus and is live
+ * (not ended, seen within STALE_SESSION_MS). The same live rule as notInBacklog.
+ */
+function liveDriver(ctx: Ctx, n: TreeNode): string | null {
+  if (n.driverSessionId === null) return null;
+  const cutoff = new Date(Date.parse(ctx.now()) - STALE_SESSION_MS).toISOString();
+  const live = ctx.db.prepare("SELECT 1 FROM sessions WHERE id = ? AND focus_node_id = ? AND state != 'ended' AND last_seen_at >= ?").get(n.driverSessionId, n.id, cutoff) !== undefined;
+  return live ? n.driverSessionId : null;
+}
+
+/**
+ * The window's own writes: archive, unarchive, rename, delete and restore, and a step's Done from Now, behind requireUi
+ * (the window has no bearer token). Delete and restore exist only here, never in MCP or the bearer API. Archive, unarchive and rename are the
  * scribe's update_project, with the same effects, and answer the same whether or not anything changed. Delete takes an
  * active project or an archived one (an active one is archived in the same write); delete and restore answer 409 on the
  * wrong state: already deleted, or not deleted.
@@ -122,6 +133,27 @@ export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: 
       const why = notInBacklog(ctx, projectId, n);
       if (why) throw badRequest(`#${node} ${why}`, 'Reload the window.');
     });
+  });
+  // Done on a Now box, with an optional outcome. A step with open steps under it is refused, and so is one a live session
+  // now drives unless the window named that session (its `driver`); that session keeps its focus. Already done answers
+  // as it stands. Checked inside finishNode's own write, so a step changed in between cannot slip through.
+  app.post('/api/ui/projects/:id/nodes/:node/done', guarded, async (req) => {
+    const { node } = windowNodeParams.parse(req.params);
+    const { slug, outcome, driver } = windowDoneBody.parse(req.body);
+    const projectId = targetBySlug(req.params, slug);
+    // A deleted project is not found (404), as for the delete route.
+    resolveProject(ctx, projectId);
+    const done = finishNode(ctx, ACTOR, node, outcome, (n) => {
+      if (n.projectId !== projectId) throw badRequest(`#${node} is not in this project`, 'Reload the window.');
+      if (n.parentId === null) throw badRequest(`#${node} is the project root`, 'Reload the window.');
+      if (n.status === 'done') return;
+      if (n.status === 'dropped') throw badRequest(`#${node} is dropped`, 'Reload the window.');
+      const open = ctx.db.prepare("SELECT id FROM nodes WHERE parent_id = ? AND status NOT IN ('done', 'dropped') ORDER BY id").all(n.id) as { id: number }[];
+      if (open.length) throw badRequest(`#${node} has open steps under it: ${open.map((o) => `#${o.id}`).join(', ')}`, 'Finish or drop them first.');
+      const live = liveDriver(ctx, n);
+      if (live !== null && live !== driver) throw conflict(`A session is driving #${node} now`, 'Look again: the box names it.');
+    });
+    return { node: done };
   });
   // Idempotent (spec 1.2): clearing twice answers the same; a 404 for an ask that does not exist.
   app.post('/api/ui/asks/:id/clear', guarded, async (req) => {

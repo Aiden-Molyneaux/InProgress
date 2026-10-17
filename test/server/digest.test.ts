@@ -62,6 +62,33 @@ describe('readDigest: done, asks, documents', () => {
     expect(d.done.map((n) => [n.id, n.outcome])).toEqual([[late.id, 'inside']]);
   });
 
+  it('ends the Done line with (you) for a step the window closed, with and without an outcome, and not for the scribe', () => {
+    const { ctx, project, group, t0 } = setup();
+    const [withOut, bare, scribe] = addNodes(ctx, 'test', { parentId: group.id, nodes: [{ title: 'With' }, { title: 'Bare' }, { title: 'Scribe' }] });
+    setClock(ctx, t0 + 1 * DAY);
+    updateNode(ctx, 'window', withOut.id, { status: 'done', outcome: 'Shipped' });
+    updateNode(ctx, 'window', bare.id, { status: 'done' });
+    updateNode(ctx, 'scribe:x', scribe.id, { status: 'done', outcome: 'Merged' });
+    const d = readDigest(ctx, project.slug, iso(t0));
+    expect(d.done.map((n) => [n.id, n.byYou])).toEqual([[withOut.id, true], [bare.id, true], [scribe.id, false]]);
+    const text = formatDigest(d, t0 + 2 * DAY, { all: true });
+    expect(text).toContain(`#${withOut.id} With: "Shipped" (you)`);
+    expect(text).toContain(`#${bare.id} Bare (you)`);
+    expect(text).toContain(`#${scribe.id} Scribe: "Merged"`);
+    expect(text).not.toContain('"Merged" (you)');
+  });
+
+  it('reads a step the window closed, reopened and the scribe closed again as not his', () => {
+    const { ctx, project, group, t0 } = setup();
+    const [step] = addNodes(ctx, 'test', { parentId: group.id, nodes: [{ title: 'Again' }] });
+    setClock(ctx, t0 + 1 * DAY);
+    updateNode(ctx, 'window', step.id, { status: 'done' });
+    updateNode(ctx, 'test', step.id, { status: 'active' });
+    updateNode(ctx, 'scribe:x', step.id, { status: 'done', outcome: 'Redone' });
+    const d = readDigest(ctx, project.slug, iso(t0));
+    expect(d.done.map((n) => [n.id, n.byYou])).toEqual([[step.id, false]]);
+  });
+
   it('lists an ask raised and one cleared with an answer, from the table', () => {
     const { ctx, project, group, t0 } = setup();
     const [step] = addNodes(ctx, 'test', { parentId: group.id, nodes: [{ title: 'Pick a port' }] });

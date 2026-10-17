@@ -157,17 +157,33 @@ export interface NodePatch {
  * and hue predate this write. Only a snapshot (or a read after the write) carries the current values.
  */
 export function updateNode(ctx: Ctx, actor: string, id: number, patch: NodePatch): TreeNode {
+  return write(ctx, actor, (record) => patchWithAsks(ctx, record, actor, requireNode(ctx, id), patch));
+}
+
+/** The body of updateNode, inside a write() already open: the drop and question-node ask clearing, then patchNode. */
+function patchWithAsks(ctx: Ctx, record: RecordEvent, actor: string, before: TreeNode, patch: NodePatch): TreeNode {
+  // Before patchNode, so node.updated stays the project's newest event (the activity strip shows it).
+  if (patch.status === 'dropped' && before.status !== 'dropped') {
+    // A dropped step's asks are moot (spec 1.2); a finished one's stay, a review ask most of all.
+    clearNodeAsks(ctx, record, actor, before.id);
+  } else if ((patch.kind ?? before.kind) === 'question' && patch.status === 'done' && before.status !== 'done') {
+    // A question node and its migrated ask are one question: finishing the node answers the ask.
+    clearNodeAsks(ctx, record, actor, before.id, (patch.outcome ?? before.outcome).trim());
+  }
+  return patchNode(ctx, record, before, patch);
+}
+
+/**
+ * The window's Done: marks step `id` done, with `outcome` when it has text (an empty one leaves any existing outcome as
+ * it is). `check` runs on the step as read inside the write. A step already done answers as it stands and writes nothing.
+ */
+export function finishNode(ctx: Ctx, actor: string, id: number, outcome: string | undefined, check: (before: TreeNode) => void): TreeNode {
   return write(ctx, actor, (record) => {
     const before = requireNode(ctx, id);
-    // Before patchNode, so node.updated stays the project's newest event (the activity strip shows it).
-    if (patch.status === 'dropped' && before.status !== 'dropped') {
-      // A dropped step's asks are moot (spec 1.2); a finished one's stay, a review ask most of all.
-      clearNodeAsks(ctx, record, actor, id);
-    } else if ((patch.kind ?? before.kind) === 'question' && patch.status === 'done' && before.status !== 'done') {
-      // A question node and its migrated ask are one question: finishing the node answers the ask.
-      clearNodeAsks(ctx, record, actor, id, (patch.outcome ?? before.outcome).trim());
-    }
-    return patchNode(ctx, record, before, patch);
+    check(before);
+    if (before.status === 'done') return before;
+    const text = outcome?.trim() ?? '';
+    return patchWithAsks(ctx, record, actor, before, text ? { status: 'done', outcome: text } : { status: 'done' });
   });
 }
 

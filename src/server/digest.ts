@@ -35,7 +35,8 @@ export interface Digest {
   /** The window start: --since, else the state note's updatedAt, else 7 days ago. */
   since: string;
   sinceSource: 'given' | 'state_note' | 'default';
-  done: { id: number; title: string; outcome: string; completedAt: string }[];
+  /** byYou: the window closed the step (its last move to done was by actor 'window'). */
+  done: { id: number; title: string; outcome: string; completedAt: string; byYou: boolean }[];
   asksRaised: Ask[];
   asksCleared: Ask[];
   /** Sessions started, or ended (by MIN(ended_at, last_seen_at)), in the window; ended ones within the 7-day trail only. */
@@ -68,7 +69,7 @@ function parseData(text: string): Record<string, unknown> {
   }
 }
 
-/** The digest of one project since a time. Reads tables, and events only for the window's own moves and quick-adds (spec 1.7). Never call inside a write(): the snapshot read may expire stale sessions. */
+/** The digest of one project since a time. Reads tables, and events only for the window's own moves and quick-adds, and for which done steps the window closed (spec 1.7). Never call inside a write(): the snapshot read may expire stale sessions. */
 export function readDigest(ctx: Ctx, ref: string | number, since?: string): Digest {
   const project = resolveProject(ctx, ref);
   const snapshot: ProjectSnapshot = getProjectSnapshot(ctx, project.id);
@@ -87,10 +88,17 @@ export function readDigest(ctx: Ctx, ref: string | number, since?: string): Dige
   }
   const trailCutoff = new Date(nowMs - TRAIL_MS).toISOString();
 
+  // The last move to done per step wins, so a step the window closed, reopened and the scribe closed again reads as not Aiden's.
+  const closers = new Map<number, string>();
+  const closings = ctx.db
+    .prepare("SELECT entity_id, actor FROM events WHERE project_id = ? AND type = 'node.updated' AND ts >= ? AND json_extract(data, '$.changes.status.to') = 'done' ORDER BY id")
+    .all(project.id, from) as { entity_id: string; actor: string }[];
+  for (const c of closings) closers.set(Number(c.entity_id), c.actor);
+
   const done = snapshot.nodes
     .filter((n): n is typeof n & { completedAt: string } => n.parentId !== null && n.status === 'done' && n.completedAt !== null && n.completedAt >= from)
     .sort((a, b) => a.completedAt.localeCompare(b.completedAt) || a.id - b.id)
-    .map((n) => ({ id: n.id, title: n.title, outcome: n.outcome, completedAt: n.completedAt }));
+    .map((n) => ({ id: n.id, title: n.title, outcome: n.outcome, completedAt: n.completedAt, byYou: closers.get(n.id) === 'window' }));
 
   const handoffSessions = new Set(snapshot.resources.filter((r) => r.purpose === 'handoff' && r.sessionId !== null).map((r) => r.sessionId as string));
   const rows = ctx.db
@@ -262,7 +270,7 @@ function sections(d: Digest, now: number): Section[] {
   return [
     {
       title: 'Done',
-      items: d.done.map((n) => `#${n.id} ${clip(n.title, 60)}${n.outcome.trim() ? `: "${clip(n.outcome)}"` : ''}`),
+      items: d.done.map((n) => `#${n.id} ${clip(n.title, 60)}${n.outcome.trim() ? `: "${clip(n.outcome)}"` : ''}${n.byYou ? ' (you)' : ''}`),
     },
     {
       title: 'Asks raised',
