@@ -133,13 +133,16 @@ function readLock(file) {
 
 /**
  * Takes the deploy lock at `file` (created only if absent, so two deploys can't both take it), recording `info` and
- * this process's pid. Returns `{ release }` when taken, else `{ holder }`: what the running deploy recorded. A lock
- * whose pid has exited (a deploy killed mid-run) is taken over. Two deploys taking over the same dead lock in the same
- * instant could both get it; that needs a crash and then a tie, so it is left.
+ * this process's pid. Returns `{ release, tookOver }` when taken, else `{ holder }`: what the running deploy recorded.
+ * A lock whose pid has exited (a deploy killed mid-run) is taken over and returned as `tookOver`, so the deploy can say
+ * so: killing a deploy's node alone can leave its tests running. A lock holding our own pid is a dead deploy's whose
+ * pid Windows reused. Two deploys taking over the same dead lock in the same instant could both get it; that needs a
+ * crash and then a tie, so it is left.
  */
 export function acquireLock({ file, info, pid = process.pid, isAlive = pidAlive }) {
   const mine = JSON.stringify({ ...info, pid });
   mkdirSync(dirname(file), { recursive: true });
+  let tookOver = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       writeFileSync(file, mine, { flag: 'wx' });
@@ -148,32 +151,45 @@ export function acquireLock({ file, info, pid = process.pid, isAlive = pidAlive 
         try {
           if (readFileSync(file, 'utf8') === mine) rmSync(file, { force: true });
         } catch {
-          // Already gone.
+          // Gone, or could not be removed: the next deploy takes over a lock whose pid has exited.
         }
       };
-      return { release };
+      return { release, tookOver };
     } catch (err) {
       if (err.code !== 'EEXIST') throw err;
     }
-    const holder = readLock(file);
+    let holder = readLock(file);
+    if (holder && !Number.isInteger(holder.pid)) {
+      // Caught between the holder's create and its write: look again before calling it unreadable.
+      sleep(100);
+      holder = readLock(file);
+    }
     if (holder === null) continue; // released between the two calls
-    if (!Number.isInteger(holder.pid) || isAlive(holder.pid)) return { holder };
+    if (!Number.isInteger(holder.pid) || (holder.pid !== pid && isAlive(holder.pid))) return { holder };
     rmSync(file, { force: true });
+    tookOver = holder;
   }
   return { holder: readLock(file) ?? {} };
 }
+
+/** A lock's deploy as words: `a deploy of 31e6b56 (main), pid 101`. */
+const lockedDeploy = (holder) =>
+  `${holder.kind === 'rollback' ? 'a rollback' : 'a deploy'}${holder.sha ? ` of ${holder.sha}` : ''}${holder.branch ? ` (${holder.branch})` : ''}, pid ${holder.pid}`;
+
+/** What a deploy prints when it took over a dead one's lock. */
+export const lockTakenOverMessage = (holder) =>
+  `Took over the lock of ${lockedDeploy(holder)}, started ${holder.startedAt ?? 'at an unknown time'}, which has exited. If its tests are still running, .build and port 4399 are in use.`;
 
 /** What a refused deploy prints: which deploy holds the lock, since when, and what to do. */
 export function lockHeldMessage(holder, file, now = Date.now()) {
   if (!Number.isInteger(holder.pid)) {
     return `Another deploy holds ${file}, but its lock could not be read. If no deploy or rollback is running, delete it and run again.`;
   }
-  const what = `${holder.kind === 'rollback' ? 'a rollback' : 'a deploy'}${holder.sha ? ` of ${holder.sha}` : ''}${holder.branch ? ` (${holder.branch})` : ''}`;
   const started = Date.parse(holder.startedAt);
   const mins = Math.floor((now - started) / 60000);
   const when = Number.isNaN(started) ? '' : `, started ${holder.startedAt} (${mins < 1 ? 'under a minute' : `${mins} min`} ago)`;
   return [
-    `Another deploy is running: ${what}, pid ${holder.pid}${when}.`,
+    `Another deploy is running: ${lockedDeploy(holder)}${when}.`,
     'Wait for it to finish, then run this again. Two at once share .build and port 4399, so this one stops here and changes nothing.',
     `If pid ${holder.pid} is not a deploy, delete ${file} and run again.`,
   ].join('\n');

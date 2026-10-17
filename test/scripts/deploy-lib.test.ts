@@ -1,8 +1,10 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
-import { acquireLock, lockHeldMessage, pidAlive, promote, restartCheck, suitesFor, swapWithPrev } from '../../scripts/deploy-lib.mjs';
+import { acquireLock, lockHeldMessage, lockTakenOverMessage, pidAlive, promote, restartCheck, suitesFor, swapWithPrev } from '../../scripts/deploy-lib.mjs';
 
 const temps: string[] = [];
 afterAll(() => {
@@ -171,7 +173,23 @@ describe('the lock that keeps two deploys apart', () => {
     acquireLock({ file, info, pid: 101 });
     const next = acquireLock({ file, info: { ...info, kind: 'rollback' }, pid: 202, isAlive: (pid) => pid !== 101 });
     expect(next.release).toBeTypeOf('function');
+    expect(next.tookOver).toEqual({ ...info, pid: 101 });
     expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ kind: 'rollback', pid: 202 });
+    expect(lockTakenOverMessage(next.tookOver!)).toBe(
+      'Took over the lock of a deploy of 31e6b56 (main), pid 101, started 2026-10-16T14:00:00.000Z, which has exited. If its tests are still running, .build and port 4399 are in use.',
+    );
+  });
+
+  it('a lock holding our own pid is a dead deploy whose pid was reused, and is taken over', () => {
+    const file = lockFile();
+    acquireLock({ file, info, pid: 101 });
+    const next = acquireLock({ file, info, pid: 101, isAlive: () => true });
+    expect(next.release).toBeTypeOf('function');
+    expect(next.tookOver).toMatchObject({ pid: 101 });
+  });
+
+  it('a free lock is taken with nothing taken over', () => {
+    expect(acquireLock({ file: lockFile(), info, pid: 101 }).tookOver).toBeNull();
   });
 
   it('release leaves a lock another deploy took over', () => {
@@ -208,5 +226,23 @@ describe('the lock that keeps two deploys apart', () => {
       'a rollback, pid 7, started 2026-10-16T14:00:00.000Z (under a minute ago).',
     );
     expect(lockHeldMessage({}, 'f')).toBe('Another deploy holds f, but its lock could not be read. If no deploy or rollback is running, delete it and run again.');
+  });
+});
+
+describe('deploy.mjs and the lock', () => {
+  it('refuses before touching anything while another deploy holds the lock, and leaves that lock alone', () => {
+    // A copy in a temp folder: the refusal exits before any npm, git-changing or server step.
+    const repo = mkdtempSync(join(tmpdir(), 'ip-deploy-run-'));
+    temps.push(repo);
+    mkdirSync(join(repo, 'scripts'));
+    for (const name of ['deploy.mjs', 'deploy-lib.mjs']) copyFileSync(fileURLToPath(new URL(`../../scripts/${name}`, import.meta.url)), join(repo, 'scripts', name));
+    mkdirSync(join(repo, '.deploy'));
+    const held = JSON.stringify({ kind: 'deploy', sha: '31e6b56', branch: 'main', startedAt: new Date().toISOString(), pid: process.pid });
+    writeFileSync(join(repo, '.deploy', 'lock'), held);
+    const run = spawnSync(process.execPath, [join(repo, 'scripts', 'deploy.mjs')], { cwd: repo, encoding: 'utf8' });
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain(`Another deploy is running: a deploy of 31e6b56 (main), pid ${process.pid}, started`);
+    expect(run.stdout).not.toContain('Type checks');
+    expect(readFileSync(join(repo, '.deploy', 'lock'), 'utf8')).toBe(held);
   });
 });
