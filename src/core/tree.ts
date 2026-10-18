@@ -1,3 +1,4 @@
+import { clipLine } from './step-ref';
 import { glyphTitle, type Session, type TreeNode } from './types';
 
 export type FoldOverrides = Record<string, 'open' | 'closed'>;
@@ -28,8 +29,9 @@ export function buildIndex(nodes: TreeNode[]): TreeIndex {
 
 export const kids = (index: TreeIndex, id: number): TreeNode[] => index.children.get(id) ?? [];
 
-export function isNeedsYou(n: Pick<TreeNode, 'assignee' | 'status'>): boolean {
-  return n.assignee === 'me' && (n.status === 'todo' || n.status === 'active' || n.status === 'blocked');
+/** Aiden's own open step. `shelved` (the step is parked or under a parked one) makes it false: set-aside work needs nobody. */
+export function isNeedsYou(n: Pick<TreeNode, 'assignee' | 'status'>, shelved = false): boolean {
+  return !shelved && n.assignee === 'me' && (n.status === 'todo' || n.status === 'active' || n.status === 'blocked');
 }
 
 export function ancestors(index: TreeIndex, id: number): TreeNode[] {
@@ -45,9 +47,23 @@ export function ancestors(index: TreeIndex, id: number): TreeNode[] {
 }
 
 export function progress(index: TreeIndex, id: number): { done: number; total: number } | null {
-  const list = kids(index, id).filter((c) => c.status !== 'dropped');
+  const list = kids(index, id).filter((c) => c.status !== 'dropped' && c.status !== 'parked');
   if (list.length === 0) return null;
   return { done: list.filter((c) => c.status === 'done').length, total: list.length };
+}
+
+/** The shelved steps: every node that is parked or has a parked ancestor. The root is never parked. */
+export function shelvedIds(index: TreeIndex): Set<number> {
+  const out = new Set<number>();
+  const walk = (id: number, shelved: boolean) => {
+    for (const k of kids(index, id)) {
+      const here = shelved || k.status === 'parked';
+      if (here) out.add(k.id);
+      walk(k.id, here);
+    }
+  };
+  if (index.root) walk(index.root.id, false);
+  return out;
 }
 
 export function countDone(index: TreeIndex, id: number): number {
@@ -72,8 +88,10 @@ export function pinnedIds(index: TreeIndex, sessions: SessionLike[], extra: Iter
       cur = cur.parentId === null ? undefined : index.byId.get(cur.parentId);
     }
   };
+  // A shelved step is set aside, so its status pins nothing; only a session's focus keeps it in view.
+  const shelved = shelvedIds(index);
   for (const n of index.byId.values()) {
-    if (n.parentId !== null && (n.status === 'active' || isNeedsYou(n))) pin(n.id);
+    if (n.parentId !== null && !shelved.has(n.id) && (n.status === 'active' || isNeedsYou(n))) pin(n.id);
   }
   for (const s of sessions) if (s.state !== 'ended' && s.focusNodeId !== null) pin(s.focusNodeId);
   for (const id of extra) pin(id);
@@ -142,7 +160,7 @@ export function computeVisible(index: TreeIndex, sessions: SessionLike[], opts: 
     if (opts.noFold || kids(index, n.id).length === 0) return false;
     const manual = overrides[`n:${n.id}`];
     if (manual) return manual === 'closed';
-    return (n.status === 'done' || n.status === 'dropped') && !pinned.has(n.id);
+    return (n.status === 'done' || n.status === 'dropped' || n.status === 'parked') && !pinned.has(n.id);
   };
 
   /** The children the far todo tail hides, whether or not its "+n more" is open. */
@@ -200,16 +218,17 @@ export function computeVisible(index: TreeIndex, sessions: SessionLike[], opts: 
   return out;
 }
 
-export function statusLabel(n: TreeNode): string {
-  if (!isNeedsYou(n)) return n.status;
+export function statusLabel(n: TreeNode, shelved = false): string {
+  if (n.status === 'parked') return `parked: ${clipLine(n.parkedReason, 80)}`;
+  if (!isNeedsYou(n, shelved)) return n.status;
   return n.status === 'todo' ? 'NEEDS YOU' : `NEEDS YOU (${n.status})`;
 }
 
-export function nodeLine(index: TreeIndex, n: TreeNode, resourcesByNode?: Map<number, number[]>): string {
+export function nodeLine(index: TreeIndex, n: TreeNode, resourcesByNode?: Map<number, number[]>, shelved?: ReadonlySet<number>): string {
   const kind = n.parentId === null || n.kind === 'task' ? '' : ` (${n.kind})`;
   const prog = progress(index, n.id);
   const res = resourcesByNode?.get(n.id);
-  return `#${n.id} ${glyphTitle(n)}${kind} · ${statusLabel(n)}${prog ? ` (${prog.done}/${prog.total})` : ''}${res?.length ? ` [${res.map((r) => `r${r}`).join(', ')}]` : ''}`;
+  return `#${n.id} ${glyphTitle(n)}${kind} · ${statusLabel(n, shelved?.has(n.id) ?? false)}${prog ? ` (${prog.done}/${prog.total})` : ''}${res?.length ? ` [${res.map((r) => `r${r}`).join(', ')}]` : ''}`;
 }
 
 export interface OutlineOptions {
@@ -219,11 +238,12 @@ export interface OutlineOptions {
 }
 
 export function renderOutline(index: TreeIndex, sessions: SessionLike[], opts: OutlineOptions = {}): string {
+  const shelved = shelvedIds(index);
   return computeVisible(index, sessions, { overrides: opts.overrides, noFold: opts.full })
     .map((item) => {
       const pad = '  '.repeat(item.depth);
       if (item.type === 'more') return `${pad}+${item.hiddenIds.length} more: ${item.hiddenIds.map((id) => `#${id}`).join(', ')}`;
-      const line = nodeLine(index, item.node, opts.resourcesByNode);
+      const line = nodeLine(index, item.node, opts.resourcesByNode, shelved);
       return item.folded ? `${pad}${line} · ${countDone(index, item.node.id)} done inside (folded)` : `${pad}${line}`;
     })
     .join('\n');

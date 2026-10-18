@@ -5,7 +5,7 @@ import { ENDED_AGENT_MS, READER_AGENT_TYPES, isReader, type CommandInfo, type Ev
 let nextId = 1;
 function n(parentId: number | null, title: string, extra: Partial<TreeNode> = {}): TreeNode {
   const id = nextId++;
-  return { id, projectId: 1, parentId, position: id, kind: parentId === null ? 'goal' : 'task', title, body: '', status: 'todo', assignee: 'claude', outcome: '', label: null, createdAt: 't', updatedAt: `2026-09-27T00:00:${String(id).padStart(2, '0')}Z`, completedAt: null, driverSessionId: null, boardState: null, stateSince: null, hue: null, ...extra };
+  return { id, projectId: 1, parentId, position: id, kind: parentId === null ? 'goal' : 'task', title, body: '', status: 'todo', assignee: 'claude', outcome: '', label: null, createdAt: 't', updatedAt: `2026-09-27T00:00:${String(id).padStart(2, '0')}Z`, completedAt: null, driverSessionId: null, boardState: null, stateSince: null, hue: null, parkedReason: '', parkedWhere: '', parkedAt: null, ...extra };
 }
 function session(id: string, focusNodeId: number | null, state: Session['state'], lastSeenAt = '2026-09-27T01:00:00Z'): Session {
   return { id, projectId: 1, title: id, cwd: null, branch: null, transcriptPath: null, state, focusNodeId, promptsSinceUpdate: 0, startedAt: 't', lastSeenAt, endedAt: null, slot: 0, role: 'worker', subagents: [], commands: [] };
@@ -1133,5 +1133,37 @@ describe('findFrontier with busy sessions', () => {
     const l = layoutOutline({ nodes: t.nodes, resources: [], sessions: [], now: T0 });
     const serving = withCommands(session('s1', t.b.id, 'idle'), [command('b1', { commandHead: 'npm run dev' })]);
     expect(findFrontier(t.nodes, [serving], l, later(t.d.id), T0)).toBe(t.d.id);
+  });
+});
+
+describe('parked steps', () => {
+  it('a parked step folds its subtree', () => {
+    nextId = 1;
+    const root = n(null, 'Root', { status: 'active' });
+    const phase = n(root.id, 'Phase', { status: 'parked', parkedReason: 'later' });
+    const child = n(phase.id, 'Child', { status: 'active' });
+    const l = layoutOutline({ nodes: [root, phase, child], resources: [], sessions: [] });
+    const ids = l.items.filter((i): i is LayoutItem & { kind: 'node' } => i.kind === 'node').map((i) => i.id);
+    expect(ids).toContain(`n${phase.id}`);
+    expect(ids).not.toContain(`n${child.id}`);
+  });
+
+  it('queueView leaves out a parked step and a step under one', () => {
+    nextId = 1;
+    const root = n(null, 'Root');
+    const phase = n(root.id, 'Phase', { status: 'parked' });
+    const under = n(phase.id, 'Under');
+    const ok = n(root.id, 'Ok');
+    expect(queueView(later(under.id, phase.id, ok.id), [root, phase, under, ok], []).unowned).toEqual([ok.id]);
+  });
+
+  it('a child of Aiden under a parked phase opened by an override is not needs-you', () => {
+    nextId = 1;
+    const root = n(null, 'Root', { status: 'active' });
+    const phase = n(root.id, 'Phase', { status: 'parked', parkedReason: 'later' });
+    const mine = n(phase.id, 'Mine', { assignee: 'me' });
+    const l = layoutOutline({ nodes: [root, phase, mine], resources: [], sessions: [], overrides: { ['n:' + phase.id]: 'open' } });
+    const item = l.items.find((x): x is LayoutItem & { kind: 'node' } => x.kind === 'node' && x.nodeId === mine.id)!;
+    expect(item.needsYou).toBe(false);
   });
 });

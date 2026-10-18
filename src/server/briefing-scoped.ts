@@ -4,7 +4,7 @@ import { deriveBoard } from '../core/board';
 import { clipLine } from '../core/step-ref';
 import { ASK_GLYPHS, askTag, glyphTitle, sessionDisplayTitle, type ProjectSnapshot, type Session, type TreeNode } from '../core/types';
 import { claimCommand } from '../lib/task-command';
-import { PLAN_EDIT_LINE, bodyLines, headerLine, leftUnfinishedOn, lineFor, openTasks, othersLine, playbookLines, spanAgo, updateRules, type BriefingOptions } from './briefing';
+import { PLAN_EDIT_LINE, bodyLines, headerLine, leftUnfinishedOn, lineFor, openTasks, othersLine, parkedFocusLine, playbookLines, spanAgo, updateRules, type BriefingOptions } from './briefing';
 
 /*
  * The scoped renderers of spec 3.4. briefing.ts dispatches to them by role and mode, and they use its line builders, so
@@ -37,6 +37,8 @@ export function stepBlock(snapshot: ProjectSnapshot, nodeId: number, session: Se
   for (const k of open.slice(0, MAX_CHILD_LINES)) lines.push(`    ${lineFor(index, k, new Map())}`);
   if (open.length > MAX_CHILD_LINES) lines.push(`    +${open.length - MAX_CHILD_LINES} more open`);
   for (const t of openTasks(snapshot.workItems, nodeId).slice(0, MAX_TASK_LINES)) lines.push(`    ${t.status === 'in_progress' ? '◐' : '○'} ${t.subject}`);
+  const parkedFocus = parkedFocusLine(snapshot, session);
+  if (parkedFocus && session.focusNodeId === nodeId) lines.push(parkedFocus);
 
   const row = deriveBoard(snapshot, now).byId.get(nodeId);
   // Who drives the step (spec 1.4): none when no live session does.

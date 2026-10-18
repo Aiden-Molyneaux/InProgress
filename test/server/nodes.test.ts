@@ -5,6 +5,7 @@ import { listEventsSince, maxEventId } from '../../src/server/repo/events';
 import { addLog } from '../../src/server/repo/logs';
 import { addNodes, deleteNode, insertPositions, listNodes, moveNode, patchNode, requireNode, setDriver, updateNode } from '../../src/server/repo/nodes';
 import { addResource } from '../../src/server/repo/resources';
+import { listProjectAsks, raiseAsk } from '../../src/server/repo/asks';
 import { makeCtx } from '../helpers';
 
 function setup() {
@@ -189,5 +190,82 @@ describe('patchNode, the update inside an open write', () => {
     const unchanged = maxEventId(ctx);
     write(ctx, 't', (record) => setDriver(ctx, record, requireNode(ctx, n.id), 's1'));
     expect(listEventsSince(ctx, unchanged)).toEqual([]);
+  });
+});
+
+describe('parked steps', () => {
+  /** The error `fn` throws, so a test can read its message and hint. */
+  const thrown = (fn: () => unknown): { message?: string; hint?: string; status?: number } => {
+    try {
+      fn();
+    } catch (err) {
+      return err as { message?: string; hint?: string; status?: number };
+    }
+    throw new Error('it did not throw');
+  };
+
+  it('parking needs a reason', () => {
+    const { ctx, root } = setup();
+    const [n] = addNodes(ctx, 't', { parentId: root, nodes: [{ title: 'Spike' }] });
+    for (const parkedReason of [undefined, '', '   ']) {
+      const err = thrown(() => updateNode(ctx, 't', n.id, { status: 'parked', ...(parkedReason === undefined ? {} : { parkedReason }) }));
+      expect(err).toMatchObject({ status: 400, message: 'parked_reason is required to park a step', hint: 'Say why it is set aside.' });
+    }
+    expect(requireNode(ctx, n.id).status).toBe('todo');
+  });
+
+  it('parking sets parked_at, clears the driver and the open asks', () => {
+    const { ctx, root } = setup();
+    const [n] = addNodes(ctx, 't', { parentId: root, nodes: [{ title: 'InThink feature', status: 'active' }] });
+    write(ctx, 't', (record) => setDriver(ctx, record, requireNode(ctx, n.id), 's1'));
+    raiseAsk(ctx, 'w', { nodeId: n.id, kind: 'question', text: 'Merge it?' });
+    const mark = maxEventId(ctx);
+    const parked = updateNode(ctx, 'scribe:s1', n.id, { status: 'parked', parkedReason: '  Not merging for now  ', parkedWhere: ' branch inthink-x ' });
+    expect(parked).toMatchObject({ status: 'parked', parkedReason: 'Not merging for now', parkedWhere: 'branch inthink-x', parkedAt: expect.any(String), driverSessionId: null, completedAt: null });
+    expect(parked.parkedAt).toBe(parked.updatedAt);
+    expect(listProjectAsks(ctx, n.projectId).filter((a) => a.nodeId === n.id && a.clearedAt === null)).toEqual([]);
+    const updated = listEventsSince(ctx, mark).filter((e) => e.type === 'node.updated').at(-1)!;
+    expect(updated.data).toMatchObject({ changes: { status: { from: 'active', to: 'parked' }, parkedReason: { from: '', to: 'Not merging for now' }, parkedWhere: { from: '', to: 'branch inthink-x' }, parkedAt: { from: null, to: parked.parkedAt } } });
+    // Staying parked edits the reason and where, and keeps parked_at.
+    const parkedAt = parked.parkedAt;
+    const edited = updateNode(ctx, 't', n.id, { parkedReason: 'Waiting on InThink v2' });
+    expect(edited).toMatchObject({ status: 'parked', parkedReason: 'Waiting on InThink v2', parkedWhere: 'branch inthink-x', parkedAt });
+    expect(thrown(() => updateNode(ctx, 't', n.id, { status: 'parked', parkedReason: ' ' })).message).toBe('parked_reason is required to park a step');
+  });
+
+  it('parking refuses the root and a done step', () => {
+    const { ctx, root } = setup();
+    const [done, dropped] = addNodes(ctx, 't', { parentId: root, nodes: [{ title: 'Done', status: 'done' }, { title: 'Dropped', status: 'dropped' }] });
+    expect(thrown(() => updateNode(ctx, 't', root, { status: 'parked', parkedReason: 'x' })).message).toBe(`#${root} is the project root; only a step can be parked`);
+    expect(thrown(() => updateNode(ctx, 't', done.id, { status: 'parked', parkedReason: 'x' })).message).toBe(`#${done.id} is done; only an open step can be parked`);
+    expect(thrown(() => updateNode(ctx, 't', dropped.id, { status: 'parked', parkedReason: 'x' })).message).toBe(`#${dropped.id} is dropped; only an open step can be parked`);
+    expect(requireNode(ctx, done.id).status).toBe('done');
+  });
+
+  it('leaving parked clears the parked fields', () => {
+    const { ctx, root } = setup();
+    const [n] = addNodes(ctx, 't', { parentId: root, nodes: [{ title: 'Spike' }] });
+    updateNode(ctx, 't', n.id, { status: 'parked', parkedReason: 'later', parkedWhere: 'wt/spike' });
+    expect(updateNode(ctx, 't', n.id, { status: 'todo' })).toMatchObject({ status: 'todo', parkedReason: '', parkedWhere: '', parkedAt: null });
+    updateNode(ctx, 't', n.id, { status: 'parked', parkedReason: 'later again' });
+    expect(updateNode(ctx, 't', n.id, { status: 'done' })).toMatchObject({ status: 'done', parkedReason: '', parkedWhere: '', parkedAt: null });
+  });
+
+  it('parked_reason without status parked is refused', () => {
+    const { ctx, root } = setup();
+    const [n] = addNodes(ctx, 't', { parentId: root, nodes: [{ title: 'Spike' }] });
+    expect(thrown(() => updateNode(ctx, 't', n.id, { parkedReason: 'why' })).message).toBe('parked_reason only goes with status "parked"');
+    expect(thrown(() => updateNode(ctx, 't', n.id, { parkedWhere: 'branch' })).message).toBe('parked_where only goes with status "parked"');
+    updateNode(ctx, 't', n.id, { status: 'parked', parkedReason: 'later' });
+    // Leaving parked with a reason sent is refused too: the reason would be cleared.
+    expect(thrown(() => updateNode(ctx, 't', n.id, { status: 'todo', parkedReason: 'why' })).message).toBe('parked_reason only goes with status "parked"');
+    expect(requireNode(ctx, n.id).status).toBe('parked');
+  });
+
+  it('add_nodes refuses status parked', () => {
+    const { ctx, root } = setup();
+    const err = thrown(() => addNodes(ctx, 't', { parentId: root, nodes: [{ title: 'Outer', children: [{ title: 'Inner', status: 'parked' }] }] }));
+    expect(err).toMatchObject({ status: 400, message: 'A new step cannot start parked' });
+    expect(listNodes(ctx, requireNode(ctx, root).projectId)).toHaveLength(1);
   });
 });

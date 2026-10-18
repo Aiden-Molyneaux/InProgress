@@ -4,6 +4,10 @@ import { ASK_KINDS, ASSIGNEES, BRIEFING_MODES, COMMAND_KINDS, COMMAND_OUTCOMES, 
 const title = z.string().trim().min(1, 'title is empty').max(200);
 /** A step's type label; null leaves it unlabelled (or clears it on a patch). */
 const label = z.enum(NODE_LABELS, { errorMap: (_issue, ctx) => ({ message: unknownLabel(ctx.data) }) }).nullable().optional();
+/** Why a step is parked: required to park it (the repo refuses an empty one, naming parked_reason). */
+const parkedReason = z.string().trim().max(2_000).optional();
+/** Where a parked step's work lives: a branch, worktree or commit. */
+const parkedWhere = z.string().trim().max(500).optional();
 export const after = z.union([z.number().int().positive(), z.literal('start'), z.literal('end')]).optional();
 
 export const nodeInput: z.ZodType<NodeInput> = z.lazy(() =>
@@ -44,7 +48,7 @@ export const updateProjectBody = z
 export const bindingBody = z.object({ path: z.string().trim().min(1).max(500), branchPattern: z.string().trim().max(200).nullish() }).strict();
 export const addNodesBody = z.object({ parentId: z.number().int().positive(), after, nodes: z.array(nodeInput).min(1).max(200) }).strict();
 export const updateNodeBody = z
-  .object({ title: title.optional(), kind: z.enum(NODE_KINDS).optional(), status: z.enum(NODE_STATUSES).optional(), assignee: z.enum(ASSIGNEES).optional(), body: z.string().max(20_000).optional(), outcome: z.string().max(2_000).optional(), label })
+  .object({ title: title.optional(), kind: z.enum(NODE_KINDS).optional(), status: z.enum(NODE_STATUSES).optional(), assignee: z.enum(ASSIGNEES).optional(), body: z.string().max(20_000).optional(), outcome: z.string().max(2_000).optional(), label, parkedReason, parkedWhere })
   .strict();
 export const moveNodeBody = z.object({ parentId: z.number().int().positive(), after }).strict();
 export const resourceBody = z
@@ -171,6 +175,12 @@ export const windowClearBody = z.object({ answer: z.string().max(2000).optional(
 export const windowDoneBody = z
   .object({ slug: windowProjectBody.shape.slug, outcome: z.string().max(2_000).optional(), driver: z.string().max(100).nullable() })
   .strict();
+/** The window's Park: the slug it shows, why the step is set aside (required; an empty one is refused by the repo), and where its work lives. */
+export const windowParkBody = z
+  .object({ slug: windowProjectBody.shape.slug, reason: z.string().max(2_000), where: z.string().max(500).optional() })
+  .strict();
+/** The window's Unpark; toNext also appends the step to the unowned Next. */
+export const windowUnparkBody = z.object({ slug: windowProjectBody.shape.slug, toNext: z.boolean().optional() }).strict();
 /** The window's measurements (spec 2.6): a name and a little data; keys outside WINDOW_EVENT_KEYS are dropped by the route. */
 export const WINDOW_EVENT_KEYS = ['view', 'gapMs', 'marks', 'area', 'action', 'node'] as const;
 export const windowEventBody = z

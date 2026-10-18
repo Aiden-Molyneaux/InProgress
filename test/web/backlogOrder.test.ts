@@ -14,7 +14,7 @@ const boxes = [box(12, [a]), box(5), box(21, [b]), box(11, [a]), box(30)];
 
 describe('parseOrder and orderKey', () => {
   it('reads the four stored orders and round-trips them', () => {
-    for (const key of ['phase', 'phase-rev', 'id', 'id-rev']) expect(orderKey(parseOrder(key))).toBe(key);
+    for (const key of ['phase', 'phase-rev', 'id', 'id-rev', 'age', 'age-rev']) expect(orderKey(parseOrder(key))).toBe(key);
     expect(parseOrder('id-rev')).toEqual({ by: 'id', reverse: true });
     expect(parseOrder('id-')).toEqual({ by: 'id', reverse: false });
   });
@@ -27,21 +27,21 @@ describe('parseOrder and orderKey', () => {
 });
 
 describe('groupByParent', () => {
-  it('puts the top level first, then parents in order of first appearance', () => {
+  it('puts the top level (No phase) last, after parents in order of first appearance', () => {
     const groups = groupByParent(boxes);
-    expect(groups.map((g) => g.parent?.id ?? null)).toEqual([null, 10, 20]);
-    expect(groups.map((g) => ids(g.boxes))).toEqual([[5, 30], [12, 11], [21]]);
+    expect(groups.map((g) => g.parent?.id ?? null)).toEqual([10, 20, null]);
+    expect(groups.map((g) => ids(g.boxes))).toEqual([[12, 11], [21], [5, 30]]);
   });
 });
 
 describe('backlogSections', () => {
   it('phase forward is the parent grouping', () => {
     const s = backlogSections(boxes, { by: 'phase', reverse: false });
-    expect(s.map((g) => [g.parent?.id ?? null, g.flat, ids(g.boxes)])).toEqual([[null, false, [5, 30]], [10, false, [12, 11]], [20, false, [21]]]);
+    expect(s.map((g) => [g.parent?.id ?? null, g.flat, ids(g.boxes)])).toEqual([[10, false, [12, 11]], [20, false, [21]], [null, false, [5, 30]]]);
   });
   it('phase reverse flips the groups and the rows in each', () => {
     const s = backlogSections(boxes, { by: 'phase', reverse: true });
-    expect(s.map((g) => [g.parent?.id ?? null, ids(g.boxes)])).toEqual([[20, [21]], [10, [11, 12]], [null, [30, 5]]]);
+    expect(s.map((g) => [g.parent?.id ?? null, ids(g.boxes)])).toEqual([[null, [30, 5]], [20, [21]], [10, [11, 12]]]);
   });
   it('id is one flat list, low to high, or high to low in reverse', () => {
     const up = backlogSections(boxes, { by: 'id', reverse: false });

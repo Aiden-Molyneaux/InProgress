@@ -7,7 +7,7 @@ const NOW = Date.parse('2026-10-13T12:00:00Z');
 let n = 0;
 const node = (id: number, parentId: number | null, title: string, status: TreeNode['status'] = 'todo', extra: Partial<TreeNode> = {}): TreeNode => ({
   id, projectId: 1, parentId, position: ++n, kind: 'task', title, body: '', status, assignee: 'claude', outcome: '', label: null,
-  createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z', completedAt: status === 'done' ? '2026-10-10T00:00:00Z' : null, driverSessionId: null, boardState: null, stateSince: null, hue: null, ...extra,
+  createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z', completedAt: status === 'done' ? '2026-10-10T00:00:00Z' : null, driverSessionId: null, boardState: null, stateSince: null, hue: null, parkedReason: '', parkedWhere: '', parkedAt: null, ...extra,
 });
 
 function snap(nodes: TreeNode[], extra: Partial<ProjectSnapshot> = {}): ProjectSnapshot {
@@ -80,5 +80,23 @@ describe('projectSections', () => {
     expect(all[2]!.allDone).toBe(true);
     const finishedTop = snap([root, node(2, 1, 'Open', 'active'), node(3, 2, 'o1'), node(4, 1, 'Loose', 'done')]);
     expect(sections(finishedTop).map((x) => x.title)).toEqual(['Open']);
+  });
+});
+
+describe('projectSections and parked steps', () => {
+  it('shows a parked step as a line with its subtree folded, and leaves it and what is under it out of the counts', () => {
+    const s = snap([root, node(2, 1, 'Alpha', 'active'), node(3, 2, 'open'), node(4, 2, 'Shelf', 'parked'), node(5, 4, 'under shelf'), node(6, 5, 'deeper', 'active')]);
+    const alpha = sections(s)[0]!;
+    expect(alpha.lines.map((l) => (l.kind === 'step' ? l.node.id : 0))).toEqual([3, 4]);
+    expect(alpha.total).toBe(1);
+    expect(alpha.counts).toEqual({ now: 0, next: 0, backlog: 1, done: 0 });
+  });
+  it('a group of done steps and a parked one is not a done group', () => {
+    const s = snap([root, node(2, 1, 'Alpha', 'active'), node(3, 2, 'finished', 'done'), node(4, 2, 'Shelf', 'parked')]);
+    expect(sections(s)[0]!.allDone).toBe(false);
+  });
+  it('a done step holding a parked one is not folded away', () => {
+    const s = snap([root, node(2, 1, 'Alpha', 'active'), node(3, 2, 'phase done', 'done'), node(4, 3, 'Shelf', 'parked'), node(5, 2, 'open')]);
+    expect(sections(s)[0]!.lines.some((l) => l.kind === 'step' && l.node.id === 3)).toBe(true);
   });
 });

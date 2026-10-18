@@ -242,6 +242,28 @@ describe('node done route', () => {
     expect(events[0]).toMatchObject({ actor: 'window', entityId: String(a) });
   });
 
+  it('a parked child does not keep its phase from being marked done, an open one does', async () => {
+    const { ctx, p, post, a } = await setup();
+    const [kid, other] = addNodes(ctx, 'test', { parentId: a, nodes: [{ title: 'Kid' }, { title: 'Other' }] });
+    updateNode(ctx, 'test', kid.id, { status: 'parked', parkedReason: 'later' });
+    const refused = await post(url(p, a), { slug: p.slug, driver: null });
+    expect(refused.statusCode).toBe(400);
+    expect(refused.json().error).toContain(`#${other.id}`);
+    expect(refused.json().error).not.toContain(`#${kid.id}`);
+    updateNode(ctx, 'test', other.id, { status: 'done' });
+    expect((await post(url(p, a), { slug: p.slug, driver: null })).statusCode).toBe(200);
+    expect(row(ctx, a).status).toBe('done');
+  });
+
+  it('a parked step marked done is still held back by its open children', async () => {
+    const { ctx, p, post, a } = await setup();
+    const [kid] = addNodes(ctx, 'test', { parentId: a, nodes: [{ title: 'Kid' }] });
+    updateNode(ctx, 'test', a, { status: 'parked', parkedReason: 'later' });
+    const res = await post(url(p, a), { slug: p.slug, driver: null });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toContain(`#${kid.id}`);
+  });
+
   it('leaves the outcome empty for an empty or whitespace one', async () => {
     const { ctx, p, post, a, b } = await setup();
     expect((await post(url(p, a), { slug: p.slug, driver: null })).statusCode).toBe(200);
@@ -408,6 +430,8 @@ describe('requireUi on the new routes', () => {
       [`/api/ui/projects/${p.id}/nodes`, { slug: p.slug, title: 'X', parent: null }],
       ['/api/ui/asks/1/clear', {}],
       ['/api/ui/events', { name: 'view', projectId: p.id }],
+      [`/api/ui/projects/${p.id}/nodes/${a}/park`, { slug: p.slug, reason: 'x' }],
+      [`/api/ui/projects/${p.id}/nodes/${a}/unpark`, { slug: p.slug, toNext: true }],
     ];
     for (const [url, payload] of routes) {
       for (const headers of [{} as Record<string, string>, { origin: 'http://evil.example', 'x-ip-ui-token': 'ui-token' }, { origin: 'http://localhost:80' }, { origin: 'http://localhost:80', 'x-ip-ui-token': 'wrong' }, auth]) {
@@ -428,5 +452,59 @@ describe('a deleted project', () => {
     const before = ctx.db.prepare('SELECT COUNT(*) FROM nodes WHERE project_id = ?').pluck().get(p.id);
     expect((await post(`/api/ui/projects/${p.id}/nodes`, { slug: p.slug, title: 'Late', parent: null })).statusCode).toBe(404);
     expect(ctx.db.prepare('SELECT COUNT(*) FROM nodes WHERE project_id = ?').pluck().get(p.id)).toBe(before);
+  });
+});
+
+describe('park and unpark routes', () => {
+  it('POST park parks with reason and where', async () => {
+    const { ctx, p, post, queue, a, b } = await setup();
+    await queue({ kind: 'move', node: a, before: null });
+    const mark = maxEventId(ctx);
+    const res = await post(`/api/ui/projects/${p.id}/nodes/${a}/park`, { slug: p.slug, reason: '  Not merging InThink yet ', where: 'branch inthink-feature' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().node).toMatchObject({ id: a, status: 'parked', parkedReason: 'Not merging InThink yet', parkedWhere: 'branch inthink-feature', parkedAt: expect.any(String) });
+    expect(listEventsSince(ctx, mark).find((e) => e.type === 'node.updated')).toMatchObject({ actor: 'window' });
+    // Out of Next.
+    expect(JSON.parse(ctx.db.prepare('SELECT queue FROM projects WHERE id = ?').pluck().get(p.id) as string)).toEqual([]);
+    // A reason is required, and where is optional.
+    const empty = await post(`/api/ui/projects/${p.id}/nodes/${b}/park`, { slug: p.slug, reason: '   ' });
+    expect(empty.statusCode).toBe(400);
+    expect(empty.json().error).toMatch(/reason/);
+    expect((await post(`/api/ui/projects/${p.id}/nodes/${b}/park`, { slug: p.slug, reason: 'later' })).json().node).toMatchObject({ status: 'parked', parkedWhere: '' });
+    // Already parked answers the step as it stands; a request not from the window is refused.
+    const again = await post(`/api/ui/projects/${p.id}/nodes/${b}/park`, { slug: p.slug, reason: 'again' });
+    expect(again.statusCode).toBe(200);
+    expect(again.json().node).toMatchObject({ status: 'parked', parkedReason: 'later' });
+    expect([401, 403]).toContain((await post(`/api/ui/projects/${p.id}/nodes/${b}/park`, { slug: p.slug, reason: 'x' }, auth)).statusCode);
+  });
+
+  it('POST unpark toNext answers the node todo and queued', async () => {
+    const { ctx, p, post, a, b } = await setup();
+    await post(`/api/ui/projects/${p.id}/nodes/${a}/park`, { slug: p.slug, reason: 'later' });
+    const res = await post(`/api/ui/projects/${p.id}/nodes/${a}/unpark`, { slug: p.slug, toNext: true });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().node).toMatchObject({ id: a, status: 'todo', parkedReason: '', parkedAt: null });
+    expect(ctx.db.prepare('SELECT queue FROM projects WHERE id = ?').pluck().get(p.id)).toBe(JSON.stringify([{ node: a, session: null }]));
+    // Without toNext it goes back to the Backlog; a step that is not parked answers as it stands, with no append.
+    await post(`/api/ui/projects/${p.id}/nodes/${b}/park`, { slug: p.slug, reason: 'later' });
+    expect((await post(`/api/ui/projects/${p.id}/nodes/${b}/unpark`, { slug: p.slug })).json().node).toMatchObject({ status: 'todo' });
+    expect(ctx.db.prepare('SELECT queue FROM projects WHERE id = ?').pluck().get(p.id)).toBe(JSON.stringify([{ node: a, session: null }]));
+    const again = await post(`/api/ui/projects/${p.id}/nodes/${b}/unpark`, { slug: p.slug, toNext: true });
+    expect(again.statusCode).toBe(200);
+    expect(again.json().node).toMatchObject({ id: b, status: 'todo' });
+    expect(ctx.db.prepare('SELECT queue FROM projects WHERE id = ?').pluck().get(p.id)).toBe(JSON.stringify([{ node: a, session: null }]));
+  });
+
+  it("park refuses another project's step", async () => {
+    const { ctx, app, p, post } = await setup();
+    const other = (await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'Other' } })).json();
+    const [foreign] = addNodes(ctx, 'test', { parentId: other.rootNodeId, nodes: [{ title: 'Foreign' }] });
+    const res = await post(`/api/ui/projects/${p.id}/nodes/${foreign.id}/park`, { slug: p.slug, reason: 'x' });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe(`#${foreign.id} is not in this project`);
+    expect(ctx.db.prepare('SELECT status FROM nodes WHERE id = ?').pluck().get(foreign.id)).toBe('todo');
+    updateNode(ctx, 'test', foreign.id, { status: 'parked', parkedReason: 'x' });
+    expect((await post(`/api/ui/projects/${p.id}/nodes/${foreign.id}/unpark`, { slug: p.slug })).json().error).toBe(`#${foreign.id} is not in this project`);
+    expect((await post(`/api/ui/projects/${p.id}/nodes/${foreign.id}/park`, { slug: 'wrong', reason: 'x' })).statusCode).toBe(409);
   });
 });

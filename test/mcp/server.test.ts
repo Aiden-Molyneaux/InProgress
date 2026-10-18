@@ -88,6 +88,7 @@ describe('scribe MCP tools', () => {
     expect(tool('set_queue').description).toMatch(/Done and dropped steps leave the queue on their own/);
     expect(tool('set_queue').description).toMatch(/this session's own entries/);
     expect(tool('set_queue').description).not.toMatch(/whole queue/);
+    expect(tool('set_queue').description).toMatch(/Parked steps and the steps under them are left out, and the answer names them/);
     expect(param('set_queue', 'unowned')).toMatch(/later:/);
     expect(tool('get_outline').description).toMatch(/Up next: "Session title": #a → #b \| later: #c/);
     expect(tool('set_focus').description).toMatch(/Focusing a todo step assigned to Claude also sets it active, in the same write\./);
@@ -184,6 +185,25 @@ describe('scribe MCP tools', () => {
     expect(await call('update_node', { id: migration, label: 'fix', session: 'l1' })).toEqual({ text: `#${migration} ⚑ Migration 3 · todo.`, isError: false });
     expect(await call('update_node', { id: migration, label: null, session: 'l1' })).toEqual({ text: `#${migration} Migration 3 · todo.`, isError: false });
     expect((await call('get_node', { id: migration })).text.split('\n')[0]).toBe(`#${migration} Migration 3 (task) · todo, Claude`);
+  });
+
+  it('update_node parks with parked_reason and parked_where', async () => {
+    const rootId = ids((await call('create_project', { name: 'Parking', description: 'Parked steps', session: 'pk1' })).text)[0];
+    const [step] = lineIds((await call('add_nodes', { parent: rootId, nodes: [{ title: 'InThink feature' }], session: 'pk1' })).text);
+    const missing = await call('update_node', { id: step, status: 'parked', session: 'pk1' });
+    expect(missing.isError).toBe(true);
+    expect(missing.text).toMatch(/parked_reason is required to park a step/);
+    expect(await call('update_node', { id: step, status: 'parked', parked_reason: 'Not merging it for now', parked_where: 'branch inthink-feature', session: 'pk1' }))
+      .toEqual({ text: `#${step} InThink feature · parked.`, isError: false });
+    const res = await fetch(`${base}/api/nodes/${step}`, { headers: { authorization: 'Bearer tok' } });
+    expect(((await res.json()) as { node: unknown }).node).toMatchObject({ status: 'parked', parkedReason: 'Not merging it for now', parkedWhere: 'branch inthink-feature' });
+    expect((await call('get_outline', { project: 'parking' })).text).toContain(`#${step} InThink feature · parked: Not merging it for now`);
+    // set_queue leaves a parked step out, and its answer says so.
+    const [next] = lineIds((await call('add_nodes', { parent: rootId, nodes: [{ title: 'Next one' }], session: 'pk1' })).text);
+    expect((await call('set_queue', { project: 'parking', nodes: [step, next], session: 'pk1', unowned: true })).text.split('\n'))
+      .toEqual([`Up next: later: #${next}`, `Left out #${step}: parked or under a parked step.`]);
+    const { tools } = await mcp.listTools();
+    expect(tools.find((t) => t.name === 'update_node')!.description).toContain('Status "parked" needs parked_reason (why it is set aside) and takes an optional parked_where (branch, worktree or commit).');
   });
 
   it('raises and clears asks, saying when the session is untracked or the ask joined an open one', async () => {

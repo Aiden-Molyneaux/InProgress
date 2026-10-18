@@ -121,3 +121,11 @@ async function sendUi<T extends object>(path: string, body: unknown): Promise<T 
   const message = payload.error ?? `HTTP ${res.status}`;
   return payload.hint ? `${message}. ${payload.hint}` : message;
 }
+
+/** Parks a step: set aside on purpose, with why (required) and where its work lives (optional). Repeating it answers the step as it stands. */
+export const parkStep = (projectId: number, slug: string, nodeId: number, reason: string, where?: string): Promise<UiResult> =>
+  postUi(`/api/ui/projects/${projectId}/nodes/${nodeId}/park`, { slug, reason, ...(where?.trim() ? { where } : {}) });
+
+/** Unparks a step back to todo in the Backlog, or with `toNext` straight into the unowned Next. */
+export const unparkStep = (projectId: number, slug: string, nodeId: number, toNext: boolean): Promise<UiResult> =>
+  postUi(`/api/ui/projects/${projectId}/nodes/${nodeId}/unpark`, { slug, ...(toNext ? { toNext: true } : {}) });

@@ -2,7 +2,7 @@ import { sessionActivity } from '../core/activity';
 import { clipLine, stepRef } from '../core/step-ref';
 import { deriveBoard, isLive } from '../core/board';
 import { formatUpNext, type QueueView } from '../core/layout';
-import { ancestors, buildIndex, dfsOrder, kids, progress, type TreeIndex } from '../core/tree';
+import { ancestors, buildIndex, dfsOrder, kids, progress, shelvedIds, type TreeIndex } from '../core/tree';
 import { ASK_GLYPHS, NODE_LABELS, askTag, glyphTitle, sessionDisplayTitle, type Ask, type ProjectSnapshot, type Session, type TreeNode, type WorkItem } from '../core/types';
 import { homeDir } from '../lib/home';
 import { claimCommand, taskCommand } from '../lib/task-command';
@@ -69,6 +69,16 @@ export function lineFor(index: TreeIndex, n: TreeNode, focusOf: Map<number, Sess
   return `#${n.id} ${glyphTitle(n)} · ${n.status}${prog ? ` (${prog.done}/${prog.total})` : ''}${here.length ? `  ${here.join(' ')}` : ''}`;
 }
 
+/** The line telling a session its focus is parked, or under a parked step, or undefined when neither. Keyed on the status, never on the reason being set. */
+export function parkedFocusLine(snapshot: ProjectSnapshot, session: Session): string | undefined {
+  const focus = session.focusNodeId !== null ? snapshot.nodes.find((n) => n.id === session.focusNodeId) : undefined;
+  if (!focus) return undefined;
+  if (focus.status === 'parked') return `#${focus.id} is parked: ${clipLine(focus.parkedReason, 80)}`;
+  // The nearest parked ancestor (ancestors run outermost first).
+  const above = ancestors(buildIndex(snapshot.nodes), focus.id).reverse().find((a) => a.status === 'parked');
+  return above ? `#${focus.id} is under parked #${above.id}: ${clipLine(above.parkedReason, 80)}` : undefined;
+}
+
 /** The open ones of `items`: in progress first, then pending, each in the order given (creation order). */
 export const inProgressFirst = (items: WorkItem[]): WorkItem[] => [...items.filter((i) => i.status === 'in_progress'), ...items.filter((i) => i.status === 'pending')];
 
@@ -100,7 +110,9 @@ export function frontierLines(snapshot: ProjectSnapshot, sessionId?: string, opt
   const chain = new Set<number>();
   // Active steps, and steps with an open ask, which the Needs you line names.
   const asked = new Set(snapshot.asks.filter((a) => a.clearedAt === null).map((a) => a.nodeId));
-  const targets = snapshot.nodes.filter((n) => n.parentId !== null && (n.status === 'active' || asked.has(n.id)));
+  // A shelved step (parked, or under a parked one) is set aside: it is no frontier of its own, only its focus shows.
+  const shelved = shelvedIds(index);
+  const targets = snapshot.nodes.filter((n) => n.parentId !== null && !shelved.has(n.id) && (n.status === 'active' || asked.has(n.id)));
   for (const id of [...targets.map((t) => t.id), ...focusOf.keys()]) {
     if (!index.byId.has(id)) continue;
     chain.add(id);
@@ -126,7 +138,7 @@ export function frontierLines(snapshot: ProjectSnapshot, sessionId?: string, opt
       }
       walk(k, depth + 1);
     }
-    const upcoming = siblingNext ? list.slice(last + 1).filter((k) => k.status === 'todo' && !chain.has(k.id)) : [];
+    const upcoming = siblingNext ? list.slice(last + 1).filter((k) => k.status === 'todo' && !chain.has(k.id) && !shelved.has(k.id)) : [];
     if (upcoming.length) {
       lines.push(`${'  '.repeat(depth)}Next: ${upcoming.slice(0, 2).map((k) => `#${k.id} ${glyphTitle(k)}`).join(' · ')}${upcoming.length > 2 ? ` (+${upcoming.length - 2} more)` : ''}`);
     }
@@ -160,7 +172,9 @@ const MAX_NEEDS_YOU = 8;
 
 /** The project's open asks, oldest first. */
 function openAsks(snapshot: ProjectSnapshot): Ask[] {
-  return snapshot.asks.filter((a) => a.clearedAt === null).sort((a, b) => a.raisedAt.localeCompare(b.raisedAt) || a.id - b.id);
+  // An ask on a shelved step stays stored, and comes back on unpark.
+  const shelved = shelvedIds(buildIndex(snapshot.nodes));
+  return snapshot.asks.filter((a) => a.clearedAt === null && !shelved.has(a.nodeId)).sort((a, b) => a.raisedAt.localeCompare(b.raisedAt) || a.id - b.id);
 }
 
 /** How long ago, whole days from one day old, then whole weeks from two weeks ("1d" … "13d", "2w"); null under 24 hours or for a time it cannot read. */
@@ -263,9 +277,10 @@ function withoutStepId(subject: string, nodeId: number): string {
 function leftUnfinished(snapshot: ProjectSnapshot, only?: number): { nodeId: number; items: WorkItem[] }[] {
   const index = buildIndex(snapshot.nodes);
   const order = dfsOrder(index);
+  const shelved = shelvedIds(index);
   const stillOpen = (id: number) => {
     const n = index.byId.get(id);
-    return n !== undefined && n.status !== 'done' && n.status !== 'dropped';
+    return n !== undefined && n.status !== 'done' && n.status !== 'dropped' && !shelved.has(id);
   };
   const left = snapshot.workItems.filter((i) => i.endedAt !== null && stillOpen(i.nodeId) && (only === undefined || i.nodeId === only));
   const steps = [...new Set(left.map((i) => i.nodeId))].sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
@@ -340,6 +355,9 @@ export function bodyLines(snapshot: ProjectSnapshot, sessionId: string, now: num
   const upNext = upNextLine(snapshot, sessionId, now);
   lines.push('Where things stand:', ...frontierLines(snapshot, sessionId, { siblingNext: upNext === undefined }).map((l) => `  ${l}`));
   if (upNext) lines.push(upNext);
+  const me = snapshot.sessions.find((x) => x.id === sessionId);
+  const parkedFocus = me ? parkedFocusLine(snapshot, me) : undefined;
+  if (parkedFocus) lines.push(parkedFocus);
   const needs = needsYouLine(snapshot, now);
   if (needs) lines.push(needs);
   const check = opts.checkOld ? checkLine(snapshot, now) : undefined;
@@ -402,10 +420,11 @@ const NUDGE = 'If a checkpoint happened, brief the inprogress-scribe; otherwise 
 
 export function renderStatusLine(snapshot: ProjectSnapshot, session: Session): string {
   const focus = session.focusNodeId !== null ? snapshot.nodes.find((n) => n.id === session.focusNodeId) : undefined;
-  const open = snapshot.asks.filter((a) => a.clearedAt === null);
+  const open = openAsks(snapshot);
   if (session.role !== 'orchestrator' && snapshot.project.briefingMode === 'scoped') {
     const step = claimedStep(snapshot, session);
-    const mine = step ? open.filter((a) => a.nodeId === step.id) : [];
+    // A session's own claimed step is not set aside from it: its asks show even under a parked phase, as stepBlock lists them.
+    const mine = step ? snapshot.asks.filter((a) => a.clearedAt === null && a.nodeId === step.id) : [];
     const where = step ? `on #${step.id}${mine.length ? ` (${mine.map((a) => askTag(a.id)).join(', ')} open)` : ''}` : 'no step claimed';
     return `[InProgress] ${snapshot.project.name} · ${where} · last scribe update ${session.promptsSinceUpdate} prompts ago. ${NUDGE}`;
   }

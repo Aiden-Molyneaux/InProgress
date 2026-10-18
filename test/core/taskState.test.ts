@@ -9,7 +9,7 @@ const ago = (ms: number) => new Date(NOW - ms).toISOString();
 const MIN = 60_000;
 
 function n(id: number, parentId: number | null, o: Partial<TreeNode> = {}): TreeNode {
-  return { id, projectId: 1, parentId, position: id, kind: 'task', title: `S${id}`, body: '', status: 'todo', assignee: 'claude', outcome: '', label: null, createdAt: T, updatedAt: T, completedAt: null, driverSessionId: null, boardState: null, stateSince: null, hue: null, ...o };
+  return { id, projectId: 1, parentId, position: id, kind: 'task', title: `S${id}`, body: '', status: 'todo', assignee: 'claude', outcome: '', label: null, createdAt: T, updatedAt: T, completedAt: null, driverSessionId: null, boardState: null, stateSince: null, hue: null, parkedReason: '', parkedWhere: '', parkedAt: null, ...o };
 }
 function s(id: string, o: Partial<Session> = {}): Session {
   return { id, projectId: 1, title: id, cwd: null, branch: null, transcriptPath: null, state: 'working', focusNodeId: null, promptsSinceUpdate: 0, startedAt: T, lastSeenAt: T, endedAt: null, slot: 0, subagents: [], commands: [], role: 'worker', ...o };
@@ -175,5 +175,15 @@ describe('sinceFallback', () => {
   });
   it('takes updatedAt for every other state, even with asks', () => {
     for (const st of ['backlog', 'ready', 'working', 'idle', 'unattended', 'blocked'] as const) expect(sinceFallback(node, st, asks)).toBe(ago(10 * MIN));
+  });
+});
+
+describe('taskBoxes with shelved steps', () => {
+  it('a permission session focused on a shelved step still gets a Needs me box, as a focusless one does', () => {
+    const w = s('w', { focusNodeId: 3, state: 'permission', lastSeenAt: ago(MIN) });
+    const i = input({ nodes: [n(1, null), n(2, 1, { status: 'parked' }), n(3, 2)], sessions: [w] });
+    const b = taskBoxes(deriveBoard(i, NOW), i, NOW);
+    expect(b.needs).toHaveLength(1);
+    expect(b.needs[0]).toMatchObject({ row: null, state: 'permission', session: { id: 'w' } });
   });
 });

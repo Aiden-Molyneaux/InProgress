@@ -7,7 +7,7 @@ const T = '2026-10-13T11:00:00.000Z';
 const DAYS = (n: number) => new Date(NOW - n * 86_400_000).toISOString();
 
 function n(id: number, parentId: number | null, o: Partial<TreeNode> = {}): TreeNode {
-  return { id, projectId: 1, parentId, position: id, kind: 'task', title: `S${id}`, body: '', status: 'todo', assignee: 'claude', outcome: '', label: null, createdAt: T, updatedAt: T, completedAt: null, driverSessionId: null, boardState: null, stateSince: null, hue: null, ...o };
+  return { id, projectId: 1, parentId, position: id, kind: 'task', title: `S${id}`, body: '', status: 'todo', assignee: 'claude', outcome: '', label: null, createdAt: T, updatedAt: T, completedAt: null, driverSessionId: null, boardState: null, stateSince: null, hue: null, parkedReason: '', parkedWhere: '', parkedAt: null, ...o };
 }
 function s(id: string, o: Partial<Session> = {}): Session {
   return { id, projectId: 1, title: id, cwd: null, branch: null, transcriptPath: null, state: 'working', focusNodeId: null, promptsSinceUpdate: 0, startedAt: T, lastSeenAt: T, endedAt: null, slot: 0, subagents: [], commands: [], role: 'worker', ...o };
@@ -214,5 +214,37 @@ describe('reconcileLine', () => {
     const helpers = deriveBoard(input({ nodes: [n(1, null), n(2, 1, { status: 'active' })], sessions: [s('h', { focusNodeId: 2, slot: 7, branch: 'h-br', cwd: 'C:/w/h' }), s('k', { focusNodeId: 2, slot: 10, state: 'idle' })] }), NOW).byId.get(2)!;
     expect(reconcileLine(helpers, 'stalled', NOW)).toBe('#2 S2: stalled: no live driver · on it: "h" branch h-br · cwd C:/w/h; "k" branch ? · cwd ?');
     expect(reconcileLine(helpers, 'deep', NOW)).toBe('#2 S2: deep');
+  });
+});
+
+describe('parked steps', () => {
+  it('a parked step and its subtree are no rows; the parked step is in parked with its open count', () => {
+    const b = deriveBoard(input({
+      nodes: [n(1, null), n(2, 1), n(3, 2, { status: 'parked', parkedReason: 'later', parkedAt: T }), n(4, 3), n(5, 4, { status: 'active' }), n(6, 3, { status: 'done', completedAt: T }), n(7, 1)],
+      queue: [{ nodeId: 4, sessionId: null }, { nodeId: 7, sessionId: null }],
+    }), NOW);
+    for (const id of [3, 4, 5, 6]) expect(b.byId.has(id), `#${id}`).toBe(false);
+    expect(b.next.map((r) => r.node.id)).toEqual([7]);
+    expect(b.done).toEqual([]);
+    expect(b.parked.map((p) => [p.node.id, p.crumb.map((c) => c.id), p.openInside])).toEqual([[3, [2], 2]]);
+  });
+
+  it('a phase whose only open child is parked is not a group', () => {
+    const b = deriveBoard(input({ nodes: [n(1, null), n(2, 1), n(3, 2, { status: 'parked' })] }), NOW);
+    expect(b.groups.has(2)).toBe(false);
+    expect(col(b, 2)).toBe('backlog');
+  });
+
+  it('keys on the status: a todo step with a leftover parked reason is still a row', () => {
+    const b = deriveBoard(input({ nodes: [n(1, null), n(2, 1, { parkedReason: 'old', parkedAt: T })] }), NOW);
+    expect(col(b, 2)).toBe('backlog');
+    expect(b.parked).toEqual([]);
+  });
+
+  it('keeps no card for a parked step inside a parked one, and counts the open steps in the whole subtree once', () => {
+    const b = deriveBoard(input({
+      nodes: [n(1, null), n(2, 1, { status: 'parked' }), n(3, 2, { status: 'parked' }), n(4, 3, { status: 'active' }), n(5, 2), n(6, 3, { status: 'done', completedAt: T })],
+    }), NOW);
+    expect(b.parked.map((p) => [p.node.id, p.openInside])).toEqual([[2, 2]]);
   });
 });

@@ -4,7 +4,8 @@ import { write, type Ctx, type RecordEvent } from '../db/tx';
 import { badRequest, notFound } from '../errors';
 import { definedOnly } from '../util';
 import { clearNodeAsks } from './asks';
-import { inLiveProject } from './projects';
+import { appendUnowned, dropFromQueue, inLiveProject } from './projects';
+import { parkedAncestor, shelvedAmong, subtreeIds } from './shelved';
 import { closeNodeTasks } from './work';
 
 interface NodeRow {
@@ -26,6 +27,9 @@ interface NodeRow {
   board_state: TaskState | null;
   state_since: string | null;
   hue: number | null;
+  parked_reason: string;
+  parked_where: string;
+  parked_at: string | null;
 }
 
 export const toNode = (r: NodeRow): TreeNode => ({
@@ -47,6 +51,9 @@ export const toNode = (r: NodeRow): TreeNode => ({
   boardState: r.board_state,
   stateSince: r.state_since,
   hue: r.hue,
+  parkedReason: r.parked_reason,
+  parkedWhere: r.parked_where,
+  parkedAt: r.parked_at,
 });
 
 /** A step by id. A deleted project's steps are not found, so every read and write by id refuses them. */
@@ -128,6 +135,7 @@ export function addNodes(ctx: Ctx, actor: string, input: { parentId: number; aft
       const title = n.title.trim();
       if (!title) throw badRequest('A node title is empty');
       const status = n.status ?? 'todo';
+      if (status === 'parked') throw badRequest('A new step cannot start parked', 'Add it, then park it with update_node: status "parked" and a parked_reason.');
       const info = insert.run(parent.projectId, parentId, position, n.kind ?? 'task', title, n.body ?? '', status, n.assignee ?? 'claude', n.outcome ?? '', n.label ?? null, ts, ts, status === 'done' ? ts : null);
       const id = Number(info.lastInsertRowid);
       ids.push(id);
@@ -149,10 +157,14 @@ export interface NodePatch {
   outcome?: string;
   /** null clears it. */
   label?: NodeLabel | null;
+  /** Why the step is set aside: required (trimmed, non-empty) to enter `parked`, editable while it stays parked. */
+  parkedReason?: string;
+  /** Where its work lives (a branch, worktree or commit); only with `parked`. */
+  parkedWhere?: string;
 }
 
 /**
- * Applies `patch` to step `id`, clearing its asks when it is dropped or a question node is finished.
+ * Applies `patch` to step `id`, clearing its asks when it is dropped or parked, or a question node is finished.
  * The node it returns is read inside the write, before write() runs the Board reconcile: its boardState, stateSince
  * and hue predate this write. Only a snapshot (or a read after the write) carries the current values.
  */
@@ -160,11 +172,11 @@ export function updateNode(ctx: Ctx, actor: string, id: number, patch: NodePatch
   return write(ctx, actor, (record) => patchWithAsks(ctx, record, actor, requireNode(ctx, id), patch));
 }
 
-/** The body of updateNode, inside a write() already open: the drop and question-node ask clearing, then patchNode. */
+/** The body of updateNode, inside a write() already open: the drop, park and question-node ask clearing, then patchNode. */
 function patchWithAsks(ctx: Ctx, record: RecordEvent, actor: string, before: TreeNode, patch: NodePatch): TreeNode {
   // Before patchNode, so node.updated stays the project's newest event (the activity strip shows it).
-  if (patch.status === 'dropped' && before.status !== 'dropped') {
-    // A dropped step's asks are moot (spec 1.2); a finished one's stay, a review ask most of all.
+  if ((patch.status === 'dropped' || patch.status === 'parked') && before.status !== patch.status) {
+    // A dropped or parked step's asks are moot (spec 1.2); a finished one's stay, a review ask most of all.
     clearNodeAsks(ctx, record, actor, before.id);
   } else if ((patch.kind ?? before.kind) === 'question' && patch.status === 'done' && before.status !== 'done') {
     // A question node and its migrated ask are one question: finishing the node answers the ask.
@@ -203,23 +215,78 @@ export function patchNode(ctx: Ctx, record: RecordEvent, before: TreeNode, patch
   const next = { ...before, ...changes };
   if (!next.title) throw badRequest('title is empty');
   if (before.parentId === null && next.kind !== 'goal') throw badRequest(`#${id} is the project root; its kind stays "goal"`);
+  const parking = next.status === 'parked' && before.status !== 'parked';
+  if (next.status === 'parked') {
+    if (parking && before.parentId === null) throw badRequest(`#${id} is the project root; only a step can be parked`);
+    if (parking && (before.status === 'done' || before.status === 'dropped')) throw badRequest(`#${id} is ${before.status}; only an open step can be parked`);
+    // Entering parked needs a reason; staying parked keeps the stored reason and where unless new ones are sent.
+    next.parkedReason = (changes.parkedReason ?? (parking ? '' : before.parkedReason)).trim();
+    if (!next.parkedReason) throw badRequest('parked_reason is required to park a step', 'Say why it is set aside.');
+    next.parkedWhere = (changes.parkedWhere ?? (parking ? '' : before.parkedWhere)).trim();
+  } else {
+    if (changes.parkedReason !== undefined) throw badRequest('parked_reason only goes with status "parked"');
+    if (changes.parkedWhere !== undefined) throw badRequest('parked_where only goes with status "parked"');
+    // Any status but parked clears the parked fields.
+    next.parkedReason = '';
+    next.parkedWhere = '';
+  }
   const ts = ctx.now();
+  next.parkedAt = next.status !== 'parked' ? null : parking ? ts : before.parkedAt;
   const completedAt = next.status === 'done' ? (before.status === 'done' ? before.completedAt : ts) : null;
-  // A done or dropped step has no driver (spec 1.1), cleared in the same UPDATE.
-  const driver = next.status === 'done' || next.status === 'dropped' ? null : before.driverSessionId;
+  // A done, dropped or parked step has no driver (spec 1.1), cleared in the same UPDATE.
+  const driver = next.status === 'done' || next.status === 'dropped' || next.status === 'parked' ? null : before.driverSessionId;
+  // Before the UPDATE, so the event's queue change reads the steps as they were in Next. Once the step is parked its
+  // whole subtree is shelved, so every step under it leaves the stored queue too, and unparking does not bring it back.
+  if (parking) dropFromQueue(ctx, record, before.projectId, subtreeIds(ctx, id), 'park');
   ctx.db
     .prepare(
-      'UPDATE nodes SET title = ?, kind = ?, status = ?, assignee = ?, body = ?, outcome = ?, label = ?, updated_at = ?, completed_at = ?, driver_session_id = ? WHERE id = ?',
+      'UPDATE nodes SET title = ?, kind = ?, status = ?, assignee = ?, body = ?, outcome = ?, label = ?, updated_at = ?, completed_at = ?, driver_session_id = ?, parked_reason = ?, parked_where = ?, parked_at = ? WHERE id = ?',
     )
-    .run(next.title, next.kind, next.status, next.assignee, next.body, next.outcome, next.label, ts, completedAt, driver, id);
+    .run(next.title, next.kind, next.status, next.assignee, next.body, next.outcome, next.label, ts, completedAt, driver, next.parkedReason, next.parkedWhere, next.parkedAt, id);
   // Before node.updated, which stays the project's newest event. Every path to done comes through here.
   if (next.status === 'done' && before.status !== 'done') closeNodeTasks(ctx, record, before.projectId, id);
   const diff: Record<string, { from: unknown; to: unknown }> = {};
-  for (const key of Object.keys(changes) as (keyof NodePatch)[]) {
+  // The parked fields change with the status as well as when sent, so they are compared whether or not the patch names them.
+  const keys = new Set<keyof TreeNode>([...(Object.keys(changes) as (keyof NodePatch)[]), 'parkedReason', 'parkedWhere', 'parkedAt']);
+  for (const key of keys) {
     if (before[key] !== next[key]) diff[key] = { from: before[key], to: next[key] };
   }
   record({ projectId: before.projectId, type: 'node.updated', entity: 'node', entityId: id, data: { changes: diff } });
   return requireNode(ctx, id);
+}
+
+/**
+ * The window's Park: parks step `id` with `reason` (required) and `where` (optional), as update_node with status
+ * "parked" does: its driver and open asks are cleared, and it and every step under it leave the stored queue. `check`
+ * runs on the step as read inside the write. A step already parked answers as it stands, writing nothing (as Done does).
+ */
+export function parkNode(ctx: Ctx, actor: string, id: number, input: { reason: string; where?: string }, check: (before: TreeNode) => void): TreeNode {
+  return write(ctx, actor, (record) => {
+    const before = requireNode(ctx, id);
+    check(before);
+    if (before.status === 'parked') return before;
+    return patchWithAsks(ctx, record, actor, before, { status: 'parked', parkedReason: input.reason, parkedWhere: input.where ?? '' });
+  });
+}
+
+/**
+ * The window's Unpark and "to Next": step `id` goes back to todo with its parked fields cleared, and with `toNext` it is
+ * appended to the unowned queue in the same write. `check` runs on the step as read inside the write. A step that is not
+ * parked answers as it stands, writing nothing. With `toNext`, a step still under a parked step is refused: it would stay
+ * shelved, so Next would not show it.
+ */
+export function unparkNode(ctx: Ctx, actor: string, id: number, toNext: boolean, check: (before: TreeNode) => void): TreeNode {
+  return write(ctx, actor, (record) => {
+    const before = requireNode(ctx, id);
+    check(before);
+    if (before.status !== 'parked') return before;
+    const above = toNext ? parkedAncestor(ctx, id) : null;
+    if (above !== null) throw badRequest(`#${id} is under parked #${above}`, `Unpark #${above} first.`);
+    const node = patchNode(ctx, record, before, { status: 'todo' });
+    // After the status change, so the queue event reads the step as open again.
+    if (toNext) appendUnowned(ctx, record, before.projectId, id);
+    return node;
+  });
 }
 
 /**
@@ -250,6 +317,9 @@ export function moveNode(ctx: Ctx, actor: string, id: number, input: { parentId:
     }
     if (input.after === id) throw badRequest(`Cannot place #${id} after itself`);
     const [position] = insertPositions(siblings(ctx, parent.id, id), input.after ?? 'end', 1);
+    // Under a parked or shelved parent the moved steps are shelved: they leave the stored queue, as parking takes them out,
+    // so unparking the parent does not bring them back to Next.
+    if (shelvedAmong(ctx, [parent.id]).size) dropFromQueue(ctx, record, node.projectId, subtreeIds(ctx, id), 'move');
     ctx.db.prepare('UPDATE nodes SET parent_id = ?, position = ?, updated_at = ? WHERE id = ?').run(parent.id, position, ctx.now(), id);
     renormalize(ctx, parent.id);
     record({ projectId: node.projectId, type: 'node.moved', entity: 'node', entityId: id, data: { fromParentId: node.parentId, toParentId: parent.id } });
@@ -261,11 +331,7 @@ export function deleteNode(ctx: Ctx, actor: string, id: number, cascade = false,
   return write(ctx, actor, (record) => {
     const node = requireNode(ctx, id);
     if (node.parentId === null) throw badRequest(`#${id} is the project root; archive the project instead`);
-    const ids = (
-      ctx.db
-        .prepare('WITH RECURSIVE sub(id) AS (SELECT ? UNION ALL SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id) SELECT id FROM sub')
-        .all(id) as { id: number }[]
-    ).map((r) => r.id);
+    const ids = subtreeIds(ctx, id);
     // The caller's own test of the node and its subtree, run in this write so it cannot go stale before the delete.
     check?.(node, ids);
     if (ids.length > 1 && !cascade) {

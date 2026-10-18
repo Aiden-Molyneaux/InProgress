@@ -595,3 +595,29 @@ describe('review fixes', () => {
     expect(answer.endsWith('…')).toBe(true);
   });
 });
+
+describe('claiming a parked step', () => {
+  it('claiming a parked step is refused', () => {
+    const { ctx, step, join } = setup();
+    join('s1');
+    updateNode(ctx, 'test', step.id, { status: 'parked', parkedReason: 'later' });
+    expect(() => claimStep(ctx, 'session:s1', 's1', step.id)).toThrow(`#${step.id} is parked`);
+    expect(findSession(ctx, 's1')?.focusNodeId).toBeNull();
+  });
+
+  it('claiming a step under a parked phase names the phase, and leaves it todo with no driver', () => {
+    const { ctx, group, step, join } = setup();
+    join('s1');
+    updateNode(ctx, 'test', group.id, { status: 'parked', parkedReason: 'later' });
+    expect(() => claimStep(ctx, 'session:s1', 's1', step.id)).toThrow(`#${step.id} is under parked #${group.id}`);
+    expect(ctx.db.prepare('SELECT status, driver_session_id AS d FROM nodes WHERE id = ?').get(step.id)).toEqual({ status: 'todo', d: null });
+  });
+
+  it('set_focus on a step under a parked phase gives it no driver', () => {
+    const { ctx, group, step, join } = setup();
+    join('s1');
+    updateNode(ctx, 'test', group.id, { status: 'parked', parkedReason: 'later' });
+    setFocus(ctx, 'scribe:s1', 's1', step.id);
+    expect(ctx.db.prepare('SELECT status, driver_session_id AS d FROM nodes WHERE id = ?').get(step.id)).toEqual({ status: 'todo', d: null });
+  });
+});

@@ -45,7 +45,7 @@ export function describeEvent(e: EventRow, snapshot: ProjectSnapshot | null): st
   const d = (e.data ?? {}) as {
     ask?: { nodeId: number };
     ids?: number[]; parentId?: number; nodeId?: number; title?: string; path?: string;
-    changes?: { status?: { to: string }; queue?: unknown; name?: unknown }; changed?: string[]; state?: string; focusNodeId?: number | null;
+    changes?: { status?: { from?: string; to: string }; queue?: unknown; name?: unknown; parkedReason?: { to: string } }; op?: string; node?: number; changed?: string[]; state?: string; focusNodeId?: number | null;
     ended?: { agentId: string; reason: EndReason }[];
     activity?: string; command?: { label: string; outcome?: CommandOutcome };
   };
@@ -53,6 +53,8 @@ export function describeEvent(e: EventRow, snapshot: ProjectSnapshot | null): st
     case 'node.created':
       return (d.ids?.length ?? 1) === 1 ? `added ${nodeLabel(d.ids?.[0] ?? Number(e.entityId), snapshot)}` : `added ${d.ids!.length} steps under ${nodeLabel(d.parentId, snapshot)}`;
     case 'node.updated':
+      if (d.changes?.status?.to === 'parked') return `parked #${e.entityId}: ${d.changes.parkedReason?.to ?? ''}`.trimEnd();
+      if (d.changes?.status?.from === 'parked' && d.changes.status.to === 'todo') return `unparked #${e.entityId}`;
       return d.changes?.status ? `${nodeLabel(Number(e.entityId), snapshot)} → ${d.changes.status.to}` : `updated ${nodeLabel(Number(e.entityId), snapshot)}`;
     case 'node.moved':
       return `moved ${nodeLabel(Number(e.entityId), snapshot)}`;
@@ -92,6 +94,7 @@ export function describeEvent(e: EventRow, snapshot: ProjectSnapshot | null): st
     case 'project.updated':
       if (d.changes?.status) return d.changes.status.to === 'archived' ? 'archived the project' : 'unarchived the project';
       if (d.changes?.name) return 'renamed the project';
+      if (d.op === 'unpark' && d.node !== undefined) return `unparked #${d.node}`;
       return d.changes?.queue ? 'Up next changed' : 'project updated';
     case 'project.deleted':
       return 'deleted the project';

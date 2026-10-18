@@ -195,7 +195,7 @@ footer p { max-width: 80ch; }
 <div class="wf">
 <div class="main">
 <p>Long projects with Claude lose their thread in the chat. A plan gets stated once and is then buried under a sandbox detour. The test suite Claude wrote five messages ago is still up there somewhere. Three sessions and their subagents are each working on something, and the only way to find out what is to read all of them. On a project that has run for three months, the state of play is split between the chat, the disk and your head, and the three do not agree.</p>
-<p>InProgress keeps one tree per project in a window beside Claude. The root says what the project is for. Under it sit phases and steps, each with a status (todo, active, done, blocked or dropped) and an owner (Claude or you). A resource such as a test suite, runbook or diagram is attached to the step where it was produced, so you find it by walking the tree instead of the scrollback. Each live Claude session appears in the window with its state and the number of subagents it is running, on the step it is working on once it has claimed the step or the scribe has set its focus.</p>
+<p>InProgress keeps one tree per project in a window beside Claude. The root says what the project is for. Under it sit phases and steps, each with a status (todo, active, done, blocked, dropped or parked) and an owner (Claude or you). A resource such as a test suite, runbook or diagram is attached to the step where it was produced, so you find it by walking the tree instead of the scrollback. Each live Claude session appears in the window with its state and the number of subagents it is running, on the step it is working on once it has claimed the step or the scribe has set its focus.</p>
 <p>The tree is a filtered view, not a transcript. It records that the signing tests need running and, later, that they ran green. It does not record the VMware wedge you fixed on the way; that goes into the step's log as a one-line note. Steps are plan-level and have outcomes. Single actions (edit a file, run grep) never become nodes.</p>
 <p>Claude owns the content and makes every edit to it through a background scribe, so the main session spends about one line of chat per update. The window is where you place and answer: you put steps in the order of Next, add a step to the backlog, and clear the asks that sessions raise. You also read, copy a reference like <code>#58</code>, and open files.</p>
 <p>Concretely, in the kit's own example: step <code>#58 Run signing tests</code> is a step you do yourself, so it carries a <span class="you">YOU</span> badge until you report it done. The test suite Claude wrote is resource <code>r12</code> on that step. The network wedge is a log line on <code>#55</code>. When you ask "where are we?", the answer names those ids, and the window is already centred on them.</p>
@@ -210,7 +210,7 @@ footer p { max-width: 80ch; }
 <aside class="spec">
   <span class="eyebrow">From your spec</span>
   <blockquote>"which of those have been actioned, which of those need action, and which of those are currently being actioned"</blockquote>
-  <p>Five statuses, an assignee per node, and a position derived from them: Now, Next, Backlog or Done. The Board shows the position, the Project view shows every step with its position chip, and an open ask shows an amber mark.</p>
+  <p>Six statuses, an assignee per node, and a position derived from them: Now, Next, Backlog or Done. The Board shows the position, the Project view shows every step with its position chip, and an open ask shows an amber mark.</p>
   <p class="where">src/core/types.ts NODE_STATUSES · src/core/board.ts deriveBoard · web/src/board/</p>
 </aside>
 </div>
@@ -484,6 +484,16 @@ Changes:
 <dd><p>A dropped step keeps its row with a struck-through title, <span class="ip-node dropped"><span class="m dropped"></span><span class="t">3 RevenueCat</span></span>, until the fold rules hide it, and it leaves the progress count: a parent shows <code>done / (children minus dropped)</code>, direct children only. The strip reports <code>moved #60 4 Build → GitHub</code> or <code>#59 3 RevenueCat → dropped</code>.</p></dd>
 </dl>
 
+<h4>Parking work for later</h4>
+<dl class="trio">
+<dt>You</dt>
+<dd><p>"Park the export feature, I'm not merging it for now; the work is on branch export-v2." Or Park… on a step in the full Backlog view or in Details.</p></dd>
+<dt>Claude</dt>
+<dd><p>The scribe sets <code>status: "parked"</code> with a <code>parked_reason</code> (required) and an optional <code>parked_where</code> (a branch, worktree or commit). Parking keeps the step where it is in the tree. It leaves Next, its driver and its open asks are cleared, and a session can no longer claim it or anything under it. Parking a step with children, or a whole phase, sets the children aside with it; they keep their own statuses.</p></dd>
+<dt>You see</dt>
+<dd><p>The step leaves the Board's Backlog preview and the everyday Backlog list, and shows in the <strong>Parked</strong> group at the bottom of the full Backlog view, with the date, the reason and where its work lives. "to Next" there unparks it into Next; Unpark (there or in Details) sends it back to the Backlog. A parked step does not count toward its parent's progress, and the outline reads <code>· parked: &lt;reason&gt;</code>. A task that belongs to no phase sits directly under the project root and shows as <strong>No phase</strong>.</p></dd>
+</dl>
+
 <h4>Your own steps</h4>
 <dl class="trio">
 <dt>You</dt>
@@ -690,18 +700,18 @@ Playbook:
 <thead><tr><th>Column</th><th>What it holds</th></tr></thead>
 <tbody>
 <tr><td>Needs me</td><td>Live permission waits first (the session, its step, the tool and the head of the command, how long it has waited), then open asks oldest first. An ask shows its kind, its text clamped to two lines, the step, who raised it, its age, and the buttons Answer… and Clear.</td></tr>
-<tr><td>Next</td><td>The queue, numbered ①②③, then the entries of a live session's own queue, tagged with its letter. A step with an open ask has the amber mark and reads "not ready". A step you do yourself carries "you". Drag a row to reorder it; hover one for "back to Backlog". Backlog folds at the foot as "Backlog · n": open, it lists the other open steps without children, grouped by parent, each with "to Next" on hover and a field to add a step.</td></tr>
+<tr><td>Next</td><td>The queue, numbered ①②③, then the entries of a live session's own queue, tagged with its letter. A step with an open ask has the amber mark and reads "not ready". A step you do yourself carries "you". Drag a row to reorder it; hover one for "back to Backlog". At its foot, the Backlog preview shows up to five Backlog steps from the phase you pick in its menu (or No phase), in tree order, each with "to Next" on hover, and a field that adds a step to that phase. Its "n ›" opens the full Backlog view: every open Backlog step, filtered by text, phase and label, sorted by phase, id or age, grouped by parent with the root's steps under No phase, and the Parked group at the bottom. "‹ Board" goes back.</td></tr>
 <tr><td>Now</td><td>One entry per active step. Each session on it is a message: its character, letter and state word, its current task as the main line, its commands, and its running subagents with elapsed time. The step is quoted under its sessions: title, label, crumb, document count, marks. A step of yours that nobody is on reads "No session · YOU · Your step: nobody is on it".</td></tr>
 <tr><td>Done</td><td>The last five done steps with their age and outcome clamped to two lines. "New since you looked" crosses the list where you last left the project's tab.</td></tr>
 </tbody>
 </table>
 </div>
-<p>A click on any row opens Details. A step with a handoff shows "handoff · 2d"; click it to read the handoff. The marks are: a session ended without closing the step, a done step with no outcome, an open ask older than 7 days, a done step a session still has focus on, and a step more than three levels deep. The position of a step comes from its state: dropped steps are off the Board; done steps are in Done; a step a live session is on, or one of yours that is active, is in Now; a queued step is in Next; any other open step with no open children is in Backlog; a step with open children is a group, shown as the crumb on its children.</p>
+<p>A click on any row opens Details. A step with a handoff shows "handoff · 2d"; click it to read the handoff. The marks are: a session ended without closing the step, a done step with no outcome, an open ask older than 7 days, a done step a session still has focus on, and a step more than three levels deep. The position of a step comes from its state: dropped steps are off the Board; parked steps and the steps under them are off it too, apart from the full Backlog view's Parked group; done steps are in Done; a step a live session is on, or one of yours that is active, is in Now; a queued step is in Next; any other open step with no open children is in Backlog; a step with open children is a group, shown as the crumb on its children.</p>
 
 <h4>What you can change from the window</h4>
 <ul>
 <li><strong>Place.</strong> Drag a step inside Next, from Backlog into Next, or from Next back to Backlog. The server applies each move to the queue as it stands, so a session's own queue changes are never overwritten by an older view.</li>
-<li><strong>Add a step.</strong> The field at the foot of Backlog adds a todo step at the root; a section's "+ Add a step" in the Project view adds one in that group; Details has "Add a step under this one". A line to a session ("add X to the backlog") still works through the scribe.</li>
+<li><strong>Add a step.</strong> The field at the foot of the Backlog preview adds a todo step in the phase it shows (at the root for No phase), and the one at the foot of the full Backlog view adds one at the root; a section's "+ Add a step" in the Project view adds one in that group; Details has "Add a step under this one". A line to a session ("add X to the backlog") still works through the scribe.</li>
 <li><strong>Clear an ask.</strong> Answer… or Clear, from Needs me or from the step's Details.</li>
 <li><strong>Projects.</strong> Archive, unarchive, rename, delete and restore, from a tab's menu, as before.</li>
 </ul>

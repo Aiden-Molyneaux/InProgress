@@ -3,7 +3,7 @@ import { renderBriefing, renderStatusAnswer, renderStatusLine } from '../../src/
 import { stepBlock } from '../../src/server/briefing-scoped';
 import { clearAsk, raiseAsk } from '../../src/server/repo/asks';
 import { addNodes, updateNode } from '../../src/server/repo/nodes';
-import { addBinding, changeProject, createProject, setQueue } from '../../src/server/repo/projects';
+import { addBinding, changeProject, createProject, listProjectSummaries, setQueue } from '../../src/server/repo/projects';
 import { addResource } from '../../src/server/repo/resources';
 import { clearBriefingDue, findSession } from '../../src/server/repo/sessions';
 import { getProjectSnapshot } from '../../src/server/repo/snapshot';
@@ -251,5 +251,104 @@ describe('Up next reads the Board', () => {
     // s2 ends without its queue being released (a row edited behind the server's back): its entry is out of Next, not unowned.
     t.ctx.db.prepare("UPDATE sessions SET state = 'ended', ended_at = ? WHERE id = 's2'").run(t.ctx.now());
     expect(t.brief('s1').find((l) => l.startsWith('Up next'))).toBe(`Up next: "Release notes": #${t.ready3.id} · later: #${t.ready1.id}`);
+  });
+});
+
+describe('parked steps in the briefing', () => {
+  it('Ready to claim and Up next leave out a shelved step the stored queue still holds', () => {
+    for (const mode of ['scoped', 'full'] as const) {
+      const t = setup(mode);
+      t.join('s1');
+      t.join('s2', 'Docs pass');
+      updateNode(t.ctx, 'test', t.group.id, { status: 'parked', parkedReason: 'later' });
+      // Seeded directly: setQueue would refuse the shelved steps, a rollback or older build would not.
+      const stored = [{ node: t.ready1.id, session: null }, { node: t.ready2.id, session: 's2' }];
+      const seed = (queue: unknown[]) => t.ctx.db.prepare('UPDATE projects SET queue = ? WHERE id = ?').run(JSON.stringify(queue), t.project.id);
+      seed(stored);
+      const text = t.brief('s1').join('\n');
+      expect(text, mode).not.toContain('Ready to claim:');
+      expect(text, mode).not.toContain('Up next');
+      const ok = addNodes(t.ctx, 'test', { parentId: t.project.rootNodeId, nodes: [{ title: 'Elsewhere' }] })[0];
+      seed([...stored, { node: ok.id, session: null }]);
+      const lines = t.brief('s1');
+      // The control: the open step shows where each mode shows its queue, and the shelved ones still do not.
+      expect(lines.find((l) => l.startsWith(mode === 'scoped' ? 'Ready to claim:' : 'Up next')), mode).toBe(mode === 'scoped' ? `Ready to claim: #${ok.id} Elsewhere` : `Up next: later: #${ok.id}`);
+    }
+  });
+
+  it('open asks on shelved steps leave the Needs you and check lines, and come back on unpark', () => {
+    const t = setup('full');
+    t.join('s1');
+    const ask = raiseAsk(t.ctx, 'test', { nodeId: t.askedStep.id, kind: 'question', text: 'Hold on' });
+    const lines = () => renderBriefing(t.snap(), 's1', Date.parse(t.ctx.now()) + 3 * 86_400_000, { checkOld: true, cli: CLI }).split('\n');
+    const check = () => lines().find((l) => l.startsWith('Check with Aiden'));
+    const needs = () => lines().find((l) => l.startsWith('Needs you'));
+    expect(needs()).toContain('Hold on');
+    expect(check()).toContain(`a${ask.id}`);
+    updateNode(t.ctx, 'test', t.group.id, { status: 'parked', parkedReason: 'later' });
+    expect(needs()).toBeUndefined();
+    expect(check()).toBeUndefined();
+    updateNode(t.ctx, 'test', t.group.id, { status: 'active' });
+    expect(needs()).toContain('Hold on');
+    expect(check()).toContain(`a${ask.id}`);
+  });
+
+  it('the status line and the project summary leave out asks on shelved steps', () => {
+    const t = setup('full');
+    t.join('s1');
+    raiseAsk(t.ctx, 'test', { nodeId: t.askedStep.id, kind: 'question', text: 'Hold on' });
+    const line = () => renderStatusLine(t.snap(), t.snap().sessions.find((x) => x.id === 's1')!);
+    const count = () => listProjectSummaries(t.ctx).find((x) => x.slug === t.project.slug)!.openAsks;
+    expect(line()).toContain('1 need you');
+    expect(count()).toBe(1);
+    updateNode(t.ctx, 'test', t.group.id, { status: 'parked', parkedReason: 'later' });
+    expect(line()).toContain('0 need you');
+    expect(count()).toBe(0);
+    updateNode(t.ctx, 'test', t.group.id, { status: 'active' });
+    expect(line()).toContain('1 need you');
+    expect(count()).toBe(1);
+  });
+
+  it("a scoped worker's status line keeps its own step's asks when a phase above it is parked", () => {
+    const t = setup();
+    t.join('s1');
+    claimStep(t.ctx, 'session:s1', 's1', t.askedStep.id);
+    const ask = raiseAsk(t.ctx, 'test', { nodeId: t.askedStep.id, kind: 'question', text: 'Hold on' });
+    updateNode(t.ctx, 'test', t.group.id, { status: 'parked', parkedReason: 'later' });
+    expect(renderStatusLine(t.snap(), t.snap().sessions.find((x) => x.id === 's1')!)).toContain(`on #${t.askedStep.id} (a${ask.id} open) ·`);
+  });
+
+  it('clips a long, multi-line parked reason to one line of 80 characters', () => {
+    const t = setup('scoped');
+    t.join('s1');
+    claimStep(t.ctx, 'session:s1', 's1', t.step.id);
+    const reason = `first line${'x'.repeat(100)}\n second line`;
+    updateNode(t.ctx, 'test', t.step.id, { status: 'parked', parkedReason: reason });
+    const line = t.brief('s1').find((l) => l.startsWith(`#${t.step.id} is parked:`))!;
+    expect(line).toBe(`#${t.step.id} is parked: ${'first line' + 'x'.repeat(69)}…`);
+    updateNode(t.ctx, 'test', t.step.id, { status: 'todo' });
+    updateNode(t.ctx, 'test', t.group.id, { status: 'parked', parkedReason: reason });
+    expect(t.brief('s1').find((l) => l.includes('is under parked'))).toBe(`#${t.step.id} is under parked #${t.group.id}: ${'first line' + 'x'.repeat(69)}…`);
+  });
+
+  it('a session focused on a parked step is told it is parked', () => {
+    for (const mode of ['scoped', 'full'] as const) {
+      const t = setup(mode);
+      t.join('s1');
+      claimStep(t.ctx, 'session:s1', 's1', t.step.id);
+      expect(t.brief('s1').join('\n'), mode).not.toContain('is parked');
+      updateNode(t.ctx, 'test', t.step.id, { status: 'parked', parkedReason: 'waiting on design' });
+      expect(t.brief('s1'), mode).toContain(`#${t.step.id} is parked: waiting on design`);
+    }
+  });
+
+  it('a session focused on a step under a parked phase is told which step is parked', () => {
+    for (const mode of ['scoped', 'full'] as const) {
+      const t = setup(mode);
+      t.join('s1');
+      claimStep(t.ctx, 'session:s1', 's1', t.step.id);
+      updateNode(t.ctx, 'test', t.group.id, { status: 'parked', parkedReason: 'waiting on design' });
+      expect(t.brief('s1'), mode).toContain(`#${t.step.id} is under parked #${t.group.id}: waiting on design`);
+    }
   });
 });

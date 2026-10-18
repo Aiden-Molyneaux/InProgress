@@ -11,7 +11,7 @@ export const LABEL_GLYPHS: Record<NodeLabel, string> = {
 };
 /** The refusal of a label outside the set, naming the set. */
 export const unknownLabel = (value: unknown): string => `Unknown label ${JSON.stringify(value)}. Use one of: ${NODE_LABELS.join(', ')}.`;
-export const NODE_STATUSES = ['todo', 'active', 'done', 'blocked', 'dropped'] as const;
+export const NODE_STATUSES = ['todo', 'active', 'done', 'blocked', 'dropped', 'parked'] as const;
 export type NodeStatus = (typeof NODE_STATUSES)[number];
 export const ASSIGNEES = ['claude', 'me'] as const;
 export type Assignee = (typeof ASSIGNEES)[number];
@@ -179,6 +179,12 @@ export interface TreeNode {
   stateSince: string | null;
   /** The task hue (0-6) held while the step is in a coloured state; null otherwise. */
   hue: number | null;
+  /** Why the step is parked (set aside on purpose); '' unless parked. */
+  parkedReason: string;
+  /** Where a parked step's work lives (a branch, worktree or commit); '' when not given or not parked. */
+  parkedWhere: string;
+  /** When the step was parked; null unless parked. */
+  parkedAt: string | null;
 }
 
 export interface NodeInput {

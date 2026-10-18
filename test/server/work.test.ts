@@ -699,3 +699,11 @@ describe('the queue', () => {
     expect(listEventsSince(ctx, mark)).toEqual([]);
   });
 });
+
+describe('working tasks on shelved steps', () => {
+  it('a task from a session focused on a step under a parked phase goes to the root', () => {
+    const t = setup();
+    updateNode(t.ctx, 'test', t.signing.id, { status: 'parked', parkedReason: 'later' });
+    expect(setTasks(t.ctx, 'session:s1', 's1', undefined, [{ subject: 'Something', status: 'pending' }]).nodeId).toBe(t.project.rootNodeId);
+  });
+});

@@ -84,7 +84,8 @@ export function taskBoxes(board: Board, input: BoardInput, now: number): Record<
   };
   const needs = [...boxes.values()].filter((b) => b.cell === 'needs');
   for (const s of input.sessions) {
-    if (s.focusNodeId === null && s.state === 'permission' && isLive(s, now)) needs.push({ row: null, session: s, cell: 'needs', state: 'permission' });
+    // A step with no row (the root, or one set aside) holds no box, so a wait on it would be lost.
+    if ((s.focusNodeId === null || !board.byId.has(s.focusNodeId)) && s.state === 'permission' && isLive(s, now)) needs.push({ row: null, session: s, cell: 'needs', state: 'permission' });
   }
   out.needs = needs.sort((a, b) =>
     needTime(a) - needTime(b) || (a.row ? 0 : 1) - (b.row ? 0 : 1) || (a.row && b.row ? a.row.node.id - b.row.node.id : (a.session!.id < b.session!.id ? -1 : a.session!.id > b.session!.id ? 1 : 0)));

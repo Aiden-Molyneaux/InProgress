@@ -4,6 +4,7 @@ import { badRequest, notFound } from '../errors';
 import { findNode, leadingNode } from './nodes';
 import { getProjectById, isTracking, notTracked } from './projects';
 import { findSession } from './sessions';
+import { shelvedAmong } from './shelved';
 import { subagentNode } from './subagents';
 
 interface WorkRow {
@@ -55,8 +56,9 @@ const findItem = (ctx: Ctx, sessionId: string, agentId: string, taskKey: string)
 const nextPosition = (ctx: Ctx, nodeId: number): number =>
   (ctx.db.prepare('SELECT COALESCE(MAX(position), 0) + 1 AS p FROM work_items WHERE node_id = ?').get(nodeId) as { p: number }).p;
 
-/** A done or dropped step: a session's focus stays on a step it has finished, so new tasks must not follow it there. */
-const isClosed = (node: { status: string }) => node.status === 'done' || node.status === 'dropped';
+/** A done, dropped or shelved step (parked, or under a parked one): a session's focus stays on a step it has finished or that was set aside, so new tasks must not follow it there. */
+const isClosed = (ctx: Ctx, node: { id: number; status: string }) =>
+  node.status === 'done' || node.status === 'dropped' || shelvedAmong(ctx, [node.id]).has(node.id);
 
 /**
  * Where a new working task goes, decided once: a leading `#id` in the subject when that node is in the session's
@@ -72,7 +74,7 @@ function attribute(ctx: Ctx, session: Session, agentId: string, subject: string)
   };
   const named = leadingNode(ctx, subject, projectId);
   const home = named === undefined ? ((agentId ? inProject(subagentNode(ctx, session.id, agentId)) : undefined) ?? inProject(session.focusNodeId)) : undefined;
-  const nodeId = named ?? (home && !isClosed(home) ? home.id : getProjectById(ctx, projectId)?.rootNodeId);
+  const nodeId = named ?? (home && !isClosed(ctx, home) ? home.id : getProjectById(ctx, projectId)?.rootNodeId);
   return nodeId === undefined ? undefined : { projectId, nodeId };
 }
 
@@ -210,7 +212,7 @@ export function setTasks(ctx: Ctx, actor: string, sessionId: string, requested: 
     }
     const findStep = () => `Find the right step id with the CLI command: outline ${getProjectById(ctx, session.projectId!)?.slug ?? '<project>'}`;
     const focus = session.focusNodeId === null ? undefined : findNode(ctx, session.focusNodeId);
-    const nodeId = requested ?? (focus && isClosed(focus) ? getProjectById(ctx, session.projectId)?.rootNodeId ?? focus.id : session.focusNodeId);
+    const nodeId = requested ?? (focus && isClosed(ctx, focus) ? getProjectById(ctx, session.projectId)?.rootNodeId ?? focus.id : session.focusNodeId);
     if (nodeId === null) throw badRequest('This session has no focus', 'Name the step: tasks <id> …');
     const node = findNode(ctx, nodeId);
     if (!node) throw notFound(`Node #${nodeId} not found`, findStep());
