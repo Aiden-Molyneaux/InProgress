@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { NODE_LABELS, type TreeNode } from '../../src/core/types';
-import { ancestors, buildIndex, computeVisible, countDone, isNeedsYou, pinnedIds, progress, renderOutline } from '../../src/core/tree';
+import { ancestors, buildIndex, computeVisible, countDone, isNeedsYou, pinnedIds, progress, renderOutline, shelvedIds } from '../../src/core/tree';
 import type { VisibleItem } from '../../src/core/tree';
 
 let nextId = 1;
 function n(parentId: number | null, title: string, extra: Partial<TreeNode> = {}): TreeNode {
   const id = extra.id ?? nextId++;
-  return { id, projectId: 1, parentId, position: id, kind: parentId === null ? 'goal' : 'task', title, body: '', status: 'todo', assignee: 'claude', outcome: '', label: null, createdAt: 't', updatedAt: 't', completedAt: null, driverSessionId: null, boardState: null, stateSince: null, hue: null, ...extra };
+  return { id, projectId: 1, parentId, position: id, kind: parentId === null ? 'goal' : 'task', title, body: '', status: 'todo', assignee: 'claude', outcome: '', label: null, createdAt: 't', updatedAt: 't', completedAt: null, driverSessionId: null, boardState: null, stateSince: null, hue: null, parkedReason: '', parkedWhere: '', parkedAt: null, ...extra };
 }
 
 function sample() {
@@ -53,6 +53,34 @@ describe('derived stats', () => {
     expect(pinned.has(t.s6.id)).toBe(true);
     expect(pinned.has(t.s7.id)).toBe(false);
     expect(pinned.has(t.m.id)).toBe(false);
+  });
+});
+
+describe('parked steps', () => {
+  it('shelvedIds holds a parked step and its whole subtree', () => {
+    nextId = 1;
+    const root = n(null, 'Root');
+    const p = n(root.id, 'Parked phase', { kind: 'phase', status: 'parked', parkedReason: 'not now', parkedAt: 't' });
+    const c = n(p.id, 'Child');
+    const g = n(c.id, 'Grandchild', { status: 'active' });
+    const s = n(root.id, 'Sibling');
+    expect([p.id, c.id, g.id, s.id]).toEqual([2, 3, 4, 5]);
+    const set = shelvedIds(buildIndex([root, p, c, g, s]));
+    expect([...set].sort((a, b) => a - b)).toEqual([2, 3, 4]);
+    expect(set.has(s.id)).toBe(false);
+    expect(set.has(root.id)).toBe(false);
+  });
+
+  it('progress leaves parked children out of the total', () => {
+    nextId = 1;
+    const root = n(null, 'Root');
+    const kidsOf = [
+      n(root.id, 'Done', { status: 'done' }),
+      n(root.id, 'Todo'),
+      n(root.id, 'Parked', { status: 'parked', parkedReason: 'later', parkedAt: 't' }),
+      n(root.id, 'Dropped', { status: 'dropped' }),
+    ];
+    expect(progress(buildIndex([root, ...kidsOf]), root.id)).toEqual({ done: 1, total: 2 });
   });
 });
 

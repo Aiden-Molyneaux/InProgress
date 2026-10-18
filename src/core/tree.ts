@@ -45,9 +45,23 @@ export function ancestors(index: TreeIndex, id: number): TreeNode[] {
 }
 
 export function progress(index: TreeIndex, id: number): { done: number; total: number } | null {
-  const list = kids(index, id).filter((c) => c.status !== 'dropped');
+  const list = kids(index, id).filter((c) => c.status !== 'dropped' && c.status !== 'parked');
   if (list.length === 0) return null;
   return { done: list.filter((c) => c.status === 'done').length, total: list.length };
+}
+
+/** The shelved steps: every node that is parked or has a parked ancestor. The root is never parked. */
+export function shelvedIds(index: TreeIndex): Set<number> {
+  const out = new Set<number>();
+  const walk = (id: number, shelved: boolean) => {
+    for (const k of kids(index, id)) {
+      const here = shelved || k.status === 'parked';
+      if (here) out.add(k.id);
+      walk(k.id, here);
+    }
+  };
+  if (index.root) walk(index.root.id, false);
+  return out;
 }
 
 export function countDone(index: TreeIndex, id: number): number {

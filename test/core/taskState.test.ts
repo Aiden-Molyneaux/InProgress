@@ -9,7 +9,7 @@ const ago = (ms: number) => new Date(NOW - ms).toISOString();
 const MIN = 60_000;
 
 function n(id: number, parentId: number | null, o: Partial<TreeNode> = {}): TreeNode {
-  return { id, projectId: 1, parentId, position: id, kind: 'task', title: `S${id}`, body: '', status: 'todo', assignee: 'claude', outcome: '', label: null, createdAt: T, updatedAt: T, completedAt: null, driverSessionId: null, boardState: null, stateSince: null, hue: null, ...o };
+  return { id, projectId: 1, parentId, position: id, kind: 'task', title: `S${id}`, body: '', status: 'todo', assignee: 'claude', outcome: '', label: null, createdAt: T, updatedAt: T, completedAt: null, driverSessionId: null, boardState: null, stateSince: null, hue: null, parkedReason: '', parkedWhere: '', parkedAt: null, ...o };
 }
 function s(id: string, o: Partial<Session> = {}): Session {
   return { id, projectId: 1, title: id, cwd: null, branch: null, transcriptPath: null, state: 'working', focusNodeId: null, promptsSinceUpdate: 0, startedAt: T, lastSeenAt: T, endedAt: null, slot: 0, subagents: [], commands: [], role: 'worker', ...o };

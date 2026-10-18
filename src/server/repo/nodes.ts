@@ -26,6 +26,10 @@ interface NodeRow {
   board_state: TaskState | null;
   state_since: string | null;
   hue: number | null;
+  /** Absent before migration 13. */
+  parked_reason?: string;
+  parked_where?: string;
+  parked_at?: string | null;
 }
 
 export const toNode = (r: NodeRow): TreeNode => ({
@@ -47,6 +51,9 @@ export const toNode = (r: NodeRow): TreeNode => ({
   boardState: r.board_state,
   stateSince: r.state_since,
   hue: r.hue,
+  parkedReason: r.parked_reason ?? '',
+  parkedWhere: r.parked_where ?? '',
+  parkedAt: r.parked_at ?? null,
 });
 
 /** A step by id. A deleted project's steps are not found, so every read and write by id refuses them. */
