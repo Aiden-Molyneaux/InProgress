@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Board, BoardRow } from '../../../src/core/board';
 import { sessionDisplayTitle, type ProjectSnapshot, type TreeNode } from '../../../src/core/types';
 import { LabelChip, rowClick, StepMarks } from '../board/Marks';
+import { Marker } from '../Marker';
 import { numeral } from '../board/NextColumn';
 import { QuickAdd } from '../board/QuickAdd';
 import { ageShort } from '../board/text';
@@ -68,7 +69,7 @@ function StepRow({ node, row, depth, snapshot, now, wide, onOpenNode, onOpenReso
   return (
     <li className={`ip-orow${wide ? ' wide' : ''}${row?.column === 'done' ? ' is-done' : ''}`} data-node={node.id} onClick={rowClick('project', () => onOpenNode(node.id))}>
       <span className="ip-orail">
-        <RailMark row={row} />
+        {node.status === 'parked' ? <Marker status="parked" question={false} paused={false} needsYou={false} pulse={false} title="Parked" /> : <RailMark row={row} />}
       </span>
       <div className="ip-ostep" style={{ paddingLeft: depth * (wide ? 16 : 10) }}>
         <span className="ip-id">{`#${node.id}`}</span>{' '}

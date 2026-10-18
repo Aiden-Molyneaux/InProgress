@@ -4,7 +4,9 @@ import { deriveBoard } from '../../../src/core/board';
 import { agentHome, agentVisible, atLimit, homedTrailAgents, isPaused, occupiedSteps } from '../../../src/core/layout';
 import { LABEL_GLYPHS, isReader, sessionDisplayTitle, type NodeDetail, type ProjectSnapshot, type TrailAgent, type TreeNode, type WorkItem } from '../../../src/core/types';
 import { AgentWords } from '../AgentWords';
-import { api, postEvent } from '../api';
+import { api, postEvent, unparkStep } from '../api';
+import { ParkForm } from '../backlog/ParkForm';
+import { shortDate } from '../done/doneGroups';
 import { AskActions } from '../board/AskActions';
 import { MARK_WORDS } from '../board/Marks';
 import { KIND_MARK } from '../board/NeedsMe';
@@ -226,6 +228,9 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
   const byId = useMemo(() => new Map(snapshot.nodes.map((n) => [n.id, n] as const)), [snapshot.nodes]);
   const now = useNow(30_000);
   const [adding, setAdding] = useState(false);
+  /** The Park… form is open; an Unpark is in flight. */
+  const [parking, setParking] = useState(false);
+  const [unparkBusy, setUnparkBusy] = useState(false);
   const addField = useRef<HTMLInputElement>(null);
   const addButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -285,6 +290,15 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
       />
     );
   };
+  const unpark = async () => {
+    setUnparkBusy(true);
+    const result = await unparkStep(projectId, snapshot.project.slug, nodeId, false);
+    setUnparkBusy(false);
+    if (result === 'reload') window.location.reload();
+    else if (result !== 'ok') onStatus?.(result);
+  };
+  /** An open step can be set aside; the root, a finished, dropped or parked one cannot. */
+  const parkable = detail.parent !== null && (node.status === 'todo' || node.status === 'active' || node.status === 'blocked');
   const copy = async () => {
     await navigator.clipboard.writeText(`#${node.id} ${node.title}`);
     setCopied(true);
@@ -321,6 +335,15 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
           </span>
         )}
       </div>
+      {node.status === 'parked' && (
+        <div className="ip-dparked">
+          <p>
+            <b>{node.parkedAt ? `Parked ${shortDate(node.parkedAt, now)}:` : 'Parked:'}</b> {node.parkedReason}
+          </p>
+          {node.parkedWhere && <p className="muted">{`where ${node.parkedWhere}`}</p>}
+          <button type="button" className="ip-btn" disabled={unparkBusy} onClick={() => void unpark()}>Unpark</button>
+        </div>
+      )}
       <AsksSection nodeId={node.id} snapshot={snapshot} now={now} />
       {(handoff || marks.length > 0) && (
         <div className="ip-dmarks">
@@ -382,6 +405,15 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
             ))}
           </ul>
         </>
+      )}
+      {parkable && (
+        <div className="ip-dadd">
+          {parking ? (
+            <ParkForm projectId={projectId} slug={snapshot.project.slug} nodeId={node.id} title={node.title} onStatus={onStatus} onDone={() => setParking(false)} onCancel={() => setParking(false)} />
+          ) : (
+            <button type="button" className="ip-btn" onClick={() => setParking(true)}>Park…</button>
+          )}
+        </div>
       )}
       <div className="ip-dadd">
         {adding ? (

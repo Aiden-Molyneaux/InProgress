@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { deriveBoard, isLive } from '../../src/core/board';
 import type { StepHit } from '../../src/core/goto';
+import { buildIndex, shelvedIds } from '../../src/core/tree';
 import type { ProjectSnapshot } from '../../src/core/types';
 import { api, postEvent } from './api';
 import { Board } from './board/Board';
@@ -10,6 +11,7 @@ import { ActivityStrip } from './chrome/ActivityStrip';
 import type { GoToHandle } from './chrome/GoTo';
 import { archivedProjects, loadTabOrder, moveTab, neighbourTab, projectTabs, pruneOrder, saveTabOrder, stepTab, TAB_ORDER_KEY } from './chrome/tabs';
 import { TopBar } from './chrome/TopBar';
+import { BacklogList } from './backlog/BacklogList';
 import { DoneList } from './done/DoneList';
 import { Details } from './panels/Details';
 import { ResourceViewer } from './panels/ResourceViewer';
@@ -67,7 +69,12 @@ export function App() {
   const opener = useRef<HTMLElement | null>(null);
   /** Open asks plus live sessions waiting on a permission: the title's count, as a tab's is (spec 2.1). */
   const waiting = useMemo(
-    () => (snapshot ? snapshot.asks.filter((a) => a.clearedAt === null).length + snapshot.sessions.filter((s) => s.state === 'permission' && isLive(s, now)).length : 0),
+    () => {
+      if (!snapshot) return 0;
+      // An ask on a shelved step (parked, or under a parked one) is not waiting on Aiden: the Board's Needs me leaves it out too.
+      const shelved = shelvedIds(buildIndex(snapshot.nodes));
+      return snapshot.asks.filter((a) => a.clearedAt === null && !shelved.has(a.nodeId)).length + snapshot.sessions.filter((s) => s.state === 'permission' && isLive(s, now)).length;
+    },
     [snapshot, now],
   );
   // The full done list stands in for the Board while open. Opening it focuses its ‹ Board; going back focuses the Board's
@@ -89,8 +96,29 @@ export function App() {
     const to = doneOpen ? ['.ip-donelist-back'] : ['.ip-done-all', '.ip-band-done h3'];
     to.map((sel) => document.querySelector<HTMLElement>(sel)).find(Boolean)?.focus();
   }, [doneOpen]);
+  // The full Backlog stands in for the Board the same way. Opening it focuses its ‹ Board; going back focuses the preview's
+  // "N ›" button. Its filter lives in the view, so leaving it clears the filter.
+  const [backlogOpen, setBacklogOpen] = useState(false);
+  const backlogMoved = useRef(false);
+  const openBacklog = () => {
+    noteAction('backlog', 'all');
+    backlogMoved.current = true;
+    setBacklogOpen(true);
+    postEvent('backlog_open', snapshot?.project.id ?? null);
+  };
+  const closeBacklog = () => {
+    backlogMoved.current = true;
+    setBacklogOpen(false);
+  };
+  useEffect(() => {
+    if (!backlogMoved.current) return;
+    backlogMoved.current = false;
+    const to = backlogOpen ? ['.ip-backlogview-back'] : ['.ip-backlog-all', '.ip-band-next h3'];
+    to.map((sel) => document.querySelector<HTMLElement>(sel)).find(Boolean)?.focus();
+  }, [backlogOpen]);
   const pickView = (v: View) => {
     setDoneOpen(false);
+    setBacklogOpen(false);
     if (v === view) return;
     noteAction('header', 'view');
     setView(v);
@@ -282,10 +310,12 @@ export function App() {
                 : 'No projects yet. In a Claude session, say "track this in InProgress".'}
             </div>
           ) : snapshot ? (
-            view === 'board' && doneOpen ? (
+            view === 'board' && backlogOpen ? (
+              <BacklogList key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onStatus={say} onBack={closeBacklog} />
+            ) : view === 'board' && doneOpen ? (
               <DoneList key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onBack={closeDone} />
             ) : view === 'board' ? (
-              <Board key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onOpenDone={openDone} lastLook={lastLook} onStatus={say} />
+              <Board key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onOpenDone={openDone} onOpenBacklog={openBacklog} lastLook={lastLook} onStatus={say} />
             ) : (
               <ProjectView key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onStatus={say} />
             )

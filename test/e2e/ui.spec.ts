@@ -118,17 +118,27 @@ const open = (page: Page, project: Seeded) => page.goto(`/#/p/${project.slug}`);
 /** A step's row on the Board, by its title. Details lists the same steps as "#id title", so the exact name is the Board's. */
 const stepRow = (page: Page, title: string) => page.getByRole('main').getByRole('button', { name: title, exact: true });
 
-/** The Backlog fold at the foot of Next; "n of total" while a filter narrows it. */
-const backlogFold = (page: Page) => page.getByRole('button', { name: /^Backlog · (\d+ of )?\d+ [▸▾]$/ });
+/** The Backlog preview's phase picker at the foot of Next. */
+const phasePicker = (page: Page) => page.getByRole('combobox', { name: 'Backlog phase' });
 
-/** Opens the Backlog fold if it is closed: its steps are rows only while it is open. */
-async function openBacklog(page: Page): Promise<void> {
-  if ((await backlogFold(page).getAttribute('aria-expanded')) === 'false') await backlogFold(page).click();
+/** Shows a phase's entries in the Backlog preview ("No phase" for the steps under the root). */
+async function showPhase(page: Page, name: string): Promise<void> {
+  await phasePicker(page).selectOption({ label: name });
 }
 
-/** Opens a step's Details from its row and answers the panel. Backlog steps need the fold open, so it opens first. */
+/** The preview's "N ›" button, which opens the full Backlog view. */
+const backlogAll = (page: Page) => page.getByRole('button', { name: /^\d+ ›$/ });
+
+/** Opens the full Backlog view from the preview and answers it. */
+async function openFullBacklog(page: Page): Promise<Locator> {
+  await backlogAll(page).click();
+  const view = page.locator('.ip-backlogview');
+  await expect(view).toBeVisible();
+  return view;
+}
+
+/** Opens a step's Details from its row and answers the panel. The preview shows the default phase (Road to market here), which holds the Backlog steps these tests open. */
 async function openDetails(page: Page, title: string): Promise<Locator> {
-  await openBacklog(page);
   await stepRow(page, title).click();
   const details = page.getByRole('complementary');
   await expect(details).toContainText(title);
@@ -177,7 +187,6 @@ test('Details keeps the last good detail when a refresh fails', async ({ page, a
 test('Details closes when its node is deleted, and stays open when another node goes', async ({ page, api, fresh }) => {
   await open(page, fresh);
   const id = fresh.ids['3 RevenueCat'];
-  await openBacklog(page);
   await expect(stepRow(page, '7 Launch')).toBeVisible();
   const details = await openDetails(page, '3 RevenueCat');
   await expect(details).toContainText(`#${id} 3 RevenueCat`);
@@ -307,7 +316,7 @@ test('the first stream starts at the snapshot, and a batch still follows its tar
   // Untargeted and right behind it: the two replay in one chunk, and React renders them as one batch.
   await write(api, fresh.session, 'post', `/api/sessions/${fresh.session}/hook`, { event: 'stop' });
   release();
-  await openBacklog(page);
+  await showPhase(page, 'No phase');
   await expect(stepRow(page, 'Hotfix')).toBeVisible({ timeout: 6000 });
   expect(streams[0]).toMatch(/\/api\/events\/stream\?since=\d+$/);
 });
@@ -1738,9 +1747,8 @@ test.describe('Board', () => {
   test('Board cells share one task box', async ({ page, fresh }) => {
     await page.setViewportSize(WIDE);
     await open(page, fresh);
-    // A step in Next: pulled up from the Backlog.
+    // A step in Next: pulled up from the Backlog preview.
     const next = band(page, 'next');
-    await next.getByRole('button', { name: /^Backlog · \d+ [▸▾]$/ }).click();
     const toNext = next.locator('.ip-backlog-row', { has: page.getByRole('button', { name: '3 RevenueCat', exact: true }) }).getByRole('button', { name: 'to Next' });
     await toNext.focus();
     await page.keyboard.press('Enter');
@@ -1767,7 +1775,7 @@ test.describe('Board', () => {
     await expect(page.locator('.ip-bands li.ip-card', { has: page.getByRole('button', { name: 'Run signing tests', exact: true }) })).toHaveCount(1);
   });
 
-  test('Backlog boxes share the task box with no hue, under their parent line', async ({ page, api, fresh }) => {
+  test('Backlog preview boxes share the task box with no hue', async ({ page, api, fresh }) => {
     // A Blocked step that sits in Backlog holds a hue by the state rule; the fold still shows none.
     await write(api, fresh.session, 'patch', `/api/nodes/${fresh.ids['5 Store listing']}`, { status: 'blocked' });
     const snapshot = (await (await api.get(`/api/projects/${fresh.slug}`)).json()) as { nodes: { id: number; hue: number | null }[] };
@@ -1775,9 +1783,7 @@ test.describe('Board', () => {
     await page.setViewportSize(WIDE);
     await open(page, fresh);
     const next = band(page, 'next');
-    await next.getByRole('button', { name: /^Backlog · \d+ [▸▾]$/ }).click();
-    const group = next.getByRole('region', { name: 'Backlog under Road to market' });
-    await expect(group.locator('.ip-group-line')).toHaveText('Road to market');
+    const group = next.getByRole('list', { name: 'Backlog: Road to market' });
     const boxes = next.locator('.ip-backlog li.ip-card');
     expect(await boxes.count()).toBeGreaterThan(1);
     const box = group.locator('li.ip-card', { has: page.getByRole('button', { name: '4 Build to GitHub', exact: true }) });
@@ -2264,48 +2270,124 @@ test.describe('Board', () => {
     await expect(you).toHaveCSS('font-weight', '900');
   });
 
-  test('the Backlog fold opens, groups by parent, and quick-add keeps its field open until Escape', async ({ page, fresh }) => {
+  test('the Backlog preview shows the picked phase and opens the full view', async ({ page, api, fresh }) => {
+    await write(api, fresh.session, 'post', '/api/nodes', { parentId: fresh.root, nodes: [{ title: 'Loose one' }] });
+    const road = fresh.ids['Road to market'];
+    await write(api, fresh.session, 'post', '/api/nodes', { parentId: road, nodes: [{ title: '8 Extra' }, { title: '9 Extra' }] });
     await page.setViewportSize(WIDE);
     await open(page, fresh);
     const next = band(page, 'next');
-    const fold = next.getByRole('button', { name: /^Backlog · \d+ [▸▾]$/ });
-    await expect(fold).toHaveAttribute('aria-expanded', 'false');
+    const picker = phasePicker(page);
+    const preview = next.getByRole('list', { name: /^Backlog: / });
+    // The default is the phase of the latest completed step, Road to market: five entries in tree order, the rest in the full view.
+    await expect(picker.locator('option:checked')).toHaveText('Road to market');
+    await expect(picker.locator('option')).toHaveText(['Road to market', 'No phase']);
+    await expect(preview.locator('.ip-backlog-row .ip-row-title')).toHaveText(['3 RevenueCat', '4 Build to GitHub', '5 Store listing', '6 Beta', '7 Launch']);
+    await expect(backlogAll(page)).toHaveText('9 ›');
+    // Another phase: its entries only, remembered after a reload.
+    await showPhase(page, 'No phase');
+    await expect(preview.locator('.ip-backlog-row .ip-row-title')).toHaveText(['Milestones', 'Loose one']);
+    await page.reload();
+    await expect(picker.locator('option:checked')).toHaveText('No phase');
+    await expect(next.getByRole('button', { name: 'Loose one', exact: true })).toBeVisible();
     await expect(next.getByRole('button', { name: '3 RevenueCat', exact: true })).toHaveCount(0);
-    const opened = page.waitForRequest((r) => r.url().endsWith('/api/ui/events') && (r.postDataJSON() as { name: string }).name === 'backlog_open');
-    await fold.click();
-    await opened;
-    await expect(fold).toHaveAttribute('aria-expanded', 'true');
-    // The steps of Road to market sit under its title.
-    const group = next.getByRole('region', { name: 'Backlog under Road to market' });
-    await expect(group.locator('.ip-group-line')).toHaveText('Road to market');
-    await expect(group.getByRole('button', { name: '3 RevenueCat', exact: true })).toBeVisible();
-    const field = next.getByRole('textbox', { name: 'Add a step to the backlog' });
-    await expect(field).toBeVisible();
-    // "+ add" focuses the field; Enter creates under the root and leaves the field open, empty and focused.
+    // Quick-add creates under the picked phase (the root for No phase) and keeps its field open until Escape.
+    const field = next.getByRole('textbox', { name: 'Add a step to No phase' });
+    await expect(field).toHaveCount(0);
     await next.getByRole('button', { name: '+ add' }).click();
     await expect(field).toBeFocused();
     await page.keyboard.type('First quick step');
     await page.keyboard.press('Enter');
-    await expect(next.getByRole('region', { name: 'Backlog at the top level' }).getByRole('button', { name: 'First quick step', exact: true })).toBeVisible();
+    await expect(next.getByRole('button', { name: 'First quick step', exact: true })).toBeVisible();
     await expect(field).toBeFocused();
     await expect(field).toHaveValue('');
-    await page.keyboard.type('Second quick step');
-    await page.keyboard.press('Enter');
-    await expect(next.getByRole('button', { name: 'Second quick step', exact: true })).toBeVisible();
-    await expect(field).toBeFocused();
     await expect(page.getByRole('complementary')).toHaveCount(0);
-    // Escape closes the field and puts focus back on "+ add".
     await page.keyboard.press('Escape');
     await expect(field).toHaveCount(0);
     await expect(next.getByRole('button', { name: '+ add' })).toBeFocused();
-    await expect(fold).toHaveAttribute('aria-expanded', 'true');
+    // The full view: every entry, under "No phase" and the phase, and back to the Board.
+    const opened = page.waitForRequest((r) => r.url().endsWith('/api/ui/events') && (r.postDataJSON() as { name: string }).name === 'backlog_open');
+    const view = await openFullBacklog(page);
+    await opened;
+    await expect(view.getByRole('heading', { name: 'Backlog · 10' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '‹ Board' })).toBeFocused();
+    await expect(view.getByRole('region', { name: 'Backlog with no phase' }).locator('.ip-group-line')).toHaveText('No phase');
+    await expect(view.getByRole('region', { name: 'Backlog under Road to market' }).getByRole('button', { name: '9 Extra', exact: true })).toBeVisible();
+    await expect(page.locator('section.ip-band-next')).toHaveCount(0);
+    await page.getByRole('button', { name: '‹ Board' }).click();
+    await expect(backlogAll(page)).toBeFocused();
+    await expect(page.locator('.ip-backlogview')).toHaveCount(0);
+    await expect(picker.locator('option:checked')).toHaveText('No phase');
   });
 
-  test('the Backlog orders by phase or by id, forward or reverse, and keeps the choice after a reload', async ({ page, fresh }) => {
+  test('the Backlog preview falls back when its remembered phase has no entries', async ({ page, api, fresh }) => {
     await page.setViewportSize(WIDE);
     await open(page, fresh);
-    const next = band(page, 'next');
-    await openBacklog(page);
+    const [loose] = await write<{ id: number }[]>(api, fresh.session, 'post', '/api/nodes', { parentId: fresh.root, nodes: [{ title: 'Loose one' }] });
+    await showPhase(page, 'No phase');
+    await expect(band(page, 'next').getByRole('button', { name: 'Loose one', exact: true })).toBeVisible();
+    // The remembered choice (No phase) is emptied (Milestones, the other step under the root, finishes too): the preview does not sit on "Nothing in No phase".
+    await write(api, fresh.session, 'patch', `/api/nodes/${loose.id}`, { status: 'done', outcome: 'Done' });
+    await write(api, fresh.session, 'patch', `/api/nodes/${fresh.ids['Milestones']}`, { status: 'done', outcome: 'Done' });
+    await expect(phasePicker(page).locator('option:checked')).toHaveText('Road to market');
+    await expect(band(page, 'next').getByRole('button', { name: '3 RevenueCat', exact: true })).toBeVisible();
+  });
+
+  test('a step parked from the full Backlog view returns to Next with to Next', async ({ page, fresh }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const view = await openFullBacklog(page);
+    const total = Number((await view.getByRole('heading').textContent())!.replace('Backlog · ', ''));
+    const rowOf = (t: string) => view.locator('.ip-backlog-row', { has: page.getByRole('button', { name: t, exact: true }) });
+    // Park… opens a form in the row: the reason is required, where is optional.
+    await rowOf('4 Build to GitHub').hover();
+    await rowOf('4 Build to GitHub').getByRole('button', { name: 'Park…' }).click();
+    const form = page.getByRole('dialog', { name: `Park #${fresh.ids['4 Build to GitHub']} 4 Build to GitHub` });
+    await expect(form.getByRole('textbox', { name: 'Reason' })).toBeFocused();
+    await expect(form.getByRole('button', { name: 'Park', exact: true })).toBeDisabled();
+    await page.keyboard.press('Escape');
+    await expect(form).toHaveCount(0);
+    await expect(rowOf('4 Build to GitHub')).toBeVisible();
+    await rowOf('4 Build to GitHub').hover();
+    await rowOf('4 Build to GitHub').getByRole('button', { name: 'Park…' }).click();
+    await form.getByRole('textbox', { name: 'Reason' }).fill('Not merging this quarter');
+    await form.getByRole('textbox', { name: 'Where' }).fill('feat/build-to-github');
+    await page.keyboard.press('Enter');
+    // It leaves the list, the title counts one fewer, and the Parked group holds it with its reason and where.
+    await expect(rowOf('4 Build to GitHub')).toHaveCount(0);
+    await expect(view.getByRole('heading', { name: `Backlog · ${total - 1}` })).toBeVisible();
+    const parked = view.getByRole('region', { name: 'Parked' });
+    await expect(parked.locator('.ip-group-line').first()).toHaveText('Parked · 1');
+    const parkedRow = parked.locator('li', { has: page.getByRole('button', { name: '4 Build to GitHub', exact: true }) });
+    await expect(parkedRow.locator('.ip-parked-why')).toHaveText(/^Parked .+: Not merging this quarter$/);
+    await expect(parkedRow.locator('.ip-parked-where')).toHaveText('where feat/build-to-github');
+    // "to Next" unparks it into Next in one write.
+    await parkedRow.hover();
+    await parkedRow.getByRole('button', { name: 'to Next' }).click();
+    await expect(parked).toHaveCount(0);
+    await page.getByRole('button', { name: '‹ Board' }).click();
+    const nextRow = band(page, 'next').locator('.ip-next-row', { has: page.getByRole('button', { name: '4 Build to GitHub', exact: true }) });
+    await expect(nextRow.locator('.ip-st')).toHaveText('Ready');
+    // Unpark sends a parked step back to the Backlog, not to Next.
+    const again = await openFullBacklog(page);
+    await again.locator('.ip-backlog-row', { has: page.getByRole('button', { name: '5 Store listing', exact: true }) }).hover();
+    await again.locator('.ip-backlog-row', { has: page.getByRole('button', { name: '5 Store listing', exact: true }) }).getByRole('button', { name: 'Park…' }).click();
+    await page.getByRole('textbox', { name: 'Reason' }).fill('Later');
+    await page.getByRole('button', { name: 'Park', exact: true }).click();
+    const shelved = again.getByRole('region', { name: 'Parked' }).locator('li', { has: page.getByRole('button', { name: '5 Store listing', exact: true }) });
+    await expect(shelved).toBeVisible();
+    await shelved.hover();
+    await shelved.getByRole('button', { name: 'Unpark' }).click();
+    await expect(again.locator('.ip-backlog-row', { has: page.getByRole('button', { name: '5 Store listing', exact: true }) })).toBeVisible();
+    await expect(again.getByRole('region', { name: 'Parked' })).toHaveCount(0);
+    await page.getByRole('button', { name: '‹ Board' }).click();
+    await expect(band(page, 'next').locator('.ip-next-row', { hasText: '5 Store listing' })).toHaveCount(0);
+  });
+
+  test('the Backlog orders by phase, id or age, forward or reverse, and keeps the choice after a reload', async ({ page, fresh }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const next = await openFullBacklog(page);
     const order = next.getByRole('group', { name: 'Backlog order' });
     const attrs = async (selector: string, name: string) => Promise.all((await next.locator(selector).all()).map((l) => l.getAttribute(name)));
     const ids = async () => (await attrs('.ip-backlog-row', 'data-node')).map(Number);
@@ -2323,13 +2405,20 @@ test.describe('Board', () => {
     const up = await ids();
     expect(up).toEqual([...phaseIds].sort((a, b) => a - b));
     await expect(next.locator('.ip-backlog-row').filter({ hasText: '3 RevenueCat' }).locator('.ip-box-parent')).toHaveText('Road to market');
+    // Age: one flat list, oldest first (creation order is id order here), forward and reverse.
+    await order.getByRole('button', { name: 'Reverse' }).click();
+    await order.getByRole('button', { name: 'Age' }).click();
+    await expect(next.getByRole('region', { name: 'Backlog by age' })).toBeVisible();
+    expect(await ids()).toEqual(up);
+    await order.getByRole('button', { name: 'Reverse' }).click();
+    await order.getByRole('button', { name: 'ID' }).click();
     // Reverse: high to low.
     await order.getByRole('button', { name: 'Reverse' }).click();
     await expect(order.getByRole('button', { name: 'Reverse' })).toHaveAttribute('aria-pressed', 'true');
     expect(await ids()).toEqual([...up].reverse());
     // The choice survives a reload.
     await page.reload();
-    await openBacklog(page);
+    await openFullBacklog(page);
     await expect(order.getByRole('button', { name: 'ID' })).toHaveAttribute('aria-pressed', 'true');
     await expect(order.getByRole('button', { name: 'Reverse' })).toHaveAttribute('aria-pressed', 'true');
     expect(await ids()).toEqual([...up].reverse());
@@ -2348,21 +2437,20 @@ test.describe('Board', () => {
     await expect(order.getByRole('button', { name: 'Reverse' })).toBeFocused();
   });
 
-  test('the Backlog filter narrows the rows under either order, counts "n of total", clears on Escape, Clear filter and close', async ({ page, api, fresh }) => {
+  test('the Backlog filter narrows the rows under either order, counts "n of total", filters by phase and label, and clears on Escape, Clear filter and leaving the view', async ({ page, api, fresh }) => {
     await write(api, fresh.session, 'patch', `/api/nodes/${fresh.ids['7 Launch']}`, { label: 'fix' });
     await page.setViewportSize(WIDE);
     await open(page, fresh);
-    const next = band(page, 'next');
-    await openBacklog(page);
-    const fold = next.getByRole('button', { name: /^Backlog · / });
+    const next = await openFullBacklog(page);
+    const count = next.locator('.ip-backlog-count');
     const field = next.getByRole('textbox', { name: 'Filter the backlog' });
     const titles = () => next.locator('.ip-backlog-row .ip-row-title').allInnerTexts();
     const total = (await titles()).length;
     expect(total).toBeGreaterThan(1);
-    await expect(fold).toHaveText(`Backlog · ${total} ▾`);
+    await expect(next.getByRole('heading')).toHaveText(`Backlog · ${total}`);
     // Every word must match: here both in the title.
     await field.fill('build git');
-    await expect(fold).toHaveText(`Backlog · 1 of ${total} ▾`);
+    await expect(count).toHaveText(`1 of ${total}`);
     expect(await titles()).toEqual(['4 Build to GitHub']);
     // The ID order filters the same way.
     await next.getByRole('group', { name: 'Backlog order' }).getByRole('button', { name: 'ID' }).click();
@@ -2378,18 +2466,18 @@ test.describe('Board', () => {
     // Nothing matching says so; Clear filter empties the field, keeps focus in it and brings every row back.
     await field.fill('zzz');
     await expect(next.getByText('Nothing matches “zzz”')).toBeVisible();
-    await expect(fold).toHaveText(`Backlog · 0 of ${total} ▾`);
+    await expect(count).toHaveText(`0 of ${total}`);
     await next.getByRole('button', { name: 'Clear filter' }).click();
     await expect(field).toBeFocused();
     await expect(field).toHaveValue('');
-    await expect(fold).toHaveText(`Backlog · ${total} ▾`);
+    await expect(count).toHaveCount(0);
     await expect.poll(async () => (await titles()).length).toBe(total);
-    // Escape in the field clears it and leaves the fold open.
+    // Escape in the field clears it and leaves the view open.
     await field.fill('store');
     await expect.poll(titles).toEqual(['5 Store listing']);
     await page.keyboard.press('Escape');
     await expect(field).toHaveValue('');
-    await expect(fold).toHaveAttribute('aria-expanded', 'true');
+    await expect(next).toBeVisible();
     // A new filter closes an open Delete confirm.
     const beta = next.locator('.ip-backlog-row').filter({ hasText: '6 Beta' });
     await beta.hover();
@@ -2404,11 +2492,21 @@ test.describe('Board', () => {
     await row.hover();
     await row.getByRole('button', { name: 'to Next' }).click();
     await expect(next.locator('.ip-next-row', { hasText: '3 RevenueCat' })).toBeVisible();
-    await expect(fold).toHaveText(`Backlog · 0 of ${total - 1} ▾`);
-    // Closing the fold clears the filter.
-    await fold.click();
-    await expect(fold).toHaveText(`Backlog · ${total - 1} ▸`);
-    await fold.click();
+    await expect(count).toHaveText(`0 of ${total - 1}`);
+    // Phase chips pick one phase, label chips any number plus unlabelled; they combine with the text.
+    await next.getByRole('button', { name: 'Clear filter' }).click();
+    await next.getByRole('group', { name: 'Phase' }).getByRole('button', { name: 'Road to market' }).click();
+    // Milestones, a finished phase with no steps open, sits at the root: it is not in Road to market.
+    await expect.poll(async () => (await titles()).length).toBe(total - 2);
+    await next.getByRole('group', { name: 'Label' }).getByRole('button', { name: /fix/ }).click();
+    await expect.poll(titles).toEqual(['7 Launch']);
+    await next.getByRole('group', { name: 'Label' }).getByRole('button', { name: 'unlabelled' }).click();
+    await expect.poll(async () => (await titles()).length).toBe(total - 2);
+    // Leaving the view clears the filter.
+    await field.fill('beta');
+    await expect.poll(titles).toEqual(['6 Beta']);
+    await page.getByRole('button', { name: '‹ Board' }).click();
+    await openFullBacklog(page);
     await expect(field).toHaveValue('');
     await expect.poll(async () => (await titles()).length).toBe(total - 1);
   });
@@ -2417,7 +2515,6 @@ test.describe('Board', () => {
     await page.setViewportSize(WIDE);
     await open(page, fresh);
     const next = band(page, 'next');
-    await next.getByRole('button', { name: /^Backlog · \d+ [▸▾]$/ }).click();
     const title = page.getByRole('button', { name: '4 Build to GitHub', exact: true });
     const toNext = next.locator('.ip-backlog-row', { has: title }).getByRole('button', { name: 'to Next' });
     await expect(toNext).toHaveCSS('opacity', '0');
@@ -2441,16 +2538,14 @@ test.describe('Board', () => {
     await expect(next.locator('.ip-next-row')).toHaveCount(0);
     await page.reload();
     await expect(next.locator('.ip-next-row')).toHaveCount(0);
-    await expect(next.getByRole('button', { name: /^Backlog · \d+ [▸▾]$/ })).toBeVisible();
+    await expect(phasePicker(page)).toBeVisible();
   });
 
   test('Backlog "Delete…" asks first, Escape and Cancel keep the step, Delete removes it from the tree', async ({ page, fresh, consoleErrors }) => {
     consoleErrors.allow(/status of 400/);
     await page.setViewportSize(WIDE);
     await open(page, fresh);
-    const next = band(page, 'next');
-    const fold = next.getByRole('button', { name: /^Backlog · \d+ [▸▾]$/ });
-    await fold.click();
+    const next = await openFullBacklog(page);
     const id = fresh.ids['6 Beta'];
     const title = next.getByRole('button', { name: '6 Beta', exact: true });
     const row = next.locator('.ip-backlog-row', { has: page.getByRole('button', { name: '6 Beta', exact: true }) });
@@ -2504,9 +2599,10 @@ test.describe('Board', () => {
     await expect(next.getByRole('button', { name: '6 Beta', exact: true })).toHaveCount(0);
     await expect(page.getByRole('complementary')).toHaveCount(0);
     await page.reload();
-    if ((await fold.getAttribute('aria-expanded')) !== 'true') await fold.click();
-    await expect(next.getByRole('button', { name: '7 Launch', exact: true })).toBeVisible();
-    await expect(next.getByRole('button', { name: '6 Beta', exact: true })).toHaveCount(0);
+    // The full view is a state flag: after a reload the Board's preview shows the phase again.
+    const preview = band(page, 'next');
+    await expect(preview.getByRole('button', { name: '7 Launch', exact: true })).toBeVisible();
+    await expect(preview.getByRole('button', { name: '6 Beta', exact: true })).toHaveCount(0);
   });
 
   test('Now "Done…" takes an optional outcome, Escape keeps the step, Enter marks it done', async ({ page, api, fresh, consoleErrors }) => {
@@ -2565,7 +2661,6 @@ test.describe('Board', () => {
     await page.setViewportSize(WIDE);
     await open(page, fresh);
     const next = band(page, 'next');
-    await next.getByRole('button', { name: /^Backlog · \d+ [▸▾]$/ }).click();
     const backlogRow = (t: string) => next.locator('.ip-backlog-row', { has: page.getByRole('button', { name: t, exact: true }) });
     const nextRow = (t: string) => next.locator('.ip-next-row', { has: page.getByRole('button', { name: t, exact: true }) });
     const order = async () => (await next.locator('.ip-next-row .ip-row-title').allTextContents()).join('|');
@@ -2587,8 +2682,7 @@ test.describe('Board', () => {
     await page.reload();
     await expect.poll(order).toBe('5 Store listing|6 Beta');
     // Back onto Backlog.
-    await next.getByRole('button', { name: /^Backlog · \d+ [▸▾]$/ }).click();
-    await nextRow('5 Store listing').dragTo(next.locator('.ip-fold'));
+    await nextRow('5 Store listing').dragTo(next.locator('.ip-backlog-head'));
     await expect(next.locator('.ip-next-row')).toHaveCount(1);
     await expect(backlogRow('5 Store listing')).toBeVisible();
     await expect.poll(order).toBe('6 Beta');
@@ -2759,7 +2853,6 @@ test.describe('Fix round 1', () => {
     await page.setViewportSize(WIDE);
     await open(page, fresh);
     const next = band(page, 'next');
-    await next.getByRole('button', { name: /^Backlog · \d+ [▸▾]$/ }).click();
     const backlogRow = (t: string) => next.locator('.ip-backlog-row', { has: page.getByRole('button', { name: t, exact: true }) });
     const nextRow = (t: string) => next.locator('.ip-next-row', { has: page.getByRole('button', { name: t, exact: true }) });
     const order = async () => (await next.locator('.ip-next-row .ip-row-title').allTextContents()).join('|');
@@ -2793,7 +2886,6 @@ test.describe('Fix round 1', () => {
     await page.setViewportSize(WIDE);
     await open(page, fresh);
     const next = band(page, 'next');
-    await next.getByRole('button', { name: /^Backlog · \d+ [▸▾]$/ }).click();
     const titles = next.locator('.ip-backlog-row .ip-row-title');
     const first = await titles.nth(0).textContent();
     const second = await titles.nth(1).textContent();

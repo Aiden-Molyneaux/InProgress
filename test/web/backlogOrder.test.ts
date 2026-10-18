@@ -14,7 +14,7 @@ const boxes = [box(12, [a]), box(5), box(21, [b]), box(11, [a]), box(30)];
 
 describe('parseOrder and orderKey', () => {
   it('reads the four stored orders and round-trips them', () => {
-    for (const key of ['phase', 'phase-rev', 'id', 'id-rev']) expect(orderKey(parseOrder(key))).toBe(key);
+    for (const key of ['phase', 'phase-rev', 'id', 'id-rev', 'age', 'age-rev'])expect(orderKey(parseOrder(key))).toBe(key);
     expect(parseOrder('id-rev')).toEqual({ by: 'id', reverse: true });
     expect(parseOrder('id-')).toEqual({ by: 'id', reverse: false });
   });

@@ -27,7 +27,10 @@ export type OutlineLine =
 
 const OPEN = new Set(['todo', 'active', 'blocked']);
 const isOpen = (n: TreeNode) => OPEN.has(n.status);
-const live = (index: TreeIndex, id: number) => kids(index, id).filter((c) => c.status !== 'dropped');
+/** A step that is open work or set aside: a done step holding one is not finished, so its line is not folded away. */
+const unfinished = (n: TreeNode) => isOpen(n) || n.status === 'parked';
+/** The steps shown under `id`: dropped ones are left out, and a parked step's whole subtree is shelved, so it holds none. */
+const live = (index: TreeIndex, id: number) => (index.byId.get(id)?.status === 'parked' ? [] : kids(index, id).filter((c) => c.status !== 'dropped'));
 
 /** Every step below `id`, at all depths, dropped ones and what is under them left out. */
 function below(index: TreeIndex, id: number): TreeNode[] {
@@ -45,7 +48,7 @@ function foldLine(parentId: number, folded: TreeNode[], depth: number): OutlineL
 function linesUnder(index: TreeIndex, board: Board, parentId: number, depth: number, out: OutlineLine[]): void {
   const folded: TreeNode[] = [];
   for (const child of live(index, parentId)) {
-    if (child.status === 'done' && !below(index, child.id).some(isOpen)) {
+    if (child.status === 'done' && !below(index, child.id).some(unfinished)) {
       folded.push(child);
       continue;
     }
@@ -61,9 +64,12 @@ export function projectSections(snapshot: ProjectSnapshot, board: Board): Sectio
   const root = index.root;
   if (!root) return [];
   const openAsk = new Set(snapshot.asks.filter((a) => a.clearedAt === null).map((a) => a.nodeId));
-  const make = (group: TreeNode | null, title: string, members: TreeNode[], lines: OutlineLine[]): Section => {
-    const ids = new Set(members.map((n) => n.id));
+  const make = (group: TreeNode | null, title: string, allMembers: TreeNode[], lines: OutlineLine[]): Section => {
+    const ids = new Set(allMembers.map((n) => n.id));
     if (group) ids.add(group.id);
+    // Parked steps are neither open nor finished: out of the counts, as dropped ones are, though they still show as lines.
+    const parked = allMembers.some((n) => n.status === 'parked');
+    const members = allMembers.filter((n) => n.status !== 'parked');
     const counts = { now: 0, next: 0, backlog: 0, done: members.filter((n) => n.status === 'done').length };
     for (const n of members) {
       const column = board.byId.get(n.id)?.column;
@@ -74,7 +80,7 @@ export function projectSections(snapshot: ProjectSnapshot, board: Board): Sectio
       docs: snapshot.resources.filter((r) => ids.has(r.nodeId)),
       lines,
       startsOpen: counts.now + counts.next > 0 || [...ids].some((id) => openAsk.has(id)),
-      allDone: members.length > 0 && counts.done === members.length,
+      allDone: !parked && members.length > 0 && counts.done === members.length,
     };
   };
   const groups: Section[] = [];

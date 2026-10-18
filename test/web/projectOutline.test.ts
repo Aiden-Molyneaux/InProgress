@@ -82,3 +82,21 @@ describe('projectSections', () => {
     expect(sections(finishedTop).map((x) => x.title)).toEqual(['Open']);
   });
 });
+
+describe('projectSections and parked steps', () => {
+  it('shows a parked step as a line with its subtree folded, and leaves it and what is under it out of the counts', () => {
+    const s = snap([root, node(2, 1, 'Alpha', 'active'), node(3, 2, 'open'), node(4, 2, 'Shelf', 'parked'), node(5, 4, 'under shelf'), node(6, 5, 'deeper', 'active')]);
+    const alpha = sections(s)[0]!;
+    expect(alpha.lines.map((l) => (l.kind === 'step' ? l.node.id : 0))).toEqual([3, 4]);
+    expect(alpha.total).toBe(1);
+    expect(alpha.counts).toEqual({ now: 0, next: 0, backlog: 1, done: 0 });
+  });
+  it('a group of done steps and a parked one is not a done group', () => {
+    const s = snap([root, node(2, 1, 'Alpha', 'active'), node(3, 2, 'finished', 'done'), node(4, 2, 'Shelf', 'parked')]);
+    expect(sections(s)[0]!.allDone).toBe(false);
+  });
+  it('a done step holding a parked one is not folded away', () => {
+    const s = snap([root, node(2, 1, 'Alpha', 'active'), node(3, 2, 'phase done', 'done'), node(4, 3, 'Shelf', 'parked'), node(5, 2, 'open')]);
+    expect(sections(s)[0]!.lines.some((l) => l.kind === 'step' && l.node.id === 3)).toBe(true);
+  });
+});
