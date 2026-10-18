@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { commandShown } from '../../../src/core/activity';
 import { deriveBoard } from '../../../src/core/board';
 import { agentHome, agentVisible, atLimit, homedTrailAgents, isPaused, occupiedSteps } from '../../../src/core/layout';
+import { buildIndex, isNeedsYou, shelvedIds } from '../../../src/core/tree';
 import { LABEL_GLYPHS, isReader, sessionDisplayTitle, type NodeDetail, type ProjectSnapshot, type TrailAgent, type TreeNode, type WorkItem } from '../../../src/core/types';
 import { AgentWords } from '../AgentWords';
 import { api, postEvent, unparkStep } from '../api';
@@ -242,6 +243,7 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
     postEvent('details_open', projectId, { node: nodeId });
   }, [projectId, nodeId]);
   const board = useMemo(() => deriveBoard(snapshot, now), [snapshot, now]);
+  const shelved = useMemo(() => shelvedIds(buildIndex(snapshot.nodes)), [snapshot.nodes]);
   const occupied = useMemo(() => occupiedSteps(byId, snapshot.sessions, snapshot.workItems, now), [byId, snapshot.sessions, snapshot.workItems, now]);
 
   // Refetch whenever the snapshot changes, so the panel follows Claude's edits. A failed refetch keeps the last good detail.
@@ -284,7 +286,7 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
         status={n.status}
         question={n.kind === 'question'}
         paused={paused}
-        needsYou={n.assignee === 'me' && n.status !== 'done'}
+        needsYou={isNeedsYou(n, shelved.has(n.id))}
         pulse={false}
         title={paused ? `Nobody is on this. Last change ${relativeTime(step.updatedAt)}` : undefined}
       />

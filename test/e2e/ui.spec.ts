@@ -1810,6 +1810,39 @@ test.describe('Board', () => {
     expect(tops).toEqual([...tops].sort((a, b) => a - b));
     await expect(nowRow(page, 'Play app signing')).toBeVisible();
     await expect(page.locator('.ip-crumb')).toHaveCount(0);
+    // The Backlog preview sits at the foot of the Next band, under its rows and above Done.
+    const preview = band(page, 'next').locator('.ip-backlog-head');
+    await expect(preview).toBeVisible();
+    const head = (await preview.boundingBox())!;
+    const doneTop = (await band(page, 'done').boundingBox())!.y;
+    expect(head.y).toBeLessThan(doneTop);
+    expect(head.y).toBeGreaterThan((await band(page, 'next').locator('h3').first().boundingBox())!.y);
+  });
+
+  test('Details parks a step with a reason and Unpark brings it back to the Backlog', async ({ page, fresh }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const title = '4 Build to GitHub';
+    const preview = band(page, 'next');
+    const previewRow = preview.locator('.ip-backlog-row', { has: page.getByRole('button', { name: title, exact: true }) });
+    await expect(previewRow).toBeVisible();
+    const details = await openDetails(page, title);
+    await details.getByRole('button', { name: 'Park…' }).click();
+    const form = details.getByRole('dialog', { name: `Park #${fresh.ids[title]} ${title}` });
+    await expect(form.getByRole('textbox', { name: 'Reason' })).toBeFocused();
+    // A reason is required.
+    await expect(form.getByRole('button', { name: 'Park', exact: true })).toBeDisabled();
+    await form.getByRole('textbox', { name: 'Reason' }).fill('Waiting on the store review');
+    await form.getByRole('button', { name: 'Park', exact: true }).click();
+    // The panel follows: it shows the reason and Unpark, and the step leaves the Backlog preview.
+    await expect(details.locator('.ip-dparked')).toContainText('Waiting on the store review');
+    await expect(previewRow).toHaveCount(0);
+    await details.getByRole('button', { name: 'Unpark' }).click();
+    await expect(details.locator('.ip-dparked')).toHaveCount(0);
+    await expect(details.getByRole('button', { name: 'Park…' })).toBeVisible();
+    await expect(previewRow).toBeVisible();
+    // Unpark goes to the Backlog, not to Next.
+    await expect(preview.locator('.ip-next-row', { hasText: title })).toHaveCount(0);
   });
 
   test('the header shows the state note as the Orchestrator with no Project view button, and lists a working session with no step', async ({ page, api, fresh }) => {
@@ -2406,10 +2439,11 @@ test.describe('Board', () => {
     expect(up).toEqual([...phaseIds].sort((a, b) => a - b));
     await expect(next.locator('.ip-backlog-row').filter({ hasText: '3 RevenueCat' }).locator('.ip-box-parent')).toHaveText('Road to market');
     // Age: one flat list, oldest first (creation order is id order here), forward and reverse.
-    await order.getByRole('button', { name: 'Reverse' }).click();
     await order.getByRole('button', { name: 'Age' }).click();
     await expect(next.getByRole('region', { name: 'Backlog by age' })).toBeVisible();
     expect(await ids()).toEqual(up);
+    await order.getByRole('button', { name: 'Reverse' }).click();
+    expect(await ids()).toEqual([...up].reverse());
     await order.getByRole('button', { name: 'Reverse' }).click();
     await order.getByRole('button', { name: 'ID' }).click();
     // Reverse: high to low.
@@ -2491,7 +2525,8 @@ test.describe('Board', () => {
     const row = next.locator('.ip-backlog-row').filter({ hasText: '3 RevenueCat' });
     await row.hover();
     await row.getByRole('button', { name: 'to Next' }).click();
-    await expect(next.locator('.ip-next-row', { hasText: '3 RevenueCat' })).toBeVisible();
+    // Next is not on screen in the full view: the row leaves it, and the count follows.
+    await expect(row).toHaveCount(0);
     await expect(count).toHaveText(`0 of ${total - 1}`);
     // Phase chips pick one phase, label chips any number plus unlabelled; they combine with the text.
     await next.getByRole('button', { name: 'Clear filter' }).click();
@@ -2520,7 +2555,6 @@ test.describe('Board', () => {
     await expect(toNext).toHaveCSS('opacity', '0');
     // The box's own buttons sit in its top line, before the title.
     await title.focus();
-    await page.keyboard.press('Shift+Tab');
     await page.keyboard.press('Shift+Tab');
     await expect(toNext).toBeFocused();
     await expect(toNext).toHaveCSS('opacity', '1');
@@ -2595,7 +2629,10 @@ test.describe('Board', () => {
     await del.focus();
     await page.keyboard.press('Enter');
     await expect(dialog).toBeVisible();
-    await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
+    // Details covers the right of the view, so the confirm's Delete is pressed from the keyboard.
+    await page.keyboard.press('Shift+Tab');
+    await expect(dialog.getByRole('button', { name: 'Delete', exact: true })).toBeFocused();
+    await page.keyboard.press('Enter');
     await expect(next.getByRole('button', { name: '6 Beta', exact: true })).toHaveCount(0);
     await expect(page.getByRole('complementary')).toHaveCount(0);
     await page.reload();
