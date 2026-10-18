@@ -144,9 +144,15 @@ export function createMcpServer(client: Client, o: McpOptions = {}): McpServer {
     async (a: { parent: number; nodes: NodeInput[]; after?: number | 'start' | 'end'; session?: string }) =>
       formatCreated(await client.post<TreeNode[]>('/api/nodes', { parentId: a.parent, after: a.after, nodes: a.nodes }, { actor: actor(a.session) })));
 
-  tool('update_node', `Change a node's title, kind, status, assignee, body, outcome or label (null clears it). Set outcome when something finishes. ${LABELS}`,
-    { id, title: z.string().optional(), kind: z.enum(NODE_KINDS).optional(), status: z.enum(NODE_STATUSES).optional(), assignee: assignee.optional(), body: z.string().optional(), outcome: z.string().optional(), label: label.optional(), session },
-    async ({ id: nodeId, session: s, ...patch }: { id: number; session?: string } & Record<string, unknown>) => {
+  tool('update_node', `Change a node's title, kind, status, assignee, body, outcome or label (null clears it). Set outcome when something finishes. Status "parked" needs parked_reason (why it is set aside) and takes an optional parked_where (branch, worktree or commit). ${LABELS}`,
+    {
+      id, title: z.string().optional(), kind: z.enum(NODE_KINDS).optional(), status: z.enum(NODE_STATUSES).optional(), assignee: assignee.optional(), body: z.string().optional(), outcome: z.string().optional(), label: label.optional(),
+      parked_reason: z.string().max(2_000).optional().describe('Why the step is set aside: required with status "parked"'),
+      parked_where: z.string().max(500).optional().describe('Where the parked work lives: a branch, worktree or commit'),
+      session,
+    },
+    async ({ id: nodeId, session: s, parked_reason: parkedReason, parked_where: parkedWhere, ...rest }: { id: number; session?: string; parked_reason?: string; parked_where?: string } & Record<string, unknown>) => {
+      const patch = { ...rest, ...(parkedReason === undefined ? {} : { parkedReason }), ...(parkedWhere === undefined ? {} : { parkedWhere }) };
       const n = await client.patch<TreeNode>(`/api/nodes/${nodeId}`, patch, { actor: actor(s) });
       return `#${n.id} ${glyphTitle(n)} · ${n.status}${n.assignee === 'me' ? ' (you)' : ''}.`;
     });

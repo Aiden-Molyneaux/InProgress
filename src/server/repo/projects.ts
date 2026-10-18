@@ -5,6 +5,7 @@ import { isUnder, normalizePath } from '../../lib/paths';
 import { msAgo, write, type Ctx, type RecordEvent } from '../db/tx';
 import { ApiError, badRequest, conflict, notFound } from '../errors';
 import { countsAsWorkSql, endSessionCommands } from './commands';
+import { shelvedAmong } from './nodes';
 import { endSubagents, NOT_READER_SQL } from './subagents';
 
 interface ProjectRow {
@@ -70,18 +71,18 @@ function parseQueue(json: string | undefined): QueueEntry[] {
 /** The stored JSON: every entry in the object shape. */
 const queueJson = (queue: QueueEntry[]): string => JSON.stringify(queue.map((e) => ({ node: e.nodeId, session: e.sessionId })));
 
-/** Which of `ids` are open steps of the project: not done, dropped or deleted. */
+/** Which of `ids` are open steps of the project: not done, dropped, deleted or shelved (parked, or under a parked step). */
 function openSteps(ctx: Ctx, projectId: number, ids: number[]): Set<number> {
   if (!ids.length) return new Set();
-  return new Set(
-    ctx.db
-      .prepare(`SELECT id FROM nodes WHERE project_id = ? AND status NOT IN ('done', 'dropped') AND id IN (${ids.map(() => '?').join(', ')})`)
-      .pluck()
-      .all(projectId, ...ids) as number[],
-  );
+  const open = ctx.db
+    .prepare(`SELECT id FROM nodes WHERE project_id = ? AND status NOT IN ('done', 'dropped', 'parked') AND id IN (${ids.map(() => '?').join(', ')})`)
+    .pluck()
+    .all(projectId, ...ids) as number[];
+  const shelved = shelvedAmong(ctx, open);
+  return new Set(open.filter((id) => !shelved.has(id)));
 }
 
-/** The queue as it is read: deleted, done and dropped nodes leave it on their own. */
+/** The queue as it is read: deleted, done, dropped and shelved nodes leave it on their own. */
 function liveQueue(ctx: Ctx, projectId: number, json: string | undefined): QueueEntry[] {
   const entries = parseQueue(json);
   const open = openSteps(ctx, projectId, entries.map((e) => e.nodeId));
@@ -141,6 +142,29 @@ function storeQueue(ctx: Ctx, record: RecordEvent, projectId: number, before: st
   const from = liveQueue(ctx, projectId, before);
   ctx.db.prepare('UPDATE projects SET queue = ?, updated_at = ? WHERE id = ?').run(json, ctx.now(), projectId);
   record({ projectId, type: 'project.updated', entity: 'project', entityId: projectId, data: { changes: { queue: { from, to: liveQueue(ctx, projectId, json) } }, ...extra } });
+}
+
+/**
+ * Takes `ids` out of the project's stored queue, whoever owns them, inside a write already open: parking a step takes it
+ * and every shelved step under it out, so unparking does not bring them back to Next. Records project.updated with
+ * data.op 'park' when the stored queue changes.
+ */
+export function dropFromQueue(ctx: Ctx, record: RecordEvent, projectId: number, ids: number[]): void {
+  const row = ctx.db.prepare('SELECT queue FROM projects WHERE id = ?').get(projectId) as { queue: string } | undefined;
+  if (!row) return;
+  const gone = new Set(ids);
+  storeQueue(ctx, record, projectId, row.queue, parseQueue(row.queue).filter((e) => !gone.has(e.nodeId)), { op: 'park' });
+}
+
+/**
+ * Appends `nodeId` to the unowned part of the project's stored queue (taking it out wherever it was), inside a write
+ * already open: "to Next" on a parked step. Records project.updated with data.op 'unpark' when the stored queue changes.
+ */
+export function appendUnowned(ctx: Ctx, record: RecordEvent, projectId: number, nodeId: number): void {
+  const row = ctx.db.prepare('SELECT queue FROM projects WHERE id = ?').get(projectId) as { queue: string } | undefined;
+  if (!row) return;
+  const rest = parseQueue(row.queue).filter((e) => e.nodeId !== nodeId);
+  storeQueue(ctx, record, projectId, row.queue, [...rest, { nodeId, sessionId: null }], { op: 'unpark', node: nodeId });
 }
 
 export const toProject = (r: ProjectRow, queue: QueueEntry[] = parseQueue(r.queue)): Project => ({
@@ -370,13 +394,14 @@ export function applyProjectChange(ctx: Ctx, record: RecordEvent, before: Projec
 /**
  * Spec 2.5: one window change applied to the queue as stored, inside one write. A move takes the node out wherever it
  * sits and places it in the unowned part before `before`; null, or a `before` no longer unowned, appends. A remove takes
- * it out. A node taken from a session's own queue records `takenFrom`. Done and dropped nodes are refused.
+ * it out. A node taken from a session's own queue records `takenFrom`. Done, dropped and shelved nodes are refused.
  */
 export function applyQueueOp(ctx: Ctx, actor: string, projectId: number, op: QueueOp): Project {
   return write(ctx, actor, (record) => {
     const node = ctx.db.prepare('SELECT project_id, status FROM nodes WHERE id = ?').get(op.node) as { project_id: number; status: string } | undefined;
     if (node?.project_id !== projectId) throw badRequest(`#${op.node} is not in this project`, 'Reload the window.');
     if (node.status === 'done' || node.status === 'dropped') throw badRequest('not open', `#${op.node} is ${node.status}.`);
+    if (shelvedAmong(ctx, [op.node]).size) throw badRequest('not open', `#${op.node} is parked.`);
     const row = ctx.db.prepare('SELECT queue FROM projects WHERE id = ?').get(projectId) as { queue: string };
     const stored = parseQueue(row.queue);
     const taken = stored.find((e) => e.nodeId === op.node);

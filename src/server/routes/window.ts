@@ -8,9 +8,9 @@ import { findSession } from '../repo/sessions';
 import { deleteProject, listDeletedProjects, restoreProject } from '../project-lifecycle';
 import { clearAsk } from '../repo/asks';
 import { recordQuiet } from '../repo/events';
-import { addNodes, deleteNode, finishNode } from '../repo/nodes';
+import { addNodes, deleteNode, finishNode, parkNode, unparkNode } from '../repo/nodes';
 import { applyQueueOp, changeProject, getProjectById, isQueued, resolveProject } from '../repo/projects';
-import { idParam, sessionIdParam, windowClearBody, windowDoneBody, windowEventBody, windowNodeBody, windowProjectBody, windowQueueBody, windowNodeParams, windowRenameBody, WINDOW_EVENT_KEYS } from '../schemas';
+import { idParam, sessionIdParam, windowClearBody, windowDoneBody, windowEventBody, windowNodeBody, windowParkBody, windowProjectBody, windowQueueBody, windowNodeParams, windowRenameBody, windowUnparkBody, WINDOW_EVENT_KEYS } from '../schemas';
 
 /** Who the window's writes are recorded as: fixed here, never taken from a header. */
 const ACTOR = 'window';
@@ -159,6 +159,32 @@ export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: 
       if (live !== null && live !== driver) throw conflict(`A session is driving #${node} now`, 'Look again: the box names it.');
     });
     return { node: done };
+  });
+  // Park: set a step aside with a reason (required) and where its work lives (optional). It and every step under it
+  // leave Next; its driver and open asks are cleared. Checked inside parkNode's own write.
+  app.post('/api/ui/projects/:id/nodes/:node/park', guarded, async (req) => {
+    const { node } = windowNodeParams.parse(req.params);
+    const { slug, reason, where } = windowParkBody.parse(req.body);
+    const projectId = targetBySlug(req.params, slug);
+    // A deleted project is not found (404), as for the delete route.
+    resolveProject(ctx, projectId);
+    return {
+      node: parkNode(ctx, ACTOR, node, { reason, where }, (n) => {
+        if (n.projectId !== projectId) throw badRequest(`#${node} is not in this project`, 'Reload the window.');
+      }),
+    };
+  });
+  // Unpark: back to todo in the Backlog, or with toNext appended to the unowned Next in the same write.
+  app.post('/api/ui/projects/:id/nodes/:node/unpark', guarded, async (req) => {
+    const { node } = windowNodeParams.parse(req.params);
+    const { slug, toNext } = windowUnparkBody.parse(req.body);
+    const projectId = targetBySlug(req.params, slug);
+    resolveProject(ctx, projectId);
+    return {
+      node: unparkNode(ctx, ACTOR, node, toNext ?? false, (n) => {
+        if (n.projectId !== projectId) throw badRequest(`#${node} is not in this project`, 'Reload the window.');
+      }),
+    };
   });
   // Idempotent (spec 1.2): clearing twice answers the same; a 404 for an ask that does not exist.
   app.post('/api/ui/asks/:id/clear', guarded, async (req) => {

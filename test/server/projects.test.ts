@@ -3,10 +3,10 @@ import type { Ctx } from '../../src/server/db/tx';
 import { listEventsSince, maxEventId } from '../../src/server/repo/events';
 import { clearAsk, raiseAsk } from '../../src/server/repo/asks';
 import { addLog } from '../../src/server/repo/logs';
-import { addNodes, findNode, requireNode, updateNode } from '../../src/server/repo/nodes';
+import { addNodes, findNode, parkNode, requireNode, shelvedAmong, unparkNode, updateNode } from '../../src/server/repo/nodes';
 import {
-  addBinding, changeProject, createProject, getProjectById, listBindings, listProjectSummaries, removeBinding,
-  resolveBinding, resolveProject, slugify, updateProject,
+  addBinding, applyQueueOp, changeProject, createProject, getProjectById, listBindings, listProjectSummaries, removeBinding,
+  resolveBinding, resolveProject, setQueue, slugify, updateProject,
 } from '../../src/server/repo/projects';
 import { addResource, requireResource } from '../../src/server/repo/resources';
 import { search } from '../../src/server/repo/search';
@@ -379,5 +379,90 @@ describe('projects', () => {
     // Quiet has the newer event, so only the worker puts Busy first.
     updateProject(ctx, 'test', quiet.slug, { description: 'newer' });
     expect(listProjectSummaries(ctx).map((x) => x.slug)).toEqual(['busy', 'quiet']);
+  });
+});
+
+describe('parked steps and the queue', () => {
+  function parkSetup() {
+    const ctx = makeCtx();
+    const project = createProject(ctx, 'test', { name: 'P' });
+    const [phase, other] = addNodes(ctx, 't', { parentId: project.rootNodeId, nodes: [{ title: 'Phase', kind: 'phase' }, { title: 'Other' }] });
+    const [child, grandParent] = addNodes(ctx, 't', { parentId: phase.id, nodes: [{ title: 'Child' }, { title: 'Holder' }] });
+    const [grand] = addNodes(ctx, 't', { parentId: grandParent.id, nodes: [{ title: 'Grandchild' }] });
+    const stored = () => (JSON.parse(ctx.db.prepare('SELECT queue FROM projects WHERE id = ?').pluck().get(project.id) as string) as { node: number }[]).map((e) => e.node);
+    const live = () => getProjectById(ctx, project.id)!.queue.map((e) => e.nodeId);
+    return { ctx, project, phase, other, child, grandParent, grand, stored, live };
+  }
+
+  it('parking takes the step and its shelved children out of the stored queue', () => {
+    const { ctx, project, phase, other, child, grand, stored, live } = parkSetup();
+    setQueue(ctx, 'scribe:s1', project.slug, [child.id, other.id, grand.id], 'unowned');
+    const mark = maxEventId(ctx);
+    updateNode(ctx, 'scribe:s1', phase.id, { status: 'parked', parkedReason: 'Not this quarter' });
+    expect(stored()).toEqual([other.id]);
+    expect(live()).toEqual([other.id]);
+    const events = listEventsSince(ctx, mark);
+    expect(events.find((e) => e.type === 'project.updated')).toMatchObject({ data: { op: 'park', changes: { queue: { from: [{ nodeId: child.id }, { nodeId: other.id }, { nodeId: grand.id }], to: [{ nodeId: other.id }] } } } });
+    // node.updated stays the newest event, as for every other status change.
+    expect(events.at(-1)!.type).toBe('node.updated');
+    // The children keep their own statuses.
+    expect(requireNode(ctx, child.id).status).toBe('todo');
+  });
+
+  it('unparking does not bring them back to Next', () => {
+    const { ctx, project, phase, child, other, stored, live } = parkSetup();
+    setQueue(ctx, 'scribe:s1', project.slug, [child.id, phase.id], 'unowned');
+    updateNode(ctx, 'scribe:s1', phase.id, { status: 'parked', parkedReason: 'later' });
+    unparkNode(ctx, 'window', phase.id, false, () => {});
+    expect(requireNode(ctx, phase.id)).toMatchObject({ status: 'todo', parkedReason: '', parkedAt: null });
+    expect(stored()).toEqual([]);
+    expect(live()).toEqual([]);
+    // A step parked while only its own entry was in Next, then unparked through update_node, stays out too.
+    setQueue(ctx, 'scribe:s1', project.slug, [other.id], 'unowned');
+    updateNode(ctx, 't', other.id, { status: 'parked', parkedReason: 'later' });
+    updateNode(ctx, 't', other.id, { status: 'todo' });
+    expect(live()).toEqual([]);
+  });
+
+  it('unpark with toNext appends to the unowned queue', () => {
+    const { ctx, project, phase, other, child, live } = parkSetup();
+    setQueue(ctx, 'scribe:s1', project.slug, [other.id], 'unowned');
+    updateNode(ctx, 't', child.id, { status: 'parked', parkedReason: 'later', parkedWhere: 'wt/child' });
+    const mark = maxEventId(ctx);
+    const node = unparkNode(ctx, 'window', child.id, true, () => {});
+    expect(node).toMatchObject({ status: 'todo', parkedReason: '', parkedWhere: '', parkedAt: null });
+    expect(getProjectById(ctx, project.id)!.queue).toEqual([{ nodeId: other.id, sessionId: null }, { nodeId: child.id, sessionId: null }]);
+    expect(listEventsSince(ctx, mark).map((e) => e.type)).toEqual(['node.updated', 'project.updated']);
+    expect(listEventsSince(ctx, mark)[1]).toMatchObject({ actor: 'window', data: { op: 'unpark', node: child.id } });
+    // Unpark refuses a step that is not parked, and the check runs inside the write.
+    expect(thrown(() => unparkNode(ctx, 'window', child.id, true, () => {})).message).toBe(`#${child.id} is not parked`);
+    expect(thrown(() => unparkNode(ctx, 'window', phase.id, false, () => {})).message).toBe(`#${phase.id} is not parked`);
+    updateNode(ctx, 't', phase.id, { status: 'parked', parkedReason: 'later' });
+    expect(thrown(() => unparkNode(ctx, 'window', phase.id, false, () => { throw new Error('checked'); })).message).toBe('checked');
+    expect(requireNode(ctx, phase.id).status).toBe('parked');
+    expect(live()).toEqual([other.id]);
+  });
+
+  it('a queue move refuses a step under a parked phase', () => {
+    const { ctx, project, phase, grand, stored } = parkSetup();
+    updateNode(ctx, 't', phase.id, { status: 'parked', parkedReason: 'later' });
+    for (const id of [phase.id, grand.id]) {
+      expect(thrown(() => applyQueueOp(ctx, 'window', project.id, { kind: 'move', node: id, before: null }))).toMatchObject({ status: 400, message: 'not open', hint: `#${id} is parked.` });
+    }
+    expect(stored()).toEqual([]);
+  });
+
+  it('parkNode parks with a reason and where, and refuses a step already parked', () => {
+    const { ctx, other } = parkSetup();
+    const node = parkNode(ctx, 'window', other.id, { reason: ' Set aside ', where: ' branch x ' }, () => {});
+    expect(node).toMatchObject({ status: 'parked', parkedReason: 'Set aside', parkedWhere: 'branch x' });
+    expect(thrown(() => parkNode(ctx, 'window', other.id, { reason: 'again' }, () => {})).message).toBe(`#${other.id} is already parked`);
+  });
+
+  it('shelvedAmong names the parked steps and everything under them', () => {
+    const { ctx, phase, other, child, grandParent, grand } = parkSetup();
+    updateNode(ctx, 't', phase.id, { status: 'parked', parkedReason: 'later' });
+    expect([...shelvedAmong(ctx, [phase.id, other.id, child.id, grandParent.id, grand.id])].sort((a, b) => a - b)).toEqual([phase.id, child.id, grandParent.id, grand.id].sort((a, b) => a - b));
+    expect(shelvedAmong(ctx, [])).toEqual(new Set());
   });
 });

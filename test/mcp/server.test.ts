@@ -186,6 +186,20 @@ describe('scribe MCP tools', () => {
     expect((await call('get_node', { id: migration })).text.split('\n')[0]).toBe(`#${migration} Migration 3 (task) · todo, Claude`);
   });
 
+  it('update_node parks with parked_reason and parked_where', async () => {
+    const rootId = ids((await call('create_project', { name: 'Parking', description: 'Parked steps', session: 'pk1' })).text)[0];
+    const [step] = lineIds((await call('add_nodes', { parent: rootId, nodes: [{ title: 'InThink feature' }], session: 'pk1' })).text);
+    const missing = await call('update_node', { id: step, status: 'parked', session: 'pk1' });
+    expect(missing.isError).toBe(true);
+    expect(missing.text).toMatch(/parked_reason is required to park a step/);
+    expect(await call('update_node', { id: step, status: 'parked', parked_reason: 'Not merging it for now', parked_where: 'branch inthink-feature', session: 'pk1' }))
+      .toEqual({ text: `#${step} InThink feature · parked.`, isError: false });
+    const res = await fetch(`${base}/api/nodes/${step}`, { headers: { authorization: 'Bearer tok' } });
+    expect(((await res.json()) as { node: unknown }).node).toMatchObject({ status: 'parked', parkedReason: 'Not merging it for now', parkedWhere: 'branch inthink-feature' });
+    const { tools } = await mcp.listTools();
+    expect(tools.find((t) => t.name === 'update_node')!.description).toContain('Status "parked" needs parked_reason (why it is set aside) and takes an optional parked_where (branch, worktree or commit).');
+  });
+
   it('raises and clears asks, saying when the session is untracked or the ask joined an open one', async () => {
     const rootId = ids((await call('create_project', { name: 'Asks', description: 'x', session: 'k1' })).text)[0];
     const [step] = lineIds((await call('add_nodes', { parent: rootId, nodes: [{ title: 'Pick a port' }] })).text);
