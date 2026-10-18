@@ -60,6 +60,8 @@ export function Backlog({ boxes, parked, snapshot, now, projectId, slug, onStatu
   const draft = useRef<ParkDraft>({ reason: '', where: '', focused: false });
   /** The row whose title takes focus when the Park form's row leaves (null: the view's heading), worked out when the form opens; a reorder may remount the element, so it is found again by its step. */
   const afterPark = useRef<string | null>(null);
+  const panelRef = useRef(panel);
+  panelRef.current = panel;
   const root = useRef<HTMLDivElement>(null);
   const filterField = useRef<HTMLInputElement>(null);
   /** The view's heading, for when the form's row leaves and takes focus with it. */
@@ -129,7 +131,9 @@ export function Backlog({ boxes, parked, snapshot, now, projectId, slug, onStatu
     setUnparking((u) => [...u, id]);
     const result = await unparkStep(projectId, slug, id, toNext);
     if (result === 'ok') {
-      after?.focus();
+      // Only when focus is still in the row, or nowhere: a click or a form the user moved on to keeps it.
+      const active = document.activeElement;
+      if (active === null || active === document.body || li?.contains(active)) after?.focus();
       return;
     }
     setUnparking((u) => u.filter((x) => x !== id));
@@ -280,8 +284,15 @@ export function Backlog({ boxes, parked, snapshot, now, projectId, slug, onStatu
                       onStatus={onStatus}
                       draft={draft.current}
                       onDone={() => {
-                        // Closes only its own form: a click on another row's Park… meanwhile opened that one.
+                        // Closes only its own form: a click on another row's Park… meanwhile opened that one. Focus moves on
+                        // only while this form still owns the panel and focus is in its row or nowhere.
+                        // (A panel already null closed because its row left, which may have parked focus on the heading.)
+                        const owns = panelRef.current === null || (panelRef.current.kind === 'park' && panelRef.current.id === row.node.id);
+                        const active = document.activeElement;
+                        const here = root.current?.querySelector(`li[data-node="${row.node.id}"]`);
+                        const free = active === null || active === document.body || here?.contains(active) === true || active.classList.contains('ip-backlogview-title');
                         setPanel((p) => (p?.id === row.node.id ? null : p));
+                        if (!owns || !free) return;
                         const next = afterPark.current && root.current?.querySelector<HTMLElement>(`li[data-node="${afterPark.current}"] .ip-row-title`);
                         (next || root.current?.closest<HTMLElement>('.ip-backlogview')?.querySelector<HTMLElement>('.ip-backlogview-title'))?.focus();
                       }}

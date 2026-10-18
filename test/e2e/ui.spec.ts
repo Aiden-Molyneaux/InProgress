@@ -2705,6 +2705,42 @@ test.describe('Board', () => {
     await onATitle();
   });
 
+  test('in the full Backlog, quick-add Escape focuses the view title, Escape waits out a park in flight, and a park resolving leaves focus in a second open form', async ({ page, fresh }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const view = await openFullBacklog(page);
+    const rowOf = (t: string) => view.locator('.ip-backlog-row', { has: page.getByRole('button', { name: t, exact: true }) });
+    const add = view.getByRole('textbox', { name: 'Add a step to the backlog' });
+    await add.focus();
+    await page.keyboard.press('Escape');
+    await expect(view.getByRole('heading', { level: 2 })).toBeFocused();
+    // The park is held back for a moment: Escape in its form does nothing meanwhile.
+    const parkUrl = '**/api/ui/projects/*/nodes/*/park';
+    await page.route(parkUrl, async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await route.continue();
+    });
+    await rowOf('4 Build to GitHub').hover();
+    await rowOf('4 Build to GitHub').getByRole('button', { name: 'Park…' }).click();
+    const first = page.getByRole('dialog', { name: /^Park #\d+ 4 Build to GitHub$/ });
+    await first.getByRole('textbox', { name: 'Reason' }).fill('Slow one');
+    await page.keyboard.press('Enter');
+    await expect(first.getByRole('button', { name: 'Park', exact: true })).toBeDisabled();
+    await page.keyboard.press('Escape');
+    await expect(first).toBeVisible();
+    // Another row's form opened while it is in flight keeps focus when the first one resolves.
+    await rowOf('5 Store listing').hover();
+    await rowOf('5 Store listing').getByRole('button', { name: 'Park…' }).click();
+    const second = page.getByRole('dialog', { name: /^Park #\d+ 5 Store listing$/ });
+    await expect(second.getByRole('textbox', { name: 'Reason' })).toBeFocused();
+    await second.getByRole('textbox', { name: 'Reason' }).fill('Typing');
+    await expect(rowOf('4 Build to GitHub')).toHaveCount(0);
+    await expect(view.getByRole('region', { name: 'Parked' })).toBeVisible();
+    await expect(second.getByRole('textbox', { name: 'Reason' })).toBeFocused();
+    await expect(second.getByRole('textbox', { name: 'Reason' })).toHaveValue('Typing');
+    await page.unroute(parkUrl);
+  });
+
   test('the full Backlog lists No phase last, and a parked step with no phase names it', async ({ page, api, fresh }) => {
     await write(api, fresh.session, 'post', '/api/nodes', { parentId: fresh.root, nodes: [{ title: 'Loose one' }, { title: 'Loose parked' }] });
     await page.setViewportSize(WIDE);
