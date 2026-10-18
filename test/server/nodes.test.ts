@@ -255,7 +255,7 @@ describe('parked steps', () => {
     const { ctx, root } = setup();
     const [n] = addNodes(ctx, 't', { parentId: root, nodes: [{ title: 'Spike' }] });
     expect(thrown(() => updateNode(ctx, 't', n.id, { parkedReason: 'why' })).message).toBe('parked_reason only goes with status "parked"');
-    expect(thrown(() => updateNode(ctx, 't', n.id, { parkedWhere: 'branch' })).message).toBe('parked_reason only goes with status "parked"');
+    expect(thrown(() => updateNode(ctx, 't', n.id, { parkedWhere: 'branch' })).message).toBe('parked_where only goes with status "parked"');
     updateNode(ctx, 't', n.id, { status: 'parked', parkedReason: 'later' });
     // Leaving parked with a reason sent is refused too: the reason would be cleared.
     expect(thrown(() => updateNode(ctx, 't', n.id, { status: 'todo', parkedReason: 'why' })).message).toBe('parked_reason only goes with status "parked"');

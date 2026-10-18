@@ -5,7 +5,7 @@ import { isUnder, normalizePath } from '../../lib/paths';
 import { msAgo, write, type Ctx, type RecordEvent } from '../db/tx';
 import { ApiError, badRequest, conflict, notFound } from '../errors';
 import { countsAsWorkSql, endSessionCommands } from './commands';
-import { shelvedAmong } from './nodes';
+import { shelvedAmong } from './shelved';
 import { endSubagents, NOT_READER_SQL } from './subagents';
 
 interface ProjectRow {
@@ -426,9 +426,9 @@ export type QueueOwner = { sessionId: string } | 'unowned';
  * node is in the queue once: one given here leaves wherever it was. A session must be tracked in the project. One that
  * has ended or gone stale owns nothing, so its steps, then its old entries, go to the head of the unowned part, as
  * releaseQueue would put them. Done and dropped nodes stay out of the queue as it is read; shelved ones (parked, or under
- * a parked step) are left out of what is stored.
+ * a parked step) are left out of what is stored, and the answer names them in `leftOut`.
  */
-export function setQueue(ctx: Ctx, actor: string, ref: string | number, nodes: number[], owner: QueueOwner): Project {
+export function setQueue(ctx: Ctx, actor: string, ref: string | number, nodes: number[], owner: QueueOwner): Project & { leftOut?: number[] } {
   return write(ctx, actor, (record) => {
     const project = resolveProject(ctx, ref);
     const asked = [...new Set(nodes)];
@@ -472,7 +472,9 @@ export function setQueue(ctx: Ctx, actor: string, ref: string | number, nodes: n
       next = spliceQueue(stored, ids, sessionId);
     }
     storeQueue(ctx, record, project.id, row.queue, next);
-    return getProjectById(ctx, project.id)!;
+    const result = getProjectById(ctx, project.id)!;
+    // Named only when there are any, so the answer reads as before otherwise.
+    return shelved.size ? { ...result, leftOut: asked.filter((id) => shelved.has(id)) } : result;
   });
 }
 

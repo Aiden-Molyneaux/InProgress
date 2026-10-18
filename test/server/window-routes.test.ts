@@ -449,8 +449,10 @@ describe('park and unpark routes', () => {
     expect(empty.statusCode).toBe(400);
     expect(empty.json().error).toMatch(/reason/);
     expect((await post(`/api/ui/projects/${p.id}/nodes/${b}/park`, { slug: p.slug, reason: 'later' })).json().node).toMatchObject({ status: 'parked', parkedWhere: '' });
-    // Already parked, and a request not from the window, are refused.
-    expect((await post(`/api/ui/projects/${p.id}/nodes/${b}/park`, { slug: p.slug, reason: 'again' })).json().error).toBe(`#${b} is already parked`);
+    // Already parked answers the step as it stands; a request not from the window is refused.
+    const again = await post(`/api/ui/projects/${p.id}/nodes/${b}/park`, { slug: p.slug, reason: 'again' });
+    expect(again.statusCode).toBe(200);
+    expect(again.json().node).toMatchObject({ status: 'parked', parkedReason: 'later' });
     expect([401, 403]).toContain((await post(`/api/ui/projects/${p.id}/nodes/${b}/park`, { slug: p.slug, reason: 'x' }, auth)).statusCode);
   });
 
@@ -461,13 +463,14 @@ describe('park and unpark routes', () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().node).toMatchObject({ id: a, status: 'todo', parkedReason: '', parkedAt: null });
     expect(ctx.db.prepare('SELECT queue FROM projects WHERE id = ?').pluck().get(p.id)).toBe(JSON.stringify([{ node: a, session: null }]));
-    // Without toNext it goes back to the Backlog; a step that is not parked is refused.
+    // Without toNext it goes back to the Backlog; a step that is not parked answers as it stands, with no append.
     await post(`/api/ui/projects/${p.id}/nodes/${b}/park`, { slug: p.slug, reason: 'later' });
     expect((await post(`/api/ui/projects/${p.id}/nodes/${b}/unpark`, { slug: p.slug })).json().node).toMatchObject({ status: 'todo' });
     expect(ctx.db.prepare('SELECT queue FROM projects WHERE id = ?').pluck().get(p.id)).toBe(JSON.stringify([{ node: a, session: null }]));
-    const again = await post(`/api/ui/projects/${p.id}/nodes/${b}/unpark`, { slug: p.slug });
-    expect(again.statusCode).toBe(400);
-    expect(again.json().error).toBe(`#${b} is not parked`);
+    const again = await post(`/api/ui/projects/${p.id}/nodes/${b}/unpark`, { slug: p.slug, toNext: true });
+    expect(again.statusCode).toBe(200);
+    expect(again.json().node).toMatchObject({ id: b, status: 'todo' });
+    expect(ctx.db.prepare('SELECT queue FROM projects WHERE id = ?').pluck().get(p.id)).toBe(JSON.stringify([{ node: a, session: null }]));
   });
 
   it("park refuses another project's step", async () => {

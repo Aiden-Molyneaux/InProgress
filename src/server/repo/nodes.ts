@@ -5,6 +5,7 @@ import { badRequest, notFound } from '../errors';
 import { definedOnly } from '../util';
 import { clearNodeAsks } from './asks';
 import { appendUnowned, dropFromQueue, inLiveProject } from './projects';
+import { parkedAncestor, shelvedAmong, subtreeIds } from './shelved';
 import { closeNodeTasks } from './work';
 
 interface NodeRow {
@@ -162,32 +163,6 @@ export interface NodePatch {
   parkedWhere?: string;
 }
 
-/** The ids among `ids` that are shelved: parked, or under a parked ancestor. One recursive walk up `parent_id`. */
-export function shelvedAmong(ctx: Ctx, ids: number[]): Set<number> {
-  if (!ids.length) return new Set();
-  return new Set(
-    ctx.db
-      .prepare(
-        `WITH RECURSIVE up(start, id) AS (
-           SELECT id, id FROM nodes WHERE id IN (${ids.map(() => '?').join(', ')})
-           UNION ALL
-           SELECT up.start, n.parent_id FROM up JOIN nodes n ON n.id = up.id WHERE n.parent_id IS NOT NULL
-         )
-         SELECT DISTINCT up.start FROM up JOIN nodes p ON p.id = up.id WHERE p.status = 'parked'`,
-      )
-      .pluck()
-      .all(...ids) as number[],
-  );
-}
-
-/** Step `id` and every step under it. */
-function subtreeIds(ctx: Ctx, id: number): number[] {
-  return ctx.db
-    .prepare('WITH RECURSIVE sub(id) AS (SELECT ? UNION ALL SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id) SELECT id FROM sub')
-    .pluck()
-    .all(id) as number[];
-}
-
 /**
  * Applies `patch` to step `id`, clearing its asks when it is dropped or parked, or a question node is finished.
  * The node it returns is read inside the write, before write() runs the Board reconcile: its boardState, stateSince
@@ -249,7 +224,8 @@ export function patchNode(ctx: Ctx, record: RecordEvent, before: TreeNode, patch
     if (!next.parkedReason) throw badRequest('parked_reason is required to park a step', 'Say why it is set aside.');
     next.parkedWhere = (changes.parkedWhere ?? (parking ? '' : before.parkedWhere)).trim();
   } else {
-    if (changes.parkedReason !== undefined || changes.parkedWhere !== undefined) throw badRequest('parked_reason only goes with status "parked"');
+    if (changes.parkedReason !== undefined) throw badRequest('parked_reason only goes with status "parked"');
+    if (changes.parkedWhere !== undefined) throw badRequest('parked_where only goes with status "parked"');
     // Any status but parked clears the parked fields.
     next.parkedReason = '';
     next.parkedWhere = '';
@@ -282,13 +258,13 @@ export function patchNode(ctx: Ctx, record: RecordEvent, before: TreeNode, patch
 /**
  * The window's Park: parks step `id` with `reason` (required) and `where` (optional), as update_node with status
  * "parked" does: its driver and open asks are cleared, and it and every step under it leave the stored queue. `check`
- * runs on the step as read inside the write. A step already parked is refused.
+ * runs on the step as read inside the write. A step already parked answers as it stands, writing nothing (as Done does).
  */
 export function parkNode(ctx: Ctx, actor: string, id: number, input: { reason: string; where?: string }, check: (before: TreeNode) => void): TreeNode {
   return write(ctx, actor, (record) => {
     const before = requireNode(ctx, id);
     check(before);
-    if (before.status === 'parked') throw badRequest(`#${id} is already parked`, 'Reload the window.');
+    if (before.status === 'parked') return before;
     return patchWithAsks(ctx, record, actor, before, { status: 'parked', parkedReason: input.reason, parkedWhere: input.where ?? '' });
   });
 }
@@ -296,13 +272,16 @@ export function parkNode(ctx: Ctx, actor: string, id: number, input: { reason: s
 /**
  * The window's Unpark and "to Next": step `id` goes back to todo with its parked fields cleared, and with `toNext` it is
  * appended to the unowned queue in the same write. `check` runs on the step as read inside the write. A step that is not
- * parked is refused.
+ * parked answers as it stands, writing nothing. With `toNext`, a step still under a parked step is refused: it would stay
+ * shelved, so Next would not show it.
  */
 export function unparkNode(ctx: Ctx, actor: string, id: number, toNext: boolean, check: (before: TreeNode) => void): TreeNode {
   return write(ctx, actor, (record) => {
     const before = requireNode(ctx, id);
     check(before);
-    if (before.status !== 'parked') throw badRequest(`#${id} is not parked`, 'Reload the window.');
+    if (before.status !== 'parked') return before;
+    const above = toNext ? parkedAncestor(ctx, id) : null;
+    if (above !== null) throw badRequest(`#${id} is under parked #${above}`, `Unpark #${above} first.`);
     const node = patchNode(ctx, record, before, { status: 'todo' });
     // After the status change, so the queue event reads the step as open again.
     if (toNext) appendUnowned(ctx, record, before.projectId, id);
@@ -338,6 +317,9 @@ export function moveNode(ctx: Ctx, actor: string, id: number, input: { parentId:
     }
     if (input.after === id) throw badRequest(`Cannot place #${id} after itself`);
     const [position] = insertPositions(siblings(ctx, parent.id, id), input.after ?? 'end', 1);
+    // Under a parked or shelved parent the moved steps are shelved: they leave the stored queue, as parking takes them out,
+    // so unparking the parent does not bring them back to Next.
+    if (shelvedAmong(ctx, [parent.id]).size) dropFromQueue(ctx, record, node.projectId, subtreeIds(ctx, id));
     ctx.db.prepare('UPDATE nodes SET parent_id = ?, position = ?, updated_at = ? WHERE id = ?').run(parent.id, position, ctx.now(), id);
     renormalize(ctx, parent.id);
     record({ projectId: node.projectId, type: 'node.moved', entity: 'node', entityId: id, data: { fromParentId: node.parentId, toParentId: parent.id } });
@@ -349,11 +331,7 @@ export function deleteNode(ctx: Ctx, actor: string, id: number, cascade = false,
   return write(ctx, actor, (record) => {
     const node = requireNode(ctx, id);
     if (node.parentId === null) throw badRequest(`#${id} is the project root; archive the project instead`);
-    const ids = (
-      ctx.db
-        .prepare('WITH RECURSIVE sub(id) AS (SELECT ? UNION ALL SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id) SELECT id FROM sub')
-        .all(id) as { id: number }[]
-    ).map((r) => r.id);
+    const ids = subtreeIds(ctx, id);
     // The caller's own test of the node and its subtree, run in this write so it cannot go stale before the delete.
     check?.(node, ids);
     if (ids.length > 1 && !cascade) {

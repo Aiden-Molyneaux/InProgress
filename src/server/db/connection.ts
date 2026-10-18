@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { timestamp } from '../backup';
 import { MIGRATIONS, REBUILDS } from './schema';
@@ -12,14 +12,21 @@ export function openDb(file: string): DB {
   db.pragma('foreign_keys = ON');
   db.pragma('busy_timeout = 5000');
   // A table rebuild copies the database file aside first. The name falls outside backupDb's rotation pattern, so
-  // the copy is kept.
+  // the copy is kept. One copy per version: a rebuild that keeps failing must not copy the database on every start.
   const beforeRebuild = file === ':memory:'
     ? undefined
     : (toVersion: number) => {
         const dir = join(dirname(file), 'backups');
         mkdirSync(dir, { recursive: true });
-        const target = join(dir, `inprogress-pre-v${toVersion}-${timestamp()}.db`).replace(/'/g, "''");
-        db.exec(`VACUUM INTO '${target}'`);
+        const prefix = `inprogress-pre-v${toVersion}-`;
+        if (readdirSync(dir).some((f) => f.startsWith(prefix) && f.endsWith('.db'))) return;
+        const target = join(dir, `${prefix}${timestamp()}.db`).replace(/'/g, "''");
+        try {
+          db.exec(`VACUUM INTO '${target}'`);
+        } catch (err) {
+          // Another start wrote the same copy this second: the copy exists, which is all this needs.
+          if (!/already exists/i.test((err as Error).message)) throw err;
+        }
       };
   migrate(db, { beforeRebuild });
   return db;
@@ -45,10 +52,13 @@ export function migrate(db: DB, opts: { beforeRebuild?: (toVersion: number) => v
     }
     if (version === MIGRATIONS.length) return false;
     const rebuild = REBUILDS.has(version);
+    // Either direction means another start migrated between the read outside and this one: a rebuild with foreign keys
+    // still on would cascade-delete every row that points at the table, and a plain migration would run unchecked.
+    if (rebuild !== offForRebuild) {
+      throw new Error(`Migration ${version + 1} ${rebuild ? 'rebuilds a table and needs foreign keys off' : 'needs foreign keys on'}; another start changed the schema version meanwhile, so start InProgress again`);
+    }
     if (rebuild && db.pragma('foreign_keys', { simple: true }) !== 0) {
-      // The version read before the transaction was not a rebuild (another open migrated in between), so foreign
-      // keys are still on, and dropping the table would cascade-delete every row that points at it.
-      throw new Error(`Migration ${version + 1} rebuilds a table and needs foreign keys off; another start changed the schema version meanwhile, so start InProgress again`);
+      throw new Error(`Migration ${version + 1} rebuilds a table and needs foreign keys off, but they are on`);
     }
     db.exec(MIGRATIONS[version]);
     if (rebuild) {
@@ -64,6 +74,8 @@ export function migrate(db: DB, opts: { beforeRebuild?: (toVersion: number) => v
   });
   // A database this call starts from nothing holds nothing to copy aside, so its rebuilds skip beforeRebuild.
   const fresh = schemaVersion(db) === 0;
+  // Whether this pass turned foreign keys off for a rebuild, as the read outside the transaction decided.
+  let offForRebuild = false;
   for (;;) {
     const version = schemaVersion(db);
     const rebuild = REBUILDS.has(version);
@@ -72,6 +84,7 @@ export function migrate(db: DB, opts: { beforeRebuild?: (toVersion: number) => v
       // Outside the transaction: SQLite ignores the foreign_keys pragma inside one.
       db.pragma('foreign_keys = OFF');
     }
+    offForRebuild = rebuild;
     try {
       if (!step.immediate()) break;
     } finally {

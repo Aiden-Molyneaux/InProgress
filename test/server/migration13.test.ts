@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
@@ -96,6 +96,58 @@ describe('migration 13', () => {
     expect(db.prepare("SELECT focus_node_id FROM sessions WHERE id = 's-1'").pluck().get()).toBeNull();
   });
 
+  it('migration 13 keeps the node id sequence, so a deleted step\'s id is never reused', () => {
+    const db = at12();
+    db.prepare("INSERT INTO nodes (id, project_id, parent_id, position, kind, title, created_at, updated_at) VALUES (40, 1, 1, 9, 'task', 'Gone', ?, ?)").run(T, T);
+    db.prepare('DELETE FROM nodes WHERE id = 40').run();
+    migrate(db);
+    const id = Number(db.prepare("INSERT INTO nodes (project_id, parent_id, position, kind, title, created_at, updated_at) VALUES (1, 1, 10, 'task', 'New', ?, ?)").run(T, T).lastInsertRowid);
+    expect(id).toBeGreaterThan(40);
+    expect(db.prepare("SELECT name FROM sqlite_sequence WHERE name LIKE 'nodes%'").pluck().all()).toEqual(['nodes']);
+  });
+
+  it('a race that read a version before the rebuild and found the rebuild inside throws, and changes nothing', () => {
+    // At 11 with foreign keys on: the read outside the transaction is not a rebuild, so they stay on.
+    const db = new Database(':memory:');
+    db.pragma('foreign_keys = OFF');
+    db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+    for (const sql of MIGRATIONS.slice(0, 11)) db.exec(sql);
+    db.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '11')").run();
+    db.prepare("INSERT INTO projects (id, slug, name, description, playbook, status, root_node_id, created_at, updated_at) VALUES (1, 'p', 'P', '', '', 'active', 1, ?, ?)").run(T, T);
+    db.prepare("INSERT INTO nodes (id, project_id, parent_id, position, kind, title, body, status, assignee, outcome, created_at, updated_at) VALUES (1, 1, NULL, 1, 'goal', 'P', '', 'active', 'claude', '', ?, ?)").run(T, T);
+    db.prepare("INSERT INTO resources (id, project_id, node_id, kind, title, content, created_at, updated_at) VALUES (1, 1, 1, 'doc', 'Doc', 'x', ?, ?)").run(T, T);
+    db.pragma('foreign_keys = ON');
+    // Another start applies migration 12 between the outer read and BEGIN IMMEDIATE.
+    let raced = false;
+    const racing = new Proxy(db, {
+      get(target, key) {
+        if (key === 'transaction') {
+          return (fn: () => boolean) => {
+            const step = target.transaction(fn);
+            return {
+              immediate: () => {
+                if (!raced) {
+                  raced = true;
+                  target.exec(MIGRATIONS[11]);
+                  target.prepare("UPDATE meta SET value = '12' WHERE key = 'schema_version'").run();
+                }
+                return step.immediate();
+              },
+            };
+          };
+        }
+        const value = Reflect.get(target, key) as unknown;
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    expect(() => migrate(racing)).toThrow(/needs foreign keys off/);
+    expect(schemaVersion(db)).toBe(12);
+    expect(db.prepare("SELECT count(*) FROM pragma_table_info('nodes') WHERE name = 'parked_reason'").pluck().get()).toBe(0);
+    expect(db.prepare('SELECT count(*) FROM resources').pluck().get()).toBe(1);
+    expect(db.prepare('SELECT count(*) FROM nodes').pluck().get()).toBe(1);
+    expect(db.pragma('foreign_keys', { simple: true })).toBe(1);
+  });
+
   it('beforeRebuild runs once, with 13, and not on a database already at 13', () => {
     const db = at12();
     const spy = vi.fn();
@@ -145,6 +197,17 @@ describe('migration 13', () => {
     // Opening again at 13 makes no second copy.
     openDb(file).close();
     expect(readdirSync(join(dir, 'backups'))).toHaveLength(1);
+  });
+
+  it('openDb makes no second pre-rebuild copy when one is already in backups, as when the migration keeps failing', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ip-m13-again-'));
+    dirs.push(dir);
+    const file = join(dir, 'live.db');
+    at12(file).close();
+    mkdirSync(join(dir, 'backups'));
+    writeFileSync(join(dir, 'backups', 'inprogress-pre-v13-20261017-000000.db'), 'an earlier copy');
+    openDb(file).close();
+    expect(readdirSync(join(dir, 'backups'))).toEqual(['inprogress-pre-v13-20261017-000000.db']);
   });
 
   it('a fresh file database makes no copy: there is nothing to keep', () => {

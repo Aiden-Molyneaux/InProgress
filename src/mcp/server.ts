@@ -235,9 +235,10 @@ export function createMcpServer(client: Client, o: McpOptions = {}): McpServer {
       unowned: z.boolean().optional().describe('true for a "later:" line: sets the unowned order, steps no session has taken on'),
     },
     async (a: { project: string; nodes: number[]; session?: string; unowned?: boolean }) => {
-      const p = await client.post<Project>(`/api/projects/${enc(a.project)}/queue`, { nodes: a.nodes, session: a.session, unowned: a.unowned }, { actor: actor(a.session) });
+      const p = await client.post<Project & { leftOut?: number[] }>(`/api/projects/${enc(a.project)}/queue`, { nodes: a.nodes, session: a.session, unowned: a.unowned }, { actor: actor(a.session) });
       // The route returns the project alone: sessions, slots and focus come with the snapshot.
-      return formatQueue(await client.get<ProjectSnapshot>(`/api/projects/${enc(p.slug)}`));
+      const queue = formatQueue(await client.get<ProjectSnapshot>(`/api/projects/${enc(p.slug)}`));
+      return p.leftOut?.length ? `${queue}\nLeft out ${p.leftOut.map((n) => `#${n}`).join(', ')}: parked.` : queue;
     });
 
   return server;

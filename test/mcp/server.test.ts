@@ -196,6 +196,10 @@ describe('scribe MCP tools', () => {
       .toEqual({ text: `#${step} InThink feature · parked.`, isError: false });
     const res = await fetch(`${base}/api/nodes/${step}`, { headers: { authorization: 'Bearer tok' } });
     expect(((await res.json()) as { node: unknown }).node).toMatchObject({ status: 'parked', parkedReason: 'Not merging it for now', parkedWhere: 'branch inthink-feature' });
+    // set_queue leaves a parked step out, and its answer says so.
+    const [next] = lineIds((await call('add_nodes', { parent: rootId, nodes: [{ title: 'Next one' }], session: 'pk1' })).text);
+    expect((await call('set_queue', { project: 'parking', nodes: [step, next], session: 'pk1', unowned: true })).text.split('\n'))
+      .toEqual([`Up next: later: #${next}`, `Left out #${step}: parked.`]);
     const { tools } = await mcp.listTools();
     expect(tools.find((t) => t.name === 'update_node')!.description).toContain('Status "parked" needs parked_reason (why it is set aside) and takes an optional parked_where (branch, worktree or commit).');
   });

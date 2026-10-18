@@ -3,7 +3,8 @@ import type { Ctx } from '../../src/server/db/tx';
 import { listEventsSince, maxEventId } from '../../src/server/repo/events';
 import { clearAsk, raiseAsk } from '../../src/server/repo/asks';
 import { addLog } from '../../src/server/repo/logs';
-import { addNodes, findNode, parkNode, requireNode, shelvedAmong, unparkNode, updateNode } from '../../src/server/repo/nodes';
+import { addNodes, findNode, moveNode, parkNode, requireNode, unparkNode, updateNode } from '../../src/server/repo/nodes';
+import { shelvedAmong } from '../../src/server/repo/shelved';
 import {
   addBinding, applyQueueOp, changeProject, createProject, getProjectById, listBindings, listProjectSummaries, removeBinding,
   resolveBinding, resolveProject, setQueue, slugify, updateProject,
@@ -434,9 +435,12 @@ describe('parked steps and the queue', () => {
     expect(getProjectById(ctx, project.id)!.queue).toEqual([{ nodeId: other.id, sessionId: null }, { nodeId: child.id, sessionId: null }]);
     expect(listEventsSince(ctx, mark).map((e) => e.type)).toEqual(['node.updated', 'project.updated']);
     expect(listEventsSince(ctx, mark)[1]).toMatchObject({ actor: 'window', data: { op: 'unpark', node: child.id } });
-    // Unpark refuses a step that is not parked, and the check runs inside the write.
-    expect(thrown(() => unparkNode(ctx, 'window', child.id, true, () => {})).message).toBe(`#${child.id} is not parked`);
-    expect(thrown(() => unparkNode(ctx, 'window', phase.id, false, () => {})).message).toBe(`#${phase.id} is not parked`);
+    // Unpark on a step that is not parked answers it as it stands: no write, no append.
+    const quiet = maxEventId(ctx);
+    expect(unparkNode(ctx, 'window', child.id, true, () => {})).toMatchObject({ id: child.id, status: 'todo' });
+    expect(unparkNode(ctx, 'window', phase.id, true, () => {})).toMatchObject({ id: phase.id, status: 'todo' });
+    expect(listEventsSince(ctx, quiet)).toEqual([]);
+    // The check runs inside the write.
     updateNode(ctx, 't', phase.id, { status: 'parked', parkedReason: 'later' });
     expect(thrown(() => unparkNode(ctx, 'window', phase.id, false, () => { throw new Error('checked'); })).message).toBe('checked');
     expect(requireNode(ctx, phase.id).status).toBe('parked');
@@ -465,7 +469,43 @@ describe('parked steps and the queue', () => {
     const { ctx, other } = parkSetup();
     const node = parkNode(ctx, 'window', other.id, { reason: ' Set aside ', where: ' branch x ' }, () => {});
     expect(node).toMatchObject({ status: 'parked', parkedReason: 'Set aside', parkedWhere: 'branch x' });
-    expect(thrown(() => parkNode(ctx, 'window', other.id, { reason: 'again' }, () => {})).message).toBe(`#${other.id} is already parked`);
+    // Park on a step already parked answers it as it stands, writing nothing.
+    const mark = maxEventId(ctx);
+    expect(parkNode(ctx, 'window', other.id, { reason: 'again' }, () => {})).toMatchObject({ status: 'parked', parkedReason: 'Set aside' });
+    expect(listEventsSince(ctx, mark)).toEqual([]);
+  });
+
+  it('moving a queued step under a parked phase takes it out of Next for good', () => {
+    const { ctx, project, phase, other, stored, live } = parkSetup();
+    const [inner] = addNodes(ctx, 't', { parentId: other.id, nodes: [{ title: 'Inner' }] });
+    setQueue(ctx, 'scribe:s1', project.slug, [other.id, inner.id], 'unowned');
+    updateNode(ctx, 't', phase.id, { status: 'parked', parkedReason: 'later' });
+    const mark = maxEventId(ctx);
+    moveNode(ctx, 't', other.id, { parentId: phase.id });
+    expect(stored()).toEqual([]);
+    expect(listEventsSince(ctx, mark).at(-1)!.type).toBe('node.moved');
+    unparkNode(ctx, 'window', phase.id, false, () => {});
+    expect(live()).toEqual([]);
+  });
+
+  it('a move under an open parent leaves the queue alone', () => {
+    const { ctx, project, phase, other, stored } = parkSetup();
+    setQueue(ctx, 'scribe:s1', project.slug, [other.id], 'unowned');
+    moveNode(ctx, 't', other.id, { parentId: phase.id });
+    expect(stored()).toEqual([other.id]);
+  });
+
+  it('unpark toNext refuses a step still under a parked phase, and writes nothing', () => {
+    const { ctx, phase, child, stored } = parkSetup();
+    updateNode(ctx, 't', child.id, { status: 'parked', parkedReason: 'own reason' });
+    updateNode(ctx, 't', phase.id, { status: 'parked', parkedReason: 'later' });
+    const mark = maxEventId(ctx);
+    expect(thrown(() => unparkNode(ctx, 'window', child.id, true, () => {}))).toMatchObject({ status: 400, message: `#${child.id} is under parked #${phase.id}`, hint: `Unpark #${phase.id} first.` });
+    expect(requireNode(ctx, child.id).status).toBe('parked');
+    expect(stored()).toEqual([]);
+    expect(listEventsSince(ctx, mark)).toEqual([]);
+    // Without toNext it may go back to the Backlog: it stays shelved under the phase.
+    expect(unparkNode(ctx, 'window', child.id, false, () => {}).status).toBe('todo');
   });
 
   it('shelvedAmong names the parked steps and everything under them', () => {

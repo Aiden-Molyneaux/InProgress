@@ -306,6 +306,11 @@ export const MIGRATIONS: string[] = [
   );
   INSERT INTO nodes_new (id, project_id, parent_id, position, kind, title, body, status, assignee, outcome, created_at, updated_at, completed_at, label, board_state, state_since, hue, driver_session_id)
     SELECT id, project_id, parent_id, position, kind, title, body, status, assignee, outcome, created_at, updated_at, completed_at, label, board_state, state_since, hue, driver_session_id FROM nodes;
+  -- Carry the AUTOINCREMENT high-water mark over: DROP TABLE deletes nodes' sqlite_sequence row, and the copy alone would
+  -- restart it at the highest surviving id, so a deleted step's id (still named by old events and queue entries) would
+  -- come back on a new step.
+  INSERT INTO sqlite_sequence (name, seq) SELECT 'nodes_new', seq FROM sqlite_sequence WHERE name = 'nodes' AND NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = 'nodes_new');
+  UPDATE sqlite_sequence SET seq = max(seq, coalesce((SELECT seq FROM sqlite_sequence WHERE name = 'nodes'), 0)) WHERE name = 'nodes_new';
   DROP TABLE nodes;
   ALTER TABLE nodes_new RENAME TO nodes;
   CREATE INDEX nodes_project ON nodes (project_id);
