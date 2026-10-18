@@ -255,6 +255,15 @@ describe('node done route', () => {
     expect(row(ctx, a).status).toBe('done');
   });
 
+  it('a parked step marked done is still held back by its open children', async () => {
+    const { ctx, p, post, a } = await setup();
+    const [kid] = addNodes(ctx, 'test', { parentId: a, nodes: [{ title: 'Kid' }] });
+    updateNode(ctx, 'test', a, { status: 'parked', parkedReason: 'later' });
+    const res = await post(url(p, a), { slug: p.slug, driver: null });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toContain(`#${kid.id}`);
+  });
+
   it('leaves the outcome empty for an empty or whitespace one', async () => {
     const { ctx, p, post, a, b } = await setup();
     expect((await post(url(p, a), { slug: p.slug, driver: null })).statusCode).toBe(200);

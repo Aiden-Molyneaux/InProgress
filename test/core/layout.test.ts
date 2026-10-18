@@ -1156,4 +1156,14 @@ describe('parked steps', () => {
     const ok = n(root.id, 'Ok');
     expect(queueView(later(under.id, phase.id, ok.id), [root, phase, under, ok], []).unowned).toEqual([ok.id]);
   });
+
+  it('a child of Aiden under a parked phase opened by an override is not needs-you', () => {
+    nextId = 1;
+    const root = n(null, 'Root', { status: 'active' });
+    const phase = n(root.id, 'Phase', { status: 'parked', parkedReason: 'later' });
+    const mine = n(phase.id, 'Mine', { assignee: 'me' });
+    const l = layoutOutline({ nodes: [root, phase, mine], resources: [], sessions: [], overrides: { ['n:' + phase.id]: 'open' } });
+    const item = l.items.find((x): x is LayoutItem & { kind: 'node' } => x.kind === 'node' && x.nodeId === mine.id)!;
+    expect(item.needsYou).toBe(false);
+  });
 });

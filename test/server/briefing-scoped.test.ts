@@ -3,7 +3,7 @@ import { renderBriefing, renderStatusAnswer, renderStatusLine } from '../../src/
 import { stepBlock } from '../../src/server/briefing-scoped';
 import { clearAsk, raiseAsk } from '../../src/server/repo/asks';
 import { addNodes, updateNode } from '../../src/server/repo/nodes';
-import { addBinding, changeProject, createProject, setQueue } from '../../src/server/repo/projects';
+import { addBinding, changeProject, createProject, listProjectSummaries, setQueue } from '../../src/server/repo/projects';
 import { addResource } from '../../src/server/repo/resources';
 import { clearBriefingDue, findSession } from '../../src/server/repo/sessions';
 import { getProjectSnapshot } from '../../src/server/repo/snapshot';
@@ -256,37 +256,57 @@ describe('Up next reads the Board', () => {
 
 describe('parked steps in the briefing', () => {
   it('Ready to claim and Up next leave out a shelved step the stored queue still holds', () => {
-    const t = setup('scoped');
-    t.join('s1');
-    t.join('s2', 'Docs pass');
-    updateNode(t.ctx, 'test', t.group.id, { status: 'parked', parkedReason: 'later' });
-    // Seeded directly: setQueue would refuse the shelved steps, a rollback or older build would not.
-    const stored = [{ node: t.ready1.id, session: null }, { node: t.ready2.id, session: 's2' }];
-    t.ctx.db.prepare('UPDATE projects SET queue = ? WHERE id = ?').run(JSON.stringify(stored), t.project.id);
-    const text = t.brief('s1').join('\n');
-    expect(text).not.toContain('Ready to claim:');
-    expect(text).not.toContain('Up next');
-    expect(text).toContain("Nothing is ready.");
-    const ok = addNodes(t.ctx, 'test', { parentId: t.project.rootNodeId, nodes: [{ title: 'Elsewhere' }] })[0];
-    t.ctx.db.prepare('UPDATE projects SET queue = ? WHERE id = ?').run(JSON.stringify([...stored, { node: ok.id, session: null }]), t.project.id);
-    const ready = t.brief('s1').find((l) => l.startsWith('Ready to claim:'));
-    expect(ready).toBe(`Ready to claim: #${ok.id} Elsewhere`);
+    for (const mode of ['scoped', 'full'] as const) {
+      const t = setup(mode);
+      t.join('s1');
+      t.join('s2', 'Docs pass');
+      updateNode(t.ctx, 'test', t.group.id, { status: 'parked', parkedReason: 'later' });
+      // Seeded directly: setQueue would refuse the shelved steps, a rollback or older build would not.
+      const stored = [{ node: t.ready1.id, session: null }, { node: t.ready2.id, session: 's2' }];
+      const seed = (queue: unknown[]) => t.ctx.db.prepare('UPDATE projects SET queue = ? WHERE id = ?').run(JSON.stringify(queue), t.project.id);
+      seed(stored);
+      const text = t.brief('s1').join('\n');
+      expect(text, mode).not.toContain('Ready to claim:');
+      expect(text, mode).not.toContain('Up next');
+      const ok = addNodes(t.ctx, 'test', { parentId: t.project.rootNodeId, nodes: [{ title: 'Elsewhere' }] })[0];
+      seed([...stored, { node: ok.id, session: null }]);
+      const lines = t.brief('s1');
+      // The control: the open step shows where each mode shows its queue, and the shelved ones still do not.
+      expect(lines.find((l) => l.startsWith(mode === 'scoped' ? 'Ready to claim:' : 'Up next')), mode).toBe(mode === 'scoped' ? `Ready to claim: #${ok.id} Elsewhere` : `Up next: later: #${ok.id}`);
+    }
   });
 
   it('open asks on shelved steps leave the Needs you and check lines, and come back on unpark', () => {
-    for (const mode of ['full'] as const) {
-      const t = setup(mode);
-      t.join('s1');
-      raiseAsk(t.ctx, 'test', { nodeId: t.askedStep.id, kind: 'question', text: 'Hold on' });
-      const lines = () => renderBriefing(t.snap(), 's1', Date.parse(t.ctx.now()) + 3 * 86_400_000, { checkOld: true, cli: CLI }).split('\n').filter((l) => l.startsWith('Needs you') || l.startsWith('Check'));
-      if (mode === 'full') expect(lines().join('\n'), mode).toContain('Hold on');
-      updateNode(t.ctx, 'test', t.group.id, { status: 'parked', parkedReason: 'later' });
-      expect(lines().join('\n'), mode).not.toContain('Hold on');
-      if (mode === 'full') {
-        updateNode(t.ctx, 'test', t.group.id, { status: 'active' });
-        expect(lines().join('\n'), mode).toContain('Hold on');
-      }
-    }
+    const t = setup('full');
+    t.join('s1');
+    const ask = raiseAsk(t.ctx, 'test', { nodeId: t.askedStep.id, kind: 'question', text: 'Hold on' });
+    const lines = () => renderBriefing(t.snap(), 's1', Date.parse(t.ctx.now()) + 3 * 86_400_000, { checkOld: true, cli: CLI }).split('\n');
+    const check = () => lines().find((l) => l.startsWith('Check with Aiden'));
+    const needs = () => lines().find((l) => l.startsWith('Needs you'));
+    expect(needs()).toContain('Hold on');
+    expect(check()).toContain(`a${ask.id}`);
+    updateNode(t.ctx, 'test', t.group.id, { status: 'parked', parkedReason: 'later' });
+    expect(needs()).toBeUndefined();
+    expect(check()).toBeUndefined();
+    updateNode(t.ctx, 'test', t.group.id, { status: 'active' });
+    expect(needs()).toContain('Hold on');
+    expect(check()).toContain(`a${ask.id}`);
+  });
+
+  it('the status line and the project summary leave out asks on shelved steps', () => {
+    const t = setup('full');
+    t.join('s1');
+    raiseAsk(t.ctx, 'test', { nodeId: t.askedStep.id, kind: 'question', text: 'Hold on' });
+    const line = () => renderStatusLine(t.snap(), t.snap().sessions.find((x) => x.id === 's1')!);
+    const count = () => listProjectSummaries(t.ctx).find((x) => x.slug === t.project.slug)!.openAsks;
+    expect(line()).toContain('1 need you');
+    expect(count()).toBe(1);
+    updateNode(t.ctx, 'test', t.group.id, { status: 'parked', parkedReason: 'later' });
+    expect(line()).toContain('0 need you');
+    expect(count()).toBe(0);
+    updateNode(t.ctx, 'test', t.group.id, { status: 'active' });
+    expect(line()).toContain('1 need you');
+    expect(count()).toBe(1);
   });
 
   it('clips a long, multi-line parked reason to one line of 80 characters', () => {

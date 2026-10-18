@@ -155,10 +155,8 @@ export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: 
       if (n.parentId === null) throw badRequest(`#${node} is the project root`, 'Reload the window.');
       if (n.status === 'done') return;
       if (n.status === 'dropped') throw badRequest(`#${node} is dropped`, 'Reload the window.');
-      // A parked child (or one under a parked step) is set aside, not unfinished: it does not hold the phase back.
-      const openKids = ctx.db.prepare("SELECT id FROM nodes WHERE parent_id = ? AND status NOT IN ('done', 'dropped') ORDER BY id").all(n.id) as { id: number }[];
-      const shelvedKids = shelvedAmong(ctx, openKids.map((o) => o.id));
-      const open = openKids.filter((o) => !shelvedKids.has(o.id));
+      // A parked child is set aside, not unfinished: it does not hold the phase back. Its own children are not direct ones.
+      const open = ctx.db.prepare("SELECT id FROM nodes WHERE parent_id = ? AND status NOT IN ('done', 'dropped', 'parked') ORDER BY id").all(n.id) as { id: number }[];
       if (open.length) throw badRequest(`#${node} has open steps under it: ${open.map((o) => `#${o.id}`).join(', ')}`, 'Finish or drop them first.');
       const live = liveDriver(ctx, n);
       if (live !== null && live !== driver) throw conflict(`A session is driving #${node} now`, 'Look again: the box names it.');

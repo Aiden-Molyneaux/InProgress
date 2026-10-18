@@ -420,7 +420,7 @@ const NUDGE = 'If a checkpoint happened, brief the inprogress-scribe; otherwise 
 
 export function renderStatusLine(snapshot: ProjectSnapshot, session: Session): string {
   const focus = session.focusNodeId !== null ? snapshot.nodes.find((n) => n.id === session.focusNodeId) : undefined;
-  const open = snapshot.asks.filter((a) => a.clearedAt === null);
+  const open = openAsks(snapshot);
   if (session.role !== 'orchestrator' && snapshot.project.briefingMode === 'scoped') {
     const step = claimedStep(snapshot, session);
     const mine = step ? open.filter((a) => a.nodeId === step.id) : [];

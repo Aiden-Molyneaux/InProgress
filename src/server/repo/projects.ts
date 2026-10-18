@@ -502,7 +502,10 @@ export function listProjectSummaries(ctx: Ctx): ProjectSummary[] {
   const rows = ctx.db
     .prepare(
       `SELECT p.*,
-        (SELECT COUNT(*) FROM asks a WHERE a.project_id = p.id AND a.cleared_at IS NULL) AS open_asks,
+        (SELECT COUNT(*) FROM asks a WHERE a.project_id = p.id AND a.cleared_at IS NULL
+          AND NOT EXISTS (
+            WITH RECURSIVE up(id) AS (SELECT a.node_id UNION ALL SELECT n.parent_id FROM up JOIN nodes n ON n.id = up.id WHERE n.parent_id IS NOT NULL)
+            SELECT 1 FROM up JOIN nodes sp ON sp.id = up.id WHERE sp.status = 'parked')) AS open_asks,
         (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.state = 'permission' AND s.last_seen_at >= ?) AS permission_waits,
         (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.state != 'ended' AND s.last_seen_at >= ?) AS active_sessions,
         (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.state = 'working' AND s.last_seen_at >= ?) AS working_sessions,
