@@ -69,7 +69,7 @@ Aiden's, 2026-10-17:
 - `nodes` gains `parked_reason TEXT NOT NULL DEFAULT ''`, `parked_where TEXT NOT NULL DEFAULT ''` and
   `parked_at TEXT` (null unless parked).
 - The `nodes.status` CHECK gains `'parked'`. SQLite cannot change a CHECK in place, so this is the codebase's first
-  table rebuild (see "Waiting on Aiden"). The migration follows SQLite's documented procedure: foreign keys off outside
+  table rebuild (see "The migration"). The migration follows SQLite's documented procedure: foreign keys off outside
   the transaction, create the new table, copy every row, drop the old, rename, recreate `nodes_project`, `nodes_parent`
   and any other index or trigger on `nodes`, run `PRAGMA foreign_key_check`, commit, foreign keys back on. The migration
   runner (`src/server/db/connection.ts`) needs a way to run one migration with foreign keys off. The database file is
@@ -188,12 +188,11 @@ Logged on #482 for a Shipwright step:
 - Grouping stays by immediate parent (the #452 meaning), with the root group named No phase.
 - The parked fields are columns on `nodes`, not a resource, so the card and the briefing can read them directly.
 
-## Waiting on Aiden
+## The migration (Aiden, 2026-10-17)
 
-- **The migration.** The parked status needs the `nodes` table rebuilt on the live database, the first rebuild in this
-  codebase. It runs once at deploy, after a copy of the database file, under the data gates. The alternative is a
-  `parked_at` column with the status left as todo: no rebuild, but every reader that treats todo as open would then need
-  a second check, and a missed one shows parked steps in Next. Recommended: the rebuild.
+The parked status rebuilds the `nodes` table on the live database, the first rebuild in this codebase. It runs once at
+deploy, after a copy of the database file, under the data gates. Aiden approved the rebuild over a `parked_at` flag with
+the status left as todo, which would have needed a second check in every reader that treats todo as open.
 
 ## Child steps (proposed)
 
