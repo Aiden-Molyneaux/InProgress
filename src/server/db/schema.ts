@@ -275,4 +275,49 @@ export const MIGRATIONS: string[] = [
   -- Only a nullable column: v1 to v11 builds can still read and write this schema, so a rollback across it works.
   INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
   `,
+  // 13: parked steps (spec 2026-10-17-parked-steps-and-loose-tasks-design.md). The status CHECK gains 'parked', which
+  // SQLite cannot change in place, so this rebuilds nodes (the first rebuild: see REBUILDS). parked_reason: why a parked
+  // step is set aside; parked_where: where its work lives (a branch, worktree or commit); both '' unless parked.
+  // parked_at: when it was parked; NULL unless parked. The runner applies it with foreign keys off, or dropping nodes
+  // would cascade-delete every row that points at it; parent_id names nodes, so it resolves to the renamed table.
+  `
+  CREATE TABLE nodes_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    parent_id INTEGER REFERENCES nodes(id) ON DELETE CASCADE,
+    position REAL NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('goal','phase','task','question')),
+    title TEXT NOT NULL,
+    body TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'todo' CHECK (status IN ('todo','active','done','blocked','dropped','parked')),
+    assignee TEXT NOT NULL DEFAULT 'claude' CHECK (assignee IN ('claude','me')),
+    outcome TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    completed_at TEXT,
+    label TEXT CHECK (label IS NULL OR label IN ('ui','server','data','integration','ops','docs','fix','refactor','research')),
+    board_state TEXT,
+    state_since TEXT,
+    hue INTEGER,
+    driver_session_id TEXT,
+    parked_reason TEXT NOT NULL DEFAULT '',
+    parked_where TEXT NOT NULL DEFAULT '',
+    parked_at TEXT
+  );
+  INSERT INTO nodes_new (id, project_id, parent_id, position, kind, title, body, status, assignee, outcome, created_at, updated_at, completed_at, label, board_state, state_since, hue, driver_session_id)
+    SELECT id, project_id, parent_id, position, kind, title, body, status, assignee, outcome, created_at, updated_at, completed_at, label, board_state, state_since, hue, driver_session_id FROM nodes;
+  DROP TABLE nodes;
+  ALTER TABLE nodes_new RENAME TO nodes;
+  CREATE INDEX nodes_project ON nodes (project_id);
+  CREATE INDEX nodes_parent ON nodes (parent_id, position);
+  -- A widened CHECK and defaulted or nullable columns: v1 to v12 builds can still read and write this schema, so a
+  -- rollback across it works.
+  INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+  `,
 ];
+
+/**
+ * The 0-based indexes into MIGRATIONS that rebuild a table. The runner applies each with foreign keys off (outside
+ * its transaction, where SQLite honours the pragma), checks foreign_key_check before committing, and turns them back on.
+ */
+export const REBUILDS: ReadonlySet<number> = new Set([12]);
