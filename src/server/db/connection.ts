@@ -19,20 +19,21 @@ export function openDb(file: string): DB {
         const dir = join(dirname(file), 'backups');
         mkdirSync(dir, { recursive: true });
         const prefix = `inprogress-pre-v${toVersion}-`;
-        if (readdirSync(dir).some((f) => f.startsWith(prefix) && f.endsWith('.db'))) return;
-        // Copied to a .tmp name, then renamed, so the check above only ever sees a complete copy. A .tmp left by a crash
-        // mid-copy is overwritten.
+        const copied = () => readdirSync(dir).some((f) => f.startsWith(prefix) && f.endsWith('.db'));
+        if (copied()) return;
+        // Copied to a .tmp name of this process's own, then renamed, so the check above only ever sees a complete copy
+        // and two racing starts never touch each other's file. A failed copy removes its .tmp.
         const target = join(dir, `${prefix}${timestamp()}.db`);
-        const tmp = `${target}.tmp`;
-        rmSync(tmp, { force: true });
+        const tmp = `${target}.${process.pid}.tmp`;
         try {
           db.exec(`VACUUM INTO '${tmp.replace(/'/g, "''")}'`);
+          renameSync(tmp, target);
         } catch (err) {
-          // Another start is writing the same copy this second: its copy will land, which is all this needs.
-          if (/already exists/i.test((err as Error).message)) return;
+          rmSync(tmp, { force: true });
+          // Another start landed its copy meanwhile, which is all this needs.
+          if (copied()) return;
           throw err;
         }
-        renameSync(tmp, target);
       };
   migrate(db, { beforeRebuild });
   return db;

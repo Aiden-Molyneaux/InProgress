@@ -217,7 +217,7 @@ describe('migration 13', () => {
     const file = join(dir, 'live.db');
     at12(file).close();
     mkdirSync(join(dir, 'backups'));
-    // A crash mid-copy left the very name this copy will use.
+    // A crash mid-copy left a .tmp stamped with this very second.
     const at = new Date(2026, 9, 17, 9, 30, 0);
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(at);
@@ -233,7 +233,8 @@ describe('migration 13', () => {
     const copy = new Database(join(dir, 'backups', copies[0]));
     expect(schemaVersion(copy)).toBe(12);
     copy.close();
-    expect(readdirSync(join(dir, 'backups')).filter((f) => f.endsWith('.tmp'))).toEqual([]);
+    // This start's own .tmp is renamed away; only the crashed start's leftover remains.
+    expect(readdirSync(join(dir, 'backups')).filter((f) => f.endsWith('.tmp'))).toEqual([`inprogress-pre-v13-${timestamp(at)}.db.tmp`]);
   });
 
   it('a fresh file database makes no copy: there is nothing to keep', () => {
