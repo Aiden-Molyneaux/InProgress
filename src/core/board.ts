@@ -1,6 +1,6 @@
 import { sessionActivity } from './activity';
 import { clipLine, stepRef } from './step-ref';
-import { ancestors, buildIndex, dfsOrder, kids } from './tree';
+import { ancestors, buildIndex, dfsOrder, kids, shelvedIds } from './tree';
 import { ASK_TRAIL_MS, STALE_SESSION_MS, STALL_MS, TRAIL_MS, sessionDisplayTitle, type Ask, type ProjectSnapshot, type ResourceMeta, type Session, type TreeNode } from './types';
 
 export type Column = 'now' | 'next' | 'backlog' | 'done';
@@ -30,6 +30,15 @@ export interface BoardRow {
   handoff: ResourceMeta | null;
 }
 
+/** A parked step (never a shelved descendant): where it sits and how many open steps it holds back. */
+export interface ParkedRow {
+  node: TreeNode;
+  /** Its ancestors below the root, outermost first. */
+  crumb: TreeNode[];
+  /** Open descendants (todo, active or blocked) set aside with it. */
+  openInside: number;
+}
+
 export interface Board {
   /** Next rows in rail order: unowned by queue order, then each live owner's entries in stored order. */
   next: BoardRow[];
@@ -45,6 +54,8 @@ export interface Board {
   groups: Set<number>;
   /** Rows with at least one mark, in tree order. */
   marked: BoardRow[];
+  /** Parked steps in tree order. They and their subtrees are no rows, and are never in `byId`. */
+  parked: ParkedRow[];
 }
 
 /** A live session (spec 1.5): not ended and heard from within STALE_SESSION_MS. The snapshot's read expires stale ones only lazily. */
@@ -118,7 +129,9 @@ export function deriveBoard(input: BoardInput, now: number): Board {
   const unowned = input.project.queue.filter((e) => e.sessionId === null);
   const queueNumber = new Map<number, number>();
   let k = 0;
-  const openIds = new Set(input.nodes.filter(isOpen).map((x) => x.id));
+  // A shelved step (parked, or under a parked one) is neither open nor finished: no row, no queue place.
+  const shelved = shelvedIds(index);
+  const openIds = new Set(input.nodes.filter((x) => isOpen(x) && !shelved.has(x.id)).map((x) => x.id));
   for (const e of unowned) if (openIds.has(e.nodeId)) queueNumber.set(e.nodeId, ++k);
   const ownerOf = new Map<number, Session>();
   for (const e of input.project.queue) {
@@ -129,7 +142,7 @@ export function deriveBoard(input: BoardInput, now: number): Board {
   const byId = new Map<number, BoardRow>();
   const groups = new Set<number>();
   for (const node of input.nodes) {
-    if (node.id === rootId || node.status === 'dropped') continue;
+    if (node.id === rootId || node.status === 'dropped' || shelved.has(node.id)) continue;
     const crumb = ancestors(index, node.id).filter((a) => a.id !== rootId);
     const focused = focusOf.get(node.id) ?? [];
     // The focused sessions are already live, so a driver found among them is the live driver.
@@ -167,6 +180,11 @@ export function deriveBoard(input: BoardInput, now: number): Board {
       handoff: handoffOf.get(node.id) ?? null,
     });
   }
+  const openInside = (id: number): number => kids(index, id).reduce((sum, k) => sum + (isOpen(k) ? 1 : 0) + openInside(k.id), 0);
+  const parked: ParkedRow[] = input.nodes
+    .filter((x) => x.status === 'parked' && x.id !== rootId)
+    .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0))
+    .map((node) => ({ node, crumb: ancestors(index, node.id).filter((a) => a.id !== rootId), openInside: openInside(node.id) }));
   const rows = [...byId.values()];
   const treeOrder = (a: BoardRow, b: BoardRow) => (order.get(a.node.id) ?? 0) - (order.get(b.node.id) ?? 0);
   const queueOrder = new Map(input.project.queue.map((e, i) => [e.nodeId, i]));
@@ -179,5 +197,6 @@ export function deriveBoard(input: BoardInput, now: number): Board {
     done: rows.filter((r) => r.column === 'done').sort((a, b) => (b.node.completedAt ?? '').localeCompare(a.node.completedAt ?? '') || b.node.id - a.node.id),
     byId, groups,
     marked: rows.filter((r) => r.marks.length).sort(treeOrder),
+    parked,
   };
 }

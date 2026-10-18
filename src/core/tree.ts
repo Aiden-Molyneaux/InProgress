@@ -86,8 +86,10 @@ export function pinnedIds(index: TreeIndex, sessions: SessionLike[], extra: Iter
       cur = cur.parentId === null ? undefined : index.byId.get(cur.parentId);
     }
   };
+  // A shelved step is set aside, so its status pins nothing; only a session's focus keeps it in view.
+  const shelved = shelvedIds(index);
   for (const n of index.byId.values()) {
-    if (n.parentId !== null && (n.status === 'active' || isNeedsYou(n))) pin(n.id);
+    if (n.parentId !== null && !shelved.has(n.id) && (n.status === 'active' || isNeedsYou(n))) pin(n.id);
   }
   for (const s of sessions) if (s.state !== 'ended' && s.focusNodeId !== null) pin(s.focusNodeId);
   for (const id of extra) pin(id);
@@ -156,7 +158,7 @@ export function computeVisible(index: TreeIndex, sessions: SessionLike[], opts: 
     if (opts.noFold || kids(index, n.id).length === 0) return false;
     const manual = overrides[`n:${n.id}`];
     if (manual) return manual === 'closed';
-    return (n.status === 'done' || n.status === 'dropped') && !pinned.has(n.id);
+    return (n.status === 'done' || n.status === 'dropped' || n.status === 'parked') && !pinned.has(n.id);
   };
 
   /** The children the far todo tail hides, whether or not its "+n more" is open. */
@@ -215,6 +217,7 @@ export function computeVisible(index: TreeIndex, sessions: SessionLike[], opts: 
 }
 
 export function statusLabel(n: TreeNode): string {
+  if (n.status === 'parked') return `parked: ${n.parkedReason}`;
   if (!isNeedsYou(n)) return n.status;
   return n.status === 'todo' ? 'NEEDS YOU' : `NEEDS YOU (${n.status})`;
 }

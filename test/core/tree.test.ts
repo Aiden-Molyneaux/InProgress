@@ -339,3 +339,27 @@ describe('renderOutline', () => {
     expect(glyphs).toEqual(['⧉', '⚙', '⛁', '⇄', '⚒', '¶', '⚑', '↻', '⌕'].map((g) => `  #2 ${g} Step · todo`));
   });
 });
+
+describe('parked outline', () => {
+  it('the outline line of a parked step names its reason, and folds its subtree', () => {
+    nextId = 1;
+    const root = n(null, 'R', { status: 'active' });
+    const phase = n(root.id, 'Phase', { status: 'parked', parkedReason: 'waiting on legal' });
+    const kid = n(phase.id, 'Kid', { status: 'done' });
+    const lines = renderOutline(buildIndex([root, phase, kid]), []).split('\n');
+    expect(lines[1]).toBe(`  #${phase.id} Phase · parked: waiting on legal (1/1) · 1 done inside (folded)`);
+    expect(renderOutline(buildIndex([root, phase, kid]), [], { full: true }).split('\n')).toEqual([
+      `#${root.id} R · active`,
+      `  #${phase.id} Phase · parked: waiting on legal (1/1)`,
+      `    #${kid.id} Kid · done`,
+    ]);
+  });
+
+  it('a shelved active step pins nothing', () => {
+    nextId = 1;
+    const root = n(null, 'R');
+    const phase = n(root.id, 'Phase', { status: 'parked' });
+    const kid = n(phase.id, 'Kid', { status: 'active' });
+    expect(pinnedIds(buildIndex([root, phase, kid]), []).has(kid.id)).toBe(false);
+  });
+});

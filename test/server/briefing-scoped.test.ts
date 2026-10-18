@@ -253,3 +253,31 @@ describe('Up next reads the Board', () => {
     expect(t.brief('s1').find((l) => l.startsWith('Up next'))).toBe(`Up next: "Release notes": #${t.ready3.id} · later: #${t.ready1.id}`);
   });
 });
+
+describe('parked steps in the briefing', () => {
+  it('Ready to claim and Up next leave out a step under a parked phase', () => {
+    for (const mode of ['scoped', 'full'] as const) {
+      const t = setup(mode);
+      t.join('s1');
+      t.join('s2', 'Docs pass');
+      setQueue(t.ctx, 'scribe:s1', t.project.slug, [t.ready1.id, t.ready2.id], 'unowned');
+      setQueue(t.ctx, 'scribe:s2', t.project.slug, [t.ready3.id], { sessionId: 's2' });
+      expect(t.brief('s1').join('\n'), mode).toContain(`#${t.ready1.id}`);
+      updateNode(t.ctx, 'test', t.group.id, { status: 'parked', parkedReason: 'later' });
+      const text = t.brief('s1').join('\n');
+      expect(text, mode).not.toContain('Up next');
+      expect(text, mode).not.toContain('Ready to claim:');
+    }
+  });
+
+  it('a session focused on a parked step is told it is parked', () => {
+    for (const mode of ['scoped', 'full'] as const) {
+      const t = setup(mode);
+      t.join('s1');
+      claimStep(t.ctx, 'session:s1', 's1', t.step.id);
+      expect(t.brief('s1').join('\n'), mode).not.toContain('is parked');
+      updateNode(t.ctx, 'test', t.step.id, { status: 'parked', parkedReason: 'waiting on design' });
+      expect(t.brief('s1'), mode).toContain(`#${t.step.id} is parked: waiting on design`);
+    }
+  });
+});

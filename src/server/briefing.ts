@@ -2,7 +2,7 @@ import { sessionActivity } from '../core/activity';
 import { clipLine, stepRef } from '../core/step-ref';
 import { deriveBoard, isLive } from '../core/board';
 import { formatUpNext, type QueueView } from '../core/layout';
-import { ancestors, buildIndex, dfsOrder, kids, progress, type TreeIndex } from '../core/tree';
+import { ancestors, buildIndex, dfsOrder, kids, progress, shelvedIds, type TreeIndex } from '../core/tree';
 import { ASK_GLYPHS, NODE_LABELS, askTag, glyphTitle, sessionDisplayTitle, type Ask, type ProjectSnapshot, type Session, type TreeNode, type WorkItem } from '../core/types';
 import { homeDir } from '../lib/home';
 import { claimCommand, taskCommand } from '../lib/task-command';
@@ -69,6 +69,12 @@ export function lineFor(index: TreeIndex, n: TreeNode, focusOf: Map<number, Sess
   return `#${n.id} ${glyphTitle(n)} · ${n.status}${prog ? ` (${prog.done}/${prog.total})` : ''}${here.length ? `  ${here.join(' ')}` : ''}`;
 }
 
+/** The line telling a session its focus is parked, or undefined when it is not. Keyed on the status, never on the reason being set. */
+export function parkedFocusLine(snapshot: ProjectSnapshot, session: Session): string | undefined {
+  const focus = session.focusNodeId !== null ? snapshot.nodes.find((n) => n.id === session.focusNodeId) : undefined;
+  return focus && focus.status === 'parked' ? `#${focus.id} is parked: ${focus.parkedReason}` : undefined;
+}
+
 /** The open ones of `items`: in progress first, then pending, each in the order given (creation order). */
 export const inProgressFirst = (items: WorkItem[]): WorkItem[] => [...items.filter((i) => i.status === 'in_progress'), ...items.filter((i) => i.status === 'pending')];
 
@@ -100,7 +106,9 @@ export function frontierLines(snapshot: ProjectSnapshot, sessionId?: string, opt
   const chain = new Set<number>();
   // Active steps, and steps with an open ask, which the Needs you line names.
   const asked = new Set(snapshot.asks.filter((a) => a.clearedAt === null).map((a) => a.nodeId));
-  const targets = snapshot.nodes.filter((n) => n.parentId !== null && (n.status === 'active' || asked.has(n.id)));
+  // A shelved step (parked, or under a parked one) is set aside: it is no frontier of its own, only its focus shows.
+  const shelved = shelvedIds(index);
+  const targets = snapshot.nodes.filter((n) => n.parentId !== null && !shelved.has(n.id) && (n.status === 'active' || asked.has(n.id)));
   for (const id of [...targets.map((t) => t.id), ...focusOf.keys()]) {
     if (!index.byId.has(id)) continue;
     chain.add(id);
@@ -126,7 +134,7 @@ export function frontierLines(snapshot: ProjectSnapshot, sessionId?: string, opt
       }
       walk(k, depth + 1);
     }
-    const upcoming = siblingNext ? list.slice(last + 1).filter((k) => k.status === 'todo' && !chain.has(k.id)) : [];
+    const upcoming = siblingNext ? list.slice(last + 1).filter((k) => k.status === 'todo' && !chain.has(k.id) && !shelved.has(k.id)) : [];
     if (upcoming.length) {
       lines.push(`${'  '.repeat(depth)}Next: ${upcoming.slice(0, 2).map((k) => `#${k.id} ${glyphTitle(k)}`).join(' · ')}${upcoming.length > 2 ? ` (+${upcoming.length - 2} more)` : ''}`);
     }
@@ -263,9 +271,10 @@ function withoutStepId(subject: string, nodeId: number): string {
 function leftUnfinished(snapshot: ProjectSnapshot, only?: number): { nodeId: number; items: WorkItem[] }[] {
   const index = buildIndex(snapshot.nodes);
   const order = dfsOrder(index);
+  const shelved = shelvedIds(index);
   const stillOpen = (id: number) => {
     const n = index.byId.get(id);
-    return n !== undefined && n.status !== 'done' && n.status !== 'dropped';
+    return n !== undefined && n.status !== 'done' && n.status !== 'dropped' && !shelved.has(id);
   };
   const left = snapshot.workItems.filter((i) => i.endedAt !== null && stillOpen(i.nodeId) && (only === undefined || i.nodeId === only));
   const steps = [...new Set(left.map((i) => i.nodeId))].sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
@@ -340,6 +349,9 @@ export function bodyLines(snapshot: ProjectSnapshot, sessionId: string, now: num
   const upNext = upNextLine(snapshot, sessionId, now);
   lines.push('Where things stand:', ...frontierLines(snapshot, sessionId, { siblingNext: upNext === undefined }).map((l) => `  ${l}`));
   if (upNext) lines.push(upNext);
+  const me = snapshot.sessions.find((x) => x.id === sessionId);
+  const parkedFocus = me ? parkedFocusLine(snapshot, me) : undefined;
+  if (parkedFocus) lines.push(parkedFocus);
   const needs = needsYouLine(snapshot, now);
   if (needs) lines.push(needs);
   const check = opts.checkOld ? checkLine(snapshot, now) : undefined;

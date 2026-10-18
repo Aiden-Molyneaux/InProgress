@@ -11,6 +11,7 @@ import { formatCounts, formatDigest, readDigest } from './digest';
 import { markAnswersDelivered, owedAnswers, undeliveredAnswers } from './repo/asks';
 import { endCommand, endSessionCommands, pruneCommands, reconcileCommands, startCommand, type BackgroundEntry } from './repo/commands';
 import { findNode, leadingNode, patchNode, requireNode, setDriver } from './repo/nodes';
+import { parkedAncestor, shelvedAmong } from './repo/shelved';
 import { getProjectById, isTracking, notTracked, releaseQueue, resolveBinding, resolveProject } from './repo/projects';
 import { assignSlot, briefingDue, clearBriefingDue, findSession, markBriefingDue, markRevived, saveSession } from './repo/sessions';
 import { getProjectSnapshot } from './repo/snapshot';
@@ -402,8 +403,8 @@ function applyFocus(ctx: Ctx, record: RecordEvent, sessionId: string, nodeId: nu
   }
   let drive: Drive = null;
   let from: Session | null = null;
-  // Only an open step gets a driver: a done or dropped one keeps none (spec 1.3), and the project root never has one.
-  if (node && node.parentId !== null && node.status !== 'done' && node.status !== 'dropped') {
+  // Only an open step gets a driver: a done, dropped or shelved one keeps none (spec 1.3), and the project root never has one.
+  if (node && node.parentId !== null && node.status !== 'done' && node.status !== 'dropped' && !shelvedAmong(ctx, [node.id]).has(node.id)) {
     // A driver id that names no session row counts as no driver, and so does a session no longer focused on the step
     // (an enrollSession repoint, or any other drift that left the column behind).
     const current = node.driverSessionId === null ? undefined : findSession(ctx, node.driverSessionId);
@@ -488,6 +489,9 @@ export function claimStep(ctx: Ctx, actor: string, sessionId: string, nodeId: nu
     // applyFocus, so an untracked session or another project's step gets that reason first.
     if (target && target.parentId === null) throw badRequest(`#${nodeId} is the project root`, 'Claim the step you will work on.');
     if (target && target.status === 'dropped') throw badRequest(`#${nodeId} is dropped`, 'Reopen it first, or claim another step.');
+    if (target && target.status === 'parked') throw badRequest(`#${nodeId} is parked`, 'Unpark it first, or claim another step.');
+    const parkedAbove = target ? parkedAncestor(ctx, nodeId) : null;
+    if (parkedAbove !== null) throw badRequest(`#${nodeId} is under parked #${parkedAbove}`, `Unpark #${parkedAbove} first, or claim another step.`);
     // A session that starts driving is told the answers no live asker will hear (spec 2), once: marked in this write.
     if (drive === 'drives' || drive === 'took_over') {
       const owed = owedAnswers(ctx, nodeId);

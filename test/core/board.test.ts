@@ -216,3 +216,28 @@ describe('reconcileLine', () => {
     expect(reconcileLine(helpers, 'deep', NOW)).toBe('#2 S2: deep');
   });
 });
+
+describe('parked steps', () => {
+  it('a parked step and its subtree are no rows; the parked step is in parked with its open count', () => {
+    const b = deriveBoard(input({
+      nodes: [n(1, null), n(2, 1), n(3, 2, { status: 'parked', parkedReason: 'later', parkedAt: T }), n(4, 3), n(5, 4, { status: 'active' }), n(6, 3, { status: 'done', completedAt: T }), n(7, 1)],
+      queue: [{ nodeId: 4, sessionId: null }, { nodeId: 7, sessionId: null }],
+    }), NOW);
+    for (const id of [3, 4, 5, 6]) expect(b.byId.has(id), `#${id}`).toBe(false);
+    expect(b.next.map((r) => r.node.id)).toEqual([7]);
+    expect(b.done).toEqual([]);
+    expect(b.parked.map((p) => [p.node.id, p.crumb.map((c) => c.id), p.openInside])).toEqual([[3, [2], 2]]);
+  });
+
+  it('a phase whose only open child is parked is not a group', () => {
+    const b = deriveBoard(input({ nodes: [n(1, null), n(2, 1), n(3, 2, { status: 'parked' })] }), NOW);
+    expect(b.groups.has(2)).toBe(false);
+    expect(col(b, 2)).toBe('backlog');
+  });
+
+  it('keys on the status: a todo step with a leftover parked reason is still a row', () => {
+    const b = deriveBoard(input({ nodes: [n(1, null), n(2, 1, { parkedReason: 'old', parkedAt: T })] }), NOW);
+    expect(col(b, 2)).toBe('backlog');
+    expect(b.parked).toEqual([]);
+  });
+});

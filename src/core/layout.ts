@@ -352,10 +352,19 @@ export interface QueueView {
  */
 export function queueView(
   queue: readonly QueueEntry[],
-  nodes: Pick<TreeNode, 'id' | 'status'>[],
+  nodes: (Pick<TreeNode, 'id' | 'status'> & Partial<Pick<TreeNode, 'parentId'>>)[],
   sessions: Pick<Session, 'id' | 'state' | 'focusNodeId'>[],
 ): QueueView {
-  const open = new Set(nodes.filter((n) => n.status !== 'done' && n.status !== 'dropped').map((n) => n.id));
+  // A shelved step (parked, or under a parked one) is not up next, whatever the stored queue still holds.
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const shelved = (n: (typeof nodes)[number]): boolean => {
+    for (let cur: (typeof nodes)[number] | undefined = n, hops = 0; cur && hops <= nodes.length; hops++) {
+      if (cur.status === 'parked') return true;
+      cur = cur.parentId == null ? undefined : byId.get(cur.parentId);
+    }
+    return false;
+  };
+  const open = new Set(nodes.filter((n) => n.status !== 'done' && n.status !== 'dropped' && !shelved(n)).map((n) => n.id));
   const focusOf = new Map(sessions.filter((s) => s.state !== 'ended').map((s) => [s.id, s.focusNodeId]));
   const view: QueueView = { bySession: new Map(), unowned: [] };
   const seen = new Set<number>();

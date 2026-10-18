@@ -1135,3 +1135,25 @@ describe('findFrontier with busy sessions', () => {
     expect(findFrontier(t.nodes, [serving], l, later(t.d.id), T0)).toBe(t.d.id);
   });
 });
+
+describe('parked steps', () => {
+  it('a parked step folds its subtree', () => {
+    nextId = 1;
+    const root = n(null, 'Root', { status: 'active' });
+    const phase = n(root.id, 'Phase', { status: 'parked', parkedReason: 'later' });
+    const child = n(phase.id, 'Child', { status: 'active' });
+    const l = layoutOutline({ nodes: [root, phase, child], resources: [], sessions: [] });
+    const ids = l.items.filter((i): i is LayoutItem & { kind: 'node' } => i.kind === 'node').map((i) => i.id);
+    expect(ids).toContain(`n${phase.id}`);
+    expect(ids).not.toContain(`n${child.id}`);
+  });
+
+  it('queueView leaves out a parked step and a step under one', () => {
+    nextId = 1;
+    const root = n(null, 'Root');
+    const phase = n(root.id, 'Phase', { status: 'parked' });
+    const under = n(phase.id, 'Under');
+    const ok = n(root.id, 'Ok');
+    expect(queueView(later(under.id, phase.id, ok.id), [root, phase, under, ok], []).unowned).toEqual([ok.id]);
+  });
+});

@@ -10,6 +10,7 @@ import { clearAsk } from '../repo/asks';
 import { recordQuiet } from '../repo/events';
 import { addNodes, deleteNode, finishNode, parkNode, unparkNode } from '../repo/nodes';
 import { applyQueueOp, changeProject, getProjectById, isQueued, resolveProject } from '../repo/projects';
+import { shelvedAmong } from '../repo/shelved';
 import { idParam, sessionIdParam, windowClearBody, windowDoneBody, windowEventBody, windowNodeBody, windowParkBody, windowProjectBody, windowQueueBody, windowNodeParams, windowRenameBody, windowUnparkBody, WINDOW_EVENT_KEYS } from '../schemas';
 
 /** Who the window's writes are recorded as: fixed here, never taken from a header. */
@@ -21,7 +22,8 @@ const ACTOR = 'window';
  * together.
  */
 function notInBacklog(ctx: Ctx, projectId: number, n: TreeNode): string | null {
-  if (n.status === 'done' || n.status === 'dropped') return `is ${n.status}`;
+  if (n.status === 'done' || n.status === 'dropped' || n.status === 'parked') return `is ${n.status}`;
+  if (shelvedAmong(ctx, [n.id]).has(n.id)) return 'is under a parked step';
   const cutoff = new Date(Date.parse(ctx.now()) - STALE_SESSION_MS).toISOString();
   const focused = ctx.db.prepare("SELECT 1 FROM sessions WHERE focus_node_id = ? AND state != 'ended' AND last_seen_at >= ?").get(n.id, cutoff) !== undefined;
   if (focused || (n.assignee === 'me' && n.status === 'active')) return 'is being worked on';

@@ -257,3 +257,14 @@ describe('raiseAskDetailed: what a raise tells its caller', () => {
     expect(raiseAsk(ctx, 'window', { nodeId: step.id, kind: 'permission', text: 'Allow' })).not.toHaveProperty('joined');
   });
 });
+
+describe('asks on shelved steps', () => {
+  it('refuses an ask on a parked step and on a step under a parked phase', () => {
+    const { ctx, project, step } = setup();
+    const [kid] = addNodes(ctx, 'scribe:s1', { parentId: step.id, nodes: [{ title: 'Kid' }] });
+    updateNode(ctx, 'test', step.id, { status: 'parked', parkedReason: 'later' });
+    expect(() => raiseAsk(ctx, 'w', { nodeId: step.id, kind: 'question', text: 'x' })).toThrow(`#${step.id} is parked`);
+    expect(() => raiseAsk(ctx, 'w', { nodeId: kid.id, kind: 'question', text: 'x' })).toThrow(`#${kid.id} is under parked #${step.id}`);
+    expect(project.id).toBeGreaterThan(0);
+  });
+});
