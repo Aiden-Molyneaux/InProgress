@@ -255,19 +255,51 @@ describe('Up next reads the Board', () => {
 });
 
 describe('parked steps in the briefing', () => {
-  it('Ready to claim and Up next leave out a step under a parked phase', () => {
-    for (const mode of ['scoped', 'full'] as const) {
+  it('Ready to claim and Up next leave out a shelved step the stored queue still holds', () => {
+    const t = setup('scoped');
+    t.join('s1');
+    t.join('s2', 'Docs pass');
+    updateNode(t.ctx, 'test', t.group.id, { status: 'parked', parkedReason: 'later' });
+    // Seeded directly: setQueue would refuse the shelved steps, a rollback or older build would not.
+    const stored = [{ node: t.ready1.id, session: null }, { node: t.ready2.id, session: 's2' }];
+    t.ctx.db.prepare('UPDATE projects SET queue = ? WHERE id = ?').run(JSON.stringify(stored), t.project.id);
+    const text = t.brief('s1').join('\n');
+    expect(text).not.toContain('Ready to claim:');
+    expect(text).not.toContain('Up next');
+    expect(text).toContain("Nothing is ready.");
+    const ok = addNodes(t.ctx, 'test', { parentId: t.project.rootNodeId, nodes: [{ title: 'Elsewhere' }] })[0];
+    t.ctx.db.prepare('UPDATE projects SET queue = ? WHERE id = ?').run(JSON.stringify([...stored, { node: ok.id, session: null }]), t.project.id);
+    const ready = t.brief('s1').find((l) => l.startsWith('Ready to claim:'));
+    expect(ready).toBe(`Ready to claim: #${ok.id} Elsewhere`);
+  });
+
+  it('open asks on shelved steps leave the Needs you and check lines, and come back on unpark', () => {
+    for (const mode of ['full'] as const) {
       const t = setup(mode);
       t.join('s1');
-      t.join('s2', 'Docs pass');
-      setQueue(t.ctx, 'scribe:s1', t.project.slug, [t.ready1.id, t.ready2.id], 'unowned');
-      setQueue(t.ctx, 'scribe:s2', t.project.slug, [t.ready3.id], { sessionId: 's2' });
-      expect(t.brief('s1').join('\n'), mode).toContain(`#${t.ready1.id}`);
+      raiseAsk(t.ctx, 'test', { nodeId: t.askedStep.id, kind: 'question', text: 'Hold on' });
+      const lines = () => renderBriefing(t.snap(), 's1', Date.parse(t.ctx.now()) + 3 * 86_400_000, { checkOld: true, cli: CLI }).split('\n').filter((l) => l.startsWith('Needs you') || l.startsWith('Check'));
+      if (mode === 'full') expect(lines().join('\n'), mode).toContain('Hold on');
       updateNode(t.ctx, 'test', t.group.id, { status: 'parked', parkedReason: 'later' });
-      const text = t.brief('s1').join('\n');
-      expect(text, mode).not.toContain('Up next');
-      expect(text, mode).not.toContain('Ready to claim:');
+      expect(lines().join('\n'), mode).not.toContain('Hold on');
+      if (mode === 'full') {
+        updateNode(t.ctx, 'test', t.group.id, { status: 'active' });
+        expect(lines().join('\n'), mode).toContain('Hold on');
+      }
     }
+  });
+
+  it('clips a long, multi-line parked reason to one line of 80 characters', () => {
+    const t = setup('scoped');
+    t.join('s1');
+    claimStep(t.ctx, 'session:s1', 's1', t.step.id);
+    const reason = `first line${'x'.repeat(100)}\n second line`;
+    updateNode(t.ctx, 'test', t.step.id, { status: 'parked', parkedReason: reason });
+    const line = t.brief('s1').find((l) => l.startsWith(`#${t.step.id} is parked:`))!;
+    expect(line).toBe(`#${t.step.id} is parked: ${'first line' + 'x'.repeat(69)}…`);
+    updateNode(t.ctx, 'test', t.step.id, { status: 'todo' });
+    updateNode(t.ctx, 'test', t.group.id, { status: 'parked', parkedReason: reason });
+    expect(t.brief('s1').find((l) => l.includes('is under parked'))).toBe(`#${t.step.id} is under parked #${t.group.id}: ${'first line' + 'x'.repeat(69)}…`);
   });
 
   it('a session focused on a parked step is told it is parked', () => {

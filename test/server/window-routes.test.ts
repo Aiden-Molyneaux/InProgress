@@ -242,6 +242,19 @@ describe('node done route', () => {
     expect(events[0]).toMatchObject({ actor: 'window', entityId: String(a) });
   });
 
+  it('a parked child does not keep its phase from being marked done, an open one does', async () => {
+    const { ctx, p, post, a } = await setup();
+    const [kid, other] = addNodes(ctx, 'test', { parentId: a, nodes: [{ title: 'Kid' }, { title: 'Other' }] });
+    updateNode(ctx, 'test', kid.id, { status: 'parked', parkedReason: 'later' });
+    const refused = await post(url(p, a), { slug: p.slug, driver: null });
+    expect(refused.statusCode).toBe(400);
+    expect(refused.json().error).toContain(`#${other.id}`);
+    expect(refused.json().error).not.toContain(`#${kid.id}`);
+    updateNode(ctx, 'test', other.id, { status: 'done' });
+    expect((await post(url(p, a), { slug: p.slug, driver: null })).statusCode).toBe(200);
+    expect(row(ctx, a).status).toBe('done');
+  });
+
   it('leaves the outcome empty for an empty or whitespace one', async () => {
     const { ctx, p, post, a, b } = await setup();
     expect((await post(url(p, a), { slug: p.slug, driver: null })).statusCode).toBe(200);

@@ -1,6 +1,6 @@
 import { commandShown, countsAsWork, orderCommands, sessionActivity } from './activity';
 import { clipLine } from './step-ref';
-import { buildIndex, computeVisible, countDone, isNeedsYou, progress, type FoldOverrides } from './tree';
+import { buildIndex, computeVisible, countDone, isNeedsYou, progress, shelvedIds, type FoldOverrides } from './tree';
 import { ENDED_AGENT_MS, glyphTitle, isReader, sessionDisplayTitle, type CommandInfo, type EventRow, type PastSession, type QueueEntry, type ResourceMeta, type Session, type SubagentInfo, type TrailAgent, type TreeNode, type WorkItem } from './types';
 
 /** A card's header box and a one-line card: a 30 px header inside the frame's 1 px border. The camera aims at y + NODE_H / 2. */
@@ -352,19 +352,12 @@ export interface QueueView {
  */
 export function queueView(
   queue: readonly QueueEntry[],
-  nodes: (Pick<TreeNode, 'id' | 'status'> & Partial<Pick<TreeNode, 'parentId'>>)[],
+  nodes: TreeNode[],
   sessions: Pick<Session, 'id' | 'state' | 'focusNodeId'>[],
 ): QueueView {
   // A shelved step (parked, or under a parked one) is not up next, whatever the stored queue still holds.
-  const byId = new Map(nodes.map((n) => [n.id, n]));
-  const shelved = (n: (typeof nodes)[number]): boolean => {
-    for (let cur: (typeof nodes)[number] | undefined = n, hops = 0; cur && hops <= nodes.length; hops++) {
-      if (cur.status === 'parked') return true;
-      cur = cur.parentId == null ? undefined : byId.get(cur.parentId);
-    }
-    return false;
-  };
-  const open = new Set(nodes.filter((n) => n.status !== 'done' && n.status !== 'dropped' && !shelved(n)).map((n) => n.id));
+  const shelved = shelvedIds(buildIndex(nodes));
+  const open = new Set(nodes.filter((n) => n.status !== 'done' && n.status !== 'dropped' && !shelved.has(n.id)).map((n) => n.id));
   const focusOf = new Map(sessions.filter((s) => s.state !== 'ended').map((s) => [s.id, s.focusNodeId]));
   const view: QueueView = { bySession: new Map(), unowned: [] };
   const seen = new Set<number>();
@@ -436,6 +429,7 @@ export function formatUpNext(view: QueueView, sessions: Pick<Session, 'id' | 'ti
 export function layoutOutline(input: LayoutInput): LayoutResult {
   const now = input.now ?? Date.now();
   const index = buildIndex(input.nodes);
+  const shelved = shelvedIds(index);
   const live = input.sessions.filter((s) => s.state !== 'ended');
   const work = [...(input.workItems ?? [])].sort((a, b) => a.position - b.position || a.id - b.id);
   const shownAgents = (s: Session) => s.subagents.filter((a) => agentVisible(a, now));
@@ -591,7 +585,7 @@ export function layoutOutline(input: LayoutInput): LayoutResult {
       doneCount: v.folded ? countDone(index, node.id) : 0,
       progress: progress(index, node.id),
       resourceIds: resourcesByNode.get(node.id) ?? [],
-      needsYou: isNeedsYou(node),
+      needsYou: isNeedsYou(node, shelved.has(node.id)),
       hasChildren: v.hasChildren,
       working: working.has(node.id),
       live: liveCards.has(node.id),

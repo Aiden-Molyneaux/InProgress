@@ -182,7 +182,8 @@ export function deriveBoard(input: BoardInput, now: number): Board {
   }
   const openInside = (id: number): number => kids(index, id).reduce((sum, k) => sum + (isOpen(k) ? 1 : 0) + openInside(k.id), 0);
   const parked: ParkedRow[] = input.nodes
-    .filter((x) => x.status === 'parked' && x.id !== rootId)
+    // Only the outermost: a parked step inside a parked one is part of its card.
+    .filter((x) => x.status === 'parked' && x.id !== rootId && !(x.parentId !== null && shelved.has(x.parentId)))
     .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0))
     .map((node) => ({ node, crumb: ancestors(index, node.id).filter((a) => a.id !== rootId), openInside: openInside(node.id) }));
   const rows = [...byId.values()];

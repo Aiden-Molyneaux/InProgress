@@ -240,4 +240,11 @@ describe('parked steps', () => {
     expect(col(b, 2)).toBe('backlog');
     expect(b.parked).toEqual([]);
   });
+
+  it('keeps no card for a parked step inside a parked one, and counts the open steps in the whole subtree once', () => {
+    const b = deriveBoard(input({
+      nodes: [n(1, null), n(2, 1, { status: 'parked' }), n(3, 2, { status: 'parked' }), n(4, 3, { status: 'active' }), n(5, 2), n(6, 3, { status: 'done', completedAt: T })],
+    }), NOW);
+    expect(b.parked.map((p) => [p.node.id, p.openInside])).toEqual([[2, 2]]);
+  });
 });

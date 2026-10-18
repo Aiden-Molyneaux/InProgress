@@ -363,3 +363,24 @@ describe('parked outline', () => {
     expect(pinnedIds(buildIndex([root, phase, kid]), []).has(kid.id)).toBe(false);
   });
 });
+
+describe('parked readers', () => {
+  it('isNeedsYou is false for a shelved step', () => {
+    nextId = 1;
+    const root = n(null, 'R');
+    const phase = n(root.id, 'Phase', { status: 'parked' });
+    const mine = n(phase.id, 'Mine', { assignee: 'me' });
+    const idx = buildIndex([root, phase, mine]);
+    expect(isNeedsYou(mine)).toBe(true);
+    expect(isNeedsYou(mine, shelvedIds(idx).has(mine.id))).toBe(false);
+    expect(renderOutline(idx, [], { full: true })).toContain(`#${mine.id} Mine · todo`);
+  });
+
+  it('clips a long parked reason to one line of 80 characters in the outline', () => {
+    nextId = 1;
+    const root = n(null, 'R');
+    const phase = n(root.id, 'Phase', { status: 'parked', parkedReason: `first${'x'.repeat(100)}`+String.fromCharCode(10)+'second' });
+    const line = renderOutline(buildIndex([root, phase]), []).split(String.fromCharCode(10))[1];
+    expect(line).toBe(`  #${phase.id} Phase · parked: first${'x'.repeat(74)}…`);
+  });
+});

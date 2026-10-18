@@ -73,10 +73,10 @@ export function lineFor(index: TreeIndex, n: TreeNode, focusOf: Map<number, Sess
 export function parkedFocusLine(snapshot: ProjectSnapshot, session: Session): string | undefined {
   const focus = session.focusNodeId !== null ? snapshot.nodes.find((n) => n.id === session.focusNodeId) : undefined;
   if (!focus) return undefined;
-  if (focus.status === 'parked') return `#${focus.id} is parked: ${focus.parkedReason}`;
+  if (focus.status === 'parked') return `#${focus.id} is parked: ${clipLine(focus.parkedReason, 80)}`;
   // The nearest parked ancestor (ancestors run outermost first).
   const above = ancestors(buildIndex(snapshot.nodes), focus.id).reverse().find((a) => a.status === 'parked');
-  return above ? `#${focus.id} is under parked #${above.id}: ${above.parkedReason}` : undefined;
+  return above ? `#${focus.id} is under parked #${above.id}: ${clipLine(above.parkedReason, 80)}` : undefined;
 }
 
 /** The open ones of `items`: in progress first, then pending, each in the order given (creation order). */
@@ -172,7 +172,9 @@ const MAX_NEEDS_YOU = 8;
 
 /** The project's open asks, oldest first. */
 function openAsks(snapshot: ProjectSnapshot): Ask[] {
-  return snapshot.asks.filter((a) => a.clearedAt === null).sort((a, b) => a.raisedAt.localeCompare(b.raisedAt) || a.id - b.id);
+  // An ask on a shelved step stays stored, and comes back on unpark.
+  const shelved = shelvedIds(buildIndex(snapshot.nodes));
+  return snapshot.asks.filter((a) => a.clearedAt === null && !shelved.has(a.nodeId)).sort((a, b) => a.raisedAt.localeCompare(b.raisedAt) || a.id - b.id);
 }
 
 /** How long ago, whole days from one day old, then whole weeks from two weeks ("1d" … "13d", "2w"); null under 24 hours or for a time it cannot read. */

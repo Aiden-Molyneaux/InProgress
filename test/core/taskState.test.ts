@@ -177,3 +177,13 @@ describe('sinceFallback', () => {
     for (const st of ['backlog', 'ready', 'working', 'idle', 'unattended', 'blocked'] as const) expect(sinceFallback(node, st, asks)).toBe(ago(10 * MIN));
   });
 });
+
+describe('taskBoxes with shelved steps', () => {
+  it('a permission session focused on a shelved step still gets a Needs me box, as a focusless one does', () => {
+    const w = s('w', { focusNodeId: 3, state: 'permission', lastSeenAt: ago(MIN) });
+    const i = input({ nodes: [n(1, null), n(2, 1, { status: 'parked' }), n(3, 2)], sessions: [w] });
+    const b = taskBoxes(deriveBoard(i, NOW), i, NOW);
+    expect(b.needs).toHaveLength(1);
+    expect(b.needs[0]).toMatchObject({ row: null, state: 'permission', session: { id: 'w' } });
+  });
+});

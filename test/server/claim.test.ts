@@ -618,6 +618,6 @@ describe('claiming a parked step', () => {
     join('s1');
     updateNode(ctx, 'test', group.id, { status: 'parked', parkedReason: 'later' });
     setFocus(ctx, 'scribe:s1', 's1', step.id);
-    expect(ctx.db.prepare('SELECT driver_session_id AS d FROM nodes WHERE id = ?').get(step.id)).toEqual({ d: null });
+    expect(ctx.db.prepare('SELECT status, driver_session_id AS d FROM nodes WHERE id = ?').get(step.id)).toEqual({ status: 'todo', d: null });
   });
 });

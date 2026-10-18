@@ -395,7 +395,9 @@ function applyFocus(ctx: Ctx, record: RecordEvent, sessionId: string, nodeId: nu
   // reads "<session> is on #id".
   // patchNode writes the node's driver back as it read it, so it runs before any setDriver here, and the driver checks
   // below use the node it returns.
-  if (node && node.status === 'todo' && node.assignee === 'claude') node = patchNode(ctx, record, node, { status: 'active' });
+  // A shelved step stays as it is: focus must not wake it.
+  const shelvedNode = node !== undefined && shelvedAmong(ctx, [node.id]).has(node.id);
+  if (node && !shelvedNode && node.status === 'todo' && node.assignee === 'claude') node = patchNode(ctx, record, node, { status: 'active' });
   // Focus that leaves a step this session drives stops the driving (spec 1.3).
   if (existing.focusNodeId !== null && existing.focusNodeId !== nodeId) {
     const old = findNode(ctx, existing.focusNodeId);
@@ -404,7 +406,7 @@ function applyFocus(ctx: Ctx, record: RecordEvent, sessionId: string, nodeId: nu
   let drive: Drive = null;
   let from: Session | null = null;
   // Only an open step gets a driver: a done, dropped or shelved one keeps none (spec 1.3), and the project root never has one.
-  if (node && node.parentId !== null && node.status !== 'done' && node.status !== 'dropped' && !shelvedAmong(ctx, [node.id]).has(node.id)) {
+  if (node && node.parentId !== null && node.status !== 'done' && node.status !== 'dropped' && !shelvedNode) {
     // A driver id that names no session row counts as no driver, and so does a session no longer focused on the step
     // (an enrollSession repoint, or any other drift that left the column behind).
     const current = node.driverSessionId === null ? undefined : findSession(ctx, node.driverSessionId);
