@@ -83,11 +83,13 @@ A step is **shelved** when it or any ancestor is parked. Only the parked step it
 descendants are not.
 
 - **Park** sets status `parked`, `parked_reason` (required, trimmed, non-empty), `parked_where` (optional) and
-  `parked_at` (now). Refused for the root, a done or dropped step, and a step already parked. Allowed for any kind,
+  `parked_at` (now). Refused for the root and a done or dropped step. Parking a step already parked from the window
+  answers it as it stands, and so does unparking a step that is not parked. Allowed for any kind,
   phases included, and for a step with children.
 - Parking, like dropping, **clears the driver**, **clears the step's open asks**, and takes the step and every shelved
-  descendant **out of the Next queue** (stored queue and `liveQueue`). Queue writes refuse a shelved step ("#id is
-  parked").
+  descendant **out of the Next queue** (stored queue and `liveQueue`). The window's queue writes refuse a shelved step ("#id is
+  parked"). `set_queue` leaves shelved steps out of what it stores and names them in its answer, and moving a step under
+  a parked or shelved parent takes its subtree out of the stored queue, so neither comes back to Next on unpark.
 - **Claiming** a shelved step is refused with "#id is parked; unpark it first", as a dropped claim is refused today.
 - **Unpark** sets status `todo` and clears the three parked fields. Any write that moves a step's status off `parked`
   clears them too. "to Next" on a parked row unparks and appends to the unowned queue in one transaction.
