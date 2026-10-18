@@ -88,6 +88,7 @@ describe('scribe MCP tools', () => {
     expect(tool('set_queue').description).toMatch(/Done and dropped steps leave the queue on their own/);
     expect(tool('set_queue').description).toMatch(/this session's own entries/);
     expect(tool('set_queue').description).not.toMatch(/whole queue/);
+    expect(tool('set_queue').description).toMatch(/Parked steps and the steps under them are left out, and the answer names them/);
     expect(param('set_queue', 'unowned')).toMatch(/later:/);
     expect(tool('get_outline').description).toMatch(/Up next: "Session title": #a → #b \| later: #c/);
     expect(tool('set_focus').description).toMatch(/Focusing a todo step assigned to Claude also sets it active, in the same write\./);
@@ -199,7 +200,7 @@ describe('scribe MCP tools', () => {
     // set_queue leaves a parked step out, and its answer says so.
     const [next] = lineIds((await call('add_nodes', { parent: rootId, nodes: [{ title: 'Next one' }], session: 'pk1' })).text);
     expect((await call('set_queue', { project: 'parking', nodes: [step, next], session: 'pk1', unowned: true })).text.split('\n'))
-      .toEqual([`Up next: later: #${next}`, `Left out #${step}: parked.`]);
+      .toEqual([`Up next: later: #${next}`, `Left out #${step}: parked or under a parked step.`]);
     const { tools } = await mcp.listTools();
     expect(tools.find((t) => t.name === 'update_node')!.description).toContain('Status "parked" needs parked_reason (why it is set aside) and takes an optional parked_where (branch, worktree or commit).');
   });

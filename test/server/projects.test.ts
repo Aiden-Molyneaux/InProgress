@@ -483,7 +483,7 @@ describe('parked steps and the queue', () => {
     const mark = maxEventId(ctx);
     moveNode(ctx, 't', other.id, { parentId: phase.id });
     expect(stored()).toEqual([]);
-    expect(listEventsSince(ctx, mark).at(-1)!.type).toBe('node.moved');
+    expect(listEventsSince(ctx, mark).map((e) => [e.type, (e.data as { op?: string }).op])).toEqual([['project.updated', 'move'], ['node.moved', undefined]]);
     unparkNode(ctx, 'window', phase.id, false, () => {});
     expect(live()).toEqual([]);
   });

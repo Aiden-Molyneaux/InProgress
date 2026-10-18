@@ -145,15 +145,15 @@ function storeQueue(ctx: Ctx, record: RecordEvent, projectId: number, before: st
 }
 
 /**
- * Takes `ids` out of the project's stored queue, whoever owns them, inside a write already open: parking a step takes it
- * and every shelved step under it out, so unparking does not bring them back to Next. Records project.updated with
- * data.op 'park' when the stored queue changes.
+ * Takes `ids` out of the project's stored queue, whoever owns them, inside a write already open: parking a step (op
+ * 'park') or moving one under a parked or shelved parent (op 'move') takes it and every step under it out, so unparking
+ * does not bring them back to Next. Records project.updated with data.op `op` when the stored queue changes.
  */
-export function dropFromQueue(ctx: Ctx, record: RecordEvent, projectId: number, ids: number[]): void {
+export function dropFromQueue(ctx: Ctx, record: RecordEvent, projectId: number, ids: number[], op: 'park' | 'move'): void {
   const row = ctx.db.prepare('SELECT queue FROM projects WHERE id = ?').get(projectId) as { queue: string } | undefined;
   if (!row) return;
   const gone = new Set(ids);
-  storeQueue(ctx, record, projectId, row.queue, parseQueue(row.queue).filter((e) => !gone.has(e.nodeId)), { op: 'park' });
+  storeQueue(ctx, record, projectId, row.queue, parseQueue(row.queue).filter((e) => !gone.has(e.nodeId)), { op });
 }
 
 /**

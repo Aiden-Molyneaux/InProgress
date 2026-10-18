@@ -237,7 +237,7 @@ export function patchNode(ctx: Ctx, record: RecordEvent, before: TreeNode, patch
   const driver = next.status === 'done' || next.status === 'dropped' || next.status === 'parked' ? null : before.driverSessionId;
   // Before the UPDATE, so the event's queue change reads the steps as they were in Next. Once the step is parked its
   // whole subtree is shelved, so every step under it leaves the stored queue too, and unparking does not bring it back.
-  if (parking) dropFromQueue(ctx, record, before.projectId, subtreeIds(ctx, id));
+  if (parking) dropFromQueue(ctx, record, before.projectId, subtreeIds(ctx, id), 'park');
   ctx.db
     .prepare(
       'UPDATE nodes SET title = ?, kind = ?, status = ?, assignee = ?, body = ?, outcome = ?, label = ?, updated_at = ?, completed_at = ?, driver_session_id = ?, parked_reason = ?, parked_where = ?, parked_at = ? WHERE id = ?',
@@ -319,7 +319,7 @@ export function moveNode(ctx: Ctx, actor: string, id: number, input: { parentId:
     const [position] = insertPositions(siblings(ctx, parent.id, id), input.after ?? 'end', 1);
     // Under a parked or shelved parent the moved steps are shelved: they leave the stored queue, as parking takes them out,
     // so unparking the parent does not bring them back to Next.
-    if (shelvedAmong(ctx, [parent.id]).size) dropFromQueue(ctx, record, node.projectId, subtreeIds(ctx, id));
+    if (shelvedAmong(ctx, [parent.id]).size) dropFromQueue(ctx, record, node.projectId, subtreeIds(ctx, id), 'move');
     ctx.db.prepare('UPDATE nodes SET parent_id = ?, position = ?, updated_at = ? WHERE id = ?').run(parent.id, position, ctx.now(), id);
     renormalize(ctx, parent.id);
     record({ projectId: node.projectId, type: 'node.moved', entity: 'node', entityId: id, data: { fromParentId: node.parentId, toParentId: parent.id } });

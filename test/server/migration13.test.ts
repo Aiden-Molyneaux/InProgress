@@ -5,6 +5,7 @@ import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MIGRATIONS, REBUILDS } from '../../src/server/db/schema';
 import { migrate, openDb, schemaVersion } from '../../src/server/db/connection';
+import { timestamp } from '../../src/server/backup';
 
 const T = '2026-10-01T00:00:00.000Z';
 
@@ -208,6 +209,31 @@ describe('migration 13', () => {
     writeFileSync(join(dir, 'backups', 'inprogress-pre-v13-20261017-000000.db'), 'an earlier copy');
     openDb(file).close();
     expect(readdirSync(join(dir, 'backups'))).toEqual(['inprogress-pre-v13-20261017-000000.db']);
+  });
+
+  it('a leftover partial .tmp copy does not stop the pre-rebuild copy', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ip-m13-tmp-'));
+    dirs.push(dir);
+    const file = join(dir, 'live.db');
+    at12(file).close();
+    mkdirSync(join(dir, 'backups'));
+    // A crash mid-copy left the very name this copy will use.
+    const at = new Date(2026, 9, 17, 9, 30, 0);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(at);
+    writeFileSync(join(dir, 'backups', `inprogress-pre-v13-${timestamp(at)}.db.tmp`), 'half a copy');
+    try {
+      openDb(file).close();
+    } finally {
+      vi.useRealTimers();
+    }
+    const copies = readdirSync(join(dir, 'backups')).filter((f) => f.endsWith('.db'));
+    expect(copies).toHaveLength(1);
+    expect(copies[0]).toMatch(/^inprogress-pre-v13-\d{8}-\d{6}\.db$/);
+    const copy = new Database(join(dir, 'backups', copies[0]));
+    expect(schemaVersion(copy)).toBe(12);
+    copy.close();
+    expect(readdirSync(join(dir, 'backups')).filter((f) => f.endsWith('.tmp'))).toEqual([]);
   });
 
   it('a fresh file database makes no copy: there is nothing to keep', () => {

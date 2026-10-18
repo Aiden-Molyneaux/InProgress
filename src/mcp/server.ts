@@ -227,7 +227,7 @@ export function createMcpServer(client: Client, o: McpOptions = {}): McpServer {
       return a.node === null ? 'Focus cleared.' : `Focus → #${a.node}.`;
     });
 
-  tool('set_queue', 'Set the order Claude plans to work in: #ids of steps in this project, next first. With session, it replaces this session\'s own entries (a "queue:" line); with unowned: true, the unowned ones (a "later:" line). Other entries stay, but a step is in the queue once, so listing it takes it from wherever it was. An empty list clears only those entries. Done and dropped steps leave the queue on their own.',
+  tool('set_queue', 'Set the order Claude plans to work in: #ids of steps in this project, next first. With session, it replaces this session\'s own entries (a "queue:" line); with unowned: true, the unowned ones (a "later:" line). Other entries stay, but a step is in the queue once, so listing it takes it from wherever it was. An empty list clears only those entries. Done and dropped steps leave the queue on their own. Parked steps and the steps under them are left out, and the answer names them.',
     {
       project,
       nodes: z.array(id).max(200).describe('Step #ids in the planned order, next first'),
@@ -238,7 +238,7 @@ export function createMcpServer(client: Client, o: McpOptions = {}): McpServer {
       const p = await client.post<Project & { leftOut?: number[] }>(`/api/projects/${enc(a.project)}/queue`, { nodes: a.nodes, session: a.session, unowned: a.unowned }, { actor: actor(a.session) });
       // The route returns the project alone: sessions, slots and focus come with the snapshot.
       const queue = formatQueue(await client.get<ProjectSnapshot>(`/api/projects/${enc(p.slug)}`));
-      return p.leftOut?.length ? `${queue}\nLeft out ${p.leftOut.map((n) => `#${n}`).join(', ')}: parked.` : queue;
+      return p.leftOut?.length ? `${queue}\nLeft out ${p.leftOut.map((n) => `#${n}`).join(', ')}: parked or under a parked step.` : queue;
     });
 
   return server;

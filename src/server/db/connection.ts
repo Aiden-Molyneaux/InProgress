@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { mkdirSync, readdirSync } from 'node:fs';
+import { mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { timestamp } from '../backup';
 import { MIGRATIONS, REBUILDS } from './schema';
@@ -20,13 +20,19 @@ export function openDb(file: string): DB {
         mkdirSync(dir, { recursive: true });
         const prefix = `inprogress-pre-v${toVersion}-`;
         if (readdirSync(dir).some((f) => f.startsWith(prefix) && f.endsWith('.db'))) return;
-        const target = join(dir, `${prefix}${timestamp()}.db`).replace(/'/g, "''");
+        // Copied to a .tmp name, then renamed, so the check above only ever sees a complete copy. A .tmp left by a crash
+        // mid-copy is overwritten.
+        const target = join(dir, `${prefix}${timestamp()}.db`);
+        const tmp = `${target}.tmp`;
+        rmSync(tmp, { force: true });
         try {
-          db.exec(`VACUUM INTO '${target}'`);
+          db.exec(`VACUUM INTO '${tmp.replace(/'/g, "''")}'`);
         } catch (err) {
-          // Another start wrote the same copy this second: the copy exists, which is all this needs.
-          if (!/already exists/i.test((err as Error).message)) throw err;
+          // Another start is writing the same copy this second: its copy will land, which is all this needs.
+          if (/already exists/i.test((err as Error).message)) return;
+          throw err;
         }
+        renameSync(tmp, target);
       };
   migrate(db, { beforeRebuild });
   return db;
