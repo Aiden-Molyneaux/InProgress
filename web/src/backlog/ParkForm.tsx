@@ -108,7 +108,7 @@ export function ParkForm({ projectId, slug, nodeId, title, draft, onDone, onCanc
       </label>
       <div className="ip-park-actions">
         <button type="button" className="ip-btn go" disabled={!ready} onClick={() => void submit()}>Park</button>
-        <button type="button" className="ip-btn" data-cancel onClick={onCancel}>Cancel</button>
+        <button type="button" className="ip-btn" data-cancel disabled={busy} onClick={onCancel}>Cancel</button>
       </div>
     </div>
   );
