@@ -423,7 +423,8 @@ export function renderStatusLine(snapshot: ProjectSnapshot, session: Session): s
   const open = openAsks(snapshot);
   if (session.role !== 'orchestrator' && snapshot.project.briefingMode === 'scoped') {
     const step = claimedStep(snapshot, session);
-    const mine = step ? open.filter((a) => a.nodeId === step.id) : [];
+    // A session's own claimed step is not set aside from it: its asks show even under a parked phase, as stepBlock lists them.
+    const mine = step ? snapshot.asks.filter((a) => a.clearedAt === null && a.nodeId === step.id) : [];
     const where = step ? `on #${step.id}${mine.length ? ` (${mine.map((a) => askTag(a.id)).join(', ')} open)` : ''}` : 'no step claimed';
     return `[InProgress] ${snapshot.project.name} · ${where} · last scribe update ${session.promptsSinceUpdate} prompts ago. ${NUDGE}`;
   }

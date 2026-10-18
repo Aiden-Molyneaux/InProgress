@@ -309,6 +309,15 @@ describe('parked steps in the briefing', () => {
     expect(count()).toBe(1);
   });
 
+  it("a scoped worker's status line keeps its own step's asks when a phase above it is parked", () => {
+    const t = setup();
+    t.join('s1');
+    claimStep(t.ctx, 'session:s1', 's1', t.askedStep.id);
+    const ask = raiseAsk(t.ctx, 'test', { nodeId: t.askedStep.id, kind: 'question', text: 'Hold on' });
+    updateNode(t.ctx, 'test', t.group.id, { status: 'parked', parkedReason: 'later' });
+    expect(renderStatusLine(t.snap(), t.snap().sessions.find((x) => x.id === 's1')!)).toContain(`on #${t.askedStep.id} (a${ask.id} open) ·`);
+  });
+
   it('clips a long, multi-line parked reason to one line of 80 characters', () => {
     const t = setup('scoped');
     t.join('s1');
