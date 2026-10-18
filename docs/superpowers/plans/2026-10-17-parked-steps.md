@@ -113,6 +113,8 @@ Rules in `patchNode` (all in the one UPDATE): entering `parked` requires a trimm
 - Consumes: `shelvedIds` (Task 1), `shelvedAmong` (Task 3).
 - Produces: `Board.parked: ParkedRow[]` with `export interface ParkedRow { node: TreeNode; crumb: TreeNode[]; openInside: number }` (open descendants), ordered by tree order; parked rows are never in `byId`, so the task-state reconcile skips them as it skips dropped steps.
 
+Every reader keys on `status === 'parked'` or `shelvedIds`/`shelvedAmong`, never on `parkedAt` or `parkedReason` being set: a rollback build can change a parked step's status and leave the fields behind (Murr, #485).
+
 Copy: outline line `· parked: <reason>`; briefing line for a session focused on a parked step `#id is parked: <reason>`; claim refusal `badRequest('#id is parked', 'Unpark it first, or claim another step.')`, and for a shelved descendant `badRequest('#id is under parked #p', 'Unpark #p first, or claim another step.')`.
 
 - [ ] **Step 1: Failing tests:** board: `a parked step and its subtree are no rows; the parked step is in parked with its open count`; `a phase whose only open child is parked is not a group`. layout: `a parked step folds its subtree`. tree: `the outline line of a parked step names its reason`. briefing-scoped: `Ready to claim and Up next leave out a step under a parked phase`; `a session focused on a parked step is told it is parked`. claim: `claiming a parked step is refused`; `claiming a step under a parked phase names the phase`.
@@ -132,7 +134,7 @@ Copy: outline line `· parked: <reason>`; briefing line for a session focused on
 **Interfaces:**
 - Consumes: `Board.parked`, `ParkedRow` (Task 4); the park/unpark routes (Task 3).
 
-Behaviour and copy are the spec's sections "The Board's Backlog preview" and "The full Backlog view". Keep today's sort persistence (`ip.backlogOrder`) and filter rules; the filter now lives in the full view's state and clears on leaving it. The narrow layout shows the same preview at the foot of the Next band.
+Behaviour and copy are the spec's sections "The Board's Backlog preview" and "The full Backlog view". Keep today's sort persistence (`ip.backlogOrder`) and filter rules; the filter now lives in the full view's state and clears on leaving it. The narrow layout shows the same preview at the foot of the Next band. Unpark with `toNext` records `node.updated` then `project.updated` with `data.op: 'unpark'`; `describe.ts` words that queue event "unparked #id" so the activity strip's newest line reads right. Park and Unpark are idempotent (a repeat answers the node as it stands), but the forms still disable while a write is in flight.
 
 - [ ] **Step 1: Failing unit tests:** `previewPhase falls back when the stored phase has no entries` (stored phase finished: the latest completed step's phase); `previewPhase picks No phase when no phase has entries`; `phaseOf is the nearest phase ancestor, null for a root task`; `age sort orders by createdAt, oldest first`; `label chips match any chosen label and unlabelled`.
 - [ ] **Step 2:** Run: FAIL.
