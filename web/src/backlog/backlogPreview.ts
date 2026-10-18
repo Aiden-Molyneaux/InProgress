@@ -1,5 +1,6 @@
 import type { Board } from '../../../src/core/board';
 import { buildIndex, dfsOrder } from '../../../src/core/tree';
+import type { TaskBox } from '../../../src/core/taskState';
 import type { TreeNode } from '../../../src/core/types';
 import { phaseOf, type Entry } from '../board/backlogOrder';
 
@@ -54,6 +55,15 @@ export function previewPhase(board: Pick<Board, 'backlog' | 'done'>, nodes: Tree
   }
   const first = backlogPhases(board, nodes).find((c) => c.value !== 'none' && has(c.value));
   return first ? first.value : 'none';
+}
+
+/**
+ * The picker's choices and the phase shown, from the Backlog cell's boxes: the same list the rows and the count read. The
+ * board's own backlog also holds a step with an open ask or an unattended active step, which sit in other cells.
+ */
+export function previewState(backlog: TaskBox[], board: Pick<Board, 'done'>, nodes: TreeNode[], stored: PreviewPhase | null): { choices: PhaseChoice[]; phase: PreviewPhase } {
+  const own = { backlog: backlog.map((b) => b.row!), done: board.done };
+  return { choices: backlogPhases(own, nodes), phase: previewPhase(own, nodes, stored) };
 }
 
 /** The entries of the picked phase, in the order given, at most PREVIEW_SIZE. */

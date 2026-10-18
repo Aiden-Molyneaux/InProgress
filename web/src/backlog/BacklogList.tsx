@@ -2,7 +2,7 @@ import { useMemo, useRef } from 'react';
 import { deriveBoard } from '../../../src/core/board';
 import { taskBoxes } from '../../../src/core/taskState';
 import { queueOp } from '../api';
-import { Backlog } from '../board/Backlog';
+import { Backlog } from './Backlog';
 import { dropToOp } from '../board/dragQueue';
 import { QuickAdd } from '../board/QuickAdd';
 import type { ViewProps } from '../views/props';
@@ -17,6 +17,7 @@ export function BacklogList({ snapshot, now, onOpenNode, onOpenResource, onStatu
   const board = useMemo(() => deriveBoard(snapshot, now), [snapshot, now]);
   const boxes = useMemo(() => taskBoxes(board, snapshot, now).backlog, [board, snapshot, now]);
   const field = useRef<HTMLInputElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
   const toNext = async (id: number) => {
     const result = await queueOp(project.id, project.slug, dropToOp(id, { zone: 'next', before: null }));
     if (result === 'reload') window.location.reload();
@@ -26,7 +27,7 @@ export function BacklogList({ snapshot, now, onOpenNode, onOpenResource, onStatu
     <div className="ip-donelist ip-backlogview">
       <div className="ip-donelist-head">
         <button type="button" className="ip-donelist-back ip-backlogview-back" onClick={onBack}>‹ Board</button>
-        <h2 className="ip-backlogview-title" tabIndex={-1}>{`Backlog · ${boxes.length}`}</h2>
+        <h2 ref={heading} className="ip-backlogview-title" tabIndex={-1}>{`Backlog · ${boxes.length}`}</h2>
       </div>
       <Backlog
         boxes={boxes}
@@ -40,7 +41,7 @@ export function BacklogList({ snapshot, now, onOpenNode, onOpenResource, onStatu
         onOpenResource={onOpenResource}
         onToNext={toNext}
       />
-      <QuickAdd projectId={project.id} slug={project.slug} inputRef={field} onStatus={onStatus} onClose={() => field.current?.blur()} />
+      <QuickAdd projectId={project.id} slug={project.slug} inputRef={field} onStatus={onStatus} onClose={() => heading.current?.focus()} />
     </div>
   );
 }

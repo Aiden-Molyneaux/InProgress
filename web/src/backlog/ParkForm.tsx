@@ -7,21 +7,42 @@ import { noteAction } from '../measure';
  * (optional). Enter in either field parks; Escape cancels. The buttons are disabled while the write is in flight, and a
  * refusal shows in the toast and keeps the text. `onDone` runs once the server has parked it.
  */
-export function ParkForm({ projectId, slug, nodeId, title, onDone, onCancel, onStatus }: {
+/** What a Park form holds, kept by its owner when the form can remount (a reorder moves its row to another group). `focused` is set once the reason field has had focus, so a remount does not take it back. */
+export interface ParkDraft {
+  reason: string;
+  where: string;
+  focused: boolean;
+}
+
+export function ParkForm({ projectId, slug, nodeId, title, draft, onDone, onCancel, onStatus }: {
   projectId: number;
   slug: string;
   nodeId: number;
   title: string;
+  draft?: ParkDraft;
   onDone: () => void;
   onCancel: () => void;
   onStatus?: (text: string) => void;
 }) {
-  const [reason, setReason] = useState('');
-  const [where, setWhere] = useState('');
+  const kept = useRef<ParkDraft>(draft ?? { reason: '', where: '', focused: false });
+  const [reason, setReasonState] = useState(kept.current.reason);
+  const [where, setWhereState] = useState(kept.current.where);
+  const setReason = (v: string) => {
+    kept.current.reason = v;
+    setReasonState(v);
+  };
+  const setWhere = (v: string) => {
+    kept.current.where = v;
+    setWhereState(v);
+  };
   const [busy, setBusy] = useState(false);
   const reasonField = useRef<HTMLInputElement>(null);
   const sending = useRef(false);
-  useEffect(() => reasonField.current?.focus(), []);
+  useEffect(() => {
+    if (kept.current.focused) return;
+    kept.current.focused = true;
+    reasonField.current?.focus();
+  }, []);
   const ready = reason.trim().length > 0 && !busy;
   const submit = async () => {
     if (reason.trim().length === 0 || sending.current) return;
@@ -33,13 +54,18 @@ export function ParkForm({ projectId, slug, nodeId, title, onDone, onCancel, onS
     setBusy(false);
     if (result === 'ok') onDone();
     else if (result === 'reload') window.location.reload();
-    else onStatus?.(result);
+    else {
+      onStatus?.(result);
+      // A refusal keeps the text; the field takes focus back from the button that was pressed.
+      reasonField.current?.focus();
+    }
   };
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Escape') {
       e.preventDefault();
       e.stopPropagation();
-      onCancel();
+      // While the write is in flight the form stays: closing it would hide a refusal's cause.
+      if (!sending.current) onCancel();
     } else if (e.key === 'Enter' && !e.nativeEvent.isComposing && (e.target as HTMLElement).tagName === 'INPUT') {
       e.preventDefault();
       void submit();

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { Board, BoardRow } from '../../src/core/board';
+import { deriveBoard, type BoardInput } from '../../src/core/board';
+import { taskBoxes } from '../../src/core/taskState';
 import type { TreeNode } from '../../src/core/types';
-import { PREVIEW_SIZE, backlogPhases, formatPreview, parsePreview, previewKey, previewPhase, previewRows } from '../../web/src/backlog/backlogPreview';
+import { PREVIEW_SIZE, backlogPhases, formatPreview, parsePreview, previewKey, previewPhase, previewRows, previewState } from '../../web/src/backlog/backlogPreview';
 
 const phase = (id: number, title: string) => ({ id, title, kind: 'phase', parentId: 1, position: id }) as unknown as TreeNode;
 const root = { id: 1, title: 'Root', kind: 'phase', parentId: null, position: 0 } as unknown as TreeNode;
@@ -68,5 +70,30 @@ describe('previewRows', () => {
     expect(previewRows(list, 10)).toHaveLength(PREVIEW_SIZE);
     expect(previewRows(list, 'none').map((e) => e.row.node.id)).toEqual([9]);
     expect(previewRows(list, 20).map((e) => e.row.node.id)).toEqual([2]);
+  });
+});
+
+describe('previewState', () => {
+  const T = '2026-10-13T11:00:00.000Z';
+  const NOW = Date.parse('2026-10-13T12:00:00.000Z');
+  const n = (id: number, parentId: number | null, o: Partial<TreeNode> = {}): TreeNode =>
+    ({ id, projectId: 1, parentId, position: id, kind: 'task', title: `S${id}`, body: '', status: 'todo', assignee: 'claude', outcome: '', label: null, createdAt: T, updatedAt: T, completedAt: null, driverSessionId: null, boardState: null, stateSince: null, hue: null, parkedReason: '', parkedWhere: '', parkedAt: null, ...o }) as TreeNode;
+  // Phase B holds only a step with an open question: the Board's backlog lists it, the Backlog cell (it sits in Needs me) does not.
+  const input: BoardInput = {
+    project: { id: 1, slug: 'p', name: 'P', description: '', playbook: '', status: 'active', rootNodeId: 1, createdAt: T, updatedAt: T, queue: [], briefingMode: 'full' },
+    nodes: [n(1, null, { kind: 'phase' }), n(10, 1, { kind: 'phase' }), n(20, 1, { kind: 'phase' }), n(11, 10), n(21, 20)],
+    sessions: [], pastSessions: [], resources: [],
+    asks: [{ id: 1, projectId: 1, nodeId: 21, kind: 'question', text: 'Q', sessionId: null, raisedAt: T, clearedAt: null, clearedBy: null, answer: '', answerDeliveredAt: null }],
+  };
+  const dboard = deriveBoard(input, NOW);
+  const cell = taskBoxes(dboard, input, NOW).backlog;
+
+  it('feeds the picker and the default from the Backlog cell, like the rows and the count', () => {
+    expect(dboard.backlog.map((r) => r.node.id)).toContain(21);
+    expect(cell.map((b) => b.row!.node.id)).toEqual([11]);
+    const { choices, phase } = previewState(cell, dboard, input.nodes, 20);
+    expect(choices.map((c) => c.value)).toEqual([10, 'none']);
+    // The stored phase 20 has nothing in the cell, so it falls back.
+    expect(phase).toBe(10);
   });
 });

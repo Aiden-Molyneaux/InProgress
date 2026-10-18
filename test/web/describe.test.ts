@@ -163,6 +163,8 @@ describe('describeEvent and parked steps', () => {
   it('words parking and unparking', () => {
     expect(describeEvent(ev('node.updated', '58', { changes: { status: { from: 'todo', to: 'parked' }, parkedReason: { from: '', to: 'not merging' } } }), snapshot)).toBe('parked #58: not merging');
     expect(describeEvent(ev('node.updated', '58', { changes: { status: { from: 'parked', to: 'todo' }, parkedReason: { from: 'x', to: '' } } }), snapshot)).toBe('unparked #58');
+    // Only parked to todo is an unpark: a parked step dropped or done reads as any status change.
+    expect(describeEvent(ev('node.updated', '58', { changes: { status: { from: 'parked', to: 'dropped' } } }), snapshot)).toMatch(/ → dropped$/);
     expect(describeEvent(ev('project.updated', '1', { changes: { queue: { from: [], to: [58] } }, op: 'unpark', node: 58 }), snapshot)).toBe('unparked #58');
     expect(describeEvent(ev('project.updated', '1', { changes: { queue: { from: [58], to: [] } }, op: 'park' }), snapshot)).toBe('Up next changed');
   });

@@ -36,7 +36,7 @@ export function phaseOf(row: { crumb: TreeNode[] }): TreeNode | null {
   return null;
 }
 
-/** Backlog boxes grouped by parent, in the order the parents first appear; boxes at the top level come first (No phase). */
+/** Backlog boxes grouped by parent, in the order the parents first appear; boxes at the top level come last (No phase). */
 export function groupByParent<T extends Entry>(boxes: T[]): { parent: TreeNode | null; boxes: T[] }[] {
   const groups = new Map<number, { parent: TreeNode | null; boxes: T[] }>();
   for (const box of boxes) {
@@ -46,7 +46,7 @@ export function groupByParent<T extends Entry>(boxes: T[]): { parent: TreeNode |
     group.boxes.push(box);
     groups.set(key, group);
   }
-  return [...groups.entries()].sort(([a], [b]) => (a === 0 ? 0 : 1) - (b === 0 ? 0 : 1)).map(([, g]) => g);
+  return [...groups.entries()].sort(([a], [b]) => (a === 0 ? 1 : 0) - (b === 0 ? 1 : 0)).map(([, g]) => g);
 }
 
 /**
@@ -61,8 +61,8 @@ export function sortFlat<T extends Entry>(boxes: T[], order: BacklogOrder): T[] 
 }
 
 /**
- * The Backlog's sections for an order. Phase: the parent groups of `groupByParent`, the top level first, then parents in
- * order of first arrival (tree order, except a step sent back from Next lands last in its group until the snapshot
+ * The Backlog's sections for an order. Phase: the parent groups of `groupByParent`, parents in
+ * order of first arrival, then the top level (No phase) last, like the preview's picker (tree order, except a step sent back from Next lands last in its group until the snapshot
  * settles), and reverse flips both the groups and the rows in each. Id and age: one flat section, oldest or lowest first, or the reverse.
  */
 export function backlogSections<T extends Entry>(boxes: T[], order: BacklogOrder): { parent: TreeNode | null; flat: boolean; boxes: T[] }[] {

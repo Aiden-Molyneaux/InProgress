@@ -232,6 +232,17 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
   /** The Park… form is open; an Unpark is in flight. */
   const [parking, setParking] = useState(false);
   const [unparkBusy, setUnparkBusy] = useState(false);
+  /** Which of Park… and Unpark should take focus once it is drawn: a form closing, or the step changing state. */
+  const [focusNext, setFocusNext] = useState<'park' | 'unpark' | null>(null);
+  const parkButton = useRef<HTMLButtonElement>(null);
+  const unparkButton = useRef<HTMLButtonElement>(null);
+  const status = detail?.node.status;
+  useEffect(() => {
+    if (focusNext === 'park' && !parking && parkButton.current) parkButton.current.focus();
+    else if (focusNext === 'unpark' && status === 'parked' && unparkButton.current) unparkButton.current.focus();
+    else return;
+    setFocusNext(null);
+  }, [focusNext, parking, status]);
   const addField = useRef<HTMLInputElement>(null);
   const addButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -296,7 +307,8 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
     setUnparkBusy(true);
     const result = await unparkStep(projectId, snapshot.project.slug, nodeId, false);
     setUnparkBusy(false);
-    if (result === 'reload') window.location.reload();
+    if (result === 'ok') setFocusNext('park');
+    else if (result === 'reload') window.location.reload();
     else if (result !== 'ok') onStatus?.(result);
   };
   /** An open step can be set aside; the root, a finished, dropped or parked one cannot. */
@@ -343,7 +355,7 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
             <b>{node.parkedAt ? `Parked ${shortDate(node.parkedAt, now)}:` : 'Parked:'}</b> {node.parkedReason}
           </p>
           {node.parkedWhere && <p className="muted">{`where ${node.parkedWhere}`}</p>}
-          <button type="button" className="ip-btn" disabled={unparkBusy} onClick={() => void unpark()}>Unpark</button>
+          <button type="button" ref={unparkButton} className="ip-btn" disabled={unparkBusy} onClick={() => void unpark()}>Unpark</button>
         </div>
       )}
       <AsksSection nodeId={node.id} snapshot={snapshot} now={now} />
@@ -411,9 +423,9 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
       {parkable && (
         <div className="ip-dadd">
           {parking ? (
-            <ParkForm projectId={projectId} slug={snapshot.project.slug} nodeId={node.id} title={node.title} onStatus={onStatus} onDone={() => setParking(false)} onCancel={() => setParking(false)} />
+            <ParkForm projectId={projectId} slug={snapshot.project.slug} nodeId={node.id} title={node.title} onStatus={onStatus} onDone={() => { setParking(false); setFocusNext('unpark'); }} onCancel={() => { setParking(false); setFocusNext('park'); }} />
           ) : (
-            <button type="button" className="ip-btn" onClick={() => setParking(true)}>Park…</button>
+            <button type="button" ref={parkButton} className="ip-btn" onClick={() => setParking(true)}>Park…</button>
           )}
         </div>
       )}

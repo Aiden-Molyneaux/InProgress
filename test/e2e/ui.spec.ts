@@ -1785,7 +1785,8 @@ test.describe('Board', () => {
     const next = band(page, 'next');
     const group = next.getByRole('list', { name: 'Backlog: Road to market' });
     const boxes = next.locator('.ip-backlog li.ip-card');
-    expect(await boxes.count()).toBeGreaterThan(1);
+    await expect(group).toBeVisible();
+    await expect.poll(() => boxes.count()).toBeGreaterThan(1);
     const box = group.locator('li.ip-card', { has: page.getByRole('button', { name: '4 Build to GitHub', exact: true }) });
     await expect(box.locator('.ip-sid')).toHaveText(`#${fresh.ids['4 Build to GitHub']}`);
     await expect(box.locator('.ip-st')).toHaveText('Backlog');
@@ -1827,6 +1828,10 @@ test.describe('Board', () => {
     const previewRow = preview.locator('.ip-backlog-row', { has: page.getByRole('button', { name: title, exact: true }) });
     await expect(previewRow).toBeVisible();
     const details = await openDetails(page, title);
+    // Cancel puts focus back on Park…
+    await details.getByRole('button', { name: 'Park…' }).click();
+    await page.keyboard.press('Escape');
+    await expect(details.getByRole('button', { name: 'Park…' })).toBeFocused();
     await details.getByRole('button', { name: 'Park…' }).click();
     const form = details.getByRole('dialog', { name: `Park #${fresh.ids[title]} ${title}` });
     await expect(form.getByRole('textbox', { name: 'Reason' })).toBeFocused();
@@ -1837,9 +1842,10 @@ test.describe('Board', () => {
     // The panel follows: it shows the reason and Unpark, and the step leaves the Backlog preview.
     await expect(details.locator('.ip-dparked')).toContainText('Waiting on the store review');
     await expect(previewRow).toHaveCount(0);
+    await expect(details.getByRole('button', { name: 'Unpark' })).toBeFocused();
     await details.getByRole('button', { name: 'Unpark' }).click();
     await expect(details.locator('.ip-dparked')).toHaveCount(0);
-    await expect(details.getByRole('button', { name: 'Park…' })).toBeVisible();
+    await expect(details.getByRole('button', { name: 'Park…' })).toBeFocused();
     await expect(previewRow).toBeVisible();
     // Unpark goes to the Backlog, not to Next.
     await expect(preview.locator('.ip-next-row', { hasText: title })).toHaveCount(0);
@@ -2642,6 +2648,81 @@ test.describe('Board', () => {
     await expect(preview.getByRole('button', { name: '6 Beta', exact: true })).toHaveCount(0);
   });
 
+  test('the full Backlog keeps focus on a row title after to Next, Delete, Park and Unpark, and a refused Park puts it back on the reason', async ({ page, fresh, consoleErrors }) => {
+    consoleErrors.allow(/status of 400/);
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const view = await openFullBacklog(page);
+    const rowOf = (t: string) => view.locator('.ip-backlog-row', { has: page.getByRole('button', { name: t, exact: true }) });
+    /** Focus sits on a row title inside the view, never dropped to the page. */
+    const onATitle = () => expect(view.locator('.ip-row-title:focus')).toHaveCount(1);
+    await rowOf('3 RevenueCat').hover();
+    await rowOf('3 RevenueCat').getByRole('button', { name: 'to Next' }).click();
+    await expect(rowOf('3 RevenueCat')).toHaveCount(0);
+    await onATitle();
+    await rowOf('6 Beta').hover();
+    await rowOf('6 Beta').getByRole('button', { name: 'Delete…' }).click();
+    await page.getByRole('dialog', { name: /^Delete #\d+ 6 Beta\?$/ }).getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(rowOf('6 Beta')).toHaveCount(0);
+    await onATitle();
+    // A refused Park keeps the form and its text and puts focus back on the reason.
+    const parkUrl = '**/api/ui/projects/*/nodes/*/park';
+    await page.route(parkUrl, (route) => route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'Refused for the test', hint: 'Reload the window.' }) }));
+    await rowOf('5 Store listing').hover();
+    await rowOf('5 Store listing').getByRole('button', { name: 'Park…' }).click();
+    const form = page.getByRole('dialog', { name: /^Park #\d+ 5 Store listing$/ });
+    await form.getByRole('textbox', { name: 'Reason' }).fill('Later');
+    await form.getByRole('button', { name: 'Park', exact: true }).click();
+    await expect(page.getByText('Refused for the test').first()).toBeVisible();
+    await expect(form.getByRole('textbox', { name: 'Reason' })).toBeFocused();
+    await expect(form.getByRole('textbox', { name: 'Reason' })).toHaveValue('Later');
+    await page.unroute(parkUrl);
+    // What is typed survives a filter and a reorder while the row is still shown, and the form does not take focus back.
+    await view.getByRole('textbox', { name: 'Filter the backlog' }).fill('store');
+    await expect(form).toBeVisible();
+    await view.getByRole('group', { name: 'Backlog order' }).getByRole('button', { name: 'ID' }).click();
+    await expect(form.getByRole('textbox', { name: 'Reason' })).toHaveValue('Later');
+    await expect(view.getByRole('group', { name: 'Backlog order' }).getByRole('button', { name: 'ID' })).toBeFocused();
+    await view.getByRole('textbox', { name: 'Filter the backlog' }).fill('');
+    await form.getByRole('textbox', { name: 'Reason' }).press('Enter');
+    await expect(rowOf('5 Store listing')).toHaveCount(0);
+    await onATitle();
+    // Unpark and to Next in the Parked group move focus on too.
+    const parked = view.getByRole('region', { name: 'Parked' });
+    const parkedRow = parked.locator('li', { has: page.getByRole('button', { name: '5 Store listing', exact: true }) });
+    await parkedRow.hover();
+    await parkedRow.getByRole('button', { name: 'Unpark' }).click();
+    await expect(parked).toHaveCount(0);
+    await onATitle();
+    await rowOf('5 Store listing').hover();
+    await rowOf('5 Store listing').getByRole('button', { name: 'Park…' }).click();
+    await page.getByRole('textbox', { name: 'Reason' }).fill('Again');
+    await page.keyboard.press('Enter');
+    await expect(parked).toBeVisible();
+    await parkedRow.hover();
+    await parkedRow.getByRole('button', { name: 'to Next' }).click();
+    await expect(parked).toHaveCount(0);
+    await onATitle();
+  });
+
+  test('the full Backlog lists No phase last, and a parked step with no phase names it', async ({ page, api, fresh }) => {
+    await write(api, fresh.session, 'post', '/api/nodes', { parentId: fresh.root, nodes: [{ title: 'Loose one' }, { title: 'Loose parked' }] });
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const view = await openFullBacklog(page);
+    await expect(view.getByRole('region', { name: 'Backlog with no phase' })).toBeVisible();
+    const groups = await Promise.all((await view.locator('.ip-backlog-group:not(.ip-parked-group)').all()).map((g) => g.getAttribute('aria-label')));
+    expect(groups.at(-1)).toBe('Backlog with no phase');
+    expect(groups.length).toBeGreaterThan(1);
+    const loose = view.locator('.ip-backlog-row', { has: page.getByRole('button', { name: 'Loose parked', exact: true }) });
+    await loose.hover();
+    await loose.getByRole('button', { name: 'Park…' }).click();
+    await page.getByRole('textbox', { name: 'Reason' }).fill('Not now');
+    await page.keyboard.press('Enter');
+    const parkedRow = view.getByRole('region', { name: 'Parked' }).locator('li', { has: page.getByRole('button', { name: 'Loose parked', exact: true }) });
+    await expect(parkedRow.locator('.ip-box-parent')).toHaveText('No phase');
+  });
+
   test('Now "Done…" takes an optional outcome, Escape keeps the step, Enter marks it done', async ({ page, api, fresh, consoleErrors }) => {
     consoleErrors.allow(/status of 400/);
     const made = await write<{ id: number; title: string }[]>(api, fresh.session, 'post', '/api/nodes', {
@@ -2755,6 +2836,8 @@ test.describe('Project view', () => {
     await expect(road.locator('.ip-orow', { has: page.getByRole('button', { name: 'Play app signing', exact: true }) }).getByRole('img', { name: 'now, a session is on it' })).toBeVisible();
     await expect(road.locator('.ip-orow', { has: page.getByRole('button', { name: '3 RevenueCat', exact: true }) }).getByRole('img', { name: 'backlog' })).toBeVisible();
     await expect(road.locator('.ip-orow', { has: page.getByRole('button', { name: 'Run signing tests', exact: true }) }).locator('.ip-you')).toHaveText('YOU');
+    // The key to the rail names the parked ring too.
+    await expect(page.getByRole('group', { name: 'The rail' })).toContainText('parked, set aside');
     // Done children fold per parent and open on a click.
     const fold = road.getByRole('button', { name: /^✓ 1 done · latest: #\d+ 1 iOS certificate/ });
     await expect(fold).toHaveAttribute('aria-expanded', 'false');

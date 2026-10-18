@@ -4,7 +4,7 @@ import type { TaskBox as BoxData } from '../../../src/core/taskState';
 import { sessionDisplayTitle, type QueueOp } from '../../../src/core/types';
 import { queueOp } from '../api';
 import { PreviewPanel } from '../backlog/PreviewPanel';
-import { backlogPhases, formatPreview, parsePreview, previewKey, previewPhase, previewRows, type PreviewPhase } from '../backlog/backlogPreview';
+import { formatPreview, parsePreview, previewKey, previewRows, previewState, type PreviewPhase } from '../backlog/backlogPreview';
 import { load, save } from '../storage';
 import { dropSlot, dropToOp, optimisticNext } from './dragQueue';
 import { focusTargetAfter } from './focus';
@@ -69,8 +69,7 @@ export function NextColumn({ snapshot, board, boxes, now, onOpenNode, onOpenReso
   const asBacklog = (b: BoxData): BoxData => (b.state === 'ready' ? { ...b, cell: 'backlog', state: 'backlog' } : b);
   const backlog = backlogIds.map((id) => asBacklog(boxOf.get(id)!));
   // The preview shows one phase: the picked one while it has entries, else the default chain (a finished or parked phase falls back).
-  const choices = backlogPhases(board, snapshot.nodes);
-  const phase = previewPhase(board, snapshot.nodes, stored);
+  const { choices, phase } = previewState(backlog, board, snapshot.nodes, stored);
   const pickPhase = (p: PreviewPhase) => {
     noteAction('backlog', 'pick_phase');
     setStored(p);

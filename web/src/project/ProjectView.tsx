@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { deriveBoard } from '../../../src/core/board';
+import { Marker } from '../Marker';
 import { useWide } from '../board/useWide';
 import { ageShort } from '../board/text';
 import { Markdown } from '../panels/Markdown';
@@ -20,6 +21,7 @@ function RailKey() {
       <div><span className="ip-num" aria-hidden="true">①</span> next, in queue order</div>
       <div><span className="ip-num ip-own" aria-hidden="true">◆</span> next, in a session's own queue</div>
       <div><span className="ip-dot ring" aria-hidden="true" /> backlog</div>
+      <div><span className="ip-railmark" aria-hidden="true"><Marker status="parked" question={false} paused={false} needsYou={false} pulse={false} /></span> parked, set aside</div>
     </div>
   );
 }

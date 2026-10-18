@@ -54,7 +54,7 @@ export function describeEvent(e: EventRow, snapshot: ProjectSnapshot | null): st
       return (d.ids?.length ?? 1) === 1 ? `added ${nodeLabel(d.ids?.[0] ?? Number(e.entityId), snapshot)}` : `added ${d.ids!.length} steps under ${nodeLabel(d.parentId, snapshot)}`;
     case 'node.updated':
       if (d.changes?.status?.to === 'parked') return `parked #${e.entityId}: ${d.changes.parkedReason?.to ?? ''}`.trimEnd();
-      if (d.changes?.status?.from === 'parked') return `unparked #${e.entityId}`;
+      if (d.changes?.status?.from === 'parked' && d.changes.status.to === 'todo') return `unparked #${e.entityId}`;
       return d.changes?.status ? `${nodeLabel(Number(e.entityId), snapshot)} → ${d.changes.status.to}` : `updated ${nodeLabel(Number(e.entityId), snapshot)}`;
     case 'node.moved':
       return `moved ${nodeLabel(Number(e.entityId), snapshot)}`;

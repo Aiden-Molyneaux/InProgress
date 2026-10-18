@@ -4,17 +4,17 @@ import { LABEL_GLYPHS, NODE_LABELS } from '../../../src/core/types';
 import { useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { deleteStep, unparkStep } from '../api';
-import { backlogPhases, type PreviewPhase } from '../backlog/backlogPreview';
-import { ParkForm } from '../backlog/ParkForm';
+import { backlogSections, filterEntries, type BacklogOrder, ORDER_KEY, orderKey, parentTitle, parseOrder, sortFlat, UNLABELLED } from '../board/backlogOrder';
+import type { BandProps } from '../board/bandProps';
+import { focusTargetAfter } from '../board/focus';
+import { endedLine, LabelChip, rowClick } from '../board/Marks';
+import { ageShort } from '../board/text';
+import { TaskBox } from '../board/TaskBox';
 import { shortDate } from '../done/doneGroups';
 import { noteAction } from '../measure';
 import { load, save } from '../storage';
-import { backlogSections, filterEntries, type BacklogOrder, ORDER_KEY, orderKey, parentTitle, parseOrder, sortFlat, UNLABELLED } from './backlogOrder';
-import { focusTargetAfter } from './focus';
-import { endedLine, LabelChip, rowClick } from './Marks';
-import type { BandProps } from './bandProps';
-import { ageShort } from './text';
-import { TaskBox } from './TaskBox';
+import { backlogPhases, type PreviewPhase } from './backlogPreview';
+import { ParkForm, type ParkDraft } from './ParkForm';
 
 /**
  * The full Backlog (the view behind "N ›"): every open entry as task boxes with no hue, under their parent's title (the
@@ -43,8 +43,8 @@ export function Backlog({ boxes, parked, snapshot, now, projectId, slug, onStatu
   const [phase, setPhase] = useState<PreviewPhase | null>(null);
   const [labels, setLabels] = useState<ReadonlySet<string>>(new Set());
   const confirming = panel?.kind === 'delete' ? panel.id : null;
-  /** A reorder or a new filter closes an open form: its row may move away from where the user was looking. */
-  const closePanel = () => setPanel(null);
+  /** A reorder or a new filter closes an open Delete confirm: its row may move away from where the user was looking. An open Park form stays (and keeps what was typed) while its row is still shown. */
+  const closePanel = () => setPanel((p) => (p?.kind === 'delete' ? null : p));
   const pick = (o: BacklogOrder) => {
     closePanel();
     setOrder(o);
@@ -56,6 +56,10 @@ export function Backlog({ boxes, parked, snapshot, now, projectId, slug, onStatu
     if (f.phase !== undefined) setPhase(f.phase);
     if (f.labels !== undefined) setLabels(f.labels);
   };
+  /** What is typed in the open Park form: it outlives the form's remount when a reorder moves the row to another group. */
+  const draft = useRef<ParkDraft>({ reason: '', where: '', focused: false });
+  /** The row whose title takes focus when the Park form's row leaves (null: the view's heading), worked out when the form opens; a reorder may remount the element, so it is found again by its step. */
+  const afterPark = useRef<string | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const filterField = useRef<HTMLInputElement>(null);
   /** The view's heading, for when the form's row leaves and takes focus with it. */
@@ -68,7 +72,7 @@ export function Backlog({ boxes, parked, snapshot, now, projectId, slug, onStatu
   const shown = filterEntries(openEntries, filter);
   const shownParked = sortFlat(filterEntries(parkedEntries, filter), order);
   const ids = openEntries.map((b) => b.row!.node.id).join(',');
-  const drawn = [...shown.map((b) => b.row!.node.id), ...shownParked.map((p) => p.row.node.id)].join(',');
+  const shownIds = shown.map((b) => b.row!.node.id).join(',');
   // The phase and label chips: what the entries (open and parked) have.
   const allEntries = [...openEntries, ...parkedEntries];
   const phases = backlogPhases({ backlog: allEntries.map((e) => e.row!) }, snapshot.nodes).filter((c) => c.value !== 'none' || allEntries.some((e) => !e.row!.crumb.some((a) => a.kind === 'phase')));
@@ -81,17 +85,17 @@ export function Backlog({ boxes, parked, snapshot, now, projectId, slug, onStatu
     heading.current = root.current?.closest<HTMLElement>('.ip-backlogview')?.querySelector<HTMLElement>('h2') ?? null;
     if (panel.kind === 'delete') root.current?.querySelector<HTMLElement>('.ip-confirm [data-cancel]')?.focus();
   }, [panel]);
-  // A row that left (deleted here or elsewhere) no longer waits. One no longer drawn (it left, or a change elsewhere took it
-  // out of the filter) no longer has its panel open; if it took focus with it, the heading has it.
+  // A row that left (deleted here or elsewhere) no longer waits. An open row no longer shown (it left, or a change elsewhere
+  // took it out of the filter) no longer has its panel open; if it took focus with it, the heading has it.
   useEffect(() => {
     const here = new Set(ids ? ids.split(',').map(Number) : []);
-    const seen = new Set(drawn ? drawn.split(',').map(Number) : []);
+    const seen = new Set(shownIds ? shownIds.split(',').map(Number) : []);
     if (panel !== null && !seen.has(panel.id)) {
       setPanel(null);
       if (document.activeElement === document.body) heading.current?.focus();
     }
     setPending((p) => (p.some((id) => !here.has(id)) ? p.filter((id) => here.has(id)) : p));
-  }, [ids, drawn, panel]);
+  }, [ids, shownIds, panel]);
   /** A parked row that is unparked leaves the Parked group: its in-flight mark ends with it. */
   const parkedIds = parked.map((p) => p.node.id).join(',');
   useEffect(() => {
@@ -119,11 +123,15 @@ export function Backlog({ boxes, parked, snapshot, now, projectId, slug, onStatu
     if (result === 'reload') window.location.reload();
     else onStatus?.(result);
   };
-  const unpark = async (id: number, toNext: boolean) => {
+  const unpark = async (id: number, toNext: boolean, li: HTMLElement | null) => {
     noteAction('backlog', toNext ? 'unpark_to_next' : 'unpark');
+    const after = focusTargetAfter(li);
     setUnparking((u) => [...u, id]);
     const result = await unparkStep(projectId, slug, id, toNext);
-    if (result === 'ok') return;
+    if (result === 'ok') {
+      after?.focus();
+      return;
+    }
     setUnparking((u) => u.filter((x) => x !== id));
     if (result === 'reload') window.location.reload();
     else onStatus?.(result);
@@ -221,12 +229,18 @@ export function Backlog({ boxes, parked, snapshot, now, projectId, slug, onStatu
                   li={{
                     'aria-busy': waiting || undefined,
                     // A press on the confirming box outside the confirm's buttons puts focus in the confirm (or keeps it
-                    // there), so Escape still closes it.
+                    // there), so Escape still closes it. A press on the parking box outside its form puts focus in the
+                    // form's reason field the same way.
                     onMouseDown: asking ? (e) => {
                       if ((e.target as HTMLElement).closest('.ip-confirm button')) return;
                       e.preventDefault();
                       const confirm = e.currentTarget.querySelector<HTMLElement>('.ip-confirm');
                       if (confirm && !confirm.contains(document.activeElement)) confirm.focus();
+                    } : parking ? (e) => {
+                      if ((e.target as HTMLElement).closest('.ip-park')) return;
+                      e.preventDefault();
+                      const form = e.currentTarget.querySelector<HTMLElement>('.ip-park');
+                      if (form && !form.contains(document.activeElement)) form.querySelector<HTMLElement>('input')?.focus();
                     } : undefined,
                     // Escape anywhere in the confirming box closes the confirm.
                     onKeyDown: asking ? (e) => {
@@ -242,7 +256,12 @@ export function Backlog({ boxes, parked, snapshot, now, projectId, slug, onStatu
                         focusTargetAfter(e.currentTarget.closest('li'))?.focus();
                         onToNext(row.node.id);
                       }}>to Next</button>
-                      <button type="button" className="ip-hover-act" data-act data-park aria-haspopup="dialog" onClick={() => setPanel({ kind: 'park', id: row.node.id })}>Park…</button>
+                      <button type="button" className="ip-hover-act" data-act data-park aria-haspopup="dialog" onClick={(e) => {
+                        draft.current = { reason: '', where: '', focused: false };
+                        const target = focusTargetAfter(e.currentTarget.closest('li'));
+                        afterPark.current = target?.closest('li')?.dataset.node ?? null;
+                        setPanel({ kind: 'park', id: row.node.id });
+                      }}>Park…</button>
                       {!hasKids(row.node.id) && (
                         <button type="button" className="ip-hover-act" data-act data-delete aria-haspopup="dialog" onClick={() => setPanel({ kind: 'delete', id: row.node.id })}>Delete…</button>
                       )}
@@ -259,7 +278,13 @@ export function Backlog({ boxes, parked, snapshot, now, projectId, slug, onStatu
                       nodeId={row.node.id}
                       title={row.node.title}
                       onStatus={onStatus}
-                      onDone={() => setPanel(null)}
+                      draft={draft.current}
+                      onDone={() => {
+                        // Closes only its own form: a click on another row's Park… meanwhile opened that one.
+                        setPanel((p) => (p?.id === row.node.id ? null : p));
+                        const next = afterPark.current && root.current?.querySelector<HTMLElement>(`li[data-node="${afterPark.current}"] .ip-row-title`);
+                        (next || root.current?.closest<HTMLElement>('.ip-backlogview')?.querySelector<HTMLElement>('.ip-backlogview-title'))?.focus();
+                      }}
                       onCancel={() => cancel(row.node.id)}
                     />
                   )}
@@ -309,14 +334,14 @@ export function Backlog({ boxes, parked, snapshot, now, projectId, slug, onStatu
                   <div className="ip-card-top">
                     <span className="ip-sid">#{node.id}</span>
                     <span className="ip-card-right">
-                      <button type="button" className="ip-hover-act" data-act disabled={busy} onClick={() => void unpark(node.id, true)}>to Next</button>
-                      <button type="button" className="ip-hover-act" data-act disabled={busy} onClick={() => void unpark(node.id, false)}>Unpark</button>
+                      <button type="button" className="ip-hover-act" data-act disabled={busy} onClick={(e) => void unpark(node.id, true, e.currentTarget.closest('li'))}>to Next</button>
+                      <button type="button" className="ip-hover-act" data-act disabled={busy} onClick={(e) => void unpark(node.id, false, e.currentTarget.closest('li'))}>Unpark</button>
                       <span className="ip-st parked">Parked</span>
                       {node.parkedAt && <span className="ip-time">{ageShort(node.parkedAt, now)}</span>}
                     </span>
                   </div>
                   <button type="button" className="ip-row-title ip-card-title">{node.title}</button>
-                  {parentTitle({ row }) && <div className="ip-group-line ip-box-parent" title={parentTitle({ row })!}>{parentTitle({ row })}</div>}
+                  <div className="ip-group-line ip-box-parent" title={parentTitle({ row }) ?? 'No phase'}>{parentTitle({ row }) ?? 'No phase'}</div>
                   <p className="ip-sys ip-parked-why">{`Parked ${node.parkedAt ? `${shortDate(node.parkedAt, now)}: ` : ': '}${node.parkedReason}`}</p>
                   {node.parkedWhere && <p className="ip-sys ip-parked-where">{`where ${node.parkedWhere}`}</p>}
                   <div className="ip-foot">
