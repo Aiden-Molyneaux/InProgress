@@ -452,6 +452,15 @@ describe('parked steps and the queue', () => {
     expect(stored()).toEqual([]);
   });
 
+  it('set_queue leaves a step under a parked phase out of the stored queue, so unparking does not bring it back to Next', () => {
+    const { ctx, project, phase, other, child, stored, live } = parkSetup();
+    updateNode(ctx, 't', phase.id, { status: 'parked', parkedReason: 'later' });
+    setQueue(ctx, 'scribe:s1', project.slug, [child.id, other.id, phase.id], 'unowned');
+    expect(stored()).toEqual([other.id]);
+    unparkNode(ctx, 'window', phase.id, false, () => {});
+    expect(live()).toEqual([other.id]);
+  });
+
   it('parkNode parks with a reason and where, and refuses a step already parked', () => {
     const { ctx, other } = parkSetup();
     const node = parkNode(ctx, 'window', other.id, { reason: ' Set aside ', where: ' branch x ' }, () => {});

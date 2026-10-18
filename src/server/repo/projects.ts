@@ -425,18 +425,22 @@ export type QueueOwner = { sessionId: string } | 'unowned';
  * twice keeps its first place; an empty list clears that part). Other owners' entries stay where they are, except that a
  * node is in the queue once: one given here leaves wherever it was. A session must be tracked in the project. One that
  * has ended or gone stale owns nothing, so its steps, then its old entries, go to the head of the unowned part, as
- * releaseQueue would put them. Done and dropped nodes stay out of the queue as it is read.
+ * releaseQueue would put them. Done and dropped nodes stay out of the queue as it is read; shelved ones (parked, or under
+ * a parked step) are left out of what is stored.
  */
 export function setQueue(ctx: Ctx, actor: string, ref: string | number, nodes: number[], owner: QueueOwner): Project {
   return write(ctx, actor, (record) => {
     const project = resolveProject(ctx, ref);
-    const ids = [...new Set(nodes)];
+    const asked = [...new Set(nodes)];
     const node = ctx.db.prepare('SELECT project_id FROM nodes WHERE id = ?');
-    for (const id of ids) {
+    for (const id of asked) {
       if ((node.get(id) as { project_id: number } | undefined)?.project_id !== project.id) {
         throw badRequest(`#${id} is not in project ${project.slug}`, 'Use get_outline to find the right #id.');
       }
     }
+    // Shelved steps are left out of what is stored, not refused: stored, they would come back to Next on an unpark.
+    const shelved = shelvedAmong(ctx, asked);
+    const ids = asked.filter((id) => !shelved.has(id));
     let sessionId: string | null = null;
     let gone = false;
     if (owner !== 'unowned') {
