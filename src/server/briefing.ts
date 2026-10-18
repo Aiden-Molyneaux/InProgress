@@ -69,10 +69,14 @@ export function lineFor(index: TreeIndex, n: TreeNode, focusOf: Map<number, Sess
   return `#${n.id} ${glyphTitle(n)} · ${n.status}${prog ? ` (${prog.done}/${prog.total})` : ''}${here.length ? `  ${here.join(' ')}` : ''}`;
 }
 
-/** The line telling a session its focus is parked, or undefined when it is not. Keyed on the status, never on the reason being set. */
+/** The line telling a session its focus is parked, or under a parked step, or undefined when neither. Keyed on the status, never on the reason being set. */
 export function parkedFocusLine(snapshot: ProjectSnapshot, session: Session): string | undefined {
   const focus = session.focusNodeId !== null ? snapshot.nodes.find((n) => n.id === session.focusNodeId) : undefined;
-  return focus && focus.status === 'parked' ? `#${focus.id} is parked: ${focus.parkedReason}` : undefined;
+  if (!focus) return undefined;
+  if (focus.status === 'parked') return `#${focus.id} is parked: ${focus.parkedReason}`;
+  // The nearest parked ancestor (ancestors run outermost first).
+  const above = ancestors(buildIndex(snapshot.nodes), focus.id).reverse().find((a) => a.status === 'parked');
+  return above ? `#${focus.id} is under parked #${above.id}: ${above.parkedReason}` : undefined;
 }
 
 /** The open ones of `items`: in progress first, then pending, each in the order given (creation order). */

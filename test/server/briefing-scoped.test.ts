@@ -280,4 +280,14 @@ describe('parked steps in the briefing', () => {
       expect(t.brief('s1'), mode).toContain(`#${t.step.id} is parked: waiting on design`);
     }
   });
+
+  it('a session focused on a step under a parked phase is told which step is parked', () => {
+    for (const mode of ['scoped', 'full'] as const) {
+      const t = setup(mode);
+      t.join('s1');
+      claimStep(t.ctx, 'session:s1', 's1', t.step.id);
+      updateNode(t.ctx, 'test', t.group.id, { status: 'parked', parkedReason: 'waiting on design' });
+      expect(t.brief('s1'), mode).toContain(`#${t.step.id} is under parked #${t.group.id}: waiting on design`);
+    }
+  });
 });
