@@ -204,7 +204,10 @@ tests. Details, the resource viewer and go-to stay; go-to opens the step's Detai
 - **Next.** Task boxes in queue order: the unowned queue, then each live session's own queue under "Queued by <session
   title>". The pill reads Ready, or Blocked for a blocked step (Not ready with a reason is a later step). Aiden's own
   steps carry "YOU". On hover a box shows "back to Backlog".
-- **Backlog** folds at the foot of the Next column: "Backlog · 14". Open, it lists one-line rows grouped by parent, each
+- **Backlog.** Superseded by `2026-10-17-parked-steps-and-loose-tasks-design.md` (#482): the fold below became the
+  Backlog preview at the foot of the Next column (up to five entries from a picked phase or No phase) and the full
+  Backlog view it opens, which keeps the sort and filter rules here and adds phase and label filters, Age, and a Parked
+  group. The fold as first built, for the record: "Backlog · 14". Open, it lists one-line rows grouped by parent, each
   with "to Next" on hover, and a quick-add field at its foot (section 2.5). A Phase | ID toggle and a direction button
   on top order the rows (#452, Aiden 2026-10-16). Phase is the grouping by immediate parent, as All done's Phase means:
   forward is tree order with the top level first, and reverse flips the groups and the rows in each. ID is one flat list
@@ -231,7 +234,7 @@ tests. Details, the resource viewer and go-to stay; go-to opens the step's Detai
 ### 2.3 Board, narrow (below 960 px)
 
 One scroll of stacked bands: Needs me, Now, Next, Done. The order is one constant, to revisit after the week. The header
-lines sit on top. An empty band shrinks to one line ("Nothing needs you"). Backlog folds at the foot of Next. Rows, drag,
+lines sit on top. An empty band shrinks to one line ("Nothing needs you"). The Backlog preview sits at the foot of Next (#482). Rows, drag,
 hover buttons and quick-add are the wide layout's components at full width, with two density rules: Now and Next rows
 drop the parent crumb, and Done folds the rows completed before the last look (section 1.7) to one line, so only new
 rows keep their outcome.
@@ -267,7 +270,7 @@ All under `/api/ui/` with the `guarded` middleware, actor `window`, slug-checked
   event.
 - **Drop targets.** Within Next, Backlog into Next, Next back to Backlog. Now, Done and Needs me are not drop targets.
 - **Create.** `POST /api/ui/projects/:id/nodes` with `{ title, parent: number | null }` creates a todo step (no label) under
-  `parent`, or the root. Entry points: the Board's Backlog fold (root), a Project view section's foot (that group), and
+  `parent`, or the root. Entry points: the Board's Backlog preview (the picked phase, or the root for No phase; #482), the full Backlog view (root), a Project view section's foot (that group), and
   Details ("Add a step under this one"). A line to any session ("add X to the backlog") still works: the scribe adds the
   step without queueing it. Labels and refinement come later from a session or `mip-orc`.
 - **Clear.** `POST /api/ui/asks/:id/clear` with `{ answer?: string }`, idempotent as section 1.2. Answer… and Clear
