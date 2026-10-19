@@ -285,8 +285,8 @@ depth none there is no walkthrough and no check surface. It takes a free port fr
    the scratch folder. A server already on that port makes the start exit quietly, and the health
    check would pass against another session's build: take the next port.
 
-A timed check (phase 4) that writes runs on a second copy, or the copy is taken again before the
-walk. Its Open session ↗, Open session to allow, Open file and Open link buttons, and links in
+A phase 4 timing run that writes data uses its own copy, taken the same way, never the one Aiden
+walks. The check surface's Open session ↗, Open session to allow, Open file and Open link buttons, and links in
 rendered Markdown, still start the desktop app, VS Code, Explorer or the browser on Aiden's
 screen (`src/server/open-path.ts`): Aiden clicks them, Sigmund never does. Sigmund stops the
 server at the go-ahead or the FAIL. A handoff names its port and stops it; whoever picks up the
@@ -343,7 +343,7 @@ the fix from phase 1 on a new branch; whether to roll back first is the owner's 
 Once the gate above is through (merged, plus any deploy and push it names), or, where it ends
 on the owner's own action (a merge click, a batched release), once you have handed that action
 over, and once every criterion has passed or been waived: brief the scribe that the step is
-done with its outcome, naming how Aiden checked it (in a tracked session), and prefix
+done with its outcome, naming how Aiden checked it (in a tracked session; otherwise in your closing message), and prefix
 this session's title with `DONE` (Session title, below).
 
 A deploy or rollback that goes red on the environment (a lock, a restart, the runner) goes to
