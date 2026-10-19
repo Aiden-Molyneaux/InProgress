@@ -106,6 +106,50 @@ function RenameField({ rename, onCancel }: { rename: Renaming; onCancel: () => v
 /** The menu items of a surface, in order. */
 const itemsOf = (el: HTMLElement) => [...el.querySelectorAll<HTMLElement>('[role="menuitem"]')];
 
+/** An item's identity across a re-render: the project and action a foot menu button carries, else null. */
+const keyOf = (el: HTMLElement) => (el.dataset.project ? `${el.dataset.project}:${el.dataset.act}` : null);
+
+/** Where focus goes when a menu closes under it and its opener is gone: the current row, else the rail's foot button. */
+export function fallbackFocus(rail: HTMLElement | null): HTMLElement | null {
+  return rail?.querySelector<HTMLElement>('a[aria-current="page"]') ?? rail?.querySelector<HTMLElement>('.ip-rail-foot button') ?? null;
+}
+
+/**
+ * Closes a menu without refocus when the window resizes, the rail scrolls (a scroll that landed before the menu opened,
+ * a click bringing its row into view, is not one that moves it away) or a press lands outside `inside` (the surface by
+ * default). A resize or a scroll that takes focus from inside the surface sends it to `opener` rather than the body.
+ */
+function useDismiss({ surface, rail, inside, active = true, onClose, opener }: {
+  surface: RefObject<HTMLElement>;
+  rail: HTMLElement | null;
+  inside?: RefObject<HTMLElement>;
+  active?: boolean;
+  onClose: (refocus: boolean) => void;
+  opener: () => HTMLElement | null;
+}): void {
+  const latest = useRef({ onClose, opener });
+  latest.current = { onClose, opener };
+  useEffect(() => {
+    if (!active) return;
+    const from = { left: rail?.scrollLeft ?? 0, top: rail?.scrollTop ?? 0 };
+    const away = () => {
+      const had = surface.current?.contains(document.activeElement) ?? false;
+      latest.current.onClose(false);
+      if (had) latest.current.opener()?.focus();
+    };
+    const scrolled = () => rail && (rail.scrollLeft !== from.left || rail.scrollTop !== from.top) && away();
+    const outside = (e: MouseEvent) => !(inside ?? surface).current?.contains(e.target as Node) && latest.current.onClose(false);
+    rail?.addEventListener('scroll', scrolled);
+    window.addEventListener('resize', away);
+    window.addEventListener('mousedown', outside);
+    return () => {
+      rail?.removeEventListener('scroll', scrolled);
+      window.removeEventListener('resize', away);
+      window.removeEventListener('mousedown', outside);
+    };
+  }, [rail, active]);
+}
+
 /**
  * What a row's menu and the foot's menu share: roving focus over the menuitems (Down and Up wrap, Home and End), Escape
  * back to the opener, closing when focus leaves, and the delete confirm or the rename field in place of the items.
@@ -117,8 +161,11 @@ function MenuSurface(props: MenuSurfaceProps) {
   const mode = confirm ? 'confirm' : rename ? 'rename' : 'items';
   /** The live sessions a delete stops tracking, as Archive's line says it: a delete archives an active project first. */
   const note = confirm && archiveNote(confirm.activeSessions);
-  /** The index of the item last focused, so a cancel from the confirm or the field puts focus back on the item that asked. */
-  const last = useRef<number | null>(null);
+  /**
+   * The item last focused, so a cancel from the confirm or the field puts focus back on the item that asked: found by its
+   * data-project and data-act where it has them (the foot menu's, whose rows can change under the confirm), else by index.
+   */
+  const last = useRef<{ at: number; key: string | null } | null>(null);
   // On opening, focus the first (or last) item; in the confirm, its Delete, so Enter confirms; in the rename field, the whole name, so typing replaces it; back from
   // the confirm or the field, the item that asked. The Confirm part would focus Cancel, so its own focus is off.
   useLayoutEffect(() => {
@@ -134,7 +181,8 @@ function MenuSurface(props: MenuSurfaceProps) {
       return;
     }
     const items = itemsOf(el);
-    const back = last.current === null ? undefined : items[last.current];
+    const asked = last.current;
+    const back = asked === null ? undefined : ((asked.key === null ? undefined : items.find((el) => keyOf(el) === asked.key)) ?? items[asked.at]);
     last.current = null;
     (back ?? (start === 'last' ? items[items.length - 1] : items[0]))?.focus();
   }, [mode]);
@@ -162,7 +210,7 @@ function MenuSurface(props: MenuSurfaceProps) {
   const onFocus = (e: FocusEvent<HTMLDivElement>) => {
     if (mode !== 'items') return;
     const at = itemsOf(e.currentTarget).indexOf(e.target as HTMLElement);
-    if (at >= 0) last.current = at;
+    if (at >= 0) last.current = { at, key: keyOf(e.target as HTMLElement) };
   };
   return (
     <div
@@ -234,23 +282,7 @@ export function RowMenu({ project, row, rail, onClose, run, runRename }: RowMenu
     const s = surface.current!;
     setAt(rowMenuAt(row.getBoundingClientRect(), { width: s.offsetWidth, height: s.offsetHeight }, windowSize(), layoutOf(rail)));
   }, [row, rail, panel]);
-  const close = useRef(onClose);
-  close.current = onClose;
-  useEffect(() => {
-    // A scroll that landed before the menu opened (a click bringing its row into view) is not one that moves it away.
-    const from = { left: rail?.scrollLeft ?? 0, top: rail?.scrollTop ?? 0 };
-    const scrolled = () => rail && (rail.scrollLeft !== from.left || rail.scrollTop !== from.top) && close.current(false);
-    const resized = () => close.current(false);
-    const outside = (e: MouseEvent) => !surface.current?.contains(e.target as Node) && close.current(false);
-    rail?.addEventListener('scroll', scrolled);
-    window.addEventListener('resize', resized);
-    window.addEventListener('mousedown', outside);
-    return () => {
-      rail?.removeEventListener('scroll', scrolled);
-      window.removeEventListener('resize', resized);
-      window.removeEventListener('mousedown', outside);
-    };
-  }, [rail]);
+  useDismiss({ surface, rail, onClose, opener: () => (row.isConnected ? row : fallbackFocus(rail)) });
   const choose = (action: ProjectAction) => {
     onClose(true);
     run(action, project, row);
@@ -284,14 +316,18 @@ export function RowMenu({ project, row, rail, onClose, run, runRename }: RowMenu
         <MenuItem onSelect={() => choose('unarchive')}>Unarchive</MenuItem>
       ) : (
         // No confirm: Unarchive undoes it. The live sessions it stops tracking keep running, and the note says so.
-        <MenuItem onSelect={() => choose('archive')}>
-          Archive
-          {note && (
-            <span id={noteId} className="ip-rail-note">
-              {note}
-            </span>
-          )}
-        </MenuItem>
+        // MenuItem's markup with a name of its own: "Archive", the sessions line as its description.
+        <button type="button" role="menuitem" className="p-menu-item" tabIndex={-1} aria-label="Archive" aria-describedby={note ? noteId : undefined} onClick={() => choose('archive')}>
+          <span className="p-menu-cur" aria-hidden="true" />
+          <span className="p-menu-label">
+            Archive
+            {note && (
+              <span id={noteId} className="ip-rail-note">
+                {note}
+              </span>
+            )}
+          </span>
+        </button>
       )}
       <MenuItem onSelect={() => setPanel('rename')}>Rename…</MenuItem>
       <MenuItem danger onSelect={() => setPanel('confirm')}>
@@ -332,28 +368,7 @@ export function FootMenu({ archived, deleted, current, onSelect, run, rail, butt
     setConfirm(null);
     if (refocus) button.current?.focus();
   };
-  useEffect(() => {
-    if (!open) return;
-    const outside = (e: MouseEvent) => {
-      if (!wrap.current?.contains(e.target as Node)) {
-        setOpen(null);
-        setConfirm(null);
-      }
-    };
-    const away = () => {
-      setOpen(null);
-      setConfirm(null);
-    };
-    const el = rail.current;
-    window.addEventListener('mousedown', outside);
-    window.addEventListener('resize', away);
-    el?.addEventListener('scroll', away);
-    return () => {
-      window.removeEventListener('mousedown', outside);
-      window.removeEventListener('resize', away);
-      el?.removeEventListener('scroll', away);
-    };
-  }, [open]);
+  useDismiss({ surface, rail: rail.current, inside: wrap, active: open !== null, onClose: shut, opener: () => button.current });
   // Measured with the menu in the page and before it paints; again when the confirm changes its size.
   useLayoutEffect(() => {
     if (!open || !surface.current || !button.current) return;
@@ -419,6 +434,8 @@ export function FootMenu({ archived, deleted, current, onSelect, run, rail, butt
                     role="menuitem"
                     tabIndex={-1}
                     className="ip-rail-open"
+                    data-project={p.id}
+                    data-act="open"
                     aria-current={p.slug === current || undefined}
                     title={p.name}
                     aria-label={projectLabel(p)}
@@ -430,10 +447,10 @@ export function FootMenu({ archived, deleted, current, onSelect, run, rail, butt
                     <span className="ip-rail-open-name">{p.name}</span>
                     <Signals p={p} />
                   </button>
-                  <button type="button" role="menuitem" tabIndex={-1} className="ip-rail-act" aria-label={`Unarchive ${p.name}`} onClick={() => act('unarchive', p)}>
+                  <button type="button" role="menuitem" tabIndex={-1} className="ip-rail-act" data-project={p.id} data-act="unarchive" aria-label={`Unarchive ${p.name}`} onClick={() => act('unarchive', p)}>
                     Unarchive
                   </button>
-                  <button type="button" role="menuitem" tabIndex={-1} className="ip-rail-act" aria-label={`Delete ${p.name}`} onClick={() => setConfirm(p)}>
+                  <button type="button" role="menuitem" tabIndex={-1} className="ip-rail-act" data-project={p.id} data-act="delete" aria-label={`Delete ${p.name}`} onClick={() => setConfirm(p)}>
                     Delete…
                   </button>
                 </div>
@@ -455,7 +472,7 @@ export function FootMenu({ archived, deleted, current, onSelect, run, rail, butt
                   <span className="ip-rail-left" id={`${ids}l${d.id}`}>
                     {daysLeftLabel(d.purgeAt, now)}
                   </span>
-                  <button type="button" role="menuitem" tabIndex={-1} className="ip-rail-act" aria-label={`Restore ${d.name}`} aria-describedby={`${ids}l${d.id}`} onClick={() => act('restore', d)}>
+                  <button type="button" role="menuitem" tabIndex={-1} className="ip-rail-act" data-project={d.id} data-act="restore" aria-label={`Restore ${d.name}`} aria-describedby={`${ids}l${d.id}`} onClick={() => act('restore', d)}>
                     Restore
                   </button>
                 </div>

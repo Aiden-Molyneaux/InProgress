@@ -5,7 +5,7 @@ import { Eyebrow } from '../parts/Eyebrow';
 import type { ActionTarget, ProjectAction } from '../projectActions';
 import { useNow } from '../useNow';
 import type { View } from '../views/view';
-import { FootMenu, isMenuKey, RowMenu, Signals, type RailLayout, type Run, type RunRename } from './projectMenus';
+import { fallbackFocus, FootMenu, isMenuKey, RowMenu, Signals, type RailLayout, type Run, type RunRename } from './projectMenus';
 import { railStep, viewTitle, type RailView } from './railLogic';
 import { moveTab, projectLabel, recentlyDeleted, tabDropSlot } from './tabs';
 
@@ -69,6 +69,9 @@ export function Rail({ tabs, archived, deleted: listed, current, onSelect, onMov
   const now = useNow(60_000);
   const deleted = useMemo(() => recentlyDeleted(listed, now), [listed, now]);
   const ids = tabs.map((p) => p.id).join(',');
+  const hasFoot = archived.length > 0 || deleted.length > 0;
+  /** Whether the nav renders at all: the observer attaches once it does, not only on the first render. */
+  const shown = tabs.length > 0 || hasFoot;
   const activeIds = tabs.filter((p) => p.status === 'active').map((p) => p.id);
   const activeKey = activeIds.join();
   /** The row being dragged, and where it would drop: before this row, or null for the end. Null while nothing drags. */
@@ -99,14 +102,33 @@ export function Rail({ tabs, archived, deleted: listed, current, onSelect, onMov
     const resize = new ResizeObserver(() => el.querySelector('a[aria-current="page"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' }));
     resize.observe(el);
     return () => resize.disconnect();
-  }, []);
+  }, [shown]);
+
+  // The roving stops follow focus: the row (or view) focused last, until the current one changes, which resets them to it.
+  const [rowStop, setRowStop] = useState<{ from: string | null; slug: string } | null>(null);
+  const [viewStop, setViewStop] = useState<{ from: View; view: View } | null>(null);
+  // Whether focus is in the views list. Switching project swaps that list for the new current row's, which takes focus
+  // with it; it goes to the new list's current view instead of the page.
+  const inViews = useRef(false);
+  useLayoutEffect(() => {
+    const had = inViews.current;
+    inViews.current = false;
+    if (!had) return;
+    const active = document.activeElement;
+    if (active && active !== document.body) return;
+    rail.current?.querySelector<HTMLElement>('button.ip-rail-view[aria-current="page"]')?.focus();
+  }, [current]);
 
   const [rowMenu, setRowMenu] = useState<{ id: number; row: HTMLElement } | null>(null);
   const menuProject = rowMenu ? tabs.find((p) => p.id === rowMenu.id) : undefined;
   // The menu's row went (its project archived or deleted from elsewhere): the menu goes with it.
   const menuGone = rowMenu !== null && (!menuProject || !rowMenu.row.isConnected);
   useEffect(() => {
-    if (menuGone) setRowMenu(null);
+    if (!menuGone) return;
+    // Focus in the menu goes to the current row (or the foot) rather than the page.
+    const had = rail.current?.querySelector('.ip-rail-menu')?.contains(document.activeElement) ?? false;
+    setRowMenu(null);
+    if (had) fallbackFocus(rail.current)?.focus();
   }, [menuGone]);
   const closeRowMenu = (refocus: boolean) => {
     const row = rowMenu?.row;
@@ -201,19 +223,19 @@ export function Rail({ tabs, archived, deleted: listed, current, onSelect, onMov
   };
   /** Out of the rail mid-drag: no line, as a drop there does nothing. */
   const onDragLeave = (e: DragEvent<HTMLUListElement>) => {
-    if (drag && !rail.current!.contains(e.relatedTarget as Node | null)) setDrag({ id: drag.id, slot: drag.id });
+    if (drag && !list.current!.contains(e.relatedTarget as Node | null)) setDrag({ id: drag.id, slot: drag.id });
   };
   const select = (e: MouseEvent<HTMLAnchorElement>, slug: string) => {
-    // Ctrl, Shift or Alt with the click, or a press other than the main one: the browser's own link (a new tab).
-    if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+    // Ctrl or Shift with the click, or a press other than the main one: the browser's own link (a new tab or window).
+    if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return;
     e.preventDefault();
     onSelect(slug);
   };
 
-  const hasFoot = archived.length > 0 || deleted.length > 0;
-  if (tabs.length === 0 && !hasFoot) return null;
-  // The rows are one stop in the tab order: the current row's, or the first row's when none is current.
-  const stop = tabs.some((p) => p.slug === current) ? current : tabs[0]?.slug;
+  if (!shown) return null;
+  // The rows are one stop in the tab order: the one focused last, else the current row's, else the first row's.
+  const stop = rowStop && rowStop.from === current && tabs.some((p) => p.slug === rowStop.slug) ? rowStop.slug : tabs.some((p) => p.slug === current) ? current : tabs[0]?.slug;
+  const viewsStop = viewStop && viewStop.from === view ? viewStop.view : view;
   const lastActive = activeIds[activeIds.length - 1];
   return (
     <nav className="ip-rail" aria-label="Projects" data-layout={layout} ref={rail}>
@@ -249,8 +271,11 @@ export function Rail({ tabs, archived, deleted: listed, current, onSelect, onMov
                   className={`ip-rail-row${isArchived ? ' archived' : ''}${p.id === menuProject?.id && !menuGone ? ' menu-open' : ''}${drag?.id === p.id ? ' dragging' : ''}${changes && drag.slot === p.id ? ' drop-before' : ''}${changes && drag.slot === null && p.id === lastActive ? ' drop-after' : ''}`}
                   style={{ '--rr': `var(--hue-${p.id % 7})` } as CSSProperties}
                   draggable={!isArchived}
+                  onFocus={() => setRowStop({ from: current, slug: p.slug })}
                   onDragStart={(e) => {
                     e.dataTransfer.effectAllowed = 'move';
+                    // A link drags its address as text too, which a text field would take; only the row's own data goes.
+                    e.dataTransfer.clearData();
                     e.dataTransfer.setData(ROW_DRAG, String(p.id));
                     setDrag({ id: p.id, slot: p.id });
                   }}
@@ -271,14 +296,24 @@ export function Rail({ tabs, archived, deleted: listed, current, onSelect, onMov
                   <Signals p={p} />
                 </a>
                 {isCurrent && (
-                  <ul className="ip-rail-views" aria-label="Views" onKeyDown={onViewKey}>
+                  <ul
+                    className="ip-rail-views"
+                    aria-label="Views"
+                    onKeyDown={onViewKey}
+                    onFocus={() => (inViews.current = true)}
+                    onBlur={(e) => {
+                      // A removed list reports a blur with nowhere to go; that is the switch the effect above answers.
+                      if (e.currentTarget.isConnected) inViews.current = e.currentTarget.contains(e.relatedTarget as Node | null);
+                    }}
+                  >
                     {views.map((v) => (
                       <li key={v.view}>
                         <button
                           type="button"
                           className="ip-rail-view"
                           aria-current={v.view === view ? 'page' : undefined}
-                          tabIndex={v.view === view ? 0 : -1}
+                          tabIndex={v.view === viewsStop ? 0 : -1}
+                          onFocus={() => setViewStop({ from: view, view: v.view })}
                           title={viewTitle(v)}
                           aria-label={viewTitle(v)}
                           onClick={() => onView(v.view)}

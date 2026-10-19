@@ -1086,7 +1086,8 @@ test("an active tab's Delete… says how many sessions it stops tracking, and de
   const menu = tabMenu(page, busyName);
   const items = menu.getByRole('menuitem');
   await expect(items).toHaveCount(3);
-  await expect(items.nth(0)).toHaveAccessibleName('Archive Stops tracking 1 session');
+  await expect(items.nth(0)).toHaveAccessibleName('Archive');
+  await expect(items.nth(0)).toHaveAccessibleDescription('Stops tracking 1 session');
   await expect(items.nth(1)).toHaveAccessibleName('Rename…');
   await expect(items.nth(2)).toHaveAccessibleName('Delete…');
   await items.nth(2).click();
@@ -1365,24 +1366,23 @@ test('the window is dark whatever the OS theme, and the menus and the confirm we
 });
 
 test("a tab's menu stays inside a narrow window, and a strip scroll closes it", async ({ page, api }) => {
-  const names = Array.from({ length: 3 }, (_, i) => unique(`Narrow menu ${i + 1}`));
+  const names = Array.from({ length: 6 }, (_, i) => unique(`Narrow menu ${i + 1}`));
   const made: { slug: string }[] = [];
   for (const name of names) made.push(await bare(api, name));
   await page.setViewportSize({ width: 420, height: 900 });
-  await page.goto(`/#/p/${made[2].slug}`);
+  await page.goto(`/#/p/${made[5].slug}`);
   // The newest project's tab is the last, at the strip's right end.
-  const last = railRow(page, names[2]);
+  const last = railRow(page, names[5]);
   await expect(last).toHaveAttribute('aria-current', 'page');
   await expect(last).toBeInViewport({ ratio: 0.99 });
   await last.click({ button: 'right' });
-  const menu = tabMenu(page, names[2]);
+  const menu = tabMenu(page, names[5]);
   await expect(menu).toBeInViewport({ ratio: 0.99 });
   const box = (await menu.boundingBox())!;
   expect(box.x).toBeGreaterThanOrEqual(8);
   expect(box.x + box.width).toBeLessThanOrEqual(420 - 8 + 0.5);
   // Scrolled away from its tab, it would point at nothing: it closes.
   await page.evaluate(`${STRIP}.scrollLeft = 0`);
-  await expect.poll(() => stripScroll(page)).toBe(0);
   await expect(menu).toBeHidden();
 });
 
@@ -3308,5 +3308,19 @@ test.describe('Module rail', () => {
     // The views sit under the new row, with Backlog current.
     await expect(railRow(page, bName).locator('xpath=..').locator('.ip-rail-view[aria-current="page"]')).toHaveAccessibleName(/^Backlog/);
     await expect(railRow(page, aName).locator('xpath=..').locator('.ip-rail-view')).toHaveCount(0);
+  });
+
+  test('focus in the views list follows a project switch: ] from the rail Backlog lands on the next project\'s Backlog', async ({ page, api }) => {
+    await page.setViewportSize({ width: 1600, height: 900 });
+    const a = await bare(api, unique('Focus a'));
+    const bName = unique('Focus b');
+    await bare(api, bName);
+    await page.goto(`/#/p/${a.slug}`);
+    await viewButton(page, 'Backlog').click();
+    await viewButton(page, 'Backlog').focus();
+    await page.keyboard.press(']');
+    await expect(railRow(page, bName)).toHaveAttribute('aria-current', 'page');
+    await expect(viewButton(page, 'Backlog')).toBeFocused();
+    await expect(viewButton(page, 'Backlog')).toHaveAttribute('aria-current', 'page');
   });
 });

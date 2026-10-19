@@ -68,6 +68,14 @@ describe('railViews', () => {
   });
 });
 
+describe('railViews with no snapshot', () => {
+  it('still lists the four views, with no counts', () => {
+    const views = railViews(null, NOW);
+    expect(views.map((v) => v.view)).toEqual(['board', 'project', 'backlog', 'done']);
+    expect(views.every((v) => v.count === undefined)).toBe(true);
+  });
+});
+
 describe('railStep', () => {
   it('moves on with Down and Right and back with Up and Left, wrapping', () => {
     expect(railStep('ArrowDown', 0, 3)).toBe(1);

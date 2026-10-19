@@ -99,14 +99,11 @@ export function App() {
     setView(v);
     saveView(v);
     postEvent('view', snapshot?.project.id ?? null, { view: v });
-    if (v === 'backlog') {
-      noteAction('backlog', 'all');
-      postEvent('backlog_open', snapshot?.project.id ?? null);
-    }
-    if (v === 'done') noteAction('done', 'all');
+    if (v === 'backlog') postEvent('backlog_open', snapshot?.project.id ?? null);
   };
   /** The Board's "N ›" and "All done ›": the pick, and focus on the view's row. */
   const openFromBoard = (v: 'backlog' | 'done') => {
+    noteAction(v === 'backlog' ? 'backlog' : 'done', 'all');
     pickView(v);
     setViewFocus((n) => n + 1);
   };
@@ -148,7 +145,7 @@ export function App() {
   const archived = useMemo(() => archivedProjects(projects), [projects]);
   const codes = useMemo(() => railCodes(tabs), [tabs]);
   // The views and their counts are the shown project's: not those of the one before it, while the next one loads.
-  const views = useMemo(() => (snapshot && snapshot.project.slug === state.slug ? railViews(snapshot, now) : []), [snapshot, state.slug, now]);
+  const views = useMemo(() => railViews(snapshot && snapshot.project.slug === state.slug ? snapshot : null, now), [snapshot, state.slug, now]);
   // ASKS: the open project's Board with focus on Needs me, or the first project in tab order that has asks. The counter
   // moves focus after the Board shows.
   const [needsFocus, setNeedsFocus] = useState(0);
@@ -346,16 +343,14 @@ export function App() {
             ) : snapshot ? (
               <>
                 {/* Under 720 px the rail is a strip with no room for the views, so they sit at the top of the page. */}
-                {views.length > 0 && (
-                  <TabStrip
-                    variant="segmented"
-                    label="Views"
-                    items={views.map((v) => ({ id: v.view, label: v.label, count: v.count }))}
-                    value={view}
-                    onChange={(id) => pickView(id as View)}
-                    className="ip-viewtabs"
-                  />
-                )}
+                <TabStrip
+                  variant="segmented"
+                  label="Views"
+                  items={views.map((v) => ({ id: v.view, label: v.label, count: v.count }))}
+                  value={view}
+                  onChange={(id) => pickView(id as View)}
+                  className="ip-viewtabs"
+                />
                 {view === 'backlog' ? (
                   <BacklogList key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onStatus={fail} />
                 ) : view === 'done' ? (

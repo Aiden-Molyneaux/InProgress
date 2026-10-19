@@ -33,8 +33,8 @@
 .ip-rail-row[aria-current='page'] .ip-rail-ask { background: var(--volt-ink); color: var(--volt); }
 /* Dragging a row: it dims, and a 2 px ink line shows the slot it would drop in. */
 .ip-rail-row.dragging { opacity: .5; }
-.ip-rail-row.drop-before { box-shadow: inset 0 2px 0 var(--text); }
-.ip-rail-row.drop-after { box-shadow: inset 0 -2px 0 var(--text); }
+.ip-rail-row.drop-before { box-shadow: inset 0 2px 0 var(--volt); }
+.ip-rail-row.drop-after { box-shadow: inset 0 -2px 0 var(--volt); }
 
 /* The open project's views, indented under its row. */
 .ip-rail-views { display: grid; padding: 2px 0 var(--sp-2); }
@@ -50,13 +50,12 @@
 .ip-rail-n { color: var(--text-dim); font-stretch: 75%; }
 .ip-rail-vcode { display: none; }
 
-/* The foot: the archived and recently deleted projects. board.css has an .ip-rail-foot of its own (the Backlog preview's head), so
-   this one is scoped to the rail. */
-.ip-rail > .ip-rail-foot { display: block; margin-top: auto; padding: var(--sp-4) var(--sp-3) 0; border-top: 1px solid var(--line-soft); }
+/* The foot: the archived and recently deleted projects. */
+.ip-rail-foot { display: block; margin-top: auto; padding: var(--sp-4) var(--sp-3) 0; border-top: 1px solid var(--line-soft); }
 .ip-rail-foot-short { display: none; }
 
 /* The menus: the Menu part's surface, fixed so the rail's overflow cannot clip it. */
-.ip-rail-menu { position: fixed; z-index: 20; min-width: 200px; max-width: min(300px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow-y: auto; }
+.ip-rail-menu { position: fixed; z-index: 20; min-width: 200px; max-width: min(300px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow-y: auto; text-align: left; }
 .ip-rail-menu .p-confirm, .ip-rail-menu .p-field { min-width: 240px; max-width: 100%; }
 .ip-rail-menu .p-field { padding: var(--sp-3); }
 /* Archive's second line: the live sessions it stops tracking. */
@@ -96,7 +95,7 @@
   .ip-rail-ask { padding: 2px 3px; }
   .ip-rail-view { justify-content: center; padding: 0; font-family: var(--font-brand); font-stretch: 112.5%; font-size: var(--t-micro); font-weight: var(--w-brand); }
   .ip-rail-view[aria-current='page']::before { content: none; }
-  .ip-rail > .ip-rail-foot { padding-inline: 0; text-align: center; }
+  .ip-rail-foot { padding-inline: 0; text-align: center; }
 }
 
 /* Under 720: the rail is a strip under the ruler, scrolling sideways, with the foot as a ⋯ at its right end. */
@@ -106,10 +105,13 @@
   .ip-rail-head, .ip-rail-views { display: none; }
   .ip-rail-rows { display: flex; grid-template-columns: none; gap: 2px; }
   .ip-rail-row { min-height: 34px; padding-inline: var(--sp-3); }
-  .ip-rail-row.drop-before { box-shadow: inset 2px 0 0 var(--text); }
-  .ip-rail-row.drop-after { box-shadow: inset -2px 0 0 var(--text); }
+  .ip-rail-row.drop-before { box-shadow: inset 2px 0 0 var(--volt); }
+  .ip-rail-row.drop-after { box-shadow: inset -2px 0 0 var(--volt); }
   /* Kept in view at the right end however far the rows scroll. */
-  .ip-rail > .ip-rail-foot { position: sticky; z-index: 20; right: 0; margin: 0 0 0 auto; padding: 0; border: 0; background: var(--canvas-0); }
+  .ip-rail-foot { position: sticky; z-index: 20; right: 0; width: 40px; display: flex; justify-content: center; margin: 0 0 0 auto; padding: 0; border: 0; background: var(--canvas-0); }
+  /* The ⋯ covers the strip's right end, so keep-in-view and the rows' end padding clear its width. */
+  .ip-rail { scroll-padding-inline-end: calc(40px + var(--sp-2)); }
+  .ip-rail-rows { padding-inline-end: calc(40px + var(--sp-2)); }
   .ip-main { flex-direction: column; }
   .ip-viewtabs { display: flex; flex: none; margin: var(--sp-3) var(--sp-4) 0; }
 }

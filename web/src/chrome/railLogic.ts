@@ -26,15 +26,16 @@ export function railCodes(rows: readonly { id: number; name: string }[]): Map<nu
 
 /**
  * The views under the current row, with the figures the Board already shows: the Project view's phases, the Backlog
- * preview's "N ›" (parked steps excluded) and the Done column's count.
+ * preview's "N ›" (parked steps excluded) and the Done column's count. Always the four views: with no snapshot (the next
+ * project's has not landed) they carry no counts, so the list never unmounts on a switch.
  */
-export function railViews(snapshot: ProjectSnapshot, now: number): RailView[] {
-  const board = deriveBoard(snapshot, now);
+export function railViews(snapshot: ProjectSnapshot | null, now: number): RailView[] {
+  const board = snapshot && deriveBoard(snapshot, now);
   return [
     { view: 'board', label: 'Board', code: 'BRD' },
-    { view: 'project', label: 'Project', code: 'PRJ', count: phaseCount(projectSections(snapshot, board)), unit: 'phases' },
-    { view: 'backlog', label: 'Backlog', code: 'BKL', count: taskBoxes(board, snapshot, now).backlog.length },
-    { view: 'done', label: 'All done', code: 'DON', count: board.done.length },
+    { view: 'project', label: 'Project', code: 'PRJ', count: snapshot && board ? phaseCount(projectSections(snapshot, board)) : undefined, unit: 'phases' },
+    { view: 'backlog', label: 'Backlog', code: 'BKL', count: snapshot && board ? taskBoxes(board, snapshot, now).backlog.length : undefined },
+    { view: 'done', label: 'All done', code: 'DON', count: board?.done.length },
   ];
 }
 
