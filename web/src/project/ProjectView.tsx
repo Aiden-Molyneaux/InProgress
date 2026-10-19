@@ -23,8 +23,8 @@ const IN_VIEW_SLACK = 24;
 
 const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-/** The Project view (spec 2.4 and 2.8): the page head, the state note, then one section per top-level group as an outline with a position rail. */
-export function ProjectView({ snapshot, now, onOpenNode, onOpenResource, onStatus }: ViewProps) {
+/** The Project view (spec 2.4 and 2.8): the page head (its code the rail's `codes` gives the project, so a clash shows the same digit in both), the state note, then one section per top-level group as an outline with a position rail. */
+export function ProjectView({ snapshot, now, onOpenNode, onOpenResource, onStatus, codes }: ViewProps & { codes?: Map<number, string> }) {
   const [root, width] = usePageWidth<HTMLDivElement>();
   const wide = width >= WIDE_FROM;
   const projectId = snapshot.project.id;
@@ -164,7 +164,7 @@ export function ProjectView({ snapshot, now, onOpenNode, onOpenResource, onStatu
   return (
     <div ref={root} className="ip-project" data-wide={wide || undefined} onScroll={measureInView} onWheel={release} onTouchMove={release} onPointerDown={release} onKeyDown={release}>
       <div className="ip-page">
-        <PageHead code={projectCode(snapshot.project.name)} name={snapshot.project.name} meta={headMeta(board, sections)} decodeKey={projectId} />
+        <PageHead code={codes?.get(snapshot.project.id) ?? projectCode(snapshot.project.name)} name={snapshot.project.name} meta={headMeta(board, sections)} decodeKey={projectId} />
         {slab}
         {!wide && (
           <div className="ip-jump">

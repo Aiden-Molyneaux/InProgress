@@ -30,7 +30,14 @@ describe('the remembered view', () => {
     expect(loadView()).toBe('board');
   });
 
-  it('reads a stored value that is neither view as the Board', () => {
+  it('loads each of the four views', () => {
+    for (const view of ['board', 'project', 'backlog', 'done'] as const) {
+      saveView(view);
+      expect(loadView()).toBe(view);
+    }
+  });
+
+  it('reads a stored value that is none of the views as the Board', () => {
     held.set('ip.view', 'canvas');
     expect(loadView()).toBe('board');
     held.set('ip.view', '');
