@@ -13,7 +13,7 @@ References:
   names v3 values by its token names.
 - **The Board, the HUD bar, the rail and the footer:** the mock (r321) and its screenshot (r322).
 - **List and detail patterns:** InThink's Projects v3 spec, `2026-10-09-projects-v3-design.md` in the same folder.
-- **Today's window:** the inventory in r325 (`~/.inprogress/resources/inprogress/2026-10-18-v3-port-window-inventory.md`):
+- **Today's window:** the inventory in r326 (`~/.inprogress/resources/inprogress/2026-10-18-v3-port-window-inventory.md`):
   the sheet's section map, every e2e assertion tied to the look, the hue path, the inline styles.
 
 ## 0. Intent, goals, non-goals, anti-goals
