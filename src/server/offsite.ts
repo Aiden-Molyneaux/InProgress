@@ -372,7 +372,8 @@ export function lastDrill(db: DB): DrillResult | undefined {
 export async function tickOffsite(db: DB, home: string, log: OffsiteLog, now: Date = new Date()): Promise<void> {
   try {
     const status = await runOffsite(db, home, log, { now });
-    if (status === 'not set up' || status === 'busy') return;
+    // A failed run is usually the network: a drill now would fail the same way and record an outage as a bad backup.
+    if (status !== 'ok') return;
     // A drill that passed within 7 days is enough; a failed one is tried again on the next tick.
     const drill = lastDrill(db);
     if (drill?.ok && now.getTime() - Date.parse(drill.at) <= 7 * DAY_MS) return;

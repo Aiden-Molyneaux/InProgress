@@ -91,6 +91,21 @@ describe('inprogress restore', { timeout: 120_000 }, () => {
     expect(marker(join(home, 'inprogress.db'))).toBe('before');
   });
 
+  it('refuses a snapshot only a newer build can open, and changes nothing', async () => {
+    const { home, db } = makeHome('newer');
+    const current = db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").pluck().get() as string;
+    db.prepare("UPDATE meta SET value = '999' WHERE key = 'schema_version'").run();
+    db.prepare("DELETE FROM meta WHERE key = 'min_reader_version'").run();
+    const { file } = await snapshotDb(db, join(home, 'backups'), new Date(2026, 9, 18, 9, 0, 0));
+    db.prepare("UPDATE meta SET value = ? WHERE key = 'schema_version'").run(current);
+    db.close();
+    const before = sha(join(home, 'inprogress.db'));
+    const lines: string[] = [];
+    expect(await runRestore(['--from', file!], (l) => lines.push(l), { home, serverUp: down })).toBe(1);
+    expect(lines[0]).toContain('This backup is from a newer InProgress (schema v999); update InProgress first');
+    expect(sha(join(home, 'inprogress.db'))).toBe(before);
+  });
+
   it('restores an offsite folder into a scratch home: resource paths follow the new home, the rest is identical', async () => {
     const source = makeHome('from the other machine');
     await exportOffsite(source.db, source.home, new Date(2026, 9, 19, 9, 0, 0));

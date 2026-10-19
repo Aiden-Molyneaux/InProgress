@@ -49,6 +49,13 @@ async function resolveSource(from: string | undefined, home: string, scratch: st
   return { kind: 'dump', path: clone };
 }
 
+/** Throws for a backup only a newer build can open: the restore would leave a database this build refuses to start on. */
+function refuseNewer(schemaVersion: number, minReader: number | null): void {
+  if (schemaVersion > MIGRATIONS.length && !(minReader !== null && Number.isInteger(minReader) && minReader <= MIGRATIONS.length)) {
+    throw new Error(`This backup is from a newer InProgress (schema v${schemaVersion}); update InProgress first`);
+  }
+}
+
 /** Copies the current database aside before it is replaced. A damaged one is copied as a file, since restoring is what it needs. */
 async function copyCurrentAside(file: string, target: string): Promise<string> {
   // Read before the open: SQLite may delete a -wal it cannot use when the connection closes.
@@ -103,15 +110,15 @@ export async function runRestore(args: string[], out: (line: string) => void, o:
       try {
         const result = String(copy.pragma('integrity_check', { simple: true }));
         if (result !== 'ok') throw new Error(`${source.path} fails its integrity_check: ${result.split('\n')[0]}`);
+        const meta = (key: string) => copy.prepare('SELECT value FROM meta WHERE key = ?').pluck().get(key) as string | undefined;
+        refuseNewer(Number(meta('schema_version') ?? 0), meta('min_reader_version') === undefined ? null : Number(meta('min_reader_version')));
       } finally {
         copy.close();
       }
     } else {
       manifest = JSON.parse(readFileSync(join(source.path, 'manifest.json'), 'utf8')) as Manifest;
       // A backup that only a newer build can read would restore into a database this build refuses to open.
-      if (manifest.schema_version > MIGRATIONS.length && !(manifest.min_reader_version !== null && manifest.min_reader_version <= MIGRATIONS.length)) {
-        throw new Error(`This backup is from a newer InProgress (schema v${manifest.schema_version}); update InProgress first`);
-      }
+      refuseNewer(manifest.schema_version, manifest.min_reader_version);
       loadDump(tmp, readDump(source.path));
       checkLoaded(tmp, manifest);
       // The dump may come from another machine, whose home folder resources/ paths still name.

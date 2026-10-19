@@ -101,7 +101,12 @@ export async function snapshotDb(db: DB, dir: string, now: Date = new Date()): P
   mkdirSync(dir, { recursive: true });
   // A crashed run's copy in progress; anything over a day old will never be finished.
   for (const f of readdirSync(dir)) {
-    if (/^inprogress-.*\.db\.\d+\.tmp$/.test(f) && now.getTime() - statSync(join(dir, f)).mtimeMs > DAY_MS) rmSync(join(dir, f), { force: true });
+    if (!/^inprogress-.*\.db\.\d+\.tmp$/.test(f)) continue;
+    try {
+      if (now.getTime() - statSync(join(dir, f)).mtimeMs > DAY_MS) rmSync(join(dir, f), { force: true });
+    } catch {
+      // Renamed or removed by its own run meanwhile: nothing to sweep.
+    }
   }
   const file = join(dir, `inprogress-${timestamp(now)}.db`);
   const tmp = `${file}.${process.pid}.tmp`;
@@ -119,7 +124,11 @@ export async function snapshotDb(db: DB, dir: string, now: Date = new Date()): P
     if (newest && sha256(join(dir, newest)) === sha256(tmp)) {
       rmSync(tmp, { force: true });
       // The newest snapshot is still current: doctor reads its mtime as "checked and found unchanged".
-      utimesSync(join(dir, newest), now, now);
+      try {
+        utimesSync(join(dir, newest), now, now);
+      } catch {
+        // A locked file (a scanner, a sync client) keeps its old mtime; the snapshot itself is still current.
+      }
       return { skipped: 'unchanged' };
     }
     renameSync(tmp, file);
