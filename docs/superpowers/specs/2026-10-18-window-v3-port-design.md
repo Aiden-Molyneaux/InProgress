@@ -386,7 +386,7 @@ order, after the font packages, in place of `./styles.css`:
 
 ## 4. Shared parts and the lab
 
-*Status: awaiting approval.* Built by #499, after Foundations. Label ui.
+*Status: approved by Aiden, 2026-10-18.* Built by #499, after Foundations. Label ui.
 
 ### What it improves
 
@@ -459,3 +459,75 @@ A specimen page for the parts: Parvati's reference and the builders' check.
 - **Tests:** vitest for each part's pure helpers (TabStrip's keys, Count's rise check), and one e2e test that opens
   `#/lab`, finds every part's heading and walks a TabStrip with the arrow keys.
 - **Review:** Parvati reviews the lab at 1600 and 400 against the mock and §2; Murr reviews the diff.
+
+## 5. Shell: the HUD bar and the footer strip
+
+*Status: awaiting approval.* Built by #500, after the parts. Label ui.
+
+### What it improves
+
+- **One glance answers "does anything need me, anywhere?"** Today a waiting ask in another project shows only as a muted
+  numeral on its tab. The HUD's figures count across every project, and the ask figure takes you to the asks in one
+  click.
+- **A lost connection is impossible to miss.** Today it is an amber line above the canvas. In v3 the HUD's link readout
+  turns alarm and a strip of alarm tape replaces the ruler, without pushing the page down.
+- **The bottom line explains itself.** The activity line keeps its place, and the keys that work right now sit beside it.
+
+### Frame
+
+The window becomes a column: the HUD bar, the ruler, the shell (the rail and the page, §6), the footer strip. The HUD
+and the footer never scroll; the page scrolls inside the shell. Until #501 lands, today's tab row sits between the ruler
+and the page, in v3 tokens.
+
+### The HUD bar
+
+60 px on `--canvas-0`, `--sp-5` side padding; 48 px under 720 px.
+
+| Place | What | Source | Notes |
+|---|---|---|---|
+| left | **INPROGRESS** wordmark: brand face, `--t-h3`, volt | | Clicking it opens the current project's Board. |
+| centre | **`[ASKS] n`**: asks and permission waits across every open project | the project list's `openAsks` and `permissionWaits` (`waitingOn`, `web/src/chrome/tabs.ts:120`) | Volt while above 0. A button: when this project has asks, it moves focus to Needs me; otherwise it opens the first project in rail order that has asks, on its Board. Its title lists the projects and their counts. |
+| centre | **`[LIVE] n`**: sessions working or busy, across every project | `busySessions` | Its title lists the projects with work going on. |
+| centre | **`[READY] n`**, **`[BACKLOG] n`**: this project's | the open project's Board | Shown from 1160 px. |
+| right | **`[LINK] OK`**, or **`[LINK] RECONNECTING`** in alarm | the stream's `connection` (`web/src/useInProgress.ts:24`) | Replaces the mock's `[HOOKS] OK`, which has no source. |
+| right | **the date and a clock**, local time, `HH:MM` in the dot face, the date in mono | the browser clock | The date hides under 1160 px. No seconds: a figure that changes every second draws the eye for nothing. |
+| right | **Find** with the `Ctrl K` KeyHint | | Opens the command bar (§10). Under 720 px, the glyph alone. |
+
+- **Not shown:** the mock's `[SCRIBE] idle` and `[DB] m13`, and "4 sessions today". The window has no source for them,
+  and §0 rules out new reads for ornament.
+- **Under 720 px:** the wordmark, the link readout, the ask figure and Find. Nothing wraps.
+- **Readout figures use the Count's rise rule** (§4): `[ASKS]` blinks once when it rises.
+
+### The ruler and the lost connection
+
+- A Ruler (`hud`) runs under the bar as the page's top edge, replacing Quiet's 3 px gradient hairline.
+- **While the stream is reconnecting**, an alarm Tape takes the ruler's place, and the link readout says
+  `RECONNECTING` with a blinking square. `.ip-banner` goes. When the stream comes back, the ruler returns and the readout
+  reads `OK`.
+- **Before the first load** (the window's own loading state, `web/src/App.tsx:299`), the HUD shows with the link readout
+  and a centred EmptyState saying "Loading…" or "Can't reach the InProgress server, retrying…" in alarm.
+
+### The footer strip
+
+One line on `--canvas-0` with a hairline above, `--sp-3` by `--sp-5` padding, mono `--t-detail-sm`.
+
+- **Left, the activity line**, as today (`web/src/chrome/ActivityStrip.tsx`): `↳ actor · when · what`, the actor and the
+  event in ink, the rest muted; only the event shrinks. A LiveDot leads it while a session in this project is working.
+  "No activity yet" when there is none.
+- **Centre, the keys that work now**, as KeyHints: `Ctrl K` Find always; `[ ]` Projects when there are two or more;
+  `Esc` Close while Details, a menu or the viewer is open. Hidden under 1160 px.
+- **Right, the server line:** `LOCALHOST:4317 · BUILD 8b796d9`, from the page's location and `/api/health`'s build
+  (`web/src/api.ts:18`), with `+DIRTY` when the build says so and the build time in its title. Hidden under 720 px.
+
+### Toasts and empty windows
+
+- The status line (`.ip-status .ip-toast`, `App.tsx:342`) becomes the Toast part, bottom left, above the footer.
+- No projects at all: the page area shows an EmptyState, "No projects yet. A Claude session adds one when it opts in.",
+  in place of `.ip-empty`.
+
+### Tests and review (#500)
+
+- One e2e test for the HUD: with the fixture's asks in two projects, `[ASKS]` shows their sum and opens
+  the first project in rail order with asks; dropping the stream turns the link readout to `RECONNECTING` and shows the alarm tape.
+- The activity strip's existing tests keep passing with their selectors moved to the footer.
+- Parvati reviews the HUD and footer at 1600, 1160, 720 and 400, with the stream open and reconnecting.
