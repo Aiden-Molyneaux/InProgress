@@ -131,9 +131,12 @@ function TabStrip({ strip, tabs, current, onSelect, onMove, menuFor, onMenu }: T
     // So does a narrower window.
     const resize = new ResizeObserver(() => revealCurrent(el));
     resize.observe(el);
-    // And so does a bundled face arriving: the tabs widen under it while the strip, already full, keeps its size.
+    // And so does a bundled face arriving: the tabs widen under it while the strip, already full, keeps its size. Both
+    // faces the strip draws load at first paint, so no later load pulls a strip the wheel moved back to the tab. The
+    // reveal also runs once here, for a face that landed between the layout effect above and this one.
     const fonts = () => revealCurrent(el);
     document.fonts.addEventListener('loadingdone', fonts);
+    fonts();
     // The wheel scrolls the strip sideways. A sideways swipe already does, natively, and Ctrl+wheel still zooms.
     const wheel = (e: WheelEvent) => {
       if (e.ctrlKey || Math.abs(e.deltaY) <= Math.abs(e.deltaX) || el.scrollWidth <= el.clientWidth) return;
