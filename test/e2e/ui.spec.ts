@@ -3065,3 +3065,34 @@ test.describe('Fix round 1', () => {
     expect(snapshot.asks.find((a) => a.id === fresh.ask)?.clearedAt).toBeNull();
   });
 });
+
+test('the parts lab opens on #/lab and walks a TabStrip with the arrow keys', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('/#/lab');
+  const sections = [
+    'Tokens', 'Type ramp', 'Hues', 'Motion', 'Eyebrow', 'Readout', 'Count', 'Chip', 'Button', 'TabStrip', 'Field', 'Menu',
+    'Confirm', 'Tile', 'Frame', 'LiveDot', 'Marker', 'KeyHint', 'Tape', 'Ruler', 'EmptyState', 'ErrorLine', 'Toast', 'ListCursor',
+  ];
+  for (const name of sections) {
+    await expect(page.getByRole('heading', { level: 2, name: new RegExp('^' + name + '$', 'i') })).toBeVisible();
+  }
+  const tabs = page.getByRole('tablist', { name: 'Lab tabs' }).getByRole('tab');
+  const count = await tabs.count();
+  await tabs.first().click();
+  await page.keyboard.press('ArrowRight');
+  await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'true');
+  await expect(tabs.nth(1)).toBeFocused();
+  await page.keyboard.press('End');
+  await expect(tabs.nth(count - 1)).toHaveAttribute('aria-selected', 'true');
+  await expect(tabs.nth(count - 1)).toBeFocused();
+  await page.keyboard.press('Home');
+  await expect(tabs.first()).toHaveAttribute('aria-selected', 'true');
+  await expect(tabs.first()).toBeFocused();
+  await page.keyboard.press('ArrowLeft');
+  await expect(tabs.nth(count - 1)).toHaveAttribute('aria-selected', 'true');
+  await expect(tabs.nth(count - 1)).toBeFocused();
+  // The window itself uses no part: nothing outside the lab carries a p- class.
+  await page.goto('/');
+  await expect(page.locator('.ip-app')).toBeVisible();
+  await expect(page.locator('[class^="p-"], [class*=" p-"]')).toHaveCount(0);
+});
