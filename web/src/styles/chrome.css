@@ -12,7 +12,8 @@
 .ip-hud-asks:focus-visible { outline: 2px solid var(--volt); outline-offset: 2px; }
 /* A rise strobes the figure once, as a Count does. */
 .ip-hud-rise { animation: p-strobe 480ms var(--ease-hard) 1; }
-.ip-hud-right { display: flex; align-items: center; gap: var(--sp-5); }
+/* Stretched to the bar's height, so the Find popover, anchored to .ip-goto, opens under the bar and not over it. */
+.ip-hud-right { align-self: stretch; display: flex; align-items: center; gap: var(--sp-5); }
 /* The link's alarm square blinks with the parts' keyframes: LiveDot is volt, and a lost link is not a live session. */
 .ip-hud-sq { display: inline-block; width: 7px; height: 7px; margin-right: var(--sp-2); background: var(--alarm); animation: p-blink 1.6s var(--ease-hard) infinite; }
 .ip-hud-when { display: flex; align-items: baseline; gap: var(--sp-2); font-family: var(--font-mono); font-stretch: 87.5%; font-size: var(--t-detail-sm); letter-spacing: 0.04em; color: var(--text-muted); font-variant-numeric: slashed-zero tabular-nums; }
@@ -21,7 +22,7 @@
 .ip-hud-edge { flex: none; height: 9px; background: var(--canvas-0); }
 .ip-hud-edge .p-tape { height: 100%; }
 /* Find: 32 px, a bright line, muted ink that turns volt. */
-.ip-goto { position: relative; flex: none; display: flex; align-items: center; }
+.ip-goto { position: relative; flex: none; align-self: stretch; display: flex; align-items: center; }
 .ip-goto-btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); height: 32px; padding: 0 var(--sp-3); border: 1px solid var(--line-bright); color: var(--text-muted); transition: color var(--dur-1) var(--ease-std), border-color var(--dur-1) var(--ease-std); }
 .ip-goto-btn:hover, .ip-goto-btn[aria-expanded='true'], .ip-goto-btn:focus-visible { outline: none; color: var(--volt); border-color: var(--volt); }
 .ip-goto-btn .p-keyhint-label { display: none; }
