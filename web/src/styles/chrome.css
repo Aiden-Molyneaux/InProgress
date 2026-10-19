@@ -5,7 +5,8 @@
 .ip-hud { flex: none; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--sp-5); height: 60px; padding: 0 var(--sp-5); background: var(--canvas-0); white-space: nowrap; }
 .ip-hud-mark { font-family: var(--font-brand); font-stretch: 112.5%; font-weight: var(--w-brand); font-size: var(--t-h3); letter-spacing: 0.08em; line-height: 1; color: var(--volt); text-transform: uppercase; }
 .ip-hud-mark:focus-visible { outline: 2px solid var(--volt); outline-offset: 4px; }
-.ip-hud-figs { display: flex; align-items: center; gap: var(--sp-5); min-width: 0; overflow: hidden; }
+/* Room inside the clip for the ASKS focus ring, given back by the margin so the figures do not move. */
+.ip-hud-figs { display: flex; align-items: center; gap: var(--sp-5); min-width: 0; overflow: hidden; padding: 6px; margin: -6px; }
 .ip-hud-wide { display: flex; align-items: center; gap: var(--sp-5); }
 .ip-hud-asks { display: inline-flex; padding: 4px 0; cursor: pointer; }
 .ip-hud-asks[aria-disabled='true'] { cursor: default; }
