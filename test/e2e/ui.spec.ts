@@ -724,7 +724,7 @@ test('a right-click on a tab opens its menu under it without switching, and Arch
   await items.first().click();
   await expect(menu).toBeHidden();
   await expect(shelfTab).toHaveCount(0);
-  await expect(statusLine(page)).toHaveText(`Archived ${shelfName}. It is under ⋯.`);
+  await expect(statusLine(page)).toHaveText(`Archived ${shelfName}. It is under Archived in the rail.`);
   // The window stays where it was, and focus is on its tab.
   await expect(railRow(page, hereName)).toHaveAttribute('aria-current', 'page');
   await expect(railRow(page, hereName)).toBeFocused();
@@ -751,7 +751,7 @@ test('archiving the open project opens the tab beside it, and focus lands there'
   await expect(railRow(page, names[2])).toBeFocused();
   await expect(page).toHaveURL(hereIs(made[2].slug));
   await expect(page).toHaveTitle(`InProgress · ${names[2]}`);
-  await expect(statusLine(page)).toHaveText(`Archived ${names[1]}. It is under ⋯.`);
+  await expect(statusLine(page)).toHaveText(`Archived ${names[1]}. It is under Archived in the rail.`);
   // The newest project has the last tab, so archiving it opens the one to its left.
   await expect(railRows(page).last()).toHaveAttribute('aria-current', 'page');
   await page.keyboard.press('Shift+F10');
@@ -843,7 +843,7 @@ test('⋯ lists the archived projects with Unarchive and Delete, and Unarchive p
   await expect(archived.getByRole('menuitem', { name: `Delete ${middleName}`, exact: true })).toHaveText('Delete…');
   await archived.getByRole('menuitem', { name: `Unarchive ${middleName}`, exact: true }).click();
   await expect(menu).toBeHidden();
-  await expect(statusLine(page)).toHaveText(`${middleName} is back in the tabs.`);
+  await expect(statusLine(page)).toHaveText(`${middleName} is back in the rail.`);
   await expect(more).toBeFocused();
   // Back between the projects made before and after it, and the window stays where it was.
   await expect(railRow(page, middleName)).toBeVisible();
@@ -884,7 +884,7 @@ test('Delete asks once, the project waits under Recently deleted with its days, 
   await expect(go).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(confirm).toBeHidden();
-  await expect(statusLine(page)).toHaveText(`Deleted ${goneName}. Restore it from ⋯ within 30 days.`);
+  await expect(statusLine(page)).toHaveText(`Deleted ${goneName}. Restore it from Archived in the rail within 30 days.`);
   await expect(more).toBeFocused();
   await expect(page).toHaveURL(hereIs(kept.slug));
   expect(await listedStatus(api, gone.slug)).toBeUndefined();
@@ -898,7 +898,7 @@ test('Delete asks once, the project waits under Recently deleted with its days, 
   await expect(restore).toHaveAccessibleDescription('30 days left');
   await expect(menu.getByRole('menuitem', { name: goneName, exact: true })).toHaveCount(0);
   await restore.click();
-  await expect(statusLine(page)).toHaveText(`Restored ${goneName}. It is under Archived in ⋯.`);
+  await expect(statusLine(page)).toHaveText(`Restored ${goneName}. It is under Archived in the rail.`);
   await expect(more).toBeFocused();
   expect(await listedStatus(api, gone.slug)).toBe('archived');
   await more.click();
@@ -935,7 +935,7 @@ test('⋯ keeps focus when a delete or a restore leaves it one row, and goes whe
     await more.click();
     await menu.getByRole('menuitem', { name: `Delete ${goneName}`, exact: true }).click();
     await page.getByRole('group', { name: `Delete ${goneName}?` }).getByRole('button', { name: 'Delete', exact: true }).click();
-    await expect(statusLine(page)).toHaveText(`Deleted ${goneName}. Restore it from ⋯ within 30 days.`);
+    await expect(statusLine(page)).toHaveText(`Deleted ${goneName}. Restore it from Archived in the rail within 30 days.`);
     await expect(more).toBeFocused();
   };
   // Restored while it is ⋯'s only row, it is under Archived at once: ⋯ never leaves the page (the same element stays),
@@ -945,7 +945,7 @@ test('⋯ keeps focus when a delete or a restore leaves it one row, and goes whe
     await expect(menu.getByRole('menuitem')).toHaveText(['Restore']);
     await page.evaluate(`document.querySelector('.ip-rail-foot button').setAttribute('data-probe', 'kept')`);
     await menu.getByRole('menuitem', { name: `Restore ${goneName}`, exact: true }).click();
-    await expect(statusLine(page)).toHaveText(`Restored ${goneName}. It is under Archived in ⋯.`);
+    await expect(statusLine(page)).toHaveText(`Restored ${goneName}. It is under Archived in the rail.`);
     await expect(more).toBeFocused();
     await expect(more).toHaveAttribute('data-probe', 'kept');
     await page.keyboard.press('ArrowDown');
@@ -974,7 +974,7 @@ test('⋯ keeps focus when a delete or a restore leaves it one row, and goes whe
   // Unarchive empties ⋯: ⋯ goes, and focus lands on the project's tab.
   await more.click();
   await menu.getByRole('menuitem', { name: `Unarchive ${goneName}`, exact: true }).click();
-  await expect(statusLine(page)).toHaveText(`${goneName} is back in the tabs.`);
+  await expect(statusLine(page)).toHaveText(`${goneName} is back in the rail.`);
   await expect(more).toHaveCount(0);
   await expect(railRow(page, goneName)).toBeFocused();
 });
@@ -1007,7 +1007,7 @@ test('deleting the open project from its tab opens the tab before it, and a link
   await expect(railRow(page, prevName)).toHaveAttribute('aria-current', 'page');
   await expect(railRow(page, prevName)).toBeFocused();
   await expect(page).toHaveURL(hereIs(prev.slug));
-  await expect(statusLine(page)).toHaveText(`Deleted ${endName}. Restore it from ⋯ within 30 days.`);
+  await expect(statusLine(page)).toHaveText(`Deleted ${endName}. Restore it from Archived in the rail within 30 days.`);
   // A link to it never paints it: another project opens.
   await page.goto(`/#/p/${end.slug}`);
   await expect(page).not.toHaveURL(hereIs(end.slug));
@@ -1053,7 +1053,7 @@ test('a delete slow to answer never makes the window ask for the project, still 
   await more.click();
   await menu.getByRole('menuitem', { name: `Delete ${goneName}`, exact: true }).click();
   await page.getByRole('group', { name: `Delete ${goneName}?` }).getByRole('button', { name: 'Delete', exact: true }).click();
-  await expect(statusLine(page)).toHaveText(`Deleted ${goneName}. Restore it from ⋯ within 30 days.`);
+  await expect(statusLine(page)).toHaveText(`Deleted ${goneName}. Restore it from Archived in the rail within 30 days.`);
   // The tab beside it, not the list's fallback.
   await expect(page).toHaveURL(hereIs(kept.slug));
   await expect(page).toHaveTitle(`InProgress · ${keptName}`);
@@ -1061,7 +1061,7 @@ test('a delete slow to answer never makes the window ask for the project, still 
   // Restored, it opens as any archived project does.
   await more.click();
   await menu.getByRole('menuitem', { name: `Restore ${goneName}`, exact: true }).click();
-  await expect(statusLine(page)).toHaveText(`Restored ${goneName}. It is under Archived in ⋯.`);
+  await expect(statusLine(page)).toHaveText(`Restored ${goneName}. It is under Archived in the rail.`);
   await more.click();
   await menu.getByRole('menuitem', { name: goneName, exact: true }).click();
   await expect(page).toHaveTitle(`InProgress · ${goneName}`);
@@ -1105,7 +1105,7 @@ test("an active tab's Delete… says how many sessions it stops tracking, and de
   await expect(go).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(busyTab).toHaveCount(0);
-  await expect(statusLine(page)).toHaveText(`Deleted ${busyName}. Restore it from ⋯ within 30 days.`);
+  await expect(statusLine(page)).toHaveText(`Deleted ${busyName}. Restore it from Archived in the rail within 30 days.`);
   // Not the open project: the window stays where it was, and focus is on its tab.
   await expect(railRow(page, hereName)).toHaveAttribute('aria-current', 'page');
   await expect(railRow(page, hereName)).toBeFocused();
@@ -1114,7 +1114,7 @@ test("an active tab's Delete… says how many sessions it stops tracking, and de
   // Restore brings it back under Archived, its session no longer tracked.
   await moreButton(page).click();
   await moreMenu(page).getByRole('menuitem', { name: `Restore ${busyName}`, exact: true }).click();
-  await expect(statusLine(page)).toHaveText(`Restored ${busyName}. It is under Archived in ⋯.`);
+  await expect(statusLine(page)).toHaveText(`Restored ${busyName}. It is under Archived in the rail.`);
   await expect(busyTab).toHaveCount(0);
   expect(await listed(api, busy.slug)).toMatchObject({ status: 'archived', activeSessions: 0 });
 });
@@ -1144,7 +1144,7 @@ test('deleting the open active project from its tab opens the tab beside it with
   await expect(railRow(page, names[2])).toBeFocused();
   await expect(page).toHaveURL(hereIs(made[2].slug));
   await expect(page).toHaveTitle(`InProgress · ${names[2]}`);
-  await expect(statusLine(page)).toHaveText(`Deleted ${names[1]}. Restore it from ⋯ within 30 days.`);
+  await expect(statusLine(page)).toHaveText(`Deleted ${names[1]}. Restore it from Archived in the rail within 30 days.`);
   expect(await listed(api, made[1].slug)).toBeUndefined();
   // The newest project has the last tab, so deleting it opens the one to its left.
   await expect(railRows(page).last()).toHaveAttribute('aria-current', 'page');
@@ -1160,12 +1160,12 @@ test('deleting the open active project from its tab opens the tab beside it with
   const more = moreButton(page);
   await more.click();
   await moreMenu(page).getByRole('menuitem', { name: `Restore ${names[1]}`, exact: true }).click();
-  await expect(statusLine(page)).toHaveText(`Restored ${names[1]}. It is under Archived in ⋯.`);
+  await expect(statusLine(page)).toHaveText(`Restored ${names[1]}. It is under Archived in the rail.`);
   await expect(middle).toHaveCount(0);
   expect((await listed(api, made[1].slug))?.status).toBe('archived');
   await more.click();
   await moreMenu(page).getByRole('menuitem', { name: `Unarchive ${names[1]}`, exact: true }).click();
-  await expect(statusLine(page)).toHaveText(`${names[1]} is back in the tabs.`);
+  await expect(statusLine(page)).toHaveText(`${names[1]} is back in the rail.`);
   await expect(middle).toBeVisible();
   const titles = await railTitles(page);
   expect(titles.indexOf(names[1])).toBe(titles.indexOf(names[0]) + 1);
