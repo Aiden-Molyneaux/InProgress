@@ -83,8 +83,6 @@
 .ip-viewer-body { flex: 1; width: 100%; max-width: 900px; margin: 0 auto; padding: 16px 20px; overflow: auto; outline: none; }
 .ip-viewer-body:focus-visible { outline: 2px solid var(--amber); outline-offset: -2px; }
 .ip-toast { position: fixed; bottom: 16px; left: 50%; z-index: 40; transform: translateX(-50%); padding: 4px 12px; background: var(--text); color: var(--bg); font-size: var(--fs-m); }
-/* The window's status line (an archive, a delete and the like), lifted clear of the 32 px activity strip. */
-.ip-status .ip-toast { bottom: 48px; width: max-content; max-width: calc(100vw - 32px); }
 
 /* Details: asks, handoff and marks, and the add-a-step foot (spec 2.7). */
 .ip-dasks { list-style: none; margin: 0; padding: 0; }

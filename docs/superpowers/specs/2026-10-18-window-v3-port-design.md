@@ -512,6 +512,9 @@ and the page, in v3 tokens.
 - **While the stream is reconnecting**, an alarm Tape takes the ruler's place, and the link readout says
   `RECONNECTING` with a blinking square. `.ip-banner` goes. When the stream comes back, the ruler returns and the readout
   reads `OK`.
+- **At narrow widths while reconnecting** (approved by Aiden at #500's review, 2026-10-19): under 720 px the word
+  `RECONNECTING` is hidden visually, still read by a screen reader, so the alarm square and the tape carry it and `[ASKS]`
+  keeps its room; under 1160 px `[LIVE]` gives way while the link is down.
 - **Before the first load** (the window's own loading state, `web/src/App.tsx:299`), the HUD shows with the link readout
   and a centred EmptyState saying "Loading…" or "Can't reach the InProgress server, retrying…" in alarm.
 
