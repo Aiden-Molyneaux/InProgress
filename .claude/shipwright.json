@@ -83,11 +83,23 @@
     "starter-kit/scripts/context-nudge.mjs": {
       "local": "scripts/context-nudge.mjs",
       "base": "ad0a7c1"
+    },
+    "skills/retro/SKILL.md": {
+      "local": ".claude/skills/retro/SKILL.md",
+      "base": "ad0a7c1",
+      "fills": {
+        "RETRO_TRIGGERS": "InProgress adds none. #490 (not built yet) will put a Retro due alert on the Board that counts repeated keys: it reports trigger 1 and adds no trigger of its own.",
+        "PILOT_LOG": "the routing pilot, #291 (closed 2026-10-10): its step log, and its result, `~/.inprogress/resources/inprogress/2026-10-10-routing-pilot-result.md`, which prices its seven sessions against the baseline (r105 on #289) and names each by session id. A later pilot keeps its window, session ids and targets on its own step, and that step's log is its pilot log. With no pilot in the window, none.",
+        "COST_REPORT": "`node scripts/session-cost.mjs --by=session --sessions=<the window's session id prefixes>`, from the main checkout or any worktree (`--since=<date>` instead of `--sessions` for everything in the window). It reads every `~/.claude/projects/C--personal-InProgress*` transcript and prices the requests at API list rates, for comparing sessions with each other, not for billing. The baseline is r105 on #289.",
+        "TRANSCRIPTS": "`~/.claude/projects/C--personal-InProgress*/<session id>.jsonl`, one folder for the main checkout and one per worktree (`C--personal-InProgress--claude-worktrees-<topic>`), with each session's subagent transcripts under `<session id>/subagents/`",
+        "WORKFLOW_FILES": "Shipwright is `C:/personal/shipwright`. `.claude/shipwright.json` maps each adopted file to its template and records the commit it was last synced from; its `skip` list names the templates InProgress has not adopted.\n   - `.claude/skills/sigmund/SKILL.md`: `skills/sigmund/SKILL.md`\n   - `.claude/skills/murr/SKILL.md`: `skills/murr/SKILL.md`\n   - `.claude/skills/parvati/SKILL.md`: `skills/parvati/SKILL.md`\n   - `.claude/skills/doctor-nick/SKILL.md`: `skills/doctor-nick/SKILL.md`\n   - `.claude/skills/retro/SKILL.md`: `skills/retro/SKILL.md`\n   - `.claude/agents/sev.md`: `agents/sev.md`\n   - `.claude/agents/moh.md`: `agents/moh.md`\n   - `.claude/agents/murr.md`: `agents/murr.md`\n   - `.claude/agents/parvati.md`: `agents/parvati-isolated.md`\n   - `scripts/context-nudge.mjs` (the context nudge): `starter-kit/scripts/context-nudge.mjs`\n   - `.claude/settings.json` (the autocompact window, the nudge hook, the deny list): project-only; the manifest skips `starter-kit/.claude/settings.json`, the nearest template to grep\n   - `CLAUDE.md` (key `CLAUDE.md#House rules`): project-only; `starter-kit/CLAUDE.md` is the nearest template to grep\n   - `docs/known-issues.md` (Doctor Nick's log): project-only\n   - the check commands: the `package.json` scripts (key `package.json#<script>`, such as `package.json#test:e2e`), `scripts/build-to.mjs`, `scripts/deploy.mjs`, `test/e2e/start-server.mjs`, and the repo checks under `test/repo/` (`no-em-dash`, `roster`, `agents`, `settings`): project-only\n   - the installed kit every tracked session reads: `claude/agents/inprogress-scribe.md`, `claude/skills/inprogress/SKILL.md`, `claude/skills/mip-orc/SKILL.md`, and the briefing the hooks inject (`src/server/briefing.ts`, `src/hooks/`): project-only, and product code, so a fill diff there is a change on Sigmund's risk list",
+        "PROPOSALS_HOME": "`~/.inprogress/resources/inprogress/<yyyy-mm-dd>-retro.md`, one file per retro, attached through the scribe as a resource on the retro's own step (a new step under InProgress, added when the retro starts). The newest `*-retro.md` there opens the next window.",
+        "APPROVAL": "one `review` ask through the scribe on the retro's step, `ask on #<id>: review, <n> proposals in <the proposal file>`, with the proposals numbered so Aiden can approve, decline or hold each by number. The ruling lines go the same way, as `log on #<the retro's step>: workflow ruling [<key>] ...`, so the next retro reads them there. The retro session stops at the ask; Aiden's answer turns each approved proposal into a step of its own (a fill diff: an InProgress step for Sigmund; a template diff: a Shipwright step)."
+      }
     }
   },
   "skip": [
     "agents/parvati-shared.md",
-    "skills/retro/SKILL.md",
     "starter-kit/.claude/settings.json"
   ]
 }
