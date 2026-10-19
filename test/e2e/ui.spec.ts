@@ -1082,7 +1082,7 @@ test("an active tab's Delete… says how many sessions it stops tracking, and de
   const note = confirm.getByText('Stops tracking 1 session', { exact: true });
   await expect(note).toBeVisible();
   await expect(note).toHaveCSS('color', await tokenColour(page, '--muted'));
-  await expect(note).toHaveCSS('font-size', '11px');
+  await expect(note).toHaveCSS('font-size', '12px');
   await expect(go).toBeFocused();
   // Escape goes back to the menu, on Delete….
   await page.keyboard.press('Escape');
@@ -1196,8 +1196,8 @@ test('Rename… turns a tab menu into a field: Escape and leaving cancel, Enter 
   expect(await field.evaluate((el: { selectionStart: number | null; selectionEnd: number | null }) => [el.selectionStart, el.selectionEnd])).toEqual([0, oldName.length]);
   await expect(page.locator('.ip-tab-menu')).toBeVisible();
   await expect(page.locator('.ip-tab-menu')).not.toHaveAttribute('role', /./);
-  // Quiet's look: an M line in ink on the panel, inside a hairline.
-  await expect(field).toHaveCSS('font-size', '12.5px');
+  // v3's look: a body line in ink on the panel, inside a line.
+  await expect(field).toHaveCSS('font-size', '15px');
   await expect(field).toHaveCSS('color', await tokenColour(page, '--text'));
   await expect(field).toHaveCSS('border-top-color', await tokenColour(page, '--border'));
   // Every key typed there stays there: ] 1 f n would switch tabs or move the camera, Home and End would leave the field.
@@ -1290,48 +1290,55 @@ test("a scribe's archive of the open project keeps it open as the end tab", asyn
   await expect(statusLine(page)).toHaveText('');
 });
 
-test('the menus and the confirm wear Quiet, by day and by night', async ({ page, api }) => {
+test('the window is dark whatever the OS theme, and the menus and the confirm wear v3', async ({ page, api }) => {
   const keptName = unique('Look kept');
   const shelfName = unique('Look shelf');
   const kept = await bare(api, keptName);
   await archiveByScribe(api, (await bare(api, shelfName)).slug);
   await page.goto(`/#/p/${kept.slug}`);
   await expect(tabFor(page, keptName)).toHaveAttribute('aria-selected', 'true');
+  const seen: string[][] = [];
   for (const scheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme: scheme });
-    const [float, border, text, text2, muted, red] = await Promise.all(['--float', '--border', '--text', '--text-2', '--muted', '--red'].map((t) => tokenColour(page, t)));
+    const colours = await Promise.all(['--float', '--border', '--text', '--text-2', '--muted', '--red', '--bg'].map((t) => tokenColour(page, t)));
+    seen.push(colours);
+    const [float, border, text, text2, muted, red] = colours;
+    // One palette: v3's canvas and text, and the browser's own controls drawn dark.
+    await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(17, 17, 17)');
+    await expect(page.locator('body')).toHaveCSS('color', 'rgb(242, 242, 242)');
+    await expect(page.locator('html')).toHaveCSS('color-scheme', 'dark');
     const surface = async (l: Locator) => {
       await expect(l).toHaveCSS('background-color', float);
       await expect(l).toHaveCSS('border-top-width', '1px');
       await expect(l).toHaveCSS('border-top-color', border);
-      await expect(l).toHaveCSS('border-radius', '8px');
+      await expect(l).toHaveCSS('border-radius', '0px');
       await expect(l).toHaveCSS('box-shadow', 'none');
     };
     // A tab's menu, and its tab in ink.
     await tabFor(page, keptName).click({ button: 'right' });
     const menu = tabMenu(page, keptName);
     await surface(menu);
-    await expect(menu.getByRole('menuitem', { name: 'Archive', exact: true })).toHaveCSS('font-size', '12.5px');
-    await expect(menu.getByRole('menuitem', { name: 'Delete…', exact: true })).toHaveCSS('font-size', '12.5px');
+    await expect(menu.getByRole('menuitem', { name: 'Archive', exact: true })).toHaveCSS('font-size', '15px');
+    await expect(menu.getByRole('menuitem', { name: 'Delete…', exact: true })).toHaveCSS('font-size', '15px');
     await expect(tabFor(page, keptName)).toHaveCSS('color', text);
     await page.keyboard.press('Escape');
-    // ⋯: heads S at 900 in muted ink, rows M, actions S.
+    // ⋯: heads S at 800 in muted ink, rows M, actions S.
     await moreButton(page).click();
     const more = moreMenu(page);
     await surface(more);
     const head = more.locator('.ip-label').first();
-    await expect(head).toHaveCSS('font-size', '11px');
-    await expect(head).toHaveCSS('font-weight', '900');
+    await expect(head).toHaveCSS('font-size', '12px');
+    await expect(head).toHaveCSS('font-weight', '800');
     await expect(head).toHaveCSS('color', muted);
-    await expect(more.getByRole('menuitem', { name: shelfName, exact: true })).toHaveCSS('font-size', '12.5px');
+    await expect(more.getByRole('menuitem', { name: shelfName, exact: true })).toHaveCSS('font-size', '15px');
     const ask = more.getByRole('menuitem', { name: `Delete ${shelfName}`, exact: true });
-    await expect(ask).toHaveCSS('font-size', '11px');
-    // The confirm: the same surface, its question M at 900, and Delete in ink with an ink border, never red.
+    await expect(ask).toHaveCSS('font-size', '12px');
+    // The confirm: the same surface, its question M at 800, and Delete in ink with an ink border, never red.
     await ask.click();
     const confirm = page.getByRole('dialog', { name: `Delete ${shelfName}?` });
     await surface(confirm);
-    await expect(confirm.locator('b')).toHaveCSS('font-weight', '900');
-    await expect(confirm.locator('b')).toHaveCSS('font-size', '12.5px');
+    await expect(confirm.locator('b')).toHaveCSS('font-weight', '800');
+    await expect(confirm.locator('b')).toHaveCSS('font-size', '15px');
     const go = confirm.getByRole('button', { name: 'Delete', exact: true });
     await expect(go).toHaveCSS('color', text2);
     await expect(go).toHaveCSS('border-top-color', text);
@@ -1340,6 +1347,7 @@ test('the menus and the confirm wear Quiet, by day and by night', async ({ page,
     await page.keyboard.press('Escape');
     await expect(more).toBeHidden();
   }
+  expect(seen[1], 'a dark OS theme gives the colours a light one does').toEqual(seen[0]);
 });
 
 test("a tab's menu stays inside a narrow window, and a strip scroll closes it", async ({ page, api }) => {
@@ -1443,21 +1451,21 @@ test.describe('Live work', () => {
     await expect(details.locator('.ip-label')).toHaveText(['Working tasks', 'Subagents', 'Resources']);
     // Each entry sits on its own soft row, and the heads read in --text-2, so sections and entries read apart.
     for (const entry of [details.locator('.ip-wt').first(), details.locator('.ip-dagent'), details.locator('.ip-res')]) {
-      await expect(entry).toHaveCSS('background-color', 'rgba(15, 23, 42, 0.05)');
+      await expect(entry).toHaveCSS('background-color', 'rgb(30, 30, 30)');
     }
-    await expect(details.locator('.ip-label').first()).toHaveCSS('color', 'rgb(30, 41, 59)');
+    await expect(details.locator('.ip-label').first()).toHaveCSS('color', 'rgb(242, 242, 242)');
     // A resource's row deepens on hover and its title takes full ink.
     await details.locator('.ip-res').hover();
-    await expect(details.locator('.ip-res')).toHaveCSS('background-color', 'rgba(15, 23, 42, 0.08)');
-    await expect(details.locator('.ip-res b')).toHaveCSS('color', 'rgb(15, 23, 42)');
+    await expect(details.locator('.ip-res')).toHaveCSS('background-color', 'rgb(40, 40, 40)');
+    await expect(details.locator('.ip-res b')).toHaveCSS('color', 'rgb(242, 242, 242)');
     // Anchored: the next row's "after Upload the key" names it too.
     await expect(details.locator('.ip-wt', { hasText: /^◐ Upload the key/ })).toHaveText('◐ Upload the key · E2E session');
     await expect(details.locator('.ip-wt', { hasText: 'Check the release track' })).toHaveText('○ Check the release track · E2E session · after Upload the key');
     await expect(details.locator('.ip-wt', { hasText: 'Collect the screenshots' })).toHaveText('○ Collect the screenshots · Draft the store notes');
     await expect(details.locator('.ip-dagent')).toHaveText(new RegExp(`^Draft the store notes · sonnet · ${RUNNING}$`));
-    // Quiet: the rows read as the canvas's. ◐ in the active ink and still.
+    // The rows read as the canvas's. ◐ in volt and still.
     const upload = details.locator('.ip-wt', { hasText: /^◐ Upload the key/ });
-    await expect(upload.locator('.ip-work-mark')).toHaveCSS('color', 'rgb(194, 65, 12)');
+    await expect(upload.locator('.ip-work-mark')).toHaveCSS('color', 'rgb(192, 254, 4)');
     await expect(upload.locator('.ip-work-mark')).toHaveCSS('animation-name', 'none');
   });
 
@@ -1533,9 +1541,9 @@ test.describe('Go to', () => {
     await expect(panel).toHaveCSS('background-color', await tokenColour(page, '--float'));
     await expect(panel).toHaveCSS('border-top-width', '1px');
     await expect(panel).toHaveCSS('border-top-color', await tokenColour(page, '--border'));
-    await expect(panel).toHaveCSS('border-radius', '8px');
+    await expect(panel).toHaveCSS('border-radius', '0px');
     await expect(panel).toHaveCSS('box-shadow', 'none');
-    await expect(field(page)).toHaveCSS('font-size', '12.5px');
+    await expect(field(page)).toHaveCSS('font-size', '15px');
     const box = (await panel.boundingBox())!;
     expect(box.y).toBeGreaterThanOrEqual(bar.y + bar.height);
     expect(box.x).toBeGreaterThanOrEqual(0);
@@ -1917,7 +1925,7 @@ test.describe('Board', () => {
     await expect(wait.locator('.ip-block .ip-code')).toHaveText('npm run build');
     await expect(wait.getByRole('button', { name: 'Open session to allow' })).toBeVisible();
     await expect(wait.locator('.ip-sess-name')).toHaveText('E2E session');
-    await expect(wait).toHaveCSS('background-color', 'rgba(251, 191, 36, 0.18)');
+    await expect(wait).toHaveCSS('background-color', 'rgba(192, 254, 4, 0.06)');
     // A permission wait has no buttons of its own to clear it; the step shows in Needs me only.
     await expect(wait.getByRole('button', { name: /Answer|Clear/ })).toHaveCount(0);
     await expect(nowRow(page, 'Play app signing')).toHaveCount(0);
@@ -2239,7 +2247,7 @@ test.describe('Board', () => {
     const row = nowRow(page, 'Mine to finish');
     await expect(row.locator('.ip-st')).toHaveText('Unattended');
     await expect(row.locator('.ip-sess')).toHaveText('No session is on it');
-    await expect(row.locator('.ip-you')).toHaveCSS('color', 'rgb(146, 64, 14)');
+    await expect(row.locator('.ip-you')).toHaveCSS('color', 'rgb(192, 254, 4)');
   });
 
   test('a label is a glyph and its word in muted ink on the row, and Details names it in its meta line; its log entries wear Quiet', async ({ page, api, fresh }) => {
@@ -2249,7 +2257,7 @@ test.describe('Board', () => {
     const chip = row.getByRole('img', { name: 'ui' });
     await expect(chip).toHaveText('⧉ ui');
     await expect(chip).toHaveAttribute('title', 'ui');
-    await expect(chip).toHaveCSS('color', 'rgb(71, 85, 105)');
+    await expect(chip).toHaveCSS('color', 'rgb(143, 143, 143)');
     await expect(chip).toHaveCSS('font-variant-emoji', 'text');
     await row.getByRole('button', { name: 'Play app signing', exact: true }).click();
     // Beside kind and status: "active task · ⧉ ui · Claude".
@@ -2259,14 +2267,14 @@ test.describe('Board', () => {
     await expect(meta.locator('.ip-glyph')).toHaveCSS('font-variant-emoji', 'text');
     await expect(meta.locator('.ip-marker.m-active')).toHaveCount(1);
     await expect(meta.locator('.ip-pill')).toHaveCount(0);
-    await expect(meta).toHaveCSS('font-size', '11px');
-    await expect(meta).toHaveCSS('color', 'rgb(71, 85, 105)');
-    // The log: the time in DM Mono, the text in ink, the session muted and upright. The entry arrives live.
+    await expect(meta).toHaveCSS('font-size', '12px');
+    await expect(meta).toHaveCSS('color', 'rgb(143, 143, 143)');
+    // The log: the time in Martian Mono, the text in ink, the session muted and upright. The entry arrives live.
     await write(api, fresh.session, 'post', `/api/nodes/${fresh.ids['Play app signing']}/log`, { text: 'Uploaded the key', sessionId: fresh.session });
     const entry = page.getByRole('complementary').locator('.ip-log li');
     await expect(entry).toHaveText('just now · Uploaded the key · E2E session');
-    await expect(entry.locator('.ip-log-time')).toHaveCSS('font-family', /DM Mono/);
-    await expect(entry.locator('.ip-log-text')).toHaveCSS('color', 'rgb(30, 41, 59)');
+    await expect(entry.locator('.ip-log-time')).toHaveCSS('font-family', /Martian Mono/);
+    await expect(entry.locator('.ip-log-text')).toHaveCSS('color', 'rgb(242, 242, 242)');
     await expect(entry.locator('i')).toHaveCount(0);
   });
 
@@ -2280,15 +2288,15 @@ test.describe('Board', () => {
     await expect(details.getByRole('button', { name: 'Copied' })).toBeVisible();
     // String form: the root tsconfig has no DOM lib, so `navigator` must not appear in test code.
     expect(await page.evaluate<string>('navigator.clipboard.readText()')).toBe(`#${id} Run signing tests`);
-    // Quiet: an opaque sheet with an 8 px top radius, the title in L ink, 24 px hairline buttons.
-    await expect(details).toHaveCSS('background-color', 'rgb(255, 255, 255)');
-    await expect(details).toHaveCSS('border-top-left-radius', '8px');
+    // v3: an opaque square sheet, the title in L ink, 24 px line buttons.
+    await expect(details).toHaveCSS('background-color', 'rgb(17, 17, 17)');
+    await expect(details).toHaveCSS('border-top-left-radius', '0px');
     const title = details.locator('header b');
-    await expect(title).toHaveCSS('font-size', '15px');
-    await expect(title).toHaveCSS('font-weight', '900');
-    await expect(title).toHaveCSS('color', 'rgb(15, 23, 42)');
+    await expect(title).toHaveCSS('font-size', '16px');
+    await expect(title).toHaveCSS('font-weight', '800');
+    await expect(title).toHaveCSS('color', 'rgb(242, 242, 242)');
     await expect(details.getByRole('button', { name: 'Close' })).toHaveCSS('height', '24px');
-    // Its steps draw the marker: a check when done, a still orange dot when active, the needs-you mark and YOU.
+    // Its steps draw the marker: a check when done, a still volt square when active, the needs-you mark and YOU.
     await details.getByRole('button', { name: /2 Android signing/ }).click();
     await expect(details).toContainText(`#${demo.ids['2 Android signing']} 2 Android signing`);
     const steps = details.locator('.ip-kids li');
@@ -2298,15 +2306,15 @@ test.describe('Board', () => {
     expect(await page.evaluate<string>(`getComputedStyle(document.querySelector('.ip-kids .ip-marker.m-done'), '::before').content`)).toMatch(/^"✓"/);
     await expect(steps.nth(0).getByRole('button')).toHaveAccessibleName(`#${demo.ids['Upload keystore']} Upload keystore`);
     const active = steps.nth(1).locator('.ip-marker.m-active');
-    await expect(active).toHaveCSS('background-color', 'rgb(194, 65, 12)');
+    await expect(active).toHaveCSS('background-color', 'rgb(192, 254, 4)');
     await expect(active).toHaveCSS('animation-name', 'none');
     await expect(steps.nth(2).locator('.ip-marker.m-you')).toHaveCount(1);
-    // Its YOU is the tag: amber ink on the amber tint, 18 px tall, S at 900.
+    // Its YOU is the tag: volt on the volt wash, 18 px tall, S at 800.
     const you = steps.nth(2).locator('.ip-you');
-    await expect(you).toHaveCSS('color', 'rgb(146, 64, 14)');
-    await expect(you).toHaveCSS('background-color', 'rgba(251, 191, 36, 0.18)');
+    await expect(you).toHaveCSS('color', 'rgb(192, 254, 4)');
+    await expect(you).toHaveCSS('background-color', 'rgba(192, 254, 4, 0.06)');
     await expect(you).toHaveCSS('height', '18px');
-    await expect(you).toHaveCSS('font-weight', '900');
+    await expect(you).toHaveCSS('font-weight', '800');
   });
 
   test('the Backlog preview shows the picked phase and opens the full view', async ({ page, api, fresh }) => {

@@ -1,9 +1,15 @@
-/* Base: the reset, the page, bare buttons, .muted, the pulse keyframes and reduced motion. */
+/* Base: the reset, the page, square corners, focus, mono numerals, bare buttons, .muted, the pulse and reduced motion. */
 @layer base {
-* { box-sizing: border-box; }
+*, *::before, *::after { box-sizing: border-box; border-radius: 0; }
 html, body, #root { height: 100%; margin: 0; }
-/* body keeps painting --bg: the night --bar only reads over it. */
-body { font: 500 12.5px/1.4 var(--font-sans); font-variant-emoji: text; background: var(--bg); color: var(--text); }
+* { scrollbar-width: thin; scrollbar-color: var(--canvas-4) transparent; }
+body { font-family: var(--font-body); font-size: var(--t-body); font-weight: var(--w-body); line-height: 1.45; font-variant-emoji: text; background: var(--canvas-1); color: var(--text); }
+::selection { background: var(--volt); color: var(--volt-ink); }
+/* The focus ring: 2 px volt on every canvas. A surface's own outline rule keeps its offset. */
+:focus-visible { outline: 2px solid var(--volt); }
+/* Ids, ages, counts and times line up: every mono use, set here once. The class list shrinks as surfaces move to parts. */
+:where(code, kbd, samp, pre, .ip-time, .ip-code, .ip-sid, .ip-cmd, .ip-kin-count, .ip-tab-count, .ip-mi-left, .ip-act-when,
+  .ip-donelist-when, .ip-res .sub, .ip-log-time, .ip-frac) { font-variant-numeric: slashed-zero tabular-nums; }
 button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
 .muted { color: var(--muted); }
 /* The one pulse: the tab dot, an active marker on a working card and an in-progress task's mark. */

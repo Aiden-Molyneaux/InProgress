@@ -12,7 +12,6 @@
   width: 8px;
   height: 8px;
   border: 0;
-  border-radius: 50%;
   background: transparent;
   color: var(--muted);
   font-size: var(--fs-s);
@@ -30,7 +29,7 @@
    names. The plain content line is the fallback for an engine without that syntax. */
 .ip-marker.m-done { width: 9px; height: auto; }
 .ip-marker.m-done::before { content: '✓'; content: '✓' / ''; }
-/* A question: a 13 px muted disc with its ? in the ground colour, whatever its status. A done question keeps the ?. */
+/* A question: a 13 px muted square with its ? in the ground colour, whatever its status. A done question keeps the ?. */
 .ip-marker.q {
   width: 13px;
   height: 13px;
@@ -44,7 +43,7 @@
 .ip-marker.q::before { content: '?'; content: '?' / ''; }
 /* Paused: an active step nobody is on. A hollow sky ring; a question's ? takes the sky. */
 .ip-marker.m-paused { width: 9px; height: 9px; border: 1.5px solid var(--sky); background: transparent; color: var(--sky); }
-/* Needs you: an amber dot, whatever the status; a question's disc turns amber and keeps its ? in the ground colour. */
+/* Needs you: an --amber square, whatever the status; a question's square turns --amber and keeps its ? in the ground colour. */
 .ip-marker.m-you { width: 8px; height: 8px; border: 0; background: var(--amber); }
 .ip-marker.q.m-paused, .ip-marker.q.m-you { width: 13px; height: 13px; }
 /* On a working card an active marker pulses. */

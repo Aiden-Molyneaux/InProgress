@@ -1,0 +1,25 @@
+/* The three faces, latin only (spec 2.2). Vite emits each file next to the app, so the window never fetches a font from
+   the network and the CSP is unchanged. The packages' own sheets declare every subset; these declare latin alone. */
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 800;
+  font-stretch: 100% 125%;
+  src: url('@fontsource-variable/archivo/files/archivo-latin-wdth-normal.woff2') format('woff2-variations');
+}
+@font-face {
+  font-family: 'Martian Mono';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 700;
+  font-stretch: 75% 112.5%;
+  src: url('@fontsource-variable/martian-mono/files/martian-mono-latin-wdth-normal.woff2') format('woff2-variations');
+}
+@font-face {
+  font-family: 'Doto';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 800;
+  src: url('@fontsource/doto/files/doto-latin-800-normal.woff2') format('woff2');
+}
