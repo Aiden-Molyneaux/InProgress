@@ -326,7 +326,7 @@ viewer 30, toast 40) move onto these.
 
 ## 3. Sheet split
 
-*Status: awaiting approval.* Built by #497, the first build step. Label refactor: no visual change.
+*Status: approved by Aiden, 2026-10-18.* Built by #497, the first build step. Label refactor: no visual change.
 
 ### What it improves
 
@@ -381,5 +381,81 @@ order, after the font packages, in place of `./styles.css`:
 ### Not in this step
 
 - No `@import` chains: Vite's handling of `@import ... layer()` is not relied on, since each file declares its own layer.
-- No CSS modules. The window keeps global `ip-*` classes; the parts in #499 follow the same naming.
+- No CSS modules. The window keeps global `ip-*` classes; the parts in #499 are global classes too (§4).
 - No dead-rule cleanup. Unused rules go when their surface is ported.
+
+## 4. Shared parts and the lab
+
+*Status: awaiting approval.* Built by #499, after Foundations. Label ui.
+
+### What it improves
+
+Today each surface draws its own versions of the same thing: three chip looks (`.ip-st`, `.ip-chip`, `.ip-mark`), four
+field looks (`.ip-answer`, `.ip-quick-add`, `.ip-rename`, `.ip-park-field`), two button looks and a menu row styled per
+menu. The parts below are built once, in every state, so each surface step assembles them rather than redrawing them,
+and Parvati has one place to check a state against.
+
+### Where they live
+
+- **Components** in `web/src/parts/`, one `<Name>.tsx` each. **Styles** in `web/src/styles/parts.css`, in the `parts`
+  layer (§3). Global classes, no CSS modules.
+- **Class prefix `p-`** (`.p-chip`, `.p-tile`), so a part never collides with a surface's `ip-*` class while both exist
+  (`.ip-chip` and `.ip-btn` already do). Variants are attributes: `.p-chip[data-tone="needs"]`.
+- **Keyboard logic is a pure function** beside its part (as `menuStep` is in `web/src/chrome/menu.ts`), so vitest covers
+  it without a DOM.
+- **Nothing on screen changes in this step.** The parts appear only in the lab until each surface step adopts them.
+
+### The parts
+
+Every interactive part has these states unless its row says otherwise: hover, `:focus-visible` (a 2 px volt outline,
+or a volt border plus the `--volt-soft` ring on boxed controls), pressed (a 1 px drop) and disabled (`opacity: .45`, no
+hover).
+
+| Part | What it is | Variants and props | Its own states | Used by |
+|---|---|---|---|---|
+| **Eyebrow** | a glyph and a label above a head: `[!] NEEDS ME` | glyph (`//`, `[+]`, `[!]`, `>>`, `[◈]`, `[✓]`), glyph tone (volt, dim) | | every head |
+| **Readout** | `[KEY] value`: a boxed micro key, a mono value | value tone (text, volt, alarm); the dot face for clocks | a title that says what the figure counts | HUD, rail foot, Details meta |
+| **Count** | a Doto figure | size (h1, h3), tone (muted, text, volt) | blinks once when it rises, the moment something new arrives; static under reduced motion | column heads, view titles |
+| **Chip** | a boxed micro label | tone: `needs` (volt fill), `live` (volt line and a blinking square), `ready` (bright line), `blocked` (alarm), `parked` (dashed, dim), `quiet` (idle, backlog; unattended dashed), `label` (glyph and word, no box), `count` | removable (an × button) when it is a filter | tiles, rows, Details, filters |
+| **Button** | a command | `primary` (volt fill), `outline` (the default), `ghost`, `danger` (alarm line, alarm fill on hover); sizes `sm` 26 px and `md` 32 px; an optional glyph after the label (`›`, `↗`) | busy (label kept, a blinking square before it, not clickable) | everywhere |
+| **TabStrip** | boxed labels split by hairlines, the active one volt-filled, each with an optional count | `tabs` (`role="tablist"`; arrows move and select; Home, End) or `segmented` (`aria-pressed` buttons, for a sort or a filter) | overflows sideways with no scrollbar and keeps the active tab in view | Backlog preview, Backlog view, All done |
+| **Field** | a text input, or a textarea that grows | size `sm`, `md`; a label (an Eyebrow) or an `aria-label`; an inline hint | invalid (alarm border, the reason under it in alarm); busy (read-only, dimmed) | answer, quick-add, rename, park, filter, the command bar |
+| **Menu** | a popover list on `--canvas-2` with a `--line-strong` edge | items with an optional glyph and a key hint at the right; a `danger` item in alarm; a separator; an Eyebrow head | the item with focus shows `--canvas-3` and full ink; a current item carries a volt `›`; Up, Down, Home and End move (today's `menuStep`) | rail menus, Project docs, row menus |
+| **Confirm** | a question, what it means, then the action and Cancel, inside a menu or a row | the action is `danger` when it deletes | focus starts on Cancel | delete, archive, park |
+| **Tile** | the task box | `hue` (0 to 6, or none: the 2 px top rule); tone `default`, `ask` (volt wash, volt-tinted edge, Frame corners), `done` (no fill, compact), `parked` (dashed, no hue); slots: top (id and the chips at the right), title (a link that opens Details), body, foot | hover (`--canvas-3`, a bright edge, the top rule turns volt when it has no hue); keyboard focus inside (Frame corners); selected, while Details shows it (volt edge); dragging (half opacity); a drop line (2 px volt above); pending (half opacity, actions hidden); entering (an 8 px rise, staggered) | Board, Backlog preview, Backlog view |
+| **Frame** | corner brackets drawn with gradients, just outside the box | size (12 px), weight (2 px), tone (volt, alarm) | | ask tile, focused tile, command bar |
+| **LiveDot** | a 7 px volt square with a blinking core | `still` (no blink: busy only on a worker or a command, as today's `.still`) | | rail, Now, footer |
+| **Marker** | a step's status at 9 px | today's statuses on squares: todo (hollow, bright line), active (volt), blocked (alarm), dropped (dim), parked (dashed, dim), done (a muted ✓), question (a `?` in a 13 px square), paused (hollow, muted), you (volt fill) | | Project outline, Details, rows |
+| **KeyHint** | a boxed key and its micro label | | | footer, command bar, tooltips |
+| **Tape** | a 6 px hazard strip | tone volt, alarm | | comms slab, reconnecting banner |
+| **Ruler** | ticks | `hud` (64 px and 8 px), `since` (violet dashes, with the time) | | under the HUD, Done |
+| **EmptyState** | a dot-grid panel, one sentence, an optional action | | | every list that can be empty |
+| **ErrorLine** | an alarm-washed line with a 2 px alarm bar, the message in reading text, and Retry | | | every failed load or write |
+| **Toast** | a status line at the bottom left, above the footer | tone neutral, alarm | leaves after 4 s, or, for an error, stays until dismissed; `role="status"` | archive, delete, write failures |
+
+Rules for every part:
+
+- **Sentence text is never micro or uppercase** (§2.5). A Chip or Button label is a word or two; a longer one means the
+  control is wrong.
+- **Volt on a part means your move or live** (§2.3). A Button is `primary` only for the one action a view most expects
+  next: Answer on an ask, Send in an answer, the chosen row in the command bar.
+- **The marker keeps its job.** It still draws the ✓ and the ? in CSS, so a step's name stays the first text.
+- **Delete is `danger`.** Quiet kept Delete in ink because red meant blocked. v3 gives destructive actions alarm
+  (InThink §5), which reverses today's rule on purpose.
+
+### The lab (`#/lab`)
+
+A specimen page for the parts: Parvati's reference and the builders' check.
+
+- **What it shows:** every part in every variant and static state (resting, disabled, busy, selected, invalid, each
+  tone), each under an Eyebrow naming it; the colour tokens as swatches; the type ramp; the seven hues on tiles; the
+  motion (a tile rise, the blink, a Count rise) with a button that replays it. Hover, focus and press are left to the
+  pointer and the keyboard, not faked with classes.
+- **Fixture data** in `web/src/lab/fixtures.ts`. No server reads.
+- **Reached only by typing `#/lab`**, read the way `#/p/<slug>` is (`web/src/useInProgress.ts:12`). Nothing links to it.
+- **A lazy chunk in every build**, not a dev-only page. Parvati reviews the built branch, not a dev server, so a dev-only
+  lab would be out of her reach, and a lazy import costs the live window nothing until the hash is typed. The strategy
+  said dev-only; this is the reason to differ.
+- **Tests:** vitest for each part's pure helpers (TabStrip's keys, Count's rise check), and one e2e test that opens
+  `#/lab`, finds every part's heading and walks a TabStrip with the arrow keys.
+- **Review:** Parvati reviews the lab at 1600 and 400 against the mock and §2; Murr reviews the diff.
