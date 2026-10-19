@@ -15,7 +15,10 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   ref,
 ) {
   const click = (event: MouseEvent<HTMLButtonElement>) => {
-    if (busy) return;
+    if (busy) {
+      event.preventDefault();
+      return;
+    }
     onClick?.(event);
   };
   return (

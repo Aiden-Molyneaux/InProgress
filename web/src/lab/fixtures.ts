@@ -76,7 +76,7 @@ export const SORTS: TabItem[] = [
 ];
 
 export const MENU_ITEMS: { glyph?: string; label: string; keyHint?: string; current?: boolean; danger?: boolean; disabled?: boolean; separatorBefore?: boolean }[] = [
-  { glyph: '›', label: 'Open step', keyHint: 'Enter' },
+  { glyph: '↗', label: 'Open step', keyHint: 'Enter' },
   { glyph: '+', label: 'Add a step below', current: true },
   { glyph: '↗', label: 'Copy link' },
   { label: 'Move to Backlog', disabled: true },

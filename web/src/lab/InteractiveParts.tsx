@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { Button } from '../parts/Button';
 import { Chip } from '../parts/Chip';
 import { Confirm } from '../parts/Confirm';
@@ -55,8 +55,6 @@ export function ChipSection() {
 export function TabStripSection() {
   const [phase, setPhase] = useState(PHASES[0].id);
   const [sort, setSort] = useState(SORTS[0].id);
-  // The narrow strip is the same tabs under other ids, so no id is on the page twice.
-  const narrow = useMemo(() => PHASES.map((p) => ({ ...p, id: `narrow-${p.id}` })), []);
   const shown = PHASES.find((p) => p.id === phase)?.label;
   return (
     <Section name="TabStrip">
@@ -68,7 +66,7 @@ export function TabStripSection() {
         <TabStrip variant="segmented" label="Sort" items={SORTS} value={sort} onChange={setSort} />
       </Cell>
       <Cell caption="Tabs in a narrow box: the strip scrolls and keeps the selected tab in view" className="lab-narrow">
-        <TabStrip label="Narrow tabs" items={narrow} value={`narrow-${phase}`} onChange={(id) => setPhase(id.replace('narrow-', ''))} />
+        <TabStrip label="Narrow tabs" items={PHASES} value={phase} onChange={setPhase} />
       </Cell>
     </Section>
   );
@@ -283,7 +281,7 @@ export function ToastSection() {
   );
 }
 
-/** The counts of the cursor grid's columns, held still so the hook's callbacks do not change on every render. */
+/** The counts of the cursor grid's columns, held still. */
 const COUNTS = CURSOR_COLUMNS.map((column) => column.length);
 
 /** A grid of plain tiles walked with the arrow keys as one Tab stop; Enter shows which one opened. */

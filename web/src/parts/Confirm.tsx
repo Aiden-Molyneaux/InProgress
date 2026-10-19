@@ -7,6 +7,8 @@ export interface ConfirmProps {
   /** The confirming button's label, a verb: "Delete step". */
   action: string;
   danger?: boolean;
+  /** The action is under way: its button shows busy and does nothing. */
+  busy?: boolean;
   /** Focus Cancel when it mounts (the default), so a stray Enter cancels. */
   focusOnMount?: boolean;
   onConfirm: () => void;
@@ -14,7 +16,7 @@ export interface ConfirmProps {
 }
 
 /** An inline "are you sure": the question, what it will do, and the action beside Cancel. Escape cancels. */
-export function Confirm({ question, detail, action, danger, focusOnMount = true, onConfirm, onCancel }: ConfirmProps) {
+export function Confirm({ question, detail, action, danger, busy, focusOnMount = true, onConfirm, onCancel }: ConfirmProps) {
   const questionId = useId();
   const detailId = useId();
   const cancel = useRef<HTMLButtonElement>(null);
@@ -38,7 +40,7 @@ export function Confirm({ question, detail, action, danger, focusOnMount = true,
         </p>
       )}
       <div className="p-confirm-acts">
-        <Button variant={danger ? 'danger' : 'outline'} size="sm" onClick={onConfirm}>
+        <Button variant={danger ? 'danger' : 'outline'} size="sm" busy={busy} onClick={onConfirm}>
           {action}
         </Button>
         <Button ref={cancel} size="sm" onClick={onCancel}>

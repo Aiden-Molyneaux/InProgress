@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, type HTMLAttributes, type KeyboardEvent } from 'react';
+import { useId, useLayoutEffect, useRef, type HTMLAttributes, type KeyboardEvent } from 'react';
 import { cx } from './classes';
 import { scrollToShow, tabStep } from './tabStripLogic';
 
@@ -26,14 +26,24 @@ export interface TabStripProps extends Omit<HTMLAttributes<HTMLDivElement>, 'onC
 export function TabStrip({ variant = 'tabs', label, items, value, onChange, className, onKeyDown, ...rest }: TabStripProps) {
   const root = useRef<HTMLDivElement>(null);
   const tabs = variant === 'tabs';
+  const prefix = useId();
+  const anySelected = items.some((item) => item.id === value);
 
   // Scroll the strip itself, never scrollIntoView: that scrolls the page too. The strip is its buttons' offsetParent.
+  // It runs when the selection or the items change, and when the strip is resized.
   useLayoutEffect(() => {
     const strip = root.current;
-    const current = strip?.querySelector<HTMLElement>('.p-tab[aria-selected="true"], .p-tab[aria-pressed="true"]');
-    if (!strip || !current) return;
-    strip.scrollLeft = scrollToShow(current.offsetLeft, current.offsetWidth, strip.scrollLeft, strip.clientWidth);
-  }, [value]);
+    if (!strip) return;
+    const show = () => {
+      const current = strip.querySelector<HTMLElement>('.p-tab[aria-selected="true"], .p-tab[aria-pressed="true"]');
+      if (current) strip.scrollLeft = scrollToShow(current.offsetLeft, current.offsetWidth, strip.scrollLeft, strip.clientWidth);
+    };
+    show();
+    if (typeof ResizeObserver === 'undefined') return;
+    const watcher = new ResizeObserver(show);
+    watcher.observe(strip);
+    return () => watcher.disconnect();
+  }, [value, items]);
 
   const keys = (event: KeyboardEvent<HTMLDivElement>) => {
     onKeyDown?.(event);
@@ -56,19 +66,19 @@ export function TabStrip({ variant = 'tabs', label, items, value, onChange, clas
       onKeyDown={keys}
       {...rest}
     >
-      {items.map((item) => {
+      {items.map((item, index) => {
         const selected = item.id === value;
         return (
           <button
             key={item.id}
             type="button"
             className="p-tab"
-            id={tabs ? item.id : undefined}
+            id={`${prefix}-${item.id}`}
             role={tabs ? 'tab' : undefined}
             aria-selected={tabs ? selected : undefined}
             aria-pressed={tabs ? undefined : selected}
             aria-controls={tabs ? item.controls : undefined}
-            tabIndex={tabs && !selected ? -1 : undefined}
+            tabIndex={tabs && !selected && !(index === 0 && !anySelected) ? -1 : undefined}
             onClick={() => onChange(item.id)}
           >
             {item.label}

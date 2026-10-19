@@ -3096,3 +3096,23 @@ test('the parts lab opens on #/lab and walks a TabStrip with the arrow keys', as
   await expect(page.locator('.ip-app')).toBeVisible();
   await expect(page.locator('[class^="p-"], [class*=" p-"]')).toHaveCount(0);
 });
+
+test('the parts lab grid is one Tab stop', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('/#/lab');
+  const grid = page.locator('.lab-grid');
+  const first = grid.locator('[data-cursor]').first();
+  await first.scrollIntoViewIfNeeded();
+  await first.focus();
+  await page.keyboard.press('ArrowRight');
+  const second = grid.locator('[data-cursor]').nth(4);
+  await expect(second).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(second.getByRole('button')).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.locator('.lab-grid :focus')).toHaveCount(0);
+  await page.keyboard.press('Shift+Tab');
+  await expect(second.getByRole('button')).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(second).toBeFocused();
+});

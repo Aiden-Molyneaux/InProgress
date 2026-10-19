@@ -13,7 +13,8 @@ const TOAST_MS = 4000;
 
 /**
  * A short message. A neutral toast with `onDismiss` calls it after four seconds; an alarm toast stays until its x is
- * pressed. Put toasts inside a ToastRegion.
+ * pressed. The timer starts when the toast mounts: key the Toast per message to restart it for a new one. Put toasts
+ * inside a ToastRegion.
  */
 export function Toast({ tone = 'neutral', children, onDismiss, className, ...rest }: ToastProps) {
   const dismiss = useRef(onDismiss);
@@ -23,7 +24,7 @@ export function Toast({ tone = 'neutral', children, onDismiss, className, ...res
     if (!timed) return;
     const timer = setTimeout(() => dismiss.current?.(), TOAST_MS);
     return () => clearTimeout(timer);
-  }, [timed, children]);
+  }, [timed]);
   return (
     <div className={cx('p-toast', className)} data-tone={tone} {...rest}>
       <p className="p-toast-text">{children}</p>

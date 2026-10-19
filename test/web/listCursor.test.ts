@@ -29,7 +29,7 @@ describe('cursorStep on a list', () => {
 
 describe('cursorStep on a grid', () => {
   it('moves across to the row whose middle is nearest', () => {
-    expect(cursorStep('ArrowRight', { col: 0, row: 1 }, grid)).toEqual({ col: 1, row: 0 });
+    expect(cursorStep('ArrowRight', { col: 0, row: 2 }, grid)).toEqual({ col: 1, row: 1 });
     expect(cursorStep('ArrowRight', { col: 1, row: 1 }, grid)).toEqual({ col: 2, row: 1 });
     expect(cursorStep('ArrowLeft', { col: 2, row: 3 }, grid)).toEqual({ col: 1, row: 1 });
   });
