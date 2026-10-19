@@ -58,7 +58,7 @@ function tableRows(db: DB, table: string): unknown[][] {
 export function dumpDb(db: DB): Dump & { counts: Record<string, number> } {
   const master = db.prepare("SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as { type: string; name: string; sql: string }[];
   const part = (types: string[]) => master.filter((m) => types.includes(m.type)).map((m) => `${m.sql};\n`).join('');
-  const schema = `${part(['table'])}${DUMP_SPLIT}\n${part(['index'])}${part(['trigger'])}${part(['view'])}`;
+  const schema = `${part(['table'])}${DUMP_SPLIT}\n${part(['index'])}${part(['view'])}${part(['trigger'])}`;
   const tables: Record<string, string> = {};
   const counts: Record<string, number> = {};
   for (const table of dumpTables(db)) {

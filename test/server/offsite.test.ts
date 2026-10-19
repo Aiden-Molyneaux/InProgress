@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openDb, type DB } from '../../src/server/db/connection';
 import { loadDump, readDump, tableDigest } from '../../src/server/dump';
-import { commitOffsite, credentialArgs, exportOffsite, initOffsite, lastDrill, offsiteDir, runDrill, runOffsite, tickOffsite } from '../../src/server/offsite';
+import { commitOffsite, takeLock, credentialArgs, exportOffsite, initOffsite, lastDrill, offsiteDir, runDrill, runOffsite, tickOffsite } from '../../src/server/offsite';
 import Database from 'better-sqlite3';
 
 const dirs: string[] = [];
@@ -73,6 +73,7 @@ describe('offsite backup', { timeout: 120_000 }, () => {
     expect(Object.keys(manifest.resources.files)).toEqual(['proj/a.txt']);
     expect(manifest.home).not.toContain('\\');
     expect(log.lines.filter((l) => l.startsWith('error'))).toEqual([]);
+    expect(log.lines.find((l) => l.includes('Backup committed'))).toMatch(/\(dump and check \d+ ms\)/);
   });
 
   it('refuses to set up twice, and is a no-op while not set up', async () => {
@@ -139,6 +140,22 @@ describe('offsite backup', { timeout: 120_000 }, () => {
     expect(existsSync(lock)).toBe(false);
   });
 
+  it('a lock taken over as stale is not deleted by the first holder releasing it', () => {
+    const dir = tempDir();
+    mkdirSync(join(dir, '.git'));
+    const lock = join(dir, '.git', 'inprogress-backup.lock');
+    const first = takeLock(dir)!;
+    expect(takeLock(dir)).toBeUndefined();
+    const old = new Date(Date.now() - 11 * 60 * 1000);
+    utimesSync(lock, old, old);
+    const second = takeLock(dir)!;
+    expect(second).toBeDefined();
+    first();
+    expect(existsSync(lock)).toBe(true);
+    second();
+    expect(existsSync(lock)).toBe(false);
+  });
+
   it('the drill passes on a good push and fails once a resource differs from its manifest', async () => {
     const remote = bareRemote();
     const { home, db } = makeHome();
@@ -146,6 +163,7 @@ describe('offsite backup', { timeout: 120_000 }, () => {
     await runOffsite(db, home, logs(), { force: true });
     const good = await runDrill(db, home, new Date());
     expect(good).toMatchObject({ ok: true });
+    expect(good.detail).toMatch(/\(dump and check \d+ ms\)$/);
     expect(lastDrill(db)).toEqual(good);
     // Change a resource in a new commit on the remote without touching the manifest.
     const other = join(tempDir('ip-other-'), 'clone');
@@ -175,6 +193,11 @@ describe('offsite backup', { timeout: 120_000 }, () => {
     const t2 = new Date(t0.getTime() + 8 * 24 * 60 * 60 * 1000);
     await tickOffsite(db, home, logs(), t2);
     expect(lastDrill(db)?.at).toBe(t2.toISOString());
+    // A failed drill is not waited out for a week: the next tick tries again.
+    db.prepare("UPDATE meta SET value = ? WHERE key = 'backup_drill'").run(JSON.stringify({ at: t2.toISOString(), ok: false, detail: 'broke', commit: null }));
+    const t3 = new Date(t2.getTime() + 60 * 60 * 1000);
+    await tickOffsite(db, home, logs(), t3);
+    expect(lastDrill(db)).toMatchObject({ at: t3.toISOString(), ok: true });
   });
 
   it('keeps a \\r\\n inside a value byte for byte through the round trip', async () => {
@@ -207,6 +230,8 @@ describe('offsite backup', { timeout: 120_000 }, () => {
 
   it('adds the gh credential helper for a github https remote only', () => {
     expect(credentialArgs('https://github.com/aiden/inprogress-backup.git')[3]).toContain('gh auth token --user aiden');
+    expect(credentialArgs('https://github.com/Aiden-M1/x.git')[3]).toContain('--user Aiden-M1');
+    expect(credentialArgs('https://github.com/a b/x.git')).toEqual([]);
     expect(credentialArgs('C:/some/bare.git')).toEqual([]);
     expect(credentialArgs('git@github.com:aiden/x.git')).toEqual([]);
   });

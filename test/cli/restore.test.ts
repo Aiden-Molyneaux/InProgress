@@ -156,4 +156,68 @@ describe('inprogress restore', { timeout: 120_000 }, () => {
     expect(await runRestore(['--from', 'abc123'], say, { home, serverUp: down })).toBe(1);
     expect(out[0]).toContain('is not set up to look it up as a commit');
   });
+
+  it('rejects any argument but --from and its value, and changes nothing', async () => {
+    const { home, db } = makeHome('live');
+    await snapshotDb(db, join(home, 'backups'), new Date(2026, 9, 18, 9, 0, 0));
+    db.close();
+    const before = sha(join(home, 'inprogress.db'));
+    for (const args of [['--help'], ['x.db'], ['--from'], ['--from', 'a', 'b']]) {
+      const { out, say } = lines();
+      expect(await runRestore(args, say, { home, serverUp: down }), args.join(' ')).toBe(1);
+      expect(out[0]).toMatch(/^Usage: inprogress restore/);
+      expect(sha(join(home, 'inprogress.db'))).toBe(before);
+    }
+    expect(readdirSync(join(home, 'backups')).filter((f) => f.includes('pre-restore'))).toEqual([]);
+  });
+
+  it('refuses a backup from a newer schema unless its min_reader_version allows this build', async () => {
+    const source = makeHome('other');
+    await exportOffsite(source.db, source.home, new Date(2026, 9, 19, 9, 0, 0));
+    source.db.close();
+    const manifestFile = join(offsiteDir(source.home), 'manifest.json');
+    const manifest = JSON.parse(readFileSync(manifestFile, 'utf8')) as Record<string, unknown>;
+    const target = makeHome('live');
+    target.db.close();
+    const before = sha(join(target.home, 'inprogress.db'));
+    writeFileSync(manifestFile, JSON.stringify({ ...manifest, schema_version: 999, min_reader_version: null }));
+    const refused = lines();
+    expect(await runRestore(['--from', offsiteDir(source.home)], refused.say, { home: target.home, serverUp: down })).toBe(1);
+    expect(refused.out[0]).toContain('This backup is from a newer InProgress (schema v999); update InProgress first');
+    expect(sha(join(target.home, 'inprogress.db'))).toBe(before);
+    expect(existsSync(join(target.home, 'backups'))).toBe(false);
+    writeFileSync(manifestFile, JSON.stringify({ ...manifest, schema_version: 999, min_reader_version: 1 }));
+    expect(await runRestore(['--from', offsiteDir(source.home)], () => undefined, { home: target.home, serverUp: down })).toBe(0);
+  });
+
+  it('rewrites resource paths stored with backslashes, and stores them forward-slashed', async () => {
+    const source = makeHome('other');
+    const back = `${source.home.replace(/\\/g, '/').replace(/\//g, '\\')}\\resources\\p\\b.txt`;
+    source.db.prepare("UPDATE resources SET path = ? WHERE title = 'A'").run(back);
+    await exportOffsite(source.db, source.home, new Date(2026, 9, 19, 9, 0, 0));
+    source.db.close();
+    const scratch = tempDir('ip-scratch-');
+    expect(await runRestore(['--from', offsiteDir(source.home)], () => undefined, { home: scratch, serverUp: down })).toBe(0);
+    const restored = new Database(join(scratch, 'inprogress.db'), { readonly: true });
+    try {
+      expect(restored.prepare('SELECT path FROM resources').pluck().get()).toBe(`${scratch.replace(/\\/g, '/')}/resources/p/b.txt`);
+    } finally {
+      restored.close();
+    }
+  });
+
+  it('copies the -wal and -shm of a live database it could not open, before deleting them', async () => {
+    const source = makeHome('good');
+    const { file } = await snapshotDb(source.db, join(source.home, 'backups'), new Date(2026, 9, 18, 9, 0, 0));
+    source.db.close();
+    const home = tempDir('ip-home-');
+    writeFileSync(join(home, 'inprogress.db'), 'not a database'.repeat(100));
+    writeFileSync(join(home, 'inprogress.db-wal'), 'wal bytes');
+    writeFileSync(join(home, 'inprogress.db-shm'), 'shm bytes');
+    expect(await runRestore(['--from', file!], () => undefined, { home, serverUp: down })).toBe(0);
+    const aside = readdirSync(join(home, 'backups')).find((f) => /^inprogress-pre-restore-.*\.db$/.test(f))!;
+    expect(readFileSync(join(home, 'backups', `${aside}-wal`), 'utf8')).toBe('wal bytes');
+    expect(readFileSync(join(home, 'backups', `${aside}-shm`), 'utf8')).toBe('shm bytes');
+    expect(existsSync(join(home, 'inprogress.db-wal'))).toBe(false);
+  });
 });

@@ -1,9 +1,10 @@
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, copyFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, copyFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { timestamp } from '../server/backup';
 import { loadDump, readDump } from '../server/dump';
+import { MIGRATIONS } from '../server/db/schema';
 import { checkLoaded, git, offsiteDir, type Manifest } from '../server/offsite';
 
 const USAGE = 'Usage: inprogress restore [--from <snapshot .db | backup folder | commit in the offsite repo>]';
@@ -44,12 +45,14 @@ async function resolveSource(from: string | undefined, home: string, scratch: st
   if (!existsSync(join(repo, '.git'))) throw new Error(`${from} is not a file or folder, and ${repo} is not set up to look it up as a commit`);
   const clone = join(scratch, 'clone');
   await git(['-c', 'core.autocrlf=false', 'clone', '--shared', '--no-checkout', repo, clone]);
-  await git(['checkout', from], clone);
+  await git(['-c', 'core.autocrlf=false', 'checkout', from], clone);
   return { kind: 'dump', path: clone };
 }
 
 /** Copies the current database aside before it is replaced. A damaged one is copied as a file, since restoring is what it needs. */
 async function copyCurrentAside(file: string, target: string): Promise<string> {
+  // Read before the open: SQLite may delete a -wal it cannot use when the connection closes.
+  const sides = ['-wal', '-shm'].filter((side) => existsSync(`${file}${side}`)).map((side) => ({ side, bytes: readFileSync(`${file}${side}`) }));
   try {
     const db = new Database(file, { fileMustExist: true });
     try {
@@ -61,6 +64,8 @@ async function copyCurrentAside(file: string, target: string): Promise<string> {
   } catch (err) {
     rmSync(target, { force: true });
     copyFileSync(file, target);
+    // The restore deletes these next; they may hold the newest writes of a database that would not open.
+    for (const { side, bytes } of sides) writeFileSync(`${target}${side}`, bytes);
     return `${target} (a plain file copy: ${(err as Error).message})`;
   }
 }
@@ -69,7 +74,7 @@ async function copyCurrentAside(file: string, target: string): Promise<string> {
 export async function runRestore(args: string[], out: (line: string) => void, o: { home: string; serverUp: () => Promise<boolean> }): Promise<number> {
   const at = args.indexOf('--from');
   const from = at >= 0 ? args[at + 1] : undefined;
-  if (args.some((a, i) => a !== '--from' && i !== at + 1) || (at >= 0 && !from)) {
+  if (args.some((_, i) => at < 0 || (i !== at && i !== at + 1)) || (at >= 0 && !from)) {
     out(USAGE);
     return 1;
   }
@@ -82,6 +87,7 @@ export async function runRestore(args: string[], out: (line: string) => void, o:
   const tmp = join(home, `inprogress.db.restore-${process.pid}.tmp`);
   const scratch = mkdtempSync(join(tmpdir(), 'ip-restore-'));
   let swapped = false;
+  const savedPaths: string[] = [];
   try {
     mkdirSync(home, { recursive: true });
     const source = await resolveSource(from, home, scratch);
@@ -102,6 +108,10 @@ export async function runRestore(args: string[], out: (line: string) => void, o:
       }
     } else {
       manifest = JSON.parse(readFileSync(join(source.path, 'manifest.json'), 'utf8')) as Manifest;
+      // A backup that only a newer build can read would restore into a database this build refuses to open.
+      if (manifest.schema_version > MIGRATIONS.length && !(manifest.min_reader_version !== null && manifest.min_reader_version <= MIGRATIONS.length)) {
+        throw new Error(`This backup is from a newer InProgress (schema v${manifest.schema_version}); update InProgress first`);
+      }
       loadDump(tmp, readDump(source.path));
       checkLoaded(tmp, manifest);
       // The dump may come from another machine, whose home folder resources/ paths still name.
@@ -110,7 +120,9 @@ export async function runRestore(args: string[], out: (line: string) => void, o:
       if (!sameCase(there, here)) {
         const db = new Database(tmp);
         try {
-          db.prepare('UPDATE resources SET path = ? || substr(path, length(?) + 1) WHERE lower(substr(path, 1, length(?))) = lower(?)').run(here, there, there, there);
+          // Rows stored with backslashes match too, and come out forward-slashed.
+          const flat = "replace(path, char(92), '/')";
+          db.prepare(`UPDATE resources SET path = ? || substr(${flat}, length(?) + 1) WHERE lower(substr(${flat}, 1, length(?))) = lower(?)`).run(here, there, there, there);
         } finally {
           db.close();
         }
@@ -120,7 +132,7 @@ export async function runRestore(args: string[], out: (line: string) => void, o:
     const stamp = timestamp();
     const backups = join(home, 'backups');
     mkdirSync(backups, { recursive: true });
-    const saved: string[] = [];
+    const saved = savedPaths;
     if (existsSync(live)) saved.push(await copyCurrentAside(live, join(backups, `inprogress-pre-restore-${stamp}.db`)));
     const resources = join(home, 'resources');
     if (source.kind === 'dump' && existsSync(resources)) {
@@ -142,7 +154,12 @@ export async function runRestore(args: string[], out: (line: string) => void, o:
     out('Next: run `inprogress start`.');
     return 0;
   } catch (err) {
-    out(`Could not restore: ${(err as Error).message}${swapped ? '' : '. The current database is unchanged.'}`);
+    if (swapped) {
+      out(`Could not finish the restore: ${(err as Error).message}. The database was already replaced.`);
+      for (const s of savedPaths) out(`The previous data is kept at ${s}`);
+    } else {
+      out(`Could not restore: ${(err as Error).message}. The current database is unchanged.`);
+    }
     return 1;
   } finally {
     // A read-only open of the WAL-flagged copy can leave side files beside it.

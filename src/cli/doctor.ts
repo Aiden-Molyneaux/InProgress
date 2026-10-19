@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -138,7 +138,8 @@ export function backupsCheck(home: string, serverUp: boolean, now: Date): Check 
   const dir = join(home, 'backups');
   const newest = (existsSync(dir) ? readdirSync(dir) : []).filter((f) => parseStamp(f)).sort().pop();
   if (newest) {
-    const age = now.getTime() - parseStamp(newest)!.getTime();
+    // A tick that finds nothing changed touches the newest snapshot instead of writing another, so its mtime counts too.
+    const age = now.getTime() - Math.max(parseStamp(newest)!.getTime(), statSync(join(dir, newest)).mtimeMs);
     parts.push(`newest snapshot ${newest} (${ago(age)} ago)`);
     if (age > 26 * HOUR_MS && serverUp) warnings.push('the newest snapshot is over 26 hours old');
   } else {

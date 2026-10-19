@@ -20,14 +20,27 @@ export function openDb(file: string): DB {
         const dir = join(dirname(file), 'backups');
         mkdirSync(dir, { recursive: true });
         const prefix = `inprogress-pre-v${toVersion}-`;
-        const copied = () => readdirSync(dir).some((f) => f.startsWith(prefix) && f.endsWith('.db'));
-        if (copied()) return;
+        const present = () => readdirSync(dir).some((f) => f.startsWith(prefix) && f.endsWith('.db'));
+        if (present()) return;
         // Copied to a .tmp name of this process's own, then renamed, so the check above only ever sees a complete copy
         // and two racing starts never touch each other's file. A failed copy removes its .tmp.
         const target = join(dir, `${prefix}${timestamp()}.db`);
         const tmp = `${target}.${process.pid}.tmp`;
         try {
           db.exec(`VACUUM INTO '${tmp.replace(/'/g, "''")}'`);
+          // Another start may have migrated between this start's read and the copy: a copy not at toVersion - 1 is no
+          // longer the state before this migration, so it is not kept.
+          const copy = new Database(tmp, { readonly: true });
+          let copied: number;
+          try {
+            copied = schemaVersion(copy);
+          } finally {
+            copy.close();
+          }
+          if (copied !== toVersion - 1) {
+            rmSync(tmp, { force: true });
+            return;
+          }
           renameSync(tmp, target);
           try {
             prunePreMigration(dir, new Date());
@@ -37,7 +50,7 @@ export function openDb(file: string): DB {
         } catch (err) {
           rmSync(tmp, { force: true });
           // Another start landed its copy meanwhile, which is all this needs.
-          if (copied()) return;
+          if (present()) return;
           throw err;
         }
       };

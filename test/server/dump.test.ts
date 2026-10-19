@@ -74,6 +74,12 @@ describe('dump', () => {
     db.exec('CREATE TABLE b (x); CREATE INDEX b_x ON b (x); CREATE TABLE a (y); INSERT INTO a VALUES (1);');
     const dump = dumpDb(db);
     expect(dump.schema).toBe(`CREATE TABLE a (y);\nCREATE TABLE b (x);\n${DUMP_SPLIT}\nCREATE INDEX b_x ON b (x);\n`);
+    // Views come before triggers below the split.
+    db.exec('CREATE VIEW v AS SELECT y FROM a; CREATE TRIGGER t_ai AFTER INSERT ON a BEGIN SELECT 1; END;');
+    const below = dumpDb(db).schema.split(DUMP_SPLIT)[1];
+    expect(below.indexOf('CREATE VIEW')).toBeGreaterThanOrEqual(0);
+    expect(below.indexOf('CREATE VIEW')).toBeLessThan(below.indexOf('CREATE TRIGGER'));
+    db.exec('DROP VIEW v; DROP TRIGGER t_ai');
     expect(dump.tables.a).toBe('INSERT INTO "a" VALUES(1);\n');
     expect(dump.counts).toEqual({ a: 1, b: 0 });
     expect(dumpDb(db)).toEqual(dump);

@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import Database from 'better-sqlite3';
@@ -70,7 +70,7 @@ export function git(args: string[], cwd?: string, env: Record<string, string> = 
 
 /** For a GitHub https remote, `gh auth token` supplies the password; any other remote (a path, ssh) needs nothing. */
 export function credentialArgs(remoteUrl: string): string[] {
-  const owner = /^https:\/\/github\.com\/([^/]+)\//.exec(remoteUrl)?.[1];
+  const owner = /^https:\/\/github\.com\/([A-Za-z0-9-]+)\//.exec(remoteUrl)?.[1];
   if (!owner) return [];
   return ['-c', 'credential.helper=', '-c', `credential.helper=!f() { echo username=x-access-token; echo password=$(gh auth token --user ${owner}); }; f`];
 }
@@ -174,24 +174,27 @@ function verifyDump(dir: string, manifest: Manifest): void {
  * Writes the dump, the resources and the manifest into `<home>/offsite`, then proves the dump loads back to the same
  * rows before anything is committed. `beforeVerify` is a seam for tests, called with the repo folder.
  */
-export async function exportOffsite(db: DB, home: string, now: Date, beforeVerify?: (dir: string) => void): Promise<Manifest> {
+export async function exportOffsite(db: DB, home: string, now: Date, beforeVerify?: (dir: string) => void): Promise<{ manifest: Manifest; checkMs: number }> {
   const dir = offsiteDir(home);
   const scratch = mkdtempSync(join(tmpdir(), 'ip-export-'));
   let dump: ReturnType<typeof dumpDb>;
   let integrity: string;
   let schemaVersion: number;
   let minReader: number | null;
+  let checkMs = 0;
   try {
     const file = join(scratch, 'snapshot.db');
     // A consistent copy first: the dump then reads one moment, whatever the server writes meanwhile.
     await db.backup(file);
     const copy = new Database(file);
+    const dumpStart = Date.now();
     try {
       integrity = String(copy.pragma('integrity_check', { simple: true }));
       dump = dumpDb(copy);
       const meta = (key: string) => copy.prepare('SELECT value FROM meta WHERE key = ?').pluck().get(key) as string | undefined;
       schemaVersion = Number(meta('schema_version') ?? 0);
       minReader = meta('min_reader_version') === undefined ? null : Number(meta('min_reader_version'));
+      checkMs += Date.now() - dumpStart;
     } finally {
       copy.close();
     }
@@ -199,6 +202,7 @@ export async function exportOffsite(db: DB, home: string, now: Date, beforeVerif
     rmSync(scratch, { recursive: true, force: true, maxRetries: 5 });
   }
   if (integrity !== 'ok') throw new Error(`Refused the backup commit: integrity_check reported ${integrity.split('\n')[0]}`);
+  const writeStart = Date.now();
   writeDump(dir, dump);
   const manifest: Manifest = {
     format_version: 1,
@@ -215,7 +219,8 @@ export async function exportOffsite(db: DB, home: string, now: Date, beforeVerif
   writeFileSync(join(dir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
   beforeVerify?.(dir);
   verifyDump(dir, manifest);
-  return manifest;
+  checkMs += Date.now() - writeStart;
+  return { manifest, checkMs };
 }
 
 /** Commits everything in the repo and returns the new commit's sha. */
@@ -253,18 +258,36 @@ async function unpushed(dir: string): Promise<boolean> {
   }
 }
 
-/** Takes the repo's lock; a lock older than 10 minutes belonged to a crashed run and is taken over. */
-function takeLock(dir: string): (() => void) | undefined {
+/**
+ * Takes the repo's lock; a lock older than 10 minutes belonged to a crashed run and is taken over. The lock holds a
+ * nonce, and a release removes the file only while it still holds its own: a run that was taken over cannot delete its successor's lock.
+ */
+export function takeLock(dir: string): (() => void) | undefined {
   const lock = join(dir, '.git', 'inprogress-backup.lock');
-  for (let attempt = 0; attempt < 2; attempt++) {
+  const nonce = randomBytes(8).toString('hex');
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      closeSync(openSync(lock, 'wx'));
-      return () => rmSync(lock, { force: true });
+      writeFileSync(lock, nonce, { flag: 'wx' });
+      return () => {
+        try {
+          if (readFileSync(lock, 'utf8') === nonce) rmSync(lock, { force: true });
+        } catch {
+          // Already gone: nothing of this run's left to release.
+        }
+      };
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-      if (Date.now() - statSync(lock).mtimeMs < LOCK_STALE_MS) return undefined;
-      rmSync(lock, { force: true });
     }
+    let age: number;
+    try {
+      age = Date.now() - statSync(lock).mtimeMs;
+    } catch (err) {
+      // Released between the failed create and the stat: try to take it again.
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      throw err;
+    }
+    if (age < LOCK_STALE_MS) return undefined;
+    rmSync(lock, { force: true });
   }
   return undefined;
 }
@@ -283,9 +306,9 @@ export async function runOffsite(db: DB, home: string, log: OffsiteLog, o: { for
     if (!release) return 'busy';
     const last = await commitTime(dir, 'HEAD');
     if (o.force || !last || now.getTime() - last.getTime() > DAY_MS) {
-      const manifest = await exportOffsite(db, home, now);
+      const { manifest, checkMs } = await exportOffsite(db, home, now);
       const sha = await commitOffsite(home, now);
-      log.info(`Backup committed ${sha.slice(0, 8)}: ${Object.keys(manifest.tables).length} tables, ${manifest.resources.count} resource files`);
+      log.info(`Backup committed ${sha.slice(0, 8)}: ${Object.keys(manifest.tables).length} tables, ${manifest.resources.count} resource files (dump and check ${checkMs} ms)`);
     }
     if (o.force || (await unpushed(dir))) {
       try {
@@ -316,13 +339,14 @@ export async function runDrill(db: DB, home: string, now: Date): Promise<DrillRe
     await git([...credentialArgs(url), '-c', 'core.autocrlf=false', 'clone', '--depth', '1', '--branch', 'main', url, clone]);
     commit = (await git(['rev-parse', 'HEAD'], clone)).trim();
     const manifest = JSON.parse(readFileSync(join(clone, 'manifest.json'), 'utf8')) as Manifest;
+    const checkStart = Date.now();
     verifyDump(clone, manifest);
     for (const [rel, hash] of Object.entries(manifest.resources.files)) {
       const file = join(clone, 'resources', rel);
       if (!existsSync(file) || sha256(file) !== hash) throw new Error(`resource ${rel} differs from the manifest`);
     }
     const rows = Object.values(manifest.tables).reduce((a, b) => a + b, 0);
-    result = { at: now.toISOString(), ok: true, detail: `commit ${commit.slice(0, 8)} loads ${rows} rows and ${manifest.resources.count} resource files`, commit };
+    result = { at: now.toISOString(), ok: true, detail: `commit ${commit.slice(0, 8)} loads ${rows} rows and ${manifest.resources.count} resource files (dump and check ${Date.now() - checkStart} ms)`, commit };
   } catch (err) {
     result = { at: now.toISOString(), ok: false, detail: (err as Error).message.replace(/^Refused the backup commit: /, ''), commit };
   } finally {
@@ -344,17 +368,18 @@ export function lastDrill(db: DB): DrillResult | undefined {
   }
 }
 
-/** The server's tick: the daily copy, then the weekly drill when the copy is set up and the last drill is over 7 days old. Never throws. */
+/** The server's tick: the daily copy, then the weekly drill when the copy is set up and the last drill is missing, failed or over 7 days old. Never throws. */
 export async function tickOffsite(db: DB, home: string, log: OffsiteLog, now: Date = new Date()): Promise<void> {
-  const status = await runOffsite(db, home, log, { now });
-  if (status === 'not set up' || status === 'busy') return;
   try {
+    const status = await runOffsite(db, home, log, { now });
+    if (status === 'not set up' || status === 'busy') return;
+    // A drill that passed within 7 days is enough; a failed one is tried again on the next tick.
     const drill = lastDrill(db);
-    if (drill && now.getTime() - Date.parse(drill.at) <= 7 * DAY_MS) return;
+    if (drill?.ok && now.getTime() - Date.parse(drill.at) <= 7 * DAY_MS) return;
     const result = await runDrill(db, home, now);
     if (result.ok) log.info(`Backup drill passed: ${result.detail}`);
     else log.error(`Backup drill FAILED: ${result.detail}`);
   } catch (err) {
-    log.error(`Could not run the backup drill: ${(err as Error).message}`);
+    log.error(`Could not run the off-machine backup tick: ${(err as Error).message}`);
   }
 }

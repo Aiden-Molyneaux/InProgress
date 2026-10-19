@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import type { DB } from './db/connection';
@@ -99,6 +99,10 @@ export async function snapshotDb(db: DB, dir: string, now: Date = new Date()): P
   const check = quickCheck(db);
   if (check !== 'ok') throw new Error(`Skipped the database backup: quick_check reported ${check}`);
   mkdirSync(dir, { recursive: true });
+  // A crashed run's copy in progress; anything over a day old will never be finished.
+  for (const f of readdirSync(dir)) {
+    if (/^inprogress-.*\.db\.\d+\.tmp$/.test(f) && now.getTime() - statSync(join(dir, f)).mtimeMs > DAY_MS) rmSync(join(dir, f), { force: true });
+  }
   const file = join(dir, `inprogress-${timestamp(now)}.db`);
   const tmp = `${file}.${process.pid}.tmp`;
   try {
@@ -114,6 +118,8 @@ export async function snapshotDb(db: DB, dir: string, now: Date = new Date()): P
     const newest = readdirSync(dir).filter((f) => SNAPSHOT.test(f)).sort().pop();
     if (newest && sha256(join(dir, newest)) === sha256(tmp)) {
       rmSync(tmp, { force: true });
+      // The newest snapshot is still current: doctor reads its mtime as "checked and found unchanged".
+      utimesSync(join(dir, newest), now, now);
       return { skipped: 'unchanged' };
     }
     renameSync(tmp, file);

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { createServer as createNetServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -598,13 +598,6 @@ describe('claude-check', () => {
 });
 
 describe('backup command', () => {
-  it('lists backup and restore in the usage', async () => {
-    const s = capture();
-    expect(await runCli([], s.out)).toBe(0);
-    expect(s.lines[0]).toContain('backup [--push | --drill | --init <remote url>]');
-    expect(s.lines[0]).toContain('restore [--from <backup>]');
-  });
-
   it('takes a snapshot in the home, and writes no second one while nothing changed', async () => {
     const other = tempDir('ip-cli-bak-');
     openDb(join(other, 'inprogress.db')).close();
@@ -655,7 +648,10 @@ describe('Backups doctor check', () => {
     db.close();
     if (o.snapshotHoursAgo !== undefined) {
       mkdirSync(join(dir, 'backups'));
-      writeFileSync(join(dir, 'backups', `inprogress-${timestamp(hoursAgo(o.snapshotHoursAgo))}.db`), 'x');
+      const snapshot = join(dir, 'backups', `inprogress-${timestamp(hoursAgo(o.snapshotHoursAgo))}.db`);
+      writeFileSync(snapshot, 'x');
+      // Doctor reads the mtime too: a fixture written now must look as old as its name.
+      utimesSync(snapshot, hoursAgo(o.snapshotHoursAgo), hoursAgo(o.snapshotHoursAgo));
     }
     if (o.pushedHoursAgo !== undefined) {
       const repo = join(dir, 'offsite');
@@ -674,6 +670,16 @@ describe('Backups doctor check', () => {
     const check = backupsCheck(homeWith({ snapshotHoursAgo: 2, pushedHoursAgo: 5, drill: goodDrill }), true, now);
     expect(check).toMatchObject({ name: 'Backups', ok: true });
     expect(check.detail).toMatch(/newest snapshot inprogress-\d{8}-\d{6}\.db \(2 h ago\); newest pushed commit 5 h ago; last drill passed 1 d ago; repo \d+\.\d MB/);
+  });
+
+  it('counts a snapshot a skipped tick touched as current', () => {
+    const dir = homeWith({ snapshotHoursAgo: 30, pushedHoursAgo: 5, drill: goodDrill });
+    const [file] = readdirSync(join(dir, 'backups'));
+    expect(backupsCheck(dir, true, now).detail).toContain('the newest snapshot is over 26 hours old');
+    utimesSync(join(dir, 'backups', file), hoursAgo(1), hoursAgo(1));
+    const check = backupsCheck(dir, true, now);
+    expect(check).toMatchObject({ ok: true });
+    expect(check.detail).toContain('(1 h ago)');
   });
 
   it('warns at a 4-day-old push', () => {

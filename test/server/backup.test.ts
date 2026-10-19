@@ -1,4 +1,4 @@
-import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
@@ -46,6 +46,8 @@ describe('backups', () => {
       expect((await snapshotDb(db, backups, new Date(2026, 8, 27, 1, 0, 0))).file).toBeDefined();
       expect(await snapshotDb(db, backups, new Date(2026, 8, 27, 2, 0, 0))).toEqual({ skipped: 'unchanged' });
       expect(readdirSync(backups)).toEqual(['inprogress-20260927-010000.db']);
+      // The skipped tick touches the newest snapshot, so doctor can tell "unchanged" from "not running".
+      expect(statSync(join(backups, 'inprogress-20260927-010000.db')).mtimeMs).toBe(new Date(2026, 8, 27, 2, 0, 0).getTime());
       db.prepare("INSERT INTO meta (key, value) VALUES ('marker', 'yes')").run();
       expect((await snapshotDb(db, backups, new Date(2026, 8, 27, 3, 0, 0))).file).toBe(join(backups, 'inprogress-20260927-030000.db'));
       expect(readdirSync(backups)).toEqual(['inprogress-20260927-010000.db', 'inprogress-20260927-030000.db']);
@@ -155,6 +157,30 @@ describe('backups', () => {
       db.close();
     }
     expect(readdirSync(backups).sort()).toEqual([...strays, 'inprogress-20260901-070000.db', 'inprogress-20260927-120000.db'].sort());
+  });
+
+  it('deletes copies in progress left by a crashed run once they are over a day old, and no others', async () => {
+    const dir = tempDir('ip-bak-');
+    const backups = join(dir, 'backups');
+    mkdirSync(backups);
+    const now = new Date(2026, 8, 27, 12, 0, 0);
+    const oldTmp = join(backups, 'inprogress-20260901-000000.db.111.tmp');
+    const freshTmp = join(backups, 'inprogress-20260927-110000.db.222.tmp');
+    const other = join(backups, 'notes.tmp');
+    for (const f of [oldTmp, freshTmp, other]) writeFileSync(f, 'x');
+    const twoDaysAgo = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000);
+    utimesSync(oldTmp, twoDaysAgo, twoDaysAgo);
+    utimesSync(other, twoDaysAgo, twoDaysAgo);
+    utimesSync(freshTmp, new Date(now.getTime() - 3600_000), new Date(now.getTime() - 3600_000));
+    const db = openDb(join(dir, 'live.db'));
+    try {
+      await snapshotDb(db, backups, now);
+    } finally {
+      db.close();
+    }
+    expect(existsSync(oldTmp)).toBe(false);
+    expect(existsSync(freshTmp)).toBe(true);
+    expect(existsSync(other)).toBe(true);
   });
 
   it('prunes pre-migration copies to the newest 3 plus any under 30 days old', () => {
