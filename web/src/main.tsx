@@ -16,13 +16,14 @@ import './styles/backlog.css';
 import './styles/marker.css';
 import { App } from './App';
 
-// The bundled faces load before the first render, so nothing is measured in a fallback face and left wrong when the
-// face swaps in (the tab strip scrolls its current tab into view by measuring it). A face that fails or stalls never
-// holds the window back for more than a second.
+// The first render waits for the bundled faces, so what it measures (the tab strip scrolls its current tab into view,
+// with a peek of the next) is measured in them and not left wrong when they swap in. Best effort: the files come from
+// this server, so they land in milliseconds, but a face that fails or stalls holds the window back two seconds at most,
+// and a strip measured in the fallback then stays as measured until the next switch or resize.
 const faces = Promise.all(['1em Archivo', '1em "Martian Mono"'].map((font) => document.fonts.load(font)));
-const stall = new Promise((resolve) => setTimeout(resolve, 1000));
+const stall = new Promise((resolve) => setTimeout(resolve, 2000));
 void Promise.race([faces, stall])
-  .catch(() => undefined)
+  .catch((error: unknown) => console.warn('A bundled face failed to load; the window draws in the fallback face.', error))
   .then(() =>
     createRoot(document.getElementById('root')!).render(
       <StrictMode>
