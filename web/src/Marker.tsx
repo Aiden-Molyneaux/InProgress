@@ -1,5 +1,4 @@
 import type { NodeStatus } from '../../src/core/types';
-import './marker.css';
 
 export interface MarkerProps {
   status: NodeStatus;
@@ -16,7 +15,7 @@ export interface MarkerProps {
 }
 
 /**
- * A step's status marker, on a card's header and in Details' step list. Its look is in marker.css, which draws
+ * A step's status marker, on a card's header and in Details' step list. Its look is in styles/marker.css, which draws
  * the done ✓ and the question's ?, so the span holds no text and a step's name stays the first text beside it.
  */
 export function Marker({ status, question, paused, needsYou, pulse, title }: MarkerProps) {

@@ -18,7 +18,7 @@ plan says and report honestly.
 - The house rules that apply to your code: `CLAUDE.md` (its House rules section). Read them before the first edit.
 - Work only in the worktree or on the branch your brief names, and run every command from there.
 - Read the files the plan names, and the call sites of anything you change.
-- UI work is judged against the window's existing screens under `web/src` (there are no mockups: match the neighbouring components, `web/src/styles.css`, and the keyboard conventions in `web/src/useKeyboard.ts`); match it rather than inventing a look.
+- UI work is judged against the window's existing screens under `web/src` (there are no mockups: match the neighbouring components, the sheets in `web/src/styles/`, and the keyboard conventions in `web/src/useKeyboard.ts`); match it rather than inventing a look.
 
 ## Rules [edit]
 

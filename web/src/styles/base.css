@@ -1,0 +1,16 @@
+/* Base: the reset, the page, bare buttons, .muted, the pulse keyframes and reduced motion. */
+@layer base {
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+/* body keeps painting --bg: the night --bar only reads over it. */
+body { font: 500 12.5px/1.4 var(--font-sans); font-variant-emoji: text; background: var(--bg); color: var(--text); }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
+.muted { color: var(--muted); }
+/* The one pulse: the tab dot, an active marker on a working card and an in-progress task's mark. */
+@keyframes ip-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+@media (prefers-reduced-motion: reduce) {
+  /* Nothing moves: no pulse, no flash, no bob, blink or ring.  */
+  * { animation: none !important; }
+}
+}
