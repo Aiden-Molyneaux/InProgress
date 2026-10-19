@@ -1535,7 +1535,7 @@ test.describe('Go to', () => {
     await open(page, demo);
     const button = (await goToButton(page).boundingBox())!;
     const bar = (await page.locator('.ip-hud').boundingBox())!;
-    // Inside the HUD's side padding (--sp-5).
+    // Inside the HUD's side padding: --sp-4 (16 px) at the suite's 520 px viewport.
     expect(bar.x + bar.width - (button.x + button.width), 'at the right end').toBeLessThanOrEqual(16);
     await goToButton(page).click();
     const panel = page.locator('.ip-goto-menu');
@@ -3131,6 +3131,9 @@ test.describe('HUD bar and footer strip', () => {
     await asks.click();
     await expect(page).toHaveURL(hereIs(waiting[0]!.slug));
     await expect(page.locator('.ip-view-name')).toHaveText(waiting[0]!.name);
+    // Now the open project has asks: a second click moves focus to its Needs me.
+    await asks.click();
+    await expect(page.locator('.ip-band-needs h3')).toBeFocused();
 
     // The stream cannot connect: the link reads RECONNECTING and the tape takes the ruler's place.
     await page.route('**/api/events/stream**', (route) => route.abort('connectionrefused'));

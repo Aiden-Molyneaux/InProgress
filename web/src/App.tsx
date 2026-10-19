@@ -189,7 +189,21 @@ export function App() {
    */
   const [status, setStatus] = useState<{ id: number; text: string; tone: 'neutral' | 'alarm' } | null>(null);
   const statusId = useRef(0);
-  const say = (text: string, tone: 'neutral' | 'alarm' = 'neutral') => setStatus({ id: ++statusId.current, text, tone });
+  /** What had focus when the toast appeared: an alarm toast's × gives focus back to it. */
+  const statusOpener = useRef<HTMLElement | null>(null);
+  const say = (text: string, tone: 'neutral' | 'alarm' = 'neutral') => {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active !== document.body && !active.closest('.p-toasts')) statusOpener.current = active;
+    setStatus({ id: ++statusId.current, text, tone });
+  };
+  /** The surfaces report only failures: those stay up, in alarm, until dismissed. */
+  const fail = (text: string) => say(text, 'alarm');
+  /** Only the toast still showing goes: a timer that fires as a new message lands leaves the new one up. */
+  const dismiss = (id: number) => {
+    const from = document.activeElement;
+    if (from instanceof HTMLElement && from.closest('.p-toasts') && statusOpener.current?.isConnected) statusOpener.current.focus();
+    setStatus((s) => (s?.id === id ? null : s));
+  };
   const onAction = async (action: ProjectAction, target: ActionTarget): Promise<boolean> => {
     // Picked before the write: archiving or deleting the open project opens the tab beside it, as a browser does when a
     // tab closes. With none, an archived project stays open as the end tab and a deleted one falls back.
@@ -344,13 +358,13 @@ export function App() {
             </EmptyState>
           ) : snapshot ? (
             view === 'board' && backlogOpen ? (
-              <BacklogList key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onStatus={say} onBack={closeBacklog} />
+              <BacklogList key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onStatus={fail} onBack={closeBacklog} />
             ) : view === 'board' && doneOpen ? (
               <DoneList key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onBack={closeDone} />
             ) : view === 'board' ? (
-              <Board key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onOpenDone={openDone} onOpenBacklog={openBacklog} lastLook={lastLook} onStatus={say} />
+              <Board key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onOpenDone={openDone} onOpenBacklog={openBacklog} lastLook={lastLook} onStatus={fail} />
             ) : (
-              <ProjectView key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onStatus={say} />
+              <ProjectView key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onStatus={fail} />
             )
           ) : (
             <EmptyState className="ip-wait">Loading project…</EmptyState>
@@ -363,7 +377,7 @@ export function App() {
               onClose={() => setSelectedNode(null)}
               onSelectNode={setSelectedNode}
               onOpenResource={openViewer}
-              onStatus={say}
+              onStatus={fail}
             />
           )}
         </main>
@@ -374,7 +388,7 @@ export function App() {
       {/* Always mounted, so a screen reader hears each new line. */}
       <ToastRegion>
         {status && (
-          <Toast key={status.id} tone={status.tone} onDismiss={() => setStatus(null)}>
+          <Toast key={status.id} tone={status.tone} onDismiss={() => dismiss(status.id)}>
             {status.text}
           </Toast>
         )}
