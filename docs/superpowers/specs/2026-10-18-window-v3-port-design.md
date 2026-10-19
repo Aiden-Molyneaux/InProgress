@@ -105,10 +105,11 @@ Each is raised as an ask on #496 when its section is written, with the strategy'
 | # | Decision | Recommendation | Section | Answer |
 |---|---|---|---|---|
 | D1 | Light theme | Drop Quiet's light palette; the window ignores the OS theme | §2 | Dark only, as recommended (Aiden, 2026-10-18) |
-| D2 | Counts in the rail | Keep the volt ask count on each project row, against InThink's rail rule | §6 | open |
+| D2 | Counts in the rail | Keep the volt ask count on each project row, against InThink's rail rule | §6 | Keep the count, as recommended (Aiden, 2026-10-18) |
 | D3 | Step hues | The seven hues become faction colours on each tile's top rule | §2 | The seven factions, as mocked (Aiden, 2026-10-18) |
 | D4 | Ctrl K | GoTo becomes a v3 command bar; the Board keeps no shortcuts of its own | §10 | open |
 | D5 | What supersedes what | The port reverses Board spec 2.8 and Quiet's palette, fonts, chrome and cards; #506 writes the ruling | §13 | open |
+| D6 | Project colour on the rail | A bright grey rule on every row, volt only for the current one | §6 | A faction per project from its id, against the recommendation (Aiden, 2026-10-18) |
 
 ### Calls made by Sigmund, not Aiden
 
@@ -462,7 +463,7 @@ A specimen page for the parts: Parvati's reference and the builders' check.
 
 ## 5. Shell: the HUD bar and the footer strip
 
-*Status: awaiting approval.* Built by #500, after the parts. Label ui.
+*Status: approved by Aiden, 2026-10-18.* Built by #500, after the parts. Label ui.
 
 ### What it improves
 
@@ -531,3 +532,100 @@ One line on `--canvas-0` with a hairline above, `--sp-3` by `--sp-5` padding, mo
   the first project in rail order with asks; dropping the stream turns the link readout to `RECONNECTING` and shows the alarm tape.
 - The activity strip's existing tests keep passing with their selectors moved to the footer.
 - Parvati reviews the HUD and footer at 1600, 1160, 720 and 400, with the stream open and reconnecting.
+
+## 6. Shell: the module rail
+
+*Status: awaiting approval.* Built by #501, after the HUD. Label ui.
+
+### What it improves
+
+- **One place to move around.** Today there are four: the project tabs, the Board | Project switch, the Backlog
+  preview's "N ›" and Done's "All done ›". The rail holds them all: projects, and under the current one its four views.
+- **Backlog and All done become views you can see from anywhere.** Today they hide behind links at the foot of two
+  Board columns. In the rail they sit beside Board and Project with their counts.
+- **Names stop being cut at 160 px.** A rail row is 190 px wide, and its full name is in its title and accessible name.
+- **Project actions are where the project is.** Rename, Archive and Delete stay on the project's own row; archived and
+  recently deleted projects get a rail foot instead of the ⋯ menu at the far right.
+
+### Layout
+
+| Width | Rail |
+|---|---|
+| 1360 px and up | 216 px column, left of the page, the full height between the ruler and the footer |
+| 720 to 1359 px | 76 px column of three-letter codes |
+| under 720 px | a strip under the ruler, scrolling sideways, with the current project's views as a TabStrip at the top of the page |
+
+The rail scrolls on its own when the projects outgrow it, keeping the current row in view.
+
+### Project rows
+
+- **Head:** an Eyebrow, `// PROJECTS`.
+- **A row** (36 px): a short 2 px rule at its top left in the project's colour, the name in the display face
+  (`--t-h3`, uppercase, cut with an ellipsis), then its signals at the right:
+  - a **LiveDot** while a session there is working (blinking) or busy on a worker or command (still), as today's tab dot;
+  - a **volt ask count** while asks or permission waits wait there (D2, Aiden 2026-10-18: kept against InThink's rail
+    rule, since the rail is how Aiden sees that another project needs him). The same figure as today's tab count
+    (`waitingOn`).
+- **The current row** is volt-filled with volt-ink text; its rule, LiveDot and count turn to ink on volt.
+- **Hover:** volt text and a `--line-strong` edge. **Keyboard focus:** a volt edge and the `--volt-soft` ring.
+- **Project colour** (Aiden, 2026-10-18): each project's rule takes a faction colour from its id, `--hue-(id mod 7)`.
+  It needs no setting and never changes. It is the rule's only use; the page itself keeps volt as its accent.
+- **Order** is today's tab order: drag a row, or Alt with Up or Down, to move it; the stored order and its key do not
+  change.
+- **An archived project that is open** shows as one more row at the end, its name upright with an `ARCHIVED` Chip, as
+  today's italic tab does; it leaves the rail when another project is opened.
+
+### The current project's views
+
+Under the current row, indented: **Board**, **Project** (with `n phases`), **Backlog** (with its open count, parked
+excluded, as the preview's "N ›"), **All done** (with its count). Mono `--t-detail-sm`, uppercase; the current view in
+volt with a `›` before it.
+
+- **Views are peers.** Backlog and All done stop being flags on the Board (`web/src/App.tsx:313-317`) and become views
+  like Board and Project. `View` grows to `'board' | 'project' | 'backlog' | 'done'`, kept in `ip.view` as today. Each
+  view keeps its own back affordance only where it still helps: the Backlog view's and All done's "‹ Board" go, since
+  the rail is always there.
+- **The links into them stay.** The Backlog preview's "N ›" and Done's "All done ›" (§7) open the same views.
+- **The Board | Project switch goes** (`web/src/chrome/ViewSwitch.tsx`).
+
+### Narrow rail (720 to 1359 px)
+
+- Each row shows a **three-letter code**: the initials of the name's words (camel-case and hyphens split words), filled
+  from the name's next consonants to three letters, uppercase; a second project with the same code gets a digit
+  (`IN2`). The name is in the title and the accessible name.
+- Signals move to the row's top right corner: the ask count as a small volt block; the LiveDot hides.
+- The views show as `BRD`, `PRJ`, `BKL`, `DON`, with their counts in their titles.
+
+### Strip (under 720 px)
+
+- The project rows run left to right at their full names, with their signals; the current one volt-filled.
+- The rail foot moves into a `⋯` button at the strip's right end.
+- The current project's views become a `segmented` TabStrip at the top of the page, above its head.
+
+### Menus
+
+- **A row's menu** opens on right-click, Shift F10 or the context-menu key, as a tab's does today, with today's items:
+  Archive (with its line on the live sessions it stops tracking), Rename… and Delete…; Unarchive in place of Archive on
+  an archived row. Rename… turns the menu into a Field; Delete… into a Confirm whose action is `danger` (§4).
+- **The rail foot** holds one ghost Button, `Archived · n`, when there are archived or recently deleted projects. It
+  opens today's ⋯ menu as a Menu: Archived rows to open or unarchive, a separator, Recently deleted rows with Restore and
+  their days left.
+
+### Keys and focus
+
+- `[` and `]` step to the previous and next project, `1` to `9` open the nth, as they do for tabs today.
+- The project rows are one Tab stop (roving tabindex, today's "one stop" rule); Up and Down move between rows; Enter or
+  Space opens. The views are a second stop, with the same keys.
+- The rail is a `nav` named "Projects", each row a link with `aria-current="page"` on the current one, its accessible
+  name today's `projectLabel` ("InThink, 2 need you, working").
+
+### Tests and review (#501)
+
+- The e2e helper `tabFor` (`test/e2e/ui.spec.ts:378`) becomes a rail-row helper, and its 82 uses check
+  `aria-current` in place of `aria-selected`.
+- The tab-row tests are rewritten for the rail (§12 lists them): the view switch remembered, a long name, the live
+  signal and reduced motion, one Tab stop, the row menu, Delete's note, Rename's field, the menus' look, a menu inside a
+  narrow window. The tab strip's sideways wheel test goes with the strip.
+- New: one e2e test that opens Backlog and All done from the rail and back to Board.
+- Murr runs on Opus for this step (focus and keyboard, the menus: the risk list). Parvati reviews the rail at 1600,
+  1360, 1159, 720 and 400, with a long name, ten projects, an open archived project and every signal.
