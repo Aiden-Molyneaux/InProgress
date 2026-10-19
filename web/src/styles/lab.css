@@ -1,0 +1,34 @@
+/* The parts lab's own layout (web/src/lab/), shipped in the lab's lazy chunk. Only the page around the specimens: the
+   parts look is parts.css. Tokens come from tokens.css. */
+@layer components {
+.lab { max-width: 1680px; margin: 0 auto; padding: var(--sp-6) var(--sp-8); display: grid; gap: var(--sp-section); }
+.lab-head { display: grid; gap: var(--sp-3); justify-items: start; }
+.lab-title { margin: 0; font-family: var(--font-display); font-stretch: 125%; font-weight: var(--w-display); font-size: var(--t-h1); line-height: 0.85; text-transform: uppercase; color: var(--text-hi); overflow-wrap: anywhere; }
+.lab-lede { margin: 0; font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-muted); }
+.lab-part { display: grid; gap: var(--sp-4); padding-top: var(--sp-4); border-top: 1px solid var(--line); min-width: 0; }
+.lab-row { display: flex; flex-wrap: wrap; gap: var(--sp-4); align-items: flex-start; min-width: 0; }
+.lab-stack { display: grid; gap: var(--sp-4); min-width: 0; }
+.lab-inline { display: inline-flex; flex-wrap: wrap; gap: var(--sp-2); }
+.lab-cell { display: grid; gap: var(--sp-2); min-width: 0; max-width: 100%; align-content: start; justify-items: start; }
+.lab-stack > .lab-cell { justify-items: stretch; }
+.lab-cap { font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-muted); overflow-wrap: anywhere; }
+.lab-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: var(--sp-3); }
+.lab-tiles > .lab-cell { justify-items: stretch; }
+.lab-swatch { display: block; width: 96px; height: 48px; border: 1px solid var(--line); }
+.lab-ramp { display: grid; gap: var(--sp-4); }
+.lab-ramp-row { display: grid; gap: var(--sp-1); min-width: 0; overflow-wrap: anywhere; }
+.lab-panel { margin: 0; font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text); }
+.lab-narrow { max-width: 260px; }
+.lab-framed { position: relative; margin: var(--sp-2); padding: var(--sp-4) var(--sp-6); background: var(--canvas-2); border: 1px solid var(--line); color: var(--text); }
+.lab-step { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.lab-answer { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.lab-answer > .p-field { flex: 1; min-width: 0; }
+.lab-pop { position: relative; }
+.lab-pop-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: var(--z-popover); max-width: calc(100vw - 2 * var(--sp-4)); }
+.lab-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-6); align-items: start; }
+.lab-col { display: grid; gap: var(--sp-3); align-content: start; min-width: 0; }
+@media (max-width: 719px) {
+  .lab { padding: var(--sp-4); }
+  .lab-grid { grid-template-columns: minmax(0, 1fr); }
+}
+}
