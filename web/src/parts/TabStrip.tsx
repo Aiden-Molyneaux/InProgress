@@ -28,9 +28,12 @@ export function TabStrip({ variant = 'tabs', label, items, value, onChange, clas
   const tabs = variant === 'tabs';
   const prefix = useId();
   const anySelected = items.some((item) => item.id === value);
+  // What the strip's widths depend on, as a string: a caller that rebuilds `items` each render does not snap a strip the
+  // reader has scrolled back to the selected tab.
+  const shape = items.map((item) => `${item.id}:${item.label}:${item.count ?? ''}`).join('|');
 
   // Scroll the strip itself, never scrollIntoView: that scrolls the page too. The strip is its buttons' offsetParent.
-  // It runs when the selection or the items change, and when the strip is resized.
+  // It runs when the selection or the tabs' ids, labels or counts change, and when the strip is resized.
   useLayoutEffect(() => {
     const strip = root.current;
     if (!strip) return;
@@ -43,7 +46,7 @@ export function TabStrip({ variant = 'tabs', label, items, value, onChange, clas
     const watcher = new ResizeObserver(show);
     watcher.observe(strip);
     return () => watcher.disconnect();
-  }, [value, items]);
+  }, [value, shape]);
 
   const keys = (event: KeyboardEvent<HTMLDivElement>) => {
     onKeyDown?.(event);

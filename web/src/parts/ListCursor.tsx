@@ -11,7 +11,7 @@ export interface CursorItemProps {
 }
 
 /** What can take focus inside an item. */
-const FOCUSABLE = 'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
+const FOCUSABLE = 'a[href], button, input, select, textarea, summary, iframe, [contenteditable]:not([contenteditable="false"]), [tabindex]';
 
 /**
  * Arrow-key movement through a list, or a grid of columns, as one Tab stop. `counts` is the item count of each column
@@ -32,14 +32,18 @@ export function useListCursor(counts: readonly number[], onOpen: (at: Cursor) =>
       const here = at !== null && key === `${at.col}:${at.row}`;
       if (here) {
         for (const inner of element.querySelectorAll<HTMLElement>('[data-cursor-off]')) {
-          inner.removeAttribute('tabindex');
+          const was = inner.getAttribute('data-cursor-off');
+          if (was) inner.setAttribute('tabindex', was);
+          else inner.removeAttribute('tabindex');
           inner.removeAttribute('data-cursor-off');
         }
       } else {
+        // The marker keeps the control's own tabindex (empty when it had none), so the restore gives back what was there.
+        // One already out of the Tab order (tabindex -1, unmarked) is left alone.
         for (const inner of element.querySelectorAll<HTMLElement>(FOCUSABLE)) {
-          if (inner === element) continue;
+          if (inner === element || inner.hasAttribute('data-cursor-off') || inner.getAttribute('tabindex') === '-1') continue;
+          inner.setAttribute('data-cursor-off', inner.getAttribute('tabindex') ?? '');
           inner.setAttribute('tabindex', '-1');
-          inner.setAttribute('data-cursor-off', '');
         }
       }
     }
