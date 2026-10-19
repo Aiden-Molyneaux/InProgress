@@ -80,7 +80,7 @@ const TASK_HUES: Record<string, [string, string]> = {
 describe('theme tokens', () => {
   it('follows the system theme: day in :root, night in the one dark block', () => {
     expect(css).toMatch(/:root\s*\{[^}]*color-scheme:\s*light dark;/);
-    expect(css.match(/@media \(prefers-color-scheme: dark\)/g)).toHaveLength(1);
+    expect(sheets.match(/@media \(prefers-color-scheme: dark\)/g)).toHaveLength(1);
     expect(Object.keys(day).length).toBeGreaterThan(0);
     expect(Object.keys(night).length).toBeGreaterThan(0);
   });
