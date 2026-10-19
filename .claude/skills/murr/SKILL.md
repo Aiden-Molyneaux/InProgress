@@ -54,7 +54,9 @@ spec gap goes to `open-questions.md`, not into his report as a guess).
    violated assumptions, and now-stale invariants live.
 5. **The tests touching the diff**: read them as claims to audit, not as evidence of correctness.
 
-Projects without the doc graph: see Project risks below for what replaces items 2 and 3.
+Projects without the doc graph: the Project risks section below says what replaces each
+doc-graph reference in this skill (the spec and contract, CONVENTIONS, spec IDs, roadmap §3 and
+phase exits, testing-strategy, `open-questions.md`).
 
 ## The method
 
@@ -162,9 +164,18 @@ The house rules this project holds code to, cited like CONVENTIONS.md: `CLAUDE.m
 
 What to probe on this codebase, whatever the diff: hooks (`src/hooks/`, `src/server/session-flow.ts`, `src/cli/claude-config.ts`) run in every session of every project, so a slow or failing hook must never block a session and what it injects must stay small; migrations in `src/server/db/schema.ts` are append-only, and an additive one keeps `min_reader_version` at 1 so a rollback across it still works; several sessions, the scribe and the window write at once (`src/server/repo/`, `src/server/db/tx.ts`, `src/mcp/`), so look for transactions, ordering, idempotence and lost updates; Windows paths with backslashes and spaces, shells, process spawning, and files locked during a rename; errors that name their cause and are never swallowed; tests that can fail; and no em dashes in tracked text.
 
-A project without the doc graph (no `product-spec.md`, no `api-contract.md`) judges against the
-request the change serves, these files, and the surrounding code; authority items 2 and 3 above
-then read "the request and `CLAUDE.md` (its House rules section)".
+A project without the doc graph (no `product-spec.md`, `api-contract.md`, `roadmap.md` or
+`open-questions.md`) judges against the request the change serves, these files, and the
+surrounding code. The doc-graph references above then read:
+
+- authority items 2 and 3, and every CONVENTIONS citation: the request and `CLAUDE.md` (its House rules section);
+- spec IDs: the request; "unspecced behavior" is behavior the request did not ask for;
+- a phase exit (roadmap §3): the review before the branch is pushed to integration or merged;
+- testing-strategy principle 6 and "a §3 risk domain": the risk list above;
+- a gap filed to `open-questions.md`: a 🤔 owner-call in the report, for the main session to
+  route.
+
+Delete this paragraph and its list in a project that has the doc graph.
 
 ## Severity
 
@@ -181,7 +192,7 @@ then read "the request and `CLAUDE.md` (its House rules section)".
 ## Report format: ALWAYS use this
 
 ```
-# Murr: code audit: <scope>
+# Murr code audit: <scope>
 **Verdict:** SOUND ✅ (0 blocker/major) | NEEDS FIXES ⚠️ (<n> blocker · <m> major)
 **Scope:** <files / diff range> · IDs: <spec IDs> · **Probed:** <the attack surfaces actually
 checked: e.g. "input boundaries on 3 endpoints · double-fire on the 2 mutations · authz as

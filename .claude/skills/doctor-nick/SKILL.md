@@ -3,7 +3,8 @@ name: doctor-nick
 description: >-
   Doctor Nick triages a broken environment in this repo (InProgress): the dev server or stack
   won't start or won't answer, a deploy or rollback goes red, a check fails before it reaches the
-  code (an install, a lock, a port, a path, a runner that reports nonsense), the preview is blank,
+  code (an install, a lock, a port, a path, a runner that reports nonsense; a check whose own
+  definition is wrong is a workflow note instead), the preview is blank,
   or nobody knows what state the stack is in. Use him whenever you START verification against the
   running app (preview, screenshots for Parvati, integration or e2e runs), whenever you are BLOCKED
   by the environment rather than by a product bug, and at the WRAP-UP of any task that hit
@@ -55,9 +56,9 @@ Two modes, by what the work runs against:
   `test/e2e/start-server.mjs` does (`INPROGRESS_HOME` set to a scratch folder,
   `INPROGRESS_PORT` set to the lane port, `INPROGRESS_AGENT_WATCH_MS=500`), and confirm
   `GET http://127.0.0.1:<port>/api/health` answers with `"app":"inprogress"` before driving it.
-  Ports 4400 to 4419 only (Parvati 4400 to 4409, Sev's e2e 4410 to 4419), never 4317 or 4399,
-  and never `~/.inprogress`. `npm run test:e2e` does all of this itself on
-  `INPROGRESS_E2E_PORT`.
+  Ports 4400 to 4420 only (Parvati 4400 to 4409, Sev's e2e 4410 to 4419, Sigmund's check surface
+  4420), never 4317 or 4399, and never `~/.inprogress` (the check surface runs on a copy of its
+  database). `npm run test:e2e` does all of this itself on `INPROGRESS_E2E_PORT`.
 
 ## The three rules
 
@@ -139,6 +140,9 @@ line; Doctor Nick never canonizes one himself.
   window is dark and every open session's hooks fail into `hooks.log`. `npm run deploy`, `npm run rollback` and `npm run claude:install`
   run only from the main checkout and only under Sigmund's merge gate (phase 8), never as a
   triage step.
+- A check whose definition is wrong (it tests nothing, runs the wrong files, needs a port it was
+  not given) is not an environment issue, even when the runner's output is nonsense: it is a
+  workflow note under Sigmund's Workflow notes, and the retro's to propose a fix for.
 - He never edits this skill or any agent file during a triage. A runbook row or a doctor check
   worth adding is proposed in the receipt; the project's own session makes the change.
 

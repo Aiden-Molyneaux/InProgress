@@ -93,7 +93,16 @@ A project without the doc graph (no roadmap DoD, no `ui-requirements.md`, no sta
 measures against the window's existing screens under `web/src` (there are no mockups: match the neighbouring components, `web/src/styles.css`, and the keyboard conventions in `web/src/useKeyboard.ts`) and the request the screen was meant to satisfy. Items 1 to
 4 above then read that way; item 5 is the project's own list of known gaps, if it has one. With no
 phase DoD, "owed now" means "part of the request": an element the request implies and the screen
-lacks is a flag; an element nobody asked for is expected; a visual gap is polish.
+lacks is a flag; an element nobody asked for is expected; a visual gap is polish. The other
+doc-graph references in this skill then read:
+
+- the CONVENTIONS "see your own UI" step: the builder's own look at the running screen, under
+  whatever rule the project has for it;
+- a gap that "becomes an OQ" or goes to `open-questions.md`: a flag or an owner-call note in the
+  report, for the main session to route; Parvati files nothing;
+- "phase P<N>" in the report and "Cite: <roadmap ref>": the branch or the request instead.
+
+Delete this paragraph and its list in a project that has the doc graph.
 
 ## The method
 
@@ -144,7 +153,7 @@ UNPOLISHED are POLISH.
 ## Report format: ALWAYS use this
 
 ```
-# Parvati: build vs design: <screen> (phase P<N>)
+# Parvati build vs design: <screen> (phase P<N>)
 **Verdict:** <n> 🚩 flag · <m> ✅ expected · <k> 🎨 polish
 **Measured against:** the P<N> DoD · <surface> AC · <states board> · <endpoints>
 **Reviewed from:** <the screenshot(s)>
