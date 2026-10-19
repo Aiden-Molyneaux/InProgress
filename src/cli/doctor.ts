@@ -1,9 +1,11 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import Database from 'better-sqlite3';
 import { readToken } from '../lib/home';
+import { parseStamp } from '../server/backup';
 import { buildLabel, readBuild, sameBuild, VERSION, type BuildInfo } from '../lib/version';
 import { allowRules, HOOK_DEFS, isInProgressHook, nodeBinary, settingsShapeError, SKILL_NAMES } from './claude-config';
 import { findEdge } from './open';
@@ -21,6 +23,8 @@ export interface DoctorOptions {
   claudeDir: string;
   repo: string;
   skipMcp?: boolean;
+  /** The clock for the Backups check's ages; defaults to the real one. */
+  now?: Date;
   /** The deployed build to compare the running server with; defaults to this CLI's own dist/build.json. */
   build?: BuildInfo | null;
 }
@@ -67,12 +71,12 @@ async function serverCheck(baseUrl: string, deployed: BuildInfo | null): Promise
 }
 
 /**
- * How to go back to a backup: the server keeps its newest 7 as backups/inprogress-<stamp>.db (backup.ts). A leftover
- * -wal file would be replayed onto the restored copy, so it goes first.
+ * How to go back to a backup: the server keeps tiered snapshots as backups/inprogress-<stamp>.db (backup.ts), and
+ * `inprogress restore` does the swap. By hand, a leftover -wal file would be replayed onto the restored copy, so it goes first.
  */
 function restoreHint(file: string): string {
   const dir = dirname(file);
-  return `run \`inprogress stop\`, delete any ${basename(file)}-wal and -shm in ${dir}, then copy the newest ${join(dir, 'backups', 'inprogress-<stamp>.db')} over ${file}`;
+  return `run \`inprogress stop\`, delete any ${basename(file)}-wal and -shm in ${dir}, then copy the newest ${join(dir, 'backups', 'inprogress-<stamp>.db')} over ${file}, or run \`inprogress restore\` (newest snapshot) or \`inprogress restore --from ${join(dir, 'offsite')}\``;
 }
 
 function dbCheck(file: string): Check {
@@ -88,6 +92,100 @@ function dbCheck(file: string): Check {
     // A damaged file fails at the pragma, after the open: close it either way, or Windows keeps the file locked.
     db?.close();
   }
+}
+
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+
+const ago = (ms: number): string => (ms >= DAY_MS ? `${Math.floor(ms / DAY_MS)} d` : `${Math.floor(ms / HOUR_MS)} h`);
+
+/** Runs git in the backup repo without touching the network; nothing when it fails. */
+function gitQuiet(dir: string, args: string[]): string | undefined {
+  try {
+    return execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', windowsHide: true, timeout: 10_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch {
+    // Not a repo, no such ref, or no git: each reads as "nothing to report" and the caller says what is missing.
+    return undefined;
+  }
+}
+
+/** The stored result of the last backup drill, read without writing; nothing when there is none. */
+function readDrill(file: string): { at: string; ok: boolean; detail: string } | undefined {
+  if (!existsSync(file)) return undefined;
+  let db: Database.Database | undefined;
+  try {
+    db = new Database(file, { readonly: true, fileMustExist: true });
+    const raw = db.prepare("SELECT value FROM meta WHERE key = 'backup_drill'").pluck().get() as string | undefined;
+    return raw ? (JSON.parse(raw) as { at: string; ok: boolean; detail: string }) : undefined;
+  } catch {
+    // An unreadable database is the Database check's to report; here it only means no drill is known.
+    return undefined;
+  } finally {
+    db?.close();
+  }
+}
+
+/**
+ * The backups: the newest snapshot (stale after 26 hours while the server is up), the newest pushed commit (warns after
+ * 3 days, fails after 7), the last drill (warns when missing, failed or over 14 days old) and the backup repo's size
+ * (warns over 500 MB). Only a push over 7 days old fails the run.
+ */
+export function backupsCheck(home: string, serverUp: boolean, now: Date): Check {
+  const warnings: string[] = [];
+  let fail = false;
+  const parts: string[] = [];
+  // Snapshots
+  const dir = join(home, 'backups');
+  const newest = (existsSync(dir) ? readdirSync(dir) : []).filter((f) => parseStamp(f)).sort().pop();
+  if (newest) {
+    const age = now.getTime() - parseStamp(newest)!.getTime();
+    parts.push(`newest snapshot ${newest} (${ago(age)} ago)`);
+    if (age > 26 * HOUR_MS && serverUp) warnings.push('the newest snapshot is over 26 hours old');
+  } else {
+    parts.push(`no snapshot in ${dir}`);
+    if (serverUp) warnings.push('no snapshot yet');
+  }
+  // Pushed commit, drill and size
+  const repo = join(home, 'offsite');
+  const pushedAt = existsSync(join(repo, '.git')) ? gitQuiet(repo, ['log', '-1', '--format=%cI', 'origin/main']) : undefined;
+  if (!existsSync(join(repo, '.git'))) {
+    parts.push('not set up: run inprogress backup --init <remote url>');
+    warnings.push('the off-machine copy is not set up');
+  } else if (!pushedAt) {
+    parts.push('no pushed commit yet: run inprogress backup --push');
+    warnings.push('nothing is pushed yet');
+  } else {
+    const age = now.getTime() - new Date(pushedAt).getTime();
+    parts.push(`newest pushed commit ${ago(age)} ago`);
+    if (age > 7 * DAY_MS) {
+      fail = true;
+      warnings.push('the newest pushed commit is over 7 days old');
+    } else if (age > 3 * DAY_MS) {
+      warnings.push('the newest pushed commit is over 3 days old');
+    }
+  }
+  if (existsSync(join(repo, '.git'))) {
+    const drill = readDrill(join(home, 'inprogress.db'));
+    if (!drill) {
+      parts.push('no drill yet');
+      warnings.push('the backup has never been drilled');
+    } else {
+      const age = now.getTime() - Date.parse(drill.at);
+      parts.push(`last drill ${drill.ok ? 'passed' : `FAILED (${drill.detail})`} ${ago(age)} ago`);
+      if (!drill.ok) warnings.push('the last drill failed');
+      else if (age > 14 * DAY_MS) warnings.push('the last drill is over 14 days old');
+    }
+    const counts = gitQuiet(repo, ['count-objects', '-v']);
+    if (counts !== undefined) {
+      const kib = (key: string) => Number(new RegExp(`^${key}: (\\d+)$`, 'm').exec(counts)?.[1] ?? 0);
+      const total = kib('size-pack') + kib('size');
+      parts.push(`repo ${(total / 1024).toFixed(1)} MB`);
+      if (total > 500 * 1024) warnings.push('the backup repo is over 500 MB');
+    }
+  }
+  const detail = parts.join('; ');
+  if (!warnings.length) return { name: 'Backups', ok: true, detail };
+  return { name: 'Backups', ok: false, warnOnly: !fail, detail: `${warnings.join('; ')} (${detail})` };
 }
 
 function agentCheck(file: string): Check {
@@ -151,6 +249,7 @@ export async function runChecks(o: DoctorOptions): Promise<Check[]> {
   const token = readToken(o.home);
   checks.push({ name: 'Token', ok: !!token, detail: token ? 'readable' : `missing at ${join(o.home, 'token')}: start the server once` });
   checks.push(dbCheck(join(o.home, 'inprogress.db')));
+  checks.push(backupsCheck(o.home, server.ok, o.now ?? new Date()));
   const settingsFile = join(o.claudeDir, 'settings.json');
   const settings = readJson(settingsFile);
   checks.push(hooksCheck(settingsFile, settings));

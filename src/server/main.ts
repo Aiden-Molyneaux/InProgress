@@ -6,9 +6,10 @@ import { baseUrl, ensureToken, homeDir, port as configuredPort } from '../lib/ho
 import { readBuild, VERSION } from '../lib/version';
 import { createWatchState, watchAgents, watchCommandEnds, watchInterval } from './agent-watch';
 import { buildApp } from './app';
-import { backupDb, truncateIfLarge } from './backup';
+import { snapshotDb, truncateIfLarge } from './backup';
 import { openDb } from './db/connection';
 import { createCtx } from './db/tx';
+import { tickOffsite } from './offsite';
 import { runMaintenance } from './project-lifecycle';
 import { reconcileProjects } from './repo/taskState';
 import { portState, reportStartupFailure } from './startup';
@@ -77,12 +78,31 @@ async function main(): Promise<void> {
     app.log.error(`Could not write server.pid: ${(err as Error).message}`);
   }
   // Back up only once we own the port, so two racing starts never write the same backup file.
-  await backupDb(db, join(home, 'backups'), 7).catch((err: Error) => app.log.error(err.message));
+  const backups = join(home, 'backups');
+  await snapshotDb(db, backups).catch((err: Error) => app.log.error(err.message));
   // After the backup, so the newest backup still holds a project the purge is about to remove; then on a timer, since
   // the server can run for weeks. runMaintenance never throws.
   const log = { info: (message: string) => app.log.info(message), error: (message: string) => app.log.error(message) };
+  // One tick at a time: a push that takes minutes must not overlap the next tick's snapshot or copy. tickOffsite never throws.
+  let ticking = false;
+  const tick = async (): Promise<void> => {
+    if (ticking) return;
+    ticking = true;
+    try {
+      await snapshotDb(db, backups).catch((err: Error) => app.log.error(err.message));
+      runMaintenance(ctx, home, log);
+      await tickOffsite(db, home, log);
+    } finally {
+      ticking = false;
+    }
+  };
   runMaintenance(ctx, home, log);
-  maintenance = setInterval(() => runMaintenance(ctx, home, log), MAINTENANCE_MS);
+  // The off-machine copy and the drill start in the background: a slow push never delays the server's first answer.
+  ticking = true;
+  void tickOffsite(db, home, log).finally(() => {
+    ticking = false;
+  });
+  maintenance = setInterval(() => void tick(), MAINTENANCE_MS);
   maintenance.unref();
   // The transcript watcher: once now, so subagents that died while the server was down end at once, then on a timer that
   // never keeps the process alive. A failed tick is logged and the next one tries again.
