@@ -54,7 +54,10 @@ export function App() {
   useLayoutEffect(() => {
     if (detailsOpen) {
       const active = document.activeElement;
-      detailsOpener.current = { element: active instanceof HTMLElement && active !== document.body ? active : null, node: selectedNodeRef.current! };
+      const outside = active instanceof HTMLElement && active !== document.body && !active.closest('.ip-details');
+      // Opening records the opener. Switching step from outside Details (another card) re-records it; from inside
+      // (its Steps rows, the parent link) the old opener stands.
+      if (outside || !detailsOpener.current) detailsOpener.current = { element: outside ? active : null, node: selectedNodeRef.current! };
       return;
     }
     const from = detailsOpener.current;
@@ -63,7 +66,7 @@ export function App() {
     if (!from || (document.activeElement && document.activeElement !== document.body)) return;
     const target = from.element?.isConnected ? from.element : document.querySelector<HTMLElement>(`[data-node="${from.node}"] .ip-row-title`);
     target?.focus();
-  }, [detailsOpen]);
+  }, [detailsOpen, selectedNode]);
   const [viewerResource, setViewerResource] = useState<number | null>(null);
   const viewerOpen = viewerResource !== null;
   const goToField = useRef<GoToHandle>(null);

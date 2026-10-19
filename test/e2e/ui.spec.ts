@@ -1548,7 +1548,7 @@ test.describe('Go to', () => {
     // Inside the HUD's side padding (20 px here).
     expect(bar.x + bar.width - (button.x + button.width), 'at the right end').toBeLessThanOrEqual(20);
     await goToButton(page).click();
-    const panel = page.locator('.ip-cmd');
+    const panel = page.locator('.ip-cmdbar');
     await expect(panel).toBeVisible();
     await expect(panel).toHaveCSS('background-color', await tokenColour(page, '--canvas-1'));
     await expect(panel).toHaveCSS('border-top-width', '1px');
@@ -1563,9 +1563,9 @@ test.describe('Go to', () => {
     expect(box.y).toBeGreaterThan(900 * 0.13);
     expect(box.y).toBeLessThan(900 * 0.17);
     // The scrim is the dialog's backdrop, and the window behind it is inert.
-    expect(await page.evaluate<string>(`getComputedStyle(document.querySelector('.ip-cmd'), '::backdrop').backgroundColor`)).toBe('rgba(0, 0, 0, 0.65)');
+    expect(await page.evaluate<string>(`getComputedStyle(document.querySelector('.ip-cmdbar'), '::backdrop').backgroundColor`)).toBe('rgba(0, 0, 0, 0.65)');
     await expect(page.locator('.ip-app')).toHaveJSProperty('inert', false);
-    expect(await page.evaluate<boolean>(`document.querySelector('.ip-cmd').matches(':modal')`)).toBe(true);
+    expect(await page.evaluate<boolean>(`document.querySelector('.ip-cmdbar').matches(':modal')`)).toBe(true);
   });
 
   test("go-to opens the step's Details, in this project and in another", async ({ page, api, fresh }) => {
@@ -1589,7 +1589,7 @@ test.describe('Go to', () => {
     // A step of another project: the project opens, then the step's Details.
     await page.keyboard.press('/');
     await page.keyboard.type(`#${notes}`);
-    await expect(page.locator('.ip-cmd-note')).toHaveText('1 step');
+    await expect(page.locator('.ip-cmdbar-note')).toHaveText('1 step');
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(hereIs(far.slug));
     await expect(field(page)).toBeHidden();
@@ -1605,9 +1605,9 @@ test.describe('Go to', () => {
     await page.keyboard.press('/');
     await page.keyboard.type('#99999999');
     await page.keyboard.press('Enter');
-    const panel = page.locator('.ip-cmd');
+    const panel = page.locator('.ip-cmdbar');
     await expect(panel).toContainText('No step #99999999');
-    await expect(panel.locator('.ip-cmd-note')).toHaveCSS('color', await tokenColour(page, '--alarm'));
+    await expect(panel.locator('.ip-cmdbar-note')).toHaveCSS('color', await tokenColour(page, '--alarm'));
     await expect(field(page)).toBeFocused();
     await expect(page).toHaveURL(hereIs(demo.slug));
     // A deleted step says the same; typing on clears the line.
@@ -1636,8 +1636,8 @@ test.describe('Go to', () => {
     await expect(options(page)).toHaveCount(2);
     await expect(options(page).nth(0)).toHaveAccessibleName(`#${home.ids[homeTitle]} ${homeTitle}, ${homeName}`);
     await expect(options(page).nth(1)).toHaveAccessibleName(`#${away.ids[awayTitle]} ${awayTitle}, ${awayName}`);
-    await expect(options(page).nth(1).locator('.ip-cmd-proj')).toHaveText(awayName);
-    await expect(page.locator('.ip-cmd-note')).toHaveText('2 steps');
+    await expect(options(page).nth(1).locator('.ip-cmdbar-proj')).toHaveText(awayName);
+    await expect(page.locator('.ip-cmdbar-note')).toHaveText('2 steps');
     await expect(options(page).nth(0)).toHaveAttribute('aria-selected', 'true');
     await page.keyboard.press('ArrowDown');
     await expect(options(page).nth(1)).toHaveAttribute('aria-selected', 'true');
@@ -1654,7 +1654,7 @@ test.describe('Go to', () => {
     await page.keyboard.type(`${word} home`);
     await expect(options(page)).toHaveCount(1);
     await page.keyboard.type(' nowhere');
-    await expect(page.locator('.ip-cmd')).toContainText('No step titles match');
+    await expect(page.locator('.ip-cmdbar')).toContainText('No step titles match');
     await expect(options(page)).toHaveCount(0);
     // Away is the open project now, so its step leads. A click picks too.
     await field(page).fill(word);
@@ -1686,7 +1686,7 @@ test.describe('Go to', () => {
       await route.continue();
     });
     await field(page).fill(`${word} beta`);
-    await expect(page.locator('.ip-cmd-row[aria-selected="true"]')).toHaveCount(0);
+    await expect(page.locator('.ip-cmdbar-row[aria-selected="true"]')).toHaveCount(0);
     await page.keyboard.press('Enter');
     await showsStep(page.getByRole('complementary'), made.ids[titles[3]], `${titles[3]}`);
   });
@@ -3065,7 +3065,8 @@ test.describe('Details: asks, handoff, add a step', () => {
     await page.keyboard.press('Enter');
     // Cleared with its answer, it moves to the answered lines.
     const cleared = asks.locator('.ip-dask.cleared');
-    await expect(cleared).toContainText(`a${fresh.ask} ? "Which keystore signs the release?" · answered "Use the upload key"`);
+    await expect(cleared.locator('.ip-dask-head')).toHaveText(new RegExp(`a${fresh.ask} \\? ANSWERED · `));
+    await expect(cleared.locator('.ip-dask-line')).toHaveText('"Which keystore signs the release?" · answered "Use the upload key"');
     await expect(asks.getByRole('button', { name: 'Answer…' })).toHaveCount(0);
     // The handoff chip opens the handoff in the viewer.
     await details.getByRole('button', { name: /^handoff · / }).click();
@@ -3259,7 +3260,7 @@ test.describe('v3 Details, viewer and command bar (#505)', () => {
     // Nothing typed: the views in order, then the other projects, the open one left out.
     const goTo = page.getByRole('group', { name: 'Go to' });
     await expect(goTo.getByRole('option').first()).toBeVisible();
-    await expect(goTo.getByRole('option').locator('.ip-cmd-name').filter({ hasText: /^(Board|Project|Backlog|All done)$/ })).toHaveText(['Board', 'Project', 'Backlog', 'All done']);
+    await expect(goTo.getByRole('option').locator('.ip-cmdbar-name').filter({ hasText: /^(Board|Project|Backlog|All done)$/ })).toHaveText(['Board', 'Project', 'Backlog', 'All done']);
     await expect(goTo.getByRole('option', { name: `Open ${other}` })).toBeVisible();
     await expect(goTo.getByRole('option').first()).toHaveAttribute('aria-selected', 'true');
     // "backlog" + Enter opens the Backlog view.
@@ -3267,19 +3268,19 @@ test.describe('v3 Details, viewer and command bar (#505)', () => {
     await expect(goTo.getByRole('option')).toHaveCount(1);
     await page.keyboard.press('Enter');
     await expect(page.locator('.ip-backlogview')).toBeVisible();
-    await expect(page.locator('.ip-cmd')).toBeHidden();
+    await expect(page.locator('.ip-cmdbar')).toBeHidden();
     await expect(page).toHaveURL(hereIs(demo.slug));
     // A project's name + Enter opens that project.
     await page.keyboard.press('Control+k');
     await page.keyboard.type(other.toLowerCase());
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(hereIs(made.slug));
-    await expect(page.locator('.ip-cmd')).toBeHidden();
+    await expect(page.locator('.ip-cmdbar')).toBeHidden();
     // Steps still answer to #id, with the old message.
     await page.keyboard.press('Control+k');
     await page.keyboard.type('#99999999');
     await page.keyboard.press('Enter');
-    await expect(page.locator('.ip-cmd-note')).toHaveText('No step #99999999');
+    await expect(page.locator('.ip-cmdbar-note')).toHaveText('No step #99999999');
   });
 
   test("Details' action strip opens Park without scrolling on a long step", async ({ page, api, fresh }) => {
@@ -3357,5 +3358,49 @@ test.describe('v3 Details, viewer and command bar (#505)', () => {
     await page.keyboard.press('Escape');
     await expect(project).toHaveAttribute('data-wide', 'true');
     await expect(page.locator('.ip-pside')).toBeVisible();
+  });
+
+  test('switching Details to another card from the Board makes that card the opener, so Escape returns focus to it', async ({ page, fresh }) => {
+    await page.setViewportSize({ width: 1600, height: 900 });
+    await open(page, fresh);
+    const a = stepRow(page, 'Play app signing');
+    const b = stepRow(page, 'Run signing tests');
+    await a.click();
+    await expect(page.getByRole('complementary').locator('.ip-dtitle')).toHaveText('Play app signing');
+    await b.click();
+    await expect(page.getByRole('complementary').locator('.ip-dtitle')).toHaveText('Run signing tests');
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('complementary')).toHaveCount(0);
+    await expect(b).toBeFocused();
+  });
+
+  test('a menu opened from the tab row paints over an open Details', async ({ page, api }) => {
+    const keptName = unique('Layer kept');
+    const shelvedName = unique('Layer shelved');
+    const kept = await bare(api, keptName);
+    const shelved = await bare(api, shelvedName);
+    await addStep(api, kept, 'Layer step');
+    await write(api, `e2e-${randomUUID()}`, 'patch', `/api/projects/${shelved.slug}`, { status: 'archived' });
+    await page.setViewportSize({ width: 800, height: 900 });
+    await page.goto(`/#/p/${kept.slug}`);
+    await openDetails(page, 'Layer step');
+    await page.getByRole('button', { name: 'Archived and deleted projects' }).click();
+    const item = page.getByRole('menu').getByRole('menuitem', { name: shelvedName, exact: true });
+    await expect(item).toBeVisible();
+    const box = (await item.boundingBox())!;
+    const hit = await page.evaluate<boolean>(`(() => { const item = [...document.querySelectorAll('[role="menuitem"]')].find((e) => e.textContent.includes(${JSON.stringify(shelvedName)})); const at = document.elementFromPoint(${box.x + box.width / 2}, ${box.y + box.height / 2}); return item === at || item.contains(at); })()`);
+    expect(hit, 'the menu item is the top element at its centre').toBe(true);
+  });
+
+  test('a press on the scrim closes the command bar and returns focus to the tile', async ({ page, fresh }) => {
+    await widen(page);
+    await open(page, fresh);
+    const tile = stepRow(page, 'Play app signing');
+    await tile.focus();
+    await page.keyboard.press('/');
+    await expect(page.locator('.ip-cmdbar')).toBeVisible();
+    await page.mouse.click(2, 2);
+    await expect(page.locator('.ip-cmdbar')).toBeHidden();
+    await expect(tile).toBeFocused();
   });
 });

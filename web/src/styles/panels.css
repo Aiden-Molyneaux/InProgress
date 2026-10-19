@@ -7,11 +7,12 @@
 @media (min-width: 1360px) { .ip-main { --details-w: 440px; } }
 @keyframes ip-details-in { from { clip-path: inset(0 0 0 100%); } to { clip-path: inset(0); } }
 .ip-details { position: absolute; top: 0; right: 0; bottom: 0; z-index: var(--z-sheet); width: var(--details-w); display: flex; flex-direction: column; background: var(--canvas-1); border-left: 1px solid var(--line-strong); font-size: var(--t-body); line-height: 1.45; animation: ip-details-in var(--dur-3) var(--ease-out); }
-@media (prefers-reduced-motion: reduce) { .ip-details { animation: none; } }
 @media (max-width: 719px) { .ip-details { left: 0; width: auto; border-left: 0; } }
 /* The Project view gives Details its width: the page narrows beside it, and ProjectView drops its wide layout (the phase
    index folds into the jump row) once the page is under 1160 px. The Board, the Backlog view and All done keep the overlay. */
 @media (min-width: 720px) { .ip-main:has(> .ip-details) > .ip-project { margin-right: var(--details-w); } }
+/* Keeps Details' z-index local to the page, so menus opened from the chrome above it paint over it. */
+.ip-main { isolation: isolate; }
 .ip-details :focus-visible { outline: 2px solid var(--volt); outline-offset: 1px; }
 .ip-details .p-btn:focus-visible { outline: none; }
 .ip-details .muted, .ip-dmuted { color: var(--text-muted); }
@@ -27,7 +28,7 @@
 .ip-dtop { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
 .ip-dtop-act { display: inline-flex; align-items: center; gap: var(--sp-1); }
 .ip-dtitle { margin: var(--sp-2) 0 0; font-family: var(--font-body); font-size: var(--t-h3); font-weight: var(--w-strong); line-height: 1.3; color: var(--text-hi); overflow-wrap: anywhere; }
-.ip-dtitle:focus:not(:focus-visible) { outline: none; }
+.ip-dtitle:focus { outline: none; }
 
 /* The body scrolls; its sections sit --sp-5 apart. */
 .ip-dbody { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: var(--sp-5); padding: var(--sp-4); }
@@ -39,7 +40,8 @@
 /* Marker, status, label, who, parent. */
 .ip-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
 .ip-dwho { color: var(--text-muted); }
-.ip-dparent { color: var(--text-muted); }
+.ip-dparent { display: inline-flex; align-items: baseline; gap: var(--sp-1); min-width: 0; max-width: 100%; color: var(--text-muted); }
+.ip-dparent .ip-link { min-width: 0; overflow-wrap: anywhere; }
 .ip-link { color: var(--text-hi); text-decoration: underline dotted; text-align: left; }
 .ip-link:hover { color: var(--volt); }
 .ip-meta .ip-glyph { font-variant-emoji: text; }
@@ -53,7 +55,8 @@
 .ip-dask { padding: var(--sp-3); background: var(--canvas-2); border: 1px solid var(--line); border-left: 2px solid var(--volt); }
 .ip-dask p { margin: var(--sp-1) 0 0; color: var(--text); }
 .ip-dask-who { margin-top: var(--sp-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
-.ip-dask.cleared { padding: 0; background: none; border: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
+.ip-dask.cleared { padding: 0; background: none; border: 0; display: grid; gap: var(--sp-1); color: var(--text-muted); }
+.ip-dask-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* The step: the handoff chip and the hygiene marks, the Markdown, the outcome in a panel. */
 .ip-dstep { gap: var(--sp-3); }
@@ -108,6 +111,9 @@
 .ip-dstrip { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); max-height: 50%; overflow-y: auto; padding: var(--sp-3) var(--sp-4); background: var(--canvas-1); border-top: 1px solid var(--line); }
 .ip-dstrip > :is(.ip-park, .ip-quick-add) { flex: 1 1 100%; min-width: 0; }
 .ip-dupdated { margin-left: auto; font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-dim); }
+/* Forms in the strip use the md controls: 32 px buttons, small muted labels. */
+.ip-dstrip .ip-btn { height: 32px; }
+.ip-dstrip label { font-size: var(--t-detail-sm); color: var(--text-muted); }
 .ip-dstrip-error { flex: 1 1 auto; }
 
 /* Markdown, in Details, the viewer and the slab: headings in the body face, code in mono, links in white. */
@@ -124,6 +130,7 @@
 .ip-md a:hover { color: var(--volt); }
 .ip-md code { font-family: var(--font-mono); font-size: var(--t-detail-sm); }
 .ip-md pre { padding: var(--sp-3); overflow: auto; background: var(--canvas-0); border: 1px solid var(--line); }
+.ip-md blockquote { margin: 0 0 var(--sp-3); padding: 0 0 0 var(--sp-3); border-left: 2px solid var(--line-bright); color: var(--text-muted); }
 .ip-md table { border-collapse: collapse; }
 .ip-md td, .ip-md th { padding: var(--sp-1) var(--sp-2); border: 1px solid var(--line); }
 

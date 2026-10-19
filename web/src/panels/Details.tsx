@@ -219,7 +219,10 @@ function AsksSection({ nodeId, snapshot, now }: { nodeId: number; snapshot: Proj
         ))}
         {answered.map((a) => (
           <li key={a.id} className="ip-dask cleared" data-ask={a.id}>
-            <span className="ip-id">{`a${a.id}`}</span> {KIND_MARK[a.kind]} {`"${a.text}"`} · answered {`"${a.answer}"`} · {ageShort(a.clearedAt!, now)}
+            <Eyebrow className="ip-dask-head">
+              <span className="ip-id">{`a${a.id}`}</span> {KIND_MARK[a.kind]} ANSWERED · <span className="ip-time">{ageShort(a.clearedAt!, now)}</span>
+            </Eyebrow>
+            <span className="ip-dask-line">{`"${a.text}"`} · answered {`"${a.answer}"`}</span>
           </li>
         ))}
       </ul>
@@ -232,7 +235,13 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
   const [error, setError] = useState<string | null>(null);
   /** Counts Retry presses: the fetch below runs again for each. */
   const [attempt, setAttempt] = useState(0);
-  const retry = () => setAttempt((n) => n + 1);
+  /** Set by Retry, so a refetch that succeeds can put back the focus the Retry button took with it. */
+  const retried = useRef(false);
+  const [refocusAdd, setRefocusAdd] = useState(false);
+  const retry = () => {
+    retried.current = true;
+    setAttempt((n) => n + 1);
+  };
   const [copied, setCopied] = useState(false);
   const copiedTimer = useRef(0);
   useEffect(() => () => window.clearTimeout(copiedTimer.current), []);
@@ -277,6 +286,10 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
         if (!alive) return;
         setDetail(d);
         setError(null);
+        if (retried.current) {
+          retried.current = false;
+          setRefocusAdd(true);
+        }
       })
       .catch((e: Error) => alive && setError(e.message));
     return () => {
@@ -289,8 +302,24 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
   const title = useRef<HTMLHeadingElement>(null);
   const loaded = detail !== null;
   useEffect(() => {
-    if (loaded) title.current?.focus();
+    if (!loaded) return;
+    // Never take focus from a field Aiden is typing in outside Details.
+    const at = document.activeElement;
+    const editable = at instanceof HTMLElement && (at.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(at.tagName));
+    if (!at || at === document.body || at.closest('.ip-details') || !editable) title.current?.focus();
   }, [loaded]);
+  // A Retry in the strip unmounts itself when the refetch succeeds: focus falls to the page, so Add a step takes it.
+  useEffect(() => {
+    if (!refocusAdd) return;
+    const at = document.activeElement;
+    if (!at || at === document.body) addButton.current?.focus();
+    setRefocusAdd(false);
+  }, [refocusAdd, detail]);
+  // The Park form closes if the step stops being parkable under it (parked or finished from elsewhere).
+  const canPark = detail !== null && detail.parent !== null && (detail.node.status === 'todo' || detail.node.status === 'active' || detail.node.status === 'blocked');
+  useEffect(() => {
+    if (!canPark) setParking(false);
+  }, [canPark]);
 
   if (!detail) {
     return (
@@ -454,7 +483,7 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
         )}
       </div>
       <div className="ip-dstrip">
-        {parking ? (
+        {parking && parkable ? (
           <ParkForm projectId={projectId} slug={snapshot.project.slug} nodeId={node.id} title={node.title} onStatus={onStatus} onDone={() => { setParking(false); setFocusNext('unpark'); }} onCancel={() => { setParking(false); setFocusNext('park'); }} />
         ) : adding ? (
           <QuickAdd

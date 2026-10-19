@@ -76,7 +76,11 @@ export function ResourceViewer({ resourceId, onClose }: { resourceId: number; on
       </div>
       <ToastRegion>
         {said && (
-          <Toast key={said.id} tone={said.tone} onDismiss={() => setSaid((now) => (now?.id === said.id ? null : now))}>
+          <Toast key={said.id} tone={said.tone} onDismiss={() => {
+              // The × that was pressed leaves with the toast: focus goes to the document pane, not to the page.
+              if (document.activeElement?.closest('.p-toasts')) body.current?.focus();
+              setSaid((now) => (now?.id === said.id ? null : now));
+            }}>
             {said.text}
           </Toast>
         )}

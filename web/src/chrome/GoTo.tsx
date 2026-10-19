@@ -20,8 +20,8 @@ export type GoPick = { kind: 'step'; hit: StepHit } | GoTarget;
 
 interface GoToProps {
   /**
-   * The row picked. A step: the window opens its project, unfolds it, centres on it, opens its Details and gives its card
-   * focus. Until then focus waits on the search button, which keeps it if the jump is dropped.
+   * The row picked. A step: the window opens its project, unfolds it, centres on it and opens its Details. Focus waits on
+   * the search button, which keeps it if the jump is dropped, and Details' title takes it once the step has loaded.
    */
   onGo: (pick: GoPick) => void;
   /** The open project's slug: its steps list first within each tier, and it is left out of the Go to rows. */
@@ -250,29 +250,33 @@ export const GoTo = forwardRef<GoToHandle, GoToProps>(function GoTo({ onGo, curr
       <dialog
         ref={dialog}
         id={`${ids}p`}
-        className="ip-cmd"
+        className="ip-cmdbar"
         aria-label="Find"
         onKeyDown={onKeyDown}
         // Escape is ours (keydown above); the dialog's own cancel would close it without returning focus.
         onCancel={(e) => e.preventDefault()}
+        // Guard: however the dialog closes, the state follows.
+        onClose={() => setOpen(false)}
         // A press on the backdrop is a press on the dialog itself. Elsewhere in the bar a press keeps focus in the field.
         onMouseDown={(e) => {
-          if (e.target === e.currentTarget) close(false);
-          else if (!(e.target instanceof HTMLInputElement)) e.preventDefault();
+          if (e.target === e.currentTarget) {
+            e.preventDefault();
+            close(true);
+          } else if (!(e.target instanceof HTMLInputElement)) e.preventDefault();
         }}
         onContextMenu={(e) => e.preventDefault()}
       >
         {open && (
           <>
             <Frame />
-            <div className="ip-cmd-field">
+            <div className="ip-cmdbar-field">
               <Eyebrow as="label" glyph="[⌕]" htmlFor={`${ids}f`}>
                 Find
               </Eyebrow>
               <input
                 ref={field}
                 id={`${ids}f`}
-                className="ip-cmd-input"
+                className="ip-cmdbar-input"
                 role="combobox"
                 aria-label="Find: go to a step, a project or a view"
                 aria-autocomplete="list"
@@ -292,22 +296,22 @@ export const GoTo = forwardRef<GoToHandle, GoToProps>(function GoTo({ onGo, curr
                 }}
               />
             </div>
-            <div role="listbox" id={`${ids}l`} aria-label="Results" className="ip-cmd-list" hidden={!listed}>
+            <div role="listbox" id={`${ids}l`} aria-label="Results" className="ip-cmdbar-list" hidden={!listed}>
               {goRows.length > 0 && (
-                <div role="group" aria-label="Go to" className="ip-cmd-group">
+                <div role="group" aria-label="Go to" className="ip-cmdbar-group">
                   <Eyebrow glyph="//" aria-hidden="true">
                     Go to
                   </Eyebrow>
                   {goRows.map((t) => (
-                    <div key={targetKey(t)} {...rowProps(targetKey(t))} aria-label={t.label} className="ip-cmd-row" onClick={() => pick(t)}>
-                      <span className="ip-cmd-name">{t.label}</span>
-                      <span className="ip-cmd-tag">{t.kind === 'view' ? 'VIEW' : 'PROJECT'}</span>
+                    <div key={targetKey(t)} {...rowProps(targetKey(t))} aria-label={t.label} className="ip-cmdbar-row" onClick={() => pick(t)}>
+                      <span className="ip-cmdbar-name">{t.label}</span>
+                      <span className="ip-cmdbar-tag">{t.kind === 'view' ? 'VIEW' : 'PROJECT'}</span>
                     </div>
                   ))}
                 </div>
               )}
               {hits.length > 0 && (
-                <div role="group" aria-label="Steps" className="ip-cmd-group">
+                <div role="group" aria-label="Steps" className="ip-cmdbar-group">
                   <Eyebrow glyph="//" aria-hidden="true">
                     Steps
                   </Eyebrow>
@@ -316,12 +320,12 @@ export const GoTo = forwardRef<GoToHandle, GoToProps>(function GoTo({ onGo, curr
                       key={h.id}
                       {...rowProps(`step:${h.id}`)}
                       aria-label={hitLabel(h)}
-                      className={`ip-cmd-row${h.status === 'done' || h.status === 'dropped' ? ' finished' : ''}`}
+                      className={`ip-cmdbar-row${h.status === 'done' || h.status === 'dropped' ? ' finished' : ''}`}
                       onClick={() => pick({ kind: 'step', hit: h })}
                     >
-                      <span className="ip-cmd-id">#{h.id}</span>
-                      <span className="ip-cmd-name">{h.title}</span>
-                      <span className="ip-cmd-tag ip-cmd-proj">
+                      <span className="ip-cmdbar-id">#{h.id}</span>
+                      <span className="ip-cmdbar-name">{h.title}</span>
+                      <span className="ip-cmdbar-tag ip-cmdbar-proj">
                         {h.projectName}
                         {h.projectStatus === 'archived' ? ' · ARCHIVED' : ''}
                       </span>
@@ -330,10 +334,10 @@ export const GoTo = forwardRef<GoToHandle, GoToProps>(function GoTo({ onGo, curr
                 </div>
               )}
             </div>
-            <div className="ip-cmd-note" data-tone={alarm ? 'alarm' : undefined} aria-live="polite">
+            <div className="ip-cmdbar-note" data-tone={alarm ? 'alarm' : undefined} aria-live="polite">
               {note}
             </div>
-            <div className="ip-cmd-foot">
+            <div className="ip-cmdbar-foot">
               <KeyHint keys={['↑↓']} label="Move" />
               <KeyHint keys={['Enter']} label="Open" />
               <KeyHint keys={['Esc']} label="Close" />
