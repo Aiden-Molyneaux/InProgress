@@ -350,6 +350,8 @@ export interface Session {
   promptsSinceUpdate: number;
   startedAt: string;
   lastSeenAt: string;
+  /** When it last got a real prompt (not a background-task notice); null before migration 14 or its first one. The Board's answered-in-chat rule reads it. */
+  lastPromptAt: string | null;
   endedAt: string | null;
   /**
    * The order of a project's sessions: the lowest slot no other live session there held when it began, was revived or

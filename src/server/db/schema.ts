@@ -319,6 +319,13 @@ export const MIGRATIONS: string[] = [
   -- rollback across it works.
   INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
   `,
+  // 14: when the session last got a real prompt (#522): a UserPromptSubmit that was not a background-task notice. NULL until
+  // its next one.
+  `
+  ALTER TABLE sessions ADD COLUMN last_prompt_at TEXT;
+  -- Only a nullable column: v1 to v13 builds can still read and write this schema, so a rollback across it works.
+  INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+  `,
 ];
 
 /**

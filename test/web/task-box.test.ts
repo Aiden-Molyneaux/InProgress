@@ -5,7 +5,7 @@ import { boxSince, hueStyle, PILLS } from '../../web/src/board/boxState';
 
 const node = (over: Record<string, unknown> = {}) => ({ id: 7, boardState: null, stateSince: null, hue: null, completedAt: null, updatedAt: '2026-10-10T00:00:00Z', ...over });
 const box = (state: TaskState, nodeOver: Record<string, unknown> = {}, asks: { raisedAt: string }[] = []): TaskBox =>
-  ({ row: { node: node(nodeOver), asks } as unknown as BoardRow, session: null, cell: 'now', state });
+  ({ row: { node: node(nodeOver), asks, waiting: asks } as unknown as BoardRow, session: null, cell: 'now', state });
 
 describe('PILLS', () => {
   it('puts question, permission and review in the needs class, and working in its own', () => {

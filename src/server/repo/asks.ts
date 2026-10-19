@@ -197,6 +197,23 @@ export function owedAnswers(ctx: Ctx, nodeId: number): Ask[] {
     .all(nodeId, msAgo(ctx, ASK_TRAIL_MS), msAgo(ctx, STALE_SESSION_MS)) as AskRow[]).map(toAsk);
 }
 
+/**
+ * The open asks a real prompt to this session reminds it to record (#522), oldest raised first: the ones it raised, and
+ * the open ones on a step it drives (and is focused on) whose raiser is not live. This mirrors the counting session of
+ * answeredInChat in src/core/board.ts: the raiser while it is live, else the step's driver.
+ */
+export function asksToRemind(ctx: Ctx, sessionId: string): Ask[] {
+  return (ctx.db
+    .prepare(
+      `SELECT * FROM asks WHERE cleared_at IS NULL AND ${inLiveProject('asks.project_id')}` +
+        ` AND (session_id = ?` +
+        ` OR (node_id IN (SELECT id FROM nodes WHERE driver_session_id = ?) AND node_id = (SELECT focus_node_id FROM sessions WHERE id = ?)` +
+        ` AND session_id IS NOT NULL AND session_id != ?` +
+        ` AND NOT EXISTS (SELECT 1 FROM sessions r WHERE r.id = asks.session_id AND r.state != 'ended' AND r.last_seen_at >= ?))) ORDER BY raised_at, id`,
+    )
+    .all(sessionId, sessionId, sessionId, sessionId, msAgo(ctx, STALE_SESSION_MS)) as AskRow[]).map(toAsk);
+}
+
 /** Sets answer_delivered_at on these asks. Not an event: nobody watches it. */
 export function markAnswersDelivered(ctx: Ctx, ids: number[]): void {
   if (!ids.length) return;

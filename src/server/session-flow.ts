@@ -8,7 +8,7 @@ import { renderOrchestratorBriefing, stepBlock } from './briefing-scoped';
 import { deriveBoard, isLive, reconcileLine } from '../core/board';
 import { askTag, sessionDisplayTitle } from '../core/types';
 import { formatCounts, formatDigest, readDigest } from './digest';
-import { markAnswersDelivered, owedAnswers, undeliveredAnswers } from './repo/asks';
+import { asksToRemind, markAnswersDelivered, owedAnswers, undeliveredAnswers } from './repo/asks';
 import { endCommand, endSessionCommands, pruneCommands, reconcileCommands, startCommand, type BackgroundEntry } from './repo/commands';
 import { findNode, leadingNode, patchNode, requireNode, setDriver } from './repo/nodes';
 import { parkedAncestor, shelvedAmong } from './repo/shelved';
@@ -143,7 +143,10 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
         // A notice ends the commands it names. Agent ids never have a row, so an agent's notice does nothing here.
         for (const t of input.tasks ?? []) endCommand(ctx, sessionId, t.taskId, t.status, now, t.exitCode);
         // A background-task notice (the scribe finishing, say) is not a prompt Aiden typed: no stale count.
-        if (!input.notice) next.promptsSinceUpdate += 1;
+        if (!input.notice) {
+          next.promptsSinceUpdate += 1;
+          next.lastPromptAt = now;
+        }
         break;
       case 'stop':
         next.state = 'idle';
@@ -313,11 +316,16 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
   // answered one on a step it drives whose asker no longer holds it (undeliveredAnswers says which route applies).
   if (input.event === 'prompt' && !input.notice) {
     const answers = undeliveredAnswers(ctx, sessionId);
+    const lines: string[] = [];
     if (answers.length) {
-      const lines = answers.map((a) => (a.answer ? `Answered: ${askTag(a.id)} "${oneLine(a.answer)}" (yours: act on it, or add it to your tasks)` : `Cleared: ${askTag(a.id)}, no answer`));
+      lines.push(...answers.map((a) => (a.answer ? `Answered: ${askTag(a.id)} "${oneLine(a.answer)}" (yours: act on it, or add it to your tasks)` : `Cleared: ${askTag(a.id)}, no answer`)));
       markAnswersDelivered(ctx, answers.map((a) => a.id));
-      context = [...lines, ...(context ? [context] : [])].join('\n');
     }
+    // The reminder (#522): every real prompt, while an ask this session holds is open, in case this prompt answers it.
+    for (const a of asksToRemind(ctx, sessionId)) {
+      lines.push(`Open ask ${askTag(a.id)} on ${stepRef(a.nodeId, findNode(ctx, a.nodeId)?.title)}: "${oneLine(a.text)}". If this prompt answers it, put "${askTag(a.id)} answered: ..." in your next scribe brief.`);
+    }
+    if (lines.length) context = [...lines, ...(context ? [context] : [])].join('\n');
   }
   return context === undefined ? { tracked: true } : { tracked: true, context };
 }

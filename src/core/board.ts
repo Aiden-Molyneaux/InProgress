@@ -4,7 +4,7 @@ import { ancestors, buildIndex, dfsOrder, kids, shelvedIds } from './tree';
 import { ASK_TRAIL_MS, STALE_SESSION_MS, STALL_MS, TRAIL_MS, sessionDisplayTitle, type Ask, type ProjectSnapshot, type ResourceMeta, type Session, type TreeNode } from './types';
 
 export type Column = 'now' | 'next' | 'backlog' | 'done';
-export const MARKS = ['ended_open', 'no_outcome', 'stale_ask', 'done_focus', 'deep', 'stalled', 'answer_waiting'] as const;
+export const MARKS = ['ended_open', 'no_outcome', 'stale_ask', 'done_focus', 'deep', 'stalled', 'answer_waiting', 'answered_in_chat'] as const;
 export type Mark = (typeof MARKS)[number];
 export type BoardInput = Pick<ProjectSnapshot, 'project' | 'nodes' | 'sessions' | 'pastSessions' | 'resources' | 'asks'>;
 
@@ -21,6 +21,8 @@ export interface BoardRow {
   driver: Session | null;
   /** Its open asks, oldest first. */
   asks: Ask[];
+  /** Its open asks still waiting on Aiden, oldest first: `asks` less those answered in chat (answeredInChat). */
+  waiting: Ask[];
   marks: Mark[];
   /** In Next with no open ask (spec 1.5). */
   ready: boolean;
@@ -64,6 +66,19 @@ export const isLive = (s: Pick<Session, 'state' | 'lastSeenAt'>, now: number): b
 const OPEN = new Set(['todo', 'active', 'blocked']);
 const isOpen = (n: TreeNode) => OPEN.has(n.status);
 const STATE_ORDER: Record<string, number> = { working: 0, permission: 1, idle: 2 };
+
+/**
+ * An open ask Aiden answered in the session's chat without it being recorded (#522): the ask names a session, and the
+ * counting session got a real prompt after the ask was raised. The counting session is the raiser when it is live, else
+ * the step's live driver when that is another session, else none. A window or migrated ask (no session) never counts.
+ * asksToRemind in src/server/repo/asks.ts mirrors the counting session.
+ */
+export function answeredInChat(ask: Ask, sessions: readonly Session[], driver: Session | null, now: number): boolean {
+  if (ask.sessionId === null) return false;
+  const raiser = sessions.find((s) => s.id === ask.sessionId);
+  const counting = raiser && isLive(raiser, now) ? raiser : driver && driver.id !== ask.sessionId ? driver : null;
+  return counting?.lastPromptAt != null && Date.parse(counting.lastPromptAt) > Date.parse(ask.raisedAt);
+}
 
 /**
  * Spec 3.1: (a) the live driver is idle (nothing running, not waiting on a permission) for STALL_MS with no open ask on
@@ -149,6 +164,7 @@ export function deriveBoard(input: BoardInput, now: number): Board {
     const driver = focused.find((x) => x.id === node.driverSessionId) ?? null;
     const sessions = driver ? [driver, ...focused.filter((x) => x !== driver)] : focused;
     const asks = openAsks.get(node.id) ?? [];
+    const waiting = asks.filter((a) => !answeredInChat(a, input.sessions, driver, now));
     let column: Column;
     if (node.status === 'done') column = 'done';
     else if (sessions.length || (node.assignee === 'me' && node.status === 'active')) column = 'now';
@@ -168,12 +184,13 @@ export function deriveBoard(input: BoardInput, now: number): Board {
     }
     // Any row: a review ask may sit on a done step (spec 1.2).
     if (asks.some((a) => now - Date.parse(a.raisedAt) > ASK_TRAIL_MS)) marks.push('stale_ask');
+    if (waiting.length < asks.length) marks.push('answered_in_chat');
     if (crumb.length >= 3) marks.push('deep');
-    if (node.status === 'active' && node.assignee !== 'me' && isStalled(driver, sessions, asks, now)) marks.push('stalled');
+    if (node.status === 'active' && node.assignee !== 'me' && isStalled(driver, sessions, waiting, now)) marks.push('stalled');
     // A question's answer is its outcome, not owed work (Review Focus 5). A done step has no driver to deliver to.
     if (node.kind !== 'question' && node.status !== 'done' && answerWaiting.has(node.id)) marks.push('answer_waiting');
     byId.set(node.id, {
-      node, column, crumb, sessions, driver, asks, marks,
+      node, column, crumb, sessions, driver, asks, waiting, marks,
       queueNumber: column === 'next' ? (queueNumber.get(node.id) ?? null) : null,
       owner: column === 'next' ? (ownerOf.get(node.id) ?? null) : null,
       ready: column === 'next' && asks.length === 0,

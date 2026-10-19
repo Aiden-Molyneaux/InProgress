@@ -10,7 +10,7 @@ function n(id: number, parentId: number | null, o: Partial<TreeNode> = {}): Tree
   return { id, projectId: 1, parentId, position: id, kind: 'task', title: `S${id}`, body: '', status: 'todo', assignee: 'claude', outcome: '', label: null, createdAt: T, updatedAt: T, completedAt: null, driverSessionId: null, boardState: null, stateSince: null, hue: null, parkedReason: '', parkedWhere: '', parkedAt: null, ...o };
 }
 function s(id: string, o: Partial<Session> = {}): Session {
-  return { id, projectId: 1, title: id, cwd: null, branch: null, transcriptPath: null, state: 'working', focusNodeId: null, promptsSinceUpdate: 0, startedAt: T, lastSeenAt: T, endedAt: null, slot: 0, subagents: [], commands: [], role: 'worker', ...o };
+  return { id, projectId: 1, title: id, cwd: null, branch: null, transcriptPath: null, state: 'working', focusNodeId: null, promptsSinceUpdate: 0, startedAt: T, lastSeenAt: T, lastPromptAt: null, endedAt: null, slot: 0, subagents: [], commands: [], role: 'worker', ...o };
 }
 function ask(id: number, nodeId: number, o: Partial<Ask> = {}): Ask {
   return { id, projectId: 1, nodeId, kind: 'question', text: 'Q', sessionId: null, raisedAt: T, clearedAt: null, clearedBy: null, answer: '', answerDeliveredAt: null, ...o };
@@ -139,6 +139,9 @@ describe('deriveBoard', () => {
     expect(marksFor({ driver: { subagents: [running({ agentType: 'Explore' })] } })).toContain('stalled');
     expect(marksFor({ driver: { state: 'permission' } })).not.toContain('stalled');
     expect(marksFor({ asks: [ask(1, 2)] })).not.toContain('stalled');
+    // An ask answered in chat no longer holds the stall off (#522).
+    expect(marksFor({ asks: [ask(1, 2, { sessionId: 'd', raisedAt: MINS(60) })], driver: { lastPromptAt: MINS(40) } })).toContain('stalled');
+    expect(marksFor({ asks: [ask(1, 2, { sessionId: 'd', raisedAt: MINS(60) })], driver: { lastPromptAt: MINS(70) } })).not.toContain('stalled');
     expect(marksFor({ node: { assignee: 'me' } })).not.toContain('stalled');
     expect(marksFor({ node: { status: 'todo' } })).not.toContain('stalled');
   });
