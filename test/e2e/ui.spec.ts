@@ -3440,8 +3440,9 @@ test.describe('v3 Details, viewer and command bar (#505)', () => {
     await expect(tile).toBeFocused();
   });
 
-  test('on the Project view at 1600 px an open Details leaves the phase index in view beside it', async ({ page, fresh }) => {
-    await page.setViewportSize({ width: 1600, height: 900 });
+  // Beside the 216 px rail and the 440 px panel, the page keeps its 1160 px from a 1816 px window.
+  test('on the Project view at 1900 px an open Details leaves the phase index in view beside it', async ({ page, fresh }) => {
+    await page.setViewportSize({ width: 1900, height: 900 });
     await open(page, fresh);
     await viewButton(page, 'Project').click();
     const project = page.locator('.ip-project');
@@ -3456,8 +3457,8 @@ test.describe('v3 Details, viewer and command bar (#505)', () => {
     expect(index.x + index.width).toBeLessThanOrEqual(panel.x + 1);
     const page1 = (await project.boundingBox())!;
     expect(page1.x + page1.width).toBeLessThanOrEqual(panel.x + 1);
-    // Under 1160 px of remaining page the index folds into the jump row.
-    await page.setViewportSize({ width: 1500, height: 900 });
+    // Under 1160 px of remaining page the index folds into the jump row: at 1600 px, beside the rail and the panel.
+    await page.setViewportSize({ width: 1600, height: 900 });
     await expect(project).not.toHaveAttribute('data-wide', 'true');
     await expect(page.locator('.ip-pside')).toHaveCount(0);
     await expect(page.locator('.ip-jump')).toBeVisible();
@@ -3488,7 +3489,7 @@ test.describe('v3 Details, viewer and command bar (#505)', () => {
     await expect(b).toBeFocused();
   });
 
-  test('a menu opened from the tab row paints over an open Details', async ({ page, api }) => {
+  test('a menu opened from the rail foot paints over an open Details', async ({ page, api }) => {
     const keptName = unique('Layer kept');
     const shelvedName = unique('Layer shelved');
     const kept = await bare(api, keptName);
