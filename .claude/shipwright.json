@@ -1,0 +1,93 @@
+{
+  "shipwright": "C:/personal/shipwright",
+  "fills": {
+    "BRANCH_MODEL": "One worktree per session under `.claude/worktrees/`, one branch per change off `main`. A session spawned from a chip starts in one; otherwise create it with `git worktree add .claude/worktrees/<topic> -b <topic> main`. Work only there: the main checkout takes only merges, deploys and `claude:install`. A worktree without its own `node_modules` resolves packages from the main checkout's, which follows main's `package.json`: when the branch's dependencies differ, run `npm install` in the worktree. Uncommitted changes outside your worktree belong to another session: don't stage them, ask about them or mention them. Stage explicit paths only. The branch's label (ui, server, data, integration, ops, docs, fix, refactor, research) picks its gates in phase 4.",
+    "DESIGN_AUTHORITY": "the window's existing screens under `web/src` (there are no mockups: match the neighbouring components, `web/src/styles.css`, and the keyboard conventions in `web/src/useKeyboard.ts`)",
+    "DOCTOR_COMMAND": "`node C:/personal/InProgress/dist/cli/main.js doctor`",
+    "EXCLUDED_DIRS": "`node_modules`, `dist`, `.build` and `.claude/worktrees`",
+    "FORBIDDEN_COMMANDS": "`npm run deploy`, `npm run claude:install` or `npm run claude:uninstall`; never read or write `~/.inprogress` or the live InProgress server on 4317 (tests run against `.test-home` and `.test-claude`)",
+    "HARD_ORDERING_LIST": "- hook ordering: what `src/hooks/` injects into a session, and in what order;\n- transactions and migrations: `src/server/db/` and `src/server/repo/`;\n- races between sessions: several sessions, the scribe and the window writing at once.",
+    "KNOWN_ISSUES_FILE": "`docs/known-issues.md`",
+    "MERGE_GATE": "On Aiden's go-ahead only. If `main` moved, merge it into the branch in its worktree first and rerun the checks. Then, from the main checkout: `git merge --no-ff <branch>`, then `npm run deploy` (typecheck and unit always; smoke and e2e when the changed files need them; a red deploy means fix on the branch, merge and deploy again, and `npm run rollback` swaps the previous live build back), then `npm run claude:install` when the branch touched `claude/` or `src/hooks/`. Then push `main` with the personal account's token and leave the active gh account alone:\n\n```bash\ngit -c credential.helper= -c 'credential.helper=!f() { echo username=x-access-token; echo password=$(gh auth token --user Aiden-Molyneaux); }; f' push origin main\n```\n\nA PR only when Aiden asks. Deploy and `claude:install` never run from a worktree: the installed hooks bake in the main checkout's absolute path.",
+    "PARVATI_PORT_LANE": "4400 to 4409",
+    "PLAN_HOME": "`docs/superpowers/plans/`, specs in `docs/superpowers/specs/`, and provisional rulings and open questions in `docs/superpowers/rulings/`",
+    "PREFLIGHT": "Two modes, by what the work runs against:\n\n- **The live install** (this session's hooks, the scribe, the window on 4317; the main session\n  only): `node C:/personal/InProgress/dist/cli/main.js doctor`. It checks, in order: Server,\n  Token, Database, Hooks, Scribe agent, Skill, Allow rules, MCP server, and Edge. No ✗ line, or\n  its printed fix applied and the doctor rerun, before going on. A `!` line is a warning (Edge\n  missing, the hooks on another Node, MCP skipped): act on it only when it bears on the work.\n- **An isolated build** (Parvati, Sev on a UI plan, a hand-driven check of a branch): from the\n  worktree, `node scripts/build-to.mjs .build`, then start `.build/dist/server/main.js` the way\n  `test/e2e/start-server.mjs` does (`INPROGRESS_HOME` set to a scratch folder,\n  `INPROGRESS_PORT` set to the lane port, `INPROGRESS_AGENT_WATCH_MS=500`), and confirm\n  `GET http://127.0.0.1:<port>/api/health` answers with `\"app\":\"inprogress\"` before driving it.\n  Ports 4400 to 4429 only (Parvati 4400 to 4409, Sev's e2e 4410 to 4419, Sigmund's check surface\n  4420 to 4429), never 4317 or 4399, and never `~/.inprogress` (the check surface runs on a copy of its\n  database). `npm run test:e2e` does all of this itself on `INPROGRESS_E2E_PORT`.",
+    "PROJECT": "InProgress",
+    "PROTECTED_LANES": "The live server on 4317 and `~/.inprogress` hold every project's tree, and every session's\n  hooks read them: a triage never stops, restarts or edits them without saying so.\n  `node C:/personal/InProgress/dist/cli/main.js stop` only when a fix needs it, named in\n  the receipt, and then `start` yourself. Otherwise it stays down until something starts it (a new\n  session, the scribe's MCP server, `start`, `doctor`, `open`, a deploy or rollback); until then the\n  window is dark and every open session's hooks fail into `hooks.log`. `npm run deploy`, `npm run rollback` and `npm run claude:install`\n  run only from the main checkout and only under Sigmund's merge gate (phase 8), never as a\n  triage step.",
+    "RISK_LIST": "- data: `src/server/db/`, or `min_reader_version`;\n- code that runs in every session of every project: `src/hooks/`, `src/cli/claude-config.ts`, `src/mcp/`, `claude/`, `src/server/session-flow.ts`, `src/server/briefing.ts`;\n- several sessions writing at once: `src/server/repo/`, `src/lib/ensure-server.ts`, `web/src/stream.ts`, `scripts/deploy*.mjs`;\n- focus and keyboard: `web/src/useKeyboard.ts`, `web/src/chrome/menu.ts`, `web/src/chrome/GoTo.tsx`, or any diff that adds a menu, popover, confirm or focus move.",
+    "RISK_STATEMENT": "`~/.inprogress` and the live window are unrecoverable: the live database holds every project's tree and resources, every Claude session on this machine reads it through the installed hooks, and no git revert undoes a stray write there or a bad deploy.",
+    "RUNBOOK": "| Symptom | First probe | Fix |\n|---|---|---|\n| The doctor prints a ✗ line | The line itself | Its printed fix, then rerun the doctor. A printed `inprogress <cmd>` means `node C:/personal/InProgress/dist/cli/main.js <cmd>`, and when a printed fix says `stop` (some add \"the next session starts the new build\"), run `start` straight after it yourself |\n| The doctor prints a `!` line | Whether it bears on the work (Edge only matters for `open`; another Node only after an nvm switch) | Its printed fix when it does; otherwise note it and go on |\n| A session started with no InProgress briefing, or `tasks` says InProgress is not running | `node C:/personal/InProgress/dist/cli/main.js status`, then the tail of `~/.inprogress/hooks.log` and `~/.inprogress/server.log` | Known issue: the server is not running when a hook fires |\n| `EPERM`, `EBUSY` or `EACCES` on a rename, a folder move, an install or a deploy | What holds the handle: the live server (files under the main checkout's `node_modules`), an editor, a shell sitting in the folder, antivirus | Known issue: Windows file locks |\n| `npm run deploy` or `npm run rollback` ends red | The last `▸` step it printed, and whether it printed \"rolling back\" | Known issue: a red deploy or rollback |\n| `Cannot find module`, or a package missing, in a worktree | Is the missing module the repo's own `dist/...`? Then a command ran a relative path from a worktree, which has no `dist/`: use `node C:/personal/InProgress/dist/cli/main.js`. Otherwise, does the worktree have its own `node_modules`? Each one here keeps its own; without it, Node resolves from the main checkout's, which follows main's `package.json`, not the branch's | The absolute path, or `npm install` in the worktree |\n| Hooks behave like an unmerged build, or the doctor's Hooks line says a hook script no longer exists | The hook entries in `~/.claude/settings.json`: each one's `args[0]` (the script; `command` is the Node binary) should start with `C:/personal/InProgress/dist/`, and so should the MCP server path in `~/.claude/agents/inprogress-scribe.md` | Known issue: claude:install from the wrong checkout |\n| The first `npm test` run reports a failed file with no failing test | Rerun `npm test` once | Known issue: the first `npm test` run fails a file |\n| `npm run dev` does not start or answer | The dev server's own output, and whether another process holds 4318 (`scripts/dev.mjs` runs on 4318 with `.dev-home` as its data) | Close the other process; never point dev at 4317 or `~/.inprogress` |\n| An isolated build does not answer on its port | The server's own output, and `/api/health` on that port (another program, or another session's build, may hold it) | The preflight above; on a clash, another port in the lane |",
+    "SEV_PORT_LANE": "4410 to 4419, passed as `INPROGRESS_E2E_PORT`",
+    "SHIP_POLICY": "InProgress has no integration branch, and nothing is pushed before the merge. The branch stays in its worktree until phase 8; Sigmund never pushes a branch to origin, and `main` is pushed only by the gate below. Ask first before anything on the risk list, before a migration, before a deletion, and before growing the scope past the request.",
+    "VERIFY_PORTS": "a port from 4400 to 4419 that the session picks (Parvati's lane is 4400 to 4409, Sev's e2e lane 4410 to 4419), or 4420 to 4429 for the owner's check surface (phase 7)",
+    "VIEWPORTS": "520x900 (the e2e viewport) and 1440x900",
+    "WORKFLOW_NOTES": "In a tracked session, the next scribe brief carries it, as `log on #<id>: workflow note [<key>] ...` on the step you drive; the receipt's `review` brief at the latest. Aiden reads the step logs for repeated keys at each phase close (#490 adds a Retro due alert that counts them)."
+  },
+  "files": {
+    "agents/sev.md": {
+      "local": ".claude/agents/sev.md",
+      "base": "ad0a7c1",
+      "fills": {
+        "REPO_MAP": "a Node CLI, Claude Code hooks and an MCP server under `src/` (`src/cli`, `src/hooks`, `src/mcp`, `src/server` with Fastify and SQLite, `src/lib`, `src/core`), a React window under `web/src`, the installed kit's skills and scribe agent under `claude/`, scripts under `scripts/`, and tests under `test/` (`test/e2e` is Playwright, `test/smoke` checks the built kit, `test/repo` the repo's shape)",
+        "HOUSE_RULE_FILES": "`CLAUDE.md` (its House rules section)",
+        "OWNER_PORTS": "4317 (the live window) or 4399 (the e2e default)",
+        "CHECKS": "`npm run typecheck` and `npm test`, plus the e2e test the plan names for a UI change (`INPROGRESS_E2E_PORT=<your port> npm run test:e2e -- -g \"<test name>\"`)"
+      }
+    },
+    "agents/moh.md": {
+      "local": ".claude/agents/moh.md",
+      "base": "ad0a7c1",
+      "fills": {
+        "REPO_MAP": "a Node CLI, Claude Code hooks and an MCP server under `src/` (`src/cli`, `src/hooks`, `src/mcp`, `src/server` with Fastify and SQLite, `src/lib`, `src/core`), a React window under `web/src`, the installed kit's skills and scribe agent under `claude/`, scripts under `scripts/`, and tests under `test/` (`test/e2e` is Playwright, `test/smoke` checks the built kit, `test/repo` the repo's shape)"
+      }
+    },
+    "agents/murr.md": {
+      "local": ".claude/agents/murr.md",
+      "base": "ad0a7c1",
+      "fills": {
+        "CHECKS": "`npm run typecheck` and `npm test`"
+      }
+    },
+    "agents/parvati-isolated.md": {
+      "local": ".claude/agents/parvati.md",
+      "base": "ad0a7c1",
+      "fills": {
+        "OWNER_PORTS": "4317 (the live window) or 4399 (the e2e default)",
+        "BUILD_AND_RUN": "build with `node scripts/build-to.mjs .build` from the worktree; never touch the repo's `dist/`. Start `.build/dist/server/main.js` the way `test/e2e/start-server.mjs` does: `INPROGRESS_HOME` set to a folder in your scratch folder, `INPROGRESS_PORT` set to your port, `INPROGRESS_AGENT_WATCH_MS=500`. Seed what the change needs through that instance's HTTP API; `test/e2e/ui.spec.ts` and `test/helpers.ts` show how the tests create projects, steps and sessions."
+      }
+    },
+    "skills/sigmund/SKILL.md": {
+      "local": ".claude/skills/sigmund/SKILL.md",
+      "base": "ad0a7c1",
+      "fills": {
+        "OWNER_PORTS": "4317 (the live window) or 4399 (the e2e default, which the deploy's own run uses)",
+        "CHECKS": "- every branch: `npm run typecheck` and `npm test` (vitest unit), from the worktree;\n- ui: plus one e2e test per user-visible feature in `test/e2e/ui.spec.ts`, run the way `npm run test:e2e` does, narrowed with `-g \"<test name>\"`, with `INPROGRESS_E2E_PORT` set to the session's port; no failing-test-first for styling or wording;\n- integration (`claude/`, `src/hooks/`, `src/cli/`, `src/mcp/`): plus `npm run test:smoke`; the full strict gates for hooks and the installer;\n- data (`src/server/db/`): the full strict gates; `min_reader_version` stays 1 when a migration only adds;\n- `npm run deploy` (phase 8) decides from the changed files which of smoke and e2e run again before the build goes live.",
+        "HANDOFF": "A handoff is a prompt a fresh session can start from, saved as `~/.inprogress/resources/inprogress/<yyyy-mm-dd>-<kebab-title>.md` and attached to its step as a resource. The standing rules live here and in `CLAUDE.md`, so a handoff never repeats them. It holds:\n\n- the goal;\n- where things are: branch, commit, worktree;\n- decisions made, with who made them;\n- what waits on Aiden;\n- what to read now, as slices (`file:lines`), not whole files;\n- the next concrete step."
+      }
+    },
+    "skills/murr/SKILL.md": {
+      "local": ".claude/skills/murr/SKILL.md",
+      "base": "ad0a7c1",
+      "fills": {
+        "HOUSE_RULE_FILES": "`CLAUDE.md` (its House rules section)"
+      }
+    },
+    "skills/parvati/SKILL.md": {
+      "local": ".claude/skills/parvati/SKILL.md",
+      "base": "ad0a7c1"
+    },
+    "skills/doctor-nick/SKILL.md": {
+      "local": ".claude/skills/doctor-nick/SKILL.md",
+      "base": "ad0a7c1"
+    },
+    "starter-kit/scripts/context-nudge.mjs": {
+      "local": "scripts/context-nudge.mjs",
+      "base": "ad0a7c1"
+    }
+  },
+  "skip": [
+    "agents/parvati-shared.md",
+    "skills/retro/SKILL.md",
+    "starter-kit/.claude/settings.json"
+  ]
+}

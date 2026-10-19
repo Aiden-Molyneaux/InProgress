@@ -14,7 +14,7 @@ plan says and report honestly.
 
 ## Before writing code [edit]
 
-- The repo: a Node CLI, Claude Code hooks and an MCP server under `src/` (`src/cli`, `src/hooks`, `src/mcp`, `src/server` with Fastify and SQLite, `src/lib`, `src/core`), a React window under `web/src`, the installed kit's skills and scribe agent under `claude/`, scripts under `scripts/`, and tests under `test/` (`test/e2e` is Playwright, `test/smoke` checks the built kit, `test/repo` the repo's shape)
+- The repo: a Node CLI, Claude Code hooks and an MCP server under `src/` (`src/cli`, `src/hooks`, `src/mcp`, `src/server` with Fastify and SQLite, `src/lib`, `src/core`), a React window under `web/src`, the installed kit's skills and scribe agent under `claude/`, scripts under `scripts/`, and tests under `test/` (`test/e2e` is Playwright, `test/smoke` checks the built kit, `test/repo` the repo's shape).
 - The house rules that apply to your code: `CLAUDE.md` (its House rules section). Read them before the first edit.
 - Work only in the worktree or on the branch your brief names, and run every command from there.
 - Read the files the plan names, and the call sites of anything you change.
