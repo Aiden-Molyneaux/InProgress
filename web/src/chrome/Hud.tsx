@@ -51,7 +51,7 @@ export function Hud({ loaded, connection, projects, tabs, current, snapshot, now
   const figures = useMemo(() => hudFigures(projects, tabs), [projects, tabs]);
   const board = useMemo(() => (snapshot ? boardFigures(deriveBoard(snapshot, now), snapshot, now) : null), [snapshot, now]);
   return (
-    <header className="ip-hud">
+    <header className="ip-hud" data-link={connection}>
       <button type="button" className="ip-hud-mark" onClick={onBoard}>
         InProgress
       </button>
@@ -59,7 +59,7 @@ export function Hud({ loaded, connection, projects, tabs, current, snapshot, now
         {loaded && (
           <>
             <Asks asks={figures.asks} title={figures.asksTitle} onAsks={onAsks} />
-            <Readout label="Live" value={figures.live} title={figures.liveTitle} />
+            <Readout className="ip-hud-live" label="Live" value={figures.live} title={figures.liveTitle} />
             {board && (
               <span className="ip-hud-wide">
                 <Readout label="Ready" value={board.ready} />
@@ -79,7 +79,7 @@ export function Hud({ loaded, connection, projects, tabs, current, snapshot, now
             ) : (
               <>
                 <span className="ip-hud-sq" aria-hidden="true" />
-                RECONNECTING
+                <span className="ip-hud-linkword">RECONNECTING</span>
               </>
             )
           }

@@ -8,7 +8,7 @@
 /* Room inside the clip for the ASKS focus ring, given back by the margin so the figures do not move. */
 .ip-hud-figs { display: flex; align-items: center; gap: var(--sp-5); min-width: 0; overflow: hidden; padding: 6px; margin: -6px; }
 .ip-hud-wide { display: flex; align-items: center; gap: var(--sp-5); }
-.ip-hud-asks { display: inline-flex; padding: 4px 0; cursor: pointer; }
+.ip-hud-asks { flex: none; display: inline-flex; padding: 4px 0; cursor: pointer; }
 .ip-hud-asks[aria-disabled='true'] { cursor: default; }
 .ip-hud-asks:focus-visible { outline: 2px solid var(--volt); outline-offset: 2px; }
 /* A rise strobes the figure once, as a Count does. */
@@ -139,7 +139,13 @@
 @media (max-width: 1159px) {
   .ip-hud-wide, .ip-hud-date, .ip-footer-keys { display: none; }
 }
+/* Reconnecting, the link readout is wider: LIVE gives way under 1160 so ASKS keeps its room. */
+@media (max-width: 1159px) {
+  .ip-hud[data-link="reconnecting"] .ip-hud-live { display: none; }
+}
 @media (max-width: 719px) {
+  /* Under 720 the word does not fit beside ASKS: the alarm square and the tape say it; a screen reader still reads it. */
+  .ip-hud-linkword { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .ip-hud { height: 48px; gap: var(--sp-3); padding: 0 var(--sp-4); }
   .ip-hud-mark { font-size: var(--t-title); }
   .ip-hud-figs > :not(.ip-hud-asks), .ip-hud-when, .ip-goto-hint { display: none; }
