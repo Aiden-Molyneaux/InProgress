@@ -2296,7 +2296,7 @@ test.describe('Board', () => {
     await expect(title).toHaveCSS('font-weight', '800');
     await expect(title).toHaveCSS('color', 'rgb(242, 242, 242)');
     await expect(details.getByRole('button', { name: 'Close' })).toHaveCSS('height', '24px');
-    // Its steps draw the marker: a check when done, a still orange dot when active, the needs-you mark and YOU.
+    // Its steps draw the marker: a check when done, a still volt square when active, the needs-you mark and YOU.
     await details.getByRole('button', { name: /2 Android signing/ }).click();
     await expect(details).toContainText(`#${demo.ids['2 Android signing']} 2 Android signing`);
     const steps = details.locator('.ip-kids li');

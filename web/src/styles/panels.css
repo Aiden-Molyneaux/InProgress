@@ -28,13 +28,13 @@
 .ip-details > .ip-label { margin: 18px 0 6px; color: var(--text-2); }
 /* Every entry in Details (an ask, a task, a subagent, a command, ended work, a resource, a step, a log line) sits on its
    own soft row, so the entries read apart. A row that opens something deepens on hover, and a resource's title takes
-   full ink too, since at night the two fills are close. */
+   full ink too, since the two fills are close. */
 .ip-details :is(.ip-dasks, .ip-wts, .ip-dagents, .ip-log) > li, .ip-details .ip-res, .ip-details .ip-kids li button { margin: 0 0 3px; padding: 4px 8px; background: var(--panel-2); }
 .ip-details .ip-res:hover, .ip-details .ip-kids li button:hover { background: var(--track); }
 .ip-details .ip-res:hover b { color: var(--text); }
 .ip-outcome { margin: 8px 0; }
 .ip-outcome b { font-weight: var(--w-heavy); }
-/* A resource: a muted row, its title in ink at 500, its summary in DM Mono. */
+/* A resource: a muted row, its title in ink at body weight, its summary in mono. */
 .ip-res { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; color: var(--muted); }
 .ip-res b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--w-text); color: var(--text-2); }
 .ip-res .sub { flex: none; margin-left: auto; font-family: var(--font-mono); font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
@@ -62,11 +62,11 @@
 .ip-kids li button { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; color: var(--text-2); }
 .ip-kids li button:hover { color: var(--text); }
 .ip-kid-mark { flex: none; display: inline-flex; justify-content: center; width: 13px; }
-/* The log: the time in DM Mono, the text in ink, the session muted and upright (no italic face ships). */
+/* The log: the time in mono, the text in ink, the session muted and upright (no italic face ships). */
 .ip-log { list-style: none; margin: 0; padding: 0; color: var(--muted); }
 .ip-log-time { font-family: var(--font-mono); font-size: var(--fs-s); }
 .ip-log-text { color: var(--text-2); }
-/* Markdown, in Details and the viewer: headings at L, M and S in 900, code in DM Mono, links in --link. */
+/* Markdown, in Details and the viewer: headings at L, M and S at --w-heavy, code in mono, links in --link. */
 .ip-md { line-height: 1.55; overflow-wrap: anywhere; }
 .ip-md :is(h1, h2, h3, h4, h5, h6, strong, b, th) { font-weight: var(--w-heavy); }
 .ip-md h1 { font-size: var(--fs-l); line-height: 20px; word-spacing: 0.05em; }

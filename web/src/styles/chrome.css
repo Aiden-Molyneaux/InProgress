@@ -1,7 +1,7 @@
 /* Chrome: the tab bar, its menus, Go to, the confirm and the rename field, the activity strip, the banner and the empty state. */
 @layer components {
 .ip-app { display: flex; flex-direction: column; height: 100%; }
-/* The hairline over the tab bar, in both themes. It sits outside .ip-topbar, so the bar alone stays 38 px. */
+/* The hairline over the tab bar. It sits outside .ip-topbar, so the bar alone stays 38 px. */
 .ip-app::before { content: ''; flex: none; height: 3px; background: var(--hairline); }
 .ip-topbar { flex: none; display: flex; align-items: stretch; height: 38px; padding: 0 6px 0 0; background: var(--bar); border-bottom: 1px solid var(--border); }
 /* One tab per project. When they overflow, the strip scrolls sideways (the wheel too: see TopBar). */
@@ -63,7 +63,7 @@
 .ip-mi-row > .nm { flex: 1; min-width: 0; padding: 7px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-m); line-height: 18px; color: var(--muted); }
 .ip-mi-act { flex: none; height: 24px; padding: 0 6px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); white-space: nowrap; }
 .ip-mi-act:hover, .ip-mi-act:focus { background: var(--panel-2); color: var(--text-2); }
-/* A deleted project's days left, a time, so DM Mono as the activity strip's time is. */
+/* A deleted project's days left, a time, so mono as the activity strip's time is. */
 .ip-mi-left { flex: none; margin-left: auto; padding-right: 4px; font-family: var(--font-mono); font-size: var(--fs-s); line-height: 14px; color: var(--muted); white-space: nowrap; }
 /* Delete's confirm, on the same surface: the question, what it means (and, for an active project with live sessions,
    Archive's line on how many it stops tracking), then Delete and Cancel. Delete is ink, never red: red marks only a

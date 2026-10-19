@@ -2,7 +2,7 @@
 @layer base {
 *, *::before, *::after { box-sizing: border-box; border-radius: 0; }
 html, body, #root { height: 100%; margin: 0; }
-html { scrollbar-width: thin; scrollbar-color: var(--canvas-4) transparent; }
+* { scrollbar-width: thin; scrollbar-color: var(--canvas-4) transparent; }
 body { font-family: var(--font-body); font-size: var(--t-body); font-weight: var(--w-body); line-height: 1.45; font-variant-emoji: text; background: var(--canvas-1); color: var(--text); }
 ::selection { background: var(--volt); color: var(--volt-ink); }
 /* The focus ring: 2 px volt on every canvas. A surface's own outline rule keeps its offset. */

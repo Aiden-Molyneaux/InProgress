@@ -66,7 +66,7 @@
 .ip-own-queue { margin-top: 10px; }
 .ip-own-head { margin: 0 0 6px 2px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
 /* The task box: one skeleton in every Board cell (Needs me, Next, Now, Done, the Backlog fold). The hue sits on the left edge of a coloured
-   state; orange marks Working and amber marks Needs you. */
+   state; --active marks Working and --amber marks Needs you. */
 .ip-list { display: flex; flex-direction: column; gap: 10px; }
 .ip-card { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 8px 10px 8px 14px; border: 1px solid var(--border); background: var(--card); min-width: 0; }
 .ip-card::before { content: ''; position: absolute; left: -1px; top: -1px; bottom: -1px; width: 4px; background: var(--hue, transparent); }
