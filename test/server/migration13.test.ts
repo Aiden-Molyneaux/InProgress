@@ -149,13 +149,13 @@ describe('migration 13', () => {
     expect(db.pragma('foreign_keys', { simple: true })).toBe(1);
   });
 
-  it('beforeRebuild runs once, with 13, and not on a database already at 13', () => {
+  it('beforeMigrate runs once, with 13, and not on a database already at 13', () => {
     const db = at12();
     const spy = vi.fn();
-    migrate(db, { beforeRebuild: spy });
+    migrate(db, { beforeMigrate: spy });
     expect(spy).toHaveBeenCalledTimes(1);
     expect(spy).toHaveBeenCalledWith(13);
-    migrate(db, { beforeRebuild: spy });
+    migrate(db, { beforeMigrate: spy });
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
@@ -242,7 +242,7 @@ describe('migration 13', () => {
     dirs.push(dir);
     const spy = vi.fn();
     const raw = new Database(join(dir, 'raw.db'));
-    migrate(raw, { beforeRebuild: spy });
+    migrate(raw, { beforeMigrate: spy });
     expect(schemaVersion(raw)).toBe(MIGRATIONS.length);
     raw.close();
     expect(spy).not.toHaveBeenCalled();

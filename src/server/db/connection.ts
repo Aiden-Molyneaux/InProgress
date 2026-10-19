@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import { mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { timestamp } from '../backup';
+import { prunePreMigration, timestamp } from '../backup';
 import { MIGRATIONS, REBUILDS } from './schema';
 
 export type DB = Database.Database;
@@ -11,31 +11,50 @@ export function openDb(file: string): DB {
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   db.pragma('busy_timeout = 5000');
-  // A table rebuild copies the database file aside first. The name falls outside backupDb's rotation pattern, so
-  // the copy is kept. One copy per version: a rebuild that keeps failing must not copy the database on every start.
-  const beforeRebuild = file === ':memory:'
+  // Before the first pending migration (a rebuild or an additive one) the database file is copied aside. The name falls
+  // outside the snapshots' rotation pattern; prunePreMigration thins these separately. One copy per version: a migration
+  // that keeps failing must not copy the database on every start.
+  const beforeMigrate = file === ':memory:'
     ? undefined
     : (toVersion: number) => {
         const dir = join(dirname(file), 'backups');
         mkdirSync(dir, { recursive: true });
         const prefix = `inprogress-pre-v${toVersion}-`;
-        const copied = () => readdirSync(dir).some((f) => f.startsWith(prefix) && f.endsWith('.db'));
-        if (copied()) return;
+        const present = () => readdirSync(dir).some((f) => f.startsWith(prefix) && f.endsWith('.db'));
+        if (present()) return;
         // Copied to a .tmp name of this process's own, then renamed, so the check above only ever sees a complete copy
         // and two racing starts never touch each other's file. A failed copy removes its .tmp.
         const target = join(dir, `${prefix}${timestamp()}.db`);
         const tmp = `${target}.${process.pid}.tmp`;
         try {
           db.exec(`VACUUM INTO '${tmp.replace(/'/g, "''")}'`);
+          // Another start may have migrated between this start's read and the copy: a copy not at toVersion - 1 is no
+          // longer the state before this migration, so it is not kept.
+          const copy = new Database(tmp, { readonly: true });
+          let copied: number;
+          try {
+            copied = schemaVersion(copy);
+          } finally {
+            copy.close();
+          }
+          if (copied !== toVersion - 1) {
+            rmSync(tmp, { force: true });
+            return;
+          }
           renameSync(tmp, target);
+          try {
+            prunePreMigration(dir, new Date());
+          } catch {
+            // Pruning old copies never blocks a start; the next migration prunes again.
+          }
         } catch (err) {
           rmSync(tmp, { force: true });
           // Another start landed its copy meanwhile, which is all this needs.
-          if (copied()) return;
+          if (present()) return;
           throw err;
         }
       };
-  migrate(db, { beforeRebuild });
+  migrate(db, { beforeMigrate });
   return db;
 }
 
@@ -44,7 +63,7 @@ export function schemaVersion(db: DB): number {
   return row ? Number(row.value) : 0;
 }
 
-export function migrate(db: DB, opts: { beforeRebuild?: (toVersion: number) => void } = {}): void {
+export function migrate(db: DB, opts: { beforeMigrate?: (toVersion: number) => void } = {}): void {
   db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
   // One migration per BEGIN IMMEDIATE transaction, reading the version under the write lock: when two
   // first-ever starts race, the later one finds the earlier one's work done instead of applying it twice.
@@ -79,15 +98,17 @@ export function migrate(db: DB, opts: { beforeRebuild?: (toVersion: number) => v
     ).run(String(version + 1));
     return true;
   });
-  // A database this call starts from nothing holds nothing to copy aside, so its rebuilds skip beforeRebuild.
-  const fresh = schemaVersion(db) === 0;
+  // A database this call starts from nothing holds nothing to copy aside. One that is newer than this build is not
+  // migrated at all. Anything else is copied once, before its first pending migration.
+  const start = schemaVersion(db);
+  const fresh = start === 0;
+  if (!fresh && start < MIGRATIONS.length) opts.beforeMigrate?.(start + 1);
   // Whether this pass turned foreign keys off for a rebuild, as the read outside the transaction decided.
   let offForRebuild = false;
   for (;;) {
     const version = schemaVersion(db);
     const rebuild = REBUILDS.has(version);
     if (rebuild) {
-      if (!fresh) opts.beforeRebuild?.(version + 1);
       // Outside the transaction: SQLite ignores the foreign_keys pragma inside one.
       db.pragma('foreign_keys = OFF');
     }
