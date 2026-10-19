@@ -4,17 +4,17 @@
    shadow, body M. Details styles the classes it shares with the canvas and the chrome under its own parents (.ip-wt,
    .ip-dagent, .ip-meta, .ip-details), so the other regions can scope their rules. */
 .ip-details { position: absolute; right: 0; top: 0; bottom: 0; z-index: 10; width: 380px; padding: 12px; overflow-y: auto; background: var(--panel); border-left: 1px solid var(--border); box-shadow: var(--shadow); font-size: var(--fs-m); line-height: 18px; }
-.ip-grab { display: none; width: 36px; height: 4px; margin: 0 auto 8px; border-radius: var(--radius); background: var(--muted); }
+.ip-grab { display: none; width: 36px; height: 4px; margin: 0 auto 8px; background: var(--muted); }
 @media (max-width: 719px) {
-  .ip-details { top: auto; left: 0; width: auto; height: 60%; border-left: 0; border-top: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+  .ip-details { top: auto; left: 0; width: auto; height: 60%; border-left: 0; border-top: 1px solid var(--border); }
   .ip-grab { display: block; }
 }
 /* The header, shared with the viewer: the title in L ink, cut on one line, then 24 px hairline buttons. */
 .ip-details header, .ip-viewer header { display: flex; align-items: center; gap: 6px; }
-.ip-details header b, .ip-viewer header b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-l); font-weight: var(--w-heavy); line-height: 20px; letter-spacing: var(--track-l); word-spacing: 0.05em; color: var(--text); }
-.ip-btn { flex: none; height: 24px; min-width: 24px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius); font-size: var(--fs-s); line-height: 14px; color: var(--muted); white-space: nowrap; }
+.ip-details header b, .ip-viewer header b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-l); font-weight: var(--w-heavy); line-height: 20px; word-spacing: 0.05em; color: var(--text); }
+.ip-btn { flex: none; height: 24px; min-width: 24px; padding: 0 8px; border: 1px solid var(--border); font-size: var(--fs-s); line-height: 14px; color: var(--muted); white-space: nowrap; }
 .ip-btn:hover { color: var(--text-2); }
-.ip-details :focus-visible, .ip-viewer header :focus-visible { outline: 2px solid var(--text-2); outline-offset: 1px; }
+.ip-details :focus-visible, .ip-viewer header :focus-visible { outline: 2px solid var(--volt); outline-offset: 1px; }
 /* Status (the shared Marker, then the word, or NEEDS YOU in the YOU tag's look), kind, label, who, parent: one muted
    S line. NEEDS YOU and a step's YOU take the canvas region's .ip-you rule. */
 .ip-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0 10px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
@@ -23,13 +23,13 @@
 .ip-meta .ip-glyph.l-data { font-size: 1.33em; }
 /* Section heads, as Up next's: S at 900, uppercase, spaced, muted. The archived menu's head shares this rule. */
 .ip-label { margin: 12px 0 4px; font-size: var(--fs-s); font-weight: var(--w-heavy); line-height: 14px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
-.ip-link { color: var(--link); text-decoration: underline; }
+.ip-link { color: var(--link); text-decoration: underline dotted; }
 /* In Details the heads sit further from the section above, in --text-2, so the sections read apart. */
 .ip-details > .ip-label { margin: 18px 0 6px; color: var(--text-2); }
 /* Every entry in Details (an ask, a task, a subagent, a command, ended work, a resource, a step, a log line) sits on its
    own soft row, so the entries read apart. A row that opens something deepens on hover, and a resource's title takes
    full ink too, since at night the two fills are close. */
-.ip-details :is(.ip-dasks, .ip-wts, .ip-dagents, .ip-log) > li, .ip-details .ip-res, .ip-details .ip-kids li button { margin: 0 0 3px; padding: 4px 8px; border-radius: var(--radius); background: var(--panel-2); }
+.ip-details :is(.ip-dasks, .ip-wts, .ip-dagents, .ip-log) > li, .ip-details .ip-res, .ip-details .ip-kids li button { margin: 0 0 3px; padding: 4px 8px; background: var(--panel-2); }
 .ip-details .ip-res:hover, .ip-details .ip-kids li button:hover { background: var(--track); }
 .ip-details .ip-res:hover b { color: var(--text); }
 .ip-outcome { margin: 8px 0; }
@@ -69,12 +69,12 @@
 /* Markdown, in Details and the viewer: headings at L, M and S in 900, code in DM Mono, links in --link. */
 .ip-md { line-height: 1.55; overflow-wrap: anywhere; }
 .ip-md :is(h1, h2, h3, h4, h5, h6, strong, b, th) { font-weight: var(--w-heavy); }
-.ip-md h1 { font-size: var(--fs-l); line-height: 20px; letter-spacing: var(--track-l); word-spacing: 0.05em; }
+.ip-md h1 { font-size: var(--fs-l); line-height: 20px; word-spacing: 0.05em; }
 .ip-md h2 { font-size: var(--fs-m); line-height: 18px; }
 .ip-md :is(h3, h4, h5, h6) { font-size: var(--fs-s); line-height: 14px; }
-.ip-md a { color: var(--link); }
+.ip-md a { color: var(--link); text-decoration: underline dotted; }
 .ip-md code { font-family: var(--font-mono); font-size: var(--fs-s); }
-.ip-md pre { padding: 8px; overflow: auto; background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius); }
+.ip-md pre { padding: 8px; overflow: auto; background: var(--panel-2); border: 1px solid var(--border); }
 .ip-md table { border-collapse: collapse; }
 .ip-md td, .ip-md th { padding: 2px 6px; border: 1px solid var(--border); }
 /* The resource viewer: the whole window on --panel. Its header shares Details' rules above. */
@@ -82,7 +82,7 @@
 .ip-viewer header { padding: 8px 12px; border-bottom: 1px solid var(--border); }
 .ip-viewer-body { flex: 1; width: 100%; max-width: 900px; margin: 0 auto; padding: 16px 20px; overflow: auto; outline: none; }
 .ip-viewer-body:focus-visible { outline: 2px solid var(--amber); outline-offset: -2px; }
-.ip-toast { position: fixed; bottom: 16px; left: 50%; z-index: 40; transform: translateX(-50%); padding: 4px 12px; border-radius: var(--radius); background: var(--text); color: var(--bg); font-size: var(--fs-m); }
+.ip-toast { position: fixed; bottom: 16px; left: 50%; z-index: 40; transform: translateX(-50%); padding: 4px 12px; background: var(--text); color: var(--bg); font-size: var(--fs-m); }
 /* The window's status line (an archive, a delete and the like), lifted clear of the 32 px activity strip. */
 .ip-status .ip-toast { bottom: 48px; width: max-content; max-width: calc(100vw - 32px); }
 

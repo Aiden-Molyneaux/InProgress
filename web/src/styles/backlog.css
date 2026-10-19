@@ -3,8 +3,8 @@
 /* The Backlog preview's head: "Backlog", the phase picker, "N ›" and "+ add" on one line. */
 .ip-backlog-head { align-items: center; justify-content: flex-start; gap: 8px; margin-bottom: 8px; }
 .ip-backlog-name { flex: none; font-size: var(--fs-s); line-height: 14px; letter-spacing: .04em; color: var(--muted); }
-.ip-backlog-phase { flex: 0 1 auto; min-width: 0; max-width: 150px; height: 20px; padding: 0 4px; font: inherit; font-size: var(--fs-s); line-height: 14px; color: var(--text-2); background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); text-overflow: ellipsis; }
-.ip-backlog-phase:focus-visible, .ip-chip:focus-visible, .ip-park-field:focus-visible, .ip-donelist-back:focus-visible { outline: 2px solid var(--text-2); outline-offset: 1px; }
+.ip-backlog-phase { flex: 0 1 auto; min-width: 0; max-width: 150px; height: 20px; padding: 0 4px; font: inherit; font-size: var(--fs-s); line-height: 14px; color: var(--text-2); background: var(--panel); border: 1px solid var(--border); text-overflow: ellipsis; }
+.ip-backlog-phase:focus-visible, .ip-chip:focus-visible, .ip-park-field:focus-visible, .ip-donelist-back:focus-visible { outline: 2px solid var(--volt); outline-offset: 1px; }
 .ip-backlog-head .ip-add { margin-left: auto; }
 /* The full Backlog view reuses All done's frame. */
 .ip-backlogview-title { margin: 0; font-size: var(--fs-m); font-weight: var(--w-heavy); color: var(--text-2); }
@@ -14,13 +14,13 @@
 .ip-backlogview .ip-backlog-tools { justify-content: space-between; }
 .ip-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .ip-chips-name { margin-right: 2px; font-size: var(--fs-s); line-height: 14px; color: var(--faint); }
-.ip-chip { max-width: 180px; padding: 1px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-s); line-height: 16px; color: var(--muted); border: 1px solid var(--border); border-radius: 9px; }
+.ip-chip { max-width: 180px; padding: 1px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-s); line-height: 16px; color: var(--muted); border: 1px solid var(--border); }
 .ip-chip:hover { color: var(--text); }
 .ip-chip[aria-pressed='true'] { background: var(--panel-2); color: var(--text); border-color: var(--text-2); }
 /* The Park… form, inside a Backlog box and in Details. */
 .ip-park { display: flex; flex-direction: column; gap: 6px; padding: 6px 6px 2px; }
 .ip-park label { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
-.ip-park-field { width: 100%; padding: 3px 6px; font: inherit; font-size: var(--fs-m); line-height: 18px; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); }
+.ip-park-field { width: 100%; padding: 3px 6px; font: inherit; font-size: var(--fs-m); line-height: 18px; color: var(--text); background: var(--panel); border: 1px solid var(--border); }
 .ip-park-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 2px; }
 .ip-park .ip-btn.go { color: var(--text-2); border-color: var(--text); }
 .ip-park .ip-btn:disabled { opacity: .5; }
@@ -31,6 +31,6 @@
 .ip-parked-row.pending .ip-hover-act { display: none; }
 .ip-st.parked { font-weight: var(--w-text); border-style: dashed; color: var(--muted); }
 .ip-parked-why, .ip-parked-where { overflow-wrap: anywhere; }
-.ip-dparked { margin: 4px 0 10px; padding: 6px 8px; border: 1px dashed var(--border); border-radius: var(--radius); }
+.ip-dparked { margin: 4px 0 10px; padding: 6px 8px; border: 1px dashed var(--border); }
 .ip-dparked p { margin: 0 0 6px; overflow-wrap: anywhere; }
 }

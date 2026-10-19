@@ -1,92 +1,125 @@
-/* Tokens: Quiet's day values in :root and their night values in the one dark block. */
+/* Tokens: InThink v3's foundations (spec section 2), dark only, then Quiet's names re-pointed at them. */
 @layer tokens {
 :root {
-  color-scheme: light dark;
-  /* Quiet's day values. The dark block below holds the night value of every token here but the theme-free ones. */
-  --bg: #f8fafc;
-  --text: #0f172a;
-  --text-2: #1e293b;
-  --muted: #475569;
-  --faint: #64748b;
-  --border: rgba(15,23,42,.11);
-  --bar: #ffffff;
-  --card: #ffffff;
-  --active-fill: #fffaf6;
-  --lane: rgba(15,23,42,.018);
-  --float: rgba(248,250,252,.94);
-  /* Overlays only (Details, the resource viewer and its header): opaque, so no card shows through. */
-  --panel: #ffffff;
-  --shadow: 0 8px 24px rgba(15,23,42,.16);
-  /* Hover fills and code blocks: a tint fainter than --border. */
-  --panel-2: rgba(15,23,42,.05);
-  --track: rgba(15,23,42,.08);
-  --track-fill: rgba(71,85,105,.5);
-  /* Orange marks only the active path, amber only attention, red only a blocked step. */
-  --active: #c2410c;
-  --active-ink: #c2410c;
-  --active-line: rgba(234,88,12,.55);
-  --sky: #0284c7;
-  --link: #0369a1;
-  --amber: #d97706;
-  --amber-ink: #92400e;
-  --amber-fill: rgba(251,191,36,.18);
-  --red: #b91c1c;
-  --red-fill: rgba(185,28,28,.08);
-  /* Task hues (a Board box's left edge): none orange, yellow, red or grey, which states own. */
-  --hue-0: #0e7490;
-  --hue-1: #2563eb;
-  --hue-2: #4f46e5;
-  --hue-3: #9333ea;
-  --hue-4: #db2777;
-  --hue-5: #15803d;
-  --hue-6: #8b5e34;
-  /* Theme-free: one value for day and night. Only Inter 500 and 900 ship, so every weight is one of the two. */
-  --radius: 8px;
-  --hairline: linear-gradient(97deg, #6366f1, #ff6600);
-  --font-sans: 'Inter', system-ui, 'Segoe UI', 'Segoe UI Symbol', sans-serif;
-  --font-mono: 'DM Mono', ui-monospace, 'Cascadia Code', Consolas, monospace;
-  --fs-l: 15px;
-  --fs-m: 12.5px;
-  --fs-s: 11px;
-  --w-text: 500;
-  --w-heavy: 900;
-  --track-l: -0.05em;
+  color-scheme: dark;
+  /* Canvas: black for the bar and readouts, then four steps up for the page, tiles, hover and press. */
+  --canvas-0: #000000;
+  --canvas-1: #111111;
+  --canvas-2: #161616;
+  --canvas-3: #1e1e1e;
+  --canvas-4: #282828;
+  /* Text: --text-dim is decorative meta only, never a sentence. */
+  --text: #f2f2f2;
+  --text-hi: #ffffff;
+  --text-muted: #8f8f8f;
+  --text-dim: #6f6f6f;
+  /* Volt is Aiden's move and live work, alarm is blocked and errors, violet is new since you looked. */
+  --volt: #c0fe04;
+  --volt-ink: #000000;
+  --volt-soft: rgba(192, 254, 4, 0.22);
+  --volt-wash: rgba(192, 254, 4, 0.06);
+  --alarm: #f24723;
+  --alarm-soft: rgba(242, 71, 35, 0.22);
+  --alarm-wash: rgba(242, 71, 35, 0.08);
+  --violet: #5200ff;
+  --violet-ink: #9f7bff;
+  /* Edges are lines: no shadows, no translucent panels. */
+  --line-soft: rgba(255, 255, 255, 0.06);
+  --line: rgba(255, 255, 255, 0.09);
+  --line-strong: rgba(255, 255, 255, 0.13);
+  --line-bright: rgba(255, 255, 255, 0.2);
+  --scrim: rgba(0, 0, 0, 0.65);
+  /* The seven factions behind the stored hue index: only ever a tile's top rule and its session diamond (D3). */
+  --hue-0: #3ad6ff;
+  --hue-1: #ff4d9d;
+  --hue-2: #b66dff;
+  --hue-3: #59b41d;
+  --hue-4: #9ebf9c;
+  --hue-5: #ff6b00;
+  --hue-6: #f6e935;
+  /* Faces: each stack keeps a symbol face, so label glyphs and marks draw as text. */
+  --font-display: 'Archivo', 'Arial Black', sans-serif;
+  --font-body: 'Archivo', system-ui, 'Segoe UI', 'Segoe UI Symbol', sans-serif;
+  --font-brand: 'Martian Mono', ui-monospace, 'Cascadia Mono', Consolas, 'Segoe UI Symbol', monospace;
+  --font-mono: 'Martian Mono', ui-monospace, 'Cascadia Mono', Consolas, 'Segoe UI Symbol', monospace;
+  --font-dot: 'Doto', 'Martian Mono', monospace;
+  /* The type ramp. No sentence is set in --t-micro; the display sizes step down under 720 px. */
+  --t-h1: 2rem;
+  --t-h2: 1.5rem;
+  --t-h3: 1.125rem;
+  --t-title: 1rem;
+  --t-body: 0.9375rem;
+  --t-detail-sm: 0.75rem;
+  --t-micro: 0.625rem;
+  --w-body: 400;
+  --w-strong: 600;
+  --w-brand: 700;
+  --w-display: 800;
+  /* Space: no --sp-7. */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-section: 32px;
+  /* Motion: nothing scales, bounces or floats. */
+  --dur-1: 120ms;
+  --dur-2: 200ms;
+  --dur-3: 320ms;
+  --ease-std: cubic-bezier(.4, 0, .2, 1);
+  --ease-out: cubic-bezier(0, 0, .2, 1);
+  --ease-hard: steps(1, end);
+  --stagger: 40ms;
+  --z-page: 0;
+  --z-chrome: 10;
+  --z-rail: 20;
+  --z-popover: 30;
+  --z-sheet: 40;
+  --z-toast: 50;
+  --z-command: 60;
+  /* Quiet's names, re-pointed at v3 (spec 2.10). Each surface step moves its rules to v3 names; the last deletes this block. */
+  --bg: var(--canvas-1);
+  --bar: var(--canvas-0);
+  --card: var(--canvas-2);
+  --lane: var(--canvas-1);
+  --panel: var(--canvas-1);
+  --float: var(--canvas-2);
+  --panel-2: var(--canvas-3);
+  --track: var(--canvas-4);
+  --track-fill: var(--text-muted);
+  --text-2: var(--text);
+  --muted: var(--text-muted);
+  --faint: var(--text-dim);
+  --border: var(--line);
+  --active: var(--volt);
+  --active-ink: var(--volt);
+  --active-line: var(--volt-soft);
+  --active-fill: var(--volt-wash);
+  --amber: var(--volt);
+  --amber-ink: var(--volt);
+  --amber-fill: var(--volt-wash);
+  --red: var(--alarm);
+  --red-fill: var(--alarm-wash);
+  --sky: var(--text-hi);
+  --link: var(--text-hi);
+  --shadow: none;
+  --hairline: var(--line-strong);
+  --radius: 0;
+  --font-sans: var(--font-body);
+  --fs-l: var(--t-title);
+  --fs-m: var(--t-body);
+  --fs-s: var(--t-detail-sm);
+  --w-text: var(--w-body);
+  --w-heavy: var(--w-display);
 }
-@media (prefers-color-scheme: dark) {
+@media (max-width: 719px) {
   :root {
-    --bg: #080d1c;
-    --text: #f1f5f9;
-    --text-2: #e2e8f0;
-    --muted: #94a3b8;
-    --faint: #64748b;
-    --border: rgba(255,255,255,.09);
-    --bar: rgba(255,255,255,.018);
-    --card: rgba(255,255,255,.035);
-    --active-fill: rgba(249,115,22,.045);
-    --lane: rgba(255,255,255,.022);
-    --float: rgba(8,13,28,.92);
-    --panel: #0c1227;
-    --shadow: 0 8px 24px rgba(0,0,0,.55);
-    --panel-2: rgba(255,255,255,.06);
-    --track: rgba(255,255,255,.08);
-    --track-fill: rgba(148,163,184,.55);
-    --active: #f97316;
-    --active-ink: #fb923c;
-    --active-line: rgba(249,115,22,.5);
-    --sky: #38bdf8;
-    --link: #38bdf8;
-    --amber: #fbbf24;
-    --amber-ink: #fcd34d;
-    --amber-fill: rgba(251,191,36,.12);
-    --red: #f87171;
-    --red-fill: rgba(248,113,113,.1);
-    --hue-0: #22d3ee;
-    --hue-1: #60a5fa;
-    --hue-2: #818cf8;
-    --hue-3: #c084fc;
-    --hue-4: #f472b6;
-    --hue-5: #4ade80;
-    --hue-6: #d4a574;
+    --t-h1: 1.625rem;
+    --t-h2: 1.25rem;
+    --t-h3: 1.0625rem;
+    --sp-section: 24px;
   }
 }
 }

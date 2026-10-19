@@ -5,7 +5,8 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   root: fileURLToPath(new URL('.', import.meta.url)),
   plugins: [react()],
-  build: { outDir: 'dist', emptyOutDir: true },
+  // Fonts always ship as files: the CSP's default-src 'self' would block a font inlined as a data: URL.
+  build: { outDir: 'dist', emptyOutDir: true, assetsInlineLimit: (file) => (/\.woff2?$/.test(file) ? false : undefined) },
   server: {
     port: 5183,
     fs: { allow: ['..'] },
