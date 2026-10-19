@@ -130,7 +130,7 @@ Each is argued in its section. Aiden can overturn any of them at that section's 
 
 ## 2. Foundations
 
-*Status: awaiting approval.* Built by #498, after the sheet split (#497).
+*Status: approved by Aiden, 2026-10-18.* Built by #498, after the sheet split (#497).
 
 ### What it improves
 
@@ -319,7 +319,67 @@ viewer 30, toast 40) move onto these.
   - `test/web/tokens.test.ts` is rewritten for one palette: `color-scheme: dark` and no `prefers-color-scheme` in any
     file under `web/src`; the v3 values above; the seven hues in order; font sizes only from the ramp tokens (plus
     `em` sizes for glyph scaling); weights only from the weight tokens; `font-stretch` only 75, 87.5, 100, 112.5 or
-    125 %; no `border-radius` but 0; no literal colour outside the tokens file. It reads the tokens file the split
-    (#497) creates.
+    125 %; no `border-radius` but 0; no literal colour outside the tokens file. It reads the sheet files the split
+    (#497) creates (§3).
   - e2e assertions on Quiet's literal values move to v3's (§12 lists them). The theme test (`ui.spec.ts:1293`) becomes
     "the window is dark whatever the OS theme": an emulated light and an emulated dark scheme give the same colours.
+
+## 3. Sheet split
+
+*Status: awaiting approval.* Built by #497, the first build step. Label refactor: no visual change.
+
+### What it improves
+
+Today the window's look is one 578-line sheet, `web/src/styles.css`, whose regions interleave (the Board's region also
+holds the activity strip, the banner and the task box the Backlog uses; Details' asks sit after the reduced-motion
+block). Every surface step would edit the same file. After the split each surface has its own file, so a diff reads per
+surface and two steps can run side by side without touching the same sheet.
+
+### Files
+
+A new folder, `web/src/styles/`. Each file wraps its rules in its own `@layer` block; `main.tsx` imports them in this
+order, after the font packages, in place of `./styles.css`:
+
+| File | Layer | Holds (today's `styles.css` lines) |
+|---|---|---|
+| `layers.css` | none | the one statement `@layer tokens, base, parts, components;` |
+| `tokens.css` | `tokens` | `:root` and the dark block (1-90) |
+| `base.css` | `base` | reset, `html`, `body`, `button`, `.muted`, the pulse keyframes (91-98); reduced motion (507-511) |
+| `chrome.css` | `components` | chrome (99-200); the activity strip, banner and empty state (400-406) |
+| `project.css` | `components` | Project view (201-264) |
+| `board.css` | `components` | Board (265-399 and 407-420): bands, header, task box, states, Next, Backlog fold, glyphs, YOU tag |
+| `panels.css` | `components` | Details and the viewer (421-506); Details' asks and marks (513-519) |
+| `done.css` | `components` | All done (520-545) |
+| `backlog.css` | `components` | the preview head, the full view and its chips, the Park form and parked rows (546-578) |
+| `marker.css` | `components` | `web/src/marker.css`, moved here, unchanged |
+
+- **`parts` is declared now and stays empty.** #499 fills it with the shared v3 parts. A rule in `components` beats one in
+  `parts` whatever its specificity, so a surface can adjust a part without a selector race.
+- **`marker.css` joins the `components` layer, last.** Today it loads after the whole sheet (`Marker.tsx:2` imports it)
+  and wins ties. Left unlayered it would beat every layered rule, so it moves into the layer at the end, which keeps its
+  place. `Marker.tsx` stops importing it.
+- **The order inside `components` is today's region order**, and each file keeps its rules in source order, so the
+  cascade inside the layer is the same as today's. Three groups change position: the activity strip, banner and empty
+  state (to `chrome.css`), Details' asks and marks (to `panels.css`) and the reduced-motion block (to `base.css`, where
+  its `!important` still wins, being the sheet's only one). The computed-style diff below proves none of them changes a
+  value.
+- **Region comments become file heads.** Each file opens with one line on what it styles. Comments inside rules move
+  with them.
+- **Nothing is renamed and no value changes.** Classes stay `ip-*`; tokens keep Quiet's names until #498.
+
+### Proving no visual change
+
+- `npm run typecheck`, `npm test` and the full e2e suite pass unchanged, with no test edited but the two that name the
+  old file: `test/web/tokens.test.ts` reads `web/src/styles/tokens.css` for the tokens and every file in
+  `web/src/styles/` for the type checks, and `test/scripts/deploy-lib.test.ts:84` names a file in the new folder.
+- **A computed-style diff.** The step builds main and the branch, opens each on the session's port with the e2e
+  fixture, and dumps `getComputedStyle` for every element on the Board wide (1600) and narrow (400), the Project view,
+  the Backlog view, All done, Details, the resource viewer, a tab menu and GoTo. The two dumps must be identical. The
+  script lives in the session's scratchpad, not the repo; its output goes in the receipt.
+- Murr reviews the diff as usual; Parvati does not run (nothing to look at).
+
+### Not in this step
+
+- No `@import` chains: Vite's handling of `@import ... layer()` is not relied on, since each file declares its own layer.
+- No CSS modules. The window keeps global `ip-*` classes; the parts in #499 follow the same naming.
+- No dead-rule cleanup. Unused rules go when their surface is ported.
