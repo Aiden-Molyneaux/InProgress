@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { deriveBoard, isLive } from '../../src/core/board';
-import type { StepHit } from '../../src/core/goto';
 import { buildIndex, shelvedIds } from '../../src/core/tree';
 import type { ProjectSnapshot } from '../../src/core/types';
 import { api, postEvent } from './api';
@@ -8,7 +7,7 @@ import { Board } from './board/Board';
 import { useLastLook } from './board/lastLook';
 import { noteAction, noteHidden, noteShown, setPoster } from './measure';
 import { Footer } from './chrome/Footer';
-import type { GoToHandle } from './chrome/GoTo';
+import type { GoPick, GoToHandle } from './chrome/GoTo';
 import { Hud, HudEdge } from './chrome/Hud';
 import { askTarget } from './chrome/hudLogic';
 import { archivedProjects, loadTabOrder, moveTab, neighbourTab, projectTabs, pruneOrder, saveTabOrder, stepTab, TAB_ORDER_KEY } from './chrome/tabs';
@@ -54,10 +53,17 @@ export function App() {
   // title button of the row that opened it.
   const detailsOpener = useRef<{ element: HTMLElement | null; node: number } | null>(null);
   const detailsOpen = selectedNode !== null;
+  /** Set when Details itself picks the next step (its Steps rows, the parent link), so the opener stands. */
+  const fromDetails = useRef(false);
   useLayoutEffect(() => {
     if (detailsOpen) {
       const active = document.activeElement;
-      detailsOpener.current = { element: active instanceof HTMLElement && active !== document.body ? active : null, node: selectedNodeRef.current! };
+      const outside = active instanceof HTMLElement && active !== document.body && !active.closest('.ip-details');
+      // Opening records the opener. Switching step from Details' own Steps rows or parent link keeps it; any other switch
+      // (another card, even a click that left focus on the page) re-records it.
+      const inside = fromDetails.current;
+      fromDetails.current = false;
+      if (!inside || !detailsOpener.current) detailsOpener.current = { element: outside ? active : null, node: selectedNodeRef.current! };
       return;
     }
     const from = detailsOpener.current;
@@ -66,7 +72,7 @@ export function App() {
     if (!from || (document.activeElement && document.activeElement !== document.body)) return;
     const target = from.element?.isConnected ? from.element : document.querySelector<HTMLElement>(`[data-node="${from.node}"] .ip-row-title`);
     target?.focus();
-  }, [detailsOpen]);
+  }, [detailsOpen, selectedNode]);
   const [viewerResource, setViewerResource] = useState<number | null>(null);
   const viewerOpen = viewerResource !== null;
   const goToField = useRef<GoToHandle>(null);
@@ -257,7 +263,16 @@ export function App() {
   goingRef.current = goingTo;
   /** The jump whose step the snapshot lacked, checked with the server once so a stale snapshot never drops it. */
   const checked = useRef<typeof goingTo>(null);
-  const goTo = (hit: StepHit) => {
+  const goTo = (pick: GoPick) => {
+    if (pick.kind === 'view') {
+      pickView(pick.view);
+      return;
+    }
+    if (pick.kind === 'project') {
+      state.selectProject(pick.slug);
+      return;
+    }
+    const { hit } = pick;
     setGoingTo({ id: hit.id, projectId: hit.projectId, slug: hit.projectSlug });
     if (hit.projectSlug !== state.slug) state.selectProject(hit.projectSlug);
   };
@@ -266,7 +281,7 @@ export function App() {
     if (!going) return;
     const drop = () => {
       setGoingTo(null);
-      say(`No step #${going.id}`);
+      fail(`No step #${going.id}`);
     };
     if (state.slug !== going.slug) {
       setGoingTo(null);
@@ -370,7 +385,10 @@ export function App() {
                 nodeId={selectedNode}
                 snapshot={snapshot}
                 onClose={() => setSelectedNode(null)}
-                onSelectNode={setSelectedNode}
+                onSelectNode={(id) => {
+                  if (id !== selectedNodeRef.current) fromDetails.current = true;
+                  setSelectedNode(id);
+                }}
                 onOpenResource={openViewer}
                 onStatus={fail}
               />

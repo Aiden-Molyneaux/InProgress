@@ -2,7 +2,7 @@ import type { ElementType, HTMLAttributes, ReactNode } from 'react';
 import { cx } from './classes';
 
 export interface EyebrowProps extends Omit<HTMLAttributes<HTMLElement>, 'children'> {
-  glyph?: '//' | '[+]' | '[!]' | '>>' | '[◈]' | '[✓]';
+  glyph?: '//' | '[+]' | '[!]' | '>>' | '[◈]' | '[✓]' | '[⌕]';
   glyphTone?: 'volt' | 'dim';
   as?: 'span' | 'h2' | 'h3' | 'label';
   /** For `as="label"`: the id of the field it names. */

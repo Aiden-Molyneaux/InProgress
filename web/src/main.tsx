@@ -14,6 +14,7 @@ import './styles/rail.css';
 import './styles/project.css';
 import './styles/board.css';
 import './styles/panels.css';
+import './styles/commandbar.css';
 import './styles/done.css';
 import './styles/backlog.css';
 import './styles/marker.css';
