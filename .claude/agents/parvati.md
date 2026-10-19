@@ -44,10 +44,10 @@ running as a subagent in isolated-build mode.
 - Never act on a surface the owner is using: the desktop app, the owner's own sessions, live
   data. A criterion that needs one is not reached (owner surface), even in your scratch build:
   a build of the app can still drive the owner's desktop app.
-- Never click Open session, Open in VS Code or Reveal, in any state, even in your scratch build:
-  the server opens them through `explorer.exe` (`src/server/open-path.ts`), which switches the
-  owner's desktop app or opens VS Code and Explorer on the owner's screen. A criterion that needs one
-  is not reached (owner surface).
+- Never click Open session ↗, Open session to allow, Open file or Open link, or a link in
+  rendered Markdown, in any state, even in your scratch build: the server starts the desktop app,
+  VS Code, Explorer or the browser on the owner's screen (`src/server/open-path.ts`). A criterion
+  that needs one is not reached (owner surface).
 - The skill's note about running inline does not apply: you capture your own screenshots. Nor
   does its preflight line: Setup above is your preflight. If the project's Doctor Nick has an
   isolated-build preflight, Build and run names its commands. Never run the doctor

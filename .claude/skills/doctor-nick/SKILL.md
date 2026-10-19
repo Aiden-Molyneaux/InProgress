@@ -56,8 +56,8 @@ Two modes, by what the work runs against:
   `test/e2e/start-server.mjs` does (`INPROGRESS_HOME` set to a scratch folder,
   `INPROGRESS_PORT` set to the lane port, `INPROGRESS_AGENT_WATCH_MS=500`), and confirm
   `GET http://127.0.0.1:<port>/api/health` answers with `"app":"inprogress"` before driving it.
-  Ports 4400 to 4420 only (Parvati 4400 to 4409, Sev's e2e 4410 to 4419, Sigmund's check surface
-  4420), never 4317 or 4399, and never `~/.inprogress` (the check surface runs on a copy of its
+  Ports 4400 to 4429 only (Parvati 4400 to 4409, Sev's e2e 4410 to 4419, Sigmund's check surface
+  4420 to 4429), never 4317 or 4399, and never `~/.inprogress` (the check surface runs on a copy of its
   database). `npm run test:e2e` does all of this itself on `INPROGRESS_E2E_PORT`.
 
 ## The three rules

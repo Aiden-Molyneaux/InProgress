@@ -111,7 +111,7 @@ When the workflow (agent and skill files, `CLAUDE.md`, hooks, check commands) ge
 Sigmund writes one line and carries on. Kinds: **misfire** (a rule fires wrongly or cites
 something gone), **dispatch** (a run fails or is wasted: turn limit, wrong model, thin brief, an
 agent that does not load), **miss** (a reviewer, or phase 0's criteria, passes what is caught
-later; phase 7 names the two cases), **lie** (a check's
+later; phase 7 names the cases), **lie** (a check's
 definition is wrong: it tests nothing, runs the wrong files, needs a port it was not given), and
 **defect** (a reviewer or the owner finds a defect in a workflow file; a reviewer-found friction
 is `defect` whatever else it is).
@@ -119,7 +119,7 @@ is `defect` whatever else it is).
     workflow note [<key>] <kind>: <what happened> · <cost, or none measured> · <fixed locally | open>
 
 `<key>` is the workflow file's repo path, plus `#<section>` for a rule inside it
-(`.claude/agents/murr.md`, `CLAUDE.md#Routing`). Where the line goes:
+(`.claude/agents/murr.md`, `CLAUDE.md#House rules`). Where the line goes:
 
 In a tracked session, the next scribe brief carries it, as `log on #<id>: workflow note [<key>] ...` on the step you drive; the receipt's `review` brief at the latest. Aiden reads the step logs for repeated keys at each phase close (#490 adds a Retro due alert that counts them).
 
@@ -208,7 +208,7 @@ as `[ ]`: seeded scratch data says nothing about speed. A criterion no check can
 desktop app, the installed hooks, the owner's own sessions) is declared, never guessed: it goes
 to the owner's walkthrough as a guided step.
 
-UI verification runs only on a port from 4400 to 4419 that the session picks (Parvati's lane is 4400 to 4409, Sev's e2e lane 4410 to 4419), or 4420 for the owner's check surface (phase 7), never on 4317 (the live window) or 4399 (the e2e default, which the deploy's own run uses). Keep it proportional:
+UI verification runs only on a port from 4400 to 4419 that the session picks (Parvati's lane is 4400 to 4409, Sev's e2e lane 4410 to 4419), or 4420 to 4429 for the owner's check surface (phase 7), never on 4317 (the live window) or 4399 (the e2e default, which the deploy's own run uses). Keep it proportional:
 small UI changes ship on check evidence and the owner's walkthrough; do not build harnesses
 unasked.
 
@@ -267,18 +267,31 @@ The receipt, leading with the outcome:
    At depth none, one line says there is nothing to try, and why.
 
 **The check surface [edit].** Aiden runs the walkthrough before the merge, on a scratch server
-Sigmund starts from the branch on port 4420, with a copy of the live data, never the live data
-itself. From the worktree: `node scripts/build-to.mjs .build/check-surface` (its own folder, so an
-e2e run or Parvati's build cannot rewrite it under the walk); copy `~/.inprogress/inprogress.db` to
-`inprogress.db` in a scratch folder the way `scripts/check-migration-10.mjs` does (the live file opened
-read-only, better-sqlite3's `backup()` writing the copy, WAL included; a plain file copy misses
-the WAL); then start `.build/check-surface/dist/server/main.js` with `INPROGRESS_HOME` set to that folder and
-`INPROGRESS_PORT=4420`, and confirm `GET http://127.0.0.1:4420/api/health` answers with
-`"app":"inprogress"`. Its Open session, Open in VS Code and Reveal still reach the desktop app,
-VS Code and Explorer through `explorer.exe` (`src/server/open-path.ts`): Aiden clicks them,
-Sigmund never does. Sigmund stops it at the go-ahead or the FAIL. A handoff names its port and
-stops it; whoever picks up the receipt restarts it, and restarts it when Aiden reports it down.
-A criterion that needs the installed hooks or the deployed build is *after the gate*.
+Sigmund starts from the branch, with a copy of the live data, never the live data itself. At
+depth none there is no walkthrough and no check surface. It takes a free port from 4420 to 4429
+(the receipt names it). With everything committed, from the worktree:
+
+1. `node scripts/build-to.mjs .build/check-surface` (its own folder, so an e2e run or Parvati's
+   build cannot rewrite it under the walk).
+2. Copy `~/.inprogress/inprogress.db` to `inprogress.db` in a scratch folder the way
+   `scripts/check-migration-10.mjs` does: the live file opened read-only, better-sqlite3's
+   `backup()` writing the copy, WAL included (a plain file copy misses the WAL).
+3. Start `.build/check-surface/dist/server/main.js` with `INPROGRESS_HOME` set to the scratch
+   folder's absolute path and `INPROGRESS_PORT` to the port. Check `INPROGRESS_HOME` before you
+   start: unset or empty, the server opens `~/.inprogress` and runs the branch's migrations on
+   the live database.
+4. Confirm `GET http://127.0.0.1:<port>/api/health` answers with `"app":"inprogress"` and a
+   `build.sha` equal to the branch's `git rev-parse --short HEAD`, and that `server.pid` is in
+   the scratch folder. A server already on that port makes the start exit quietly, and the health
+   check would pass against another session's build: take the next port.
+
+A timed check (phase 4) that writes runs on a second copy, or the copy is taken again before the
+walk. Its Open session ↗, Open session to allow, Open file and Open link buttons, and links in
+rendered Markdown, still start the desktop app, VS Code, Explorer or the browser on Aiden's
+screen (`src/server/open-path.ts`): Aiden clicks them, Sigmund never does. Sigmund stops the
+server at the go-ahead or the FAIL. A handoff names its port and stops it; whoever picks up the
+receipt restarts it, and restarts it when Aiden reports it down. A criterion that needs the
+installed hooks or the deployed build is *after the gate*.
 
 Before you stop, brief the scribe `ask on #<id>: review, <one line on what is ready>; walkthrough: <n> criteria` (or "nothing to try"). Aiden's go-ahead answers it, and the answer reaches you on your next prompt; the open ask keeps the step from reading as stalled. Then prefix this session's title with `REVIEW`, or `BLOCKED` while another ask waits on Aiden (Session title, below).
 
@@ -320,7 +333,7 @@ A PR only when Aiden asks. Deploy and `claude:install` never run from a worktree
 
 **After the gate.** Criteria marked *after the gate*, and a walkthrough whose check surface
 follows a landing: once the landing or deploy puts the change in front of the owner, hand them
-over as a `review` ask (in a tracked session; otherwise in your closing message) with the
+over as a `review` ask through the scribe (in a tracked session; otherwise in your closing message) with the
 `REVIEW` prefix. Hold the steps that come after the point where the change reaches the owner
 (a release PR opened after a walk on the integration branch; the landing's own push is part of
 the landing) until the owner passes them. A merge click the owner makes is not held: hand it
@@ -329,8 +342,8 @@ the fix from phase 1 on a new branch; whether to roll back first is the owner's 
 
 Once the gate above is through (merged, plus any deploy and push it names), or, where it ends
 on the owner's own action (a merge click, a batched release), once you have handed that action
-over, and once every criterion has passed or been waived: mark your step done in
-InProgress with its outcome, naming how the owner checked it (in a tracked session), and prefix
+over, and once every criterion has passed or been waived: brief the scribe that the step is
+done with its outcome, naming how Aiden checked it (in a tracked session), and prefix
 this session's title with `DONE` (Session title, below).
 
 A deploy or rollback that goes red on the environment (a lock, a restart, the runner) goes to
@@ -356,7 +369,7 @@ A retry that is itself a gated action (another deploy, a rollback, an installer)
 - Report to Mip through InProgress only: the step's status and outcome, new steps, asks, and the working tasks. Mip reads them at its next opening. Do not message Mip.
 - **Session title (Aiden, 2026-10-16, #455).** In the desktop app, keep a status prefix on this session's title so the sidebar shows where it stands:
   - `REVIEW`: set whenever you end a turn with the phase 7 receipt still open, its `review` ask included, or with phase 8's *after the gate* criteria waiting on Aiden. The go-ahead ("ship it", "merge it", "go ahead") or Aiden's PASS drops it and the gated phase runs with no prefix; a change request or a FAIL drops it until the next receipt.
-  - `BLOCKED`: set when you end a turn waiting on Aiden for anything but the receipt: a scribe `question` or `permission` ask, or a question in your closing message. Drop it when he answers. If one is open while the receipt waits, `BLOCKED` wins: his answer comes before a ship. A question asked inside a turn (AskUserQuestion) sets nothing.
+  - `BLOCKED`: set when you end a turn waiting on Aiden for anything but the receipt: a scribe `question` or `permission` ask, or a question in your closing message. Drop it when Aiden answers. If one is open while the receipt waits, `BLOCKED` wins: the answer comes before a ship. A question asked inside a turn (AskUserQuestion) sets nothing.
   - `DONE`: set once the step is merged, deployed and pushed (phase 8) and every criterion has passed or been waived. It stays.
   - Otherwise no prefix: while you work, deploy retries included.
 
@@ -381,11 +394,9 @@ effort high. Run this through Sigmund."
   been waived.
 - Never answers pure codebase questions: no change, no Sigmund.
 - Never carries state across sessions. Continuity is InProgress's: the tree, mip-orc, handoffs.
-- Never covers the project-level work that comes before a change [edit]: in a project on
-  Shipwright's lifecycle playbook, Stages 1 to 3 (the product spec, the design, the architecture
-  lock and roadmap), which keep their own routing (spec-elicitation, ac-author, burt). Name the
-  project's own equivalent and its skills, or delete this line if it has none. The written plan
-  for a change is not one of them: that is Sigmund's phase 2.
+- Never covers the project-level work that comes before a change [edit]: InProgress writes
+  specs in `docs/superpowers/specs/` with brainstorming, and they get no reviewer subagent. The
+  written plan for a change is not one of them: that is Sigmund's phase 2.
 - Never skips Murr, even for one-liners: proportional mode makes small diffs cheap. Past phase
   5's cap, the receipt names the lines he has not seen.
 - Never asks permission for routine, reversible steps the lifecycle already covers.
