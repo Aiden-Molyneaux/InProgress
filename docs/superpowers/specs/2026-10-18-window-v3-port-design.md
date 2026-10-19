@@ -108,7 +108,7 @@ Each is raised as an ask on #496 when its section is written, with the strategy'
 | D2 | Counts in the rail | Keep the volt ask count on each project row, against InThink's rail rule | §6 | Keep the count, as recommended (Aiden, 2026-10-18) |
 | D3 | Step hues | The seven hues become faction colours on each tile's top rule | §2 | The seven factions, as mocked (Aiden, 2026-10-18) |
 | D4 | Ctrl K | GoTo becomes a v3 command bar; the Board keeps no shortcuts of its own | §4, §10 | Two parts (Aiden, 2026-10-18): the command bar finds steps and moves you (projects, views), and writes nothing; lists get an arrow cursor with no letter keys |
-| D5 | What supersedes what | The port reverses Board spec 2.8 and Quiet's palette, fonts, chrome and cards; #506 writes the ruling | §13 | open |
+| D5 | What supersedes what | The port reverses Board spec 2.8 and Quiet's palette, fonts, chrome and cards; #506 writes the ruling | §13 | As recommended: not a UI call, so recorded without asking under Aiden's standing approval (2026-10-18); his to overturn |
 | D6 | Project colour on the rail | A bright grey rule on every row, volt only for the current one | §6 | A faction per project from its id, against the recommendation (Aiden, 2026-10-18) |
 
 ### Calls made by Sigmund, not Aiden
@@ -916,3 +916,177 @@ InThink's module-head rule (Projects v3 spec, "Standing rules").
 - New e2e test: the phase TabStrip and a label Chip together narrow the list, and the meta line says how many are shown.
 - Parvati reviews both at 1600, 720 and 400 with a long Backlog (three phases, No phase, parked rows with and without
   where, a step with open children) and a long All done in both orders.
+
+## 10. Details, the resource viewer and the command bar
+
+*Status: written under Aiden's standing approval (2026-10-18).* Built by #505, after the parts. Label ui.
+
+### What it improves
+
+- **Details reads top-down by urgency:** what waits on you, what the step is, what is happening on it, what it links
+  to, what happened. Today's order mixes them.
+- **Park and Add a step stay in reach** in a strip at the foot of Details, where today they sit at the end of a long
+  scroll.
+- **At 400 px Details takes the page**, not 60 % of it with the Board showing through above.
+- **The command bar moves you, not just to steps:** projects and views by name, in the same box that finds a step
+  (D4, Aiden 2026-10-18).
+
+### Details
+
+A side panel over the page's right side: `--canvas-1`, a `--line-strong` left edge, `--z-sheet`, no scrim (the Board stays
+usable beside it). 440 px wide from 1360 px, 380 px from 720 px. Under 720 px it covers the whole page area between the
+HUD and the footer. It enters with a 320 ms clip-path wipe from the right; under reduced motion it appears.
+
+Top to bottom:
+
+1. **Head** (sticky): an Eyebrow `#482 · STEP` (the kind), **Copy #id** (ghost `sm`, "Copied" for 1.2 s), **×**
+   (Close). The title under it in the body face at 1.125rem, 600, `--text-hi`, wrapping (today it cuts to one line).
+2. **Meta row:** the Marker and the status as a Chip, the label Chip, who it is for (`YOU` as a `needs` Chip, or
+   "Claude"), and "in #parent" as a link that opens the parent's Details.
+3. **Parked** (when parked): a dashed panel, "Parked 12 Oct" in an Eyebrow, the reason, where, and **Unpark** (outline).
+4. **Asks** (when any): each open ask in the Board's ask panel (§7): Eyebrow with kind and age, the raiser, the text,
+   Answer… and Clear. Answered asks follow, muted, one line each: the text, "answered …", the age.
+5. **The step:** the handoff Chip and hygiene Chips; the body as Markdown at 68ch; the outcome in a panel under an
+   Eyebrow `[✓] OUTCOME`.
+6. **Live work** (when any), under an Eyebrow `[◈] LIVE WORK`: working tasks with their marks, subagents (◇ for
+   readers, the purpose under each), background commands in a terminal readout, then ended work, muted, per session.
+   Today's 30 s refresh stands.
+7. **Resources:** rows of title and mono summary, each opening the viewer.
+8. **Steps:** the children, each a row with its Marker, `#id`, title and `YOU` where it applies, opening that child's
+   Details.
+9. **Log:** time in mono, the text, the session muted.
+10. **Action strip** (sticky at the foot): **Park…** (outline, when today's rule allows it) and **Add a step** (ghost),
+    each opening its form in the strip, and at the right `UPDATED 2M AGO` in mono dim. A failed refresh turns that line
+    into an ErrorLine, "Couldn't refresh", with Retry; the last detail stays on screen, as today.
+
+Every section head is an Eyebrow with its count (`// RESOURCES · 3`). Empty sections are left out, as today. Loading
+shows the head with `#id` and a "Loading…" line; a failed load shows an ErrorLine with Retry.
+
+**Keys and focus:** Esc closes Details (today's rule: not from a field), and focus returns to the tile or row that opened
+it. Opening Details moves focus to its title. Tab stays in the page order: Details is not modal.
+
+### The resource viewer
+
+The whole window, `--canvas-1`, `--z-command`, modal (the window behind it is inert, as today).
+
+- **Head:** an Eyebrow `R324 · HANDOFF` (id and kind), the title in the body face at 1.125rem, 600; at the right Copy,
+  Open file, Copy path and Open link (outline `sm`, each only when it applies, as today), then ×.
+- **Body:** Markdown at 68ch, centred, `--sp-8` padding, focused on open. Code blocks on `--canvas-0` in mono; tables
+  with `--line` rules; headings in the body face at 600 (`h1` 1.5rem, `h2` 1.25rem, `h3` 1rem), never display or
+  uppercase; links in `--text-hi` with a dotted underline that turns volt on hover. Today's sanitising rules stand.
+- **States:** "Loading…", an ErrorLine, "File: <path>", the URL, "No content", as today. Copy and open results show in
+  the Toast.
+- Esc closes it and focus returns to its opener.
+
+### The command bar
+
+Opened by Ctrl K or `/` (outside a field), or by the HUD's Find. A panel 640 px wide at 15 % from the top, over a
+`--scrim`, `--z-command`, with volt Frame corners; it enters with a 320 ms clip-path wipe from the top (a fade under
+reduced motion). Under 720 px it spans the page width at the top. The window behind is inert while it is open.
+
+- **Field:** an Eyebrow `[⌕] FIND`, the input at 1rem in the body face, placeholder "#id, a step's title, a project or a
+  view".
+- **Results**, grouped under Eyebrows:
+  - **Steps:** today's search (`api.find`, 150 ms debounce, the newest request wins). A row: `#id`, the title, the
+    project at the right in mono dim (archived marked), finished steps muted. Choosing one opens its Details, switching
+    project first when needed, as today.
+  - **Go to:** projects ("Open InThink") and the current project's views ("Board", "Project", "Backlog", "All done"),
+    matched on the words typed. With nothing typed, Go to lists the views and the projects in rail order.
+- **The highlighted row** is volt-filled with ink text, the same mark as the current rail row.
+- **Keys:** Up and Down move across both groups, Enter opens the highlighted row (or the first), Esc closes and returns
+  focus to where it was, Tab stays inside the bar. Ctrl K inside the field is swallowed, as today.
+- **Messages,** as today: "No step #N", "Couldn't search: …", "No step titles match", the count.
+- **Foot:** KeyHints `↑↓` Move, `Enter` Open, `Esc` Close.
+- Nothing in it writes (D4).
+
+### Tests and review (#505)
+
+- Rewritten (§12): the Details look tests (working tasks, the label chip and log, "wears Quiet"), GoTo's surface and note
+  colour; GoTo's behaviour tests keep their keys and messages with the bar's selectors.
+- New e2e tests: typing "backlog" in the command bar and Enter opens the Backlog view; Details' action strip opens Park
+  without scrolling on a long step; at 400 px Details covers the page and Esc returns focus to its tile.
+- Murr runs on Opus (focus, a modal, the keyboard: the risk list). Parvati reviews Details, the viewer and the bar at
+  1600, 720 and 400, Details on a step with every section.
+
+## 11. Narrow (400 px)
+
+*Status: written under Aiden's standing approval (2026-10-18).* Each surface section says what it does under 720 px; this
+section only gathers the rules they share, so Parvati's 400 px pass has one list.
+
+- **Shell:** the HUD at 48 px (wordmark, link, asks, Find); the rail as a strip under the ruler; the current project's
+  views as a `segmented` TabStrip at the top of the page; the footer with the activity line only.
+- **Side padding** `--sp-4`; `--sp-section` 24 px; display sizes step down (§2.5); content sizes do not.
+- **One column everywhere.** Board order: Needs me, Now, Next, Done. Project view: no phase index, a jump row instead.
+- **Overlays take the page:** Details and the viewer cover the page area; the command bar spans the top.
+- **Hover actions show on focus too** (already the rule), and every row action stays reachable by Tab.
+- **Nothing scrolls sideways** except the rail strip and a TabStrip that overflows.
+- **Targets:** buttons stay at their `sm` 26 px height in rows and grow to 32 px (`md`) in the action strip and forms.
+
+## 12. Tests and review per step
+
+*Status: written under Aiden's standing approval (2026-10-18).*
+
+The rule is the strategy's: the step that changes a value or a selector rewrites the assertion on it in the same branch.
+Each ui step keeps the label's gates (typecheck, unit, one e2e test per user-visible feature), Murr on every diff, and
+Parvati on every surface step at the widths its section names. Line numbers are `test/e2e/ui.spec.ts` on main at
+7933a3f.
+
+| Step | Rewrites | Adds |
+|---|---|---|
+| #497 split | `test/web/tokens.test.ts` (reads `web/src/styles/`), `test/scripts/deploy-lib.test.ts:84` (path) | none; the computed-style diff in the receipt |
+| #498 Foundations | `tokens.test.ts` for one palette (§2.10); literal values in :1059, :1175, :1293 (becomes "dark whatever the OS theme"), :1433, :1526, :1910, :2236, :2245, :2273 | none |
+| #499 parts | none | vitest for TabStrip keys, `cursorStep` and the Count rise; one e2e for the lab |
+| #500 HUD | the activity strip's selectors | one e2e: ASKS sums and jumps, LINK shows reconnecting |
+| #501 rail | `tabFor` (:378) and its 82 uses (`aria-current`); :151, :202, :481, :640, :681, :1059, :1175, :1293, :1345, :1854; :596 (tab-strip wheel) is deleted | one e2e: Backlog and All done from the rail |
+| #502 Board | :1716, :1806 (positions at the new widths), :1778 (preview rows), :1910, :2236, :2555, :2584 | e2e: to tidy, Alt+Down in Next, More on the note, a note reference |
+| #503 Project | the Project view's head selectors (`.ip-view-name`, :300, :410) | e2e: the phase index opens a section |
+| #504 Backlog, All done | the Backlog view's and All done's selectors and their "‹ Board" steps | e2e: phase TabStrip and label Chip narrow the list |
+| #505 Details, viewer, bar | :1433, :2245, :2273 (Details' look), :1526, :1573 (GoTo's look); GoTo's behaviour tests move to the bar | e2e: the bar opens a view, Details' action strip, Details at 400 |
+| #506 docs | none | the final Parvati pass over every surface at 1600 and 400 |
+
+Parallel steps (§13's waves) both touch `ui.spec.ts`. Each adds its tests in its own `test.describe` block near the end
+of the file and rewrites only the tests in its row, so a merge conflict stays inside one block.
+
+## 13. What supersedes what, and the build order
+
+*Status: written under Aiden's standing approval (2026-10-18).*
+
+### What the port supersedes (D5)
+
+As the strategy recommends, recorded here and written as a ruling by #506 in `docs/superpowers/rulings/`:
+
+- **Board spec section 2.8 Look** (`docs/superpowers/specs/2026-10-12-board-and-asks-design.md`): "InThink's look is not
+  adopted" is reversed. Draft C's artboards stop being the reference for spacing and type; this spec and the mock are.
+  The rest of 2.8 (who and when first, the task box as the Board's one skeleton, sessions wearing no character or hue)
+  stands, restated in §7. The Next column's "Backlog · n ▸" and the header's "Project view ›" give way to §6 and §7.
+- **Quiet restyle sections 1 to 3** (`docs/superpowers/specs/2026-10-05-quiet-restyle-design.md`): its tokens, both
+  themes, its fonts and type, its chrome (tabs, hairline, activity strip) and its card styling are replaced by §2 to §7.
+  Its behaviour rules that are not about the look stand.
+- **The parked-steps spec's Board preview and full view** (`2026-10-17-parked-steps-and-loose-tasks-design.md`) keep
+  their rules; their look, the phase select and the full view's "‹ Board" give way to §7 and §9.
+- #506 also adds a pointer at the head of each of those sections to this spec, updates the guide's screenshots and
+  text, and checks that no Quiet token name is left (§2.10).
+
+### Build order
+
+The strategy's plan, with this spec's sections:
+
+| Step | Builds | Spec | Needs |
+|---|---|---|---|
+| #497 | the sheet split | §3 | this spec |
+| #498 | Foundations | §2 | #497 |
+| #499 | shared parts and the lab | §4 | #498 |
+| #500 | HUD bar and footer | §5 | #499 |
+| #501 | module rail | §6 | #500 |
+| #502 | Board | §7 | #499; #501 for the views' new links |
+| #503 | Project view | §8 | #499 |
+| #504 | Backlog view and All done | §9 | #499; #501, which makes them views |
+| #505 | Details, viewer, command bar | §10 | #499 |
+| #506 | docs, the ruling, guide screenshots, the final pass | §13 | #500 to #505 |
+
+#497 to #499 run one after another. Then in waves of two, each in its own worktree: #500 with #503, then #501 with
+#505, then #502 with #504 (both need the rail's views), then #506. The step that lands last among #500 to #505 deletes
+the Quiet aliases (§2.10).
+
+**Done for the phase:** every surface in v3 on main; no Quiet token value or name left; the fonts bundled and served
+offline; reduced motion keeps every surface usable; every surface works at 400 px; the guide shows the new window.
