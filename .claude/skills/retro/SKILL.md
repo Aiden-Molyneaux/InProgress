@@ -53,12 +53,14 @@ Read the inputs in this order, cheapest first. Stop when the cause is clear.
    The retro reads them through the inprogress-scribe agent: a read-only brief asking for
    `get_node` on each step in the window and, in place of its usual one-line reply, every log
    line that contains `workflow note [` or `workflow ruling [`, matched without case, verbatim,
-   and each step's entry count. A summary in place of the lines is a failed read: send it again.
-   The steps are the previous retro's step (input 6) and the ones
+   and how many entries `get_node` showed for each. A summary or the usual one-line reply in
+   place of the lines is a failed read: send it again. The brief names each step by id: the
+   previous retro's step (input 6; the first retro has none), and the ones
    `node C:/personal/InProgress/dist/cli/main.js digest inprogress --since <window start> --all`
-   names: those that closed, those its Asks lines name, and those its sessions' titles carry,
-   which not every title does. `search` does not reach log text, and `get_node` shows a step's
-   latest 20 entries: when a step shows 20, say that its older notes went unread.
+   names: those that closed, and those its Asks lines name. A session title may carry a step id
+   too; a step it does not name is found only through those two. `search` does not reach log
+   text, and `get_node` shows a step's latest 20 entries: when a step shows 20, say that its
+   older notes went unread.
 2. **Pilot log:** the routing pilot, #291: its step log, and its result, `~/.inprogress/resources/inprogress/2026-10-10-routing-pilot-result.md`, which prices its seven sessions against the baseline (r105 on #289) and names each by session id. A later pilot keeps its window, session ids and targets on its own step, and that step's log is its pilot log. With no pilot in the window, none.
 3. **Cost report:** `node scripts/session-cost.mjs --by=session --sessions=<the window's session id prefixes>`, from the main checkout or any worktree (`--since=<date>` instead of `--sessions` for everything in the window). It reads every `~/.claude/projects/C--personal-InProgress*` transcript and prices the requests at API list rates, for comparing sessions with each other, not for billing. The baseline is r105 on #289.
 4. **Transcripts:** `~/.claude/projects/C--personal-InProgress*/<session id>.jsonl`, one folder for the main checkout and one per worktree (`C--personal-InProgress--claude-worktrees-<topic>`), with each session's subagent transcripts under `<session id>/subagents/` (method step 3).
