@@ -1,10 +1,10 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { migrate, openDb, schemaVersion } from '../../src/server/db/connection';
-import { MIGRATIONS } from '../../src/server/db/schema';
+import { MIGRATIONS, REBUILDS } from '../../src/server/db/schema';
 import { write } from '../../src/server/db/tx';
 import { NODE_LABELS, type EventRow } from '../../src/core/types';
 import { maxEventId } from '../../src/server/repo/events';
@@ -641,5 +641,64 @@ describe('database', () => {
     });
     expect(result).toBe(42);
     expect(seen.map((e) => e.type)).toEqual(['first', 'second']);
+  });
+});
+
+describe('pre-migration copy', () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true });
+  });
+  function tempDir(): string {
+    const dir = mkdtempSync(join(tmpdir(), 'ip-premig-'));
+    dirs.push(dir);
+    return dir;
+  }
+  /** A database one migration behind this build, the way migration13.test.ts builds its schema-12 one. */
+  function behind(file: string, version = MIGRATIONS.length - 1): void {
+    const db = new Database(file);
+    db.pragma('foreign_keys = OFF');
+    db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+    for (const sql of MIGRATIONS.slice(0, version)) db.exec(sql);
+    db.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(String(version));
+    db.close();
+  }
+
+  it('copies the database before an additive migration, once, named for the first pending one', () => {
+    // Migration 11 only adds; the rebuild (13) comes later in the same pass and gets no copy of its own.
+    expect(REBUILDS.has(10)).toBe(false);
+    const dir = tempDir();
+    const file = join(dir, 'inprogress.db');
+    behind(file, 10);
+    openDb(file).close();
+    const copies = readdirSync(join(dir, 'backups'));
+    expect(copies).toHaveLength(1);
+    expect(copies[0]).toMatch(/^inprogress-pre-v11-\d{8}-\d{6}\.db$/);
+    const copy = new Database(join(dir, 'backups', copies[0]), { readonly: true });
+    expect(schemaVersion(copy)).toBe(10);
+    copy.close();
+  });
+
+  it('makes no copy for a fresh database, an up-to-date one, or :memory:', () => {
+    const dir = tempDir();
+    const file = join(dir, 'inprogress.db');
+    openDb(file).close();
+    openDb(file).close();
+    expect(existsSync(join(dir, 'backups'))).toBe(false);
+  });
+
+  it('prunes old pre-migration copies after a new one lands, and leaves other names', () => {
+    const dir = tempDir();
+    const file = join(dir, 'inprogress.db');
+    behind(file);
+    mkdirSync(join(dir, 'backups'));
+    const old = ['20250101', '20250102', '20250103', '20250104'].map((d) => `inprogress-pre-v9-${d}-000000.db`);
+    for (const f of [...old, 'pre-stage1-rollout-20261013.db']) writeFileSync(join(dir, 'backups', f), 'x');
+    openDb(file).close();
+    const left = readdirSync(join(dir, 'backups'));
+    // The new copy plus the two newest old ones: the newest 3 overall. The recent copy is under 30 days old.
+    expect(left.filter((f) => f.startsWith('inprogress-pre-v9-')).sort()).toEqual(old.slice(2));
+    expect(left.filter((f) => f.startsWith(`inprogress-pre-v${MIGRATIONS.length}-`))).toHaveLength(1);
+    expect(left).toContain('pre-stage1-rollout-20261013.db');
   });
 });
