@@ -1,6 +1,6 @@
 # Backup strategy for InProgress's real data (#514)
 
-Status: recommendation, awaiting Aiden's ruling. Research only; nothing here is built. The build becomes its own change step, run through Sigmund.
+Status: accepted. Aiden ruled on 2026-10-19 ("I like your plan"): the recommendation stands as written, so the off-machine copy is a private repo on his personal GitHub, in plaintext. Nothing here is built yet; the build is its own change step, run through Sigmund.
 
 ## Recommendation
 
