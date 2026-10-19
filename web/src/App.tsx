@@ -193,7 +193,9 @@ export function App() {
   const statusOpener = useRef<HTMLElement | null>(null);
   const say = (text: string, tone: 'neutral' | 'alarm' = 'neutral') => {
     const active = document.activeElement;
-    if (active instanceof HTMLElement && active !== document.body && !active.closest('.p-toasts')) statusOpener.current = active;
+    // Focus inside the toasts keeps the opener it had; focus nowhere forgets an older one, so × never jumps to it.
+    if (!(active instanceof HTMLElement) || active === document.body) statusOpener.current = null;
+    else if (!active.closest('.p-toasts')) statusOpener.current = active;
     setStatus({ id: ++statusId.current, text, tone });
   };
   /** The surfaces report only failures: those stay up, in alarm, until dismissed. */
