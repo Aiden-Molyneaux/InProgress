@@ -1,4 +1,4 @@
-import type { GoToQuery, StepHit } from '../../../src/core/goto';
+import { parseGoTo, type GoToQuery, type StepHit } from '../../../src/core/goto';
 
 /** A Go to option's name: the step as `#77 Title`, then its project, which the row shows muted. */
 export function hitLabel(h: StepHit): string {
@@ -30,4 +30,46 @@ export function pickHit(hits: readonly StepHit[], highlighted: number | undefine
 /** Ctrl+K (Cmd+K on a Mac), with nothing else held: the Go to field's chord. */
 export function isGoToChord(e: { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }): boolean {
   return (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === 'k' || e.key === 'K');
+}
+
+export type GoView = 'board' | 'project' | 'backlog' | 'done';
+
+/** A place the command bar lists without a search: one of the window's views, or a project. */
+export type GoTarget = { kind: 'view'; view: GoView; label: string } | { kind: 'project'; slug: string; label: string; name: string };
+
+const VIEWS: { view: GoView; label: string }[] = [
+  { view: 'board', label: 'Board' },
+  { view: 'project', label: 'Project' },
+  { view: 'backlog', label: 'Backlog' },
+  { view: 'done', label: 'All done' },
+];
+
+/** What the bar lists with nothing typed: the views in order, then "Open <name>" for each project, `current` left out. */
+export function goTargets(projects: { slug: string; name: string }[], current: string | null): GoTarget[] {
+  return [
+    ...VIEWS.map((v): GoTarget => ({ kind: 'view', ...v })),
+    ...projects.filter((p) => p.slug !== current).map((p): GoTarget => ({ kind: 'project', slug: p.slug, label: `Open ${p.name}`, name: p.name })),
+  ];
+}
+
+/**
+ * The targets the typed text narrows to: all of them for nothing typed, none for an id. Otherwise each typed word (a
+ * leading "open" dropped) must start a word of the view's label or the project's name, in any case.
+ */
+export function matchTargets(text: string, targets: GoTarget[]): GoTarget[] {
+  const query = parseGoTo(text);
+  if (query.kind === 'empty') return targets;
+  if (query.kind === 'id') return [];
+  const typed = query.words.map((w) => w.toLowerCase());
+  if (typed[0] === 'open') typed.shift();
+  if (typed.length === 0) return targets;
+  return targets.filter((t) => {
+    const words = (t.kind === 'view' ? t.label : t.name).toLowerCase().split(/\s+/);
+    return typed.every((w) => words.some((x) => x.startsWith(w)));
+  });
+}
+
+/** A row's identity, which the highlight follows as the list changes. */
+export function targetKey(t: GoTarget): string {
+  return t.kind === 'view' ? `view:${t.view}` : `project:${t.slug}`;
 }

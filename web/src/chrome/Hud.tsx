@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { deriveBoard } from '../../../src/core/board';
-import type { StepHit } from '../../../src/core/goto';
 import type { ProjectSnapshot, ProjectSummary } from '../../../src/core/types';
 import { countRose } from '../parts/countLogic';
 import { Readout } from '../parts/Readout';
 import { Ruler } from '../parts/Ruler';
 import { Tape } from '../parts/Tape';
-import { GoTo, type GoToHandle } from './GoTo';
+import { GoTo, type GoPick, type GoToHandle } from './GoTo';
 import { boardFigures, clockText, hudFigures } from './hudLogic';
 import { useMinute } from './useMinute';
 
@@ -23,7 +22,7 @@ export interface HudProps {
   /** The app's clock (ms), for the Board's figures. */
   now: number;
   goTo: RefObject<GoToHandle>;
-  onGoTo: (hit: StepHit) => void;
+  onGoTo: (pick: GoPick) => void;
   onBoard: () => void;
   onAsks: () => void;
 }
@@ -93,7 +92,7 @@ export function Hud({ loaded, connection, projects, tabs, current, snapshot, now
                 {time}
               </time>
             </span>
-            <GoTo ref={goTo} onGo={onGoTo} current={current} />
+            <GoTo ref={goTo} onGo={onGoTo} current={current} projects={tabs.map((t) => ({ slug: t.slug, name: t.name }))} />
           </>
         )}
       </div>

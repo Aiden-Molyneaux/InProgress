@@ -1,0 +1,27 @@
+/* The command bar (GoTo.tsx): a modal dialog under the top edge, with its Frame, a field, the Go to and Steps rows, a note and a key-hint foot. */
+@layer components {
+@keyframes ip-cmdbar-in { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0); } }
+.ip-cmdbar { position: fixed; top: 15vh; margin: 0 auto; width: 640px; max-width: calc(100vw - 2 * var(--sp-4)); padding: 0; border: 1px solid var(--line-strong); background: var(--canvas-1); color: var(--text); overflow: visible; }
+.ip-cmdbar[open] { animation: ip-cmdbar-in var(--dur-3) var(--ease-out); }
+.ip-cmdbar::backdrop { background: var(--scrim); }
+@media (max-width: 719px) {
+  .ip-cmdbar { top: 0; width: 100%; max-width: none; border-left: 0; border-right: 0; }
+}
+.ip-cmdbar-field { display: grid; gap: var(--sp-2); padding: var(--sp-4); }
+.ip-cmdbar-input { display: block; width: 100%; padding: var(--sp-2) var(--sp-3); font-family: var(--font-body); font-size: var(--t-title); line-height: 1.5; color: var(--text); background: var(--canvas-0); border: 1px solid var(--line); }
+.ip-cmdbar-input:focus { outline: 2px solid var(--volt); outline-offset: 1px; }
+.ip-cmdbar-input::placeholder { color: var(--text-dim); }
+.ip-cmdbar-list { max-height: 50vh; overflow-y: auto; padding: 0 var(--sp-2) var(--sp-2); }
+.ip-cmdbar-group { display: grid; padding-bottom: var(--sp-2); }
+.ip-cmdbar-group > .p-eyebrow { padding: var(--sp-2) var(--sp-3); }
+.ip-cmdbar-row { display: flex; align-items: center; gap: var(--sp-3); min-height: 32px; padding: var(--sp-2) var(--sp-3); cursor: pointer; font-family: var(--font-body); font-size: var(--t-body); line-height: 1.4; color: var(--text); }
+.ip-cmdbar-id { flex: none; font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-dim); }
+.ip-cmdbar-name { font-family: var(--font-body); line-height: 1.4; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.ip-cmdbar-row.finished .ip-cmdbar-name { color: var(--text-muted); }
+.ip-cmdbar-tag { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-dim); }
+.ip-cmdbar-row[aria-selected='true'] { background: var(--volt); color: var(--volt-ink); }
+.ip-cmdbar-row[aria-selected='true'] :is(.ip-cmdbar-id, .ip-cmdbar-name, .ip-cmdbar-tag) { color: inherit; }
+.ip-cmdbar-note:not(:empty) { padding: var(--sp-2) var(--sp-4); font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-dim); }
+.ip-cmdbar-note[data-tone='alarm'] { font-family: var(--font-body); font-size: var(--t-body); color: var(--alarm); }
+.ip-cmdbar-foot { display: flex; flex-wrap: wrap; gap: var(--sp-4); padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--line); }
+}
