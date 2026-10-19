@@ -13,7 +13,7 @@ import { TabStrip } from '../parts/TabStrip';
 import type { ViewProps } from '../views/props';
 import { FINISHED_KEY, FinishedPhases, PhaseIndex, RailKey, type FinishedEntry, type PhaseEntry } from './PhaseIndex';
 import { loadFolds, saveFolds } from './projectFolds';
-import { headMeta, projectSections } from './projectOutline';
+import { headMeta, projectSections, renderedRows } from './projectOutline';
 import { Section } from './Section';
 
 /** A page this wide, in px, lays out with the phase index at the right. */
@@ -31,11 +31,13 @@ export function ProjectView({ snapshot, now, onOpenNode, onOpenResource, onStatu
   const [folds, setFolds] = useState(() => loadFolds(projectId));
   const board = deriveBoard(snapshot, now);
   const sections = projectSections(snapshot, board);
-  const setFold = (key: string, value: boolean) => {
-    const next = { ...folds, [key]: value };
-    setFolds(next);
-    saveFolds(projectId, next);
-  };
+  // `update` gets the fold's current value (undefined before a choice), so a toggle reads the latest state, not the render's.
+  const setFold = (key: string, update: (was: boolean | undefined) => boolean) =>
+    setFolds((prev) => {
+      const next = { ...prev, [key]: update(prev[key]) };
+      saveFolds(projectId, next);
+      return next;
+    });
   const key = (s: { group: { id: number } | null }) => `section:${s.group?.id ?? 0}`;
   const doneGroups = sections.filter((s) => s.allDone);
   const finishedOpen = folds[FINISHED_KEY] ?? false;
@@ -46,6 +48,9 @@ export function ProjectView({ snapshot, now, onOpenNode, onOpenResource, onStatu
 
   // The section in view, and the jump from the index: open it if folded, scroll it to the top, put focus on its head.
   const elements = useRef(new Map<string, HTMLElement>());
+  // The shown sections' keys in screen order, for the measure.
+  const order = useRef<string[]>([]);
+  order.current = shown.map(key);
   const [inView, setInView] = useState<string | null>(null);
   const pending = useRef<string | null>(null);
   // A jump marks its section as the one in view, even when the page is too short to scroll it to the top, until the reader scrolls or types.
@@ -59,11 +64,12 @@ export function ProjectView({ snapshot, now, onOpenNode, onOpenResource, onStatu
     }
     const top = page.getBoundingClientRect().top;
     let current: string | null = null;
-    for (const [k, element] of elements.current) {
-      if (current === null || element.getBoundingClientRect().top <= top + IN_VIEW_SLACK) current = k;
+    for (const k of order.current) {
+      const element = elements.current.get(k);
+      if (element && (current === null || element.getBoundingClientRect().top <= top + IN_VIEW_SLACK)) current = k;
     }
     // Scrolled to the very end, the last section is the one in view though its top never reaches the page's top.
-    if (page.scrollHeight > page.clientHeight && page.scrollTop + page.clientHeight >= page.scrollHeight - 1) current = [...elements.current.keys()].pop() ?? current;
+    if (page.scrollHeight > page.clientHeight && page.scrollTop + page.clientHeight >= page.scrollHeight - 1) current = order.current.filter((k) => elements.current.has(k)).pop() ?? current;
     setInView((was) => (was === current ? was : current));
   }, [root]);
   const release = () => {
@@ -84,7 +90,7 @@ export function ProjectView({ snapshot, now, onOpenNode, onOpenResource, onStatu
       return;
     }
     pending.current = k;
-    setFold(k, true);
+    setFold(k, () => true);
   };
   useLayoutEffect(() => {
     if (pending.current === null) return;
@@ -92,24 +98,16 @@ export function ProjectView({ snapshot, now, onOpenNode, onOpenResource, onStatu
     pending.current = null;
     scrollToSection(k);
   });
-  // The elements map is in render order of the sections; measure after each render, and when the page is resized.
+  // Measure after each render, and when the page is resized.
   useLayoutEffect(() => {
     measureInView();
   }, [measureInView, width, folds, snapshot]);
 
   // One list cursor across every open section's rows, in screen order.
-  const cursorKeys: string[] = [];
-  for (const s of shown) {
-    if (!isOpen(s)) continue;
-    for (const line of s.lines) {
-      if (line.kind === 'step') cursorKeys.push(`s${line.node.id}`);
-      else {
-        cursorKeys.push(`d${line.parentId}`);
-        if (folds[`done:${line.parentId}`] ?? false) for (const n of line.nodes) cursorKeys.push(`o${n.id}`);
-      }
-    }
-  }
-  const toggleDone = (parentId: number) => setFold(`done:${parentId}`, !(folds[`done:${parentId}`] ?? false));
+  const doneOpen = (parentId: number) => folds[`done:${parentId}`] ?? false;
+  const cursorKeys = shown.flatMap((s) => (isOpen(s) ? renderedRows(s.lines, doneOpen).map((r) => r.key) : []));
+  const cursorRow = new Map(cursorKeys.map((k, i) => [k, i]));
+  const toggleDone = (parentId: number) => setFold(`done:${parentId}`, (was) => !was);
   const { itemProps } = useListCursor(
     [cursorKeys.length],
     ({ row }) => {
@@ -121,20 +119,20 @@ export function ProjectView({ snapshot, now, onOpenNode, onOpenResource, onStatu
     [cursorKeys],
   );
   const cursorFor = (k: string) => {
-    const row = cursorKeys.indexOf(k);
-    return row < 0 ? undefined : itemProps(0, row);
+    const row = cursorRow.get(k);
+    return row === undefined ? undefined : itemProps(0, row);
   };
 
-  const outline = { snapshot, board, now, wide, doneOpen: (parentId: number) => folds[`done:${parentId}`] ?? false, onToggleDone: toggleDone, cursorFor, onOpenNode, onOpenResource };
+  const outline = { snapshot, board, now, wide, doneOpen, onToggleDone: toggleDone, cursorFor, onOpenNode, onOpenResource };
 
   const phases: PhaseEntry[] = shown.filter((s) => !s.allDone).map((s) => ({ key: key(s), title: s.title, done: s.done, now: s.counts.now, total: s.total }));
   const finished: FinishedEntry[] = doneGroups.map((s) => ({ key: key(s), id: s.group!.id, title: s.title }));
   const finishedBlock = (
-    <FinishedPhases finished={finished} open={finishedOpen} current={inView} onToggle={() => setFold(FINISHED_KEY, !finishedOpen)} onJump={jumpTo} />
+    <FinishedPhases finished={finished} open={finishedOpen} current={inView} onToggle={() => setFold(FINISHED_KEY, (was) => !was)} onJump={jumpTo} />
   );
 
   const slab = (
-    <CommsSlab age={note ? ageShort(note.updatedAt, now).toUpperCase() : null}>
+    <CommsSlab age={note ? ageShort(note.updatedAt, now) : null}>
       {note ? <Markdown text={note.content} /> : <p className="ip-quiet">No state note yet</p>}
     </CommsSlab>
   );
@@ -150,7 +148,7 @@ export function ProjectView({ snapshot, now, onOpenNode, onOpenResource, onStatu
             key={k}
             section={s}
             open={open}
-            onToggle={() => setFold(k, !open)}
+            onToggle={() => setFold(k, (was) => !(was ?? s.startsOpen))}
             elementRef={(element) => {
               if (element) elements.current.set(k, element);
               else elements.current.delete(k);
@@ -164,7 +162,7 @@ export function ProjectView({ snapshot, now, onOpenNode, onOpenResource, onStatu
   );
 
   return (
-    <div ref={root} className="ip-project" data-wide={wide || undefined} onScroll={measureInView} onWheel={release} onTouchMove={release} onKeyDown={release}>
+    <div ref={root} className="ip-project" data-wide={wide || undefined} onScroll={measureInView} onWheel={release} onTouchMove={release} onPointerDown={release} onKeyDown={release}>
       <div className="ip-page">
         <PageHead code={projectCode(snapshot.project.name)} name={snapshot.project.name} meta={headMeta(board, sections)} decodeKey={projectId} />
         {slab}
@@ -174,7 +172,7 @@ export function ProjectView({ snapshot, now, onOpenNode, onOpenResource, onStatu
             <TabStrip
               variant="segmented"
               label="Phases"
-              items={phases.map((p) => ({ id: p.key, label: p.title.length > 24 ? `${p.title.slice(0, 23)}…` : p.title }))}
+              items={phases.map((p) => ({ id: p.key, label: [...p.title].length > 24 ? `${[...p.title].slice(0, 23).join('')}…` : p.title }))}
               value={inView ?? ''}
               onChange={jumpTo}
             />
@@ -188,7 +186,7 @@ export function ProjectView({ snapshot, now, onOpenNode, onOpenResource, onStatu
           </div>
           {wide && (
             <div className="ip-pside">
-              <PhaseIndex phases={phases} finished={finished} current={inView} finishedOpen={finishedOpen} onToggleFinished={() => setFold(FINISHED_KEY, !finishedOpen)} onJump={jumpTo} />
+              <PhaseIndex phases={phases} finished={finished} current={inView} finishedOpen={finishedOpen} onToggleFinished={() => setFold(FINISHED_KEY, (was) => !was)} onJump={jumpTo} />
             </div>
           )}
         </div>

@@ -24,8 +24,8 @@ export function DocsMenu({ docs, label, onOpenResource }: { docs: ResourceMeta[]
     }, 0);
   });
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    // Shift+Tab off the first item lands on the opener, and the menu closes behind it.
-    if (e.key === 'Tab' && e.shiftKey && document.activeElement === e.currentTarget.querySelector('[role="menuitem"]')) {
+    // Menu items are out of the Tab order, so Shift+Tab from any of them would land on the opener with the menu still open.
+    if (e.key === 'Tab' && e.shiftKey) {
       e.preventDefault();
       shut(true);
     }

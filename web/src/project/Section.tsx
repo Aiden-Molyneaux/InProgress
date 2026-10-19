@@ -11,7 +11,7 @@ import { Readout } from '../parts/Readout';
 import type { ViewProps } from '../views/props';
 import { DocsMenu } from './DocsMenu';
 import { RowMark } from './PositionMark';
-import type { OutlineLine, Section as SectionData } from './projectOutline';
+import { renderedRows, type OutlineLine, type Section as SectionData } from './projectOutline';
 
 /** "22 done · 2 now · 2 next · 2 backlog", with the zero counts left out. */
 export function legendText(c: SectionData['counts']): string {
@@ -72,7 +72,7 @@ function StepRow({ node, row, depth, cursor, snapshot, now, wide, onOpenNode, on
       <span className="ip-orail"><RowMark node={node} row={row} /></span>
       <div className="ip-ostep">
         <span className="ip-id">{`#${node.id}`}</span>{' '}
-        <button type="button" className={`ip-row-title${row ? '' : ' grp'}`}>{node.title}</button>
+        <button type="button" className={`ip-row-title${row || node.status === 'parked' ? '' : ' grp'}`}>{node.title}</button>
       </div>
       {wide ? (
         <>
@@ -93,26 +93,23 @@ function StepRow({ node, row, depth, cursor, snapshot, now, wide, onOpenNode, on
 }
 
 function Lines({ lines, ...p }: OutlineProps & { lines: OutlineLine[] }): ReactNode {
-  const rowFor = (node: TreeNode, depth: number, key: string) => (
-    <StepRow key={key} node={node} row={p.board.byId.get(node.id) ?? null} depth={depth} cursor={p.cursorFor(key)} snapshot={p.snapshot} now={p.now} wide={p.wide} onOpenNode={p.onOpenNode} onOpenResource={p.onOpenResource} />
-  );
-  return lines.flatMap((line) => {
-    if (line.kind === 'step') return rowFor(line.node, line.depth, `s${line.node.id}`);
+  return renderedRows(lines, p.doneOpen).map((r) => {
+    if (r.kind !== 'fold') {
+      return <StepRow key={r.key} node={r.node} row={p.board.byId.get(r.node.id) ?? null} depth={r.depth} cursor={p.cursorFor(r.key)} snapshot={p.snapshot} now={p.now} wide={p.wide} onOpenNode={p.onOpenNode} onOpenResource={p.onOpenResource} />;
+    }
+    const line = r.fold!;
     const open = p.doneOpen(line.parentId);
-    // A parent's done children, once its fold is open, follow the fold line.
-    const opened = open ? line.nodes.map((n) => rowFor(n, line.depth, `o${n.id}`)) : [];
     const latest = `✓ ${line.count} done · latest #${line.latest.id} ${line.latest.title}${line.latest.completedAt ? ` · ${ageShort(line.latest.completedAt, p.now).toUpperCase()}` : ''}`;
-    return [
-      <li key={`d${line.parentId}`} className="ip-orow ip-odone-row" style={indent(line.depth, p.wide)} {...p.cursorFor(`d${line.parentId}`)}>
+    return (
+      <li key={r.key} className="ip-orow ip-odone-row" style={indent(line.depth, p.wide)} {...p.cursorFor(r.key)}>
         <span className="ip-orail" />
         <div className="ip-ostep">
           <button type="button" className="ip-done-fold-btn" data-act aria-expanded={open} onClick={() => p.onToggleDone(line.parentId)}>
             {latest}
           </button>
         </div>
-      </li>,
-      ...opened,
-    ];
+      </li>
+    );
   });
 }
 

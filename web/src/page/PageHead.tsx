@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useLayoutEffect, useState } from 'react';
 import { scrambled } from './scrambled';
 
 export interface PageHeadProps {
@@ -18,13 +18,15 @@ const DECODE_MS = 520;
 /** The page head (spec section 7): the code block, the project's name, and the meta line to the right. */
 export function PageHead({ code, name, meta, decodeKey }: PageHeadProps) {
   const [shown, setShown] = useState(name);
-  useEffect(() => {
+  // A layout effect, so the name never paints clean before the decode scrambles it.
+  useLayoutEffect(() => {
     setShown(name);
     if (lastDecoded === decodeKey) return;
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       lastDecoded = decodeKey;
       return;
     }
+    setShown(scrambled(name, 0));
     const letters = [...name].length;
     const started = performance.now();
     let frame = 0;

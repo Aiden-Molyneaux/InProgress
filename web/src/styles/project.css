@@ -3,13 +3,13 @@
 /* Kept for the Board's header until the Board moves to the page head. */
 .ip-view-name { margin: 0 0 8px; font-size: var(--fs-l); font-weight: var(--w-heavy); line-height: 20px; }
 
-.ip-project { flex: 1; min-width: 0; overflow-x: hidden; overflow-y: auto; }
+.ip-project { container-type: size; flex: 1; min-width: 0; overflow-x: hidden; overflow-y: auto; }
 .ip-page { display: grid; gap: var(--sp-4); padding: var(--sp-3); }
 .ip-project[data-wide] .ip-page { gap: var(--sp-6); padding: var(--sp-6); }
 .ip-pbody { display: block; min-width: 0; }
 .ip-project[data-wide] .ip-pbody { display: grid; grid-template-columns: minmax(0, 1040px) 240px; gap: var(--sp-6); align-items: start; }
 .ip-pmain { display: grid; gap: var(--sp-4); min-width: 0; }
-.ip-pside { position: sticky; top: 0; min-width: 0; }
+.ip-pside { position: sticky; top: 0; min-width: 0; max-height: 100cqh; overflow-y: auto; }
 
 /* The jump row under the slab on a narrow page. */
 .ip-jump { display: grid; gap: var(--sp-2); min-width: 0; }
@@ -53,7 +53,7 @@
 .ip-orow { position: relative; display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: var(--sp-2); align-items: start; min-height: 28px; padding: 0 var(--sp-4); }
 .ip-project[data-wide] .ip-orow { grid-template-columns: 28px minmax(0, 1fr) 96px minmax(0, 184px) 140px 48px; align-items: center; }
 li.ip-orow:hover { background: var(--canvas-3); }
-.ip-orow:focus-visible { outline: none; background: var(--canvas-3); box-shadow: inset 2px 0 0 var(--volt); }
+.ip-orow:focus-visible { outline: 2px solid var(--volt); outline-offset: -2px; background: var(--canvas-3); }
 .ip-orail { display: flex; align-items: center; justify-content: center; min-height: 28px; }
 .ip-orow .ip-orail { grid-row: span 2; align-self: start; }
 .ip-project[data-wide] .ip-orow .ip-orail { grid-row: auto; align-self: center; }

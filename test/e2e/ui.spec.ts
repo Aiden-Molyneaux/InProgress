@@ -2919,6 +2919,14 @@ test.describe('Project view', () => {
     await page.locator('.ip-page-title').click();
     await expect(menu).toHaveCount(0);
     await expect(opener).toHaveAttribute('aria-expanded', 'false');
+    // Shift+Tab from any item, not only the first, closes the menu and lands on the opener.
+    await opener.click();
+    await expect(menu).toBeVisible();
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('Shift+Tab');
+    await expect(menu).toHaveCount(0);
+    await expect(opener).toBeFocused();
+    await expect(opener).toHaveAttribute('aria-expanded', 'false');
     await opener.click();
     await menu.getByRole('menuitem', { name: /Signing test suite/ }).click();
     await expect(page.getByRole('dialog')).toContainText('Signing tests');

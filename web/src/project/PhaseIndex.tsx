@@ -33,6 +33,7 @@ export function FinishedPhases({ finished, open, current, onToggle, onJump }: { 
           {finished.map((f) => (
             <li key={f.key}>
               <button type="button" className="ip-pi-row ip-pi-finished" aria-current={current === f.key ? 'location' : undefined} onClick={() => onJump(f.key)}>
+                <span className="ip-pi-cur" aria-hidden="true">{current === f.key ? '›' : ''}</span>
                 <span className="ip-pi-title"><span className="ip-id">{`#${f.id}`}</span> {f.title}</span>
               </button>
             </li>
