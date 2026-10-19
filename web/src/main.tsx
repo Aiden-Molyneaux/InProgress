@@ -16,8 +16,17 @@ import './styles/backlog.css';
 import './styles/marker.css';
 import { App } from './App';
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+// The bundled faces load before the first render, so nothing is measured in a fallback face and left wrong when the
+// face swaps in (the tab strip scrolls its current tab into view by measuring it). A face that fails or stalls never
+// holds the window back for more than a second.
+const faces = Promise.all(['1em Archivo', '1em "Martian Mono"'].map((font) => document.fonts.load(font)));
+const stall = new Promise((resolve) => setTimeout(resolve, 1000));
+void Promise.race([faces, stall])
+  .catch(() => undefined)
+  .then(() =>
+    createRoot(document.getElementById('root')!).render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    ),
+  );
