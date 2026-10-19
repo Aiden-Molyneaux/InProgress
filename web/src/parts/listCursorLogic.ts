@@ -4,6 +4,11 @@ export interface Cursor {
   row: number;
 }
 
+/** Where the cursor was last, and the key of the item it was on when the list gave keys. */
+export interface StoredCursor extends Cursor {
+  key?: string;
+}
+
 /**
  * Where the cursor can rest given each column's item count. Null when every column is empty; null `at` gives the first
  * item of the first non-empty column; an empty column (or one past the end) moves to the nearest non-empty one, looking
@@ -55,4 +60,19 @@ export function cursorStep(key: string, at: Cursor, middles: readonly (readonly 
     default:
       return null;
   }
+}
+
+/**
+ * Where the cursor is now. With `keys` (one array per column) and a remembered key still in them, the cursor is on that
+ * item wherever it has moved to, so a row added above it does not carry the cursor to another item; otherwise it is
+ * `clampCursor` of the remembered position.
+ */
+export function resolveCursor(last: StoredCursor | null, counts: readonly number[], keys?: readonly (readonly string[])[]): Cursor | null {
+  if (keys && last?.key !== undefined) {
+    for (let col = 0; col < keys.length; col++) {
+      const row = keys[col].indexOf(last.key);
+      if (row >= 0 && row < (counts[col] ?? 0)) return { col, row };
+    }
+  }
+  return clampCursor(last, counts);
 }

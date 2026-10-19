@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { deriveBoard } from '../../src/core/board';
 import type { ProjectSnapshot, TreeNode } from '../../src/core/types';
-import { projectSections } from '../../web/src/project/projectOutline';
+import { headMeta, projectSections } from '../../web/src/project/projectOutline';
 
 const NOW = Date.parse('2026-10-13T12:00:00Z');
 let n = 0;
@@ -98,5 +98,19 @@ describe('projectSections and parked steps', () => {
   it('a done step holding a parked one is not folded away', () => {
     const s = snap([root, node(2, 1, 'Alpha', 'active'), node(3, 2, 'phase done', 'done'), node(4, 3, 'Shelf', 'parked'), node(5, 2, 'open')]);
     expect(sections(s)[0]!.lines.some((l) => l.kind === 'step' && l.node.id === 3)).toBe(true);
+  });
+});
+
+describe('headMeta', () => {
+  it('counts the phases, the steps now and next, and the done steps', () => {
+    const s = snap([root, node(2, 1, 'Alpha', 'active'), node(3, 2, 'a1', 'done'), node(4, 1, 'Beta', 'active'), node(5, 4, 'b1', 'active', { driverSessionId: null }), node(6, 1, 'Loose')]);
+    const board = deriveBoard(s, NOW);
+    const meta = headMeta(board, projectSections(s, board));
+    expect(meta.map((m) => m.label)).toEqual(['PHASES', 'NOW', 'NEXT', 'DONE']);
+    // Alpha (all done, so finished) and Beta are phases; "Top level" is not.
+    expect(meta[0]!.value).toBe(2);
+    expect(meta[3]!.value).toBe(board.done.length);
+    expect(meta[1]!.value).toBe(board.now.length);
+    expect(meta[2]!.value).toBe(board.next.length);
   });
 });

@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent } from 'react';
-import { clampCursor, cursorStep, type Cursor } from './listCursorLogic';
+import { cursorStep, resolveCursor, type Cursor, type StoredCursor } from './listCursorLogic';
 
 /** What a list or grid item spreads onto its element. */
 export interface CursorItemProps {
@@ -20,11 +20,18 @@ const FOCUSABLE = 'a[href], button, input, select, textarea, summary, iframe, [c
  *
  * One Tab stop (D4): only the cursor item is in the Tab order, and the controls inside every other item are taken out of
  * it (tabindex -1, marked data-cursor-off) after each render. Tab goes into the focused item's own controls, then out of the list.
+ *
+ * `keys` (one array per column, an id for each item) makes the cursor follow its item: a live update that adds or removes
+ * rows around it does not carry it to another item. Without keys it holds its position.
  */
-export function useListCursor(counts: readonly number[], onOpen: (at: Cursor) => void): { itemProps: (col: number, row: number) => CursorItemProps } {
-  const [last, setLast] = useState<Cursor | null>(null);
+export function useListCursor(
+  counts: readonly number[],
+  onOpen: (at: Cursor) => void,
+  keys?: readonly (readonly string[])[],
+): { itemProps: (col: number, row: number) => CursorItemProps } {
+  const [last, setLast] = useState<StoredCursor | null>(null);
   const items = useRef(new Map<string, HTMLElement>());
-  const at = clampCursor(last, counts);
+  const at = resolveCursor(last, counts, keys);
 
   // After every render: the controls inside a non-cursor item leave the Tab order, and come back when it is the cursor item.
   useLayoutEffect(() => {
@@ -56,7 +63,10 @@ export function useListCursor(counts: readonly number[], onOpen: (at: Cursor) =>
     },
     tabIndex: at && at.col === col && at.row === row ? 0 : -1,
     // Focus anywhere inside the item makes it the cursor item, so Shift+Tab back out of its controls lands on it.
-    onFocus: () => setLast((now) => (now && now.col === col && now.row === row ? now : { col, row })),
+    onFocus: () => {
+      const key = keys?.[col]?.[row];
+      setLast((now) => (now && now.col === col && now.row === row && now.key === key ? now : { col, row, key }));
+    },
     onKeyDown: (event) => {
       // Keys inside an item's own fields and buttons are theirs; Alt with an arrow is the Board's reorder.
       if (event.target !== event.currentTarget || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;

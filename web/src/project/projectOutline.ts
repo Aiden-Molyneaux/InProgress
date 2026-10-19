@@ -105,3 +105,13 @@ export function projectSections(snapshot: ProjectSnapshot, board: Board): Sectio
   }
   return [...sections, ...groups.filter((s) => s.allDone)];
 }
+
+/** The page head's figures: the phases (sections that are a group, finished ones too), and the steps now, next and done. */
+export function headMeta(board: Board, sections: Section[]): { label: string; value: number }[] {
+  return [
+    { label: 'PHASES', value: sections.filter((s) => s.group).length },
+    { label: 'NOW', value: board.now.length },
+    { label: 'NEXT', value: board.next.length },
+    { label: 'DONE', value: board.done.length },
+  ];
+}
