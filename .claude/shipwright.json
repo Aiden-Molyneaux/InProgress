@@ -2,7 +2,7 @@
   "shipwright": "C:/personal/shipwright",
   "fills": {
     "BRANCH_MODEL": "One worktree per session under `.claude/worktrees/`, one branch per change off `main`. A session spawned from a chip starts in one; otherwise create it with `git worktree add .claude/worktrees/<topic> -b <topic> main`. Work only there: the main checkout takes only merges, deploys and `claude:install`. A worktree without its own `node_modules` resolves packages from the main checkout's, which follows main's `package.json`: when the branch's dependencies differ, run `npm install` in the worktree. Uncommitted changes outside your worktree belong to another session: don't stage them, ask about them or mention them. Stage explicit paths only. The branch's label (ui, server, data, integration, ops, docs, fix, refactor, research) picks its gates in phase 4.",
-    "DESIGN_AUTHORITY": "the window's existing screens under `web/src` (there are no mockups: match the neighbouring components, `web/src/styles.css`, and the keyboard conventions in `web/src/useKeyboard.ts`)",
+    "DESIGN_AUTHORITY": "the window's existing screens under `web/src` (there are no mockups: match the neighbouring components, the sheets in `web/src/styles/`, and the keyboard conventions in `web/src/useKeyboard.ts`)",
     "DOCTOR_COMMAND": "`node C:/personal/InProgress/dist/cli/main.js doctor`",
     "EXCLUDED_DIRS": "`node_modules`, `dist`, `.build` and `.claude/worktrees`",
     "FORBIDDEN_COMMANDS": "`npm run deploy`, `npm run claude:install` or `npm run claude:uninstall`; never read or write `~/.inprogress` or the live InProgress server on 4317 (tests run against `.test-home` and `.test-claude`)",

@@ -90,7 +90,7 @@ The DoD is the arbiter, so never skip it.
 ### Design authority [edit]
 
 A project without the doc graph (no roadmap DoD, no `ui-requirements.md`, no states board)
-measures against the window's existing screens under `web/src` (there are no mockups: match the neighbouring components, `web/src/styles.css`, and the keyboard conventions in `web/src/useKeyboard.ts`) and the request the screen was meant to satisfy. Items 1 to
+measures against the window's existing screens under `web/src` (there are no mockups: match the neighbouring components, the sheets in `web/src/styles/`, and the keyboard conventions in `web/src/useKeyboard.ts`) and the request the screen was meant to satisfy. Items 1 to
 4 above then read that way; item 5 is the project's own list of known gaps, if it has one. With no
 phase DoD, "owed now" means "part of the request": an element the request implies and the screen
 lacks is a flag; an element nobody asked for is expected; a visual gap is polish. The other

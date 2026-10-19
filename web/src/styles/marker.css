@@ -1,7 +1,8 @@
-/* The status marker (Marker.tsx), which imports this file, so it loads after styles.css. Tokens come from styles.css;
-   the keyframes ip-pulse and ip-flash stay there; reduced motion is styles.css's blanket rule. Every rule names two
-   classes or more (the base lists every status to get there), so it outranks any .ip-marker rule of one class in
-   styles.css, and wins a tie of two because this file loads later. */
+/* The status marker (Marker.tsx), last in the components layer, so it loads after every other sheet. Tokens come from
+   tokens.css; the keyframes ip-pulse (base.css) and ip-flash (board.css) stay there; reduced motion is base.css's
+   blanket rule. Every rule names two classes or more (the base lists every status to get there), so it outranks any
+   .ip-marker rule of one class in another sheet, and wins a tie of two because this file loads later. */
+@layer components {
 .ip-marker.m-todo, .ip-marker.m-active, .ip-marker.m-done, .ip-marker.m-blocked, .ip-marker.m-dropped, .ip-marker.m-parked {
   flex: none;
   display: inline-flex;
@@ -48,3 +49,4 @@
 .ip-marker.q.m-paused, .ip-marker.q.m-you { width: 13px; height: 13px; }
 /* On a working card an active marker pulses. */
 .ip-marker.m-active.m-pulse { animation: ip-pulse 1.6s ease-in-out infinite; }
+}

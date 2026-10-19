@@ -1,0 +1,92 @@
+/* Tokens: Quiet's day values in :root and their night values in the one dark block. */
+@layer tokens {
+:root {
+  color-scheme: light dark;
+  /* Quiet's day values. The dark block below holds the night value of every token here but the theme-free ones. */
+  --bg: #f8fafc;
+  --text: #0f172a;
+  --text-2: #1e293b;
+  --muted: #475569;
+  --faint: #64748b;
+  --border: rgba(15,23,42,.11);
+  --bar: #ffffff;
+  --card: #ffffff;
+  --active-fill: #fffaf6;
+  --lane: rgba(15,23,42,.018);
+  --float: rgba(248,250,252,.94);
+  /* Overlays only (Details, the resource viewer and its header): opaque, so no card shows through. */
+  --panel: #ffffff;
+  --shadow: 0 8px 24px rgba(15,23,42,.16);
+  /* Hover fills and code blocks: a tint fainter than --border. */
+  --panel-2: rgba(15,23,42,.05);
+  --track: rgba(15,23,42,.08);
+  --track-fill: rgba(71,85,105,.5);
+  /* Orange marks only the active path, amber only attention, red only a blocked step. */
+  --active: #c2410c;
+  --active-ink: #c2410c;
+  --active-line: rgba(234,88,12,.55);
+  --sky: #0284c7;
+  --link: #0369a1;
+  --amber: #d97706;
+  --amber-ink: #92400e;
+  --amber-fill: rgba(251,191,36,.18);
+  --red: #b91c1c;
+  --red-fill: rgba(185,28,28,.08);
+  /* Task hues (a Board box's left edge): none orange, yellow, red or grey, which states own. */
+  --hue-0: #0e7490;
+  --hue-1: #2563eb;
+  --hue-2: #4f46e5;
+  --hue-3: #9333ea;
+  --hue-4: #db2777;
+  --hue-5: #15803d;
+  --hue-6: #8b5e34;
+  /* Theme-free: one value for day and night. Only Inter 500 and 900 ship, so every weight is one of the two. */
+  --radius: 8px;
+  --hairline: linear-gradient(97deg, #6366f1, #ff6600);
+  --font-sans: 'Inter', system-ui, 'Segoe UI', 'Segoe UI Symbol', sans-serif;
+  --font-mono: 'DM Mono', ui-monospace, 'Cascadia Code', Consolas, monospace;
+  --fs-l: 15px;
+  --fs-m: 12.5px;
+  --fs-s: 11px;
+  --w-text: 500;
+  --w-heavy: 900;
+  --track-l: -0.05em;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #080d1c;
+    --text: #f1f5f9;
+    --text-2: #e2e8f0;
+    --muted: #94a3b8;
+    --faint: #64748b;
+    --border: rgba(255,255,255,.09);
+    --bar: rgba(255,255,255,.018);
+    --card: rgba(255,255,255,.035);
+    --active-fill: rgba(249,115,22,.045);
+    --lane: rgba(255,255,255,.022);
+    --float: rgba(8,13,28,.92);
+    --panel: #0c1227;
+    --shadow: 0 8px 24px rgba(0,0,0,.55);
+    --panel-2: rgba(255,255,255,.06);
+    --track: rgba(255,255,255,.08);
+    --track-fill: rgba(148,163,184,.55);
+    --active: #f97316;
+    --active-ink: #fb923c;
+    --active-line: rgba(249,115,22,.5);
+    --sky: #38bdf8;
+    --link: #38bdf8;
+    --amber: #fbbf24;
+    --amber-ink: #fcd34d;
+    --amber-fill: rgba(251,191,36,.12);
+    --red: #f87171;
+    --red-fill: rgba(248,113,113,.1);
+    --hue-0: #22d3ee;
+    --hue-1: #60a5fa;
+    --hue-2: #818cf8;
+    --hue-3: #c084fc;
+    --hue-4: #f472b6;
+    --hue-5: #4ade80;
+    --hue-6: #d4a574;
+  }
+}
+}

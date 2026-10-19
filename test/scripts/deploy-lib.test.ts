@@ -81,7 +81,7 @@ describe('which test suites a deploy runs', () => {
   it('runs smoke for hook, CLI, MCP, server and kit changes, and e2e for UI, core and server changes', () => {
     expect(suitesFor(['src/hooks/handlers.ts'])).toMatchObject({ smoke: true, e2e: false });
     expect(suitesFor(['claude/skills/inprogress/SKILL.md', 'src/cli/doctor.ts'])).toMatchObject({ smoke: true, e2e: false });
-    expect(suitesFor(['web/src/chrome/TopBar.tsx', 'web/src/styles.css'])).toMatchObject({ smoke: false, e2e: true });
+    expect(suitesFor(['web/src/chrome/TopBar.tsx', 'web/src/styles/board.css'])).toMatchObject({ smoke: false, e2e: true });
     expect(suitesFor(['src/core/layout.ts'])).toMatchObject({ smoke: false, e2e: true });
     expect(suitesFor(['src/server/routes/read.ts'])).toMatchObject({ smoke: true, e2e: true });
     expect(suitesFor(['package.json'])).toMatchObject({ smoke: true, e2e: true });

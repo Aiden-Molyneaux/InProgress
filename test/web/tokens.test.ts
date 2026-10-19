@@ -1,8 +1,15 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-/** The stylesheet with its comments taken out, so a comment can never pass for a rule. */
-const css = readFileSync('web/src/styles.css', 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+/** A sheet with its comments taken out, so a comment can never pass for a rule. */
+const uncommented = (path: string) => readFileSync(path, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+/** The tokens' sheet. */
+const css = uncommented('web/src/styles/tokens.css');
+/** Every sheet in web/src/styles/, for the checks on type. */
+const sheets = readdirSync('web/src/styles')
+  .filter((name) => name.endsWith('.css'))
+  .map((name) => uncommented(`web/src/styles/${name}`))
+  .join('\n');
 
 /** The custom properties a block declares: name (without the --) to value. */
 function tokens(body: string | undefined): Record<string, string> {
@@ -73,7 +80,7 @@ const TASK_HUES: Record<string, [string, string]> = {
 describe('theme tokens', () => {
   it('follows the system theme: day in :root, night in the one dark block', () => {
     expect(css).toMatch(/:root\s*\{[^}]*color-scheme:\s*light dark;/);
-    expect(css.match(/@media \(prefers-color-scheme: dark\)/g)).toHaveLength(1);
+    expect(sheets.match(/@media \(prefers-color-scheme: dark\)/g)).toHaveLength(1);
     expect(Object.keys(day).length).toBeGreaterThan(0);
     expect(Object.keys(night).length).toBeGreaterThan(0);
   });
@@ -106,19 +113,19 @@ describe('theme tokens', () => {
   });
 
   it('neither declares nor reads a removed token', () => {
-    for (const name of ['accent', 'edge', 'green', 'purple', 'clay']) expect(css, `--${name}`).not.toMatch(new RegExp(`--${name}\\b`));
+    for (const name of ['accent', 'edge', 'green', 'purple', 'clay']) expect(sheets, `--${name}`).not.toMatch(new RegExp(`--${name}\\b`));
   });
 });
 
 describe('type', () => {
   it('asks only for the two weights that ship, 500 and 900', () => {
-    const weights = [...css.matchAll(/font-weight:\s*([^;}]+)/g)].map((m) => m[1].trim());
+    const weights = [...sheets.matchAll(/font-weight:\s*([^;}]+)/g)].map((m) => m[1].trim());
     const allowed = ['500', '900', 'var(--w-text)', 'var(--w-heavy)', 'inherit'];
     expect(weights.filter((w) => !allowed.includes(w))).toEqual([]);
   });
 
   it('sizes text L, M or S, or relative to its parent', () => {
-    const sizes = [...css.matchAll(/font-size:\s*([^;}]+)/g)].map((m) => m[1].trim());
+    const sizes = [...sheets.matchAll(/font-size:\s*([^;}]+)/g)].map((m) => m[1].trim());
     const allowed = ['15px', '12.5px', '11px', 'var(--fs-l)', 'var(--fs-m)', 'var(--fs-s)', 'inherit'];
     expect(sizes.filter((s) => !allowed.includes(s) && !/^[\d.]+em$/.test(s))).toEqual([]);
   });
