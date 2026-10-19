@@ -8,6 +8,7 @@ import './styles/fonts.css';
 import './styles/tokens.css';
 import './styles/base.css';
 import './styles/parts.css';
+import './styles/page.css';
 import './styles/chrome.css';
 import './styles/project.css';
 import './styles/board.css';

@@ -1,0 +1,24 @@
+/* The page head and the comms slab, shared by the Project view and (next) the Board (spec section 7). */
+@layer components {
+.ip-page-head { container-type: inline-size; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); min-width: 0; }
+.ip-page-code { flex: none; padding: var(--sp-1) var(--sp-2); background: var(--volt); color: var(--volt-ink); font-family: var(--font-brand); font-weight: var(--w-brand); font-size: var(--t-h3); line-height: 1.2; letter-spacing: 0.04em; }
+.ip-page-title { flex: 1 1 0; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-display); font-weight: var(--w-display); font-size: var(--t-h1); line-height: 1.1; text-transform: uppercase; color: var(--text-hi); }
+.ip-page-meta { flex: none; margin: 0; font-family: var(--font-mono); font-size: var(--t-detail-sm); letter-spacing: 0.04em; text-align: right; text-transform: uppercase; color: var(--volt); font-variant-numeric: tabular-nums; }
+.ip-page-meta [data-zero] { color: var(--text-dim); }
+.ip-page-sep { color: var(--text-dim); white-space: pre; }
+/* Under 720 px of page the meta line wraps under the title. */
+@container (max-width: 719px) {
+  .ip-page-meta { flex-basis: 100%; text-align: left; }
+}
+
+.ip-comms { background: var(--canvas-0); border: 1px solid var(--line); }
+.ip-comms-inner { display: grid; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4) var(--sp-4); }
+.ip-comms-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); }
+.ip-comms-age { font-family: var(--font-mono); font-size: var(--t-detail-sm); letter-spacing: 0.04em; color: var(--text-dim); }
+.ip-comms-actions { margin-left: auto; display: inline-flex; align-items: center; gap: var(--sp-2); }
+.ip-comms-body { max-width: 68ch; min-width: 0; color: var(--text-hi); font-size: var(--t-body); line-height: 1.5; overflow-wrap: anywhere; }
+.ip-comms-body .ip-md { color: var(--text-hi); font-size: var(--t-body); line-height: 1.5; }
+.ip-comms-body .ip-md :is(table, img) { max-width: 100%; }
+.ip-comms-body .ip-md table { display: block; overflow-x: auto; }
+.ip-comms-body .ip-quiet { margin: 0; color: var(--text-muted); }
+}

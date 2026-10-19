@@ -105,3 +105,34 @@ export function projectSections(snapshot: ProjectSnapshot, board: Board): Sectio
   }
   return [...sections, ...groups.filter((s) => s.allDone)];
 }
+
+/** The page head's figures: the phases (sections that are a group, finished ones too), and the steps now, next and done. */
+export function headMeta(board: Board, sections: Section[]): { label: string; value: number }[] {
+  const phases = sections.filter((x) => x.group).length;
+  return [
+    { label: phases === 1 ? 'PHASE' : 'PHASES', value: phases },
+    { label: 'NOW', value: board.now.length },
+    { label: 'NEXT', value: board.next.length },
+    { label: 'DONE', value: board.done.length },
+  ];
+}
+
+/** One row as the outline draws it: a step, a done fold, or a done child under an open fold. `key` is the list cursor's key. */
+export interface OutlineRow {
+  key: string;
+  kind: 'step' | 'fold' | 'child';
+  /** The step; for a fold, its latest done step. */
+  node: TreeNode;
+  depth: number;
+  /** The fold's line (a fold only). */
+  fold?: Extract<OutlineLine, { kind: 'done' }>;
+}
+
+/** The rows a section draws, in screen order, given which done folds are open. The cursor's order and the DOM's both come from here. */
+export function renderedRows(lines: OutlineLine[], doneOpen: (parentId: number) => boolean): OutlineRow[] {
+  return lines.flatMap((line): OutlineRow[] => {
+    if (line.kind === 'step') return [{ key: `s${line.node.id}`, kind: 'step', node: line.node, depth: line.depth }];
+    const fold: OutlineRow = { key: `d${line.parentId}`, kind: 'fold', node: line.latest, depth: line.depth, fold: line };
+    return [fold, ...(doneOpen(line.parentId) ? line.nodes.map((n): OutlineRow => ({ key: `o${n.id}`, kind: 'child', node: n, depth: line.depth })) : [])];
+  });
+}

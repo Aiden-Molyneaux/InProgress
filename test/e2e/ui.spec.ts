@@ -2854,8 +2854,9 @@ test.describe('Board', () => {
 });
 
 test.describe('Project view', () => {
+  // 1600 wide, so the page has room for the phase index at the right.
   const projectView = async (page: Page, project: Seeded) => {
-    await page.setViewportSize(WIDE);
+    await page.setViewportSize({ width: 1600, height: 900 });
     await open(page, project);
     await page.getByRole('button', { name: 'Project', exact: true }).click();
     await expect(page.getByRole('region', { name: 'Sections' })).toBeVisible();
@@ -2882,20 +2883,21 @@ test.describe('Project view', () => {
     await expect(road.locator('.ip-orow', { has: page.getByRole('button', { name: '3 RevenueCat', exact: true }) }).getByRole('img', { name: 'backlog' })).toBeVisible();
     await expect(road.locator('.ip-orow', { has: page.getByRole('button', { name: 'Run signing tests', exact: true }) }).locator('.ip-you')).toHaveText('YOU');
     // The key to the rail names the parked ring too.
-    await expect(page.getByRole('group', { name: 'The rail' })).toContainText('parked, set aside');
+    await expect(page.getByRole('group', { name: 'Key to the marks' })).toContainText('parked, set aside');
     // Done children fold per parent and open on a click.
-    const fold = road.getByRole('button', { name: /^✓ 1 done · latest: #\d+ 1 iOS certificate/ });
+    const fold = road.getByRole('button', { name: /^✓ 1 done · latest #\d+ 1 iOS certificate/ });
     await expect(fold).toHaveAttribute('aria-expanded', 'false');
     await expect(road.getByRole('button', { name: '1 iOS certificate', exact: true })).toHaveCount(0);
     await fold.click();
     await expect(fold).toHaveAttribute('aria-expanded', 'true');
     await expect(road.getByRole('button', { name: '1 iOS certificate', exact: true })).toBeVisible();
-    // A fully done group is not a section until it is picked from "Done groups".
+    // A fully done group is not a section until it is picked from the index's Finished fold.
     await expect(section(page, 'Milestones')).toHaveCount(0);
-    const groups = page.getByRole('button', { name: /^Done groups · 1/ });
+    const index = page.getByRole('navigation', { name: 'Phases' });
+    const groups = index.getByRole('button', { name: /^Finished · 1/ });
     await expect(groups).toHaveAttribute('aria-expanded', 'false');
     await groups.click();
-    await page.getByRole('button', { name: /Milestones/ }).click();
+    await index.getByRole('button', { name: /Milestones/ }).click();
     await expect(section(page, 'Milestones').getByRole('button', { name: /Milestones/, expanded: true })).toBeVisible();
     // A step opens its Details.
     await road.getByRole('button', { name: '3 RevenueCat', exact: true }).click();
@@ -2915,8 +2917,16 @@ test.describe('Project view', () => {
     await expect(opener).toBeFocused();
     await opener.click();
     await expect(menu).toBeVisible();
-    await page.locator('.ip-view-name').click();
+    await page.locator('.ip-page-title').click();
     await expect(menu).toHaveCount(0);
+    await expect(opener).toHaveAttribute('aria-expanded', 'false');
+    // Shift+Tab from any item, not only the first, closes the menu and lands on the opener.
+    await opener.click();
+    await expect(menu).toBeVisible();
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('Shift+Tab');
+    await expect(menu).toHaveCount(0);
+    await expect(opener).toBeFocused();
     await expect(opener).toHaveAttribute('aria-expanded', 'false');
     await opener.click();
     await menu.getByRole('menuitem', { name: /Signing test suite/ }).click();
@@ -2947,6 +2957,62 @@ test.describe('Project view', () => {
     await page.reload();
     const row = road.locator('.ip-orow', { has: page.getByRole('button', { name: 'Quick one', exact: true }) });
     await expect(row.getByRole('img', { name: 'backlog' })).toBeVisible();
+  });
+
+  test('a phase index row opens a folded section and focuses its head; a narrow page has the jump row instead', async ({ page, api, fresh }) => {
+    await write(api, fresh.session, 'post', '/api/nodes', { parentId: fresh.root, nodes: [{ title: 'Parked', kind: 'phase', children: [{ title: 'Idle thing' }] }] });
+    await projectView(page, fresh);
+    const index = page.getByRole('navigation', { name: 'Phases' });
+    const parked = section(page, 'Parked');
+    const toggle = parked.getByRole('button', { name: 'Parked', exact: true });
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    // The page head: the code block, the name, and the meta line.
+    await expect(page.locator('.ip-page-code')).toHaveText(/^[A-Z0-9]{3}$/);
+    await expect(page.locator('.ip-page-title')).toBeVisible();
+    await expect(page.locator('.ip-page-meta')).toContainText(/\d+ PHASES · \d+ NOW · \d+ NEXT · \d+ DONE/);
+    await expect(page.getByRole('region', { name: 'Orchestrator note' })).toBeVisible();
+    await index.getByRole('button', { name: /^Parked/ }).click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(toggle).toBeFocused();
+    await expect(index.getByRole('button', { name: /^Parked/ })).toHaveAttribute('aria-current', 'location');
+    // Under 1160 of page the index becomes a jump row under the slab.
+    await page.setViewportSize({ width: 720, height: 900 });
+    await expect(index).toHaveCount(0);
+    const jump = page.getByRole('group', { name: 'Phases' });
+    await expect(jump).toBeVisible();
+    await jump.getByRole('button', { name: 'Road to market' }).click();
+    await expect(section(page, 'Road to market').getByRole('button', { name: 'Road to market', exact: true })).toBeFocused();
+    // Nothing scrolls sideways at 400.
+    await page.setViewportSize({ width: 400, height: 900 });
+    await expect(page.getByRole('region', { name: 'Sections' })).toBeVisible();
+    expect(await page.evaluate<boolean>(`(() => { const e = document.querySelector('.ip-project'); return e.scrollWidth <= e.clientWidth; })()`)).toBe(true);
+  });
+
+  test('the outline is one Tab stop: the arrows walk its rows across sections, and Enter opens Details', async ({ page, api, fresh }) => {
+    await write(api, fresh.session, 'post', '/api/nodes', { parentId: fresh.root, nodes: [{ title: 'Second phase', kind: 'phase', children: [{ title: 'Second step' }] }] });
+    await projectView(page, fresh);
+    await page.getByRole('navigation', { name: 'Phases' }).getByRole('button', { name: /^Second phase/ }).click();
+    const rows = page.locator('.ip-orow[data-cursor]');
+    const stops = page.locator('.ip-orow[data-cursor][tabindex="0"]');
+    await expect(stops).toHaveCount(1);
+    const count = await rows.count();
+    expect(count).toBeGreaterThan(3);
+    await stops.focus();
+    await page.keyboard.press('End');
+    await expect(rows.nth(count - 1)).toBeFocused();
+    await page.keyboard.press('Home');
+    await expect(rows.first()).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(rows.nth(1)).toBeFocused();
+    await page.keyboard.press('ArrowUp');
+    await expect(rows.first()).toBeFocused();
+    await expect(stops).toHaveCount(1);
+    await expect(rows.first()).toHaveAttribute('tabindex', '0');
+    // The last row is in the second section: End crossed the sections. Enter on a step opens its Details.
+    await page.keyboard.press('End');
+    await expect(rows.last().locator('.ip-row-title')).toHaveText('Second step');
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('complementary')).toContainText('Second step');
   });
 });
 

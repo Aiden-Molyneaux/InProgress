@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { deriveBoard } from '../../src/core/board';
 import type { ProjectSnapshot, TreeNode } from '../../src/core/types';
-import { projectSections } from '../../web/src/project/projectOutline';
+import { headMeta, projectSections, renderedRows } from '../../web/src/project/projectOutline';
 
 const NOW = Date.parse('2026-10-13T12:00:00Z');
 let n = 0;
@@ -98,5 +98,36 @@ describe('projectSections and parked steps', () => {
   it('a done step holding a parked one is not folded away', () => {
     const s = snap([root, node(2, 1, 'Alpha', 'active'), node(3, 2, 'phase done', 'done'), node(4, 3, 'Shelf', 'parked'), node(5, 2, 'open')]);
     expect(sections(s)[0]!.lines.some((l) => l.kind === 'step' && l.node.id === 3)).toBe(true);
+  });
+});
+
+describe('headMeta', () => {
+  it('counts the phases, the steps now and next, and the done steps, with known numbers', () => {
+    // Alpha is finished (its one step is done); Beta's step is active with no session on it, so it is not in Now; "Loose" is queued.
+    const queue = [{ nodeId: 6, sessionId: null }];
+    const s = snap([root, node(2, 1, 'Alpha', 'active'), node(3, 2, 'a1', 'done'), node(4, 1, 'Beta', 'active'), node(5, 4, 'b1', 'active'), node(6, 1, 'Loose')], { project: { id: 1, queue } as never });
+    const board = deriveBoard(s, NOW);
+    expect(headMeta(board, projectSections(s, board))).toEqual([
+      { label: 'PHASES', value: 2 },
+      { label: 'NOW', value: 0 },
+      { label: 'NEXT', value: 1 },
+      { label: 'DONE', value: 1 },
+    ]);
+  });
+
+  it('reads PHASE at one', () => {
+    const s = snap([root, node(2, 1, 'Alpha', 'active'), node(3, 2, 'a1')]);
+    const board = deriveBoard(s, NOW);
+    expect(headMeta(board, projectSections(s, board))[0]).toEqual({ label: 'PHASE', value: 1 });
+  });
+});
+
+describe('renderedRows', () => {
+  const s = snap([root, node(2, 1, 'Alpha', 'active'), node(3, 2, 'open one'), node(4, 2, 'done one', 'done'), node(5, 2, 'done two', 'done')]);
+  const lines = sections(s)[0]!.lines;
+
+  it('gives the steps and a fold line, and the done children only while the fold is open', () => {
+    expect(renderedRows(lines, () => false).map((r) => r.key)).toEqual(['s3', 'd2']);
+    expect(renderedRows(lines, () => true).map((r) => `${r.kind}:${r.key}`)).toEqual(['step:s3', 'fold:d2', 'child:o5', 'child:o4']);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clampCursor, cursorStep } from '../../web/src/parts/listCursorLogic';
+import { clampCursor, cursorStep, resolveCursor } from '../../web/src/parts/listCursorLogic';
 
 const list = [[10, 30, 50]];
 const grid = [[10, 50, 90], [30, 70], [20, 60, 100, 140]];
@@ -70,5 +70,28 @@ describe('clampCursor', () => {
     expect(clampCursor({ col: 1, row: 0 }, [2, 0, 3])).toEqual({ col: 2, row: 0 });
     expect(clampCursor({ col: 2, row: 1 }, [2, 3, 0])).toEqual({ col: 1, row: 1 });
     expect(clampCursor({ col: 5, row: 0 }, [2, 3])).toEqual({ col: 1, row: 0 });
+  });
+});
+
+describe('resolveCursor', () => {
+  const keys = [['a', 'b', 'c', 'd']];
+
+  it('holds the position when no keys are given, as clampCursor does', () => {
+    expect(resolveCursor({ col: 0, row: 2, key: 'c' }, [4])).toEqual({ col: 0, row: 2 });
+    expect(resolveCursor(null, [4])).toEqual({ col: 0, row: 0 });
+  });
+
+  it('follows the remembered key to where it is now', () => {
+    // A row was added above c: it is at row 3 now.
+    expect(resolveCursor({ col: 0, row: 2, key: 'c' }, [5], [['x', 'a', 'b', 'c', 'd']])).toEqual({ col: 0, row: 3 });
+    expect(resolveCursor({ col: 0, row: 2, key: 'c' }, [4], keys)).toEqual({ col: 0, row: 2 });
+  });
+
+  it('falls back to the clamped position when the key is gone', () => {
+    expect(resolveCursor({ col: 0, row: 3, key: 'z' }, [3], [['a', 'b', 'c']])).toEqual({ col: 0, row: 2 });
+  });
+
+  it('uses the position when nothing was remembered by key', () => {
+    expect(resolveCursor({ col: 0, row: 1 }, [4], keys)).toEqual({ col: 0, row: 1 });
   });
 });

@@ -1,115 +1,196 @@
-import { useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { deriveBoard } from '../../../src/core/board';
-import { Marker } from '../Marker';
-import { useWide } from '../board/useWide';
 import { ageShort } from '../board/text';
+import { CommsSlab } from '../page/CommsSlab';
+import { PageHead } from '../page/PageHead';
+import { projectCode } from '../page/projectCode';
+import { usePageWidth } from '../page/usePageWidth';
 import { Markdown } from '../panels/Markdown';
+import { Eyebrow } from '../parts/Eyebrow';
+import { EmptyState } from '../parts/EmptyState';
+import { useListCursor } from '../parts/ListCursor';
+import { TabStrip } from '../parts/TabStrip';
 import type { ViewProps } from '../views/props';
+import { FINISHED_KEY, FinishedPhases, PhaseIndex, RailKey, type FinishedEntry, type PhaseEntry } from './PhaseIndex';
 import { loadFolds, saveFolds } from './projectFolds';
-import { projectSections } from './projectOutline';
+import { headMeta, projectSections, renderedRows } from './projectOutline';
 import { Section } from './Section';
 
-const DONE_GROUPS_KEY = 'done:0';
+/** A page this wide, in px, lays out with the phase index at the right. */
+const WIDE_FROM = 1160;
+/** A section is "in view" once its top is within this many px of the page's top. */
+const IN_VIEW_SLACK = 24;
 
-/** The key to the left rail, wide only. */
-function RailKey() {
-  return (
-    <div className="ip-railkey" role="group" aria-label="The rail">
-      <div className="ip-label">The rail</div>
-      <div><span className="ip-dot live" aria-hidden="true" /> now, a session is on it</div>
-      <div><span className="ip-dot idle" aria-hidden="true" /> now, no session</div>
-      <div><span className="ip-num" aria-hidden="true">①</span> next, in queue order</div>
-      <div><span className="ip-num ip-own" aria-hidden="true">◆</span> next, in a session's own queue</div>
-      <div><span className="ip-dot ring" aria-hidden="true" /> backlog</div>
-      <div><span className="ip-railmark" aria-hidden="true"><Marker status="parked" question={false} paused={false} needsYou={false} pulse={false} /></span> parked, set aside</div>
-    </div>
-  );
-}
+const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-/** The Project view (spec 2.4 and 2.8): the state note, then one section per top-level group as an outline with a position rail. */
+/** The Project view (spec 2.4 and 2.8): the page head, the state note, then one section per top-level group as an outline with a position rail. */
 export function ProjectView({ snapshot, now, onOpenNode, onOpenResource, onStatus }: ViewProps) {
-  const wide = useWide();
+  const [root, width] = usePageWidth<HTMLDivElement>();
+  const wide = width >= WIDE_FROM;
   const projectId = snapshot.project.id;
   const [folds, setFolds] = useState(() => loadFolds(projectId));
   const board = deriveBoard(snapshot, now);
   const sections = projectSections(snapshot, board);
-  const flip = (key: string, current: boolean) => {
-    const next = { ...folds, [key]: !current };
-    setFolds(next);
-    saveFolds(projectId, next);
-  };
+  // `update` gets the fold's current value (undefined before a choice), so a toggle reads the latest state, not the render's.
+  const setFold = (key: string, update: (was: boolean | undefined) => boolean) =>
+    setFolds((prev) => {
+      const next = { ...prev, [key]: update(prev[key]) };
+      saveFolds(projectId, next);
+      return next;
+    });
   const key = (s: { group: { id: number } | null }) => `section:${s.group?.id ?? 0}`;
   const doneGroups = sections.filter((s) => s.allDone);
-  const doneGroupsOpen = folds[DONE_GROUPS_KEY] ?? false;
-  // A fully done group shows as a section only once it is picked from "Done groups".
+  const finishedOpen = folds[FINISHED_KEY] ?? false;
+  // A fully done group shows as a section only once it is picked from "Finished".
   const shown = sections.filter((s) => !s.allDone || folds[key(s)] === true);
+  const isOpen = (s: (typeof sections)[number]) => folds[key(s)] ?? s.startsOpen;
   const note = snapshot.stateNote;
-  const outline = { snapshot, board, now, wide, doneOpen: (parentId: number) => folds[`done:${parentId}`] ?? false, onToggleDone: (parentId: number) => flip(`done:${parentId}`, folds[`done:${parentId}`] ?? false), onOpenNode, onOpenResource };
 
-  const noteBlock = note ? (
-    <div className="ip-msg ip-pnote">
-      <div className="ip-msg-body">
-        <div className="ip-msg-head">
-          <b>Orchestrator</b> · <span className="ip-time">{ageShort(note.updatedAt, now)}</span>
-        </div>
-        <Markdown text={note.content} />
-      </div>
-    </div>
-  ) : (
-    <p className="ip-quiet">No state note yet</p>
+  // The section in view, and the jump from the index: open it if folded, scroll it to the top, put focus on its head.
+  const elements = useRef(new Map<string, HTMLElement>());
+  // The shown sections' keys in screen order, for the measure.
+  const order = useRef<string[]>([]);
+  order.current = shown.map(key);
+  const [inView, setInView] = useState<string | null>(null);
+  const pending = useRef<string | null>(null);
+  // A jump marks its section as the one in view, even when the page is too short to scroll it to the top, until the reader scrolls or types.
+  const jumped = useRef<string | null>(null);
+  const measureInView = useCallback(() => {
+    const page = root.current;
+    if (!page) return;
+    if (jumped.current !== null && elements.current.has(jumped.current)) {
+      setInView(jumped.current);
+      return;
+    }
+    const top = page.getBoundingClientRect().top;
+    let current: string | null = null;
+    for (const k of order.current) {
+      const element = elements.current.get(k);
+      if (element && (current === null || element.getBoundingClientRect().top <= top + IN_VIEW_SLACK)) current = k;
+    }
+    // Scrolled to the very end, the last section is the one in view though its top never reaches the page's top.
+    if (page.scrollHeight > page.clientHeight && page.scrollTop + page.clientHeight >= page.scrollHeight - 1) current = order.current.filter((k) => elements.current.has(k)).pop() ?? current;
+    setInView((was) => (was === current ? was : current));
+  }, [root]);
+  const release = () => {
+    jumped.current = null;
+  };
+  const scrollToSection = (k: string) => {
+    const element = elements.current.get(k);
+    if (!element) return;
+    element.scrollIntoView({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' });
+    element.querySelector<HTMLElement>('.ip-sec-toggle')?.focus({ preventScroll: true });
+    jumped.current = k;
+    setInView(k);
+  };
+  const jumpTo = (k: string) => {
+    const target = shown.find((s) => key(s) === k);
+    if (target && isOpen(target)) {
+      scrollToSection(k);
+      return;
+    }
+    pending.current = k;
+    setFold(k, () => true);
+  };
+  useLayoutEffect(() => {
+    if (pending.current === null) return;
+    const k = pending.current;
+    pending.current = null;
+    scrollToSection(k);
+  });
+  // Measure after each render, and when the page is resized.
+  useLayoutEffect(() => {
+    measureInView();
+  }, [measureInView, width, folds, snapshot]);
+
+  // One list cursor across every open section's rows, in screen order.
+  const doneOpen = (parentId: number) => folds[`done:${parentId}`] ?? false;
+  const cursorKeys = shown.flatMap((s) => (isOpen(s) ? renderedRows(s.lines, doneOpen).map((r) => r.key) : []));
+  const cursorRow = new Map(cursorKeys.map((k, i) => [k, i]));
+  const toggleDone = (parentId: number) => setFold(`done:${parentId}`, (was) => !was);
+  const { itemProps } = useListCursor(
+    [cursorKeys.length],
+    ({ row }) => {
+      const k = cursorKeys[row];
+      if (!k) return;
+      if (k.startsWith('d')) toggleDone(Number(k.slice(1)));
+      else onOpenNode(Number(k.slice(1)));
+    },
+    [cursorKeys],
+  );
+  const cursorFor = (k: string) => {
+    const row = cursorRow.get(k);
+    return row === undefined ? undefined : itemProps(0, row);
+  };
+
+  const outline = { snapshot, board, now, wide, doneOpen, onToggleDone: toggleDone, cursorFor, onOpenNode, onOpenResource };
+
+  const phases: PhaseEntry[] = shown.filter((s) => !s.allDone).map((s) => ({ key: key(s), title: s.title, done: s.done, now: s.counts.now, total: s.total }));
+  const finished: FinishedEntry[] = doneGroups.map((s) => ({ key: key(s), id: s.group!.id, title: s.title }));
+  const finishedBlock = (
+    <FinishedPhases finished={finished} open={finishedOpen} current={inView} onToggle={() => setFold(FINISHED_KEY, (was) => !was)} onJump={jumpTo} />
   );
 
-  const doneBlock = doneGroups.length > 0 && (
-    <div className="ip-donegroups">
-      <button type="button" className="ip-fold" aria-expanded={doneGroupsOpen} onClick={() => flip(DONE_GROUPS_KEY, doneGroupsOpen)}>
-        {`Done groups · ${doneGroups.length} ${doneGroupsOpen ? '▾' : '▸'}`}
-      </button>
-      {doneGroupsOpen && (
-        <ul>
-          {doneGroups.map((s) => (
-            <li key={key(s)}>
-              <button type="button" className="ip-dg-item" aria-expanded={folds[key(s)] === true} onClick={() => flip(key(s), folds[key(s)] === true)}>
-                <span className="ip-id">{`#${s.group!.id}`}</span> {s.title}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+  const slab = (
+    <CommsSlab age={note ? ageShort(note.updatedAt, now) : null}>
+      {note ? <Markdown text={note.content} /> : <p className="ip-quiet">No state note yet</p>}
+    </CommsSlab>
   );
 
   const sectionList = (
     <div className="ip-sections" role="region" aria-label="Sections">
-      {shown.length === 0 && <p className="ip-quiet ip-empty-line">No steps yet</p>}
+      {shown.length === 0 && <EmptyState>No steps yet</EmptyState>}
       {shown.map((s) => {
-        const open = folds[key(s)] ?? s.startsOpen;
+        const k = key(s);
+        const open = isOpen(s);
         return (
-          <Section key={key(s)} section={s} open={open} onToggle={() => flip(key(s), open)} onStatus={onStatus} {...outline} />
+          <Section
+            key={k}
+            section={s}
+            open={open}
+            onToggle={() => setFold(k, (was) => !(was ?? s.startsOpen))}
+            elementRef={(element) => {
+              if (element) elements.current.set(k, element);
+              else elements.current.delete(k);
+            }}
+            onStatus={onStatus}
+            {...outline}
+          />
         );
       })}
     </div>
   );
 
   return (
-    <div className={`ip-project ${wide ? 'wide' : 'narrow'}`}>
-      {wide ? (
-        <>
-          <div className="ip-pside">
-            <h2 className="ip-view-name">{snapshot.project.name}</h2>
-            {noteBlock}
-            <RailKey />
-            {doneBlock}
+    <div ref={root} className="ip-project" data-wide={wide || undefined} onScroll={measureInView} onWheel={release} onTouchMove={release} onPointerDown={release} onKeyDown={release}>
+      <div className="ip-page">
+        <PageHead code={projectCode(snapshot.project.name)} name={snapshot.project.name} meta={headMeta(board, sections)} decodeKey={projectId} />
+        {slab}
+        {!wide && (
+          <div className="ip-jump">
+            <Eyebrow glyph="//">{`Phases · ${phases.length}`}</Eyebrow>
+            <TabStrip
+              variant="segmented"
+              label="Phases"
+              items={phases.map((p) => ({ id: p.key, label: [...p.title].length > 24 ? `${[...p.title].slice(0, 23).join('')}…` : p.title }))}
+              value={inView ?? ''}
+              onChange={jumpTo}
+            />
           </div>
-          <div className="ip-pmain">{sectionList}</div>
-        </>
-      ) : (
-        <>
-          <h2 className="ip-view-name">{snapshot.project.name}</h2>
-          {noteBlock}
-          {sectionList}
-          {doneBlock}
-        </>
-      )}
+        )}
+        <div className="ip-pbody">
+          <div className="ip-pmain">
+            <RailKey />
+            {sectionList}
+            {!wide && finishedBlock}
+          </div>
+          {wide && (
+            <div className="ip-pside">
+              <PhaseIndex phases={phases} finished={finished} current={inView} finishedOpen={finishedOpen} onToggleFinished={() => setFold(FINISHED_KEY, (was) => !was)} onJump={jumpTo} />
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
