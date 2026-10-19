@@ -3372,6 +3372,13 @@ test.describe('v3 Details, viewer and command bar (#505)', () => {
     await page.keyboard.press('Escape');
     await expect(page.getByRole('complementary')).toHaveCount(0);
     await expect(b).toBeFocused();
+    // A click that leaves focus where it was (here in Details) still makes the clicked card the opener.
+    await a.click();
+    await expect(page.getByRole('complementary').locator('.ip-dtitle')).toBeFocused();
+    await b.dispatchEvent('click');
+    await expect(page.getByRole('complementary').locator('.ip-dtitle')).toHaveText('Run signing tests');
+    await page.keyboard.press('Escape');
+    await expect(b).toBeFocused();
   });
 
   test('a menu opened from the tab row paints over an open Details', async ({ page, api }) => {

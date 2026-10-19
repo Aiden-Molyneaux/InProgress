@@ -51,13 +51,17 @@ export function App() {
   // title button of the row that opened it.
   const detailsOpener = useRef<{ element: HTMLElement | null; node: number } | null>(null);
   const detailsOpen = selectedNode !== null;
+  /** Set when Details itself picks the next step (its Steps rows, the parent link), so the opener stands. */
+  const fromDetails = useRef(false);
   useLayoutEffect(() => {
     if (detailsOpen) {
       const active = document.activeElement;
       const outside = active instanceof HTMLElement && active !== document.body && !active.closest('.ip-details');
-      // Opening records the opener. Switching step from outside Details (another card) re-records it; from inside
-      // (its Steps rows, the parent link) the old opener stands.
-      if (outside || !detailsOpener.current) detailsOpener.current = { element: outside ? active : null, node: selectedNodeRef.current! };
+      // Opening records the opener. Switching step from Details' own Steps rows or parent link keeps it; any other switch
+      // (another card, even a click that left focus on the page) re-records it.
+      const inside = fromDetails.current;
+      fromDetails.current = false;
+      if (!inside || !detailsOpener.current) detailsOpener.current = { element: outside ? active : null, node: selectedNodeRef.current! };
       return;
     }
     const from = detailsOpener.current;
@@ -393,7 +397,10 @@ export function App() {
               nodeId={selectedNode}
               snapshot={snapshot}
               onClose={() => setSelectedNode(null)}
-              onSelectNode={setSelectedNode}
+              onSelectNode={(id) => {
+                if (id !== selectedNodeRef.current) fromDetails.current = true;
+                setSelectedNode(id);
+              }}
               onOpenResource={openViewer}
               onStatus={fail}
             />

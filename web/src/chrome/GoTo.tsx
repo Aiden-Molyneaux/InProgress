@@ -155,7 +155,7 @@ export const GoTo = forwardRef<GoToHandle, GoToProps>(function GoTo({ onGo, curr
     timer.current = window.setTimeout(() => void ask(trimmed), DEBOUNCE_MS);
   }, [open, trimmed]);
 
-  /** Focus waits on the search button (the opener may be a card the switch takes away); the card takes it on landing. */
+  /** Focus waits on the search button (the opener may be a card the switch takes away); Details' title takes it once the step opens. */
   const pick = (picked: GoPick) => {
     close(false);
     button.current?.focus();
