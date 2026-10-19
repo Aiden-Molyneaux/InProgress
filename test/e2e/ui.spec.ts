@@ -951,7 +951,7 @@ test('⋯ keeps focus when a delete or a restore leaves it one row, and goes whe
   await expect(page.getByRole('tab')).toHaveCount(1);
   await deleteGone();
   await expect(page.getByRole('tab')).toHaveCount(0);
-  await expect(page.locator('.ip-empty')).toHaveText('No projects. Restore one from ⋯, or in a Claude session say "track this in InProgress".');
+  await expect(page.locator('.p-empty')).toHaveText('No projects. Restore one from ⋯, or in a Claude session say "track this in InProgress".');
   await restoreGone();
   // Nothing else is listed, so it opens, as the list's fallback opens the first listed project.
   await expect(page).toHaveURL(hereIs(gone.slug));
@@ -1534,8 +1534,9 @@ test.describe('Go to', () => {
   test("wears the menus' surface, under the bar at its right end", async ({ page, demo }) => {
     await open(page, demo);
     const button = (await goToButton(page).boundingBox())!;
-    const bar = (await page.locator('.ip-topbar').boundingBox())!;
-    expect(bar.x + bar.width - (button.x + button.width), 'at the right end').toBeLessThanOrEqual(8);
+    const bar = (await page.locator('.ip-hud').boundingBox())!;
+    // Inside the HUD's side padding (--sp-5).
+    expect(bar.x + bar.width - (button.x + button.width), 'at the right end').toBeLessThanOrEqual(16);
     await goToButton(page).click();
     const panel = page.locator('.ip-goto-menu');
     await expect(panel).toHaveCSS('background-color', await tokenColour(page, '--float'));
@@ -3091,10 +3092,6 @@ test('the parts lab opens on #/lab and walks a TabStrip with the arrow keys', as
   await page.keyboard.press('ArrowLeft');
   await expect(tabs.nth(count - 1)).toHaveAttribute('aria-selected', 'true');
   await expect(tabs.nth(count - 1)).toBeFocused();
-  // The window itself uses no part: nothing outside the lab carries a p- class.
-  await page.goto('/');
-  await expect(page.locator('.ip-app')).toBeVisible();
-  await expect(page.locator('[class^="p-"], [class*=" p-"]')).toHaveCount(0);
 });
 
 test('the parts lab grid is one Tab stop', async ({ page }) => {
@@ -3115,4 +3112,39 @@ test('the parts lab grid is one Tab stop', async ({ page }) => {
   await expect(second.getByRole('button')).toBeFocused();
   await page.keyboard.press('Shift+Tab');
   await expect(second).toBeFocused();
+});
+
+test.describe('HUD bar and footer strip', () => {
+  test('ASKS sums every active project and opens the first with asks; a dropped stream shows RECONNECTING and the tape', async ({ page, api, fresh, consoleErrors }) => {
+    consoleErrors.allow(/ERR_CONNECTION_REFUSED/);
+    const other = await seed(api, 'E2E HUD Other');
+    // The open project has no ask of its own now; the other one does.
+    await write(api, fresh.session, 'post', `/api/asks/${fresh.ask}/clear`, {});
+    await open(page, fresh);
+    const list = (await (await api.get('/api/projects')).json()) as { id: number; slug: string; name: string; status: string; openAsks: number; permissionWaits: number }[];
+    const waiting = list.filter((p) => p.status === 'active' && p.openAsks + p.permissionWaits > 0).sort((a, b) => a.id - b.id);
+    const total = waiting.reduce((sum, p) => sum + p.openAsks + p.permissionWaits, 0);
+    expect(waiting.map((p) => p.slug), 'the other project waits on Aiden').toContain(other.slug);
+    const asks = page.locator('.ip-hud-asks');
+    await expect(asks.locator('.p-readout-value')).toHaveText(String(total));
+    await expect(asks).toHaveAttribute('title', /E2E HUD Other: 1/);
+    await asks.click();
+    await expect(page).toHaveURL(hereIs(waiting[0]!.slug));
+    await expect(page.locator('.ip-view-name')).toHaveText(waiting[0]!.name);
+
+    // The stream cannot connect: the link reads RECONNECTING and the tape takes the ruler's place.
+    await page.route('**/api/events/stream**', (route) => route.abort('connectionrefused'));
+    await page.reload();
+    const link = page.locator('.ip-hud-link');
+    await expect(link).toContainText('RECONNECTING');
+    await expect(page.locator('.ip-hud-edge .p-tape')).toBeVisible();
+    await expect(page.locator('.ip-hud-edge .p-ruler')).toHaveCount(0);
+    await expect(page.locator('.ip-banner')).toHaveCount(0);
+    const under = (await page.locator('.ip-topbar').boundingBox())!.y;
+    await page.unroute('**/api/events/stream**');
+    await expect(link).toContainText('OK', { timeout: 10_000 });
+    await expect(page.locator('.ip-hud-edge .p-ruler')).toBeVisible();
+    await expect(page.locator('.ip-hud-edge .p-tape')).toHaveCount(0);
+    expect((await page.locator('.ip-topbar').boundingBox())!.y, 'the page does not move').toBe(under);
+  });
 });

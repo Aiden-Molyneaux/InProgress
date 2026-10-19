@@ -7,13 +7,17 @@ import { api, postEvent } from './api';
 import { Board } from './board/Board';
 import { useLastLook } from './board/lastLook';
 import { noteAction, noteHidden, noteShown, setPoster } from './measure';
-import { ActivityStrip } from './chrome/ActivityStrip';
+import { Footer } from './chrome/Footer';
 import type { GoToHandle } from './chrome/GoTo';
+import { Hud, HudEdge } from './chrome/Hud';
+import { askTarget } from './chrome/hudLogic';
 import { archivedProjects, loadTabOrder, moveTab, neighbourTab, projectTabs, pruneOrder, saveTabOrder, stepTab, TAB_ORDER_KEY } from './chrome/tabs';
 import { TopBar } from './chrome/TopBar';
 import { BacklogList } from './backlog/BacklogList';
 import { DoneList } from './done/DoneList';
 import { Details } from './panels/Details';
+import { EmptyState } from './parts/EmptyState';
+import { Toast, ToastRegion } from './parts/Toast';
 import { ResourceViewer } from './panels/ResourceViewer';
 import { ProjectView } from './project/ProjectView';
 import { actionMessage, renameMessage, type ActionTarget, type ProjectAction } from './projectActions';
@@ -161,33 +165,44 @@ export function App() {
     noteAction('header', 'tab_move');
   };
   const archived = useMemo(() => archivedProjects(projects), [projects]);
+  // ASKS: the open project's Board with focus on Needs me, or the first project in tab order that has asks. The counter
+  // moves focus after the Board shows.
+  const [needsFocus, setNeedsFocus] = useState(0);
+  useEffect(() => {
+    if (needsFocus > 0) document.querySelector<HTMLElement>('.ip-band-needs h3')?.focus();
+  }, [needsFocus]);
+  const onAsks = () => {
+    const target = askTarget(tabs, state.slug);
+    if (target === null) return;
+    pickView('board');
+    if (target === 'here') setNeedsFocus((n) => n + 1);
+    else state.selectProject(target);
+  };
   const stepProject = (step: 1 | -1) => {
     const slug = stepTab(tabs, state.slug, step);
     if (slug) state.selectProject(slug);
   };
 
-  /** The status line: what an archive, unarchive, rename, delete or restore did, or why it failed. Shown for 3 s. */
-  const [status, setStatus] = useState<string | null>(null);
-  const statusTimer = useRef(0);
-  const say = (text: string) => {
-    setStatus(text);
-    window.clearTimeout(statusTimer.current);
-    statusTimer.current = window.setTimeout(() => setStatus(null), 3000);
-  };
-  useEffect(() => () => window.clearTimeout(statusTimer.current), []);
+  /**
+   * The status line, a toast: what an archive, unarchive, rename, delete or restore did, or why it failed. A neutral one
+   * goes after four seconds; an alarm one (a failed action) stays until dismissed. A new message replaces the old one.
+   */
+  const [status, setStatus] = useState<{ id: number; text: string; tone: 'neutral' | 'alarm' } | null>(null);
+  const statusId = useRef(0);
+  const say = (text: string, tone: 'neutral' | 'alarm' = 'neutral') => setStatus({ id: ++statusId.current, text, tone });
   const onAction = async (action: ProjectAction, target: ActionTarget): Promise<boolean> => {
     // Picked before the write: archiving or deleting the open project opens the tab beside it, as a browser does when a
     // tab closes. With none, an archived project stays open as the end tab and a deleted one falls back.
     const leaving = (action === 'archive' || action === 'delete') && target.slug === state.slug;
     const result = await state.act(action, target, leaving ? neighbourTab(tabs, target.slug) : null);
     if (result === 'reload') return false;
-    say(result === 'ok' ? actionMessage(action, target.name) : result);
+    say(result === 'ok' ? actionMessage(action, target.name) : result, result === 'ok' ? 'neutral' : 'alarm');
     return result === 'ok';
   };
   const onRename = async (target: ActionTarget, name: string): Promise<boolean> => {
     const result = await state.rename(target, name);
     if (result === 'reload') return false;
-    say(result === 'ok' ? renameMessage(name) : result);
+    say(result === 'ok' ? renameMessage(name) : result, result === 'ok' ? 'neutral' : 'alarm');
     return result === 'ok';
   };
 
@@ -296,19 +311,37 @@ export function App() {
   );
 
   // Before anything has loaded, a failing stream means the server is unreachable: say so instead of "Loading…".
-  if (!state.loaded) return <div className="ip-empty">{state.connection === 'reconnecting' ? "Can't reach the InProgress server, retrying…" : 'Loading…'}</div>;
+  const hud = (loaded: boolean) => (
+    <>
+      <Hud loaded={loaded} connection={state.connection} projects={projects} tabs={tabs} current={state.slug} snapshot={snapshot} now={now} goTo={goToField} onGoTo={goTo} onBoard={() => pickView('board')} onAsks={onAsks} />
+      <HudEdge connection={state.connection} />
+    </>
+  );
+  if (!state.loaded) {
+    const unreachable = state.connection === 'reconnecting';
+    return (
+      <div className="ip-app">
+        {hud(false)}
+        <main className="ip-main">
+          <EmptyState className="ip-wait" data-alarm={unreachable || undefined}>
+            {unreachable ? "Can't reach the InProgress server, retrying…" : 'Loading…'}
+          </EmptyState>
+        </main>
+      </div>
+    );
+  }
   return (
     <>
       <div className="ip-app" ref={app}>
-        <TopBar tabs={tabs} archived={archived} deleted={state.deleted} current={state.slug} onSelect={state.selectProject} onAction={onAction} onRename={onRename} onMove={onMoveTab} goTo={goToField} onGoTo={goTo} view={view} onView={pickView} />
-        {state.connection === 'reconnecting' && <div className="ip-banner">Reconnecting to InProgress…</div>}
+        {hud(true)}
+        <TopBar tabs={tabs} archived={archived} deleted={state.deleted} current={state.slug} onSelect={state.selectProject} onAction={onAction} onRename={onRename} onMove={onMoveTab} view={view} onView={pickView} />
         <main className="ip-main">
           {projects.length === 0 ? (
-            <div className="ip-empty">
+            <EmptyState className="ip-wait">
               {state.deleted.length > 0
                 ? 'No projects. Restore one from ⋯, or in a Claude session say "track this in InProgress".'
-                : 'No projects yet. In a Claude session, say "track this in InProgress".'}
-            </div>
+                : 'No projects yet. A Claude session adds one when it opts in.'}
+            </EmptyState>
           ) : snapshot ? (
             view === 'board' && backlogOpen ? (
               <BacklogList key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onStatus={say} onBack={closeBacklog} />
@@ -320,7 +353,7 @@ export function App() {
               <ProjectView key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onStatus={say} />
             )
           ) : (
-            <div className="ip-empty">Loading project…</div>
+            <EmptyState className="ip-wait">Loading project…</EmptyState>
           )}
           {snapshot && selectedNode !== null && (
             <Details
@@ -334,14 +367,18 @@ export function App() {
             />
           )}
         </main>
-        {snapshot && <ActivityStrip event={state.lastEvent} snapshot={snapshot} />}
+        <Footer event={state.lastEvent} snapshot={snapshot} tabs={tabs.length} closable={detailsOpen || viewerOpen} />
       </div>
       {/* Outside .ip-app, which turns inert while the viewer is open. */}
       {viewerOpen && <ResourceViewer key={viewerResource} resourceId={viewerResource} onClose={() => setViewerResource(null)} />}
-      {/* Always mounted, so a screen reader hears each new line; drawn over the activity strip, not on it. */}
-      <div role="status" className="ip-status">
-        {status && <div className="ip-toast">{status}</div>}
-      </div>
+      {/* Always mounted, so a screen reader hears each new line. */}
+      <ToastRegion>
+        {status && (
+          <Toast key={status.id} tone={status.tone} onDismiss={() => setStatus(null)}>
+            {status.text}
+          </Toast>
+        )}
+      </ToastRegion>
     </>
   );
 }

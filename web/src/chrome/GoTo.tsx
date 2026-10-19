@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent } from 'react';
 import { parseGoTo, type StepHit } from '../../../src/core/goto';
 import { api } from '../api';
+import { KeyHint } from '../parts/KeyHint';
 import { goToMessage, hitLabel, isGoToChord, pickHit } from './goToText';
 import { menuStep } from './menu';
 
@@ -38,7 +39,7 @@ const Glass = () => (
 );
 
 /**
- * The search button at the right end of the top bar, and the Go to field it opens: a combobox floating under the bar on
+ * The Find button at the right end of the HUD bar, and the Go to field it opens: a combobox floating under the bar on
  * the menus' surface. An id (`#77`, `77`) and Enter jumps to that step in whatever project holds it; words list the
  * steps whose titles hold them, across projects, as they are typed. Up and Down move through the list, Enter picks,
  * Escape closes back to whatever had focus before, and Tab closes. Typing clears the highlight, so Enter never picks a
@@ -204,8 +205,8 @@ export const GoTo = forwardRef<GoToHandle, GoToProps>(function GoTo({ onGo, curr
       <button
         ref={button}
         className="ip-goto-btn"
-        aria-label="Go to a step"
-        title="Go to a step (/ or Ctrl+K)"
+        aria-label="Find, go to a step"
+        title="Find, go to a step (/ or Ctrl+K)"
         aria-keyshortcuts="/ Control+K"
         aria-expanded={open}
         aria-controls={open ? `${ids}p` : undefined}
@@ -214,6 +215,7 @@ export const GoTo = forwardRef<GoToHandle, GoToProps>(function GoTo({ onGo, curr
         onClick={() => (open ? close(true) : show())}
       >
         <Glass />
+        <KeyHint keys={['Ctrl K']} label="Find" className="ip-goto-hint" />
       </button>
       {open && (
         <div id={`${ids}p`} className="ip-menu ip-goto-menu" onKeyDown={onKeyDown} onBlur={onBlur} onContextMenu={(e) => e.preventDefault()}>
