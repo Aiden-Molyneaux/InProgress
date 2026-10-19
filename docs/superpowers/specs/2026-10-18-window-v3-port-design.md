@@ -107,7 +107,7 @@ Each is raised as an ask on #496 when its section is written, with the strategy'
 | D1 | Light theme | Drop Quiet's light palette; the window ignores the OS theme | §2 | Dark only, as recommended (Aiden, 2026-10-18) |
 | D2 | Counts in the rail | Keep the volt ask count on each project row, against InThink's rail rule | §6 | Keep the count, as recommended (Aiden, 2026-10-18) |
 | D3 | Step hues | The seven hues become faction colours on each tile's top rule | §2 | The seven factions, as mocked (Aiden, 2026-10-18) |
-| D4 | Ctrl K | GoTo becomes a v3 command bar; the Board keeps no shortcuts of its own | §10 | open |
+| D4 | Ctrl K | GoTo becomes a v3 command bar; the Board keeps no shortcuts of its own | §4, §10 | Two parts (Aiden, 2026-10-18): the command bar finds steps and moves you (projects, views), and writes nothing; lists get an arrow cursor with no letter keys |
 | D5 | What supersedes what | The port reverses Board spec 2.8 and Quiet's palette, fonts, chrome and cards; #506 writes the ruling | §13 | open |
 | D6 | Project colour on the rail | A bright grey rule on every row, volt only for the current one | §6 | A faction per project from its id, against the recommendation (Aiden, 2026-10-18) |
 
@@ -433,6 +433,13 @@ hover).
 | **EmptyState** | a dot-grid panel, one sentence, an optional action | | | every list that can be empty |
 | **ErrorLine** | an alarm-washed line with a 2 px alarm bar, the message in reading text, and Retry | | | every failed load or write |
 | **Toast** | a status line at the bottom left, above the footer | tone neutral, alarm | leaves after 4 s, or, for an error, stays until dismissed; `role="status"` | archive, delete, write failures |
+| **ListCursor** | the arrow cursor (D4, added 2026-10-18 after this section's approval) | a list, or a grid of lists (the Board's columns) | see below | Board, Backlog view, All done, Project outline |
+
+**The list cursor (D4).** A list is one Tab stop: the item last focused (else the first) holds `tabIndex` 0, the rest
+-1. Up and Down move between items; in a grid, Left and Right move to the item nearest the same height in the next
+column; Home and End go to the ends. Enter opens the item's Details. Tab goes into the focused item's own controls,
+then out of the list. Typing in a field never moves it, and there are no letter keys. Esc keeps today's meaning (it
+closes Details). The step logic is a pure function beside the part (`cursorStep`), tested with vitest like `menuStep`.
 
 Rules for every part:
 
@@ -535,7 +542,7 @@ One line on `--canvas-0` with a hairline above, `--sp-3` by `--sp-5` padding, mo
 
 ## 6. Shell: the module rail
 
-*Status: awaiting approval.* Built by #501, after the HUD. Label ui.
+*Status: approved by Aiden, 2026-10-18.* Built by #501, after the HUD. Label ui.
 
 ### What it improves
 
@@ -629,3 +636,283 @@ volt with a `›` before it.
 - New: one e2e test that opens Backlog and All done from the rail and back to Board.
 - Murr runs on Opus for this step (focus and keyboard, the menus: the risk list). Parvati reviews the rail at 1600,
   1360, 1159, 720 and 400, with a long name, ten projects, an open archived project and every signal.
+
+## 7. Board
+
+*Status: written under Aiden's standing approval (2026-10-18).* Built by #502, after the parts. Label ui. The mock is
+the reference; this section says where it improves on it.
+
+### What it improves
+
+- **The page says where it stands before you read a tile:** a head with the project's counts and the Orchestrator's
+  note in a slab, its step references clickable, the full note one click away.
+- **"N to tidy" does something.** Today it is a static count whose tooltip lists the marked steps. It becomes a button
+  that lists them in a Menu, each opening its Details.
+- **Two asks on one step read apart**, each in its own panel with its own Answer and Clear, its text expandable rather
+  than cut.
+- **The Now column shows progress, not just presence:** "Task 3 of 4" and the newest command in a terminal readout.
+- **Next can be reordered from the keyboard**, not only by dragging.
+- **The Backlog preview takes a third of the height:** one-line rows and a phase TabStrip in place of full boxes and a
+  native select.
+- **The tile you have open in Details stays marked**, so you can see where you are on the Board.
+
+### Page head
+
+- **Code block:** the project's three-letter rail code (§6) in a volt block, brand face. It matches what the narrow rail
+  shows.
+- **Title:** the project name at `--t-h1`, display, uppercase, `--text-hi`. On first paint after a project switch it
+  decodes once (the mock's scramble, at most 520 ms); static under reduced motion.
+- **Meta line**, right-aligned, mono `--t-detail-sm`, volt: `2 ASKS · 2 LIVE · 1 READY · 113 DONE`, the project's own
+  figures (the HUD's are window-wide, §5). A zero figure is dim.
+
+### The comms slab
+
+`--canvas-0`, a `--line` edge, a volt Tape along its top.
+
+- **First row:** an Eyebrow `[◈] COMMS // ORCHESTRATOR` and the note's age (`LOOKED 2D AGO`, mono, dim).
+- **The message:** the state note's first sentence at 1.0625rem, `--text-hi`, at most 68ch. Step references (`#399`)
+  are mono volt links that open that step's Details. When the note has more than one sentence, **More** (ghost `sm`)
+  opens the whole note in place as Markdown, and **Less** folds it. No note: "No state note yet", muted.
+- **Actions at the right:** **N to tidy** (`danger`, `sm`) when steps carry hygiene marks; it opens a Menu, one item per
+  marked step (`#id` and its marks, as `hygieneTitle` writes them in `web/src/board/text.ts:23`), each opening Details.
+  The mock's "Project view ›" goes: the rail has it.
+- **Second row, "No claimed step":** when live sessions are not on a Now row (`headerSessions`, today's rule), an Eyebrow
+  `// NO CLAIMED STEP` and one session line each: a neutral diamond, the title, an `ORCHESTRATOR` Chip where it is one,
+  its activity word, Open ↗. Absent when there are none.
+
+### Columns
+
+| Width | Layout |
+|---|---|
+| 1160 px and up (of the page, not the window) | four columns: Needs me, Next, Now, Done, widths 1.12 : 1 : 1.12 : 0.94, `--sp-6` apart |
+| 720 to 1159 px | two by two: Needs me and Now on top, Next and Done below, `--sp-section` between rows |
+| under 720 px | one column: Needs me, Now, Next, Done |
+
+The four-column switch moves from today's 960 px (`web/src/board/useWide.ts:3`) to a page width of 1160 px, since v3's
+type is larger; `useWide` measures the page column, not the window, so the rail's width counts.
+
+**Column head:** the column's glyph (`[!]`, `>>`, `[◈]`, `[✓]`), its name in the display face at `--t-h3`, a Doto Count
+at the right, and under the name a short hint in mono `--t-detail-sm`, sentence case: "Oldest wait first", "Queue
+order, drag or Alt+arrows", "Live sessions, working first", "Latest of 113". A hairline under the head; volt for Needs
+me, whose glyph and Count are volt too, and whose Count blinks once when it rises (§4). The others stay muted.
+
+### Needs me
+
+- **An ask tile** (Tile `ask`: volt wash, volt-tinted edge, Frame corners, the step's hue on its top rule):
+  - top: `#id`, a `needs` Chip naming the kind (`REVIEW`, `QUESTION`, `PERMISSION`), the age;
+  - the title;
+  - the session line: the hue diamond, the session's title, its state word, **Open ↗**;
+  - **each ask in its own panel** (`--canvas-1`, a `--line` edge): an Eyebrow `01 REVIEW` and its age; the text at
+    `--t-body`, cut at four lines with **Show all** when longer; **Answer…** (`primary`, `sm`) and **Clear** (`ghost`,
+    `sm`). Answer… turns the row into a Field ("Your answer, then Enter") and a **Send** button; Enter sends, Escape
+    returns focus to Answer…. A sent or cleared ask strikes through at half opacity until the snapshot drops it. A
+    refusal shows as an ErrorLine in the panel;
+  - the foot: the handoff Chip (opens the viewer), `▤ n` for documents, the label Chip, hygiene words as `quiet` Chips.
+- **A permission wait** is an ask tile whose panel reads "Allow a shell command" with the newest running command in a
+  terminal readout (`--canvas-0`, mono), or "Waiting for permission", and one **Open session to allow ↗** (`primary`).
+- **Order:** oldest wait first, as today. **Empty:** an EmptyState, "Nothing needs you", at its smallest (one line on
+  the dot grid).
+
+### Next
+
+- **Tiles** for the unowned queue: hue, a `ready` Chip, the age, the title, the foot. **back to Backlog** (ghost `sm`)
+  shows on hover and whenever focus is inside the tile, as today.
+- **Drag to reorder**, today's rules (`web/src/board/dragQueue.ts`), with the Tile's drop line in volt. **New: Alt+Up
+  and Alt+Down** on a focused Next tile move it one place, through the same queue write as a drop; focus stays on it.
+- **Own queues:** an Eyebrow `// QUEUED BY <session title>` over each session's own queue, as today's "Queued by".
+- **Empty:** "Nothing is queued".
+
+### The Backlog preview (foot of Next)
+
+A dashed `--line-strong` edge above it.
+
+- **Head:** an Eyebrow `[+] BACKLOG · N` (N as today's "N ›": open entries, parked excluded), then **+ Add** (ghost
+  `sm`) and **Open ›** (ghost `sm`, opens the Backlog view).
+- **Phase TabStrip** (`tabs`): the phases with entries in tree order, then No phase, each with its count, the picked one
+  volt. It replaces the native select; the choice, its storage key (`ip.backlogPreview.<projectId>`) and its default
+  rule do not change.
+- **Rows**, up to five, one line each: mono `#id` in a fixed column, the title at `--t-body`, the age at the right, and a
+  second line only when there is a label or a `blocked` Chip. Hover or focus: `--canvas-2` and **to Next** (ghost `sm`)
+  at the right. Rows drag into Next, as today. A row opens Details.
+- **Foot:** "4 more in No phase · Open Backlog ›" when the phase has more than five; **+ Add** opens the quick-add Field
+  here, which creates under the picked phase (today's rule).
+- **Empty:** "Nothing in <phase>", with the TabStrip still there.
+
+### Now
+
+- **Tiles** for steps with live sessions, working first. Top: hue, a Chip (`live` WORKING, `quiet` IDLE, `quiet` dashed
+  UNATTENDED, `blocked`), the age (`NOW` while working).
+- **Per session:** the session line (hue diamond, title, `drives` or `helping` when there is a driver, Open ↗), then a
+  terminal readout when there is anything to show:
+  - `Task 3 of 4 · <the in-progress task>`, counted from the session's working tasks (the focus step's first, today's
+    rule);
+  - `▸ <newest command> · 2M`, muted while serving, as today's commands line;
+  - `2 subagents` with their purposes in its title, as today's kin count.
+- **No session:** "No session is on it", muted.
+- **Done…** (ghost `sm`, in the foot) opens a Confirm in the tile: "Mark #id done?", the driver note, an outcome Field
+  ("Outcome (optional), then Enter"), **Mark done** (`primary`; "Marking done…" while in flight) and Cancel. Today's
+  keys and rules stand (`web/src/board/NowColumn.tsx:176-221`).
+- **Open ↗** failing shows the copyable `claude --resume` command, as today.
+- **Empty:** "Nothing is in flight".
+
+### Done
+
+- **Tiles** (Tile `done`): no fill, compact; top: `#id`, the label Chip, the age; the title at 0.9375rem, 600; the
+  outcome in muted body text, cut at two lines. No hue and no "Done" Chip.
+- **Since you looked:** a violet Ruler (`since`) with `SINCE YOU LOOKED · 09:14` (the time of the last look, from
+  `ip.look.<projectId>`) where today's divider falls: the tiles above it are new.
+- **Under 720 px** older tiles fold to "✓ N earlier", as today's narrow fold.
+- **Foot:** **All done · 113 ›** (ghost `sm`), opening the All done view.
+- **Empty:** "Nothing done yet".
+
+### Every tile
+
+- **A click anywhere on a tile opens Details**, except on its controls, as today (`web/src/board/Marks.tsx:65-71`).
+- **The tile Details shows stays selected** (volt edge) until Details closes.
+- **Hue:** coloured states only (Needs me, Next, Now), as today's rule; Done and the preview have none.
+- **YOU** (a step Aiden does himself) is a `needs` Chip, since it is his move.
+- **Keyboard (D4):** the four columns are one ListCursor grid (§4): arrows walk the tiles across and down, Enter opens
+  Details, Tab reaches a tile's own buttons. The Backlog preview's rows are a list of their own inside the Next column.
+  Alt+Up and Alt+Down reorder a focused Next tile (above).
+- **Motion:** on first paint of a project's Board the tiles rise in a stagger (§2.7). A tile that arrives later by a
+  live update rises alone. Nothing re-animates on an ordinary snapshot.
+
+### Tests and review (#502)
+
+- Rewritten (§12 lists them): the band position tests for the new widths, the preview test for rows in place of boxes,
+  the permission-wait colour, the YOU tag, the hover actions' visibility.
+- New e2e tests: "N to tidy" lists the marked steps and opens one; Alt+Down moves a Next tile; More opens the whole
+  state note; a reference in the note opens its Details.
+- Parvati reviews the Board at 1600, 1160, 720 and 400 against the mock, with every tile state the fixture can reach (two
+  asks on one step, a permission wait, an unattended step, a blocked step, own queues, an empty column, the since-ruler).
+
+## 8. Project view
+
+*Status: written under Aiden's standing approval (2026-10-18).* Built by #503, after the parts. Label ui. The mock does
+not show it; this section designs it.
+
+### What it improves
+
+- **The whole plan at a glance.** Today the wide layout spends a 320 px side column on the name, the note, a rail key
+  and the done groups. v3 gives that column to a **phase index**: every phase with its progress, one click from its
+  section.
+- **Progress reads as one figure and one bar** per phase, not a legend sentence, a fraction and a bar side by side.
+- **The rail marks explain themselves** in a one-line key above the sections, where today's key sits in the side
+  column only at 960 px and up.
+- **The note reads in full** in the same comms slab as the Board's, so the two views share a voice.
+
+### Layout
+
+| Page width | Layout |
+|---|---|
+| 1160 px and up | the sections (max 1040 px) and, at the right, the phase index (240 px, sticky under the page head) |
+| under 1160 px | one column; the phase index folds into a "Phases · 7" TabStrip-style jump row under the slab |
+
+Top to bottom: the page head (as the Board's: code, name, meta line `7 PHASES · 2 NOW · 3 NEXT · 113 DONE`), the comms
+slab with the whole note open as Markdown (no More), the rail key, the sections, then the finished phases.
+
+### The phase index
+
+- An Eyebrow `// PHASES`, then one row per section in tree order: the phase title (body 600, one line, ellipsis), a thin
+  progress bar (`--canvas-4` track, done in `--text-muted`, now in volt), and `22/30` in mono.
+- A row scrolls its section into view, opens it if folded, and moves focus to its head. The section in view carries a
+  volt `›`.
+- **Finished phases** (today's "Done groups") sit at the index's foot under `// FINISHED · n`, folded; a row opens that
+  section below the open ones, as today's pick does. The fold keeps today's key (`done:0` in `ip.folds.<projectId>`).
+
+### Sections
+
+A panel per section (`--canvas-2`, a `--line` edge), in today's order and with today's open rule
+(`web/src/project/projectOutline.ts:82`) and fold storage (`ip.folds.<projectId>`).
+
+- **Head:** an Eyebrow `[+] #399` (the group's id), the title at `--t-title` in the body face (a phase title is content,
+  not chrome), then at the right: `22/30` as a Readout (`[DONE] 22/30`), `▤ n` (the docs Menu, today's DocsMenu as a
+  Menu part), and the fold caret. The whole head toggles the fold.
+- **Progress bar** under the head: one 4 px bar in four segments, done (`--text-muted`), now (volt), next (`--text`),
+  backlog (a `--line-bright` outline), with today's legend ("22 done · 2 now · 2 next · 2 backlog", zeros left out) in
+  its title and as hidden text. A folded section shows only its head and bar.
+- **Outline rows** (open sections): the position mark, mono `#id`, the title at `--t-body`, then at 1160 px and up in
+  columns: the label Chip, the marks, the sessions on it (one line each, title only, ellipsis), `▤ n`. Under 1160 px the
+  label, marks and sessions wrap onto a second line. Indent per depth: 16 px, 12 px under 1160 px. A row opens Details.
+- **Position marks**, the rail key's legend: Now with a session, a volt LiveDot; Now without one, a muted square; Next,
+  its queue number in mono volt; an own-queue entry, a muted ◆ with its session's title in the title; Backlog, a hollow
+  square; parked, a dashed square. The one-line key above the sections draws each with its word.
+- **Done folds:** "✓ 8 done · latest #412 Fix export · 2D" as one muted mono row; a click expands it, as today.
+- **Foot:** **+ Add a step** (ghost `sm`) opens the quick-add Field, creating under the section's group, as today.
+- **Top level** comes last among the open sections, as today.
+
+### States and keys
+
+- No steps: an EmptyState, "No steps yet".
+- The outline rows of the open sections are one ListCursor list (D4), in screen order across sections; Enter opens
+  Details. The section heads and the index rows are ordinary buttons in the Tab order.
+- Narrow (under 720 px): the slab, the jump row, the sections; outline rows on two lines; the rail key wraps.
+
+### Tests and review (#503)
+
+- The Project view tests keep their behaviour, with selectors on the new head (`.ip-view-name` gives way to the page
+  head) (§12).
+- New e2e test: a phase index row opens a folded section and focuses its head.
+- Parvati reviews the Project view at 1600, 1160, 720 and 400 with a long plan (seven phases, one folded, one finished,
+  a parked step, an own-queue entry).
+
+## 9. Backlog view and All done
+
+*Status: written under Aiden's standing approval (2026-10-18).* Built by #504, after the parts. Label ui.
+
+Both are now rail views (§6). Both use the page head, then their controls in rows `--sp-4` apart, then the list:
+InThink's module-head rule (Projects v3 spec, "Standing rules").
+
+### What it improves
+
+- **Rows instead of boxes.** Today the full Backlog repeats the Board's task box for every entry. A one-line row (the
+  preview's) shows three times as many entries in the same height, with the same actions.
+- **Filters you can see at once:** the phase filter is a TabStrip with counts, the labels are Chips, and the count of
+  what is shown sits in the head's meta line.
+- **All done reads as a log:** a time column, the title and outcome, grouped by day or phase, with the day's count in
+  each heading.
+
+### The Backlog view
+
+- **Head:** code block, title `BACKLOG`, meta line `24 OPEN · 3 PARKED`, which reads `9 OF 24 SHOWN · 3 PARKED` while
+  a filter is on.
+- **Row 1:** the filter Field ("Filter…", today's words-AND rule over `#id`, title, label and parent title; Escape
+  clears it), then at the right the sort as a `segmented` TabStrip (Phase, ID, Age) and the reverse Button (↑ ↓), kept in
+  `ip.backlogOrder` as today.
+- **Row 2:** the phase filter as a `segmented` TabStrip: All, each phase with entries, No phase, each with its count;
+  then the label Chips (multi-select, plus "unlabelled"). The filter lasts while the view is open, as today.
+- **List:** under Phase sort, groups by immediate parent, each headed by an Eyebrow with the parent's id and count
+  (`[+] #399 · 3`) over the parent's title in the body face at 600 ("No phase" for the root's children); ID and Age sorts are one flat list. Each row: mono `#id`, the title
+  at `--t-body`, the label Chip, the age, and, under ID or Age sort, the phase in mono dim. A `blocked` Chip where it
+  applies. A step with open children shows `N open inside`.
+- **Row actions**, on hover and whenever focus is inside the row: **to Next**, **Park…**, **Delete…** (only without
+  children), as today. Park… opens the Park form in the row (Fields: "Why is it set aside?" required, "Where does the
+  work live? (optional)"; **Park** `primary`, disabled until there is a reason). Delete… opens a Confirm whose action is
+  `danger`: "Delete #id title? It can't be undone."
+- **Parked**, at the bottom: an Eyebrow `PARKED · 3`, dashed rows with "Parked 12 Oct: <reason>" and "where <…>" on a
+  second line, and **to Next** and **Unpark**.
+- **Foot:** the quick-add Field, creating a root step, as today.
+- **States:** empty, an EmptyState "Backlog is empty"; no match, "Nothing matches "<filter>"" with **Clear filter**,
+  which focuses the field. A pending row is half opacity with its actions hidden; a refused write shows a Toast and
+  restores the row, as today.
+- **Keys:** the rows (groups and Parked included) are one ListCursor list; Enter opens Details. No drag, as today.
+
+### All done
+
+- **Head:** code block, title `ALL DONE`, meta `113 DONE`, and at the right the order as a `segmented` TabStrip (Time,
+  Phase), kept in `ip.doneOrder`.
+- **By time:** sections Today, Yesterday, then dates, then Undated, each headed by an Eyebrow with its count
+  (`TODAY · 6`). Rows: the time (`HH:MM`) in a fixed mono column, then `#id`, the title, the label Chip and the parent
+  in mono dim; the outcome under it in muted body text, one line, its whole text in the title.
+- **By phase:** sections per immediate parent, headed by the crumb path in the body face at 600
+  ("#26 InProgress › #495 Port the window") with the count in an Eyebrow above it; the left column shows the short date.
+- **Rows** open Details. The rows are one ListCursor list.
+- **Empty:** "Nothing done yet".
+
+### Tests and review (#504)
+
+- The Backlog view's and All done's tests keep their behaviour; their selectors move to the new rows and heads, and
+  "‹ Board" assertions go (§12).
+- New e2e test: the phase TabStrip and a label Chip together narrow the list, and the meta line says how many are shown.
+- Parvati reviews both at 1600, 720 and 400 with a long Backlog (three phases, No phase, parked rows with and without
+  where, a step with open children) and a long All done in both orders.
