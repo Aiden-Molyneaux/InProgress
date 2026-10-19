@@ -38,7 +38,9 @@
 .ip-docs-btn:hover { color: var(--volt); background: var(--canvas-3); }
 .ip-docs-pop { position: absolute; top: 100%; right: 0; z-index: var(--z-popover); width: 320px; max-width: calc(100vw - 2 * var(--sp-4)); margin-top: var(--sp-1); }
 .ip-docs-sum { margin-left: var(--sp-2); font-size: var(--t-detail-sm); color: var(--text-muted); }
-.ip-sec-toggle:focus-visible, .ip-done-fold-btn:focus-visible, .ip-docs-btn:focus-visible, .ip-pi-row:focus-visible, .ip-finished-fold:focus-visible { outline: 2px solid var(--volt); outline-offset: 1px; }
+.ip-sec-toggle:focus-visible, .ip-done-fold-btn:focus-visible, .ip-docs-btn:focus-visible { outline: 2px solid var(--volt); outline-offset: 1px; }
+/* Inside the index, which scrolls and so clips: the ring sits inside the row. */
+.ip-pi-row:focus-visible, .ip-finished-fold:focus-visible { outline: 2px solid var(--volt); outline-offset: -2px; }
 
 .ip-sbar { display: flex; gap: 2px; height: 4px; margin: 0 var(--sp-4) var(--sp-3); }
 .ip-sbar i { display: block; height: 100%; }
