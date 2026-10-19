@@ -50,13 +50,14 @@ Never on a schedule. A retro with no trigger reads a quiet log and proposes nois
 Read the inputs in this order, cheapest first. Stop when the cause is clear.
 
 1. **Workflow notes:** In a tracked session, the next scribe brief carries it, as `log on #<id>: workflow note [<key>] ...` on the step you drive; the receipt's `review` brief at the latest. Aiden reads the step logs for repeated keys at each phase close (#490 adds a Retro due alert that counts them).
-   The retro reads them through the inprogress-scribe agent, read only: `get_node` on each step
-   in the window, returning every log line that contains `workflow note [` or `workflow ruling [`,
-   matched without case, verbatim. `node C:/personal/InProgress/dist/cli/main.js digest inprogress
-   --since <window start> --all` lists the window's sessions (their titles carry their step ids)
-   and the steps that closed in it. `search` does not reach log text, and `get_node` shows a
-   step's latest 20 entries: when a step shows 20, say that its older notes went unread.
-2. **Pilot log:** the routing pilot, #291 (closed 2026-10-10): its step log, and its result, `~/.inprogress/resources/inprogress/2026-10-10-routing-pilot-result.md`, which prices its seven sessions against the baseline (r105 on #289) and names each by session id. A later pilot keeps its window, session ids and targets on its own step, and that step's log is its pilot log. With no pilot in the window, none.
+   The retro reads them through the inprogress-scribe agent: a read-only brief asking for
+   `get_node` on each step in the window and, in place of its usual one-line reply, every log
+   line that contains `workflow note [` or `workflow ruling [`, matched without case, verbatim.
+   `node C:/personal/InProgress/dist/cli/main.js digest inprogress --since <window start> --all`
+   finds the steps: the ones that closed, the ones its Asks lines name, and the ones its sessions'
+   titles usually carry. `search` does not reach log text, and `get_node` shows a step's latest
+   20 entries: when a step shows 20, say that its older notes went unread.
+2. **Pilot log:** the routing pilot, #291: its step log, and its result, `~/.inprogress/resources/inprogress/2026-10-10-routing-pilot-result.md`, which prices its seven sessions against the baseline (r105 on #289) and names each by session id. A later pilot keeps its window, session ids and targets on its own step, and that step's log is its pilot log. With no pilot in the window, none.
 3. **Cost report:** `node scripts/session-cost.mjs --by=session --sessions=<the window's session id prefixes>`, from the main checkout or any worktree (`--since=<date>` instead of `--sessions` for everything in the window). It reads every `~/.claude/projects/C--personal-InProgress*` transcript and prices the requests at API list rates, for comparing sessions with each other, not for billing. The baseline is r105 on #289.
 4. **Transcripts:** `~/.claude/projects/C--personal-InProgress*/<session id>.jsonl`, one folder for the main checkout and one per worktree (`C--personal-InProgress--claude-worktrees-<topic>`), with each session's subagent transcripts under `<session id>/subagents/` (method step 3).
 5. **Workflow files, their keys and their templates:** Shipwright is `C:/personal/shipwright`. `.claude/shipwright.json` maps each adopted file to its template and records the commit it was last synced from; its `skip` list names the templates InProgress has not adopted.
@@ -75,7 +76,7 @@ Read the inputs in this order, cheapest first. Stop when the cause is clear.
    - `docs/known-issues.md` (Doctor Nick's log): project-only
    - the check commands: the `package.json` scripts (key `package.json#<script>`, such as `package.json#test:e2e`), `scripts/build-to.mjs`, `scripts/deploy.mjs`, `test/e2e/start-server.mjs`, and the repo checks under `test/repo/` (`no-em-dash`, `roster`, `agents`, `settings`): project-only
    - the installed kit every tracked session reads: `claude/agents/inprogress-scribe.md`, `claude/skills/inprogress/SKILL.md`, `claude/skills/mip-orc/SKILL.md`, and the briefing the hooks inject (`src/server/briefing.ts`, `src/hooks/`): project-only, and product code, so a fill diff there is a change on Sigmund's risk list
-6. **Proposals home:** `~/.inprogress/resources/inprogress/<yyyy-mm-dd>-retro.md`, one file per retro, attached through the scribe as a resource on the retro's own step (a new step under InProgress, added when the retro starts). The newest `*-retro.md` there opens the next window.
+6. **Proposals home:** `~/.inprogress/resources/inprogress/<yyyy-mm-dd>-retro.md`, one file per retro, attached through the scribe as a resource on the retro's own step (a new step under InProgress, added when the retro starts). The newest `*-retro.md` there opens the next window, and the step it is attached to holds the last ruling lines, so read that step's log too. Until the first one exists, the window starts on 2026-10-18, when #460 brought Sigmund's Workflow notes into InProgress.
 7. **Approval:** one `review` ask through the scribe on the retro's step, `ask on #<id>: review, <n> proposals in <the proposal file>`, with the proposals numbered so Aiden can approve, decline or hold each by number. The ruling lines go the same way, as `log on #<the retro's step>: workflow ruling [<key>] ...`, so the next retro reads them there. The retro session stops at the ask; Aiden's answer turns each approved proposal into a step of its own (a fill diff: an InProgress step for Sigmund; a template diff: a Shipwright step).
 
 ## Method
