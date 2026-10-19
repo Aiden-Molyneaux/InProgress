@@ -99,22 +99,6 @@
    items' focus-visible draws, since focus is always in it. */
 .ip-rename { display: block; width: min(240px, calc(100vw - 30px)); padding: 6px 8px; font: inherit; font-size: var(--fs-m); line-height: 18px; color: var(--text); background: var(--panel); border: 1px solid var(--border); }
 .ip-rename:focus { outline: 2px solid var(--volt); outline-offset: 1px; }
-/* The Go to field on ⋯'s surface: the rename field's look, then the steps as rows, M in ink with the project S and
-   muted at the right, and a muted M line when there is nothing to list. The option Up and Down reach shows as a
-   hovered row does, since focus stays in the field. */
-/* The HUD it opens from never wraps; a long error note must. */
-.ip-menu.ip-goto-menu { width: 360px; white-space: normal; }
-.ip-goto-field { display: block; width: 100%; padding: 6px 8px; font: inherit; font-size: var(--fs-m); line-height: 18px; color: var(--text); background: var(--panel); border: 1px solid var(--border); }
-.ip-goto-field:focus { outline: 2px solid var(--volt); outline-offset: 1px; }
-.ip-goto-field::placeholder { color: var(--faint); }
-.ip-goto-list { margin-top: 4px; }
-.ip-goto-hit { cursor: pointer; color: var(--text-2); }
-.ip-goto-hit .nm { flex: 1; }
-.ip-goto-hit[aria-selected='true'] { background: var(--panel-2); }
-.ip-goto-hit.finished .nm { color: var(--muted); }
-.ip-goto-proj { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
-.ip-goto-proj.archived { font-style: italic; }
-.ip-goto-note:not(:empty) { padding: 7px 8px 3px; font-size: var(--fs-m); line-height: 18px; color: var(--muted); }
 /* A command's mark in a fixed 12 px centred box, as .ip-work-mark: `!`, `✓` and `▸` all sit the same distance from the tag. */
 .ip-cmd-mark { display: inline-block; width: 12px; text-align: center; }
 /* A reader's ◇ in a list (the popover, Details): neutral. */

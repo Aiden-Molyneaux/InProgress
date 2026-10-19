@@ -145,6 +145,12 @@ async function openDetails(page: Page, title: string): Promise<Locator> {
   return details;
 }
 
+/** Details shows this step: its head reads `#id · KIND` and its title is the heading. */
+async function showsStep(details: Locator, id: number, title: string): Promise<void> {
+  await expect(details.locator('.ip-dtop .p-eyebrow')).toHaveText(new RegExp(`^#${id} · `));
+  await expect(details.locator('.ip-dtitle')).toHaveText(title);
+}
+
 /** A resource's row in Details, by its title. */
 const resourceRow = (page: Page, title: string) => page.locator('.ip-res', { hasText: title });
 
@@ -175,12 +181,12 @@ test('Details keeps the last good detail when a refresh fails', async ({ page, a
   await open(page, fresh);
   const id = fresh.ids['Run signing tests'];
   const details = await openDetails(page, 'Run signing tests');
-  await expect(details).toContainText(`#${id} Run signing tests`);
+  await showsStep(details, id, 'Run signing tests');
   await page.route(`**/api/nodes/${id}`, (route) => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'Database is busy' }) }));
   // Any change to the project makes Details refetch.
   await write(api, fresh.session, 'patch', `/api/nodes/${fresh.ids['Play app signing']}`, { outcome: 'Configured' });
-  await expect(details).toContainText("Couldn't refresh: Database is busy");
-  await expect(details).toContainText(`#${id} Run signing tests`);
+  await expect(details.locator('.p-error')).toHaveText(/Couldn't refresh/);
+  await showsStep(details, id, 'Run signing tests');
   await expect(details.getByRole('button', { name: `Copy #${id}` })).toBeVisible();
 });
 
@@ -189,11 +195,11 @@ test('Details closes when its node is deleted, and stays open when another node 
   const id = fresh.ids['3 RevenueCat'];
   await expect(stepRow(page, '7 Launch')).toBeVisible();
   const details = await openDetails(page, '3 RevenueCat');
-  await expect(details).toContainText(`#${id} 3 RevenueCat`);
+  await showsStep(details, id, '3 RevenueCat');
   await write(api, fresh.session, 'delete', `/api/nodes/${fresh.ids['7 Launch']}`);
   // 7 Launch leaving the Board shows that the snapshot without it has landed.
   await expect(stepRow(page, '7 Launch')).toHaveCount(0);
-  await expect(details).toContainText(`#${id} 3 RevenueCat`);
+  await showsStep(details, id, '3 RevenueCat');
   await write(api, fresh.session, 'delete', `/api/nodes/${id}`);
   await expect(details).toBeHidden();
   await expect(page.getByText("Couldn't refresh")).toHaveCount(0);
@@ -1447,17 +1453,17 @@ test.describe('Live work', () => {
     await write(api, fresh.session, 'post', '/api/resources', { nodeId: fresh.ids['Play app signing'], kind: 'doc', title: 'Signing notes', content: '# Notes' });
     await open(page, fresh);
     const details = await openDetails(page, 'Play app signing');
-    // The live work reads before the step's resources.
-    await expect(details.locator('.ip-label')).toHaveText(['Working tasks', 'Subagents', 'Resources']);
-    // Each entry sits on its own soft row, and the heads read in --text-2, so sections and entries read apart.
-    for (const entry of [details.locator('.ip-wt').first(), details.locator('.ip-dagent'), details.locator('.ip-res')]) {
-      await expect(entry).toHaveCSS('background-color', 'rgb(30, 30, 30)');
-    }
-    await expect(details.locator('.ip-label').first()).toHaveCSS('color', 'rgb(242, 242, 242)');
-    // A resource's row deepens on hover and its title takes full ink.
+    // The live work reads before the step's resources: one LIVE WORK head counts the live tasks and subagents, and its
+    // sub-heads name the lists.
+    await expect(details.locator('h3.p-eyebrow')).toHaveText([/LIVE WORK · 4$/, /RESOURCES · 1$/]);
+    await expect(details.locator('.ip-dsub')).toHaveText(['Working tasks', 'Subagents']);
+    // Each entry is its own row.
+    await expect(details.locator('.ip-dagents > li')).toHaveCount(1);
+    await expect(details.locator('.ip-res')).toHaveCount(1);
+    // A resource's row deepens to --canvas-3 on hover, its title in body ink.
     await details.locator('.ip-res').hover();
-    await expect(details.locator('.ip-res')).toHaveCSS('background-color', 'rgb(40, 40, 40)');
-    await expect(details.locator('.ip-res b')).toHaveCSS('color', 'rgb(242, 242, 242)');
+    await expect(details.locator('.ip-res')).toHaveCSS('background-color', 'rgb(30, 30, 30)');
+    await expect(details.locator('.ip-res-title')).toHaveCSS('color', 'rgb(242, 242, 242)');
     // Anchored: the next row's "after Upload the key" names it too.
     await expect(details.locator('.ip-wt', { hasText: /^◐ Upload the key/ })).toHaveText('◐ Upload the key · E2E session');
     await expect(details.locator('.ip-wt', { hasText: 'Check the release track' })).toHaveText('○ Check the release track · E2E session · after Upload the key');
@@ -1472,9 +1478,9 @@ test.describe('Live work', () => {
 });
 
 test.describe('Go to', () => {
-  const field = (page: Page) => page.getByRole('combobox', { name: 'Go to a step' });
-  const goToButton = (page: Page) => page.getByRole('button', { name: 'Go to a step' });
-  const options = (page: Page) => page.getByRole('listbox', { name: 'Steps' }).getByRole('option');
+  const field = (page: Page) => page.getByRole('combobox', { name: 'Find: go to a step, a project or a view' });
+  const goToButton = (page: Page) => page.getByRole('button', { name: 'Find, go to a step' });
+  const options = (page: Page) => page.getByRole('group', { name: 'Steps' }).getByRole('option');
 
   /** A project of its own with `nodes` under its root. Answers its slug and its top steps' ids by title. */
   async function project(api: APIRequestContext, name: string, nodes: unknown[]): Promise<{ id: number; slug: string; ids: Record<string, number> }> {
@@ -1484,7 +1490,7 @@ test.describe('Go to', () => {
     return { id: p.id, slug: p.slug, ids: Object.fromEntries(created.map((n) => [n.title, n.id])) };
   }
 
-  test('/ and Ctrl+K open it, Escape closes it back to the opener, Tab closes it, and the app keys wait while typing', async ({ page, api, demo }) => {
+  test('/ and Ctrl+K open it, Escape closes it back to the opener, Tab stays in the bar, and the app keys wait while typing', async ({ page, api, demo }) => {
     // Somewhere else for ] and 1 to go.
     await bare(api, unique('Go to keys'));
     await widen(page);
@@ -1513,7 +1519,7 @@ test.describe('Go to', () => {
     await expect(field(page)).toBeHidden();
     await expect(tab).toBeFocused();
     await expect(details).toBeVisible();
-    // The button opens it too, and Escape gives focus back to the button. Tab leaves and closes it.
+    // The button opens it too, and Escape gives focus back to the button. Tab stays in the bar: it has one focus stop.
     await goToButton(page).click();
     await expect(field(page)).toBeFocused();
     await page.keyboard.press('Escape');
@@ -1521,6 +1527,9 @@ test.describe('Go to', () => {
     await page.keyboard.press('Enter');
     await expect(field(page)).toBeFocused();
     await page.keyboard.press('Tab');
+    await page.keyboard.press('Shift+Tab');
+    await expect(field(page)).toBeFocused();
+    await page.keyboard.press('Escape');
     await expect(field(page)).toBeHidden();
     // Neither opens it from a text field.
     await page.evaluate(`document.body.append(Object.assign(document.createElement('input'), { id: 'typing' }))`);
@@ -1531,24 +1540,32 @@ test.describe('Go to', () => {
     await expect(field(page)).toBeHidden();
   });
 
-  test("wears the menus' surface, under the bar at its right end", async ({ page, demo }) => {
+  test('is a modal bar on the canvas surface, 640 px wide and centred near the top, over a scrim; the Find button sits at the bar\'s right end', async ({ page, demo }) => {
+    await widen(page);
     await open(page, demo);
     const button = (await goToButton(page).boundingBox())!;
     const bar = (await page.locator('.ip-hud').boundingBox())!;
-    // Inside the HUD's side padding: --sp-4 (16 px) at the suite's 520 px viewport.
-    expect(bar.x + bar.width - (button.x + button.width), 'at the right end').toBeLessThanOrEqual(16);
+    // Inside the HUD's side padding (20 px here).
+    expect(bar.x + bar.width - (button.x + button.width), 'at the right end').toBeLessThanOrEqual(20);
     await goToButton(page).click();
-    const panel = page.locator('.ip-goto-menu');
-    await expect(panel).toHaveCSS('background-color', await tokenColour(page, '--float'));
+    const panel = page.locator('.ip-cmd');
+    await expect(panel).toBeVisible();
+    await expect(panel).toHaveCSS('background-color', await tokenColour(page, '--canvas-1'));
     await expect(panel).toHaveCSS('border-top-width', '1px');
-    await expect(panel).toHaveCSS('border-top-color', await tokenColour(page, '--border'));
+    await expect(panel).toHaveCSS('border-top-color', await tokenColour(page, '--line-strong'));
     await expect(panel).toHaveCSS('border-radius', '0px');
     await expect(panel).toHaveCSS('box-shadow', 'none');
-    await expect(field(page)).toHaveCSS('font-size', '15px');
+    await expect(field(page)).toHaveCSS('font-size', '16px');
+    // The animation ends, then the box is measured: 640 wide, centred, its top near 15 % of the window.
+    await expect.poll(async () => (await panel.boundingBox())!.width).toBe(640);
     const box = (await panel.boundingBox())!;
-    expect(box.y).toBeGreaterThanOrEqual(bar.y + bar.height);
-    expect(box.x).toBeGreaterThanOrEqual(0);
-    expect(box.x + box.width).toBeLessThanOrEqual(520);
+    expect(Math.abs(box.x + box.width / 2 - 500), 'centred').toBeLessThanOrEqual(1);
+    expect(box.y).toBeGreaterThan(900 * 0.13);
+    expect(box.y).toBeLessThan(900 * 0.17);
+    // The scrim is the dialog's backdrop, and the window behind it is inert.
+    expect(await page.evaluate<string>(`getComputedStyle(document.querySelector('.ip-cmd'), '::backdrop').backgroundColor`)).toBe('rgba(0, 0, 0, 0.65)');
+    await expect(page.locator('.ip-app')).toHaveJSProperty('inert', false);
+    expect(await page.evaluate<boolean>(`document.querySelector('.ip-cmd').matches(':modal')`)).toBe(true);
   });
 
   test("go-to opens the step's Details, in this project and in another", async ({ page, api, fresh }) => {
@@ -1567,16 +1584,16 @@ test.describe('Go to', () => {
     await page.keyboard.type(`#${launch}`);
     await page.keyboard.press('Enter');
     await expect(field(page)).toBeHidden();
-    await expect(details).toContainText(`#${launch} 7 Launch`);
+    await showsStep(details, launch, '7 Launch');
     await expect(page).toHaveURL(hereIs(fresh.slug));
     // A step of another project: the project opens, then the step's Details.
     await page.keyboard.press('/');
     await page.keyboard.type(`#${notes}`);
-    await expect(page.locator('.ip-goto-note')).toHaveText('1 step');
+    await expect(page.locator('.ip-cmd-note')).toHaveText('1 step');
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(hereIs(far.slug));
     await expect(field(page)).toBeHidden();
-    await expect(details).toContainText(`#${notes} Old release notes`);
+    await showsStep(details, notes, 'Old release notes');
   });
 
   test('an unknown or deleted id says there is no such step, and the field stays open', async ({ page, api, demo }) => {
@@ -1588,9 +1605,9 @@ test.describe('Go to', () => {
     await page.keyboard.press('/');
     await page.keyboard.type('#99999999');
     await page.keyboard.press('Enter');
-    const panel = page.locator('.ip-goto-menu');
+    const panel = page.locator('.ip-cmd');
     await expect(panel).toContainText('No step #99999999');
-    await expect(panel.locator('.ip-goto-note')).toHaveCSS('color', await tokenColour(page, '--muted'));
+    await expect(panel.locator('.ip-cmd-note')).toHaveCSS('color', await tokenColour(page, '--alarm'));
     await expect(field(page)).toBeFocused();
     await expect(page).toHaveURL(hereIs(demo.slug));
     // A deleted step says the same; typing on clears the line.
@@ -1619,8 +1636,8 @@ test.describe('Go to', () => {
     await expect(options(page)).toHaveCount(2);
     await expect(options(page).nth(0)).toHaveAccessibleName(`#${home.ids[homeTitle]} ${homeTitle}, ${homeName}`);
     await expect(options(page).nth(1)).toHaveAccessibleName(`#${away.ids[awayTitle]} ${awayTitle}, ${awayName}`);
-    await expect(options(page).nth(1).locator('.ip-goto-proj')).toHaveText(awayName);
-    await expect(page.locator('.ip-goto-note')).toHaveText('2 steps');
+    await expect(options(page).nth(1).locator('.ip-cmd-proj')).toHaveText(awayName);
+    await expect(page.locator('.ip-cmd-note')).toHaveText('2 steps');
     await expect(options(page).nth(0)).toHaveAttribute('aria-selected', 'true');
     await page.keyboard.press('ArrowDown');
     await expect(options(page).nth(1)).toHaveAttribute('aria-selected', 'true');
@@ -1631,13 +1648,13 @@ test.describe('Go to', () => {
     await expect(options(page).nth(1)).toHaveAttribute('aria-selected', 'true');
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(hereIs(away.slug));
-    await expect(page.getByRole('complementary')).toContainText(`#${away.ids[awayTitle]} ${awayTitle}`);
+    await showsStep(page.getByRole('complementary'), away.ids[awayTitle], `${awayTitle}`);
     // More words narrow the list; none matching says so.
     await page.keyboard.press('/');
     await page.keyboard.type(`${word} home`);
     await expect(options(page)).toHaveCount(1);
     await page.keyboard.type(' nowhere');
-    await expect(page.locator('.ip-goto-menu')).toContainText('No step titles match');
+    await expect(page.locator('.ip-cmd')).toContainText('No step titles match');
     await expect(options(page)).toHaveCount(0);
     // Away is the open project now, so its step leads. A click picks too.
     await field(page).fill(word);
@@ -1645,7 +1662,7 @@ test.describe('Go to', () => {
     await expect(options(page).nth(0)).toContainText(awayTitle);
     await options(page).nth(1).click();
     await expect(page).toHaveURL(hereIs(home.slug));
-    await expect(page.getByRole('complementary')).toContainText(`#${home.ids[homeTitle]} ${homeTitle}`);
+    await showsStep(page.getByRole('complementary'), home.ids[homeTitle], `${homeTitle}`);
   });
 
   test('Enter straight after typing picks the first step of the new list, never the row highlighted in the old one', async ({ page, api }) => {
@@ -1669,9 +1686,9 @@ test.describe('Go to', () => {
       await route.continue();
     });
     await field(page).fill(`${word} beta`);
-    await expect(page.locator('.ip-goto-hit[aria-selected="true"]')).toHaveCount(0);
+    await expect(page.locator('.ip-cmd-row[aria-selected="true"]')).toHaveCount(0);
     await page.keyboard.press('Enter');
-    await expect(page.getByRole('complementary')).toContainText(`#${made.ids[titles[3]]} ${titles[3]}`);
+    await showsStep(page.getByRole('complementary'), made.ids[titles[3]], `${titles[3]}`);
   });
 
   test('a picked step that went since the search is not jumped to: the status line says so and focus waits on the button', async ({ page, api, demo, consoleErrors }) => {
@@ -1689,7 +1706,7 @@ test.describe('Go to', () => {
     await expect(options(page)).toHaveCount(1);
     await write(api, `e2e-${randomUUID()}`, 'delete', `/api/nodes/${step}`);
     await page.keyboard.press('Enter');
-    await expect(statusLine(page)).toHaveText(`No step #${step}`);
+    await expect(statusLine(page)).toContainText(`No step #${step}`);
     await expect(goToButton(page)).toBeFocused();
     await expect(page.getByRole('complementary')).toHaveCount(0);
     // Its whole project is deleted after the list shows it: the project's address answers 404 and the window moves on.
@@ -1698,7 +1715,7 @@ test.describe('Go to', () => {
     await expect(options(page)).toHaveCount(1);
     expect((await windowPost(page, `/api/ui/projects/${gone.id}/delete`, { slug: gone.slug })).status).toBe(200);
     await page.keyboard.press('Enter');
-    await expect(statusLine(page)).toHaveText(`No step #${gone.ids[`${word} lost`]}`);
+    await expect(statusLine(page)).toContainText(`No step #${gone.ids[`${word} lost`]}`);
     await expect(page).not.toHaveURL(hereIs(gone.slug));
     await expect(goToButton(page)).toBeFocused();
   });
@@ -2102,14 +2119,14 @@ test.describe('Board', () => {
     await open(page, fresh);
     const details = page.getByRole('complementary');
     await nowRow(page, 'Play app signing').locator('.ip-sid').click();
-    await expect(details).toContainText(`#${fresh.ids['Play app signing']} Play app signing`);
+    await showsStep(details, fresh.ids['Play app signing'], 'Play app signing');
     await page.keyboard.press('Escape');
     await expect(details).toHaveCount(0);
     await boxIn(page, 'done', 'Upload keystore').locator('.ip-sid').click();
-    await expect(details).toContainText(`#${fresh.ids['Upload keystore']} Upload keystore`);
+    await showsStep(details, fresh.ids['Upload keystore'], 'Upload keystore');
     await page.keyboard.press('Escape');
     await boxIn(page, 'needs', 'Run signing tests').getByRole('button', { name: 'Run signing tests', exact: true }).click();
-    await expect(details).toContainText(`#${fresh.ids['Run signing tests']} Run signing tests`);
+    await showsStep(details, fresh.ids['Run signing tests'], 'Run signing tests');
     await page.keyboard.press('Escape');
     // Answer… is the row's own button: it opens its field, not Details.
     await band(page, 'needs').getByRole('button', { name: 'Answer…' }).click();
@@ -2261,45 +2278,47 @@ test.describe('Board', () => {
     await expect(chip).toHaveCSS('color', 'rgb(143, 143, 143)');
     await expect(chip).toHaveCSS('font-variant-emoji', 'text');
     await row.getByRole('button', { name: 'Play app signing', exact: true }).click();
-    // Beside kind and status: "active task · ⧉ ui · Claude".
+    // The meta row: the marker, the status chip, the label chip (glyph and word), then who it is for.
     const meta = page.getByRole('complementary').locator('.ip-meta');
-    await expect(meta.locator('.ip-meta-label')).toHaveText('· ⧉ ui');
-    await expect(meta).toHaveText(/^active\s*task\s*· ⧉ ui\s*· Claude/);
-    await expect(meta.locator('.ip-glyph')).toHaveCSS('font-variant-emoji', 'text');
+    await expect(meta.locator('.ip-meta-label')).toHaveText(/⧉\s*ui/);
+    await expect(meta).toHaveText(/^active\s*⧉\s*ui\s*Claude/);
+    await expect(meta.locator('.p-chip[data-tone="label"]')).toHaveCount(1);
+    await expect(meta.locator('.p-chip[data-tone="live"]')).toHaveText('active');
     await expect(meta.locator('.ip-marker.m-active')).toHaveCount(1);
-    await expect(meta.locator('.ip-pill')).toHaveCount(0);
-    await expect(meta).toHaveCSS('font-size', '12px');
-    await expect(meta).toHaveCSS('color', 'rgb(143, 143, 143)');
-    // The log: the time in Martian Mono, the text in ink, the session muted and upright. The entry arrives live.
+    // The log: the time in Martian Mono, the text in ink, the session muted. The entry arrives live.
     await write(api, fresh.session, 'post', `/api/nodes/${fresh.ids['Play app signing']}/log`, { text: 'Uploaded the key', sessionId: fresh.session });
     const entry = page.getByRole('complementary').locator('.ip-log li');
-    await expect(entry).toHaveText('just now · Uploaded the key · E2E session');
+    await expect(entry).toHaveText('just now Uploaded the key · E2E session');
     await expect(entry.locator('.ip-log-time')).toHaveCSS('font-family', /Martian Mono/);
     await expect(entry.locator('.ip-log-text')).toHaveCSS('color', 'rgb(242, 242, 242)');
+    await expect(entry.locator('.ip-log-session')).toHaveCSS('color', 'rgb(143, 143, 143)');
     await expect(entry.locator('i')).toHaveCount(0);
   });
 
-  test('a row opens Details, which copies a reference, wears Quiet, and lists its steps with their markers and YOU tag', async ({ page, demo }) => {
+  test('a row opens Details, which copies a reference, wears v3, and lists its steps with their markers and YOU tag', async ({ page, demo }) => {
     await open(page, demo);
     const id = demo.ids['Run signing tests'];
     const details = await openDetails(page, 'Run signing tests');
-    await expect(details).toContainText(`#${id} Run signing tests`);
+    await showsStep(details, id, 'Run signing tests');
     await details.getByRole('button', { name: `Copy #${id}` }).click();
     // The clipboard write has finished once the button says so.
     await expect(details.getByRole('button', { name: 'Copied' })).toBeVisible();
     // String form: the root tsconfig has no DOM lib, so `navigator` must not appear in test code.
     expect(await page.evaluate<string>('navigator.clipboard.readText()')).toBe(`#${id} Run signing tests`);
-    // v3: an opaque square sheet, the title in L ink, 24 px line buttons.
+    // v3: an opaque square panel on --canvas-1, the title in the body face at 600 in white, 26 px ghost buttons.
     await expect(details).toHaveCSS('background-color', 'rgb(17, 17, 17)');
     await expect(details).toHaveCSS('border-top-left-radius', '0px');
-    const title = details.locator('header b');
-    await expect(title).toHaveCSS('font-size', '16px');
-    await expect(title).toHaveCSS('font-weight', '800');
-    await expect(title).toHaveCSS('color', 'rgb(242, 242, 242)');
-    await expect(details.getByRole('button', { name: 'Close' })).toHaveCSS('height', '24px');
+    await expect(details.locator('.ip-dtop .p-eyebrow')).toHaveText(`#${id} · TASK`);
+    const title = details.locator('h2.ip-dtitle');
+    // --t-h3: 1.0625rem under 720 px, which is this suite's 520 px window.
+    await expect(title).toHaveCSS('font-size', '17px');
+    await expect(title).toHaveCSS('font-weight', '600');
+    await expect(title).toHaveCSS('color', 'rgb(255, 255, 255)');
+    await expect(title).toHaveCSS('font-family', /Archivo/);
+    await expect(details.getByRole('button', { name: 'Close' })).toHaveCSS('min-height', '26px');
     // Its steps draw the marker: a check when done, a still volt square when active, the needs-you mark and YOU.
     await details.getByRole('button', { name: /2 Android signing/ }).click();
-    await expect(details).toContainText(`#${demo.ids['2 Android signing']} 2 Android signing`);
+    await showsStep(details, demo.ids['2 Android signing'], '2 Android signing');
     const steps = details.locator('.ip-kids li');
     await expect(steps).toHaveText([/Upload keystore$/, /Play app signing$/, /Run signing tests\s*YOU$/]);
     // The stylesheet draws the check, so the marker holds no text and the step's name starts with its #id.
@@ -2310,12 +2329,12 @@ test.describe('Board', () => {
     await expect(active).toHaveCSS('background-color', 'rgb(192, 254, 4)');
     await expect(active).toHaveCSS('animation-name', 'none');
     await expect(steps.nth(2).locator('.ip-marker.m-you')).toHaveCount(1);
-    // Its YOU is the tag: volt on the volt wash, 18 px tall, S at 800.
-    const you = steps.nth(2).locator('.ip-you');
-    await expect(you).toHaveCSS('color', 'rgb(192, 254, 4)');
-    await expect(you).toHaveCSS('background-color', 'rgba(192, 254, 4, 0.06)');
-    await expect(you).toHaveCSS('height', '18px');
-    await expect(you).toHaveCSS('font-weight', '800');
+    // Its YOU is the needs Chip: black on volt, at 600.
+    const you = steps.nth(2).locator('.p-chip[data-tone="needs"]');
+    await expect(you).toHaveText('YOU');
+    await expect(you).toHaveCSS('color', 'rgb(0, 0, 0)');
+    await expect(you).toHaveCSS('background-color', 'rgb(192, 254, 4)');
+    await expect(you).toHaveCSS('font-weight', '600');
   });
 
   test('the Backlog preview shows the picked phase and opens the full view', async ({ page, api, fresh }) => {
@@ -3029,7 +3048,8 @@ test.describe('Details: asks, handoff, add a step', () => {
     const asks = details.locator('.ip-dasks');
     const open1 = asks.locator('.ip-dask', { hasText: 'Which keystore signs the release?' });
     await expect(open1).toContainText(`a${fresh.ask}`);
-    await expect(open1).toContainText(/\? question · migrated · (now|\d+m)/);
+    await expect(open1.locator('.ip-dask-head')).toHaveText(new RegExp(`a${fresh.ask} \\? question · (now|\\d+m)`));
+    await expect(open1.locator('.ip-dask-who')).toHaveText('migrated');
     await expect(open1.getByRole('button', { name: 'Clear' })).toBeVisible();
     // Answer… takes focus; Escape closes the field only, returns focus to the button, and leaves Details open.
     const answer = open1.getByRole('button', { name: 'Answer…' });
@@ -3052,12 +3072,12 @@ test.describe('Details: asks, handoff, add a step', () => {
     await expect(page.getByRole('dialog', { name: 'Resource' })).toContainText('Pick up at the upload step.');
   });
 
-  test('Add a step under this one creates a child, keeps its field focused for the next, and Escape returns focus to the button without closing Details', async ({ page, api, fresh }) => {
+  test('Add a step creates a child, keeps its field focused for the next, and Escape returns focus to the button without closing Details', async ({ page, api, fresh }) => {
     const id = fresh.ids['Play app signing'];
     await page.setViewportSize(WIDE);
     await open(page, fresh);
     const details = await openDetails(page, 'Play app signing');
-    const add = details.getByRole('button', { name: 'Add a step under this one' });
+    const add = details.getByRole('button', { name: `Add a step under #${id}` });
     await add.click();
     const field = details.getByRole('textbox', { name: `Add a step under #${id}` });
     await expect(field).toBeFocused();
@@ -3215,5 +3235,127 @@ test.describe('HUD bar and footer strip', () => {
     await expect(page.locator('.ip-hud-edge .p-ruler')).toBeVisible();
     await expect(page.locator('.ip-hud-edge .p-tape')).toHaveCount(0);
     expect((await page.locator('.ip-topbar').boundingBox())!.y, 'the page does not move').toBe(under);
+  });
+});
+
+test.describe('v3 Details, viewer and command bar (#505)', () => {
+  /** Opens a step's Details by id through the command bar, which works over any view. */
+  async function goToStep(page: Page, id: number): Promise<Locator> {
+    await page.keyboard.press('Control+k');
+    await page.keyboard.type(`#${id}`);
+    await page.keyboard.press('Enter');
+    const details = page.getByRole('complementary');
+    await expect(details.locator('.ip-dtop .p-eyebrow')).toHaveText(new RegExp(`^#${id} · `));
+    return details;
+  }
+
+  test('the command bar lists views and projects, and backlog + Enter opens the Backlog view', async ({ page, api, demo }) => {
+    const other = unique('Cmdbar');
+    const made = await bare(api, other);
+    await widen(page);
+    await open(page, demo);
+    await expect(page.getByRole('tab', { selected: true })).toBeVisible();
+    await page.keyboard.press('Control+k');
+    // Nothing typed: the views in order, then the other projects, the open one left out.
+    const goTo = page.getByRole('group', { name: 'Go to' });
+    await expect(goTo.getByRole('option').first()).toBeVisible();
+    await expect(goTo.getByRole('option').locator('.ip-cmd-name').filter({ hasText: /^(Board|Project|Backlog|All done)$/ })).toHaveText(['Board', 'Project', 'Backlog', 'All done']);
+    await expect(goTo.getByRole('option', { name: `Open ${other}` })).toBeVisible();
+    await expect(goTo.getByRole('option').first()).toHaveAttribute('aria-selected', 'true');
+    // "backlog" + Enter opens the Backlog view.
+    await page.keyboard.type('backlog');
+    await expect(goTo.getByRole('option')).toHaveCount(1);
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.ip-backlogview')).toBeVisible();
+    await expect(page.locator('.ip-cmd')).toBeHidden();
+    await expect(page).toHaveURL(hereIs(demo.slug));
+    // A project's name + Enter opens that project.
+    await page.keyboard.press('Control+k');
+    await page.keyboard.type(other.toLowerCase());
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(hereIs(made.slug));
+    await expect(page.locator('.ip-cmd')).toBeHidden();
+    // Steps still answer to #id, with the old message.
+    await page.keyboard.press('Control+k');
+    await page.keyboard.type('#99999999');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.ip-cmd-note')).toHaveText('No step #99999999');
+  });
+
+  test("Details' action strip opens Park without scrolling on a long step", async ({ page, api, fresh }) => {
+    const body = Array.from({ length: 60 }, (_, i) => `Paragraph ${i + 1} of a long step body.`).join('\n\n');
+    const [step] = await write<{ id: number }[]>(api, fresh.session, 'post', '/api/nodes', { parentId: fresh.ids['Road to market'], nodes: [{ title: 'A very long step', status: 'active', body }] });
+    for (let i = 0; i < 30; i++) await write(api, fresh.session, 'post', `/api/nodes/${step.id}/log`, { text: `Log line ${i + 1}`, sessionId: fresh.session });
+    await page.setViewportSize({ width: 1000, height: 700 });
+    await open(page, fresh);
+    await expect(stepRow(page, 'Play app signing')).toBeVisible();
+    const details = await goToStep(page, step.id);
+    // The body scrolls; the head and the strip do not.
+    const scroller = details.locator('.ip-dbody');
+    await expect.poll(() => page.evaluate<number>(`(() => { const e = document.querySelector('.ip-dbody'); return e.scrollHeight - e.clientHeight; })()`)).toBeGreaterThan(200);
+    const park = details.getByRole('button', { name: 'Park…' });
+    await expect(park).toBeInViewport({ ratio: 1 });
+    const strip = (await details.locator('.ip-dstrip').boundingBox())!;
+    const box = (await park.boundingBox())!;
+    const frame = (await details.boundingBox())!;
+    expect(box.y).toBeGreaterThanOrEqual(strip.y);
+    expect(box.y + box.height).toBeLessThanOrEqual(frame.y + frame.height);
+    expect(await page.evaluate<number>(`document.querySelector('.ip-dbody').scrollTop`)).toBe(0);
+    await park.click();
+    // The form opens in the strip, and the head stays on screen.
+    const form = details.locator('.ip-dstrip').getByRole('dialog', { name: /^Park #/ });
+    await expect(form).toBeVisible();
+    await expect(form.getByRole('textbox', { name: 'Reason' })).toBeFocused();
+    await expect(details.locator('.ip-dtitle')).toBeInViewport({ ratio: 1 });
+    const strip2 = (await details.locator('.ip-dstrip').boundingBox())!;
+    expect(strip2.height, 'at most half the panel').toBeLessThanOrEqual(frame.height / 2 + 1);
+  });
+
+  test('at 400 px Details covers the page and Escape returns focus to its tile', async ({ page, fresh }) => {
+    await page.setViewportSize({ width: 400, height: 800 });
+    await open(page, fresh);
+    const tile = stepRow(page, 'Play app signing');
+    await tile.click();
+    const details = page.getByRole('complementary');
+    await expect(details.locator('.ip-dtitle')).toHaveText('Play app signing');
+    await expect(details.locator('.ip-dtitle')).toBeFocused();
+    // It fills .ip-main exactly: below the HUD, above the footer.
+    const main = (await page.locator('.ip-main').boundingBox())!;
+    const cover = (await details.boundingBox())!;
+    for (const edge of ['x', 'y', 'width', 'height'] as const) expect(Math.abs(cover[edge] - main[edge]), edge).toBeLessThanOrEqual(1);
+    const hud = (await page.locator('.ip-hud').boundingBox())!;
+    const footer = (await page.locator('.ip-footer').boundingBox())!;
+    expect(cover.y).toBeGreaterThanOrEqual(hud.y + hud.height - 1);
+    expect(cover.y + cover.height).toBeLessThanOrEqual(footer.y + 1);
+    await page.keyboard.press('Escape');
+    await expect(details).toHaveCount(0);
+    await expect(tile).toBeFocused();
+  });
+
+  test('on the Project view at 1600 px an open Details leaves the phase index in view beside it', async ({ page, fresh }) => {
+    await page.setViewportSize({ width: 1600, height: 900 });
+    await open(page, fresh);
+    await page.getByRole('button', { name: 'Project', exact: true }).click();
+    const project = page.locator('.ip-project');
+    await expect(project).toHaveAttribute('data-wide', 'true');
+    await expect(page.locator('.ip-pside')).toBeVisible();
+    await goToStep(page, fresh.ids['Play app signing']);
+    const details = page.getByRole('complementary');
+    // The page narrowed beside Details: 1160 px is still wide, and the index sits left of the panel.
+    await expect(project).toHaveAttribute('data-wide', 'true');
+    const index = (await page.locator('.ip-pside').boundingBox())!;
+    const panel = (await details.boundingBox())!;
+    expect(index.x + index.width).toBeLessThanOrEqual(panel.x + 1);
+    const page1 = (await project.boundingBox())!;
+    expect(page1.x + page1.width).toBeLessThanOrEqual(panel.x + 1);
+    // Under 1160 px of remaining page the index folds into the jump row.
+    await page.setViewportSize({ width: 1500, height: 900 });
+    await expect(project).not.toHaveAttribute('data-wide', 'true');
+    await expect(page.locator('.ip-pside')).toHaveCount(0);
+    await expect(page.locator('.ip-jump')).toBeVisible();
+    // Closed, the page takes the width back and the index returns.
+    await page.keyboard.press('Escape');
+    await expect(project).toHaveAttribute('data-wide', 'true');
+    await expect(page.locator('.ip-pside')).toBeVisible();
   });
 });

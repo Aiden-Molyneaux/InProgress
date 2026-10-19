@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseGoTo, type StepHit } from '../../src/core/goto';
-import { goToMessage, hitLabel, isGoToChord, pickHit } from '../../web/src/chrome/goToText';
+import { goTargets, goToMessage, hitLabel, isGoToChord, matchTargets, pickHit, targetKey } from '../../web/src/chrome/goToText';
 
 const hit = (extra: Partial<StepHit> = {}): StepHit => ({ id: 77, title: 'Play app signing', status: 'active', projectId: 3, projectSlug: 'ingame', projectName: 'InGame', projectStatus: 'active', ...extra });
 
@@ -68,5 +68,55 @@ describe('pickHit', () => {
     expect(pickHit(list, undefined)?.id).toBe(1);
     expect(pickHit([list[2], list[0]], 2)?.id).toBe(3);
     expect(pickHit([], 2)).toBeUndefined();
+  });
+});
+
+describe('goTargets', () => {
+  const projects = [{ slug: 'inthink', name: 'InThink' }, { slug: 'ingame', name: 'InGame' }];
+
+  it('lists the views in order, then each project in the order given', () => {
+    const labels = goTargets(projects, null).map((t) => t.label);
+    expect(labels).toEqual(['Board', 'Project', 'Backlog', 'All done', 'Open InThink', 'Open InGame']);
+  });
+
+  it('leaves out the open project', () => {
+    expect(goTargets(projects, 'inthink').map((t) => t.label)).toEqual(['Board', 'Project', 'Backlog', 'All done', 'Open InGame']);
+  });
+
+  it('keys a view and a project apart', () => {
+    expect(goTargets(projects, null).map(targetKey)).toEqual(['view:board', 'view:project', 'view:backlog', 'view:done', 'project:inthink', 'project:ingame']);
+  });
+});
+
+describe('matchTargets', () => {
+  const targets = goTargets([{ slug: 'inthink', name: 'InThink' }, { slug: 'ingame', name: 'InGame' }], null);
+  const labels = (text: string) => matchTargets(text, targets).map((t) => t.label);
+
+  it('lists everything for nothing typed, and nothing for an id', () => {
+    expect(matchTargets('', targets)).toHaveLength(6);
+    expect(matchTargets('   ', targets)).toHaveLength(6);
+    expect(labels('#77')).toEqual([]);
+    expect(labels('77')).toEqual([]);
+  });
+
+  it('matches the start of a word of a view or a project name, in any case', () => {
+    expect(labels('backlog')).toEqual(['Backlog']);
+    expect(labels('BACK')).toEqual(['Backlog']);
+    expect(labels('all')).toEqual(['All done']);
+    expect(labels('done')).toEqual(['All done']);
+    expect(labels('inth')).toEqual(['Open InThink']);
+    expect(labels('open inth')).toEqual(['Open InThink']);
+  });
+
+  it('needs every typed word to match, and a bare "open" lists all', () => {
+    expect(labels('in')).toEqual(['Open InThink', 'Open InGame']);
+    expect(labels('all done')).toEqual(['All done']);
+    expect(labels('all inth')).toEqual([]);
+    expect(labels('open')).toHaveLength(6);
+  });
+
+  it('finds nothing for a word that starts none', () => {
+    expect(labels('zzz')).toEqual([]);
+    expect(labels('klog')).toEqual([]);
   });
 });

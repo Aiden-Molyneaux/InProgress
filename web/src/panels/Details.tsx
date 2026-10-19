@@ -15,6 +15,10 @@ import { QuickAdd } from '../board/QuickAdd';
 import { ageShort } from '../board/text';
 import { TASK_MARK, agentLineParts, commandDescription, commandLabel, commandMark, commandWhen, taskOwner, trailAgentParts, waitsFor, withoutOwnId, workMark } from '../live';
 import { Marker } from '../Marker';
+import { Button } from '../parts/Button';
+import { Chip } from '../parts/Chip';
+import { ErrorLine } from '../parts/ErrorLine';
+import { Eyebrow } from '../parts/Eyebrow';
 import { relativeTime } from '../time';
 import { useNow } from '../useNow';
 import { resourceSummary } from './format';
@@ -69,7 +73,8 @@ function PurposeLine({ purpose }: { purpose: string | null }) {
  * The node's working tasks, with who is on each, the subagents working on it, and its trail of ended work (tasks an
  * ended session left here and subagents that stopped), under each session's title: live, from the snapshot. A running
  * reader is listed marked `◇`; an ended one is not. Each subagent's purpose, when known, is a second line under it. The commands
- * homed here (running, or ended under five minutes ago) are listed under Background.
+ * homed here (running, or ended under five minutes ago) are listed under Background. One LIVE WORK head counts the
+ * live tasks, subagents and commands over the four lists.
  */
 function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'>) {
   const now = useNow(30_000);
@@ -87,11 +92,13 @@ function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'
     .filter((t) => t.nodeId === nodeId)
     .map((t) => t.agent);
   const trail = trailGroups(snapshot, onNode.filter((w) => w.endedAt !== null), trailHere);
+  if (tasks.length + agents.length + commands.length + trail.length === 0) return null;
   return (
-    <>
+    <section className="ip-dsec ip-dlive">
+      <Eyebrow as="h3" glyph="[◈]">{`LIVE WORK · ${tasks.length + agents.length + commands.length}`}</Eyebrow>
       {tasks.length > 0 && (
         <>
-          <div className="ip-label">Working tasks</div>
+          <Eyebrow className="ip-dsub">Working tasks</Eyebrow>
           <ul className="ip-wts">
             {tasks.map((w) => {
               const waits = waitsFor(w, snapshot.workItems);
@@ -111,7 +118,7 @@ function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'
       )}
       {agents.length > 0 && (
         <>
-          <div className="ip-label">Subagents</div>
+          <Eyebrow className="ip-dsub">Subagents</Eyebrow>
           <ul className="ip-dagents">
             {agents.map(({ session, agent }) => {
               return (
@@ -131,8 +138,8 @@ function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'
       )}
       {commands.length > 0 && (
         <>
-          <div className="ip-label">Background</div>
-          <ul className="ip-dagents">
+          <Eyebrow className="ip-dsub">Background</Eyebrow>
+          <ul className="ip-dagents ip-dcmds">
             {commands.map(({ session, command }) => {
               const description = commandDescription(command);
               return (
@@ -152,7 +159,7 @@ function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'
       )}
       {trail.length > 0 && (
         <>
-          <div className="ip-label">Ended work</div>
+          <Eyebrow className="ip-dsub">Ended work</Eyebrow>
           {trail.map((g) => (
             <div key={g.id} className="ip-trail">
               <div className="ip-trail-head">
@@ -177,7 +184,7 @@ function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'
           ))}
         </>
       )}
-    </>
+    </section>
   );
 }
 
@@ -197,14 +204,15 @@ function AsksSection({ nodeId, snapshot, now }: { nodeId: number; snapshot: Proj
     return sessionDisplayTitle(s ?? { id: sessionId, title: null });
   };
   return (
-    <>
-      <div className="ip-label">Asks</div>
+    <section className="ip-dsec">
+      <Eyebrow as="h3" glyph="//">{`ASKS · ${open.length + answered.length}`}</Eyebrow>
       <ul className="ip-dasks">
         {open.map((a) => (
           <li key={a.id} className="ip-dask" data-ask={a.id}>
-            <div className="ip-dask-head">
-              <span className="ip-id">{`a${a.id}`}</span> {KIND_MARK[a.kind]} {a.kind} · <span className="ip-dask-who" title={raiser(a.sessionId)}>{raiser(a.sessionId)}</span> · <span className="ip-time">{ageShort(a.raisedAt, now)}</span>
-            </div>
+            <Eyebrow className="ip-dask-head">
+              <span className="ip-id">{`a${a.id}`}</span> {KIND_MARK[a.kind]} {a.kind} · <span className="ip-time">{ageShort(a.raisedAt, now)}</span>
+            </Eyebrow>
+            <div className="ip-dask-who" title={raiser(a.sessionId)}>{raiser(a.sessionId)}</div>
             <p>{a.text}</p>
             <AskActions ask={a} area="details" />
           </li>
@@ -215,13 +223,16 @@ function AsksSection({ nodeId, snapshot, now }: { nodeId: number; snapshot: Proj
           </li>
         ))}
       </ul>
-    </>
+    </section>
   );
 }
 
 export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResource, onStatus }: DetailsProps) {
   const [detail, setDetail] = useState<NodeDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Counts Retry presses: the fetch below runs again for each. */
+  const [attempt, setAttempt] = useState(0);
+  const retry = () => setAttempt((n) => n + 1);
   const [copied, setCopied] = useState(false);
   const copiedTimer = useRef(0);
   useEffect(() => () => window.clearTimeout(copiedTimer.current), []);
@@ -271,16 +282,26 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
     return () => {
       alive = false;
     };
-  }, [nodeId, snapshot]);
+  }, [nodeId, snapshot, attempt]);
+
+  // Opening Details moves focus to its title once the step has loaded. A passive effect, not a layout effect: App's layout
+  // effect has already recorded the tile that opened it.
+  const title = useRef<HTMLHeadingElement>(null);
+  const loaded = detail !== null;
+  useEffect(() => {
+    if (loaded) title.current?.focus();
+  }, [loaded]);
 
   if (!detail) {
     return (
       <aside className="ip-details" aria-label="Node details">
-        <header>
-          <b>#{nodeId}</b>
-          <button className="ip-btn" onClick={onClose} aria-label="Close">×</button>
+        <header className="ip-dhead">
+          <div className="ip-dtop">
+            <Eyebrow>{`#${nodeId}`}</Eyebrow>
+            <Button variant="ghost" size="sm" aria-label="Close" onClick={onClose}>×</Button>
+          </div>
         </header>
-        <p className="muted">{error || 'Loading…'}</p>
+        <div className="ip-dbody">{error ? <ErrorLine message={error} onRetry={retry} /> : <p className="ip-dmuted">Loading…</p>}</div>
       </aside>
     );
   }
@@ -319,118 +340,123 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
     window.clearTimeout(copiedTimer.current);
     copiedTimer.current = window.setTimeout(() => setCopied(false), 1200);
   };
+  const statusTone = isNeedsYou(node, shelved.has(node.id)) ? 'needs' : node.status === 'active' ? 'live' : node.status === 'blocked' ? 'blocked' : node.status === 'parked' ? 'parked' : 'quiet';
 
   return (
     <aside className="ip-details" aria-label="Node details">
-      <div className="ip-grab" />
-      <header>
-        <b tabIndex={-1}>#{node.id} {node.title}</b>
-        <button className="ip-btn" onClick={() => void copy()}>{copied ? 'Copied' : `Copy #${node.id}`}</button>
-        <button className="ip-btn" onClick={onClose} aria-label="Close">×</button>
+      <header className="ip-dhead">
+        <div className="ip-dtop">
+          <Eyebrow>{`#${node.id} · ${node.kind.toUpperCase()}`}</Eyebrow>
+          <span className="ip-dtop-act">
+            <Button variant="ghost" size="sm" onClick={() => void copy()}>{copied ? 'Copied' : `Copy #${node.id}`}</Button>
+            <Button variant="ghost" size="sm" aria-label="Close" onClick={onClose}>×</Button>
+          </span>
+        </div>
+        <h2 ref={title} tabIndex={-1} className="ip-dtitle">{node.title}</h2>
       </header>
-      <div className="ip-meta">
-        {/* The canvas's marker, then the status as a muted word. A paused step draws the sky ring here too; nothing
-            pulses here. */}
-        {marker(node)}
-        <span>{node.status}</span>
-        <span>{node.kind}</span>
-        {node.label && (
-          <span className="ip-meta-label">
-            · <span className={`ip-glyph l-${node.label}`}>{LABEL_GLYPHS[node.label]}</span> {node.label}
-          </span>
+      <div className="ip-dbody">
+        <div className="ip-meta">
+          {/* The canvas's marker, then the status as a chip. A paused step draws the sky ring here too; nothing pulses here. */}
+          {marker(node)}
+          <Chip tone={statusTone}>{node.status}</Chip>
+          {node.label && (
+            <Chip tone="label" glyph={LABEL_GLYPHS[node.label]} className="ip-meta-label">
+              {node.label}
+            </Chip>
+          )}
+          {node.assignee === 'me' ? <Chip tone="needs">YOU</Chip> : <span className="ip-dwho">Claude</span>}
+          {detail.parent && (
+            <span className="ip-dparent">
+              in{' '}
+              <button className="ip-link" onClick={() => onSelectNode(detail.parent!.id)}>
+                #{detail.parent.id} {detail.parent.title}
+              </button>
+            </span>
+          )}
+        </div>
+        {node.status === 'parked' && (
+          <div className="ip-dparked">
+            <Eyebrow>{node.parkedAt ? `Parked ${shortDate(node.parkedAt, now)}` : 'Parked'}</Eyebrow>
+            <p>{node.parkedReason}</p>
+            {node.parkedWhere && <p className="ip-dmuted">{`where ${node.parkedWhere}`}</p>}
+            <Button ref={unparkButton} variant="outline" size="sm" busy={unparkBusy} onClick={() => void unpark()}>Unpark</Button>
+          </div>
         )}
-        <span>· {node.assignee === 'me' ? 'you' : 'Claude'}</span>
-        {detail.parent && (
-          <span>
-            · in{' '}
-            <button className="ip-link" onClick={() => onSelectNode(detail.parent!.id)}>
-              #{detail.parent.id} {detail.parent.title}
-            </button>
-          </span>
+        <AsksSection nodeId={node.id} snapshot={snapshot} now={now} />
+        {(handoff || marks.length > 0 || node.body || node.outcome) && (
+          <section className="ip-dsec ip-dstep">
+            {(handoff || marks.length > 0) && (
+              <div className="ip-dmarks">
+                {handoff && (
+                  <button type="button" className="ip-chip-handoff" onClick={() => onOpenResource(handoff.id)}>
+                    {`handoff · ${ageShort(handoff.createdAt, now)}`}
+                  </button>
+                )}
+                {marks.map((m) => (
+                  <Chip key={m} tone="quiet" dashed>
+                    {MARK_WORDS[m]}
+                  </Chip>
+                ))}
+              </div>
+            )}
+            {node.body && <Markdown text={node.body} />}
+            {node.outcome && (
+              <div className="ip-outcome">
+                <Eyebrow glyph="[✓]">OUTCOME</Eyebrow>
+                <p>{node.outcome}</p>
+              </div>
+            )}
+          </section>
+        )}
+        <LiveWork nodeId={node.id} snapshot={snapshot} />
+        {detail.resources.length > 0 && (
+          <section className="ip-dsec">
+            <Eyebrow as="h3" glyph="//">{`RESOURCES · ${detail.resources.length}`}</Eyebrow>
+            <div className="ip-ress">
+              {detail.resources.map((r) => (
+                <button key={r.id} className="ip-res" onClick={() => onOpenResource(r.id)}>
+                  <span className="ip-res-title">{r.title}</span>
+                  <span className="sub">{resourceSummary(r)}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+        {detail.children.length > 0 && (
+          <section className="ip-dsec">
+            <Eyebrow as="h3" glyph="//">{`STEPS · ${detail.children.length}`}</Eyebrow>
+            <ul className="ip-kids">
+              {detail.children.map((c) => (
+                <li key={c.id}>
+                  <button onClick={() => onSelectNode(c.id)}>
+                    <span className="ip-kid-mark">{marker(c)}</span>
+                    <span className="ip-kid-id">#{c.id}</span>{' '}
+                    <span className="ip-kid-title">{c.title}</span>
+                    {c.assignee === 'me' && c.status !== 'done' ? <Chip tone="needs">YOU</Chip> : null}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+        {detail.log.length > 0 && (
+          <section className="ip-dsec">
+            <Eyebrow as="h3" glyph="//">{`LOG · ${detail.log.length}`}</Eyebrow>
+            <ul className="ip-log">
+              {detail.log.map((l) => (
+                <li key={l.id}>
+                  <span className="ip-log-time">{relativeTime(l.createdAt)}</span> <span className="ip-log-text">{l.text}</span>
+                  {l.sessionTitle ? <span className="ip-log-session"> · {l.sessionTitle}</span> : null}
+                </li>
+              ))}
+            </ul>
+          </section>
         )}
       </div>
-      {node.status === 'parked' && (
-        <div className="ip-dparked">
-          <p>
-            <b>{node.parkedAt ? `Parked ${shortDate(node.parkedAt, now)}:` : 'Parked:'}</b> {node.parkedReason}
-          </p>
-          {node.parkedWhere && <p className="muted">{`where ${node.parkedWhere}`}</p>}
-          <button type="button" ref={unparkButton} className="ip-btn" disabled={unparkBusy} onClick={() => void unpark()}>Unpark</button>
-        </div>
-      )}
-      <AsksSection nodeId={node.id} snapshot={snapshot} now={now} />
-      {(handoff || marks.length > 0) && (
-        <div className="ip-dmarks">
-          {handoff && (
-            <button type="button" className="ip-chip-handoff" onClick={() => onOpenResource(handoff.id)}>
-              {`handoff · ${ageShort(handoff.createdAt, now)}`}
-            </button>
-          )}
-          {marks.map((m) => (
-            <span key={m} className="ip-mark hygiene">
-              {MARK_WORDS[m]}
-            </span>
-          ))}
-        </div>
-      )}
-      {node.body && <Markdown text={node.body} />}
-      {node.outcome && (
-        <p className="ip-outcome">
-          <b>Outcome:</b> {node.outcome}
-        </p>
-      )}
-      <LiveWork nodeId={node.id} snapshot={snapshot} />
-      {detail.resources.length > 0 && (
-        <>
-          <div className="ip-label">Resources</div>
-          {detail.resources.map((r) => (
-            <button key={r.id} className="ip-res" onClick={() => onOpenResource(r.id)}>
-              ▤ <b>{r.title}</b>
-              <span className="sub">{resourceSummary(r)}</span>
-            </button>
-          ))}
-        </>
-      )}
-      {detail.children.length > 0 && (
-        <>
-          <div className="ip-label">Steps</div>
-          <ul className="ip-kids">
-            {detail.children.map((c) => (
-              <li key={c.id}>
-                <button onClick={() => onSelectNode(c.id)}>
-                  <span className="ip-kid-mark">{marker(c)}</span>
-                  #{c.id} {c.title}
-                  {c.assignee === 'me' && c.status !== 'done' ? <span className="ip-you">YOU</span> : null}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-      {detail.log.length > 0 && (
-        <>
-          <div className="ip-label">Log</div>
-          <ul className="ip-log">
-            {detail.log.map((l) => (
-              <li key={l.id}>
-                <span className="ip-log-time">{relativeTime(l.createdAt)}</span> · <span className="ip-log-text">{l.text}</span>
-                {l.sessionTitle ? <span> · {l.sessionTitle}</span> : null}
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-      {parkable && (
-        <div className="ip-dadd">
-          {parking ? (
-            <ParkForm projectId={projectId} slug={snapshot.project.slug} nodeId={node.id} title={node.title} onStatus={onStatus} onDone={() => { setParking(false); setFocusNext('unpark'); }} onCancel={() => { setParking(false); setFocusNext('park'); }} />
-          ) : (
-            <button type="button" ref={parkButton} className="ip-btn" onClick={() => setParking(true)}>Park…</button>
-          )}
-        </div>
-      )}
-      <div className="ip-dadd">
-        {adding ? (
+      <div className="ip-dstrip">
+        {parking ? (
+          <ParkForm projectId={projectId} slug={snapshot.project.slug} nodeId={node.id} title={node.title} onStatus={onStatus} onDone={() => { setParking(false); setFocusNext('unpark'); }} onCancel={() => { setParking(false); setFocusNext('park'); }} />
+        ) : adding ? (
           <QuickAdd
             projectId={snapshot.project.id}
             slug={snapshot.project.slug}
@@ -445,15 +471,17 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
             }}
           />
         ) : (
-          <button type="button" ref={addButton} className="ip-btn" onClick={() => setAdding(true)}>
-            Add a step under this one
-          </button>
+          <>
+            {parkable && <Button ref={parkButton} variant="outline" size="md" onClick={() => setParking(true)}>Park…</Button>}
+            <Button ref={addButton} variant="ghost" size="md" aria-label={`Add a step under #${node.id}`} onClick={() => setAdding(true)}>Add a step</Button>
+            {error ? (
+              <ErrorLine className="ip-dstrip-error" message="Couldn't refresh" onRetry={retry} />
+            ) : (
+              <span className="ip-dupdated">{`UPDATED ${relativeTime(node.updatedAt).toUpperCase()}`}</span>
+            )}
+          </>
         )}
       </div>
-      <p className="muted" style={{ marginTop: 12 }}>
-        Updated {relativeTime(node.updatedAt)} · {snapshot.project.name}
-      </p>
-      {error && <p className="muted">Couldn't refresh: {error}</p>}
     </aside>
   );
 }

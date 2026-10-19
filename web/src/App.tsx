@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { deriveBoard, isLive } from '../../src/core/board';
-import type { StepHit } from '../../src/core/goto';
 import { buildIndex, shelvedIds } from '../../src/core/tree';
 import type { ProjectSnapshot } from '../../src/core/types';
 import { api, postEvent } from './api';
@@ -8,7 +7,7 @@ import { Board } from './board/Board';
 import { useLastLook } from './board/lastLook';
 import { noteAction, noteHidden, noteShown, setPoster } from './measure';
 import { Footer } from './chrome/Footer';
-import type { GoToHandle } from './chrome/GoTo';
+import type { GoPick, GoToHandle } from './chrome/GoTo';
 import { Hud, HudEdge } from './chrome/Hud';
 import { askTarget } from './chrome/hudLogic';
 import { archivedProjects, loadTabOrder, moveTab, neighbourTab, projectTabs, pruneOrder, saveTabOrder, stepTab, TAB_ORDER_KEY } from './chrome/tabs';
@@ -276,7 +275,21 @@ export function App() {
   goingRef.current = goingTo;
   /** The jump whose step the snapshot lacked, checked with the server once so a stale snapshot never drops it. */
   const checked = useRef<typeof goingTo>(null);
-  const goTo = (hit: StepHit) => {
+  const goTo = (pick: GoPick) => {
+    if (pick.kind === 'view') {
+      if (pick.view === 'board' || pick.view === 'project') pickView(pick.view);
+      else {
+        pickView('board');
+        if (pick.view === 'backlog') openBacklog();
+        else openDone();
+      }
+      return;
+    }
+    if (pick.kind === 'project') {
+      state.selectProject(pick.slug);
+      return;
+    }
+    const { hit } = pick;
     setGoingTo({ id: hit.id, projectId: hit.projectId, slug: hit.projectSlug });
     if (hit.projectSlug !== state.slug) state.selectProject(hit.projectSlug);
   };
@@ -285,7 +298,7 @@ export function App() {
     if (!going) return;
     const drop = () => {
       setGoingTo(null);
-      say(`No step #${going.id}`);
+      fail(`No step #${going.id}`);
     };
     if (state.slug !== going.slug) {
       setGoingTo(null);
