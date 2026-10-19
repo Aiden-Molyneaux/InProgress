@@ -106,7 +106,7 @@ export function Rail({ tabs, archived, deleted: listed, current, onSelect, onMov
 
   // The roving stops follow focus: the row (or view) focused last, until the current one changes, which resets them to it.
   const [rowStop, setRowStop] = useState<{ from: string | null; slug: string } | null>(null);
-  const [viewStop, setViewStop] = useState<{ from: View; view: View } | null>(null);
+  const [viewStop, setViewStop] = useState<{ from: string; view: View } | null>(null);
   // Whether focus is in the views list. Switching project swaps that list for the new current row's, which takes focus
   // with it; it goes to the new list's current view instead of the page.
   const inViews = useRef(false);
@@ -125,10 +125,11 @@ export function Rail({ tabs, archived, deleted: listed, current, onSelect, onMov
   const menuGone = rowMenu !== null && (!menuProject || !rowMenu.row.isConnected);
   useEffect(() => {
     if (!menuGone) return;
-    // Focus in the menu goes to the current row (or the foot) rather than the page.
-    const had = rail.current?.querySelector('.ip-rail-menu')?.contains(document.activeElement) ?? false;
+    // The menu has already left the page with its row, so focus that was in it now sits on the body: it goes to the
+    // current row (or the foot) rather than the page.
+    const active = document.activeElement;
     setRowMenu(null);
-    if (had) fallbackFocus(rail.current)?.focus();
+    if (!active || active === document.body) fallbackFocus(rail.current)?.focus();
   }, [menuGone]);
   const closeRowMenu = (refocus: boolean) => {
     const row = rowMenu?.row;
@@ -235,7 +236,8 @@ export function Rail({ tabs, archived, deleted: listed, current, onSelect, onMov
   if (!shown) return null;
   // The rows are one stop in the tab order: the one focused last, else the current row's, else the first row's.
   const stop = rowStop && rowStop.from === current && tabs.some((p) => p.slug === rowStop.slug) ? rowStop.slug : tabs.some((p) => p.slug === current) ? current : tabs[0]?.slug;
-  const viewsStop = viewStop && viewStop.from === view ? viewStop.view : view;
+  // The views stop resets on a new view or a new project, whose list starts at its current view.
+  const viewsStop = viewStop && viewStop.from === `${current}:${view}` ? viewStop.view : view;
   const lastActive = activeIds[activeIds.length - 1];
   return (
     <nav className="ip-rail" aria-label="Projects" data-layout={layout} ref={rail}>
@@ -313,7 +315,7 @@ export function Rail({ tabs, archived, deleted: listed, current, onSelect, onMov
                           className="ip-rail-view"
                           aria-current={v.view === view ? 'page' : undefined}
                           tabIndex={v.view === viewsStop ? 0 : -1}
-                          onFocus={() => setViewStop({ from: view, view: v.view })}
+                          onFocus={() => setViewStop({ from: `${current}:${view}`, view: v.view })}
                           title={viewTitle(v)}
                           aria-label={viewTitle(v)}
                           onClick={() => onView(v.view)}

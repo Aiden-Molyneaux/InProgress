@@ -104,8 +104,10 @@ export function App() {
     noteAction('header', 'view');
     setView(v);
     saveView(v);
-    postEvent('view', snapshot?.project.id ?? null, { view: v });
-    if (v === 'backlog') postEvent('backlog_open', snapshot?.project.id ?? null);
+    // Mid-switch the snapshot is still the last project's: a pick then belongs to no project rather than the wrong one.
+    const shown = snapshot && snapshot.project.slug === state.slug ? snapshot.project.id : null;
+    postEvent('view', shown, { view: v });
+    if (v === 'backlog') postEvent('backlog_open', shown);
   };
   /** The Board's "N ›" and "All done ›": the pick, and focus on the view's row. */
   const openFromBoard = (v: 'backlog' | 'done') => {
