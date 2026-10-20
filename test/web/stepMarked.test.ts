@@ -30,4 +30,9 @@ describe('parseWithStepRefs', () => {
       expect(html).toContain('&#39;');
     }
   });
+
+  it('leaves a bare &# with no semicolon as text, not a step link', () => {
+    for (const text of ['R&#5 is', 'x&#39 foo']) expect(parseWithStepRefs(text, has)).not.toContain('data-step');
+    expect(parseWithStepRefs('&#39;#5 now', has)).toContain('data-step="5"');
+  });
 });

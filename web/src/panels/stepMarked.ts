@@ -17,6 +17,9 @@ const stepMarked = new Marked({
         if (this.lexer.state.inLink) return undefined;
         const entity = /^&#\d+;/.exec(src);
         if (entity) return { type: 'stepRef', raw: entity[0], entity: entity[0] };
+        // `&#5` with no semicolon is not an entity: the `&` stays text and the digits are not a step.
+        const bare = /^&#(\d+)(?![\d;])/.exec(src);
+        if (bare) return { type: 'stepRef', raw: bare[0], entity: `&amp;#${bare[1]}` };
         const m = /^#(\d+)(?!\w)/.exec(src);
         if (!m || !knownStep(Number(m[1]))) return undefined;
         return { type: 'stepRef', raw: m[0], id: Number(m[1]) };

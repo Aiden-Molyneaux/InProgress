@@ -13,7 +13,7 @@ export function ColumnHead({ band, count, hint }: { band: Band; count: number; h
         <span className="ip-col-glyph" aria-hidden="true">{GLYPH[band]}</span>
         <h2 tabIndex={-1}>{BAND_LABEL[band]}</h2>
       </div>
-      <p className="ip-col-hint">{hint}</p>
+      <p className="ip-col-hint" title={hint}>{hint}</p>
       <Count value={count} size="h3" tone={band === 'needs' ? 'volt' : 'muted'} />
     </header>
   );
