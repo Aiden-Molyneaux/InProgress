@@ -33,6 +33,8 @@ export interface BoardTileProps {
   chips?: ReactNode;
   /** The foot's own buttons. */
   actions?: ReactNode;
+  /** Replaces the age: Now says NOW while a session works on the step. */
+  age?: string;
   /** The body. */
   children?: ReactNode;
   system?: string | null;
@@ -53,7 +55,7 @@ export interface BoardTileProps {
  * then the title, the body, the system line and the foot. A click on the tile (not on its own controls) opens Details.
  * A box with no step (a permission wait on no step) has no id and no `data-node`, and is titled with its session.
  */
-export function BoardTile({ box, now, area, band, docs = 0, cursor, rise, selected, chips, actions, children, system, li, still = false, pending, dropBefore, dragging, onKeyDown, onOpenNode, onOpenResource }: BoardTileProps) {
+export function BoardTile({ box, now, area, band, docs = 0, cursor, rise, selected, chips, age, actions, children, system, li, still = false, pending, dropBefore, dragging, onKeyDown, onOpenNode, onOpenResource }: BoardTileProps) {
   const { row, session, state } = box;
   const node = row?.node;
   const since = boxSince(box);
@@ -76,13 +78,14 @@ export function BoardTile({ box, now, area, band, docs = 0, cursor, rise, select
           <>
             {chips}
             {you && <Chip tone="needs">YOU</Chip>}
-            {since && <span className="ip-tile-age">{ageShort(since, now)}</span>}
+            {since && <span className="ip-tile-age">{age ?? ageShort(since, now)}</span>}
           </>
         }
         title={node ? node.title : session ? sessionDisplayTitle(session) : ''}
         titleClassName={node ? 'ip-row-title' : undefined}
+        titleTabIndex={still ? -1 : undefined}
         body={children || system ? <>{children}{system && <p className="ip-sys">{system}</p>}</> : undefined}
-        foot={row ? <TileFoot row={row} now={now} area={area} docs={docs} onOpenResource={onOpenResource} /> : undefined}
+        foot={row ? <TileFoot row={row} now={now} area={area} docs={docs} noLabel={band === 'done'} onOpenResource={onOpenResource} /> : undefined}
         actions={actions}
         selected={selected}
         pending={pending}

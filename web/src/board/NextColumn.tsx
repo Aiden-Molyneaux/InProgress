@@ -17,10 +17,6 @@ import { focusTargetAfter } from './focus';
 import { endedLine } from './Marks';
 import type { NextQueue } from './useNextQueue';
 
-const CIRCLED = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳';
-/** ①②③ for the first twenty places, the plain number after. */
-export const numeral = (n: number) => (n >= 1 && n <= CIRCLED.length ? CIRCLED[n - 1]! : String(n));
-
 /**
  * Next as tiles in queue order, and the Backlog preview at its foot (spec 2.2, 2.5, 2.8; parked-steps spec). The order and
  * its writes come from `useNextQueue` in the Board; this holds the drag state and the Alt+arrow moves.

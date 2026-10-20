@@ -1783,18 +1783,18 @@ test.describe('Board', () => {
     await expect(needs.getByRole('button', { name: 'Answer…' })).toBeVisible();
     await expect(needs.getByRole('button', { name: 'Clear' })).toBeVisible();
     const now = nowRow(page, 'Play app signing');
-    await expect(now.locator('.ip-sid')).toHaveText(`#${fresh.ids['Play app signing']}`);
-    await expect(now.locator('.ip-sess-name')).toHaveText('E2E session');
-    await expect(now.getByRole('button', { name: 'Open session ↗' })).toBeVisible();
-    await expect(now.locator('.ip-st')).toHaveText('Working');
+    await expect(now.locator('.p-tile-id')).toHaveText(`#${fresh.ids['Play app signing']}`);
+    await expect(now.locator('.ip-sessline-title')).toHaveText('E2E session');
+    await expect(now.getByRole('button', { name: 'Open', exact: true })).toBeVisible();
+    await expect(now.locator('.p-tile-chips .p-chip')).toHaveText('WORKING');
     // A Board box carries no character, session letter or breadcrumb.
     await expect(page.locator('.ip-bands .ip-char, .ip-bands .ip-crumb, .ip-bands .ip-num')).toHaveCount(0);
     const done = boxIn(page, 'done', 'Upload keystore');
     await expect(done).toContainText('The upload key was accepted by Play');
-    await expect(done.locator('.ip-st')).toHaveText('✓ Done');
-    expect(await band(page, 'done').locator('li.ip-card').count()).toBe(5);
+    await expect(done.locator('.p-tile-chips .p-chip')).toHaveCount(0);
+    expect(await band(page, 'done').locator('li:has(> article.ip-tile)').count()).toBe(5);
     // Done steps with no outcome carry a mark, and the header counts the marked steps and names them.
-    await expect(boxIn(page, 'done', '1 iOS certificate').locator('.ip-mark')).toHaveText('no outcome');
+    await expect(boxIn(page, 'done', '1 iOS certificate').locator('.p-tile-foot .p-chip')).toHaveText('no outcome');
     await expect(page.getByRole('button', { name: /to tidy$/ })).toHaveAttribute('title', new RegExp(`#${fresh.ids['1 iOS certificate']} no_outcome`));
     await expect(page.locator('.ip-comms')).toContainText('No state note yet');
   });
@@ -1817,15 +1817,16 @@ test.describe('Board', () => {
     await expect(pulled.getByRole('button', { name: '3 RevenueCat', exact: true })).toBeVisible();
     await expect(pulled.locator('.p-tile-chips .ip-tile-age')).toBeVisible();
     const cells = [
-      { band: 'now', title: 'Play app signing', state: 'Working' },
-      { band: 'done', title: 'Upload keystore', state: '✓ Done' },
+      { band: 'now', title: 'Play app signing', state: 'WORKING' },
+      { band: 'done', title: 'Upload keystore', state: null },
     ] as const;
     for (const c of cells) {
       const box = boxIn(page, c.band, c.title);
-      await expect(box.locator('.ip-sid'), c.band).toHaveText(`#${fresh.ids[c.title]}`);
-      await expect(box.locator('.ip-st'), c.band).toHaveText(c.state);
+      await expect(box.locator('.p-tile-id'), c.band).toHaveText(`#${fresh.ids[c.title]}`);
+      if (c.state) await expect(box.locator('.p-tile-chips .p-chip'), c.band).toHaveText(c.state);
+      else await expect(box.locator('.p-tile-chips .p-chip'), c.band).toHaveCount(0);
       await expect(box.getByRole('button', { name: c.title, exact: true }), c.band).toBeVisible();
-      await expect(box.locator('.ip-card-top .ip-time'), c.band).toBeVisible();
+      await expect(box.locator('.p-tile-chips .ip-tile-age'), c.band).toBeVisible();
     }
     const needs = boxIn(page, 'needs', 'Run signing tests');
     // Needs me draws the Tile part (#502).
@@ -1943,12 +1944,12 @@ test.describe('Board', () => {
     await page.setViewportSize(WIDE);
     await open(page, fresh);
     // Each session's line names it and its role on the step, the driver's first.
-    const lines = nowRow(page, 'Play app signing').locator('.ip-sess');
+    const lines = nowRow(page, 'Play app signing').locator('.ip-sessline');
     await expect(lines).toHaveCount(2);
-    await expect(lines.first().locator('.ip-sess-name')).toHaveText('E2E session');
-    await expect(lines.first().locator('.ip-role')).toHaveText('· drives');
-    await expect(lines.nth(1).locator('.ip-sess-name')).toHaveText('Helper session');
-    await expect(lines.nth(1).locator('.ip-role')).toHaveText('· helping');
+    await expect(lines.first().locator('.ip-sessline-title')).toHaveText('E2E session');
+    await expect(lines.first().locator('.ip-sessline-word')).toHaveText('drives');
+    await expect(lines.nth(1).locator('.ip-sessline-title')).toHaveText('Helper session');
+    await expect(lines.nth(1).locator('.ip-sessline-word')).toHaveText('helping');
   });
 
   test('no session letter, character or session hue shows anywhere in the window', async ({ page, api, fresh }) => {
@@ -1988,7 +1989,7 @@ test.describe('Board', () => {
     // Going on ends the wait.
     await hook(api, fresh.session, { event: 'prompt' });
     await expect(wait).toHaveCount(0);
-    await expect(nowRow(page, 'Play app signing').locator('.ip-st')).toHaveText('Working');
+    await expect(nowRow(page, 'Play app signing').locator('.p-tile-chips .p-chip')).toHaveText('WORKING');
   });
 
   test('a permission wait with no running command reads Waiting for permission', async ({ page, api, fresh }) => {
@@ -2003,7 +2004,7 @@ test.describe('Board', () => {
     await page.route('**/api/ui/sessions/*/open-desktop', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: false, command: `claude --resume ${fresh.session}` }) }));
     await open(page, fresh);
     const box = nowRow(page, 'Play app signing');
-    await box.getByRole('button', { name: 'Open session ↗' }).click();
+    await box.getByRole('button', { name: 'Open', exact: true }).click();
     await expect(box.locator('.ip-sess-cmd .ip-code')).toHaveText(`claude --resume ${fresh.session}`);
     // Opening the session did not open Details.
     await expect(page.getByRole('complementary')).toHaveCount(0);
@@ -2024,13 +2025,13 @@ test.describe('Board', () => {
     });
     await open(page, fresh);
     const box = nowRow(page, 'Play app signing');
-    await box.getByRole('button', { name: 'Open session ↗' }).dblclick();
+    await box.getByRole('button', { name: 'Open', exact: true }).dblclick();
     await expect(box.locator('.ip-sess-cmd .ip-code')).toHaveText(`claude --resume ${fresh.session}`);
     await expect(box.locator('.ip-sys')).toHaveText("Launcher unavailable. Run it in the session's folder.");
     expect(calls).toBe(1);
     await expect(page.getByRole('complementary')).toHaveCount(0);
     refuse = false;
-    await box.getByRole('button', { name: 'Open session ↗' }).click();
+    await box.getByRole('button', { name: 'Open', exact: true }).click();
     await expect(box.getByRole('button', { name: 'Opening…' })).toHaveAttribute('aria-busy', 'true');
     await expect(box.locator('.ip-sess-cmd')).toHaveCount(0);
     expect(calls).toBe(2);
@@ -2046,15 +2047,15 @@ test.describe('Board', () => {
     });
     await open(page, fresh);
     const box = nowRow(page, 'Play app signing');
-    await box.getByRole('button', { name: 'Open session ↗' }).click();
+    await box.getByRole('button', { name: 'Open', exact: true }).click();
     await expect(box.locator('.ip-sys')).toHaveText('Claude Code was not found on this computer');
     mode = 'null';
-    await box.getByRole('button', { name: 'Open session ↗' }).click();
+    await box.getByRole('button', { name: 'Open', exact: true }).click();
     await expect(box.locator('.ip-sys')).toContainText("Run it in the session's folder.");
     await expect(box.locator('.ip-sess-cmd .ip-code')).toHaveText(`claude --resume ${fresh.session}`);
     mode = 'stale';
     const reloaded = page.waitForEvent('load');
-    await box.getByRole('button', { name: 'Open session ↗' }).click();
+    await box.getByRole('button', { name: 'Open', exact: true }).click();
     await reloaded;
   });
 
@@ -2158,11 +2159,11 @@ test.describe('Board', () => {
     await page.setViewportSize(WIDE);
     await open(page, fresh);
     const details = page.getByRole('complementary');
-    await nowRow(page, 'Play app signing').locator('.ip-sid').click();
+    await nowRow(page, 'Play app signing').locator('.p-tile-id').click();
     await showsStep(details, fresh.ids['Play app signing'], 'Play app signing');
     await page.keyboard.press('Escape');
     await expect(details).toHaveCount(0);
-    await boxIn(page, 'done', 'Upload keystore').locator('.ip-sid').click();
+    await boxIn(page, 'done', 'Upload keystore').locator('.p-tile-id').click();
     await showsStep(details, fresh.ids['Upload keystore'], 'Upload keystore');
     await page.keyboard.press('Escape');
     await boxIn(page, 'needs', 'Run signing tests').getByRole('button', { name: 'Run signing tests', exact: true }).click();
@@ -2187,9 +2188,9 @@ test.describe('Board', () => {
     const rows = band(page, 'done').locator('ol.ip-list > li');
     await expect(rows.nth(0)).toContainText('Newer step');
     await expect(rows.nth(1)).toHaveAttribute('role', 'separator');
-    await expect(rows.nth(1)).toHaveText('New since you looked');
+    await expect(rows.nth(1)).toHaveText(/^SINCE YOU LOOKED · \d\d:\d\d$/);
     await expect(rows.nth(2)).toContainText('Older step');
-    await page.setViewportSize(NARROW);
+    await page.setViewportSize(NARROWEST);
     await expect(band(page, 'done').getByRole('button', { name: 'Newer step', exact: true })).toBeVisible();
     await expect(band(page, 'done').getByRole('button', { name: 'Older step', exact: true })).toHaveCount(0);
     await expect(band(page, 'done').locator('.ip-done-fold')).toHaveText('✓ 4 earlier');
@@ -2203,8 +2204,8 @@ test.describe('Board', () => {
     });
     await page.setViewportSize(WIDE);
     await open(page, fresh);
-    await expect(band(page, 'done').locator('li.ip-card')).toHaveCount(5);
-    await band(page, 'done').getByRole('button', { name: /^All done · [0-9]+ ›$/ }).click();
+    await expect(band(page, 'done').locator('li:has(> article.ip-tile)')).toHaveCount(5);
+    await band(page, 'done').getByRole('button', { name: /^All done · [0-9]+$/ }).click();
     await expect(viewButton(page, 'All done')).toBeFocused();
     await expect(page.locator('.ip-board')).toHaveCount(0);
     for (const title of titles) await expect(page.getByRole('button', { name: title, exact: true })).toBeVisible();
@@ -2228,7 +2229,7 @@ test.describe('Board', () => {
     await expect(band(page, 'done')).toBeVisible();
     // A reload lands on the Board, and the list opens again in the order picked last.
     await page.reload();
-    await band(page, 'done').getByRole('button', { name: /^All done · [0-9]+ ›$/ }).click();
+    await band(page, 'done').getByRole('button', { name: /^All done · [0-9]+$/ }).click();
     await expect(page.getByRole('button', { name: 'Phase', exact: true })).toHaveAttribute('aria-pressed', 'true');
   });
 
@@ -2252,10 +2253,10 @@ test.describe('Board', () => {
     const kin = box.locator('.ip-kin-count');
     await expect(kin).toHaveText('1 subagent');
     await expect(kin).toHaveAttribute('title', /^Wire up RevenueCat · (<1m|\d+m)$/);
-    await expect(box.locator('.ip-st')).toHaveText('Working');
+    await expect(box.locator('.p-tile-chips .p-chip')).toHaveText('WORKING');
     // The session stops with its workers still running: the box reads Idle and still counts the worker.
     await hook(api, fresh.session, { event: 'stop' });
-    await expect(box.locator('.ip-st')).toHaveText('Idle');
+    await expect(box.locator('.p-tile-chips .p-chip')).toHaveText('IDLE');
     await expect(kin).toHaveText('1 subagent');
   });
 
@@ -2265,7 +2266,7 @@ test.describe('Board', () => {
     await open(page, fresh);
     const session = nowRow(page, 'Play app signing');
     const line = session.locator('.ip-cmd');
-    await expect(session.locator('.ip-st')).toHaveText('Idle');
+    await expect(session.locator('.p-tile-chips .p-chip')).toHaveText('IDLE');
     await expect(line).toHaveText(/^▸ npm run test:e2e · <1m$/);
     await expect(line).toHaveAttribute('title', /^npm run test:e2e · Run the e2e suite · <1m$/);
     await expect(line).toHaveRole('group');
@@ -2280,7 +2281,7 @@ test.describe('Board', () => {
     await hook(api, fresh.session, { event: 'prompt' });
     await stopWith(api, fresh.session, []);
     await expect(line).toHaveText(/^! npm run lint( \+1)?$/);
-    await expect(session.locator('.ip-st')).toHaveText('Idle');
+    await expect(session.locator('.p-tile-chips .p-chip')).toHaveText('IDLE');
   });
 
   test('a command line wears no tag, and a server command reads serving', async ({ page, api, fresh }) => {
@@ -2302,17 +2303,18 @@ test.describe('Board', () => {
     await write(api, fresh.session, 'post', '/api/nodes', { parentId: fresh.root, nodes: [{ title: 'Mine to finish', status: 'active', assignee: 'me' }] });
     await open(page, fresh);
     const row = nowRow(page, 'Mine to finish');
-    await expect(row.locator('.ip-st')).toHaveText('Unattended');
-    await expect(row.locator('.ip-sess')).toHaveText('No session is on it');
-    await expect(row.locator('.ip-you')).toHaveCSS('color', 'rgb(192, 254, 4)');
+    await expect(row.locator('.p-tile-chips .p-chip').first()).toHaveText('UNATTENDED');
+    await expect(row.locator('.p-tile-body')).toContainText('No session is on it');
+    await expect(row.locator('.p-tile-chips .p-chip[data-tone="needs"]')).toHaveText('YOU');
+    await expect(row.locator('.p-tile-chips .p-chip[data-tone="needs"]')).toHaveCSS('background-color', 'rgb(192, 254, 4)');
   });
 
   test('a label is a glyph and its word in muted ink on the row, and Details names it in its meta line; its log entries wear Quiet', async ({ page, api, fresh }) => {
     await write(api, fresh.session, 'patch', `/api/nodes/${fresh.ids['Play app signing']}`, { label: 'ui' });
     await open(page, fresh);
     const row = nowRow(page, 'Play app signing');
-    const chip = row.getByRole('img', { name: 'ui' });
-    await expect(chip).toHaveText('⧉ ui');
+    const chip = row.locator('.p-tile-foot .p-chip[data-tone="label"]');
+    await expect(chip).toHaveText(/^⧉\s?ui$/);
     await expect(chip).toHaveAttribute('title', 'ui');
     await expect(chip).toHaveCSS('color', 'rgb(143, 143, 143)');
     await expect(chip).toHaveCSS('font-variant-emoji', 'text');
@@ -3304,7 +3306,7 @@ test.describe('Module rail', () => {
     await expect(page.locator('.ip-backlogview')).toBeVisible();
     await expect(viewButton(page, 'Backlog')).toBeFocused();
     await viewButton(page, 'Board').click();
-    await band(page, 'done').getByRole('button', { name: /^All done · [0-9]+ ›$/ }).click();
+    await band(page, 'done').getByRole('button', { name: /^All done · [0-9]+$/ }).click();
     await expect(page.locator('.ip-donelist')).toBeVisible();
     await expect(viewButton(page, 'All done')).toBeFocused();
   });

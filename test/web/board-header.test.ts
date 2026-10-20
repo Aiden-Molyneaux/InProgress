@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { BoardRow } from '../../src/core/board';
-import type { PastSession, Session } from '../../src/core/types';
+import type { PastSession, Session, WorkItem } from '../../src/core/types';
 import { headerSessions } from '../../web/src/board/headerSessions';
-import { ageShort, endedLine, firstSentence, hygieneTitle, noteHasMore, splitRefs } from '../../web/src/board/text';
+import { taskProgress } from '../../web/src/board/nowTask';
+import { ageShort, endedLine, firstSentence, hhmm, hygieneTitle, noteHasMore, splitRefs } from '../../web/src/board/text';
 
 const NOW = Date.parse('2026-10-13T12:00:00Z');
 
@@ -123,5 +124,38 @@ describe('noteHasMore', () => {
     expect(noteHasMore('Signing is half done. The tests come next.')).toBe(true);
     expect(noteHasMore('# Where we are\n\nSigning is half done.')).toBe(true);
     expect(noteHasMore('First line.\n\nSecond paragraph')).toBe(true);
+  });
+});
+
+describe('hhmm', () => {
+  it('reads a time as local 24-hour HH:MM, padded', () => {
+    const at = new Date(2026, 9, 13, 9, 4);
+    expect(hhmm(at.toISOString())).toBe('09:04');
+    expect(hhmm(new Date(2026, 9, 13, 23, 59).toISOString())).toBe('23:59');
+  });
+  it('gives nothing for a time it cannot read', () => {
+    expect(hhmm('not a time')).toBe('');
+  });
+});
+
+describe('taskProgress', () => {
+  const item = (over: Partial<WorkItem> & { id: number }): WorkItem => ({
+    nodeId: 10, sessionId: 's1', agentId: '', subject: `T${over.id}`, status: 'pending', blocks: [], position: over.id, updatedAt: '', endedAt: null, ...over,
+  });
+  it('counts the session\'s own tasks with the focus step first, and names the first in progress', () => {
+    const items = [
+      item({ id: 1, nodeId: 20, status: 'in_progress' }),
+      item({ id: 2, nodeId: 10, status: 'completed' }),
+      item({ id: 3, nodeId: 10, status: 'in_progress' }),
+      item({ id: 4, nodeId: 10, agentId: 'a1', status: 'in_progress' }),
+      item({ id: 5, nodeId: 10, sessionId: 's2', status: 'in_progress' }),
+    ];
+    const got = taskProgress(items, 's1', 10);
+    expect(got?.item.id).toBe(3);
+    expect(got?.place).toBe(2);
+    expect(got?.total).toBe(3);
+  });
+  it('is null when nothing is in progress', () => {
+    expect(taskProgress([item({ id: 1 })], 's1', 10)).toBeNull();
   });
 });

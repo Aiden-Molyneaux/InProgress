@@ -70,10 +70,12 @@
 .ip-answer-row .p-field { flex: 1; min-width: 0; }
 [data-ask][data-sent] { opacity: 0.5; text-decoration: line-through; text-decoration-color: var(--text-dim); }
 /* A terminal readout: a command or a session's progress on the darkest ground. */
+.ip-term:has(.ip-term-task, .ip-cmd, .ip-kin-count) { display: grid; gap: var(--sp-2); }
+.ip-term-task { color: var(--text-hi); overflow-wrap: anywhere; }
+.ip-cmd { color: var(--text); overflow-wrap: anywhere; }
+.ip-cmd.serving { color: var(--text-muted); }
+.ip-kin-count { width: fit-content; color: var(--text-dim); cursor: help; text-decoration: underline dotted; text-underline-offset: 2px; }
 .ip-term { display: block; padding: var(--sp-3); background: var(--canvas-0); border: 1px solid var(--line); font-family: var(--font-mono); font-size: var(--t-detail-sm); line-height: 1.4; color: var(--text); overflow-wrap: anywhere; }
-.ip-answer { display: block; width: 100%; margin-top: 3px; padding: 4px 8px; font: inherit; font-size: var(--fs-m); line-height: 18px; color: var(--text); background: var(--panel); border: 1px solid var(--border); }
-.ip-answer:focus { outline: 2px solid var(--volt); outline-offset: 1px; }
-.ip-problem { font-size: var(--fs-s); line-height: 14px; color: var(--amber-ink); }
 /* Row parts: the title that opens Details, the id, docs and marks. */
 .ip-id { color: var(--muted); font-family: var(--font-mono); }
 .ip-row-title { max-width: 100%; text-align: left; font-size: var(--fs-m); line-height: 18px; font-weight: var(--w-text); color: var(--text-2); overflow-wrap: anywhere; }
@@ -85,21 +87,23 @@
 .ip-mark.hygiene { border: 1px solid var(--border); color: var(--muted); }
 .ip-chip-handoff { height: 18px; padding: 0 6px; border: 1px solid var(--border); font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
 .ip-chip-handoff:hover { color: var(--text-2); background: var(--panel-2); }
-/* Done: New since you looked crosses the list where the last look falls. */
-.ip-divider { position: relative; padding: 0; font-size: var(--fs-s); line-height: 14px; color: var(--active-ink); }
-.ip-divider::before { content: ''; position: absolute; left: 0; right: 0; top: 7px; height: 1px; background: var(--active-line); }
-.ip-divider span { position: relative; padding: 0 6px 0 0; background: var(--bg); }
-.ip-done-fold { margin-left: 4px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
+/* Done: the since-ruler crosses the list where the last look falls; older tiles fold under the one-column layout. */
+.ip-since { padding: var(--sp-1) 0; }
+.ip-done-outcome { font-size: 0.8667em; line-height: 1.45; color: var(--text-muted); }
+.ip-done-fold { margin-left: var(--sp-1); font-size: var(--t-detail-sm); line-height: 1.4; color: var(--text-muted); }
+.ip-band .p-btn.ip-done-all { display: inline-flex; margin: var(--sp-3) 0 0; justify-self: start; }
 /* Next: boxes, own-queue boxes under "Queued by <session>", and the Backlog fold at its foot. */
 /* Next: a drop at the end of the queue draws the volt line under the last tile (a drop before a tile is the Tile part's own). */
 .ip-next { display: grid; gap: var(--sp-4); }
 .ip-list.drop-end > li:last-child > .p-tile::after { content: ''; position: absolute; left: -1px; right: -1px; bottom: calc(-1 * var(--sp-2) - 1px); height: 2px; background: var(--volt); }
-.ip-backlog-row .ip-confirm, .ip-now-row .ip-confirm { max-width: none; }
-.ip-confirm:focus { outline: none; }
-.ip-backlog-row.pending, .ip-now-row.pending { opacity: .5; }
-.ip-backlog-row.pending .ip-hover-act, .ip-now-row.pending .ip-hover-act { display: none; }
-.ip-num { font-size: var(--fs-l); line-height: 24px; text-align: center; color: var(--text-2); }
-.ip-own { color: var(--text-2); font-size: var(--fs-s); }
+/* Now: the Done confirm inside the tile, drawn with parts; chrome.css's .ip-confirm sizing and its div rule give way. */
+.ip-tile .ip-done-form { display: grid; gap: var(--sp-3); max-width: none; padding: var(--sp-3); background: var(--canvas-1); border: 1px solid var(--line); }
+.ip-tile .ip-done-form:focus { outline: none; }
+.ip-tile .ip-done-form b { font-size: var(--t-body); font-weight: var(--w-strong); line-height: 1.35; color: var(--text-hi); }
+.ip-tile .ip-done-form p { margin: 0; font-size: var(--t-detail-sm); line-height: 1.4; color: var(--text-muted); }
+.ip-tile .ip-done-form div { display: block; margin-top: 0; }
+.ip-tile .ip-done-form .ip-confirm-buttons { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.ip-tile .ip-done-form .p-error { margin-top: 0; }
 .ip-own-queue { display: grid; gap: var(--sp-3); }
 .ip-own-head { display: flex; }
 /* The task box: one skeleton in every Board cell (Needs me, Next, Now, Done, the Backlog fold). The hue sits on the left edge of a coloured
@@ -124,14 +128,6 @@ button.ip-card-title:hover { color: var(--text); text-decoration: underline; }
 .st-working .ip-sess-name::before { content: '◆ '; color: var(--active); }
 .ip-sess-cmd { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .ip-sess-cmd .ip-code { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: normal; }
-.ip-block { display: flex; flex-direction: column; gap: 3px; padding-left: 10px; border-left: 2px solid var(--border); }
-.st-needs .ip-block { border-left-color: color-mix(in srgb, var(--amber) 60%, transparent); }
-.st-working .ip-block { border-left-color: var(--active-line); }
-.ip-card-main { font-size: var(--fs-m); line-height: 18px; color: var(--text-2); overflow-wrap: anywhere; }
-.ip-cmd, .ip-kin-count { font-family: var(--font-mono); font-size: var(--fs-s); line-height: 14px; color: var(--muted); overflow-wrap: anywhere; }
-.ip-cmd.serving { color: var(--faint); }
-.ip-kin-count { font-family: var(--font-sans); cursor: help; text-decoration: underline dotted; text-underline-offset: 2px; width: fit-content; }
-.ip-card-outcome { font-size: var(--fs-s); line-height: 15px; color: var(--muted); }
 .ip-sys { font-size: var(--fs-s); line-height: 14px; color: var(--faint); }
 .ip-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-height: 18px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
 .ip-foot .ip-type { margin-left: auto; }

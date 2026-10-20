@@ -57,3 +57,10 @@ export function splitRefs(text: string, has: (id: number) => boolean): NoteRun[]
 export function noteHasMore(content: string): boolean {
   return content.replace(/\s+/g, ' ').trim().length > firstSentence(content).length;
 }
+
+/** A time of day as local 24-hour `HH:MM`: the since-ruler's label. An unreadable time gives an empty string. */
+export function hhmm(iso: string): string {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return '';
+  return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
+}

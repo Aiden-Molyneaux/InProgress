@@ -6,7 +6,7 @@ import { MARK_WORDS } from './Marks';
 import { ageShort } from './text';
 
 /** A tile's foot: the handoff (opens the viewer), the documents, the label, and the hygiene words, all as parts. */
-export function TileFoot({ row, now, area, docs, onOpenResource }: { row: BoardRow; now: number; area: MeasureArea; docs: number; onOpenResource: (id: number) => void }) {
+export function TileFoot({ row, now, area, docs, noLabel, onOpenResource }: { row: BoardRow; now: number; area: MeasureArea; docs: number; /** The label is already in the tile's top (Done). */ noLabel?: boolean; onOpenResource: (id: number) => void }) {
   const label = row.node.label;
   const hygiene = row.marks.filter((m) => m !== 'ended_open');
   return (
@@ -26,7 +26,7 @@ export function TileFoot({ row, now, area, docs, onOpenResource }: { row: BoardR
         </button>
       )}
       {docs > 0 && <span className="ip-docs" title={`${docs} resource${docs > 1 ? 's' : ''}`}>{`▤ ${docs}`}</span>}
-      {label && <Chip tone="label" glyph={LABEL_GLYPHS[label]} title={label}>{label}</Chip>}
+      {label && !noLabel && <Chip tone="label" glyph={LABEL_GLYPHS[label]} title={label}>{label}</Chip>}
       {hygiene.map((m) => <Chip key={m} tone="quiet">{MARK_WORDS[m]}</Chip>)}
     </>
   );

@@ -8,13 +8,13 @@ import { useListCursor } from '../parts/ListCursor';
 import type { ViewProps } from '../views/props';
 import type { BandProps } from './bandProps';
 import { BAND_LABEL, ColumnHead, type Band } from './ColumnHead';
-import { DoneColumn } from './DoneColumn';
+import { DoneColumn, doneKeys, doneView } from './DoneColumn';
 import { boardHeadFigures } from './headFigures';
 import { layoutFor } from './layout';
 import { BoardSlab } from './BoardSlab';
 import { NeedsMe, needsKeys } from './NeedsMe';
 import { NextColumn } from './NextColumn';
-import { NowColumn } from './NowColumn';
+import { NowColumn, nowKeys } from './NowColumn';
 import { useNextQueue } from './useNextQueue';
 import { useRise } from './useRise';
 
@@ -33,13 +33,15 @@ export function Board(props: ViewProps) {
   const band: BandProps = { ...props, board, boxes, wide: layout === 'four', layout };
   const order = layout === 'four' ? WIDE_ORDER : NARROW_ORDER;
   const queue = useNextQueue(band);
-  // The keyboard grid: the columns in the layout's order. Now and Done still draw the older boxes, so they hold no cursor
-  // items yet (a count of 0) until they move to BoardTile.
-  const keys: Record<Band, string[]> = { needs: needsKeys(boxes), next: queue.drawn.map((b) => String(b.row!.node.id)), now: [], done: [] };
+  const lastLook = props.lastLook ?? null;
+  const done = doneView(boxes, layout, lastLook);
+  // The keyboard grid: the four columns in the layout's order, each with the keys of the tiles it draws.
+  const keys: Record<Band, string[]> = { needs: needsKeys(boxes), next: queue.drawn.map((b) => String(b.row!.node.id)), now: nowKeys(boxes), done: doneKeys(done) };
   const { itemProps } = useListCursor(
     order.map((b) => keys[b].length),
     ({ col, row }) => {
-      const box = order[col] === 'needs' ? boxes.needs[row] : order[col] === 'next' ? queue.drawn[row] : undefined;
+      const at = order[col];
+      const box = at === 'needs' ? boxes.needs[row] : at === 'next' ? queue.drawn[row] : at === 'now' ? boxes.now[row] : done.shown[row];
       if (box?.row) props.onOpenNode(box.row.node.id);
     },
     order.map((b) => keys[b]),
@@ -47,9 +49,9 @@ export function Board(props: ViewProps) {
   const rise = useRise(order.flatMap((b) => keys[b].map((k) => `${b}:${k}`)));
   const body: Record<Band, ReactNode> = {
     needs: <NeedsMe {...band} cursor={(row) => itemProps(order.indexOf('needs'), row)} rise={rise} />,
-    now: <NowColumn {...band} />,
+    now: <NowColumn {...band} cursor={(row) => itemProps(order.indexOf('now'), row)} rise={rise} />,
     next: <NextColumn {...band} queue={queue} cursor={(row) => itemProps(order.indexOf('next'), row)} rise={rise} />,
-    done: <DoneColumn {...band} lastLook={props.lastLook ?? null} />,
+    done: <DoneColumn {...band} view={done} lastLook={lastLook} cursor={(row) => itemProps(order.indexOf('done'), row)} rise={rise} />,
   };
   const counts: Record<Band, number> = { needs: boxes.needs.length, next: boxes.next.length, now: boxes.now.length, done: board.done.length };
   const hints: Record<Band, string> = {
