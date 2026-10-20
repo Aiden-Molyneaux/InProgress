@@ -71,7 +71,7 @@ export function previewRows<T extends Entry>(entries: T[], phase: PreviewPhase):
   return entries.filter((e) => phaseValue(e.row!) === phase).slice(0, PREVIEW_SIZE);
 }
 
-/** How many entries each phase holds (a phase with none is absent), for the tab strip's counts. */
+/** How many entries each phase holds (a phase with none is absent), for the phase menu's counts. */
 export function phaseCounts<T extends Entry>(entries: T[]): Map<PreviewPhase, number> {
   const counts = new Map<PreviewPhase, number>();
   for (const e of entries) {

@@ -18,8 +18,8 @@ import { phaseCounts, previewRows, type PhaseChoice, type PreviewPhase } from '.
  * for the phase (`<phase> · <count> ▾`), then up to five entries of the picked phase, each its own tile (their own
  * arrow-key list, draggable into Next), and "N more in <phase> · Open Backlog ›" past five. The quick-add field sits under the rows when + Add has opened it.
  */
-export function PreviewPanel({ entries, choices, phase, adding, field, addButton, snapshot, now, selectedNode, onPick, onOpenAll, onAdd, onCloseAdd, onStatus, onOpenNode, onOpenResource, onDragStart, onDragEnd, onToNext }: Pick<BandProps, 'snapshot' | 'now' | 'selectedNode' | 'onOpenNode' | 'onOpenResource' | 'onStatus'> & {
-  /** Every open Backlog entry, parked excluded: the count, the tabs' counts and the rows come from it. */
+export function PreviewPanel({ entries, choices, phase, adding, field, addButton, snapshot, now, selectedNode, dragging, onPick, onOpenAll, onAdd, onCloseAdd, onStatus, onOpenNode, onOpenResource, onDragStart, onDragEnd, onToNext }: Pick<BandProps, 'snapshot' | 'now' | 'selectedNode' | 'onOpenNode' | 'onOpenResource' | 'onStatus'> & {
+  /** Every open Backlog entry, parked excluded: the count, the phase menu's counts and the rows come from it. */
   entries: BoxData[];
   choices: PhaseChoice[];
   phase: PreviewPhase;
@@ -33,6 +33,8 @@ export function PreviewPanel({ entries, choices, phase, adding, field, addButton
   onDragStart: (e: DragEvent, id: number) => void;
   onDragEnd: () => void;
   onToNext: (id: number) => void;
+  /** The id being dragged, so its tile dims. */
+  dragging?: number | null;
 }) {
   const { project } = snapshot;
   const title = choices.find((c) => c.value === phase)?.title ?? 'No phase';
@@ -58,10 +60,11 @@ export function PreviewPanel({ entries, choices, phase, adding, field, addButton
       </div>
       <MenuButton
         menuLabel="Backlog phase"
+        variant="outline"
         align="start"
-        items={choices.map((c) => ({ key: String(c.value), label: `${c.title} · ${counts.get(c.value) ?? 0}`, current: c.value === phase, onSelect: () => onPick(c.value) }))}
+        items={choices.filter((c) => c.value === phase || (counts.get(c.value) ?? 0) > 0).map((c) => ({ key: String(c.value), label: `${c.title} · ${counts.get(c.value) ?? 0}`, current: c.value === phase, onSelect: () => onPick(c.value) }))}
       >
-        {`${title} · ${counts.get(phase) ?? 0} ▾`}
+        {`${title} · ${counts.get(phase) ?? 0} `}<span aria-hidden="true">▾</span>
       </MenuButton>
       {rows.length === 0 ? (
         <EmptyState>{`Nothing in ${title}`}</EmptyState>
@@ -79,6 +82,7 @@ export function PreviewPanel({ entries, choices, phase, adding, field, addButton
                 docs={snapshot.resources.filter((r) => r.nodeId === id).length}
                 cursor={itemProps(0, i)}
                 selected={selectedNode === id}
+                dragging={dragging === id}
                 chips={box.state === 'blocked' ? <Chip tone="blocked">BLOCKED</Chip> : undefined}
                 li={{ draggable: true, onDragStart: (e) => onDragStart(e, id), onDragEnd }}
                 lead={
@@ -105,7 +109,7 @@ export function PreviewPanel({ entries, choices, phase, adding, field, addButton
       )}
       {more > 0 && (
         <p className="ip-backlog-more">
-          {`${more} more in ${title} · `}
+          {`${more} more in ${title}`}
           <Button variant="ghost" size="sm" glyph="›" onClick={onOpenAll}>Open Backlog</Button>
         </p>
       )}

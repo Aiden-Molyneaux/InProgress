@@ -118,8 +118,8 @@ const open = (page: Page, project: Seeded) => page.goto(`/#/p/${project.slug}`);
 /** A step's row on the Board, by its title. Details lists the same steps as "#id title", so the exact name is the Board's. */
 const stepRow = (page: Page, title: string) => page.getByRole('main').getByRole('button', { name: title, exact: true });
 
-/** The Backlog preview's phase menu button at the foot of Next: its face reads `<phase> · <count> ▾`. */
-const phasePicker = (page: Page) => page.locator('.ip-preview').getByRole('button', { name: /▾$/ });
+/** The Backlog preview's phase menu button at the foot of Next: its face reads `<phase> · <count>` (the ▾ is decoration). */
+const phasePicker = (page: Page) => page.locator('.ip-preview button[aria-haspopup="menu"]');
 /** The phase menu's popover. */
 const phaseMenu = (page: Page) => page.getByRole('menu', { name: 'Backlog phase' });
 /** The button, whose face names the picked phase. */
@@ -1885,7 +1885,7 @@ test.describe('Board', () => {
     await expect(page.locator('.ip-bands :is(li.ip-card, article.ip-tile)', { has: page.getByRole('button', { name: 'Run signing tests', exact: true }) })).toHaveCount(1);
   });
 
-  test('Backlog preview rows are one line each with no hue', async ({ page, api, fresh }) => {
+  test('Backlog preview entries are boxes with no hue', async ({ page, api, fresh }) => {
     // A Blocked step that sits in Backlog holds a hue by the state rule; the fold still shows none.
     await write(api, fresh.session, 'patch', `/api/nodes/${fresh.ids['5 Store listing']}`, { status: 'blocked' });
     const snapshot = (await (await api.get(`/api/projects/${fresh.slug}`)).json()) as { nodes: { id: number; hue: number | null }[] };
@@ -1897,11 +1897,12 @@ test.describe('Board', () => {
     const boxes = next.locator('.ip-backlog .ip-backlog-row');
     await expect(group).toBeVisible();
     await expect.poll(() => boxes.count()).toBeGreaterThan(1);
-    // The preview draws one-line rows, not tiles: the id, the title, the age.
+    // Each entry is its own box, a Board tile with no hue: the id, the title, the age.
     const box = group.locator('.ip-backlog-row', { has: page.getByRole('button', { name: '4 Build to GitHub', exact: true }) });
     await expect(box.locator('.p-tile-id')).toHaveText(`#${fresh.ids['4 Build to GitHub']}`);
     await expect(box.locator('.ip-tile-age')).toBeVisible();
-    await expect(box.locator('.p-tile, .ip-sess')).toHaveCount(0);
+    await expect(box).toHaveClass(/ip-tile.*ip-backlog-row|ip-backlog-row.*ip-tile/);
+    await expect(box).not.toHaveAttribute('data-hue', /.*/);
     const blocked = group.locator('.ip-backlog-row', { has: page.getByRole('button', { name: '5 Store listing', exact: true }) });
     await expect(blocked.locator('.p-chip[data-tone="blocked"]')).toHaveText('BLOCKED');
     for (const b of await boxes.all()) expect(await b.getAttribute('style')).toBeNull();
@@ -3842,5 +3843,21 @@ test.describe('#502 Board in v3', () => {
     await page.reload();
     await expect(phasePicker(page)).toContainText('No phase');
     await expect(next.locator('.ip-backlog-row .ip-row-title')).toHaveText(['Milestones', 'Loose one']);
+    // Shift+Tab closes with focus on the button.
+    await button.click();
+    await expect(menu).toBeVisible();
+    await page.keyboard.press('Shift+Tab');
+    await expect(menu).toHaveCount(0);
+    await expect(button).toBeFocused();
+    // Tab out closes it, and focus moves on to the first preview tile.
+    await button.click();
+    await page.keyboard.press('Tab');
+    await expect(menu).toHaveCount(0);
+    await expect(next.locator('.ip-backlog-row').first()).toBeFocused();
+    // A press on a column head closes it.
+    await button.click();
+    await expect(menu).toBeVisible();
+    await band(page, 'now').locator('h2').click();
+    await expect(menu).toHaveCount(0);
   });
 });

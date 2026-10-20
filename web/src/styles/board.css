@@ -26,7 +26,7 @@
 .ip-ref:hover { text-decoration: underline; }
 .ip-ref:focus-visible { outline: 2px solid var(--volt); outline-offset: 1px; }
 .ip-menubtn { position: relative; display: inline-flex; }
-.ip-menubtn-pop { position: absolute; top: 100%; right: 0; z-index: var(--z-popover); width: 320px; max-width: calc(100vw - 2 * var(--sp-4)); margin-top: var(--sp-1); }
+.ip-menubtn-pop { position: absolute; top: 100%; right: 0; z-index: var(--z-popover); width: 320px; max-width: calc(100vw - 2 * var(--sp-4)); margin-top: var(--sp-2); }
 .ip-menubtn-pop[data-align='start'] { left: 0; right: auto; width: max-content; min-width: 100%; }
 .ip-noclaim { display: grid; gap: var(--sp-2); padding-top: var(--sp-3); border-top: 1px solid var(--line); }
 .ip-noclaim-item { display: grid; gap: var(--sp-1); min-width: 0; }
@@ -169,7 +169,7 @@ button.ip-hover-act:not(.p-btn):hover { color: var(--text); background: var(--pa
 .ip-tile:is(:hover, :focus-within) .p-btn.ip-hover-act, .ip-tile .p-btn.ip-hover-act:focus-visible { opacity: 1; }
 .ip-preview .ip-backlog-list { gap: var(--sp-3); }
 .ip-tile.ip-backlog-row { padding: var(--sp-3); gap: var(--sp-2); }
-.ip-backlog-more { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); font-family: var(--font-mono); font-size: var(--t-detail-sm); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+.ip-backlog-more { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1); font-family: var(--font-mono); font-size: var(--t-detail-sm); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
 .ip-backlog-groups { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
 .ip-group-line { margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-s); line-height: 14px; color: var(--faint); }
 /* The Backlog filter field and order control share one line (#453). */
