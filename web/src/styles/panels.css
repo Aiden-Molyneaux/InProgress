@@ -145,4 +145,17 @@
 .ip-viewer-doc { max-width: 68ch; margin: 0 auto; padding: var(--sp-8); }
 @media (max-width: 719px) { .ip-viewer-doc { padding: var(--sp-4); } }
 .ip-vmuted { margin: 0; color: var(--text-muted); }
+/* A page (spec 2026-10-20-library-and-docs-design.md): the freshness strip under the title, the sandboxed frame, refusals. */
+.ip-viewer-doc[data-wide] { max-width: none; }
+.ip-fresh { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); padding: var(--sp-3) var(--sp-4); background: var(--canvas-0); border-bottom: 1px solid var(--line); font-family: var(--font-mono); font-size: var(--t-micro); color: var(--text-muted); }
+.ip-fresh-count { color: var(--alarm); }
+.ip-fresh[data-current] .ip-fresh-count { color: var(--text-muted); }
+.ip-fresh-covers { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.ip-fresh-confirm { margin-left: auto; }
+.ip-pframe { display: grid; }
+.ip-pframe-label { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--sp-2); padding: 6px var(--sp-3); border: 1px solid var(--line); border-bottom: 0; background: var(--canvas-0); font-family: var(--font-mono); font-size: var(--t-micro); color: var(--text-dim); }
+.ip-pframe-path { min-width: 0; overflow-wrap: anywhere; }
+.ip-pframe-frame { display: block; width: 100%; border: 1px solid var(--line); background: #fff; }
+.ip-page-refused { display: grid; gap: var(--sp-2); }
+.ip-page-path { margin: 0; font-family: var(--font-mono); font-size: var(--t-body); color: var(--text); overflow-wrap: anywhere; }
 }
