@@ -647,7 +647,16 @@ describe('the open-ask reminder line (#522)', () => {
     const asks = [1, 2, 3, 4, 5].map((i) => raiseAsk(ctx, 'session:s1', { nodeId: step.id, kind: 'question', text: 'Q' + i, sessionId: 's1' }));
     const lines = handleHookEvent(ctx, 's1', prompt()).context!.split('\n');
     expect(lines.filter((l) => l.startsWith('Open ask '))).toEqual([2, 3, 4].map((i) => line(asks[i].id, step.id, 'Build tabs', 'Q' + (i + 1))));
-    expect(lines).toContain('+2 more open asks: a' + asks[0].id + ', a' + asks[1].id);
+    expect(lines).toContain(`+2 more open asks: a${asks[0].id}, a${asks[1].id}. If this prompt answers one, put "aN answered: ..." in your next scribe brief.`);
+  });
+
+  it('names at most 10 of the rest by tag, the newest', () => {
+    const { ctx, step, join } = setup();
+    join('s1');
+    const asks = Array.from({ length: 15 }, (_, i) => raiseAsk(ctx, 'session:s1', { nodeId: step.id, kind: 'question', text: 'Q' + i, sessionId: 's1' }));
+    const lines = handleHookEvent(ctx, 's1', prompt()).context!.split('\n');
+    const tags = asks.slice(2, 12).map((a) => `a${a.id}`).join(', ');
+    expect(lines).toContain(`+12 more open asks: ${tags}, and 2 older. If this prompt answers one, put "aN answered: ..." in your next scribe brief.`);
   });
 
   it("the driver route needs the step to be the driver's focus", () => {

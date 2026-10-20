@@ -98,6 +98,8 @@ function oneLine(text: string): string {
 
 /** How many open-ask reminder lines a prompt carries before the rest are only named. */
 const REMINDERS = 3;
+/** How many of the rest the overflow line names by tag. */
+const REMINDER_TAGS = 10;
 
 const clean = (text: string | undefined): string | null => text?.trim() || null;
 
@@ -332,7 +334,13 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
     for (const a of reminders.slice(-REMINDERS)) {
       lines.push(`Open ask ${askTag(a.id)} on ${stepRef(a.nodeId, findNode(ctx, a.nodeId)?.title)}: "${oneLine(a.text)}". If this prompt answers it, put "${askTag(a.id)} answered: ..." in your next scribe brief.`);
     }
-    if (reminders.length > REMINDERS) lines.push(`+${reminders.length - REMINDERS} more open asks: ${reminders.slice(0, -REMINDERS).map((a) => askTag(a.id)).join(', ')}`);
+    // The rest by tag, the newest few of them only, so the line stays short however many are open.
+    const rest = reminders.slice(0, -REMINDERS);
+    if (rest.length) {
+      const named = rest.slice(-REMINDER_TAGS).map((a) => askTag(a.id)).join(', ');
+      const unnamed = rest.length - Math.min(rest.length, REMINDER_TAGS);
+      lines.push(`+${rest.length} more open asks: ${named}${unnamed ? `, and ${unnamed} older` : ''}. If this prompt answers one, put "aN answered: ..." in your next scribe brief.`);
+    }
     if (lines.length) context = [...lines, ...(context ? [context] : [])].join('\n');
   }
   return context === undefined ? { tracked: true } : { tracked: true, context };
