@@ -1,13 +1,15 @@
 import { existsSync, readFileSync, type Stats } from 'node:fs';
 import { stat } from 'node:fs/promises';
-import { isAbsolute, join } from 'node:path';
+import { join } from 'node:path';
 import fastifyStatic from '@fastify/static';
 import type { FastifyInstance } from 'fastify';
+import { isLocalAbsolutePath } from '../../lib/paths';
 import type { AppOptions, Guard } from '../app';
 import { badRequest } from '../errors';
 import { openInDefaultBrowser, openInEditorOrReveal } from '../open-path';
-import { requireResource } from '../repo/resources';
-import { openBody, openUrlBody } from '../schemas';
+import { pageHead } from '../pages';
+import { confirmPage, requireResource } from '../repo/resources';
+import { idParam, openBody, openUrlBody } from '../schemas';
 
 const TOKEN_META = /<meta name="ip-ui-token" content="[^"]*"\s*\/?>/;
 
@@ -16,16 +18,6 @@ const TOKEN_META = /<meta name="ip-ui-token" content="[^"]*"\s*\/?>/;
  * pages' frames, and stops resource Markdown from loading remote images (tracking pixels).
  */
 const CSP = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
-
-/**
- * A path on a local disk. UNC and device paths (\\host\share, //host/share, \\?\, \\.\) are refused
- * before anything touches them: Windows would open an SMB session with the user's credentials,
- * and a slow or unreachable host would stall the server.
- */
-function isLocalAbsolutePath(path: string): boolean {
-  if (path.startsWith('\\\\') || path.startsWith('//')) return false;
-  return process.platform === 'win32' ? /^[A-Za-z]:[\\/]/.test(path) : isAbsolute(path);
-}
 
 export function registerUi(app: FastifyInstance, opts: AppOptions, requireToken: Guard, requireUi: Guard): void {
   app.post('/api/admin/shutdown', { preHandler: requireToken }, async () => {
@@ -51,6 +43,12 @@ export function registerUi(app: FastifyInstance, opts: AppOptions, requireToken:
     if (!info.isFile()) throw badRequest(`Not a file: ${resource.path}`);
     await (opts.openPath ?? openInEditorOrReveal)(resource.path);
     return { ok: true };
+  });
+
+  // The viewer's Still accurate: the page's claim holds at its repo's HEAD now.
+  app.post('/api/ui/resources/:id/confirm', { onRequest: requireUi }, async (req) => {
+    const id = idParam.parse(req.params).id;
+    return confirmPage(opts.ctx, 'window', id, await pageHead(requireResource(opts.ctx, id)));
   });
 
   // The UI runs in an Edge app window, where a plain link opens in Edge: links go through here to the default browser.
