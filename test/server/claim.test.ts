@@ -532,7 +532,8 @@ describe('the answers line', () => {
     const { ctx, step, join } = setup();
     join('s1');
     const ask = raiseAsk(ctx, 'session:s1', { nodeId: step.id, kind: 'question', text: 'Which port?', sessionId: 's1' });
-    expect(handleHookEvent(ctx, 's1', prompt()).context).toBeUndefined();
+    // Open, it brings the reminder instead (the open-ask reminder line, below).
+    expect(handleHookEvent(ctx, 's1', prompt()).context).toMatch(/^Open ask /);
     clearAsk(ctx, 'window', ask.id, '8080');
     expect(handleHookEvent(ctx, 's1', prompt({ notice: true })).context).toBeUndefined();
     expect(handleHookEvent(ctx, 's1', prompt()).context).toMatch(new RegExp(`^Answered: a${ask.id} "8080" \\(yours: act on it, or add it to your tasks\\)(\n|$)`));
@@ -557,6 +558,117 @@ describe('the answers line', () => {
     clearAsk(ctx, 'window', ask.id, 'yes');
     expect(handleHookEvent(ctx, 's2', prompt()).context).toBeUndefined();
     expect(handleHookEvent(ctx, 's1', prompt()).context).toBe(`Answered: a${ask.id} "yes" (yours: act on it, or add it to your tasks)`);
+  });
+});
+
+describe('the open-ask reminder line (#522)', () => {
+  const prompt = (extra = {}) => ({ event: 'prompt' as const, cwd: 'C:/personal/InGame', ...extra });
+  const end = { event: 'end' as const, cwd: 'C:/personal/InGame' };
+  const line = (id: number, nodeId: number, title: string, text: string) =>
+    `Open ask a${id} on #${nodeId} ${title}: "${text}". If this prompt answers it, put "a${id} answered: ..." in your next scribe brief.`;
+
+  it('rides every real prompt while the ask is open, and not a notice', () => {
+    const { ctx, step, join } = setup();
+    join('s1');
+    const ask = raiseAsk(ctx, 'session:s1', { nodeId: step.id, kind: 'question', text: 'Which port?', sessionId: 's1' });
+    const want = line(ask.id, step.id, 'Build tabs', 'Which port?');
+    expect(handleHookEvent(ctx, 's1', prompt()).context!.split('\n')).toContain(want);
+    expect(handleHookEvent(ctx, 's1', prompt()).context!.split('\n')).toContain(want);
+    expect(handleHookEvent(ctx, 's1', prompt({ notice: true })).context).toBeUndefined();
+  });
+
+  it('goes after the answers lines and before the rest of the context', () => {
+    const { ctx, step, other, join } = setup();
+    join('s1');
+    const first = raiseAsk(ctx, 'session:s1', { nodeId: step.id, kind: 'question', text: 'Q1', sessionId: 's1' });
+    const second = raiseAsk(ctx, 'session:s1', { nodeId: other.id, kind: 'question', text: 'Q2', sessionId: 's1' });
+    clearAsk(ctx, 'window', first.id, 'yes');
+    const lines = handleHookEvent(ctx, 's1', prompt({ asksStatus: true })).context!.split('\n');
+    expect(lines[0]).toBe(`Answered: a${first.id} "yes" (yours: act on it, or add it to your tasks)`);
+    expect(lines[1]).toBe(line(second.id, other.id, 'Write guide', 'Q2'));
+    expect(lines[2]).toContain('Where things stand in InGame');
+  });
+
+  it('C5: stops once the ask is cleared, which brings the Answered line instead', () => {
+    const { ctx, step, join } = setup();
+    join('s1');
+    const ask = raiseAsk(ctx, 'session:s1', { nodeId: step.id, kind: 'question', text: 'Which port?', sessionId: 's1' });
+    clearAsk(ctx, 'window', ask.id, '8080');
+    const text = handleHookEvent(ctx, 's1', prompt()).context!;
+    expect(text).toBe(`Answered: a${ask.id} "8080" (yours: act on it, or add it to your tasks)`);
+    expect(handleHookEvent(ctx, 's1', prompt()).context ?? '').not.toContain('Open ask');
+  });
+
+  it("is not told about another session's ask on another step", () => {
+    const { ctx, step, other, join } = setup();
+    join('s1');
+    join('s2');
+    claimStep(ctx, 'session:s2', 's2', other.id);
+    raiseAsk(ctx, 'session:s1', { nodeId: step.id, kind: 'question', text: 'Q', sessionId: 's1' });
+    expect(handleHookEvent(ctx, 's2', prompt()).context ?? '').not.toContain('Open ask');
+  });
+
+  it('the driver route: the raiser ended, the prompting session drives the step and is focused on it', () => {
+    const { ctx, step, join } = setup();
+    join('s1');
+    join('s2');
+    claimStep(ctx, 'session:s1', 's1', step.id);
+    claimStep(ctx, 'session:s2', 's2', step.id);
+    const ask = raiseAsk(ctx, 'session:s2', { nodeId: step.id, kind: 'question', text: 'Land it?', sessionId: 's2' });
+    // The raiser is live: the driver is not reminded of it.
+    expect(handleHookEvent(ctx, 's1', prompt()).context ?? '').not.toContain('Open ask');
+    handleHookEvent(ctx, 's2', end);
+    expect(handleHookEvent(ctx, 's1', prompt()).context!.split('\n')).toContain(line(ask.id, step.id, 'Build tabs', 'Land it?'));
+  });
+
+  it('the driver route still reminds when the raiser moved to another project and is live', () => {
+    const { ctx, step, join } = setup();
+    const elsewhere = createProject(ctx, 'test', { name: 'Elsewhere' });
+    join('s1');
+    join('s2');
+    claimStep(ctx, 'session:s1', 's1', step.id);
+    claimStep(ctx, 'session:s2', 's2', step.id);
+    const ask = raiseAsk(ctx, 'session:s2', { nodeId: step.id, kind: 'question', text: 'Land it?', sessionId: 's2' });
+    enrollSession(ctx, 'scribe:s2', 's2', elsewhere.slug);
+    expect(handleHookEvent(ctx, 's1', prompt()).context!.split('\n')).toContain(line(ask.id, step.id, 'Build tabs', 'Land it?'));
+  });
+
+  it('a window ask (no session) on the step the session drives and focuses gets no reminder', () => {
+    const { ctx, step, join } = setup();
+    join('s1');
+    claimStep(ctx, 'session:s1', 's1', step.id);
+    raiseAsk(ctx, 'window', { nodeId: step.id, kind: 'question', text: 'Q' });
+    expect(handleHookEvent(ctx, 's1', prompt()).context ?? '').not.toContain('Open ask');
+  });
+
+  it('carries the 3 newest asks, oldest first, and names the rest in one line', () => {
+    const { ctx, step, join } = setup();
+    join('s1');
+    const asks = [1, 2, 3, 4, 5].map((i) => raiseAsk(ctx, 'session:s1', { nodeId: step.id, kind: 'question', text: 'Q' + i, sessionId: 's1' }));
+    const lines = handleHookEvent(ctx, 's1', prompt()).context!.split('\n');
+    expect(lines.filter((l) => l.startsWith('Open ask '))).toEqual([2, 3, 4].map((i) => line(asks[i].id, step.id, 'Build tabs', 'Q' + (i + 1))));
+    expect(lines).toContain(`+2 more open asks: a${asks[0].id}, a${asks[1].id}. If this prompt answers one, put "aN answered: ..." in your next scribe brief.`);
+  });
+
+  it('names at most 10 of the rest by tag, the newest', () => {
+    const { ctx, step, join } = setup();
+    join('s1');
+    const asks = Array.from({ length: 15 }, (_, i) => raiseAsk(ctx, 'session:s1', { nodeId: step.id, kind: 'question', text: 'Q' + i, sessionId: 's1' }));
+    const lines = handleHookEvent(ctx, 's1', prompt()).context!.split('\n');
+    const tags = asks.slice(2, 12).map((a) => `a${a.id}`).join(', ');
+    expect(lines).toContain(`+12 more open asks: ${tags}, and 2 older. If this prompt answers one, put "aN answered: ..." in your next scribe brief.`);
+  });
+
+  it("the driver route needs the step to be the driver's focus", () => {
+    const { ctx, step, other, join } = setup();
+    join('s1');
+    join('s2');
+    claimStep(ctx, 'session:s1', 's1', step.id);
+    claimStep(ctx, 'session:s2', 's2', step.id);
+    raiseAsk(ctx, 'session:s2', { nodeId: step.id, kind: 'question', text: 'Land it?', sessionId: 's2' });
+    handleHookEvent(ctx, 's2', end);
+    setFocus(ctx, 'scribe:s1', 's1', other.id);
+    expect(handleHookEvent(ctx, 's1', prompt()).context ?? '').not.toContain('Open ask');
   });
 });
 
