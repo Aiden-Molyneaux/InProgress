@@ -1,6 +1,6 @@
 # InProgress redesign: a mirror, a backlog, and project memory
 
-Date: 2026-10-20. Status: draft for Aiden. Design only, no code.
+Date: 2026-10-20. Status: approved by Aiden (section 12 answered 2026-10-20). Design only, no code; the plan follows.
 
 Supersedes the narrower spec written this morning, `2026-10-20-mechanical-live-capture-design.md`, whose inventory and
 evidence sections (1 to 3) this document relies on and does not repeat.
@@ -52,9 +52,16 @@ keep true. Anything that stays true only if a session remembers to update it is 
 - The orchestrator slab goes from the Board; the state note stays as Mip's memory.
 - Trimming waits for the v3 steps already in build (#502, #504) to land, then runs as one step.
 
-### Open (section 12)
+### Aiden's answers (2026-10-20, section 12)
 
-Project memory's shape, the title channel's enforcement, and the fate of a few surfaces.
+Any reply clears a wait (1). Title channel B behind a setting, A underneath (2). The Project view is cut (3). Asks of
+an ended or archived session clear as "session ended" (4). #502 lands as built; the trim removes Answer… after (5).
+What and Why are required on every Claude-filed step (6). The desktop archive ends the session, never the step (7).
+Order: title channel, backlog, truth, trim (8). Origin means whose idea the step was (9).
+
+### Open
+
+Project memory's shape (the other session's).
 
 ## 2. Goals, non-goals, anti-goals
 
@@ -154,7 +161,8 @@ later, a decision for next week). In-turn asks and their `aN answered` clears le
 
 Every step tile in Needs me gets **Park…** beside Open session, the Backlog's Park form (reason required, where
 optional). A parked step leaves Needs me and Now as parked steps do today; its asks are already hidden and come back on
-unpark (`openAsks`, briefing.ts:174).
+unpark (`openAsks`, briefing.ts:174). Parking never closes a step, and neither does anything else in this spec but a
+session's own `done` with an outcome (Aiden, question 7).
 
 Every Needs me tile, step or session, gets **Dismiss** (ghost): it clears the session's waiting state until the next
 turn end sets it again. No reason, no plan state: it is the escape from a wrong lane state the weaker sources (a
@@ -183,17 +191,21 @@ allow rule so `set_session_title` runs without a prompt. A is in both.
   the session sets the title and stops again (`stop_hook_active` keeps it to one pass). Cost: one short model call
   whenever a prefix changes. Gain: the sidebar is right at every turn end, `RUNNING` included.
 
-My recommendation: B, behind a project setting, with A as its fallback where B is off. A's line exists in both.
+Decided (question 2): B behind a project setting, A underneath it, A's line in both.
+
+Built first (question 8), so until phase 3 lands the check has no mechanical waiting state: RUNNING (live background
+work at Stop) and DONE (the step's status) are enforced from the start; REVIEW and BLOCKED are checked against the
+step's open scribe asks until phase 3 replaces that with `waiting_kind`.
 
 ## 5. Job 2: the backlog, and What and Why
 
 - **Notes on add.** The quick-add form (window `QuickAdd.tsx`, title only today) gets an optional notes field that
   writes the step's body. Enter on the title adds at once; Tab reaches the notes.
-- **Origin.** `nodes.created_by`, set from the writer and backfilled from `node.created` events: `me` for the window.
-  For a scribe write, the mechanical reading is `claude`, but most scribe-filed steps are work Aiden asked for in
-  chat (163 scribe-filed against 8 window-filed in 14 days), and the ones he wants marked are Claude's own
-  follow-ups. Question 9 decides whether a third value, `proposed`, set by the scribe brief, is worth the one extra
-  word in the brief. Backlog rows and tiles show a small chip for whichever origin is the minority.
+- **Origin** (Aiden, question 9): whose idea the step was. `nodes.origin`: `me` for a window write; `asked` for a
+  scribe or CLI write by default (work Aiden asked for in chat; 163 scribe-filed against 8 window-filed in 14 days);
+  `proposed` when the scribe brief says so, the one word a session adds when it files a follow-up of its own
+  (`(task, fix, proposed)`). Backlog rows and tiles show a `proposed` chip; nothing on the rest. Existing steps
+  backfill to `me` or `asked` from the writer. A later unsupervised flag attaches to `proposed` steps first.
 - **What and Why.** Two short fields on a step, `what` and `why`, written for Aiden: what this step implements, and
   why it is worth doing. The scribe's `add_nodes` and `update_node` take them; the briefing rule for a new step with a
   deliverable reads "a new step with one label, a What and a Why". An open, Claude-filed step created after the
@@ -240,18 +252,19 @@ staleness does not belong.
 - **#503 Project view** (done): the view is cut by the trim step; the phase index part moves.
 - **#505 Details** (done): reordered by phase 2.
 
-## 9. Phases
+## 9. Phases, in Aiden's order (question 8)
 
-1. **Truth** (integration; full strict gates for hooks and installer): 4.1, 4.2, 4.3, 4.4, 4.6's Dismiss, and the
-   briefing rules of 4.5. A day of hook capture first, to confirm `wrap_up` reaches PostToolUse with its input, what
-   Stop's `last_assistant_message` holds when the box has the question, and the current Notification matchers. If
-   `wrap_up` does not reach PostToolUse, the transcript watcher (`agent-watch.ts`, 60 s) reads the turn's last
-   `wrap_up` tool_use from the transcript tail instead: the transcript holds it (this morning's parse counted 82 of
-   them that way). Phase 1 is not blocked on the hook.
+1. **Title channel** (integration; full strict gates for hooks): 4.8, A first, then B behind the setting. RUNNING and
+   DONE enforced at once; REVIEW and BLOCKED against scribe asks until phase 3.
 2. **Backlog and What/Why** (data, then ui): the columns and scribe tools, the briefing rule, the quick-add notes
    field, the origin chip, Details reordered.
-3. **Trim** (ui), after #502 and #504 land: section 7 and 4.6, 4.7 as one step.
-4. **Title channel** (integration): 4.8, A first, then B behind the setting.
+3. **Truth** (integration; full strict gates for hooks and installer): 4.1, 4.2, 4.3, 4.4, 4.6's Dismiss, and the
+   briefing rules of 4.5; the title check switches to `waiting_kind`. A day of hook capture first, to confirm
+   `wrap_up` reaches PostToolUse with its input, what Stop's `last_assistant_message` holds when the box has the
+   question, and the current Notification matchers. If `wrap_up` does not reach PostToolUse, the transcript watcher
+   (`agent-watch.ts`, 60 s) reads the turn's last `wrap_up` tool_use from the transcript tail instead: the transcript
+   holds it (this morning's parse counted 82 of them that way). The phase is not blocked on the hook.
+4. **Trim** (ui), after #502 and #504 land: section 7, 4.6's Park and 4.7 as one step.
 5. **Project memory**: its own line, from the other session.
 
 ## 10. Left to the builder
@@ -265,22 +278,32 @@ wording in reconcile; how the trim step removes the Project view's routes and te
 The unsupervised queue's rules; the documentation views; any change to Sigmund's phases beyond the title section and
 the ask lines; multi-user anything.
 
-## 12. Questions for Aiden
+## 12. Questions for Aiden, with his answers (2026-10-20)
 
 1. **Waiting clears on any reply.** A session leaves Needs me when you send it any prompt, even one about something
    else. Right, or should a reply that is not an answer keep it there?
+   **Any reply clears it.** Needs me means "stopped, waiting on you"; a session that asks again is back in it. A
+   trail of cleared questions on the Now tile was offered and set aside until use says it is needed.
 2. **Title channel.** A (nudge on the next prompt, free, one turn late) or B (enforce at Stop, one extra short model
    call when a prefix changes, right at every turn end, `RUNNING` included)?
+   **B behind a setting, A underneath.**
 3. **Project view.** Cut it, with the phase index moving to the Board's head? Or is there a use you have not had yet
    (coming back to a project after months)?
+   **Cut it.**
 4. **Stale asks.** When a session ends or you archive it, its open asks: clear as "session ended", stay until you
    Clear them, or move to the step's log?
+   **Clear them as "session ended".**
 5. **#502.** Ask that session now to leave Answer… out of the v3 Needs me?
+   **No; let it land as built.**
 6. **What and Why.** Required on every Claude-filed step (a hygiene mark until filled), or only on backlog items?
+   **Required on every Claude-filed step.**
 7. **Desktop archive ends the session.** Yes?
+   **Yes**, the session only: a step is done only when a session marks it done with an outcome. The 60 s read of the
+   desktop file is the transcript watcher's pattern (a stat per live session, a read only when the file changed).
 8. **Order.** Truth, then Backlog, then Trim, then Title channel. Agree, or Backlog first?
+   **Title channel, Backlog, Truth, Trim**, with the title check's REVIEW and BLOCKED on scribe asks until Truth
+   lands.
 9. **Origin.** Is the mark "I typed it vs Claude filed it" (mechanical, but it marks almost nothing since Claude
    files what you ask for too), or "work I asked for vs a follow-up Claude proposed" (one word in the scribe brief,
    `proposed`, and the thing the later unsupervised flag would attach to)?
-
-Where an answer is missing, the builder plans the first option named in each question.
+   **Whose idea it was**: `me`, `asked`, `proposed` (section 5).
