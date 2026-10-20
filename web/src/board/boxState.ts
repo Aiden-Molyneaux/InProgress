@@ -24,7 +24,7 @@ export function boxSince(box: TaskBox): string | null {
   const node = box.row?.node;
   if (!node) return box.session?.lastSeenAt ?? null;
   if (node.boardState === box.state && node.stateSince) return node.stateSince;
-  return sinceFallback(node, box.state, box.row?.asks ?? []);
+  return sinceFallback(node, box.state, box.row?.waiting ?? []);
 }
 
 /** The box's task hue index (0 to 6), or null: none for Done and Backlog, and none while the step holds no valid hue. */

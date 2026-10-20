@@ -11,7 +11,7 @@ const agent = (extra: Partial<SubagentInfo> = {}): SubagentInfo => ({
 });
 const session = (extra: Partial<Session> = {}): Session => ({
   id: 's1abcdef', projectId: 1, title: 'E2E session', cwd: null, branch: null, transcriptPath: null, state: 'working', focusNodeId: 57,
-  promptsSinceUpdate: 0, startedAt: 't', lastSeenAt: 't', endedAt: null, slot: 0, role: 'worker', subagents: [], commands: [], ...extra,
+  promptsSinceUpdate: 0, startedAt: 't', lastSeenAt: 't', lastPromptAt: null, endedAt: null, slot: 0, role: 'worker', subagents: [], commands: [], ...extra,
 });
 const task = (id: number, extra: Partial<WorkItem> = {}): WorkItem => ({
   id, nodeId: 57, sessionId: 's1abcdef', agentId: '', subject: `Task ${id}`, status: 'pending', blocks: [], position: id, updatedAt: 't', endedAt: null, ...extra,

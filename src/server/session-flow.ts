@@ -8,7 +8,7 @@ import { renderOrchestratorBriefing, stepBlock } from './briefing-scoped';
 import { deriveBoard, isLive, reconcileLine } from '../core/board';
 import { askTag, sessionDisplayTitle } from '../core/types';
 import { formatCounts, formatDigest, readDigest } from './digest';
-import { markAnswersDelivered, owedAnswers, undeliveredAnswers } from './repo/asks';
+import { asksToRemind, markAnswersDelivered, owedAnswers, undeliveredAnswers } from './repo/asks';
 import { endCommand, endSessionCommands, pruneCommands, reconcileCommands, startCommand, type BackgroundEntry } from './repo/commands';
 import { findNode, leadingNode, patchNode, requireNode, setDriver } from './repo/nodes';
 import { parkedAncestor, shelvedAmong } from './repo/shelved';
@@ -96,6 +96,11 @@ function oneLine(text: string): string {
   return line.length > 300 ? `${line.slice(0, 299)}…` : line;
 }
 
+/** How many open-ask reminder lines a prompt carries before the rest are only named. */
+const REMINDERS = 3;
+/** How many of the rest the overflow line names by tag. */
+const REMINDER_TAGS = 10;
+
 const clean = (text: string | undefined): string | null => text?.trim() || null;
 
 export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInput): HookEventResult {
@@ -143,7 +148,10 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
         // A notice ends the commands it names. Agent ids never have a row, so an agent's notice does nothing here.
         for (const t of input.tasks ?? []) endCommand(ctx, sessionId, t.taskId, t.status, now, t.exitCode);
         // A background-task notice (the scribe finishing, say) is not a prompt Aiden typed: no stale count.
-        if (!input.notice) next.promptsSinceUpdate += 1;
+        if (!input.notice) {
+          next.promptsSinceUpdate += 1;
+          next.lastPromptAt = now;
+        }
         break;
       case 'stop':
         next.state = 'idle';
@@ -254,6 +262,8 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
     if (before.state === 'ended' && next.state !== 'ended') markRevived(ctx, sessionId, now);
     const after = findSession(ctx, sessionId)!;
     const changed: string[] = VISIBLE.filter((k) => before![k] !== after[k]);
+    // A prompt that changes nothing above still moves a step out of Needs me when an ask this session holds is open (#522).
+    if (before.lastPromptAt !== after.lastPromptAt && asksToRemind(ctx, sessionId).length) changed.push('lastPromptAt');
     if (JSON.stringify(before.subagents) !== JSON.stringify(after.subagents)) changed.push('subagents');
     if (JSON.stringify(before.commands) !== JSON.stringify(after.commands)) changed.push('commands');
     if (created || changed.length) {
@@ -313,11 +323,25 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
   // answered one on a step it drives whose asker no longer holds it (undeliveredAnswers says which route applies).
   if (input.event === 'prompt' && !input.notice) {
     const answers = undeliveredAnswers(ctx, sessionId);
+    const lines: string[] = [];
     if (answers.length) {
-      const lines = answers.map((a) => (a.answer ? `Answered: ${askTag(a.id)} "${oneLine(a.answer)}" (yours: act on it, or add it to your tasks)` : `Cleared: ${askTag(a.id)}, no answer`));
+      lines.push(...answers.map((a) => (a.answer ? `Answered: ${askTag(a.id)} "${oneLine(a.answer)}" (yours: act on it, or add it to your tasks)` : `Cleared: ${askTag(a.id)}, no answer`)));
       markAnswersDelivered(ctx, answers.map((a) => a.id));
-      context = [...lines, ...(context ? [context] : [])].join('\n');
     }
+    // The reminder (#522): every real prompt, while an ask this session holds is open, in case this prompt answers it.
+    // At most the 3 newest, oldest first among themselves; the rest are named by tag in one line.
+    const reminders = asksToRemind(ctx, sessionId);
+    for (const a of reminders.slice(-REMINDERS)) {
+      lines.push(`Open ask ${askTag(a.id)} on ${stepRef(a.nodeId, findNode(ctx, a.nodeId)?.title)}: "${oneLine(a.text)}". If this prompt answers it, put "${askTag(a.id)} answered: ..." in your next scribe brief.`);
+    }
+    // The rest by tag, the newest few of them only, so the line stays short however many are open.
+    const rest = reminders.slice(0, -REMINDERS);
+    if (rest.length) {
+      const named = rest.slice(-REMINDER_TAGS).map((a) => askTag(a.id)).join(', ');
+      const unnamed = rest.length - Math.min(rest.length, REMINDER_TAGS);
+      lines.push(`+${rest.length} more open asks: ${named}${unnamed ? `, and ${unnamed} older` : ''}. If this prompt answers one, put "aN answered: ..." in your next scribe brief.`);
+    }
+    if (lines.length) context = [...lines, ...(context ? [context] : [])].join('\n');
   }
   return context === undefined ? { tracked: true } : { tracked: true, context };
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { deriveBoard, type BoardInput } from '../../src/core/board';
 import { COLOURED, HUES, sinceFallback, TASK_STATES, taskBoxes, taskStateOf, type TaskCell, type TaskState } from '../../src/core/taskState';
-import { TRAIL_MS, type Ask, type PastSession, type Session, type TreeNode } from '../../src/core/types';
+import { STALE_SESSION_MS, TRAIL_MS, type Ask, type PastSession, type Session, type TreeNode } from '../../src/core/types';
 
 const NOW = Date.parse('2026-10-13T12:00:00.000Z');
 const T = '2026-10-13T11:00:00.000Z';
@@ -12,7 +12,7 @@ function n(id: number, parentId: number | null, o: Partial<TreeNode> = {}): Tree
   return { id, projectId: 1, parentId, position: id, kind: 'task', title: `S${id}`, body: '', status: 'todo', assignee: 'claude', outcome: '', label: null, createdAt: T, updatedAt: T, completedAt: null, driverSessionId: null, boardState: null, stateSince: null, hue: null, parkedReason: '', parkedWhere: '', parkedAt: null, ...o };
 }
 function s(id: string, o: Partial<Session> = {}): Session {
-  return { id, projectId: 1, title: id, cwd: null, branch: null, transcriptPath: null, state: 'working', focusNodeId: null, promptsSinceUpdate: 0, startedAt: T, lastSeenAt: T, endedAt: null, slot: 0, subagents: [], commands: [], role: 'worker', ...o };
+  return { id, projectId: 1, title: id, cwd: null, branch: null, transcriptPath: null, state: 'working', focusNodeId: null, promptsSinceUpdate: 0, startedAt: T, lastSeenAt: T, lastPromptAt: null, endedAt: null, slot: 0, subagents: [], commands: [], role: 'worker', ...o };
 }
 function ask(id: number, nodeId: number, o: Partial<Ask> = {}): Ask {
   return { id, projectId: 1, nodeId, kind: 'question', text: 'Q', sessionId: null, raisedAt: T, clearedAt: null, clearedBy: null, answer: '', answerDeliveredAt: null, ...o };
@@ -185,5 +185,99 @@ describe('taskBoxes with shelved steps', () => {
     const b = taskBoxes(deriveBoard(i, NOW), i, NOW);
     expect(b.needs).toHaveLength(1);
     expect(b.needs[0]).toMatchObject({ row: null, state: 'permission', session: { id: 'w' } });
+  });
+});
+
+describe('answered in chat (#522)', () => {
+  const RAISED = ago(30 * MIN);
+  const BEFORE = ago(40 * MIN);
+  const AFTER = ago(10 * MIN);
+  const nodes = [n(1, null), n(2, 1, { status: 'active', driverSessionId: 'd' })];
+  /** Step 2, with an ask a1 raised by `by` at RAISED, a driver d and `others` as the rest of the sessions. */
+  const row = (sessions: Session[], asks: Ask[] = [ask(1, 2, { sessionId: 'r', raisedAt: RAISED })]) => {
+    const i = input({ nodes, sessions, asks });
+    const board = deriveBoard(i, NOW);
+    return { i, r: board.byId.get(2)!, box: taskBoxes(board, i, NOW) };
+  };
+  const cellOf2 = (x: ReturnType<typeof row>) => (['needs', 'now', 'next', 'done', 'backlog'] as const).find((c) => x.box[c].some((b) => b.row?.node.id === 2));
+
+  it('C1: a live working raiser that got a prompt after the raise: Now, marked, the ask still open', () => {
+    const x = row([s('r', { focusNodeId: 2, lastPromptAt: AFTER })]);
+    expect(stateOf2(x.i)).toBe('working');
+    expect(cellOf2(x)).toBe('now');
+    expect(x.r.marks).toContain('answered_in_chat');
+    expect(x.r.asks).toHaveLength(1);
+    expect(x.r.waiting).toEqual([]);
+  });
+
+  it('C1: the same with the raiser idle', () => {
+    const x = row([s('r', { focusNodeId: 2, state: 'idle', lastPromptAt: AFTER })]);
+    expect(stateOf2(x.i)).toBe('idle');
+    expect(cellOf2(x)).toBe('now');
+    expect(x.r.marks).toContain('answered_in_chat');
+  });
+
+  it('a prompt before the raise, or none: Needs me, no mark', () => {
+    for (const lastPromptAt of [BEFORE, null]) {
+      const x = row([s('r', { focusNodeId: 2, lastPromptAt })]);
+      expect(cellOf2(x)).toBe('needs');
+      expect(x.r.marks).not.toContain('answered_in_chat');
+      expect(x.r.waiting).toHaveLength(1);
+    }
+  });
+
+  it('C2: a second ask raised after the prompt returns the step to Needs me', () => {
+    const x = row([s('r', { focusNodeId: 2, lastPromptAt: AFTER })], [ask(1, 2, { sessionId: 'r', raisedAt: RAISED }), ask(2, 2, { kind: 'review', sessionId: 'r', raisedAt: ago(5 * MIN) })]);
+    expect(cellOf2(x)).toBe('needs');
+    expect(stateOf2(x.i)).toBe('review');
+    expect(x.r.marks).toContain('answered_in_chat');
+    expect(x.r.waiting.map((a) => a.id)).toEqual([2]);
+  });
+
+  it('C3: the raiser ended and the live driver got a prompt after the raise: Now', () => {
+    const x = row([s('r', { state: 'ended', endedAt: T }), s('d', { focusNodeId: 2, state: 'idle', lastPromptAt: AFTER })]);
+    expect(cellOf2(x)).toBe('now');
+    expect(x.r.marks).toContain('answered_in_chat');
+  });
+
+  it('C3: the driver prompted before the raise, or no live driver: Needs me', () => {
+    expect(cellOf2(row([s('r', { state: 'ended', endedAt: T }), s('d', { focusNodeId: 2, state: 'idle', lastPromptAt: BEFORE })]))).toBe('needs');
+    expect(cellOf2(row([s('r', { state: 'ended', endedAt: T }), s('d', { state: 'ended', endedAt: T, focusNodeId: 2, lastPromptAt: AFTER })]))).toBe('needs');
+    expect(cellOf2(row([s('r', { state: 'ended', endedAt: T })]))).toBe('needs');
+  });
+
+  it('C3: a stale raiser counts as gone, so a prompted driver decides', () => {
+    const stale = ago(STALE_SESSION_MS + MIN);
+    const x = row([s('r', { focusNodeId: 2, state: 'idle', lastSeenAt: stale, lastPromptAt: BEFORE }), s('d', { focusNodeId: 2, state: 'idle', lastPromptAt: AFTER })]);
+    expect(cellOf2(x)).toBe('now');
+  });
+
+  it('a live raiser decides over the driver: its own old prompt keeps the step in Needs me', () => {
+    const x = row([s('r', { focusNodeId: 2, state: 'idle', lastPromptAt: BEFORE }), s('d', { focusNodeId: 2, state: 'idle', lastPromptAt: AFTER })]);
+    expect(cellOf2(x)).toBe('needs');
+  });
+
+  it('an ask with no session (the window, a migrated one) never counts', () => {
+    const x = row([s('r', { focusNodeId: 2, lastPromptAt: AFTER }), s('d', { focusNodeId: 2, lastPromptAt: AFTER })], [ask(1, 2, { sessionId: null, raisedAt: RAISED })]);
+    expect(cellOf2(x)).toBe('needs');
+    expect(x.r.marks).not.toContain('answered_in_chat');
+  });
+
+  it('a session in permission state on the row still shows permission', () => {
+    const x = row([s('r', { focusNodeId: 2, state: 'permission', lastPromptAt: AFTER })]);
+    expect(stateOf2(x.i)).toBe('permission');
+    expect(cellOf2(x)).toBe('needs');
+  });
+
+  it('C5: a cleared ask carries no mark', () => {
+    const x = row([s('r', { focusNodeId: 2, lastPromptAt: AFTER })], [ask(1, 2, { sessionId: 'r', raisedAt: RAISED, clearedAt: AFTER, answer: 'yes' })]);
+    expect(x.r.marks).not.toContain('answered_in_chat');
+    expect(x.r.asks).toEqual([]);
+  });
+
+  it('the Needs me time and the since fallback read the waiting asks only', () => {
+    const x = row([s('r', { focusNodeId: 2, lastPromptAt: AFTER })], [ask(1, 2, { sessionId: 'r', raisedAt: RAISED }), ask(2, 2, { sessionId: null, raisedAt: ago(5 * MIN) })]);
+    expect(x.r.waiting.map((a) => a.id)).toEqual([2]);
+    expect(sinceFallback(x.r.node, 'question', x.r.waiting)).toBe(ago(5 * MIN));
   });
 });

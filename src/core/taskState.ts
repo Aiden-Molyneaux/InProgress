@@ -25,8 +25,8 @@ export interface TaskBox {
 /** The state of one row (the rules, first match wins). The window and the server's reconcile both call this. */
 export function taskStateOf(row: BoardRow, input: BoardInput, now: number): TaskState {
   const { node } = row;
-  if (row.sessions.some((s) => s.state === 'permission') || row.asks.some((a) => a.kind === 'permission')) return 'permission';
-  if (row.asks.length) return row.asks[0].kind;
+  if (row.sessions.some((s) => s.state === 'permission') || row.waiting.some((a) => a.kind === 'permission')) return 'permission';
+  if (row.waiting.length) return row.waiting[0].kind;
   if (node.status === 'done') return 'done';
   if (row.sessions.some((s) => s.state === 'working')) return 'working';
   if (node.status === 'blocked') return 'blocked';
@@ -78,7 +78,7 @@ export function taskBoxes(board: Board, input: BoardInput, now: number): Record<
   const needTime = (b: TaskBox): number => {
     const row = b.row;
     if (!row) return Date.parse(b.session!.lastSeenAt);
-    const times = row.asks.map((a) => Date.parse(a.raisedAt));
+    const times = row.waiting.map((a) => Date.parse(a.raisedAt));
     for (const s of row.sessions) if (s.state === 'permission') times.push(Date.parse(s.lastSeenAt));
     return Math.min(...times);
   };

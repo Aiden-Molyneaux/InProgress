@@ -92,7 +92,7 @@ export function NeedsMe({ snapshot, boxes, now, selectedNode, onOpenNode, onOpen
   const body = (box: BoxData) => {
     // Every session of the step that waits on permission has its own panel (a focusless box holds just its session).
     const waiting = box.row ? box.row.sessions.filter((x) => x.state === 'permission') : box.session ? [box.session] : [];
-    const asks = box.row?.asks ?? [];
+    const asks = box.row?.waiting ?? [];
     // One session line per run of asks from the same session; a permission wait leads with its own session's line.
     const parts = [] as { key: string; node: ReactNode }[];
     // A focusless box is titled with its session's name, so its line does not repeat it.
