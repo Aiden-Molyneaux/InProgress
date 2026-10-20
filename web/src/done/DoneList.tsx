@@ -12,7 +12,7 @@ const KEY = 'ip.doneOrder';
  * Every done step of the project (#406), a view of its own: the rail opens it, and so does "All done ›" on the Board. By time (a section per day) or
  * by phase (a section per parent step). Rows open Details as the Done column's do.
  */
-export function DoneList({ snapshot, now, onOpenNode }: ViewProps) {
+export function DoneList({ snapshot, now, onOpenNode }: ViewProps & { codes?: Map<number, string> }) {
   const [order, setOrder] = useState<Order>(() => (load(KEY) === 'phase' ? 'phase' : 'time'));
   const pick = (o: Order) => {
     setOrder(o);

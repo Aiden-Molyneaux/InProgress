@@ -1,4 +1,4 @@
-import { Fragment, useLayoutEffect, useState } from 'react';
+import { Fragment, useLayoutEffect, useState, type ReactNode, type Ref } from 'react';
 import { scrambled } from './scrambled';
 
 export interface PageHeadProps {
@@ -9,6 +9,10 @@ export interface PageHeadProps {
   meta: { label: string; value: number }[];
   /** What the title decodes for: the project's id. A project decoded once is not decoded again until another one is. */
   decodeKey: number;
+  /** Given, the title takes this ref and can be focused by script (tabIndex -1): where focus lands when a view's last row leaves. */
+  titleRef?: Ref<HTMLHeadingElement>;
+  /** Drawn after the meta, such as a view's order switch. */
+  children?: ReactNode;
 }
 
 /** The project the title last decoded for, so a view switch inside one project does not play it again. */
@@ -16,7 +20,7 @@ let lastDecoded: number | null = null;
 
 const DECODE_MS = 520;
 /** The page head (spec section 7): the code block, the project's name, and the meta line to the right. */
-export function PageHead({ code, name, meta, decodeKey }: PageHeadProps) {
+export function PageHead({ code, name, meta, decodeKey, titleRef, children }: PageHeadProps) {
   const [shown, setShown] = useState(name);
   // A layout effect, so the name never paints clean before the decode scrambles it.
   useLayoutEffect(() => {
@@ -42,7 +46,7 @@ export function PageHead({ code, name, meta, decodeKey }: PageHeadProps) {
   return (
     <header className="ip-page-head">
       <span className="ip-page-code" aria-hidden="true">{code}</span>
-      <h1 className="ip-page-title" title={name} aria-label={name}>
+      <h1 ref={titleRef} tabIndex={titleRef ? -1 : undefined} className="ip-page-title" title={name} aria-label={name}>
         <span aria-hidden="true">{shown}</span>
       </h1>
       <p className="ip-page-meta">
@@ -53,6 +57,7 @@ export function PageHead({ code, name, meta, decodeKey }: PageHeadProps) {
           </Fragment>
         ))}
       </p>
+      {children && <div className="ip-page-aside">{children}</div>}
     </header>
   );
 }

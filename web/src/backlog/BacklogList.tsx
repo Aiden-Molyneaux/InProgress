@@ -12,7 +12,7 @@ import type { ViewProps } from '../views/props';
  * Every open entry, the filter and order controls, and a Parked group at the bottom; the quick-add
  * at the foot creates a root step (No phase).
  */
-export function BacklogList({ snapshot, now, onOpenNode, onOpenResource, onStatus }: ViewProps) {
+export function BacklogList({ snapshot, now, onOpenNode, onOpenResource, onStatus }: ViewProps & { codes?: Map<number, string> }) {
   const { project } = snapshot;
   const board = useMemo(() => deriveBoard(snapshot, now), [snapshot, now]);
   const boxes = useMemo(() => taskBoxes(board, snapshot, now).backlog, [board, snapshot, now]);
