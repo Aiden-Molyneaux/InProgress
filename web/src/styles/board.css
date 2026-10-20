@@ -106,6 +106,7 @@
 .ip-tile .ip-done-form div { display: block; margin-top: 0; }
 .ip-tile .ip-done-form .p-field { display: grid; }
 .ip-tile .ip-done-form .p-field-box { display: flex; justify-content: flex-start; }
+.ip-tile .ip-done-form .p-field-input { flex: 1; min-width: 0; width: 100%; }
 .ip-tile .ip-done-form .ip-confirm-buttons { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .ip-tile .ip-done-form .p-error { margin-top: 0; }
 .ip-own-queue { display: grid; gap: var(--sp-3); }
