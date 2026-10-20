@@ -15,6 +15,7 @@ export const MARK_WORDS: Record<Mark, string> = {
   deep: 'deep',
   stalled: 'stalled',
   answer_waiting: 'answer waiting',
+  answered_in_chat: 'answered in chat, not recorded',
 };
 
 /** The label chip: glyph plus word in muted ink. Its accessible name is the word. */

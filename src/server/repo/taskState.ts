@@ -57,7 +57,7 @@ export function reconcileProjects(ctx: Ctx, projectIds: number[]): void {
       }
       // A first set (never reconciled: both null) dates the state from the step's own fields. Otherwise it changed now,
       // including a step coming back on the board (board_state null, state_since when it left).
-      const since = node.boardState === null && node.stateSince === null ? sinceFallback(node, state, row.asks) : now;
+      const since = node.boardState === null && node.stateSince === null ? sinceFallback(node, state, row.waiting) : now;
       let hue: number | null;
       if (!coloured) {
         if (wasColoured) hold(node.hue, -1);

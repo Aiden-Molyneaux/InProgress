@@ -46,7 +46,7 @@ describe('migration 13', () => {
     const db = at12();
     const before = nodeRows(db);
     migrate(db);
-    expect(schemaVersion(db)).toBe(13);
+    expect(schemaVersion(db)).toBe(MIGRATIONS.length);
     const after = nodeRows(db);
     expect(after.map(({ parked_reason: _r, parked_where: _w, parked_at: _a, ...rest }) => rest)).toEqual(before);
     expect(after[1]).toMatchObject({ label: 'data', board_state: 'working', hue: 4, driver_session_id: 's-1', position: 2.5 });
@@ -186,7 +186,7 @@ describe('migration 13', () => {
     const file = join(dir, 'live.db');
     at12(file).close();
     const db = openDb(file);
-    expect(schemaVersion(db)).toBe(13);
+    expect(schemaVersion(db)).toBe(MIGRATIONS.length);
     db.close();
     const copies = readdirSync(join(dir, 'backups'));
     expect(copies).toHaveLength(1);

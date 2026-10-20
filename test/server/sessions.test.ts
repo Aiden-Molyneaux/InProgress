@@ -140,6 +140,22 @@ describe('handleHookEvent', () => {
     expect(handleHookEvent(ctx, 's1', { event: 'prompt', notice: true }).context).toBeUndefined();
   });
 
+  it('records the last real prompt in lastPromptAt: a notice, a start and a stop leave it alone', () => {
+    const { ctx } = setup();
+    handleHookEvent(ctx, 's1', start());
+    expect(findSession(ctx, 's1')?.lastPromptAt).toBeNull();
+    handleHookEvent(ctx, 's1', { event: 'prompt' });
+    const at = findSession(ctx, 's1')!.lastPromptAt;
+    expect(at).toBe(findSession(ctx, 's1')!.lastSeenAt);
+    expect(at).not.toBeNull();
+    handleHookEvent(ctx, 's1', { event: 'prompt', notice: true });
+    handleHookEvent(ctx, 's1', { event: 'stop' });
+    handleHookEvent(ctx, 's1', start());
+    expect(findSession(ctx, 's1')?.lastPromptAt).toBe(at);
+    handleHookEvent(ctx, 's1', { event: 'prompt' });
+    expect(findSession(ctx, 's1')!.lastPromptAt! > at!).toBe(true);
+  });
+
   it('answers status questions with the current frontier', () => {
     const { ctx, a3 } = setup();
     handleHookEvent(ctx, 's1', start());
