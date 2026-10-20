@@ -16,10 +16,13 @@ function baseCode(name: string): string {
 /**
  * The code block's three letters (spec section 6): each word's first letter, then the name's next consonants, then its
  * other letters. `others` is the names of the projects before this one in the rail: when one shares the code, the third
- * letter becomes the count of those sharing it plus one (`IPR`, then `IP2`, `IP3`).
+ * letter becomes the count of those sharing it plus one (`IPR`, then `IP2`, `IP3`). Past nine the number takes the
+ * second letter too (`I10`), so the code stays three characters.
  */
 export function projectCode(name: string, others: readonly string[] = []): string {
   const code = baseCode(name);
   const clashes = others.filter((other) => baseCode(other) === code).length;
-  return clashes === 0 ? code : `${code.slice(0, 2)}${clashes + 1}`;
+  if (clashes === 0) return code;
+  const n = String(clashes + 1);
+  return `${code.slice(0, Math.max(0, 3 - n.length))}${n}`.slice(-3);
 }

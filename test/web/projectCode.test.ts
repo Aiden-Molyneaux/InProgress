@@ -24,6 +24,11 @@ describe('projectCode', () => {
     expect(projectCode('InProgress', ['InProgress'])).toBe('IP2');
     expect(projectCode('InProgress', ['InProgress', 'In-Progress', 'Other'])).toBe('IP3');
   });
+
+  it('keeps three characters past nine clashes', () => {
+    expect(projectCode('InProgress', Array(9).fill('InProgress'))).toBe('I10');
+    expect(projectCode('InProgress', Array(99).fill('InProgress'))).toBe('100');
+  });
 });
 
 describe('scrambled', () => {

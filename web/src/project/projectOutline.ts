@@ -106,9 +106,14 @@ export function projectSections(snapshot: ProjectSnapshot, board: Board): Sectio
   return [...sections, ...groups.filter((s) => s.allDone)];
 }
 
+/** How many phases the project has: the sections that are a group, finished ones too. The page head and the rail count them. */
+export function phaseCount(sections: Section[]): number {
+  return sections.filter((x) => x.group).length;
+}
+
 /** The page head's figures: the phases (sections that are a group, finished ones too), and the steps now, next and done. */
 export function headMeta(board: Board, sections: Section[]): { label: string; value: number }[] {
-  const phases = sections.filter((x) => x.group).length;
+  const phases = phaseCount(sections);
   return [
     { label: phases === 1 ? 'PHASE' : 'PHASES', value: phases },
     { label: 'NOW', value: board.now.length },
