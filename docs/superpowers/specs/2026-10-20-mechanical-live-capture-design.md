@@ -1,6 +1,7 @@
 # Mechanical live capture
 
-Date: 2026-10-20. Status: proposal, for Aiden's answers in section 9. Research and spec only: no code.
+Date: 2026-10-20. Status: superseded the same day by `2026-10-20-inprogress-redesign-design.md`, which keeps this document's
+inventory and evidence (sections 1 to 3) and replaces its direction. Research and spec only: no code.
 
 ## 0. Summary
 
