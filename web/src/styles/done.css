@@ -8,6 +8,9 @@
 .ip-donelist { container-type: inline-size; flex: 1; min-width: 0; overflow-x: hidden; overflow-y: auto; }
 .ip-donelist .ip-page { display: grid; align-content: start; gap: var(--sp-5); }
 .ip-donelist .ip-page-aside { margin-left: auto; }
+@container (min-width: 1160px) {
+  .ip-donelist .ip-page { padding: var(--sp-6); }
+}
 .ip-done-sec { display: grid; gap: var(--sp-2); min-width: 0; }
 .ip-done-head { display: grid; gap: var(--sp-1); min-width: 0; }
 .ip-done-head h3 { margin: 0; }

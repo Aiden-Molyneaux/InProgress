@@ -8,6 +8,9 @@
 .ip-backlog-head .ip-add { margin-left: auto; }
 /* The full Backlog view: the page, its controls, groups and one-line rows (#504). */
 .ip-backlogview { container-type: inline-size; flex: 1; min-width: 0; overflow-x: hidden; overflow-y: auto; }
+@container (min-width: 1160px) {
+  .ip-backlogview .ip-page { padding: var(--sp-6); }
+}
 .ip-bl { display: grid; gap: var(--sp-4); min-width: 0; }
 .ip-bl-tools { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
 .ip-bl-tools .ip-bl-filter { flex: 1 1 0; min-width: 0; }

@@ -2184,19 +2184,19 @@ test.describe('Board', () => {
     await band(page, 'done').getByRole('button', { name: /^All done · [0-9]+ ›$/ }).click();
     await expect(viewButton(page, 'All done')).toBeFocused();
     await expect(page.locator('.ip-board')).toHaveCount(0);
-    for (const title of titles) await expect(page.getByRole('button', { name: title, exact: true })).toBeVisible();
+    for (const title of titles) await expect(page.locator('.ip-donelist .ip-done-title', { hasText: new RegExp(`^${title}$`) })).toBeVisible();
     // Every row shows its step's #id beside the title, in both orders (#447).
-    const ids = page.locator('.ip-donelist-row').filter({ hasText: 'Listed step' });
+    const ids = page.locator('.ip-done-row').filter({ hasText: 'Listed step' });
     const idsShown = async () => {
       await expect(ids).toHaveCount(titles.length);
-      for (const row of await ids.all()) await expect(row.locator('.ip-sid')).toHaveText(`#${await row.getAttribute('data-node')}`);
+      for (const row of await ids.all()) await expect(row.locator('.ip-done-id')).toHaveText(`#${await row.getAttribute('data-node')}`);
     };
     await idsShown();
-    await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible();
-    await page.getByRole('button', { name: 'Phase', exact: true }).click();
-    await expect(page.getByRole('heading', { name: /^Release prep · 7$/ })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /^TODAY · \d+$/ })).toBeVisible();
+    await page.getByRole('group', { name: 'Order' }).getByRole('button', { name: 'Phase', exact: true }).click();
+    await expect(page.getByRole('heading', { name: /^#\d+ Release prep$|Release prep$/ })).toBeVisible();
     await idsShown();
-    await page.getByRole('button', { name: 'Listed step 3', exact: true }).click();
+    await page.locator('.ip-done-row', { hasText: 'Listed step 3' }).click();
     const details = page.getByRole('complementary');
     await expect(details).toContainText('Listed step 3');
     await page.keyboard.press('Escape');
@@ -2206,7 +2206,7 @@ test.describe('Board', () => {
     // A reload lands on the Board, and the list opens again in the order picked last.
     await page.reload();
     await band(page, 'done').getByRole('button', { name: /^All done · [0-9]+ ›$/ }).click();
-    await expect(page.getByRole('button', { name: 'Phase', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('group', { name: 'Order' }).getByRole('button', { name: 'Phase', exact: true })).toHaveAttribute('aria-pressed', 'true');
   });
 
   test('leaving the window stamps the last look under ip.look.<id>', async ({ page, api, fresh }) => {
@@ -3627,5 +3627,45 @@ test.describe('#504 Backlog view and All done', () => {
     // Enter opens Details on the focused row.
     await page.keyboard.press('Enter');
     await expect(page.getByRole('complementary').locator('.ip-dtitle')).toContainText('5 Store listing');
+  });
+
+  test('All done reads as a log by time and by phase', async ({ page, api, fresh }) => {
+    const titles = ['Log step 1', 'Log step 2', 'Log step 3'];
+    await write(api, fresh.session, 'post', '/api/nodes', {
+      parentId: fresh.root,
+      nodes: [{ title: 'Log phase', children: titles.map((title) => ({ title, status: 'done' as const, outcome: 'Shipped it.' })) }],
+    });
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    await viewButton(page, 'All done').click();
+    const view = page.locator('.ip-donelist');
+    await expect(view.getByRole('heading', { name: 'ALL DONE', level: 1 })).toBeVisible();
+    await expect(view.locator('.ip-page-meta')).toContainText(/\d+ DONE/);
+    // By time: a TODAY heading with its count, an HH:MM column, the outcome on one line with its whole text in the title.
+    await expect(view.getByRole('heading', { name: /^TODAY · \d+$/ })).toBeVisible();
+    const rows = view.locator('.ip-done-row').filter({ hasText: 'Log step' });
+    await expect(rows).toHaveCount(3);
+    await expect(rows.first().locator('.ip-done-when')).toHaveText(/^\d\d:\d\d$/);
+    await expect(rows.first().locator('.ip-done-outcome')).toHaveAttribute('title', 'Shipped it.');
+    // By phase: the crumb path with ids under an "n DONE" eyebrow, and the short date on the left.
+    await view.getByRole('group', { name: 'Order' }).getByRole('button', { name: 'Phase', exact: true }).click();
+    const path = view.locator('.ip-done-path', { hasText: 'Log phase' });
+    await expect(path).toHaveText(/^#\d+ .+ › #\d+ Log phase$/);
+    await expect(path.locator('xpath=preceding-sibling::*[1]')).toHaveText(/^3 DONE$/);
+    await expect(rows.first().locator('.ip-done-when')).toHaveText(/^[A-Z][a-z]{2} \d{1,2}/);
+    // The order is kept over a reload.
+    await page.reload();
+    await viewButton(page, 'All done').click();
+    await expect(view.getByRole('group', { name: 'Order' }).getByRole('button', { name: 'Phase', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    // The rows are one list: Down moves and Enter opens Details.
+    const first = view.locator('.ip-done-row[tabindex="0"]');
+    await expect(first).toHaveCount(1);
+    await first.focus();
+    await page.keyboard.press('ArrowDown');
+    const second = view.locator('.ip-done-row:focus');
+    await expect(second).toHaveCount(1);
+    const title = await second.locator('.ip-done-title').innerText();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('complementary').locator('.ip-dtitle')).toContainText(title);
   });
 });
