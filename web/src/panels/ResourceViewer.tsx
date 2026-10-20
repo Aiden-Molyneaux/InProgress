@@ -32,12 +32,13 @@ function countText(count: number | null): string {
  */
 function FreshnessStrip({ fresh, covers, registeredAt, busy, onConfirm }: { fresh: PageFreshness; covers: string[]; registeredAt: string; busy: boolean; onConfirm: () => void }) {
   const current = fresh.count === 0;
-  const how = fresh.confirmedAt === registeredAt ? 'at registration' : 'Still accurate';
+  // Registration sets the first confirmation; after that the row does not say how it was confirmed.
+  const how = fresh.confirmedAt === registeredAt ? ' · at registration' : '';
   return (
     <div className="ip-fresh" data-current={current || undefined}>
       <span className="ip-fresh-count">{countText(fresh.count)}</span>
       {fresh.confirmedAt && (
-        <span className="ip-fresh-when">{`confirmed ${DAY.format(new Date(fresh.confirmedAt))} · ${how}${fresh.confirmedSha ? ` · ${fresh.confirmedSha.slice(0, 7)}` : ''}`}</span>
+        <span className="ip-fresh-when">{`confirmed ${DAY.format(new Date(fresh.confirmedAt))}${how}${fresh.confirmedSha ? ` · ${fresh.confirmedSha.slice(0, 7)}` : ''}`}</span>
       )}
       <span className="ip-fresh-covers" aria-label="Covers">
         {covers.map((c) => (
@@ -130,6 +131,8 @@ export function ResourceViewer({ resourceId, onClose }: { resourceId: number; on
     const next = await api.pageBody(answer.id);
     setPage(next.ok ? next.body : next);
     setConfirming(false);
+    // Still accurate leaves with the stale count: focus goes to the document pane, not to the page behind the modal.
+    body.current?.focus();
     say('Confirmed');
   };
   const isPage = !!resource?.path && isPagePurpose(resource.purpose);

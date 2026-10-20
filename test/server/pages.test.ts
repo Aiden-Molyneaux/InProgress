@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
@@ -76,6 +76,8 @@ describe('pages: registration', () => {
       [{ path: join(repo, 'docs', 'big.md') }, 'size'],
       [{ path: join(repo, 'docs', 'ok.md'), content: '# copy' }, 'content'],
       [{ path: join(repo, 'docs', 'ok.md'), kind: 'runbook' }, 'kind'],
+      [{ path: `${repo}/docs/../../${outside.split(/[\\/]/).pop()}/x.md` }, 'local'],
+      [{ path: `${repo}/./docs/ok.md` }, 'local'],
     ];
     for (const [payload, rule] of cases) {
       const res = await register(String(payload.path), payload);
@@ -83,6 +85,26 @@ describe('pages: registration', () => {
       expect(res.json(), JSON.stringify(payload)).toMatchObject({ code: 'page-rule', rule });
     }
     expect(project.id).toBeGreaterThan(0);
+  });
+
+  it('refuses a file a junction inside the bound folder points outside it, on registration and on a read', async () => {
+    const { repo, register, app } = setup();
+    const outside = mkdtempSync(join(tmpdir(), 'ip-outside-'));
+    tempDirs.push(outside);
+    writeFileSync(join(outside, 'x.md'), '# outside');
+    symlinkSync(outside, join(repo, 'docs', 'link'), 'junction');
+    const res = await register(join(repo, 'docs', 'link', 'x.md'));
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ code: 'page-rule', rule: 'binding' });
+    // A page whose folder becomes a junction after registration is refused on its next read.
+    mkdirSync(join(repo, 'later'));
+    writeFileSync(join(repo, 'later', 'x.md'), '# inside');
+    const page = (await register(join(repo, 'later', 'x.md'))).json();
+    rmSync(join(repo, 'later'), { recursive: true });
+    symlinkSync(outside, join(repo, 'later'), 'junction');
+    const read = await app.inject({ url: `/api/resources/${page.id}/body` });
+    expect(read.statusCode).toBe(422);
+    expect(read.json()).toMatchObject({ code: 'page-refused', rule: 'binding' });
   });
 
   it('refuses a folder that is not a git repository with a commit', async () => {
@@ -180,6 +202,18 @@ describe('pages: the live body', () => {
     }
   });
 
+  it('refuses a page that is not UTF-8, so a UTF-16 secret cannot slip past the scan', async () => {
+    const { app, repo, register } = setup();
+    const file = join(repo, 'docs', 'ps.md');
+    writeFileSync(file, '# PowerShell\n');
+    const page = (await register(file)).json();
+    writeFileSync(file, Buffer.from('\uFEFF# Ops\nkey sk-ant-api03-9fKq2LmZ8xYv4TbW1nRpQs\n', 'utf16le'));
+    const res = await app.inject({ url: `/api/resources/${page.id}/body` });
+    expect(res.statusCode).toBe(422);
+    expect(res.json()).toMatchObject({ code: 'page-refused', rule: 'encoding' });
+    expect(res.body).not.toContain('9fKq');
+  });
+
   it('is refused for a resource that is not a page', async () => {
     const { app, project } = setup();
     const doc = (await app.inject({ method: 'POST', url: '/api/resources', headers: auth, payload: { nodeId: project.rootNodeId, kind: 'doc', title: 'Doc', content: '# x' } })).json();
@@ -263,6 +297,8 @@ describe('pages: front matter', () => {
     expect(front).toEqual({ covers: ['src/**', 'docs/a.md'], shelf: 'pages', templates: ['skills/sigmund/SKILL.md', 'agents/murr.md'] });
     expect(body).toBe('Body');
     expect(parseMarkdownFront('# No front matter\n---\n').front).toEqual({ covers: [], shelf: 'pages', templates: [] });
+    // Covers are repo-relative: backslashes become slashes; a drive or a climb out of the repo is dropped.
+    expect(parseMarkdownFront('---\ncovers: [src\\app.ts, ../other/**, C:/repo/x.ts, ./docs/a.md]\n---\n').front.covers).toEqual(['src/app.ts', './docs/a.md']);
   });
 
   it('reads HTML meta tags in any attribute order, comma-separated', () => {
@@ -289,6 +325,9 @@ describe('pages: the secret scan', () => {
       'API_KEY=<from the password manager>',
       'call re_render_the_whole_board_now() to repaint',
       'the sk-learn-preprocessing-pipeline package',
+      'const apiKey = process.env.RESEND_API_KEY;',
+      'hotkey=ctrl+shift+alt+k+x+y+z+w',
+      'API_TOKEN=${{ secrets.API_TOKEN_2026 }}',
     ]) expect(findSecretLine(text), text).toBeNull();
   });
 });

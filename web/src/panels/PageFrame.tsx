@@ -16,8 +16,8 @@ export function PageFrame({ resourceId, path, title }: { resourceId: number; pat
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       if (!frame.current || event.source !== frame.current.contentWindow) return;
-      if (typeof event.data !== 'number' || !Number.isFinite(event.data) || event.data < 0) return;
-      setHeight(Math.min(MAX_HEIGHT, Math.ceil(event.data)));
+      if (typeof event.data !== 'number' || !Number.isFinite(event.data)) return;
+      setHeight(Math.min(MAX_HEIGHT, Math.max(START_HEIGHT, Math.ceil(event.data))));
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);

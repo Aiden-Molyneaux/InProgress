@@ -48,7 +48,7 @@ export function registerUi(app: FastifyInstance, opts: AppOptions, requireToken:
   // The viewer's Still accurate: the page's claim holds at its repo's HEAD now.
   app.post('/api/ui/resources/:id/confirm', { onRequest: requireUi }, async (req) => {
     const id = idParam.parse(req.params).id;
-    return confirmPage(opts.ctx, 'window', id, await pageHead(requireResource(opts.ctx, id)));
+    return confirmPage(opts.ctx, 'window', id, await pageHead(opts.ctx, requireResource(opts.ctx, id)));
   });
 
   // The UI runs in an Edge app window, where a plain link opens in Edge: links go through here to the default browser.

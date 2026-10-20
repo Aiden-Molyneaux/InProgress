@@ -1,6 +1,6 @@
 import { RESOURCE_PURPOSES, type Resource, type ResourceKind, type ResourceMeta, type ResourcePurpose, type StateNote } from '../../core/types';
 import { write, type Ctx, type RecordEvent } from '../db/tx';
-import { badRequest, notFound } from '../errors';
+import { badRequest, conflict, notFound } from '../errors';
 import { requireNode } from './nodes';
 import { checkPageRules, isPage } from '../pages';
 import { inLiveProject } from './projects';
@@ -65,6 +65,20 @@ export interface ResourcePatch {
   purpose?: ResourcePurpose | null;
   /** Set when the patch makes the resource a page or points a page at another file: its new first confirmation. */
   confirmedSha?: string | null;
+  /** The path the route inspected for that confirmation: a write that finds another path refuses with a 409. */
+  inspectedPath?: string | null;
+}
+
+/** The resource a patch leaves, before the write: for the route that inspects a page's file and for the write itself. */
+export function nextResource(before: Resource, patch: ResourcePatch) {
+  return {
+    kind: patch.kind ?? before.kind,
+    title: patch.title?.trim() || before.title,
+    content: patch.content !== undefined ? patch.content : before.content,
+    path: patch.path !== undefined ? clean(patch.path) : before.path,
+    url: patch.url !== undefined ? clean(patch.url) : before.url,
+    purpose: patch.purpose !== undefined ? patch.purpose : before.purpose,
+  };
 }
 
 /** True when a patch makes `before` a page, or points a page at another file: it then needs a new first confirmation. */
@@ -160,20 +174,14 @@ export function updateResource(ctx: Ctx, actor: string, id: number, patch: Resou
       if (node.projectId !== before.projectId) throw badRequest(`#${node.id} is in a different project than r${id}`);
       nodeId = node.id;
     }
-    const next = {
-      kind: patch.kind ?? before.kind,
-      title: patch.title?.trim() || before.title,
-      content: patch.content !== undefined ? patch.content : before.content,
-      path: patch.path !== undefined ? clean(patch.path) : before.path,
-      url: patch.url !== undefined ? clean(patch.url) : before.url,
-      purpose: patch.purpose !== undefined ? patch.purpose : before.purpose,
-    };
+    const next = nextResource(before, patch);
     if (next.content === null && !next.path && !next.url) throw badRequest('A resource needs content, a path, or a url');
     const page = isPage(next);
     if (page) checkPageRules(ctx, before.projectId, next);
     // A patch that makes a page, or points one at another file, brings its own first confirmation; any other keeps the old one.
     const reconfirm = page && patchNeedsPageCheck(before, patch);
     if (reconfirm && !patch.confirmedSha) throw badRequest('A page is re-pointed with its repo HEAD', 'PATCH /api/resources/:id inspects the file first.');
+    if (reconfirm && patch.inspectedPath !== next.path) throw conflict(`r${id} changed while its file was checked`, 'Send the patch again.');
     const confirmedSha = page ? (reconfirm ? patch.confirmedSha! : before.confirmedSha) : null;
     const confirmedAt = page ? (reconfirm ? ctx.now() : before.confirmedAt) : null;
     if (next.purpose === 'state') {

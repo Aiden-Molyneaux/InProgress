@@ -5,7 +5,7 @@ import { addLog } from '../repo/logs';
 import { addNodes, deleteNode, moveNode, requireNode, updateNode } from '../repo/nodes';
 import { addBinding, createProject, removeBinding, setQueue, updateProject } from '../repo/projects';
 import { checkPageRules, inspectNewPage, isPage, pageHead } from '../pages';
-import { addResource, confirmPage, deleteResource, patchNeedsPageCheck, requireResource, updateResource } from '../repo/resources';
+import { addResource, confirmPage, deleteResource, nextResource, patchNeedsPageCheck, requireResource, updateResource } from '../repo/resources';
 import {
   addNodesBody, bindingBody, createProjectBody, idParam, logBody, moveNodeBody, queueBody,
   resourceBody, resourcePatchBody, updateNodeBody, updateProjectBody,
@@ -40,8 +40,9 @@ export function registerWriteRoutes(app: FastifyInstance, ctx: Ctx, requireToken
   app.post('/api/resources', guarded, async (req, reply) => {
     const body = resourceBody.parse(req.body);
     if (!isPage(body)) return reply.code(201).send(addResource(ctx, actorOf(req), body));
-    checkPageRules(ctx, requireNode(ctx, body.nodeId).projectId, body);
-    const { confirmedSha } = await inspectNewPage(body.path!.trim());
+    const projectId = requireNode(ctx, body.nodeId).projectId;
+    checkPageRules(ctx, projectId, body);
+    const { confirmedSha } = await inspectNewPage(ctx, projectId, body.path!.trim());
     return reply.code(201).send(addResource(ctx, actorOf(req), { ...body, confirmedSha }));
   });
   app.patch('/api/resources/:id', guarded, async (req) => {
@@ -49,15 +50,15 @@ export function registerWriteRoutes(app: FastifyInstance, ctx: Ctx, requireToken
     const patch = resourcePatchBody.parse(req.body);
     const before = requireResource(ctx, id);
     if (!patchNeedsPageCheck(before, patch)) return updateResource(ctx, actorOf(req), id, patch);
-    const next = { kind: patch.kind ?? before.kind, content: patch.content !== undefined ? patch.content : before.content, path: patch.path !== undefined ? patch.path : before.path };
+    const next = nextResource(before, patch);
     checkPageRules(ctx, before.projectId, next);
-    const { confirmedSha } = await inspectNewPage(next.path!.trim());
-    return updateResource(ctx, actorOf(req), id, { ...patch, confirmedSha });
+    const { confirmedSha } = await inspectNewPage(ctx, before.projectId, next.path!);
+    return updateResource(ctx, actorOf(req), id, { ...patch, confirmedSha, inspectedPath: next.path });
   });
   // Still accurate, for the scribe and Sigmund's receipt (#531): the page's claim holds at its repo's HEAD now.
   app.post('/api/resources/:id/confirm', guarded, async (req) => {
     const id = idParam.parse(req.params).id;
-    return confirmPage(ctx, actorOf(req), id, await pageHead(requireResource(ctx, id)));
+    return confirmPage(ctx, actorOf(req), id, await pageHead(ctx, requireResource(ctx, id)));
   });
   app.delete('/api/resources/:id', guarded, async (req) => {
     deleteResource(ctx, actorOf(req), idParam.parse(req.params).id);

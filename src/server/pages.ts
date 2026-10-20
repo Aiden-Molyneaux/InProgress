@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, extname } from 'node:path';
 import { isPagePurpose, type PageBody, type PageFreshness, type PageFront, type Resource } from '../core/types';
 import { isLocalAbsolutePath, isUnder, normalizePath } from '../lib/paths';
@@ -17,7 +17,7 @@ const HTML_EXTS = ['.html', '.htm'];
 const GIT_TIMEOUT_MS = 5_000;
 
 /** The rule a registration broke, sent as `rule` beside `code: 'page-rule'` in the 400. */
-export type PageRule = 'kind' | 'content' | 'path' | 'local' | 'binding' | 'extension' | 'file' | 'size' | 'repo';
+export type PageRule = 'kind' | 'content' | 'path' | 'local' | 'binding' | 'extension' | 'file' | 'size' | 'repo' | 'encoding';
 
 const ruleError = (rule: PageRule, message: string, hint?: string) => new ApiError(400, message, hint, { code: 'page-rule', rule });
 
@@ -41,13 +41,17 @@ function brokenRule(ctx: Ctx, projectId: number, r: { kind: string; content?: st
   const path = r.path?.trim();
   if (!path) return ruleError('path', 'A page needs the path of its file');
   if (!isLocalAbsolutePath(path)) return ruleError('local', `Not a local absolute path: ${path}`, 'Use the full path on a local disk, e.g. C:/personal/InGame/docs/map.html.');
+  // As for a binding: a . or .. segment would let a string check pass for a file outside the bound folder.
+  if (normalizePath(path).split('/').some((seg) => seg === '.' || seg === '..')) return ruleError('local', `A page path must not contain . or .. segments: ${path}`);
   if (!formatOf(path)) return ruleError('extension', `A page ends in .md, .markdown, .html or .htm: ${path}`);
-  const folders = ctx.db.prepare('SELECT path FROM bindings WHERE project_id = ?').pluck().all(projectId) as string[];
+  const folders = boundFolders(ctx, projectId);
   if (!folders.some((folder) => isUnder(path, folder))) {
     return ruleError('binding', `${path} is not under a folder bound to this project`, folders.length ? `Bound folders: ${folders.join(', ')}.` : 'The project has no bound folder.');
   }
   return null;
 }
+
+const boundFolders = (ctx: Ctx, projectId: number): string[] => ctx.db.prepare('SELECT path FROM bindings WHERE project_id = ?').pluck().all(projectId) as string[];
 
 /** Throws the first broken rule as a typed 400. For addResource and updateResource, inside their write. */
 export function checkPageRules(ctx: Ctx, projectId: number, r: { kind: string; content?: string | null; path?: string | null }): void {
@@ -56,16 +60,21 @@ export function checkPageRules(ctx: Ctx, projectId: number, r: { kind: string; c
 }
 
 interface GitResult {
+  /** git's exit code; -1 when it could not start or was killed at the timeout. */
   code: number;
   stdout: string;
+  /** Why it failed, for a message: git's first stderr line, or the start or timeout error. */
+  why: string;
 }
 
-/** Runs git in `cwd` and answers its exit code and stdout. A git that cannot start answers code -1. */
+/** Runs git in `cwd` and answers its exit code, stdout and why it failed. Never rejects. */
 function git(cwd: string, args: string[]): Promise<GitResult> {
   return new Promise((resolve) => {
-    execFile('git', ['-C', cwd, ...args], { windowsHide: true, timeout: GIT_TIMEOUT_MS, maxBuffer: 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }, (err, stdout) => {
-      const code = err ? (typeof (err as { code?: unknown }).code === 'number' ? ((err as { code: number }).code) : -1) : 0;
-      resolve({ code, stdout: String(stdout) });
+    execFile('git', ['-C', cwd, ...args], { windowsHide: true, timeout: GIT_TIMEOUT_MS, maxBuffer: 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }, (err, stdout, stderr) => {
+      const e = err as (NodeJS.ErrnoException & { killed?: boolean }) | null;
+      const code = !e ? 0 : typeof e.code === 'number' ? e.code : -1;
+      const why = !e ? '' : e.killed ? `git timed out after ${GIT_TIMEOUT_MS / 1000} s` : String(stderr).split(/\r?\n/).find((l) => l.trim())?.trim() || e.message;
+      resolve({ code, stdout: String(stdout), why });
     });
   });
 }
@@ -80,7 +89,7 @@ interface Repo {
 async function repoOf(dir: string): Promise<Repo | string> {
   const out = await git(dir, ['rev-parse', '--path-format=absolute', '--show-toplevel', '--git-dir', '--git-common-dir', 'HEAD']);
   const [top, gitDir, commonDir, head] = out.stdout.split(/\r?\n/);
-  if (out.code !== 0 || !top || !head || !/^[0-9a-f]{40,64}$/.test(head)) return `${dir} is not in a git repository with a commit`;
+  if (out.code !== 0 || !top || !head || !/^[0-9a-f]{40,64}$/.test(head)) return `${dir} is not in a git repository with a commit${out.why ? ` (${out.why})` : ''}`;
   // A linked worktree has its own git dir under the main one's: pages show what has merged, so they are read from the main checkout.
   if (normalizePath(gitDir).toLowerCase() !== normalizePath(commonDir).toLowerCase()) return `${dir} is in a linked worktree; register the page from the main checkout`;
   return { top: normalizePath(top), head };
@@ -89,11 +98,29 @@ async function repoOf(dir: string): Promise<Repo | string> {
 /** What the disk says about a page's file: a regular file of 2 MB or less, in a usable repo. */
 type Inspected = { ok: true; repo: Repo; size: number } | { ok: false; missing: boolean; rule: PageRule; message: string };
 
-async function inspect(path: string): Promise<Inspected> {
+/** A path as the disk resolves it (junctions, links, 8.3 names), forward-slashed; null when it does not resolve. */
+const resolved = async (path: string): Promise<string | null> => {
+  try {
+    return normalizePath(await realpath(path));
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * `folders` are the project's bound folders: the file must sit under one of them once both are resolved, so a junction
+ * or link inside a bound folder cannot reach a file outside it.
+ */
+async function inspect(path: string, folders: string[]): Promise<Inspected> {
   try {
     const info = await stat(path);
     if (!info.isFile()) return { ok: false, missing: true, rule: 'file', message: `Not a file: ${path}` };
     if (info.size > PAGE_MAX_BYTES) return { ok: false, missing: false, rule: 'size', message: `${path} is over 2 MB` };
+    const real = await resolved(path);
+    const realFolders = await Promise.all(folders.map(resolved));
+    if (!real || !realFolders.some((folder) => folder && isUnder(real, folder))) {
+      return { ok: false, missing: false, rule: 'binding', message: `${path} resolves to ${real ?? 'nothing'}, outside the folders bound to this project` };
+    }
     const repo = await repoOf(dirname(path));
     if (typeof repo === 'string') return { ok: false, missing: false, rule: 'repo', message: repo };
     return { ok: true, repo, size: info.size };
@@ -108,9 +135,9 @@ async function inspect(path: string): Promise<Inspected> {
  * Before a page is stored: its file passes the disk rules, and the answer is the confirmation registration sets (the
  * repo's HEAD). Async, so a slow disk or git never blocks the event loop; the write then checks the row rules again.
  */
-export async function inspectNewPage(path: string): Promise<{ confirmedSha: string }> {
+export async function inspectNewPage(ctx: Ctx, projectId: number, path: string): Promise<{ confirmedSha: string }> {
   if (!isLocalAbsolutePath(path)) throw ruleError('local', `Not a local absolute path: ${path}`);
-  const found = await inspect(path);
+  const found = await inspect(path, boundFolders(ctx, projectId));
   if (!found.ok) throw ruleError(found.rule, found.message);
   return { confirmedSha: found.repo.head };
 }
@@ -125,10 +152,19 @@ const unquote = (v: string): string => {
 };
 const listOf = (items: string[]): string[] => items.map(unquote).filter((s) => s && s.length <= MAX_ITEM).slice(0, MAX_LIST);
 
+/**
+ * Covers are relative to the repo root: a backslash becomes a slash, and one that names a drive or climbs out with ..
+ * is dropped (git would match nothing, or refuse it, and the strip would never read stale).
+ */
+const coversOf = (items: string[]): string[] =>
+  listOf(items)
+    .map((c) => c.replace(/\\/g, '/'))
+    .filter((c) => !/^[A-Za-z]:/.test(c) && !c.split('/').includes('..'));
+
 function frontOf(values: Map<string, string[]>): PageFront {
   const shelf = values.get('shelf')?.[0];
   return {
-    covers: listOf(values.get('covers') ?? []),
+    covers: coversOf(values.get('covers') ?? []),
     shelf: shelf === 'roster' ? 'roster' : 'pages',
     templates: listOf(values.get('templates') ?? []),
   };
@@ -200,15 +236,17 @@ const KEY_SHAPES = [
   /(?<![A-Za-z0-9])AKIA[A-Z0-9]{16}(?![A-Za-z0-9])/g,
   /(?<!\w)xox[abposr]-[A-Za-z0-9-]{10,}/g,
 ];
-const NAMED_SECRET = /(?<![\w-])[A-Za-z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD)\s*=\s*["'`]?[^\s"'`]{16,}/i;
+const NAMED_SECRET = /(?<![\w-])[A-Za-z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD)\s*=\s*["'`]?([^\s"'`]{16,})/gi;
 const looksRandom = (s: string) => /[A-Za-z]/.test(s) && /\d/.test(s);
+/** A value that only says where the secret comes from: an env read, a shell or template variable, a placeholder. */
+const REFERENCE = /^(process\.env|import\.meta\.env|os\.environ|\$|\{|<|%)/;
 
 /** The 1-based line of the first secret-shaped text, or null. Never answers the text itself. */
 export function findSecretLine(text: string): number | null {
   const lines = text.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    if (NAMED_SECRET.test(line)) return i + 1;
+    for (const [, value] of line.matchAll(NAMED_SECRET)) if (!REFERENCE.test(value) && looksRandom(value)) return i + 1;
     for (const shape of KEY_SHAPES) {
       for (const [hit] of line.matchAll(shape)) if (looksRandom(hit.replace(/^(sk-|sk_live_|re_|ghp_|github_pat_|AKIA|xox[abposr]-)/, ''))) return i + 1;
     }
@@ -227,11 +265,16 @@ async function freshness(repo: Repo, confirmedSha: string | null, confirmedAt: s
   if (!confirmedSha || !/^[0-9a-f]{7,64}$/.test(confirmedSha)) return { count: null, confirmedSha, confirmedAt };
   const key = JSON.stringify([repo.top, confirmedSha, repo.head, covers]);
   if (freshCache.has(key)) return { count: freshCache.get(key)!, confirmedSha, confirmedAt };
+  // A confirmed sha that left HEAD's history (a rebase, exit 1, or an unknown object, 128) counts as stale: the strip
+  // says "confirm again". Any other failure (a timeout, no git) answers null for now and is not cached.
+  const ancestor = await git(repo.top, ['merge-base', '--is-ancestor', confirmedSha, repo.head]);
   let count: number | null = null;
-  // A confirmed sha that left HEAD's history (a rebase) counts as stale: the strip says "confirm again".
-  if ((await git(repo.top, ['merge-base', '--is-ancestor', confirmedSha, repo.head])).code === 0) {
+  if (ancestor.code === 0) {
     const out = await git(repo.top, ['rev-list', '--count', `${confirmedSha}..${repo.head}`, '--', ...covers.map(pathspec)]);
-    if (out.code === 0 && /^\d+\s*$/.test(out.stdout)) count = Number(out.stdout.trim());
+    if (out.code !== 0 || !/^\d+\s*$/.test(out.stdout)) return { count: null, confirmedSha, confirmedAt };
+    count = Number(out.stdout.trim());
+  } else if (ancestor.code !== 1 && ancestor.code !== 128) {
+    return { count: null, confirmedSha, confirmedAt };
   }
   if (freshCache.size >= FRESH_CACHE_MAX) freshCache.clear();
   freshCache.set(key, count);
@@ -251,19 +294,29 @@ const pageMissing = (r: Resource, message: string) => new ApiError(404, `This pa
  * A page as its file stands now. Re-checks the registration rules on every read: a moved or deleted file is a 404
  * `page-missing`, any other broken rule a 422 `page-refused`, and secret-shaped text a 422 `page-has-secret` with the line.
  */
-export async function readPage(ctx: Ctx, r: Resource): Promise<PageBody> {
+/** A page as the rules still allow it, row and disk both: for a read and for Still accurate. */
+async function loadPage(ctx: Ctx, r: Resource): Promise<{ path: string; repo: Repo }> {
   const path = requirePage(r);
   const broken = brokenRule(ctx, r.projectId, r);
   if (broken) throw unprocessable(broken.message, broken.hint, { code: 'page-refused', rule: String(broken.extra?.rule ?? '') });
-  const found = await inspect(path);
+  const found = await inspect(path, boundFolders(ctx, r.projectId));
   if (!found.ok) {
     if (found.missing) throw pageMissing(r, found.message);
     throw unprocessable(found.message, undefined, { code: 'page-refused', rule: found.rule });
   }
+  return { path, repo: found.repo };
+}
+
+export async function readPage(ctx: Ctx, r: Resource): Promise<PageBody> {
+  const { path, repo } = await loadPage(ctx, r);
   let raw: string;
   try {
-    raw = (await readFile(path, 'utf8')).replace(/^\uFEFF/, '');
+    const bytes = await readFile(path);
+    // UTF-16 (PowerShell 5.1's Out-File) or binary would read as text with NULs between the characters, past the secret scan.
+    if (bytes.includes(0)) throw unprocessable(`${path} is not UTF-8 text`, 'Save it as UTF-8.', { code: 'page-refused', rule: 'encoding' });
+    raw = bytes.toString('utf8').replace(/^\uFEFF/, '');
   } catch (err) {
+    if (err instanceof ApiError) throw err;
     const code = (err as NodeJS.ErrnoException).code;
     if (code === 'ENOENT' || code === 'ENOTDIR') throw pageMissing(r, `File not found: ${path}`);
     throw unprocessable(`Cannot read ${path}: ${(err as Error).message}`, undefined, { code: 'page-refused', rule: 'file' });
@@ -272,19 +325,13 @@ export async function readPage(ctx: Ctx, r: Resource): Promise<PageBody> {
   if (line !== null) throw unprocessable(`This page looks like it holds a secret on line ${line}; fix it in its repo`, undefined, { code: 'page-has-secret', line });
   const format = formatOf(path)!;
   const { front, body: text } = format === 'markdown' ? parseMarkdownFront(raw) : { front: parseHtmlFront(raw), body: raw };
-  const fresh = front.covers.length ? await freshness(found.repo, r.confirmedSha, r.confirmedAt, front.covers) : null;
-  return { format, text, front, sha: found.repo.head, fresh };
+  const fresh = front.covers.length ? await freshness(repo, r.confirmedSha, r.confirmedAt, front.covers) : null;
+  return { format, text, front, sha: repo.head, fresh };
 }
 
 /** The repo HEAD a page's Still accurate records. A gone file is a 404 `page-missing`, as on a read. */
-export async function pageHead(r: Resource): Promise<string> {
-  const path = requirePage(r);
-  const found = await inspect(path);
-  if (!found.ok) {
-    if (found.missing) throw pageMissing(r, found.message);
-    throw unprocessable(found.message, undefined, { code: 'page-refused', rule: found.rule });
-  }
-  return found.repo.head;
+export async function pageHead(ctx: Ctx, r: Resource): Promise<string> {
+  return (await loadPage(ctx, r)).repo.head;
 }
 
 /** The policy an HTML page runs under: its own inline scripts and styles, Google Fonts, data: images, and no other network. */
@@ -296,11 +343,15 @@ export const PAGE_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-s
  */
 export const PAGE_FRAME_HEADER_CSP = `${PAGE_CSP}; base-uri 'none'; form-action 'none'; frame-ancestors 'self'; sandbox allow-scripts`;
 
-/** Posts the page's height to the window, as a number, whenever it changes. */
+/**
+ * Posts the page's height to the window, as a number, whenever it changes. A page sized to its frame (height: 100% with
+ * a body margin) grows by the same few pixels on every report; after three such steps in a row the small growths stop.
+ */
 const HEIGHT_SCRIPT =
-  '<script>(()=>{const b=document.body;if(!b)return;let last=-1;const post=()=>{const s=getComputedStyle(b);' +
-  'const h=Math.ceil(b.scrollHeight+parseFloat(s.marginTop)+parseFloat(s.marginBottom));' +
-  'if(h!==last){last=h;parent.postMessage(h,"*");}};addEventListener("load",post);new ResizeObserver(post).observe(b);post();})()</script>';
+  '<script>(()=>{const b=document.body;if(!b)return;let last=-1,creep=0;const post=()=>{const s=getComputedStyle(b);' +
+  'const h=Math.ceil(b.scrollHeight+parseFloat(s.marginTop)+parseFloat(s.marginBottom));if(h===last)return;' +
+  'const step=h-last;if(last>0&&step>0&&step<=32){if(++creep>3)return;}else creep=0;' +
+  'last=h;parent.postMessage(h,"*");};addEventListener("load",post);new ResizeObserver(post).observe(b);post();})()</script>';
 
 /**
  * The HTML the frame route serves: the spec's CSP meta tag first in the head (after a doctype, so the page keeps its

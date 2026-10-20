@@ -433,8 +433,11 @@ test('the freshness strip counts commits to covers since the confirmation, and S
   await expect(strip.locator('.p-chip')).toHaveText(['src/**']);
   await strip.getByRole('button', { name: 'Still accurate' }).click();
   await expect(strip.locator('.ip-fresh-count')).toHaveText('no commits since confirmed');
-  await expect(strip.locator('.ip-fresh-when')).toContainText('Still accurate');
+  await expect(strip.locator('.ip-fresh-when')).not.toContainText('at registration');
   await expect(strip.getByRole('button', { name: 'Still accurate' })).toHaveCount(0);
+  // The button left with the stale count; focus stays in the dialog, on its document pane.
+  await expect(viewer.locator('.ip-viewer-body')).toBeFocused();
+  await expect(strip.locator('.p-chip')).toHaveCSS('text-transform', 'none');
 });
 
 test('a moved page says it is gone, and a page with a secret never shows its text', async ({ page, fresh, api, consoleErrors }) => {
