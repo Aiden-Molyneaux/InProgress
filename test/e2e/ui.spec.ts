@@ -1785,7 +1785,7 @@ test.describe('Board', () => {
     const now = nowRow(page, 'Play app signing');
     await expect(now.locator('.p-tile-id')).toHaveText(`#${fresh.ids['Play app signing']}`);
     await expect(now.locator('.ip-sessline-title')).toHaveText('E2E session');
-    await expect(now.getByRole('button', { name: 'Open', exact: true })).toBeVisible();
+    await expect(now.getByRole('button', { name: 'Open session', exact: true })).toBeVisible();
     await expect(now.locator('.p-tile-chips .p-chip')).toHaveText('WORKING');
     // A Board box carries no character, session letter or breadcrumb.
     await expect(page.locator('.ip-bands .ip-char, .ip-bands .ip-crumb, .ip-bands .ip-num')).toHaveCount(0);
@@ -1797,6 +1797,49 @@ test.describe('Board', () => {
     await expect(boxIn(page, 'done', '1 iOS certificate').locator('.p-tile-foot .p-chip')).toHaveText('no outcome');
     await expect(page.getByRole('button', { name: /to tidy$/ })).toHaveAttribute('title', new RegExp(`#${fresh.ids['1 iOS certificate']} no_outcome`));
     await expect(page.locator('.ip-comms')).toContainText('No state note yet');
+  });
+
+  test('the columns by page width: four at 1600 and at 1160, two by two from 720 to 1159, one at 400', async ({ page, fresh }) => {
+    await page.setViewportSize(WIDEST);
+    await open(page, fresh);
+    const board = page.locator('.ip-board');
+    await expect(board).toBeVisible();
+    const boxes = async () => Promise.all((['needs', 'next', 'now', 'done'] as const).map(async (b) => (await band(page, b).boundingBox())!));
+    const pageWidth = async () => (await board.boundingBox())!.width;
+    // The page is the viewport less the rail: learn that offset at 1600.
+    const offset = 1600 - (await pageWidth());
+    // Four columns at 1600: one row, left to right needs, next, now, done.
+    let [needs, next, now, done] = await boxes();
+    expect(new Set([needs.y, next.y, now.y, done.y]).size, 'one row').toBe(1);
+    expect(needs.x).toBeLessThan(next.x);
+    expect(next.x).toBeLessThan(now.x);
+    expect(now.x).toBeLessThan(done.x);
+    // Four at 1160: the page is exactly 1160 wide.
+    await page.setViewportSize({ width: 1160 + offset, height: 900 });
+    await expect.poll(pageWidth).toBe(1160);
+    [needs, next, now, done] = await boxes();
+    expect(new Set([needs.y, next.y, now.y, done.y]).size, 'one row at 1160').toBe(1);
+    expect(needs.x).toBeLessThan(next.x);
+    expect(next.x).toBeLessThan(now.x);
+    expect(now.x).toBeLessThan(done.x);
+    // Two by two at a page of 720 to 1159: needs and now on top, next and done under them.
+    await page.setViewportSize({ width: 900 + offset, height: 900 });
+    await expect.poll(async () => (await pageWidth()) >= 720 && (await pageWidth()) < 1160).toBe(true);
+    [needs, next, now, done] = await boxes();
+    expect(needs.y).toBe(now.y);
+    expect(next.y).toBeGreaterThan(needs.y);
+    expect(next.y).toBe(done.y);
+    expect(needs.x).toBeLessThan(now.x);
+    expect(next.x).toBe(needs.x);
+    expect(done.x).toBe(now.x);
+    // One column at 400: stacked, needs, now, next, done.
+    await page.setViewportSize({ width: 400, height: 900 });
+    await expect.poll(pageWidth).toBeLessThan(720);
+    [needs, next, now, done] = await boxes();
+    expect(new Set([needs.x, next.x, now.x, done.x]).size, 'one left edge').toBe(1);
+    expect(needs.y).toBeLessThan(now.y);
+    expect(now.y).toBeLessThan(next.y);
+    expect(next.y).toBeLessThan(done.y);
   });
 
   test('Board cells share one task box', async ({ page, fresh }) => {
@@ -1971,7 +2014,7 @@ test.describe('Board', () => {
     await expect(page.locator(retired)).toHaveCount(0);
   });
 
-  test('a permission wait is an amber box with the command and a way to open the session, and the step leaves Now while it waits', async ({ page, api, fresh }) => {
+  test('a permission wait is a volt ask tile with the command and a way to open the session, and the step leaves Now while it waits', async ({ page, api, fresh }) => {
     await startCommand(api, fresh.session, 'b1', 'npm run build');
     await hook(api, fresh.session, { event: 'permission' });
     await open(page, fresh);
@@ -1981,8 +2024,17 @@ test.describe('Board', () => {
     await expect(wait.locator('.ip-ask-panel .ip-term')).toHaveText('npm run build');
     await expect(wait.getByRole('button', { name: 'Open session to allow' })).toBeVisible();
     await expect(wait.locator('.ip-sessline-title')).toHaveText('E2E session');
-    // An ask tile: the Tile part's volt wash and edge (batch 5 of #502 rewrites this to the new colours).
+    // An ask tile (v3): its edge is the volt-soft line, not the old amber.
     await expect(wait.locator('article')).toHaveAttribute('data-tone', 'ask');
+    const voltSoft = await page.evaluate(`(() => {
+      const probe = document.createElement('div');
+      probe.style.borderTop = '1px solid var(--volt-soft)';
+      document.body.append(probe);
+      const colour = getComputedStyle(probe).borderTopColor;
+      probe.remove();
+      return colour;
+    })()`) as string;
+    await expect(wait.locator('article')).toHaveCSS('border-top-color', voltSoft);
     // A permission wait has no buttons of its own to clear it; the step shows in Needs me only.
     await expect(wait.getByRole('button', { name: /Answer|Clear/ })).toHaveCount(0);
     await expect(nowRow(page, 'Play app signing')).toHaveCount(0);
@@ -2004,7 +2056,7 @@ test.describe('Board', () => {
     await page.route('**/api/ui/sessions/*/open-desktop', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: false, command: `claude --resume ${fresh.session}` }) }));
     await open(page, fresh);
     const box = nowRow(page, 'Play app signing');
-    await box.getByRole('button', { name: 'Open', exact: true }).click();
+    await box.getByRole('button', { name: 'Open session', exact: true }).click();
     await expect(box.locator('.ip-sess-cmd .ip-code')).toHaveText(`claude --resume ${fresh.session}`);
     // Opening the session did not open Details.
     await expect(page.getByRole('complementary')).toHaveCount(0);
@@ -2025,13 +2077,13 @@ test.describe('Board', () => {
     });
     await open(page, fresh);
     const box = nowRow(page, 'Play app signing');
-    await box.getByRole('button', { name: 'Open', exact: true }).dblclick();
+    await box.getByRole('button', { name: 'Open session', exact: true }).dblclick();
     await expect(box.locator('.ip-sess-cmd .ip-code')).toHaveText(`claude --resume ${fresh.session}`);
     await expect(box.locator('.ip-sys')).toHaveText("Launcher unavailable. Run it in the session's folder.");
     expect(calls).toBe(1);
     await expect(page.getByRole('complementary')).toHaveCount(0);
     refuse = false;
-    await box.getByRole('button', { name: 'Open', exact: true }).click();
+    await box.getByRole('button', { name: 'Open session', exact: true }).click();
     await expect(box.getByRole('button', { name: 'Opening…' })).toHaveAttribute('aria-busy', 'true');
     await expect(box.locator('.ip-sess-cmd')).toHaveCount(0);
     expect(calls).toBe(2);
@@ -2047,15 +2099,15 @@ test.describe('Board', () => {
     });
     await open(page, fresh);
     const box = nowRow(page, 'Play app signing');
-    await box.getByRole('button', { name: 'Open', exact: true }).click();
+    await box.getByRole('button', { name: 'Open session', exact: true }).click();
     await expect(box.locator('.ip-sys')).toHaveText('Claude Code was not found on this computer');
     mode = 'null';
-    await box.getByRole('button', { name: 'Open', exact: true }).click();
+    await box.getByRole('button', { name: 'Open session', exact: true }).click();
     await expect(box.locator('.ip-sys')).toContainText("Run it in the session's folder.");
     await expect(box.locator('.ip-sess-cmd .ip-code')).toHaveText(`claude --resume ${fresh.session}`);
     mode = 'stale';
     const reloaded = page.waitForEvent('load');
-    await box.getByRole('button', { name: 'Open', exact: true }).click();
+    await box.getByRole('button', { name: 'Open session', exact: true }).click();
     await reloaded;
   });
 
@@ -3674,5 +3726,63 @@ test.describe('#502 Board in v3', () => {
     await expect.poll(stored).toEqual(ids);
     await expect.poll(order).toBe(titles.join('|'));
     await expect(tile(titles[0])).toBeFocused();
+  });
+
+  test('"N to tidy" lists the marked steps, an item opens its Details, and Escape closes the menu with focus on the button', async ({ page, fresh }) => {
+    await page.setViewportSize(WIDEST);
+    await open(page, fresh);
+    const button = page.getByRole('button', { name: /to tidy$/ });
+    await button.click();
+    const menu = page.getByRole('menu', { name: 'Steps to tidy' });
+    await expect(menu).toBeVisible();
+    const marked = fresh.ids['1 iOS certificate'];
+    const item = menu.getByRole('menuitem', { name: new RegExp(`^#${marked} no_outcome`) });
+    await expect(item).toBeVisible();
+    expect(await menu.getByRole('menuitem').count()).toBe(Number((await button.textContent())!.match(/^\d+/)![0]));
+    // Escape closes the menu and puts focus on the button; Details stays shut.
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    await expect(button).toBeFocused();
+    await expect(page.getByRole('complementary')).toHaveCount(0);
+    // An item opens that step's Details.
+    await button.click();
+    await item.click();
+    await expect(menu).toHaveCount(0);
+    await expect(page.getByRole('complementary')).toContainText('1 iOS certificate');
+  });
+
+  test('More opens the whole state note and Less folds it back to the first sentence', async ({ page, api, fresh }) => {
+    const content = 'The first sentence of the note. A second sentence only the open note shows.\n\n## Later\n\nA closing paragraph.';
+    await write(api, fresh.session, 'post', '/api/resources', { nodeId: fresh.root, kind: 'doc', title: 'State', content, purpose: 'state' });
+    await page.setViewportSize(WIDEST);
+    await open(page, fresh);
+    const comms = page.locator('.ip-comms');
+    await expect(comms).toContainText('The first sentence of the note.');
+    await expect(comms).not.toContainText('A second sentence');
+    await comms.getByRole('button', { name: 'More' }).click();
+    await expect(comms).toContainText('A second sentence only the open note shows.');
+    await expect(comms).toContainText('A closing paragraph.');
+    await comms.getByRole('button', { name: 'Less' }).click();
+    await expect(comms).not.toContainText('A second sentence');
+    await expect(comms).not.toContainText('A closing paragraph.');
+    await expect(comms.getByRole('button', { name: 'More' })).toBeVisible();
+  });
+
+  test("a #id in the state note opens that step's Details, in the first sentence and in the open Markdown", async ({ page, api, fresh }) => {
+    const first = fresh.ids['Play app signing'];
+    const later = fresh.ids['3 RevenueCat'];
+    const content = `Waiting on #${first} before anything ships.\n\nThen #${later} is next.`;
+    await write(api, fresh.session, 'post', '/api/resources', { nodeId: fresh.root, kind: 'doc', title: 'State', content, purpose: 'state' });
+    await page.setViewportSize(WIDEST);
+    await open(page, fresh);
+    const comms = page.locator('.ip-comms');
+    const details = page.getByRole('complementary');
+    await comms.getByRole('button', { name: `#${first}`, exact: true }).click();
+    await expect(details).toContainText('Play app signing');
+    await page.keyboard.press('Escape');
+    await expect(details).toHaveCount(0);
+    await comms.getByRole('button', { name: 'More' }).click();
+    await comms.getByRole('link', { name: `#${later}`, exact: true }).click();
+    await expect(details).toContainText('3 RevenueCat');
   });
 });

@@ -24,7 +24,7 @@ export function SessionLine({ session, word, role, nameless }: { session: Sessio
         <span className="ip-sessline-dot" aria-hidden="true">◆</span>
         {!nameless && <span className="ip-sessline-title" title={title}>{title}</span>}
         {(role ?? word) && <span className="ip-sessline-word">{role ?? word}</span>}
-        <OpenButton sessionId={session.id} className="ip-sessline-open" variant="ghost" glyph="↗">Open</OpenButton>
+        <OpenButton sessionId={session.id} className="ip-sessline-open" variant="ghost" glyph="↗" label="Open session">Open</OpenButton>
       </div>
       <OpenFailure sessionId={session.id} />
     </>

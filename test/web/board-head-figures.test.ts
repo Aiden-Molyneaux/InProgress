@@ -7,17 +7,17 @@ import { boardHeadFigures } from '../../web/src/board/headFigures';
 const NOW = Date.parse('2026-10-20T12:00:00Z');
 const session = (over: Partial<Session> & { id: string }): Session => ({
   projectId: 1, title: null, cwd: null, branch: null, transcriptPath: null, state: 'idle', focusNodeId: null, promptsSinceUpdate: 0,
-  startedAt: '2026-10-20T09:00:00Z', lastSeenAt: '2026-10-20T11:59:00Z', endedAt: null, slot: 0, role: 'worker', subagents: [], commands: [], ...over,
+  startedAt: '2026-10-20T09:00:00Z', lastSeenAt: '2026-10-20T11:59:00Z', endedAt: null, slot: 0, role: 'worker', lastPromptAt: null, subagents: [], commands: [], ...over,
 });
 const ask = (id: number): Ask => ({ id, projectId: 1, nodeId: 1, kind: 'question', text: 'q', sessionId: null, raisedAt: '2026-10-20T10:00:00Z', clearedAt: null, clearedBy: null, answer: '', answerDeliveredAt: null });
 const row = (over: Partial<BoardRow>) => over as BoardRow;
 const box = (r: BoardRow | null, s: Session | null = null) => ({ row: r, session: s, cell: 'needs', state: 'question' }) as TaskBox;
 
 describe('boardHeadFigures', () => {
-  it('counts the Needs me panels: asks, sessions in permission, and a focusless wait as one', () => {
+  it('counts the Needs me panels: asks still waiting on the user, sessions in permission, and a focusless wait as one', () => {
     const needs = [
-      box(row({ asks: [ask(1), ask(2)], sessions: [] })),
-      box(row({ asks: [], sessions: [session({ id: 'p', state: 'permission' }), session({ id: 'i' })] })),
+      box(row({ asks: [ask(1), ask(2), ask(5)], waiting: [ask(1), ask(2)], sessions: [] })),
+      box(row({ asks: [], waiting: [], sessions: [session({ id: 'p', state: 'permission' }), session({ id: 'i' })] })),
       box(null, session({ id: 'f', state: 'permission' })),
     ];
     const figures = boardHeadFigures({ next: [], done: [] }, { needs }, { sessions: [] }, NOW);

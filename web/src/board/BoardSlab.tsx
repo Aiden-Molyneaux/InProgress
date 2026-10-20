@@ -113,7 +113,7 @@ export function BoardSlab({ snapshot, board, now, onOpenNode }: BandProps) {
                 <span className="ip-noclaim-title">{sessionDisplayTitle(s)}</span>
                 {s.role === 'orchestrator' && <Chip tone="quiet">ORCHESTRATOR</Chip>}
                 <span className="ip-noclaim-word">{WORDS[sessionActivity(s, now)]}</span>
-                <OpenButton sessionId={s.id} className="ip-noclaim-open" variant="ghost" glyph="↗">Open</OpenButton>
+                <OpenButton sessionId={s.id} className="ip-noclaim-open" variant="ghost" glyph="↗" label="Open session">Open</OpenButton>
               </div>
               <OpenFailure sessionId={s.id} />
             </div>
