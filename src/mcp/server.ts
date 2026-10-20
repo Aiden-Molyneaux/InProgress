@@ -170,7 +170,7 @@ export function createMcpServer(client: Client, o: McpOptions = {}): McpServer {
     });
 
   tool('add_resource', 'Attach a resource to the node where it was produced. Give a path (with snapshot_file=true for text files up to 200 KB), a url, or content.',
-    { node: id, kind: z.enum(RESOURCE_KINDS), title: z.string().min(1), content: z.string().optional(), path: z.string().optional().describe('Absolute path of the file; with snapshot_file its text is read and saved'), url: z.string().optional(), snapshot_file: z.boolean().optional(), purpose: z.enum(RESOURCE_PURPOSES).optional().describe('handoff: the handoff a session leaves on its step. state: the project state note, on the root; it replaces the previous one'), session },
+    { node: id, kind: z.enum(RESOURCE_KINDS), title: z.string().min(1), content: z.string().optional(), path: z.string().optional().describe('Absolute path of the file; with snapshot_file its text is read and saved'), url: z.string().optional(), snapshot_file: z.boolean().optional(), purpose: z.enum(RESOURCE_PURPOSES).optional().describe('handoff: the handoff a session leaves on its step. state: the project state note, on the root; it replaces the previous one. library or page: a page (kind doc) read live from its path under a folder bound to the project, listed in the Library or in the Docs view of its project; it takes no content and no snapshot_file'), session },
     async (a: { node: number; kind: string; title: string; content?: string; path?: string; url?: string; snapshot_file?: boolean; purpose?: string; session?: string }) => {
       let content = a.content;
       if (a.snapshot_file) {
@@ -184,7 +184,7 @@ export function createMcpServer(client: Client, o: McpOptions = {}): McpServer {
     });
 
   tool('update_resource', 'Edit a resource or move it to another node in the same project. Changing path does not re-read the file: to refresh a snapshot, add a new resource with snapshot_file and delete this one.',
-    { id: resourceId, node: id.optional(), kind: z.enum(RESOURCE_KINDS).optional(), title: z.string().optional(), content: z.string().optional(), path: z.string().optional().describe('Absolute path of the file (the saved content stays as it is)'), url: z.string().optional(), purpose: z.enum(RESOURCE_PURPOSES).nullable().optional().describe('handoff or state; null clears it'), session },
+    { id: resourceId, node: id.optional(), kind: z.enum(RESOURCE_KINDS).optional(), title: z.string().optional(), content: z.string().optional(), path: z.string().optional().describe('Absolute path of the file (the saved content stays as it is)'), url: z.string().optional(), purpose: z.enum(RESOURCE_PURPOSES).nullable().optional().describe('handoff, state, library or page; null clears it'), session },
     async ({ id: rid, node, session: s, ...patch }: { id: number; node?: number; session?: string } & Record<string, unknown>) => {
       const r = await client.patch<Resource>(`/api/resources/${rid}`, { ...patch, nodeId: node }, { actor: actor(s) });
       return `r${r.id} "${r.title}" on #${r.nodeId}.`;

@@ -326,6 +326,14 @@ export const MIGRATIONS: string[] = [
   -- Only a nullable column: v1 to v13 builds can still read and write this schema, so a rollback across it works.
   INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
   `,
+  // 15: a page's last confirmation (#528, spec 2026-10-20-library-and-docs-design.md "Freshness"): the owning repo's HEAD
+  // and the time, set at registration and by Still accurate. NULL on every other resource.
+  `
+  ALTER TABLE resources ADD COLUMN confirmed_sha TEXT;
+  ALTER TABLE resources ADD COLUMN confirmed_at TEXT;
+  -- Only nullable columns: v1 to v14 builds can still read and write this schema, so a rollback across it works.
+  INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+  `,
 ];
 
 /**
