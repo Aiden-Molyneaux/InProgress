@@ -3356,7 +3356,10 @@ test.describe('Module rail', () => {
     await expect(backlog).toHaveAttribute('aria-pressed', 'true');
     // Hovered, the picked tab is still ink on volt, not volt on volt.
     await backlog.hover();
-    const [ink, fill] = await backlog.evaluate((el) => [getComputedStyle(el).color, getComputedStyle(el).backgroundColor]);
+    const [ink, fill] = await backlog.evaluate((el) => {
+      const style = (globalThis as unknown as { getComputedStyle(e: unknown): { color: string; backgroundColor: string } }).getComputedStyle(el);
+      return [style.color, style.backgroundColor];
+    });
     expect(ink).not.toBe(fill);
     await backlog.focus();
     await page.keyboard.press(']');

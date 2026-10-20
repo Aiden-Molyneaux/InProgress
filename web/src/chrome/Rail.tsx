@@ -236,7 +236,7 @@ export function Rail({ tabs, archived, deleted: listed, current, onSelect, onMov
   if (!shown) return null;
   // The rows are one stop in the tab order: the one focused last, else the current row's, else the first row's.
   const stop = rowStop && rowStop.from === current && tabs.some((p) => p.slug === rowStop.slug) ? rowStop.slug : tabs.some((p) => p.slug === current) ? current : tabs[0]?.slug;
-  // The views stop resets on a new view or a new project, whose list starts at its current view.
+  // The views stop follows focus within one project's list and one view; on another view or project it is the current view.
   const viewsStop = viewStop && viewStop.from === `${current}:${view}` ? viewStop.view : view;
   const lastActive = activeIds[activeIds.length - 1];
   return (

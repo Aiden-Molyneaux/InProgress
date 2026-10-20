@@ -104,7 +104,7 @@ export function App() {
     noteAction('header', 'view');
     setView(v);
     saveView(v);
-    // Mid-switch the snapshot is still the last project's: a pick then belongs to no project rather than the wrong one.
+    // A switch clears the snapshot until the next project's lands: a pick then belongs to no project, never the last one.
     const shown = snapshot && snapshot.project.slug === state.slug ? snapshot.project.id : null;
     postEvent('view', shown, { view: v });
     if (v === 'backlog') postEvent('backlog_open', shown);
