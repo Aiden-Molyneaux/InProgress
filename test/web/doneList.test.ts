@@ -54,4 +54,7 @@ describe('byPhase', () => {
   it('names just the crumb when the project has no root node', () => {
     expect(byPhase([row(1, at(2026, 10, 13), [phase])], null).map((g) => g.path)).toEqual(['#10 Phase A']);
   });
+  it('calls a top-level step "Top level" when there is no root node either', () => {
+    expect(byPhase([row(1, at(2026, 10, 13))], null).map((g) => g.path)).toEqual(['Top level']);
+  });
 });

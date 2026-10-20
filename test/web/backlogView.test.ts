@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TreeNode } from '../../src/core/types';
-import { backlogMeta, openInside, phaseTabs } from '../../web/src/backlog/backlogView';
+import { backlogMeta, openInsideIndex, phaseTabs } from '../../web/src/backlog/backlogView';
 
 const node = (id: number, parentId: number | null, status: TreeNode['status'], kind: TreeNode['kind'] = 'task', title = `n${id}`): TreeNode =>
   ({ id, projectId: 1, parentId, position: id, kind, title, status }) as unknown as TreeNode;
@@ -30,13 +30,13 @@ describe('phaseTabs', () => {
   });
 });
 
-describe('openInside', () => {
+describe('openInsideIndex', () => {
   const nodes = [node(1, null, 'active'), node(2, 1, 'todo'), node(3, 2, 'blocked'), node(4, 3, 'active'), node(5, 2, 'done'), node(6, 1, 'dropped'), node(7, 1, 'parked')];
   it('counts todo, active and blocked below a step at every depth', () => {
-    expect(openInside(nodes, 1)).toBe(3);
-    expect(openInside(nodes, 2)).toBe(2);
+    expect(openInsideIndex(nodes)(1)).toBe(3);
+    expect(openInsideIndex(nodes)(2)).toBe(2);
   });
   it('is 0 for a step with no children', () => {
-    expect(openInside(nodes, 4)).toBe(0);
+    expect(openInsideIndex(nodes)(4)).toBe(0);
   });
 });

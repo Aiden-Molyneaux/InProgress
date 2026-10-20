@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
+import { useKeepRowFocus } from '../backlog/useKeepRowFocus';
 import { deriveBoard, type BoardRow } from '../../../src/core/board';
 import { LABEL_GLYPHS } from '../../../src/core/types';
 import { rowClick } from '../board/Marks';
@@ -54,6 +55,10 @@ export function DoneList({ snapshot, now, onOpenNode, codes }: ViewProps & { cod
     [rowIds.map(String)],
   );
 
+  // A row that leaves through a write from elsewhere hands its focus to a neighbour (or the page title).
+  const list = useRef<HTMLDivElement>(null);
+  useKeepRowFocus(list, rowIds, heading);
+
   const parentTitle = (row: BoardRow) => (row.crumb.length > 0 ? row.crumb[row.crumb.length - 1].title : null);
   const item = (row: BoardRow) => {
     const { node } = row;
@@ -78,7 +83,7 @@ export function DoneList({ snapshot, now, onOpenNode, codes }: ViewProps & { cod
   };
 
   return (
-    <div className="ip-donelist">
+    <div className="ip-donelist" ref={list}>
       <div className="ip-page">
         <PageHead
           code={codes?.get(project.id) ?? projectCode(project.name)}

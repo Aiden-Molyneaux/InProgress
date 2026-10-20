@@ -60,7 +60,7 @@ export function byPhase(rows: BoardRow[], root: TreeNode | null): { parent: Tree
     const id = parent ? parent.id : null;
     let group = groups.get(id);
     if (!group) {
-      group = { parent, path: (root ? [root, ...row.crumb] : row.crumb).map((n) => `#${n.id} ${n.title}`).join(' › '), rows: [] };
+      group = { parent, path: (root ? [root, ...row.crumb] : row.crumb).map((n) => `#${n.id} ${n.title}`).join(' › ') || 'Top level', rows: [] };
       groups.set(id, group);
     }
     group.rows.push(row);

@@ -39,10 +39,10 @@
 .ip-bl-age { font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-dim); white-space: nowrap; }
 .ip-bl-acts { display: flex; gap: var(--sp-1); opacity: 0; }
 .ip-bl-row:hover .ip-bl-acts, .ip-bl-row:focus-within .ip-bl-acts { opacity: 1; }
-.ip-bl-row > :is(.ip-park, .ip-bl-panel, .ip-bl-why, .ip-bl-where) { grid-column: 1 / -1; margin-top: var(--sp-2); }
+.ip-bl-row > :is(.ip-park, .ip-bl-panel) { grid-column: 1 / -1; margin-top: var(--sp-2); }
 .ip-bl-parkedrow { border: 1px dashed var(--line-strong); margin-top: var(--sp-1); }
-.ip-bl-why, .ip-bl-where { margin: 0; overflow-wrap: anywhere; font-size: var(--t-detail-sm); color: var(--text-muted); }
-.ip-bl-why { grid-column: 2 / -1; }
+.ip-bl-row > :is(.ip-bl-why, .ip-bl-where) { grid-column: 2 / -1; margin: 0; overflow-wrap: anywhere; font-size: var(--t-detail-sm); color: var(--text-muted); }
+.ip-bl-row > .ip-bl-why { margin-top: var(--sp-2); }
 /* Under 720 px of view the label, phase and age drop to a second line under the title. */
 @container (max-width: 719px) {
   .ip-bl-tools { flex-wrap: wrap; }

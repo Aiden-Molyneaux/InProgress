@@ -1877,10 +1877,10 @@ test.describe('Board', () => {
     await expect(details.getByRole('button', { name: 'Park…' })).toBeFocused();
     await details.getByRole('button', { name: 'Park…' }).click();
     const form = details.getByRole('dialog', { name: `Park #${fresh.ids[title]} ${title}` });
-    await expect(form.getByRole('textbox', { name: 'Reason' })).toBeFocused();
+    await expect(form.getByRole('textbox', { name: 'Why is it set aside?' })).toBeFocused();
     // A reason is required.
     await expect(form.getByRole('button', { name: 'Park', exact: true })).toBeDisabled();
-    await form.getByRole('textbox', { name: 'Reason' }).fill('Waiting on the store review');
+    await form.getByRole('textbox', { name: 'Why is it set aside?' }).fill('Waiting on the store review');
     await form.getByRole('button', { name: 'Park', exact: true }).click();
     // The panel follows: it shows the reason and Unpark, and the step leaves the Backlog preview.
     await expect(details.locator('.ip-dparked')).toContainText('Waiting on the store review');
@@ -2426,15 +2426,15 @@ test.describe('Board', () => {
     await rowOf('4 Build to GitHub').hover();
     await rowOf('4 Build to GitHub').getByRole('button', { name: 'Park…' }).click();
     const form = page.getByRole('dialog', { name: `Park #${fresh.ids['4 Build to GitHub']} 4 Build to GitHub` });
-    await expect(form.getByRole('textbox', { name: 'Reason' })).toBeFocused();
+    await expect(form.getByRole('textbox', { name: 'Why is it set aside?' })).toBeFocused();
     await expect(form.getByRole('button', { name: 'Park', exact: true })).toBeDisabled();
     await page.keyboard.press('Escape');
     await expect(form).toHaveCount(0);
     await expect(rowOf('4 Build to GitHub')).toBeVisible();
     await rowOf('4 Build to GitHub').hover();
     await rowOf('4 Build to GitHub').getByRole('button', { name: 'Park…' }).click();
-    await form.getByRole('textbox', { name: 'Reason' }).fill('Not merging this quarter');
-    await form.getByRole('textbox', { name: 'Where' }).fill('feat/build-to-github');
+    await form.getByRole('textbox', { name: 'Why is it set aside?' }).fill('Not merging this quarter');
+    await form.getByRole('textbox', { name: 'Where does the work live?' }).fill('feat/build-to-github');
     await page.keyboard.press('Enter');
     // It leaves the list, the head counts one fewer open, and the Parked group holds it with its reason and where.
     await expect(rowOf('4 Build to GitHub')).toHaveCount(0);
@@ -2459,7 +2459,7 @@ test.describe('Board', () => {
     const again = await openFullBacklog(page);
     await blRow(page, again, '5 Store listing').hover();
     await blRow(page, again, '5 Store listing').getByRole('button', { name: 'Park…' }).click();
-    await page.getByRole('textbox', { name: 'Reason' }).fill('Later');
+    await page.getByRole('textbox', { name: 'Why is it set aside?' }).fill('Later');
     await page.getByRole('button', { name: 'Park', exact: true }).click();
     const shelved = pRow(page, again.getByRole('region', { name: 'Parked' }), '5 Store listing');
     await expect(shelved).toBeVisible();
@@ -2705,61 +2705,87 @@ test.describe('Board', () => {
     await expect(preview.getByRole('button', { name: '6 Beta', exact: true })).toHaveCount(0);
   });
 
-  test('the full Backlog keeps focus on a row after to Next, Delete, Park and Unpark, and a refused Park puts it back on the reason', async ({ page, fresh, consoleErrors }) => {
-    consoleErrors.allow(/status of 400/);
+  test('the full Backlog keeps focus on the neighbouring row after to Next, Delete, Park and Unpark, a refused Park or Unpark puts it back, and a row removed from outside hands focus on', async ({ page, api, fresh, consoleErrors }) => {
+    consoleErrors.allow(/status of (400|409)/);
     await page.setViewportSize(WIDE);
     await open(page, fresh);
     const view = await openFullBacklog(page);
     const rowOf = (t: string) => blRow(page, view, t);
-    /** Focus sits on a row inside the view, never dropped to the page. */
-    const onARow = () => expect(view.locator('li.ip-bl-row:focus')).toHaveCount(1);
+    const idsNow = async () => Promise.all((await view.locator('li.ip-bl-row').all()).map((l) => l.getAttribute('data-node')));
+    /** After the row `gone` left (or moved), focus sits on the row that followed it in the list as it was, else the one before. */
+    const onNeighbourOf = async (gone: number, before: (string | null)[]) => {
+      const at = before.indexOf(String(gone));
+      const want = before[at + 1] ?? before[at - 1];
+      await expect(view.locator('li.ip-bl-row:focus')).toHaveAttribute('data-node', want!);
+    };
+    const revenue = fresh.ids['3 RevenueCat'];
+    let before = await idsNow();
     await rowOf('3 RevenueCat').hover();
     await rowOf('3 RevenueCat').getByRole('button', { name: 'to Next' }).click();
     await expect(rowOf('3 RevenueCat')).toHaveCount(0);
-    await onARow();
+    await onNeighbourOf(revenue, before);
+    before = await idsNow();
     await rowOf('6 Beta').hover();
     await rowOf('6 Beta').getByRole('button', { name: 'Delete…' }).click();
     await page.getByRole('group', { name: /^Delete #\d+ 6 Beta\?$/ }).getByRole('button', { name: 'Delete', exact: true }).click();
     await expect(rowOf('6 Beta')).toHaveCount(0);
-    await onARow();
+    await onNeighbourOf(fresh.ids['6 Beta'], before);
     // A refused Park keeps the form and its text and puts focus back on the reason.
     const parkUrl = '**/api/ui/projects/*/nodes/*/park';
     await page.route(parkUrl, (route) => route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'Refused for the test', hint: 'Reload the window.' }) }));
     await rowOf('5 Store listing').hover();
     await rowOf('5 Store listing').getByRole('button', { name: 'Park…' }).click();
     const form = page.getByRole('dialog', { name: /^Park #\d+ 5 Store listing$/ });
-    await form.getByRole('textbox', { name: 'Reason' }).fill('Later');
+    await form.getByRole('textbox', { name: 'Why is it set aside?' }).fill('Later');
     await form.getByRole('button', { name: 'Park', exact: true }).click();
     await expect(page.getByText('Refused for the test').first()).toBeVisible();
-    await expect(form.getByRole('textbox', { name: 'Reason' })).toBeFocused();
-    await expect(form.getByRole('textbox', { name: 'Reason' })).toHaveValue('Later');
+    await expect(form.getByRole('textbox', { name: 'Why is it set aside?' })).toBeFocused();
+    await expect(form.getByRole('textbox', { name: 'Why is it set aside?' })).toHaveValue('Later');
     await page.unroute(parkUrl);
     // What is typed survives a filter and a reorder while the row is still shown, and the form does not take focus back.
     await view.getByRole('textbox', { name: 'Filter the backlog' }).fill('store');
     await expect(form).toBeVisible();
     await view.getByRole('group', { name: 'Backlog order' }).getByRole('button', { name: 'ID' }).click();
-    await expect(form.getByRole('textbox', { name: 'Reason' })).toHaveValue('Later');
+    await expect(form.getByRole('textbox', { name: 'Why is it set aside?' })).toHaveValue('Later');
     await expect(view.getByRole('group', { name: 'Backlog order' }).getByRole('button', { name: 'ID' })).toBeFocused();
     await view.getByRole('textbox', { name: 'Filter the backlog' }).fill('');
-    await form.getByRole('textbox', { name: 'Reason' }).press('Enter');
+    before = await idsNow();
+    await form.getByRole('textbox', { name: 'Why is it set aside?' }).press('Enter');
     await expect(rowOf('5 Store listing')).toHaveCount(0);
-    await onARow();
-    // Unpark and to Next in the Parked group move focus on too.
+    await onNeighbourOf(fresh.ids['5 Store listing'], before);
+    // A refused Unpark gives focus back to the button that was pressed.
     const parked = view.getByRole('region', { name: 'Parked' });
     const parkedRow = pRow(page, parked, '5 Store listing');
+    const unparkUrl = '**/api/ui/projects/*/nodes/*/unpark';
+    await page.route(unparkUrl, (route) => route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'Refused for the test', hint: 'Reload the window.' }) }));
     await parkedRow.hover();
     await parkedRow.getByRole('button', { name: 'Unpark' }).click();
+    await expect(page.getByText('Refused for the test').first()).toBeVisible();
+    await expect(parkedRow.getByRole('button', { name: 'Unpark' })).toBeFocused();
+    await expect(parkedRow.getByRole('button', { name: 'Unpark' })).toBeEnabled();
+    await page.unroute(unparkUrl);
+    // Unpark and to Next in the Parked group move focus on too.
+    before = await idsNow();
+    await parkedRow.getByRole('button', { name: 'Unpark' }).click();
     await expect(parked).toHaveCount(0);
-    await onARow();
+    await onNeighbourOf(fresh.ids['5 Store listing'], before);
     await rowOf('5 Store listing').hover();
     await rowOf('5 Store listing').getByRole('button', { name: 'Park…' }).click();
-    await page.getByRole('textbox', { name: 'Reason' }).fill('Again');
+    await page.getByRole('textbox', { name: 'Why is it set aside?' }).fill('Again');
     await page.keyboard.press('Enter');
     await expect(parked).toBeVisible();
+    before = await idsNow();
     await parkedRow.hover();
     await parkedRow.getByRole('button', { name: 'to Next' }).click();
     await expect(parked).toHaveCount(0);
-    await onARow();
+    await onNeighbourOf(fresh.ids['5 Store listing'], before);
+    // A row removed by another session while it has focus hands focus to the row that followed it.
+    before = await idsNow();
+    const victim = before[1]!;
+    await view.locator(`li.ip-bl-row[data-node="${victim}"]`).focus();
+    await write(api, fresh.session, 'delete', `/api/nodes/${victim}`);
+    await expect(view.locator(`li.ip-bl-row[data-node="${victim}"]`)).toHaveCount(0);
+    await expect(view.locator('li.ip-bl-row:focus')).toHaveAttribute('data-node', before[2]!);
   });
 
   test('in the full Backlog, quick-add Escape focuses the page title, Escape waits out a park in flight, and a park resolving leaves focus in a second open form', async ({ page, fresh }) => {
@@ -2780,7 +2806,7 @@ test.describe('Board', () => {
     await rowOf('4 Build to GitHub').hover();
     await rowOf('4 Build to GitHub').getByRole('button', { name: 'Park…' }).click();
     const first = page.getByRole('dialog', { name: /^Park #\d+ 4 Build to GitHub$/ });
-    await first.getByRole('textbox', { name: 'Reason' }).fill('Slow one');
+    await first.getByRole('textbox', { name: 'Why is it set aside?' }).fill('Slow one');
     await page.keyboard.press('Enter');
     await expect(first.getByRole('button', { name: 'Park', exact: true })).toBeDisabled();
     await page.keyboard.press('Escape');
@@ -2789,12 +2815,12 @@ test.describe('Board', () => {
     await rowOf('5 Store listing').hover();
     await rowOf('5 Store listing').getByRole('button', { name: 'Park…' }).click();
     const second = page.getByRole('dialog', { name: /^Park #\d+ 5 Store listing$/ });
-    await expect(second.getByRole('textbox', { name: 'Reason' })).toBeFocused();
-    await second.getByRole('textbox', { name: 'Reason' }).fill('Typing');
+    await expect(second.getByRole('textbox', { name: 'Why is it set aside?' })).toBeFocused();
+    await second.getByRole('textbox', { name: 'Why is it set aside?' }).fill('Typing');
     await expect(rowOf('4 Build to GitHub')).toHaveCount(0);
     await expect(view.getByRole('region', { name: 'Parked' })).toBeVisible();
-    await expect(second.getByRole('textbox', { name: 'Reason' })).toBeFocused();
-    await expect(second.getByRole('textbox', { name: 'Reason' })).toHaveValue('Typing');
+    await expect(second.getByRole('textbox', { name: 'Why is it set aside?' })).toBeFocused();
+    await expect(second.getByRole('textbox', { name: 'Why is it set aside?' })).toHaveValue('Typing');
     await page.unroute(parkUrl);
   });
 
@@ -2810,7 +2836,7 @@ test.describe('Board', () => {
     const loose = blRow(page, view, 'Loose parked');
     await loose.hover();
     await loose.getByRole('button', { name: 'Park…' }).click();
-    await page.getByRole('textbox', { name: 'Reason' }).fill('Not now');
+    await page.getByRole('textbox', { name: 'Why is it set aside?' }).fill('Not now');
     await page.keyboard.press('Enter');
     const parkedRow = pRow(page, view.getByRole('region', { name: 'Parked' }), 'Loose parked');
     await expect(parkedRow.locator('.ip-bl-phase')).toHaveText('No phase');
@@ -3453,7 +3479,7 @@ test.describe('v3 Details, viewer and command bar (#505)', () => {
     // The form opens in the strip, and the head stays on screen.
     const form = details.locator('.ip-dstrip').getByRole('dialog', { name: /^Park #/ });
     await expect(form).toBeVisible();
-    await expect(form.getByRole('textbox', { name: 'Reason' })).toBeFocused();
+    await expect(form.getByRole('textbox', { name: 'Why is it set aside?' })).toBeFocused();
     await expect(details.locator('.ip-dtitle')).toBeInViewport({ ratio: 1 });
     const strip2 = (await details.locator('.ip-dstrip').boundingBox())!;
     expect(strip2.height, 'at most half the panel').toBeLessThanOrEqual(frame.height / 2 + 1);
@@ -3566,7 +3592,7 @@ test.describe('#504 Backlog view and All done', () => {
     const row = blRow(page, view, title);
     await row.hover();
     await row.getByRole('button', { name: 'Park…' }).click();
-    await page.getByRole('textbox', { name: 'Reason' }).fill(reason);
+    await page.getByRole('textbox', { name: 'Why is it set aside?' }).fill(reason);
     await page.keyboard.press('Enter');
     await expect(pRow(page, view.getByRole('region', { name: 'Parked' }), title)).toBeVisible();
   }

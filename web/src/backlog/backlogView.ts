@@ -33,23 +33,23 @@ export function phaseTabs(phases: { value: number | 'none'; title: string }[], o
 
 const OPEN = new Set(['todo', 'active', 'blocked']);
 
-/** How many open steps (todo, active, blocked) lie below `id`, at every depth. */
-export function openInside(nodes: TreeNode[], id: number): number {
-  const children = new Map<number, TreeNode[]>();
+/**
+ * Builds the open-below count once for a snapshot's nodes: the returned function says how many open steps (todo, active,
+ * blocked) lie below an id, at every depth.
+ */
+export function openInsideIndex(nodes: TreeNode[]): (id: number) => number {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const counts = new Map<number, number>();
   for (const n of nodes) {
-    if (n.parentId === null) continue;
-    const list = children.get(n.parentId);
-    if (list) list.push(n);
-    else children.set(n.parentId, [n]);
+    if (!OPEN.has(n.status)) continue;
+    // Walks up with a bound: a cycle in a corrupt tree must not hang the window.
+    let at = n.parentId === null ? undefined : byId.get(n.parentId);
+    for (let hops = 0; at && hops < nodes.length; hops++) {
+      counts.set(at.id, (counts.get(at.id) ?? 0) + 1);
+      at = at.parentId === null ? undefined : byId.get(at.parentId);
+    }
   }
-  let count = 0;
-  const stack = [...(children.get(id) ?? [])];
-  while (stack.length) {
-    const n = stack.pop()!;
-    if (OPEN.has(n.status)) count++;
-    stack.push(...(children.get(n.id) ?? []));
-  }
-  return count;
+  return (id) => counts.get(id) ?? 0;
 }
 
 /** The slice of an HTMLElement that cursorAfter reads, so the helper type-checks where the DOM lib is not loaded. */
@@ -63,7 +63,8 @@ const FOLLOWING = 4; // Node.DOCUMENT_POSITION_FOLLOWING
 
 /**
  * Where focus goes when a row leaves its view: the next row's item, else the previous one, else the page title.
- * A pending (deleting) row is passed over. Null when the row is in no Backlog or All done view.
+ * A pending (deleting) row is passed over. Null when the row is in no Backlog or All done view. The answer is a row's `li`,
+ * or the page title (not an `li`): check `matches('li[data-node]')` before reading a step id from it.
  */
 export function cursorAfter<T extends RowLike>(row: T | null): T | null {
   const view = row?.closest('.ip-backlogview, .ip-donelist') ?? null;

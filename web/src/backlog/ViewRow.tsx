@@ -8,7 +8,7 @@ import type { CursorItemProps } from '../parts/ListCursor';
  * steps are open inside, the label, the age) and the actions, which show on hover and on focus. `children` is a
  * full-width block under that line: an open Park form or Confirm, or a parked row's reason.
  */
-export function ViewRow({ id, title, cursor, phase, blocked, inside, label, age, acts, pending, confirming, parked, onOpen, onMouseDown, onKeyDown, children }: {
+export function ViewRow({ id, title, cursor, phase, blocked, inside, label, age, acts, pending, confirming, parked, keepActs, onOpen, onMouseDown, onKeyDown, children }: {
   id: number;
   title: string;
   cursor: CursorItemProps;
@@ -25,6 +25,8 @@ export function ViewRow({ id, title, cursor, phase, blocked, inside, label, age,
   pending?: boolean;
   confirming?: boolean;
   parked?: boolean;
+  /** The actions stay drawn (their buttons disabled by the caller) while the row is pending: a refusal gives focus back to the one pressed. */
+  keepActs?: boolean;
   onOpen: (event: MouseEvent<HTMLLIElement>) => void;
   onMouseDown?: (event: MouseEvent<HTMLLIElement>) => void;
   onKeyDown?: (event: KeyboardEvent<HTMLLIElement>) => void;
@@ -52,7 +54,7 @@ export function ViewRow({ id, title, cursor, phase, blocked, inside, label, age,
         {inside > 0 && <Chip tone="quiet">{`${inside} open inside`}</Chip>}
         {label && <Chip tone="label" glyph={LABEL_GLYPHS[label]}>{label}</Chip>}
         {age && <span className="ip-bl-age">{age}</span>}
-        {!pending && !confirming && <span className="ip-bl-acts" data-act>{acts}</span>}
+        {(keepActs || (!pending && !confirming)) && <span className="ip-bl-acts" data-act>{acts}</span>}
       </span>
       {children}
     </li>

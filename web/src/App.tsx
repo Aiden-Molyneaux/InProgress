@@ -70,7 +70,8 @@ export function App() {
     detailsOpener.current = null;
     // Only when focus went down with Details: a close Aiden did not cause (its step deleted) leaves his focus alone.
     if (!from || (document.activeElement && document.activeElement !== document.body)) return;
-    const target = from.element?.isConnected ? from.element : document.querySelector<HTMLElement>(`[data-node="${from.node}"] .ip-row-title`);
+    const row = document.querySelector<HTMLElement>(`[data-node="${from.node}"]`);
+    const target = from.element?.isConnected ? from.element : row?.matches('[data-cursor]') ? row : row?.querySelector<HTMLElement>('.ip-row-title');
     target?.focus();
   }, [detailsOpen, selectedNode]);
   const [viewerResource, setViewerResource] = useState<number | null>(null);
