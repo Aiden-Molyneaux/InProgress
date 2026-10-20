@@ -20,6 +20,8 @@ interface SessionRow {
   ended_at: string | null;
   slot: number | null;
   role: string;
+  /** Migration 15. */
+  title_asked: string | null;
 }
 
 const toSession = (ctx: Ctx, r: SessionRow): Session => ({
@@ -38,6 +40,7 @@ const toSession = (ctx: Ctx, r: SessionRow): Session => ({
   endedAt: r.ended_at,
   slot: r.slot,
   role: r.role === 'orchestrator' ? 'orchestrator' : 'worker',
+  titleAsked: r.title_asked,
   subagents: listSubagents(ctx, r.id),
   commands: listCommands(ctx, r.id),
 });
@@ -50,8 +53,8 @@ export function findSession(ctx: Ctx, id: string): Session | undefined {
 /** Persist every column except subagents (which live in session_subagents). */
 export function saveSession(ctx: Ctx, s: Session): void {
   ctx.db
-    .prepare('UPDATE sessions SET project_id = ?, title = ?, cwd = ?, branch = ?, transcript_path = ?, state = ?, focus_node_id = ?, prompts_since_update = ?, last_seen_at = ?, last_prompt_at = ?, ended_at = ?, slot = ?, role = ? WHERE id = ?')
-    .run(s.projectId, s.title, s.cwd, s.branch, s.transcriptPath, s.state, s.focusNodeId, s.promptsSinceUpdate, s.lastSeenAt, s.lastPromptAt, s.endedAt, s.slot, s.role, s.id);
+    .prepare('UPDATE sessions SET project_id = ?, title = ?, cwd = ?, branch = ?, transcript_path = ?, state = ?, focus_node_id = ?, prompts_since_update = ?, last_seen_at = ?, last_prompt_at = ?, ended_at = ?, slot = ?, role = ?, title_asked = ? WHERE id = ?')
+    .run(s.projectId, s.title, s.cwd, s.branch, s.transcriptPath, s.state, s.focusNodeId, s.promptsSinceUpdate, s.lastSeenAt, s.lastPromptAt, s.endedAt, s.slot, s.role, s.titleAsked, s.id);
 }
 
 /*

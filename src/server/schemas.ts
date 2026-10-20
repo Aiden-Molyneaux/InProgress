@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ASK_KINDS, ASSIGNEES, BRIEFING_MODES, COMMAND_KINDS, COMMAND_OUTCOMES, HOOK_EVENTS, NODE_KINDS, NODE_LABELS, NODE_STATUSES, PROJECT_NAME_MAX, RESOURCE_KINDS, RESOURCE_PURPOSES, WORK_STATUSES, unknownLabel, type NodeInput } from '../core/types';
+import { ASK_KINDS, ASSIGNEES, BRIEFING_MODES, COMMAND_KINDS, COMMAND_OUTCOMES, HOOK_EVENTS, NODE_KINDS, NODE_LABELS, NODE_STATUSES, PROJECT_NAME_MAX, RESOURCE_KINDS, RESOURCE_PURPOSES, TITLE_CHANNELS, WORK_STATUSES, unknownLabel, type NodeInput } from '../core/types';
 
 const title = z.string().trim().min(1, 'title is empty').max(200);
 /** A step's type label; null leaves it unlabelled (or clears it on a patch). */
@@ -43,7 +43,7 @@ export const createProjectBody = z
   .object({ name: projectName, description: z.string().max(5_000).optional(), playbook: z.string().max(10_000).optional(), slug: z.string().max(60).optional() })
   .strict();
 export const updateProjectBody = z
-  .object({ name: z.string().trim().min(1).max(PROJECT_NAME_MAX).optional(), description: z.string().max(5_000).optional(), playbook: z.string().max(10_000).optional(), status: z.enum(['active', 'archived']).optional(), briefingMode: z.enum(BRIEFING_MODES).optional() })
+  .object({ name: z.string().trim().min(1).max(PROJECT_NAME_MAX).optional(), description: z.string().max(5_000).optional(), playbook: z.string().max(10_000).optional(), status: z.enum(['active', 'archived']).optional(), briefingMode: z.enum(BRIEFING_MODES).optional(), titleChannel: z.enum(TITLE_CHANNELS).optional() })
   .strict();
 export const bindingBody = z.object({ path: z.string().trim().min(1).max(500), branchPattern: z.string().trim().max(200).nullish() }).strict();
 export const addNodesBody = z.object({ parentId: z.number().int().positive(), after, nodes: z.array(nodeInput).min(1).max(200) }).strict();

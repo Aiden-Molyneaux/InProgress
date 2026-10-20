@@ -2,7 +2,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import {
-  ASK_KINDS, ASSIGNEES, BRIEFING_MODES, NODE_KINDS, NODE_LABELS, NODE_STATUSES, RESOURCE_KINDS, RESOURCE_PURPOSES, askTag, glyphTitle, unknownLabel,
+  ASK_KINDS, ASSIGNEES, BRIEFING_MODES, NODE_KINDS, NODE_LABELS, NODE_STATUSES, RESOURCE_KINDS, RESOURCE_PURPOSES, TITLE_CHANNELS, askTag, glyphTitle, unknownLabel,
   type Ask, type Binding, type LogEntry, type NodeDetail, type NodeInput, type Project, type ProjectSnapshot, type ProjectSummary, type Resource, type SearchResult, type TreeNode,
 } from '../core/types';
 import { ApiClientError, type Client } from '../lib/client';
@@ -120,9 +120,9 @@ export function createMcpServer(client: Client, o: McpOptions = {}): McpServer {
     });
 
   tool('update_project', "Rename a project, change its description or playbook, or archive / unarchive it. Archiving stops tracking the project's live sessions (they keep running) and drops their Up next entries.",
-    { project, name: z.string().optional(), description: z.string().optional(), playbook: z.string().optional(), status: z.enum(['active', 'archived']).optional(), briefing_mode: z.enum(BRIEFING_MODES).optional().describe('full: every session gets the whole briefing. scoped: a worker gets its claimed step; the orchestrator the whole'), session },
-    async ({ project, session: s, briefing_mode, ...rest }: { project: string; session?: string; name?: string; description?: string; playbook?: string; status?: 'active' | 'archived'; briefing_mode?: 'full' | 'scoped' }) => {
-      const patch = { ...rest, ...(briefing_mode === undefined ? {} : { briefingMode: briefing_mode }) };
+    { project, name: z.string().optional(), description: z.string().optional(), playbook: z.string().optional(), status: z.enum(['active', 'archived']).optional(), briefing_mode: z.enum(BRIEFING_MODES).optional().describe('full: every session gets the whole briefing. scoped: a worker gets its claimed step; the orchestrator the whole'), title_channel: z.enum(TITLE_CHANNELS).optional().describe('nudge: the briefing tells a session when its title prefix is off. enforce: the Stop hook also sends the session back once to set it'), session },
+    async ({ project, session: s, briefing_mode, title_channel, ...rest }: { project: string; session?: string; name?: string; description?: string; playbook?: string; status?: 'active' | 'archived'; briefing_mode?: 'full' | 'scoped'; title_channel?: 'nudge' | 'enforce' }) => {
+      const patch = { ...rest, ...(briefing_mode === undefined ? {} : { briefingMode: briefing_mode }), ...(title_channel === undefined ? {} : { titleChannel: title_channel }) };
       const p = await client.patch<Project>(`/api/projects/${enc(project)}`, patch, { actor: actor(s) });
       return `Updated project ${p.slug} (${p.status}).`;
     });

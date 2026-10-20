@@ -93,7 +93,7 @@ describe('previewState', () => {
     ({ id, projectId: 1, parentId, position: id, kind: 'task', title: `S${id}`, body: '', status: 'todo', assignee: 'claude', outcome: '', label: null, createdAt: T, updatedAt: T, completedAt: null, driverSessionId: null, boardState: null, stateSince: null, hue: null, parkedReason: '', parkedWhere: '', parkedAt: null, ...o }) as TreeNode;
   // Phase B holds only a step with an open question: the Board's backlog lists it, the Backlog cell (it sits in Needs me) does not.
   const input: BoardInput = {
-    project: { id: 1, slug: 'p', name: 'P', description: '', playbook: '', status: 'active', rootNodeId: 1, createdAt: T, updatedAt: T, queue: [], briefingMode: 'full' },
+    project: { id: 1, slug: 'p', name: 'P', description: '', playbook: '', status: 'active', rootNodeId: 1, createdAt: T, updatedAt: T, queue: [], briefingMode: 'full', titleChannel: 'nudge' },
     nodes: [n(1, null, { kind: 'phase' }), n(10, 1, { kind: 'phase' }), n(20, 1, { kind: 'phase' }), n(11, 10), n(21, 20)],
     sessions: [], pastSessions: [], resources: [],
     asks: [{ id: 1, projectId: 1, nodeId: 21, kind: 'question', text: 'Q', sessionId: null, raisedAt: T, clearedAt: null, clearedBy: null, answer: '', answerDeliveredAt: null }],

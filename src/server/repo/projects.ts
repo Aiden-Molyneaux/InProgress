@@ -1,5 +1,5 @@
 import { COMMAND_WORK_MS } from '../../core/activity';
-import { BRIEFING_MODES, DELETED_RETENTION_MS, STALE_SESSION_MS, type Binding, type BriefingMode, type Project, type ProjectSummary, type QueueEntry, type QueueOp } from '../../core/types';
+import { BRIEFING_MODES, DELETED_RETENTION_MS, STALE_SESSION_MS, TITLE_CHANNELS, type Binding, type BriefingMode, type Project, type ProjectSummary, type QueueEntry, type QueueOp, type TitleChannel } from '../../core/types';
 import { globMatch } from '../../lib/glob';
 import { isUnder, normalizePath } from '../../lib/paths';
 import { msAgo, write, type Ctx, type RecordEvent } from '../db/tx';
@@ -20,6 +20,8 @@ interface ProjectRow {
   updated_at: string;
   queue: string;
   briefing_mode: string;
+  /** Migration 15. */
+  title_channel: string;
   /** When it was deleted (it is archived then); null while it is not. Migration 8. */
   deleted_at: string | null;
 }
@@ -179,6 +181,7 @@ export const toProject = (r: ProjectRow, queue: QueueEntry[] = parseQueue(r.queu
   updatedAt: r.updated_at,
   queue,
   briefingMode: r.briefing_mode === 'scoped' ? 'scoped' : 'full',
+  titleChannel: r.title_channel === 'enforce' ? 'enforce' : 'nudge',
 });
 
 const readProject = (ctx: Ctx, r: ProjectRow): Project => toProject(r, liveQueue(ctx, r.id, r.queue));
@@ -292,6 +295,7 @@ export interface UpdateProjectInput {
   playbook?: string;
   status?: 'active' | 'archived';
   briefingMode?: BriefingMode;
+  titleChannel?: TitleChannel;
 }
 
 /** Whether InProgress tracks the sessions of project `projectId`: it exists, is active and is not deleted. */
@@ -361,24 +365,28 @@ export function applyProjectChange(ctx: Ctx, record: RecordEvent, before: Projec
   if (patch.briefingMode !== undefined && !(BRIEFING_MODES as readonly string[]).includes(patch.briefingMode)) {
     throw badRequest(`Unknown briefing mode ${JSON.stringify(patch.briefingMode)}. Use one of: ${BRIEFING_MODES.join(', ')}.`);
   }
+  if (patch.titleChannel !== undefined && !(TITLE_CHANNELS as readonly string[]).includes(patch.titleChannel)) {
+    throw badRequest(`Unknown title channel ${JSON.stringify(patch.titleChannel)}. Use one of: ${TITLE_CHANNELS.join(', ')}.`);
+  }
   const next = {
     name: patch.name?.trim() || before.name,
     description: patch.description ?? before.description,
     playbook: patch.playbook ?? before.playbook,
     status: patch.status ?? before.status,
     briefingMode: patch.briefingMode ?? before.briefingMode,
+    titleChannel: patch.titleChannel ?? before.titleChannel,
   };
   // Before the status change and its event, so the activity strip's newest line is the archive.
   const endedSessions = before.status === 'active' && next.status === 'archived' ? endProjectSessions(ctx, record, before.id) : [];
   const ts = ctx.now();
   ctx.db
-    .prepare('UPDATE projects SET name = ?, description = ?, playbook = ?, status = ?, briefing_mode = ?, updated_at = ? WHERE id = ?')
-    .run(next.name, next.description, next.playbook, next.status, next.briefingMode, ts, before.id);
+    .prepare('UPDATE projects SET name = ?, description = ?, playbook = ?, status = ?, briefing_mode = ?, title_channel = ?, updated_at = ? WHERE id = ?')
+    .run(next.name, next.description, next.playbook, next.status, next.briefingMode, next.titleChannel, ts, before.id);
   if (patch.name !== undefined || patch.description !== undefined) {
     ctx.db.prepare('UPDATE nodes SET title = ?, body = ?, updated_at = ? WHERE id = ?').run(next.name, next.description, ts, before.rootNodeId);
   }
   const changes: Record<string, { from: unknown; to: unknown }> = {};
-  for (const key of ['name', 'description', 'playbook', 'status', 'briefingMode'] as const) {
+  for (const key of ['name', 'description', 'playbook', 'status', 'briefingMode', 'titleChannel'] as const) {
     if (patch[key] !== undefined && before[key] !== next[key]) changes[key] = { from: before[key], to: next[key] };
   }
   // The root step's change first, so the activity strip's newest line is the project's own (renamed the project).

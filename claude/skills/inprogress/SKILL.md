@@ -33,7 +33,7 @@ Changes:
 - later: #61
 ```
 
-When a session needs Aiden to answer, allow or look at something, brief `ask on #id: <kind>, <text>` (kind `question`, `permission` or `review`) and name the asking session; the answer comes back to that session on its next prompt. When he answers in chat, brief `a7 answered: <answer>`. Do not add a question step for it. `assignee me` is only for a step Aiden does himself. A handoff line attaches the handoff doc to its step; a state line is the Orchestrator's note on the root and replaces the previous one. `briefing mode <slug>: scoped|full` switches what a project's sessions see in their briefings. Backtracking marks steps `dropped` or moves them; it never deletes them.
+When a session needs Aiden to answer, allow or look at something, brief `ask on #id: <kind>, <text>` (kind `question`, `permission` or `review`) and name the asking session; the answer comes back to that session on its next prompt. When he answers in chat, brief `a7 answered: <answer>`. Do not add a question step for it. `assignee me` is only for a step Aiden does himself. A handoff line attaches the handoff doc to its step; a state line is the Orchestrator's note on the root and replaces the previous one. `briefing mode <slug>: scoped|full` switches what a project's sessions see in their briefings. `title channel <slug>: nudge|enforce` switches whether a session whose title prefix is off only hears it in its briefing or is also sent back once at Stop to set it. Backtracking marks steps `dropped` or moves them; it never deletes them.
 
 Never write an em dash in a brief or a task subject: use a comma, a colon, a period or " · ".
 
