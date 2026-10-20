@@ -3,7 +3,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { migrate, schemaVersion } from '../../src/server/db/connection';
 import { MIGRATIONS } from '../../src/server/db/schema';
 import type { Ctx } from '../../src/server/db/tx';
-import { clearAsk, raiseAsk } from '../../src/server/repo/asks';
+import { deriveBoard } from '../../src/core/board';
+import { taskBoxes, taskStateOf } from '../../src/core/taskState';
+import { getProjectSnapshot } from '../../src/server/repo/snapshot';
+import { clearAsk, raiseAsk, raiseAskDetailed } from '../../src/server/repo/asks';
 import { listEventsSince, maxEventId } from '../../src/server/repo/events';
 import { addNodes, requireNode, updateNode } from '../../src/server/repo/nodes';
 import { addBinding, createProject } from '../../src/server/repo/projects';
@@ -253,5 +256,57 @@ describe('the Board reconcile', () => {
     expect(stored(ctx, other.id).board_state).toBe('blocked');
     expect(stored(ctx, focused.id).board_state).not.toBe('idle');
     expect(findSession(ctx, 's-old')?.state).not.toBe('ended');
+  });
+});
+
+describe('answered in chat (#522)', () => {
+  const cwd = 'C:/personal/InGame';
+  function chat() {
+    const { ctx, project } = setup();
+    addBinding(ctx, 'test', project.slug, cwd);
+    const [step] = addNodes(ctx, 'test', { parentId: project.rootNodeId, nodes: [{ title: 'Step', status: 'active' }] });
+    handleHookEvent(ctx, 's1', { event: 'start', source: 'startup', cwd });
+    setFocus(ctx, 'scribe:s1', 's1', step.id);
+    return { ctx, project, step };
+  }
+  const board = (ctx: Ctx, projectId: number) => {
+    const snap = getProjectSnapshot(ctx, projectId);
+    const b = deriveBoard(snap, Date.parse(ctx.now()));
+    return { snap, b };
+  };
+
+  it('a re-raise of the same ask after a real prompt moves its raisedAt and returns the step to Needs me', () => {
+    const { ctx, project, step } = chat();
+    const first = raiseAsk(ctx, 's1', { nodeId: step.id, kind: 'question', text: 'Which port?', sessionId: 's1' });
+    handleHookEvent(ctx, 's1', { event: 'prompt', cwd });
+    let { snap, b } = board(ctx, project.id);
+    expect(taskBoxes(b, snap, Date.parse(ctx.now())).now.map((x) => x.row?.node.id)).toContain(step.id);
+    const again = raiseAskDetailed(ctx, 's1', { nodeId: step.id, kind: 'question', text: 'Which port?', sessionId: 's1' });
+    expect(again.joined).toBe(true);
+    expect(again.ask.id).toBe(first.id);
+    expect(again.ask.raisedAt > first.raisedAt).toBe(true);
+    ({ snap, b } = board(ctx, project.id));
+    const now = Date.parse(ctx.now());
+    expect(taskStateOf(b.byId.get(step.id)!, snap, now)).toBe('question');
+    expect(taskBoxes(b, snap, now).needs.map((x) => x.row?.node.id)).toContain(step.id);
+  });
+
+  it('a re-raise with no prompt in between keeps the ask\'s age', () => {
+    const { ctx, step } = chat();
+    const first = raiseAsk(ctx, 's1', { nodeId: step.id, kind: 'question', text: 'Which port?', sessionId: 's1' });
+    const again = raiseAsk(ctx, 's1', { nodeId: step.id, kind: 'question', text: 'Which port?', sessionId: 's1' });
+    expect(again.raisedAt).toBe(first.raisedAt);
+  });
+
+  it('a prompt to a session already working still records an update, so the step leaves Needs me', () => {
+    const { ctx, step } = chat();
+    handleHookEvent(ctx, 's1', { event: 'prompt', cwd });
+    raiseAsk(ctx, 's1', { nodeId: step.id, kind: 'question', text: 'Which port?', sessionId: 's1' });
+    expect(findSession(ctx, 's1')?.state).toBe('working');
+    expect(stored(ctx, step.id).board_state).toBe('question');
+    const mark = maxEventId(ctx);
+    handleHookEvent(ctx, 's1', { event: 'prompt', cwd });
+    expect(listEventsSince(ctx, mark).filter((e) => e.type === 'session.updated')).toHaveLength(1);
+    expect(stored(ctx, step.id).board_state).toBe('working');
   });
 });

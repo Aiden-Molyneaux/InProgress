@@ -96,6 +96,9 @@ function oneLine(text: string): string {
   return line.length > 300 ? `${line.slice(0, 299)}…` : line;
 }
 
+/** How many open-ask reminder lines a prompt carries before the rest are only named. */
+const REMINDERS = 3;
+
 const clean = (text: string | undefined): string | null => text?.trim() || null;
 
 export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInput): HookEventResult {
@@ -257,6 +260,8 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
     if (before.state === 'ended' && next.state !== 'ended') markRevived(ctx, sessionId, now);
     const after = findSession(ctx, sessionId)!;
     const changed: string[] = VISIBLE.filter((k) => before![k] !== after[k]);
+    // A prompt that changes nothing above still moves a step out of Needs me when an ask this session holds is open (#522).
+    if (before.lastPromptAt !== after.lastPromptAt && asksToRemind(ctx, sessionId).length) changed.push('lastPromptAt');
     if (JSON.stringify(before.subagents) !== JSON.stringify(after.subagents)) changed.push('subagents');
     if (JSON.stringify(before.commands) !== JSON.stringify(after.commands)) changed.push('commands');
     if (created || changed.length) {
@@ -322,9 +327,12 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
       markAnswersDelivered(ctx, answers.map((a) => a.id));
     }
     // The reminder (#522): every real prompt, while an ask this session holds is open, in case this prompt answers it.
-    for (const a of asksToRemind(ctx, sessionId)) {
+    // At most the 3 newest, oldest first among themselves; the rest are named by tag in one line.
+    const reminders = asksToRemind(ctx, sessionId);
+    for (const a of reminders.slice(-REMINDERS)) {
       lines.push(`Open ask ${askTag(a.id)} on ${stepRef(a.nodeId, findNode(ctx, a.nodeId)?.title)}: "${oneLine(a.text)}". If this prompt answers it, put "${askTag(a.id)} answered: ..." in your next scribe brief.`);
     }
+    if (reminders.length > REMINDERS) lines.push(`+${reminders.length - REMINDERS} more open asks: ${reminders.slice(0, -REMINDERS).map((a) => askTag(a.id)).join(', ')}`);
     if (lines.length) context = [...lines, ...(context ? [context] : [])].join('\n');
   }
   return context === undefined ? { tracked: true } : { tracked: true, context };

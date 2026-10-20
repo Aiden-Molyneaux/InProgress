@@ -58,7 +58,7 @@ export interface RaisedAsk {
   untracked: boolean;
 }
 
-/** Idempotent: the open ask with this node, kind and text, inserted if missing. Records ask.raised only when inserted. */
+/** Idempotent: the open ask with this node, kind and text, inserted if missing. Records ask.raised when inserted, and when a joined ask is raised again after its session's last prompt (its age restarts). */
 export function raiseAsk(ctx: Ctx, actor: string, input: RaiseAskInput): Ask {
   return raiseAskDetailed(ctx, actor, input).ask;
 }
@@ -82,9 +82,20 @@ export function raiseAskDetailed(ctx: Ctx, actor: string, input: RaiseAskInput):
     const info = ctx.db
       .prepare('INSERT INTO asks (project_id, node_id, kind, text, session_id, raised_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING')
       .run(node.projectId, node.id, input.kind, text, tracked ? input.sessionId : null, ctx.now());
-    const row = ctx.db.prepare('SELECT * FROM asks WHERE node_id = ? AND kind = ? AND text = ? AND cleared_at IS NULL').get(node.id, input.kind, text) as AskRow;
+    let row = ctx.db.prepare('SELECT * FROM asks WHERE node_id = ? AND kind = ? AND text = ? AND cleared_at IS NULL').get(node.id, input.kind, text) as AskRow;
+    // A session that asks again after a real prompt (Aiden answered in its chat, #522) is asking anew: the joined ask's
+    // age restarts, or the Board would still read it as answered in chat. A re-raise before any prompt keeps its age.
+    let bumped = false;
+    if (!info.changes && tracked) {
+      const prompted = ctx.db.prepare('SELECT last_prompt_at FROM sessions WHERE id = ?').pluck().get(input.sessionId) as string | null;
+      if (prompted !== null && Date.parse(prompted) > Date.parse(row.raised_at)) {
+        ctx.db.prepare('UPDATE asks SET raised_at = ? WHERE id = ?').run(ctx.now(), row.id);
+        row = ctx.db.prepare('SELECT * FROM asks WHERE id = ?').get(row.id) as AskRow;
+        bumped = true;
+      }
+    }
     const ask = toAsk(row);
-    if (info.changes) record({ projectId: node.projectId, type: 'ask.raised', entity: 'ask', entityId: ask.id, data: { ask } });
+    if (info.changes || bumped) record({ projectId: node.projectId, type: 'ask.raised', entity: 'ask', entityId: ask.id, data: { ask } });
     return { ask, joined: !info.changes, untracked: !!input.sessionId && !tracked };
   });
 }
@@ -209,7 +220,7 @@ export function asksToRemind(ctx: Ctx, sessionId: string): Ask[] {
         ` AND (session_id = ?` +
         ` OR (node_id IN (SELECT id FROM nodes WHERE driver_session_id = ?) AND node_id = (SELECT focus_node_id FROM sessions WHERE id = ?)` +
         ` AND session_id IS NOT NULL AND session_id != ?` +
-        ` AND NOT EXISTS (SELECT 1 FROM sessions r WHERE r.id = asks.session_id AND r.state != 'ended' AND r.last_seen_at >= ?))) ORDER BY raised_at, id`,
+        ` AND NOT EXISTS (SELECT 1 FROM sessions r WHERE r.id = asks.session_id AND r.state != 'ended' AND r.last_seen_at >= ? AND r.project_id = asks.project_id))) ORDER BY raised_at, id`,
     )
     .all(sessionId, sessionId, sessionId, sessionId, msAgo(ctx, STALE_SESSION_MS)) as AskRow[]).map(toAsk);
 }

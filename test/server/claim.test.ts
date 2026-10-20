@@ -621,6 +621,35 @@ describe('the open-ask reminder line (#522)', () => {
     expect(handleHookEvent(ctx, 's1', prompt()).context!.split('\n')).toContain(line(ask.id, step.id, 'Build tabs', 'Land it?'));
   });
 
+  it('the driver route still reminds when the raiser moved to another project and is live', () => {
+    const { ctx, step, join } = setup();
+    const elsewhere = createProject(ctx, 'test', { name: 'Elsewhere' });
+    join('s1');
+    join('s2');
+    claimStep(ctx, 'session:s1', 's1', step.id);
+    claimStep(ctx, 'session:s2', 's2', step.id);
+    const ask = raiseAsk(ctx, 'session:s2', { nodeId: step.id, kind: 'question', text: 'Land it?', sessionId: 's2' });
+    enrollSession(ctx, 'scribe:s2', 's2', elsewhere.slug);
+    expect(handleHookEvent(ctx, 's1', prompt()).context!.split('\n')).toContain(line(ask.id, step.id, 'Build tabs', 'Land it?'));
+  });
+
+  it('a window ask (no session) on the step the session drives and focuses gets no reminder', () => {
+    const { ctx, step, join } = setup();
+    join('s1');
+    claimStep(ctx, 'session:s1', 's1', step.id);
+    raiseAsk(ctx, 'window', { nodeId: step.id, kind: 'question', text: 'Q' });
+    expect(handleHookEvent(ctx, 's1', prompt()).context ?? '').not.toContain('Open ask');
+  });
+
+  it('carries the 3 newest asks, oldest first, and names the rest in one line', () => {
+    const { ctx, step, join } = setup();
+    join('s1');
+    const asks = [1, 2, 3, 4, 5].map((i) => raiseAsk(ctx, 'session:s1', { nodeId: step.id, kind: 'question', text: 'Q' + i, sessionId: 's1' }));
+    const lines = handleHookEvent(ctx, 's1', prompt()).context!.split('\n');
+    expect(lines.filter((l) => l.startsWith('Open ask '))).toEqual([2, 3, 4].map((i) => line(asks[i].id, step.id, 'Build tabs', 'Q' + (i + 1))));
+    expect(lines).toContain('+2 more open asks: a' + asks[0].id + ', a' + asks[1].id);
+  });
+
   it("the driver route needs the step to be the driver's focus", () => {
     const { ctx, step, other, join } = setup();
     join('s1');
