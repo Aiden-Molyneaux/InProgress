@@ -349,10 +349,13 @@ export function Backlog({ boxes, parked, snapshot, now, projectId, slug, code, t
                           const free = active === null || active === document.body || here?.contains(active) === true || active.classList.contains('ip-page-title');
                           setPanel((p) => (p?.id === id ? null : p));
                           if (!owns || !free) return;
-                          // The row's neighbours as they are now; the ones worked out when the form opened serve only once the row has gone.
+                          // The row's neighbours as they are now, while it is still among the open rows. Once the snapshot has
+                          // moved it into Parked (the answer and the snapshot land in either order), the neighbour worked out
+                          // when the form opened comes first, so focus stays where the row was.
+                          const stillOpen = here instanceof HTMLElement && here.closest('.ip-bl-parked') === null;
                           const live = here instanceof HTMLElement ? cursorAfter(here) : null;
                           const opened = afterPark.current ? root.current?.querySelector<HTMLElement>(`li[data-node="${afterPark.current}"]`) : null;
-                          (live ?? opened ?? titleRef.current)?.focus();
+                          ((stillOpen ? live ?? opened : opened ?? live) ?? titleRef.current)?.focus();
                         }}
                         onCancel={() => cancel(id)}
                       />
