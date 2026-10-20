@@ -91,18 +91,17 @@
 .ip-divider span { position: relative; padding: 0 6px 0 0; background: var(--bg); }
 .ip-done-fold { margin-left: 4px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
 /* Next: boxes, own-queue boxes under "Queued by <session>", and the Backlog fold at its foot. */
-.ip-next { min-height: 48px; }
-.ip-backlog-row.dragging, .ip-next-row.dragging { opacity: .5; }
-.ip-next-row.drop-before { box-shadow: 0 -2px 0 var(--text-2); }
-.ip-list.drop-end > .ip-next-row:last-child { box-shadow: 0 2px 0 var(--text-2); }
+/* Next: a drop at the end of the queue draws the volt line under the last tile (a drop before a tile is the Tile part's own). */
+.ip-next { display: grid; gap: var(--sp-4); }
+.ip-list.drop-end > li:last-child > .p-tile::after { content: ''; position: absolute; left: -1px; right: -1px; bottom: calc(-1 * var(--sp-2) - 1px); height: 2px; background: var(--volt); }
 .ip-backlog-row .ip-confirm, .ip-now-row .ip-confirm { max-width: none; }
 .ip-confirm:focus { outline: none; }
 .ip-backlog-row.pending, .ip-now-row.pending { opacity: .5; }
 .ip-backlog-row.pending .ip-hover-act, .ip-now-row.pending .ip-hover-act { display: none; }
 .ip-num { font-size: var(--fs-l); line-height: 24px; text-align: center; color: var(--text-2); }
 .ip-own { color: var(--text-2); font-size: var(--fs-s); }
-.ip-own-queue { margin-top: 10px; }
-.ip-own-head { margin: 0 0 6px 2px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
+.ip-own-queue { display: grid; gap: var(--sp-3); }
+.ip-own-head { display: flex; }
 /* The task box: one skeleton in every Board cell (Needs me, Next, Now, Done, the Backlog fold). The hue sits on the left edge of a coloured
    state; --active marks Working and --amber marks Needs you. */
 .ip-list { display: flex; flex-direction: column; gap: 10px; }
@@ -151,12 +150,29 @@ button.ip-card-title:hover { color: var(--text); text-decoration: underline; }
 .ip-card:hover .ip-hover-act, .ip-card:focus-within .ip-hover-act, .ip-hover-act:focus-visible { opacity: 1; }
 .ip-hover-act + .ip-hover-act { margin-left: 4px; }
 .ip-hover-act:hover { color: var(--text); background: var(--panel-2); }
-.ip-hover-act:focus-visible, .ip-fold:focus-visible, .ip-quick-add:focus { outline: 2px solid var(--volt); outline-offset: 1px; }
-.ip-backlog { margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border); }
-.ip-backlog.drop-here { background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--text-2); }
-.ip-preview-foot { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.ip-fold { padding: 0; font-size: var(--fs-s); line-height: 14px; letter-spacing: .04em; color: var(--muted); }
-.ip-fold:hover { color: var(--text); }
+.ip-hover-act:focus-visible, .ip-quick-add:focus { outline: 2px solid var(--volt); outline-offset: 1px; }
+.ip-backlog { margin-top: var(--sp-3); padding-top: var(--sp-4); border-top: 1px dashed var(--line-strong); }
+.ip-backlog.drop-here { background: var(--canvas-2); box-shadow: inset 0 0 0 1px var(--volt); }
+/* The Backlog preview: head, phase tabs, one-line rows, and the "more" line. */
+.ip-preview { display: grid; gap: var(--sp-3); min-width: 0; }
+.ip-backlog-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.ip-backlog-acts { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.ip-backlog-list { border-top: 1px solid var(--line-soft); }
+.ip-preview .ip-backlog-row { position: relative; display: grid; grid-template-columns: 4.5ch minmax(0, 1fr) auto; gap: var(--sp-1) var(--sp-3); align-items: baseline; padding: var(--sp-3) var(--sp-1); border-bottom: 1px solid var(--line-soft); cursor: pointer; transition: background-color var(--dur-1) var(--ease-std); }
+.ip-preview .ip-backlog-row:is(:hover, :focus-within) { background: var(--canvas-2); }
+.ip-preview .ip-backlog-row:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--volt-soft); }
+.ip-preview .ip-backlog-row[draggable='true']:active { cursor: grabbing; }
+.ip-bl-id { font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-dim); }
+.ip-preview .ip-row-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; font-size: var(--t-body); line-height: 1.35; color: var(--text); }
+.ip-preview .ip-row-title:hover { text-decoration: none; }
+.ip-bl-age { font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-dim); }
+.ip-bl-meta { grid-column: 2 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+/* "to Next" and "back to Backlog" are ghost buttons that show on hover and focus; the older rule above set a box look they do not take. */
+.ip-tile .p-btn.ip-hover-act, .ip-preview .p-btn.ip-hover-act { height: auto; margin-left: 0; padding: 0 var(--sp-2); border-color: transparent; background: transparent; font-size: inherit; line-height: inherit; color: var(--text-muted); opacity: 0; }
+.ip-tile .p-btn.ip-hover-act:hover, .ip-preview .p-btn.ip-hover-act:hover { border-color: var(--line-strong); background: transparent; color: var(--volt); }
+.ip-tile:is(:hover, :focus-within) .p-btn.ip-hover-act, .ip-preview .ip-backlog-row:is(:hover, :focus-within) .p-btn.ip-hover-act, .ip-tile .p-btn.ip-hover-act:focus-visible, .ip-preview .p-btn.ip-hover-act:focus-visible { opacity: 1; }
+.ip-preview .p-btn.ip-hover-act { position: absolute; right: var(--sp-1); top: 50%; margin-top: -13px; background: var(--canvas-2); }
+.ip-backlog-more { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); font-size: var(--t-detail-sm); color: var(--text-muted); }
 .ip-backlog-groups { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
 .ip-group-line { margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-s); line-height: 14px; color: var(--faint); }
 /* The Backlog filter field and order control share one line (#453). */

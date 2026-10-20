@@ -118,16 +118,29 @@ const open = (page: Page, project: Seeded) => page.goto(`/#/p/${project.slug}`);
 /** A step's row on the Board, by its title. Details lists the same steps as "#id title", so the exact name is the Board's. */
 const stepRow = (page: Page, title: string) => page.getByRole('main').getByRole('button', { name: title, exact: true });
 
-/** The Backlog preview's phase picker at the foot of Next. */
-const phasePicker = (page: Page) => page.getByRole('combobox', { name: 'Backlog phase' });
+/** The Backlog preview's phase tabs at the foot of Next. */
+const phasePicker = (page: Page) => page.getByRole('tablist', { name: 'Backlog phase' });
+/** The phase tab that is picked. */
+const pickedPhase = (page: Page) => phasePicker(page).getByRole('tab', { selected: true });
 
 /** Shows a phase's entries in the Backlog preview ("No phase" for the steps under the root). */
 async function showPhase(page: Page, name: string): Promise<void> {
-  await phasePicker(page).selectOption({ label: name });
+  await phasePicker(page).getByRole('tab', { name: new RegExp(`^${name}`) }).click();
 }
 
-/** The preview's "N ›" button, which opens the full Backlog view. */
-const backlogAll = (page: Page) => page.getByRole('button', { name: /^\d+ ›$/ });
+/**
+ * Drags one element onto another. At 900 px the Board scrolls, and Playwright's dragTo scrolls the target into view after the
+ * button is down; Chromium then starts the drag on whatever the pointer is over (seen: mousedown on 6 Beta, the Board scrolls,
+ * dragstart on 4 Build). So both ends are brought into view first, and the drag itself scrolls nothing.
+ */
+async function drag(source: Locator, target: Locator, targetPosition?: { x: number; y: number }): Promise<void> {
+  await target.scrollIntoViewIfNeeded();
+  await source.scrollIntoViewIfNeeded();
+  await source.dragTo(target, { targetPosition });
+}
+
+/** The preview's "Open ›" button, which opens the full Backlog view. */
+const backlogAll = (page: Page) => page.locator('.ip-backlog-all');
 
 /** Opens the full Backlog view from the preview and answers it. */
 async function openFullBacklog(page: Page): Promise<Locator> {
@@ -1797,8 +1810,13 @@ test.describe('Board', () => {
     await expect(boxIn(page, 'next', '3 RevenueCat')).toBeVisible();
     // One cell per task: the step pulled up has left the Backlog.
     await expect(next.locator('.ip-backlog-row', { has: page.getByRole('button', { name: '3 RevenueCat', exact: true }) })).toHaveCount(0);
+    // Next draws the Tile part (#502): the id, a READY chip and the age.
+    const pulled = boxIn(page, 'next', '3 RevenueCat');
+    await expect(pulled.locator('.p-tile-id')).toHaveText(`#${fresh.ids['3 RevenueCat']}`);
+    await expect(pulled.locator('.p-tile-chips .p-chip')).toHaveText('READY');
+    await expect(pulled.getByRole('button', { name: '3 RevenueCat', exact: true })).toBeVisible();
+    await expect(pulled.locator('.p-tile-chips .ip-tile-age')).toBeVisible();
     const cells = [
-      { band: 'next', title: '3 RevenueCat', state: 'Ready' },
       { band: 'now', title: 'Play app signing', state: 'Working' },
       { band: 'done', title: 'Upload keystore', state: '✓ Done' },
     ] as const;
@@ -1820,7 +1838,7 @@ test.describe('Board', () => {
     await expect(page.locator('.ip-bands :is(li.ip-card, article.ip-tile)', { has: page.getByRole('button', { name: 'Run signing tests', exact: true }) })).toHaveCount(1);
   });
 
-  test('Backlog preview boxes share the task box with no hue', async ({ page, api, fresh }) => {
+  test('Backlog preview rows are one line each with no hue', async ({ page, api, fresh }) => {
     // A Blocked step that sits in Backlog holds a hue by the state rule; the fold still shows none.
     await write(api, fresh.session, 'patch', `/api/nodes/${fresh.ids['5 Store listing']}`, { status: 'blocked' });
     const snapshot = (await (await api.get(`/api/projects/${fresh.slug}`)).json()) as { nodes: { id: number; hue: number | null }[] };
@@ -1829,19 +1847,18 @@ test.describe('Board', () => {
     await open(page, fresh);
     const next = band(page, 'next');
     const group = next.getByRole('list', { name: 'Backlog: Road to market' });
-    const boxes = next.locator('.ip-backlog li.ip-card');
+    const boxes = next.locator('.ip-backlog .ip-backlog-row');
     await expect(group).toBeVisible();
     await expect.poll(() => boxes.count()).toBeGreaterThan(1);
-    const box = group.locator('li.ip-card', { has: page.getByRole('button', { name: '4 Build to GitHub', exact: true }) });
-    await expect(box.locator('.ip-sid')).toHaveText(`#${fresh.ids['4 Build to GitHub']}`);
-    await expect(box.locator('.ip-st')).toHaveText('Backlog');
-    await expect(box.locator('.ip-card-top .ip-time')).toBeVisible();
-    await expect(box.locator('.ip-foot')).toBeVisible();
-    await expect(box.locator('.ip-sess')).toHaveCount(0);
-    const blocked = group.locator('li.ip-card', { has: page.getByRole('button', { name: '5 Store listing', exact: true }) });
-    await expect(blocked.locator('.ip-st')).toHaveText('Blocked');
+    // The preview draws one-line rows, not tiles: the id, the title, the age.
+    const box = group.locator('.ip-backlog-row', { has: page.getByRole('button', { name: '4 Build to GitHub', exact: true }) });
+    await expect(box.locator('.ip-bl-id')).toHaveText(`#${fresh.ids['4 Build to GitHub']}`);
+    await expect(box.locator('.ip-bl-age')).toBeVisible();
+    await expect(box.locator('.p-tile, .ip-sess')).toHaveCount(0);
+    const blocked = group.locator('.ip-backlog-row', { has: page.getByRole('button', { name: '5 Store listing', exact: true }) });
+    await expect(blocked.locator('.p-chip[data-tone="blocked"]')).toHaveText('BLOCKED');
     for (const b of await boxes.all()) expect(await b.getAttribute('style')).toBeNull();
-    // A click on the box opens Details; its own buttons do not.
+    // A click on the row opens Details; its own buttons do not.
     await box.getByRole('button', { name: 'to Next' }).focus();
     await expect(box.getByRole('button', { name: 'to Next' })).toHaveCSS('opacity', '1');
     await box.click({ position: { x: 4, y: 4 } });
@@ -2369,15 +2386,15 @@ test.describe('Board', () => {
     const picker = phasePicker(page);
     const preview = next.getByRole('list', { name: /^Backlog: / });
     // The default is the phase of the latest completed step, Road to market: five entries in tree order, the rest in the full view.
-    await expect(picker.locator('option:checked')).toHaveText('Road to market');
-    await expect(picker.locator('option')).toHaveText(['Road to market', 'No phase']);
+    await expect(pickedPhase(page)).toContainText('Road to market');
+    await expect(picker.getByRole('tab')).toHaveText([/^Road to market/, /^No phase/]);
     await expect(preview.locator('.ip-backlog-row .ip-row-title')).toHaveText(['3 RevenueCat', '4 Build to GitHub', '5 Store listing', '6 Beta', '7 Launch']);
-    await expect(backlogAll(page)).toHaveText('9 ›');
+    await expect(next.locator('.ip-backlog-name')).toContainText('Backlog · 9');
     // Another phase: its entries only, remembered after a reload.
     await showPhase(page, 'No phase');
     await expect(preview.locator('.ip-backlog-row .ip-row-title')).toHaveText(['Milestones', 'Loose one']);
     await page.reload();
-    await expect(picker.locator('option:checked')).toHaveText('No phase');
+    await expect(pickedPhase(page)).toContainText('No phase');
     await expect(next.getByRole('button', { name: 'Loose one', exact: true })).toBeVisible();
     await expect(next.getByRole('button', { name: '3 RevenueCat', exact: true })).toHaveCount(0);
     // Quick-add creates under the picked phase (the root for No phase) and keeps its field open until Escape.
@@ -2405,7 +2422,7 @@ test.describe('Board', () => {
     await expect(page.locator('section.ip-band-next')).toHaveCount(0);
     await viewButton(page, 'Board').click();
     await expect(page.locator('.ip-backlogview')).toHaveCount(0);
-    await expect(picker.locator('option:checked')).toHaveText('No phase');
+    await expect(pickedPhase(page)).toContainText('No phase');
   });
 
   test('the Backlog preview falls back when its remembered phase has no entries', async ({ page, api, fresh }) => {
@@ -2417,7 +2434,7 @@ test.describe('Board', () => {
     // The remembered choice (No phase) is emptied (Milestones, the other step under the root, finishes too): the preview does not sit on "Nothing in No phase".
     await write(api, fresh.session, 'patch', `/api/nodes/${loose.id}`, { status: 'done', outcome: 'Done' });
     await write(api, fresh.session, 'patch', `/api/nodes/${fresh.ids['Milestones']}`, { status: 'done', outcome: 'Done' });
-    await expect(phasePicker(page).locator('option:checked')).toHaveText('Road to market');
+    await expect(pickedPhase(page)).toContainText('Road to market');
     await expect(band(page, 'next').getByRole('button', { name: '3 RevenueCat', exact: true })).toBeVisible();
   });
 
@@ -2455,7 +2472,7 @@ test.describe('Board', () => {
     await expect(parked).toHaveCount(0);
     await viewButton(page, 'Board').click();
     const nextRow = band(page, 'next').locator('.ip-next-row', { has: page.getByRole('button', { name: '4 Build to GitHub', exact: true }) });
-    await expect(nextRow.locator('.ip-st')).toHaveText('Ready');
+    await expect(nextRow.locator('.p-tile-chips .p-chip')).toHaveText('READY');
     // Unpark sends a parked step back to the Backlog, not to Next.
     const again = await openFullBacklog(page);
     await again.locator('.ip-backlog-row', { has: page.getByRole('button', { name: '5 Store listing', exact: true }) }).hover();
@@ -2609,19 +2626,20 @@ test.describe('Board', () => {
     const title = page.getByRole('button', { name: '4 Build to GitHub', exact: true });
     const toNext = next.locator('.ip-backlog-row', { has: title }).getByRole('button', { name: 'to Next' });
     await expect(toNext).toHaveCSS('opacity', '0');
-    // The box's own buttons sit in its top line, before the title.
-    await title.focus();
-    await page.keyboard.press('Shift+Tab');
+    // The row is a cursor item: Tab goes into its own buttons (the title, then to Next).
+    await next.locator('.ip-backlog-row', { has: title }).focus();
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Tab');
     await expect(toNext).toBeFocused();
     await expect(toNext).toHaveCSS('opacity', '1');
     await page.keyboard.press('Enter');
     const row = next.locator('.ip-next-row', { has: page.getByRole('button', { name: '4 Build to GitHub', exact: true }) });
-    await expect(row.locator('.ip-st')).toHaveText('Ready');
+    await expect(row.locator('.p-tile-chips .p-chip')).toHaveText('READY');
     // A button of the row's own does not open Details.
     await expect(page.getByRole('complementary')).toHaveCount(0);
     // The queue was written: the step is Ready in Next after a reload, with "back to Backlog" on it.
     await page.reload();
-    await expect(row.locator('.ip-st')).toHaveText('Ready');
+    await expect(row.locator('.p-tile-chips .p-chip')).toHaveText('READY');
     await row.getByRole('button', { name: 'back to Backlog' }).focus();
     await expect(row.getByRole('button', { name: 'back to Backlog' })).toHaveCSS('opacity', '1');
     await page.keyboard.press('Enter');
@@ -2863,32 +2881,31 @@ test.describe('Board', () => {
   });
 
   test('drag: Backlog into Next, within Next, and Next back to Backlog, without opening Details', async ({ page, fresh }) => {
-    // Tall, so the drag never has to scroll the Board: the ask tiles in Needs me made the page longer than 900 px (#502).
-    await page.setViewportSize({ width: 1200, height: 2400 });
+    await page.setViewportSize(WIDE);
     await open(page, fresh);
     const next = band(page, 'next');
     const backlogRow = (t: string) => next.locator('.ip-backlog-row', { has: page.getByRole('button', { name: t, exact: true }) });
     const nextRow = (t: string) => next.locator('.ip-next-row', { has: page.getByRole('button', { name: t, exact: true }) });
     const order = async () => (await next.locator('.ip-next-row .ip-row-title').allTextContents()).join('|');
     // Into an empty rail.
-    await backlogRow('5 Store listing').dragTo(next.getByText('Nothing is queued'));
+    await drag(backlogRow('5 Store listing'), next.getByText('Nothing is queued'));
     await expect.poll(order).toBe('5 Store listing');
     // Onto the top half of a Next row: before it.
-    await backlogRow('6 Beta').dragTo(nextRow('5 Store listing'), { targetPosition: { x: 40, y: 2 } });
+    await drag(backlogRow('6 Beta'), nextRow('5 Store listing'), { x: 40, y: 2 });
     await expect.poll(order).toBe('6 Beta|5 Store listing');
     // Within Next: the bottom half of the last row puts it last. Measured, since the row's height follows its padding.
     const last = (await nextRow('5 Store listing').boundingBox())!;
-    await nextRow('6 Beta').dragTo(nextRow('5 Store listing'), { targetPosition: { x: 40, y: last.height - 6 } });
+    await drag(nextRow('6 Beta'), nextRow('5 Store listing'), { x: 40, y: last.height - 6 });
     await expect.poll(order).toBe('5 Store listing|6 Beta');
     // Each box shows its step id and its state.
-    await expect(nextRow('6 Beta').locator('.ip-sid')).toHaveText(`#${fresh.ids['6 Beta']}`);
-    await expect(nextRow('6 Beta').locator('.ip-st')).toHaveText('Ready');
+    await expect(nextRow('6 Beta').locator('.p-tile-id')).toHaveText(`#${fresh.ids['6 Beta']}`);
+    await expect(nextRow('6 Beta').locator('.p-tile-chips .p-chip')).toHaveText('READY');
     await expect(page.getByRole('complementary')).toHaveCount(0);
     // The queue was written.
     await page.reload();
     await expect.poll(order).toBe('5 Store listing|6 Beta');
     // Back onto Backlog.
-    await nextRow('5 Store listing').dragTo(next.locator('.ip-backlog-head'));
+    await drag(nextRow('5 Store listing'), next.locator('.ip-backlog-head'));
     await expect(next.locator('.ip-next-row')).toHaveCount(1);
     await expect(backlogRow('5 Store listing')).toBeVisible();
     await expect.poll(order).toBe('6 Beta');
@@ -3134,14 +3151,14 @@ test.describe('Fix round 1', () => {
     const order = async () => (await next.locator('.ip-next-row .ip-row-title').allTextContents()).join('|');
     // Near the foot of a row: its bottom half, measured since the row's height follows its padding.
     const bottom = async (t: string) => ({ x: 40, y: (await nextRow(t).boundingBox())!.height - 6 });
-    await backlogRow('4 Build to GitHub').dragTo(next.getByText('Nothing is queued'));
-    await backlogRow('5 Store listing').dragTo(nextRow('4 Build to GitHub'), { targetPosition: await bottom('4 Build to GitHub') });
-    await backlogRow('6 Beta').dragTo(nextRow('5 Store listing'), { targetPosition: await bottom('5 Store listing') });
+    await drag(backlogRow('4 Build to GitHub'), next.getByText('Nothing is queued'));
+    await drag(backlogRow('5 Store listing'), nextRow('4 Build to GitHub'), await bottom('4 Build to GitHub'));
+    await drag(backlogRow('6 Beta'), nextRow('5 Store listing'), await bottom('5 Store listing'));
     const expected = '4 Build to GitHub|5 Store listing|6 Beta';
     await expect.poll(order).toBe(expected);
     // The middle row on its own top half, then on the bottom half of the row above it.
-    await nextRow('5 Store listing').dragTo(nextRow('5 Store listing'), { targetPosition: { x: 40, y: 2 } });
-    await nextRow('5 Store listing').dragTo(nextRow('4 Build to GitHub'), { targetPosition: await bottom('4 Build to GitHub') });
+    await drag(nextRow('5 Store listing'), nextRow('5 Store listing'), { x: 40, y: 2 });
+    await drag(nextRow('5 Store listing'), nextRow('4 Build to GitHub'), await bottom('4 Build to GitHub'));
     await expect.poll(order).toBe(expected);
     await page.reload();
     await expect.poll(order).toBe(expected);
@@ -3167,7 +3184,8 @@ test.describe('Fix round 1', () => {
     const second = await titles.nth(1).textContent();
     expect(first).not.toBe(second);
     await next.locator('.ip-backlog-row').first().getByRole('button', { name: 'to Next' }).click();
-    await expect(next.getByRole('button', { name: second!, exact: true }).first()).toBeFocused();
+    // The row is a cursor item, so focus lands on the row itself.
+    await expect(next.locator('.ip-backlog-row', { has: page.getByRole('button', { name: second!, exact: true }) })).toBeFocused();
     // Enter on an empty answer field does nothing.
     const row = boxIn(page, 'needs', 'Run signing tests');
     await row.getByRole('button', { name: 'Answer…' }).click();
@@ -3617,5 +3635,42 @@ test.describe('#502 Board in v3', () => {
     await expect(second).toHaveAttribute('data-selected', 'true');
     await page.keyboard.press('Escape');
     await expect(second).not.toHaveAttribute('data-selected', /.*/);
+  });
+
+  test('Alt+Down on a focused Next tile moves it one place down and Alt+Up back, the order holds after the snapshot and focus stays on it', async ({ page, api, fresh }) => {
+    await page.setViewportSize(WIDEST);
+    await open(page, fresh);
+    const next = band(page, 'next');
+    const titles = ['3 RevenueCat', '4 Build to GitHub', '5 Store listing'];
+    for (const t of titles) {
+      await next.locator('.ip-backlog-row', { has: page.getByRole('button', { name: t, exact: true }) }).getByRole('button', { name: 'to Next' }).click();
+      await expect(next.locator('article.ip-next-row', { has: page.getByRole('button', { name: t, exact: true }) })).toBeVisible();
+    }
+    const tile = (t: string) => next.locator('article.ip-next-row', { has: page.getByRole('button', { name: t, exact: true }) });
+    const order = async () => (await next.locator('.ip-next-row .ip-row-title').allTextContents()).join('|');
+    const stored = async () => ((await (await api.get(`/api/projects/${fresh.slug}`)).json()) as { project: { queue: { nodeId: number }[] } }).project.queue.map((e) => e.nodeId);
+    const ids = titles.map((t) => fresh.ids[t]);
+    await expect.poll(order).toBe(titles.join('|'));
+    await tile(titles[0]).focus();
+    await page.keyboard.press('Alt+ArrowDown');
+    await expect.poll(order).toBe([titles[1], titles[0], titles[2]].join('|'));
+    await expect(tile(titles[0])).toBeFocused();
+    // The write lands: the server holds the new order, the window shows it, and focus is still on the moved tile.
+    await expect.poll(stored).toEqual([ids[1], ids[0], ids[2]]);
+    await expect.poll(order).toBe([titles[1], titles[0], titles[2]].join('|'));
+    await expect(tile(titles[0])).toBeFocused();
+    // Down from the middle puts it last; at the end nothing moves.
+    await page.keyboard.press('Alt+ArrowDown');
+    await expect.poll(stored).toEqual([ids[1], ids[2], ids[0]]);
+    await expect(tile(titles[0])).toBeFocused();
+    await page.keyboard.press('Alt+ArrowDown');
+    await expect.poll(order).toBe([titles[1], titles[2], titles[0]].join('|'));
+    // Alt+Up goes back, one place at a time.
+    await page.keyboard.press('Alt+ArrowUp');
+    await expect.poll(stored).toEqual([ids[1], ids[0], ids[2]]);
+    await page.keyboard.press('Alt+ArrowUp');
+    await expect.poll(stored).toEqual(ids);
+    await expect.poll(order).toBe(titles.join('|'));
+    await expect(tile(titles[0])).toBeFocused();
   });
 });

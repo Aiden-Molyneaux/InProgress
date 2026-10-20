@@ -18,6 +18,8 @@ export function AskActions({ ask, area }: { ask: Pick<Ask, 'id' | 'text'>; area:
   const [text, setText] = useState('');
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** The ask went out and the snapshot has not dropped it yet: its buttons are inert (aria-disabled, clicks do nothing). */
+  const [sent, setSent] = useState(false);
   const field = useRef<HTMLInputElement>(null);
   const opener = useRef<HTMLButtonElement>(null);
   const clearButton = useRef<HTMLButtonElement>(null);
@@ -31,19 +33,22 @@ export function AskActions({ ask, area }: { ask: Pick<Ask, 'id' | 'text'>; area:
     }
   }, [answering]);
   const send = async (answer?: string) => {
-    if (busy) return;
+    if (busy || sent) return;
     const row = (field.current ?? opener.current)?.closest('li') ?? null;
     // A box holding another open ask hands focus to that ask's controls; otherwise the walk to the next row.
     const own = (field.current ?? opener.current)?.closest('[data-ask]') ?? null;
     // Details' row is itself the ask (li.ip-dask): its siblings are under its parent.
     const scope = row && row === own ? row.parentElement : row;
-    const sibling = scope ? [...scope.querySelectorAll<HTMLElement>('[data-ask]')].find((b) => b !== own && !b.classList.contains('cleared')) : undefined;
+    const sibling = scope ? [...scope.querySelectorAll<HTMLElement>('[data-ask]')].find((b) => b !== own && !b.classList.contains('cleared') && !b.hasAttribute('data-sent')) : undefined;
     const target = sibling?.querySelector<HTMLElement>('input, button') ?? focusTargetAfter(row);
     setBusy(true);
     const result = await clearAsk(ask.id, answer);
     setBusy(false);
     // A sent or cleared ask strikes through until the snapshot drops it; the panel is the element holding the ask's id.
-    if (result === 'ok') own?.setAttribute('data-sent', '');
+    if (result === 'ok') {
+      own?.setAttribute('data-sent', '');
+      setSent(true);
+    }
     if (result === 'reload') return window.location.reload();
     // Aiden may have moved on while the request ran: focus moves only if it is still on this ask's row, or fell to the page.
     const active = document.activeElement;
@@ -94,7 +99,7 @@ export function AskActions({ ask, area }: { ask: Pick<Ask, 'id' | 'text'>; area:
             onKeyDown={onKey}
             placeholder="Your answer, then Enter"
           />
-          <Button variant="primary" size="sm" data-act aria-disabled={busy} onClick={submit}>
+          <Button variant="primary" size="sm" data-act aria-disabled={busy || sent} onClick={submit}>
             Send
           </Button>
         </div>
@@ -105,7 +110,9 @@ export function AskActions({ ask, area }: { ask: Pick<Ask, 'id' | 'text'>; area:
             variant="primary"
             size="sm"
             data-act
+            aria-disabled={sent}
             onClick={() => {
+              if (sent) return;
               noteAction(area, 'answer_open');
               setAnswering(true);
             }}
@@ -117,8 +124,9 @@ export function AskActions({ ask, area }: { ask: Pick<Ask, 'id' | 'text'>; area:
             variant="ghost"
             size="sm"
             data-act
-            aria-disabled={busy}
+            aria-disabled={busy || sent}
             onClick={() => {
+              if (sent) return;
               noteAction(area, 'clear');
               void send();
             }}
