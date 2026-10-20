@@ -1,8 +1,5 @@
 /* The Project view: the page head and slab, then sections as outlines with a position mark at the left, and the phase index (spec 2.4, section 8). */
 @layer components {
-/* Kept for the Board's header until the Board moves to the page head. */
-.ip-view-name { margin: 0 0 8px; font-size: var(--fs-l); font-weight: var(--w-heavy); line-height: 20px; }
-
 .ip-project { container-type: size; flex: 1; min-width: 0; overflow-x: hidden; overflow-y: auto; }
 .ip-page { display: grid; gap: var(--sp-4); padding: var(--sp-3); }
 .ip-project[data-wide] .ip-page { gap: var(--sp-6); padding: var(--sp-6); }

@@ -27,9 +27,15 @@ export function boxSince(box: TaskBox): string | null {
   return sinceFallback(node, box.state, box.row?.waiting ?? []);
 }
 
+/** The box's task hue index (0 to 6), or null: none for Done and Backlog, and none while the step holds no valid hue. */
+export function hueOf(box: TaskBox): number | null {
+  const hue = box.row?.node.hue;
+  if (hue == null || !COLOURED.has(box.state) || !Number.isInteger(hue) || hue < 0 || hue >= HUES) return null;
+  return hue;
+}
+
 /** The box's task hue as a style (`--hue`), or undefined: none for Done and Backlog, and none while the step holds no hue. */
 export function hueStyle(box: TaskBox): CSSProperties | undefined {
-  const hue = box.row?.node.hue;
-  if (hue == null || !COLOURED.has(box.state) || !Number.isInteger(hue) || hue < 0 || hue >= HUES) return undefined;
-  return { ['--hue' as string]: `var(--hue-${hue})` };
+  const hue = hueOf(box);
+  return hue === null ? undefined : { ['--hue' as string]: `var(--hue-${hue})` };
 }

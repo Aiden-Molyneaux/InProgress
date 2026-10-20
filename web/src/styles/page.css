@@ -1,8 +1,8 @@
 /* The page head and the comms slab, shared by the Project view and (next) the Board (spec section 7). */
 @layer components {
 .ip-page-head { container-type: inline-size; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); min-width: 0; }
-.ip-page-code { flex: none; padding: var(--sp-1) var(--sp-2); background: var(--volt); color: var(--volt-ink); font-family: var(--font-brand); font-weight: var(--w-brand); font-size: var(--t-h3); line-height: 1.2; letter-spacing: 0.04em; }
-.ip-page-title { flex: 1 1 0; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-display); font-weight: var(--w-display); font-size: var(--t-h1); line-height: 1.1; text-transform: uppercase; color: var(--text-hi); }
+.ip-page-code { flex: none; padding: var(--sp-1) var(--sp-2); background: var(--volt); color: var(--volt-ink); font-family: var(--font-brand); font-weight: var(--w-brand); font-size: var(--t-title); line-height: 1.2; letter-spacing: 0.04em; }
+.ip-page-title { flex: 1 1 0; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-display); font-weight: var(--w-display); font-size: var(--t-h2); line-height: 1.1; text-transform: uppercase; color: var(--text-hi); }
 .ip-page-meta { flex: none; margin: 0; font-family: var(--font-mono); font-size: var(--t-detail-sm); letter-spacing: 0.04em; text-align: right; text-transform: uppercase; color: var(--volt); font-variant-numeric: tabular-nums; }
 .ip-page-meta [data-zero] { color: var(--text-dim); }
 .ip-page-sep { color: var(--text-dim); white-space: pre; }

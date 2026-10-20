@@ -1,41 +1,89 @@
-/* The Board, in Draft C, Inbox, in Quiet (spec 2.8): who and when first, ink for text, amber only for attention. */
+/* The Board (spec section 7): columns of tiles under the page head and the slab. Rules for the old task box stay while anything still draws it. */
 @layer components {
-.ip-board { flex: 1; min-width: 0; overflow-y: auto; padding: 12px; }
-.ip-board h3 { margin: 0 0 6px; font-size: var(--fs-s); font-weight: var(--w-heavy); line-height: 14px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
-.ip-board h3.ip-sub-head { margin-top: 14px; }
+.ip-board { flex: 1; min-width: 0; overflow-x: hidden; overflow-y: auto; }
+.ip-board-page { display: grid; gap: var(--sp-4); padding: var(--sp-3); min-width: 0; }
+.ip-board:is([data-layout='four'], [data-layout='two']) .ip-board-page { gap: var(--sp-6); padding: var(--sp-6); }
+.ip-bands { display: grid; gap: var(--sp-6); align-items: start; }
+.ip-board[data-layout='four'] .ip-bands { grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr) minmax(0, 1.12fr) minmax(0, 0.94fr); }
+.ip-board[data-layout='two'] .ip-bands { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: var(--sp-section); }
+.ip-board[data-layout='one'] .ip-bands { grid-template-columns: minmax(0, 1fr); row-gap: var(--sp-section); }
+.ip-band { display: grid; gap: var(--sp-3); align-content: start; min-width: 0; }
+/* A column's head: glyph and name, the hint under it, the count at the right; a hairline under (volt for Needs me). */
+.ip-col-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: var(--sp-1) var(--sp-3); padding-bottom: var(--sp-3); border-bottom: 1px solid var(--line); margin-bottom: var(--sp-1); }
+.ip-col-head[data-band='needs'] { border-bottom-color: var(--volt); }
+.ip-col-head .ip-col-title { grid-row: 1; grid-column: 1; }
+.ip-col-head .p-count { grid-row: 1; grid-column: 2; }
+.ip-col-head .ip-col-hint { grid-row: 2; grid-column: 1 / -1; }
+.ip-col-title { display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; }
+.ip-col-glyph { flex: none; font-family: var(--font-brand); font-size: var(--t-micro); font-weight: var(--w-brand); letter-spacing: 0.08em; color: var(--text-dim); }
+.ip-col-head[data-band='needs'] .ip-col-glyph { color: var(--volt); }
+.ip-col-title h2 { min-width: 0; margin: 0; font-family: var(--font-display); font-stretch: 125%; font-weight: var(--w-display); font-size: var(--t-h3); line-height: 0.9; text-transform: uppercase; color: var(--text-hi); }
+.ip-col-title h2:focus-visible { outline: 2px solid var(--volt); outline-offset: 2px; }
+.ip-col-hint { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--t-detail-sm); font-stretch: 87.5%; color: var(--text-dim); }
+/* The slab: the note's first sentence at 1.0625rem (its parent is --t-body, so 1.1333em), a #id as a mono volt link. */
+.ip-note-first { font-size: 1.1333em; line-height: 1.4; }
+.ip-ref { padding: 0; font-family: var(--font-mono); font-stretch: 87.5%; font-size: 0.8235em; color: var(--volt); }
+.ip-ref:hover { text-decoration: underline; }
+.ip-ref:focus-visible { outline: 2px solid var(--volt); outline-offset: 1px; }
+.ip-menubtn { position: relative; display: inline-flex; }
+.ip-menubtn-pop { position: absolute; top: 100%; right: 0; z-index: var(--z-popover); width: 320px; max-width: calc(100vw - 2 * var(--sp-4)); margin-top: var(--sp-2); }
+.ip-menubtn-pop[data-align='start'] { left: 0; right: auto; width: max-content; min-width: 100%; }
+.ip-noclaim { display: grid; gap: var(--sp-2); padding-top: var(--sp-3); border-top: 1px solid var(--line); }
+.ip-noclaim-item { display: grid; gap: var(--sp-1); min-width: 0; }
+.ip-noclaim-line { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; font-size: var(--t-body); color: var(--text); }
+.ip-noclaim-dot { flex: none; color: var(--text-dim); }
+.ip-noclaim-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ip-noclaim-word { flex: none; font-size: var(--t-detail-sm); color: var(--text-muted); white-space: nowrap; }
+.ip-noclaim-open { margin-left: auto; flex: none; }
 .ip-board ul, .ip-board ol { list-style: none; margin: 0; padding: 0; }
 .ip-board p { margin: 0; }
 .ip-quiet, .ip-role { color: var(--muted); }
 .ip-empty-line { font-size: var(--fs-m); line-height: 18px; }
 .ip-time { font-family: var(--font-mono); font-size: var(--fs-s); color: var(--muted); }
 .ip-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
-.ip-bands { display: grid; gap: 14px; align-items: start; }
-.ip-board.narrow .ip-bands { grid-template-columns: minmax(0, 1fr); }
-.ip-board.wide .ip-bands { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.25fr) minmax(0, 1fr); gap: 18px; }
-.ip-band { min-width: 0; }
-/* Header: the state note as a message, the sessions on no step, the hygiene count at the right. */
-.ip-hdr { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 18px; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
-.ip-hdr-note { flex: 1 1 320px; min-width: 0; }
-.ip-hdr.wide .ip-hdr-note { flex: 2 1 0; }
-.ip-hdr-sessions { flex: 1 1 200px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.ip-hdr-sessions .ip-label { margin: 0 0 2px; }
-.ip-hdr-session { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; font-size: var(--fs-m); line-height: 18px; }
-.ip-hdr-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ip-hdr-session > .ip-quiet { flex: none; white-space: nowrap; }
-.ip-hygiene { margin-left: auto; align-self: center; padding: 2px 8px; border: 1px solid var(--border); font-size: var(--fs-s); line-height: 14px; color: var(--muted); cursor: default; }
 .ip-link-btn { padding: 0; font-size: var(--fs-s); line-height: 14px; color: var(--link); text-decoration: underline dotted; }
 .ip-link-btn:hover { text-decoration: underline; }
 .ip-link-btn:focus-visible, .ip-row-title:focus-visible, .ip-chip-handoff:focus-visible, .ip-btn:focus-visible { outline: 2px solid var(--volt); outline-offset: 1px; }
-/* A message: who and when, the text and the step (the header's note, the Project view's). */
-.ip-msg { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
-.ip-msg-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-m); line-height: 18px; }
-.ip-msg-head { color: var(--muted); font-size: var(--fs-s); line-height: 14px; }
-.ip-msg-head b { color: var(--text); font-weight: var(--w-heavy); }
 .ip-code { display: block; max-width: 100%; padding: 3px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--fs-s); line-height: 14px; background: var(--panel-2); }
-.ip-ask-actions { display: flex; gap: 6px; margin-top: 3px; }
-.ip-answer { display: block; width: 100%; margin-top: 3px; padding: 4px 8px; font: inherit; font-size: var(--fs-m); line-height: 18px; color: var(--text); background: var(--panel); border: 1px solid var(--border); }
-.ip-answer:focus { outline: 2px solid var(--volt); outline-offset: 1px; }
-.ip-problem { font-size: var(--fs-s); line-height: 14px; color: var(--amber-ink); }
+/* Board tiles (BoardTile): the age, the foot's parts and the system line, in v3 type. */
+/* A tile's title reads stronger on the Board (Done keeps the part's body size); the #id a little stronger. */
+.ip-tile .p-tile-title { font-size: var(--t-h3); font-weight: var(--w-strong); color: var(--text-hi); }
+.ip-tile .p-tile-title button { font-size: inherit; font-weight: inherit; line-height: inherit; color: inherit; }
+.ip-tile.ip-done-tile .p-tile-title { font-size: var(--t-body); }
+.ip-tile .p-tile-id { font-size: var(--t-detail-sm); font-weight: var(--w-strong); color: var(--text); }
+.ip-band .ip-list { gap: var(--sp-4); }
+.ip-tile-age { font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-dim); }
+.ip-tile .p-tile-body { display: grid; gap: var(--sp-3); }
+.ip-tile .ip-sys { font-size: var(--t-detail-sm); line-height: 1.4; color: var(--text-dim); }
+.ip-tile .ip-docs { font-size: var(--t-detail-sm); color: var(--text-muted); }
+.ip-tile-handoff { padding: 0; line-height: 1; }
+.ip-tile-handoff:hover .p-chip { border-color: var(--volt); color: var(--volt); }
+.ip-tile-handoff:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--volt-soft); }
+/* The session line: a diamond in the step's hue, the title, the state word, Open at the right. */
+.ip-sessline { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; font-size: var(--t-detail-sm); }
+.ip-sessline-dot { flex: none; color: var(--p-hue, var(--text-dim)); }
+.ip-sessline-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.ip-sessline-word { flex: none; color: var(--text-dim); }
+.ip-sessline-open { margin-left: auto; flex: none; }
+.ip-sessline-none { color: var(--text-muted); }
+/* Needs me: each ask in its own panel; a sent or cleared ask strikes through until the snapshot drops it. */
+.ip-ask-panel { display: grid; gap: var(--sp-3); min-width: 0; padding: var(--sp-3); background: var(--canvas-1); border: 1px solid var(--line); }
+.ip-ask-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.ip-ask-text { font-size: var(--t-body); line-height: 1.45; color: var(--text); overflow-wrap: anywhere; }
+.ip-ask-clamp { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.ip-ask-clamp[data-open] { display: block; overflow: visible; }
+.ip-ask-more { justify-self: start; }
+.ip-ask-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.ip-answer-row { display: flex; align-items: center; gap: var(--sp-2); }
+.ip-answer-row .p-field { flex: 1; min-width: 0; }
+[data-ask][data-sent] { opacity: 0.5; text-decoration: line-through; text-decoration-color: var(--text-dim); }
+/* A terminal readout: a command or a session's progress on the darkest ground. */
+.ip-term:has(.ip-term-task, .ip-cmd, .ip-kin-count) { display: grid; gap: var(--sp-2); }
+.ip-term-task { color: var(--text-hi); overflow-wrap: anywhere; }
+.ip-cmd { color: var(--text); overflow-wrap: anywhere; }
+.ip-cmd.serving { color: var(--text-muted); }
+.ip-kin-count { width: fit-content; color: var(--text-dim); cursor: help; text-decoration: underline dotted; text-underline-offset: 2px; }
+.ip-term { display: block; padding: var(--sp-3); background: var(--canvas-0); border: 1px solid var(--line); font-family: var(--font-mono); font-size: var(--t-detail-sm); line-height: 1.4; color: var(--text); overflow-wrap: anywhere; }
 /* Row parts: the title that opens Details, the id, docs and marks. */
 .ip-id { color: var(--muted); font-family: var(--font-mono); }
 .ip-row-title { max-width: 100%; text-align: left; font-size: var(--fs-m); line-height: 18px; font-weight: var(--w-text); color: var(--text-2); overflow-wrap: anywhere; }
@@ -47,24 +95,28 @@
 .ip-mark.hygiene { border: 1px solid var(--border); color: var(--muted); }
 .ip-chip-handoff { height: 18px; padding: 0 6px; border: 1px solid var(--border); font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
 .ip-chip-handoff:hover { color: var(--text-2); background: var(--panel-2); }
-/* Done: New since you looked crosses the list where the last look falls. */
-.ip-divider { position: relative; padding: 0; font-size: var(--fs-s); line-height: 14px; color: var(--active-ink); }
-.ip-divider::before { content: ''; position: absolute; left: 0; right: 0; top: 7px; height: 1px; background: var(--active-line); }
-.ip-divider span { position: relative; padding: 0 6px 0 0; background: var(--bg); }
-.ip-done-fold { margin-left: 4px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
+/* Done: the since-ruler crosses the list where the last look falls; older tiles fold under the one-column layout. */
+.ip-since { padding: var(--sp-1) 0; }
+.ip-done-outcome { font-size: 0.8667em; line-height: 1.45; color: var(--text-muted); }
+.ip-done-fold { margin-left: var(--sp-1); font-size: var(--t-detail-sm); line-height: 1.4; color: var(--text-muted); }
+.ip-band .p-btn.ip-done-all { display: inline-flex; margin: var(--sp-3) 0 0; justify-self: start; }
 /* Next: boxes, own-queue boxes under "Queued by <session>", and the Backlog fold at its foot. */
-.ip-next { min-height: 48px; }
-.ip-backlog-row.dragging, .ip-next-row.dragging { opacity: .5; }
-.ip-next-row.drop-before { box-shadow: 0 -2px 0 var(--text-2); }
-.ip-list.drop-end > .ip-next-row:last-child { box-shadow: 0 2px 0 var(--text-2); }
-.ip-backlog-row .ip-confirm, .ip-now-row .ip-confirm { max-width: none; }
-.ip-confirm:focus { outline: none; }
-.ip-backlog-row.pending, .ip-now-row.pending { opacity: .5; }
-.ip-backlog-row.pending .ip-hover-act, .ip-now-row.pending .ip-hover-act { display: none; }
-.ip-num { font-size: var(--fs-l); line-height: 24px; text-align: center; color: var(--text-2); }
-.ip-own { color: var(--text-2); font-size: var(--fs-s); }
-.ip-own-queue { margin-top: 10px; }
-.ip-own-head { margin: 0 0 6px 2px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
+/* Next: a drop at the end of the queue draws the volt line under the last tile (a drop before a tile is the Tile part's own). */
+.ip-next { display: grid; gap: var(--sp-4); }
+.ip-list.drop-end > li:last-child > .p-tile::after { content: ''; position: absolute; left: -1px; right: -1px; bottom: calc(-1 * var(--sp-2) - 1px); height: 2px; background: var(--volt); }
+/* Now: the Done confirm inside the tile, drawn with parts; chrome.css's .ip-confirm sizing and its div rule give way. */
+.ip-tile .ip-done-form { display: grid; gap: var(--sp-3); max-width: none; padding: var(--sp-3); background: var(--canvas-1); border: 1px solid var(--line); }
+.ip-tile .ip-done-form:focus { outline: none; }
+.ip-tile .ip-done-form b { font-size: var(--t-body); font-weight: var(--w-strong); line-height: 1.35; color: var(--text-hi); }
+.ip-tile .ip-done-form p { margin: 0; font-size: var(--t-detail-sm); line-height: 1.4; color: var(--text-muted); }
+.ip-tile .ip-done-form div { display: block; margin-top: 0; }
+.ip-tile .ip-done-form .p-field { display: grid; }
+.ip-tile .ip-done-form .p-field-box { display: flex; justify-content: flex-start; }
+.ip-tile .ip-done-form .p-field-input { flex: 1; min-width: 0; width: 100%; }
+.ip-tile .ip-done-form .ip-confirm-buttons { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.ip-tile .ip-done-form .p-error { margin-top: 0; }
+.ip-own-queue { display: grid; gap: var(--sp-3); }
+.ip-own-head { display: flex; }
 /* The task box: one skeleton in every Board cell (Needs me, Next, Now, Done, the Backlog fold). The hue sits on the left edge of a coloured
    state; --active marks Working and --amber marks Needs you. */
 .ip-list { display: flex; flex-direction: column; gap: 10px; }
@@ -87,14 +139,6 @@ button.ip-card-title:hover { color: var(--text); text-decoration: underline; }
 .st-working .ip-sess-name::before { content: '◆ '; color: var(--active); }
 .ip-sess-cmd { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .ip-sess-cmd .ip-code { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: normal; }
-.ip-block { display: flex; flex-direction: column; gap: 3px; padding-left: 10px; border-left: 2px solid var(--border); }
-.st-needs .ip-block { border-left-color: color-mix(in srgb, var(--amber) 60%, transparent); }
-.st-working .ip-block { border-left-color: var(--active-line); }
-.ip-card-main { font-size: var(--fs-m); line-height: 18px; color: var(--text-2); overflow-wrap: anywhere; }
-.ip-cmd, .ip-kin-count { font-family: var(--font-mono); font-size: var(--fs-s); line-height: 14px; color: var(--muted); overflow-wrap: anywhere; }
-.ip-cmd.serving { color: var(--faint); }
-.ip-kin-count { font-family: var(--font-sans); cursor: help; text-decoration: underline dotted; text-underline-offset: 2px; width: fit-content; }
-.ip-card-outcome { font-size: var(--fs-s); line-height: 15px; color: var(--muted); }
 .ip-sys { font-size: var(--fs-s); line-height: 14px; color: var(--faint); }
 .ip-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-height: 18px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
 .ip-foot .ip-type { margin-left: auto; }
@@ -109,16 +153,23 @@ button.ip-card-title:hover { color: var(--text); text-decoration: underline; }
 .ip-st.blocked { color: var(--red); border-color: var(--red); background: var(--red-fill); }
 .ip-st.backlog { color: var(--faint); }
 /* The row's own buttons show on hover and whenever focus is inside the row, so Tab reaches them and shows them. */
-.ip-hover-act { margin-left: auto; height: 18px; padding: 0 6px; border: 1px solid var(--border); font-size: var(--fs-s); line-height: 14px; color: var(--muted); background: var(--bg); opacity: 0; }
+button.ip-hover-act:not(.p-btn) { margin-left: auto; height: 18px; padding: 0 6px; border: 1px solid var(--border); font-size: var(--fs-s); line-height: 14px; color: var(--muted); background: var(--bg); opacity: 0; }
 .ip-card:hover .ip-hover-act, .ip-card:focus-within .ip-hover-act, .ip-hover-act:focus-visible { opacity: 1; }
-.ip-hover-act + .ip-hover-act { margin-left: 4px; }
-.ip-hover-act:hover { color: var(--text); background: var(--panel-2); }
-.ip-hover-act:focus-visible, .ip-fold:focus-visible, .ip-quick-add:focus { outline: 2px solid var(--volt); outline-offset: 1px; }
-.ip-backlog { margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border); }
-.ip-backlog.drop-here { background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--text-2); }
-.ip-preview-foot { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.ip-fold { padding: 0; font-size: var(--fs-s); line-height: 14px; letter-spacing: .04em; color: var(--muted); }
-.ip-fold:hover { color: var(--text); }
+button.ip-hover-act:not(.p-btn) + button.ip-hover-act:not(.p-btn) { margin-left: 4px; }
+button.ip-hover-act:not(.p-btn):hover { color: var(--text); background: var(--panel-2); }
+.ip-hover-act:focus-visible, .ip-quick-add:focus { outline: 2px solid var(--volt); outline-offset: 1px; }
+.ip-backlog { margin-top: var(--sp-3); padding-top: var(--sp-4); border-top: 1px dashed var(--line-strong); }
+.ip-backlog.drop-here { background: var(--canvas-2); box-shadow: inset 0 0 0 1px var(--volt); }
+/* The Backlog preview: head, the phase menu button, one compact tile per entry, and the "more" line. */
+.ip-preview { display: grid; gap: var(--sp-3); min-width: 0; }
+.ip-backlog-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.ip-backlog-acts { display: inline-flex; align-items: center; gap: var(--sp-1); }
+/* The hover buttons (to Next, back to Backlog, Done...) are the Button part's ghost sm as it is; only their showing is the Board's. */
+.ip-tile .p-btn.ip-hover-act { opacity: 0; }
+.ip-tile:is(:hover, :focus-within) .p-btn.ip-hover-act, .ip-tile .p-btn.ip-hover-act:focus-visible { opacity: 1; }
+.ip-preview .ip-backlog-list { gap: var(--sp-3); }
+.ip-tile.ip-backlog-row { padding: var(--sp-3); gap: var(--sp-2); }
+.ip-backlog-more { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1); font-family: var(--font-mono); font-size: var(--t-detail-sm); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
 .ip-backlog-groups { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
 .ip-group-line { margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-s); line-height: 14px; color: var(--faint); }
 /* The Backlog filter field and order control share one line (#453). */
