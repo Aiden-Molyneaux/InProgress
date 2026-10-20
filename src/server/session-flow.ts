@@ -62,6 +62,8 @@ export interface HookEventInput {
   backgroundTruncated?: boolean;
   /** A stop: Claude Code's stop_hook_active, true in the extra pass a block caused. */
   stopHookActive?: boolean;
+  /** A prompt or a stop: the session runs in the Claude desktop app, the only place it can set its title. */
+  desktop?: boolean;
 }
 
 export interface HookEventResult {
@@ -316,10 +318,17 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
   // it: the one the enroll returned went to the scribe.
   const nowMs = Date.parse(ctx.now());
   // The title advice reads the session as this event left it (its title, its state), so an obeyed demand is not repeated.
-  const adviceEvent = input.event === 'stop' ? 'stop' : input.event === 'prompt' && !input.notice ? 'prompt' : undefined;
+  const adviceEvent = input.desktop !== true ? undefined : input.event === 'stop' ? 'stop' : input.event === 'prompt' && !input.notice ? 'prompt' : undefined;
   // Only a titled session's stop reads the channel: a prompt never blocks, and an untitled session gets no advice.
   const titleChannel = adviceEvent === 'stop' && session.title?.trim() ? (getProjectById(ctx, projectId)?.titleChannel ?? 'nudge') : 'nudge';
-  const advice = adviceEvent ? titleAdvice(ctx, session, adviceEvent, { stopHookActive: input.stopHookActive === true, titleChannel }) : {};
+  let advice: ReturnType<typeof titleAdvice> = {};
+  // The advice is extra: a fault in it must not fail the hook reply after the main write has committed (an owed
+  // briefing was cleared there).
+  try {
+    if (adviceEvent) advice = titleAdvice(ctx, session, adviceEvent, { stopHookActive: input.stopHookActive === true, titleChannel });
+  } catch (err) {
+    console.error(`InProgress: title advice failed for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+  }
   let context: string | undefined;
   if (input.event === 'start' || created || briefingOwed) {
     const checkOld = briefingOwed || !(input.event === 'start' && input.source === 'compact');

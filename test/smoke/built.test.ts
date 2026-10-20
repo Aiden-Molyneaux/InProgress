@@ -57,7 +57,8 @@ function freePort(): Promise<number> {
 beforeAll(async () => {
   const port = await freePort();
   base = `http://127.0.0.1:${port}`;
-  env = { ...process.env, INPROGRESS_HOME: home, INPROGRESS_PORT: String(port), INPROGRESS_CLAUDE_DIR: claude };
+  // Not the desktop app unless a test says so: the suite may itself run inside a desktop session.
+  env = { ...process.env, INPROGRESS_HOME: home, INPROGRESS_PORT: String(port), INPROGRESS_CLAUDE_DIR: claude, CLAUDE_CODE_ENTRYPOINT: '' };
   server = spawn(process.execPath, [bin('server/main.js')], { env, stdio: 'ignore' });
   for (let i = 0; i < 80 && !(await isServerUp(base)); i++) await new Promise((r) => setTimeout(r, 100));
   expect(await isServerUp(base)).toBe(true);
@@ -298,7 +299,10 @@ describe('built artifacts', () => {
     await client.post('/api/sessions/smoke-title/enroll', { project: p.slug, title: `#${step.id} Ship the titles` }, { actor: 'scribe:smoke-title' });
     await client.post('/api/sessions/smoke-title/focus', { nodeId: step.id }, { actor: 'scribe:smoke-title' });
     await client.patch(`/api/nodes/${step.id}`, { status: 'done' });
-    const stopWith = (active: boolean) => runHook('stop', { session_id: 'smoke-title', hook_event_name: 'Stop', stop_hook_active: active, background_tasks: [], session_crons: [] });
+    const payload = (active: boolean) => JSON.stringify({ session_id: 'smoke-title', hook_event_name: 'Stop', stop_hook_active: active, background_tasks: [], session_crons: [] });
+    const stopWith = (active: boolean) => spawnSync(process.execPath, [bin('hooks/hook.js'), 'stop'], { input: payload(active), env: { ...env, CLAUDE_CODE_ENTRYPOINT: 'claude-desktop' }, encoding: 'utf8' });
+    // Outside the desktop app the same stop prints nothing.
+    expect(runHook('stop', JSON.parse(payload(false)) as object)).toMatchObject({ status: 0, stdout: '', stderr: '' });
     const extra = stopWith(true);
     expect(extra).toMatchObject({ status: 0, stdout: '', stderr: '' });
     const blocked = stopWith(false);

@@ -128,6 +128,8 @@ export const hookBody = z
     backgroundTruncated: z.boolean().optional(),
     /** A stop: Claude Code's stop_hook_active, true in the extra pass a block caused. */
     stopHookActive: z.boolean().optional(),
+    /** A prompt or a stop from a session in the Claude desktop app (CLAUDE_CODE_ENTRYPOINT), the only place the title channel runs. */
+    desktop: z.boolean().optional(),
   })
   .strict();
 /**

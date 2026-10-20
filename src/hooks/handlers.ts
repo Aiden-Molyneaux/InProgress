@@ -129,9 +129,12 @@ export function buildHookBody(name: Exclude<HookName, ToolHookName>, input: Hook
     // The server must not reconcile against a list that was cut: it would end commands that are still running.
     if (truncated) body.backgroundTruncated = true;
   }
-  // True in the extra pass a block caused: the server must not block again. Absent when unknown, so an older server
-  // still accepts the post.
-  if (name === 'stop' && typeof input.stop_hook_active === 'boolean') body.stopHookActive = input.stop_hook_active;
+  // True in the extra pass a block caused: the server must not block again. Sent only when true (the server acts on
+  // nothing else), so an ordinary stop's body stays exactly what an older server accepts.
+  if (name === 'stop' && input.stop_hook_active === true) body.stopHookActive = true;
+  // The title channel runs only in the desktop app, where set_session_title exists; a CLI session can carry a /rename
+  // title too. Claude Code hands its hooks its own environment. Flagged only when true, as above.
+  if ((name === 'prompt-submit' || name === 'stop') && process.env.CLAUDE_CODE_ENTRYPOINT === 'claude-desktop') body.desktop = true;
   if (name === 'subagent-start' || name === 'subagent-stop') {
     if (input.agent_id) body.agentId = input.agent_id;
     if (typeof input.agent_type === 'string') body.agentType = input.agent_type;

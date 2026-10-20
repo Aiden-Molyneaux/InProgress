@@ -30,7 +30,9 @@ export function titleAdvice(
   // Only the focus step and the asks this session raised on it count: no full snapshot on the hook's budget.
   const focus = session.focusNodeId === null ? undefined : findNode(ctx, session.focusNodeId);
   const snapshot = { nodes: focus ? [focus] : [], asks: focus ? openAsksBy(ctx, session.id, focus.id) : [] };
-  const prefix = expectedPrefix(session, snapshot, Date.parse(ctx.now()));
+  // A prompt is judged as at the turn's end, so work still running keeps RUNNING expected: else the prompt would ask to
+  // drop a RUNNING the next stop puts back, and clear the memory of a declined demand.
+  const prefix = expectedPrefix(event === 'prompt' ? { ...session, state: 'idle' } : session, snapshot, Date.parse(ctx.now()));
   const expected = withPrefix(splitPrefix(title).rest, prefix);
   // A title that is only a prefix word would be asked to become empty: leave it alone.
   if (!expected) return {};
@@ -41,6 +43,8 @@ export function titleAdvice(
   const reason = prefixReason(prefix, session.focusNodeId);
   const line = `Title: set it to "${expected}" (mcp__ccd_session_mgmt__set_session_title on "self"); InProgress sees ${reason}.`;
   if (event !== 'stop' || o.titleChannel !== 'enforce' || o.stopHookActive || session.titleAsked === expected) return { line };
+  // Recorded before the hook prints it: a reply that misses the hook's timeout spends this demand unprinted. Accepted;
+  // the next prompt's line still names the title.
   setTitleAsked(ctx, session.id, expected);
   return { line, demand: { title: expected, reason } };
 }

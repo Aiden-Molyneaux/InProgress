@@ -25,8 +25,8 @@ function setup(o: { title?: string | ((stepId: number) => string); channel?: Tit
   return { ctx, project, step, other, hook, done, session };
 }
 
-const stop = (extra: Partial<HookEventInput> = {}): HookEventInput => ({ event: 'stop', stopHookActive: false, ...extra });
-const prompt = (extra: Partial<HookEventInput> = {}): HookEventInput => ({ event: 'prompt', mentionsInProgress: false, asksStatus: false, ...extra });
+const stop = (extra: Partial<HookEventInput> = {}): HookEventInput => ({ event: 'stop', stopHookActive: false, desktop: true, ...extra });
+const prompt = (extra: Partial<HookEventInput> = {}): HookEventInput => ({ event: 'prompt', mentionsInProgress: false, asksStatus: false, desktop: true, ...extra });
 
 describe('titleAdvice', () => {
   it('gives nothing to a session without a title, on either event, and writes nothing', () => {
@@ -127,6 +127,26 @@ describe('the title channel through the hook', () => {
     // The session took the RUNNING title meanwhile; now nothing runs, so the bare title is a new demand.
     expect(hook(stop({ title: 'RUNNING Fix export' })).title).toEqual({ title: 'Fix export', reason: 'nothing is running or waiting' });
     expect(session().titleAsked).toBe('Fix export');
+  });
+
+  it('keeps RUNNING expected on a prompt while the work runs, so a declined demand stays declined', () => {
+    const { hook, session } = setup({ title: 'Fix export', channel: 'enforce' });
+    hook({ event: 'command-started', taskId: 'bshell003', kind: 'shell', commandHead: 'npm test' });
+    expect(hook(stop()).title?.title).toBe('RUNNING Fix export');
+    // Declined: the next prompt still names RUNNING (the work runs) and keeps the memory of the demand.
+    expect(hook(prompt({ title: 'Fix export' })).context?.split('\n')[0]).toContain('"RUNNING Fix export"');
+    expect(session().titleAsked).toBe('RUNNING Fix export');
+    expect(hook(stop({ title: 'Fix export' })).title).toBeUndefined();
+    // Taken: a prompt while the work runs asks for nothing.
+    expect(hook(prompt({ title: 'RUNNING Fix export' })).context ?? '').not.toContain('Title:');
+  });
+
+  it('gives a session outside the desktop app no advice, whatever its title', () => {
+    const { hook, done, session } = setup({ title: 'Fix export', channel: 'enforce' });
+    done();
+    expect(hook(prompt({ desktop: undefined })).context ?? '').not.toContain('Title:');
+    expect(hook(stop({ desktop: undefined })).title).toBeUndefined();
+    expect(session().titleAsked).toBeNull();
   });
 
   it('does not count a persistent Monitor as running', () => {

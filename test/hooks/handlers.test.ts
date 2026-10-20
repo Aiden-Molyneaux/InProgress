@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TreeNode } from '../../src/core/types';
 import { buildHookBody, buildToolHookBody, commandHead, HOOK_NAMES, hookErrorLine, parseHookInput, purposeOf, runHandler, stripPasted, type HookName, type HookOutput } from '../../src/hooks/handlers';
 import { ApiClientError, createClient } from '../../src/lib/client';
@@ -44,6 +44,9 @@ afterAll(async () => {
 });
 
 const run = (name: HookName, input: Record<string, unknown>) => runHandler(name, input, deps);
+
+beforeEach(() => vi.stubEnv('CLAUDE_CODE_ENTRYPOINT', ''));
+afterEach(() => vi.unstubAllEnvs());
 
 describe('parseHookInput', () => {
   it('ignores a UTF-8 BOM (PowerShell pipes add one) and reads empty input as {}', () => {
@@ -512,12 +515,24 @@ describe('buildHookBody: stop background tasks', () => {
     expect(stopBody([{ id: 'b1abcde', type: 't'.repeat(60), description: 'd'.repeat(300) }]).background).toEqual([{ taskId: 'b1abcde', type: 't'.repeat(40), description: 'd'.repeat(200) }]);
   });
 
-  it('sends stop_hook_active as stopHookActive only when it is a boolean', () => {
+  it('sends stop_hook_active as stopHookActive only when it is true', () => {
     expect(buildHookBody('stop', { session_id: SESSION, stop_hook_active: true }).stopHookActive).toBe(true);
-    expect(buildHookBody('stop', { session_id: SESSION, stop_hook_active: false }).stopHookActive).toBe(false);
+    expect(buildHookBody('stop', { session_id: SESSION, stop_hook_active: false })).not.toHaveProperty('stopHookActive');
     expect(buildHookBody('stop', { session_id: SESSION })).not.toHaveProperty('stopHookActive');
     expect(buildHookBody('stop', { session_id: SESSION, stop_hook_active: 'yes' })).not.toHaveProperty('stopHookActive');
     expect(buildHookBody('prompt-submit', { session_id: SESSION, stop_hook_active: true })).not.toHaveProperty('stopHookActive');
+  });
+});
+
+describe('buildHookBody: desktop', () => {
+  // The suite may itself run inside a desktop session: every other test sees no entrypoint (the top-level beforeEach).
+  it('flags a prompt or a stop from the desktop app, and nothing else', () => {
+    vi.stubEnv('CLAUDE_CODE_ENTRYPOINT', 'claude-desktop');
+    expect(buildHookBody('prompt-submit', { session_id: SESSION, prompt: 'hi' }).desktop).toBe(true);
+    expect(buildHookBody('stop', { session_id: SESSION }).desktop).toBe(true);
+    expect(buildHookBody('session-start', { session_id: SESSION })).not.toHaveProperty('desktop');
+    vi.stubEnv('CLAUDE_CODE_ENTRYPOINT', 'cli');
+    expect(buildHookBody('stop', { session_id: SESSION })).not.toHaveProperty('desktop');
   });
 });
 
