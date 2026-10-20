@@ -1,32 +1,54 @@
-/* The Backlog: the preview head, the full view and its chips, the Park form and parked rows. */
+/* The Backlog: the preview head, the full view, the Park form and parked rows. */
 @layer components {
 /* The Backlog preview's head: "Backlog", the phase picker, "N ›" and "+ add" on one line. */
 .ip-backlog-head { align-items: center; justify-content: flex-start; gap: 8px; margin-bottom: 8px; }
 .ip-backlog-name { flex: none; font-size: var(--fs-s); line-height: 14px; letter-spacing: .04em; color: var(--muted); }
 .ip-backlog-phase { flex: 0 1 auto; min-width: 0; max-width: 150px; height: 20px; padding: 0 4px; font: inherit; font-size: var(--fs-s); line-height: 14px; color: var(--text-2); background: var(--panel); border: 1px solid var(--border); text-overflow: ellipsis; }
-.ip-backlog-phase:focus-visible, .ip-chip:focus-visible { outline: 2px solid var(--volt); outline-offset: 1px; }
+.ip-backlog-phase:focus-visible { outline: 2px solid var(--volt); outline-offset: 1px; }
 .ip-backlog-head .ip-add { margin-left: auto; }
-/* The full Backlog view reuses All done's frame. */
-.ip-backlogview-title { margin: 0; font-size: var(--fs-m); font-weight: var(--w-heavy); color: var(--text-2); }
-.ip-backlogview-title:focus { outline: none; }
-.ip-backlogview .ip-quick-add { margin-top: 0; }
-.ip-backlog-count { font-size: var(--fs-s); line-height: 14px; white-space: nowrap; }
-.ip-backlogview .ip-backlog-tools { justify-content: space-between; }
-.ip-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
-.ip-chips-name { margin-right: 2px; font-size: var(--fs-s); line-height: 14px; color: var(--faint); }
-.ip-chip { max-width: 180px; padding: 1px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-s); line-height: 16px; color: var(--muted); border: 1px solid var(--border); }
-.ip-chip:hover { color: var(--text); }
-.ip-chip[aria-pressed='true'] { background: var(--panel-2); color: var(--text); border-color: var(--text-2); }
+/* The full Backlog view: the page, its controls, groups and one-line rows (#504). */
+.ip-backlogview { container-type: inline-size; flex: 1; min-width: 0; overflow-x: hidden; overflow-y: auto; }
+.ip-bl { display: grid; gap: var(--sp-4); min-width: 0; }
+.ip-bl-tools { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+.ip-bl-tools .ip-bl-filter { flex: 1 1 0; min-width: 0; }
+.ip-bl-order { display: flex; flex: none; align-items: center; gap: var(--sp-2); }
+.ip-bl-filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); min-width: 0; }
+.ip-bl-filters .p-tabstrip { max-width: 100%; }
+.ip-bl-labels { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.ip-bl-labelbtn { cursor: pointer; }
+.ip-bl-labelbtn:hover { color: var(--text); border-color: var(--line-bright); }
+.ip-bl-labelbtn[aria-pressed="true"] { border-color: var(--volt); color: var(--volt); }
+.ip-bl-labelbtn:focus-visible { outline: 2px solid var(--volt); outline-offset: 1px; }
+.ip-bl-group { display: grid; gap: var(--sp-2); min-width: 0; }
+.ip-bl-ghead { display: grid; gap: var(--sp-1); min-width: 0; }
+.ip-bl-gtitle { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--t-body); font-weight: var(--w-strong); color: var(--text-hi); }
+.ip-bl-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.ip-bl-row { display: grid; grid-template-columns: 6ch minmax(0, 1fr) auto; column-gap: var(--sp-3); align-items: center; min-height: 32px; padding: var(--sp-1) var(--sp-2); cursor: pointer; }
+.ip-bl-row:hover, .ip-bl-row:focus-within, .ip-bl-row:focus { background: var(--canvas-2); }
+.ip-bl-row:focus-visible { outline: 2px solid var(--volt); outline-offset: -2px; }
+.ip-bl-row.pending { opacity: .5; }
+.ip-bl-row.confirming { cursor: default; }
+.ip-bl-row > :is(.ip-bl-id, .ip-bl-title, .ip-bl-extras) { min-width: 0; }
+.ip-bl-id { font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ip-bl-row .ip-bl-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; font-size: var(--t-body); color: var(--text); text-decoration: none; }
+.ip-bl-extras { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-2); }
+.ip-bl-phase { max-width: 18ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-dim); }
+.ip-bl-age { font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-dim); white-space: nowrap; }
+.ip-bl-acts { display: flex; gap: var(--sp-1); opacity: 0; }
+.ip-bl-row:hover .ip-bl-acts, .ip-bl-row:focus-within .ip-bl-acts { opacity: 1; }
+.ip-bl-row > :is(.ip-park, .p-confirm, .ip-bl-why, .ip-bl-where) { grid-column: 1 / -1; margin-top: var(--sp-2); }
+.ip-bl-parkedrow { border: 1px dashed var(--line-strong); margin-top: var(--sp-1); }
+.ip-bl-why, .ip-bl-where { margin: 0; overflow-wrap: anywhere; font-size: var(--t-detail-sm); color: var(--text-muted); }
+.ip-bl-why { grid-column: 2 / -1; }
+/* Under 720 px of view the label, phase and age drop to a second line under the title. */
+@container (max-width: 719px) {
+  .ip-bl-tools { flex-wrap: wrap; }
+  .ip-bl-row > .ip-bl-extras { grid-column: 2 / -1; grid-row: 2; justify-content: flex-start; flex-wrap: wrap; }
+  .ip-bl-row > .ip-bl-title { grid-column: 2 / -1; }
+}
 /* The Park… form, inside a Backlog box and in Details. */
 .ip-park { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-2); background: var(--canvas-1); border: 1px solid var(--line); }
 .ip-park-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); }
-/* Parked: muted and dashed, no hue, like its marker. */
-.ip-card.ip-parked-row { padding-left: 10px; border-style: dashed; }
-.ip-parked-row .ip-card-title { color: var(--text-2); }
-.ip-parked-row.pending { opacity: .5; }
-.ip-parked-row.pending .ip-hover-act { display: none; }
-.ip-st.parked { font-weight: var(--w-text); border-style: dashed; color: var(--muted); }
-.ip-parked-why, .ip-parked-where { overflow-wrap: anywhere; }
 .ip-dparked { margin: 4px 0 10px; padding: 6px 8px; border: 1px dashed var(--border); }
 .ip-dparked p { margin: 0 0 6px; overflow-wrap: anywhere; }
 }
