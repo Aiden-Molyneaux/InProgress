@@ -3344,6 +3344,26 @@ test.describe('Module rail', () => {
     await expect(viewButton(page, 'Backlog')).toBeFocused();
     await expect(viewButton(page, 'Backlog')).toHaveAttribute('aria-current', 'page');
   });
+
+  test('under 720 the Views tabs keep focus over a project switch, and the picked tab keeps its label under the pointer', async ({ page, api }) => {
+    await page.setViewportSize({ width: 400, height: 800 });
+    const a = await bare(api, unique('Strip a'));
+    const bName = unique('Strip b');
+    await bare(api, bName);
+    await page.goto(`/#/p/${a.slug}`);
+    const backlog = viewButton(page, 'Backlog');
+    await backlog.click();
+    await expect(backlog).toHaveAttribute('aria-pressed', 'true');
+    // Hovered, the picked tab is still ink on volt, not volt on volt.
+    await backlog.hover();
+    const [ink, fill] = await backlog.evaluate((el) => [getComputedStyle(el).color, getComputedStyle(el).backgroundColor]);
+    expect(ink).not.toBe(fill);
+    await backlog.focus();
+    await page.keyboard.press(']');
+    await expect(railRow(page, bName)).toHaveAttribute('aria-current', 'page');
+    await expect(backlog).toBeFocused();
+    await expect(backlog).toHaveAttribute('aria-pressed', 'true');
+  });
 });
 
 test.describe('v3 Details, viewer and command bar (#505)', () => {

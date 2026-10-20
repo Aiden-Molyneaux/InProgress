@@ -357,9 +357,10 @@ export function App() {
                   ? 'No projects. Restore one from Archived, or in a Claude session say "track this in InProgress".'
                   : 'No projects yet. A Claude session adds one when it opts in.'}
               </EmptyState>
-            ) : snapshot ? (
+            ) : (
               <>
-                {/* Under 720 px the rail is a strip with no room for the views, so they sit at the top of the page. */}
+                {/* Under 720 px the rail is a strip with no room for the views, so they sit at the top of the page. Kept
+                    up while the next project loads, so a switch with focus in it keeps focus there. */}
                 <TabStrip
                   variant="segmented"
                   label="Views"
@@ -368,7 +369,9 @@ export function App() {
                   onChange={(id) => pickView(id as View)}
                   className="ip-viewtabs"
                 />
-                {view === 'backlog' ? (
+                {!snapshot ? (
+                  <EmptyState className="ip-wait">Loading project…</EmptyState>
+                ) : view === 'backlog' ? (
                   <BacklogList key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onStatus={fail} />
                 ) : view === 'done' ? (
                   <DoneList key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} />
@@ -378,8 +381,6 @@ export function App() {
                   <ProjectView key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onStatus={fail} codes={codes} />
                 )}
               </>
-            ) : (
-              <EmptyState className="ip-wait">Loading project…</EmptyState>
             )}
             {snapshot && selectedNode !== null && (
               <Details
