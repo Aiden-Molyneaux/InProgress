@@ -284,7 +284,8 @@ export function Backlog({ boxes, parked, snapshot, now, projectId, slug, code, t
                     age={since ? ageShort(since, now) : null}
                     pending={waiting}
                     confirming={asking || parking}
-                    onOpen={rowClick('backlog', () => onOpenNode(id))}
+                    // An open confirm or form is the row's own: a click on the row around it opens nothing.
+                    onOpen={asking || parking ? () => undefined : rowClick('backlog', () => onOpenNode(id))}
                     // A press on the confirming row outside the confirm keeps focus in it (so Escape still closes it). A press
                     // on the parking row outside its form puts focus in the form's reason field the same way.
                     onMouseDown={asking ? (e) => {
@@ -348,14 +349,16 @@ export function Backlog({ boxes, parked, snapshot, now, projectId, slug, code, t
                       />
                     )}
                     {asking && (
-                      <Confirm
-                        question={`Delete #${id} ${row.node.title}?`}
-                        detail="It can't be undone."
-                        action="Delete"
-                        danger
-                        onConfirm={() => void remove(id, root.current?.querySelector<HTMLElement>(`li[data-node="${id}"]`) ?? null)}
-                        onCancel={() => cancel(id)}
-                      />
+                      <div className="ip-bl-panel" data-act>
+                        <Confirm
+                          question={`Delete #${id} ${row.node.title}?`}
+                          detail="It can't be undone."
+                          action="Delete"
+                          danger
+                          onConfirm={() => void remove(id, root.current?.querySelector<HTMLElement>(`li[data-node="${id}"]`) ?? null)}
+                          onCancel={() => cancel(id)}
+                        />
+                      </div>
                     )}
                   </ViewRow>
                 );
