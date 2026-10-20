@@ -35,6 +35,12 @@ export function expectedPrefix(
   return sessionActivity(session, now) === 'busy' ? 'RUNNING' : null;
 }
 
+/** A hook reply's demand that the session set its title: the full title, and the words saying why. */
+export interface TitleDemand {
+  title: string;
+  reason: string;
+}
+
 /** The words the nudge and the block give for a prefix on a step. */
 export function prefixReason(prefix: TitlePrefix | null, nodeId: number | null): string {
   switch (prefix) {

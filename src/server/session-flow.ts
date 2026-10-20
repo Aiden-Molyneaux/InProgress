@@ -1,5 +1,6 @@
 import { commandLabel, sessionActivity } from '../core/activity';
 import { clipLine, stepRef } from '../core/step-ref';
+import type { TitleDemand } from '../core/title';
 import { SCRIBE_AGENT, type CommandKind, type CommandOutcome, type HookEvent, type Session, type TreeNode, type WorkStatus } from '../core/types';
 import { write, type Ctx, type RecordEvent } from './db/tx';
 import { badRequest } from './errors';
@@ -58,11 +59,15 @@ export interface HookEventInput {
   /** A stop: the session's running background tasks, also when empty; `backgroundTruncated` when the list was cut at 50. */
   background?: BackgroundEntry[];
   backgroundTruncated?: boolean;
+  /** A stop: Claude Code's stop_hook_active, true in the extra pass a block caused. */
+  stopHookActive?: boolean;
 }
 
 export interface HookEventResult {
   tracked: boolean;
   context?: string;
+  /** A stop: the title the session should set, which the hook turns into a block. */
+  title?: TitleDemand;
 }
 
 const VISIBLE = ['projectId', 'title', 'state', 'focusNodeId', 'slot'] as const;

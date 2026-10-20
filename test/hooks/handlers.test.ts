@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { TreeNode } from '../../src/core/types';
-import { buildHookBody, buildToolHookBody, commandHead, HOOK_NAMES, hookErrorLine, parseHookInput, purposeOf, runHandler, stripPasted, type HookName } from '../../src/hooks/handlers';
+import { buildHookBody, buildToolHookBody, commandHead, HOOK_NAMES, hookErrorLine, parseHookInput, purposeOf, runHandler, stripPasted, type HookName, type HookOutput } from '../../src/hooks/handlers';
 import { ApiClientError, createClient } from '../../src/lib/client';
 import { homeDir } from '../../src/lib/home';
 import { buildApp } from '../../src/server/app';
@@ -511,6 +511,14 @@ describe('buildHookBody: stop background tasks', () => {
     expect(stopBody([{ type: 'shell' }, { id: 7, type: 'shell' }, { id: 'b1abcde', type: ' ' }, null, 'x']).background).toEqual([]);
     expect(stopBody([{ id: 'b1abcde', type: 't'.repeat(60), description: 'd'.repeat(300) }]).background).toEqual([{ taskId: 'b1abcde', type: 't'.repeat(40), description: 'd'.repeat(200) }]);
   });
+
+  it('sends stop_hook_active as stopHookActive only when it is a boolean', () => {
+    expect(buildHookBody('stop', { session_id: SESSION, stop_hook_active: true }).stopHookActive).toBe(true);
+    expect(buildHookBody('stop', { session_id: SESSION, stop_hook_active: false }).stopHookActive).toBe(false);
+    expect(buildHookBody('stop', { session_id: SESSION })).not.toHaveProperty('stopHookActive');
+    expect(buildHookBody('stop', { session_id: SESSION, stop_hook_active: 'yes' })).not.toHaveProperty('stopHookActive');
+    expect(buildHookBody('prompt-submit', { session_id: SESSION, stop_hook_active: true })).not.toHaveProperty('stopHookActive');
+  });
 });
 
 describe('commandHead', () => {
@@ -557,7 +565,7 @@ describe('commandHead', () => {
 
 describe('runHandler', () => {
   it('briefs a session started in a bound folder and ignores others', async () => {
-    const brief = await run('session-start', { session_id: 'h1', cwd: `${bound}/src`, source: 'startup', session_title: 'Hook session' });
+    const brief = (await run('session-start', { session_id: 'h1', cwd: `${bound}/src`, source: 'startup', session_title: 'Hook session' }))?.context;
     expect(brief).toContain('tracked in project "HookDemo"');
     expect(brief).toContain('Session id: h1');
     expect(findSession(ctx, 'h1')?.title).toBe('Hook session');
@@ -567,12 +575,12 @@ describe('runHandler', () => {
 
   it('hints untracked sessions only on a direct mention', async () => {
     expect(await run('prompt-submit', { session_id: 'h3', prompt: '<pasted_content>InProgress</pasted_content>' })).toBeUndefined();
-    expect(await run('prompt-submit', { session_id: 'h3', prompt: 'track this in InProgress please' })).toContain('Session id: h3');
+    expect((await run('prompt-submit', { session_id: 'h3', prompt: 'track this in InProgress please' }))?.context).toContain('Session id: h3');
   });
 
   it('answers status questions and updates states', async () => {
     await run('session-start', { session_id: 'h4', cwd: bound, source: 'startup' });
-    expect(await run('prompt-submit', { session_id: 'h4', prompt: 'where are we?' })).toContain('Where things stand in HookDemo');
+    expect((await run('prompt-submit', { session_id: 'h4', prompt: 'where are we?' }))?.context).toContain('Where things stand in HookDemo');
     await run('notification', { session_id: 'h4' });
     expect(findSession(ctx, 'h4')?.state).toBe('permission');
     await run('subagent-start', { session_id: 'h4', agent_id: 'ag1', agent_type: 'Explore' });
@@ -593,12 +601,25 @@ describe('runHandler', () => {
 
   it('returns context only for events that can inject it', async () => {
     const stub: Parameters<typeof runHandler>[2] = { post: async () => ({ tracked: true, context: 'x' }), ensureServer: async () => true };
-    const got: Record<string, string | undefined> = {};
+    const got: Record<string, HookOutput | undefined> = {};
     for (const name of HOOK_NAMES) got[name] = await runHandler(name, { session_id: 's' }, stub);
     expect(got).toStrictEqual({
-      'session-start': 'x', 'prompt-submit': 'x', stop: undefined, notification: undefined, 'subagent-start': undefined, 'subagent-stop': undefined, 'session-end': undefined,
+      'session-start': { context: 'x' }, 'prompt-submit': { context: 'x' }, stop: undefined, notification: undefined, 'subagent-start': undefined, 'subagent-stop': undefined, 'session-end': undefined,
       'pre-tool': undefined, 'post-tool': undefined,
     });
+    const empty: Parameters<typeof runHandler>[2] = { post: async () => ({ tracked: true, context: '' }), ensureServer: async () => true };
+    expect(await runHandler('prompt-submit', { session_id: 's' }, empty)).toBeUndefined();
+  });
+
+  it('turns a title demand on the stop reply into a block, and only on stop', async () => {
+    const stub: Parameters<typeof runHandler>[2] = { post: async () => ({ tracked: true, title: { title: 'DONE #1 x', reason: '#1 is done' } }), ensureServer: async () => true };
+    const stop = await runHandler('stop', { session_id: 's' }, stub);
+    expect(stop).toStrictEqual({ block: expect.stringContaining('DONE #1 x') });
+    expect(stop?.block).toBe('Set this session\'s title to "DONE #1 x" with mcp__ccd_session_mgmt__set_session_title on "self" (InProgress: #1 is done), then stop.');
+    expect(await runHandler('prompt-submit', { session_id: 's' }, stub)).toBeUndefined();
+    const both: Parameters<typeof runHandler>[2] = { post: async () => ({ tracked: true, context: 'x', title: { title: 'DONE #1 x', reason: '#1 is done' } }), ensureServer: async () => true };
+    expect(await runHandler('prompt-submit', { session_id: 's' }, both)).toStrictEqual({ context: 'x' });
+    expect(await runHandler('post-tool', { session_id: 's', tool_name: 'TaskStop', tool_input: { task_id: 'b1abcdef' }, tool_response: { task_id: 'b1abcdef', task_type: 'local_bash' } }, stub)).toBeUndefined();
   });
 
   it('pairs a dispatched subagent with its description and node, and stays silent', async () => {
@@ -653,7 +674,7 @@ describe('runHandler', () => {
 
   it('clips a long title to the server limit so the session is still tracked', async () => {
     const long = 'x'.repeat(400);
-    expect(await run('session-start', { session_id: 'h6', cwd: bound, source: 'startup', session_title: long })).toContain('tracked in project "HookDemo"');
+    expect((await run('session-start', { session_id: 'h6', cwd: bound, source: 'startup', session_title: long }))?.context).toContain('tracked in project "HookDemo"');
     expect(buildHookBody('session-start', { session_id: 'h6', cwd: bound, session_title: long }).title).toBe('x'.repeat(300));
     expect(findSession(ctx, 'h6')?.title).toHaveLength(300);
   });

@@ -232,6 +232,16 @@ describe('session routes', () => {
     expect(elsewhere.json()).toEqual({ tracked: false });
   });
 
+  it('accepts stopHookActive on a stop, and only as a boolean', async () => {
+    const { app } = setup();
+    await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'InGame' } });
+    await app.inject({ method: 'POST', url: '/api/sessions/s1/enroll', headers: auth, payload: { project: 'ingame' } });
+    const stop = (stopHookActive: unknown) => app.inject({ method: 'POST', url: '/api/sessions/s1/hook', headers: auth, payload: { event: 'stop', stopHookActive } });
+    expect((await stop(true)).statusCode).toBe(200);
+    expect((await stop(false)).statusCode).toBe(200);
+    expect((await stop('yes')).statusCode).toBe(400);
+  });
+
   it("reads a session's claimed step for the status line, without a token, and null for no step or no session", async () => {
     const { app } = setup();
     const step = (id: string) => app.inject({ url: `/api/sessions/${id}/step` });

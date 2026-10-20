@@ -126,6 +126,8 @@ export const hookBody = z
       .max(50)
       .optional(),
     backgroundTruncated: z.boolean().optional(),
+    /** A stop: Claude Code's stop_hook_active, true in the extra pass a block caused. */
+    stopHookActive: z.boolean().optional(),
   })
   .strict();
 /**
