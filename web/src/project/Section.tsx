@@ -127,7 +127,7 @@ export function Section({
   const p: OutlineProps = { snapshot, board, now, wide, doneOpen, onToggleDone, cursorFor, onOpenNode, onOpenResource };
   // A click on the head toggles, unless it landed on a control of the head's own.
   const headClick = (e: MouseEvent) => {
-    if (!(e.target as HTMLElement).closest('button, .ip-docs-wrap')) onToggle();
+    if (!(e.target as HTMLElement).closest('button, .p-menubtn')) onToggle();
   };
   return (
     <section ref={elementRef} className={`ip-section${open ? ' open' : ''}`} aria-label={title}>
