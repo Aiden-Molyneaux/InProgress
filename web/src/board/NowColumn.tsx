@@ -67,7 +67,7 @@ export function NowColumn({ snapshot, boxes, now, onStatus, onOpenNode, onOpenRe
   useEffect(() => {
     if (closing === null) return;
     const home = root.current?.closest<HTMLElement>('.ip-band');
-    heading.current = home?.querySelector<HTMLElement>('h3, header b') ?? null;
+    heading.current = home?.querySelector<HTMLElement>('h2') ?? null;
     root.current?.querySelector<HTMLElement>('.ip-done-form input')?.focus();
   }, [closing]);
   // A box that left Now (done here or elsewhere) no longer waits or confirms; if it took focus with it, the heading has it.

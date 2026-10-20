@@ -31,3 +31,29 @@ export function endedLine(row: BoardRow, past: PastSession[], now: number): stri
   if (!last) return null;
   return `Its last session ended ${ageShort(last.endedAt, now)} ago without closing it`;
 }
+
+/** A piece of a note: plain text, or a `#id` that names a step. */
+export type NoteRun = { kind: 'text'; text: string } | { kind: 'ref'; id: number; text: string };
+
+/**
+ * A note's text split into runs. A `#<digits>` at a word start whose id `has` knows is a ref; an unknown id, or a hash
+ * inside a word (`a#12`), stays text. Joining the runs' text gives the input back.
+ */
+export function splitRefs(text: string, has: (id: number) => boolean): NoteRun[] {
+  const runs: NoteRun[] = [];
+  let from = 0;
+  for (const m of text.matchAll(/(?<![\w#])#(\d+)(?!\w)/g)) {
+    const id = Number(m[1]);
+    if (!has(id)) continue;
+    if (m.index > from) runs.push({ kind: 'text', text: text.slice(from, m.index) });
+    runs.push({ kind: 'ref', id, text: m[0] });
+    from = m.index + m[0].length;
+  }
+  if (from < text.length) runs.push({ kind: 'text', text: text.slice(from) });
+  return runs;
+}
+
+/** Whether a note says more than its first sentence: its text with whitespace collapsed is longer than that sentence. */
+export function noteHasMore(content: string): boolean {
+  return content.replace(/\s+/g, ' ').trim().length > firstSentence(content).length;
+}

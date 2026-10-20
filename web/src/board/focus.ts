@@ -14,5 +14,5 @@ export function focusTargetAfter(row: Element | null): HTMLElement | null {
   // The nearest row each way that has a title button to focus: a row without one (a permission wait on no step) is passed over, and a row's own buttons (data-act) never take focus from a walk.
   const after = others.filter((li) => row.compareDocumentPosition(li) & Node.DOCUMENT_POSITION_FOLLOWING).map(pick).find(Boolean);
   const before = others.filter((li) => row.compareDocumentPosition(li) & Node.DOCUMENT_POSITION_PRECEDING).reverse().map(pick).find(Boolean);
-  return after ?? before ?? home.querySelector<HTMLElement>('h3, header b, .ip-backlogview-title');
+  return after ?? before ?? (home.querySelector<HTMLElement>('h2') ?? home.querySelector<HTMLElement>('h3, header b, .ip-backlogview-title'));
 }

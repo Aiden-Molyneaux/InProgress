@@ -311,7 +311,7 @@ test('says so when the server is unreachable at first paint, then recovers', asy
   await open(page, demo);
   await expect(page.getByText("Can't reach the InProgress server, retrying…")).toBeVisible();
   await page.unroute('**/api/**');
-  await expect(page.locator('.ip-view-name')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('.ip-page-title')).toBeVisible({ timeout: 10_000 });
 });
 
 test('the first stream starts at the snapshot, and a batch still follows its targeted event', async ({ page, api, fresh }) => {
@@ -429,7 +429,7 @@ test('the tabs hold every active project, oldest first, mark the current one and
   await expect(railRow(page, olderName)).not.toHaveAttribute('aria-current');
   await expect(page).toHaveURL(new RegExp(`#/p/${newer.slug}$`));
   await expect(page).toHaveTitle(`(1) InProgress · ${newerName}`);
-  await expect(page.locator('.ip-view-name')).toContainText(newerName);
+  await expect(page.locator('.ip-page-title')).toContainText(newerName);
   // A visit with no project in the URL opens the one picked last.
   await page.goto('/');
   await expect(railRow(page, newerName)).toHaveAttribute('aria-current', 'page');
@@ -1255,7 +1255,7 @@ test('Rename… turns a tab menu into a field: Escape and leaving cancel, Enter 
   await expect(railRow(page, oldName)).toHaveCount(0);
   await expect(page).toHaveTitle(`InProgress · ${newName}`);
   await expect(statusLine(page)).toHaveText(`Renamed to ${newName}.`);
-  await expect(page.locator('.ip-view-name')).toContainText(newName);
+  await expect(page.locator('.ip-page-title')).toContainText(newName);
   await expect(page.locator('.ip-act-who')).toHaveText('you');
   await expect(page.locator('.ip-act-what')).toHaveText('renamed the project');
   // Display only: the slug, so the URL and every link, stays.
@@ -1737,6 +1737,10 @@ test.describe('Go to', () => {
 
 const WIDE = { width: 1200, height: 900 };
 const NARROW = { width: 800, height: 900 };
+/** A page of 1160 or more beside the rail: the Board's four columns (#502). */
+const WIDEST = { width: 1600, height: 900 };
+/** A page under 720 beside the rail or its tabs: the Board's one column (#502). */
+const NARROWEST = { width: 600, height: 900 };
 const band = (page: Page, name: 'needs' | 'now' | 'next' | 'done') => page.locator(`section.ip-band-${name}`);
 /** The task box with this title in a band: every cell shares the one skeleton (`li.ip-card`). */
 const boxIn = (page: Page, name: 'needs' | 'now' | 'next' | 'done', title: string) => band(page, name).locator('li.ip-card', { has: page.getByRole('button', { name: title, exact: true }) });
@@ -1753,7 +1757,7 @@ const stopWith = (api: APIRequestContext, session: string, running: { taskId: st
 test.describe('Board', () => {
   test('wide: Needs me, Next, Now and Done run left to right and show an ask, a session with its step, and a done outcome', async ({ page, api, fresh }) => {
     await write(api, fresh.session, 'patch', `/api/nodes/${fresh.ids['Upload keystore']}`, { outcome: 'The upload key was accepted by Play' });
-    await page.setViewportSize(WIDE);
+    await page.setViewportSize(WIDEST);
     await open(page, fresh);
     const xs = await Promise.all((['needs', 'next', 'now', 'done'] as const).map(async (b) => (await band(page, b).boundingBox())!.x));
     expect(xs).toEqual([...xs].sort((a, b) => a - b));
@@ -1778,8 +1782,8 @@ test.describe('Board', () => {
     expect(await band(page, 'done').locator('li.ip-card').count()).toBe(5);
     // Done steps with no outcome carry a mark, and the header counts the marked steps and names them.
     await expect(boxIn(page, 'done', '1 iOS certificate').locator('.ip-mark')).toHaveText('no outcome');
-    await expect(page.locator('.ip-hygiene')).toHaveAttribute('title', new RegExp(`#${fresh.ids['1 iOS certificate']} no_outcome`));
-    await expect(page.locator('.ip-hdr')).toContainText('No state note yet');
+    await expect(page.getByRole('button', { name: /to tidy$/ })).toHaveAttribute('title', new RegExp(`#${fresh.ids['1 iOS certificate']} no_outcome`));
+    await expect(page.locator('.ip-comms')).toContainText('No state note yet');
   });
 
   test('Board cells share one task box', async ({ page, fresh }) => {
@@ -1842,9 +1846,9 @@ test.describe('Board', () => {
   });
 
   test('narrow: the bands stack as Needs me, Now, Next, Done, and a Now box has no breadcrumb', async ({ page, fresh }) => {
-    await page.setViewportSize(NARROW);
+    await page.setViewportSize(NARROWEST);
     await open(page, fresh);
-    await expect(page.locator('.ip-band > h3:first-child')).toHaveText(['Needs me', 'Now', 'Next', 'Done']);
+    await expect(page.locator('.ip-band > .ip-col-head h2')).toHaveText(['Needs me', 'Now', 'Next', 'Done']);
     const tops = await Promise.all((['needs', 'now', 'next', 'done'] as const).map(async (b) => (await band(page, b).boundingBox())!.y));
     expect(tops).toEqual([...tops].sort((a, b) => a - b));
     await expect(nowRow(page, 'Play app signing')).toBeVisible();
@@ -1855,7 +1859,7 @@ test.describe('Board', () => {
     const head = (await preview.boundingBox())!;
     const doneTop = (await band(page, 'done').boundingBox())!.y;
     expect(head.y).toBeLessThan(doneTop);
-    expect(head.y).toBeGreaterThan((await band(page, 'next').locator('h3').first().boundingBox())!.y);
+    expect(head.y).toBeGreaterThan((await band(page, 'next').locator('h2').first().boundingBox())!.y);
   });
 
   test('Details parks a step with a reason and Unpark brings it back to the Backlog', async ({ page, fresh }) => {
@@ -1896,16 +1900,17 @@ test.describe('Board', () => {
     await hook(api, second, { event: 'prompt' });
     await page.setViewportSize(WIDE);
     await open(page, fresh);
-    const header = page.locator('.ip-hdr');
-    await expect(header.locator('.ip-msg-head')).toContainText(/Orchestrator · (now|\d+m)/);
+    const header = page.locator('.ip-comms');
+    await expect(header).toContainText('COMMS // ORCHESTRATOR');
+    await expect(header.locator('.ip-comms-age')).toContainText(/LOOKED (JUST NOW|\d+M AGO)/);
     await expect(header).toContainText('Signing is half done.');
     await expect(header).not.toContainText('The tests come next');
     const sessions = header.getByRole('group', { name: 'No claimed step' });
     await expect(sessions).toContainText('Second session');
     await expect(sessions).toContainText('working');
     // The first session is on a Now row, so it is not listed here.
-    await expect(sessions.locator('.ip-hdr-session')).toHaveCount(1);
-    await expect(header.getByRole('button')).toHaveCount(0);
+    await expect(sessions.locator('.ip-noclaim-line')).toHaveCount(1);
+    await expect(header.getByRole('button', { name: /Project view/ })).toHaveCount(0);
   });
 
   test('the Now row names its driver and its helper', async ({ page, api, fresh }) => {
@@ -2154,7 +2159,7 @@ test.describe('Board', () => {
     await new Promise((resolve) => setTimeout(resolve, 60));
     await done('Newer step');
     await page.addInitScript(`localStorage.setItem('ip.look.${project.project.id}', '${look}')`);
-    await page.setViewportSize(WIDE);
+    await page.setViewportSize(WIDEST);
     await open(page, fresh);
     const rows = band(page, 'done').locator('ol.ip-list > li');
     await expect(rows.nth(0)).toContainText('Newer step');
@@ -3229,10 +3234,10 @@ test.describe('HUD bar and footer strip', () => {
     await expect(asks).toHaveAttribute('title', /E2E HUD Other: 1/);
     await asks.click();
     await expect(page).toHaveURL(hereIs(waiting[0]!.slug));
-    await expect(page.locator('.ip-view-name')).toHaveText(waiting[0]!.name);
+    await expect(page.locator('.ip-page-title')).toHaveText(waiting[0]!.name);
     // Now the open project has asks: a second click moves focus to its Needs me.
     await asks.click();
-    await expect(page.locator('.ip-band-needs h3')).toBeFocused();
+    await expect(page.locator('.ip-band-needs h2')).toBeFocused();
 
     // The stream cannot connect: the link reads RECONNECTING and the tape takes the ruler's place.
     await page.route('**/api/events/stream**', (route) => route.abort('connectionrefused'));

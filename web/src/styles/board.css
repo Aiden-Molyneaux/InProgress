@@ -1,36 +1,46 @@
-/* The Board, in Draft C, Inbox, in Quiet (spec 2.8): who and when first, ink for text, amber only for attention. */
+/* The Board (spec section 7): columns of tiles under the page head and the slab. Rules for the old task box stay while anything still draws it. */
 @layer components {
-.ip-board { flex: 1; min-width: 0; overflow-y: auto; padding: 12px; }
-.ip-board h3 { margin: 0 0 6px; font-size: var(--fs-s); font-weight: var(--w-heavy); line-height: 14px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
-.ip-board h3.ip-sub-head { margin-top: 14px; }
+.ip-board { flex: 1; min-width: 0; overflow-x: hidden; overflow-y: auto; }
+.ip-board-page { display: grid; gap: var(--sp-4); padding: var(--sp-3); min-width: 0; }
+.ip-board:is([data-layout='four'], [data-layout='two']) .ip-board-page { gap: var(--sp-6); padding: var(--sp-6); }
+.ip-bands { display: grid; gap: var(--sp-6); align-items: start; }
+.ip-board[data-layout='four'] .ip-bands { grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr) minmax(0, 1.12fr) minmax(0, 0.94fr); }
+.ip-board[data-layout='two'] .ip-bands { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: var(--sp-section); }
+.ip-board[data-layout='one'] .ip-bands { grid-template-columns: minmax(0, 1fr); row-gap: var(--sp-section); }
+.ip-band { display: grid; gap: var(--sp-3); align-content: start; min-width: 0; }
+/* A column's head: glyph and name, the hint under it, the count at the right; a hairline under (volt for Needs me). */
+.ip-col-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: var(--sp-1) var(--sp-3); padding-bottom: var(--sp-3); border-bottom: 1px solid var(--line); margin-bottom: var(--sp-1); }
+.ip-col-head[data-band='needs'] { border-bottom-color: var(--volt); }
+.ip-col-head .p-count { grid-row: span 2; grid-column: 2; }
+.ip-col-title { display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; }
+.ip-col-glyph { flex: none; font-family: var(--font-brand); font-size: var(--t-micro); font-weight: var(--w-brand); letter-spacing: 0.08em; color: var(--text-dim); }
+.ip-col-head[data-band='needs'] .ip-col-glyph { color: var(--volt); }
+.ip-col-title h2 { margin: 0; font-family: var(--font-display); font-stretch: 125%; font-weight: var(--w-display); font-size: var(--t-h3); line-height: 0.9; text-transform: uppercase; color: var(--text-hi); }
+.ip-col-title h2:focus-visible { outline: 2px solid var(--volt); outline-offset: 2px; }
+.ip-col-hint { margin: 0; font-family: var(--font-mono); font-size: var(--t-detail-sm); font-stretch: 87.5%; color: var(--text-dim); }
+/* The slab: the note's first sentence at 1.0625rem (its parent is --t-body, so 1.1333em), a #id as a mono volt link. */
+.ip-note-first { font-size: 1.1333em; line-height: 1.4; }
+.ip-ref { padding: 0; font-family: var(--font-mono); font-stretch: 87.5%; font-size: 0.8235em; color: var(--volt); }
+.ip-ref:hover { text-decoration: underline; }
+.ip-ref:focus-visible { outline: 2px solid var(--volt); outline-offset: 1px; }
+.ip-tidy-wrap { position: relative; }
+.ip-tidy-pop { position: absolute; top: 100%; right: 0; z-index: var(--z-popover); width: 320px; max-width: calc(100vw - 2 * var(--sp-4)); margin-top: var(--sp-1); }
+.ip-noclaim { display: grid; gap: var(--sp-2); padding-top: var(--sp-3); border-top: 1px solid var(--line); }
+.ip-noclaim-item { display: grid; gap: var(--sp-1); min-width: 0; }
+.ip-noclaim-line { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; font-size: var(--t-body); color: var(--text); }
+.ip-noclaim-dot { flex: none; color: var(--text-dim); }
+.ip-noclaim-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ip-noclaim-word { flex: none; font-size: var(--t-detail-sm); color: var(--text-muted); white-space: nowrap; }
+.ip-noclaim-open { margin-left: auto; flex: none; }
 .ip-board ul, .ip-board ol { list-style: none; margin: 0; padding: 0; }
 .ip-board p { margin: 0; }
 .ip-quiet, .ip-role { color: var(--muted); }
 .ip-empty-line { font-size: var(--fs-m); line-height: 18px; }
 .ip-time { font-family: var(--font-mono); font-size: var(--fs-s); color: var(--muted); }
 .ip-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
-.ip-bands { display: grid; gap: 14px; align-items: start; }
-.ip-board.narrow .ip-bands { grid-template-columns: minmax(0, 1fr); }
-.ip-board.wide .ip-bands { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.25fr) minmax(0, 1fr); gap: 18px; }
-.ip-band { min-width: 0; }
-/* Header: the state note as a message, the sessions on no step, the hygiene count at the right. */
-.ip-hdr { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 18px; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
-.ip-hdr-note { flex: 1 1 320px; min-width: 0; }
-.ip-hdr.wide .ip-hdr-note { flex: 2 1 0; }
-.ip-hdr-sessions { flex: 1 1 200px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.ip-hdr-sessions .ip-label { margin: 0 0 2px; }
-.ip-hdr-session { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; font-size: var(--fs-m); line-height: 18px; }
-.ip-hdr-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ip-hdr-session > .ip-quiet { flex: none; white-space: nowrap; }
-.ip-hygiene { margin-left: auto; align-self: center; padding: 2px 8px; border: 1px solid var(--border); font-size: var(--fs-s); line-height: 14px; color: var(--muted); cursor: default; }
 .ip-link-btn { padding: 0; font-size: var(--fs-s); line-height: 14px; color: var(--link); text-decoration: underline dotted; }
 .ip-link-btn:hover { text-decoration: underline; }
 .ip-link-btn:focus-visible, .ip-row-title:focus-visible, .ip-chip-handoff:focus-visible, .ip-btn:focus-visible { outline: 2px solid var(--volt); outline-offset: 1px; }
-/* A message: who and when, the text and the step (the header's note, the Project view's). */
-.ip-msg { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
-.ip-msg-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-m); line-height: 18px; }
-.ip-msg-head { color: var(--muted); font-size: var(--fs-s); line-height: 14px; }
-.ip-msg-head b { color: var(--text); font-weight: var(--w-heavy); }
 .ip-code { display: block; max-width: 100%; padding: 3px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--fs-s); line-height: 14px; background: var(--panel-2); }
 .ip-ask-actions { display: flex; gap: 6px; margin-top: 3px; }
 .ip-answer { display: block; width: 100%; margin-top: 3px; padding: 4px 8px; font: inherit; font-size: var(--fs-m); line-height: 18px; color: var(--text); background: var(--panel); border: 1px solid var(--border); }
