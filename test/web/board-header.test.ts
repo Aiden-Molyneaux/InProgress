@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { BoardRow } from '../../src/core/board';
-import type { PastSession, Session } from '../../src/core/types';
+import type { PastSession, Session, WorkItem } from '../../src/core/types';
 import { headerSessions } from '../../web/src/board/headerSessions';
-import { ageShort, endedLine, firstSentence, hygieneTitle } from '../../web/src/board/text';
+import { taskProgress } from '../../web/src/board/nowTask';
+import { ageShort, endedLine, firstSentence, hhmm, hygieneTitle, noteHasMore, splitRefs } from '../../web/src/board/text';
 
 const NOW = Date.parse('2026-10-13T12:00:00Z');
 
@@ -91,5 +92,70 @@ describe('endedLine', () => {
   });
   it('is null for a row without the mark', () => {
     expect(endedLine(row(['deep']), past, NOW)).toBeNull();
+  });
+});
+
+describe('splitRefs', () => {
+  const has = (id: number) => id === 12 || id === 7;
+  it('splits known #ids out of the text and gives the text back when joined', () => {
+    const runs = splitRefs('See #12 and #7, not #99 or a#12.', has);
+    expect(runs).toEqual([
+      { kind: 'text', text: 'See ' },
+      { kind: 'ref', id: 12, text: '#12' },
+      { kind: 'text', text: ' and ' },
+      { kind: 'ref', id: 7, text: '#7' },
+      { kind: 'text', text: ', not #99 or a#12.' },
+    ]);
+    expect(runs.map((r) => r.text).join('')).toBe('See #12 and #7, not #99 or a#12.');
+  });
+  it('treats a ref at the start and a hash with letters after it as text', () => {
+    expect(splitRefs('#12', has)).toEqual([{ kind: 'ref', id: 12, text: '#12' }]);
+    expect(splitRefs('#12abc', has)).toEqual([{ kind: 'text', text: '#12abc' }]);
+    expect(splitRefs('', has)).toEqual([]);
+  });
+});
+
+describe('noteHasMore', () => {
+  it('is false for a note that is only its first sentence', () => {
+    expect(noteHasMore('Signing is half done.')).toBe(false);
+    expect(noteHasMore('Signing is half done.\n')).toBe(false);
+  });
+  it('is true when more follows the first sentence, or a heading comes before it', () => {
+    expect(noteHasMore('Signing is half done. The tests come next.')).toBe(true);
+    expect(noteHasMore('# Where we are\n\nSigning is half done.')).toBe(true);
+    expect(noteHasMore('First line.\n\nSecond paragraph')).toBe(true);
+  });
+});
+
+describe('hhmm', () => {
+  it('reads a time as local 24-hour HH:MM, padded', () => {
+    const at = new Date(2026, 9, 13, 9, 4);
+    expect(hhmm(at.toISOString())).toBe('09:04');
+    expect(hhmm(new Date(2026, 9, 13, 23, 59).toISOString())).toBe('23:59');
+  });
+  it('gives nothing for a time it cannot read', () => {
+    expect(hhmm('not a time')).toBe('');
+  });
+});
+
+describe('taskProgress', () => {
+  const item = (over: Partial<WorkItem> & { id: number }): WorkItem => ({
+    nodeId: 10, sessionId: 's1', agentId: '', subject: `T${over.id}`, status: 'pending', blocks: [], position: over.id, updatedAt: '', endedAt: null, ...over,
+  });
+  it('counts the session\'s own tasks with the focus step first, and names the first in progress', () => {
+    const items = [
+      item({ id: 1, nodeId: 20, status: 'in_progress' }),
+      item({ id: 2, nodeId: 10, status: 'completed' }),
+      item({ id: 3, nodeId: 10, status: 'in_progress' }),
+      item({ id: 4, nodeId: 10, agentId: 'a1', status: 'in_progress' }),
+      item({ id: 5, nodeId: 10, sessionId: 's2', status: 'in_progress' }),
+    ];
+    const got = taskProgress(items, 's1', 10);
+    expect(got?.item.id).toBe(3);
+    expect(got?.place).toBe(2);
+    expect(got?.total).toBe(3);
+  });
+  it('is null when nothing is in progress', () => {
+    expect(taskProgress([item({ id: 1 })], 's1', 10)).toBeNull();
   });
 });

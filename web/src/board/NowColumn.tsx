@@ -1,30 +1,38 @@
 import { commandShown, orderCommands } from '../../../src/core/activity';
 import type { BoardRow } from '../../../src/core/board';
+import type { TaskState } from '../../../src/core/taskState';
 import { isReader, sessionDisplayTitle, type Session } from '../../../src/core/types';
 import { useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { markDone } from '../api';
 import { agentName, commandLineParts, runTime, withoutOwnId } from '../live';
 import { noteAction } from '../measure';
+import { Button } from '../parts/Button';
+import { Chip } from '../parts/Chip';
+import { EmptyState } from '../parts/EmptyState';
+import { ErrorLine } from '../parts/ErrorLine';
+import { Field } from '../parts/Field';
+import type { CursorItemProps } from '../parts/ListCursor';
 import { focusTargetAfter } from './focus';
 import { endedLine } from './Marks';
 import type { BandProps } from './bandProps';
-import { SessionLine, TaskBox } from './TaskBox';
+import { BoardTile } from './BoardTile';
+import { taskProgress } from './nowTask';
+import { SessionLine } from './SessionLine';
+import { OpenScope } from './TaskBox';
 
-/** One session on a step: its line, then a block with its in-progress task, its commands line and its running subagents. */
+/** One session on a step: its line, then a terminal readout with its in-progress task, its commands line and its running subagents. */
 function SessionPart({ session, row, snapshot, now }: { session: Session; row: BoardRow; snapshot: BandProps['snapshot']; now: number }) {
-  const task = snapshot.workItems
-    .filter((w) => w.sessionId === session.id && w.agentId === '' && w.status === 'in_progress')
-    .sort((a, b) => (a.nodeId === row.node.id ? 0 : 1) - (b.nodeId === row.node.id ? 0 : 1) || a.position - b.position)[0];
+  const progress = taskProgress(snapshot.workItems, session.id, row.node.id);
   const kin = session.subagents.filter((a) => a.endedAt === null && !isReader(a.agentType));
   const commands = orderCommands(session.commands.filter((c) => commandShown(c, now)));
   const line = commands.length ? commandLineParts(commands, now) : null;
   return (
     <>
-      <SessionLine session={session} area="now" role={row.driver ? (row.driver.id === session.id ? 'drives' : 'helping') : undefined} />
-      {(task || line || kin.length > 0) && (
-        <div className="ip-block" data-session={session.id}>
-          {task && <p className="ip-card-main">{withoutOwnId(task.subject, row.node.id)}</p>}
+      <SessionLine session={session} role={row.driver ? (row.driver.id === session.id ? 'drives' : 'helping') : undefined} />
+      {(progress || line || kin.length > 0) && (
+        <div className="ip-term" data-session={session.id}>
+          {progress && <p className="ip-term-task">{`Task ${progress.place} of ${progress.total} · ${withoutOwnId(progress.item.subject, row.node.id)}`}</p>}
           {line && (
             <div className={`ip-cmd${line.serving ? ' serving' : ''}${line.ended ? ' ended' : ''}`} role="group" title={line.title} aria-label={line.title}>
               {`${line.mark} ${line.label}${line.when ? ` · ${line.when}` : ''}`}
@@ -41,12 +49,31 @@ function SessionPart({ session, row, snapshot, now }: { session: Session; row: B
   );
 }
 
+/** The chip a Now tile wears for its state. */
+function StateChip({ state }: { state: TaskState }) {
+  if (state === 'working') return <Chip tone="live">WORKING</Chip>;
+  if (state === 'idle') return <Chip tone="quiet">IDLE</Chip>;
+  if (state === 'unattended') return <Chip tone="quiet" dashed>UNATTENDED</Chip>;
+  if (state === 'blocked') return <Chip tone="blocked">BLOCKED</Chip>;
+  return null;
+}
+
+/** The keys of the Now tiles, in draw order: the grid's cursor and the rise follow them. */
+export function nowKeys(boxes: BandProps['boxes']): string[] {
+  return boxes.now.map((b) => String(b.row!.node.id));
+}
+
 /**
  * Now: one box per step in flight, with each session on it; a step nobody is on says so (spec 2.8). "Done…" on a box
  * opens a form inside it: an optional one-line outcome, then Mark done (Enter in the field does the same). A live driver
  * is named in the form; it keeps its focus.
  */
-export function NowColumn({ snapshot, boxes, now, onStatus, onOpenNode, onOpenResource }: BandProps) {
+export function NowColumn({ snapshot, boxes, now, selectedNode, onStatus, onOpenNode, onOpenResource, cursor, rise }: BandProps & {
+  /** The grid cursor's props for the tile at this row. */
+  cursor: (row: number) => CursorItemProps;
+  /** The stagger place a tile key (`now:<id>`) rises with. */
+  rise: (key: string) => number | undefined;
+}) {
   /** The box whose Done form is open: one at a time. */
   const [closing, setClosing] = useState<number | null>(null);
   /** Steps marked done and waiting for the answer, or for the snapshot that moves them out of Now. */
@@ -67,7 +94,7 @@ export function NowColumn({ snapshot, boxes, now, onStatus, onOpenNode, onOpenRe
   useEffect(() => {
     if (closing === null) return;
     const home = root.current?.closest<HTMLElement>('.ip-band');
-    heading.current = home?.querySelector<HTMLElement>('h3, header b') ?? null;
+    heading.current = home?.querySelector<HTMLElement>('h2') ?? null;
     root.current?.querySelector<HTMLElement>('.ip-done-form input')?.focus();
   }, [closing]);
   // A box that left Now (done here or elsewhere) no longer waits or confirms; if it took focus with it, the heading has it.
@@ -82,7 +109,7 @@ export function NowColumn({ snapshot, boxes, now, onStatus, onOpenNode, onOpenRe
     setPending((p) => (p.some((id) => !here.has(id)) ? p.filter((id) => here.has(id)) : p));
   }, [ids, closing]);
   /** Puts focus back on that box's Done… button, once it is drawn again. */
-  const refocus = (id: number) => window.requestAnimationFrame(() => root.current?.querySelector<HTMLElement>(`li[data-node="${id}"] [data-done]`)?.focus());
+  const refocus = (id: number) => window.requestAnimationFrame(() => root.current?.querySelector<HTMLElement>(`[data-node="${id}"] [data-done]`)?.focus());
   const open = (id: number) => {
     setProblem(null);
     setText('');
@@ -99,7 +126,6 @@ export function NowColumn({ snapshot, boxes, now, onStatus, onOpenNode, onOpenRe
   const finish = async (row: BoardRow, li: HTMLElement | null) => {
     const id = row.node.id;
     noteAction('now', 'done');
-    const after = focusTargetAfter(li);
     setProblem(null);
     setPending((p) => [...p, id]);
     const result = await markDone(projectId, slug, id, text, row.driver?.id ?? null);
@@ -111,7 +137,8 @@ export function NowColumn({ snapshot, boxes, now, onStatus, onOpenNode, onOpenRe
         setText('');
       }
       // Only when focus is still in that box or fell to the body: the user may have moved on while it was out.
-      if (here) after?.focus();
+      // Worked out now, not before the request: the neighbour it named may have left meanwhile. A box that left falls back to the band's heading.
+      if (here) (li?.isConnected ? focusTargetAfter(li) : (root.current?.closest<HTMLElement>('.ip-band')?.querySelector<HTMLElement>('h2') ?? null))?.focus();
       return;
     }
     if (result === 'reload') return window.location.reload();
@@ -121,30 +148,36 @@ export function NowColumn({ snapshot, boxes, now, onStatus, onOpenNode, onOpenRe
       if (mine) setProblem(result);
     });
     if (!mine) onStatus?.(result);
-    else if (here) root.current?.querySelector<HTMLElement>(`li[data-node="${id}"] .ip-done-form input`)?.focus();
+    else if (here) root.current?.querySelector<HTMLElement>(`[data-node="${id}"] .ip-done-form input`)?.focus();
   };
-  if (boxes.now.length === 0) return <p className="ip-quiet ip-empty-line">Nothing is in flight</p>;
+  if (boxes.now.length === 0) return <EmptyState>Nothing is in flight</EmptyState>;
   return (
     <ul className="ip-list" ref={root}>
-      {boxes.now.map((box) => {
+      {boxes.now.map((box, at) => {
         const row = box.row!;
         const sessions = row.sessions;
         const asking = closing === row.node.id;
         const waiting = pending.includes(row.node.id);
         const key = `nd${row.node.id}`;
         return (
-          <TaskBox
+          <BoardTile
             key={row.node.id}
             box={box}
             now={now}
             area="now"
+            band="now"
             docs={snapshot.resources.filter((r) => r.nodeId === row.node.id).length}
             system={endedLine(row, snapshot.pastSessions, now)}
-            className={`ip-now-row${waiting ? ' pending' : ''}${asking ? ' confirming' : ''}`}
+            cursor={cursor(at)}
+            rise={rise(`now:${row.node.id}`)}
+            selected={selectedNode === row.node.id}
+            chips={<StateChip state={box.state} />}
+            age={box.state === 'working' ? 'NOW' : undefined}
             still={asking || waiting}
+            pending={waiting}
             li={{
               'aria-busy': waiting || undefined,
-              // A press on the box outside the form's buttons and field puts focus in the form (or keeps it there), so
+              // A press on the tile outside the form's buttons and field puts focus in the form (or keeps it there), so
               // Escape still closes it.
               onMouseDown: asking ? (e) => {
                 const target = e.target as HTMLElement;
@@ -153,26 +186,28 @@ export function NowColumn({ snapshot, boxes, now, onStatus, onOpenNode, onOpenRe
                 const form = e.currentTarget.querySelector<HTMLElement>('.ip-confirm');
                 if (form && !form.contains(document.activeElement)) form.focus();
               } : undefined,
-              // Escape anywhere in the box closes the form.
+              // Escape anywhere in the tile closes the form.
               onKeyDown: asking ? (e) => {
                 if (e.key !== 'Escape') return;
                 e.stopPropagation();
                 cancel(row.node.id);
               } : undefined,
             }}
-            extra={asking ? undefined : (
-              <button type="button" className="ip-hover-act" data-act data-done aria-haspopup="dialog" onClick={() => open(row.node.id)}>Done…</button>
+            actions={asking ? undefined : (
+              <Button variant="ghost" size="sm" className="ip-hover-act" data-act data-done aria-haspopup="dialog" onClick={() => open(row.node.id)}>
+                Done…
+              </Button>
             )}
             onOpenNode={onOpenNode}
             onOpenResource={onOpenResource}
           >
-            {sessions.length > 0 ? (
-              sessions.map((s) => <SessionPart key={s.id} session={s} row={row} snapshot={snapshot} now={now} />)
-            ) : (
-              <div className="ip-sess">
+            <OpenScope area="now">
+              {sessions.length > 0 ? (
+                sessions.map((s) => <SessionPart key={s.id} session={s} row={row} snapshot={snapshot} now={now} />)
+              ) : (
                 <span className="ip-quiet">No session is on it</span>
-              </div>
-            )}
+              )}
+            </OpenScope>
             {asking && (
               <div
                 className="ip-confirm ip-done-form"
@@ -185,14 +220,13 @@ export function NowColumn({ snapshot, boxes, now, onStatus, onOpenNode, onOpenRe
               >
                 <b id={`${key}q`}>Mark #{row.node.id} {row.node.title} done?</b>
                 {row.driver && <p id={`${key}d`}>{`“${sessionDisplayTitle(row.driver)}” drives it. It stays on this step until it claims another, ends or goes stale.`}</p>}
-                <input
-                  className="ip-answer"
-                  type="text"
+                <Field
+                  size="sm"
                   aria-label="Outcome (optional)"
                   placeholder="Outcome (optional), then Enter"
                   maxLength={2000}
                   value={text}
-                  readOnly={waiting}
+                  busy={waiting}
                   onChange={(e) => setText(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.nativeEvent.isComposing) return;
@@ -206,20 +240,20 @@ export function NowColumn({ snapshot, boxes, now, onStatus, onOpenNode, onOpenRe
                     }
                   }}
                 />
-                <div>
-                  <button type="button" className="ip-btn go" aria-disabled={waiting || undefined} onClick={(e) => {
+                <div className="ip-confirm-buttons">
+                  <Button variant="primary" size="sm" aria-disabled={waiting || undefined} onClick={(e) => {
                     if (!waiting) void finish(row, e.currentTarget.closest('li'));
                   }}>
                     {waiting ? 'Marking done…' : 'Mark done'}
-                  </button>
-                  <button type="button" className="ip-btn" data-cancel aria-disabled={waiting || undefined} onClick={() => cancel(row.node.id)}>
+                  </Button>
+                  <Button variant="ghost" size="sm" data-cancel aria-disabled={waiting || undefined} onClick={() => cancel(row.node.id)}>
                     Cancel
-                  </button>
+                  </Button>
                 </div>
-                {problem && <div className="ip-problem" role="alert">{problem}</div>}
+                {problem && <ErrorLine message={problem} role="alert" />}
               </div>
             )}
-          </TaskBox>
+          </BoardTile>
         );
       })}
     </ul>

@@ -1,6 +1,9 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type Ref } from 'react';
 import type { Ask } from '../../../src/core/types';
 import { clearAsk } from '../api';
+import { Button } from '../parts/Button';
+import { ErrorLine } from '../parts/ErrorLine';
+import { Field } from '../parts/Field';
 import { noteAction, type MeasureArea } from '../measure';
 import { focusTargetAfter } from './focus';
 
@@ -15,6 +18,8 @@ export function AskActions({ ask, area }: { ask: Pick<Ask, 'id' | 'text'>; area:
   const [text, setText] = useState('');
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** The ask went out and the snapshot has not dropped it yet: its buttons are inert (aria-disabled, clicks do nothing). */
+  const [sent, setSent] = useState(false);
   const field = useRef<HTMLInputElement>(null);
   const opener = useRef<HTMLButtonElement>(null);
   const clearButton = useRef<HTMLButtonElement>(null);
@@ -28,17 +33,28 @@ export function AskActions({ ask, area }: { ask: Pick<Ask, 'id' | 'text'>; area:
     }
   }, [answering]);
   const send = async (answer?: string) => {
-    if (busy) return;
+    if (busy || sent) return;
     const row = (field.current ?? opener.current)?.closest('li') ?? null;
-    // A box holding another open ask hands focus to that ask's controls; otherwise the walk to the next row.
     const own = (field.current ?? opener.current)?.closest('[data-ask]') ?? null;
-    // Details' row is itself the ask (li.ip-dask): its siblings are under its parent.
-    const scope = row && row === own ? row.parentElement : row;
-    const sibling = scope ? [...scope.querySelectorAll<HTMLElement>('[data-ask]')].find((b) => b !== own && !b.classList.contains('cleared')) : undefined;
-    const target = sibling?.querySelector<HTMLElement>('input, button') ?? focusTargetAfter(row);
+    /** Where focus goes once this ask is cleared, worked out when it is needed: the box holding another open ask hands focus to that ask's Answer…, else the walk to the next row, else the band's heading. */
+    const handoff = (): HTMLElement | null => {
+      // Details' row is itself the ask (li.ip-dask): its siblings are under its parent.
+      const scope = row && row === own ? row.parentElement : row;
+      const sibling = scope?.isConnected ? [...scope.querySelectorAll<HTMLElement>('[data-ask]')].find((b) => b !== own && !b.classList.contains('cleared') && !b.hasAttribute('data-sent')) : undefined;
+      const answer = sibling?.querySelector<HTMLElement>('[data-answer]') ?? sibling?.querySelector<HTMLElement>('input');
+      if (answer) return answer;
+      if (row?.isConnected) return focusTargetAfter(row);
+      return (home ?? null)?.querySelector<HTMLElement>('h2') ?? null;
+    };
+    const home = row?.closest<HTMLElement>('.ip-band, aside, .ip-backlogview') ?? null;
     setBusy(true);
     const result = await clearAsk(ask.id, answer);
     setBusy(false);
+    // A sent or cleared ask strikes through until the snapshot drops it; the panel is the element holding the ask's id.
+    if (result === 'ok') {
+      own?.setAttribute('data-sent', '');
+      setSent(true);
+    }
     if (result === 'reload') return window.location.reload();
     // Aiden may have moved on while the request ran: focus moves only if it is still on this ask's row, or fell to the page.
     const active = document.activeElement;
@@ -49,17 +65,21 @@ export function AskActions({ ask, area }: { ask: Pick<Ask, 'id' | 'text'>; area:
     if (result !== 'ok') {
       setProblem(result);
       (field.current ?? clearButton.current)?.focus();
-    } else if (target?.isConnected) target.focus();
+    } else handoff()?.focus();
     // On 'ok' the stream brings a snapshot without this ask, and the row goes.
+  };
+  /** Enter and Send: an empty answer does nothing. */
+  const submit = () => {
+    const answer = text.trim();
+    if (!answer) return;
+    noteAction(area, 'answer');
+    void send(answer);
   };
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault();
       if (e.nativeEvent.isComposing) return;
-      const answer = text.trim();
-      if (!answer) return;
-      noteAction(area, 'answer');
-      void send(answer);
+      submit();
     } else if (e.key === 'Escape') {
       e.preventDefault();
       // Escape here closes the field only; it must not reach a panel that closes on Escape.
@@ -72,48 +92,57 @@ export function AskActions({ ask, area }: { ask: Pick<Ask, 'id' | 'text'>; area:
   return (
     <>
       {answering ? (
-        <input
-          ref={field}
-          data-act
-          className="ip-answer"
-          aria-label={`Answer to ${ask.text}`}
-          value={text}
-          // readOnly, not disabled: a disabled field would drop focus while the answer is on its way.
-          readOnly={busy}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={onKey}
-          placeholder="Your answer, then Enter"
-        />
+        <div className="ip-answer-row">
+          <Field
+            ref={field as Ref<HTMLInputElement | HTMLTextAreaElement>}
+            size="sm"
+            data-act
+            aria-label={`Answer to ${ask.text}`}
+            value={text}
+            // Read-only while the answer is on its way, never disabled: a disabled field would drop focus.
+            busy={busy}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={onKey}
+            placeholder="Your answer, then Enter"
+          />
+          <Button variant="primary" size="sm" data-act aria-disabled={busy || sent} onClick={submit}>
+            Send
+          </Button>
+        </div>
       ) : (
         <div className="ip-ask-actions">
-          <button
-            type="button"
+          <Button
             ref={opener}
+            variant="primary"
+            size="sm"
             data-act
-            className="ip-btn"
+            data-answer
+            aria-disabled={sent}
             onClick={() => {
+              if (sent) return;
               noteAction(area, 'answer_open');
               setAnswering(true);
             }}
           >
             Answer…
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
             ref={clearButton}
+            variant="ghost"
+            size="sm"
             data-act
-            className="ip-btn"
-            aria-disabled={busy}
+            aria-disabled={busy || sent}
             onClick={() => {
+              if (sent) return;
               noteAction(area, 'clear');
               void send();
             }}
           >
             Clear
-          </button>
+          </Button>
         </div>
       )}
-      {problem && <div className="ip-problem" role="alert">{problem}</div>}
+      {problem && <ErrorLine message={problem} role="alert" />}
     </>
   );
 }

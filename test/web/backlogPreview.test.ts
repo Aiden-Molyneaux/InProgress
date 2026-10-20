@@ -3,7 +3,7 @@ import type { Board, BoardRow } from '../../src/core/board';
 import { deriveBoard, type BoardInput } from '../../src/core/board';
 import { taskBoxes } from '../../src/core/taskState';
 import type { TreeNode } from '../../src/core/types';
-import { PREVIEW_SIZE, backlogPhases, formatPreview, parsePreview, previewKey, previewPhase, previewRows, previewState } from '../../web/src/backlog/backlogPreview';
+import { PREVIEW_SIZE, backlogPhases, formatPreview, parsePreview, phaseCounts, previewKey, previewPhase, previewRows, previewState } from '../../web/src/backlog/backlogPreview';
 
 const phase = (id: number, title: string) => ({ id, title, kind: 'phase', parentId: 1, position: id }) as unknown as TreeNode;
 const root = { id: 1, title: 'Root', kind: 'phase', parentId: null, position: 0 } as unknown as TreeNode;
@@ -70,6 +70,19 @@ describe('previewRows', () => {
     expect(previewRows(list, 10)).toHaveLength(PREVIEW_SIZE);
     expect(previewRows(list, 'none').map((e) => e.row.node.id)).toEqual([9]);
     expect(previewRows(list, 20).map((e) => e.row.node.id)).toEqual([2]);
+  });
+});
+
+describe('phaseCounts', () => {
+  const entry = (id: number, crumb: TreeNode[]) => ({ row: row(id, crumb) }) as unknown as { row: Pick<BoardRow, 'node' | 'crumb'> };
+  it('counts the entries of each phase, No phase included, and leaves out a phase with none', () => {
+    const list = [entry(1, [pa]), entry(2, [pb]), entry(3, [pa]), entry(4, [])];
+    const counts = phaseCounts(list);
+    expect(counts.get(10)).toBe(2);
+    expect(counts.get(20)).toBe(1);
+    expect(counts.get('none')).toBe(1);
+    expect(counts.get(99)).toBeUndefined();
+    expect(phaseCounts([]).size).toBe(0);
   });
 });
 

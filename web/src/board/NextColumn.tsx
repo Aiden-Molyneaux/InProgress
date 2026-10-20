@@ -1,32 +1,35 @@
-import { useEffect, useRef, useState, type DragEvent } from 'react';
+import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
 import type { BoardRow } from '../../../src/core/board';
 import type { TaskBox as BoxData } from '../../../src/core/taskState';
-import { sessionDisplayTitle, type QueueOp } from '../../../src/core/types';
-import { queueOp } from '../api';
 import { PreviewPanel } from '../backlog/PreviewPanel';
-import { formatPreview, parsePreview, previewKey, previewRows, previewState, type PreviewPhase } from '../backlog/backlogPreview';
+import { formatPreview, parsePreview, previewKey, previewState, type PreviewPhase } from '../backlog/backlogPreview';
+import { Button } from '../parts/Button';
+import { Chip } from '../parts/Chip';
+import { EmptyState } from '../parts/EmptyState';
+import { Eyebrow } from '../parts/Eyebrow';
+import type { CursorItemProps } from '../parts/ListCursor';
 import { load, save } from '../storage';
+import { noteAction } from '../measure';
+import type { BandProps } from './bandProps';
+import { BoardTile } from './BoardTile';
 import { dropSlot, dropToOp, optimisticNext } from './dragQueue';
 import { focusTargetAfter } from './focus';
 import { endedLine } from './Marks';
-import { noteAction } from '../measure';
-import type { BandProps } from './bandProps';
-import { TaskBox } from './TaskBox';
+import type { NextQueue } from './useNextQueue';
 
-const CIRCLED = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳';
-/** ①②③ for the first twenty places, the plain number after. */
-export const numeral = (n: number) => (n >= 1 && n <= CIRCLED.length ? CIRCLED[n - 1]! : String(n));
-
-/** The order the window shows until the next snapshot lands, and the step it moved (which is no longer in anyone's own queue). */
-interface Pending {
-  ids: number[];
-  moved: number;
-}
-
-/** Next as boxes in queue order, and the Backlog preview at its foot (spec 2.2, 2.5, 2.8; parked-steps spec). */
-export function NextColumn({ snapshot, board, boxes, now, onOpenNode, onOpenResource, onOpenBacklog, onStatus }: BandProps) {
+/**
+ * Next as tiles in queue order, and the Backlog preview at its foot (spec 2.2, 2.5, 2.8; parked-steps spec). The order and
+ * its writes come from `useNextQueue` in the Board; this holds the drag state and the Alt+arrow moves.
+ */
+export function NextColumn({ snapshot, board, now, selectedNode, onOpenNode, onOpenResource, onOpenBacklog, onStatus, queue, cursor, rise }: BandProps & {
+  queue: NextQueue;
+  /** The grid cursor's props for the tile at this row of the column (unowned steps first, then own queues). */
+  cursor: (row: number) => CursorItemProps;
+  /** The stagger place a tile key (`next:<id>`) rises with. */
+  rise: (key: string) => number | undefined;
+}) {
   const { project } = snapshot;
-  const [pending, setPending] = useState<Pending | null>(null);
+  const { next, nextIds, shown, unowned, ownedGroups, drawn, inNext, backlog, write, toNext, toBacklog } = queue;
   const [dragging, setDragging] = useState<number | null>(null);
   /** Where a drop would land: the unowned step it goes before, or null for the end of the unowned queue; undefined when over nothing. */
   const [slot, setSlot] = useState<number | null | undefined>(undefined);
@@ -37,37 +40,11 @@ export function NextColumn({ snapshot, board, boxes, now, onOpenNode, onOpenReso
   const [focusTick, setFocusTick] = useState(0);
   const field = useRef<HTMLInputElement>(null);
   const addButton = useRef<HTMLButtonElement>(null);
-  const clearTimer = useRef(0);
 
-  // The server's event brings a new snapshot; it replaces what the window guessed once it shows the order the guess was of.
-  // Until then (an event for something else, say) the guess stays; the timer after a write is the fallback.
-  useEffect(() => {
-    const order = boxes.next.map((b) => b.row!.node.id).join();
-    setPending((p) => (p && p.ids.join() === order ? null : p));
-  }, [snapshot]);
-  useEffect(() => () => window.clearTimeout(clearTimer.current), []);
   useEffect(() => {
     if (focusTick > 0) field.current?.focus();
   }, [focusTick]);
 
-  // Every task shows once: Next holds the boxes in the next cell, Backlog the ones in the backlog cell. A step in any other
-  // cell (it has a session, an ask, ...) shows there, and neither list names it.
-  const boxOf = new Map<number, BoxData>();
-  for (const cell of ['next', 'backlog'] as const) for (const b of boxes[cell]) boxOf.set(b.row!.node.id, b);
-  /** Dragged into Next and not yet confirmed, a backlog box reads as Ready. */
-  const asNext = (b: BoxData): BoxData => (b.state === 'backlog' ? { ...b, cell: 'next', state: 'ready' } : b);
-  const nextIds = pending ? pending.ids.filter((id) => boxOf.has(id)) : boxes.next.map((b) => b.row!.node.id);
-  const next = nextIds.map((id) => asNext(boxOf.get(id)!));
-  const ownerOf = (row: BoardRow) => (pending?.moved === row.node.id ? null : row.owner);
-  const shown = next.map((b) => ({ node: b.row!.node, owner: ownerOf(b.row!) }));
-  const unowned = next.filter((b) => !ownerOf(b.row!));
-  const owned = next.filter((b) => ownerOf(b.row!));
-  const inNext = new Set(nextIds);
-  // A step sent back shows in Backlog at once; one pulled into Next leaves it.
-  const backlogIds = pending ? [...board.backlog, ...board.next].map((r) => r.node.id).filter((id) => !inNext.has(id) && boxOf.has(id)) : boxes.backlog.map((b) => b.row!.node.id);
-  /** Sent back from Next and not yet confirmed, a ready box reads as Backlog. */
-  const asBacklog = (b: BoxData): BoxData => (b.state === 'ready' ? { ...b, cell: 'backlog', state: 'backlog' } : b);
-  const backlog = backlogIds.map((id) => asBacklog(boxOf.get(id)!));
   // The preview shows one phase: the picked one while it has entries, else the default chain (a finished or parked phase falls back).
   const { choices, phase } = previewState(backlog, board, snapshot.nodes, stored);
   const pickPhase = (p: PreviewPhase) => {
@@ -76,21 +53,6 @@ export function NextColumn({ snapshot, board, boxes, now, onOpenNode, onOpenReso
     save(previewKey(project.id), formatPreview(p));
   };
 
-  const write = async (op: QueueOp) => {
-    window.clearTimeout(clearTimer.current);
-    setPending({ ids: optimisticNext(shown, op), moved: op.node });
-    const result = await queueOp(project.id, project.slug, op);
-    if (result === 'ok') {
-      // Normally the snapshot clears this first; a move that changed nothing sends none.
-      clearTimer.current = window.setTimeout(() => setPending(null), 2000);
-      return;
-    }
-    setPending(null);
-    if (result === 'reload') window.location.reload();
-    else onStatus?.(result);
-  };
-  const toNext = (id: number) => write(dropToOp(id, { zone: 'next', before: null }));
-  const toBacklog = (id: number) => write(dropToOp(id, { zone: 'backlog' }));
   const endDrag = () => {
     setDragging(null);
     setSlot(undefined);
@@ -145,45 +107,76 @@ export function NextColumn({ snapshot, board, boxes, now, onOpenNode, onOpenReso
     addButton.current?.focus();
   };
 
+  /** Alt+Up / Alt+Down on a focused unowned tile moves it one place; own-queue tiles and the ends do nothing. */
+  const moveKey = (e: KeyboardEvent<HTMLElement>, id: number) => {
+    if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.target !== e.currentTarget) return;
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    // Key repeat while a move is out would send moves the window has not seen the result of: hold it back.
+    if (e.repeat && queue.writing()) {
+      e.preventDefault();
+      return;
+    }
+    const at = unowned.findIndex((b) => b.row!.node.id === id);
+    if (at < 0) return;
+    let before: number | null;
+    if (e.key === 'ArrowUp') {
+      if (at === 0) return;
+      before = unowned[at - 1].row!.node.id;
+    } else {
+      if (at === unowned.length - 1) return;
+      before = unowned[at + 2]?.row!.node.id ?? null;
+    }
+    e.preventDefault();
+    noteAction('next', 'key_move');
+    void write(dropToOp(id, { zone: 'next', before }));
+  };
+
   const nextRow = (box: BoxData) => {
     const row = box.row!;
+    const id = row.node.id;
     return (
-      <TaskBox
-        key={row.node.id}
+      <BoardTile
+        key={id}
         box={box}
         now={now}
         area="next"
-        docs={snapshot.resources.filter((r) => r.nodeId === row.node.id).length}
+        band="next"
+        docs={snapshot.resources.filter((r) => r.nodeId === id).length}
         system={endedLine(row, snapshot.pastSessions, now)}
-        className={`ip-next-row${slot === row.node.id ? ' drop-before' : ''}${dragging === row.node.id ? ' dragging' : ''}`}
+        cursor={cursor(drawn.indexOf(box))}
+        rise={rise(`next:${id}`)}
+        selected={selectedNode === id}
+        dropBefore={slot === id}
+        dragging={dragging === id}
+        chips={box.state === 'blocked' ? <Chip tone="blocked">BLOCKED</Chip> : <Chip tone="ready">READY</Chip>}
         li={{
           draggable: true,
-          onDragStart: (e) => startDrag(e, row.node.id),
+          onDragStart: (e) => startDrag(e, id),
           onDragEnd: endDrag,
           onDragOver: (e) => overRow(e, row),
           onDrop: dropInNext,
         }}
-        extra={
-          <button type="button" className="ip-hover-act" data-act onClick={(e) => {
-            noteAction('next', 'to_backlog');
-            focusTargetAfter(e.currentTarget.closest('li'))?.focus();
-            void toBacklog(row.node.id);
-          }}>back to Backlog</button>
+        onKeyDown={(e) => moveKey(e, id)}
+        lead={
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ip-hover-act"
+            data-act
+            onClick={(e) => {
+              noteAction('next', 'to_backlog');
+              focusTargetAfter(e.currentTarget.closest('li'))?.focus();
+              void toBacklog(id);
+            }}
+          >
+            back to Backlog
+          </Button>
         }
         onOpenNode={onOpenNode}
         onOpenResource={onOpenResource}
       />
     );
   };
-
-  // Own-queue entries run together per session: one line for each.
-  const ownedGroups: { key: string; title: string; boxes: BoxData[] }[] = [];
-  for (const b of owned) {
-    const o = ownerOf(b.row!)!;
-    const last = ownedGroups[ownedGroups.length - 1];
-    if (last && last.key === o.id) last.boxes.push(b);
-    else ownedGroups.push({ key: o.id, title: sessionDisplayTitle(o), boxes: [b] });
-  }
 
   return (
     <div
@@ -195,7 +188,7 @@ export function NextColumn({ snapshot, board, boxes, now, onOpenNode, onOpenReso
       }}
       onDrop={dropInNext}
     >
-      {next.length === 0 && <p className="ip-quiet ip-empty-line">Nothing is queued</p>}
+      {next.length === 0 && <EmptyState>Nothing is queued</EmptyState>}
       {unowned.length > 0 && (
         <ol className={`ip-list${slot === null ? ' drop-end' : ''}`} aria-label="Next">
           {unowned.map(nextRow)}
@@ -203,7 +196,7 @@ export function NextColumn({ snapshot, board, boxes, now, onOpenNode, onOpenReso
       )}
       {ownedGroups.map((g) => (
         <div key={g.key} className="ip-own-queue">
-          <div className="ip-own-head">{`Queued by ${g.title}`}</div>
+          <Eyebrow glyph="//" className="ip-own-head">{`Queued by ${g.title}`}</Eyebrow>
           <ol className="ip-list">{g.boxes.map(nextRow)}</ol>
         </div>
       ))}
@@ -222,15 +215,16 @@ export function NextColumn({ snapshot, board, boxes, now, onOpenNode, onOpenReso
         onDrop={dropOnBacklog}
       >
         <PreviewPanel
-          rows={previewRows(backlog, phase)}
+          entries={backlog}
           choices={choices}
           phase={phase}
-          total={backlog.length}
           adding={adding}
           field={field}
           addButton={addButton}
           snapshot={snapshot}
           now={now}
+          selectedNode={selectedNode}
+          dragging={dragging}
           onPick={pickPhase}
           onOpenAll={() => onOpenBacklog?.()}
           onAdd={addClick}

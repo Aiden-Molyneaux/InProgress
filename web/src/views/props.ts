@@ -9,6 +9,8 @@ export interface ViewProps {
   onOpenNode: (id: number) => void;
   /** A resource picked: the window opens its viewer. */
   onOpenResource: (id: number) => void;
+  /** The step whose Details is open, if any: its tile stays marked. */
+  selectedNode?: number | null;
   /** The Board's Done column opens the full list of done steps. */
   onOpenDone?: () => void;
   /** The Board's Backlog preview opens the full Backlog view. */
