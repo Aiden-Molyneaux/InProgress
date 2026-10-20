@@ -35,6 +35,8 @@ export interface NextQueue {
   inNext: Set<number>;
   backlog: BoxData[];
   write: (op: QueueOp) => Promise<void>;
+  /** A write is on its way (its answer has not come back). */
+  writing: () => boolean;
   toNext: (id: number) => Promise<void>;
   toBacklog: (id: number) => Promise<void>;
 }
@@ -47,6 +49,7 @@ export function useNextQueue({ snapshot, board, boxes, onStatus }: Pick<BandProp
   const { project } = snapshot;
   const [pending, setPending] = useState<Pending | null>(null);
   const clearTimer = useRef(0);
+  const inFlight = useRef(0);
 
   // The server's event brings a new snapshot; it replaces what the window guessed once it shows the order the guess was of.
   // Until then (an event for something else, say) the guess stays; the timer after a write is the fallback.
@@ -87,9 +90,13 @@ export function useNextQueue({ snapshot, board, boxes, onStatus }: Pick<BandProp
   const write = async (op: QueueOp) => {
     window.clearTimeout(clearTimer.current);
     setPending({ ids: optimisticNext(shown, op), moved: op.node });
-    const result = await queueOp(project.id, project.slug, op);
+    inFlight.current += 1;
+    const result = await queueOp(project.id, project.slug, op).finally(() => {
+      inFlight.current -= 1;
+    });
     if (result === 'ok') {
-      // Normally the snapshot clears this first; a move that changed nothing sends none.
+      // Normally the snapshot clears this first; a move that changed nothing sends none. A write that came back meanwhile left its timer: this one replaces it.
+      window.clearTimeout(clearTimer.current);
       clearTimer.current = window.setTimeout(() => setPending(null), 2000);
       return;
     }
@@ -100,5 +107,5 @@ export function useNextQueue({ snapshot, board, boxes, onStatus }: Pick<BandProp
   const toNext = (id: number) => write(dropToOp(id, { zone: 'next', before: null }));
   const toBacklog = (id: number) => write(dropToOp(id, { zone: 'backlog' }));
 
-  return { next, nextIds, shown, unowned, owned, ownedGroups, drawn: [...unowned, ...owned], inNext, backlog, write, toNext, toBacklog };
+  return { next, nextIds, shown, unowned, owned, ownedGroups, drawn: [...unowned, ...owned], inNext, backlog, write, writing: () => inFlight.current > 0, toNext, toBacklog };
 }

@@ -3728,6 +3728,26 @@ test.describe('#502 Board in v3', () => {
     await expect(tile(titles[0])).toBeFocused();
   });
 
+  test('two by two, ArrowDown from the last Needs me tile reaches the first Next tile, and ArrowUp comes back', async ({ page, fresh }) => {
+    await page.setViewportSize({ width: 1000, height: 900 });
+    await open(page, fresh);
+    const next = band(page, 'next');
+    await next.locator('.ip-backlog-row', { has: page.getByRole('button', { name: '3 RevenueCat', exact: true }) }).getByRole('button', { name: 'to Next' }).click();
+    const nextTile = next.locator('article.ip-next-row', { has: page.getByRole('button', { name: '3 RevenueCat', exact: true }) });
+    await expect(nextTile).toBeVisible();
+    // Next sits under Needs me in the left column here.
+    const needs = (await band(page, 'needs').boundingBox())!;
+    const nextBox = (await nextTile.boundingBox())!;
+    expect(nextBox.x).toBeLessThan(needs.x + needs.width);
+    expect(nextBox.y).toBeGreaterThan(needs.y);
+    const last = band(page, 'needs').locator('article.ip-tile').last();
+    await last.focus();
+    await page.keyboard.press('ArrowDown');
+    await expect(nextTile).toBeFocused();
+    await page.keyboard.press('ArrowUp');
+    await expect(last).toBeFocused();
+  });
+
   test('"N to tidy" lists the marked steps, an item opens its Details, and Escape closes the menu with focus on the button', async ({ page, fresh }) => {
     await page.setViewportSize(WIDEST);
     await open(page, fresh);
@@ -3749,6 +3769,10 @@ test.describe('#502 Board in v3', () => {
     await item.click();
     await expect(menu).toHaveCount(0);
     await expect(page.getByRole('complementary')).toContainText('1 iOS certificate');
+    // Details took the button as its opener: Escape returns there.
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('complementary')).toHaveCount(0);
+    await expect(button).toBeFocused();
   });
 
   test('More opens the whole state note and Less folds it back to the first sentence', async ({ page, api, fresh }) => {

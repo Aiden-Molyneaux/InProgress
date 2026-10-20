@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 /** How long a tile keeps its rise, in ms: the animation is done well before, and a later render no longer carries it. */
 export const RISE_MS = 900;
@@ -37,8 +37,18 @@ export function useRise(keys: readonly string[]): (key: string) => number | unde
   const committed = useRef<RiseMap | null>(null);
   const at = Date.now();
   const map = riseFor(committed.current, keys, at);
+  const [, setTick] = useState(0);
   useEffect(() => {
     committed.current = map;
   });
+  // A render after the windows end is what drops `data-entering` from the tiles: schedule one when the newest ends.
+  const newest = Math.max(0, ...Array.from(map.values(), (v) => v.since));
+  const ends = newest + RISE_MS;
+  const risingNow = newest > 0 && ends > at;
+  useEffect(() => {
+    if (!risingNow) return undefined;
+    const timer = setTimeout(() => setTick((n) => n + 1), Math.max(0, ends - Date.now()) + 20);
+    return () => clearTimeout(timer);
+  }, [risingNow, ends]);
   return (key) => riseOf(map, key, at);
 }

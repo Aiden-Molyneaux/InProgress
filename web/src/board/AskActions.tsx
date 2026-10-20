@@ -35,12 +35,18 @@ export function AskActions({ ask, area }: { ask: Pick<Ask, 'id' | 'text'>; area:
   const send = async (answer?: string) => {
     if (busy || sent) return;
     const row = (field.current ?? opener.current)?.closest('li') ?? null;
-    // A box holding another open ask hands focus to that ask's controls; otherwise the walk to the next row.
     const own = (field.current ?? opener.current)?.closest('[data-ask]') ?? null;
-    // Details' row is itself the ask (li.ip-dask): its siblings are under its parent.
-    const scope = row && row === own ? row.parentElement : row;
-    const sibling = scope ? [...scope.querySelectorAll<HTMLElement>('[data-ask]')].find((b) => b !== own && !b.classList.contains('cleared') && !b.hasAttribute('data-sent')) : undefined;
-    const target = sibling?.querySelector<HTMLElement>('input, button') ?? focusTargetAfter(row);
+    /** Where focus goes once this ask is cleared, worked out when it is needed: the box holding another open ask hands focus to that ask's Answer…, else the walk to the next row, else the band's heading. */
+    const handoff = (): HTMLElement | null => {
+      // Details' row is itself the ask (li.ip-dask): its siblings are under its parent.
+      const scope = row && row === own ? row.parentElement : row;
+      const sibling = scope?.isConnected ? [...scope.querySelectorAll<HTMLElement>('[data-ask]')].find((b) => b !== own && !b.classList.contains('cleared') && !b.hasAttribute('data-sent')) : undefined;
+      const answer = sibling?.querySelector<HTMLElement>('[data-answer]') ?? sibling?.querySelector<HTMLElement>('input');
+      if (answer) return answer;
+      if (row?.isConnected) return focusTargetAfter(row);
+      return (home ?? null)?.querySelector<HTMLElement>('h2') ?? null;
+    };
+    const home = row?.closest<HTMLElement>('.ip-band, aside, .ip-backlogview') ?? null;
     setBusy(true);
     const result = await clearAsk(ask.id, answer);
     setBusy(false);
@@ -59,7 +65,7 @@ export function AskActions({ ask, area }: { ask: Pick<Ask, 'id' | 'text'>; area:
     if (result !== 'ok') {
       setProblem(result);
       (field.current ?? clearButton.current)?.focus();
-    } else if (target?.isConnected) target.focus();
+    } else handoff()?.focus();
     // On 'ok' the stream brings a snapshot without this ask, and the row goes.
   };
   /** Enter and Send: an empty answer does nothing. */
@@ -110,6 +116,7 @@ export function AskActions({ ask, area }: { ask: Pick<Ask, 'id' | 'text'>; area:
             variant="primary"
             size="sm"
             data-act
+            data-answer
             aria-disabled={sent}
             onClick={() => {
               if (sent) return;

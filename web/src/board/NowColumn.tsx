@@ -126,7 +126,6 @@ export function NowColumn({ snapshot, boxes, now, selectedNode, onStatus, onOpen
   const finish = async (row: BoardRow, li: HTMLElement | null) => {
     const id = row.node.id;
     noteAction('now', 'done');
-    const after = focusTargetAfter(li);
     setProblem(null);
     setPending((p) => [...p, id]);
     const result = await markDone(projectId, slug, id, text, row.driver?.id ?? null);
@@ -138,7 +137,8 @@ export function NowColumn({ snapshot, boxes, now, selectedNode, onStatus, onOpen
         setText('');
       }
       // Only when focus is still in that box or fell to the body: the user may have moved on while it was out.
-      if (here) after?.focus();
+      // Worked out now, not before the request: the neighbour it named may have left meanwhile. A box that left falls back to the band's heading.
+      if (here) (li?.isConnected ? focusTargetAfter(li) : (root.current?.closest<HTMLElement>('.ip-band')?.querySelector<HTMLElement>('h2') ?? null))?.focus();
       return;
     }
     if (result === 'reload') return window.location.reload();

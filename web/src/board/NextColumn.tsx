@@ -111,6 +111,11 @@ export function NextColumn({ snapshot, board, now, selectedNode, onOpenNode, onO
   const moveKey = (e: KeyboardEvent<HTMLElement>, id: number) => {
     if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.target !== e.currentTarget) return;
     if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    // Key repeat while a move is out would send moves the window has not seen the result of: hold it back.
+    if (e.repeat && queue.writing()) {
+      e.preventDefault();
+      return;
+    }
     const at = unowned.findIndex((b) => b.row!.node.id === id);
     if (at < 0) return;
     let before: number | null;

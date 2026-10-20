@@ -67,7 +67,8 @@ function Tidy({ board, onOpenNode }: Pick<BandProps, 'board' | 'onOpenNode'>) {
               <MenuItem
                 key={row.node.id}
                 onSelect={() => {
-                  shut(false);
+                  // Focus goes to the button first: Details records the focused element as its opener, and Escape returns there.
+                  shut(true);
                   noteAction('header', 'tidy_open');
                   onOpenNode(row.node.id);
                 }}
