@@ -1,6 +1,9 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type Ref } from 'react';
 import type { Ask } from '../../../src/core/types';
 import { clearAsk } from '../api';
+import { Button } from '../parts/Button';
+import { ErrorLine } from '../parts/ErrorLine';
+import { Field } from '../parts/Field';
 import { noteAction, type MeasureArea } from '../measure';
 import { focusTargetAfter } from './focus';
 
@@ -39,6 +42,8 @@ export function AskActions({ ask, area }: { ask: Pick<Ask, 'id' | 'text'>; area:
     setBusy(true);
     const result = await clearAsk(ask.id, answer);
     setBusy(false);
+    // A sent or cleared ask strikes through until the snapshot drops it; the panel is the element holding the ask's id.
+    if (result === 'ok') own?.setAttribute('data-sent', '');
     if (result === 'reload') return window.location.reload();
     // Aiden may have moved on while the request ran: focus moves only if it is still on this ask's row, or fell to the page.
     const active = document.activeElement;
@@ -52,14 +57,18 @@ export function AskActions({ ask, area }: { ask: Pick<Ask, 'id' | 'text'>; area:
     } else if (target?.isConnected) target.focus();
     // On 'ok' the stream brings a snapshot without this ask, and the row goes.
   };
+  /** Enter and Send: an empty answer does nothing. */
+  const submit = () => {
+    const answer = text.trim();
+    if (!answer) return;
+    noteAction(area, 'answer');
+    void send(answer);
+  };
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault();
       if (e.nativeEvent.isComposing) return;
-      const answer = text.trim();
-      if (!answer) return;
-      noteAction(area, 'answer');
-      void send(answer);
+      submit();
     } else if (e.key === 'Escape') {
       e.preventDefault();
       // Escape here closes the field only; it must not reach a panel that closes on Escape.
@@ -72,37 +81,42 @@ export function AskActions({ ask, area }: { ask: Pick<Ask, 'id' | 'text'>; area:
   return (
     <>
       {answering ? (
-        <input
-          ref={field}
-          data-act
-          className="ip-answer"
-          aria-label={`Answer to ${ask.text}`}
-          value={text}
-          // readOnly, not disabled: a disabled field would drop focus while the answer is on its way.
-          readOnly={busy}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={onKey}
-          placeholder="Your answer, then Enter"
-        />
+        <div className="ip-answer-row">
+          <Field
+            ref={field as Ref<HTMLInputElement | HTMLTextAreaElement>}
+            size="sm"
+            data-act
+            aria-label={`Answer to ${ask.text}`}
+            value={text}
+            // Read-only while the answer is on its way, never disabled: a disabled field would drop focus.
+            busy={busy}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={onKey}
+            placeholder="Your answer, then Enter"
+          />
+          <Button variant="primary" size="sm" data-act aria-disabled={busy} onClick={submit}>
+            Send
+          </Button>
+        </div>
       ) : (
         <div className="ip-ask-actions">
-          <button
-            type="button"
+          <Button
             ref={opener}
+            variant="primary"
+            size="sm"
             data-act
-            className="ip-btn"
             onClick={() => {
               noteAction(area, 'answer_open');
               setAnswering(true);
             }}
           >
             Answer…
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
             ref={clearButton}
+            variant="ghost"
+            size="sm"
             data-act
-            className="ip-btn"
             aria-disabled={busy}
             onClick={() => {
               noteAction(area, 'clear');
@@ -110,10 +124,10 @@ export function AskActions({ ask, area }: { ask: Pick<Ask, 'id' | 'text'>; area:
             }}
           >
             Clear
-          </button>
+          </Button>
         </div>
       )}
-      {problem && <div className="ip-problem" role="alert">{problem}</div>}
+      {problem && <ErrorLine message={problem} role="alert" />}
     </>
   );
 }

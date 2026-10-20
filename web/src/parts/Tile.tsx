@@ -9,6 +9,8 @@ export interface TileProps extends Omit<HTMLAttributes<HTMLElement>, 'title' | '
   id?: ReactNode;
   chips?: ReactNode;
   title: string;
+  /** A class for the title button, for a surface that finds it by name. */
+  titleClassName?: string;
   onOpen?: () => void;
   body?: ReactNode;
   foot?: ReactNode;
@@ -24,7 +26,7 @@ export interface TileProps extends Omit<HTMLAttributes<HTMLElement>, 'title' | '
 
 /** A step's tile: hue rule, id and chips, a title that opens it, a body, and a foot with actions. */
 export const Tile = forwardRef<HTMLElement, TileProps>(function Tile(
-  { hue, tone = 'default', id, chips, title, onOpen, body, foot, actions, selected, dragging, dropBefore, pending, rise, className, style, children, ...rest },
+  { hue, tone = 'default', id, chips, title, titleClassName, onOpen, body, foot, actions, selected, dragging, dropBefore, pending, rise, className, style, children, ...rest },
   ref,
 ) {
   const vars = { '--p-hue': hue == null ? undefined : `var(--hue-${hue})`, '--p-i': rise } as CSSProperties;
@@ -50,7 +52,7 @@ export const Tile = forwardRef<HTMLElement, TileProps>(function Tile(
         </div>
       )}
       <h3 className="p-tile-title">
-        <button type="button" onClick={onOpen}>
+        <button type="button" className={titleClassName} onClick={onOpen}>
           {title}
         </button>
       </h3>

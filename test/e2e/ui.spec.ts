@@ -1742,8 +1742,8 @@ const WIDEST = { width: 1600, height: 900 };
 /** A page under 720 beside the rail or its tabs: the Board's one column (#502). */
 const NARROWEST = { width: 600, height: 900 };
 const band = (page: Page, name: 'needs' | 'now' | 'next' | 'done') => page.locator(`section.ip-band-${name}`);
-/** The task box with this title in a band: every cell shares the one skeleton (`li.ip-card`). */
-const boxIn = (page: Page, name: 'needs' | 'now' | 'next' | 'done', title: string) => band(page, name).locator('li.ip-card', { has: page.getByRole('button', { name: title, exact: true }) });
+/** The task box with this title in a band: the older skeleton (`li.ip-card`) or, where a column has moved to it, the Tile part's `li` (#502). */
+const boxIn = (page: Page, name: 'needs' | 'now' | 'next' | 'done', title: string) => band(page, name).locator('li.ip-card, li:has(> article.ip-tile)', { has: page.getByRole('button', { name: title, exact: true }) });
 const nowRow = (page: Page, title: string) => boxIn(page, 'now', title);
 
 /** A background command started for the session, as the PostToolUse hook reports one. */
@@ -1764,9 +1764,9 @@ test.describe('Board', () => {
     expect(new Set(xs).size, 'four columns side by side').toBe(4);
     const needs = boxIn(page, 'needs', 'Run signing tests');
     await expect(needs).toContainText('Which keystore signs the release?');
-    await expect(needs.locator('.ip-st')).toHaveText('Question');
-    await expect(needs.locator('.ip-time')).toHaveText(/^(now|\d+m)$/);
-    await expect(needs.locator('.ip-sess')).toHaveText('No session: raised before sessions were tracked');
+    await expect(needs.locator('.p-tile-chips .p-chip').first()).toHaveText('QUESTION');
+    await expect(needs.locator('.p-tile-chips .ip-tile-age')).toHaveText(/^(now|\d+m)$/);
+    await expect(needs.locator('.ip-sessline')).toHaveText('No session: raised before sessions were tracked');
     await expect(needs.getByRole('button', { name: 'Answer…' })).toBeVisible();
     await expect(needs.getByRole('button', { name: 'Clear' })).toBeVisible();
     const now = nowRow(page, 'Play app signing');
@@ -1798,7 +1798,6 @@ test.describe('Board', () => {
     // One cell per task: the step pulled up has left the Backlog.
     await expect(next.locator('.ip-backlog-row', { has: page.getByRole('button', { name: '3 RevenueCat', exact: true }) })).toHaveCount(0);
     const cells = [
-      { band: 'needs', title: 'Run signing tests', state: 'Question' },
       { band: 'next', title: '3 RevenueCat', state: 'Ready' },
       { band: 'now', title: 'Play app signing', state: 'Working' },
       { band: 'done', title: 'Upload keystore', state: '✓ Done' },
@@ -1811,10 +1810,14 @@ test.describe('Board', () => {
       await expect(box.locator('.ip-card-top .ip-time'), c.band).toBeVisible();
     }
     const needs = boxIn(page, 'needs', 'Run signing tests');
+    // Needs me draws the Tile part (#502).
+    await expect(needs.locator('.p-tile-id')).toHaveText(`#${fresh.ids['Run signing tests']}`);
+    await expect(needs.locator('.p-tile-chips .p-chip').first()).toHaveText('QUESTION');
+    await expect(needs.locator('.p-tile-chips .ip-tile-age')).toBeVisible();
     await expect(needs.getByRole('button', { name: 'Answer…' })).toBeVisible();
     await expect(needs.getByRole('button', { name: 'Clear' })).toBeVisible();
     // One cell per task: the step with the ask is in Needs me and nowhere else.
-    await expect(page.locator('.ip-bands li.ip-card', { has: page.getByRole('button', { name: 'Run signing tests', exact: true }) })).toHaveCount(1);
+    await expect(page.locator('.ip-bands :is(li.ip-card, article.ip-tile)', { has: page.getByRole('button', { name: 'Run signing tests', exact: true }) })).toHaveCount(1);
   });
 
   test('Backlog preview boxes share the task box with no hue', async ({ page, api, fresh }) => {
@@ -1955,12 +1958,13 @@ test.describe('Board', () => {
     await hook(api, fresh.session, { event: 'permission' });
     await open(page, fresh);
     const wait = boxIn(page, 'needs', 'Play app signing');
-    await expect(wait.locator('.ip-st')).toHaveText('Permission');
-    await expect(wait.locator('.ip-block')).toContainText('Allow a shell command');
-    await expect(wait.locator('.ip-block .ip-code')).toHaveText('npm run build');
+    await expect(wait.locator('.p-tile-chips .p-chip')).toHaveText('PERMISSION');
+    await expect(wait.locator('.ip-ask-panel')).toContainText('Allow a shell command');
+    await expect(wait.locator('.ip-ask-panel .ip-term')).toHaveText('npm run build');
     await expect(wait.getByRole('button', { name: 'Open session to allow' })).toBeVisible();
-    await expect(wait.locator('.ip-sess-name')).toHaveText('E2E session');
-    await expect(wait).toHaveCSS('background-color', 'rgba(192, 254, 4, 0.06)');
+    await expect(wait.locator('.ip-sessline-title')).toHaveText('E2E session');
+    // An ask tile: the Tile part's volt wash and edge (batch 5 of #502 rewrites this to the new colours).
+    await expect(wait.locator('article')).toHaveAttribute('data-tone', 'ask');
     // A permission wait has no buttons of its own to clear it; the step shows in Needs me only.
     await expect(wait.getByRole('button', { name: /Answer|Clear/ })).toHaveCount(0);
     await expect(nowRow(page, 'Play app signing')).toHaveCount(0);
@@ -1974,8 +1978,8 @@ test.describe('Board', () => {
     await hook(api, fresh.session, { event: 'permission' });
     await open(page, fresh);
     const wait = boxIn(page, 'needs', 'Play app signing');
-    await expect(wait.locator('.ip-block')).toContainText('Waiting for permission');
-    await expect(wait.locator('.ip-block .ip-code')).toHaveCount(0);
+    await expect(wait.locator('.ip-ask-panel')).toContainText('Waiting for permission');
+    await expect(wait.locator('.ip-ask-panel .ip-term')).toHaveCount(0);
   });
 
   test('Open session shows the command to copy when the server cannot open it, and Copy puts it on the clipboard', async ({ page, fresh }) => {
@@ -2078,15 +2082,17 @@ test.describe('Board', () => {
     });
     await open(page, fresh);
     const box = boxIn(page, 'needs', 'Play app signing');
-    await expect(box.locator('.ip-block').filter({ hasText: 'Waiting for permission' })).toHaveCount(2);
+    await expect(box.locator('.ip-ask-panel').filter({ hasText: 'Waiting for permission' })).toHaveCount(2);
     await expect(box.getByRole('button', { name: 'Open session to allow' })).toHaveCount(2);
     // A session shows in its line and its permission block, and again over an ask of its own when another session's block comes between: one launch, so every button of it reads Opening… and one request goes.
     await box.getByRole('button', { name: 'Open session to allow' }).first().click();
     await expect.poll(() => box.getByRole('button', { name: 'Opening…' }).count()).toBeGreaterThanOrEqual(2);
     // The other session's own button stays idle while the first launches: one read, with the launch still held.
-    const other = box.locator('.ip-block').filter({ hasText: 'Waiting for permission' }).nth(1).getByRole('button', { name: /^Open session to allow$|^Opening…$/ });
-    expect(await other.textContent()).toBe('Open session to allow');
-    await box.getByRole('button', { name: 'Opening…' }).last().click();
+    const other = box.locator('.ip-ask-panel').filter({ hasText: 'Waiting for permission' }).nth(1).getByRole('button', { name: /^Open session to allow$|^Opening…$/ });
+    // The button's trailing glyph is part of its text (#502).
+    expect(await other.textContent()).toBe('Open session to allow↗');
+    // A busy Button part is aria-disabled, which Playwright will not click without force; the click must still do nothing.
+    await box.getByRole('button', { name: 'Opening…' }).last().click({ force: true });
     release();
     await expect(box.getByRole('button', { name: 'Opening…' })).toHaveCount(0);
     expect(calls).toHaveLength(1);
@@ -2119,8 +2125,8 @@ test.describe('Board', () => {
     await write(api, fresh.session, 'post', `/api/nodes/${fresh.ids['Play app signing']}/asks`, { kind: 'review', text: 'Is the keystore setup right?' });
     await open(page, fresh);
     const row = boxIn(page, 'needs', 'Play app signing');
-    await expect(row.locator('.ip-st')).toHaveText('Review');
-    await expect(row.locator('.ip-sess')).toHaveText('No session: raised before sessions were tracked');
+    await expect(row.locator('.p-tile-chips .p-chip')).toHaveText('REVIEW');
+    await expect(row.locator('.ip-sessline')).toHaveText('No session: raised before sessions were tracked');
     await expect(row).toContainText('Is the keystore setup right?');
     await row.getByRole('button', { name: 'Clear' }).click();
     await expect(row).toHaveCount(0);
@@ -2857,7 +2863,8 @@ test.describe('Board', () => {
   });
 
   test('drag: Backlog into Next, within Next, and Next back to Backlog, without opening Details', async ({ page, fresh }) => {
-    await page.setViewportSize(WIDE);
+    // Tall, so the drag never has to scroll the Board: the ask tiles in Needs me made the page longer than 900 px (#502).
+    await page.setViewportSize({ width: 1200, height: 2400 });
     await open(page, fresh);
     const next = band(page, 'next');
     const backlogRow = (t: string) => next.locator('.ip-backlog-row', { has: page.getByRole('button', { name: t, exact: true }) });
@@ -3545,5 +3552,70 @@ test.describe('v3 Details, viewer and command bar (#505)', () => {
     await page.mouse.click(2, 2);
     await expect(page.locator('.ip-cmdbar')).toBeHidden();
     await expect(tile).toBeFocused();
+  });
+});
+
+test.describe('#502 Board in v3', () => {
+  test('two asks on one step read as two panels, each with its own Answer… and Clear, and Send sends the answer', async ({ page, api, fresh }) => {
+    await write(api, fresh.session, 'post', `/api/nodes/${fresh.ids['Run signing tests']}/asks`, { kind: 'review', text: 'And which store account?' });
+    await page.setViewportSize(WIDEST);
+    await open(page, fresh);
+    const tile = boxIn(page, 'needs', 'Run signing tests');
+    const panels = tile.locator('.ip-ask-panel');
+    await expect(panels).toHaveCount(2);
+    await expect(panels.nth(0).locator('.p-eyebrow')).toHaveText('01 QUESTION');
+    await expect(panels.nth(1).locator('.p-eyebrow')).toHaveText('02 REVIEW');
+    for (const i of [0, 1]) {
+      await expect(panels.nth(i).getByRole('button', { name: 'Answer…' })).toBeVisible();
+      await expect(panels.nth(i).getByRole('button', { name: 'Clear' })).toBeVisible();
+    }
+    // Answer… becomes a Field and Send; Send with nothing typed does nothing; typed, it clears the ask with the answer.
+    await panels.nth(0).getByRole('button', { name: 'Answer…' }).click();
+    const send = panels.nth(0).getByRole('button', { name: 'Send' });
+    await send.click();
+    await expect(panels).toHaveCount(2);
+    await panels.nth(0).getByRole('textbox').fill('Use the upload key');
+    await send.click();
+    await expect(panels).toHaveCount(1);
+    const snapshot = (await (await api.get(`/api/projects/${fresh.slug}`)).json()) as { asks: { id: number; answer: string }[] };
+    expect(snapshot.asks.find((a) => a.id === fresh.ask)).toMatchObject({ answer: 'Use the upload key' });
+  });
+
+  test('an ask text longer than four lines shows Show all and Show less, and a short one shows neither', async ({ page, api, fresh }) => {
+    await write(api, fresh.session, 'post', `/api/nodes/${fresh.ids['Play app signing']}/asks`, { kind: 'question', text: Array.from({ length: 40 }, (_, i) => `word${i}`).join(' ') });
+    await page.setViewportSize(WIDEST);
+    await open(page, fresh);
+    const long = boxIn(page, 'needs', 'Play app signing').locator('.ip-ask-panel');
+    const short = boxIn(page, 'needs', 'Run signing tests').locator('.ip-ask-panel');
+    await expect(short.getByRole('button', { name: /^Show/ })).toHaveCount(0);
+    const text = long.locator('.ip-ask-text');
+    const folded = (await text.boundingBox())!.height;
+    await long.getByRole('button', { name: 'Show all' }).click();
+    expect((await text.boundingBox())!.height).toBeGreaterThan(folded);
+    await long.getByRole('button', { name: 'Show less' }).click();
+    expect((await text.boundingBox())!.height).toBe(folded);
+  });
+
+  test('the Board tiles are one Tab stop: arrows move between them and Enter opens Details', async ({ page, api, fresh }) => {
+    await write(api, fresh.session, 'post', `/api/nodes/${fresh.ids['Play app signing']}/asks`, { kind: 'question', text: 'A second step with an ask?' });
+    await page.setViewportSize(WIDEST);
+    await open(page, fresh);
+    // Oldest wait first: the fixture's ask on Run signing tests, then the one just raised.
+    const first = boxIn(page, 'needs', 'Run signing tests').locator('article');
+    const second = boxIn(page, 'needs', 'Play app signing').locator('article');
+    await expect(first).toHaveAttribute('data-cursor', '');
+    // Only the cursor tile is in the Tab order; the other tile's buttons are out of it.
+    const stops = await page.locator('section.ip-band-needs article[tabindex="0"]').count();
+    expect(stops).toBe(1);
+    await first.focus();
+    await page.keyboard.press('ArrowDown');
+    await expect(second).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('complementary')).toBeVisible();
+    await expect(page.getByRole('complementary')).toContainText('Play app signing');
+    // The tile Details shows stays marked until Details closes.
+    await expect(second).toHaveAttribute('data-selected', 'true');
+    await page.keyboard.press('Escape');
+    await expect(second).not.toHaveAttribute('data-selected', /.*/);
   });
 });

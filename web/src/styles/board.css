@@ -42,7 +42,35 @@
 .ip-link-btn:hover { text-decoration: underline; }
 .ip-link-btn:focus-visible, .ip-row-title:focus-visible, .ip-chip-handoff:focus-visible, .ip-btn:focus-visible { outline: 2px solid var(--volt); outline-offset: 1px; }
 .ip-code { display: block; max-width: 100%; padding: 3px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--fs-s); line-height: 14px; background: var(--panel-2); }
-.ip-ask-actions { display: flex; gap: 6px; margin-top: 3px; }
+/* Board tiles (BoardTile): the age, the foot's parts and the system line, in v3 type. */
+.ip-band .ip-list { gap: var(--sp-4); }
+.ip-tile-age { font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-dim); }
+.ip-tile .p-tile-body { display: grid; gap: var(--sp-3); }
+.ip-tile .ip-sys { font-size: var(--t-detail-sm); line-height: 1.4; color: var(--text-dim); }
+.ip-tile .ip-docs { font-size: var(--t-detail-sm); color: var(--text-muted); }
+.ip-tile-handoff { padding: 0; line-height: 1; }
+.ip-tile-handoff:hover .p-chip { border-color: var(--volt); color: var(--volt); }
+.ip-tile-handoff:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--volt-soft); }
+/* The session line: a diamond in the step's hue, the title, the state word, Open at the right. */
+.ip-sessline { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; font-size: var(--t-detail-sm); }
+.ip-sessline-dot { flex: none; color: var(--p-hue, var(--text-dim)); }
+.ip-sessline-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.ip-sessline-word { flex: none; color: var(--text-dim); }
+.ip-sessline-open { margin-left: auto; flex: none; }
+.ip-sessline-none { color: var(--text-muted); }
+/* Needs me: each ask in its own panel; a sent or cleared ask strikes through until the snapshot drops it. */
+.ip-ask-panel { display: grid; gap: var(--sp-3); min-width: 0; padding: var(--sp-3); background: var(--canvas-1); border: 1px solid var(--line); }
+.ip-ask-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.ip-ask-text { font-size: var(--t-body); line-height: 1.45; color: var(--text); overflow-wrap: anywhere; }
+.ip-ask-clamp { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.ip-ask-clamp[data-open] { display: block; overflow: visible; }
+.ip-ask-more { justify-self: start; }
+.ip-ask-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.ip-answer-row { display: flex; align-items: center; gap: var(--sp-2); }
+.ip-answer-row .p-field { flex: 1; min-width: 0; }
+[data-ask][data-sent] { opacity: 0.5; text-decoration: line-through; text-decoration-color: var(--text-dim); }
+/* A terminal readout: a command or a session's progress on the darkest ground. */
+.ip-term { display: block; padding: var(--sp-3); background: var(--canvas-0); border: 1px solid var(--line); font-family: var(--font-mono); font-size: var(--t-detail-sm); line-height: 1.4; color: var(--text); overflow-wrap: anywhere; }
 .ip-answer { display: block; width: 100%; margin-top: 3px; padding: 4px 8px; font: inherit; font-size: var(--fs-m); line-height: 18px; color: var(--text); background: var(--panel); border: 1px solid var(--border); }
 .ip-answer:focus { outline: 2px solid var(--volt); outline-offset: 1px; }
 .ip-problem { font-size: var(--fs-s); line-height: 14px; color: var(--amber-ink); }

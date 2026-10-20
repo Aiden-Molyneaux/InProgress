@@ -4,6 +4,7 @@ import { taskBoxes } from '../../../src/core/taskState';
 import { PageHead } from '../page/PageHead';
 import { projectCode } from '../page/projectCode';
 import { usePageWidth } from '../page/usePageWidth';
+import { useListCursor } from '../parts/ListCursor';
 import type { ViewProps } from '../views/props';
 import type { BandProps } from './bandProps';
 import { BAND_LABEL, ColumnHead, type Band } from './ColumnHead';
@@ -11,9 +12,10 @@ import { DoneColumn } from './DoneColumn';
 import { boardHeadFigures } from './headFigures';
 import { layoutFor } from './layout';
 import { BoardSlab } from './BoardSlab';
-import { NeedsMe } from './NeedsMe';
+import { NeedsMe, needsKeys } from './NeedsMe';
 import { NextColumn } from './NextColumn';
 import { NowColumn } from './NowColumn';
+import { useRise } from './useRise';
 
 /** The narrow layouts' columns, top to bottom (and two by two): one constant, to revisit after the week. */
 export const NARROW_ORDER = ['needs', 'now', 'next', 'done'] as const;
@@ -28,8 +30,21 @@ export function Board(props: ViewProps) {
   const board = deriveBoard(snapshot, now);
   const boxes = taskBoxes(board, snapshot, now);
   const band: BandProps = { ...props, board, boxes, wide: layout === 'four', layout };
+  const order = layout === 'four' ? WIDE_ORDER : NARROW_ORDER;
+  // The keyboard grid: the columns in the layout's order. Next, Now and Done still draw the older boxes, so they hold no
+  // cursor items yet (a count of 0) until they move to BoardTile.
+  const keys: Record<Band, string[]> = { needs: needsKeys(boxes), next: [], now: [], done: [] };
+  const { itemProps } = useListCursor(
+    order.map((b) => keys[b].length),
+    ({ col, row }) => {
+      const box = order[col] === 'needs' ? boxes.needs[row] : undefined;
+      if (box?.row) props.onOpenNode(box.row.node.id);
+    },
+    order.map((b) => keys[b]),
+  );
+  const rise = useRise(order.flatMap((b) => keys[b].map((k) => `${b}:${k}`)));
   const body: Record<Band, ReactNode> = {
-    needs: <NeedsMe {...band} />,
+    needs: <NeedsMe {...band} cursor={(row) => itemProps(order.indexOf('needs'), row)} rise={rise} />,
     now: <NowColumn {...band} />,
     next: <NextColumn {...band} />,
     done: <DoneColumn {...band} lastLook={props.lastLook ?? null} />,
@@ -41,7 +56,6 @@ export function Board(props: ViewProps) {
     now: 'Live sessions, working first',
     done: `Latest of ${board.done.length}`,
   };
-  const order = layout === 'four' ? WIDE_ORDER : NARROW_ORDER;
   return (
     <div ref={root} className="ip-board" data-layout={layout}>
       <div className="ip-board-page">

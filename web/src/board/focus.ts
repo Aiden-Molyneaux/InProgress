@@ -1,5 +1,5 @@
 /** The rows a band or a panel lists, as a focus walk sees them. A pending box (a Backlog delete waiting for its answer) is about to leave too, and a confirming one keeps its title out of the Tab order (a walk's script focus would still reach it), so both are passed over. */
-const ROWS = 'li.ip-card:not(.pending):not(.confirming), li.ip-dask:not(.cleared)';
+const ROWS = 'li.ip-card:not(.pending):not(.confirming), article.ip-tile:not([data-pending]), .ip-backlog-row:not(.pending):not(.confirming), li.ip-dask:not(.cleared)';
 
 /**
  * Where focus goes when `row` is about to leave (spec 2.2): the title button of the next row in its band or panel, else
@@ -10,7 +10,8 @@ export function focusTargetAfter(row: Element | null): HTMLElement | null {
   const home = row?.closest<HTMLElement>('.ip-band, aside, .ip-backlogview');
   if (!row || !home) return null;
   const others = [...home.querySelectorAll(ROWS)].filter((li) => li !== row && !row.contains(li) && !li.contains(row));
-  const pick = (li: Element) => li.querySelector<HTMLElement>('.ip-row-title');
+  // A cursor item (a Board tile, a preview row) takes focus itself; the older rows take their title button.
+  const pick = (li: Element) => (li.matches('[data-cursor]') ? (li as HTMLElement) : li.querySelector<HTMLElement>('.ip-row-title'));
   // The nearest row each way that has a title button to focus: a row without one (a permission wait on no step) is passed over, and a row's own buttons (data-act) never take focus from a walk.
   const after = others.filter((li) => row.compareDocumentPosition(li) & Node.DOCUMENT_POSITION_FOLLOWING).map(pick).find(Boolean);
   const before = others.filter((li) => row.compareDocumentPosition(li) & Node.DOCUMENT_POSITION_PRECEDING).reverse().map(pick).find(Boolean);
