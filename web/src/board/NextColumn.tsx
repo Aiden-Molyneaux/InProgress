@@ -157,7 +157,7 @@ export function NextColumn({ snapshot, board, now, selectedNode, onOpenNode, onO
           onDrop: dropInNext,
         }}
         onKeyDown={(e) => moveKey(e, id)}
-        actions={
+        lead={
           <Button
             variant="ghost"
             size="sm"

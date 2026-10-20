@@ -22,4 +22,12 @@ describe('parseWithStepRefs', () => {
     expect(html).not.toContain('data-step');
     expect(html).toContain('&#39;');
   });
+
+  it('keeps a numeric entity as text at the start of a line and after emphasis', () => {
+    for (const text of ['&#39;tis fine', '**x**&#39;s fine']) {
+      const html = parseWithStepRefs(text, has);
+      expect(html).not.toContain('data-step');
+      expect(html).toContain('&#39;');
+    }
+  });
 });

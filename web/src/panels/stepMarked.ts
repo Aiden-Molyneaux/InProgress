@@ -9,16 +9,19 @@ const stepMarked = new Marked({
     {
       name: 'stepRef',
       level: 'inline',
-      // Not after `&`: that is a numeric entity (`&#39;`), which marked leaves for the browser to read.
-      start: (src: string) => /(?<![\w#&])#\d/.exec(src)?.index,
+      // A numeric entity (`&#39;`) is a candidate too, so the tokenizer sees its `&` even at the start of an inline run
+      // and passes it through whole, never as `&` and a step link.
+      start: (src: string) => /(?<![\w#&])#\d|&#\d/.exec(src)?.index,
       tokenizer(this: { lexer: { state: { inLink: boolean } } }, src: string) {
         // Inside a link's text a nested <a> would empty the outer link.
         if (this.lexer.state.inLink) return undefined;
+        const entity = /^&#\d+;/.exec(src);
+        if (entity) return { type: 'stepRef', raw: entity[0], entity: entity[0] };
         const m = /^#(\d+)(?!\w)/.exec(src);
         if (!m || !knownStep(Number(m[1]))) return undefined;
         return { type: 'stepRef', raw: m[0], id: Number(m[1]) };
       },
-      renderer: (token) => `<a href="#step-${token.id}" data-step="${token.id}">#${token.id}</a>`,
+      renderer: (token) => token.entity ? token.entity : `<a href="#step-${token.id}" data-step="${token.id}">#${token.id}</a>`,
     },
   ],
 });

@@ -5,6 +5,11 @@ import { noteAction, type MeasureArea } from '../measure';
 import { MARK_WORDS } from './Marks';
 import { ageShort } from './text';
 
+/** Whether the foot has anything to show: a tile with none draws no foot row at all. */
+export function tileFootHas(row: BoardRow, docs: number, noLabel?: boolean): boolean {
+  return Boolean(row.handoff) || docs > 0 || Boolean(row.node.label && !noLabel) || row.marks.some((m) => m !== 'ended_open');
+}
+
 /** A tile's foot: the handoff (opens the viewer), the documents, the label, and the hygiene words, all as parts. */
 export function TileFoot({ row, now, area, docs, noLabel, onOpenResource }: { row: BoardRow; now: number; area: MeasureArea; docs: number; /** The label is already in the tile's top (Done). */ noLabel?: boolean; onOpenResource: (id: number) => void }) {
   const label = row.node.label;

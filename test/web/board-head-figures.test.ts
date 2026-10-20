@@ -40,4 +40,22 @@ describe('boardHeadFigures', () => {
       { label: 'DONE', value: 2 },
     ]);
   });
+
+  it('counts LIVE as the server counts busy sessions: working, or running a non-reader subagent or a command that counts as work', () => {
+    const agent = (agentType: string, endedAt: string | null) => ({ agentId: agentType, agentType, startedAt: '2026-10-20T11:00:00Z', runStartedAt: '2026-10-20T11:00:00Z', endedAt }) as unknown as Session['subagents'][number];
+    const command = (over: Record<string, unknown>) => ({ taskId: 'b1', persistent: false, commandHead: 'npm test', startedAt: '2026-10-20T11:50:00Z', endedAt: null, ...over }) as unknown as Session['commands'][number];
+    const sessions = [
+      session({ id: 'working', state: 'working' }),
+      session({ id: 'idle-with-agent', subagents: [agent('general-purpose', null)] }),
+      session({ id: 'idle-with-reader', subagents: [agent('Explore', null)] }),
+      session({ id: 'idle-agent-ended', subagents: [agent('general-purpose', '2026-10-20T11:30:00Z')] }),
+      session({ id: 'idle-with-command', commands: [command({})] }),
+      session({ id: 'idle-with-server', commands: [command({ commandHead: 'npm run dev' })] }),
+      session({ id: 'permission-with-command', state: 'permission', commands: [command({})] }),
+      session({ id: 'stale', state: 'working', lastSeenAt: '2026-10-19T08:00:00Z' }),
+      session({ id: 'idle' }),
+    ];
+    const live = boardHeadFigures({ next: [], done: [] }, { needs: [] }, { sessions }, NOW).find((f) => f.label === 'LIVE');
+    expect(live?.value).toBe(4);
+  });
 });

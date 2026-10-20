@@ -7,7 +7,7 @@ import { Tile } from '../parts/Tile';
 import type { MeasureArea } from '../measure';
 import { rowClick } from './Marks';
 import { boxSince, hueOf } from './boxState';
-import { TileFoot } from './TileFoot';
+import { TileFoot, tileFootHas } from './TileFoot';
 import { ageShort } from './text';
 import type { Band } from './ColumnHead';
 
@@ -31,6 +31,8 @@ export interface BoardTileProps {
   selected?: boolean;
   /** Chips after the id, before YOU and the age. */
   chips?: ReactNode;
+  /** A control at the head of the top row, before the chips. */
+  lead?: ReactNode;
   /** The foot's own buttons. */
   actions?: ReactNode;
   /** Replaces the age: Now says NOW while a session works on the step. */
@@ -55,7 +57,7 @@ export interface BoardTileProps {
  * then the title, the body, the system line and the foot. A click on the tile (not on its own controls) opens Details.
  * A box with no step (a permission wait on no step) has no id and no `data-node`, and is titled with its session.
  */
-export function BoardTile({ box, now, area, band, docs = 0, cursor, rise, selected, chips, age, actions, children, system, li, still = false, pending, dropBefore, dragging, onKeyDown, onOpenNode, onOpenResource }: BoardTileProps) {
+export function BoardTile({ box, now, area, band, docs = 0, cursor, rise, selected, chips, lead, age, actions, children, system, li, still = false, pending, dropBefore, dragging, onKeyDown, onOpenNode, onOpenResource }: BoardTileProps) {
   const { row, session, state } = box;
   const node = row?.node;
   const since = boxSince(box);
@@ -76,6 +78,7 @@ export function BoardTile({ box, now, area, band, docs = 0, cursor, rise, select
         id={node ? `#${node.id}` : undefined}
         chips={
           <>
+            {lead}
             {chips}
             {you && <Chip tone="needs">YOU</Chip>}
             {since && <span className="ip-tile-age">{age ?? ageShort(since, now)}</span>}
@@ -85,7 +88,7 @@ export function BoardTile({ box, now, area, band, docs = 0, cursor, rise, select
         titleClassName={node ? 'ip-row-title' : undefined}
         titleTabIndex={still ? -1 : undefined}
         body={children || system ? <>{children}{system && <p className="ip-sys">{system}</p>}</> : undefined}
-        foot={row ? <TileFoot row={row} now={now} area={area} docs={docs} noLabel={band === 'done'} onOpenResource={onOpenResource} /> : undefined}
+        foot={row && tileFootHas(row, docs, band === 'done') ? <TileFoot row={row} now={now} area={area} docs={docs} noLabel={band === 'done'} onOpenResource={onOpenResource} /> : undefined}
         actions={actions}
         selected={selected}
         pending={pending}
