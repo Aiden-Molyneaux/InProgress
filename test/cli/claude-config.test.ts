@@ -318,7 +318,7 @@ describe('install', () => {
   it('replaces the tasks rules an older checkout left, before adding its own', () => {
     const dir = claudeDirWithSettings({ ...existing, permissions: { allow: ['Bash(git status)', ...staleTaskRules, 'mcp__inprogress'] } });
     install({ repo, claudeDir: dir, stamp: 'st' });
-    expect(readSettings(dir).permissions.allow).toEqual(['Bash(git status)', 'mcp__inprogress', 'Edit(~/.inprogress/resources/**)', ...taskRules]);
+    expect(readSettings(dir).permissions.allow).toEqual(['Bash(git status)', 'mcp__inprogress', ...STATIC_ALLOW_RULES.slice(1), ...taskRules]);
   });
 
   it('leaves the tasks rules out for a repo path with a space, and says why', () => {
@@ -493,6 +493,20 @@ describe('install', () => {
   });
 });
 
+const TITLE_RULE = 'mcp__ccd_session_mgmt__set_session_title';
+
+describe('the set_session_title allow rule', () => {
+  it('is an allow rule, written by install and removed by uninstall', () => {
+    expect(allowRules(repo)).toContain(TITLE_RULE);
+    const dir = claudeDirWithSettings(existing);
+    install({ repo, claudeDir: dir, stamp: 'tr1' });
+    expect(readSettings(dir).permissions.allow).toContain(TITLE_RULE);
+    uninstall({ claudeDir: dir, stamp: 'tr2' });
+    expect(readSettings(dir).permissions?.allow ?? []).not.toContain(TITLE_RULE);
+    expect(readSettings(dir)).toEqual(existing);
+  });
+});
+
 describe('uninstall', () => {
   it('removes exactly what install added', () => {
     const dir = claudeDirWithSettings(existing);
@@ -602,6 +616,18 @@ describe('kitStatus', () => {
     install({ repo, claudeDir: dir, stamp: 'ka2' });
     expect(kitStatus({ repo, claudeDir: dir })).toEqual({ installed: true, differs: [] });
     expect(readSettings(dir).hooks.PostToolUse.filter((g: { hooks: { async?: boolean }[] }) => g.hooks[0].async)).toHaveLength(1);
+  });
+
+  it('reports the settings as different for an install from before the set_session_title rule, until install runs again', () => {
+    const dir = claudeDirWithSettings({ theme: 'dark' });
+    install({ repo, claudeDir: dir, stamp: 'kn1' });
+    const settings = readSettings(dir);
+    settings.permissions.allow = settings.permissions.allow.filter((r: string) => r !== TITLE_RULE);
+    writeFileSync(join(dir, 'settings.json'), JSON.stringify(settings, null, 2));
+    expect(kitStatus({ repo, claudeDir: dir })).toEqual({ installed: true, differs: ['settings'] });
+    install({ repo, claudeDir: dir, stamp: 'kn2' });
+    expect(kitStatus({ repo, claudeDir: dir })).toEqual({ installed: true, differs: [] });
+    expect(readSettings(dir).permissions.allow).toContain(TITLE_RULE);
   });
 
   it('reports the settings as different when a tasks rule is missing or belongs to another checkout', () => {
