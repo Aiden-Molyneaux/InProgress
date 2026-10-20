@@ -9,10 +9,10 @@ type Order = 'time' | 'phase';
 const KEY = 'ip.doneOrder';
 
 /**
- * Every done step of the project (#406), opened from the foot of the Board's Done column. By time (a section per day) or
+ * Every done step of the project (#406), a view of its own: the rail opens it, and so does "All done ›" on the Board. By time (a section per day) or
  * by phase (a section per parent step). Rows open Details as the Done column's do.
  */
-export function DoneList({ snapshot, now, onOpenNode, onBack }: ViewProps & { onBack: () => void }) {
+export function DoneList({ snapshot, now, onOpenNode }: ViewProps) {
   const [order, setOrder] = useState<Order>(() => (load(KEY) === 'phase' ? 'phase' : 'time'));
   const pick = (o: Order) => {
     setOrder(o);
@@ -40,7 +40,6 @@ export function DoneList({ snapshot, now, onOpenNode, onBack }: ViewProps & { on
   return (
     <div className="ip-donelist">
       <div className="ip-donelist-head">
-        <button type="button" className="ip-donelist-back" onClick={onBack}>‹ Board</button>
         <span className="ip-quiet">{`${done.length} done`}</span>
         <div className="ip-donelist-toggle" role="group" aria-label="Order">
           <button type="button" aria-pressed={order === 'time'} onClick={() => pick('time')}>Time</button>

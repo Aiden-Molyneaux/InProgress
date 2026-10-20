@@ -8,11 +8,11 @@ import { QuickAdd } from '../board/QuickAdd';
 import type { ViewProps } from '../views/props';
 
 /**
- * The full Backlog (opened from "N ›" on the Board), built like All done: it replaces the Board body while open, with
- * "‹ Board" to go back. Every open entry, the filter and order controls, and a Parked group at the bottom; the quick-add
+ * The full Backlog (a view of its own: the rail opens it, and so does "N ›" on the Board), built like All done.
+ * Every open entry, the filter and order controls, and a Parked group at the bottom; the quick-add
  * at the foot creates a root step (No phase).
  */
-export function BacklogList({ snapshot, now, onOpenNode, onOpenResource, onStatus, onBack }: ViewProps & { onBack: () => void }) {
+export function BacklogList({ snapshot, now, onOpenNode, onOpenResource, onStatus }: ViewProps) {
   const { project } = snapshot;
   const board = useMemo(() => deriveBoard(snapshot, now), [snapshot, now]);
   const boxes = useMemo(() => taskBoxes(board, snapshot, now).backlog, [board, snapshot, now]);
@@ -26,7 +26,6 @@ export function BacklogList({ snapshot, now, onOpenNode, onOpenResource, onStatu
   return (
     <div className="ip-donelist ip-backlogview">
       <div className="ip-donelist-head">
-        <button type="button" className="ip-donelist-back ip-backlogview-back" onClick={onBack}>‹ Board</button>
         <h2 ref={heading} className="ip-backlogview-title" tabIndex={-1}>{`Backlog · ${boxes.length}`}</h2>
       </div>
       <Backlog

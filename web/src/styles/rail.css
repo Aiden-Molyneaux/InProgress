@@ -1,0 +1,118 @@
+/* The module rail (spec section 6): projects and, under the open one, its views. A 216 px column, a 76 px column of codes from
+   1359 px down, and under 720 px a strip under the ruler with the views as a TabStrip at the top of the page. */
+@layer components {
+.ip-shell { flex: 1; display: flex; min-width: 0; min-height: 0; }
+.ip-rail { flex: none; width: 216px; display: flex; flex-direction: column; gap: var(--sp-4); padding: var(--sp-6) var(--sp-3); border-right: 1px solid var(--line); background: var(--canvas-0); overflow-y: auto; scrollbar-width: thin; }
+.ip-rail > * { flex: none; }
+.ip-rail ul { list-style: none; margin: 0; }
+.ip-rail-head { padding-inline: var(--sp-3); }
+.ip-rail-rows { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; padding: 0; }
+.ip-rail-rows > li { position: relative; }
+
+/* A project row: the 2 px rule in its faction colour at the top left, the name, then the signals at the right. */
+.ip-rail-row {
+  position: relative; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
+  min-height: 36px; padding: var(--sp-2) var(--sp-3);
+  border: 1px solid transparent; color: var(--text); text-decoration: none; cursor: pointer;
+  font-family: var(--font-display); font-stretch: 125%; font-weight: var(--w-display); font-size: var(--t-h3); line-height: 0.9; text-transform: uppercase; white-space: nowrap;
+  transition: color var(--dur-1) var(--ease-std), background-color var(--dur-1) var(--ease-std), border-color var(--dur-1) var(--ease-std);
+}
+.ip-rail-rule { position: absolute; left: var(--sp-3); top: 3px; width: var(--sp-4); height: 2px; background: var(--rr, var(--line-bright)); }
+.ip-rail-row:hover, .ip-rail-row.menu-open { color: var(--volt); border-color: var(--line-strong); }
+.ip-rail-row:focus-visible { outline: none; border-color: var(--volt); box-shadow: 0 0 0 2px var(--volt-soft); }
+.ip-rail-row[aria-current='page'] { background: var(--volt); color: var(--volt-ink); }
+.ip-rail-row[aria-current='page'] .ip-rail-rule { background: var(--volt-ink); }
+.ip-rail-row[aria-current='page'] .p-livedot { border-color: var(--volt-ink); }
+.ip-rail-row[aria-current='page'] .p-livedot::after { background: var(--volt-ink); }
+.ip-rail-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ip-rail-chip { flex: none; }
+.ip-rail-code { display: none; }
+.ip-rail-sig { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+/* How many asks and permission waits wait there. */
+.ip-rail-ask { padding: 3px 5px; background: var(--volt); color: var(--volt-ink); font-family: var(--font-mono); font-stretch: 75%; font-weight: var(--w-strong); font-size: var(--t-micro); line-height: 1; }
+.ip-rail-row[aria-current='page'] .ip-rail-ask { background: var(--volt-ink); color: var(--volt); }
+/* Dragging a row: it dims, and a 2 px ink line shows the slot it would drop in. */
+.ip-rail-row.dragging { opacity: .5; }
+.ip-rail-row.drop-before { box-shadow: inset 0 2px 0 var(--volt); }
+.ip-rail-row.drop-after { box-shadow: inset 0 -2px 0 var(--volt); }
+
+/* The open project's views, indented under its row. */
+.ip-rail-views { display: grid; padding: 2px 0 var(--sp-2); }
+.ip-rail-view {
+  position: relative; display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 30px; padding: 0 var(--sp-3) 0 calc(var(--sp-3) + var(--sp-4));
+  border: 1px solid transparent; color: var(--text-muted); text-align: left; cursor: pointer; white-space: nowrap;
+  font-family: var(--font-mono); font-stretch: 87.5%; font-size: var(--t-detail-sm); letter-spacing: 0.04em; text-transform: uppercase;
+}
+.ip-rail-view:hover { color: var(--volt); }
+.ip-rail-view:focus-visible { outline: none; border-color: var(--volt); }
+.ip-rail-view[aria-current='page'] { color: var(--volt); }
+.ip-rail-view[aria-current='page']::before { content: '\203A'; position: absolute; left: var(--sp-3); }
+.ip-rail-n { color: var(--text-dim); font-stretch: 75%; }
+.ip-rail-vcode { display: none; }
+
+/* The foot: the archived and recently deleted projects. */
+.ip-rail-foot { display: block; margin-top: auto; padding: var(--sp-4) var(--sp-3) 0; border-top: 1px solid var(--line-soft); }
+.ip-rail-foot-short { display: none; }
+
+/* The menus: the Menu part's surface, fixed so the rail's overflow cannot clip it. */
+.ip-rail-menu { position: fixed; z-index: 20; min-width: 200px; max-width: min(300px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow-y: auto; text-align: left; }
+.ip-rail-menu .p-confirm, .ip-rail-menu .p-field { min-width: 240px; max-width: 100%; }
+.ip-rail-menu .p-field { padding: var(--sp-3); }
+/* Archive's second line: the live sessions it stops tracking. */
+.ip-rail-note { display: block; margin-top: var(--sp-1); font-size: var(--t-detail-sm); color: var(--text-muted); }
+.ip-rail-menu-head { padding: var(--sp-2) var(--sp-3) var(--sp-1); }
+/* An archived or a deleted project: its name (an item for an archived one), then its actions at the right. */
+.ip-rail-menu-row { display: flex; align-items: center; gap: var(--sp-1); padding-right: var(--sp-2); }
+.ip-rail-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); text-align: left; font-size: var(--t-body); color: var(--text); }
+.ip-rail-open:hover, .ip-rail-open:focus { background: var(--canvas-3); color: var(--text-hi); outline: none; }
+.ip-rail-open:focus-visible { box-shadow: inset 2px 0 0 var(--volt); }
+.ip-rail-open[aria-current='true'] .ip-rail-open-name { color: var(--volt); }
+.ip-rail-open-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ip-rail-gone { padding: var(--sp-2) var(--sp-3); font-size: var(--t-body); color: var(--text); }
+/* Days left: a time, so mono, muted. */
+.ip-rail-left { flex: none; font-family: var(--font-mono); font-size: var(--t-micro); color: var(--text-muted); white-space: nowrap; }
+.ip-rail-act { flex: none; padding: var(--sp-1) var(--sp-2); color: var(--text-muted); white-space: nowrap; font-family: var(--font-brand); font-stretch: 112.5%; font-weight: var(--w-brand); font-size: var(--t-micro); letter-spacing: 0.08em; text-transform: uppercase; }
+.ip-rail-act:hover, .ip-rail-act:focus { color: var(--volt); outline: none; }
+.ip-rail-act:focus-visible { box-shadow: inset 0 0 0 2px var(--volt-soft); }
+
+/* Under 720 the views are a TabStrip at the top of the page; from 720 up the rail has them. */
+.ip-viewtabs { display: none; }
+
+/* 720 to 1359: a 76 px column of three-letter codes. The ask count is a small block at the row's top right, and the foot is
+   its ⋯ (the same name). */
+@media (max-width: 1359px) {
+  .ip-rail-foot-full { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .ip-rail-foot-short { display: inline; }
+}
+@media (min-width: 720px) and (max-width: 1359px) {
+  .ip-rail { width: 76px; padding-inline: var(--sp-2); }
+  .ip-rail-head { padding-inline: 0; justify-content: center; }
+  .ip-rail-head-text, .ip-rail-name, .ip-rail-vlabel, .ip-rail-n, .ip-rail-chip, .ip-rail-row .p-livedot { display: none; }
+  .ip-rail-row { justify-content: center; padding: var(--sp-2) var(--sp-1); font-family: var(--font-brand); font-stretch: 112.5%; font-size: var(--t-detail-sm); letter-spacing: 0.08em; }
+  .ip-rail-code, .ip-rail-vcode { display: inline; }
+  .ip-rail-rule { left: 50%; translate: -50% 0; }
+  .ip-rail-sig { position: absolute; top: 2px; right: 2px; }
+  .ip-rail-ask { padding: 2px 3px; }
+  .ip-rail-view { justify-content: center; padding: 0; font-family: var(--font-brand); font-stretch: 112.5%; font-size: var(--t-micro); font-weight: var(--w-brand); }
+  .ip-rail-view[aria-current='page']::before { content: none; }
+  .ip-rail-foot { padding-inline: 0; text-align: center; }
+}
+
+/* Under 720: the rail is a strip under the ruler, scrolling sideways, with the foot as a ⋯ at its right end. */
+@media (max-width: 719px) {
+  .ip-shell { flex-direction: column; }
+  .ip-rail { width: auto; flex-direction: row; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-right: 0; border-bottom: 1px solid var(--line); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+  .ip-rail-head, .ip-rail-views { display: none; }
+  .ip-rail-rows { display: flex; grid-template-columns: none; gap: 2px; }
+  .ip-rail-row { min-height: 34px; padding-inline: var(--sp-3); }
+  .ip-rail-row.drop-before { box-shadow: inset 2px 0 0 var(--volt); }
+  .ip-rail-row.drop-after { box-shadow: inset -2px 0 0 var(--volt); }
+  /* Kept in view at the right end however far the rows scroll. */
+  .ip-rail-foot { position: sticky; z-index: 20; right: 0; width: 40px; display: flex; justify-content: center; margin: 0 0 0 auto; padding: 0; border: 0; background: var(--canvas-0); }
+  /* The ⋯ covers the strip's right end, so keep-in-view and the rows' end padding clear its width. */
+  .ip-rail { scroll-padding-inline-end: calc(40px + var(--sp-2)); }
+  .ip-rail-rows { padding-inline-end: calc(40px + var(--sp-2)); }
+  .ip-main { flex-direction: column; }
+  .ip-viewtabs { display: flex; flex: none; margin: var(--sp-3) var(--sp-4) 0; }
+}
+}

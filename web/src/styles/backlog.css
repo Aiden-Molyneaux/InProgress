@@ -4,7 +4,7 @@
 .ip-backlog-head { align-items: center; justify-content: flex-start; gap: 8px; margin-bottom: 8px; }
 .ip-backlog-name { flex: none; font-size: var(--fs-s); line-height: 14px; letter-spacing: .04em; color: var(--muted); }
 .ip-backlog-phase { flex: 0 1 auto; min-width: 0; max-width: 150px; height: 20px; padding: 0 4px; font: inherit; font-size: var(--fs-s); line-height: 14px; color: var(--text-2); background: var(--panel); border: 1px solid var(--border); text-overflow: ellipsis; }
-.ip-backlog-phase:focus-visible, .ip-chip:focus-visible, .ip-park-field:focus-visible, .ip-donelist-back:focus-visible { outline: 2px solid var(--volt); outline-offset: 1px; }
+.ip-backlog-phase:focus-visible, .ip-chip:focus-visible, .ip-park-field:focus-visible { outline: 2px solid var(--volt); outline-offset: 1px; }
 .ip-backlog-head .ip-add { margin-left: auto; }
 /* The full Backlog view reuses All done's frame. */
 .ip-backlogview-title { margin: 0; font-size: var(--fs-m); font-weight: var(--w-heavy); color: var(--text-2); }

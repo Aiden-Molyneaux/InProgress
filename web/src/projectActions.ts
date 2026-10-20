@@ -1,7 +1,7 @@
 import { DELETED_RETENTION_MS, PROJECT_NAME_MAX, type DeletedProject, type Project, type ProjectSnapshot, type ProjectSummary, type TreeNode } from '../../src/core/types';
 
 /**
- * The window's own writes to a project: archive from a tab, unarchive and delete from a tab or ⋯, restore from ⋯. A
+ * The window's own writes to a project: archive from a rail row, unarchive and delete from a row or the rail foot, restore from the rail foot. A
  * delete of an active project archives it in the same write.
  */
 export type ProjectAction = 'archive' | 'unarchive' | 'delete' | 'restore';
@@ -13,13 +13,13 @@ export type ActionTarget = Pick<ProjectSummary, 'id' | 'slug' | 'name'>;
 export function actionMessage(action: ProjectAction, name: string): string {
   switch (action) {
     case 'archive':
-      return `Archived ${name}. It is under ⋯.`;
+      return `Archived ${name}. It is under Archived in the rail.`;
     case 'unarchive':
-      return `${name} is back in the tabs.`;
+      return `${name} is back in the rail.`;
     case 'delete':
-      return `Deleted ${name}. Restore it from ⋯ within 30 days.`;
+      return `Deleted ${name}. Restore it from Archived in the rail within 30 days.`;
     case 'restore':
-      return `Restored ${name}. It is under Archived in ⋯.`;
+      return `Restored ${name}. It is under Archived in the rail.`;
   }
 }
 
@@ -56,7 +56,7 @@ export function renamedSnapshot<S extends RenameableSnapshot>(snapshot: S | null
 }
 
 /**
- * Archive's second line in a tab's menu: the live sessions it stops tracking (they keep running). Delete's confirm
+ * Archive's second line in a rail row's menu: the live sessions it stops tracking (they keep running). Delete's confirm
  * says it too, since a delete archives an active project first.
  */
 export function archiveNote(activeSessions: number): string | null {
@@ -66,7 +66,7 @@ export function archiveNote(activeSessions: number): string | null {
 
 /**
  * The project list as it stands once an action has gone through, until the reload that follows lands. A restored
- * project comes back at once as `restored`, the server's answer: left to the reload, ⋯ would close in between when
+ * project comes back at once as `restored`, the server's answer: left to the reload, the foot menu would close in between when
  * the project was its only row, and focus would fall elsewhere. One the list already holds stays as it is.
  */
 export function patchProjects<P extends Pick<ProjectSummary, 'id' | 'status'>>(projects: P[], action: ProjectAction, id: number, restored?: P): P[] {

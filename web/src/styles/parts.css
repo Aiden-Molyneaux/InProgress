@@ -172,7 +172,8 @@
   transition: color var(--dur-1) var(--ease-std), background-color var(--dur-1) var(--ease-std), translate var(--dur-1) var(--ease-std);
 }
 .p-tab:last-child { border-right: 0; }
-.p-tab:hover:not(:disabled):not([aria-disabled="true"]) { color: var(--volt); }
+/* The picked tab keeps its ink on volt under the pointer. */
+.p-tab:hover:not(:disabled):not([aria-disabled="true"]):not([aria-selected="true"]):not([aria-pressed="true"]) { color: var(--volt); }
 .p-tab:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--volt-soft); }
 .p-tab:active:not(:disabled):not([aria-disabled="true"]) { translate: 0 1px; }
 .p-tab[aria-selected="true"], .p-tab[aria-pressed="true"] { background: var(--volt); color: var(--volt-ink); }

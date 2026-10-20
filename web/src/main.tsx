@@ -10,15 +10,17 @@ import './styles/base.css';
 import './styles/parts.css';
 import './styles/page.css';
 import './styles/chrome.css';
+import './styles/rail.css';
 import './styles/project.css';
 import './styles/board.css';
 import './styles/panels.css';
+import './styles/commandbar.css';
 import './styles/done.css';
 import './styles/backlog.css';
 import './styles/marker.css';
 import { Root } from './Root';
 
-// The first render waits for the bundled faces, so what it measures (the tab strip scrolls its current tab into view,
+// The first render waits for the bundled faces, so what it measures (the rail scrolls its current row into view,
 // with a peek of the next) is measured in them and not left wrong when they swap in. Best effort: the files come from
 // this server, so they land in milliseconds, but a face that fails or stalls holds the window back two seconds at most,
 // and a strip measured in the fallback then stays as measured until the next switch or resize.

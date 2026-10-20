@@ -35,7 +35,7 @@ export function PreviewPanel({ rows, choices, phase, total, adding, field, addBu
   const title = choices.find((c) => c.value === phase)?.title ?? 'No phase';
   return (
     <>
-      <div className="ip-rail-foot ip-backlog-head">
+      <div className="ip-preview-foot ip-backlog-head">
         <span className="ip-backlog-name">Backlog</span>
         <select
           className="ip-backlog-phase"

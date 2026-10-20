@@ -4,10 +4,10 @@ import { actionMessage, archiveNote, patchDeleted, patchName, patchProjects, ren
 
 describe('actionMessage', () => {
   it("says what happened and where the project went, in the status line's words", () => {
-    expect(actionMessage('archive', 'Old Site')).toBe('Archived Old Site. It is under ⋯.');
-    expect(actionMessage('unarchive', 'Old Site')).toBe('Old Site is back in the tabs.');
-    expect(actionMessage('delete', 'Old Site')).toBe('Deleted Old Site. Restore it from ⋯ within 30 days.');
-    expect(actionMessage('restore', 'Old Site')).toBe('Restored Old Site. It is under Archived in ⋯.');
+    expect(actionMessage('archive', 'Old Site')).toBe('Archived Old Site. It is under Archived in the rail.');
+    expect(actionMessage('unarchive', 'Old Site')).toBe('Old Site is back in the rail.');
+    expect(actionMessage('delete', 'Old Site')).toBe('Deleted Old Site. Restore it from Archived in the rail within 30 days.');
+    expect(actionMessage('restore', 'Old Site')).toBe('Restored Old Site. It is under Archived in the rail.');
   });
 });
 

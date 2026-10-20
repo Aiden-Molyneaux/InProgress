@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { deriveBoard, isLive } from '../../src/core/board';
-import type { StepHit } from '../../src/core/goto';
 import { buildIndex, shelvedIds } from '../../src/core/tree';
 import type { ProjectSnapshot } from '../../src/core/types';
 import { api, postEvent } from './api';
@@ -8,15 +7,17 @@ import { Board } from './board/Board';
 import { useLastLook } from './board/lastLook';
 import { noteAction, noteHidden, noteShown, setPoster } from './measure';
 import { Footer } from './chrome/Footer';
-import type { GoToHandle } from './chrome/GoTo';
+import type { GoPick, GoToHandle } from './chrome/GoTo';
 import { Hud, HudEdge } from './chrome/Hud';
 import { askTarget } from './chrome/hudLogic';
 import { archivedProjects, loadTabOrder, moveTab, neighbourTab, projectTabs, pruneOrder, saveTabOrder, stepTab, TAB_ORDER_KEY } from './chrome/tabs';
-import { TopBar } from './chrome/TopBar';
+import { Rail } from './chrome/Rail';
+import { railCodes, railViews } from './chrome/railLogic';
 import { BacklogList } from './backlog/BacklogList';
 import { DoneList } from './done/DoneList';
 import { Details } from './panels/Details';
 import { EmptyState } from './parts/EmptyState';
+import { TabStrip } from './parts/TabStrip';
 import { Toast, ToastRegion } from './parts/Toast';
 import { ResourceViewer } from './panels/ResourceViewer';
 import { ProjectView } from './project/ProjectView';
@@ -52,10 +53,17 @@ export function App() {
   // title button of the row that opened it.
   const detailsOpener = useRef<{ element: HTMLElement | null; node: number } | null>(null);
   const detailsOpen = selectedNode !== null;
+  /** Set when Details itself picks the next step (its Steps rows, the parent link), so the opener stands. */
+  const fromDetails = useRef(false);
   useLayoutEffect(() => {
     if (detailsOpen) {
       const active = document.activeElement;
-      detailsOpener.current = { element: active instanceof HTMLElement && active !== document.body ? active : null, node: selectedNodeRef.current! };
+      const outside = active instanceof HTMLElement && active !== document.body && !active.closest('.ip-details');
+      // Opening records the opener. Switching step from Details' own Steps rows or parent link keeps it; any other switch
+      // (another card, even a click that left focus on the page) re-records it.
+      const inside = fromDetails.current;
+      fromDetails.current = false;
+      if (!inside || !detailsOpener.current) detailsOpener.current = { element: outside ? active : null, node: selectedNodeRef.current! };
       return;
     }
     const from = detailsOpener.current;
@@ -64,7 +72,7 @@ export function App() {
     if (!from || (document.activeElement && document.activeElement !== document.body)) return;
     const target = from.element?.isConnected ? from.element : document.querySelector<HTMLElement>(`[data-node="${from.node}"] .ip-row-title`);
     target?.focus();
-  }, [detailsOpen]);
+  }, [detailsOpen, selectedNode]);
   const [viewerResource, setViewerResource] = useState<number | null>(null);
   const viewerOpen = viewerResource !== null;
   const goToField = useRef<GoToHandle>(null);
@@ -81,53 +89,31 @@ export function App() {
     },
     [snapshot, now],
   );
-  // The full done list stands in for the Board while open. Opening it focuses its ‹ Board; going back focuses the Board's
-  // All done button, or the Done heading when nothing is done. Only these two moves take focus: a project switch leaves it.
-  const [doneOpen, setDoneOpen] = useState(false);
-  const doneMoved = useRef(false);
-  const openDone = () => {
-    noteAction('done', 'all');
-    doneMoved.current = true;
-    setDoneOpen(true);
-  };
-  const closeDone = () => {
-    doneMoved.current = true;
-    setDoneOpen(false);
-  };
+  // The four views are peers. A pick (from the rail, the narrow window's Views tabs or a link on the Board) shows its view;
+  // the Backlog and All done links on the Board then move focus to the current view's row in the rail (or, in the strip,
+  // its Views tab), since the control that was pressed has left with the Board. A counter and an effect, as ASKS uses.
+  const [viewFocus, setViewFocus] = useState(0);
   useEffect(() => {
-    if (!doneMoved.current) return;
-    doneMoved.current = false;
-    const to = doneOpen ? ['.ip-donelist-back'] : ['.ip-done-all', '.ip-band-done h3'];
-    to.map((sel) => document.querySelector<HTMLElement>(sel)).find(Boolean)?.focus();
-  }, [doneOpen]);
-  // The full Backlog stands in for the Board the same way. Opening it focuses its ‹ Board; going back focuses the preview's
-  // "N ›" button. Its filter lives in the view, so leaving it clears the filter.
-  const [backlogOpen, setBacklogOpen] = useState(false);
-  const backlogMoved = useRef(false);
-  const openBacklog = () => {
-    noteAction('backlog', 'all');
-    backlogMoved.current = true;
-    setBacklogOpen(true);
-    postEvent('backlog_open', snapshot?.project.id ?? null);
-  };
-  const closeBacklog = () => {
-    backlogMoved.current = true;
-    setBacklogOpen(false);
-  };
-  useEffect(() => {
-    if (!backlogMoved.current) return;
-    backlogMoved.current = false;
-    const to = backlogOpen ? ['.ip-backlogview-back'] : ['.ip-backlog-all', '.ip-band-next h3'];
-    to.map((sel) => document.querySelector<HTMLElement>(sel)).find(Boolean)?.focus();
-  }, [backlogOpen]);
+    if (viewFocus === 0) return;
+    const rows = [...document.querySelectorAll<HTMLElement>('.ip-rail-view[aria-current="page"], .ip-viewtabs .p-tab[aria-pressed="true"]')];
+    // Only one of the two is on screen: the other is display: none.
+    rows.find((el) => el.offsetParent !== null)?.focus();
+  }, [viewFocus]);
   const pickView = (v: View) => {
-    setDoneOpen(false);
-    setBacklogOpen(false);
     if (v === view) return;
     noteAction('header', 'view');
     setView(v);
     saveView(v);
-    postEvent('view', snapshot?.project.id ?? null, { view: v });
+    // A switch clears the snapshot until the next project's lands: a pick then belongs to no project, never the last one.
+    const shown = snapshot && snapshot.project.slug === state.slug ? snapshot.project.id : null;
+    postEvent('view', shown, { view: v });
+    if (v === 'backlog') postEvent('backlog_open', shown);
+  };
+  /** The Board's "N ›" and "All done ›": the pick, and focus on the view's row. */
+  const openFromBoard = (v: 'backlog' | 'done') => {
+    noteAction(v === 'backlog' ? 'backlog' : 'done', 'all');
+    pickView(v);
+    setViewFocus((n) => n + 1);
   };
   // The tabs follow the picked slug, not the loaded snapshot, so a tab lights up on the click and [ ] step on from it.
   // The tab order Aiden dragged, kept in the window's localStorage. A second window follows a move through `storage`.
@@ -165,6 +151,9 @@ export function App() {
     noteAction('header', 'tab_move');
   };
   const archived = useMemo(() => archivedProjects(projects), [projects]);
+  const codes = useMemo(() => railCodes(tabs), [tabs]);
+  // The views and their counts are the shown project's: not those of the one before it, while the next one loads.
+  const views = useMemo(() => railViews(snapshot && snapshot.project.slug === state.slug ? snapshot : null, now), [snapshot, state.slug, now]);
   // ASKS: the open project's Board with focus on Needs me, or the first project in tab order that has asks. The counter
   // moves focus after the Board shows.
   const [needsFocus, setNeedsFocus] = useState(0);
@@ -276,7 +265,16 @@ export function App() {
   goingRef.current = goingTo;
   /** The jump whose step the snapshot lacked, checked with the server once so a stale snapshot never drops it. */
   const checked = useRef<typeof goingTo>(null);
-  const goTo = (hit: StepHit) => {
+  const goTo = (pick: GoPick) => {
+    if (pick.kind === 'view') {
+      pickView(pick.view);
+      return;
+    }
+    if (pick.kind === 'project') {
+      state.selectProject(pick.slug);
+      return;
+    }
+    const { hit } = pick;
     setGoingTo({ id: hit.id, projectId: hit.projectId, slug: hit.projectSlug });
     if (hit.projectSlug !== state.slug) state.selectProject(hit.projectSlug);
   };
@@ -285,7 +283,7 @@ export function App() {
     if (!going) return;
     const drop = () => {
       setGoingTo(null);
-      say(`No step #${going.id}`);
+      fail(`No step #${going.id}`);
     };
     if (state.slug !== going.slug) {
       setGoingTo(null);
@@ -350,39 +348,56 @@ export function App() {
     <>
       <div className="ip-app" ref={app}>
         {hud(true)}
-        <TopBar tabs={tabs} archived={archived} deleted={state.deleted} current={state.slug} onSelect={state.selectProject} onAction={onAction} onRename={onRename} onMove={onMoveTab} view={view} onView={pickView} />
-        <main className="ip-main">
-          {projects.length === 0 ? (
-            <EmptyState className="ip-wait">
-              {state.deleted.length > 0
-                ? 'No projects. Restore one from ⋯, or in a Claude session say "track this in InProgress".'
-                : 'No projects yet. A Claude session adds one when it opts in.'}
-            </EmptyState>
-          ) : snapshot ? (
-            view === 'board' && backlogOpen ? (
-              <BacklogList key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onStatus={fail} onBack={closeBacklog} />
-            ) : view === 'board' && doneOpen ? (
-              <DoneList key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onBack={closeDone} />
-            ) : view === 'board' ? (
-              <Board key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onOpenDone={openDone} onOpenBacklog={openBacklog} lastLook={lastLook} onStatus={fail} />
+        <div className="ip-shell">
+          <Rail tabs={tabs} archived={archived} deleted={state.deleted} current={state.slug} onSelect={state.selectProject} onAction={onAction} onRename={onRename} onMove={onMoveTab} view={view} onView={pickView} views={views} codes={codes} />
+          <main className="ip-main">
+            {projects.length === 0 ? (
+              <EmptyState className="ip-wait">
+                {state.deleted.length > 0
+                  ? 'No projects. Restore one from Archived, or in a Claude session say "track this in InProgress".'
+                  : 'No projects yet. A Claude session adds one when it opts in.'}
+              </EmptyState>
             ) : (
-              <ProjectView key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onStatus={fail} />
-            )
-          ) : (
-            <EmptyState className="ip-wait">Loading project…</EmptyState>
-          )}
-          {snapshot && selectedNode !== null && (
-            <Details
-              key={selectedNode}
-              nodeId={selectedNode}
-              snapshot={snapshot}
-              onClose={() => setSelectedNode(null)}
-              onSelectNode={setSelectedNode}
-              onOpenResource={openViewer}
-              onStatus={fail}
-            />
-          )}
-        </main>
+              <>
+                {/* Under 720 px the rail is a strip with no room for the views, so they sit at the top of the page. Kept
+                    up while the next project loads, so a switch with focus in it keeps focus there. */}
+                <TabStrip
+                  variant="segmented"
+                  label="Views"
+                  items={views.map((v) => ({ id: v.view, label: v.label, count: v.count }))}
+                  value={view}
+                  onChange={(id) => pickView(id as View)}
+                  className="ip-viewtabs"
+                />
+                {!snapshot ? (
+                  <EmptyState className="ip-wait">Loading project…</EmptyState>
+                ) : view === 'backlog' ? (
+                  <BacklogList key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onStatus={fail} />
+                ) : view === 'done' ? (
+                  <DoneList key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} />
+                ) : view === 'board' ? (
+                  <Board key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onOpenDone={() => openFromBoard('done')} onOpenBacklog={() => openFromBoard('backlog')} lastLook={lastLook} onStatus={fail} />
+                ) : (
+                  <ProjectView key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onStatus={fail} codes={codes} />
+                )}
+              </>
+            )}
+            {snapshot && selectedNode !== null && (
+              <Details
+                key={selectedNode}
+                nodeId={selectedNode}
+                snapshot={snapshot}
+                onClose={() => setSelectedNode(null)}
+                onSelectNode={(id) => {
+                  if (id !== selectedNodeRef.current) fromDetails.current = true;
+                  setSelectedNode(id);
+                }}
+                onOpenResource={openViewer}
+                onStatus={fail}
+              />
+            )}
+          </main>
+        </div>
         <Footer event={state.lastEvent} snapshot={snapshot} tabs={tabs.length} closable={detailsOpen || viewerOpen} />
       </div>
       {/* Outside .ip-app, which turns inert while the viewer is open. */}
