@@ -16,6 +16,7 @@ import { parkedAncestor, shelvedAmong } from './repo/shelved';
 import { getProjectById, isTracking, notTracked, releaseQueue, resolveBinding, resolveProject } from './repo/projects';
 import { assignSlot, briefingDue, clearBriefingDue, findSession, markBriefingDue, markRevived, saveSession } from './repo/sessions';
 import { getProjectSnapshot } from './repo/snapshot';
+import { titleAdvice } from './title-channel';
 import { endAgent, endSubagents, launchSubagent, messageAgent, pinStartFocus, pruneSubagents, recordDispatch, startSubagent, stopSubagent, subagentNode } from './repo/subagents';
 import { taskCreated, taskUpdated } from './repo/work';
 
@@ -314,6 +315,11 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
   // source, and an owed briefing count as new. An owed briefing is the enroll's even when a compaction's start brings
   // it: the one the enroll returned went to the scribe.
   const nowMs = Date.parse(ctx.now());
+  // The title advice reads the session as this event left it (its title, its state), so an obeyed demand is not repeated.
+  const adviceEvent = input.event === 'stop' ? 'stop' : input.event === 'prompt' && !input.notice ? 'prompt' : undefined;
+  // Only a titled session's stop reads the channel: a prompt never blocks, and an untitled session gets no advice.
+  const titleChannel = adviceEvent === 'stop' && session.title?.trim() ? (getProjectById(ctx, projectId)?.titleChannel ?? 'nudge') : 'nudge';
+  const advice = adviceEvent ? titleAdvice(ctx, session, adviceEvent, { stopHookActive: input.stopHookActive === true, titleChannel }) : {};
   let context: string | undefined;
   if (input.event === 'start' || created || briefingOwed) {
     const checkOld = briefingOwed || !(input.event === 'start' && input.source === 'compact');
@@ -347,8 +353,12 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
       lines.push(`+${rest.length} more open asks: ${named}${unnamed ? `, and ${unnamed} older` : ''}. If this prompt answers one, put "aN answered: ..." in your next scribe brief.`);
     }
     if (lines.length) context = [...lines, ...(context ? [context] : [])].join('\n');
+    // The title line leads: it is the one thing in the reply the session acts on before anything else.
+    if (advice.line) context = [advice.line, ...(context ? [context] : [])].join('\n');
   }
-  return context === undefined ? { tracked: true } : { tracked: true, context };
+  const result: HookEventResult = context === undefined ? { tracked: true } : { tracked: true, context };
+  if (input.event === 'stop' && advice.demand) result.title = advice.demand;
+  return result;
 }
 
 export function enrollSession(ctx: Ctx, actor: string, sessionId: string, projectRef: string | number, title?: string): { session: Session; briefing: string } {

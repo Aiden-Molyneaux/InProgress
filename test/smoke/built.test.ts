@@ -289,6 +289,29 @@ describe('built artifacts', () => {
     expect(logged().slice(before)).toBe('');
   });
 
+  it('under enforce, a Stop whose title is out of step prints one block naming the title, and nothing in the pass it causes', async () => {
+    const client = createClient({ baseUrl: base, token: readToken(home) });
+    // Its own project, so the Smoke project stays in nudge mode for the other stops.
+    const p = await client.post<{ slug: string; rootNodeId: number }>('/api/projects', { name: 'Smoke Titles' });
+    await client.patch(`/api/projects/${p.slug}`, { titleChannel: 'enforce' });
+    const [step] = await client.post<TreeNode[]>('/api/nodes', { parentId: p.rootNodeId, nodes: [{ title: 'Ship the titles', status: 'active' }] });
+    await client.post('/api/sessions/smoke-title/enroll', { project: p.slug, title: `#${step.id} Ship the titles` }, { actor: 'scribe:smoke-title' });
+    await client.post('/api/sessions/smoke-title/focus', { nodeId: step.id }, { actor: 'scribe:smoke-title' });
+    await client.patch(`/api/nodes/${step.id}`, { status: 'done' });
+    const stopWith = (active: boolean) => runHook('stop', { session_id: 'smoke-title', hook_event_name: 'Stop', stop_hook_active: active, background_tasks: [], session_crons: [] });
+    const extra = stopWith(true);
+    expect(extra).toMatchObject({ status: 0, stdout: '', stderr: '' });
+    const blocked = stopWith(false);
+    expect(blocked).toMatchObject({ status: 0, stderr: '' });
+    const reply = JSON.parse(blocked.stdout) as { decision: string; reason: string };
+    expect(reply).toEqual({ decision: 'block', reason: expect.stringContaining(`"DONE #${step.id} Ship the titles"`) });
+    expect(reply.reason).toContain('mcp__ccd_session_mgmt__set_session_title');
+    expect(storedRows('sessions').find((r) => r.id === 'smoke-title')).toMatchObject({ title_asked: `DONE #${step.id} Ship the titles` });
+    // The extra pass the block causes, and a second stop with the same title, print nothing.
+    expect(stopWith(true)).toMatchObject({ status: 0, stdout: '', stderr: '' });
+    expect(stopWith(false)).toMatchObject({ status: 0, stdout: '', stderr: '' });
+  });
+
   it('hooks exit 0 silently when the capture folder cannot be written, or capture is off', () => {
     const blocked = mkdtempSync(join(tmpdir(), 'ip-smoke-capture-'));
     try {
