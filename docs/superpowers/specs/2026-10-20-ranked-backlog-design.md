@@ -5,7 +5,7 @@ Step #539. Written on 2026-10-20 from Aiden's pick of mock E (r364,
 same day. Builds on the v3 port spec (`2026-10-18-window-v3-port-design.md`): its parts (§4), its tokens (§2), the
 Board's Next and Backlog preview (§7) and the Backlog view #504 built (§9).
 
-*Status: written, waiting on Aiden's approval.*
+*Status: approved by Aiden, 2026-10-20, as written, with the build steps under #534.*
 
 ## 0. Intent, goals, non-goals, anti-goals
 
