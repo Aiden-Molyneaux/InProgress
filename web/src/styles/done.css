@@ -26,7 +26,7 @@
 .ip-done-row .ip-done-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; font-size: var(--t-body); color: var(--text); text-decoration: none; }
 .ip-done-parent { flex: 0 1 auto; max-width: 40ch; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-dim); }
 .ip-done-outcome { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--t-detail-sm); color: var(--text-muted); }
-/* Under 560 px of view (a window under about 660 px) the label and parent drop to a second line under the title. */
+/* Under 560 px of view (a window under about 610 px with the rail as a strip, 640 px beside its code column) the label and parent drop to a second line under the title. */
 @container (max-width: 559px) {
   .ip-done-line { flex-wrap: wrap; row-gap: var(--sp-1); }
   .ip-done-row .ip-done-title { flex: 1 1 calc(100% - 8ch); }

@@ -44,10 +44,12 @@
 .ip-bl-parkedrow { border: 1px dashed var(--line-strong); margin-top: var(--sp-1); }
 .ip-bl-row > :is(.ip-bl-why, .ip-bl-where) { grid-column: 2 / -1; margin: 0; overflow-wrap: anywhere; font-size: var(--t-detail-sm); color: var(--text-muted); }
 .ip-bl-row > .ip-bl-why { margin-top: var(--sp-2); }
-/* Under 560 px of view (a window under about 660 px, once the rail and padding are taken) the label, phase and age drop to a second line under the title. */
+/* Under 560 px of view (a window under about 610 px with the rail as a strip, 640 px beside its code column) the label, phase and age drop to a second line under the title. */
 @container (max-width: 559px) {
   .ip-bl-tools { flex-wrap: wrap; }
-  .ip-bl-row > .ip-bl-extras { grid-column: 2 / -1; grid-row: 2; justify-content: flex-start; flex-wrap: wrap; }
+  /* The actions lie over the meta line's right end (they sit inside it), so the title stays whole. */
+  .ip-bl-row > .ip-bl-extras { position: relative; grid-column: 2 / -1; grid-row: 2; justify-content: flex-start; flex-wrap: wrap; }
+  .ip-bl-acts { top: 50%; right: 0; translate: 0 -50%; }
   .ip-bl-row > .ip-bl-title { grid-column: 2 / -1; }
 }
 /* The Park… form, inside a Backlog box and in Details. */

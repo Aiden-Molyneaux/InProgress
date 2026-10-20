@@ -1,10 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react';
 
 /**
- * Keeps focus in a row list when the row that had it leaves through a write nobody here pressed (another session's, or a
- * step reopened elsewhere). It remembers the row ids in order from the last render and which row had focus inside it; when
- * that row is gone and focus fell to the page, the row that followed it in the old order and is still drawn takes focus,
- * else the one before it, else the page title. `list` is the element holding the `li[data-node]` rows.
+ * Keeps focus in a row list when a write nobody here pressed (another session's, or a step reopened elsewhere) takes the
+ * focused row away. It remembers the row ids in order from the last render and which row had focus inside it. When that row
+ * is gone and focus fell to the page, the row that followed it in the old order and is still drawn takes focus, else the one
+ * before it, else the page title; when the row is still listed but was drawn anew (moved to another group), it takes focus
+ * back itself, without scrolling. Focus let go on a press on blank page forgets the row. `list` is the element holding the
+ * `li[data-node]` rows.
  */
 export function useKeepRowFocus(list: RefObject<HTMLElement>, rowIds: readonly number[], title: RefObject<HTMLElement>): void {
   const before = useRef<readonly number[]>(rowIds);
@@ -43,7 +45,7 @@ export function useKeepRowFocus(list: RefObject<HTMLElement>, rowIds: readonly n
     const lost = active === null || active === document.body;
     // A row still listed but drawn anew (moved to another group by a write elsewhere) takes focus back itself.
     if (rowIds.includes(id)) {
-      if (lost) list.current?.querySelector<HTMLElement>(`li[data-node="${id}"]`)?.focus();
+      if (lost) list.current?.querySelector<HTMLElement>(`li[data-node="${id}"]`)?.focus({ preventScroll: true });
       return;
     }
     held.current = null;
