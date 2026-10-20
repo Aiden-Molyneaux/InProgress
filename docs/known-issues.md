@@ -104,7 +104,7 @@ work. A re-hit bumps **Hits** and **Verified**. Entries seeded from the code and
 - **Fix:** rerun `npm test` once. A file that fails twice is a real failure. On the next hit,
   record the file name and its error text here.
 - **Second hit (2026-10-20, #502, inside `npm run deploy`):** `test/server/open-desktop.test.ts` failed at teardown with
-  `ENOTEMPTY: directory not empty, rmdir '...\Temp\ip-open-desktop-<id>\sessions-8ccount-uuid\org-uuid'`; all 1760
+  `ENOTEMPTY: directory not empty, rmdir '...\Temp\ip-open-desktop-<id>\sessions-8\account-uuid\org-uuid'`; all 1760
   tests passed, 1 of 96 files failed. A rerun of the deploy was green. So at least one cause is a Windows temp-folder
   removal racing a handle still open on it during a file's cleanup.
 - **Verified:** 2026-10-20 · **Hits:** 2
