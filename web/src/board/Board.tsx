@@ -9,7 +9,6 @@ import type { ViewProps } from '../views/props';
 import type { BandProps } from './bandProps';
 import { BAND_LABEL, ColumnHead, type Band } from './ColumnHead';
 import { DoneColumn, doneKeys, doneView } from './DoneColumn';
-import { boardHeadFigures } from './headFigures';
 import { layoutFor, type BoardLayout } from './layout';
 import { BoardSlab } from './BoardSlab';
 import { NeedsMe, needsKeys } from './NeedsMe';
@@ -91,7 +90,6 @@ export function Board(props: ViewProps) {
         <PageHead
           code={projectCode(snapshot.project.name)}
           name={snapshot.project.name}
-          meta={boardHeadFigures(board, boxes, snapshot, now)}
           decodeKey={snapshot.project.id}
         />
         <BoardSlab {...band} />

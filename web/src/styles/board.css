@@ -25,8 +25,9 @@
 .ip-ref { padding: 0; font-family: var(--font-mono); font-stretch: 87.5%; font-size: 0.8235em; color: var(--volt); }
 .ip-ref:hover { text-decoration: underline; }
 .ip-ref:focus-visible { outline: 2px solid var(--volt); outline-offset: 1px; }
-.ip-tidy-wrap { position: relative; }
-.ip-tidy-pop { position: absolute; top: 100%; right: 0; z-index: var(--z-popover); width: 320px; max-width: calc(100vw - 2 * var(--sp-4)); margin-top: var(--sp-1); }
+.ip-menubtn { position: relative; display: inline-flex; }
+.ip-menubtn-pop { position: absolute; top: 100%; right: 0; z-index: var(--z-popover); width: 320px; max-width: calc(100vw - 2 * var(--sp-4)); margin-top: var(--sp-1); }
+.ip-menubtn-pop[data-align='start'] { left: 0; right: auto; width: max-content; min-width: 100%; }
 .ip-noclaim { display: grid; gap: var(--sp-2); padding-top: var(--sp-3); border-top: 1px solid var(--line); }
 .ip-noclaim-item { display: grid; gap: var(--sp-1); min-width: 0; }
 .ip-noclaim-line { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; font-size: var(--t-body); color: var(--text); }
@@ -45,6 +46,11 @@
 .ip-link-btn:focus-visible, .ip-row-title:focus-visible, .ip-chip-handoff:focus-visible, .ip-btn:focus-visible { outline: 2px solid var(--volt); outline-offset: 1px; }
 .ip-code { display: block; max-width: 100%; padding: 3px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--fs-s); line-height: 14px; background: var(--panel-2); }
 /* Board tiles (BoardTile): the age, the foot's parts and the system line, in v3 type. */
+/* A tile's title reads stronger on the Board (Done keeps the part's body size); the #id a little stronger. */
+.ip-tile .p-tile-title { font-size: var(--t-h3); font-weight: var(--w-strong); color: var(--text-hi); }
+.ip-tile .p-tile-title button { font-size: inherit; font-weight: inherit; line-height: inherit; color: inherit; }
+.ip-tile.ip-done-tile .p-tile-title { font-size: var(--t-body); }
+.ip-tile .p-tile-id { font-size: var(--t-detail-sm); font-weight: var(--w-strong); color: var(--text); }
 .ip-band .ip-list { gap: var(--sp-4); }
 .ip-tile-age { font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-dim); }
 .ip-tile .p-tile-body { display: grid; gap: var(--sp-3); }
@@ -154,32 +160,16 @@ button.ip-hover-act:not(.p-btn):hover { color: var(--text); background: var(--pa
 .ip-hover-act:focus-visible, .ip-quick-add:focus { outline: 2px solid var(--volt); outline-offset: 1px; }
 .ip-backlog { margin-top: var(--sp-3); padding-top: var(--sp-4); border-top: 1px dashed var(--line-strong); }
 .ip-backlog.drop-here { background: var(--canvas-2); box-shadow: inset 0 0 0 1px var(--volt); }
-/* The Backlog preview: head, phase tabs, one-line rows, and the "more" line. */
+/* The Backlog preview: head, the phase menu button, one compact tile per entry, and the "more" line. */
 .ip-preview { display: grid; gap: var(--sp-3); min-width: 0; }
 .ip-backlog-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
 .ip-backlog-acts { display: inline-flex; align-items: center; gap: var(--sp-1); }
-.ip-backlog-list { border-top: 1px solid var(--line-soft); }
-.ip-preview .ip-backlog-row { position: relative; display: grid; grid-template-columns: 4.5ch minmax(0, 1fr) auto; gap: var(--sp-1) var(--sp-3); align-items: baseline; padding: var(--sp-2) var(--sp-1); border-bottom: 1px solid var(--line-soft); cursor: pointer; transition: background-color var(--dur-1) var(--ease-std); }
-.ip-preview .ip-backlog-row:is(:hover, :focus-within) { background: var(--canvas-2); }
-.ip-preview .ip-backlog-row:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--volt-soft); }
-.ip-preview .ip-backlog-row[draggable='true']:active { cursor: grabbing; }
-.ip-bl-id { font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-dim); }
-.ip-preview .ip-row-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; font-size: var(--t-body); line-height: 1.35; color: var(--text); }
-.ip-preview .ip-row-title:hover { text-decoration: none; }
-.ip-bl-age { font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-dim); }
-.ip-bl-meta { grid-column: 2 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
 /* The hover buttons (to Next, back to Backlog, Done...) are the Button part's ghost sm as it is; only their showing is the Board's. */
-.ip-tile .p-btn.ip-hover-act, .ip-preview .p-btn.ip-hover-act { opacity: 0; }
-.ip-tile:is(:hover, :focus-within) .p-btn.ip-hover-act, .ip-preview .ip-backlog-row:is(:hover, :focus-within) .p-btn.ip-hover-act, .ip-tile .p-btn.ip-hover-act:focus-visible, .ip-preview .p-btn.ip-hover-act:focus-visible { opacity: 1; }
-/* In a preview row it sits over the age's place, which hides while it shows, so the title keeps its width. */
-.ip-preview .p-btn.ip-hover-act { position: absolute; right: var(--sp-1); top: 50%; transform: translateY(-50%); background: var(--canvas-2); }
-.ip-preview .ip-backlog-row:is(:hover, :focus-within) .ip-bl-age { visibility: hidden; }
-/* The preview's rows touch: the band's list gap is for tiles. */
-.ip-preview .ip-backlog-list { gap: 0; }
+.ip-tile .p-btn.ip-hover-act { opacity: 0; }
+.ip-tile:is(:hover, :focus-within) .p-btn.ip-hover-act, .ip-tile .p-btn.ip-hover-act:focus-visible { opacity: 1; }
+.ip-preview .ip-backlog-list { gap: var(--sp-3); }
+.ip-tile.ip-backlog-row { padding: var(--sp-3); gap: var(--sp-2); }
 .ip-backlog-more { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); font-family: var(--font-mono); font-size: var(--t-detail-sm); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
-/* The preview's phase tabs wrap onto a second row rather than scroll out of sight. */
-.ip-preview .p-tabstrip { flex-wrap: wrap; overflow: visible; }
-.ip-preview .p-tabstrip .p-tab { border-bottom: 1px solid var(--line-strong); margin-bottom: -1px; }
 .ip-backlog-groups { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
 .ip-group-line { margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-s); line-height: 14px; color: var(--faint); }
 /* The Backlog filter field and order control share one line (#453). */

@@ -118,14 +118,17 @@ const open = (page: Page, project: Seeded) => page.goto(`/#/p/${project.slug}`);
 /** A step's row on the Board, by its title. Details lists the same steps as "#id title", so the exact name is the Board's. */
 const stepRow = (page: Page, title: string) => page.getByRole('main').getByRole('button', { name: title, exact: true });
 
-/** The Backlog preview's phase tabs at the foot of Next. */
-const phasePicker = (page: Page) => page.getByRole('tablist', { name: 'Backlog phase' });
-/** The phase tab that is picked. */
-const pickedPhase = (page: Page) => phasePicker(page).getByRole('tab', { selected: true });
+/** The Backlog preview's phase menu button at the foot of Next: its face reads `<phase> · <count> ▾`. */
+const phasePicker = (page: Page) => page.locator('.ip-preview').getByRole('button', { name: /▾$/ });
+/** The phase menu's popover. */
+const phaseMenu = (page: Page) => page.getByRole('menu', { name: 'Backlog phase' });
+/** The button, whose face names the picked phase. */
+const pickedPhase = phasePicker;
 
 /** Shows a phase's entries in the Backlog preview ("No phase" for the steps under the root). */
 async function showPhase(page: Page, name: string): Promise<void> {
-  await phasePicker(page).getByRole('tab', { name: new RegExp(`^${name}`) }).click();
+  await phasePicker(page).click();
+  await phaseMenu(page).getByRole('menuitem', { name: new RegExp(`^${name}`) }).click();
 }
 
 /**
@@ -1896,8 +1899,8 @@ test.describe('Board', () => {
     await expect.poll(() => boxes.count()).toBeGreaterThan(1);
     // The preview draws one-line rows, not tiles: the id, the title, the age.
     const box = group.locator('.ip-backlog-row', { has: page.getByRole('button', { name: '4 Build to GitHub', exact: true }) });
-    await expect(box.locator('.ip-bl-id')).toHaveText(`#${fresh.ids['4 Build to GitHub']}`);
-    await expect(box.locator('.ip-bl-age')).toBeVisible();
+    await expect(box.locator('.p-tile-id')).toHaveText(`#${fresh.ids['4 Build to GitHub']}`);
+    await expect(box.locator('.ip-tile-age')).toBeVisible();
     await expect(box.locator('.p-tile, .ip-sess')).toHaveCount(0);
     const blocked = group.locator('.ip-backlog-row', { has: page.getByRole('button', { name: '5 Store listing', exact: true }) });
     await expect(blocked.locator('.p-chip[data-tone="blocked"]')).toHaveText('BLOCKED');
@@ -2441,7 +2444,9 @@ test.describe('Board', () => {
     const preview = next.getByRole('list', { name: /^Backlog: / });
     // The default is the phase of the latest completed step, Road to market: five entries in tree order, the rest in the full view.
     await expect(pickedPhase(page)).toContainText('Road to market');
-    await expect(picker.getByRole('tab')).toHaveText([/^Road to market/, /^No phase/]);
+    await picker.click();
+    await expect(phaseMenu(page).getByRole('menuitem')).toHaveText([/^›?Road to market/, /^No phase/]);
+    await page.keyboard.press('Escape');
     await expect(preview.locator('.ip-backlog-row .ip-row-title')).toHaveText(['3 RevenueCat', '4 Build to GitHub', '5 Store listing', '6 Beta', '7 Launch']);
     await expect(next.locator('.ip-backlog-name')).toContainText('Backlog · 9');
     // Another phase: its entries only, remembered after a reload.
@@ -2680,9 +2685,8 @@ test.describe('Board', () => {
     const title = page.getByRole('button', { name: '4 Build to GitHub', exact: true });
     const toNext = next.locator('.ip-backlog-row', { has: title }).getByRole('button', { name: 'to Next' });
     await expect(toNext).toHaveCSS('opacity', '0');
-    // The row is a cursor item: Tab goes into its own buttons (the title, then to Next).
+    // The tile is a cursor item: Tab goes into its own buttons (to Next in the top row, then the title).
     await next.locator('.ip-backlog-row', { has: title }).focus();
-    await page.keyboard.press('Tab');
     await page.keyboard.press('Tab');
     await expect(toNext).toBeFocused();
     await expect(toNext).toHaveCSS('opacity', '1');
@@ -3808,5 +3812,35 @@ test.describe('#502 Board in v3', () => {
     await comms.getByRole('button', { name: 'More' }).click();
     await comms.getByRole('link', { name: `#${later}`, exact: true }).click();
     await expect(details).toContainText('3 RevenueCat');
+  });
+  test('the Backlog phase menu picks a phase, the choice holds after a reload, and Escape returns focus to the button', async ({ page, api, fresh }) => {
+    await write(api, fresh.session, 'post', '/api/nodes', { parentId: fresh.root, nodes: [{ title: 'Loose one' }] });
+    await page.setViewportSize(WIDEST);
+    await open(page, fresh);
+    const next = band(page, 'next');
+    const button = phasePicker(page);
+    const menu = phaseMenu(page);
+    // No hazard tape on the slab and no meta line on the head.
+    await expect(page.locator('.ip-comms .p-tape')).toHaveCount(0);
+    await expect(page.locator('.ip-page-meta')).toHaveCount(0);
+    await expect(button).toHaveAttribute('aria-haspopup', 'menu');
+    await expect(button).toContainText('Road to market');
+    // Escape closes the menu without picking and puts focus back on the button.
+    await button.click();
+    await expect(menu.getByRole('menuitem', { name: /^Road to market/ })).toHaveAttribute('aria-current', 'true');
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    await expect(button).toBeFocused();
+    await expect(button).toContainText('Road to market');
+    // Select picks a phase, closes the menu and focuses the button.
+    await button.click();
+    await menu.getByRole('menuitem', { name: /^No phase/ }).click();
+    await expect(menu).toHaveCount(0);
+    await expect(button).toBeFocused();
+    await expect(button).toContainText('No phase');
+    await expect(next.locator('.ip-backlog-row .ip-row-title')).toHaveText(['Milestones', 'Loose one']);
+    await page.reload();
+    await expect(phasePicker(page)).toContainText('No phase');
+    await expect(next.locator('.ip-backlog-row .ip-row-title')).toHaveText(['Milestones', 'Loose one']);
   });
 });

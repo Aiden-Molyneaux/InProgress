@@ -14,13 +14,16 @@ import type { Band } from './ColumnHead';
 /** What a column sets on the tile's `li` itself: drag and drop, and a confirm's press, Escape and busy state. */
 export type LiProps = Pick<LiHTMLAttributes<HTMLLIElement>, 'draggable' | 'onDragStart' | 'onDragEnd' | 'onDragOver' | 'onDrop' | 'onMouseDown' | 'onKeyDown' | 'aria-busy'>;
 
-const TILE_CLASS: Record<Band, string> = { needs: 'ip-needs-tile', next: 'ip-next-row', now: 'ip-now-row', done: 'ip-done-tile' };
+/** The Backlog preview draws its entries as tiles too: no hue, compact. */
+export type TileBand = Band | 'backlog';
+
+const TILE_CLASS: Record<TileBand, string> = { needs: 'ip-needs-tile', next: 'ip-next-row', now: 'ip-now-row', done: 'ip-done-tile', backlog: 'ip-backlog-row' };
 
 export interface BoardTileProps {
   box: TaskBox;
   now: number;
   area: MeasureArea;
-  band: Band;
+  band: TileBand;
   /** How many resources the step holds. */
   docs?: number;
   /** The grid cursor's props for this tile. */
@@ -72,7 +75,7 @@ export function BoardTile({ box, now, area, band, docs = 0, cursor, rise, select
         } : cursor?.onKeyDown}
         className={`ip-tile ${TILE_CLASS[band]}`}
         tone={band === 'needs' ? 'ask' : band === 'done' ? 'done' : 'default'}
-        hue={band === 'done' ? null : hueOf(box)}
+        hue={band === 'done' || band === 'backlog' ? null : hueOf(box)}
         data-node={node?.id}
         data-state={state}
         id={node ? `#${node.id}` : undefined}

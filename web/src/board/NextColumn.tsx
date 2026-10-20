@@ -223,6 +223,7 @@ export function NextColumn({ snapshot, board, now, selectedNode, onOpenNode, onO
           addButton={addButton}
           snapshot={snapshot}
           now={now}
+          selectedNode={selectedNode}
           onPick={pickPhase}
           onOpenAll={() => onOpenBacklog?.()}
           onAdd={addClick}
