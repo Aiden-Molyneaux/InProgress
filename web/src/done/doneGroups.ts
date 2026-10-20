@@ -48,15 +48,19 @@ export function byTime(rows: BoardRow[], now: number): { heading: string; rows: 
   return out;
 }
 
-/** Rows (newest first) grouped by their immediate parent step, groups in order of their newest row. */
-export function byPhase(rows: BoardRow[]): { parent: TreeNode | null; path: string; rows: BoardRow[] }[] {
+/**
+ * Rows (newest first) grouped by their immediate parent step, groups in order of their newest row. The path names the
+ * project's root and every step down to the parent, each with its id: "#26 InProgress › #495 Port the window" (a
+ * top-level step has just the root).
+ */
+export function byPhase(rows: BoardRow[], root: TreeNode | null): { parent: TreeNode | null; path: string; rows: BoardRow[] }[] {
   const groups = new Map<number | null, { parent: TreeNode | null; path: string; rows: BoardRow[] }>();
   for (const row of rows) {
     const parent = row.crumb.length > 0 ? row.crumb[row.crumb.length - 1] : null;
     const id = parent ? parent.id : null;
     let group = groups.get(id);
     if (!group) {
-      group = { parent, path: parent ? row.crumb.map((c) => c.title).join(' › ') : 'Top level', rows: [] };
+      group = { parent, path: (root ? [root, ...row.crumb] : row.crumb).map((n) => `#${n.id} ${n.title}`).join(' › '), rows: [] };
       groups.set(id, group);
     }
     group.rows.push(row);
