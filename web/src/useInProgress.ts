@@ -5,6 +5,7 @@ import type { DeletedProject, EventRow, ProjectSnapshot, ProjectSummary } from '
 import { api } from './api';
 import { pickSlug } from './chrome/tabs';
 import { stripSkips } from './describe';
+import { parseLibraryHash } from './library/route';
 import { patchDeleted, patchName, patchProjects, renamedSnapshot, summaryOf, type ActionTarget, type ProjectAction } from './projectActions';
 import { load, save } from './storage';
 import { subscribe } from './stream';
@@ -153,11 +154,13 @@ export function useInProgress(): InProgressState {
       setSnapshot(null);
       setLastEvent(null);
       setLiveEvent(null);
-      if (window.location.hash) window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      // A Library route keeps its address with no project underneath.
+      if (window.location.hash && parseLibraryHash(window.location.hash) === null) window.history.replaceState(null, '', window.location.pathname + window.location.search);
       return;
     }
     save('ip.project', slug);
-    if (window.location.hash !== `#/p/${slug}`) window.history.replaceState(null, '', `#/p/${slug}`);
+    // The Library keeps the address while it is open; the slug stays loaded underneath for when it closes.
+    if (parseLibraryHash(window.location.hash) === null && window.location.hash !== `#/p/${slug}`) window.history.replaceState(null, '', `#/p/${slug}`);
     setSnapshot(null);
     // A live event belongs to the project it came from: the next project's canvas must not follow it.
     // Clearing the ref now, not at the next render, stops an old project's event slipping in before that render.

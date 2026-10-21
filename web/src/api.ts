@@ -1,6 +1,6 @@
 import type { BuildInfo } from '../../src/core/build';
 import type { StepHit } from '../../src/core/goto';
-import type { DeletedProject, NodeDetail, PageBody, Project, ProjectSnapshot, ProjectSummary, QueueOp, RankOp, Resource } from '../../src/core/types';
+import type { DeletedProject, LibraryPages, LibrarySync, NodeDetail, PageBody, Project, ProjectSnapshot, ProjectSummary, QueueOp, RankOp, Resource } from '../../src/core/types';
 import type { ActionTarget, ProjectAction } from './projectActions';
 
 async function getJson<T>(path: string): Promise<T> {
@@ -41,6 +41,18 @@ export const api = {
    * (the open project's slug) first within each tier.
    */
   find: (q: string, here: string | null) => getJson<StepHit[]>(`/api/find?q=${encodeURIComponent(q)}${here ? `&here=${encodeURIComponent(here)}` : ''}`),
+  /** The Library group: its pages (read live), and every manifest's Sync check. */
+  libraryPages: () => getJson<LibraryPages>('/api/library/pages'),
+  /**
+   * The Sync check: a UI POST, as it runs Shipwright's script. Rejects with the reason. It loads with the window, not on a
+   * click, so a 401 says so rather than reloading: a page with no key (npm run dev) would reload for ever.
+   */
+  librarySync: async (): Promise<LibrarySync> => {
+    const answer = await sendUi<LibrarySync>('/api/ui/library/sync', {});
+    if (answer === 'reload') throw new Error("The window's key is out of date. Reload the page.");
+    if (typeof answer === 'string') throw new Error(answer);
+    return answer;
+  },
   openResource: (id: number) => postUi('/api/ui/open', { resourceId: id }),
   /** Opens an http(s) link in the default browser: from the Edge app window a plain link would open in Edge. */
   openUrl: (url: string) => postUi('/api/ui/open-url', { url }),
