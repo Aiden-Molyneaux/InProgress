@@ -3,6 +3,9 @@ covers:
   - src/hooks/**
   - src/server/briefing.ts
   - src/server/session-flow.ts
+  - src/server/briefing-scoped.ts
+  - src/server/title-channel.ts
+  - src/cli/claude-config.ts
 ---
 
 # Session hooks and the briefing
@@ -69,7 +72,7 @@ in.
 
 All of it runs in one write per event (`handleHookEvent`):
 
-- **start**: the session goes `idle`; a `clear` resets its role to worker; a `resume` ends the
+- **start**: the session goes `idle` (a `compact` start leaves its state alone); a `clear` resets its role to worker; a `resume` ends the
   background commands left over from before.
 - **prompt**: the session goes `working`. A background-task notice ends the commands it reports
   and is not counted as a prompt; a typed prompt counts toward the status nudge.
@@ -99,18 +102,20 @@ The full briefing, in order:
    Aiden, a check on stale asks, what finished recently, what was left unfinished, recent
    resources, and the other sessions in the project.
 
-Projects that use claimed steps get a scoped variant instead: an orchestrator briefing, a worker
-briefing built around the step the session drives, or an unclaimed briefing that lists the steps
-ready to claim and the command to claim one (`briefing-scoped.ts`).
+An orchestrator session gets its own briefing in any project. In a project that uses claimed
+steps, a worker gets a briefing built around the step it drives, or, with no step claimed, one that
+lists the steps ready to claim and the command to claim one (`briefing-scoped.ts`).
 
-On a **typed prompt** after that, the context is short and built in this order:
+Every **typed prompt** can carry short lines, in this order:
 
-- a **Title:** line first, when the session's title prefix differs from the one InProgress
-  expects (desktop sessions only);
-- the answer to a status question, or a one-line status nudge once two prompts have passed
-  without an update;
-- `Answered: aN …` lines for asks Aiden answered since the last prompt;
-- reminders for up to three open asks, and a count of the rest.
+1. a **Title:** line, when the session's title prefix differs from the one InProgress expects
+   (desktop sessions only); it is added last in the code so that it leads;
+2. `Answered: aN "…"` or `Cleared: aN, no answer` for each ask of this session's that Aiden
+   cleared since the last prompt, delivered once;
+3. a reminder for each of the three newest open asks the session holds, then
+   `+N more open asks: …` naming the rest;
+4. then the full briefing when one is owed, or else the answer to a status question, or a
+   one-line status nudge once two prompts have passed without an update.
 
 A background-task notice gets none of these.
 
