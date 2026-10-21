@@ -31,8 +31,9 @@
 /* How many asks and permission waits wait there. */
 .ip-rail-ask { padding: 3px 5px; background: var(--volt); color: var(--volt-ink); font-family: var(--font-mono); font-stretch: 75%; font-weight: var(--w-strong); font-size: var(--t-micro); line-height: 1; }
 .ip-rail-row[aria-current='page'] .ip-rail-ask { background: var(--volt-ink); color: var(--volt); }
-/* The Library row's count of projects behind Shipwright: outlined, in the behind colour. */
-.ip-rail-behind { padding: 3px 5px; border: 1px solid var(--behind); color: var(--behind); font-family: var(--font-mono); font-stretch: 75%; font-weight: var(--w-strong); font-size: var(--t-micro); line-height: 1; }
+/* The Library row's count of projects behind Shipwright: outlined, in the behind colour. Its border comes out of the ask
+   count's padding, so both are one height: a row that grew when the count landed would make the strip jump. */
+.ip-rail-behind { padding: 2px 4px; border: 1px solid var(--behind); color: var(--behind); font-family: var(--font-mono); font-stretch: 75%; font-weight: var(--w-strong); font-size: var(--t-micro); line-height: 1; }
 .ip-rail-row[aria-current='page'] .ip-rail-behind { border-color: var(--volt-ink); color: var(--volt-ink); }
 /* Dragging a row: it dims, and a 2 px ink line shows the slot it would drop in. */
 .ip-rail-row.dragging { opacity: .5; }
@@ -96,7 +97,8 @@
   .ip-rail-code, .ip-rail-vcode { display: inline; }
   .ip-rail-rule { left: 50%; translate: -50% 0; }
   .ip-rail-sig { position: absolute; top: 2px; right: 2px; }
-  .ip-rail-ask, .ip-rail-behind { padding: 2px 3px; }
+  .ip-rail-ask { padding: 2px 3px; }
+  .ip-rail-behind { padding: 1px 2px; }
   .ip-rail-view { justify-content: center; padding: 0; font-family: var(--font-brand); font-stretch: 112.5%; font-size: var(--t-micro); font-weight: var(--w-brand); }
   .ip-rail-view[aria-current='page']::before { content: none; }
   .ip-rail-foot { padding-inline: 0; text-align: center; }
