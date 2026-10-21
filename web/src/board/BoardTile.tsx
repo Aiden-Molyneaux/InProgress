@@ -49,6 +49,8 @@ export interface BoardTileProps {
   pending?: boolean;
   dropBefore?: boolean;
   dragging?: boolean;
+  /** Its rank number, shown before `#id` when it is a number (the Backlog preview). */
+  number?: number | null;
   /** The tile's own keys (Next's Alt+arrows): run after the grid cursor's. */
   onKeyDown?: (e: KeyboardEvent<HTMLElement>) => void;
   onOpenNode: (id: number) => void;
@@ -60,7 +62,7 @@ export interface BoardTileProps {
  * then the title, the body, the system line and the foot. A click on the tile (not on its own controls) opens Details.
  * A box with no step (a permission wait on no step) has no id and no `data-node`, and is titled with its session.
  */
-export function BoardTile({ box, now, area, band, docs = 0, cursor, rise, selected, chips, lead, age, actions, children, system, li, still = false, pending, dropBefore, dragging, onKeyDown, onOpenNode, onOpenResource }: BoardTileProps) {
+export function BoardTile({ box, now, area, band, docs = 0, cursor, rise, selected, chips, lead, age, actions, children, system, li, still = false, pending, dropBefore, dragging, number, onKeyDown, onOpenNode, onOpenResource }: BoardTileProps) {
   const { row, session, state } = box;
   const node = row?.node;
   const since = boxSince(box);
@@ -78,7 +80,7 @@ export function BoardTile({ box, now, area, band, docs = 0, cursor, rise, select
         hue={band === 'done' || band === 'backlog' ? null : hueOf(box)}
         data-node={node?.id}
         data-state={state}
-        id={node ? `#${node.id}` : undefined}
+        id={node ? (typeof number === 'number' ? <><span className="ip-tile-num"><span aria-hidden="true">{number}</span><span className="ip-tile-num-sr">{`Rank ${number}, `}</span></span>{`#${node.id}`}</> : `#${node.id}`) : undefined}
         chips={
           <>
             {lead}

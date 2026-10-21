@@ -1,44 +1,79 @@
 /* The Backlog: the preview head, the full view, the Park form and parked rows. */
 @layer components {
 /* The Backlog preview's head, tabs and rows are in board.css. */
-/* The full Backlog view: the page, its controls, groups and one-line rows (#504). */
+/* The full Backlog view: the page, its controls, ranked bands, groups and one-line rows (#504, #542). */
 .ip-backlogview { container-type: inline-size; flex: 1; min-width: 0; overflow-x: hidden; overflow-y: auto; }
 @container (min-width: 1160px) {
   .ip-backlogview .ip-page { padding: var(--sp-6); }
 }
 .ip-bl { display: grid; gap: var(--sp-4); min-width: 0; }
-.ip-bl-tools { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
-.ip-bl-tools .ip-bl-filter { flex: 1 1 0; min-width: 0; }
-.ip-bl-order { display: flex; flex: none; align-items: center; gap: var(--sp-2); }
-.ip-bl-filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); min-width: 0; }
-.ip-bl-filters .p-tabstrip { max-width: 100%; }
-.ip-bl-labels { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
-.ip-bl-labelbtn { cursor: pointer; }
-.ip-bl-labelbtn:hover { color: var(--text); border-color: var(--line-bright); }
-.ip-bl-labelbtn[aria-pressed="true"] { border-color: var(--volt); color: var(--volt); }
-.ip-bl-labelbtn:focus-visible { outline: 2px solid var(--volt); outline-offset: 1px; }
+.ip-bl-tools { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); min-width: 0; }
+.ip-bl-tools .p-tabstrip { max-width: 100%; flex: 0 1 auto; }
+.ip-bl-tools .ip-bl-filter { flex: 0 1 280px; min-width: 0; }
 .ip-bl-group { display: grid; gap: var(--sp-2); min-width: 0; }
 .ip-bl-ghead { display: grid; gap: var(--sp-1); min-width: 0; }
 .ip-bl-gtitle { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--t-body); font-weight: var(--w-strong); color: var(--text-hi); }
-.ip-bl-list { display: grid; margin: 0; padding: 0; list-style: none; }
-.ip-bl-row { display: grid; grid-template-columns: 6ch minmax(0, 1fr) auto; column-gap: var(--sp-3); align-items: center; min-height: 32px; padding: var(--sp-1) var(--sp-2); cursor: pointer; position: relative; }
-.ip-bl-row:hover, .ip-bl-row:focus-within, .ip-bl-row:focus { background: var(--canvas-2); }
+.ip-bl-list { display: grid; margin: 0; padding: 0; list-style: none; position: relative; }
+.ip-bl-row { display: grid; grid-template-columns: 6ch minmax(0, 1fr) auto; column-gap: var(--sp-3); align-items: center; min-height: 36px; padding: var(--sp-1) var(--sp-2); border-bottom: 1px solid var(--line-soft); cursor: pointer; position: relative; }
+.ip-bl-row:hover, .ip-bl-row:focus-within, .ip-bl-row:focus { background: var(--canvas-3); }
 .ip-bl-row:focus-visible { outline: 2px solid var(--volt); outline-offset: -2px; }
 .ip-bl-row.pending { opacity: .5; }
 .ip-bl-row.confirming { cursor: default; }
 .ip-bl-row > :is(.ip-bl-id, .ip-bl-title, .ip-bl-extras) { min-width: 0; }
-.ip-bl-id { font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ip-bl-id { font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .ip-bl-row .ip-bl-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; font-size: var(--t-body); color: var(--text); text-decoration: none; }
 .ip-bl-extras { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-2); }
 .ip-bl-phase { max-width: 18ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-dim); }
 .ip-bl-age { font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-dim); white-space: nowrap; }
 /* The actions sit over the right of the first line on hover or focus, so a row keeps no room for them; hidden, they stay focusable (Tab and a refocus reach them) and let presses through. */
-.ip-bl-acts { position: absolute; top: var(--sp-1); right: var(--sp-2); display: flex; gap: var(--sp-1); padding-left: var(--sp-2); background: var(--canvas-2); opacity: 0; pointer-events: none; }
+.ip-bl-acts { position: absolute; top: var(--sp-1); right: var(--sp-2); display: flex; gap: var(--sp-1); padding-left: var(--sp-2); background: var(--canvas-3); opacity: 0; pointer-events: none; }
 .ip-bl-row:hover .ip-bl-acts, .ip-bl-row:focus-within .ip-bl-acts { opacity: 1; pointer-events: auto; }
 .ip-bl-row > :is(.ip-park, .ip-bl-panel) { grid-column: 1 / -1; margin-top: var(--sp-2); }
 .ip-bl-parkedrow { border: 1px dashed var(--line-strong); margin-top: var(--sp-1); }
 .ip-bl-row > :is(.ip-bl-why, .ip-bl-where) { grid-column: 2 / -1; margin: 0; overflow-wrap: anywhere; font-size: var(--t-detail-sm); color: var(--text-muted); }
 .ip-bl-row > .ip-bl-why { margin-top: var(--sp-2); }
+/* Ranked: a handle column and a number column in front of the id. Rows without them (an own queue) leave the columns empty. */
+.ip-bl-list.ranked .ip-bl-row { grid-template-columns: 2ch 3ch 6ch minmax(0, 1fr) auto; }
+.ip-bl-list.ranked .ip-bl-row > .ip-bl-handle { grid-column: 1; }
+.ip-bl-list.ranked .ip-bl-row > .ip-bl-num { grid-column: 2; }
+.ip-bl-list.ranked .ip-bl-row > .ip-bl-id { grid-column: 3; }
+.ip-bl-list.ranked .ip-bl-row > .ip-bl-title { grid-column: 4; }
+.ip-bl-list.ranked .ip-bl-row > .ip-bl-extras { grid-column: 5; }
+.ip-bl-handle { color: var(--text-dim); cursor: grab; user-select: none; line-height: 1; }
+.ip-bl-row:hover .ip-bl-handle { color: var(--text); }
+.ip-bl-num { font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.ip-bl-num.volt { color: var(--volt); }
+/* Ranked's bands: a head with its count, a hairline and a hint, --sp-section apart. */
+.ip-bl-band { display: grid; gap: var(--sp-2); min-width: 0; }
+.ip-bl-band + .ip-bl-band { margin-top: calc(var(--sp-section) - var(--sp-4)); }
+.ip-bl-bhead { display: grid; grid-template-columns: auto 1fr auto; align-items: center; column-gap: var(--sp-2); padding-bottom: var(--sp-2); border-bottom: 1px solid var(--line); }
+.ip-bl-bname { margin: 0; font-family: var(--font-display); font-size: var(--t-h3); font-weight: var(--w-strong); color: var(--text-hi); }
+.ip-bl-bright { display: flex; align-items: center; gap: var(--sp-2); }
+.ip-bl-hint { grid-column: 1 / -1; margin: var(--sp-1) 0 0; font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-dim); }
+.ip-bl-none-line { margin: 0; padding: var(--sp-2); font-size: var(--t-body); color: var(--text-muted); }
+.ip-bl-own { display: grid; gap: var(--sp-1); margin-top: var(--sp-3); }
+.ip-bl-ownhead { padding: 0 var(--sp-2); }
+.ip-bl-notice { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); background: var(--canvas-2); border: 1px solid var(--line); font-size: var(--t-body); color: var(--text); }
+.ip-bl-footwrap { display: grid; }
+.ip-bl-foot { padding: var(--sp-2) var(--sp-3); background: none; border: 1px dashed var(--line-strong); color: var(--text-muted); font: inherit; font-size: var(--t-body); text-align: left; cursor: pointer; }
+.ip-bl-foot:hover { color: var(--text); border-color: var(--line-bright); }
+.ip-bl-foot:focus-visible { outline: 2px solid var(--volt); outline-offset: 1px; }
+/* Drag: the dragged row at half opacity, a volt line where it would land, a dashed volt edge on an empty band or the folded head. */
+.ip-bl-row.dragging { opacity: .5; }
+.ip-bl-row.drop-before::after, .ip-bl-list.drop-end > .ip-bl-row:last-child::after { content: ''; position: absolute; left: 0; right: 0; height: 2px; background: var(--volt); pointer-events: none; }
+.ip-bl-row.drop-before::after { top: -1px; }
+.ip-bl-list.drop-end > .ip-bl-row:last-child::after { bottom: -1px; }
+.ip-bl-band.drop-empty, .ip-bl-band.drop-fold { outline: 1px dashed var(--volt); outline-offset: 2px; }
+/* A row picked for its inspector: a volt left edge on the raised canvas. */
+.ip-bl-row.picked { background: var(--canvas-2); box-shadow: inset 2px 0 0 var(--volt); }
+@media (max-width: 719px) {
+  .ip-bl-handle { display: none; }
+  .ip-bl-list.ranked .ip-bl-row { grid-template-columns: 3ch 6ch minmax(0, 1fr) auto; }
+  .ip-bl-list.ranked .ip-bl-row > .ip-bl-num { grid-column: 1; }
+  .ip-bl-list.ranked .ip-bl-row > .ip-bl-id { grid-column: 2; }
+  .ip-bl-list.ranked .ip-bl-row > .ip-bl-title { grid-column: 3; }
+  .ip-bl-list.ranked .ip-bl-row > .ip-bl-extras { grid-column: 4; }
+}
 /* Under 560 px of view (a window under about 610 px with the rail as a strip, 640 px beside its code column) the label, phase and age drop to a second line under the title. */
 @container (max-width: 559px) {
   .ip-bl-tools { flex-wrap: wrap; }
@@ -46,6 +81,14 @@
   .ip-bl-row > .ip-bl-extras { position: relative; grid-column: 2 / -1; grid-row: 2; justify-content: flex-start; flex-wrap: wrap; }
   .ip-bl-acts { top: 50%; right: 0; translate: 0 -50%; }
   .ip-bl-row > .ip-bl-title { grid-column: 2 / -1; }
+  .ip-bl-list.ranked .ip-bl-row > .ip-bl-title { grid-column: 4 / -1; }
+  .ip-bl-list.ranked .ip-bl-row > .ip-bl-extras { grid-column: 4 / -1; }
+}
+/* Under 720 px the ranked tracks are number, id, title, actions: the title spans from the third. */
+@media (max-width: 719px) {
+  @container (max-width: 559px) {
+    .ip-bl-list.ranked .ip-bl-row > .ip-bl-title, .ip-bl-list.ranked .ip-bl-row > .ip-bl-extras { grid-column: 3 / -1; }
+  }
 }
 /* The Park… form, inside a Backlog box and in Details. */
 .ip-park { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-2); background: var(--canvas-1); border: 1px solid var(--line); }

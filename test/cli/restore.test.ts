@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -11,7 +10,7 @@ import { openDb, type DB } from '../../src/server/db/connection';
 import { createCtx } from '../../src/server/db/tx';
 import { createProject } from '../../src/server/repo/projects';
 import { tableDigest } from '../../src/server/dump';
-import { commitOffsite, exportOffsite, initOffsite, offsiteDir } from '../../src/server/offsite';
+import { exportOffsite, offsiteDir } from '../../src/server/offsite';
 
 const dirs: string[] = [];
 function tempDir(prefix = 'ip-rst-'): string {
@@ -44,7 +43,6 @@ function makeHome(marker: string): { home: string; db: DB } {
 }
 
 const sha = (file: string): string => createHash('sha256').update(readFileSync(file)).digest('hex');
-const sh = (args: string[], cwd?: string): string => execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true }).trim();
 const marker = (file: string): string => {
   const db = new Database(file, { readonly: true });
   try {
@@ -129,25 +127,6 @@ describe('inprogress restore', { timeout: 120_000 }, () => {
     }
     expect(sha(join(scratch, 'resources', 'p', 'a.txt'))).toBe(sourceFiles['p/a.txt']);
     expect(out.join('\n')).toContain('Restored');
-  });
-
-  it('restores a commit of the offsite repo', async () => {
-    const remote = join(tempDir('ip-remote-'), 'remote.git');
-    sh(['init', '--bare', '--initial-branch=main', remote]);
-    const { home, db } = makeHome('first');
-    await initOffsite(home, remote);
-    await exportOffsite(db, home, new Date(2026, 9, 19, 9, 0, 0));
-    const first = await commitOffsite(home, new Date(2026, 9, 19, 9, 0, 0));
-    db.prepare("UPDATE meta SET value = 'second' WHERE key = 'marker'").run();
-    await exportOffsite(db, home, new Date(2026, 9, 20, 9, 0, 0));
-    await commitOffsite(home, new Date(2026, 9, 20, 9, 0, 0));
-    db.close();
-    expect(marker(join(home, 'inprogress.db'))).toBe('second');
-    const { out, say } = lines();
-    expect(await runRestore(['--from', first], say, { home, serverUp: down })).toBe(0);
-    expect(marker(join(home, 'inprogress.db'))).toBe('first');
-    expect(out.join('\n')).toContain('inprogress-pre-restore-');
-    expect(readdirSync(join(home, 'backups')).some((f) => f.startsWith('resources-pre-restore-'))).toBe(true);
   });
 
   it('leaves the live database untouched when the source is damaged', async () => {

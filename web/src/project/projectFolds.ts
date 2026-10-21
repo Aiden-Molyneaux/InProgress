@@ -1,12 +1,12 @@
 import { loadJson, save } from '../storage';
 
-/** `section:<id>` is a section (0 is "Top level"), `done:<parentId>` is a parent's folded done children (0 is the "Done groups" list). */
-const KEY_PATTERN = /^(section|done):\d+$/;
+/** `section:<id>` is a section (0 is "Top level"), `done:<parentId>` is a parent's folded done children (0 is the "Done groups" list), `someday` is the Backlog's Someday band. */
+const KEY_PATTERN = /^((section|done):\d+|someday)$/;
 const storeKey = (projectId: number) => `ip.folds.${projectId}`;
 
 /**
  * Fold choices Aiden made in a project, true for open and false for closed. The key is the one earlier versions used, whose
- * values were 'open' or 'closed' by node id: anything that is not a `section:` or `done:` key holding a boolean is dropped.
+ * values were 'open' or 'closed' by node id: anything that is not a `section:`, `done:` or `someday` key holding a boolean is dropped.
  */
 export function loadFolds(projectId: number): Record<string, boolean> {
   const raw = loadJson<unknown>(storeKey(projectId), {});

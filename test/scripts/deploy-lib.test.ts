@@ -89,8 +89,17 @@ describe('which test suites a deploy runs', () => {
     expect(suitesFor(['src\\hooks\\main.ts'])).toMatchObject({ smoke: true });
   });
 
+  it('runs the slow suites for core, server, CLI, lib and script changes, and for the slow suites themselves', () => {
+    for (const path of ['src/core/types.ts', 'src/server/offsite.ts', 'src/cli/restore.ts', 'src/lib/home.ts', 'scripts/context-nudge.mjs', 'test/slow/pages.test.ts', 'test/helpers.ts', 'vitest.slow.config.ts', 'vitest.config.ts', 'package.json']) {
+      expect(suitesFor([path]).slow, path).toBe(true);
+    }
+    for (const path of ['web/src/chrome/TopBar.tsx', 'src/hooks/handlers.ts', 'claude/skills/inprogress/SKILL.md', 'test/server/pages.test.ts', 'README.md']) {
+      expect(suitesFor([path]).slow, path).toBe(false);
+    }
+  });
+
   it('runs everything when the deployed build is unknown', () => {
-    expect(suitesFor(null)).toMatchObject({ smoke: true, e2e: true });
+    expect(suitesFor(null)).toMatchObject({ smoke: true, slow: true, e2e: true });
   });
 });
 

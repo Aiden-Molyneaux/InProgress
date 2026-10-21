@@ -6,7 +6,7 @@ import { createStep } from '../api';
  * empty and focused for the next one; Escape closes it, and `onClose` puts focus back on "+ add". A refusal shows in the
  * toast and keeps the text.
  */
-export function QuickAdd({ projectId, slug, inputRef, onStatus, onClose, parent = null, label = 'Add a step to the backlog' }: { projectId: number; slug: string; inputRef: RefObject<HTMLInputElement>; onStatus?: (text: string) => void; onClose: () => void; parent?: number | null; label?: string }) {
+export function QuickAdd({ projectId, slug, inputRef, onStatus, onClose, parent = null, label = 'Add a step to the backlog', band }: { projectId: number; slug: string; inputRef: RefObject<HTMLInputElement>; onStatus?: (text: string) => void; onClose: () => void; parent?: number | null; label?: string; band?: 'soon' }) {
   // One create at a time, so a held Enter never posts the same title twice.
   const sending = useRef(false);
   const onKeyDown = async (e: KeyboardEvent<HTMLInputElement>) => {
@@ -22,7 +22,7 @@ export function QuickAdd({ projectId, slug, inputRef, onStatus, onClose, parent 
     const title = field.value.trim();
     if (!title || sending.current) return;
     sending.current = true;
-    const result = await createStep(projectId, slug, title, parent);
+    const result = await createStep(projectId, slug, title, parent, band);
     sending.current = false;
     if (result === 'ok') {
       field.value = '';
