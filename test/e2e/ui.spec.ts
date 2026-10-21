@@ -2670,9 +2670,8 @@ test.describe('Board', () => {
     await page.setViewportSize(WIDE);
     await open(page, fresh);
     const next = band(page, 'next');
-    const id = fresh.id;
     for (const title of ['3 RevenueCat', '4 Build to GitHub', '5 Store listing', '6 Beta', '7 Launch', 'Milestones']) {
-      await windowPost(page, `/api/ui/projects/${id}/rank`, { slug: fresh.slug, op: { node: fresh.ids[title], to: 'someday', before: null } });
+      await rank(api, fresh, { node: fresh.ids[title], to: 'someday', before: null });
     }
     await expect(next.getByText('Nothing in Soon')).toBeVisible();
     await expect(next.getByRole('button', { name: 'Triage' })).toHaveCount(0);
