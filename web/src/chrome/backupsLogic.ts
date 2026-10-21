@@ -9,8 +9,10 @@ export function worstLevel(status: BackupStatus): BackupLevel {
   return status.warnings.length ? 'warn' : 'ok';
 }
 
-/** The first warning, for the footer button's title; nothing while all is ok. */
-/** The fail row's note while one fails (a warn can come first in doctor's order), else the first warning. */
+/**
+ * The footer button's title: the fail row's note while one fails (a warn can come first in doctor's order), else the
+ * first warning; nothing while all is ok.
+ */
 export const worstNote = (status: BackupStatus): string | undefined =>
   (status.fail ? status.rows.find((r) => r.level === 'fail')?.note : undefined) ?? status.warnings[0];
 
