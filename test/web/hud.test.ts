@@ -62,7 +62,7 @@ describe('boardFigures', () => {
   const NOW = Date.parse('2026-10-13T12:00:00.000Z');
   const node = (id: number, parentId: number | null): TreeNode => ({
     id, projectId: 1, parentId, position: id, kind: 'task', title: `S${id}`, body: '', status: 'todo', assignee: 'claude', outcome: '', label: null,
-    createdAt: T, updatedAt: T, completedAt: null, driverSessionId: null, boardState: null, stateSince: null, hue: null, parkedReason: '', parkedWhere: '', parkedAt: null,
+    createdAt: T, updatedAt: T, completedAt: null, driverSessionId: null, boardState: null, stateSince: null, hue: null, parkedReason: '', parkedWhere: '', parkedAt: null, rankBand: null, rank: null,
   });
   const ask = (nodeId: number): Ask => ({ id: nodeId, projectId: 1, nodeId, kind: 'question', text: 'Q', sessionId: null, raisedAt: T, clearedAt: null, clearedBy: null, answer: '', answerDeliveredAt: null });
   const input = (queue: number[], asks: Ask[]): BoardInput => ({

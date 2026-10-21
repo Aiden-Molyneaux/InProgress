@@ -343,6 +343,18 @@ export const MIGRATIONS: string[] = [
   -- works.
   INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
   `,
+  // 17: the ranked Backlog (#541, spec 2026-10-20-ranked-backlog-design.md section 2). rank_band: the step's band, soon or
+  // someday; NULL is unranked (Needs Triage). There is no next band: Next up is the queue. rank: a fractional place within
+  // the band, project-wide; NULL inside a band sorts after the ranked steps, in tree order. Every open task or question
+  // below the root starts in Soon with no rank (R8), so day one shows today's tree order. updated_at is left alone.
+  `
+  ALTER TABLE nodes ADD COLUMN rank_band TEXT CHECK (rank_band IS NULL OR rank_band IN ('soon','someday'));
+  ALTER TABLE nodes ADD COLUMN rank REAL;
+  UPDATE nodes SET rank_band = 'soon'
+    WHERE parent_id IS NOT NULL AND status IN ('todo','active','blocked') AND kind IN ('task','question');
+  -- Only nullable columns: v1 to v16 builds can still read and write this schema, so a rollback across it works.
+  INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+  `,
 ];
 
 /**

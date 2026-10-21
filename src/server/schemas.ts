@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ASK_KINDS, ASSIGNEES, BRIEFING_MODES, COMMAND_KINDS, COMMAND_OUTCOMES, HOOK_EVENTS, NODE_KINDS, NODE_LABELS, NODE_STATUSES, PROJECT_NAME_MAX, RESOURCE_KINDS, RESOURCE_PURPOSES, TITLE_CHANNELS, WORK_STATUSES, unknownLabel, type NodeInput } from '../core/types';
+import { ASK_KINDS, ASSIGNEES, BRIEFING_MODES, COMMAND_KINDS, COMMAND_OUTCOMES, HOOK_EVENTS, NODE_KINDS, NODE_LABELS, NODE_STATUSES, PROJECT_NAME_MAX, RANK_BANDS, RESOURCE_KINDS, RESOURCE_PURPOSES, TITLE_CHANNELS, WORK_STATUSES, unknownLabel, type NodeInput } from '../core/types';
 
 const title = z.string().trim().min(1, 'title is empty').max(200);
 /** A step's type label; null leaves it unlabelled (or clears it on a patch). */
@@ -169,10 +169,26 @@ export const windowQueueBody = z
     ]),
   })
   .strict();
-/** The window's quick-add: a todo step under `parent`, or the root when null. */
+/** The window's quick-add: a todo step under `parent`, or the root when null; with band 'soon', at the bottom of Soon. */
 export const windowNodeBody = z
-  .object({ slug: windowProjectBody.shape.slug, title: z.string().trim().min(1).max(200), parent: z.number().int().positive().nullable() })
+  .object({
+    slug: windowProjectBody.shape.slug,
+    title: z.string().trim().min(1).max(200),
+    parent: z.number().int().positive().nullable(),
+    band: z.literal('soon').optional(),
+  })
   .strict();
+/** The window's rank change (ranked Backlog spec section 2): one RankOp, applied to the steps as stored. */
+export const windowRankBody = z
+  .object({
+    slug: windowProjectBody.shape.slug,
+    op: z.object({ node: z.number().int().positive(), to: z.enum(['next', ...RANK_BANDS]), before: z.number().int().positive().nullable() }).strict(),
+  })
+  .strict();
+/** The inspector's Label select: one of NODE_LABELS, or null for unlabelled. */
+export const windowLabelBody = z.object({ slug: windowProjectBody.shape.slug, label: label.unwrap() }).strict();
+/** The inspector's Phase select: the new parent's id, or null for No phase (the root). */
+export const windowMoveBody = z.object({ slug: windowProjectBody.shape.slug, parent: z.number().int().positive().nullable() }).strict();
 /** The window's clear of an ask; only Answer... sends an answer. */
 export const windowClearBody = z.object({ answer: z.string().max(2000).optional() }).strict();
 /** The window's Done on a Now box: the slug it shows, an optional outcome, and the live driver it showed (a session id or null). */

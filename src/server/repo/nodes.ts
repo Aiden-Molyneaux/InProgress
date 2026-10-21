@@ -1,10 +1,11 @@
 import type { TaskState } from '../../core/taskState';
-import type { After, Assignee, NodeInput, NodeKind, NodeLabel, NodeStatus, TreeNode } from '../../core/types';
+import type { After, Assignee, NodeInput, NodeKind, NodeLabel, NodeStatus, Project, RankBand, RankOp, TreeNode } from '../../core/types';
 import { write, type Ctx, type RecordEvent } from '../db/tx';
-import { badRequest, notFound } from '../errors';
+import { badRequest, conflict, notFound } from '../errors';
 import { definedOnly } from '../util';
 import { clearNodeAsks } from './asks';
-import { appendUnowned, dropFromQueue, inLiveProject } from './projects';
+import { appendUnowned, dropFromQueue, getProjectById, inLiveProject, isQueued, moveInQueue } from './projects';
+import { placeInBand } from './rank';
 import { parkedAncestor, shelvedAmong, subtreeIds } from './shelved';
 import { closeNodeTasks } from './work';
 
@@ -30,6 +31,8 @@ interface NodeRow {
   parked_reason: string;
   parked_where: string;
   parked_at: string | null;
+  rank_band: RankBand | null;
+  rank: number | null;
 }
 
 export const toNode = (r: NodeRow): TreeNode => ({
@@ -54,6 +57,8 @@ export const toNode = (r: NodeRow): TreeNode => ({
   parkedReason: r.parked_reason,
   parkedWhere: r.parked_where,
   parkedAt: r.parked_at,
+  rankBand: r.rank_band,
+  rank: r.rank,
 });
 
 /** A step by id. A deleted project's steps are not found, so every read and write by id refuses them. */
@@ -119,7 +124,11 @@ function renormalize(ctx: Ctx, parentId: number): void {
  * The nodes it returns are read inside the write, before write() runs the Board reconcile: their boardState, stateSince
  * and hue predate this write. Only a snapshot (or a read after the write) carries the current values.
  */
-export function addNodes(ctx: Ctx, actor: string, input: { parentId: number; after?: After; nodes: NodeInput[]; check?: (parent: TreeNode) => void }): TreeNode[] {
+export function addNodes(
+  ctx: Ctx,
+  actor: string,
+  input: { parentId: number; after?: After; nodes: NodeInput[]; check?: (parent: TreeNode) => void; band?: 'soon' },
+): TreeNode[] {
   if (input.nodes.length === 0) throw badRequest('nodes is empty');
   return write(ctx, actor, (record) => {
     const parent = requireNode(ctx, input.parentId);
@@ -141,8 +150,21 @@ export function addNodes(ctx: Ctx, actor: string, input: { parentId: number; aft
       ids.push(id);
       (n.children ?? []).forEach((child, i) => add(child, id, i + 1));
     };
-    input.nodes.forEach((n, i) => add(n, parent.id, positions[i]));
+    const top = input.nodes.map((n, i) => {
+      const at = ids.length;
+      add(n, parent.id, positions[i]);
+      return ids[at];
+    });
     renormalize(ctx, parent.id);
+    // The window's quick-add (ranked Backlog spec section 3): each new open step goes to the bottom of Soon, in order. A
+    // session's add (MCP, API) never sends a band, so its steps land unranked (R2).
+    if (input.band) {
+      const place = ctx.db.prepare('UPDATE nodes SET rank_band = ?, rank = ? WHERE id = ?');
+      for (const [i, id] of top.entries()) {
+        const status = input.nodes[i].status ?? 'todo';
+        if (status === 'todo' || status === 'active' || status === 'blocked') place.run(input.band, placeInBand(ctx, listNodes(ctx, parent.projectId), id, input.band, null), id);
+      }
+    }
     record({ projectId: parent.projectId, type: 'node.created', entity: 'node', entityId: ids[0], data: { ids, parentId: parent.id } });
     return ids.map((id) => requireNode(ctx, id));
   });
@@ -235,19 +257,26 @@ export function patchNode(ctx: Ctx, record: RecordEvent, before: TreeNode, patch
   const completedAt = next.status === 'done' ? (before.status === 'done' ? before.completedAt : ts) : null;
   // A done, dropped or parked step has no driver (spec 1.1), cleared in the same UPDATE.
   const driver = next.status === 'done' || next.status === 'dropped' || next.status === 'parked' ? null : before.driverSessionId;
+  // Parking drops the step's band and rank (ranked Backlog R5), and it comes back unranked, in Needs Triage; a step parked
+  // by a build from before ranks may still carry one, so leaving parked clears it too. Shelved children keep theirs.
+  if (parking || (before.status === 'parked' && next.status !== 'parked')) {
+    next.rankBand = null;
+    next.rank = null;
+  }
   // Before the UPDATE, so the event's queue change reads the steps as they were in Next. Once the step is parked its
   // whole subtree is shelved, so every step under it leaves the stored queue too, and unparking does not bring it back.
   if (parking) dropFromQueue(ctx, record, before.projectId, subtreeIds(ctx, id), 'park');
   ctx.db
     .prepare(
-      'UPDATE nodes SET title = ?, kind = ?, status = ?, assignee = ?, body = ?, outcome = ?, label = ?, updated_at = ?, completed_at = ?, driver_session_id = ?, parked_reason = ?, parked_where = ?, parked_at = ? WHERE id = ?',
+      'UPDATE nodes SET title = ?, kind = ?, status = ?, assignee = ?, body = ?, outcome = ?, label = ?, updated_at = ?, completed_at = ?, driver_session_id = ?, parked_reason = ?, parked_where = ?, parked_at = ?, rank_band = ?, rank = ? WHERE id = ?',
     )
-    .run(next.title, next.kind, next.status, next.assignee, next.body, next.outcome, next.label, ts, completedAt, driver, next.parkedReason, next.parkedWhere, next.parkedAt, id);
+    .run(next.title, next.kind, next.status, next.assignee, next.body, next.outcome, next.label, ts, completedAt, driver, next.parkedReason, next.parkedWhere, next.parkedAt, next.rankBand, next.rank, id);
   // Before node.updated, which stays the project's newest event. Every path to done comes through here.
   if (next.status === 'done' && before.status !== 'done') closeNodeTasks(ctx, record, before.projectId, id);
   const diff: Record<string, { from: unknown; to: unknown }> = {};
-  // The parked fields change with the status as well as when sent, so they are compared whether or not the patch names them.
-  const keys = new Set<keyof TreeNode>([...(Object.keys(changes) as (keyof NodePatch)[]), 'parkedReason', 'parkedWhere', 'parkedAt']);
+  // The parked and rank fields change with the status as well as when sent, so they are compared whether or not the
+  // patch names them.
+  const keys = new Set<keyof TreeNode>([...(Object.keys(changes) as (keyof NodePatch)[]), 'parkedReason', 'parkedWhere', 'parkedAt', 'rankBand', 'rank']);
   for (const key of keys) {
     if (before[key] !== next[key]) diff[key] = { from: before[key], to: next[key] };
   }
@@ -290,6 +319,19 @@ export function unparkNode(ctx: Ctx, actor: string, id: number, toNext: boolean,
 }
 
 /**
+ * The inspector's Label select: sets step `id`'s label, or clears it with null, as update_node does. `check` runs on the
+ * step as read inside the write. The project root has no label.
+ */
+export function labelNode(ctx: Ctx, actor: string, id: number, label: NodeLabel | null, check: (before: TreeNode) => void): TreeNode {
+  return write(ctx, actor, (record) => {
+    const before = requireNode(ctx, id);
+    check(before);
+    if (before.parentId === null) throw conflict(`#${id} is the project root`, 'Reload the window.');
+    return patchNode(ctx, record, before, { label });
+  });
+}
+
+/**
  * Sets or clears the session that drives `node`, inside a write() already open, and records node.updated with the
  * change. A driver change is not an edit of the step, so updatedAt (where the needs-you age counts from) stays. No-op
  * when the driver is already `sessionId`.
@@ -306,11 +348,13 @@ export function setDriver(ctx: Ctx, record: RecordEvent, node: TreeNode, session
   });
 }
 
-export function moveNode(ctx: Ctx, actor: string, id: number, input: { parentId: number; after?: After }): TreeNode {
+export function moveNode(ctx: Ctx, actor: string, id: number, input: { parentId: number; after?: After; check?: (node: TreeNode, parent: TreeNode) => void }): TreeNode {
   return write(ctx, actor, (record) => {
     const node = requireNode(ctx, id);
     if (node.parentId === null) throw badRequest(`#${id} is the project root and cannot be moved`);
     const parent = requireNode(ctx, input.parentId);
+    // The caller's own test of the step and its new parent, run in this write so neither can go stale before the move.
+    input.check?.(node, parent);
     if (parent.projectId !== node.projectId) throw badRequest(`#${parent.id} is in a different project than #${id}`);
     for (let cur: TreeNode | undefined = parent; cur; cur = cur.parentId === null ? undefined : findNode(ctx, cur.parentId)) {
       if (cur.id === id) throw badRequest(`Cannot move #${id} under its own descendant #${parent.id}`);
@@ -324,6 +368,49 @@ export function moveNode(ctx: Ctx, actor: string, id: number, input: { parentId:
     renormalize(ctx, parent.id);
     record({ projectId: node.projectId, type: 'node.moved', entity: 'node', entityId: id, data: { fromParentId: node.parentId, toParentId: parent.id } });
     return requireNode(ctx, id);
+  });
+}
+
+/**
+ * Why step `node` cannot take a rank change, or null when it can: open, not shelved, and not a group (a step with open
+ * steps under it), unless it is queued: the Board keeps a queued group as a Next row (deriveBoard), so it can still be
+ * moved within Next or out of it.
+ */
+function notRankable(ctx: Ctx, node: TreeNode): string | null {
+  if (node.parentId === null) return 'is the project root';
+  if (node.status !== 'todo' && node.status !== 'active' && node.status !== 'blocked') return `is ${node.status}`;
+  if (shelvedAmong(ctx, [node.id]).size) return 'is under a parked step';
+  const group = ctx.db.prepare("SELECT 1 FROM nodes WHERE parent_id = ? AND status IN ('todo', 'active', 'blocked')").get(node.id) !== undefined;
+  if (group && !isQueued(ctx, node.projectId, node.id)) return 'has open steps under it';
+  return null;
+}
+
+/**
+ * The window's rank change (ranked Backlog spec section 2), in one write. `to: 'next'` is the queue move before `before`
+ * in the unowned queue, the band untouched. Soon or someday takes the step out of the queue, whoever owns its entry, and
+ * places it in that band before `before` (null: at the end), with `updated_at` set and one node.updated; the queue's
+ * project.updated comes first, as parking orders them. A step of another project, the root, one that is not open, a
+ * shelved step or one with open steps under it is refused (409), and so is a `before` that is not in the band named.
+ */
+export function applyRankOp(ctx: Ctx, actor: string, projectId: number, op: RankOp): { node: TreeNode; project: Project } {
+  return write(ctx, actor, (record) => {
+    const node = findNode(ctx, op.node);
+    if (node?.projectId !== projectId) throw conflict(`#${op.node} is not in this project`, 'Reload the window.');
+    const why = notRankable(ctx, node);
+    if (why) throw conflict(`#${op.node} ${why}`, 'Reload the window.');
+    if (op.to === 'next') {
+      if (op.before === op.node) throw conflict(`#${op.node} cannot be placed before itself`, 'Reload the window.');
+      moveInQueue(ctx, record, projectId, op.node, op.before);
+      return { node, project: getProjectById(ctx, projectId)! };
+    }
+    const rank = placeInBand(ctx, listNodes(ctx, projectId), op.node, op.to, op.before);
+    dropFromQueue(ctx, record, projectId, [op.node], 'rank');
+    ctx.db.prepare('UPDATE nodes SET rank_band = ?, rank = ?, updated_at = ? WHERE id = ?').run(op.to, rank, ctx.now(), op.node);
+    const changes: Record<string, { from: unknown; to: unknown }> = {};
+    if (node.rankBand !== op.to) changes.rankBand = { from: node.rankBand, to: op.to };
+    if (node.rank !== rank) changes.rank = { from: node.rank, to: rank };
+    record({ projectId, type: 'node.updated', entity: 'node', entityId: op.node, data: { changes } });
+    return { node: requireNode(ctx, op.node), project: getProjectById(ctx, projectId)! };
   });
 }
 

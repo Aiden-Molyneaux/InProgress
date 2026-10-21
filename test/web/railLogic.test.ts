@@ -6,10 +6,10 @@ const NOW = Date.parse('2026-10-13T12:00:00Z');
 let n = 0;
 const node = (id: number, parentId: number | null, title: string, status: TreeNode['status'] = 'todo', extra: Partial<TreeNode> = {}): TreeNode => ({
   id, projectId: 1, parentId, position: ++n, kind: 'task', title, body: '', status, assignee: 'claude', outcome: '', label: null,
-  createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z', completedAt: status === 'done' ? '2026-10-10T00:00:00Z' : null, driverSessionId: null, boardState: null, stateSince: null, hue: null, parkedReason: '', parkedWhere: '', parkedAt: null, ...extra,
+  createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z', completedAt: status === 'done' ? '2026-10-10T00:00:00Z' : null, driverSessionId: null, boardState: null, stateSince: null, hue: null, parkedReason: '', parkedWhere: '', parkedAt: null, rankBand: null, rank: null, ...extra,
 });
 const snap = (nodes: TreeNode[]): ProjectSnapshot => ({
-  project: { id: 1, queue: [] } as never, nodes, resources: [], sessions: [], workItems: [], trailAgents: [], pastSessions: [], asks: [],
+  project: { id: 1, queue: [] } as never, nodes, resources: [], sessions: [], workItems: [], trailAgents: [], pastSessions: [], asks: [], stepTouches: [],
   stateNote: null, lastEventId: 0, lastEvent: null,
 });
 

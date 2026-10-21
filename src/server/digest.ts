@@ -162,9 +162,10 @@ export function readDigest(ctx: Ctx, ref: string | number, since?: string): Dige
         const n = byId.get(id);
         if (n) quickAdds.push({ id: n.id, title: n.title, createdAt: e.ts });
       }
-    } else if (data.op === 'move' || data.op === 'remove') {
+    } else if (data.op === 'move' || data.op === 'remove' || data.op === 'rank') {
       const nodeId = typeof data.node === 'number' ? data.node : typeof data.nodeId === 'number' ? data.nodeId : null;
-      if (nodeId !== null) moves.push({ ts: e.ts, op: data.op, nodeId });
+      // A rank change into Soon or Someday takes the step out of Next: for the digest, a remove.
+      if (nodeId !== null) moves.push({ ts: e.ts, op: data.op === 'rank' ? 'remove' : data.op, nodeId });
     }
   }
 
