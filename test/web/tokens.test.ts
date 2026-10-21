@@ -205,7 +205,7 @@ describe('type', () => {
   it('sizes text from the ramp, or relative to its parent', () => {
     const sizes = [...rules.matchAll(/font-size:\s*([^;}]+)/g)].map((m) => m[1].trim());
     const ramp = ['h1', 'h2', 'h3', 'title', 'body', 'detail-sm', 'micro'].map((t) => `var(--t-${t})`);
-    const allowed = [...ramp, 'var(--fs-l)', 'var(--fs-m)', 'var(--fs-s)', 'inherit'];
+    const allowed = [...ramp, 'inherit'];
     expect(sizes.filter((s) => !allowed.includes(s) && !/^[\d.]+em$/.test(s))).toEqual([]);
   });
 
