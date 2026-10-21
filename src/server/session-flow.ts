@@ -1,5 +1,6 @@
 import { commandLabel, sessionActivity } from '../core/activity';
 import { clipLine, stepRef } from '../core/step-ref';
+import type { TitleDemand } from '../core/title';
 import { SCRIBE_AGENT, type CommandKind, type CommandOutcome, type HookEvent, type Session, type TreeNode, type WorkStatus } from '../core/types';
 import { write, type Ctx, type RecordEvent } from './db/tx';
 import { badRequest } from './errors';
@@ -15,6 +16,7 @@ import { parkedAncestor, shelvedAmong } from './repo/shelved';
 import { getProjectById, isTracking, notTracked, releaseQueue, resolveBinding, resolveProject } from './repo/projects';
 import { assignSlot, briefingDue, clearBriefingDue, findSession, markBriefingDue, markRevived, saveSession } from './repo/sessions';
 import { getProjectSnapshot } from './repo/snapshot';
+import { titleAdvice } from './title-channel';
 import { endAgent, endSubagents, launchSubagent, messageAgent, pinStartFocus, pruneSubagents, recordDispatch, startSubagent, stopSubagent, subagentNode } from './repo/subagents';
 import { taskCreated, taskUpdated } from './repo/work';
 
@@ -58,11 +60,17 @@ export interface HookEventInput {
   /** A stop: the session's running background tasks, also when empty; `backgroundTruncated` when the list was cut at 50. */
   background?: BackgroundEntry[];
   backgroundTruncated?: boolean;
+  /** A stop: Claude Code's stop_hook_active, true in the extra pass a block caused. */
+  stopHookActive?: boolean;
+  /** A prompt or a stop: the session runs in the Claude desktop app, the only place it can set its title. */
+  desktop?: boolean;
 }
 
 export interface HookEventResult {
   tracked: boolean;
   context?: string;
+  /** A stop: the title the session should set, which the hook turns into a block. */
+  title?: TitleDemand;
 }
 
 const VISIBLE = ['projectId', 'title', 'state', 'focusNodeId', 'slot'] as const;
@@ -309,6 +317,18 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
   // source, and an owed briefing count as new. An owed briefing is the enroll's even when a compaction's start brings
   // it: the one the enroll returned went to the scribe.
   const nowMs = Date.parse(ctx.now());
+  // The title advice reads the session as this event left it (its title, its state), so an obeyed demand is not repeated.
+  const adviceEvent = input.desktop !== true ? undefined : input.event === 'stop' ? 'stop' : input.event === 'prompt' && !input.notice ? 'prompt' : undefined;
+  // Only a titled session's stop reads the channel: a prompt never blocks, and an untitled session gets no advice.
+  const titleChannel = adviceEvent === 'stop' && session.title?.trim() ? (getProjectById(ctx, projectId)?.titleChannel ?? 'nudge') : 'nudge';
+  let advice: ReturnType<typeof titleAdvice> = {};
+  // The advice is extra: a fault in it must not fail the hook reply after the main write has committed (an owed
+  // briefing was cleared there).
+  try {
+    if (adviceEvent) advice = titleAdvice(ctx, session, adviceEvent, { stopHookActive: input.stopHookActive === true, titleChannel });
+  } catch (err) {
+    console.error(`InProgress: title advice failed for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+  }
   let context: string | undefined;
   if (input.event === 'start' || created || briefingOwed) {
     const checkOld = briefingOwed || !(input.event === 'start' && input.source === 'compact');
@@ -342,8 +362,12 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
       lines.push(`+${rest.length} more open asks: ${named}${unnamed ? `, and ${unnamed} older` : ''}. If this prompt answers one, put "aN answered: ..." in your next scribe brief.`);
     }
     if (lines.length) context = [...lines, ...(context ? [context] : [])].join('\n');
+    // The title line leads: it is the one thing in the reply the session acts on before anything else.
+    if (advice.line) context = [advice.line, ...(context ? [context] : [])].join('\n');
   }
-  return context === undefined ? { tracked: true } : { tracked: true, context };
+  const result: HookEventResult = context === undefined ? { tracked: true } : { tracked: true, context };
+  if (input.event === 'stop' && advice.demand) result.title = advice.demand;
+  return result;
 }
 
 export function enrollSession(ctx: Ctx, actor: string, sessionId: string, projectRef: string | number, title?: string): { session: Session; briefing: string } {

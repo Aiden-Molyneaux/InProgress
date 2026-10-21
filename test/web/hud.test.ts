@@ -66,7 +66,7 @@ describe('boardFigures', () => {
   });
   const ask = (nodeId: number): Ask => ({ id: nodeId, projectId: 1, nodeId, kind: 'question', text: 'Q', sessionId: null, raisedAt: T, clearedAt: null, clearedBy: null, answer: '', answerDeliveredAt: null });
   const input = (queue: number[], asks: Ask[]): BoardInput => ({
-    project: { id: 1, slug: 'p', name: 'P', description: '', playbook: '', status: 'active', rootNodeId: 1, createdAt: T, updatedAt: T, queue: queue.map((nodeId) => ({ nodeId, sessionId: null })), briefingMode: 'full' },
+    project: { id: 1, slug: 'p', name: 'P', description: '', playbook: '', status: 'active', rootNodeId: 1, createdAt: T, updatedAt: T, queue: queue.map((nodeId) => ({ nodeId, sessionId: null })), briefingMode: 'full', titleChannel: 'nudge' },
     nodes: [node(1, null), node(2, 1), node(3, 1), node(4, 1), node(5, 1)], sessions: [], pastSessions: [], resources: [], asks,
   });
 

@@ -7,8 +7,8 @@ import { homeDir } from '../lib/home';
 import { normalizePath } from '../lib/paths';
 import { CLI_SUBCOMMANDS, cliAllowRules, cliPrefix, isCliAllowRule, repoCli, taskPrefix } from '../lib/task-command';
 
-/** The allow rules that are the same for every repo: the scribe's tools and its resource snapshots. */
-export const STATIC_ALLOW_RULES = ['mcp__inprogress', 'Edit(~/.inprogress/resources/**)'];
+/** The allow rules that are the same for every repo: the scribe's tools and its resource snapshots, and the desktop app's session-title tool. */
+export const STATIC_ALLOW_RULES = ['mcp__inprogress', 'Edit(~/.inprogress/resources/**)', 'mcp__ccd_session_mgmt__set_session_title'];
 export const HOOK_SCRIPT_SUFFIX = '/dist/hooks/hook.js';
 const NOT_SCRIBE = '^(?!inprogress-scribe$).*';
 /** What the hooks and the scribe's MCP server run: install refuses without them. */

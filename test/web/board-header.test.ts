@@ -9,7 +9,7 @@ const NOW = Date.parse('2026-10-13T12:00:00Z');
 
 const session = (over: Partial<Session> & { id: string }): Session => ({
   projectId: 1, title: null, cwd: null, branch: null, transcriptPath: null, state: 'idle', focusNodeId: null, promptsSinceUpdate: 0,
-  startedAt: '2026-10-13T09:00:00Z', lastSeenAt: '2026-10-13T11:59:00Z', lastPromptAt: null, endedAt: null, slot: 0, role: 'worker', subagents: [], commands: [], ...over,
+  startedAt: '2026-10-13T09:00:00Z', lastSeenAt: '2026-10-13T11:59:00Z', lastPromptAt: null, endedAt: null, slot: 0, role: 'worker', titleAsked: null, subagents: [], commands: [], ...over,
 });
 
 /** Just the part of a Board that headerSessions reads: which column each focused step sits in. */

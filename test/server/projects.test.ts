@@ -287,6 +287,27 @@ describe('projects', () => {
     expect(() => changeProject(ctx, 'scribe:s1', p.slug, { briefingMode: 'half' as never })).toThrow(/Unknown briefing mode/);
   });
 
+  it('titleChannel defaults to nudge, changes through updateProject with an event, and refuses an unknown channel', () => {
+    const ctx = makeCtx();
+    const p = createProject(ctx, 'test', { name: 'P' });
+    expect(p.titleChannel).toBe('nudge');
+    const since = maxEventId(ctx);
+    expect(updateProject(ctx, 'scribe:s1', p.slug, { titleChannel: 'enforce' }).titleChannel).toBe('enforce');
+    expect(getProjectById(ctx, p.id)?.titleChannel).toBe('enforce');
+    const event = listEventsSince(ctx, since).find((e) => e.type === 'project.updated');
+    expect(event?.data).toMatchObject({ changes: { titleChannel: { from: 'nudge', to: 'enforce' } } });
+    const err = thrown(() => updateProject(ctx, 'scribe:s1', p.slug, { titleChannel: 'loud' as never }));
+    expect(err.status).toBe(400);
+    expect(err.message).toMatch(/Unknown title channel "loud"\. Use one of: nudge, enforce\./);
+  });
+
+  it('reads an unknown stored title_channel as nudge', () => {
+    const ctx = makeCtx();
+    const p = createProject(ctx, 'test', { name: 'P' });
+    ctx.db.prepare("UPDATE projects SET title_channel = 'loud' WHERE id = ?").run(p.id);
+    expect(getProjectById(ctx, p.id)?.titleChannel).toBe('nudge');
+  });
+
   it('summaries count open asks and live sessions waiting on a permission', () => {
     const ctx = makeCtx();
     const p = createProject(ctx, 'test', { name: 'P' });

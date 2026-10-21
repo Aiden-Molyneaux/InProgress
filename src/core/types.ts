@@ -40,6 +40,9 @@ export const SESSION_ROLES = ['worker', 'orchestrator'] as const;
 export type SessionRole = (typeof SESSION_ROLES)[number];
 export const BRIEFING_MODES = ['full', 'scoped'] as const;
 export type BriefingMode = (typeof BRIEFING_MODES)[number];
+/** nudge: the briefing tells a session when its title prefix is off. enforce: the Stop hook also sends it back once to set it. */
+export const TITLE_CHANNELS = ['nudge', 'enforce'] as const;
+export type TitleChannel = (typeof TITLE_CHANNELS)[number];
 export const RESOURCE_PURPOSES = ['handoff', 'state', 'library', 'page'] as const;
 export type ResourcePurpose = (typeof RESOURCE_PURPOSES)[number];
 /** A doc read live from its path in a bound repo: `library` lists it in the Library, `page` in its project's Docs view. */
@@ -103,6 +106,7 @@ export interface Project {
    */
   queue: QueueEntry[];
   briefingMode: BriefingMode;
+  titleChannel: TitleChannel;
 }
 
 /**
@@ -394,6 +398,8 @@ export interface Session {
    */
   slot: number | null;
   role: SessionRole;
+  /** The full title the session's last Stop block demanded (migration 16); null before any. */
+  titleAsked: string | null;
   subagents: SubagentInfo[];
   /** Its background commands: running ones and those that ended in the last five minutes, at most 30. */
   commands: CommandInfo[];
