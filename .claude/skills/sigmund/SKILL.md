@@ -371,6 +371,7 @@ A retry that is itself a gated action (another deploy, a rollback, an installer)
   - `REVIEW`: set whenever you end a turn with the phase 7 receipt still open, its `review` ask included, or with phase 8's *after the gate* criteria waiting on Aiden. The go-ahead ("ship it", "merge it", "go ahead") or Aiden's PASS drops it and the gated phase runs with no prefix; a change request or a FAIL drops it until the next receipt.
   - `BLOCKED`: set when you end a turn waiting on Aiden for anything but the receipt: a scribe `question` or `permission` ask, or a question in your closing message. Drop it when Aiden answers. If one is open while the receipt waits, `BLOCKED` wins: the answer comes before a ship. A question asked inside a turn (AskUserQuestion) sets nothing.
   - `DONE`: set once the step is merged, deployed and pushed (phase 8) and every criterion has passed or been waived. It stays.
+  - `PARKED` (#535): set while your step, or a step above it, is parked. It comes after `DONE` and before the others.
   - `RUNNING` (#535): set when you end a turn with a background subagent or command still running; drop it at the first turn end after that work finishes.
   - Otherwise no prefix: while you work, deploy retries included.
 

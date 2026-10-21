@@ -149,6 +149,15 @@ describe('the title channel through the hook', () => {
     expect(session().titleAsked).toBeNull();
   });
 
+  it('expects PARKED on a parked step, and on a step under one', () => {
+    const { ctx, step, hook } = setup({ title: 'Fix export', channel: 'enforce' });
+    updateNode(ctx, 'test', step.id, { status: 'parked', parkedReason: 'later' });
+    expect(hook(stop()).title).toEqual({ title: 'PARKED Fix export', reason: `#${step.id} is parked` });
+    const [child] = addNodes(ctx, 'test', { parentId: step.id, nodes: [{ title: 'Inner' }] });
+    setFocus(ctx, 'scribe:s1', 's1', child.id);
+    expect(hook(prompt({ title: 'Fix export' })).context?.split('\n')[0]).toMatch(new RegExp(`"PARKED Fix export".*InProgress sees #${child.id} is parked`));
+  });
+
   it('does not count a persistent Monitor as running', () => {
     const { hook } = setup({ title: 'Fix export', channel: 'enforce' });
     hook({ event: 'command-started', taskId: 'bmonit001', kind: 'monitor', persistent: true, description: 'watch' });

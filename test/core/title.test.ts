@@ -30,6 +30,7 @@ describe('splitPrefix', () => {
     expect(splitPrefix('DONE #455 Sigmund title status')).toEqual({ prefix: 'DONE', rest: '#455 Sigmund title status' });
     expect(splitPrefix('BLOCKED   #12 x')).toEqual({ prefix: 'BLOCKED', rest: '#12 x' });
     expect(splitPrefix('DONE')).toEqual({ prefix: 'DONE', rest: '' });
+    expect(splitPrefix('PARKED #7 Later')).toEqual({ prefix: 'PARKED', rest: '#7 Later' });
   });
   it('leaves ordinary words alone', () => {
     expect(splitPrefix('Review and clean up staging')).toEqual({ prefix: null, rest: 'Review and clean up staging' });
@@ -51,6 +52,9 @@ describe('expectedPrefix', () => {
   it('is DONE when the focus step is done, whatever else is true', () => {
     const sess = s({ subagents: [agent()] });
     expect(expectedPrefix(sess, snap('done', [ask(1, { kind: 'review' }), ask(2)]), NOW)).toBe('DONE');
+  });
+  it('is PARKED when the focus step is parked, before its asks and its work', () => {
+    expect(expectedPrefix(s({ subagents: [agent()] }), snap('parked', [ask(1, { kind: 'question' })]), NOW)).toBe('PARKED');
   });
   it('is BLOCKED before REVIEW when both asks are open', () => {
     expect(expectedPrefix(s(), snap('active', [ask(1, { kind: 'review' }), ask(2, { kind: 'permission' })]), NOW)).toBe('BLOCKED');
@@ -92,6 +96,7 @@ describe('expectedPrefix', () => {
 describe('prefixReason', () => {
   it('names the step', () => {
     expect(prefixReason('DONE', 12)).toBe('#12 is done');
+    expect(prefixReason('PARKED', 12)).toBe('#12 is parked');
     expect(prefixReason('BLOCKED', 12)).toBe('an ask on #12 waits on Aiden');
     expect(prefixReason('REVIEW', 12)).toBe('a review on #12 waits on Aiden');
     expect(prefixReason('RUNNING', 12)).toBe('background work is still running');

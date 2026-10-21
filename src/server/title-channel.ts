@@ -4,6 +4,7 @@ import { write, type Ctx } from './db/tx';
 import { openAsksBy } from './repo/asks';
 import { findNode } from './repo/nodes';
 import { findSession, saveSession } from './repo/sessions';
+import { parkedAncestor } from './repo/shelved';
 
 /** Records the last title a block demanded (null clears it); no event, since the window never shows it. */
 function setTitleAsked(ctx: Ctx, sessionId: string, titleAsked: string | null): void {
@@ -28,7 +29,9 @@ export function titleAdvice(
   const title = session.title?.trim();
   if (!title) return {};
   // Only the focus step and the asks this session raised on it count: no full snapshot on the hook's budget.
-  const focus = session.focusNodeId === null ? undefined : findNode(ctx, session.focusNodeId);
+  const node = session.focusNodeId === null ? undefined : findNode(ctx, session.focusNodeId);
+  // A step under a parked step is parked too, as the briefing reads it.
+  const focus = node && node.status !== 'parked' && node.status !== 'done' && parkedAncestor(ctx, node.id) !== null ? { ...node, status: 'parked' as const } : node;
   const snapshot = { nodes: focus ? [focus] : [], asks: focus ? openAsksBy(ctx, session.id, focus.id) : [] };
   // A prompt is judged as at the turn's end, so work still running keeps RUNNING expected: else the prompt would ask to
   // drop a RUNNING the next stop puts back, and clear the memory of a declined demand.
