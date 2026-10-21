@@ -365,7 +365,7 @@ test('the resource viewer neutralises unsafe Markdown', async ({ page, demo }) =
 
 const pageDirs: string[] = [];
 test.afterAll(() => {
-  for (const dir of pageDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  for (const dir of pageDirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
 });
 
 /** A git repo bound to the project, for its pages, in a temp folder the file's afterAll removes. */
@@ -385,8 +385,8 @@ async function pageRepo(api: APIRequestContext, project: Seeded) {
   };
   commit('src/app.ts', 'export {};\n');
   await write(api, project.session, 'post', `/api/projects/${project.slug}/bindings`, { path: dir });
-  const register = (file: string, title: string) =>
-    write<{ id: number }>(api, project.session, 'post', '/api/resources', { nodeId: project.ids['Upload keystore'], kind: 'doc', title, path: join(dir, file), purpose: 'page' });
+  const register = (file: string, title: string, purpose = 'page') =>
+    write<{ id: number }>(api, project.session, 'post', '/api/resources', { nodeId: project.ids['Upload keystore'], kind: 'doc', title, path: join(dir, file), purpose });
   return { dir, commit, register };
 }
 
@@ -505,6 +505,101 @@ test('a moved page says it is gone, and a page with a secret never shows its tex
   await expect(viewer).not.toContainText('lives in Railway');
 });
 
+/** A Shipwright folder (bound to a project of its own, with a sync script that finds one file behind) and a page repo for `project` that adopts it, holding a library page with templates and a roster page. */
+async function libraryRepo(api: APIRequestContext, project: Seeded) {
+  // Shipwright, as a folder bound to a project, holding a sync script that finds one file behind.
+  const shipwright = await bare(api, 'Shipwright');
+  const swDir = mkdtempSync(join(tmpdir(), 'ip-e2e-sw-'));
+  pageDirs.push(swDir);
+  mkdirSync(join(swDir, 'scripts'));
+  const check = { shipwright: { head: 'abc1234def', date: '2026-10-20', subject: 'x' }, project: 'p', lastSync: null, files: [{ template: 'agents/sev.md', local: 'agents/sev.md', base: null, state: 'behind', behind: 1, commits: [], fills: {}, detail: null }], skip: [], notAdopted: [], fills: {} };
+  writeFileSync(join(swDir, 'scripts', 'template-sync.mjs'), `console.log(${JSON.stringify(JSON.stringify(check))});`);
+  await write(api, `e2e-${randomUUID()}`, 'post', `/api/projects/${shipwright.slug}/bindings`, { path: swDir });
+  const repo = await pageRepo(api, project);
+  mkdirSync(join(repo.dir, '.claude'));
+  writeFileSync(join(repo.dir, '.claude', 'shipwright.json'), JSON.stringify({ shipwright: swDir, files: { 'agents/sev.md': {} }, skip: [] }));
+  repo.commit('docs/guide.md', ['---', 'templates: [agents/sev.md]', '---', '# Guide', ''].join('\n'));
+  repo.commit('docs/roster.md', ['---', 'shelf: roster', '---', '# Agent roster', '', 'Who owns what.', ''].join('\n'));
+  // Titles of their own: the server is shared, and another test's library pages list beside these.
+  const titles = { guide: `Agent guide ${randomUUID().slice(0, 8)}`, roster: `Agent roster ${randomUUID().slice(0, 8)}` };
+  await repo.register('docs/guide.md', titles.guide, 'library');
+  await repo.register('docs/roster.md', titles.roster, 'library');
+  return { ...repo, titles };
+}
+
+test('the Library group lists pages by project, opens the roster in place, and keeps its route on reload', async ({ page, fresh, api }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const repo = await libraryRepo(api, fresh);
+  const { guide, roster } = repo.titles;
+  await open(page, fresh);
+  const lib = projectRail(page).locator('a[data-lib]');
+  // The server is shared, so another test's project may be behind too: at least this one is.
+  await expect(lib.locator('.ip-rail-behind')).toHaveText(/^[1-9]\d*$/);
+  await expect(lib).toHaveAccessibleName(/^Library, [1-9]\d* behind Shipwright$/);
+  await lib.click();
+  await expect(page).toHaveURL(/#\/lib\/pages$/);
+  await expect(page.getByRole('heading', { level: 1, name: 'PAGES' })).toBeVisible();
+  const shelves = projectRail(page).getByRole('list', { name: 'Library' });
+  await expect(shelves.getByRole('button')).toHaveText([/^Pages/, /^Roster/, /^Sync/]);
+  const row = page.locator('.ip-lib-row', { hasText: guide });
+  await expect(row.locator('.p-chip').first()).toHaveText('MD');
+  await expect(row.locator('.ip-lib-path')).toHaveText(join(repo.dir, 'docs', 'guide.md'));
+  // The roster page is on its own shelf, not in Pages.
+  await expect(page.locator('.ip-lib-row', { hasText: roster })).toHaveCount(0);
+  await expect(row.locator(`a.ip-lib-adapt[href^="#/lib/sync/${fresh.slug}/"]`)).toHaveAttribute('href', `#/lib/sync/${fresh.slug}/agents%2Fsev.md`);
+  await page.reload();
+  await expect(page).toHaveURL(/#\/lib\/pages$/);
+  await expect(page.locator('.ip-lib-row', { hasText: guide })).toBeVisible();
+  await shelves.getByRole('button', { name: /^Roster/ }).click();
+  await expect(page).toHaveURL(/#\/lib\/roster$/);
+  await expect(page.locator('section.ip-viewer[data-inline] .ip-md h1')).toHaveText('Agent roster');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(shelves.locator('.ip-rail-n[data-warn]')).toHaveText(/^[1-9]\d* behind$/);
+  await projectRail(page).locator(`a[href="#/p/${fresh.slug}"]`).click();
+  await expect(page).toHaveURL(hereIs(fresh.slug));
+  await expect(page.getByRole('heading', { name: 'Now', exact: true })).toBeVisible();
+});
+
+test('the Library row is one more stop in the rail: arrows reach it, Space opens it, shelves hand focus back to the project views, and a chip lands on the Sync button', async ({ page, fresh, api }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const { titles } = await libraryRepo(api, fresh);
+  await open(page, fresh);
+  const lib = projectRail(page).locator('a[data-lib]');
+  await expect(lib.locator('.ip-rail-behind')).toHaveText(/^[1-9]\d*$/);
+  const hash = () => page.evaluate('location.hash');
+  // End from the last project row reaches the Library row, Up returns to it.
+  const last = railRows(page).last();
+  await last.focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(lib).toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  await expect(last).toBeFocused();
+  await page.keyboard.press('End');
+  await expect(lib).toBeFocused();
+  // Alt+Down and Shift+F10 do nothing: no menu, no move, the address stays.
+  const before = await hash();
+  await page.keyboard.press('Alt+ArrowDown');
+  await page.keyboard.press('Shift+F10');
+  await expect(page.getByRole('menu')).toHaveCount(0);
+  expect(await hash()).toBe(before);
+  await expect(lib).toBeFocused();
+  await page.keyboard.press('Space');
+  await expect(page).toHaveURL(/#\/lib\/pages$/);
+  // With focus on a shelf button, 1 opens the first project and focus lands on that project's current view.
+  const shelves = projectRail(page).getByRole('list', { name: 'Library' });
+  await shelves.getByRole('button', { name: /^Roster/ }).focus();
+  await page.keyboard.press('1');
+  await expect(page).toHaveURL(/#\/p\//);
+  await expect(projectRail(page).locator('button.ip-rail-view[aria-current="page"]')).toBeFocused();
+  // Enter on an Adapted in chip opens Sync, with focus on the rail's Sync button.
+  await lib.click();
+  const chip = page.locator('.ip-lib-row', { hasText: titles.guide }).locator(`a.ip-lib-adapt[href^="#/lib/sync/${fresh.slug}/"]`);
+  await chip.focus();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/#\/lib\/sync\//);
+  await expect(shelves.getByRole('button', { name: /^Sync/ })).toBeFocused();
+});
+
 test('says so when the server is unreachable at first paint, then recovers', async ({ page, demo, consoleErrors }) => {
   consoleErrors.allow(/ERR_CONNECTION_REFUSED/);
   await page.route('**/api/**', (route) => route.abort('connectionrefused'));
@@ -606,7 +701,7 @@ const projectRail = (page: Page) => page.getByRole('navigation', { name: 'Projec
 /** One project's row in the rail (a link, named as its tab was). */
 const railRow = (page: Page, name: string | RegExp) => projectRail(page).getByRole('link', { name });
 /** Every project row, in rail order. */
-const railRows = (page: Page) => projectRail(page).getByRole('link');
+const railRows = (page: Page) => projectRail(page).locator('a[data-tab]');
 /** The current project's row. */
 const railCurrent = (page: Page) => projectRail(page).locator('a[aria-current="page"]');
 

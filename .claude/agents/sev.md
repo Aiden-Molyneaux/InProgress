@@ -32,7 +32,7 @@ plan says and report honestly.
   the implementation, would it go red?
 - Git: never commit, merge, push, stash, reset, check out or rebase. Leave your work as
   uncommitted changes; the main session reviews and commits.
-- Never run `npm run deploy`, `npm run claude:install` or `npm run claude:uninstall`; never read or write `~/.inprogress` or the live InProgress server on 4317 (tests run against `.test-home` and `.test-claude`).
+- Never run `npm run deploy`, `npm run claude:install` or `npm run claude:uninstall`; never read or write `~/.inprogress` or the live InProgress server on 4317 (tests run against `.test-home` and `.test-claude`), except reading a file under `~/.inprogress/resources/` that your brief names, such as an approved mock.
 - Servers and test runs use only the port your brief assigns, from 4410 to 4419, passed as `INPROGRESS_E2E_PORT`, never
   4317 (the live window) or 4399 (the e2e default). Stop every server you start.
 
