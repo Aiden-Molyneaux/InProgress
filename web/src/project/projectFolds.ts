@@ -1,7 +1,7 @@
 import { loadJson, save } from '../storage';
 
-/** `section:<id>` is a section (0 is "Top level"), `done:<parentId>` is a parent's folded done children (0 is the "Done groups" list). */
-const KEY_PATTERN = /^(section|done):\d+$/;
+/** `section:<id>` is a section (0 is "Top level"), `done:<parentId>` is a parent's folded done children (0 is the "Done groups" list), `someday` is the Backlog's Someday band. */
+const KEY_PATTERN = /^((section|done):\d+|someday)$/;
 const storeKey = (projectId: number) => `ip.folds.${projectId}`;
 
 /**

@@ -156,6 +156,20 @@ async function openFullBacklog(page: Page): Promise<Locator> {
   return view;
 }
 
+/** Picks a view of the full Backlog from its strip: Ranked, By Phase, Needs Triage, Stale or Parked. */
+async function pickView(view: Locator, name: string): Promise<void> {
+  const tab = view.getByRole('group', { name: 'Backlog view' }).getByRole('button', { name: new RegExp(`^${name}`) });
+  await tab.click();
+  await expect(tab).toHaveAttribute('aria-pressed', 'true');
+}
+
+/** Opens the full Backlog on a view other than Ranked: seeded steps are unranked, and By Phase lists every open one. */
+async function openBacklogView(page: Page, name: string): Promise<Locator> {
+  const view = await openFullBacklog(page);
+  await pickView(view, name);
+  return view;
+}
+
 /** A full-view Backlog row (open, not parked) by its title text, inside `scope`. */
 const blRow = (page: Page, scope: Locator, title: string): Locator => scope.locator('li.ip-bl-row:not(.ip-bl-parkedrow)', { has: page.getByText(title, { exact: true }) });
 /** The same for a row in the Parked group. */
@@ -2621,8 +2635,10 @@ test.describe('Board', () => {
     const opened = page.waitForRequest((r) => r.url().endsWith('/api/ui/events') && (r.postDataJSON() as { name: string }).name === 'backlog_open');
     const view = await openFullBacklog(page);
     await opened;
-    await expect(view.locator('.ip-page-meta')).toContainText('10 OPEN');
+    await expect(view.locator('.ip-page-meta')).toContainText('11 OPEN');
     await expect(viewButton(page, 'Backlog')).toBeFocused();
+    // Seeded steps are unranked: By Phase lists every open one, under its parent.
+    await pickView(view, 'By Phase');
     await expect(view.getByRole('region', { name: 'Backlog with no phase' }).locator('.ip-bl-gtitle')).toHaveText('No phase');
     await expect(view.getByRole('region', { name: 'Backlog under Road to market' }).getByText('9 Extra', { exact: true })).toBeVisible();
     await expect(page.locator('section.ip-band-next')).toHaveCount(0);
@@ -2647,7 +2663,7 @@ test.describe('Board', () => {
   test('a step parked from the full Backlog view returns to Next with to Next', async ({ page, fresh }) => {
     await page.setViewportSize(WIDE);
     await open(page, fresh);
-    const view = await openFullBacklog(page);
+    const view = await openBacklogView(page, 'By Phase');
     const meta = view.locator('.ip-page-meta');
     const total = Number((await meta.textContent())!.match(/^(\d+) OPEN/)![1]);
     const rowOf = (t: string) => blRow(page, view, t);
@@ -2668,6 +2684,7 @@ test.describe('Board', () => {
     // It leaves the list, the head counts one fewer open, and the Parked group holds it with its reason and where.
     await expect(rowOf('4 Build to GitHub')).toHaveCount(0);
     await expect(meta).toHaveText(`${total - 1} OPEN · 1 PARKED`);
+    await pickView(view, 'Parked');
     const parked = view.getByRole('region', { name: 'Parked' });
     await expect(parked.locator('.p-eyebrow').first()).toHaveText('PARKED · 1');
     const parkedRow = pRow(page, parked, '4 Build to GitHub');
@@ -2685,81 +2702,28 @@ test.describe('Board', () => {
     const nextRow = band(page, 'next').locator('.ip-next-row', { has: page.getByRole('button', { name: '4 Build to GitHub', exact: true }) });
     await expect(nextRow.locator('.p-tile-chips .p-chip')).toHaveText('READY');
     // Unpark sends a parked step back to the Backlog, not to Next.
-    const again = await openFullBacklog(page);
+    const again = await openBacklogView(page, 'By Phase');
     await blRow(page, again, '5 Store listing').hover();
     await blRow(page, again, '5 Store listing').getByRole('button', { name: 'Park…' }).click();
     await page.getByRole('textbox', { name: 'Why is it set aside?' }).fill('Later');
     await page.getByRole('button', { name: 'Park', exact: true }).click();
+    await pickView(again, 'Parked');
     const shelved = pRow(page, again.getByRole('region', { name: 'Parked' }), '5 Store listing');
     await expect(shelved).toBeVisible();
     await shelved.hover();
     await shelved.getByRole('button', { name: 'Unpark' }).click();
-    await expect(blRow(page, again, '5 Store listing')).toBeVisible();
     await expect(again.getByRole('region', { name: 'Parked' })).toHaveCount(0);
+    await pickView(again, 'By Phase');
+    await expect(blRow(page, again, '5 Store listing')).toBeVisible();
     await viewButton(page, 'Board').click();
     await expect(band(page, 'next').locator('.ip-next-row', { hasText: '5 Store listing' })).toHaveCount(0);
   });
 
-  test('the Backlog orders by phase, id or age, forward or reverse, and keeps the choice after a reload', async ({ page, fresh }) => {
-    await page.setViewportSize(WIDE);
-    await open(page, fresh);
-    const next = await openFullBacklog(page);
-    const order = next.getByRole('group', { name: 'Backlog order' });
-    const attrs = async (selector: string, name: string) => Promise.all((await next.locator(selector).all()).map((l) => l.getAttribute(name)));
-    const ids = async () => (await attrs('li.ip-bl-row', 'data-node')).map(Number);
-    const regions = () => attrs('.ip-bl-group', 'aria-label');
-    // Phase, forward, is the default: groups under each parent.
-    await expect(order.getByRole('button', { name: 'Phase' })).toHaveAttribute('aria-pressed', 'true');
-    await expect(order.getByRole('button', { name: 'Reverse' })).toHaveAttribute('aria-pressed', 'false');
-    const phaseRegions = await regions();
-    expect(phaseRegions).toContain('Backlog under Road to market');
-    const phaseIds = await ids();
-    // ID: one flat list, low to high, each row naming its parent.
-    await order.getByRole('button', { name: 'ID' }).click();
-    await expect(next.getByRole('region', { name: 'Backlog by id' })).toBeVisible();
-    expect(await regions()).toEqual(['Backlog by id']);
-    const up = await ids();
-    expect(up).toEqual([...phaseIds].sort((a, b) => a - b));
-    await expect(blRow(page, next, '3 RevenueCat').locator('.ip-bl-phase')).toHaveText('Road to market');
-    // Age: one flat list, oldest first (creation order is id order here), forward and reverse.
-    await order.getByRole('button', { name: 'Age' }).click();
-    await expect(next.getByRole('region', { name: 'Backlog by age' })).toBeVisible();
-    expect(await ids()).toEqual(up);
-    await order.getByRole('button', { name: 'Reverse' }).click();
-    expect(await ids()).toEqual([...up].reverse());
-    await order.getByRole('button', { name: 'Reverse' }).click();
-    await order.getByRole('button', { name: 'ID' }).click();
-    // Reverse: high to low.
-    await order.getByRole('button', { name: 'Reverse' }).click();
-    await expect(order.getByRole('button', { name: 'Reverse' })).toHaveAttribute('aria-pressed', 'true');
-    expect(await ids()).toEqual([...up].reverse());
-    // The choice survives a reload.
-    await page.reload();
-    // Backlog is a view of its own now, so the reload keeps it open.
-    await expect(next).toBeVisible();
-    await expect(order.getByRole('button', { name: 'ID' })).toHaveAttribute('aria-pressed', 'true');
-    await expect(order.getByRole('button', { name: 'Reverse' })).toHaveAttribute('aria-pressed', 'true');
-    expect(await ids()).toEqual([...up].reverse());
-    // Phase, reverse: the groups and the rows in each flip.
-    await order.getByRole('button', { name: 'Phase' }).click();
-    await expect(next.getByRole('region', { name: 'Backlog under Road to market' })).toBeVisible();
-    expect(await regions()).toEqual([...phaseRegions].reverse());
-    expect(await ids()).toEqual([...phaseIds].reverse());
-    // A reorder closes an open Delete confirm, and focus stays on the control.
-    const victim = blRow(page, next, '3 RevenueCat');
-    await victim.hover();
-    await victim.getByRole('button', { name: 'Delete…' }).click();
-    await expect(next.locator('.p-confirm')).toBeVisible();
-    await order.getByRole('button', { name: 'Reverse' }).click();
-    await expect(next.locator('.p-confirm')).toHaveCount(0);
-    await expect(order.getByRole('button', { name: 'Reverse' })).toBeFocused();
-  });
-
-  test('the Backlog filter narrows the rows under either order, says "X of N shown", filters by phase and label, and clears on Escape, Clear filter and leaving the view', async ({ page, api, fresh }) => {
+  test('the Backlog filter narrows the rows, says "X of N shown", matches id, label and phase, and clears on Escape, Clear filter and leaving the view', async ({ page, api, fresh }) => {
     await write(api, fresh.session, 'patch', `/api/nodes/${fresh.ids['7 Launch']}`, { label: 'fix' });
     await page.setViewportSize(WIDE);
     await open(page, fresh);
-    const next = await openFullBacklog(page);
+    const next = await openBacklogView(page, 'By Phase');
     const meta = next.locator('.ip-page-meta');
     const field = next.getByRole('textbox', { name: 'Filter the backlog' });
     const titles = () => next.locator('li.ip-bl-row .ip-bl-title').allInnerTexts();
@@ -2769,10 +2733,6 @@ test.describe('Board', () => {
     // Every word must match: here both in the title.
     await field.fill('build git');
     await expect(meta).toContainText(`1 OF ${total} SHOWN`);
-    expect(await titles()).toEqual(['4 Build to GitHub']);
-    // The ID order filters the same way.
-    await next.getByRole('group', { name: 'Backlog order' }).getByRole('button', { name: 'ID' }).click();
-    await expect(next.getByRole('region', { name: 'Backlog by id' })).toBeVisible();
     expect(await titles()).toEqual(['4 Build to GitHub']);
     // "#id", the label, and the parent title with the title.
     await field.fill(`#${fresh.ids['6 Beta']}`);
@@ -2805,30 +2765,24 @@ test.describe('Board', () => {
     await field.fill('beta');
     await expect(next.locator('.p-confirm')).toHaveCount(0);
     await expect.poll(titles).toEqual(['6 Beta']);
-    // "to Next" still works on a filtered row, and the count follows.
+    // "to Next" still works on a filtered row: it stays in By Phase, now marked NEXT.
     await field.fill('revenuecat');
     const row = blRow(page, next, '3 RevenueCat');
     await row.hover();
     await row.getByRole('button', { name: 'to Next' }).click();
-    // Next is not on screen in the full view: the row leaves it, and the count follows.
-    await expect(row).toHaveCount(0);
-    await expect(meta).toContainText(`0 OF ${total - 1} SHOWN`);
-    // Phase tabs pick one phase, label buttons any number plus unlabelled; they combine with the text.
-    await next.getByRole('button', { name: 'Clear filter' }).click();
-    await next.getByRole('group', { name: 'Phase' }).getByRole('button', { name: /^Road to market/ }).click();
-    // Milestones, a finished phase with no steps open, sits at the root: it is not in Road to market.
-    await expect.poll(async () => (await titles()).length).toBe(total - 2);
-    await next.getByRole('group', { name: 'Label' }).getByRole('button', { name: /fix/ }).click();
-    await expect.poll(titles).toEqual(['7 Launch']);
-    await next.getByRole('group', { name: 'Label' }).getByRole('button', { name: 'unlabelled' }).click();
-    await expect.poll(async () => (await titles()).length).toBe(total - 2);
+    await expect(row.locator('.p-chip')).toHaveText('NEXT');
+    await expect(meta).toContainText(`1 OF ${total} SHOWN`);
+    // The phase title matches too: the steps under Road to market, not Milestones (a phase of its own).
+    await field.fill('road market');
+    await expect.poll(titles).toContain('7 Launch');
+    expect(await titles()).not.toContain('Milestones');
     // Leaving the view clears the filter.
     await field.fill('beta');
     await expect.poll(titles).toEqual(['6 Beta']);
     await viewButton(page, 'Board').click();
-    await openFullBacklog(page);
+    await openBacklogView(page, 'By Phase');
     await expect(field).toHaveValue('');
-    await expect.poll(async () => (await titles()).length).toBe(total - 1);
+    await expect.poll(async () => (await titles()).length).toBe(total);
   });
 
   test('"to Next" and "back to Backlog" are buttons Tab reaches and shows, and write the queue', async ({ page, fresh }) => {
@@ -2864,7 +2818,7 @@ test.describe('Board', () => {
     consoleErrors.allow(/status of 400/);
     await page.setViewportSize(WIDE);
     await open(page, fresh);
-    const next = await openFullBacklog(page);
+    const next = await openBacklogView(page, 'By Phase');
     const id = fresh.ids['6 Beta'];
     const row = blRow(page, next, '6 Beta');
     const acts = row.locator('.ip-bl-acts');
@@ -2938,7 +2892,7 @@ test.describe('Board', () => {
     consoleErrors.allow(/status of (400|409)/);
     await page.setViewportSize(WIDE);
     await open(page, fresh);
-    const view = await openFullBacklog(page);
+    const view = await openBacklogView(page, 'By Phase');
     const rowOf = (t: string) => blRow(page, view, t);
     const idsNow = async () => Promise.all((await view.locator('li.ip-bl-row').all()).map((l) => l.getAttribute('data-node')));
     /** After the row `gone` left (or moved), focus sits on the row that followed it in the list as it was, else the one before. */
@@ -2951,7 +2905,8 @@ test.describe('Board', () => {
     let before = await idsNow();
     await rowOf('3 RevenueCat').hover();
     await rowOf('3 RevenueCat').getByRole('button', { name: 'to Next' }).click();
-    await expect(rowOf('3 RevenueCat')).toHaveCount(0);
+    // By Phase keeps the row, now marked NEXT; focus has moved on to the row after it.
+    await expect(rowOf('3 RevenueCat').locator('.p-chip')).toHaveText('NEXT');
     await onNeighbourOf(revenue, before);
     before = await idsNow();
     await rowOf('6 Beta').hover();
@@ -2974,15 +2929,14 @@ test.describe('Board', () => {
     // What is typed survives a filter and a reorder while the row is still shown, and the form does not take focus back.
     await view.getByRole('textbox', { name: 'Filter the backlog' }).fill('store');
     await expect(form).toBeVisible();
-    await view.getByRole('group', { name: 'Backlog order' }).getByRole('button', { name: 'ID' }).click();
     await expect(form.getByRole('textbox', { name: 'Why is it set aside?' })).toHaveValue('Later');
-    await expect(view.getByRole('group', { name: 'Backlog order' }).getByRole('button', { name: 'ID' })).toBeFocused();
     await view.getByRole('textbox', { name: 'Filter the backlog' }).fill('');
     before = await idsNow();
     await form.getByRole('textbox', { name: 'Why is it set aside?' }).press('Enter');
     await expect(rowOf('5 Store listing')).toHaveCount(0);
     await onNeighbourOf(fresh.ids['5 Store listing'], before);
     // A refused Unpark gives focus back to the button that was pressed.
+    await pickView(view, 'Parked');
     const parked = view.getByRole('region', { name: 'Parked' });
     const parkedRow = pRow(page, parked, '5 Store listing');
     const unparkUrl = '**/api/ui/projects/*/nodes/*/unpark';
@@ -2993,21 +2947,23 @@ test.describe('Board', () => {
     await expect(parkedRow.getByRole('button', { name: 'Unpark' })).toBeFocused();
     await expect(parkedRow.getByRole('button', { name: 'Unpark' })).toBeEnabled();
     await page.unroute(unparkUrl);
-    // Unpark and to Next in the Parked group move focus on too.
-    before = await idsNow();
+    // Unpark and to Next in the Parked view move focus on too: with no row left, to the page title.
     await parkedRow.getByRole('button', { name: 'Unpark' }).click();
     await expect(parked).toHaveCount(0);
-    await onNeighbourOf(fresh.ids['5 Store listing'], before);
+    await expect(view.getByRole('heading', { level: 1 })).toBeFocused();
+    await pickView(view, 'By Phase');
     await rowOf('5 Store listing').hover();
     await rowOf('5 Store listing').getByRole('button', { name: 'Park…' }).click();
     await page.getByRole('textbox', { name: 'Why is it set aside?' }).fill('Again');
     await page.keyboard.press('Enter');
+    await expect(rowOf('5 Store listing')).toHaveCount(0);
+    await pickView(view, 'Parked');
     await expect(parked).toBeVisible();
-    before = await idsNow();
     await parkedRow.hover();
     await parkedRow.getByRole('button', { name: 'to Next' }).click();
     await expect(parked).toHaveCount(0);
-    await onNeighbourOf(fresh.ids['5 Store listing'], before);
+    await expect(view.getByRole('heading', { level: 1 })).toBeFocused();
+    await pickView(view, 'By Phase');
     // A row removed by another session while it has focus hands focus to the row that followed it.
     before = await idsNow();
     const victim = before[1]!;
@@ -3020,12 +2976,16 @@ test.describe('Board', () => {
   test('in the full Backlog, quick-add Escape focuses the page title, Escape waits out a park in flight, and a park resolving leaves focus in a second open form', async ({ page, fresh }) => {
     await page.setViewportSize(WIDE);
     await open(page, fresh);
-    const view = await openFullBacklog(page);
+    const view = await openBacklogView(page, 'By Phase');
     const rowOf = (t: string) => blRow(page, view, t);
-    const add = view.getByRole('textbox', { name: 'Add a step to the backlog' });
-    await add.focus();
+    // The group foot's quick-add: Escape puts focus back on its box.
+    const group = view.getByRole('region', { name: 'Backlog with no phase' });
+    const box = group.getByRole('button', { name: '+ Add a step' });
+    await box.click();
+    const add = group.getByRole('textbox', { name: 'Add a step with no phase' });
+    await expect(add).toBeFocused();
     await page.keyboard.press('Escape');
-    await expect(view.getByRole('heading', { level: 1 })).toBeFocused();
+    await expect(box).toBeFocused();
     // The park is held back for a moment: Escape in its form does nothing meanwhile.
     const parkUrl = '**/api/ui/projects/*/nodes/*/park';
     await page.route(parkUrl, async (route) => {
@@ -3047,7 +3007,6 @@ test.describe('Board', () => {
     await expect(second.getByRole('textbox', { name: 'Why is it set aside?' })).toBeFocused();
     await second.getByRole('textbox', { name: 'Why is it set aside?' }).fill('Typing');
     await expect(rowOf('4 Build to GitHub')).toHaveCount(0);
-    await expect(view.getByRole('region', { name: 'Parked' })).toBeVisible();
     await expect(second.getByRole('textbox', { name: 'Why is it set aside?' })).toBeFocused();
     await expect(second.getByRole('textbox', { name: 'Why is it set aside?' })).toHaveValue('Typing');
     await page.unroute(parkUrl);
@@ -3057,7 +3016,7 @@ test.describe('Board', () => {
     await write(api, fresh.session, 'post', '/api/nodes', { parentId: fresh.root, nodes: [{ title: 'Loose one' }, { title: 'Loose parked' }] });
     await page.setViewportSize(WIDE);
     await open(page, fresh);
-    const view = await openFullBacklog(page);
+    const view = await openBacklogView(page, 'By Phase');
     await expect(view.getByRole('region', { name: 'Backlog with no phase' })).toBeVisible();
     const groups = await Promise.all((await view.locator('.ip-bl-group:not(.ip-bl-parked)').all()).map((g) => g.getAttribute('aria-label')));
     expect(groups.at(-1)).toBe('Backlog with no phase');
@@ -3067,6 +3026,7 @@ test.describe('Board', () => {
     await loose.getByRole('button', { name: 'Park…' }).click();
     await page.getByRole('textbox', { name: 'Why is it set aside?' }).fill('Not now');
     await page.keyboard.press('Enter');
+    await pickView(view, 'Parked');
     const parkedRow = pRow(page, view.getByRole('region', { name: 'Parked' }), 'Loose parked');
     await expect(parkedRow.locator('.ip-bl-phase')).toHaveText('No phase');
   });
@@ -3594,9 +3554,12 @@ test.describe('Module rail', () => {
     await addStep(api, b, 'Entry of b');
     await page.goto(`/#/p/${a.slug}`);
     await viewButton(page, 'Backlog').click();
+    // A new step is unranked, so By Phase (kept per project) is where it shows.
+    await pickView(page.locator('.ip-backlogview'), 'By Phase');
     await expect(page.locator('.ip-backlogview').getByText('Entry of a', { exact: true })).toBeVisible();
     await railRow(page, bName).click();
     await expect(railRow(page, bName)).toHaveAttribute('aria-current', 'page');
+    await pickView(page.locator('.ip-backlogview'), 'By Phase');
     await expect(page.locator('.ip-backlogview').getByText('Entry of b', { exact: true })).toBeVisible();
     await expect(page.locator('.ip-backlogview').getByText('Entry of a', { exact: true })).toHaveCount(0);
     await expect(page.locator('.ip-backlogview').getByRole('heading', { level: 1, name: 'BACKLOG' })).toBeVisible();
@@ -3825,65 +3788,35 @@ test.describe('#504 Backlog view and All done', () => {
     await row.getByRole('button', { name: 'Park…' }).click();
     await page.getByRole('textbox', { name: 'Why is it set aside?' }).fill(reason);
     await page.keyboard.press('Enter');
-    await expect(pRow(page, view.getByRole('region', { name: 'Parked' }), title)).toBeVisible();
+    await expect(blRow(page, view, title)).toHaveCount(0);
   }
 
-  test('the phase TabStrip and a label Chip together narrow the Backlog, and the meta says how many are shown', async ({ page, api, fresh }) => {
-    await write(api, fresh.session, 'patch', `/api/nodes/${fresh.ids['7 Launch']}`, { label: 'fix' });
-    await write(api, fresh.session, 'patch', `/api/nodes/${fresh.ids['4 Build to GitHub']}`, { label: 'fix' });
+  test('the Backlog rows are one Tab stop: Home and End cross the groups and Enter opens Details', async ({ page, fresh }) => {
     await page.setViewportSize(WIDE);
     await open(page, fresh);
-    const view = await openFullBacklog(page);
-    await parkFromView(page, view, '6 Beta', 'Later');
-    const meta = view.locator('.ip-page-meta');
-    const total = Number((await meta.textContent())!.match(/^(\d+) OPEN/)![1]);
-    await expect(meta).toHaveText(`${total} OPEN · 1 PARKED`);
-    const titles = () => view.locator('li.ip-bl-row:not(.ip-bl-parkedrow) .ip-bl-title').allInnerTexts();
-    const phaseTab = view.getByRole('group', { name: 'Phase' }).getByRole('button', { name: /^Road to market/ });
-    await phaseTab.click();
-    await expect(phaseTab).toHaveAttribute('aria-pressed', 'true');
-    const label = view.getByRole('group', { name: 'Label' }).getByRole('button', { name: /fix/ });
-    await label.click();
-    await expect(label).toHaveAttribute('aria-pressed', 'true');
-    await expect.poll(async () => (await titles()).sort()).toEqual(['4 Build to GitHub', '7 Launch']);
-    await expect(meta).toHaveText(`2 OF ${total} SHOWN · 1 PARKED`);
-    // Nothing matches both the text and the picks: Clear filter clears all three and restores the open count.
-    await view.getByRole('textbox', { name: 'Filter the backlog' }).fill('zzz');
-    await view.getByRole('button', { name: 'Clear filter' }).click();
-    await expect(meta).toHaveText(`${total} OPEN · 1 PARKED`);
-    await expect(phaseTab).toHaveAttribute('aria-pressed', 'false');
-    await expect(label).toHaveAttribute('aria-pressed', 'false');
-    await expect(view.getByRole('textbox', { name: 'Filter the backlog' })).toBeFocused();
-  });
-
-  test('the Backlog rows are one Tab stop: Down crosses from the groups into Parked and Enter opens Details', async ({ page, fresh }) => {
-    await page.setViewportSize(WIDE);
-    await open(page, fresh);
-    const view = await openFullBacklog(page);
-    await parkFromView(page, view, '5 Store listing', 'Later');
+    const view = await openBacklogView(page, 'By Phase');
     // Exactly one row is in the Tab order.
     await expect(view.locator('li.ip-bl-row[tabindex="0"]')).toHaveCount(1);
     // Tab from the controls above lands on that row.
-    await view.getByRole('button', { name: 'Reverse' }).focus();
+    await view.getByRole('textbox', { name: 'Filter the backlog' }).focus();
     for (let i = 0; i < 12; i++) {
       if ((await view.locator('li.ip-bl-row:focus').count()) > 0) break;
       await page.keyboard.press('Tab');
     }
     const landed = await view.locator('li.ip-bl-row:focus').getAttribute('data-node');
     expect(landed).toBe(await view.locator('li.ip-bl-row[tabindex="0"]').getAttribute('data-node'));
-    // Down from the last open row goes into Parked; Home goes back to the first row.
-    const lastOpen = view.locator('.ip-bl-group:not(.ip-bl-parked) li.ip-bl-row').last();
-    await lastOpen.focus();
-    await page.keyboard.press('ArrowDown');
-    const parkedRow = pRow(page, view.getByRole('region', { name: 'Parked' }), '5 Store listing');
-    await expect(parkedRow).toBeFocused();
+    // End goes to the last row, in the last group; Home goes back to the first row.
+    await page.keyboard.press('End');
+    const last = view.locator('li.ip-bl-row').last();
+    await expect(last).toBeFocused();
     await page.keyboard.press('Home');
     await expect(view.locator('li.ip-bl-row').first()).toBeFocused();
     await page.keyboard.press('End');
-    await expect(parkedRow).toBeFocused();
+    await expect(last).toBeFocused();
     // Enter opens Details on the focused row.
+    const title = await last.locator('.ip-bl-title').innerText();
     await page.keyboard.press('Enter');
-    await expect(page.getByRole('complementary').locator('.ip-dtitle')).toContainText('5 Store listing');
+    await expect(page.getByRole('complementary').locator('.ip-dtitle')).toContainText(title);
   });
 
   test('All done reads as a log by time and by phase', async ({ page, api, fresh }) => {
@@ -4183,5 +4116,141 @@ test.describe('#502 Board in v3', () => {
     await expect(doomed).toHaveCount(0);
     await expect(menu).toBeVisible();
     await expect(current).toBeFocused();
+  });
+});
+
+/** One rank change as the window makes it (ranked Backlog spec section 2): from the page, with its UI token. */
+async function rankFromPage(page: Page, projectId: number, slug: string, op: { node: number; to: 'next' | 'soon' | 'someday'; before: number | null }): Promise<void> {
+  const res = await windowPost(page, `/api/ui/projects/${projectId}/rank`, { slug, op });
+  expect(res.status, `rank ${JSON.stringify(op)} answered ${res.status}: ${JSON.stringify(res.body)}`).toBe(200);
+}
+
+/** The project's id, from the listing (the seed returns the slug). */
+async function projectIdOf(api: APIRequestContext, slug: string): Promise<number> {
+  const listed = ((await (await api.get('/api/projects')).json()) as { id: number; slug: string }[]).find((p) => p.slug === slug);
+  expect(listed, `project ${slug} is listed`).toBeTruthy();
+  return listed!.id;
+}
+
+test.describe('#542 ranked Backlog', () => {
+  /** Ranks the steps into the bottom of Soon in the order given, then opens the Ranked view. Each test ranks what it asserts on. */
+  async function openRankedWith(page: Page, api: APIRequestContext, fresh: Seeded, titles: string[]): Promise<{ view: Locator; projectId: number }> {
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const projectId = await projectIdOf(api, fresh.slug);
+    for (const title of titles) await rankFromPage(page, projectId, fresh.slug, { node: fresh.ids[title], to: 'soon', before: null });
+    const view = await openFullBacklog(page);
+    return { view, projectId };
+  }
+  const handleOf = (row: Locator) => row.locator('.ip-bl-handle');
+  const soonTitles = (view: Locator) => view.getByRole('region', { name: 'Soon' }).locator('.ip-bl-title').allInnerTexts();
+
+  test('the Backlog opens on Ranked: Next up, Soon and a folded Someday, under the five views with counts', async ({ page, api, fresh }) => {
+    const { view, projectId } = await openRankedWith(page, api, fresh, ['3 RevenueCat', '4 Build to GitHub']);
+    await rankFromPage(page, projectId, fresh.slug, { node: fresh.ids['5 Store listing'], to: 'someday', before: null });
+    const views = view.getByRole('group', { name: 'Backlog view' });
+    await expect(views.getByRole('button')).toHaveText([/^Ranked/, /^By Phase/, /^Needs Triage/, /^Stale/, /^Parked/]);
+    await expect(views.getByRole('button', { name: /^Ranked/ })).toHaveAttribute('aria-pressed', 'true');
+    await expect(view.getByRole('region', { name: 'Next up' }).locator('h3')).toHaveText('Next up');
+    await expect(view.getByRole('region', { name: 'Soon' }).locator('h3')).toHaveText('Soon');
+    const someday = view.getByRole('region', { name: 'Someday' });
+    await expect(someday.getByRole('button', { name: /^Show \d+$/ })).toBeVisible();
+    await expect(someday.locator('li')).toHaveCount(0);
+    // Soon's rows are numbered and carry a handle.
+    await expect(blRow(page, view, '3 RevenueCat').locator('.ip-bl-num')).toHaveText(/^\d+$/);
+    await expect(handleOf(blRow(page, view, '3 RevenueCat'))).toBeVisible();
+    // Show opens the fold, and the choice is kept.
+    await someday.getByRole('button', { name: /^Show/ }).click();
+    await expect(blRow(page, someday, '5 Store listing')).toBeVisible();
+    await page.reload();
+    await expect(blRow(page, page.getByRole('region', { name: 'Someday' }), '5 Store listing')).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Someday' }).getByRole('button', { name: 'Hide' })).toBeVisible();
+  });
+
+  test("dragging a Soon row into Next up queues it, and the Board's Next shows it", async ({ page, api, fresh }) => {
+    const { view } = await openRankedWith(page, api, fresh, ['3 RevenueCat', '4 Build to GitHub']);
+    const nextUp = view.getByRole('region', { name: 'Next up' });
+    const row = blRow(page, view, '4 Build to GitHub');
+    await drag(handleOf(row), nextUp);
+    // It shows in Next up at once and stays after the snapshot has settled.
+    const queued = blRow(page, nextUp, '4 Build to GitHub');
+    await expect(queued).toBeVisible();
+    await expect(blRow(page, view.getByRole('region', { name: 'Soon' }), '4 Build to GitHub')).toHaveCount(0);
+    await page.waitForTimeout(2500);
+    await expect(queued).toBeVisible();
+    await expect(queued.locator('.ip-bl-num')).toHaveClass(/volt/);
+    // The Board's Next lists it.
+    await viewButton(page, 'Board').click();
+    await expect(band(page, 'next').locator('.ip-next-row', { has: page.getByRole('button', { name: '4 Build to GitHub', exact: true }) })).toHaveCount(1);
+  });
+
+  test('dragging within Soon persists across a reload', async ({ page, api, fresh }) => {
+    const mine = ['3 RevenueCat', '4 Build to GitHub', '5 Store listing'];
+    const { view } = await openRankedWith(page, api, fresh, mine);
+    const mineOnly = async (v: Locator) => (await soonTitles(v)).filter((t) => mine.includes(t));
+    await expect.poll(() => mineOnly(view)).toEqual(mine);
+    // The top half of 3 RevenueCat: 5 Store listing goes before it.
+    await drag(handleOf(blRow(page, view, '5 Store listing')), blRow(page, view, '3 RevenueCat'), { x: 80, y: 4 });
+    await expect.poll(() => mineOnly(view)).toEqual(['5 Store listing', '3 RevenueCat', '4 Build to GitHub']);
+    await page.reload();
+    const again = page.locator('.ip-backlogview');
+    await expect.poll(() => mineOnly(again)).toEqual(['5 Store listing', '3 RevenueCat', '4 Build to GitHub']);
+  });
+
+  test('Alt+Down on a focused Soon row moves it one place and keeps focus', async ({ page, api, fresh }) => {
+    const mine = ['3 RevenueCat', '4 Build to GitHub', '5 Store listing'];
+    const { view } = await openRankedWith(page, api, fresh, mine);
+    const mineOnly = async (v: Locator) => (await soonTitles(v)).filter((t) => mine.includes(t));
+    const row = blRow(page, view, '3 RevenueCat');
+    await row.focus();
+    await page.keyboard.press('Alt+ArrowDown');
+    await expect.poll(() => mineOnly(view)).toEqual(['4 Build to GitHub', '3 RevenueCat', '5 Store listing']);
+    await expect(blRow(page, view, '3 RevenueCat')).toBeFocused();
+    await page.reload();
+    await expect.poll(() => mineOnly(page.locator('.ip-backlogview'))).toEqual(['4 Build to GitHub', '3 RevenueCat', '5 Store listing']);
+  });
+
+  test('a step a session adds shows in Needs Triage and the Ranked notice', async ({ page, api, fresh }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const view = await openFullBacklog(page);
+    const triageTab = view.getByRole('group', { name: 'Backlog view' }).getByRole('button', { name: /^Needs Triage/ });
+    const before = Number(await triageTab.locator('.p-tab-count').innerText());
+    await write(api, fresh.session, 'post', '/api/nodes', { parentId: fresh.root, nodes: [{ title: 'Session added step' }] });
+    await expect(triageTab.locator('.p-tab-count')).toHaveText(String(before + 1));
+    const notice = view.locator('.ip-bl-notice');
+    await expect(notice).toContainText(before + 1 === 1 ? '1 new step to rank' : `${before + 1} new steps to rank`);
+    await notice.getByRole('button', { name: 'Triage ›' }).click();
+    await expect(triageTab).toHaveAttribute('aria-pressed', 'true');
+    await expect(blRow(page, view, 'Session added step')).toBeVisible();
+  });
+
+  test("the filter narrows every view's count and the meta, and Escape clears it", async ({ page, api, fresh }) => {
+    await openRankedWith(page, api, fresh, ['4 Build to GitHub']);
+    const view = page.locator('.ip-backlogview');
+    const field = view.getByRole('textbox', { name: 'Filter the backlog' });
+    const meta = view.locator('.ip-page-meta');
+    await field.fill('build git');
+    await expect(meta).toContainText('1 OF');
+    await expect(meta).toContainText('SHOWN');
+    const counts = view.getByRole('group', { name: 'Backlog view' }).locator('.p-tab-count');
+    await expect(counts).toHaveText(['1', '1', /^[01]$/, '0', '0']);
+    await field.focus();
+    await page.keyboard.press('Escape');
+    await expect(field).toHaveValue('');
+    await expect(meta).not.toContainText('SHOWN');
+  });
+
+  test('quick-add at the foot of Ranked creates a step at the bottom of Soon, and Escape returns focus to the box', async ({ page, api, fresh }) => {
+    const { view } = await openRankedWith(page, api, fresh, ['3 RevenueCat']);
+    const foot = view.getByRole('button', { name: '+ Add a step to Soon…' });
+    await foot.click();
+    const field = view.getByRole('textbox', { name: 'Add a step to Soon' });
+    await expect(field).toBeFocused();
+    await field.fill('Quick Soon step');
+    await page.keyboard.press('Enter');
+    await expect.poll(async () => (await soonTitles(view)).slice(-1)[0]).toBe('Quick Soon step');
+    await page.keyboard.press('Escape');
+    await expect(foot).toBeFocused();
   });
 });
