@@ -763,6 +763,8 @@ test('a tab drags to a new place, Alt+arrows move the focused tab, and the order
   await expect(page).toHaveURL(new RegExp(`#/p/${b.slug}$`));
   // A tab dragged to the right keeps the focus its press gave it, so the keys still reach the strip. Chromium keeps it
   // even without TabStrip's refocus after a drop, so this checks the outcome, not that guard.
+  // Other tests' projects can push our rows to the column's foot, where a held drag scrolls it: bring the target to its middle first.
+  await railRow(page, names[0]).evaluate((el) => el.scrollIntoView({ block: 'center' }));
   const last = (await railRow(page, names[0]).boundingBox())!;
   await railRow(page, names[2]).dragTo(railRow(page, names[0]), { targetPosition: { x: 10, y: last.height - 4 } });
   await expect.poll(() => ours()).toEqual([names[1], names[0], names[2]]);
