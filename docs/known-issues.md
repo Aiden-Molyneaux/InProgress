@@ -122,6 +122,13 @@ work. A re-hit bumps **Hits** and **Verified**. Entries seeded from the code and
   removal racing a handle still open on it during a file's cleanup.
 - **Verified:** 2026-10-20 · **Hits:** 2
 
+## Global git hooks make the page-repo e2e tests time out
+
+- **Symptom:** `npm run deploy` red on e2e "the freshness strip counts commits to covers since the confirmation, and Still accurate resets it" (`test/e2e/ui.spec.ts`): `Test timeout of 30000ms exceeded`, at a click or at `toHaveText('no commits since confirmed')`. Fails 5 of 5 even on a commit whose own deploy passed it.
+- **Diagnosis:** `core.hooksPath = ~/.githooks` in `~/.gitconfig`. A Git LFS install (2026-10-21 08:54) added `post-commit`, `post-checkout`, `post-merge` and `pre-push` there; `git lfs post-commit` took 2.8 s and the identity-check `pre-commit` 0.7 s per commit. The test's `pageRepo` helper makes five commits, so it ran past 30 s. The server's answer was right: the body after Still accurate said `count: 0`.
+- **Fix:** the `pageRepo` helper passes `-c core.hooksPath=<repo>/.git/no-hooks` (a folder that does not exist), so no hooks run in its throwaway repo. A test that makes commits in a temp repo should do the same.
+- **Verified:** 2026-10-21 · **Hits:** 1
+
 # Promoted
 
 # Canonized

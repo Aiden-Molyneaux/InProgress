@@ -1,8 +1,10 @@
-import { resolve } from 'node:path';
 import { defineConfig } from 'vitest/config';
 
-/** Points core.hooksPath at a folder that does not exist, through git's environment config, so no hook runs. */
-export const NO_GIT_HOOKS = { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.hooksPath', GIT_CONFIG_VALUE_0: resolve('.test-home', 'no-git-hooks') };
+/**
+ * Runs git without the user's hooks: core.hooksPath at a folder no repo has, through git's environment config, for the
+ * tests' own git and the code under test. Global hooks such as Git LFS cost seconds per commit, push or clone.
+ */
+export const NO_GIT_HOOKS = { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.hooksPath', GIT_CONFIG_VALUE_0: '.ip-test-no-hooks' };
 
 export default defineConfig({
   test: {
@@ -13,8 +15,7 @@ export default defineConfig({
     pool: 'threads',
     testTimeout: 20_000,
     hookTimeout: 30_000,
-    // Keep every test out of the real ~/.inprogress and ~/.claude, and every git a test spawns away from the machine's
-    // global hooks: a hook costs seconds per commit, push or clone on Windows, and no test is about the hooks.
+    // Keep every test out of the real ~/.inprogress and ~/.claude, and every git it runs away from the user's hooks.
     env: { INPROGRESS_HOME: '.test-home', INPROGRESS_CLAUDE_DIR: '.test-claude', ...NO_GIT_HOOKS },
   },
 });
