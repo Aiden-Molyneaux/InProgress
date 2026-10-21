@@ -34,6 +34,11 @@ export const STALE_SESSION_MS = 12 * 60 * 60 * 1000;
 export const STALL_MS = 30 * 60 * 1000;
 /** How long ended work stays on its step as the trail: an ended session's working tasks, and a subagent after it stopped. */
 export const TRAIL_MS = 7 * 24 * 60 * 60 * 1000;
+/** How long a Soon or Someday step may go untouched (no edit, no focusing session, no ask) before the Backlog calls it Stale. */
+export const STALE_STEP_MS = 14 * 24 * 60 * 60 * 1000;
+/** A step's Backlog band. There is no next band: Next up is the queue, which wins over the band while the step is in it. */
+export const RANK_BANDS = ['soon', 'someday'] as const;
+export type RankBand = (typeof RANK_BANDS)[number];
 export const ASK_KINDS = ['question', 'permission', 'review'] as const;
 export type AskKind = (typeof ASK_KINDS)[number];
 export const SESSION_ROLES = ['worker', 'orchestrator'] as const;
@@ -122,6 +127,13 @@ export interface QueueEntry {
 /** One window change to the queue (spec 2.5): applied to the stored queue on the server, never a replacement list. */
 export type QueueOp = { kind: 'move'; node: number; before: number | null } | { kind: 'remove'; node: number };
 
+/**
+ * One window change to a step's rank (ranked Backlog spec section 2): `next` is the queue move, before `before` in the
+ * unowned queue, the band untouched; `soon` or `someday` takes it out of the queue and places it in that band before
+ * `before` (null: at the end).
+ */
+export type RankOp = { node: number; to: 'next' | RankBand; before: number | null };
+
 /** The longest a project's name may be, once trimmed: the server's rule, and the window's rename field. */
 export const PROJECT_NAME_MAX = 120;
 
@@ -193,6 +205,10 @@ export interface TreeNode {
   parkedWhere: string;
   /** When the step was parked; null unless parked. */
   parkedAt: string | null;
+  /** Its Backlog band; null when unranked (Needs Triage). Parking clears it. */
+  rankBand: RankBand | null;
+  /** Its place within the band, project-wide, lowest first; null sorts after the ranked steps of the band, in tree order. */
+  rank: number | null;
 }
 
 export interface NodeInput {
@@ -358,6 +374,18 @@ export interface PastSession {
   endedAt: string;
 }
 
+/**
+ * When a session or an ask last touched an open step in a band (ranked Backlog spec section 4), read with no time limit:
+ * `pastSessions` and the asks reach back 7 days, Stale 14. Only steps with either time are listed.
+ */
+export interface StepTouch {
+  nodeId: number;
+  /** The newest end (or last sign, while it runs) of a session whose focus is the step; null when none. */
+  sessionAt: string | null;
+  /** When the newest ask on the step was raised; null when none was. */
+  askAt: string | null;
+}
+
 /** One of Claude's working tasks, under the node it was attributed to when it was created. */
 export interface WorkItem {
   id: number;
@@ -429,6 +457,8 @@ export interface ProjectSnapshot {
   pastSessions: PastSession[];
   /** Open asks, and those cleared in the last 7 days, oldest raised first. */
   asks: Ask[];
+  /** The last session and ask times of the open steps in a band, however old, for the Backlog's Stale view. */
+  stepTouches: StepTouch[];
   stateNote: StateNote | null;
   lastEventId: number;
   lastEvent: EventRow | null;

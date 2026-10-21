@@ -48,7 +48,7 @@ describe('migration 13', () => {
     migrate(db);
     expect(schemaVersion(db)).toBe(MIGRATIONS.length);
     const after = nodeRows(db);
-    expect(after.map(({ parked_reason: _r, parked_where: _w, parked_at: _a, ...rest }) => rest)).toEqual(before);
+    expect(after.map(({ parked_reason: _r, parked_where: _w, parked_at: _a, rank_band: _b, rank: _k, ...rest }) => rest)).toEqual(before);
     expect(after[1]).toMatchObject({ label: 'data', board_state: 'working', hue: 4, driver_session_id: 's-1', position: 2.5 });
     expect(db.prepare('SELECT node_id FROM resources WHERE id = 1').pluck().get()).toBe(2);
     expect(db.prepare('SELECT node_id FROM log_entries WHERE id = 1').pluck().get()).toBe(2);

@@ -6,6 +6,7 @@ import { lastProjectEvent, maxEventId } from './events';
 import { listLogs } from './logs';
 import { listNodes, requireNode } from './nodes';
 import { getProjectById, resolveProject } from './projects';
+import { listStepTouches } from './rank';
 import { listNodeResources, listResourceMeta, readStateNote } from './resources';
 import { expireStaleSessions, listPastSessions, readProjectSessions } from './sessions';
 import { listTrailAgents } from './subagents';
@@ -48,6 +49,7 @@ export function getProjectSnapshot(ctx: Ctx, ref: string | number): ProjectSnaps
     trailAgents: listTrailAgents(ctx, project.id),
     pastSessions,
     asks,
+    stepTouches: listStepTouches(ctx, project.id),
     stateNote: readStateNote(ctx, project.id),
     lastEventId: maxEventId(ctx),
     lastEvent: lastProjectEvent(ctx, project.id),

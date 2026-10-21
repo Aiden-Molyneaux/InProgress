@@ -149,9 +149,10 @@ function storeQueue(ctx: Ctx, record: RecordEvent, projectId: number, before: st
 /**
  * Takes `ids` out of the project's stored queue, whoever owns them, inside a write already open: parking a step (op
  * 'park') or moving one under a parked or shelved parent (op 'move') takes it and every step under it out, so unparking
- * does not bring them back to Next. Records project.updated with data.op `op` when the stored queue changes.
+ * does not bring them back to Next; a rank change into Soon or Someday (op 'rank') takes the one step out. Records
+ * project.updated with data.op `op` when the stored queue changes.
  */
-export function dropFromQueue(ctx: Ctx, record: RecordEvent, projectId: number, ids: number[], op: 'park' | 'move'): void {
+export function dropFromQueue(ctx: Ctx, record: RecordEvent, projectId: number, ids: number[], op: 'park' | 'move' | 'rank'): void {
   const row = ctx.db.prepare('SELECT queue FROM projects WHERE id = ?').get(projectId) as { queue: string } | undefined;
   if (!row) return;
   const gone = new Set(ids);
@@ -410,19 +411,32 @@ export function applyQueueOp(ctx: Ctx, actor: string, projectId: number, op: Que
     if (node?.project_id !== projectId) throw badRequest(`#${op.node} is not in this project`, 'Reload the window.');
     if (node.status === 'done' || node.status === 'dropped') throw badRequest('not open', `#${op.node} is ${node.status}.`);
     if (shelvedAmong(ctx, [op.node]).size) throw badRequest('not open', `#${op.node} is parked.`);
-    const row = ctx.db.prepare('SELECT queue FROM projects WHERE id = ?').get(projectId) as { queue: string };
-    const stored = parseQueue(row.queue);
-    const taken = stored.find((e) => e.nodeId === op.node);
-    const rest = stored.filter((e) => e.nodeId !== op.node);
-    let next = rest;
-    if (op.kind === 'move') {
-      const entry = { nodeId: op.node, sessionId: null };
-      const at = op.before === null ? -1 : rest.findIndex((e) => e.nodeId === op.before && e.sessionId === null);
-      next = at < 0 ? [...rest, entry] : [...rest.slice(0, at), entry, ...rest.slice(at)];
-    }
-    storeQueue(ctx, record, projectId, row.queue, next, { op: op.kind, node: op.node, ...(taken?.sessionId ? { takenFrom: taken.sessionId } : {}) });
+    storeQueueOp(ctx, record, projectId, op);
     return getProjectById(ctx, projectId)!;
   });
+}
+
+/** applyQueueOp's change to the stored queue, inside a write already open, once the node has been checked. */
+function storeQueueOp(ctx: Ctx, record: RecordEvent, projectId: number, op: QueueOp): void {
+  const row = ctx.db.prepare('SELECT queue FROM projects WHERE id = ?').get(projectId) as { queue: string };
+  const stored = parseQueue(row.queue);
+  const taken = stored.find((e) => e.nodeId === op.node);
+  const rest = stored.filter((e) => e.nodeId !== op.node);
+  let next = rest;
+  if (op.kind === 'move') {
+    const entry = { nodeId: op.node, sessionId: null };
+    const at = op.before === null ? -1 : rest.findIndex((e) => e.nodeId === op.before && e.sessionId === null);
+    next = at < 0 ? [...rest, entry] : [...rest.slice(0, at), entry, ...rest.slice(at)];
+  }
+  storeQueue(ctx, record, projectId, row.queue, next, { op: op.kind, node: op.node, ...(taken?.sessionId ? { takenFrom: taken.sessionId } : {}) });
+}
+
+/**
+ * The queue move of applyQueueOp (into the unowned part before `before`; null, or a `before` no longer unowned,
+ * appends), inside a write already open, for a node the caller has checked: the rank route's `to: 'next'`.
+ */
+export function moveInQueue(ctx: Ctx, record: RecordEvent, projectId: number, node: number, before: number | null): void {
+  storeQueueOp(ctx, record, projectId, { kind: 'move', node, before });
 }
 
 /** Whose entries a set_queue write replaces: a session's own order (`queue:`), or the unowned one (`later:`). */

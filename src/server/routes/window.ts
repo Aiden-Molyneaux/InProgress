@@ -7,11 +7,12 @@ import { openInDesktop, resumeCommand, usableCwd, type DesktopSession, type Open
 import { findSession } from '../repo/sessions';
 import { deleteProject, listDeletedProjects, restoreProject } from '../project-lifecycle';
 import { clearAsk } from '../repo/asks';
+import { write } from '../db/tx';
 import { recordQuiet } from '../repo/events';
-import { addNodes, deleteNode, finishNode, parkNode, unparkNode } from '../repo/nodes';
+import { addNodes, applyRankOp, deleteNode, finishNode, moveNode, parkNode, patchNode, requireNode, unparkNode } from '../repo/nodes';
 import { applyQueueOp, changeProject, getProjectById, isQueued, resolveProject } from '../repo/projects';
 import { shelvedAmong } from '../repo/shelved';
-import { idParam, sessionIdParam, windowClearBody, windowDoneBody, windowEventBody, windowNodeBody, windowParkBody, windowProjectBody, windowQueueBody, windowNodeParams, windowRenameBody, windowUnparkBody, WINDOW_EVENT_KEYS } from '../schemas';
+import { idParam, sessionIdParam, windowClearBody, windowDoneBody, windowEventBody, windowLabelBody, windowMoveBody, windowNodeBody, windowParkBody, windowProjectBody, windowQueueBody, windowNodeParams, windowRankBody, windowRenameBody, windowUnparkBody, WINDOW_EVENT_KEYS } from '../schemas';
 
 /** Who the window's writes are recorded as: fixed here, never taken from a header. */
 const ACTOR = 'window';
@@ -106,9 +107,18 @@ export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: 
     resolveProject(ctx, projectId);
     return { project: applyQueueOp(ctx, ACTOR, projectId, op) };
   });
-  // Quick-add: a todo step with no label under `parent`, or the root.
+  // A rank change (ranked Backlog spec section 2): to Next, or into Soon or Someday before a step of that band. Refusals
+  // are 409, and the window puts the row back.
+  app.post('/api/ui/projects/:id/rank', guarded, async (req) => {
+    const { slug, op } = windowRankBody.parse(req.body);
+    const projectId = targetBySlug(req.params, slug);
+    // A deleted project is not found (404), as for the queue route.
+    resolveProject(ctx, projectId);
+    return applyRankOp(ctx, ACTOR, projectId, op);
+  });
+  // Quick-add: a todo step with no label under `parent`, or the root; with band 'soon', at the bottom of Soon.
   app.post('/api/ui/projects/:id/nodes', guarded, async (req) => {
-    const { slug, title, parent } = windowNodeBody.parse(req.body);
+    const { slug, title, parent, band } = windowNodeBody.parse(req.body);
     const projectId = targetBySlug(req.params, slug);
     const project = resolveProject(ctx, projectId);
     // A parent that does not exist reads as one outside this project; the rest is checked inside the write.
@@ -122,8 +132,45 @@ export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: 
         if (home.projectId !== projectId) throw badRequest(`#${parent} is not in this project`, 'Reload the window.');
         if (home.status === 'dropped') throw badRequest(`#${parent} is dropped`, 'Reload the window.');
       },
+      band,
     });
     return { node };
+  });
+  // The inspector's Label select: sets or clears the step's label, checked in the same write.
+  app.post('/api/ui/projects/:id/nodes/:node/label', guarded, async (req) => {
+    const { node } = windowNodeParams.parse(req.params);
+    const { slug, label } = windowLabelBody.parse(req.body);
+    const projectId = targetBySlug(req.params, slug);
+    resolveProject(ctx, projectId);
+    return {
+      node: write(ctx, ACTOR, (record) => {
+        const n = requireNode(ctx, node);
+        if (n.projectId !== projectId) throw conflict(`#${node} is not in this project`, 'Reload the window.');
+        if (n.parentId === null) throw conflict(`#${node} is the project root`, 'Reload the window.');
+        return patchNode(ctx, record, n, { label });
+      }),
+    };
+  });
+  // The inspector's Phase select: moves the step to the end of `parent`'s steps, or the root's for null (No phase).
+  // Refused (409) for a parked, shelved or dropped parent; the repo refuses the step itself or a step under it.
+  app.post('/api/ui/projects/:id/nodes/:node/move', guarded, async (req) => {
+    const { node } = windowNodeParams.parse(req.params);
+    const { slug, parent } = windowMoveBody.parse(req.body);
+    const projectId = targetBySlug(req.params, slug);
+    const project = resolveProject(ctx, projectId);
+    // A parent that does not exist reads as one outside this project, as for quick-add.
+    if (parent !== null && ctx.db.prepare('SELECT 1 FROM nodes WHERE id = ?').get(parent) === undefined) throw conflict(`#${parent} is not in this project`, 'Reload the window.');
+    return {
+      node: moveNode(ctx, ACTOR, node, {
+        parentId: parent ?? project.rootNodeId,
+        check: (n, home) => {
+          if (n.projectId !== projectId) throw conflict(`#${node} is not in this project`, 'Reload the window.');
+          if (home.projectId !== projectId) throw conflict(`#${parent} is not in this project`, 'Reload the window.');
+          if (home.status === 'dropped') throw conflict(`#${home.id} is dropped`, 'Reload the window.');
+          if (shelvedAmong(ctx, [home.id]).size) throw conflict(`#${home.id} is parked or under a parked step`, 'Unpark it first.');
+        },
+      }),
+    };
   });
   // Delete a step from the tree (the Backlog's Delete). Never one with steps under it: those may be done, and deleting
   // them would lose their history. Asks, resources and logs go with it (FK cascade); the queue drops it on read.
