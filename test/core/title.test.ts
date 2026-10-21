@@ -7,7 +7,7 @@ const T = '2026-10-20T11:00:00.000Z';
 const MINS = (m: number) => new Date(NOW - m * 60_000).toISOString();
 
 function n(id: number, o: Partial<TreeNode> = {}): TreeNode {
-  return { id, projectId: 1, parentId: null, position: id, kind: 'task', title: `S${id}`, body: '', status: 'active', assignee: 'claude', outcome: '', label: null, createdAt: T, updatedAt: T, completedAt: null, driverSessionId: null, boardState: null, stateSince: null, hue: null, parkedReason: '', parkedWhere: '', parkedAt: null, ...o };
+  return { id, projectId: 1, parentId: null, position: id, kind: 'task', title: `S${id}`, body: '', status: 'active', assignee: 'claude', outcome: '', label: null, createdAt: T, updatedAt: T, completedAt: null, driverSessionId: null, boardState: null, stateSince: null, hue: null, parkedReason: '', parkedWhere: '', parkedAt: null, rankBand: null, rank: null, ...o };
 }
 function s(o: Partial<Session> = {}): Session {
   return { id: 'sess', projectId: 1, title: null, cwd: null, branch: null, transcriptPath: null, state: 'idle', focusNodeId: 12, promptsSinceUpdate: 0, startedAt: T, lastSeenAt: T, lastPromptAt: null, endedAt: null, slot: 0, subagents: [], commands: [], role: 'worker', ...o } as Session;

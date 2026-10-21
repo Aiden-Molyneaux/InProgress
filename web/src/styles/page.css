@@ -4,6 +4,8 @@
 .ip-page-code { flex: none; padding: var(--sp-1) var(--sp-2); background: var(--volt); color: var(--volt-ink); font-family: var(--font-brand); font-weight: var(--w-brand); font-size: var(--t-title); line-height: 1.2; letter-spacing: 0.04em; }
 .ip-page-title { flex: 1 1 0; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-display); font-weight: var(--w-display); font-size: var(--t-h2); line-height: 1.1; text-transform: uppercase; color: var(--text-hi); }
 .ip-page-meta { flex: none; margin: 0; font-family: var(--font-mono); font-size: var(--t-detail-sm); letter-spacing: 0.04em; text-align: right; text-transform: uppercase; color: var(--volt); font-variant-numeric: tabular-nums; }
+.ip-page-title:focus { outline: none; }
+.ip-page-aside { flex: none; }
 .ip-page-meta [data-zero] { color: var(--text-dim); }
 .ip-page-sep { color: var(--text-dim); white-space: pre; }
 /* Under 720 px of page the meta line wraps under the title. */

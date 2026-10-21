@@ -1,35 +1,49 @@
 import type { TaskBox as BoxData } from '../../../src/core/taskState';
 import type { ParkedRow } from '../../../src/core/board';
 import { LABEL_GLYPHS, NODE_LABELS } from '../../../src/core/types';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
 import { deleteStep, unparkStep } from '../api';
 import { backlogSections, filterEntries, type BacklogOrder, ORDER_KEY, orderKey, parentTitle, parseOrder, sortFlat, UNLABELLED } from '../board/backlogOrder';
 import type { BandProps } from '../board/bandProps';
-import { focusTargetAfter } from '../board/focus';
-import { endedLine, LabelChip, rowClick } from '../board/Marks';
+import { boxSince } from '../board/boxState';
+import { rowClick } from '../board/Marks';
 import { ageShort } from '../board/text';
-import { TaskBox } from '../board/TaskBox';
 import { shortDate } from '../done/doneGroups';
 import { noteAction } from '../measure';
+import { PageHead } from '../page/PageHead';
+import { Button } from '../parts/Button';
+import { Confirm } from '../parts/Confirm';
+import { EmptyState } from '../parts/EmptyState';
+import { Eyebrow } from '../parts/Eyebrow';
+import { Field } from '../parts/Field';
+import { useListCursor } from '../parts/ListCursor';
+import { TabStrip } from '../parts/TabStrip';
 import { load, save } from '../storage';
 import { backlogPhases, type PreviewPhase } from './backlogPreview';
+import { backlogMeta, cursorAfter, openInsideIndex, phaseTabs } from './backlogView';
 import { ParkForm, type ParkDraft } from './ParkForm';
+import { useKeepRowFocus } from './useKeepRowFocus';
+import { ViewRow } from './ViewRow';
 
 /**
- * The full Backlog (the view behind "N ›"): every open entry as task boxes with no hue, under their parent's title (the
- * top level reads "No phase"), with "to Next", "Park…" and "Delete…" shown on hover and on focus, and a Parked group at the
- * bottom. "Delete…" and "Park…" open their form inside the box. Controls on top filter by text (#453), phase and label
- * and order the rows by phase, id or age, forward or reverse (#452). The filter is this component's state: it ends with
- * the view. No drag: Next is not on screen.
+ * The full Backlog (the view behind "N ›"): the page head, then every open entry as a one-line row under its parent's
+ * title (the top level reads "No phase"), with "to Next", "Park…" and "Delete…" shown on hover and on focus, and a
+ * Parked group at the bottom. "Delete…" and "Park…" open their form inside the row. Controls on top filter by text
+ * (#453), phase and label and order the rows by phase, id or age, forward or reverse (#452). The filter is this
+ * component's state: it ends with the view. No drag: Next is not on screen. Every row of the page is one Tab stop.
  */
-export function Backlog({ boxes, parked, snapshot, now, projectId, slug, onStatus, onOpenNode, onOpenResource, onToNext }: Pick<BandProps, 'snapshot' | 'now' | 'onOpenNode' | 'onOpenResource' | 'onStatus'> & {
+export function Backlog({ boxes, parked, snapshot, now, projectId, slug, code, titleRef, onStatus, onOpenNode, onToNext }: Pick<BandProps, 'snapshot' | 'now' | 'onOpenNode' | 'onOpenResource' | 'onStatus'> & {
   /** Every open Backlog box; the filter picks the ones drawn. */
   boxes: BoxData[];
   /** Every parked step (top level only); the filter picks the ones drawn. */
   parked: ParkedRow[];
   projectId: number;
   slug: string;
+  /** The page head's code block. */
+  code: string;
+  /** The page title: where focus lands when the last row leaves. */
+  titleRef: RefObject<HTMLHeadingElement>;
   onToNext: (id: number) => void;
 }) {
   /** The row whose Delete confirm or Park form is open: one at a time. */
@@ -58,14 +72,12 @@ export function Backlog({ boxes, parked, snapshot, now, projectId, slug, onStatu
   };
   /** What is typed in the open Park form: it outlives the form's remount when a reorder moves the row to another group. */
   const draft = useRef<ParkDraft>({ reason: '', where: '', focused: false });
-  /** The row whose title takes focus when the Park form's row leaves (null: the view's heading), worked out when the form opens; a reorder may remount the element, so it is found again by its step. */
+  /** The step whose row takes focus when the Park form's row leaves (null: the page title), worked out when the form opens; a reorder may remount the element, so it is found again by its step. */
   const afterPark = useRef<string | null>(null);
   const panelRef = useRef(panel);
   panelRef.current = panel;
   const root = useRef<HTMLDivElement>(null);
-  const filterField = useRef<HTMLInputElement>(null);
-  /** The view's heading, for when the form's row leaves and takes focus with it. */
-  const heading = useRef<HTMLElement | null>(null);
+  const filterField = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
 
   const openEntries = boxes;
   const parkedEntries = parked.map((p) => ({ row: p }));
@@ -73,28 +85,40 @@ export function Backlog({ boxes, parked, snapshot, now, projectId, slug, onStatu
   const filtering = query.trim() !== '' || phase !== null || labels.size > 0;
   const shown = filterEntries(openEntries, filter);
   const shownParked = sortFlat(filterEntries(parkedEntries, filter), order);
+  const sections = backlogSections(shown, order);
   const ids = openEntries.map((b) => b.row!.node.id).join(',');
   const shownIds = shown.map((b) => b.row!.node.id).join(',');
-  // The phase and label chips: what the entries (open and parked) have.
+  // The phase tabs and label buttons: what the entries (open and parked) have.
   const allEntries = [...openEntries, ...parkedEntries];
   const phases = backlogPhases({ backlog: allEntries.map((e) => e.row!) }, snapshot.nodes).filter((c) => c.value !== 'none' || allEntries.some((e) => !e.row!.crumb.some((a) => a.kind === 'phase')));
   const labelsHere = NODE_LABELS.filter((l) => allEntries.some((e) => e.row!.node.label === l));
   const anyUnlabelled = allEntries.some((e) => e.row!.node.label === null);
 
-  // The form's first field (or Cancel) takes focus when a panel opens.
-  useEffect(() => {
-    if (panel === null) return;
-    heading.current = root.current?.closest<HTMLElement>('.ip-backlogview')?.querySelector<HTMLElement>('h2') ?? null;
-    if (panel.kind === 'delete') root.current?.querySelector<HTMLElement>('.ip-confirm [data-cancel]')?.focus();
-  }, [panel]);
+  // Every drawn row, open groups then Parked, is one list: one Tab stop, Up and Down through all of them.
+  const rowIds = [...sections.flatMap((g) => g.boxes.map((b) => b.row!.node.id)), ...shownParked.map(({ row }) => row.node.id)];
+  const rowAt = new Map(rowIds.map((id, i) => [id, i]));
+  const { itemProps } = useListCursor(
+    [rowIds.length],
+    (at) => {
+      const id = rowIds[at.row];
+      // A row asking or parking is busy with its own panel: Enter on it opens nothing.
+      if (id === undefined || panelRef.current?.id === id) return;
+      noteAction('backlog', 'open');
+      onOpenNode(id);
+    },
+    [rowIds.map(String)],
+  );
+
+  // A row that leaves through a write from elsewhere hands its focus to a neighbour (or the page title).
+  useKeepRowFocus(root, rowIds, titleRef);
+  const insideOf = useMemo(() => openInsideIndex(snapshot.nodes), [snapshot.nodes]);
   // A row that left (deleted here or elsewhere) no longer waits. An open row no longer shown (it left, or a change elsewhere
-  // took it out of the filter) no longer has its panel open; if it took focus with it, the heading has it.
+  // took it out of the filter) no longer has its panel open; if it took focus with it, useKeepRowFocus has moved it.
   useEffect(() => {
     const here = new Set(ids ? ids.split(',').map(Number) : []);
     const seen = new Set(shownIds ? shownIds.split(',').map(Number) : []);
     if (panel !== null && !seen.has(panel.id)) {
       setPanel(null);
-      if (document.activeElement === document.body) heading.current?.focus();
     }
     setPending((p) => (p.some((id) => !here.has(id)) ? p.filter((id) => here.has(id)) : p));
   }, [ids, shownIds, panel]);
@@ -113,7 +137,7 @@ export function Backlog({ boxes, parked, snapshot, now, projectId, slug, onStatu
   };
   const remove = async (id: number, li: HTMLElement | null) => {
     noteAction('backlog', 'delete');
-    const after = focusTargetAfter(li);
+    const after = cursorAfter(li);
     setPanel(null);
     setPending((p) => [...p, id]);
     after?.focus();
@@ -125,9 +149,9 @@ export function Backlog({ boxes, parked, snapshot, now, projectId, slug, onStatu
     if (result === 'reload') window.location.reload();
     else onStatus?.(result);
   };
-  const unpark = async (id: number, toNext: boolean, li: HTMLElement | null) => {
+  const unpark = async (id: number, toNext: boolean, li: HTMLElement | null, pressed: HTMLElement) => {
     noteAction('backlog', toNext ? 'unpark_to_next' : 'unpark');
-    const after = focusTargetAfter(li);
+    const after = cursorAfter(li);
     setUnparking((u) => [...u, id]);
     const result = await unparkStep(projectId, slug, id, toNext);
     if (result === 'ok') {
@@ -136,7 +160,10 @@ export function Backlog({ boxes, parked, snapshot, now, projectId, slug, onStatu
       if (active === null || active === document.body || li?.contains(active)) after?.focus();
       return;
     }
-    setUnparking((u) => u.filter((x) => x !== id));
+    // Drawn at once so the pressed button is enabled to take focus back, if the press left it nowhere.
+    flushSync(() => setUnparking((u) => u.filter((x) => x !== id)));
+    const now = document.activeElement;
+    if (now === null || now === document.body || li?.contains(now)) pressed.focus();
     if (result === 'reload') window.location.reload();
     else onStatus?.(result);
   };
@@ -151,220 +178,245 @@ export function Backlog({ boxes, parked, snapshot, now, projectId, slug, onStatu
     filterField.current?.focus();
   };
 
-  if (openEntries.length === 0 && parked.length === 0) return <p className="ip-quiet ip-empty-line">Backlog is empty</p>;
+  const head = (
+    <PageHead code={code} name="BACKLOG" meta={backlogMeta(openEntries.length, shown.length, parked.length, filtering)} decodeKey={projectId} titleRef={titleRef} />
+  );
+  if (openEntries.length === 0 && parked.length === 0) {
+    return (
+      <>
+        {head}
+        <EmptyState>Backlog is empty</EmptyState>
+      </>
+    );
+  }
   /** The server refuses a step with any step under it, done or dropped ones too. */
   const parents = new Set(snapshot.nodes.map((n) => n.parentId));
   const hasKids = (id: number) => parents.has(id);
+  const nothing = shown.length === 0 && shownParked.length === 0;
   return (
-    <div className="ip-backlog-groups" ref={root}>
-      <div className="ip-backlog-tools">
-        <input
-          ref={filterField}
-          className="ip-backlog-filter"
-          type="text"
-          aria-label="Filter the backlog"
-          placeholder="Filter…"
-          value={query}
-          onChange={(e) => narrow({ query: e.target.value })}
-          onKeyDown={(e) => {
-            // Escape clears a filter; in an empty field it does nothing here.
-            if (e.key !== 'Escape' || !query) return;
-            e.preventDefault();
-            e.stopPropagation();
-            narrow({ query: '' });
-          }}
-        />
-        {filtering && <span className="ip-quiet ip-backlog-count">{`${shown.length} of ${openEntries.length}`}</span>}
-        <div className="ip-backlog-order" role="group" aria-label="Backlog order">
-          <button type="button" aria-pressed={order.by === 'phase'} onClick={() => pick({ ...order, by: 'phase' })}>Phase</button>
-          <button type="button" aria-pressed={order.by === 'id'} onClick={() => pick({ ...order, by: 'id' })}>ID</button>
-          <button type="button" aria-pressed={order.by === 'age'} onClick={() => pick({ ...order, by: 'age' })}>Age</button>
-          <button type="button" aria-label="Reverse" title={order.reverse ? 'Reverse order' : 'Forward order'} aria-pressed={order.reverse} onClick={() => pick({ ...order, reverse: !order.reverse })}>
-            {order.reverse ? '↓' : '↑'}
-          </button>
+    <>
+      {head}
+      <div className="ip-bl" ref={root}>
+        <div className="ip-bl-tools">
+          <Field
+            ref={filterField}
+            size="sm"
+            className="ip-bl-filter"
+            type="text"
+            aria-label="Filter the backlog"
+            placeholder="Filter…"
+            value={query}
+            onChange={(e) => narrow({ query: e.target.value })}
+            onKeyDown={(e) => {
+              // Escape clears a filter; in an empty field it does nothing here.
+              if (e.key !== 'Escape' || !query) return;
+              e.preventDefault();
+              e.stopPropagation();
+              narrow({ query: '' });
+            }}
+          />
+          <div className="ip-bl-order" role="group" aria-label="Backlog order">
+            <TabStrip
+              variant="segmented"
+              label="Sort"
+              items={[{ id: 'phase', label: 'Phase' }, { id: 'id', label: 'ID' }, { id: 'age', label: 'Age' }]}
+              value={order.by}
+              onChange={(id) => pick({ ...order, by: id === 'id' ? 'id' : id === 'age' ? 'age' : 'phase' })}
+            />
+            <Button variant="ghost" size="sm" aria-label="Reverse" title={order.reverse ? 'Reverse order' : 'Forward order'} aria-pressed={order.reverse} onClick={() => pick({ ...order, reverse: !order.reverse })}>
+              {order.reverse ? '↓' : '↑'}
+            </Button>
+          </div>
         </div>
-      </div>
-      <div className="ip-chips" role="group" aria-label="Phase">
-        <span className="ip-chips-name">Phase</span>
-        <button type="button" className="ip-chip" aria-pressed={phase === null} onClick={() => narrow({ phase: null })}>All</button>
-        {phases.map((c) => (
-          <button key={String(c.value)} type="button" className="ip-chip" aria-pressed={phase === c.value} title={c.title} onClick={() => narrow({ phase: c.value })}>{c.title}</button>
-        ))}
-      </div>
-      {(labelsHere.length > 0 || anyUnlabelled) && (
-        <div className="ip-chips" role="group" aria-label="Label">
-          <span className="ip-chips-name">Label</span>
-          {labelsHere.map((l) => (
-            <button key={l} type="button" className="ip-chip" aria-pressed={labels.has(l)} onClick={() => toggleLabel(l)}>{`${LABEL_GLYPHS[l]} ${l}`}</button>
-          ))}
-          {anyUnlabelled && <button type="button" className="ip-chip" aria-pressed={labels.has(UNLABELLED)} onClick={() => toggleLabel(UNLABELLED)}>{UNLABELLED}</button>}
+        <div className="ip-bl-filters">
+          <TabStrip
+            variant="segmented"
+            label="Phase"
+            items={phaseTabs(phases, openEntries)}
+            value={phase === null ? 'all' : String(phase)}
+            onChange={(id) => narrow({ phase: id === 'all' ? null : id === 'none' ? 'none' : Number(id) })}
+          />
+          {(labelsHere.length > 0 || anyUnlabelled) && (
+            <div className="ip-bl-labels" role="group" aria-label="Label">
+              {labelsHere.map((l) => (
+                <button key={l} type="button" className="p-chip ip-bl-labelbtn" data-tone="quiet" aria-pressed={labels.has(l)} onClick={() => toggleLabel(l)}>
+                  <span className="p-chip-glyph" aria-hidden="true">{LABEL_GLYPHS[l]}</span>
+                  {l}
+                </button>
+              ))}
+              {anyUnlabelled && (
+                <button type="button" className="p-chip ip-bl-labelbtn" data-tone="quiet" aria-pressed={labels.has(UNLABELLED)} onClick={() => toggleLabel(UNLABELLED)}>{UNLABELLED}</button>
+              )}
+            </div>
+          )}
         </div>
-      )}
-      {shown.length === 0 && shownParked.length === 0 && (
-        <p className="ip-quiet ip-empty-line ip-backlog-none">
-          {query.trim() ? `Nothing matches “${query.trim()}” ` : 'Nothing matches this filter '}
-          <button type="button" className="ip-link-btn" onClick={clearAll}>Clear filter</button>
-        </p>
-      )}
-      {backlogSections(shown, order).map((g) => (
-        <section
-          key={g.flat ? order.by : (g.parent?.id ?? 0)}
-          className="ip-backlog-group"
-          aria-label={g.flat ? `Backlog by ${order.by}` : g.parent ? `Backlog under ${g.parent.title}` : 'Backlog with no phase'}
-        >
-          {!g.flat && <div className="ip-group-line" title={g.parent?.title ?? 'No phase'}>{g.parent ? g.parent.title : 'No phase'}</div>}
-          <ul className="ip-list">
-            {g.boxes.map((box) => {
-              const row = box.row!;
-              const asking = confirming === row.node.id;
-              const parking = panel?.kind === 'park' && panel.id === row.node.id;
-              const waiting = pending.includes(row.node.id);
-              return (
-                <TaskBox
-                  key={row.node.id}
-                  box={box}
-                  now={now}
-                  area="backlog"
-                  docs={snapshot.resources.filter((r) => r.nodeId === row.node.id).length}
-                  system={endedLine(row, snapshot.pastSessions, now)}
-                  className={`ip-backlog-row${waiting ? ' pending' : ''}${asking || parking ? ' confirming' : ''}`}
-                  noHue
-                  still={asking || parking || waiting}
-                  li={{
-                    'aria-busy': waiting || undefined,
-                    // A press on the confirming box outside the confirm's buttons puts focus in the confirm (or keeps it
-                    // there), so Escape still closes it. A press on the parking box outside its form puts focus in the
-                    // form's reason field the same way.
-                    onMouseDown: asking ? (e) => {
-                      if ((e.target as HTMLElement).closest('.ip-confirm button')) return;
+        {nothing && (
+          <EmptyState
+            className="ip-bl-none"
+            action={<Button variant="ghost" size="sm" onClick={clearAll}>Clear filter</Button>}
+          >
+            {query.trim() ? `Nothing matches “${query.trim()}”` : 'Nothing matches this filter'}
+          </EmptyState>
+        )}
+        {sections.map((g) => (
+          <section
+            key={g.flat ? order.by : (g.parent?.id ?? 0)}
+            className="ip-bl-group"
+            aria-label={g.flat ? `Backlog by ${order.by}` : g.parent ? `Backlog under ${g.parent.title}` : 'Backlog with no phase'}
+          >
+            {!g.flat && (
+              <header className="ip-bl-ghead">
+                <Eyebrow glyph="[+]">{g.parent ? `#${g.parent.id} · ${g.boxes.length}` : `TOP LEVEL · ${g.boxes.length}`}</Eyebrow>
+                <h3 className="ip-bl-gtitle" title={g.parent?.title ?? 'No phase'}>{g.parent ? g.parent.title : 'No phase'}</h3>
+              </header>
+            )}
+            <ul className="ip-bl-list">
+              {g.boxes.map((box) => {
+                const row = box.row!;
+                const id = row.node.id;
+                const asking = confirming === id;
+                const parking = panel?.kind === 'park' && panel.id === id;
+                const waiting = pending.includes(id);
+                const since = boxSince(box);
+                return (
+                  <ViewRow
+                    key={id}
+                    id={id}
+                    title={row.node.title}
+                    cursor={itemProps(0, rowAt.get(id)!)}
+                    phase={g.flat ? parentTitle(box) : undefined}
+                    blocked={row.node.status === 'blocked'}
+                    inside={insideOf(id)}
+                    label={row.node.label}
+                    age={since ? ageShort(since, now) : null}
+                    pending={waiting}
+                    confirming={asking || parking}
+                    // An open confirm or form is the row's own: a click on the row around it opens nothing.
+                    onOpen={asking || parking ? () => undefined : rowClick('backlog', () => onOpenNode(id))}
+                    // A press on the confirming row outside the confirm keeps focus in it (so Escape still closes it). A press
+                    // on the parking row outside its form puts focus in the form's reason field the same way.
+                    onMouseDown={asking ? (e) => {
+                      if ((e.target as HTMLElement).closest('.p-confirm button')) return;
                       e.preventDefault();
-                      const confirm = e.currentTarget.querySelector<HTMLElement>('.ip-confirm');
-                      if (confirm && !confirm.contains(document.activeElement)) confirm.focus();
+                      const confirm = e.currentTarget.querySelector<HTMLElement>('.p-confirm');
+                      if (confirm && !confirm.contains(document.activeElement)) confirm.querySelector<HTMLElement>('.p-confirm-acts button:last-child')?.focus();
                     } : parking ? (e) => {
-                      if ((e.target as HTMLElement).closest('.ip-park')) return;
+                      if ((e.target as HTMLElement).closest('.ip-park input, .ip-park button')) return;
                       e.preventDefault();
                       const form = e.currentTarget.querySelector<HTMLElement>('.ip-park');
                       if (form && !form.contains(document.activeElement)) form.querySelector<HTMLElement>('input')?.focus();
-                    } : undefined,
-                    // Escape anywhere in the confirming box closes the confirm.
-                    onKeyDown: asking ? (e) => {
+                    } : undefined}
+                    // Escape anywhere in the confirming row closes the confirm.
+                    onKeyDown={asking ? (e) => {
                       if (e.key !== 'Escape') return;
                       e.stopPropagation();
-                      cancel(row.node.id);
-                    } : undefined,
-                  }}
-                  extra={asking || parking ? undefined : (
-                    <>
-                      <button type="button" className="ip-hover-act" data-act onClick={(e) => {
-                        noteAction('backlog', 'to_next');
-                        focusTargetAfter(e.currentTarget.closest('li'))?.focus();
-                        onToNext(row.node.id);
-                      }}>to Next</button>
-                      <button type="button" className="ip-hover-act" data-act data-park aria-haspopup="dialog" onClick={(e) => {
-                        draft.current = { reason: '', where: '', focused: false };
-                        const target = focusTargetAfter(e.currentTarget.closest('li'));
-                        afterPark.current = target?.closest('li')?.dataset.node ?? null;
-                        setPanel({ kind: 'park', id: row.node.id });
-                      }}>Park…</button>
-                      {!hasKids(row.node.id) && (
-                        <button type="button" className="ip-hover-act" data-act data-delete aria-haspopup="dialog" onClick={() => setPanel({ kind: 'delete', id: row.node.id })}>Delete…</button>
-                      )}
-                    </>
-                  )}
-                  onOpenNode={onOpenNode}
-                  onOpenResource={onOpenResource}
-                >
-                  {g.flat && parentTitle(box) && <div className="ip-group-line ip-box-parent" title={parentTitle(box)!}>{parentTitle(box)}</div>}
-                  {parking && (
-                    <ParkForm
-                      projectId={projectId}
-                      slug={slug}
-                      nodeId={row.node.id}
-                      title={row.node.title}
-                      onStatus={onStatus}
-                      draft={draft.current}
-                      onDone={() => {
-                        // Closes only its own form: a click on another row's Park… meanwhile opened that one. Focus moves on
-                        // only while this form still owns the panel and focus is in its row or nowhere.
-                        // (A panel already null closed because its row left, which may have parked focus on the heading.)
-                        const owns = panelRef.current === null || (panelRef.current.kind === 'park' && panelRef.current.id === row.node.id);
-                        const active = document.activeElement;
-                        const here = root.current?.querySelector(`li[data-node="${row.node.id}"]`);
-                        const free = active === null || active === document.body || here?.contains(active) === true || active.classList.contains('ip-backlogview-title');
-                        setPanel((p) => (p?.id === row.node.id ? null : p));
-                        if (!owns || !free) return;
-                        const next = afterPark.current && root.current?.querySelector<HTMLElement>(`li[data-node="${afterPark.current}"] .ip-row-title`);
-                        (next || root.current?.closest<HTMLElement>('.ip-backlogview')?.querySelector<HTMLElement>('.ip-backlogview-title'))?.focus();
-                      }}
-                      onCancel={() => cancel(row.node.id)}
-                    />
-                  )}
-                  {asking && (
-                    <div
-                      className="ip-confirm"
-                      role="dialog"
-                      aria-modal={false}
-                      aria-labelledby={`bl${row.node.id}q`}
-                      aria-describedby={`bl${row.node.id}d`}
-                      tabIndex={-1}
-                      data-act
-                    >
-                      <b id={`bl${row.node.id}q`}>Delete #{row.node.id} {row.node.title}?</b>
-                      <p id={`bl${row.node.id}d`}>It can't be undone.</p>
-                      <div>
-                        <button type="button" className="ip-btn go" onClick={(e) => void remove(row.node.id, e.currentTarget.closest('li'))}>
-                          Delete
-                        </button>
-                        <button type="button" className="ip-btn" data-cancel onClick={() => cancel(row.node.id)}>
-                          Cancel
-                        </button>
+                      cancel(id);
+                    } : undefined}
+                    acts={
+                      <>
+                        <Button variant="ghost" size="sm" data-act onClick={(e) => {
+                          noteAction('backlog', 'to_next');
+                          cursorAfter(e.currentTarget.closest('li'))?.focus();
+                          onToNext(id);
+                        }}>to Next</Button>
+                        <Button variant="ghost" size="sm" data-act data-park aria-haspopup="dialog" onClick={(e) => {
+                          draft.current = { reason: '', where: '', focused: false };
+                          const target = cursorAfter(e.currentTarget.closest('li'));
+                          afterPark.current = target?.matches('li[data-node]') ? (target.dataset.node ?? null) : null;
+                          setPanel({ kind: 'park', id });
+                        }}>Park…</Button>
+                        {!hasKids(id) && (
+                          <Button variant="ghost" size="sm" data-act data-delete aria-haspopup="dialog" onClick={() => setPanel({ kind: 'delete', id })}>Delete…</Button>
+                        )}
+                      </>
+                    }
+                  >
+                    {parking && (
+                      <ParkForm
+                        projectId={projectId}
+                        slug={slug}
+                        nodeId={id}
+                        title={row.node.title}
+                        onStatus={onStatus}
+                        draft={draft.current}
+                        onDone={() => {
+                          // Closes only its own form: a click on another row's Park… meanwhile opened that one. Focus moves on
+                          // only while this form still owns the panel and focus is in its row or nowhere.
+                          // (A panel already null closed because its row left, which may have parked focus on the page title.)
+                          const owns = panelRef.current === null || (panelRef.current.kind === 'park' && panelRef.current.id === id);
+                          const active = document.activeElement;
+                          const here = root.current?.querySelector(`li[data-node="${id}"]`);
+                          const free = active === null || active === document.body || here?.contains(active) === true || active.classList.contains('ip-page-title');
+                          setPanel((p) => (p?.id === id ? null : p));
+                          if (!owns || !free) return;
+                          // The row's neighbours as they are now, while it is still among the open rows. Once the snapshot has
+                          // moved it into Parked (the answer and the snapshot land in either order), the neighbour worked out
+                          // when the form opened comes first, so focus stays where the row was.
+                          const stillOpen = here instanceof HTMLElement && here.closest('.ip-bl-parked') === null;
+                          const live = here instanceof HTMLElement ? cursorAfter(here) : null;
+                          const opened = afterPark.current ? root.current?.querySelector<HTMLElement>(`li[data-node="${afterPark.current}"]`) : null;
+                          ((stillOpen ? live ?? opened : opened ?? live) ?? titleRef.current)?.focus();
+                        }}
+                        onCancel={() => cancel(id)}
+                      />
+                    )}
+                    {asking && (
+                      <div className="ip-bl-panel" data-act>
+                        <Confirm
+                          question={`Delete #${id} ${row.node.title}?`}
+                          detail="It can't be undone."
+                          action="Delete"
+                          danger
+                          onConfirm={() => void remove(id, root.current?.querySelector<HTMLElement>(`li[data-node="${id}"]`) ?? null)}
+                          onCancel={() => cancel(id)}
+                        />
                       </div>
-                    </div>
-                  )}
-                </TaskBox>
-              );
-            })}
-          </ul>
-        </section>
-      ))}
-      {shownParked.length > 0 && (
-        <section className="ip-backlog-group ip-parked-group" aria-label="Parked">
-          <div className="ip-group-line">{`Parked · ${shownParked.length}`}</div>
-          <ul className="ip-list">
-            {shownParked.map(({ row }) => {
-              const { node } = row;
-              const busy = unparking.includes(node.id);
-              return (
-                <li
-                  key={node.id}
-                  className={`ip-card ip-parked-row${busy ? ' pending' : ''}`}
-                  data-node={node.id}
-                  aria-busy={busy || undefined}
-                  onClick={rowClick('backlog', () => onOpenNode(node.id))}
-                >
-                  <div className="ip-card-top">
-                    <span className="ip-sid">#{node.id}</span>
-                    <span className="ip-card-right">
-                      <button type="button" className="ip-hover-act" data-act disabled={busy} onClick={(e) => void unpark(node.id, true, e.currentTarget.closest('li'))}>to Next</button>
-                      <button type="button" className="ip-hover-act" data-act disabled={busy} onClick={(e) => void unpark(node.id, false, e.currentTarget.closest('li'))}>Unpark</button>
-                      <span className="ip-st parked">Parked</span>
-                      {node.parkedAt && <span className="ip-time">{ageShort(node.parkedAt, now)}</span>}
-                    </span>
-                  </div>
-                  <button type="button" className="ip-row-title ip-card-title">{node.title}</button>
-                  <div className="ip-group-line ip-box-parent" title={parentTitle({ row }) ?? 'No phase'}>{parentTitle({ row }) ?? 'No phase'}</div>
-                  <p className="ip-sys ip-parked-why">{`Parked ${node.parkedAt ? `${shortDate(node.parkedAt, now)}: ` : ': '}${node.parkedReason}`}</p>
-                  {node.parkedWhere && <p className="ip-sys ip-parked-where">{`where ${node.parkedWhere}`}</p>}
-                  <div className="ip-foot">
-                    {row.openInside > 0 && <span className="ip-mark hygiene">{`${row.openInside} open inside`}</span>}
-                    <LabelChip label={node.label} />
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        </section>
-      )}
-    </div>
+                    )}
+                  </ViewRow>
+                );
+              })}
+            </ul>
+          </section>
+        ))}
+        {shownParked.length > 0 && (
+          <section className="ip-bl-group ip-bl-parked" aria-label="Parked">
+            <header className="ip-bl-ghead">
+              <Eyebrow>{`PARKED · ${shownParked.length}`}</Eyebrow>
+            </header>
+            <ul className="ip-bl-list">
+              {shownParked.map(({ row }) => {
+                const { node } = row;
+                const busy = unparking.includes(node.id);
+                return (
+                  <ViewRow
+                    key={node.id}
+                    id={node.id}
+                    parked
+                    title={node.title}
+                    cursor={itemProps(0, rowAt.get(node.id)!)}
+                    phase={parentTitle({ row }) ?? 'No phase'}
+                    inside={row.openInside}
+                    label={node.label}
+                    age={node.parkedAt ? ageShort(node.parkedAt, now) : null}
+                    pending={busy}
+                    keepActs
+                    onOpen={rowClick('backlog', () => onOpenNode(node.id))}
+                    acts={
+                      <>
+                        <Button variant="ghost" size="sm" data-act disabled={busy} onClick={(e) => void unpark(node.id, true, e.currentTarget.closest('li'), e.currentTarget)}>to Next</Button>
+                        <Button variant="ghost" size="sm" data-act disabled={busy} onClick={(e) => void unpark(node.id, false, e.currentTarget.closest('li'), e.currentTarget)}>Unpark</Button>
+                      </>
+                    }
+                  >
+                    <p className="ip-bl-why">{`Parked ${node.parkedAt ? `${shortDate(node.parkedAt, now)}: ` : ': '}${node.parkedReason}`}</p>
+                    {node.parkedWhere && <p className="ip-bl-where">{`where ${node.parkedWhere}`}</p>}
+                  </ViewRow>
+                );
+              })}
+            </ul>
+          </section>
+        )}
+      </div>
+    </>
   );
 }

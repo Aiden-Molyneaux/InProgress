@@ -6,7 +6,7 @@ export interface MarkerProps {
   question: boolean;
   /** LayoutNodeItem.paused on a card, isPaused in Details: the hollow sky ring. */
   paused: boolean;
-  /** isNeedsYou(node): the --amber square. */
+  /** isNeedsYou(node): the --volt square. */
   needsYou: boolean;
   /** LayoutNodeItem.working: an active marker pulses (ip-pulse). Details passes false. */
   pulse: boolean;
