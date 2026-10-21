@@ -242,6 +242,22 @@ describe('session routes', () => {
     expect((await stop('yes')).statusCode).toBe(400);
   });
 
+  it('ignores an unknown key on a hook body, so a hook newer than the running server is not rejected', async () => {
+    const { app } = setup();
+    await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'InGame' } });
+    await app.inject({ method: 'POST', url: '/api/sessions/s1/enroll', headers: auth, payload: { project: 'ingame' } });
+    const post = (payload: object) => app.inject({ method: 'POST', url: '/api/sessions/s1/hook', headers: auth, payload });
+    const plain = await post({ event: 'stop' });
+    const extra = await post({ event: 'stop', someFutureField: 'x' });
+    expect(extra.statusCode).toBe(200);
+    expect(extra.json()).toEqual(plain.json());
+    // Also inside a list entry, where a newer hook may add a field the same way.
+    const nested = await post({ event: 'stop', background: [{ taskId: 't1', type: 'shell', someFutureField: 1 }] });
+    expect(nested.statusCode).toBe(200);
+    // Field-level validation is unchanged: a known key with a bad value is still a 400.
+    expect((await post({ event: 'stop', stopHookActive: 'yes', someFutureField: 'x' })).statusCode).toBe(400);
+  });
+
   it("reads a session's claimed step for the status line, without a token, and null for no step or no session", async () => {
     const { app } = setup();
     const step = (id: string) => app.inject({ url: `/api/sessions/${id}/step` });
@@ -343,7 +359,7 @@ describe('live work routes', () => {
     expect(focused.json()).toMatchObject({ nodeId: guide, tasks: [{ nodeId: guide, subject: 'Draft the guide', status: 'in_progress' }] });
   });
 
-  it('takes the live-work fields on the hook route, and refuses unknown ones', async () => {
+  it('takes the live-work fields on the hook route, drops unknown ones and refuses bad values', async () => {
     const { app } = await planned();
     const post = (payload: object) => app.inject({ method: 'POST', url: '/api/sessions/s1/hook', headers: auth, payload });
     for (const payload of [
@@ -355,7 +371,8 @@ describe('live work routes', () => {
     ]) {
       expect((await post(payload)).json(), payload.event).toEqual({ tracked: true });
     }
-    expect((await post({ event: 'task-created', taskKey: '2', subject: 'x', prompt: 'never sent' })).statusCode).toBe(400);
+    // An unknown key such as a whole prompt is dropped at parse, so the handler never sees it.
+    expect((await post({ event: 'task-created', taskKey: '2', subject: 'x', prompt: 'never sent' })).json()).toEqual({ tracked: true });
     expect((await post({ event: 'task-updated', taskKey: '2', status: 'archived' })).statusCode).toBe(400);
     expect((await post({ event: 'task-created', taskKey: '3', subject: 'x'.repeat(301) })).statusCode).toBe(400);
     expect((await post({ event: 'agent-dispatch', toolUseId: 'toolu_2', agentType: 'Explore', description: 'x', purpose: 'p'.repeat(201) })).statusCode).toBe(400);
