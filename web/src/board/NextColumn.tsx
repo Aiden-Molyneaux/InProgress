@@ -2,13 +2,14 @@ import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 
 import type { BoardRow } from '../../../src/core/board';
 import type { TaskBox as BoxData } from '../../../src/core/taskState';
 import { PreviewPanel } from '../backlog/PreviewPanel';
-import { formatPreview, parsePreview, previewKey, previewState, type PreviewPhase } from '../backlog/backlogPreview';
+import { backlogViewKey, soonPreview } from '../backlog/backlogPreview';
+import { deriveBacklog } from '../../../src/core/backlog';
 import { Button } from '../parts/Button';
 import { Chip } from '../parts/Chip';
 import { EmptyState } from '../parts/EmptyState';
 import { Eyebrow } from '../parts/Eyebrow';
 import type { CursorItemProps } from '../parts/ListCursor';
-import { load, save } from '../storage';
+import { save } from '../storage';
 import { noteAction } from '../measure';
 import type { BandProps } from './bandProps';
 import { BoardTile } from './BoardTile';
@@ -35,8 +36,6 @@ export function NextColumn({ snapshot, board, now, selectedNode, onOpenNode, onO
   const [slot, setSlot] = useState<number | null | undefined>(undefined);
   const [overBacklog, setOverBacklog] = useState(false);
   const [adding, setAdding] = useState(false);
-  /** The phase Aiden picked for the Backlog preview, kept per project in this browser; null until he picks one. */
-  const [stored, setStored] = useState<PreviewPhase | null>(() => parsePreview(load(previewKey(project.id))));
   const [focusTick, setFocusTick] = useState(0);
   const field = useRef<HTMLInputElement>(null);
   const addButton = useRef<HTMLButtonElement>(null);
@@ -45,12 +44,12 @@ export function NextColumn({ snapshot, board, now, selectedNode, onOpenNode, onO
     if (focusTick > 0) field.current?.focus();
   }, [focusTick]);
 
-  // The preview shows one phase: the picked one while it has entries, else the default chain (a finished or parked phase falls back).
-  const { choices, phase } = previewState(backlog, board, snapshot.nodes, stored);
-  const pickPhase = (p: PreviewPhase) => {
-    noteAction('backlog', 'pick_phase');
-    setStored(p);
-    save(previewKey(project.id), formatPreview(p));
+  // The preview shows Soon's first five, numbered as the Backlog's Ranked view numbers them.
+  const preview = soonPreview(deriveBacklog(board, snapshot, now), backlog);
+  const onTriage = () => {
+    noteAction('backlog', 'triage');
+    save(backlogViewKey(project.id), 'triage');
+    onOpenBacklog?.();
   };
 
   const endDrag = () => {
@@ -215,9 +214,10 @@ export function NextColumn({ snapshot, board, now, selectedNode, onOpenNode, onO
         onDrop={dropOnBacklog}
       >
         <PreviewPanel
-          entries={backlog}
-          choices={choices}
-          phase={phase}
+          rows={preview.rows}
+          count={preview.count}
+          more={preview.more}
+          triage={preview.triage}
           adding={adding}
           field={field}
           addButton={addButton}
@@ -225,7 +225,7 @@ export function NextColumn({ snapshot, board, now, selectedNode, onOpenNode, onO
           now={now}
           selectedNode={selectedNode}
           dragging={dragging}
-          onPick={pickPhase}
+          onTriage={onTriage}
           onOpenAll={() => onOpenBacklog?.()}
           onAdd={addClick}
           onCloseAdd={closeAdd}
