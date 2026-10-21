@@ -1,11 +1,6 @@
 /* The Backlog: the preview head, the full view, the Park form and parked rows. */
 @layer components {
-/* The Backlog preview's head: "Backlog", the phase picker, "N ›" and "+ add" on one line. */
-.ip-backlog-head { align-items: center; justify-content: flex-start; gap: 8px; margin-bottom: 8px; }
-.ip-backlog-name { flex: none; font-size: var(--fs-s); line-height: 14px; letter-spacing: .04em; color: var(--muted); }
-.ip-backlog-phase { flex: 0 1 auto; min-width: 0; max-width: 150px; height: 20px; padding: 0 4px; font: inherit; font-size: var(--fs-s); line-height: 14px; color: var(--text-2); background: var(--panel); border: 1px solid var(--border); text-overflow: ellipsis; }
-.ip-backlog-phase:focus-visible { outline: 2px solid var(--volt); outline-offset: 1px; }
-.ip-backlog-head .ip-add { margin-left: auto; }
+/* The Backlog preview's head, tabs and rows are in board.css. */
 /* The full Backlog view: the page, its controls, groups and one-line rows (#504). */
 .ip-backlogview { container-type: inline-size; flex: 1; min-width: 0; overflow-x: hidden; overflow-y: auto; }
 @container (min-width: 1160px) {

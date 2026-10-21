@@ -663,14 +663,15 @@ the reference; this section says where it improves on it.
 
 - **Code block:** the project's three-letter rail code (§6) in a volt block, brand face. It matches what the narrow rail
   shows.
-- **Title:** the project name at `--t-h1`, display, uppercase, `--text-hi`. On first paint after a project switch it
+- **Title:** the project name at `--t-h2` (Aiden, 2026-10-20, #502: `--t-h1` read too big; the Project view's head
+  follows), display, uppercase, `--text-hi`. On first paint after a project switch it
   decodes once (the mock's scramble, at most 520 ms); static under reduced motion.
-- **Meta line**, right-aligned, mono `--t-detail-sm`, volt: `2 ASKS · 2 LIVE · 1 READY · 113 DONE`, the project's own
-  figures (the HUD's are window-wide, §5). A zero figure is dim.
+- **No meta line on the Board** (Aiden, 2026-10-20, #502): the HUD and the rail already carry the asks, live, ready and
+  done figures. The Project view keeps its own meta line.
 
 ### The comms slab
 
-`--canvas-0`, a `--line` edge, a volt Tape along its top.
+`--canvas-0`, a `--line` edge. No Tape (Aiden, 2026-10-20, #502: the hazard strip went, on the Project view's slab too).
 
 - **First row:** an Eyebrow `[◈] COMMS // ORCHESTRATOR` and the note's age (`LOOKED 2D AGO`, mono, dim).
 - **The message:** the state note's first sentence at 1.0625rem, `--text-hi`, at most 68ch. Step references (`#399`)
@@ -731,15 +732,16 @@ A dashed `--line-strong` edge above it.
 
 - **Head:** an Eyebrow `[+] BACKLOG · N` (N as today's "N ›": open entries, parked excluded), then **+ Add** (ghost
   `sm`) and **Open ›** (ghost `sm`, opens the Backlog view).
-- **Phase TabStrip** (`tabs`): the phases with entries in tree order, then No phase, each with its count, the picked one
-  volt. It replaces the native select; the choice, its storage key (`ip.backlogPreview.<projectId>`) and its default
-  rule do not change.
-- **Rows**, up to five, one line each: mono `#id` in a fixed column, the title at `--t-body`, the age at the right, and a
-  second line only when there is a label or a `blocked` Chip. Hover or focus: `--canvas-2` and **to Next** (ghost `sm`)
-  at the right. Rows drag into Next, as today. A row opens Details.
+- **Phase menu button** (Aiden, 2026-10-20, #502, in place of the mock's TabStrip): ghost `sm` reading
+  `<phase> · <count> ▾`, opening a Menu of the phases with entries in tree order, then No phase, each with its count,
+  the picked one current. The choice, its storage key (`ip.backlogPreview.<projectId>`) and its default rule do not
+  change.
+- **Boxes**, up to five, one per entry (Aiden, 2026-10-20, #502, in place of the mock's one-line rows): the Board's
+  tile with no hue and compact padding; top `#id`, a `blocked` Chip when blocked, the age, and **to Next** (ghost `sm`)
+  on hover or focus; the title; the foot as other tiles. Boxes drag into Next, as today. A box opens Details.
 - **Foot:** "4 more in No phase · Open Backlog ›" when the phase has more than five; **+ Add** opens the quick-add Field
   here, which creates under the picked phase (today's rule).
-- **Empty:** "Nothing in <phase>", with the TabStrip still there.
+- **Empty:** "Nothing in <phase>", with the phase menu button still there.
 
 ### Now
 

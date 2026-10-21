@@ -159,7 +159,7 @@ export function App() {
   // moves focus after the Board shows.
   const [needsFocus, setNeedsFocus] = useState(0);
   useEffect(() => {
-    if (needsFocus > 0) document.querySelector<HTMLElement>('.ip-band-needs h3')?.focus();
+    if (needsFocus > 0) document.querySelector<HTMLElement>('.ip-band-needs h2')?.focus();
   }, [needsFocus]);
   const onAsks = () => {
     const target = askTarget(tabs, state.slug);
@@ -377,7 +377,7 @@ export function App() {
                 ) : view === 'done' ? (
                   <DoneList key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} codes={codes} />
                 ) : view === 'board' ? (
-                  <Board key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onOpenDone={() => openFromBoard('done')} onOpenBacklog={() => openFromBoard('backlog')} lastLook={lastLook} onStatus={fail} />
+                  <Board key={snapshot.project.id} snapshot={snapshot} now={now} selectedNode={selectedNode} onOpenNode={setSelectedNode} onOpenResource={openViewer} onOpenDone={() => openFromBoard('done')} onOpenBacklog={() => openFromBoard('backlog')} lastLook={lastLook} onStatus={fail} />
                 ) : (
                   <ProjectView key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onStatus={fail} codes={codes} />
                 )}

@@ -1,6 +1,6 @@
 import type { BuildInfo } from '../../src/core/build';
 import type { StepHit } from '../../src/core/goto';
-import type { DeletedProject, NodeDetail, Project, ProjectSnapshot, ProjectSummary, QueueOp, Resource } from '../../src/core/types';
+import type { DeletedProject, NodeDetail, PageBody, Project, ProjectSnapshot, ProjectSummary, QueueOp, Resource } from '../../src/core/types';
 import type { ActionTarget, ProjectAction } from './projectActions';
 
 async function getJson<T>(path: string): Promise<T> {
@@ -22,6 +22,20 @@ export const api = {
   project: (slug: string) => getJson<ProjectSnapshot>(`/api/projects/${encodeURIComponent(slug)}`),
   node: (id: number) => getJson<NodeDetail>(`/api/nodes/${id}`),
   resource: (id: number) => getJson<Resource>(`/api/resources/${id}`),
+  /** A page as its file stands now, or why it cannot be shown: the typed answer (page-missing, page-has-secret) kept whole. */
+  pageBody: async (id: number): Promise<PageAnswer> => {
+    let res: Response;
+    try {
+      res = await fetch(`/api/resources/${id}/body`);
+    } catch {
+      return { ok: false, status: 0, error: 'Could not reach the InProgress server. Is it still running?' };
+    }
+    if (res.ok) return { ok: true, body: (await res.json()) as PageBody };
+    const payload = (await res.json().catch(() => ({}))) as Omit<PageRefusal, 'ok' | 'status'>;
+    return { ...payload, ok: false, status: res.status, error: payload.error ?? `HTTP ${res.status}` };
+  },
+  /** Still accurate: the page's claim holds at its repo's HEAD now. Answers the resource as confirmed. */
+  confirmPage: (id: number) => sendUi<Resource>(`/api/ui/resources/${id}/confirm`, {}),
   /**
    * The Go to field: the step an id names, or the steps whose titles hold the words, across projects, those of `here`
    * (the open project's slug) first within each tier.
@@ -41,6 +55,18 @@ export const api = {
   /** Renames a project, by id, the slug going along as for projectAction. Done, it answers the project as renamed. */
   renameProject: (p: ActionTarget, name: string) => sendUi<{ project: Project }>(`/api/ui/projects/${p.id}/rename`, { slug: p.slug, name }),
 };
+
+/** Why a page cannot be shown: the server's typed refusal, e.g. { code: 'page-has-secret', line: 4 }. */
+export interface PageRefusal {
+  ok: false;
+  status: number;
+  error: string;
+  code?: string;
+  line?: number;
+  path?: string;
+}
+
+export type PageAnswer = { ok: true; body: PageBody } | PageRefusal;
 
 /** What a window write answers: 'ok' when it was done, 'reload' after a server restart, else a message for the user. */
 export type UiResult = 'ok' | 'reload' | string;

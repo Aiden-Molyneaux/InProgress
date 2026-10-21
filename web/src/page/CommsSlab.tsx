@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react';
 import { Eyebrow } from '../parts/Eyebrow';
-import { Tape } from '../parts/Tape';
 
 export interface CommsSlabProps {
   /** How long ago the note was written, as `ageShort` gives it ("now", "5m", "2d"); null when there is no note. */
@@ -13,11 +12,10 @@ export interface CommsSlabProps {
   below?: ReactNode;
 }
 
-/** The slab that speaks for the whole window (spec section 7): the orchestrator's note, under a stripe of tape. */
+/** The slab that speaks for the whole window (spec section 7): the orchestrator's note. */
 export function CommsSlab({ age, children, actions, below }: CommsSlabProps) {
   return (
     <section className="ip-comms" aria-label="Orchestrator note">
-      <Tape />
       <div className="ip-comms-inner">
         <div className="ip-comms-row">
           <Eyebrow glyph="[◈]">COMMS // ORCHESTRATOR</Eyebrow>

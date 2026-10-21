@@ -5,8 +5,8 @@ export interface PageHeadProps {
   /** The three-letter code block (see `projectCode`). */
   code: string;
   name: string;
-  /** The meta line's figures, read as "3 PHASES". */
-  meta: { label: string; value: number }[];
+  /** The meta line's figures, when the view has any, read as "3 PHASES". */
+  meta?: { label: string; value: number }[];
   /** What the title decodes for: the project's id. A project decoded once is not decoded again until another one is. */
   decodeKey: number;
   /** Given, the title takes this ref and can be focused by script (tabIndex -1): where focus lands when a view's last row leaves. */
@@ -19,7 +19,7 @@ export interface PageHeadProps {
 let lastDecoded: number | null = null;
 
 const DECODE_MS = 520;
-/** The page head (spec section 7): the code block, the project's name, and the meta line to the right. */
+/** The page head (spec section 7): the code block, the project's name, and the meta line to the right (the Board has none). */
 export function PageHead({ code, name, meta, decodeKey, titleRef, children }: PageHeadProps) {
   const [shown, setShown] = useState(name);
   // A layout effect, so the name never paints clean before the decode scrambles it.
@@ -49,14 +49,16 @@ export function PageHead({ code, name, meta, decodeKey, titleRef, children }: Pa
       <h1 ref={titleRef} tabIndex={titleRef ? -1 : undefined} className="ip-page-title" title={name} aria-label={name}>
         <span aria-hidden="true">{shown}</span>
       </h1>
-      <p className="ip-page-meta">
-        {meta.map((m, i) => (
-          <Fragment key={m.label}>
-            {i > 0 && <span className="ip-page-sep"> · </span>}
-            <span data-zero={m.value === 0 || undefined}>{`${m.value} ${m.label}`}</span>
-          </Fragment>
-        ))}
-      </p>
+      {meta && (
+        <p className="ip-page-meta">
+          {meta.map((m, i) => (
+            <Fragment key={m.label}>
+              {i > 0 && <span className="ip-page-sep"> · </span>}
+              <span data-zero={m.value === 0 || undefined}>{`${m.value} ${m.label}`}</span>
+            </Fragment>
+          ))}
+        </p>
+      )}
       {children && <div className="ip-page-aside">{children}</div>}
     </header>
   );

@@ -2,6 +2,7 @@ import { createContext, useContext, useRef, useState, type LiHTMLAttributes, typ
 import { sessionDisplayTitle } from '../../../src/core/types';
 import type { TaskBox as BoxData } from '../../../src/core/taskState';
 import { openDesktop } from '../api';
+import { Button, type ButtonProps } from '../parts/Button';
 import { noteAction, type MeasureArea } from '../measure';
 import { LabelChip, rowClick, StepMarks } from './Marks';
 import { boxSince, hueStyle, PILLS } from './boxState';
@@ -82,13 +83,24 @@ export function OpenScope({ area, children }: { area: MeasureArea; children: Rea
   return <OpenContext.Provider value={{ stateOf: (id) => states[id] ?? IDLE, open }}>{children}</OpenContext.Provider>;
 }
 
-/** A button that opens the session in its scope; it reads "Opening…" while the request is out. */
-export function OpenButton({ sessionId, className, children }: { sessionId: string; className: string; children: string }) {
+/**
+ * A button that opens the session in its scope; it reads "Opening…" while the request is out. With `variant` it draws the
+ * Button part (and `glyph` after its label); without, a plain button of the given class. `label` sets the accessible name where the visible
+ * text is shorter than it (not while busy, when the text reads "Opening…").
+ */
+export function OpenButton({ sessionId, className, variant, size = 'sm', glyph, label, children }: { sessionId: string; className: string; variant?: ButtonProps['variant']; size?: ButtonProps['size']; glyph?: ButtonProps['glyph']; label?: string; children: string }) {
   const scope = useContext(OpenContext);
   if (!scope) throw new Error('OpenButton needs an OpenScope');
   const { busy } = scope.stateOf(sessionId);
+  if (variant) {
+    return (
+      <Button variant={variant} size={size} glyph={glyph} className={className} data-act aria-label={busy ? undefined : label} busy={busy} onClick={() => void scope.open(sessionId)}>
+        {busy ? 'Opening…' : children}
+      </Button>
+    );
+  }
   return (
-    <button type="button" className={className} data-act aria-busy={busy} onClick={() => void scope.open(sessionId)}>
+    <button type="button" className={className} data-act aria-label={busy ? undefined : label} aria-busy={busy} onClick={() => void scope.open(sessionId)}>
       {busy ? 'Opening…' : children}
     </button>
   );
