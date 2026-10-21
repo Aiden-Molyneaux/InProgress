@@ -161,7 +161,7 @@ async function checkRow(ctx: Ctx, m: ManifestRow, manifestDirs: string[]): Promi
   }
 }
 
-/** GET /api/library/sync: every manifest's check, in parallel. */
+/** POST /api/ui/library/sync: every manifest's check, in parallel. */
 export async function librarySync(ctx: Ctx): Promise<LibrarySync> {
   const { rows, noManifest } = await manifests(ctx);
   const projects: SyncRow[] = await Promise.all(rows.map(async (m) => ({ projectId: m.projectId, slug: m.slug, name: m.name, dir: m.dir, check: await checkRow(ctx, m, rows.map((r) => r.dir)) })));

@@ -309,7 +309,7 @@ export interface SyncRow {
   dir: string;
   check: SyncOutcome;
 }
-/** GET /api/library/sync. `noManifest`: bound projects with no manifest; `source` marks Shipwright itself. */
+/** POST /api/ui/library/sync. `noManifest`: bound projects with no manifest; `source` marks Shipwright itself. */
 export interface LibrarySync {
   projects: SyncRow[];
   noManifest: { projectId: number; slug: string; name: string; source: boolean }[];
