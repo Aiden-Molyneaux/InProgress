@@ -35,6 +35,20 @@ describe('the panel renders what the server says', () => {
     expect(worstNote(warned)).toBe('the last drill failed');
     expect(worstLevel(status({ warnings: ['the newest pushed commit is over 7 days old'], fail: true }))).toBe('fail');
   });
+
+  it('names the failing row, not an earlier warning, while one fails', () => {
+    const stale = 'the newest snapshot is over 26 hours old';
+    const old = 'the newest pushed commit is over 7 days old';
+    const failing = status({
+      warnings: [stale, old],
+      fail: true,
+      rows: [
+        { label: 'Snapshot', value: 'inprogress-20261020-080000.db · 1 d ago', level: 'warn', note: stale },
+        { label: 'Pushed', value: '8 d ago', level: 'fail', note: old },
+      ],
+    });
+    expect(worstNote(failing)).toBe(old);
+  });
 });
 
 describe('restoreCommands', () => {
@@ -46,7 +60,7 @@ describe('restoreCommands', () => {
   });
 
   it('quotes a Windows path whole, backslashes and spaces kept', () => {
-    expect(restoreCommands(status({ offsiteDir: 'C:\Users\A B\.inprogress\offsite' }))[2].command).toBe('inprogress restore --from "C:\Users\A B\.inprogress\offsite"');
+    expect(restoreCommands(status({ offsiteDir: 'C:\\Users\\A B\\.inprogress\\offsite' }))[2].command).toBe('inprogress restore --from "C:\\Users\\A B\\.inprogress\\offsite"');
   });
 
   it('says there is no snapshot to restore when there is none', () => {
