@@ -9,6 +9,8 @@ import { addBinding, createProject } from '../../src/server/repo/projects';
 import { clearSyncCache, parseCheck } from '../../src/server/sync';
 import { makeCtx } from '../helpers';
 
+const UI = { origin: 'http://localhost:80', 'x-ip-ui-token': 'ui-token' };
+
 const tempDirs: string[] = [];
 afterAll(() => {
   for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
@@ -98,7 +100,7 @@ function setup(script?: string) {
 describe('library: sync', GIT_TIMEOUT, () => {
   it('checks each manifest, refuses an unbound Shipwright folder without running it, and lists the projects with no manifest', async () => {
     const { app, a, b, c, sw, runCount, unbound } = setup();
-    const body = (await app.inject({ url: '/api/library/sync' })).json();
+    const body = (await app.inject({ method: 'POST', url: '/api/ui/library/sync', headers: UI, payload: {} })).json();
     expect(body.projects.map((p: { slug: string }) => p.slug)).toEqual([a.slug, b.slug]);
     const [rowA, rowB] = body.projects;
     expect(rowA.check, JSON.stringify(rowA.check)).toMatchObject({ ok: true });
@@ -115,20 +117,39 @@ describe('library: sync', GIT_TIMEOUT, () => {
 
   it('runs the script once for a second load within 60 s and for two loads at once', async () => {
     const { app, runCount } = setup();
-    const [one, two] = await Promise.all([app.inject({ url: '/api/library/sync' }), app.inject({ url: '/api/library/sync' })]);
+    const [one, two] = await Promise.all([app.inject({ method: 'POST', url: '/api/ui/library/sync', headers: UI, payload: {} }), app.inject({ method: 'POST', url: '/api/ui/library/sync', headers: UI, payload: {} })]);
     expect(one.statusCode).toBe(200);
     expect(two.statusCode).toBe(200);
     expect(runCount()).toBe(1);
-    await app.inject({ url: '/api/library/sync' });
+    await app.inject({ method: 'POST', url: '/api/ui/library/sync', headers: UI, payload: {} });
     expect(runCount()).toBe(1);
   });
 
   it('answers a failing script as a failed row with its stderr, and still answers the others', async () => {
     const { app } = setup("console.error('boom: bad project');\nprocess.exit(2);\n");
-    const body = (await app.inject({ url: '/api/library/sync' })).json();
+    const body = (await app.inject({ method: 'POST', url: '/api/ui/library/sync', headers: UI, payload: {} })).json();
     expect(body.projects).toHaveLength(2);
     expect(body.projects[0].check).toEqual({ ok: false, error: 'boom: bad project' });
     expect(body.projects[1].check.ok).toBe(false);
+  });
+
+  it('runs only on the window POST, and refuses a manifest that names its own project as Shipwright without running it', async () => {
+    const { ctx, app } = setup();
+    expect((await app.inject({ url: '/api/library/sync' })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'POST', url: '/api/ui/library/sync', payload: {} })).statusCode).toBeGreaterThanOrEqual(400);
+    const self = mkdtempSync(join(tmpdir(), 'ip-lib-self-'));
+    tempDirs.push(self);
+    mkdirSync(join(self, 'scripts'));
+    writeFileSync(join(self, 'scripts', 'template-sync.mjs'), "import { writeFileSync } from 'node:fs';writeFileSync(new URL('ran.txt', import.meta.url), 'ran');console.log('{}');");
+    mkdirSync(join(self, '.claude'));
+    writeFileSync(join(self, '.claude', 'shipwright.json'), JSON.stringify({ shipwright: '.', files: {} }));
+    const d = createProject(ctx, 'test', { name: 'Delta' });
+    addBinding(ctx, 'test', d.slug, self);
+    const body = (await app.inject({ method: 'POST', url: '/api/ui/library/sync', headers: UI, payload: {} })).json();
+    const rowD = body.projects.find((p: { slug: string }) => p.slug === d.slug);
+    expect(rowD.check.ok).toBe(false);
+    expect(rowD.check.error).toContain('keeps its own .claude/shipwright.json');
+    expect(existsSync(join(self, 'scripts', 'ran.txt'))).toBe(false);
   });
 });
 

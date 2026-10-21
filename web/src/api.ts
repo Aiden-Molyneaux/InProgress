@@ -43,7 +43,13 @@ export const api = {
   find: (q: string, here: string | null) => getJson<StepHit[]>(`/api/find?q=${encodeURIComponent(q)}${here ? `&here=${encodeURIComponent(here)}` : ''}`),
   /** The Library group: its pages (read live), and every manifest's Sync check. */
   libraryPages: () => getJson<LibraryPages>('/api/library/pages'),
-  librarySync: () => getJson<LibrarySync>('/api/library/sync'),
+  /** The Sync check: a UI POST, as it runs Shipwright's script. Rejects with the reason, and reloads on a 401. */
+  librarySync: async (): Promise<LibrarySync> => {
+    const answer = await sendUi<LibrarySync>('/api/ui/library/sync', {});
+    if (answer === 'reload') window.location.reload();
+    if (typeof answer === 'string') throw new Error(answer === 'reload' ? 'Reloading' : answer);
+    return answer;
+  },
   openResource: (id: number) => postUi('/api/ui/open', { resourceId: id }),
   /** Opens an http(s) link in the default browser: from the Edge app window a plain link would open in Edge. */
   openUrl: (url: string) => postUi('/api/ui/open-url', { url }),

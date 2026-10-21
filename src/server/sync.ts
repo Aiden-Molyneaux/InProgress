@@ -131,10 +131,14 @@ const headOf = async (shipwright: string): Promise<string> => {
 };
 
 /** One manifest's check. Refuses a Shipwright folder that no project binds, without running anything. */
-async function checkRow(ctx: Ctx, m: ManifestRow): Promise<SyncOutcome> {
+async function checkRow(ctx: Ctx, m: ManifestRow, manifestDirs: string[]): Promise<SyncOutcome> {
   if (m.error) return { ok: false, error: m.error };
   if (!m.shipwright || !isLocalAbsolutePath(m.shipwright) || !boundSomewhere(ctx, m.shipwright)) {
     return { ok: false, error: `Shipwright path ${m.shipwright || '(none)'} is not a folder bound to a project` };
+  }
+  // The source keeps no manifest of its own: a project that does (this one included) cannot be where the script comes from.
+  if (manifestDirs.some((d) => same(d, m.shipwright))) {
+    return { ok: false, error: `Shipwright path ${m.shipwright} is a project that keeps its own .claude/shipwright.json, not Shipwright` };
   }
   const key = JSON.stringify([await headOf(m.shipwright), m.mtimeMs, m.dir]);
   const hit = cache.get(m.projectId);
@@ -160,7 +164,7 @@ async function checkRow(ctx: Ctx, m: ManifestRow): Promise<SyncOutcome> {
 /** GET /api/library/sync: every manifest's check, in parallel. */
 export async function librarySync(ctx: Ctx): Promise<LibrarySync> {
   const { rows, noManifest } = await manifests(ctx);
-  const projects: SyncRow[] = await Promise.all(rows.map(async (m) => ({ projectId: m.projectId, slug: m.slug, name: m.name, dir: m.dir, check: await checkRow(ctx, m) })));
+  const projects: SyncRow[] = await Promise.all(rows.map(async (m) => ({ projectId: m.projectId, slug: m.slug, name: m.name, dir: m.dir, check: await checkRow(ctx, m, rows.map((r) => r.dir)) })));
   return { projects, noManifest };
 }
 

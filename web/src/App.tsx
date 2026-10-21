@@ -65,6 +65,11 @@ export function App() {
   const now = useNow(30_000);
   const lastLook = useLastLook(snapshot?.project.id ?? null);
   const [selectedNode, setSelectedNode] = useState<number | null>(null);
+  // The Library has no Details: opening it (a click, a key or the address) lets go of the selected step.
+  const libraryOpen = library !== null;
+  useEffect(() => {
+    if (libraryOpen) setSelectedNode(null);
+  }, [libraryOpen]);
   const selectedNodeRef = useRef(selectedNode);
   selectedNodeRef.current = selectedNode;
   // A node deleted while Details shows it closes Details: the snapshot before held it, the new one doesn't. A node picked
