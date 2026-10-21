@@ -254,6 +254,7 @@ describe('session routes', () => {
     // Also inside a list entry, where a newer hook may add a field the same way.
     const nested = await post({ event: 'stop', background: [{ taskId: 't1', type: 'shell', someFutureField: 1 }] });
     expect(nested.statusCode).toBe(200);
+    expect((await post({ event: 'prompt', notice: true, tasks: [{ taskId: 't1', status: 'completed', someFutureField: 1 }] })).statusCode).toBe(200);
     // Field-level validation is unchanged: a known key with a bad value is still a 400.
     expect((await post({ event: 'stop', stopHookActive: 'yes', someFutureField: 'x' })).statusCode).toBe(400);
   });
