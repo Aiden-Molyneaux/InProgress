@@ -64,7 +64,7 @@ export function openUrl(url: string): Promise<void> {
 }
 
 /** Start a program detached, resolving once it started and rejecting when it could not. */
-function start(file: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string } = {}): Promise<void> {
+function start(file: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string; windowsHide?: boolean } = {}): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(file, args, { detached: true, stdio: 'ignore', windowsHide: true, ...options });
     child.once('spawn', () => {
@@ -194,9 +194,12 @@ export async function openInEditorOrReveal(path: string): Promise<void> {
   else launch('xdg-open', [dirname(target)]);
 }
 
-/** Open a folder in the file manager. No shell is involved; the path is one argument. */
+/**
+ * Open a folder in the file manager. No shell is involved; the path is one argument. Not hidden: windowsHide passes
+ * SW_HIDE, and Explorer opens the folder's window hidden.
+ */
 export async function openFolder(path: string): Promise<void> {
   const target = resolve(path);
-  if (process.platform === 'win32') return start(join(systemRoot(), 'explorer.exe'), [target]);
+  if (process.platform === 'win32') return start(join(systemRoot(), 'explorer.exe'), [target], { windowsHide: false });
   return start(process.platform === 'darwin' ? 'open' : 'xdg-open', [target]);
 }
