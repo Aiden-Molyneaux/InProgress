@@ -2,13 +2,12 @@ import { bandOrder, deriveBacklog, keepBefore, type BacklogRow, type BacklogView
 import { deriveBoard, type ParkedRow } from '../../../src/core/board';
 import { buildIndex, dfsOrder } from '../../../src/core/tree';
 import { sessionDisplayTitle, type RankOp } from '../../../src/core/types';
-import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
-import { deleteStep, unparkStep } from '../api';
+import { deleteStep, labelStep, moveStep, queueOp, unparkStep } from '../api';
 import { groupByParent, parentTitle } from '../board/backlogOrder';
 import type { BandProps } from '../board/bandProps';
 import { dropSlot } from '../board/dragQueue';
-import { rowClick } from '../board/Marks';
 import { QuickAdd } from '../board/QuickAdd';
 import { ageShort } from '../board/text';
 import { shortDate } from '../done/doneGroups';
@@ -24,7 +23,8 @@ import { useListCursor } from '../parts/ListCursor';
 import { TabStrip } from '../parts/TabStrip';
 import { loadFolds, saveFolds } from '../project/projectFolds';
 import { load, save } from '../storage';
-import { altMove, backlogMatch, backlogMeta, cursorAfter, openInsideIndex, optimisticRank, parseView, viewKey, viewTabs } from './backlogView';
+import { altMove, backlogMatch, backlogMeta, cursorAfter, moveTopBefore, nextTopBefore, openInsideIndex, optimisticRank, parseView, phaseOptions, phaseValue, viewKey, viewTabs } from './backlogView';
+import { Inspector } from './Inspector';
 import { ParkForm, type ParkDraft } from './ParkForm';
 import { useKeepRowFocus } from './useKeepRowFocus';
 import { useRankedOrder, type RankedBand } from './useRankedOrder';
@@ -61,10 +61,13 @@ const ROW_LINE = 36;
  * The full Backlog (the view behind "N ›"): the page head, the views strip and the filter, then the open view. Ranked is the
  * default: Next up (the queue), Soon and a folded Someday, ranked by drag or Alt+arrows; By Phase groups every open step
  * under its parent; Needs Triage lists the steps nobody has ranked; Stale the ones left alone; Parked the ones set aside.
- * A row shows "to Next" (not in Next up), "Keep" (Stale), "Park…" and "Delete…" on hover and on focus; "Delete…" and
- * "Park…" open their form inside the row. The filter and the view are this component's state (the view is kept per project). Every row of the page is one Tab stop.
+ * A row shows "to Next" (not in Next up) and "Keep" (Stale) on hover and on focus; a parked row shows "to Next" and "Unpark".
+ * A click, Enter or Space on a row opens its inspector under it (one at a time, in every view): the body, the Phase, Label and
+ * Band selects, and the buttons, among them "Park…" and "Delete…", whose form and confirm replace the button column. Escape
+ * closes the inspector and puts focus on its row. The filter, the view and the picked row are this component's state (the view
+ * is kept per project). Every row of the page is one Tab stop.
  */
-export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStatus, onOpenNode }: Pick<BandProps, 'snapshot' | 'now' | 'onOpenNode' | 'onStatus'> & {
+export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStatus, onOpenNode, onOpenResource }: Pick<BandProps, 'snapshot' | 'now' | 'onOpenNode' | 'onOpenResource' | 'onStatus'> & {
   projectId: number;
   slug: string;
   /** The page head's code block. */
@@ -87,6 +90,13 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
   /** Where a drop would land: the band and the step it goes before (null: the end); undefined when over nothing. */
   const [over, setOver] = useState<{ band: RankedBand; before: number | null } | undefined>(undefined);
   const [overFold, setOverFold] = useState(false);
+  /** The row whose inspector is open: one at a time, in every view. */
+  const [picked, setPicked] = useState<number | null>(null);
+  const pickedRef = useRef(picked);
+  pickedRef.current = picked;
+  /** The control to focus once its step is drawn again after an inspector write that moved the row (that control's `data-insp`). */
+  const want = useRef<{ id: number; ctl: string } | null>(null);
+  const wantTimer = useRef(0);
   const confirming = panel?.kind === 'delete' ? panel.id : null;
   /** A view switch or a new filter closes an open Delete confirm: its row may move away from where the user was looking. An open Park form stays (and keeps what was typed) while its row is still shown. */
   const closePanel = () => setPanel((p) => (p?.kind === 'delete' ? null : p));
@@ -161,14 +171,20 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
   }
   const rowIds = drawn.map((d) => d.id);
   const rowAt = new Map(rowIds.map((id, i) => [id, i]));
+  /** Opens the row's inspector, or closes it; another row's open panel closes with the move. */
+  const toggle = (id: number) => {
+    noteAction('backlog', 'inspect');
+    const open = pickedRef.current !== id;
+    setPicked(open ? id : null);
+    setPanel((p) => (p !== null && (p.id !== id || !open) ? null : p));
+  };
   const { itemProps } = useListCursor(
     [rowIds.length],
     (at) => {
       const id = rowIds[at.row];
       // A row asking or parking is busy with its own panel: Enter on it opens nothing.
       if (id === undefined || panelRef.current?.id === id) return;
-      noteAction('backlog', 'open');
-      onOpenNode(id);
+      toggle(id);
     },
     [rowIds.map(String)],
   );
@@ -187,8 +203,10 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
     if (panel !== null && !seen.has(panel.id)) {
       setPanel(null);
     }
+    // The inspector follows its step while the step is drawn; once it leaves the view, it closes.
+    if (picked !== null && !seen.has(picked)) setPicked(null);
     setPending((p) => (p.some((id) => !here.has(id)) ? p.filter((id) => here.has(id)) : p));
-  }, [ids, openIds, panel]);
+  }, [ids, openIds, panel, picked]);
   /** A parked row that is unparked leaves the Parked view: its in-flight mark ends with it. */
   const parkedIds = backlog.parked.map((p) => p.node.id).join(',');
   useEffect(() => {
@@ -198,6 +216,30 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
   useEffect(() => {
     if (adding !== null) addField.current?.focus();
   }, [adding]);
+  useEffect(() => () => window.clearTimeout(wantTimer.current), []);
+  // After an inspector write that redraws the row elsewhere: if focus fell to the page, it goes back to the control used.
+  useEffect(() => {
+    const w = want.current;
+    if (!w) return;
+    const active = document.activeElement;
+    const target = root.current?.querySelector<HTMLElement>(`li[data-node="${w.id}"]`);
+    // Gone from the view, or focus is somewhere on purpose: nothing to give back.
+    if (!rowIds.includes(w.id) || (active !== null && active !== document.body)) {
+      want.current = null;
+      return;
+    }
+    if (!target) return;
+    (target.querySelector<HTMLElement>(`[data-insp="${w.ctl}"]`) ?? target).focus();
+    want.current = null;
+  });
+  /** Notes the control an inspector write was made from, for the effect above; given up after 3 s. */
+  const follow = (id: number, ctl: string) => {
+    want.current = { id, ctl };
+    window.clearTimeout(wantTimer.current);
+    wantTimer.current = window.setTimeout(() => {
+      want.current = null;
+    }, 3000);
+  };
 
   /** Puts focus back on that row's button, once it is drawn again. */
   const refocus = (id: number, attr: 'data-delete' | 'data-park') => window.requestAnimationFrame(() => root.current?.querySelector<HTMLElement>(`li[data-node="${id}"] [${attr}]`)?.focus());
@@ -349,6 +391,50 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
   };
   const askDelete = (id: number) => setPanel({ kind: 'delete', id });
   const drawnBy = new Map(drawn.map((d) => [d.id, d]));
+  /** The unfiltered Next up queue's unowned steps, and every backlog step: what Move to top reads. */
+  const unownedNext = board.next.filter((r) => r.owner === null).map((r) => r.node.id);
+  const backlogIds = new Set(board.backlog.map((r) => r.node.id));
+  /** A click on a row (not on a button or field of its own) opens or closes its inspector. */
+  const clickRow = (id: number) => (e: MouseEvent) => {
+    if ((e.target as HTMLElement).closest('[data-act], input, textarea')) return;
+    toggle(id);
+  };
+  /** Space on the focused row opens or closes its inspector, as Enter does. */
+  const spaceKey = (e: KeyboardEvent<HTMLElement>, id: number) => {
+    if (e.key !== ' ' || e.target !== e.currentTarget || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    e.preventDefault();
+    if (panelRef.current?.id !== id) toggle(id);
+  };
+  /** Escape on the row or in its inspector closes the inspector and puts focus on its row; false when none is open there. */
+  const escapeKey = (e: KeyboardEvent<HTMLElement>, id: number): boolean => {
+    if (e.key !== 'Escape' || pickedRef.current !== id) return false;
+    e.preventDefault();
+    e.stopPropagation();
+    setPicked(null);
+    setPanel((p) => (p?.id === id ? null : p));
+    e.currentTarget.focus();
+    return true;
+  };
+  /** A step's last session: the newer of the one `stepTouches` lists and the newest sign of a session that has it as focus. */
+  const lastSessionOf = (id: number): string | null => {
+    let best = snapshot.stepTouches.find((t) => t.nodeId === id)?.sessionAt ?? null;
+    for (const s of snapshot.sessions) if (s.focusNodeId === id && (best === null || s.lastSeenAt > best)) best = s.lastSeenAt;
+    return best;
+  };
+  /** The Phase and Label selects' writes: `'reload'` reloads the window; a refusal goes back to the select, which says it. */
+  const selectWrite = async (write: Promise<string>): Promise<string> => {
+    const result = await write;
+    if (result === 'reload') window.location.reload();
+    return result;
+  };
+  /** Back to Backlog: the step leaves the queue and returns to its band. */
+  const backToBacklog = async (id: number) => {
+    noteAction('backlog', 'back_to_backlog');
+    follow(id, 'back');
+    const result = await queueOp(projectId, slug, { kind: 'remove', node: id });
+    if (result === 'reload') window.location.reload();
+    else if (result !== 'ok') onStatus?.(result);
+  };
 
   const drawRow = (d: Drawn): ReactNode => {
     const { look } = d;
@@ -368,7 +454,11 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
           age={node.parkedAt ? ageShort(node.parkedAt, now) : null}
           pending={busy}
           keepActs
-          onOpen={rowClick('backlog', () => onOpenNode(node.id))}
+          picked={picked === node.id}
+          onOpen={clickRow(node.id)}
+          onKeyDown={(e) => {
+            if (!escapeKey(e, node.id)) spaceKey(e, node.id);
+          }}
           acts={
             <>
               <Button variant="ghost" size="sm" data-act disabled={busy} onClick={(e) => void unpark(node.id, true, e.currentTarget.closest('li'), e.currentTarget)}>to Next</Button>
@@ -378,6 +468,40 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
         >
           <p className="ip-bl-why">{`Parked ${node.parkedAt ? `${shortDate(node.parkedAt, now)}: ` : ': '}${node.parkedReason}`}</p>
           {node.parkedWhere && <p className="ip-bl-where">{`where ${node.parkedWhere}`}</p>}
+          {picked === node.id && (
+            <Inspector
+              id={node.id}
+              node={node}
+              inside={d.parked.openInside}
+              band={null}
+              parked
+              handoff={null}
+              docs={snapshot.resources.filter((r) => r.nodeId === node.id)}
+              lastSession={lastSessionOf(node.id)}
+              phases={[]}
+              phase={null}
+              can={{ toNext: false, backToBacklog: false, moveTop: false, keep: false, park: false, remove: false, unpark: true }}
+              panel={null}
+              now={now}
+              onBand={async () => 'ok'}
+              onPhase={async () => 'ok'}
+              onLabel={async () => 'ok'}
+              onToNext={() => undefined}
+              onBackToBacklog={() => undefined}
+              onMoveTop={() => undefined}
+              onKeep={() => undefined}
+              onPark={() => undefined}
+              onDelete={() => undefined}
+              onOpenDetails={() => {
+                noteAction('backlog', 'open');
+                onOpenNode(node.id);
+              }}
+              onUnpark={(toNext, from) => {
+                if (!busy) void unpark(node.id, toNext, from.closest('li'), from);
+              }}
+              onOpenResource={onOpenResource}
+            />
+          )}
         </ViewRow>
       );
     }
@@ -388,6 +512,58 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
     const parking = panel?.kind === 'park' && panel.id === id;
     const waiting = pending.includes(id) || ranked.isPending(id);
     const rank = look.rank;
+    const open = picked === id;
+    /** The band as drawn: Ranked's lists show a write at once, before the snapshot says it. */
+    const band = rank ?? r.band;
+    const owned = row.owner !== null;
+    const panelNode = parking ? (
+      <ParkForm
+        projectId={projectId}
+        slug={slug}
+        nodeId={id}
+        title={row.node.title}
+        onStatus={onStatus}
+        draft={draft.current}
+        onDone={() => {
+          // Closes only its own form: a click on another row's Park… meanwhile opened that one. Focus moves on
+          // only while this form still owns the panel and focus is in its row or nowhere.
+          // (A panel already null closed because its row left, which may have parked focus on the page title.)
+          const owns = panelRef.current === null || (panelRef.current.kind === 'park' && panelRef.current.id === id);
+          const active = document.activeElement;
+          const here = root.current?.querySelector(`li[data-node="${id}"]`);
+          const free = active === null || active === document.body || here?.contains(active) === true || active.classList.contains('ip-page-title');
+          setPanel((p) => (p?.id === id ? null : p));
+          if (!owns || !free) return;
+          // The row's neighbours as they are now, while it is still drawn. Once the snapshot has dropped it (the answer
+          // and the snapshot land in either order), the neighbour worked out when the form opened takes focus.
+          const live = here instanceof HTMLElement ? cursorAfter(here) : null;
+          const opened = afterPark.current ? root.current?.querySelector<HTMLElement>(`li[data-node="${afterPark.current}"]`) : null;
+          (live ?? opened ?? titleRef.current)?.focus();
+        }}
+        onCancel={() => cancel(id)}
+      />
+    ) : asking ? (
+      <div className="ip-bl-panel" data-act>
+        <Confirm
+          question={`Delete #${id} ${row.node.title}?`}
+          detail="It can't be undone."
+          action="Delete"
+          danger
+          onConfirm={() => void remove(id, root.current?.querySelector<HTMLElement>(`li[data-node="${id}"]`) ?? null)}
+          onCancel={() => cancel(id)}
+        />
+      </div>
+    ) : null;
+    // Move to top: where the step goes before, or undefined when it is already first (or its order is a session's).
+    const top: { to: 'next' | 'soon' | 'someday'; before: number | null } | undefined = (() => {
+      if (band === 'next') {
+        const before = owned ? undefined : nextTopBefore(unownedNext, id);
+        return before === undefined ? undefined : { to: 'next', before };
+      }
+      if (band !== 'soon' && band !== 'someday') return undefined;
+      const before = moveTopBefore(snapshot.nodes, backlogIds, id, band);
+      return before === undefined ? undefined : { to: band, before };
+    })();
     return (
       <ViewRow
         key={id}
@@ -401,6 +577,7 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
         age={look.stale ? `untouched ${ageShort(r.touchedAt, now)}` : ageShort(row.node.createdAt, now)}
         pending={waiting}
         confirming={asking || parking}
+        picked={open}
         number={look.number}
         band={look.chip}
         handle={rank ? { onDragStart: (e) => startDrag(e, id), onDragEnd: endDrag } : undefined}
@@ -415,16 +592,16 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
         } : undefined}
         onDrop={rank ? drop : undefined}
         // An open confirm or form is the row's own: a click on the row around it opens nothing.
-        onOpen={asking || parking ? () => undefined : rowClick('backlog', () => onOpenNode(id))}
+        onOpen={asking || parking ? () => undefined : clickRow(id)}
         // A press on the confirming row outside the confirm keeps focus in it (so Escape still closes it). A press
         // on the parking row outside its form puts focus in the form's reason field the same way.
         onMouseDown={asking ? (e) => {
-          if ((e.target as HTMLElement).closest('.p-confirm button')) return;
+          if ((e.target as HTMLElement).closest('.p-confirm button, .ip-insp-main')) return;
           e.preventDefault();
           const confirm = e.currentTarget.querySelector<HTMLElement>('.p-confirm');
           if (confirm && !confirm.contains(document.activeElement)) confirm.querySelector<HTMLElement>('.p-confirm-acts button:last-child')?.focus();
         } : parking ? (e) => {
-          if ((e.target as HTMLElement).closest('.ip-park input, .ip-park button')) return;
+          if ((e.target as HTMLElement).closest('.ip-park input, .ip-park button, .ip-insp-main')) return;
           e.preventDefault();
           const form = e.currentTarget.querySelector<HTMLElement>('.ip-park');
           if (form && !form.contains(document.activeElement)) form.querySelector<HTMLElement>('input')?.focus();
@@ -436,6 +613,8 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
             cancel(id);
             return;
           }
+          if (escapeKey(e, id)) return;
+          spaceKey(e, id);
           if (rank) moveKey(e, rank, id);
         }}
         acts={
@@ -447,51 +626,52 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
             {look.stale && (
               <Button variant="ghost" size="sm" data-act onClick={(e) => e.detail <= 1 && keep(id, e.currentTarget)}>Keep</Button>
             )}
-            <Button variant="ghost" size="sm" data-act data-park aria-haspopup="dialog" onClick={(e) => openPark(id, e.currentTarget)}>Park…</Button>
-            {!hasKids(id) && (
-              <Button variant="ghost" size="sm" data-act data-delete aria-haspopup="dialog" onClick={() => askDelete(id)}>Delete…</Button>
-            )}
           </>
         }
       >
-        {parking && (
-          <ParkForm
-            projectId={projectId}
-            slug={slug}
-            nodeId={id}
-            title={row.node.title}
-            onStatus={onStatus}
-            draft={draft.current}
-            onDone={() => {
-              // Closes only its own form: a click on another row's Park… meanwhile opened that one. Focus moves on
-              // only while this form still owns the panel and focus is in its row or nowhere.
-              // (A panel already null closed because its row left, which may have parked focus on the page title.)
-              const owns = panelRef.current === null || (panelRef.current.kind === 'park' && panelRef.current.id === id);
-              const active = document.activeElement;
-              const here = root.current?.querySelector(`li[data-node="${id}"]`);
-              const free = active === null || active === document.body || here?.contains(active) === true || active.classList.contains('ip-page-title');
-              setPanel((p) => (p?.id === id ? null : p));
-              if (!owns || !free) return;
-              // The row's neighbours as they are now, while it is still drawn. Once the snapshot has dropped it (the answer
-              // and the snapshot land in either order), the neighbour worked out when the form opened takes focus.
-              const live = here instanceof HTMLElement ? cursorAfter(here) : null;
-              const opened = afterPark.current ? root.current?.querySelector<HTMLElement>(`li[data-node="${afterPark.current}"]`) : null;
-              (live ?? opened ?? titleRef.current)?.focus();
+        {open && (
+          <Inspector
+            id={id}
+            node={row.node}
+            inside={insideOf(id)}
+            band={band}
+            handoff={row.handoff}
+            docs={snapshot.resources.filter((x) => x.nodeId === id)}
+            lastSession={lastSessionOf(id)}
+            phases={phaseOptions(snapshot.nodes, snapshot.project.rootNodeId, row.node.parentId)}
+            phase={phaseValue(snapshot.project.rootNodeId, row.node.parentId)}
+            can={{ toNext: band !== 'next', backToBacklog: band === 'next', moveTop: top !== undefined, keep: look.stale === true, park: true, remove: !hasKids(id), unpark: false }}
+            panel={panelNode}
+            now={now}
+            focusBand={view === 'triage'}
+            onBand={(b) => {
+              follow(id, 'band');
+              return ranked.write({ node: id, to: b, before: null }, true, true);
             }}
-            onCancel={() => cancel(id)}
+            onPhase={(parent) => selectWrite(moveStep(projectId, slug, id, parent))}
+            onLabel={(l) => selectWrite(labelStep(projectId, slug, id, l))}
+            onToNext={() => {
+              noteAction('backlog', 'to_next');
+              follow(id, 'tonext');
+              void ranked.write({ node: id, to: 'next', before: null });
+            }}
+            onBackToBacklog={() => void backToBacklog(id)}
+            onMoveTop={() => {
+              if (!top) return;
+              noteAction('backlog', 'move_top');
+              follow(id, 'top');
+              void ranked.write({ node: id, to: top.to, before: top.before });
+            }}
+            onKeep={(from) => keep(id, from)}
+            onPark={(from) => openPark(id, from)}
+            onDelete={() => askDelete(id)}
+            onOpenDetails={() => {
+              noteAction('backlog', 'open');
+              onOpenNode(id);
+            }}
+            onUnpark={() => undefined}
+            onOpenResource={onOpenResource}
           />
-        )}
-        {asking && (
-          <div className="ip-bl-panel" data-act>
-            <Confirm
-              question={`Delete #${id} ${row.node.title}?`}
-              detail="It can't be undone."
-              action="Delete"
-              danger
-              onConfirm={() => void remove(id, root.current?.querySelector<HTMLElement>(`li[data-node="${id}"]`) ?? null)}
-              onCancel={() => cancel(id)}
-            />
-          </div>
         )}
       </ViewRow>
     );

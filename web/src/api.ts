@@ -1,6 +1,6 @@
 import type { BuildInfo } from '../../src/core/build';
 import type { StepHit } from '../../src/core/goto';
-import type { DeletedProject, NodeDetail, PageBody, Project, ProjectSnapshot, ProjectSummary, QueueOp, RankOp, Resource } from '../../src/core/types';
+import type { DeletedProject, NodeDetail, NodeLabel, PageBody, Project, ProjectSnapshot, ProjectSummary, QueueOp, RankOp, Resource } from '../../src/core/types';
 import type { ActionTarget, ProjectAction } from './projectActions';
 
 async function getJson<T>(path: string): Promise<T> {
@@ -79,6 +79,13 @@ export const queueOp = (projectId: number, slug: string, op: QueueOp): Promise<U
 
 /** One rank change (ranked Backlog spec section 2): to Next, or into Soon or Someday before a step of that band. */
 export const rankOp = (projectId: number, slug: string, op: RankOp): Promise<UiResult> => postUi(`/api/ui/projects/${projectId}/rank`, { slug, op });
+
+/** The inspector's Label select: sets the step's label, or clears it with null. */
+export const labelStep = (projectId: number, slug: string, nodeId: number, label: NodeLabel | null): Promise<UiResult> =>
+  postUi(`/api/ui/projects/${projectId}/nodes/${nodeId}/label`, { slug, label });
+/** The inspector's Phase select: moves the step to the end of `parent`'s steps (null: No phase, the root). */
+export const moveStep = (projectId: number, slug: string, nodeId: number, parent: number | null): Promise<UiResult> =>
+  postUi(`/api/ui/projects/${projectId}/nodes/${nodeId}/move`, { slug, parent });
 
 /** Quick-add: a todo step under `parent`, or under the root when null; with band 'soon', at the bottom of Soon. */
 export const createStep = (projectId: number, slug: string, title: string, parent: number | null, band?: 'soon'): Promise<UiResult> =>

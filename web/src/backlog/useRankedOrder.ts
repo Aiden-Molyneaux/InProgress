@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Backlog, BacklogRow } from '../../../src/core/backlog';
 import type { ProjectSnapshot, RankOp } from '../../../src/core/types';
-import { rankOp } from '../api';
+import { rankOp, type UiResult } from '../api';
 import { optimisticRank, type RankLists } from './backlogView';
 
 export type RankedBand = keyof RankLists;
@@ -14,8 +14,12 @@ export interface RankedOrder {
   lists: RankLists;
   /** Each row's number while a guess is shown (Next up's unowned rows, then Soon, then Someday); null once the snapshot has settled. */
   numbers: Map<number, number> | null;
-  /** `guess` false sends the write without showing a result first (a no-op move such as Keep); an op shows that one instead (the lists the window holds differ from the server's, as under a filter). */
-  write: (op: RankOp, guess?: boolean | RankOp) => Promise<void>;
+  /**
+   * `guess` false sends the write without showing a result first (a no-op move such as Keep); an op shows that one instead (the
+   * lists the window holds differ from the server's, as under a filter). It answers with the write's result; `quiet` keeps a
+   * refusal from reaching `onStatus` (the caller says it in place), though the lists are still restored.
+   */
+  write: (op: RankOp, guess?: boolean | RankOp, quiet?: boolean) => Promise<UiResult>;
   /** A write is on its way (its answer has not come back). */
   writing: () => boolean;
   /** The step is in a write whose answer has not come back. */
@@ -61,7 +65,7 @@ export function useRankedOrder({ backlog, snapshot, projectId, slug, query, onSt
   useEffect(() => () => window.clearTimeout(clearTimer.current), []);
   useEffect(() => setPending(null), [query]);
 
-  const write = async (op: RankOp, guess: boolean | RankOp = true) => {
+  const write = async (op: RankOp, guess: boolean | RankOp = true, quiet = false): Promise<UiResult> => {
     window.clearTimeout(clearTimer.current);
     if (guess) setPending(optimisticRank(lists, guess === true ? op : guess));
     inFlight.current += 1;
@@ -78,11 +82,12 @@ export function useRankedOrder({ backlog, snapshot, projectId, slug, query, onSt
       // Normally the snapshot clears this first; a move that changed nothing sends none. A write that came back meanwhile left its timer: this one replaces it.
       window.clearTimeout(clearTimer.current);
       clearTimer.current = window.setTimeout(() => setPending(null), 2000);
-      return;
+      return result;
     }
     setPending(null);
     if (result === 'reload') window.location.reload();
-    else onStatus?.(result);
+    else if (!quiet) onStatus?.(result);
+    return result;
   };
 
   let numbers: Map<number, number> | null = null;
