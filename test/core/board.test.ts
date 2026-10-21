@@ -65,7 +65,7 @@ describe('deriveBoard', () => {
     const past: PastSession[] = [{ id: 'old', title: null, focusNodeId: 2, startedAt: DAYS(2), endedAt: DAYS(1) }];
     const left = deriveBoard(input({ nodes: [n(1, null), n(2, 1, { status: 'active' })], pastSessions: past }), NOW);
     expect(left.byId.get(2)).toMatchObject({ column: 'backlog', marks: ['ended_open'] });
-    const handoff: ResourceMeta = { id: 9, projectId: 1, nodeId: 2, kind: 'doc', title: 'h', path: null, url: null, contentLength: 1, sessionId: 'old', createdAt: DAYS(1.5), updatedAt: DAYS(1.5), purpose: 'handoff' };
+    const handoff: ResourceMeta = { id: 9, projectId: 1, nodeId: 2, kind: 'doc', title: 'h', path: null, url: null, contentLength: 1, sessionId: 'old', createdAt: DAYS(1.5), updatedAt: DAYS(1.5), purpose: 'handoff', confirmedSha: null, confirmedAt: null };
     const clean = deriveBoard(input({ nodes: [n(1, null), n(2, 1, { status: 'active' })], pastSessions: past, resources: [handoff] }), NOW);
     expect(clean.byId.get(2)?.marks).toEqual([]);
     expect(clean.byId.get(2)?.handoff?.id).toBe(9);

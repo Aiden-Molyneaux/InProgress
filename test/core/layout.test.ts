@@ -13,7 +13,7 @@ function session(id: string, focusNodeId: number | null, state: Session['state']
 /** Unowned queue entries. */
 const later = (...ids: number[]): QueueEntry[] => ids.map((nodeId) => ({ nodeId, sessionId: null }));
 const entry = (nodeId: number, sessionId: string | null = null): QueueEntry => ({ nodeId, sessionId });
-const resource = (id: number, nodeId: number): ResourceMeta => ({ id, projectId: 1, nodeId, kind: 'doc', title: `R${id}`, path: null, url: null, contentLength: 1, sessionId: null, createdAt: 't', updatedAt: 't', purpose: null });
+const resource = (id: number, nodeId: number): ResourceMeta => ({ id, projectId: 1, nodeId, kind: 'doc', title: `R${id}`, path: null, url: null, contentLength: 1, sessionId: null, createdAt: 't', updatedAt: 't', purpose: null, confirmedSha: null, confirmedAt: null });
 
 function sample() {
   nextId = 1;

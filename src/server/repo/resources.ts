@@ -1,7 +1,8 @@
 import { RESOURCE_PURPOSES, type Resource, type ResourceKind, type ResourceMeta, type ResourcePurpose, type StateNote } from '../../core/types';
 import { write, type Ctx, type RecordEvent } from '../db/tx';
-import { badRequest, notFound } from '../errors';
+import { badRequest, conflict, notFound } from '../errors';
 import { requireNode } from './nodes';
+import { checkPageRules, isPage } from '../pages';
 import { inLiveProject } from './projects';
 
 interface ResourceRow {
@@ -18,9 +19,11 @@ interface ResourceRow {
   updated_at: string;
   content_length: number | null;
   purpose: string | null;
+  confirmed_sha: string | null;
+  confirmed_at: string | null;
 }
 
-const META = 'id, project_id, node_id, kind, title, path, url, session_id, created_at, updated_at, length(content) AS content_length, purpose';
+const META = 'id, project_id, node_id, kind, title, path, url, session_id, created_at, updated_at, length(content) AS content_length, purpose, confirmed_sha, confirmed_at';
 
 const toMeta = (r: ResourceRow): ResourceMeta => ({
   id: r.id,
@@ -35,6 +38,8 @@ const toMeta = (r: ResourceRow): ResourceMeta => ({
   createdAt: r.created_at,
   updatedAt: r.updated_at,
   purpose: (RESOURCE_PURPOSES as readonly (string | null)[]).includes(r.purpose) ? (r.purpose as ResourcePurpose) : null,
+  confirmedSha: r.confirmed_sha,
+  confirmedAt: r.confirmed_at,
 });
 
 export interface ResourceInput {
@@ -46,6 +51,8 @@ export interface ResourceInput {
   url?: string | null;
   sessionId?: string | null;
   purpose?: ResourcePurpose | null;
+  /** A page's repo HEAD at registration (inspectNewPage); stored with the time as its first confirmation. */
+  confirmedSha?: string | null;
 }
 
 export interface ResourcePatch {
@@ -56,6 +63,29 @@ export interface ResourcePatch {
   path?: string | null;
   url?: string | null;
   purpose?: ResourcePurpose | null;
+  /** Set when the patch makes the resource a page or points a page at another file: its new first confirmation. */
+  confirmedSha?: string | null;
+  /** The path the route inspected for that confirmation: a write that finds another path refuses with a 409. */
+  inspectedPath?: string | null;
+}
+
+/** The resource a patch leaves, before the write: for the route that inspects a page's file and for the write itself. */
+export function nextResource(before: Resource, patch: ResourcePatch) {
+  return {
+    kind: patch.kind ?? before.kind,
+    title: patch.title?.trim() || before.title,
+    content: patch.content !== undefined ? patch.content : before.content,
+    path: patch.path !== undefined ? clean(patch.path) : before.path,
+    url: patch.url !== undefined ? clean(patch.url) : before.url,
+    purpose: patch.purpose !== undefined ? patch.purpose : before.purpose,
+  };
+}
+
+/** True when a patch makes `before` a page, or points a page at another file: it then needs a new first confirmation. */
+export function patchNeedsPageCheck(before: Resource, patch: ResourcePatch): boolean {
+  const after = { purpose: patch.purpose !== undefined ? patch.purpose : before.purpose };
+  if (!isPage(after)) return false;
+  return !isPage(before) || (patch.path !== undefined && clean(patch.path) !== before.path);
 }
 
 const clean = (v: string | null | undefined) => (v?.trim() ? v.trim() : null);
@@ -118,10 +148,16 @@ export function addResource(ctx: Ctx, actor: string, input: ResourceInput): Reso
     if (!title) throw badRequest('Resource title is empty');
     const purpose = input.purpose ?? null;
     if (purpose === 'state') claimStateNote(ctx, record, node.projectId, node.id, node.parentId, null);
+    const page = isPage({ purpose });
+    if (page) {
+      checkPageRules(ctx, node.projectId, { kind: input.kind, content, path });
+      if (!input.confirmedSha) throw badRequest('A page is registered with its repo HEAD', 'POST /api/resources inspects the file first.');
+    }
     const ts = ctx.now();
+    const confirmedSha = page ? input.confirmedSha! : null;
     const info = ctx.db
-      .prepare('INSERT INTO resources (project_id, node_id, kind, title, content, path, url, session_id, created_at, updated_at, purpose) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-      .run(node.projectId, node.id, input.kind, title, content, path, url, input.sessionId ?? null, ts, ts, purpose);
+      .prepare('INSERT INTO resources (project_id, node_id, kind, title, content, path, url, session_id, created_at, updated_at, purpose, confirmed_sha, confirmed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
+      .run(node.projectId, node.id, input.kind, title, content, path, url, input.sessionId ?? null, ts, ts, purpose, confirmedSha, page ? ts : null);
     const resource = requireResource(ctx, Number(info.lastInsertRowid));
     record({ projectId: node.projectId, type: 'resource.created', entity: 'resource', entityId: resource.id, data: { nodeId: node.id, title, kind: input.kind } });
     return resource;
@@ -138,23 +174,36 @@ export function updateResource(ctx: Ctx, actor: string, id: number, patch: Resou
       if (node.projectId !== before.projectId) throw badRequest(`#${node.id} is in a different project than r${id}`);
       nodeId = node.id;
     }
-    const next = {
-      kind: patch.kind ?? before.kind,
-      title: patch.title?.trim() || before.title,
-      content: patch.content !== undefined ? patch.content : before.content,
-      path: patch.path !== undefined ? clean(patch.path) : before.path,
-      url: patch.url !== undefined ? clean(patch.url) : before.url,
-      purpose: patch.purpose !== undefined ? patch.purpose : before.purpose,
-    };
+    const next = nextResource(before, patch);
     if (next.content === null && !next.path && !next.url) throw badRequest('A resource needs content, a path, or a url');
+    const page = isPage(next);
+    if (page) checkPageRules(ctx, before.projectId, next);
+    // A patch that makes a page, or points one at another file, brings its own first confirmation; any other keeps the old one.
+    const reconfirm = page && patchNeedsPageCheck(before, patch);
+    if (reconfirm && !patch.confirmedSha) throw badRequest('A page is re-pointed with its repo HEAD', 'PATCH /api/resources/:id inspects the file first.');
+    if (reconfirm && patch.inspectedPath !== next.path) throw conflict(`r${id} changed while its file was checked`, 'Send the patch again.');
+    const confirmedSha = page ? (reconfirm ? patch.confirmedSha! : before.confirmedSha) : null;
+    const confirmedAt = page ? (reconfirm ? ctx.now() : before.confirmedAt) : null;
     if (next.purpose === 'state') {
       const target = requireNode(ctx, nodeId);
       claimStateNote(ctx, record, before.projectId, nodeId, target.parentId, id);
     }
     ctx.db
-      .prepare('UPDATE resources SET node_id = ?, kind = ?, title = ?, content = ?, path = ?, url = ?, purpose = ?, updated_at = ? WHERE id = ?')
-      .run(nodeId, next.kind, next.title, next.content, next.path, next.url, next.purpose, ctx.now(), id);
+      .prepare('UPDATE resources SET node_id = ?, kind = ?, title = ?, content = ?, path = ?, url = ?, purpose = ?, confirmed_sha = ?, confirmed_at = ?, updated_at = ? WHERE id = ?')
+      .run(nodeId, next.kind, next.title, next.content, next.path, next.url, next.purpose, confirmedSha, confirmedAt, ctx.now(), id);
     record({ projectId: before.projectId, type: 'resource.updated', entity: 'resource', entityId: id, data: { nodeId, fromNodeId: before.nodeId } });
+    return requireResource(ctx, id);
+  });
+}
+
+/** Still accurate: the page's claim holds at `sha`, the owning repo's HEAD now. */
+export function confirmPage(ctx: Ctx, actor: string, id: number, sha: string): Resource {
+  return write(ctx, actor, (record) => {
+    const before = requireResource(ctx, id);
+    if (!isPage(before)) throw badRequest(`r${id} is not a page`);
+    const ts = ctx.now();
+    ctx.db.prepare('UPDATE resources SET confirmed_sha = ?, confirmed_at = ?, updated_at = ? WHERE id = ?').run(sha, ts, ts, id);
+    record({ projectId: before.projectId, type: 'resource.updated', entity: 'resource', entityId: id, data: { nodeId: before.nodeId, fromNodeId: before.nodeId } });
     return requireResource(ctx, id);
   });
 }

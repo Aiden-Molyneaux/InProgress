@@ -20,7 +20,7 @@ interface SessionRow {
   ended_at: string | null;
   slot: number | null;
   role: string;
-  /** Migration 15. */
+  /** Migration 16. */
   title_asked: string | null;
 }
 

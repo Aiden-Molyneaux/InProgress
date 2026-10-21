@@ -4,6 +4,8 @@ import { buildIndex, renderOutline } from '../../core/tree';
 import type { BuildInfo } from '../../lib/version';
 import type { Ctx } from '../db/tx';
 import { listBindings, listProjectSummaries, resolveProject } from '../repo/projects';
+import { badRequest } from '../errors';
+import { frameHtml, PAGE_FRAME_HEADER_CSP, readPage } from '../pages';
 import { requireResource } from '../repo/resources';
 import { findSteps, search } from '../repo/search';
 import { getNodeDetail, getProjectSnapshot } from '../repo/snapshot';
@@ -42,6 +44,24 @@ export function registerReadRoutes(app: FastifyInstance, ctx: Ctx, version: stri
   });
   app.get('/api/nodes/:id', async (req) => getNodeDetail(ctx, idParam.parse(req.params).id));
   app.get('/api/resources/:id', async (req) => requireResource(ctx, idParam.parse(req.params).id));
+  // A page read live from its file (spec "Reading a page live"): rules re-checked, secrets refused, never cached.
+  app.get('/api/resources/:id/body', async (req, reply) => {
+    const body = await readPage(ctx, requireResource(ctx, idParam.parse(req.params).id));
+    return reply.header('cache-control', 'no-store').send(body);
+  });
+  // An HTML page as its sandboxed frame loads it. An srcdoc frame would inherit the window's own CSP, which blocks the
+  // page's inline scripts, so the page comes from here under a policy of its own.
+  app.get('/api/resources/:id/frame', async (req, reply) => {
+    const body = await readPage(ctx, requireResource(ctx, idParam.parse(req.params).id));
+    if (body.format !== 'html') throw badRequest('Only an HTML page loads in a frame');
+    return reply
+      .type('text/html; charset=utf-8')
+      .header('cache-control', 'no-store')
+      .header('content-security-policy', PAGE_FRAME_HEADER_CSP)
+      .header('x-content-type-options', 'nosniff')
+      .header('referrer-policy', 'no-referrer')
+      .send(frameHtml(body.text));
+  });
   app.get('/api/bindings', async () => listBindings(ctx));
   app.get('/api/search', async (req) => {
     const q = searchQuery.parse(req.query);

@@ -43,8 +43,12 @@ export type BriefingMode = (typeof BRIEFING_MODES)[number];
 /** nudge: the briefing tells a session when its title prefix is off. enforce: the Stop hook also sends it back once to set it. */
 export const TITLE_CHANNELS = ['nudge', 'enforce'] as const;
 export type TitleChannel = (typeof TITLE_CHANNELS)[number];
-export const RESOURCE_PURPOSES = ['handoff', 'state'] as const;
+export const RESOURCE_PURPOSES = ['handoff', 'state', 'library', 'page'] as const;
 export type ResourcePurpose = (typeof RESOURCE_PURPOSES)[number];
+/** A doc read live from its path in a bound repo: `library` lists it in the Library, `page` in its project's Docs view. */
+export const PAGE_PURPOSES = ['library', 'page'] as const satisfies readonly ResourcePurpose[];
+export type PagePurpose = (typeof PAGE_PURPOSES)[number];
+export const isPagePurpose = (p: string | null | undefined): p is PagePurpose => (PAGE_PURPOSES as readonly (string | null | undefined)[]).includes(p);
 /** How long a cleared ask stays in the snapshot, and how old an open one is before it is stale. */
 export const ASK_TRAIL_MS = 7 * 24 * 60 * 60 * 1000;
 /** An ask's glyph by kind, for the window and the briefing. */
@@ -219,10 +223,40 @@ export interface ResourceMeta {
   createdAt: string;
   updatedAt: string;
   purpose: ResourcePurpose | null;
+  /** A page's last confirmation: the owning repo's HEAD and the time. Set at registration and by Still accurate. */
+  confirmedSha: string | null;
+  confirmedAt: string | null;
 }
 
 export interface Resource extends ResourceMeta {
   content: string | null;
+}
+
+/** A page's front matter: YAML in markdown, `<meta name="inprogress:<key>">` in HTML. */
+export interface PageFront {
+  /** Paths or globs, relative to the page's repo root, that the page describes. */
+  covers: string[];
+  shelf: 'pages' | 'roster';
+  /** Shipwright template paths the page explains. */
+  templates: string[];
+}
+
+/** Commits to a page's `covers` since its confirmation; `count` is null when `confirmedSha` left the repo's history. */
+export interface PageFreshness {
+  count: number | null;
+  confirmedSha: string | null;
+  confirmedAt: string | null;
+}
+
+/** GET /api/resources/:id/body: a page as its file stands now. Markdown `text` has its front matter taken off. */
+export interface PageBody {
+  format: 'markdown' | 'html';
+  text: string;
+  front: PageFront;
+  /** The owning repo's HEAD. */
+  sha: string;
+  /** Null when the page has no `covers`: no strip. */
+  fresh: PageFreshness | null;
 }
 
 export interface LogEntry {
@@ -364,7 +398,7 @@ export interface Session {
    */
   slot: number | null;
   role: SessionRole;
-  /** The full title the session's last Stop block demanded (migration 15); null before any. */
+  /** The full title the session's last Stop block demanded (migration 16); null before any. */
   titleAsked: string | null;
   subagents: SubagentInfo[];
   /** Its background commands: running ones and those that ended in the last five minutes, at most 30. */

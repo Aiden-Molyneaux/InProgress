@@ -1,5 +1,8 @@
+import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test as base, expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 
 interface Seeded {
@@ -319,6 +322,144 @@ test('the resource viewer neutralises unsafe Markdown', async ({ page, demo }) =
   await expect(viewer.locator('img')).toHaveJSProperty('complete', true);
   await page.evaluate('new Promise((resolve) => setTimeout(resolve, 100))');
   expect(await page.evaluate<string[]>('window.__titles')).not.toContain('XSS');
+});
+
+const pageDirs: string[] = [];
+test.afterAll(() => {
+  for (const dir of pageDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+/** A git repo bound to the project, for its pages, in a temp folder the file's afterAll removes. */
+async function pageRepo(api: APIRequestContext, project: Seeded) {
+  const dir = mkdtempSync(join(tmpdir(), 'ip-e2e-pages-'));
+  pageDirs.push(dir);
+  const git = (...args: string[]) => execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], { stdio: 'ignore' });
+  git('init', '-q', '-b', 'main');
+  mkdirSync(join(dir, 'docs'));
+  mkdirSync(join(dir, 'src'));
+  const commit = (file: string, text: string) => {
+    writeFileSync(join(dir, file), text);
+    git('add', '.');
+    git('commit', '-q', '-m', `edit ${file}`);
+  };
+  commit('src/app.ts', 'export {};\n');
+  await write(api, project.session, 'post', `/api/projects/${project.slug}/bindings`, { path: dir });
+  const register = (file: string, title: string) =>
+    write<{ id: number }>(api, project.session, 'post', '/api/resources', { nodeId: project.ids['Upload keystore'], kind: 'doc', title, path: join(dir, file), purpose: 'page' });
+  return { dir, commit, register };
+}
+
+/** Opens a resource on Upload keystore in the viewer and answers the dialog. Details opens first unless it already shows the step. */
+async function openPage(page: Page, title: string): Promise<Locator> {
+  if (!(await resourceRow(page, title).isVisible())) await openDetails(page, 'Upload keystore');
+  await resourceRow(page, title).click();
+  return page.getByRole('dialog');
+}
+
+test('a markdown page reads live from its file and has no strip without covers', async ({ page, fresh, api }) => {
+  await widen(page);
+  const repo = await pageRepo(api, fresh);
+  repo.commit('docs/guide.md', '---\nshelf: pages\n---\n# First draft\n\nRead live.\n');
+  await repo.register('docs/guide.md', 'Guide page');
+  await open(page, fresh);
+  let viewer = await openPage(page, 'Guide page');
+  await expect(viewer.locator('.ip-md h1')).toHaveText('First draft');
+  await expect(viewer.locator('.p-eyebrow')).toContainText('DOC · MD');
+  await expect(viewer.locator('.ip-fresh')).toHaveCount(0);
+  await expect(viewer.locator('.ip-md')).not.toContainText('shelf');
+  writeFileSync(join(repo.dir, 'docs', 'guide.md'), '# Second draft\n');
+  await page.keyboard.press('Escape');
+  await expect(viewer).toBeHidden();
+  viewer = await openPage(page, 'Guide page');
+  await expect(viewer.locator('.ip-md h1')).toHaveText('Second draft');
+});
+
+const SANDBOX_PAGE = [
+  '<!doctype html>',
+  '<html><head><title>Map</title><style>body { margin: 8px; } .tall { height: 1400px; }</style></head>',
+  '<body>',
+  `<button id="node" onclick="this.textContent = 'Picked'">API node</button>`,
+  '<p id="net">checking</p>',
+  '<p id="store">checking</p>',
+  '<div class="tall"></div>',
+  '<script>',
+  "  Promise.allSettled([fetch('https://example.com/'), fetch('/api/health')]).then((r) => {",
+  "    document.getElementById('net').textContent = r.every((x) => x.status === 'rejected') ? 'blocked' : 'reached';",
+  '  });',
+  "  try { localStorage.getItem('x'); document.getElementById('store').textContent = 'storage open'; } catch { document.getElementById('store').textContent = 'no storage'; }",
+  "  setTimeout(() => { parent.postMessage('99999', '*'); parent.postMessage({ height: 99999 }, '*'); parent.postMessage(NaN, '*'); }, 300);",
+  '</script>',
+  '</body></html>',
+].join('\n');
+
+test('an HTML page runs in its sandboxed frame: its clicks work, it reaches no network, and it sizes the frame', async ({ page, fresh, api, consoleErrors }) => {
+  // The page's own fetches are refused by its CSP, and Chromium logs each refusal.
+  consoleErrors.allow(/Content Security Policy|Failed to fetch|ERR_BLOCKED|example\.com|api\/health/);
+  await widen(page);
+  const repo = await pageRepo(api, fresh);
+  repo.commit('docs/map.html', SANDBOX_PAGE);
+  await repo.register('docs/map.html', 'Services map');
+  await open(page, fresh);
+  const viewer = await openPage(page, 'Services map');
+  const frame = viewer.locator('iframe.ip-pframe-frame');
+  await expect(frame).toHaveAttribute('sandbox', 'allow-scripts');
+  await expect(viewer.locator('.ip-pframe-label')).toContainText('sandboxed frame · scripts on · no network');
+  const inside = page.frameLocator('iframe.ip-pframe-frame');
+  await expect(inside.locator('#net')).toHaveText('blocked');
+  await expect(inside.locator('#store')).toHaveText('no storage');
+  await inside.getByRole('button', { name: 'API node' }).click();
+  await expect(inside.locator('#node')).toHaveText('Picked');
+  // The frame grows to the page (1400 px of content and more), and the non-numeric messages after it change nothing.
+  await expect.poll(async () => (await frame.boundingBox())?.height ?? 0).toBeGreaterThan(1400);
+  await page.evaluate('new Promise((resolve) => setTimeout(resolve, 600))');
+  const height = (await frame.boundingBox())?.height ?? 0;
+  expect(height).toBeGreaterThan(1400);
+  expect(height).toBeLessThan(2000);
+});
+
+test('the freshness strip counts commits to covers since the confirmation, and Still accurate resets it', async ({ page, fresh, api }) => {
+  await widen(page);
+  const repo = await pageRepo(api, fresh);
+  repo.commit('docs/ops.md', '---\ncovers: [src/**]\n---\n# Ops\n');
+  await repo.register('docs/ops.md', 'Ops page');
+  repo.commit('src/app.ts', 'export const a = 1;\n');
+  repo.commit('README.md', 'not covered\n');
+  repo.commit('src/app.ts', 'export const a = 2;\n');
+  await open(page, fresh);
+  const viewer = await openPage(page, 'Ops page');
+  const strip = viewer.locator('.ip-fresh');
+  await expect(strip.locator('.ip-fresh-count')).toHaveText('2 commits since confirmed');
+  await expect(strip).toContainText('at registration');
+  await expect(strip.locator('.p-chip')).toHaveText(['src/**']);
+  await strip.getByRole('button', { name: 'Still accurate' }).click();
+  await expect(strip.locator('.ip-fresh-count')).toHaveText('no commits since confirmed');
+  await expect(strip.locator('.ip-fresh-when')).not.toContainText('at registration');
+  await expect(strip.getByRole('button', { name: 'Still accurate' })).toHaveCount(0);
+  // The button left with the stale count; focus stays in the dialog, on its document pane.
+  await expect(viewer.locator('.ip-viewer-body')).toBeFocused();
+  await expect(strip.locator('.p-chip')).toHaveCSS('text-transform', 'none');
+});
+
+test('a moved page says it is gone, and a page with a secret never shows its text', async ({ page, fresh, api, consoleErrors }) => {
+  consoleErrors.allow(/status of (404|422)/);
+  await widen(page);
+  const repo = await pageRepo(api, fresh);
+  repo.commit('docs/old.md', '# Old\n');
+  repo.commit('docs/ops.md', '# Ops\n\nThe key lives in Railway.\n');
+  await repo.register('docs/old.md', 'Old page');
+  await repo.register('docs/ops.md', 'Secret page');
+  renameSync(join(repo.dir, 'docs', 'old.md'), join(repo.dir, 'docs', 'new.md'));
+  writeFileSync(join(repo.dir, 'docs', 'ops.md'), '# Ops\n\nRESEND_API_KEY=re_9fKq2LmZ8xYv4TbW1nRpQs\n');
+  await open(page, fresh);
+  let viewer = await openPage(page, 'Old page');
+  await expect(viewer).toContainText('This page is gone');
+  await expect(viewer.locator('.ip-page-path')).toHaveText(join(repo.dir, 'docs', 'old.md'));
+  await page.keyboard.press('Escape');
+  await expect(viewer).toBeHidden();
+  viewer = await openPage(page, 'Secret page');
+  await expect(viewer).toContainText('This page looks like it holds a secret on line 3; fix it in its repo');
+  await expect(viewer).not.toContainText('re_9fKq');
+  await expect(viewer).not.toContainText('lives in Railway');
 });
 
 test('says so when the server is unreachable at first paint, then recovers', async ({ page, demo, consoleErrors }) => {

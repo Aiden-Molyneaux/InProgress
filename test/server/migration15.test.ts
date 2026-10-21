@@ -5,29 +5,27 @@ import { migrate, schemaVersion } from '../../src/server/db/connection';
 
 const T = '2026-10-01T00:00:00.000Z';
 
-/** A database at schema 14 with one project and one session, then migrated to 15. */
+/** A database at schema 14 with one resource, then migrated to 15. */
 function at14() {
   const db = new Database(':memory:');
   db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
   for (const sql of MIGRATIONS.slice(0, 14)) db.exec(sql);
   db.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '14') ON CONFLICT(key) DO UPDATE SET value = '14'").run();
-  // Foreign keys stay off while seeding: the project row names its root node before the node exists.
-  db.prepare("INSERT INTO projects (id, slug, name, description, playbook, status, root_node_id, created_at, updated_at) VALUES (1, 'p', 'P', '', '', 'active', 1, ?, ?)").run(T, T);
-  db.prepare("INSERT INTO nodes (id, project_id, parent_id, position, kind, title, body, status, assignee, outcome, created_at, updated_at) VALUES (1, 1, NULL, 1, 'goal', 'P', '', 'active', 'claude', '', ?, ?)").run(T, T);
-  db.prepare("INSERT INTO sessions (id, project_id, state, started_at, last_seen_at) VALUES ('s1', 1, 'idle', ?, ?)").run(T, T);
+  db.pragma('foreign_keys = OFF');
+  db.prepare("INSERT INTO resources (id, project_id, node_id, kind, title, content, created_at, updated_at) VALUES (1, 1, 1, 'doc', 'R', 'x', ?, ?)").run(T, T);
+  db.pragma('foreign_keys = ON');
   migrate(db);
   return db;
 }
 
 describe('migration 15', () => {
-  it('adds title_channel (nudge on old rows) and title_asked (NULL), and keeps min_reader_version 1', () => {
+  it('adds confirmed_sha and confirmed_at, leaves existing rows NULL and keeps min_reader_version 1', () => {
     const db = at14();
     expect(schemaVersion(db)).toBe(MIGRATIONS.length);
     expect(MIGRATIONS.length).toBeGreaterThanOrEqual(15);
-    expect(db.prepare('SELECT title_channel FROM projects WHERE id = 1').pluck().get()).toBe('nudge');
-    const columns = (db.prepare('PRAGMA table_info(sessions)').all() as { name: string }[]).map((c) => c.name);
-    expect(columns).toContain('title_asked');
-    expect(db.prepare("SELECT title_asked FROM sessions WHERE id = 's1'").pluck().get()).toBeNull();
+    const columns = (db.prepare('PRAGMA table_info(resources)').all() as { name: string }[]).map((c) => c.name);
+    expect(columns).toEqual(expect.arrayContaining(['confirmed_sha', 'confirmed_at']));
+    expect(db.prepare('SELECT confirmed_sha, confirmed_at FROM resources WHERE id = 1').get()).toEqual({ confirmed_sha: null, confirmed_at: null });
     expect(db.prepare("SELECT value FROM meta WHERE key = 'min_reader_version'").pluck().get()).toBe('1');
   });
 });

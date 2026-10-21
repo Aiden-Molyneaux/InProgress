@@ -20,7 +20,7 @@ interface ProjectRow {
   updated_at: string;
   queue: string;
   briefing_mode: string;
-  /** Migration 15. */
+  /** Migration 16. */
   title_channel: string;
   /** When it was deleted (it is archived then); null while it is not. Migration 8. */
   deleted_at: string | null;

@@ -64,7 +64,7 @@ export function buildApp(opts: AppOptions): FastifyInstance {
 
   // Fastify 5 types the handler's error as unknown unless told otherwise.
   app.setErrorHandler<Error & { statusCode?: number }>((err, _req, reply) => {
-    if (err instanceof ApiError) return reply.code(err.status).send({ error: err.message, hint: err.hint });
+    if (err instanceof ApiError) return reply.code(err.status).send({ ...err.extra, error: err.message, hint: err.hint });
     if (err instanceof ZodError) {
       return reply.code(400).send({ error: 'Invalid request', hint: err.issues.map((i) => `${i.path.join('.') || 'body'}: ${i.message}`).join('; ') });
     }
