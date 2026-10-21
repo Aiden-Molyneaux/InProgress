@@ -39,9 +39,10 @@ export function MenuButton({ children, items, menuLabel, variant = 'ghost', clas
     if (restoreFocus) opener.current?.focus();
   };
   // When the item holding focus goes away (a live update drops it), focus would fall to the page: keep it in the menu.
+  // Focus on the button is not lost: a press on it, mid-close, puts it there.
   const keys = items.map((i) => i.key).join('|');
   useEffect(() => {
-    if (!open || !surface.current || surface.current.contains(document.activeElement)) return;
+    if (!open || !surface.current || surface.current.contains(document.activeElement) || document.activeElement === opener.current) return;
     const all = Array.from(surface.current.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)'));
     const target = all.find((el) => el.getAttribute('aria-current') === 'true') ?? all[0];
     if (target) target.focus();
