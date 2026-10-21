@@ -14,6 +14,9 @@ afterAll(() => {
 });
 beforeEach(() => clearFreshCache());
 
+/** Every test here runs real git, which takes seconds per call on Windows under a full-suite load. */
+const GIT_TIMEOUT = { timeout: 120_000 };
+
 const TOKEN = 'test-token';
 const auth = { authorization: `Bearer ${TOKEN}`, 'x-inprogress-actor': 'scribe:s1' };
 const UI = { origin: 'http://localhost:80', 'x-ip-ui-token': 'ui-token' };
@@ -45,7 +48,7 @@ function setup() {
   return { ctx, app, repo, project, commit, register };
 }
 
-describe('pages: registration', () => {
+describe('pages: registration', GIT_TIMEOUT, () => {
   it('registers a page under a binding and sets its first confirmation to the repo HEAD', async () => {
     const { app, repo, register } = setup();
     writeFileSync(join(repo, 'docs', 'map.md'), '# Map\n');
@@ -152,7 +155,7 @@ describe('pages: registration', () => {
   });
 });
 
-describe('pages: the live body', () => {
+describe('pages: the live body', GIT_TIMEOUT, () => {
   it('reads the file at request time, so an edit shows with no re-registration', async () => {
     const { app, repo, register } = setup();
     const file = join(repo, 'docs', 'live.md');
@@ -223,7 +226,7 @@ describe('pages: the live body', () => {
   });
 });
 
-describe('pages: freshness', () => {
+describe('pages: freshness', GIT_TIMEOUT, () => {
   it('counts commits to covers since the confirmation, and Still accurate resets it to 0', async () => {
     const { app, repo, register, commit } = setup();
     writeFileSync(join(repo, 'docs', 'map.html'), '<!doctype html><html><head><meta name="inprogress:covers" content="src/**, infra/*.yml"></head><body>Map</body></html>');
@@ -262,7 +265,7 @@ describe('pages: freshness', () => {
   });
 });
 
-describe('pages: the HTML frame', () => {
+describe('pages: the HTML frame', GIT_TIMEOUT, () => {
   it('serves the page under its own sandboxed CSP, with the meta tag after the doctype and the height reporter', async () => {
     const { app, repo, register } = setup();
     writeFileSync(join(repo, 'docs', 'map.html'), '<!doctype html><html><head><title>Map</title></head><body><button onclick="this.textContent=1">x</button></body></html>');
