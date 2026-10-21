@@ -48,7 +48,10 @@ export function useRankedOrder({ backlog, snapshot, projectId, slug, query, onSt
     someday: backlog.someday.map((r) => r.row.node.id),
   };
   const key = (l: RankLists) => `${l.next.join()}|${l.soon.join()}|${l.someday.join()}`;
-  const lists = pending ?? server;
+  // A step a session took into its own queue meanwhile is drawn under that queue, never a second time in Next up, and no
+  // drop or Alt+arrow names it as `before`.
+  const owned = new Set(backlog.next.filter((r) => r.row.owner !== null).map((r) => r.row.node.id));
+  const lists: RankLists = pending ? { ...pending, next: pending.next.filter((id) => !owned.has(id)) } : server;
 
   // The server's event brings a new snapshot; it replaces the guess once it shows the lists the guess was of. Until then
   // (an event for something else, say) the guess stays; the timer after a write is the fallback.
@@ -87,8 +90,6 @@ export function useRankedOrder({ backlog, snapshot, projectId, slug, query, onSt
     numbers = new Map();
     for (const id of [...pending.next, ...pending.soon, ...pending.someday]) numbers.set(id, numbers.size + 1);
   }
-  // A step a session took into its own queue meanwhile is drawn under that queue, never a second time here.
-  const owned = new Set(backlog.next.filter((r) => r.row.owner !== null).map((r) => r.row.node.id));
-  const order = (band: RankedBand): BacklogRow[] => lists[band].filter((id) => !owned.has(id)).flatMap((id) => rows.get(id) ?? []);
+  const order = (band: RankedBand): BacklogRow[] => lists[band].flatMap((id) => rows.get(id) ?? []);
   return { order, lists, numbers, write, writing: () => inFlight.current > 0, isPending: (id) => flying.has(id) };
 }

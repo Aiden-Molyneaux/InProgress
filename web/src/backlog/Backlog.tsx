@@ -54,6 +54,8 @@ interface Drawn {
 }
 
 const BAND_CHIP = { next: 'NEXT', soon: 'SOON', someday: 'SOMEDAY' } as const;
+/** A row's first line in px: `.ip-bl-row`'s min-height in backlog.css. A drop's half is measured on it. */
+const ROW_LINE = 36;
 
 /**
  * The full Backlog (the view behind "N ›"): the page head, the views strip and the filter, then the open view. Ranked is the
@@ -257,14 +259,13 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
     e.dataTransfer.setData('text/plain', String(id));
     setDragging(id);
   };
-  // A row remounted mid-drag never sends its dragend: the document's catches it, so no drag is left stuck.
+  // A row remounted mid-drag sends its dragend from a detached node, which reaches no listener. The browser sends no mouse
+  // events while a native drag runs, so the first mousemove after one means it has ended, however it ended.
   useEffect(() => {
     if (dragging === null) return;
-    document.addEventListener('dragend', endDrag);
-    document.addEventListener('drop', endDrag);
+    for (const type of ['dragend', 'drop', 'mousemove']) document.addEventListener(type, endDrag);
     return () => {
-      document.removeEventListener('dragend', endDrag);
-      document.removeEventListener('drop', endDrag);
+      for (const type of ['dragend', 'drop', 'mousemove']) document.removeEventListener(type, endDrag);
     };
   }, [dragging]);
   /** Over a row of a band: the top half drops before it, the bottom half before the step after it. */
@@ -275,7 +276,7 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
     setOverFold(false);
     // The half is of the row's first line: an open inspector under a picked row is not part of it.
     const box = e.currentTarget.getBoundingClientRect();
-    const before = dropSlot(lists[band], id, e.clientY < box.top + Math.min(box.height, 36) / 2, dragging);
+    const before = dropSlot(lists[band], id, e.clientY < box.top + Math.min(box.height, ROW_LINE) / 2, dragging);
     setOver((p) => (p?.band === band && p.before === before ? p : { band, before }));
   };
   /** Over a band's empty area or below its last row: the end of the band. */
@@ -410,6 +411,7 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
           if (dragging === null) return;
           e.stopPropagation();
           setOver(undefined);
+          setOverFold(false);
         } : undefined}
         onDrop={rank ? drop : undefined}
         // An open confirm or form is the row's own: a click on the row around it opens nothing.
