@@ -1,7 +1,6 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { Fragment, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { LABEL_GLYPHS, NODE_LABELS, type NodeLabel, type ResourceMeta, type TreeNode } from '../../../src/core/types';
 import type { BacklogBand } from '../../../src/core/backlog';
-import type { UiResult } from '../api';
 import { ageShort } from '../board/text';
 import { shortDate } from '../done/doneGroups';
 import { noteAction } from '../measure';
@@ -10,23 +9,22 @@ import { Button } from '../parts/Button';
 import { ErrorLine } from '../parts/ErrorLine';
 import { Eyebrow } from '../parts/Eyebrow';
 import { DocsMenu } from '../project/DocsMenu';
-
-type Sel = 'phase' | 'label' | 'band';
+import type { InspSel as Sel, InspState } from './useInspectorWrites';
 
 /**
  * A Backlog row's inspector, drawn under the row in `ViewRow`'s `children`: the step's body, a facts line, the Phase, Label
  * and Band selects (each saves on change) and a column of buttons. The caller decides which buttons show (`can`) and what
  * each does; a Park form or a Delete confirm it passes as `panel` takes the button column's place.
  */
-export function Inspector({ id, node, inside, band, parked, handoff, docs, lastSession, phases, phase, can, panel, now, onBand, onPhase, onLabel, onToNext, onBackToBacklog, onMoveTop, onKeep, onPark, onDelete, onOpenDetails, onUnpark, onOpenResource, focusBand }: {
+export function Inspector({ id, node, inside, band, parked, handoff, docs, lastSession, phases, phase, can, panel, now, state, deleting, onChange, onToNext, onBackToBacklog, onMoveTop, onKeep, onPark, onDelete, onOpenDetails, onUnpark, onOpenResource }: {
   id: number;
   node: TreeNode;
   /** Open steps under it (openInsideIndex). */
   inside: number;
   /** The row's band as drawn: 'next' for a queued row, a band, or null (Needs Triage). */
   band: BacklogBand | null;
-  /** A parked row: no selects. */
-  parked?: boolean;
+  /** A parked row: its reason and where stand in place of the selects. `at` is when it was parked. */
+  parked?: { reason: string; where: string | null; at: string | null };
   /** From the Board row: its handoff resource, or null. */
   handoff: ResourceMeta | null;
   /** The step's resources (snapshot.resources with nodeId === id). */
@@ -41,10 +39,12 @@ export function Inspector({ id, node, inside, band, parked, handoff, docs, lastS
   /** The Park form or the Delete confirm, when one is open: drawn in place of the button column. */
   panel: ReactNode;
   now: number;
-  /** The select writes; each resolves to the UiResult. */
-  onBand: (band: 'next' | 'soon' | 'someday') => Promise<UiResult>;
-  onPhase: (parent: number | null) => Promise<UiResult>;
-  onLabel: (label: NodeLabel | null) => Promise<UiResult>;
+  /** The selects' write state, kept above the rows so it outlives a remount. */
+  state: InspState;
+  /** A delete is on its way: neither the buttons nor a panel are drawn. */
+  deleting?: boolean;
+  /** A select changed to this option value; the caller does the write. */
+  onChange: (sel: Sel, value: string) => void;
   /** The buttons; each gets the element pressed. */
   onToNext: (from: HTMLElement) => void;
   onBackToBacklog: (from: HTMLElement) => void;
@@ -55,15 +55,9 @@ export function Inspector({ id, node, inside, band, parked, handoff, docs, lastS
   onOpenDetails: (from: HTMLElement) => void;
   onUnpark: (toNext: boolean, from: HTMLElement) => void;
   onOpenResource: (id: number) => void;
-  /** Focus the Band select on mount (Needs Triage). */
-  focusBand?: boolean;
 }) {
-  const [pending, setPending] = useState<Partial<Record<Sel, string>>>({});
-  const [busy, setBusy] = useState<Partial<Record<Sel, boolean>>>({});
-  const [error, setError] = useState<string | null>(null);
-  const bandSelect = useRef<HTMLSelectElement>(null);
+  const { pending, busy, error } = state;
   const body = useRef<HTMLDivElement>(null);
-  const timers = useRef<Partial<Record<Sel, number>>>({});
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
   const text = node.body.trim();
@@ -75,53 +69,10 @@ export function Inspector({ id, node, inside, band, parked, handoff, docs, lastS
     if (!el || expanded) return;
     setOverflows(el.scrollHeight > el.clientHeight);
   }, [node.body, expanded]);
-  useEffect(() => {
-    if (focusBand) bandSelect.current?.focus();
-  }, []);
-  useEffect(() => () => {
-    for (const t of Object.values(timers.current)) window.clearTimeout(t);
-  }, []);
-
   const current: Record<Sel, string> = {
     phase: String(phase ?? 'none'),
     label: node.label ?? 'none',
     band: band ?? '',
-  };
-  // The snapshot that shows the new value ends the wait.
-  useEffect(() => {
-    setPending((p) => {
-      const settled = (Object.keys(p) as Sel[]).filter((k) => p[k] === current[k] && !busy[k]);
-      if (settled.length === 0) return p;
-      const next = { ...p };
-      for (const k of settled) delete next[k];
-      return next;
-    });
-  }, [current.phase, current.label, current.band, busy]);
-
-  const change = (sel: Sel, value: string, write: () => Promise<UiResult>) => {
-    if (busy[sel]) return;
-    window.clearTimeout(timers.current[sel]);
-    setPending((p) => ({ ...p, [sel]: value }));
-    setBusy((b) => ({ ...b, [sel]: true }));
-    setError(null);
-    void write().then((result) => {
-      setBusy((b) => ({ ...b, [sel]: false }));
-      if (result === 'ok') {
-        // The snapshot normally brings the value first; a write that changed nothing sends none.
-        timers.current[sel] = window.setTimeout(() => setPending((p) => {
-          const next = { ...p };
-          delete next[sel];
-          return next;
-        }), 2000);
-        return;
-      }
-      setPending((p) => {
-        const next = { ...p };
-        delete next[sel];
-        return next;
-      });
-      if (result !== 'reload') setError(result);
-    });
   };
   const value = (sel: Sel) => pending[sel] ?? current[sel];
 
@@ -149,18 +100,17 @@ export function Inspector({ id, node, inside, band, parked, handoff, docs, lastS
   }
   if (inside > 0) facts.push(<span key="inside">{`${inside} OPEN INSIDE`}</span>);
 
-  const select = (sel: Sel, label: string, options: ReactNode, onChange: (v: string) => void) => (
+  const select = (sel: Sel, label: string, options: ReactNode) => (
     <label className="ip-insp-sel p-field" data-size="sm">
       <Eyebrow>{label}</Eyebrow>
       <span className="p-field-box">
         <select
-          ref={sel === 'band' ? bandSelect : undefined}
           className={`p-field-input${busy[sel] ? ' busy' : ''}`}
           aria-label={label}
           aria-busy={busy[sel] || undefined}
           data-insp={sel}
           value={value(sel)}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => onChange(sel, e.target.value)}
         >
           {options}
         </select>
@@ -197,11 +147,15 @@ export function Inspector({ id, node, inside, band, parked, handoff, docs, lastS
             </Fragment>
           ))}
         </p>
-        {!parked && (
+        {parked ? (
+          <>
+            <p className="ip-insp-why">{`Parked ${parked.at ? `${shortDate(parked.at, now)}: ` : ': '}${parked.reason}`}</p>
+            {parked.where && <p className="ip-insp-where">{`where ${parked.where}`}</p>}
+          </>
+        ) : (
           <>
             <div className="ip-insp-selects">
-              {select('phase', 'Phase', phases.map((p) => <option key={String(p.value ?? 'none')} value={String(p.value ?? 'none')}>{p.label}</option>), (v) =>
-                change('phase', v, () => onPhase(v === 'none' ? null : Number(v))))}
+              {select('phase', 'Phase', phases.map((p) => <option key={String(p.value ?? 'none')} value={String(p.value ?? 'none')}>{p.label}</option>))}
               {select(
                 'label',
                 'Label',
@@ -209,7 +163,6 @@ export function Inspector({ id, node, inside, band, parked, handoff, docs, lastS
                   {NODE_LABELS.map((l) => <option key={l} value={l}>{`${LABEL_GLYPHS[l]} ${l}`}</option>)}
                   <option value="none">Unlabelled</option>
                 </>,
-                (v) => change('label', v, () => onLabel(v === 'none' ? null : (v as NodeLabel))),
               )}
               {select(
                 'band',
@@ -220,14 +173,13 @@ export function Inspector({ id, node, inside, band, parked, handoff, docs, lastS
                   <option value="soon">Soon</option>
                   <option value="someday">Someday</option>
                 </>,
-                (v) => change('band', v, () => onBand(v as 'next' | 'soon' | 'someday')),
               )}
             </div>
-            {error && <ErrorLine message={error} />}
+            {error && <ErrorLine role="alert" message={error} />}
           </>
         )}
       </div>
-      {panel ?? (
+      {deleting ? null : panel ?? (
         <div className="ip-insp-acts">
           {can.toNext && <Button variant="primary" data-insp="tonext" onClick={press(onToNext)}>To Next</Button>}
           {can.unpark && <Button variant="primary" data-insp="unpark" onClick={press((el) => onUnpark(false, el))}>Unpark</Button>}

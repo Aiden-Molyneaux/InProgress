@@ -84,6 +84,7 @@
 .ip-insp-more { justify-self: start; }
 .ip-insp-nobody { margin: 0; color: var(--text-dim); }
 .ip-insp-facts { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-dim); }
+.ip-insp-why, .ip-insp-where { margin: 0; overflow-wrap: anywhere; font-size: var(--t-detail-sm); color: var(--text-muted); }
 .ip-insp-selects { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
 .ip-insp-sel { gap: var(--sp-1); min-width: 140px; }
 .ip-insp-sel .p-field-input { cursor: pointer; }

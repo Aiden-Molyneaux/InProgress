@@ -187,7 +187,7 @@ async function openBacklogView(page: Page, name: string): Promise<Locator> {
 const blRow = (page: Page, scope: Locator, title: string): Locator => scope.locator('li.ip-bl-row:not(.ip-bl-parkedrow)', { has: page.getByText(title, { exact: true }) });
 /** Opens a full-view row's inspector with a click on its title (when it is not open already) and answers it. */
 async function openInspector(row: Locator): Promise<Locator> {
-  if ((await row.getAttribute('aria-expanded')) !== 'true') await row.locator('.ip-bl-title').click();
+  if (!((await row.getAttribute('class')) ?? '').split(' ').includes('picked')) await row.locator('.ip-bl-title').click();
   const inspector = row.getByRole('group', { name: /^Inspector for #/ });
   await expect(inspector).toBeVisible();
   return inspector;
@@ -2728,7 +2728,10 @@ test.describe('Board', () => {
     await parkedRow.locator('.ip-bl-why').click();
     await parkedRow.getByRole('button', { name: 'Open Details ›' }).click();
     await expect(page.getByRole('complementary')).toHaveCount(1);
+    // Details took focus, so Escape closes Details and leaves the inspector open; Escape on the row would close the inspector instead.
     await page.keyboard.press('Escape');
+    await expect(page.getByRole('complementary')).toHaveCount(0);
+    await expect(parkedRow.getByRole('group', { name: /^Inspector for #/ })).toBeVisible();
     // "to Next" unparks it into Next in one write.
     await parkedRow.hover();
     await parkedRow.getByRole('button', { name: 'to Next' }).click();
@@ -2862,7 +2865,8 @@ test.describe('Board', () => {
     await row.focus();
     await page.keyboard.press('Enter');
     await expect(del).toBeVisible();
-    await del.focus();
+    for (let i = 0; i < 10 && (await page.locator(':focus').getAttribute('data-delete')) === null; i++) await page.keyboard.press('Tab');
+    await expect(del).toBeFocused();
     await page.keyboard.press('Enter');
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeFocused();
@@ -2876,10 +2880,15 @@ test.describe('Board', () => {
     await expect(row).toBeVisible();
     // A click on the question, or on the confirming row's own padding, does not open Details.
     await page.keyboard.press('Enter');
+    const inspectorOfRow = row.getByRole('group', { name: /^Inspector for #/ });
     await dialog.locator('.p-confirm-q').click();
     await expect(page.getByRole('complementary')).toHaveCount(0);
+    await expect(dialog).toBeVisible();
+    await expect(inspectorOfRow).toBeVisible();
     await next.locator(`li[data-node="${id}"]`).click({ position: { x: 2, y: 2 } });
     await expect(page.getByRole('complementary')).toHaveCount(0);
+    await expect(dialog).toBeVisible();
+    await expect(inspectorOfRow).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
     await expect(del).toBeFocused();
@@ -4252,5 +4261,19 @@ test.describe('#542 ranked Backlog', () => {
     await page.keyboard.press('Escape');
     await expect(inspector).toHaveCount(0);
     await expect(row).toBeFocused();
+  });
+
+  test("the Band select keeps focus when the row moves to another band's list", async ({ page, api, fresh }) => {
+    const { view } = await openRankedWith(page, api, fresh, ['3 RevenueCat', '4 Build to GitHub']);
+    await rank(api, fresh, { node: fresh.ids['5 Store listing'], to: 'someday', before: null });
+    const someday = view.getByRole('region', { name: 'Someday' });
+    await someday.getByRole('button', { name: /^Show/ }).click();
+    const inspector = await openInspector(blRow(page, view, '4 Build to GitHub'));
+    const bandSelect = inspector.getByRole('combobox', { name: 'Band' });
+    await bandSelect.focus();
+    await bandSelect.selectOption('someday');
+    const moved = blRow(page, someday, '4 Build to GitHub');
+    await expect(moved).toBeVisible();
+    await expect(moved.getByRole('combobox', { name: 'Band' })).toBeFocused();
   });
 });

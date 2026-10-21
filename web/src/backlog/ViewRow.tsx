@@ -52,7 +52,6 @@ export function ViewRow({ id, title, cursor, phase, blocked, inside, label, age,
       className={`ip-bl-row${parked ? ' ip-bl-parkedrow' : ''}${pending ? ' pending' : ''}${confirming ? ' confirming' : ''}${picked ? ' picked' : ''}${dragging ? ' dragging' : ''}${dropBefore ? ' drop-before' : ''}`}
       data-node={id}
       aria-busy={pending || undefined}
-      aria-expanded={picked ?? false}
       onClick={onOpen}
       onMouseDown={onMouseDown}
       onKeyDown={(e) => {

@@ -1,8 +1,8 @@
 import { bandOrder, deriveBacklog, keepBefore, type BacklogRow, type BacklogView } from '../../../src/core/backlog';
 import { deriveBoard, type ParkedRow } from '../../../src/core/board';
 import { buildIndex, dfsOrder } from '../../../src/core/tree';
-import { sessionDisplayTitle, type RankOp } from '../../../src/core/types';
-import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
+import { sessionDisplayTitle, type NodeLabel, type RankOp } from '../../../src/core/types';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
 import { deleteStep, labelStep, moveStep, queueOp, unparkStep } from '../api';
 import { groupByParent, parentTitle } from '../board/backlogOrder';
@@ -25,6 +25,7 @@ import { loadFolds, saveFolds } from '../project/projectFolds';
 import { load, save } from '../storage';
 import { altMove, backlogMatch, backlogMeta, cursorAfter, moveTopBefore, nextTopBefore, openInsideIndex, optimisticRank, parseView, phaseOptions, phaseValue, viewKey, viewTabs } from './backlogView';
 import { Inspector } from './Inspector';
+import { useInspectorWrites } from './useInspectorWrites';
 import { ParkForm, type ParkDraft } from './ParkForm';
 import { useKeepRowFocus } from './useKeepRowFocus';
 import { useRankedOrder, type RankedBand } from './useRankedOrder';
@@ -102,6 +103,7 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
   const closePanel = () => setPanel((p) => (p?.kind === 'delete' ? null : p));
   const pickView = (v: BacklogView) => {
     setPanel(null);
+    setPicked(null);
     setAdding(null);
     setView(v);
     save(viewKey(projectId), v);
@@ -175,6 +177,7 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
   const toggle = (id: number) => {
     noteAction('backlog', 'inspect');
     const open = pickedRef.current !== id;
+    if (open) insp.forget(id);
     setPicked(open ? id : null);
     setPanel((p) => (p !== null && (p.id !== id || !open) ? null : p));
   };
@@ -188,6 +191,41 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
     },
     [rowIds.map(String)],
   );
+
+  useEffect(() => () => window.clearTimeout(wantTimer.current), []);
+  // After a Band change that redraws the row elsewhere: if focus fell to the page, it goes back to the select. A layout effect
+  // declared before useKeepRowFocus's, so it runs first and the row's `li` has not taken the focus.
+  useLayoutEffect(() => {
+    const w = want.current;
+    if (!w) return;
+    const active = document.activeElement;
+    const target = root.current?.querySelector<HTMLElement>(`li[data-node="${w.id}"]`);
+    // Gone from the view, or focus is somewhere on purpose: nothing to give back.
+    if (!rowIds.includes(w.id) || (active !== null && active !== document.body)) {
+      want.current = null;
+      return;
+    }
+    if (!target) return;
+    (target.querySelector<HTMLElement>(`[data-insp="${w.ctl}"]`) ?? target).focus();
+    want.current = null;
+  });
+  /** Notes the control a Band change was made from, for the effect above; given up after 3 s. */
+  const follow = (id: number, ctl: string) => {
+    want.current = { id, ctl };
+    window.clearTimeout(wantTimer.current);
+    wantTimer.current = window.setTimeout(() => {
+      want.current = null;
+    }, 3000);
+  };
+  /** The value each inspector select shows in the snapshot, for the writes to settle on. */
+  const shownValue = (id: number, sel: 'phase' | 'label' | 'band'): string | undefined => {
+    const node = snapshot.nodes.find((n) => n.id === id);
+    if (!node) return undefined;
+    if (sel === 'phase') return String(phaseValue(snapshot.project.rootNodeId, node.parentId) ?? 'none');
+    if (sel === 'label') return node.label ?? 'none';
+    return drawn.find((d) => d.id === id)?.row?.band ?? '';
+  };
+  const insp = useInspectorWrites(shownValue, (id) => pickedRef.current === id, (text) => onStatus?.(text));
 
   // A row that leaves through a write from elsewhere hands its focus to a neighbour (or the page title).
   useKeepRowFocus(root, rowIds, titleRef);
@@ -216,30 +254,6 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
   useEffect(() => {
     if (adding !== null) addField.current?.focus();
   }, [adding]);
-  useEffect(() => () => window.clearTimeout(wantTimer.current), []);
-  // After an inspector write that redraws the row elsewhere: if focus fell to the page, it goes back to the control used.
-  useEffect(() => {
-    const w = want.current;
-    if (!w) return;
-    const active = document.activeElement;
-    const target = root.current?.querySelector<HTMLElement>(`li[data-node="${w.id}"]`);
-    // Gone from the view, or focus is somewhere on purpose: nothing to give back.
-    if (!rowIds.includes(w.id) || (active !== null && active !== document.body)) {
-      want.current = null;
-      return;
-    }
-    if (!target) return;
-    (target.querySelector<HTMLElement>(`[data-insp="${w.ctl}"]`) ?? target).focus();
-    want.current = null;
-  });
-  /** Notes the control an inspector write was made from, for the effect above; given up after 3 s. */
-  const follow = (id: number, ctl: string) => {
-    want.current = { id, ctl };
-    window.clearTimeout(wantTimer.current);
-    wantTimer.current = window.setTimeout(() => {
-      want.current = null;
-    }, 3000);
-  };
 
   /** Puts focus back on that row's button, once it is drawn again. */
   const refocus = (id: number, attr: 'data-delete' | 'data-park') => window.requestAnimationFrame(() => root.current?.querySelector<HTMLElement>(`li[data-node="${id}"] [${attr}]`)?.focus());
@@ -430,7 +444,6 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
   /** Back to Backlog: the step leaves the queue and returns to its band. */
   const backToBacklog = async (id: number) => {
     noteAction('backlog', 'back_to_backlog');
-    follow(id, 'back');
     const result = await queueOp(projectId, slug, { kind: 'remove', node: id });
     if (result === 'reload') window.location.reload();
     else if (result !== 'ok') onStatus?.(result);
@@ -474,7 +487,7 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
               node={node}
               inside={d.parked.openInside}
               band={null}
-              parked
+              parked={{ reason: node.parkedReason ?? '', where: node.parkedWhere ?? null, at: node.parkedAt ?? null }}
               handoff={null}
               docs={snapshot.resources.filter((r) => r.nodeId === node.id)}
               lastSession={lastSessionOf(node.id)}
@@ -483,9 +496,8 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
               can={{ toNext: false, backToBacklog: false, moveTop: false, keep: false, park: false, remove: false, unpark: true }}
               panel={null}
               now={now}
-              onBand={async () => 'ok'}
-              onPhase={async () => 'ok'}
-              onLabel={async () => 'ok'}
+              state={insp.stateOf(node.id)}
+              onChange={() => undefined}
               onToNext={() => undefined}
               onBackToBacklog={() => undefined}
               onMoveTop={() => undefined}
@@ -643,23 +655,29 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
             can={{ toNext: band !== 'next', backToBacklog: band === 'next', moveTop: top !== undefined, keep: look.stale === true, park: true, remove: !hasKids(id), unpark: false }}
             panel={panelNode}
             now={now}
-            focusBand={view === 'triage'}
-            onBand={(b) => {
-              follow(id, 'band');
-              return ranked.write({ node: id, to: b, before: null }, true, true);
+            state={insp.stateOf(id)}
+            deleting={pending.includes(id)}
+            onChange={(sel, v) => {
+              if (sel === 'band') {
+                // An own-queue step is drawn under its session, never in a band's list: no guess for it.
+                insp.change(id, sel, v, () => {
+                  follow(id, 'band');
+                  return ranked.write({ node: id, to: v as 'next' | 'soon' | 'someday', before: null }, !owned, true);
+                });
+              } else if (sel === 'phase') {
+                insp.change(id, sel, v, () => selectWrite(moveStep(projectId, slug, id, v === 'none' ? null : Number(v))));
+              } else {
+                insp.change(id, sel, v, () => selectWrite(labelStep(projectId, slug, id, v === 'none' ? null : (v as NodeLabel))));
+              }
             }}
-            onPhase={(parent) => selectWrite(moveStep(projectId, slug, id, parent))}
-            onLabel={(l) => selectWrite(labelStep(projectId, slug, id, l))}
             onToNext={() => {
               noteAction('backlog', 'to_next');
-              follow(id, 'tonext');
               void ranked.write({ node: id, to: 'next', before: null });
             }}
             onBackToBacklog={() => void backToBacklog(id)}
             onMoveTop={() => {
               if (!top) return;
               noteAction('backlog', 'move_top');
-              follow(id, 'top');
               void ranked.write({ node: id, to: top.to, before: top.before });
             }}
             onKeep={(from) => keep(id, from)}
@@ -786,7 +804,7 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
             <Eyebrow glyph="//" glyphTone="dim" />
             <h3 className="ip-bl-bname">Someday</h3>
             <span className="ip-bl-bright">
-              <Button variant="ghost" size="sm" aria-expanded={someday} onClick={toggleSomeday}>{someday ? 'Hide' : `Show ${somedayRows.length}`}</Button>
+              {somedayRows.length > 0 && <Button variant="ghost" size="sm" aria-expanded={someday} onClick={toggleSomeday}>{someday ? 'Hide' : `Show ${somedayRows.length}`}</Button>}
               <Count size="h3" tone="muted" value={somedayRows.length} />
             </span>
             <p className="ip-bl-hint">{someday ? 'Drag to rank' : 'Folded'}</p>
