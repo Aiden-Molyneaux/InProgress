@@ -5,12 +5,14 @@ import type { BuildInfo } from '../../lib/version';
 import type { Ctx } from '../db/tx';
 import { listBindings, listProjectSummaries, resolveProject } from '../repo/projects';
 import { badRequest } from '../errors';
+import { libraryPages } from '../library';
 import { frameHtml, PAGE_FRAME_HEADER_CSP, readPage } from '../pages';
 import { requireResource } from '../repo/resources';
 import { findSteps, search } from '../repo/search';
 import { getNodeDetail, getProjectSnapshot } from '../repo/snapshot';
 import { formatCounts, formatDigest, readDigest } from '../digest';
 import { formatUsage, readUsage } from '../usage';
+import { librarySync } from '../sync';
 import { digestQuery, findQuery, idParam, searchQuery, usageQuery } from '../schemas';
 
 export function registerReadRoutes(app: FastifyInstance, ctx: Ctx, version: string, build: BuildInfo | null): void {
@@ -62,6 +64,9 @@ export function registerReadRoutes(app: FastifyInstance, ctx: Ctx, version: stri
       .header('referrer-policy', 'no-referrer')
       .send(frameHtml(body.text));
   });
+  // The Library group: its pages (read live, so a gone file is a row with its error) and the Sync check of every manifest.
+  app.get('/api/library/pages', async (_req, reply) => reply.header('cache-control', 'no-store').send(await libraryPages(ctx)));
+  app.get('/api/library/sync', async (_req, reply) => reply.header('cache-control', 'no-store').send(await librarySync(ctx)));
   app.get('/api/bindings', async () => listBindings(ctx));
   app.get('/api/search', async (req) => {
     const q = searchQuery.parse(req.query);

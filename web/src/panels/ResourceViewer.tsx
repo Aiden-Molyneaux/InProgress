@@ -74,7 +74,11 @@ function PageRefused({ refusal, path }: { refusal: PageRefusal; path: string }) 
   return <ErrorLine message={refusal.error} />;
 }
 
-export function ResourceViewer({ resourceId, onClose }: { resourceId: number; onClose: () => void }) {
+/**
+ * The viewer over the window, or with `inline` a section in place (the Library's Roster): no dialog, no ×, and it leaves
+ * focus where it is.
+ */
+export function ResourceViewer({ resourceId, onClose, inline }: { resourceId: number; onClose?: () => void; inline?: boolean }) {
   const [resource, setResource] = useState<Resource | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [said, setSaid] = useState<Say | null>(null);
@@ -103,8 +107,8 @@ export function ResourceViewer({ resourceId, onClose }: { resourceId: number; on
   // Focus the scrollable body, so Home/End and the arrow keys scroll it as soon as the viewer opens. Its tabIndex
   // of 0 lets Tab reach it again after focus moves to the buttons.
   useEffect(() => {
-    body.current?.focus();
-  }, []);
+    if (!inline) body.current?.focus();
+  }, [inline]);
 
   // One toast at a time; a new line replaces the old one and restarts its timer (the Toast is keyed per line).
   const say = (text: string, tone: Say['tone'] = 'neutral') => setSaid({ id: ++sayId.current, text, tone });
@@ -140,8 +144,9 @@ export function ResourceViewer({ resourceId, onClose }: { resourceId: number; on
   // Only web links open. The server accepts nothing else, and this keeps any other scheme away from window.open.
   const link = resource?.url && /^https?:/i.test(resource.url) ? resource.url : null;
 
+  const Root = inline ? 'section' : 'div';
   return (
-    <div className="ip-viewer" role="dialog" aria-modal="true" aria-label="Resource">
+    <Root className="ip-viewer" data-inline={inline || undefined} {...(inline ? { 'aria-label': resource?.title ?? 'Resource' } : { role: 'dialog', 'aria-modal': true, 'aria-label': 'Resource' })}>
       <header className="ip-vhead">
         <div className="ip-vtitle-block">
           {resource && <Eyebrow>{`R${resource.id} · ${resource.kind.toUpperCase()}${pageBody ? ` · ${pageBody.format === 'html' ? 'HTML' : 'MD'}` : ''}`}</Eyebrow>}
@@ -152,7 +157,7 @@ export function ResourceViewer({ resourceId, onClose }: { resourceId: number; on
           {resource?.path && <Button variant="outline" size="sm" onClick={() => void open(resource.id)}>Open file</Button>}
           {resource?.path && <Button variant="outline" size="sm" onClick={() => void copy(resource.path!, 'Path copied')}>Copy path</Button>}
           {link && <Button variant="outline" size="sm" onClick={() => void openLink(link)}>Open link</Button>}
-          <Button variant="ghost" size="sm" aria-label="Close" onClick={onClose}>×</Button>
+          {!inline && <Button variant="ghost" size="sm" aria-label="Close" onClick={onClose}>×</Button>}
         </div>
       </header>
       {resource && pageBody?.fresh && (
@@ -192,6 +197,6 @@ export function ResourceViewer({ resourceId, onClose }: { resourceId: number; on
           </Toast>
         )}
       </ToastRegion>
-    </div>
+    </Root>
   );
 }

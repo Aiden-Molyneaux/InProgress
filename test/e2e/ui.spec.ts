@@ -349,8 +349,8 @@ async function pageRepo(api: APIRequestContext, project: Seeded) {
   };
   commit('src/app.ts', 'export {};\n');
   await write(api, project.session, 'post', `/api/projects/${project.slug}/bindings`, { path: dir });
-  const register = (file: string, title: string) =>
-    write<{ id: number }>(api, project.session, 'post', '/api/resources', { nodeId: project.ids['Upload keystore'], kind: 'doc', title, path: join(dir, file), purpose: 'page' });
+  const register = (file: string, title: string, purpose = 'page') =>
+    write<{ id: number }>(api, project.session, 'post', '/api/resources', { nodeId: project.ids['Upload keystore'], kind: 'doc', title, path: join(dir, file), purpose });
   return { dir, commit, register };
 }
 
@@ -467,6 +467,51 @@ test('a moved page says it is gone, and a page with a secret never shows its tex
   await expect(viewer).not.toContainText('lives in Railway');
 });
 
+test('the Library group lists pages by project, opens the roster in place, and keeps its route on reload', async ({ page, fresh, api }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  // Shipwright, as a folder bound to a project, holding a sync script that finds one file behind.
+  const shipwright = await bare(api, 'Shipwright');
+  const swDir = mkdtempSync(join(tmpdir(), 'ip-e2e-sw-'));
+  pageDirs.push(swDir);
+  mkdirSync(join(swDir, 'scripts'));
+  const check = { shipwright: { head: 'abc1234def', date: '2026-10-20', subject: 'x' }, project: 'p', lastSync: null, files: [{ template: 'agents/sev.md', local: 'agents/sev.md', base: null, state: 'behind', behind: 1, commits: [], fills: {}, detail: null }], skip: [], notAdopted: [], fills: {} };
+  writeFileSync(join(swDir, 'scripts', 'template-sync.mjs'), `console.log(${JSON.stringify(JSON.stringify(check))});`);
+  await write(api, `e2e-${randomUUID()}`, 'post', `/api/projects/${shipwright.slug}/bindings`, { path: swDir });
+  const repo = await pageRepo(api, fresh);
+  mkdirSync(join(repo.dir, '.claude'));
+  writeFileSync(join(repo.dir, '.claude', 'shipwright.json'), JSON.stringify({ shipwright: swDir, files: { 'agents/sev.md': {} }, skip: [] }));
+  repo.commit('docs/guide.md', ['---', 'templates: [agents/sev.md]', '---', '# Guide', ''].join('\n'));
+  repo.commit('docs/roster.md', ['---', 'shelf: roster', '---', '# Agent roster', '', 'Who owns what.', ''].join('\n'));
+  await repo.register('docs/guide.md', 'Agent guide', 'library');
+  await repo.register('docs/roster.md', 'Agent roster', 'library');
+  await open(page, fresh);
+  const lib = projectRail(page).locator('a[data-lib]');
+  await expect(lib.locator('.ip-rail-behind')).toHaveText('1');
+  await expect(lib).toHaveAccessibleName('Library, 1 behind Shipwright');
+  await lib.click();
+  await expect(page).toHaveURL(/#\/lib\/pages$/);
+  await expect(page.getByRole('heading', { level: 1, name: 'PAGES' })).toBeVisible();
+  const shelves = projectRail(page).getByRole('list', { name: 'Library' });
+  await expect(shelves.getByRole('button')).toHaveText([/^Pages/, /^Roster/, /^Sync/]);
+  const row = page.locator('.ip-lib-row', { hasText: 'Agent guide' });
+  await expect(row.locator('.p-chip').first()).toHaveText('MD');
+  await expect(row.locator('.ip-lib-path')).toHaveText(join(repo.dir, 'docs', 'guide.md'));
+  // The roster page is on its own shelf, not in Pages.
+  await expect(page.locator('.ip-lib-row', { hasText: 'Agent roster' })).toHaveCount(0);
+  await expect(row.locator('a.ip-lib-adapt')).toHaveAttribute('href', `#/lib/sync/${fresh.slug}/agents%2Fsev.md`);
+  await page.reload();
+  await expect(page).toHaveURL(/#\/lib\/pages$/);
+  await expect(page.locator('.ip-lib-row', { hasText: 'Agent guide' })).toBeVisible();
+  await shelves.getByRole('button', { name: /^Roster/ }).click();
+  await expect(page).toHaveURL(/#\/lib\/roster$/);
+  await expect(page.locator('section.ip-viewer[data-inline] .ip-md h1')).toHaveText('Agent roster');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(shelves.locator('.ip-rail-n[data-warn]')).toHaveText('1 behind');
+  await projectRail(page).locator(`a[href="#/p/${fresh.slug}"]`).click();
+  await expect(page).toHaveURL(hereIs(fresh.slug));
+  await expect(page.getByRole('heading', { name: 'Now', exact: true })).toBeVisible();
+});
+
 test('says so when the server is unreachable at first paint, then recovers', async ({ page, demo, consoleErrors }) => {
   consoleErrors.allow(/ERR_CONNECTION_REFUSED/);
   await page.route('**/api/**', (route) => route.abort('connectionrefused'));
@@ -557,7 +602,7 @@ const projectRail = (page: Page) => page.getByRole('navigation', { name: 'Projec
 /** One project's row in the rail (a link, named as its tab was). */
 const railRow = (page: Page, name: string | RegExp) => projectRail(page).getByRole('link', { name });
 /** Every project row, in rail order. */
-const railRows = (page: Page) => projectRail(page).getByRole('link');
+const railRows = (page: Page) => projectRail(page).locator('a[data-tab]');
 /** The current project's row. */
 const railCurrent = (page: Page) => projectRail(page).locator('a[aria-current="page"]');
 

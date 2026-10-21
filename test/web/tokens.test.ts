@@ -52,6 +52,8 @@ const COLOUR: Record<string, string> = {
   alarm: '#f24723',
   'alarm-soft': 'rgba(242, 71, 35, 0.22)',
   'alarm-wash': 'rgba(242, 71, 35, 0.08)',
+  behind: '#ff6b00',
+  'behind-wash': 'rgba(255, 107, 0, 0.08)',
   violet: '#5200ff',
   'violet-ink': '#9f7bff',
   'line-soft': 'rgba(255, 255, 255, 0.06)',

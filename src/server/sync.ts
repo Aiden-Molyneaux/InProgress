@@ -1,0 +1,161 @@
+import { execFile } from 'node:child_process';
+import { readFile, stat } from 'node:fs/promises';
+import { join } from 'node:path';
+import type { LibrarySync, SyncCheck, SyncOutcome, SyncRow } from '../core/types';
+import { isLocalAbsolutePath, normalizePath } from '../lib/paths';
+import type { Ctx } from './db/tx';
+import { listBindings } from './repo/projects';
+
+/**
+ * The Library's Sync check (spec 2026-10-20-library-and-docs-design.md, "Sync"): for every project with a
+ * `.claude/shipwright.json`, Shipwright's `template-sync.mjs --check --json` run once and cached. The script's folder
+ * comes from the manifest, so it must be a folder bound to a project: a repo file never chooses what code runs.
+ */
+
+const CHECK_TIMEOUT_MS = 20_000;
+const HEAD_TIMEOUT_MS = 5_000;
+const FRESH_MS = 60_000;
+const ERROR_CAP = 4000;
+
+interface ManifestRow {
+  projectId: number;
+  slug: string;
+  name: string;
+  dir: string;
+  /** The manifest's `shipwright` folder as written; '' when the manifest does not parse. */
+  shipwright: string;
+  /** The template paths the manifest adopts (the keys of `files`). */
+  adopted: string[];
+  manifestPath: string;
+  mtimeMs: number;
+  /** Set when the manifest cannot be used: the row's check fails with it and nothing runs. */
+  error?: string;
+}
+
+interface Manifests {
+  rows: ManifestRow[];
+  noManifest: LibrarySync['noManifest'];
+}
+
+const same = (a: string, b: string): boolean => normalizePath(a).toLowerCase() === normalizePath(b).toLowerCase();
+
+/** Every active project with a bound folder, first binding by id: its manifest read, or its place in `noManifest`. */
+export async function manifests(ctx: Ctx): Promise<Manifests> {
+  const projects = ctx.db.prepare("SELECT id, slug, name FROM projects WHERE status = 'active' AND deleted_at IS NULL ORDER BY id").all() as { id: number; slug: string; name: string }[];
+  const first = new Map<number, string>();
+  for (const b of listBindings(ctx)) if (!first.has(b.projectId)) first.set(b.projectId, b.path);
+  const rows: ManifestRow[] = [];
+  const missing: { projectId: number; slug: string; name: string; dir: string }[] = [];
+  for (const p of projects) {
+    const dir = first.get(p.id);
+    if (!dir) continue;
+    const manifestPath = join(dir, '.claude', 'shipwright.json');
+    let text: string;
+    let mtimeMs = 0;
+    try {
+      text = await readFile(manifestPath, 'utf8');
+      mtimeMs = (await stat(manifestPath)).mtimeMs;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT' || code === 'ENOTDIR') {
+        missing.push({ projectId: p.id, slug: p.slug, name: p.name, dir });
+        continue;
+      }
+      rows.push({ projectId: p.id, slug: p.slug, name: p.name, dir, shipwright: '', adopted: [], manifestPath, mtimeMs, error: `Cannot read ${manifestPath}: ${(err as Error).message}` });
+      continue;
+    }
+    const base = { projectId: p.id, slug: p.slug, name: p.name, dir, manifestPath, mtimeMs };
+    try {
+      const m = JSON.parse(text.replace(/^﻿/, '')) as { shipwright?: unknown; files?: unknown };
+      const files = m.files && typeof m.files === 'object' ? Object.keys(m.files) : [];
+      rows.push({ ...base, shipwright: typeof m.shipwright === 'string' ? m.shipwright : '', adopted: files });
+    } catch (err) {
+      rows.push({ ...base, shipwright: '', adopted: [], error: `shipwright.json does not parse: ${(err as Error).message}` });
+    }
+  }
+  const sources = rows.map((r) => r.shipwright).filter(Boolean);
+  return { rows, noManifest: missing.map((m) => ({ projectId: m.projectId, slug: m.slug, name: m.name, source: sources.some((s) => same(s, m.dir)) })) };
+}
+
+/** Whether `path` is a folder bound to a project that is not deleted. */
+const boundSomewhere = (ctx: Ctx, path: string): boolean => listBindings(ctx).some((b) => same(b.path, path));
+
+const capped = (text: string): string => text.trim().slice(0, ERROR_CAP);
+
+/** Runs a command and answers its outcome. Never rejects. */
+function run(file: string, args: string[], timeout: number): Promise<{ ok: true; stdout: string } | { ok: false; error: string }> {
+  return new Promise((resolve) => {
+    execFile(file, args, { timeout, windowsHide: true, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }, (err, stdout, stderr) => {
+      if (!err) return resolve({ ok: true, stdout: String(stdout) });
+      const e = err as NodeJS.ErrnoException & { killed?: boolean };
+      const text = capped(String(stderr));
+      resolve({ ok: false, error: text || (e.killed ? 'template-sync timed out after 20 s' : e.message) });
+    });
+  });
+}
+
+const parseCheck = (stdout: string): SyncOutcome => {
+  try {
+    const result = JSON.parse(stdout) as SyncCheck;
+    if (!result || !Array.isArray(result.files)) return { ok: false, error: 'template-sync printed JSON without a files list' };
+    return { ok: true, result };
+  } catch (err) {
+    return { ok: false, error: `template-sync printed output that does not parse: ${(err as Error).message}` };
+  }
+};
+
+interface Cached {
+  key: string;
+  at: number;
+  outcome: SyncOutcome;
+}
+const cache = new Map<number, Cached>();
+const inFlight = new Map<number, Promise<SyncOutcome>>();
+
+/** For tests: forget cached checks and shared runs. */
+export const clearSyncCache = (): void => {
+  cache.clear();
+  inFlight.clear();
+};
+
+const headOf = async (shipwright: string): Promise<string> => {
+  const out = await run('git', ['-C', shipwright, 'rev-parse', 'HEAD'], HEAD_TIMEOUT_MS);
+  return out.ok ? out.stdout.trim() : '';
+};
+
+/** One manifest's check. Refuses a Shipwright folder that no project binds, without running anything. */
+async function checkRow(ctx: Ctx, m: ManifestRow): Promise<SyncOutcome> {
+  if (m.error) return { ok: false, error: m.error };
+  if (!m.shipwright || !isLocalAbsolutePath(m.shipwright) || !boundSomewhere(ctx, m.shipwright)) {
+    return { ok: false, error: `Shipwright path ${m.shipwright || '(none)'} is not a folder bound to a project` };
+  }
+  const key = JSON.stringify([await headOf(m.shipwright), m.mtimeMs, m.dir]);
+  const hit = cache.get(m.projectId);
+  if (hit && hit.key === key && Date.now() - hit.at < FRESH_MS) return hit.outcome;
+  const running = inFlight.get(m.projectId);
+  if (running) return running;
+  const started = (async (): Promise<SyncOutcome> => {
+    const out = await run(process.execPath, [join(m.shipwright, 'scripts', 'template-sync.mjs'), '--check', '--json', '--project', m.dir], CHECK_TIMEOUT_MS);
+    const outcome: SyncOutcome = out.ok ? parseCheck(out.stdout) : out;
+    cache.set(m.projectId, { key, at: Date.now(), outcome });
+    return outcome;
+  })();
+  inFlight.set(m.projectId, started);
+  try {
+    return await started;
+  } finally {
+    inFlight.delete(m.projectId);
+  }
+}
+
+/** GET /api/library/sync: every manifest's check, in parallel. */
+export async function librarySync(ctx: Ctx): Promise<LibrarySync> {
+  const { rows, noManifest } = await manifests(ctx);
+  const projects: SyncRow[] = await Promise.all(rows.map(async (m) => ({ projectId: m.projectId, slug: m.slug, name: m.name, dir: m.dir, check: await checkRow(ctx, m) })));
+  return { projects, noManifest };
+}
+
+/** The manifests' rows with what each adopts and the Shipwright folder it names, no script run: for a page's Adapted in. */
+export async function adopters(ctx: Ctx): Promise<{ slug: string; name: string; adopted: string[]; shipwright: string }[]> {
+  return (await manifests(ctx)).rows.map((m) => ({ slug: m.slug, name: m.name, adopted: m.adopted, shipwright: m.shipwright }));
+}

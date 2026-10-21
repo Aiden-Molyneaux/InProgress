@@ -12,9 +12,12 @@ import { Hud, HudEdge } from './chrome/Hud';
 import { askTarget } from './chrome/hudLogic';
 import { archivedProjects, loadTabOrder, moveTab, neighbourTab, projectTabs, pruneOrder, saveTabOrder, stepTab, TAB_ORDER_KEY } from './chrome/tabs';
 import { Rail } from './chrome/Rail';
-import { railCodes, railViews } from './chrome/railLogic';
+import { libraryBehind, libraryViews, railCodes, railViews } from './chrome/railLogic';
 import { BacklogList } from './backlog/BacklogList';
 import { DoneList } from './done/DoneList';
+import { LibraryView } from './library/LibraryView';
+import { libraryHash, parseLibraryHash, type LibraryRoute, type Shelf } from './library/route';
+import { useLibrary } from './library/useLibrary';
 import { Details } from './panels/Details';
 import { EmptyState } from './parts/EmptyState';
 import { TabStrip } from './parts/TabStrip';
@@ -36,6 +39,29 @@ export function App() {
   const state = useInProgress();
   const { snapshot, projects } = state;
   const [view, setView] = useState<View>(loadView);
+  // The Library's route lives in the hash, not in useInProgress: the open project's slug stays loaded underneath, so leaving
+  // the Library returns to it.
+  const [library, setLibrary] = useState<LibraryRoute | null>(() => parseLibraryHash(window.location.hash));
+  useEffect(() => {
+    const onHash = () => setLibrary(parseLibraryHash(window.location.hash));
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+  const openLibrary = (route: LibraryRoute) => {
+    setLibrary(route);
+    window.history.replaceState(null, '', libraryHash(route));
+  };
+  /** Any project or view pick leaves the Library, back to the project underneath. */
+  const leaveLibrary = () => {
+    if (!library) return;
+    setLibrary(null);
+    if (state.slug) window.history.replaceState(null, '', `#/p/${state.slug}`);
+  };
+  const selectProject = (slug: string) => {
+    leaveLibrary();
+    state.selectProject(slug);
+  };
+  const lib = useLibrary(library !== null);
   const now = useNow(30_000);
   const lastLook = useLastLook(snapshot?.project.id ?? null);
   const [selectedNode, setSelectedNode] = useState<number | null>(null);
@@ -104,6 +130,7 @@ export function App() {
     rows.find((el) => el.offsetParent !== null)?.focus();
   }, [viewFocus]);
   const pickView = (v: View) => {
+    leaveLibrary();
     if (v === view) return;
     noteAction('header', 'view');
     setView(v);
@@ -160,6 +187,7 @@ export function App() {
   const views = useMemo(() => railViews(snapshot && snapshot.project.slug === state.slug ? snapshot : null, now), [snapshot, state.slug, now]);
   // ASKS: the open project's Board with focus on Needs me, or the first project in tab order that has asks. The counter
   // moves focus after the Board shows.
+  const libraryRail = useMemo(() => libraryViews(lib.pages, lib.sync), [lib.pages, lib.sync]);
   const [needsFocus, setNeedsFocus] = useState(0);
   useEffect(() => {
     if (needsFocus > 0) document.querySelector<HTMLElement>('.ip-band-needs h2')?.focus();
@@ -169,11 +197,11 @@ export function App() {
     if (target === null) return;
     pickView('board');
     if (target === 'here') setNeedsFocus((n) => n + 1);
-    else state.selectProject(target);
+    else selectProject(target);
   };
   const stepProject = (step: 1 | -1) => {
     const slug = stepTab(tabs, state.slug, step);
-    if (slug) state.selectProject(slug);
+    if (slug) selectProject(slug);
   };
 
   /**
@@ -253,8 +281,8 @@ export function App() {
     };
   }, []);
   useEffect(() => {
-    document.title = `${waiting ? `(${waiting}) ` : ''}InProgress${snapshot ? ` · ${snapshot.project.name}` : ''}`;
-  }, [waiting, snapshot]);
+    document.title = `${waiting ? `(${waiting}) ` : ''}InProgress${library ? ' · Library' : snapshot ? ` · ${snapshot.project.name}` : ''}`;
+  }, [waiting, snapshot, library]);
   useEffect(() => {
     setSelectedNode(null);
     setViewerResource(null);
@@ -275,12 +303,13 @@ export function App() {
       return;
     }
     if (pick.kind === 'project') {
-      state.selectProject(pick.slug);
+      selectProject(pick.slug);
       return;
     }
     const { hit } = pick;
     setGoingTo({ id: hit.id, projectId: hit.projectId, slug: hit.projectSlug });
-    if (hit.projectSlug !== state.slug) state.selectProject(hit.projectSlug);
+    if (hit.projectSlug !== state.slug) selectProject(hit.projectSlug);
+    else leaveLibrary();
   };
   useEffect(() => {
     const going = goingTo;
@@ -321,7 +350,7 @@ export function App() {
           onNextTab: () => stepProject(1),
           onTab: (n) => {
             const tab = tabs[n - 1];
-            if (tab) state.selectProject(tab.slug);
+            if (tab) selectProject(tab.slug);
           },
           onEscape: () => setSelectedNode(null),
           onGoTo: () => goToField.current?.open(),
@@ -353,9 +382,22 @@ export function App() {
       <div className="ip-app" ref={app}>
         {hud(true)}
         <div className="ip-shell">
-          <Rail tabs={tabs} archived={archived} deleted={state.deleted} current={state.slug} onSelect={state.selectProject} onAction={onAction} onRename={onRename} onMove={onMoveTab} view={view} onView={pickView} views={views} codes={codes} />
+          <Rail tabs={tabs} archived={archived} deleted={state.deleted} current={library ? null : state.slug} onSelect={selectProject} onAction={onAction} onRename={onRename} onMove={onMoveTab} view={view} onView={pickView} views={views} codes={codes} library={library?.shelf ?? null} onLibrary={(shelf) => openLibrary({ shelf, pick: null })} libraryViews={libraryRail} behind={libraryBehind(lib.sync)} />
           <main className="ip-main">
-            {projects.length === 0 ? (
+            {library ? (
+              <>
+                {/* Under 720 px the Library row sits in the strip and the shelves are the page's tabs, as the views are. */}
+                <TabStrip
+                  variant="segmented"
+                  label="Library"
+                  items={libraryRail.map((v) => ({ id: v.shelf, label: v.label }))}
+                  value={library.shelf}
+                  onChange={(id) => openLibrary({ shelf: id as Shelf, pick: null })}
+                  className="ip-viewtabs"
+                />
+                <LibraryView route={library} lib={lib} tabs={tabs} codes={codes} onOpenResource={openViewer} onRoute={openLibrary} />
+              </>
+            ) : projects.length === 0 ? (
               <EmptyState className="ip-wait">
                 {state.deleted.length > 0
                   ? 'No projects. Restore one from Archived, or in a Claude session say "track this in InProgress".'
@@ -386,7 +428,7 @@ export function App() {
                 )}
               </>
             )}
-            {snapshot && selectedNode !== null && (
+            {!library && snapshot && selectedNode !== null && (
               <Details
                 key={selectedNode}
                 nodeId={selectedNode}

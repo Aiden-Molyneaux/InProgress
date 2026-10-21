@@ -1,6 +1,7 @@
 import { deriveBoard } from '../../../src/core/board';
 import { taskBoxes } from '../../../src/core/taskState';
-import type { ProjectSnapshot } from '../../../src/core/types';
+import { projectBehind, type LibraryPages, type LibrarySync, type ProjectSnapshot } from '../../../src/core/types';
+import type { Shelf } from '../library/route';
 import { projectCode } from '../page/projectCode';
 import { phaseCount, projectSections } from '../project/projectOutline';
 import type { View } from '../views/view';
@@ -14,6 +15,29 @@ export interface RailView {
   code: string;
   count?: number;
   unit?: string;
+}
+
+/** One of the Library's shelves as the rail lists it under the Library row. `warn` paints the count in the behind colour. */
+export interface LibraryRailView {
+  shelf: Shelf;
+  label: string;
+  code: string;
+  count?: string;
+  warn?: boolean;
+}
+
+/** How many projects have a file behind Shipwright, or null before the first check has landed. */
+export const libraryBehind = (sync: LibrarySync | null): number | null => (sync ? sync.projects.filter(projectBehind).length : null);
+
+/** The Library's three shelves: Pages with its page count, Roster with none, Sync with "N behind" while any are. */
+export function libraryViews(pages: LibraryPages | null, sync: LibrarySync | null): LibraryRailView[] {
+  const behind = libraryBehind(sync);
+  const shelved = pages ? pages.pages.filter((p) => p.shelf === 'pages').length : undefined;
+  return [
+    { shelf: 'pages', label: 'Pages', code: 'PGS', count: shelved === undefined ? undefined : String(shelved) },
+    { shelf: 'roster', label: 'Roster', code: 'RST' },
+    { shelf: 'sync', label: 'Sync', code: 'SYN', ...(behind ? { count: `${behind} behind`, warn: true } : {}) },
+  ];
 }
 
 /**

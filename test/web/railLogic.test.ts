@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { ProjectSnapshot, TreeNode } from '../../src/core/types';
-import { footMenuAt, MENU_MARGIN, railCodes, railStep, railViews, rowMenuAt, viewTitle } from '../../web/src/chrome/railLogic';
+import type { LibraryPage, LibraryPages, LibrarySync, ProjectSnapshot, SyncFile, TreeNode } from '../../src/core/types';
+import { footMenuAt, libraryBehind, libraryViews, MENU_MARGIN, railCodes, railStep, railViews, rowMenuAt, viewTitle } from '../../web/src/chrome/railLogic';
 
 const NOW = Date.parse('2026-10-13T12:00:00Z');
 let n = 0;
@@ -115,5 +115,34 @@ describe('where a menu opens', () => {
     const button = { top: 500, left: 12, right: 150, bottom: 530 };
     expect(footMenuAt(button, menu, win, 'column')).toEqual({ top: 500 - 4 - menu.height, left: 12 });
     expect(footMenuAt({ top: 4, left: 940, right: 970, bottom: 34 }, menu, win, 'strip')).toEqual({ top: 38, left: 770 });
+  });
+});
+
+describe('the Library on the rail', () => {
+  const file = (state: SyncFile['state']): SyncFile => ({ template: 't', local: 't', base: null, state, behind: state === 'behind' ? 1 : 0, commits: [], fills: {}, detail: null });
+  const row = (projectId: number, check: LibrarySync['projects'][number]['check']): LibrarySync['projects'][number] => ({ projectId, slug: `p${projectId}`, name: `P${projectId}`, dir: 'C:/x', check });
+  const ok = (...states: SyncFile['state'][]) => ({ ok: true as const, result: { shipwright: { head: 'h', date: 'd', subject: 's' }, project: 'x', lastSync: null, files: states.map(file), skip: [], notAdopted: [], fills: {} } });
+  const sync = (...projects: LibrarySync['projects']): LibrarySync => ({ projects, noManifest: [] });
+  const page = (id: number, shelf: LibraryPage['shelf']): LibraryPage => ({ id, title: 't', path: 'C:/x.md', projectId: 1, projectSlug: 'a', projectName: 'A', format: 'markdown', shelf, templates: [], error: null, adaptedIn: [] });
+  const pages = (...p: LibraryPage[]): LibraryPages => ({ pages: p, sourceProjectId: null });
+
+  it('counts the projects with a file behind, and none before the first check', () => {
+    expect(libraryBehind(null)).toBeNull();
+    expect(libraryBehind(sync())).toBe(0);
+    expect(libraryBehind(sync(row(1, ok('current', 'behind')), row(2, ok('current')), row(3, { ok: false, error: 'x' }), row(4, ok('behind', 'behind'))))).toBe(2);
+  });
+
+  it('lists the three shelves, Pages with its pages-shelf count and Sync with N behind in warn', () => {
+    const views = libraryViews(pages(page(1, 'pages'), page(2, 'roster'), page(3, 'pages')), sync(row(1, ok('behind'))));
+    expect(views.map((v) => [v.shelf, v.code, v.count, v.warn])).toEqual([
+      ['pages', 'PGS', '2', undefined],
+      ['roster', 'RST', undefined, undefined],
+      ['sync', 'SYN', '1 behind', true],
+    ]);
+  });
+
+  it('shows no count before the data lands, and none on Sync when nothing is behind', () => {
+    expect(libraryViews(null, null).map((v) => v.count)).toEqual([undefined, undefined, undefined]);
+    expect(libraryViews(pages(), sync(row(1, ok('current')))).map((v) => v.count)).toEqual(['0', undefined, undefined]);
   });
 });

@@ -6,7 +6,8 @@ import type { ActionTarget, ProjectAction } from '../projectActions';
 import { useNow } from '../useNow';
 import type { View } from '../views/view';
 import { fallbackFocus, FootMenu, isMenuKey, RowMenu, Signals, type RailLayout, type Run, type RunRename } from './projectMenus';
-import { railStep, viewTitle, type RailView } from './railLogic';
+import type { Shelf } from '../library/route';
+import { railStep, viewTitle, type LibraryRailView, type RailView } from './railLogic';
 import { moveTab, projectLabel, recentlyDeleted, tabDropSlot } from './tabs';
 
 export interface RailProps {
@@ -32,6 +33,13 @@ export interface RailProps {
   views: RailView[];
   /** Each row's three-letter code, by project id (railCodes). */
   codes: Map<number, string>;
+  /** The open Library shelf, or null while the Library is closed. */
+  library: Shelf | null;
+  onLibrary: (s: Shelf) => void;
+  /** The Library's shelves with their counts (libraryViews). */
+  libraryViews: LibraryRailView[];
+  /** Projects behind Shipwright: the Library row's count; null before the check has landed. */
+  behind: number | null;
 }
 
 /** A row drag's data type. Not text/plain, which a text field would take as typed text. */
@@ -60,7 +68,7 @@ function useLayout(): RailLayout {
  * The module rail: a row per active project (and the open archived one, at the end), under the current one its views,
  * and a foot for the archived and recently deleted projects. A column at the left of the page; under 720 px a strip.
  */
-export function Rail({ tabs, archived, deleted: listed, current, onSelect, onMove, onAction, onRename, view, onView, views, codes }: RailProps) {
+export function Rail({ tabs, archived, deleted: listed, current, onSelect, onMove, onAction, onRename, view, onView, views, codes, library, onLibrary, libraryViews, behind }: RailProps) {
   const layout = useLayout();
   const rail = useRef<HTMLElement>(null);
   const list = useRef<HTMLUListElement>(null);
@@ -95,7 +103,7 @@ export function Rail({ tabs, archived, deleted: listed, current, onSelect, onMov
   // A switch (click, key or link) brings the current row into view, and so does a row coming or going, and a resize.
   useLayoutEffect(() => {
     rail.current?.querySelector('a[aria-current="page"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  }, [current, ids]);
+  }, [current, ids, library]);
   useEffect(() => {
     const el = rail.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
@@ -105,6 +113,8 @@ export function Rail({ tabs, archived, deleted: listed, current, onSelect, onMov
   }, [shown]);
 
   // The roving stops follow focus: the row (or view) focused last, until the current one changes, which resets them to it.
+  // The Library row is one more stop, under the key ':lib' (a slug never holds a colon).
+  const currentKey = library ? ':lib' : current;
   const [rowStop, setRowStop] = useState<{ from: string | null; slug: string } | null>(null);
   const [viewStop, setViewStop] = useState<{ from: string; view: View } | null>(null);
   // Whether focus is in the views list. Switching project swaps that list for the new current row's, which takes focus
@@ -157,13 +167,15 @@ export function Rail({ tabs, archived, deleted: listed, current, onSelect, onMov
 
   /** The rows' keys: the menu key, Alt with an arrow to reorder, a bare arrow, Home or End to move focus, Space to open. */
   const onRowKey = (e: KeyboardEvent<HTMLUListElement>) => {
-    const rows = [...e.currentTarget.querySelectorAll<HTMLAnchorElement>('a[data-tab]')];
+    // The project rows and the Library row are one list. The Library row (the last) has no menu and no move.
+    const rows = [...(rail.current ?? e.currentTarget).querySelectorAll<HTMLAnchorElement>('a[data-tab], a[data-lib]')];
     const at = rows.indexOf(e.target as HTMLAnchorElement);
     if (at < 0) return;
+    const onLibraryRow = at >= tabs.length;
     // Shift+F10 or the Menu key opens the row's menu. Handled here too, in case the browser makes no contextmenu of it.
     if (isMenuKey(e)) {
       e.preventDefault();
-      setRowMenu({ id: tabs[at].id, row: rows[at] });
+      if (!onLibraryRow) setRowMenu({ id: tabs[at].id, row: rows[at] });
       return;
     }
     const arrow = e.key.startsWith('Arrow');
@@ -171,6 +183,7 @@ export function Rail({ tabs, archived, deleted: listed, current, onSelect, onMov
     // Back, and the window routes by hash.
     if (arrow && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
       e.preventDefault();
+      if (onLibraryRow) return;
       const p = tabs[at];
       if (p.status !== 'active') return;
       const earlier = e.key === 'ArrowUp' || e.key === 'ArrowLeft';
@@ -184,7 +197,8 @@ export function Rail({ tabs, archived, deleted: listed, current, onSelect, onMov
     // Space opens a row, as Enter does: a link does not take it natively.
     if (e.key === ' ') {
       e.preventDefault();
-      onSelect(tabs[at].slug);
+      if (!onLibraryRow) onSelect(tabs[at].slug);
+      else if (!library) onLibrary('pages');
       return;
     }
     // The arrows, Home and End move focus and open nothing.
@@ -232,10 +246,22 @@ export function Rail({ tabs, archived, deleted: listed, current, onSelect, onMov
     e.preventDefault();
     onSelect(slug);
   };
+  const openLibrary = (e: MouseEvent<HTMLAnchorElement>) => {
+    if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    e.preventDefault();
+    if (!library) onLibrary('pages');
+  };
 
   if (!shown) return null;
   // The rows are one stop in the tab order: the one focused last, else the current row's, else the first row's.
-  const stop = rowStop && rowStop.from === current && tabs.some((p) => p.slug === rowStop.slug) ? rowStop.slug : tabs.some((p) => p.slug === current) ? current : tabs[0]?.slug;
+  const stop =
+    rowStop && rowStop.from === currentKey && (rowStop.slug === ':lib' || tabs.some((p) => p.slug === rowStop.slug))
+      ? rowStop.slug
+      : library
+        ? ':lib'
+        : tabs.some((p) => p.slug === current)
+          ? current
+          : tabs[0]?.slug;
   // The views stop follows focus within one project's list and one view; on another view or project it is the current view.
   const viewsStop = viewStop && viewStop.from === `${current}:${view}` ? viewStop.view : view;
   const lastActive = activeIds[activeIds.length - 1];
@@ -273,7 +299,7 @@ export function Rail({ tabs, archived, deleted: listed, current, onSelect, onMov
                   className={`ip-rail-row${isArchived ? ' archived' : ''}${p.id === menuProject?.id && !menuGone ? ' menu-open' : ''}${drag?.id === p.id ? ' dragging' : ''}${changes && drag.slot === p.id ? ' drop-before' : ''}${changes && drag.slot === null && p.id === lastActive ? ' drop-after' : ''}`}
                   style={{ '--rr': `var(--hue-${p.id % 7})` } as CSSProperties}
                   draggable={!isArchived}
-                  onFocus={() => setRowStop({ from: current, slug: p.slug })}
+                  onFocus={() => setRowStop({ from: currentKey, slug: p.slug })}
                   onDragStart={(e) => {
                     e.dataTransfer.effectAllowed = 'move';
                     // A link drags its address as text too, which a text field would take; only the row's own data goes.
@@ -333,6 +359,61 @@ export function Rail({ tabs, archived, deleted: listed, current, onSelect, onMov
           })}
         </ul>
       )}
+      <Eyebrow glyph="//" className="ip-rail-head">
+        <span className="ip-rail-head-text">Library</span>
+      </Eyebrow>
+      <ul className="ip-rail-rows ip-rail-lib" onKeyDown={onRowKey}>
+        <li data-row>
+          <a
+            href="#/lib/pages"
+            data-lib
+            className="ip-rail-row"
+            aria-current={library ? 'page' : undefined}
+            style={{ '--rr': 'var(--text-hi)' } as CSSProperties}
+            tabIndex={stop === ':lib' ? 0 : -1}
+            title="Library"
+            aria-label={behind ? `Library, ${behind} behind Shipwright` : 'Library'}
+            onFocus={() => setRowStop({ from: currentKey, slug: ':lib' })}
+            onClick={openLibrary}
+          >
+            <span className="ip-rail-rule" />
+            <span className="ip-rail-name">Library</span>
+            <span className="ip-rail-code">LIB</span>
+            {behind !== null && behind > 0 && (
+              <span className="ip-rail-sig">
+                <span className="ip-rail-behind" title={`${behind} project${behind === 1 ? '' : 's'} behind Shipwright`}>
+                  {behind}
+                </span>
+              </span>
+            )}
+          </a>
+          {library && (
+            <ul className="ip-rail-views" aria-label="Library" onKeyDown={onViewKey}>
+              {libraryViews.map((v) => (
+                <li key={v.shelf}>
+                  <button
+                    type="button"
+                    className="ip-rail-view"
+                    aria-current={v.shelf === library ? 'page' : undefined}
+                    tabIndex={v.shelf === library ? 0 : -1}
+                    title={v.count ? `${v.label}, ${v.count}` : v.label}
+                    aria-label={v.count ? `${v.label}, ${v.count}` : v.label}
+                    onClick={() => onLibrary(v.shelf)}
+                  >
+                    <span className="ip-rail-vlabel">{v.label}</span>
+                    <span className="ip-rail-vcode">{v.code}</span>
+                    {v.count !== undefined && (
+                      <span className="ip-rail-n" data-warn={v.warn || undefined}>
+                        {v.count}
+                      </span>
+                    )}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </li>
+      </ul>
       {rowMenu && menuProject && !menuGone && <RowMenu key={rowMenu.id} project={menuProject} row={rowMenu.row} rail={rail.current} onClose={closeRowMenu} run={run} runRename={runRename} />}
       {hasFoot && <FootMenu archived={archived} deleted={deleted} current={current} onSelect={onSelect} run={run} rail={rail} button={foot} />}
     </nav>

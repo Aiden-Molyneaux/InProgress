@@ -1,6 +1,6 @@
 import type { BuildInfo } from '../../src/core/build';
 import type { StepHit } from '../../src/core/goto';
-import type { DeletedProject, NodeDetail, PageBody, Project, ProjectSnapshot, ProjectSummary, QueueOp, Resource } from '../../src/core/types';
+import type { DeletedProject, LibraryPages, LibrarySync, NodeDetail, PageBody, Project, ProjectSnapshot, ProjectSummary, QueueOp, Resource } from '../../src/core/types';
 import type { ActionTarget, ProjectAction } from './projectActions';
 
 async function getJson<T>(path: string): Promise<T> {
@@ -41,6 +41,9 @@ export const api = {
    * (the open project's slug) first within each tier.
    */
   find: (q: string, here: string | null) => getJson<StepHit[]>(`/api/find?q=${encodeURIComponent(q)}${here ? `&here=${encodeURIComponent(here)}` : ''}`),
+  /** The Library group: its pages (read live), and every manifest's Sync check. */
+  libraryPages: () => getJson<LibraryPages>('/api/library/pages'),
+  librarySync: () => getJson<LibrarySync>('/api/library/sync'),
   openResource: (id: number) => postUi('/api/ui/open', { resourceId: id }),
   /** Opens an http(s) link in the default browser: from the Edge app window a plain link would open in Edge. */
   openUrl: (url: string) => postUi('/api/ui/open-url', { url }),
