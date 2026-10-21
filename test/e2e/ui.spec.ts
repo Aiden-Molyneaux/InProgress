@@ -101,12 +101,6 @@ function uiHeaders(api: APIRequestContext): Promise<Record<string, string>> {
   return cached;
 }
 
-/** A project's id, read from the window's own snapshot call. */
-async function projectId(page: Page, project: Seeded): Promise<number> {
-  const res = await page.request.get('/api/projects');
-  return ((await res.json()) as { id: number; slug: string }[]).find((p) => p.slug === project.slug)!.id;
-}
-
 interface TestFixtures {
   /** Console errors and uncaught exceptions fail the test. A test that causes one on purpose allows its pattern. */
   consoleErrors: { allow: (pattern: RegExp) => void };
@@ -2075,7 +2069,7 @@ test.describe('Board', () => {
     await expect.poll(() => boxes.count()).toBeGreaterThan(1);
     // Each entry is its own box, a Board tile with no hue: the id, the title, the age.
     const box = group.locator('.ip-backlog-row', { has: page.getByRole('button', { name: '4 Build to GitHub', exact: true }) });
-    await expect(box.locator('.p-tile-id')).toHaveText(new RegExp(`#${fresh.ids['4 Build to GitHub']}$`));
+    await expect(box.locator('.p-tile-id')).toHaveText(new RegExp(`^(\\d+)Rank \\1, #${fresh.ids['4 Build to GitHub']}$`));
     await expect(box.locator('.ip-tile-age')).toBeVisible();
     await expect(box).toHaveClass(/ip-tile.*ip-backlog-row|ip-backlog-row.*ip-tile/);
     await expect(box).not.toHaveAttribute('data-hue', /.*/);
@@ -2627,6 +2621,8 @@ test.describe('Board', () => {
     await windowPost(page, `/api/ui/projects/${fresh.id}/rank`, { slug: fresh.slug, op: { node: fresh.ids['7 Launch'], to: 'soon', before: fresh.ids['3 RevenueCat'] } });
     await expect(titles).toHaveText(['7 Launch', '3 RevenueCat', '4 Build to GitHub', '5 Store listing', '6 Beta']);
     await expect(soon.locator('.ip-tile-num [aria-hidden]')).toHaveText(['1', '2', '3', '4', '5']);
+    // A screen reader hears the rank as words of its own.
+    await expect(soon.locator('.ip-tile-num-sr').first()).toHaveText('Rank 1, ');
     await expect(head).toContainText('Soon · 5');
     await expect(next.locator('.ip-backlog-more')).toHaveCount(0);
     // + Add creates at the bottom of Soon and keeps its field open.
