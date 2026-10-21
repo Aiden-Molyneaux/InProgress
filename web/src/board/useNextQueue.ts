@@ -72,7 +72,8 @@ export function useNextQueue({ snapshot, board, boxes, onStatus }: Pick<BandProp
   const unowned = next.filter((b) => !ownerOf(b.row!));
   const owned = next.filter((b) => ownerOf(b.row!));
   const inNext = new Set(nextIds);
-  // A step sent back shows in Backlog at once; one pulled into Next leaves it.
+  // One pulled into Next leaves the Backlog at once. A step sent back joins this list at once, but the Board's Soon preview
+  // shows it only once the snapshot lands, since its rank band and order read from the Board.
   const backlogIds = pending ? [...board.backlog, ...board.next].map((r) => r.node.id).filter((id) => !inNext.has(id) && boxOf.has(id)) : boxes.backlog.map((b) => b.row!.node.id);
   /** Sent back from Next and not yet confirmed, a ready box reads as Backlog. */
   const asBacklog = (b: BoxData): BoxData => (b.state === 'ready' ? { ...b, cell: 'backlog', state: 'backlog' } : b);

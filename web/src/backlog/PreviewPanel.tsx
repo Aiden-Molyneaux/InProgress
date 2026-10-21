@@ -10,23 +10,26 @@ import { Chip } from '../parts/Chip';
 import { EmptyState } from '../parts/EmptyState';
 import { Eyebrow } from '../parts/Eyebrow';
 import { useListCursor } from '../parts/ListCursor';
-import { MenuButton } from '../parts/MenuButton';
-import { phaseCounts, previewRows, type PhaseChoice, type PreviewPhase } from './backlogPreview';
 
 /**
- * The Backlog preview at the foot of Next (and of the narrow Next band): `[+] BACKLOG · N`, + Add and Open ›, a menu button
- * for the phase (`<phase> · <count> ▾`), then up to five entries of the picked phase, each its own tile (their own
- * arrow-key list, draggable into Next), and "N more in <phase> · Open Backlog ›" past five. The quick-add field sits under the rows when + Add has opened it.
+ * The Backlog preview at the foot of Next (and of the narrow Next band): `>> SOON · N`, + Add and Open ›, then Soon's first
+ * five steps in rank order, each its own numbered tile (their own arrow-key list, draggable into Next), and "N more in Soon
+ * · Open Backlog ›" past five. An empty Soon says so, with Triage › when unranked steps wait. + Add creates at the bottom
+ * of Soon; the quick-add field sits under the rows when + Add has opened it.
  */
-export function PreviewPanel({ entries, choices, phase, adding, field, addButton, snapshot, now, selectedNode, dragging, onPick, onOpenAll, onAdd, onCloseAdd, onStatus, onOpenNode, onOpenResource, onDragStart, onDragEnd, onToNext }: Pick<BandProps, 'snapshot' | 'now' | 'selectedNode' | 'onOpenNode' | 'onOpenResource' | 'onStatus'> & {
-  /** Every open Backlog entry, parked excluded: the count, the phase menu's counts and the rows come from it. */
-  entries: BoxData[];
-  choices: PhaseChoice[];
-  phase: PreviewPhase;
+export function PreviewPanel({ rows, count, more, triage, adding, field, addButton, snapshot, now, selectedNode, dragging, onTriage, onOpenAll, onAdd, onCloseAdd, onStatus, onOpenNode, onOpenResource, onDragStart, onDragEnd, onToNext }: Pick<BandProps, 'snapshot' | 'now' | 'selectedNode' | 'onOpenNode' | 'onOpenResource' | 'onStatus'> & {
+  /** Soon's first five (see soonPreview), each with its Ranked number. */
+  rows: { box: BoxData; number: number | null }[];
+  /** How many steps Soon holds in the Backlog cell. */
+  count: number;
+  /** How many lie past the rows. */
+  more: number;
+  /** An unranked step waits: an empty Soon offers Triage ›. */
+  triage: boolean;
   adding: boolean;
   field: RefObject<HTMLInputElement>;
   addButton: RefObject<HTMLButtonElement>;
-  onPick: (phase: PreviewPhase) => void;
+  onTriage: () => void;
   onOpenAll: () => void;
   onAdd: () => void;
   onCloseAdd: () => void;
@@ -37,45 +40,37 @@ export function PreviewPanel({ entries, choices, phase, adding, field, addButton
   dragging?: number | null;
 }) {
   const { project } = snapshot;
-  const title = choices.find((c) => c.value === phase)?.title ?? 'No phase';
-  const rows = previewRows(entries, phase);
-  const counts = phaseCounts(entries);
-  const more = (counts.get(phase) ?? 0) - rows.length;
   const { itemProps } = useListCursor(
     [rows.length],
     ({ row }) => {
-      const box = rows[row];
-      if (box) onOpenNode(box.row!.node.id);
+      const r = rows[row];
+      if (r) onOpenNode(r.box.row!.node.id);
     },
-    [rows.map((b) => String(b.row!.node.id))],
+    [rows.map((r) => String(r.box.row!.node.id))],
   );
   return (
     <div className="ip-preview">
       <div className="ip-backlog-head">
-        <Eyebrow glyph="[+]" className="ip-backlog-name">{`Backlog · ${entries.length}`}</Eyebrow>
+        <Eyebrow glyph=">>" className="ip-backlog-name">{`Soon · ${count}`}</Eyebrow>
         <span className="ip-backlog-acts">
           <Button ref={addButton} variant="ghost" size="sm" className="ip-add" onClick={onAdd}>+ Add</Button>
           <Button variant="ghost" size="sm" glyph="›" className="ip-backlog-all" title="Open the full Backlog" onClick={onOpenAll}>Open</Button>
         </span>
       </div>
-      <MenuButton
-        menuLabel="Backlog phase"
-        variant="outline"
-        align="start"
-        items={choices.filter((c) => c.value === phase || (counts.get(c.value) ?? 0) > 0).map((c) => ({ key: String(c.value), label: `${c.title} · ${counts.get(c.value) ?? 0}`, current: c.value === phase, onSelect: () => onPick(c.value) }))}
-      >
-        {`${title} · ${counts.get(phase) ?? 0} `}<span aria-hidden="true">▾</span>
-      </MenuButton>
       {rows.length === 0 ? (
-        <EmptyState>{`Nothing in ${title}`}</EmptyState>
+        <>
+          <EmptyState>Nothing in Soon</EmptyState>
+          {triage && <Button variant="ghost" size="sm" glyph="›" className="ip-preview-triage" onClick={onTriage}>Triage</Button>}
+        </>
       ) : (
-        <ul className="ip-list ip-backlog-list" aria-label={`Backlog: ${title}`}>
-          {rows.map((box, i) => {
+        <ul className="ip-list ip-backlog-list" aria-label="Soon">
+          {rows.map(({ box, number }, i) => {
             const id = box.row!.node.id;
             return (
               <BoardTile
                 key={id}
                 box={box}
+                number={number}
                 now={now}
                 area="backlog"
                 band="backlog"
@@ -109,11 +104,11 @@ export function PreviewPanel({ entries, choices, phase, adding, field, addButton
       )}
       {more > 0 && (
         <p className="ip-backlog-more">
-          {`${more} more in ${title}`}
+          {`${more} more in Soon`}
           <Button variant="ghost" size="sm" glyph="›" onClick={onOpenAll}>Open Backlog</Button>
         </p>
       )}
-      {adding && <QuickAdd projectId={project.id} slug={project.slug} inputRef={field} parent={phase === 'none' ? null : phase} label={`Add a step to ${title}`} onStatus={onStatus} onClose={onCloseAdd} />}
+      {adding && <QuickAdd projectId={project.id} slug={project.slug} inputRef={field} parent={null} band="soon" label="Add a step to Soon" onStatus={onStatus} onClose={onCloseAdd} />}
     </div>
   );
 }

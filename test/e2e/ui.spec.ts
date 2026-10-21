@@ -14,6 +14,8 @@ interface Seeded {
   session: string;
   /** The open question ask on 'Run signing tests': the one thing waiting on Aiden. */
   ask: number;
+  /** The project's id. */
+  id: number;
 }
 
 const headers = (session: string) => ({
@@ -45,7 +47,7 @@ const UNSAFE_MARKDOWN = [
 async function seed(api: APIRequestContext, name = 'E2E Demo'): Promise<Seeded> {
   const session = `e2e-${randomUUID()}`;
   const post = <T = unknown>(path: string, data: unknown) => write<T>(api, session, 'post', path, data);
-  const project = await post<{ slug: string; rootNodeId: number }>('/api/projects', { name, description: 'Seeded by Playwright' });
+  const project = await post<{ id: number; slug: string; rootNodeId: number }>('/api/projects', { name, description: 'Seeded by Playwright' });
   const milestones = Array.from({ length: 25 }, (_, i) => ({ title: `Milestone ${i + 1}`, status: 'done' as const }));
   const created = await post<{ id: number; title: string }[]>('/api/nodes', {
     parentId: project.rootNodeId,
@@ -72,7 +74,31 @@ async function seed(api: APIRequestContext, name = 'E2E Demo'): Promise<Seeded> 
   await post(`/api/sessions/${session}/enroll`, { project: project.slug, title: 'E2E session' });
   await post(`/api/sessions/${session}/focus`, { nodeId: ids['Play app signing'] });
   await post(`/api/sessions/${session}/hook`, { event: 'prompt' });
-  return { slug: project.slug, root: project.rootNodeId, ids, session, ask: ask.id };
+  // Soon holds the five steps that follow the ones under way, in tree order: the Backlog preview shows Soon.
+  const uiPost = await uiHeaders(api);
+  for (const title of ['3 RevenueCat', '4 Build to GitHub', '5 Store listing', '6 Beta', '7 Launch']) {
+    const res = await api.post(`/api/ui/projects/${project.id}/rank`, { headers: uiPost, data: { slug: project.slug, op: { node: ids[title], to: 'soon', before: null } } });
+    expect(res.ok(), `rank ${title} answered ${res.status()}: ${await res.text()}`).toBe(true);
+  }
+  return { id: project.id, slug: project.slug, root: project.rootNodeId, ids, session, ask: ask.id };
+}
+
+/** The headers a window write needs, read once per api context from the page the server hands out. */
+const uiHeaderCache = new WeakMap<APIRequestContext, Promise<Record<string, string>>>();
+function uiHeaders(api: APIRequestContext): Promise<Record<string, string>> {
+  let cached = uiHeaderCache.get(api);
+  if (!cached) {
+    cached = (async () => {
+      const res = await api.get('/');
+      const html = await res.text();
+      const token = /<meta name="ip-ui-token" content="([^"]*)"/.exec(html)?.[1];
+      expect(token, 'the page carries no ip-ui-token meta').toBeTruthy();
+      const base = new URL(res.url());
+      return { origin: base.origin, 'content-type': 'application/json', 'x-ip-ui-token': token! };
+    })();
+    uiHeaderCache.set(api, cached);
+  }
+  return cached;
 }
 
 interface TestFixtures {
@@ -121,19 +147,6 @@ const open = (page: Page, project: Seeded) => page.goto(`/#/p/${project.slug}`);
 /** A step's row on the Board, by its title. Details lists the same steps as "#id title", so the exact name is the Board's. */
 const stepRow = (page: Page, title: string) => page.getByRole('main').getByRole('button', { name: title, exact: true });
 
-/** The Backlog preview's phase menu button at the foot of Next: its face reads `<phase> · <count>` (the ▾ is decoration). */
-const phasePicker = (page: Page) => page.locator('.ip-preview button[aria-haspopup="menu"]');
-/** The phase menu's popover. */
-const phaseMenu = (page: Page) => page.getByRole('menu', { name: 'Backlog phase' });
-/** The button, whose face names the picked phase. */
-const pickedPhase = phasePicker;
-
-/** Shows a phase's entries in the Backlog preview ("No phase" for the steps under the root). */
-async function showPhase(page: Page, name: string): Promise<void> {
-  await phasePicker(page).click();
-  await phaseMenu(page).getByRole('menuitem', { name: new RegExp(`^${name}`) }).click();
-}
-
 /**
  * Drags one element onto another. At 900 px the Board scrolls, and Playwright's dragTo scrolls the target into view after the
  * button is down; Chromium then starts the drag on whatever the pointer is over (seen: mousedown on 6 Beta, the Board scrolls,
@@ -163,7 +176,7 @@ async function pickView(view: Locator, name: string): Promise<void> {
   await expect(tab).toHaveAttribute('aria-pressed', 'true');
 }
 
-/** Opens the full Backlog on a view other than Ranked: seeded steps are unranked, and By Phase lists every open one. */
+/** Opens the full Backlog on a view other than Ranked: By Phase lists every open step, ranked or not. */
 async function openBacklogView(page: Page, name: string): Promise<Locator> {
   const view = await openFullBacklog(page);
   await pickView(view, name);
@@ -175,7 +188,7 @@ const blRow = (page: Page, scope: Locator, title: string): Locator => scope.loca
 /** The same for a row in the Parked group. */
 const pRow = (page: Page, scope: Locator, title: string): Locator => scope.locator('li.ip-bl-parkedrow', { has: page.getByText(title, { exact: true }) });
 
-/** Opens a step's Details from its row and answers the panel. The preview shows the default phase (Road to market here), which holds the Backlog steps these tests open. */
+/** Opens a step's Details from its row and answers the panel. The preview shows Soon, which holds the steps these tests open. */
 async function openDetails(page: Page, title: string): Promise<Locator> {
   await stepRow(page, title).click();
   const details = page.getByRole('complementary');
@@ -502,11 +515,11 @@ test('the first stream starts at the snapshot, and a batch still follows its tar
   });
   await open(page, fresh);
   await expect(stepRow(page, 'Play app signing')).toBeVisible();
-  await write(api, fresh.session, 'post', '/api/nodes', { parentId: fresh.root, after: 'start', nodes: [{ title: 'Hotfix', status: 'active' }] });
+  const [hotfix] = await write<{ id: number }[]>(api, fresh.session, 'post', '/api/nodes', { parentId: fresh.root, after: 'start', nodes: [{ title: 'Hotfix', status: 'active' }] });
+  await rankSoon(api, fresh, hotfix.id, fresh.ids['3 RevenueCat']);
   // Untargeted and right behind it: the two replay in one chunk, and React renders them as one batch.
   await write(api, fresh.session, 'post', `/api/sessions/${fresh.session}/hook`, { event: 'stop' });
   release();
-  await showPhase(page, 'No phase');
   await expect(stepRow(page, 'Hotfix')).toBeVisible({ timeout: 6000 });
   expect(streams[0]).toMatch(/\/api\/events\/stream\?since=\d+$/);
 });
@@ -561,9 +574,20 @@ const unique = (label: string) => `${label} ${randomUUID().slice(0, 8)}`;
 /** A project with only its root: nothing needs you and no session works in it. */
 const bare = (api: APIRequestContext, name: string) => write<{ id: number; slug: string; rootNodeId: number }>(api, `e2e-${randomUUID()}`, 'post', '/api/projects', { name });
 
-/** A todo step under a bare project's root, so its Board has a row to open. */
-const addStep = (api: APIRequestContext, project: { rootNodeId: number }, title: string) =>
-  write(api, `e2e-${randomUUID()}`, 'post', '/api/nodes', { parentId: project.rootNodeId, nodes: [{ title }] });
+/** One rank change as the window makes it (ranked Backlog spec section 2), sent with the window's headers. */
+async function rank(api: APIRequestContext, project: { id: number; slug: string }, op: { node: number; to: 'next' | 'soon' | 'someday'; before: number | null }): Promise<void> {
+  const res = await api.post(`/api/ui/projects/${project.id}/rank`, { headers: await uiHeaders(api), data: { slug: project.slug, op } });
+  expect(res.ok(), `rank ${JSON.stringify(op)} answered ${res.status()}: ${await res.text()}`).toBe(true);
+}
+
+/** Ranks a step into Soon (at the bottom, or before another step), where the Board's Backlog preview shows it. */
+const rankSoon = (api: APIRequestContext, project: { id: number; slug: string }, node: number, before: number | null = null) => rank(api, project, { node, to: 'soon', before });
+
+/** A todo step under a bare project's root, ranked into Soon so its Board has a row to open. */
+async function addStep(api: APIRequestContext, project: { id: number; slug: string; rootNodeId: number }, title: string): Promise<void> {
+  const [node] = await write<{ id: number }[]>(api, `e2e-${randomUUID()}`, 'post', '/api/nodes', { parentId: project.rootNodeId, nodes: [{ title }] });
+  await rankSoon(api, project, node.id);
+}
 
 /** A view's button in the rail (or, in a narrow window, its Views tab), named by its label. */
 const viewButton = (page: Page, label: string) => page.getByRole('button', { name: new RegExp(`^${label}\\b`) }).and(page.locator('.ip-rail-view, .ip-viewtabs .p-tab'));
@@ -1938,6 +1962,9 @@ test.describe('Board', () => {
     const xs = await Promise.all((['needs', 'next', 'now', 'done'] as const).map(async (b) => (await band(page, b).boundingBox())!.x));
     expect(xs).toEqual([...xs].sort((a, b) => a - b));
     expect(new Set(xs).size, 'four columns side by side').toBe(4);
+    // No hazard tape on the slab and no meta line on the head.
+    await expect(page.locator('.ip-comms .p-tape')).toHaveCount(0);
+    await expect(page.locator('.ip-page-meta')).toHaveCount(0);
     const needs = boxIn(page, 'needs', 'Run signing tests');
     await expect(needs).toContainText('Which keystore signs the release?');
     await expect(needs.locator('.p-tile-chips .p-chip').first()).toHaveText('QUESTION');
@@ -2053,13 +2080,13 @@ test.describe('Board', () => {
     await page.setViewportSize(WIDE);
     await open(page, fresh);
     const next = band(page, 'next');
-    const group = next.getByRole('list', { name: 'Backlog: Road to market' });
+    const group = next.getByRole('list', { name: 'Soon' });
     const boxes = next.locator('.ip-backlog .ip-backlog-row');
     await expect(group).toBeVisible();
     await expect.poll(() => boxes.count()).toBeGreaterThan(1);
     // Each entry is its own box, a Board tile with no hue: the id, the title, the age.
     const box = group.locator('.ip-backlog-row', { has: page.getByRole('button', { name: '4 Build to GitHub', exact: true }) });
-    await expect(box.locator('.p-tile-id')).toHaveText(`#${fresh.ids['4 Build to GitHub']}`);
+    await expect(box.locator('.p-tile-id')).toHaveText(new RegExp(`^(\\d+)Rank \\1, #${fresh.ids['4 Build to GitHub']}$`));
     await expect(box.locator('.ip-tile-age')).toBeVisible();
     await expect(box).toHaveClass(/ip-tile.*ip-backlog-row|ip-backlog-row.*ip-tile/);
     await expect(box).not.toHaveAttribute('data-hue', /.*/);
@@ -2090,7 +2117,7 @@ test.describe('Board', () => {
     expect(head.y).toBeGreaterThan((await band(page, 'next').locator('h2').first().boundingBox())!.y);
   });
 
-  test('Details parks a step with a reason and Unpark brings it back to the Backlog', async ({ page, fresh }) => {
+  test('Details parks a step with a reason and Unpark brings it back to the Backlog', async ({ page, api, fresh }) => {
     await page.setViewportSize(WIDE);
     await open(page, fresh);
     const title = '4 Build to GitHub';
@@ -2116,7 +2143,12 @@ test.describe('Board', () => {
     await details.getByRole('button', { name: 'Unpark' }).click();
     await expect(details.locator('.ip-dparked')).toHaveCount(0);
     await expect(details.getByRole('button', { name: 'Park…' })).toBeFocused();
-    await expect(previewRow).toBeVisible();
+    // Unpark puts it back unranked (Needs Triage), so it is not in Soon's preview; Triage › shows only on an empty Soon.
+    await expect(previewRow).toHaveCount(0);
+    await expect(preview.getByRole('button', { name: 'Triage' })).toBeHidden();
+    // Still in the tree: todo, unranked, no longer parked.
+    const snapshot = (await (await api.get(`/api/projects/${fresh.slug}`)).json()) as { nodes: { id: number; status: string; rankBand: string | null; parkedAt: string | null }[] };
+    expect(snapshot.nodes.find((n) => n.id === fresh.ids[title])).toMatchObject({ status: 'todo', rankBand: null, parkedAt: null });
     // Unpark goes to the Backlog, not to Next.
     await expect(preview.locator('.ip-next-row', { hasText: title })).toHaveCount(0);
   });
@@ -2594,70 +2626,63 @@ test.describe('Board', () => {
     await expect(you).toHaveCSS('font-weight', '600');
   });
 
-  test('the Backlog preview shows the picked phase and opens the full view', async ({ page, api, fresh }) => {
-    await write(api, fresh.session, 'post', '/api/nodes', { parentId: fresh.root, nodes: [{ title: 'Loose one' }] });
-    const road = fresh.ids['Road to market'];
-    await write(api, fresh.session, 'post', '/api/nodes', { parentId: road, nodes: [{ title: '8 Extra' }, { title: '9 Extra' }] });
+  test("the Backlog preview shows Soon's first five in rank order and + Add creates at the bottom of Soon", async ({ page, fresh }) => {
     await page.setViewportSize(WIDE);
     await open(page, fresh);
     const next = band(page, 'next');
-    const picker = phasePicker(page);
-    const preview = next.getByRole('list', { name: /^Backlog: / });
-    // The default is the phase of the latest completed step, Road to market: five entries in tree order, the rest in the full view.
-    await expect(pickedPhase(page)).toContainText('Road to market');
-    await picker.click();
-    await expect(phaseMenu(page).getByRole('menuitem')).toHaveText([/^›?Road to market/, /^No phase/]);
-    await page.keyboard.press('Escape');
-    await expect(preview.locator('.ip-backlog-row .ip-row-title')).toHaveText(['3 RevenueCat', '4 Build to GitHub', '5 Store listing', '6 Beta', '7 Launch']);
-    await expect(next.locator('.ip-backlog-name')).toContainText('Backlog · 9');
-    // Another phase: its entries only, remembered after a reload.
-    await showPhase(page, 'No phase');
-    await expect(preview.locator('.ip-backlog-row .ip-row-title')).toHaveText(['Milestones', 'Loose one']);
-    await page.reload();
-    await expect(pickedPhase(page)).toContainText('No phase');
-    await expect(next.getByRole('button', { name: 'Loose one', exact: true })).toBeVisible();
-    await expect(next.getByRole('button', { name: '3 RevenueCat', exact: true })).toHaveCount(0);
-    // Quick-add creates under the picked phase (the root for No phase) and keeps its field open until Escape.
-    const field = next.getByRole('textbox', { name: 'Add a step to No phase' });
+    const soon = next.getByRole('list', { name: 'Soon' });
+    const titles = soon.locator('.ip-backlog-row .ip-row-title');
+    const head = next.locator('.ip-backlog-name');
+    // Rank 7 Launch to the top of Soon: the preview follows, numbered as the Backlog's Ranked view numbers it.
+    await expect(head).toContainText('Soon · 5');
+    await windowPost(page, `/api/ui/projects/${fresh.id}/rank`, { slug: fresh.slug, op: { node: fresh.ids['7 Launch'], to: 'soon', before: fresh.ids['3 RevenueCat'] } });
+    await expect(titles).toHaveText(['7 Launch', '3 RevenueCat', '4 Build to GitHub', '5 Store listing', '6 Beta']);
+    await expect(soon.locator('.ip-tile-num [aria-hidden]')).toHaveText(['1', '2', '3', '4', '5']);
+    // A screen reader hears the rank as words of its own.
+    await expect(soon.locator('.ip-tile-num-sr').first()).toHaveText('Rank 1, ');
+    await expect(head).toContainText('Soon · 5');
+    await expect(next.locator('.ip-backlog-more')).toHaveCount(0);
+    // + Add creates at the bottom of Soon and keeps its field open.
+    const field = next.getByRole('textbox', { name: 'Add a step to Soon' });
     await expect(field).toHaveCount(0);
-    await next.getByRole('button', { name: '+ add' }).click();
+    await next.getByRole('button', { name: '+ Add' }).click();
     await expect(field).toBeFocused();
-    await page.keyboard.type('First quick step');
+    await page.keyboard.type('Quick soon step');
     await page.keyboard.press('Enter');
-    await expect(next.getByRole('button', { name: 'First quick step', exact: true })).toBeVisible();
+    await expect(head).toContainText('Soon · 6');
+    await expect(next.locator('.ip-backlog-more')).toContainText('1 more in Soon');
     await expect(field).toBeFocused();
     await expect(field).toHaveValue('');
-    await expect(page.getByRole('complementary')).toHaveCount(0);
     await page.keyboard.press('Escape');
     await expect(field).toHaveCount(0);
-    await expect(next.getByRole('button', { name: '+ add' })).toBeFocused();
-    // The full view: every entry, under "No phase" and the phase, and back to the Board.
+    await expect(next.getByRole('button', { name: '+ Add' })).toBeFocused();
+    // Sending 3 RevenueCat to Next lets the new step into the five.
+    await soon.locator('.ip-backlog-row', { has: page.getByRole('button', { name: '3 RevenueCat', exact: true }) }).getByRole('button', { name: 'to Next' }).click();
+    await expect(titles).toHaveText(['7 Launch', '4 Build to GitHub', '5 Store listing', '6 Beta', 'Quick soon step']);
+    await expect(soon.locator('.ip-tile-num [aria-hidden]')).toHaveText(['2', '3', '4', '5', '6']);
+    await expect(head).toContainText('Soon · 5');
     const opened = page.waitForRequest((r) => r.url().endsWith('/api/ui/events') && (r.postDataJSON() as { name: string }).name === 'backlog_open');
-    const view = await openFullBacklog(page);
+    await openFullBacklog(page);
     await opened;
-    await expect(view.locator('.ip-page-meta')).toContainText('11 OPEN');
-    await expect(viewButton(page, 'Backlog')).toBeFocused();
-    // Seeded steps are unranked: By Phase lists every open one, under its parent.
-    await pickView(view, 'By Phase');
-    await expect(view.getByRole('region', { name: 'Backlog with no phase' }).locator('.ip-bl-gtitle')).toHaveText('No phase');
-    await expect(view.getByRole('region', { name: 'Backlog under Road to market' }).getByText('9 Extra', { exact: true })).toBeVisible();
-    await expect(page.locator('section.ip-band-next')).toHaveCount(0);
-    await viewButton(page, 'Board').click();
-    await expect(page.locator('.ip-backlogview')).toHaveCount(0);
-    await expect(pickedPhase(page)).toContainText('No phase');
   });
 
-  test('the Backlog preview falls back when its remembered phase has no entries', async ({ page, api, fresh }) => {
+  test('an empty Soon says so and Triage › opens the Backlog on Needs Triage', async ({ page, api, fresh }) => {
     await page.setViewportSize(WIDE);
     await open(page, fresh);
-    const [loose] = await write<{ id: number }[]>(api, fresh.session, 'post', '/api/nodes', { parentId: fresh.root, nodes: [{ title: 'Loose one' }] });
-    await showPhase(page, 'No phase');
-    await expect(band(page, 'next').getByRole('button', { name: 'Loose one', exact: true })).toBeVisible();
-    // The remembered choice (No phase) is emptied (Milestones, the other step under the root, finishes too): the preview does not sit on "Nothing in No phase".
-    await write(api, fresh.session, 'patch', `/api/nodes/${loose.id}`, { status: 'done', outcome: 'Done' });
-    await write(api, fresh.session, 'patch', `/api/nodes/${fresh.ids['Milestones']}`, { status: 'done', outcome: 'Done' });
-    await expect(pickedPhase(page)).toContainText('Road to market');
-    await expect(band(page, 'next').getByRole('button', { name: '3 RevenueCat', exact: true })).toBeVisible();
+    const next = band(page, 'next');
+    for (const title of ['3 RevenueCat', '4 Build to GitHub', '5 Store listing', '6 Beta', '7 Launch', 'Milestones']) {
+      await rank(api, fresh, { node: fresh.ids[title], to: 'someday', before: null });
+    }
+    await expect(next.getByText('Nothing in Soon')).toBeVisible();
+    await expect(next.getByRole('button', { name: 'Triage' })).toHaveCount(0);
+    // An unranked step appears: Triage › offers itself.
+    await write(api, fresh.session, 'post', '/api/nodes', { parentId: fresh.root, nodes: [{ title: 'Unranked one' }] });
+    const triage = next.getByRole('button', { name: 'Triage' });
+    await expect(triage).toBeVisible();
+    await triage.click();
+    const view = page.locator('.ip-backlogview');
+    await expect(view.getByRole('group', { name: 'Backlog view' }).getByRole('button', { name: /^Needs Triage/ })).toHaveAttribute('aria-pressed', 'true');
+    await expect(view.getByText('Unranked one', { exact: true })).toBeVisible();
   });
 
   test('a step parked from the full Backlog view returns to Next with to Next', async ({ page, fresh }) => {
@@ -2811,7 +2836,7 @@ test.describe('Board', () => {
     await expect(next.locator('.ip-next-row')).toHaveCount(0);
     await page.reload();
     await expect(next.locator('.ip-next-row')).toHaveCount(0);
-    await expect(phasePicker(page)).toBeVisible();
+    await expect(band(page, 'next').locator('.ip-backlog-name')).toContainText('Soon');
   });
 
   test('Backlog "Delete…" asks first, Escape and Cancel keep the step, Delete removes it from the tree', async ({ page, fresh, consoleErrors }) => {
@@ -4042,103 +4067,15 @@ test.describe('#502 Board in v3', () => {
     await comms.getByRole('link', { name: `#${later}`, exact: true }).click();
     await expect(details).toContainText('3 RevenueCat');
   });
-  test('the Backlog phase menu picks a phase, the choice holds after a reload, and Escape returns focus to the button', async ({ page, api, fresh }) => {
-    await write(api, fresh.session, 'post', '/api/nodes', { parentId: fresh.root, nodes: [{ title: 'Loose one' }] });
-    await page.setViewportSize(WIDEST);
-    await open(page, fresh);
-    const next = band(page, 'next');
-    const button = phasePicker(page);
-    const menu = phaseMenu(page);
-    // No hazard tape on the slab and no meta line on the head.
-    await expect(page.locator('.ip-comms .p-tape')).toHaveCount(0);
-    await expect(page.locator('.ip-page-meta')).toHaveCount(0);
-    await expect(button).toHaveAttribute('aria-haspopup', 'menu');
-    await expect(button).toContainText('Road to market');
-    // Escape closes the menu without picking and puts focus back on the button.
-    await button.click();
-    await expect(menu.getByRole('menuitem', { name: /^Road to market/ })).toHaveAttribute('aria-current', 'true');
-    await page.keyboard.press('Escape');
-    await expect(menu).toHaveCount(0);
-    await expect(button).toBeFocused();
-    await expect(button).toContainText('Road to market');
-    // Select picks a phase, closes the menu and focuses the button.
-    await button.click();
-    await menu.getByRole('menuitem', { name: /^No phase/ }).click();
-    await expect(menu).toHaveCount(0);
-    await expect(button).toBeFocused();
-    await expect(button).toContainText('No phase');
-    await expect(next.locator('.ip-backlog-row .ip-row-title')).toHaveText(['Milestones', 'Loose one']);
-    await page.reload();
-    await expect(phasePicker(page)).toContainText('No phase');
-    await expect(next.locator('.ip-backlog-row .ip-row-title')).toHaveText(['Milestones', 'Loose one']);
-    // Shift+Tab closes with focus on the button.
-    await button.click();
-    await expect(menu).toBeVisible();
-    await page.keyboard.press('Shift+Tab');
-    await expect(menu).toHaveCount(0);
-    await expect(button).toBeFocused();
-    // Tab out closes it, and focus moves on to the first preview tile.
-    await button.click();
-    await page.keyboard.press('Tab');
-    await expect(menu).toHaveCount(0);
-    await expect(next.locator('.ip-backlog-row').first()).toBeFocused();
-    // A press on a column head closes it, and focus stays where the press put it.
-    await button.click();
-    await expect(menu).toBeVisible();
-    await band(page, 'now').locator('h2').click();
-    await expect(menu).toHaveCount(0);
-    await expect(band(page, 'now').locator('h2')).toBeFocused();
-    // A press on nothing that takes focus closes it, and focus goes back to the button rather than to the page.
-    await button.click();
-    await expect(menu).toBeVisible();
-    await page.locator('.ip-page-title').click();
-    await expect(menu).toHaveCount(0);
-    await expect(button).toBeFocused();
-  });
-
-  test('the Backlog phase menu keeps focus when the focused phase empties under it', async ({ page, api, fresh }) => {
-    const created = await write<{ id: number; title: string }[]>(api, fresh.session, 'post', '/api/nodes', {
-      parentId: fresh.root,
-      nodes: [{ title: 'Spare phase', kind: 'phase', status: 'active', children: [{ title: 'Spare entry' }] }],
-    });
-    const entry = created.find((n) => n.title === 'Spare entry')!;
-    await page.setViewportSize(WIDEST);
-    await open(page, fresh);
-    const menu = phaseMenu(page);
-    await phasePicker(page).click();
-    const current = menu.getByRole('menuitem', { name: /^Road to market/ });
-    const doomed = menu.getByRole('menuitem', { name: /^Spare phase · 1/ });
-    await expect(current).toBeFocused();
-    await page.keyboard.press('ArrowDown');
-    await expect(doomed).toBeFocused();
-    // The phase's only entry finishes elsewhere: its item goes, and focus moves to the current phase, not the page.
-    await write(api, fresh.session, 'patch', `/api/nodes/${entry.id}`, { status: 'done', outcome: 'Done' });
-    await expect(doomed).toHaveCount(0);
-    await expect(menu).toBeVisible();
-    await expect(current).toBeFocused();
-  });
 });
-
-/** One rank change as the window makes it (ranked Backlog spec section 2): from the page, with its UI token. */
-async function rankFromPage(page: Page, projectId: number, slug: string, op: { node: number; to: 'next' | 'soon' | 'someday'; before: number | null }): Promise<void> {
-  const res = await windowPost(page, `/api/ui/projects/${projectId}/rank`, { slug, op });
-  expect(res.status, `rank ${JSON.stringify(op)} answered ${res.status}: ${JSON.stringify(res.body)}`).toBe(200);
-}
-
-/** The project's id, from the listing (the seed returns the slug). */
-async function projectIdOf(api: APIRequestContext, slug: string): Promise<number> {
-  const listed = ((await (await api.get('/api/projects')).json()) as { id: number; slug: string }[]).find((p) => p.slug === slug);
-  expect(listed, `project ${slug} is listed`).toBeTruthy();
-  return listed!.id;
-}
 
 test.describe('#542 ranked Backlog', () => {
   /** Ranks the steps into the bottom of Soon in the order given, then opens the Ranked view. Each test ranks what it asserts on. */
   async function openRankedWith(page: Page, api: APIRequestContext, fresh: Seeded, titles: string[]): Promise<{ view: Locator; projectId: number }> {
     await page.setViewportSize(WIDE);
     await open(page, fresh);
-    const projectId = await projectIdOf(api, fresh.slug);
-    for (const title of titles) await rankFromPage(page, projectId, fresh.slug, { node: fresh.ids[title], to: 'soon', before: null });
+    const projectId = fresh.id;
+    for (const title of titles) await rank(api, fresh, { node: fresh.ids[title], to: 'soon', before: null });
     const view = await openFullBacklog(page);
     return { view, projectId };
   }
@@ -4147,7 +4084,7 @@ test.describe('#542 ranked Backlog', () => {
 
   test('the Backlog opens on Ranked: Next up, Soon and a folded Someday, under the five views with counts', async ({ page, api, fresh }) => {
     const { view, projectId } = await openRankedWith(page, api, fresh, ['3 RevenueCat', '4 Build to GitHub']);
-    await rankFromPage(page, projectId, fresh.slug, { node: fresh.ids['5 Store listing'], to: 'someday', before: null });
+    await rank(api, fresh, { node: fresh.ids['5 Store listing'], to: 'someday', before: null });
     const views = view.getByRole('group', { name: 'Backlog view' });
     await expect(views.getByRole('button')).toHaveText([/^Ranked/, /^By Phase/, /^Needs Triage/, /^Stale/, /^Parked/]);
     await expect(views.getByRole('button', { name: /^Ranked/ })).toHaveAttribute('aria-pressed', 'true');
@@ -4200,10 +4137,10 @@ test.describe('#542 ranked Backlog', () => {
   test('a queued step that is first in Someday, dragged from Next up onto the folded Someday head, lands first in Someday', async ({ page, api, fresh }) => {
     const { view, projectId } = await openRankedWith(page, api, fresh, []);
     const [first, second] = [fresh.ids['3 RevenueCat'], fresh.ids['4 Build to GitHub']];
-    await rankFromPage(page, projectId, fresh.slug, { node: first, to: 'someday', before: null });
-    await rankFromPage(page, projectId, fresh.slug, { node: second, to: 'someday', before: null });
+    await rank(api, fresh, { node: first, to: 'someday', before: null });
+    await rank(api, fresh, { node: second, to: 'someday', before: null });
     // Queued, it keeps its band: it is still the first member of Someday's order.
-    await rankFromPage(page, projectId, fresh.slug, { node: first, to: 'next', before: null });
+    await rank(api, fresh, { node: first, to: 'next', before: null });
     const nextUp = view.getByRole('region', { name: 'Next up' });
     const someday = view.getByRole('region', { name: 'Someday' });
     await drag(handleOf(blRow(page, nextUp, '3 RevenueCat')), someday.locator('.ip-bl-bhead'));
