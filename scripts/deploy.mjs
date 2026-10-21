@@ -107,6 +107,10 @@ if (suites.smoke) {
   step('Smoke tests against a fresh build in .build');
   npm('test:smoke');
 } else console.log(`\n▸ Smoke tests skipped: no hook, CLI, MCP, server or kit changes ${since}`);
+if (suites.slow) {
+  step('Slow tests: real git and node processes');
+  npm('test:slow');
+} else console.log(`\n▸ Slow tests skipped: no core, server, CLI, lib, script or test config changes ${since}`);
 if (suites.e2e) {
   step('Browser tests against a full build in .build');
   npm('test:e2e');
