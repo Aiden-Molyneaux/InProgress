@@ -92,13 +92,14 @@ function run(file: string, args: string[], timeout: number): Promise<{ ok: true;
       const e = err as NodeJS.ErrnoException & { killed?: boolean; signal?: string | null };
       const text = capped(String(stderr));
       // A kill at the timeout is said first, with whatever the script printed after it.
-      if (e.killed || e.signal) return resolve({ ok: false, error: `template-sync timed out after 20 s${text ? `\n${text}` : ''}` });
+      // Over maxBuffer the child is killed too, but that is not a timeout.
+      if (e.code !== 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' && (e.killed || e.signal)) return resolve({ ok: false, error: `template-sync timed out after 20 s${text ? `\n${text}` : ''}` });
       resolve({ ok: false, error: text || e.message });
     });
   });
 }
 
-const parseCheck = (stdout: string): SyncOutcome => {
+export const parseCheck = (stdout: string): SyncOutcome => {
   try {
     const result = JSON.parse(stdout) as SyncCheck;
     const sound = result && typeof result.shipwright?.head === 'string' && Array.isArray(result.files) && result.files.every((f) => f && typeof f === 'object' && typeof f.state === 'string' && typeof f.template === 'string');

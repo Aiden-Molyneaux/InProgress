@@ -6,7 +6,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../../src/server/app';
 import { clearFreshCache } from '../../src/server/pages';
 import { addBinding, createProject } from '../../src/server/repo/projects';
-import { clearSyncCache } from '../../src/server/sync';
+import { clearSyncCache, parseCheck } from '../../src/server/sync';
 import { makeCtx } from '../helpers';
 
 const tempDirs: string[] = [];
@@ -160,5 +160,17 @@ describe('library: pages', GIT_TIMEOUT, () => {
     expect(roster).toMatchObject({ shelf: 'roster', adaptedIn: [] });
     expect(doomed.error).toContain('gone');
     expect(doomed).toMatchObject({ format: 'markdown', shelf: 'pages', templates: [] });
+  });
+});
+
+describe('library: the shape of a sync check', () => {
+  it('takes a check with a head and files that each have a template and state, and refuses any other shape', () => {
+    const file = { template: 'agents/sev.md', local: '.claude/agents/sev.md', base: 'a', state: 'current', behind: 0, commits: [], fills: {}, detail: null };
+    const good = { shipwright: { head: 'abc1234', date: '2026-10-21', subject: 's' }, project: 'P', lastSync: null, files: [file], skip: [], notAdopted: [], fills: {} };
+    expect(parseCheck(JSON.stringify(good)).ok).toBe(true);
+    for (const bad of [null, 3, '"x"', { files: [file] }, { ...good, files: [null] }, { ...good, files: [{ template: 'a' }] }, { ...good, shipwright: {} }]) {
+      expect(parseCheck(typeof bad === 'string' ? bad : JSON.stringify(bad)).ok).toBe(false);
+    }
+    expect(parseCheck('not json').ok).toBe(false);
   });
 });
