@@ -15,6 +15,7 @@
     "dev": "node scripts/dev.mjs",
     "typecheck": "tsc -p tsconfig.json && tsc -p web/tsconfig.json",
     "test": "vitest run",
+    "test:slow": "vitest run --config vitest.slow.config.ts",
     "test:smoke": "node scripts/build-to.mjs .build --node-only && vitest run --config vitest.smoke.config.ts",
     "test:e2e": "node scripts/build-to.mjs .build && playwright test",
     "claude:install": "node dist/cli/main.js claude-install",

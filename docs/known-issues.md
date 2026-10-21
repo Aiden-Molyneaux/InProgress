@@ -55,9 +55,10 @@ work. A re-hit bumps **Hits** and **Verified**. Entries seeded from the code and
   previous build did not start cleanly: run `npm run rollback` again to return to the newer
   one." and the same line.
 - **Diagnosis:** the deploy runs type checks, unit tests, smoke when hook, CLI, MCP, server or kit
-  files changed, e2e (or only the build) when UI, core or server files changed, then promotes the
-  new build (the old one moves to `.deploy/prev`), reinstalls the Claude kit when `claude-check`
-  asks for it, and restarts the server (scripts/deploy.mjs:75-118). A red before the promote
+  files changed, the slow suites in `test/slow` (real git and node processes) when core, server,
+  CLI, lib or script files changed, e2e (or only the build) when UI, core or server files changed,
+  then promotes the new build (the old one moves to `.deploy/prev`), reinstalls the Claude kit
+  when `claude-check` asks for it, and restarts the server (scripts/deploy.mjs:75-122). A red before the promote
   leaves the live build untouched. A red restart swaps the previous build back and restarts it.
   The restart check passes when `/api/health` reports the sha and builtAt in `dist/build.json`
   (scripts/deploy-lib.mjs:81-108). Its "Restart check:" line gives the build expected, the status,
