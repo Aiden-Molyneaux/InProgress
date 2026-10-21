@@ -70,12 +70,12 @@ function setup(script?: string) {
   // A script in the unbound folder that marks its run: a manifest must not be able to make the server run it.
   mkdirSync(join(unbound, 'scripts'));
   writeFileSync(join(unbound, 'scripts', 'template-sync.mjs'), "import { writeFileSync } from 'node:fs';writeFileSync(new URL('ran.txt', import.meta.url), 'ran');console.log('{}');");
-  const manifest = (dir: string, shipwrightPath: string, adopts: string) => {
+  const manifest = (dir: string, shipwrightPath: string, adopts: string[]) => {
     mkdirSync(join(dir, '.claude'), { recursive: true });
-    writeFileSync(join(dir, '.claude', 'shipwright.json'), JSON.stringify({ shipwright: shipwrightPath, files: { [adopts]: {} }, skip: [] }));
+    writeFileSync(join(dir, '.claude', 'shipwright.json'), JSON.stringify({ shipwright: shipwrightPath, files: Object.fromEntries(adopts.map((t) => [t, {}])), skip: [] }));
   };
-  manifest(dirA, shipwright, 'agents/sev.md');
-  manifest(dirB, unbound, 'agents/moh.md');
+  manifest(dirA, shipwright, ['agents/sev.md', 'skills/sigmund/SKILL.md']);
+  manifest(dirB, unbound, ['agents/moh.md']);
   const a = createProject(ctx, 'test', { name: 'Alpha' });
   addBinding(ctx, 'test', a.slug, dirA);
   const b = createProject(ctx, 'test', { name: 'Bravo' });
@@ -135,7 +135,7 @@ describe('library: sync', GIT_TIMEOUT, () => {
 describe('library: pages', GIT_TIMEOUT, () => {
   it('lists library pages with their shelf and Adapted in, leaves other purposes out, and keeps a gone file as an error row', async () => {
     const { app, a, sw, dirs, register } = setup();
-    writeFileSync(join(dirs.dirA, 'guide.md'), '---\ntemplates: [agents/sev.md]\n---\n# Guide\n');
+    writeFileSync(join(dirs.dirA, 'guide.md'), '---\ntemplates: [skills/sigmund/SKILL.md, agents/sev.md]\n---\n# Guide\n');
     writeFileSync(join(dirs.dirA, 'roster.md'), '---\nshelf: roster\n---\n# Roster\n');
     writeFileSync(join(dirs.dirA, 'plain.md'), '# Plain\n');
     writeFileSync(join(dirs.dirA, 'doomed.md'), '# Doomed\n');
@@ -156,7 +156,9 @@ describe('library: pages', GIT_TIMEOUT, () => {
     expect(body.sourceProjectId).toBe(sw.id);
     expect(body.pages.map((p: { title: string }) => p.title)).toEqual(['Guide', 'Roster', 'Doomed']);
     const [guide, roster, doomed] = body.pages;
-    expect(guide).toMatchObject({ shelf: 'pages', format: 'markdown', templates: ['agents/sev.md'], projectSlug: a.slug, error: null, adaptedIn: [{ slug: a.slug, name: 'Alpha', template: 'agents/sev.md' }] });
+    expect(guide).toMatchObject({ shelf: 'pages', format: 'markdown', templates: ['skills/sigmund/SKILL.md', 'agents/sev.md'], projectSlug: a.slug, error: null });
+    // Two of its templates adopted by one project: one chip, opening the first.
+    expect(guide.adaptedIn).toEqual([{ slug: a.slug, name: 'Alpha', template: 'skills/sigmund/SKILL.md' }]);
     expect(roster).toMatchObject({ shelf: 'roster', adaptedIn: [] });
     expect(doomed.error).toContain('gone');
     expect(doomed).toMatchObject({ format: 'markdown', shelf: 'pages', templates: [] });

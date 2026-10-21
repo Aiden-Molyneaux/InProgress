@@ -39,8 +39,10 @@ export async function libraryPages(ctx: Ctx): Promise<LibraryPages> {
         const body = await readPage(ctx, requireResource(ctx, row.id));
         const templates = body.front.templates;
         const adaptedIn: LibraryPage['adaptedIn'] = [];
-        for (const template of templates) {
-          for (const a of who) if (a.adopted.includes(template) && !adaptedIn.some((x) => x.slug === a.slug && x.template === template)) adaptedIn.push({ slug: a.slug, name: a.name, template });
+        // One chip per adopting project (spec "Pages"), opening the first of the page's templates it adopts.
+        for (const a of who) {
+          const template = templates.find((t) => a.adopted.includes(t));
+          if (template && !adaptedIn.some((x) => x.slug === a.slug)) adaptedIn.push({ slug: a.slug, name: a.name, template });
         }
         return { ...base, format: body.format, shelf: body.front.shelf, templates, ...(body.fresh ? { fresh: body.fresh.count } : {}), error: null, adaptedIn };
       } catch (err) {
