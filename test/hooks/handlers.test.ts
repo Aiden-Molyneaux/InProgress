@@ -154,6 +154,9 @@ describe('buildHookBody', () => {
     for (const prompt of quoting) {
       expect(buildHookBody('prompt-submit', { session_id: 's', prompt }), prompt).toMatchObject({ notice: true, mentionsInProgress: false, asksStatus: false });
     }
+    // Any reminder with an id ends at the closing tag naming it, not at a quoted one: only the typed text is read.
+    const quotedLinked = '<system-reminder id="r1">\nLinked: inprogress-a quotes </system-reminder> here\n</system-reminder id="r1">\nwhere are we?';
+    expect(buildHookBody('prompt-submit', { session_id: 's', prompt: quotedLinked })).toMatchObject({ asksStatus: true, mentionsInProgress: false });
   });
 
   it('sends the task ends of a notice reminder ahead of a typed prompt, which stays a prompt', () => {
