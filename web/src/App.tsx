@@ -55,7 +55,7 @@ export function App() {
   const leaveLibrary = () => {
     if (!library) return;
     setLibrary(null);
-    if (state.slug) window.history.replaceState(null, '', `#/p/${state.slug}`);
+    window.history.replaceState(null, '', state.slug ? `#/p/${state.slug}` : window.location.pathname + window.location.search);
   };
   const selectProject = (slug: string) => {
     leaveLibrary();
@@ -139,6 +139,11 @@ export function App() {
     const shown = snapshot && snapshot.project.slug === state.slug ? snapshot.project.id : null;
     postEvent('view', shown, { view: v });
     if (v === 'backlog') postEvent('backlog_open', shown);
+  };
+  /** An Adapted in chip: the route, and focus on the open shelf's button, as the Board's links do for their view. */
+  const openFromChip = (route: LibraryRoute) => {
+    openLibrary(route);
+    setViewFocus((n) => n + 1);
   };
   /** The Board's "N ›" and "All done ›": the pick, and focus on the view's row. */
   const openFromBoard = (v: 'backlog' | 'done') => {
@@ -395,7 +400,7 @@ export function App() {
                   onChange={(id) => openLibrary({ shelf: id as Shelf, pick: null })}
                   className="ip-viewtabs"
                 />
-                <LibraryView route={library} lib={lib} tabs={tabs} codes={codes} onOpenResource={openViewer} onRoute={openLibrary} />
+                <LibraryView route={library} lib={lib} tabs={tabs} codes={codes} onOpenResource={openViewer} onRoute={openFromChip} />
               </>
             ) : projects.length === 0 ? (
               <EmptyState className="ip-wait">

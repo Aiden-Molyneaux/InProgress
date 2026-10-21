@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { readFile, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve as resolvePath } from 'node:path';
 import type { LibrarySync, SyncCheck, SyncOutcome, SyncRow } from '../core/types';
 import { isLocalAbsolutePath, normalizePath } from '../lib/paths';
 import type { Ctx } from './db/tx';
@@ -68,7 +68,9 @@ export async function manifests(ctx: Ctx): Promise<Manifests> {
     try {
       const m = JSON.parse(text.replace(/^﻿/, '')) as { shipwright?: unknown; files?: unknown };
       const files = m.files && typeof m.files === 'object' ? Object.keys(m.files) : [];
-      rows.push({ ...base, shipwright: typeof m.shipwright === 'string' ? m.shipwright : '', adopted: files });
+      // A relative path is the project folder's own: it resolves against it, and the bound-folder check then applies as ever.
+      const sw = typeof m.shipwright === 'string' && m.shipwright.trim() ? resolvePath(dir, m.shipwright.trim()) : '';
+      rows.push({ ...base, shipwright: sw, adopted: files });
     } catch (err) {
       rows.push({ ...base, shipwright: '', adopted: [], error: `shipwright.json does not parse: ${(err as Error).message}` });
     }
@@ -87,9 +89,11 @@ function run(file: string, args: string[], timeout: number): Promise<{ ok: true;
   return new Promise((resolve) => {
     execFile(file, args, { timeout, windowsHide: true, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }, (err, stdout, stderr) => {
       if (!err) return resolve({ ok: true, stdout: String(stdout) });
-      const e = err as NodeJS.ErrnoException & { killed?: boolean };
+      const e = err as NodeJS.ErrnoException & { killed?: boolean; signal?: string | null };
       const text = capped(String(stderr));
-      resolve({ ok: false, error: text || (e.killed ? 'template-sync timed out after 20 s' : e.message) });
+      // A kill at the timeout is said first, with whatever the script printed after it.
+      if (e.killed || e.signal) return resolve({ ok: false, error: `template-sync timed out after 20 s${text ? `\n${text}` : ''}` });
+      resolve({ ok: false, error: text || e.message });
     });
   });
 }
@@ -97,7 +101,8 @@ function run(file: string, args: string[], timeout: number): Promise<{ ok: true;
 const parseCheck = (stdout: string): SyncOutcome => {
   try {
     const result = JSON.parse(stdout) as SyncCheck;
-    if (!result || !Array.isArray(result.files)) return { ok: false, error: 'template-sync printed JSON without a files list' };
+    const sound = result && typeof result.shipwright?.head === 'string' && Array.isArray(result.files) && result.files.every((f) => f && typeof f === 'object' && typeof f.state === 'string' && typeof f.template === 'string');
+    if (!sound) return { ok: false, error: 'template-sync printed JSON that is not a sync check (shipwright.head, or a file with a template and state, is missing)' };
     return { ok: true, result };
   } catch (err) {
     return { ok: false, error: `template-sync printed output that does not parse: ${(err as Error).message}` };
@@ -110,7 +115,7 @@ interface Cached {
   outcome: SyncOutcome;
 }
 const cache = new Map<number, Cached>();
-const inFlight = new Map<number, Promise<SyncOutcome>>();
+const inFlight = new Map<string, Promise<SyncOutcome>>();
 
 /** For tests: forget cached checks and shared runs. */
 export const clearSyncCache = (): void => {
@@ -118,8 +123,9 @@ export const clearSyncCache = (): void => {
   inFlight.clear();
 };
 
+// The script compares against Shipwright's main by default, so main's sha is what a cached answer depends on.
 const headOf = async (shipwright: string): Promise<string> => {
-  const out = await run('git', ['-C', shipwright, 'rev-parse', 'HEAD'], HEAD_TIMEOUT_MS);
+  const out = await run('git', ['-C', shipwright, 'rev-parse', 'main'], HEAD_TIMEOUT_MS);
   return out.ok ? out.stdout.trim() : '';
 };
 
@@ -132,19 +138,21 @@ async function checkRow(ctx: Ctx, m: ManifestRow): Promise<SyncOutcome> {
   const key = JSON.stringify([await headOf(m.shipwright), m.mtimeMs, m.dir]);
   const hit = cache.get(m.projectId);
   if (hit && hit.key === key && Date.now() - hit.at < FRESH_MS) return hit.outcome;
-  const running = inFlight.get(m.projectId);
+  const flight = `${m.projectId}|${key}`;
+  const running = inFlight.get(flight);
   if (running) return running;
   const started = (async (): Promise<SyncOutcome> => {
     const out = await run(process.execPath, [join(m.shipwright, 'scripts', 'template-sync.mjs'), '--check', '--json', '--project', m.dir], CHECK_TIMEOUT_MS);
     const outcome: SyncOutcome = out.ok ? parseCheck(out.stdout) : out;
-    cache.set(m.projectId, { key, at: Date.now(), outcome });
+    // A failure is not kept: the next load tries again.
+    if (outcome.ok) cache.set(m.projectId, { key, at: Date.now(), outcome });
     return outcome;
   })();
-  inFlight.set(m.projectId, started);
+  inFlight.set(flight, started);
   try {
     return await started;
   } finally {
-    inFlight.delete(m.projectId);
+    inFlight.delete(flight);
   }
 }
 

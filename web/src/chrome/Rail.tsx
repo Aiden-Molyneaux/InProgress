@@ -117,6 +117,8 @@ export function Rail({ tabs, archived, deleted: listed, current, onSelect, onMov
   const currentKey = library ? ':lib' : current;
   const [rowStop, setRowStop] = useState<{ from: string | null; slug: string } | null>(null);
   const [viewStop, setViewStop] = useState<{ from: string; view: View } | null>(null);
+  // The Library's shelf list keeps its stop the same way, until the open shelf changes.
+  const [shelfStop, setShelfStop] = useState<{ from: Shelf; shelf: Shelf } | null>(null);
   // Whether focus is in the views list. Switching project swaps that list for the new current row's, which takes focus
   // with it; it goes to the new list's current view instead of the page.
   const inViews = useRef(false);
@@ -127,7 +129,7 @@ export function Rail({ tabs, archived, deleted: listed, current, onSelect, onMov
     const active = document.activeElement;
     if (active && active !== document.body) return;
     rail.current?.querySelector<HTMLElement>('button.ip-rail-view[aria-current="page"]')?.focus();
-  }, [current]);
+  }, [currentKey]);
 
   const [rowMenu, setRowMenu] = useState<{ id: number; row: HTMLElement } | null>(null);
   const menuProject = rowMenu ? tabs.find((p) => p.id === rowMenu.id) : undefined;
@@ -261,9 +263,10 @@ export function Rail({ tabs, archived, deleted: listed, current, onSelect, onMov
         ? ':lib'
         : tabs.some((p) => p.slug === current)
           ? current
-          : tabs[0]?.slug;
+          : (tabs[0]?.slug ?? ':lib');
   // The views stop follows focus within one project's list and one view; on another view or project it is the current view.
   const viewsStop = viewStop && viewStop.from === `${current}:${view}` ? viewStop.view : view;
+  const shelvesStop = library && shelfStop && shelfStop.from === library ? shelfStop.shelf : library;
   const lastActive = activeIds[activeIds.length - 1];
   return (
     <nav className="ip-rail" aria-label="Projects" data-layout={layout} ref={rail}>
@@ -388,14 +391,23 @@ export function Rail({ tabs, archived, deleted: listed, current, onSelect, onMov
             )}
           </a>
           {library && (
-            <ul className="ip-rail-views" aria-label="Library" onKeyDown={onViewKey}>
+            <ul
+              className="ip-rail-views"
+              aria-label="Library"
+              onKeyDown={onViewKey}
+              onFocus={() => (inViews.current = true)}
+              onBlur={(e) => {
+                if (e.currentTarget.isConnected) inViews.current = e.currentTarget.contains(e.relatedTarget as Node | null);
+              }}
+            >
               {libraryViews.map((v) => (
                 <li key={v.shelf}>
                   <button
                     type="button"
                     className="ip-rail-view"
                     aria-current={v.shelf === library ? 'page' : undefined}
-                    tabIndex={v.shelf === library ? 0 : -1}
+                    tabIndex={v.shelf === shelvesStop ? 0 : -1}
+                    onFocus={() => setShelfStop({ from: library, shelf: v.shelf })}
                     title={v.count ? `${v.label}, ${v.count}` : v.label}
                     aria-label={v.count ? `${v.label}, ${v.count}` : v.label}
                     onClick={() => onLibrary(v.shelf)}

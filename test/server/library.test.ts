@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
@@ -67,6 +67,9 @@ function setup(script?: string) {
   const dirC = repoDir('ip-lib-c-');
   const unbound = mkdtempSync(join(tmpdir(), 'ip-lib-unbound-'));
   tempDirs.push(unbound);
+  // A script in the unbound folder that marks its run: a manifest must not be able to make the server run it.
+  mkdirSync(join(unbound, 'scripts'));
+  writeFileSync(join(unbound, 'scripts', 'template-sync.mjs'), "import { writeFileSync } from 'node:fs';writeFileSync(new URL('ran.txt', import.meta.url), 'ran');console.log('{}');");
   const manifest = (dir: string, shipwrightPath: string, adopts: string) => {
     mkdirSync(join(dir, '.claude'), { recursive: true });
     writeFileSync(join(dir, '.claude', 'shipwright.json'), JSON.stringify({ shipwright: shipwrightPath, files: { [adopts]: {} }, skip: [] }));
@@ -103,6 +106,7 @@ describe('library: sync', GIT_TIMEOUT, () => {
     expect(rowB.check.ok).toBe(false);
     expect(rowB.check.error).toContain(`Shipwright path ${unbound} is not a folder bound to a project`);
     expect(runCount()).toBe(1);
+    expect(existsSync(join(unbound, 'scripts', 'ran.txt'))).toBe(false);
     expect(body.noManifest).toEqual([
       { projectId: sw.id, slug: sw.slug, name: 'Shipwright', source: true },
       { projectId: c.id, slug: c.slug, name: 'Charlie', source: false },

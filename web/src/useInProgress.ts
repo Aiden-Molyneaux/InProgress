@@ -154,7 +154,8 @@ export function useInProgress(): InProgressState {
       setSnapshot(null);
       setLastEvent(null);
       setLiveEvent(null);
-      if (window.location.hash) window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      // A Library route keeps its address with no project underneath.
+      if (window.location.hash && parseLibraryHash(window.location.hash) === null) window.history.replaceState(null, '', window.location.pathname + window.location.search);
       return;
     }
     save('ip.project', slug);
