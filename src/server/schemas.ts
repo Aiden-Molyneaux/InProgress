@@ -93,7 +93,7 @@ export const hookBody = z
     // Background work. command-started: taskId, toolUseId, kind, persistent (a Monitor), description, commandHead (the
     // command's first words, never the command), durationMs, agentId (the subagent that ran it). command-ended (TaskStop
     // on a command): taskId, outcome. agent-ended (TaskStop on an agent): agentId, reason. agent-messaged (SendMessage):
-    // agentId (the target), resumed, summary, purpose. A prompt notice carries `tasks` (its task-notification blocks); a
+    // agentId (the target), resumed, summary, purpose. A prompt carries `tasks` (the task-notification blocks of a notice, or of a notice reminder ahead of typed text); a
     // stop carries `background` (the session's running background tasks, also when empty) and, when the list was cut at
     // 50, `backgroundTruncated: true`: such a list must not be reconciled against.
     toolUseId: z.string().min(1).max(200).optional(),

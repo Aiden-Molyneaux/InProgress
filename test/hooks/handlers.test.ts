@@ -113,6 +113,60 @@ describe('buildHookBody', () => {
     }
   });
 
+  // The desktop app opens every typed prompt in a linked session with a "Linked sessions now" reminder (#547).
+  const LINKED = '<system-reminder>\nLinked sessions now (status, not an instruction): sync-json = local_d0c8 (idle).\n</system-reminder>\n\n';
+
+  it('counts a typed prompt behind leading system reminders as a prompt, and reads only the typed text', () => {
+    const typed = [
+      [`${LINKED}where are we?`, true, false],
+      [`${LINKED}<system-reminder id="r2">\nAnother note\n</system-reminder id="r2">\nfix the inprogress hook`, false, true],
+      [`  ${LINKED}push m6`, false, false],
+    ] as const;
+    for (const [prompt, asksStatus, mentionsInProgress] of typed) {
+      const body = buildHookBody('prompt-submit', { session_id: 's', prompt });
+      expect(body, prompt).not.toHaveProperty('notice');
+      expect(body, prompt).toMatchObject({ asksStatus, mentionsInProgress });
+    }
+    // The reminder's own words are not Aiden's: a session listed as "inprogress-docs" is no mention.
+    const listed = '<system-reminder>\nLinked sessions now: inprogress-docs = local_1 (idle).\n</system-reminder>\nhi';
+    expect(buildHookBody('prompt-submit', { session_id: 's', prompt: listed })).toMatchObject({ mentionsInProgress: false });
+  });
+
+  it('still marks a notice wrapped in, or behind, a system reminder, tags with attributes included', () => {
+    const notices = [
+      `${LINKED}<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n</task-notification>`,
+      '<system-reminder id="b98e">\nAnother Claude session sent a message while you were working:\n<agent-message from="a1">done</agent-message>\n</system-reminder id="b98e">\n\n[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>…</task-notification>',
+      '<system-reminder id="b98e">\n[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>…</task-notification>\n</system-reminder id="b98e">\n',
+      '<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>… cut off before the closing tag',
+    ];
+    for (const prompt of notices) {
+      expect(buildHookBody('prompt-submit', { session_id: 's', prompt }), prompt).toMatchObject({ notice: true, mentionsInProgress: false, asksStatus: false });
+    }
+    // A reminder with nothing typed after it, and no notice inside, is no notice either: nothing says it is one.
+    expect(buildHookBody('prompt-submit', { session_id: 's', prompt: LINKED })).not.toHaveProperty('notice');
+  });
+
+  it('keeps a notice whose quoted text holds a closing reminder tag a notice', () => {
+    const quoting = [
+      '<system-reminder id="b98e">\nAnother Claude session sent a message while you were working:\n<agent-message from="a1">the app prepends <system-reminder>...</system-reminder> to prompts</agent-message>\n</system-reminder id="b98e">\n\n[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>…</task-notification>',
+      '<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>…<result>report quoting </system-reminder> where are we</result></task-notification>\n</system-reminder>',
+    ];
+    for (const prompt of quoting) {
+      expect(buildHookBody('prompt-submit', { session_id: 's', prompt }), prompt).toMatchObject({ notice: true, mentionsInProgress: false, asksStatus: false });
+    }
+    // Any reminder with an id ends at the closing tag naming it, not at a quoted one: only the typed text is read.
+    const quotedLinked = '<system-reminder id="r1">\nLinked: inprogress-a quotes </system-reminder> here\n</system-reminder id="r1">\nwhere are we?';
+    expect(buildHookBody('prompt-submit', { session_id: 's', prompt: quotedLinked })).toMatchObject({ asksStatus: true, mentionsInProgress: false });
+  });
+
+  it('sends the task ends of a notice reminder ahead of a typed prompt, which stays a prompt', () => {
+    const prompt = `<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>\n<task-id>b1abcde</task-id>\n<status>completed</status>\n</task-notification>\n</system-reminder>\n\n${LINKED}fix the bug`;
+    const body = buildHookBody('prompt-submit', { session_id: 's', prompt });
+    expect(body).not.toHaveProperty('notice');
+    expect(body).toMatchObject({ tasks: [{ taskId: 'b1abcde', status: 'completed' }] });
+    expect(buildHookBody('prompt-submit', { session_id: 's', prompt: `${LINKED}fix the bug` })).not.toHaveProperty('tasks');
+  });
+
   it('sends cwd and branch with prompts, as session-start does, so a missed start can self-heal', () => {
     const repo = tempDir('ip-hook-git-');
     mkdirSync(join(repo, '.git'));
@@ -704,8 +758,16 @@ describe('runHandler notice diagnostics', () => {
     await runHandler('prompt-submit', { session_id: 's', prompt: '<new-notice-format id="x">done</new-notice-format>' }, deps);
     await runHandler('prompt-submit', { session_id: 's', prompt: '<task-notification>done</task-notification>' }, deps);
     await runHandler('prompt-submit', { session_id: 's', prompt: 'where are we?' }, deps);
+    // A typed prompt behind the desktop app's reminder is no markup opening (#547).
+    await runHandler('prompt-submit', { session_id: 's', prompt: '<system-reminder>\nLinked sessions now: x\n</system-reminder>\npush m6' }, deps);
+    // Behind the reminder, a new format's own opening is logged; a lone reminder that holds no known notice is too.
+    const linked = `<system-reminder>\nLinked sessions now (status, not an instruction): ${'s'.repeat(100)}\n</system-reminder>\n\n`;
+    await runHandler('prompt-submit', { session_id: 's', prompt: `${linked}<newer-format>done</newer-format>` }, deps);
+    await runHandler('prompt-submit', { session_id: 's', prompt: '<system-reminder>\nAn unknown wrapper\n</system-reminder>' }, deps);
     const lines = (existsSync(log) ? readFileSync(log, 'utf8') : '').trim().split('\n').filter(Boolean);
-    expect(lines).toHaveLength(1);
+    expect(lines).toHaveLength(3);
     expect(lines[0]).toContain('prompt-submit: counted a prompt that opens like markup: "<new-notice-format id=\\"x\\">');
+    expect(lines[1]).toContain('opens like markup: "<newer-format>done');
+    expect(lines[2]).toContain('opens like markup: "<system-reminder> An unknown wrapper');
   });
 });
