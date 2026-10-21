@@ -31,7 +31,8 @@ export function titleAdvice(
   // Only the focus step and the asks this session raised on it count: no full snapshot on the hook's budget.
   const node = session.focusNodeId === null ? undefined : findNode(ctx, session.focusNodeId);
   // A step under a parked step is parked too, as the briefing reads it.
-  const focus = node && node.status !== 'parked' && node.status !== 'done' && parkedAncestor(ctx, node.id) !== null ? { ...node, status: 'parked' as const } : node;
+  const parkedAbove = node && node.status !== 'parked' && node.status !== 'done' ? parkedAncestor(ctx, node.id) : null;
+  const focus = node && parkedAbove !== null ? { ...node, status: 'parked' as const } : node;
   const snapshot = { nodes: focus ? [focus] : [], asks: focus ? openAsksBy(ctx, session.id, focus.id) : [] };
   // A prompt is judged as at the turn's end, so work still running keeps RUNNING expected: else the prompt would ask to
   // drop a RUNNING the next stop puts back, and clear the memory of a declined demand.
@@ -43,7 +44,7 @@ export function titleAdvice(
     if (session.titleAsked !== null) setTitleAsked(ctx, session.id, null);
     return {};
   }
-  const reason = prefixReason(prefix, session.focusNodeId);
+  const reason = prefix === 'PARKED' && parkedAbove !== null ? `#${session.focusNodeId} is under parked #${parkedAbove}` : prefixReason(prefix, session.focusNodeId);
   const line = `Title: set it to "${expected}" (mcp__ccd_session_mgmt__set_session_title on "self"); InProgress sees ${reason}.`;
   if (event !== 'stop' || o.titleChannel !== 'enforce' || o.stopHookActive || session.titleAsked === expected) return { line };
   // Recorded before the hook prints it: a reply that misses the hook's timeout spends this demand unprinted. Accepted;
