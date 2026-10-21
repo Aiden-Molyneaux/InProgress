@@ -8,6 +8,7 @@ import { KeyHint } from '../parts/KeyHint';
 import { LiveDot } from '../parts/LiveDot';
 import { relativeTime } from '../time';
 import { useNow } from '../useNow';
+import { Backups } from './Backups';
 import { footerKeys, serverLine } from './hudLogic';
 import { useMenuOpen } from './useMenuOpen';
 
@@ -71,6 +72,7 @@ export function Footer({ event, snapshot, tabs, closable }: FooterProps) {
           <KeyHint key={k.label} keys={k.keys} label={k.label} />
         ))}
       </div>
+      <Backups />
       <span className="ip-footer-server" title={build ? `Built ${build.builtAt}` : undefined}>
         {serverLine(window.location.host, build)}
       </span>

@@ -1,3 +1,4 @@
+import type { BackUpNowResult, BackupStatus } from '../../src/core/backups';
 import type { BuildInfo } from '../../src/core/build';
 import type { StepHit } from '../../src/core/goto';
 import type { DeletedProject, NodeDetail, PageBody, Project, ProjectSnapshot, ProjectSummary, QueueOp, RankOp, Resource } from '../../src/core/types';
@@ -41,6 +42,11 @@ export const api = {
    * (the open project's slug) first within each tier.
    */
   find: (q: string, here: string | null) => getJson<StepHit[]>(`/api/find?q=${encodeURIComponent(q)}${here ? `&here=${encodeURIComponent(here)}` : ''}`),
+  /** The Backups panel: what doctor's Backups check reports, as rows. */
+  backups: () => getJson<BackupStatus>('/api/backups'),
+  /** Back up now: the same work as `inprogress backup --push`. Answers the result and the status after it. */
+  backUpNow: () => sendUi<{ result: BackUpNowResult; status: BackupStatus }>('/api/ui/backups/run', {}),
+  openBackupsFolder: () => postUi('/api/ui/backups/open-folder', {}),
   openResource: (id: number) => postUi('/api/ui/open', { resourceId: id }),
   /** Opens an http(s) link in the default browser: from the Edge app window a plain link would open in Edge. */
   openUrl: (url: string) => postUi('/api/ui/open-url', { url }),

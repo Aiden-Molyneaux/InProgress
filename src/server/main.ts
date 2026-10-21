@@ -9,7 +9,7 @@ import { buildApp } from './app';
 import { snapshotDb, truncateIfLarge } from './backup';
 import { openDb } from './db/connection';
 import { createCtx } from './db/tx';
-import { tickOffsite } from './offsite';
+import { createBackupRunner } from './backup-runner';
 import { runMaintenance } from './project-lifecycle';
 import { reconcileProjects } from './repo/taskState';
 import { portState, reportStartupFailure } from './startup';
@@ -36,11 +36,17 @@ async function main(): Promise<void> {
   const ctx = createCtx(db);
   // The Board reconcile runs inside every write; set here, not in createCtx, so tests opt in.
   ctx.reconcile = reconcileProjects;
+  // The runner serializes the timer's tick, the startup run and the window's Back up now. It logs through the app's logger,
+  // which does not exist yet: the closure looks it up when a line is written. runMaintenance never throws.
+  const log = { info: (message: string) => app.log.info(message), error: (message: string) => app.log.error(message) };
+  const runner = createBackupRunner({ db, home, log, maintenance: () => runMaintenance(ctx, home, log) });
   let closing = false;
   let maintenance: NodeJS.Timeout | undefined;
   let watchTimer: NodeJS.Timeout | undefined;
   const app = buildApp({
     ctx,
+    home,
+    backups: runner,
     token,
     uiToken: randomBytes(16).toString('hex'),
     version: VERSION,
@@ -82,27 +88,10 @@ async function main(): Promise<void> {
   await snapshotDb(db, backups).catch((err: Error) => app.log.error(err.message));
   // After the backup, so the newest backup still holds a project the purge is about to remove; then on a timer, since
   // the server can run for weeks. runMaintenance never throws.
-  const log = { info: (message: string) => app.log.info(message), error: (message: string) => app.log.error(message) };
-  // One tick at a time: a push that takes minutes must not overlap the next tick's snapshot or copy. tickOffsite never throws.
-  let ticking = false;
-  const tick = async (): Promise<void> => {
-    if (ticking) return;
-    ticking = true;
-    try {
-      await snapshotDb(db, backups).catch((err: Error) => app.log.error(err.message));
-      runMaintenance(ctx, home, log);
-      await tickOffsite(db, home, log);
-    } finally {
-      ticking = false;
-    }
-  };
   runMaintenance(ctx, home, log);
   // The off-machine copy and the drill start in the background: a slow push never delays the server's first answer.
-  ticking = true;
-  void tickOffsite(db, home, log).finally(() => {
-    ticking = false;
-  });
-  maintenance = setInterval(() => void tick(), MAINTENANCE_MS);
+  runner.startup();
+  maintenance = setInterval(() => void runner.tick(), MAINTENANCE_MS);
   maintenance.unref();
   // The transcript watcher: once now, so subagents that died while the server was down end at once, then on a timer that
   // never keeps the process alive. A failed tick is logged and the next one tries again.

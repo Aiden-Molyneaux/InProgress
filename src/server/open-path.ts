@@ -193,3 +193,10 @@ export async function openInEditorOrReveal(path: string): Promise<void> {
   else if (process.platform === 'darwin') launch('open', ['-R', target]);
   else launch('xdg-open', [dirname(target)]);
 }
+
+/** Open a folder in the file manager. No shell is involved; the path is one argument. */
+export async function openFolder(path: string): Promise<void> {
+  const target = resolve(path);
+  if (process.platform === 'win32') return start(join(systemRoot(), 'explorer.exe'), [target]);
+  return start(process.platform === 'darwin' ? 'open' : 'xdg-open', [target]);
+}

@@ -3,9 +3,11 @@ import Fastify, { LogController, type FastifyInstance, type FastifyReply, type F
 import { ZodError } from 'zod';
 import type { BuildInfo } from '../lib/version';
 import type { Ctx } from './db/tx';
+import type { BackupRunner } from './backup-runner';
 import { ApiError } from './errors';
 import type { DesktopSession, OpenDesktopResult } from './open-desktop';
 import { registerAskRoutes } from './routes/asks';
+import { registerBackupRoutes } from './routes/backups';
 import { registerReadRoutes } from './routes/read';
 import { registerSessionRoutes } from './routes/sessions';
 import { registerSse } from './routes/sse';
@@ -27,6 +29,11 @@ export interface AppOptions {
   openUrl?: (url: string) => Promise<void>;
   /** Opens the session in the Claude desktop app, or says why not. Replaceable so tests never open the app. */
   openDesktop?: (session: DesktopSession) => Promise<OpenDesktopResult>;
+  /** The data folder: the Backups panel reads its backups and offsite copy. Without it, and `backups`, the panel's routes are not served. */
+  home?: string;
+  backups?: BackupRunner;
+  /** Opens a folder in the file manager. Replaceable so tests never open one. */
+  openFolder?: (path: string) => Promise<void>;
 }
 
 export type Guard = (req: FastifyRequest, reply: FastifyReply) => Promise<unknown>;
@@ -112,5 +119,6 @@ export function buildApp(opts: AppOptions): FastifyInstance {
   registerSse(app, opts.ctx);
   registerWindowRoutes(app, opts.ctx, requireUi, opts.openDesktop);
   registerUi(app, opts, requireToken, requireUi);
+  if (opts.home && opts.backups) registerBackupRoutes(app, { ...opts, home: opts.home, backups: opts.backups }, requireUi);
   return app;
 }
