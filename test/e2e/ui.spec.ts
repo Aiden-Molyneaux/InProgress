@@ -365,7 +365,9 @@ test.afterAll(() => {
 async function pageRepo(api: APIRequestContext, project: Seeded) {
   const dir = mkdtempSync(join(tmpdir(), 'ip-e2e-pages-'));
   pageDirs.push(dir);
-  const git = (...args: string[]) => execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], { stdio: 'ignore' });
+  // No hooks: the user's global ones (Git LFS, an identity check) cost seconds a commit and would run the test past its timeout.
+  const hooksOff = `core.hooksPath=${join(dir, '.git', 'no-hooks')}`;
+  const git = (...args: string[]) => execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', '-c', hooksOff, ...args], { stdio: 'ignore' });
   git('init', '-q', '-b', 'main');
   mkdirSync(join(dir, 'docs'));
   mkdirSync(join(dir, 'src'));
