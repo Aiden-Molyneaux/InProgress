@@ -10,7 +10,7 @@ import { addLog } from '../../src/server/repo/logs';
 import { addNodes, listNodes, updateNode } from '../../src/server/repo/nodes';
 import { addBinding, createProject, setQueue, updateProject } from '../../src/server/repo/projects';
 import { addResource } from '../../src/server/repo/resources';
-import { briefingDue, expireStaleSessions, findSession, listPastSessions, readProjectSessions } from '../../src/server/repo/sessions';
+import { briefingDue, expireStaleSessions, findSession, listPastSessions, readProjectSessions, saveSession } from '../../src/server/repo/sessions';
 import { getNodeDetail, getProjectSnapshot } from '../../src/server/repo/snapshot';
 import { renderBriefing } from '../../src/server/briefing';
 import { setTasks } from '../../src/server/repo/work';
@@ -154,6 +154,14 @@ describe('handleHookEvent', () => {
     expect(findSession(ctx, 's1')?.lastPromptAt).toBe(at);
     handleHookEvent(ctx, 's1', { event: 'prompt' });
     expect(findSession(ctx, 's1')!.lastPromptAt! > at!).toBe(true);
+  });
+
+  it('keeps titleAsked: null at first, then the title saveSession wrote', () => {
+    const { ctx } = setup();
+    handleHookEvent(ctx, 's1', start());
+    expect(findSession(ctx, 's1')?.titleAsked).toBeNull();
+    saveSession(ctx, { ...findSession(ctx, 's1')!, titleAsked: 'DONE #1 x' });
+    expect(findSession(ctx, 's1')?.titleAsked).toBe('DONE #1 x');
   });
 
   it('answers status questions with the current frontier', () => {

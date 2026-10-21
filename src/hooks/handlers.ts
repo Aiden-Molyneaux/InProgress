@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { ID_MAX, TASK_ID_MAX, noticeTasks, text } from '../core/notices';
+import type { TitleDemand } from '../core/title';
 import { SCRIBE_AGENT, WORK_STATUSES, type HookEvent } from '../core/types';
 import { detectBranch } from '../lib/git';
 import { homeDir } from '../lib/home';
@@ -41,12 +42,19 @@ export interface HookStdin {
   tool_use_id?: unknown;
   tool_input?: unknown;
   tool_response?: unknown;
+  stop_hook_active?: unknown;
   [key: string]: unknown;
 }
 
 export interface HookDeps {
-  post: (path: string, body: unknown) => Promise<{ tracked: boolean; context?: string }>;
+  post: (path: string, body: unknown) => Promise<{ tracked: boolean; context?: string; title?: TitleDemand }>;
   ensureServer: () => Promise<boolean>;
+}
+
+/** What a hook prints: a context event's briefing, or a stop's block reason. Never both. */
+export interface HookOutput {
+  context?: string;
+  block?: string;
 }
 
 /** Mirrors the `title` max in the server's hookBody zod schema: a longer title gets the whole hook POST rejected. */
@@ -121,6 +129,12 @@ export function buildHookBody(name: Exclude<HookName, ToolHookName>, input: Hook
     // The server must not reconcile against a list that was cut: it would end commands that are still running.
     if (truncated) body.backgroundTruncated = true;
   }
+  // True in the extra pass a block caused: the server must not block again. Sent only when true (the server acts on
+  // nothing else), so an ordinary stop's body stays exactly what an older server accepts.
+  if (name === 'stop' && input.stop_hook_active === true) body.stopHookActive = true;
+  // The title channel runs only in the desktop app, where set_session_title exists; a CLI session can carry a /rename
+  // title too. Claude Code hands its hooks its own environment. Flagged only when true, as above.
+  if ((name === 'prompt-submit' || name === 'stop') && process.env.CLAUDE_CODE_ENTRYPOINT === 'claude-desktop') body.desktop = true;
   if (name === 'subagent-start' || name === 'subagent-stop') {
     if (input.agent_id) body.agentId = input.agent_id;
     if (typeof input.agent_type === 'string') body.agentType = input.agent_type;
@@ -389,7 +403,7 @@ function stoppedBackground(tasks: unknown[]): { tasks: Record<string, unknown>[]
   return { tasks: out, truncated: false };
 }
 
-export async function runHandler(name: HookName, input: HookStdin, deps: HookDeps): Promise<string | undefined> {
+export async function runHandler(name: HookName, input: HookStdin, deps: HookDeps): Promise<HookOutput | undefined> {
   if (!input.session_id) return undefined;
   if (isToolHook(name)) {
     // Silent: a tool hook never prints, so it can never steer the tool call.
@@ -404,5 +418,10 @@ export async function runHandler(name: HookName, input: HookStdin, deps: HookDep
     appendLog(join(homeDir(), 'hooks.log'), `prompt-submit: counted a prompt that opens like markup: ${JSON.stringify(input.prompt.slice(0, 80))}`);
   }
   const result = await deps.post(`/api/sessions/${encodeURIComponent(input.session_id)}/hook`, body);
-  return CONTEXT_EVENT_NAME[name] ? result.context : undefined;
+  if (CONTEXT_EVENT_NAME[name]) return result.context ? { context: result.context } : undefined;
+  if (name === 'stop' && result.title) {
+    const { title, reason } = result.title;
+    return { block: `Set this session's title to "${title}" with mcp__ccd_session_mgmt__set_session_title on "self" (InProgress: ${reason}), then stop.` };
+  }
+  return undefined;
 }

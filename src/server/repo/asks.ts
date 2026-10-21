@@ -140,6 +140,11 @@ export function listProjectAsks(ctx: Ctx, projectId: number): Ask[] {
     .all(projectId, msAgo(ctx, ASK_TRAIL_MS)) as AskRow[]).map(toAsk);
 }
 
+/** The open asks session `sessionId` raised on node `nodeId`, oldest raised first: all the title rules read. */
+export function openAsksBy(ctx: Ctx, sessionId: string, nodeId: number): Ask[] {
+  return (ctx.db.prepare('SELECT * FROM asks WHERE cleared_at IS NULL AND session_id = ? AND node_id = ? ORDER BY raised_at, id').all(sessionId, nodeId) as AskRow[]).map(toAsk);
+}
+
 /** Asks of the project raised at or after `since` (ISO), oldest first, cleared or not: the digest reads the table, not the 7-day snapshot. */
 export function listAsksRaisedSince(ctx: Ctx, projectId: number, since: string): Ask[] {
   return (ctx.db.prepare('SELECT * FROM asks WHERE project_id = ? AND raised_at >= ? ORDER BY raised_at, id').all(projectId, since) as AskRow[]).map(toAsk);

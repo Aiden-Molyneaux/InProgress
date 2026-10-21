@@ -46,13 +46,15 @@ async function main(): Promise<void> {
     // Synchronous and silent; it never throws. Off with INPROGRESS_HOOK_CAPTURE=0 or a file ~/.inprogress/capture/off.
     captureHookInput(name, input);
     const url = baseUrl();
-    const context = await runHandler(name, input, {
+    const output = await runHandler(name, input, {
       ensureServer: () => ensureServer({ baseUrl: url, waitMs: budget.serverWaitMs }),
       // Read the token lazily: the first server start creates it.
       post: (path, body) => createClient({ baseUrl: url, token: readToken(), timeoutMs: budget.postTimeoutMs }).post(path, body),
     });
     const eventName = CONTEXT_EVENT_NAME[name];
-    if (context && eventName) await writeStdout(JSON.stringify({ hookSpecificOutput: { hookEventName: eventName, additionalContext: context } }));
+    // A stop's block sends the session back for one more pass; Claude Code reads one JSON object, so never both.
+    if (name === 'stop' && output?.block) await writeStdout(JSON.stringify({ decision: 'block', reason: output.block }));
+    else if (output?.context && eventName) await writeStdout(JSON.stringify({ hookSpecificOutput: { hookEventName: eventName, additionalContext: output.context } }));
   })();
   work.catch((err: unknown) => appendLog(logFile, hookErrorLine(name, err)));
   // We exit as soon as the limit passes, so the work's own error line never gets written: log the timeout instead.

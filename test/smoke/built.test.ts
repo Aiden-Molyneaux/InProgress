@@ -57,7 +57,8 @@ function freePort(): Promise<number> {
 beforeAll(async () => {
   const port = await freePort();
   base = `http://127.0.0.1:${port}`;
-  env = { ...process.env, INPROGRESS_HOME: home, INPROGRESS_PORT: String(port), INPROGRESS_CLAUDE_DIR: claude };
+  // Not the desktop app unless a test says so: the suite may itself run inside a desktop session.
+  env = { ...process.env, INPROGRESS_HOME: home, INPROGRESS_PORT: String(port), INPROGRESS_CLAUDE_DIR: claude, CLAUDE_CODE_ENTRYPOINT: '' };
   server = spawn(process.execPath, [bin('server/main.js')], { env, stdio: 'ignore' });
   for (let i = 0; i < 80 && !(await isServerUp(base)); i++) await new Promise((r) => setTimeout(r, 100));
   expect(await isServerUp(base)).toBe(true);
@@ -287,6 +288,32 @@ describe('built artifacts', () => {
     expect(again).toMatchObject({ status: 0, stdout: '', stderr: '' });
     expect(commands().map((r) => [r.task_id, r.outcome]).sort()).toEqual([['bc802pkev', 'unknown'], ['sb0o4266c', null]]);
     expect(logged().slice(before)).toBe('');
+  });
+
+  it('under enforce, a Stop whose title is out of step prints one block naming the title, and nothing in the pass it causes', async () => {
+    const client = createClient({ baseUrl: base, token: readToken(home) });
+    // Its own project, so the Smoke project stays in nudge mode for the other stops.
+    const p = await client.post<{ slug: string; rootNodeId: number }>('/api/projects', { name: 'Smoke Titles' });
+    await client.patch(`/api/projects/${p.slug}`, { titleChannel: 'enforce' });
+    const [step] = await client.post<TreeNode[]>('/api/nodes', { parentId: p.rootNodeId, nodes: [{ title: 'Ship the titles', status: 'active' }] });
+    await client.post('/api/sessions/smoke-title/enroll', { project: p.slug, title: `#${step.id} Ship the titles` }, { actor: 'scribe:smoke-title' });
+    await client.post('/api/sessions/smoke-title/focus', { nodeId: step.id }, { actor: 'scribe:smoke-title' });
+    await client.patch(`/api/nodes/${step.id}`, { status: 'done' });
+    const payload = (active: boolean) => JSON.stringify({ session_id: 'smoke-title', hook_event_name: 'Stop', stop_hook_active: active, background_tasks: [], session_crons: [] });
+    const stopWith = (active: boolean) => spawnSync(process.execPath, [bin('hooks/hook.js'), 'stop'], { input: payload(active), env: { ...env, CLAUDE_CODE_ENTRYPOINT: 'claude-desktop' }, encoding: 'utf8' });
+    // Outside the desktop app the same stop prints nothing.
+    expect(runHook('stop', JSON.parse(payload(false)) as object)).toMatchObject({ status: 0, stdout: '', stderr: '' });
+    const extra = stopWith(true);
+    expect(extra).toMatchObject({ status: 0, stdout: '', stderr: '' });
+    const blocked = stopWith(false);
+    expect(blocked).toMatchObject({ status: 0, stderr: '' });
+    const reply = JSON.parse(blocked.stdout) as { decision: string; reason: string };
+    expect(reply).toEqual({ decision: 'block', reason: expect.stringContaining(`"DONE #${step.id} Ship the titles"`) });
+    expect(reply.reason).toContain('mcp__ccd_session_mgmt__set_session_title');
+    expect(storedRows('sessions').find((r) => r.id === 'smoke-title')).toMatchObject({ title_asked: `DONE #${step.id} Ship the titles` });
+    // The extra pass the block causes, and a second stop with the same title, print nothing.
+    expect(stopWith(true)).toMatchObject({ status: 0, stdout: '', stderr: '' });
+    expect(stopWith(false)).toMatchObject({ status: 0, stdout: '', stderr: '' });
   });
 
   it('hooks exit 0 silently when the capture folder cannot be written, or capture is off', () => {

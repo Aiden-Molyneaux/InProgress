@@ -3223,6 +3223,7 @@ test.describe('Project view', () => {
     await page.locator('.ip-page-title').click();
     await expect(menu).toHaveCount(0);
     await expect(opener).toHaveAttribute('aria-expanded', 'false');
+    await expect(opener).toBeFocused();
     // Shift+Tab from any item, not only the first, closes the menu and lands on the opener.
     await opener.click();
     await expect(menu).toBeVisible();
@@ -4148,10 +4149,39 @@ test.describe('#502 Board in v3', () => {
     await page.keyboard.press('Tab');
     await expect(menu).toHaveCount(0);
     await expect(next.locator('.ip-backlog-row').first()).toBeFocused();
-    // A press on a column head closes it.
+    // A press on a column head closes it, and focus stays where the press put it.
     await button.click();
     await expect(menu).toBeVisible();
     await band(page, 'now').locator('h2').click();
     await expect(menu).toHaveCount(0);
+    await expect(band(page, 'now').locator('h2')).toBeFocused();
+    // A press on nothing that takes focus closes it, and focus goes back to the button rather than to the page.
+    await button.click();
+    await expect(menu).toBeVisible();
+    await page.locator('.ip-page-title').click();
+    await expect(menu).toHaveCount(0);
+    await expect(button).toBeFocused();
+  });
+
+  test('the Backlog phase menu keeps focus when the focused phase empties under it', async ({ page, api, fresh }) => {
+    const created = await write<{ id: number; title: string }[]>(api, fresh.session, 'post', '/api/nodes', {
+      parentId: fresh.root,
+      nodes: [{ title: 'Spare phase', kind: 'phase', status: 'active', children: [{ title: 'Spare entry' }] }],
+    });
+    const entry = created.find((n) => n.title === 'Spare entry')!;
+    await page.setViewportSize(WIDEST);
+    await open(page, fresh);
+    const menu = phaseMenu(page);
+    await phasePicker(page).click();
+    const current = menu.getByRole('menuitem', { name: /^Road to market/ });
+    const doomed = menu.getByRole('menuitem', { name: /^Spare phase · 1/ });
+    await expect(current).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(doomed).toBeFocused();
+    // The phase's only entry finishes elsewhere: its item goes, and focus moves to the current phase, not the page.
+    await write(api, fresh.session, 'patch', `/api/nodes/${entry.id}`, { status: 'done', outcome: 'Done' });
+    await expect(doomed).toHaveCount(0);
+    await expect(menu).toBeVisible();
+    await expect(current).toBeFocused();
   });
 });

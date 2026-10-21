@@ -30,10 +30,10 @@
 .ip-sec-toggle { display: flex; flex: 1 1 auto; align-items: center; gap: var(--sp-3); min-width: 0; text-align: left; font-family: var(--font-body); font-size: var(--t-title); font-weight: var(--w-strong); line-height: 1.3; color: var(--text-hi); }
 .ip-sec-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ip-caret { flex: none; width: 12px; text-align: center; color: var(--text-muted); }
-.ip-docs-wrap { position: relative; flex: none; }
+.ip-sec-head > .p-menubtn { flex: none; }
 .ip-docs-btn { padding: 2px var(--sp-1); font-family: var(--font-mono); font-size: var(--t-detail-sm); line-height: 1.4; color: var(--text-muted); }
 .ip-docs-btn:hover { color: var(--volt); background: var(--canvas-3); }
-.ip-docs-pop { position: absolute; top: 100%; right: 0; z-index: var(--z-popover); width: 320px; max-width: calc(100vw - 2 * var(--sp-4)); margin-top: var(--sp-1); }
+.ip-sec-head .p-menubtn-pop { margin-top: var(--sp-1); }
 .ip-docs-sum { margin-left: var(--sp-2); font-size: var(--t-detail-sm); color: var(--text-muted); }
 .ip-sec-toggle:focus-visible, .ip-done-fold-btn:focus-visible, .ip-docs-btn:focus-visible { outline: 2px solid var(--volt); outline-offset: 1px; }
 /* Inside the index, which scrolls and so clips: the ring sits inside the row. */
