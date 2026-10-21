@@ -96,7 +96,7 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
   const pickedRef = useRef(picked);
   pickedRef.current = picked;
   /** The control to focus once its step is drawn again after an inspector write that moved the row (that control's `data-insp`). */
-  const want = useRef<{ id: number; ctl: string } | null>(null);
+  const want = useRef<{ id: number; ctl: string; el: HTMLElement | null } | null>(null);
   const wantTimer = useRef(0);
   const confirming = panel?.kind === 'delete' ? panel.id : null;
   /** A view switch or a new filter closes an open Delete confirm: its row may move away from where the user was looking. An open Park form stays (and keeps what was typed) while its row is still shown. */
@@ -193,25 +193,29 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
   );
 
   useEffect(() => () => window.clearTimeout(wantTimer.current), []);
-  // After a Band or Phase change that redraws the row elsewhere: if focus fell to the page, it goes back to the select. A layout
-  // effect declared before useKeepRowFocus's, so it runs first and the row's `li` has not taken the focus. It holds while focus
-  // stays in the step's row: the row may be redrawn more than once (the guess, then the snapshot, or a refusal's restore).
+  // After a Band or Phase change that redraws the row elsewhere: if a redraw took the select away with focus in it, focus goes to
+  // the select drawn in its place. A layout effect declared before useKeepRowFocus's, so it runs first and the row's `li` has
+  // not taken the focus. It holds through several redraws (the guess, then the snapshot, or a refusal's restore), and only for
+  // the select: focus the user moves anywhere else, or lets go of while the select is still there, ends it.
   useLayoutEffect(() => {
     const w = want.current;
     if (!w) return;
     const active = document.activeElement;
-    const target = root.current?.querySelector<HTMLElement>(`li[data-node="${w.id}"]`);
+    if (active === w.el) return;
     const lost = active === null || active === document.body;
-    // Gone from the view, or focus moved on out of the row: nothing to give back.
-    if (!rowIds.includes(w.id) || (!lost && !target?.contains(active))) {
+    const target = root.current?.querySelector<HTMLElement>(`li[data-node="${w.id}"]`);
+    if (!rowIds.includes(w.id) || !lost || w.el?.isConnected) {
       want.current = null;
       return;
     }
-    if (target && lost) (target.querySelector<HTMLElement>(`[data-insp="${w.ctl}"]`) ?? target).focus();
+    if (!target) return;
+    const next = target.querySelector<HTMLElement>(`[data-insp="${w.ctl}"]`) ?? target;
+    next.focus();
+    w.el = next;
   });
-  /** Notes the control a Band or Phase change was made from, for the effect above; given up after 3 s. */
+  /** Notes the control a Band or Phase change was made from (focused now), for the effect above; given up after 3 s. */
   const follow = (id: number, ctl: string) => {
-    want.current = { id, ctl };
+    want.current = { id, ctl, el: document.activeElement instanceof HTMLElement ? document.activeElement : null };
     window.clearTimeout(wantTimer.current);
     wantTimer.current = window.setTimeout(() => {
       want.current = null;
