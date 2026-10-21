@@ -4197,6 +4197,22 @@ test.describe('#542 ranked Backlog', () => {
     await expect.poll(() => mineOnly(again)).toEqual(['5 Store listing', '3 RevenueCat', '4 Build to GitHub']);
   });
 
+  test('a queued step that is first in Someday, dragged from Next up onto the folded Someday head, lands first in Someday', async ({ page, api, fresh }) => {
+    const { view, projectId } = await openRankedWith(page, api, fresh, []);
+    const [first, second] = [fresh.ids['3 RevenueCat'], fresh.ids['4 Build to GitHub']];
+    await rankFromPage(page, projectId, fresh.slug, { node: first, to: 'someday', before: null });
+    await rankFromPage(page, projectId, fresh.slug, { node: second, to: 'someday', before: null });
+    // Queued, it keeps its band: it is still the first member of Someday's order.
+    await rankFromPage(page, projectId, fresh.slug, { node: first, to: 'next', before: null });
+    const nextUp = view.getByRole('region', { name: 'Next up' });
+    const someday = view.getByRole('region', { name: 'Someday' });
+    await drag(handleOf(blRow(page, nextUp, '3 RevenueCat')), someday.locator('.ip-bl-bhead'));
+    await expect(blRow(page, nextUp, '3 RevenueCat')).toHaveCount(0);
+    await someday.getByRole('button', { name: /^Show/ }).click();
+    const mine = ['3 RevenueCat', '4 Build to GitHub'];
+    await expect.poll(async () => (await someday.locator('.ip-bl-title').allInnerTexts()).filter((t) => mine.includes(t))).toEqual(mine);
+  });
+
   test('Alt+Down on a focused Soon row moves it one place and keeps focus', async ({ page, api, fresh }) => {
     const mine = ['3 RevenueCat', '4 Build to GitHub', '5 Store listing'];
     const { view } = await openRankedWith(page, api, fresh, mine);

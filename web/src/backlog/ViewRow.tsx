@@ -13,7 +13,7 @@ export function ViewRow({ id, title, cursor, phase, blocked, inside, label, age,
   id: number;
   title: string;
   cursor: CursorItemProps;
-  /** The parent's name, in mono dim: under the ID and Age sorts, and on a parked row. */
+  /** The parent's name, in mono dim: in every view but By Phase, and on a parked row. */
   phase?: string | null;
   blocked?: boolean;
   /** Steps open below this one; none shown at 0. */

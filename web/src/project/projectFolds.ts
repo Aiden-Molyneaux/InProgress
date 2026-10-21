@@ -6,7 +6,7 @@ const storeKey = (projectId: number) => `ip.folds.${projectId}`;
 
 /**
  * Fold choices Aiden made in a project, true for open and false for closed. The key is the one earlier versions used, whose
- * values were 'open' or 'closed' by node id: anything that is not a `section:` or `done:` key holding a boolean is dropped.
+ * values were 'open' or 'closed' by node id: anything that is not a `section:`, `done:` or `someday` key holding a boolean is dropped.
  */
 export function loadFolds(projectId: number): Record<string, boolean> {
   const raw = loadJson<unknown>(storeKey(projectId), {});

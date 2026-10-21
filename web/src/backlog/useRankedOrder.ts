@@ -14,8 +14,8 @@ export interface RankedOrder {
   lists: RankLists;
   /** Each row's number while a guess is shown (Next up's unowned rows, then Soon, then Someday); null once the snapshot has settled. */
   numbers: Map<number, number> | null;
-  /** `guess` false sends the write without showing a result first (a no-op move such as Keep). */
-  write: (op: RankOp, guess?: boolean) => Promise<void>;
+  /** `guess` false sends the write without showing a result first (a no-op move such as Keep); an op shows that one instead (the lists the window holds differ from the server's, as under a filter). */
+  write: (op: RankOp, guess?: boolean | RankOp) => Promise<void>;
   /** A write is on its way (its answer has not come back). */
   writing: () => boolean;
   /** The step is in a write whose answer has not come back. */
@@ -26,11 +26,13 @@ export interface RankedOrder {
  * Ranked's order, the way `useNextQueue` keeps Next's: a drag or Alt+arrow shows its result at once (`pending`), and the
  * snapshot that brings the same lists replaces the guess. A refusal puts the server's lists back and says why.
  */
-export function useRankedOrder({ backlog, snapshot, projectId, slug, onStatus }: {
+export function useRankedOrder({ backlog, snapshot, projectId, slug, query, onStatus }: {
   backlog: Backlog;
   snapshot: ProjectSnapshot;
   projectId: number;
   slug: string;
+  /** The filter: a guess made under one filter is not the lists under another. */
+  query: string;
   onStatus?: (text: string) => void;
 }): RankedOrder {
   const [pending, setPending] = useState<RankLists | null>(null);
@@ -54,10 +56,11 @@ export function useRankedOrder({ backlog, snapshot, projectId, slug, onStatus }:
     setPending((p) => (p && key(p) === key(server) ? null : p));
   }, [snapshot]);
   useEffect(() => () => window.clearTimeout(clearTimer.current), []);
+  useEffect(() => setPending(null), [query]);
 
-  const write = async (op: RankOp, guess = true) => {
+  const write = async (op: RankOp, guess: boolean | RankOp = true) => {
     window.clearTimeout(clearTimer.current);
-    if (guess) setPending(optimisticRank(lists, op));
+    if (guess) setPending(optimisticRank(lists, guess === true ? op : guess));
     inFlight.current += 1;
     setFlying((f) => new Set(f).add(op.node));
     const result = await rankOp(projectId, slug, op).finally(() => {
@@ -80,10 +83,12 @@ export function useRankedOrder({ backlog, snapshot, projectId, slug, onStatus }:
   };
 
   let numbers: Map<number, number> | null = null;
-  if (pending) {
+  if (pending && query.trim() === '') {
     numbers = new Map();
     for (const id of [...pending.next, ...pending.soon, ...pending.someday]) numbers.set(id, numbers.size + 1);
   }
-  const order = (band: RankedBand): BacklogRow[] => lists[band].flatMap((id) => rows.get(id) ?? []);
+  // A step a session took into its own queue meanwhile is drawn under that queue, never a second time here.
+  const owned = new Set(backlog.next.filter((r) => r.row.owner !== null).map((r) => r.row.node.id));
+  const order = (band: RankedBand): BacklogRow[] => lists[band].filter((id) => !owned.has(id)).flatMap((id) => rows.get(id) ?? []);
   return { order, lists, numbers, write, writing: () => inFlight.current > 0, isPending: (id) => flying.has(id) };
 }

@@ -59,10 +59,10 @@ const BAND_CHIP = { next: 'NEXT', soon: 'SOON', someday: 'SOMEDAY' } as const;
  * The full Backlog (the view behind "N ›"): the page head, the views strip and the filter, then the open view. Ranked is the
  * default: Next up (the queue), Soon and a folded Someday, ranked by drag or Alt+arrows; By Phase groups every open step
  * under its parent; Needs Triage lists the steps nobody has ranked; Stale the ones left alone; Parked the ones set aside.
- * Every row has "to Next", "Park…" and "Delete…" on hover and on focus; "Delete…" and "Park…" open their form inside the
- * row. The filter and the view are this component's state (the view is kept per project). Every row of the page is one Tab stop.
+ * A row shows "to Next" (not in Next up), "Keep" (Stale), "Park…" and "Delete…" on hover and on focus; "Delete…" and
+ * "Park…" open their form inside the row. The filter and the view are this component's state (the view is kept per project). Every row of the page is one Tab stop.
  */
-export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStatus, onOpenNode }: Pick<BandProps, 'snapshot' | 'now' | 'onOpenNode' | 'onOpenResource' | 'onStatus'> & {
+export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStatus, onOpenNode }: Pick<BandProps, 'snapshot' | 'now' | 'onOpenNode' | 'onStatus'> & {
   projectId: number;
   slug: string;
   /** The page head's code block. */
@@ -112,7 +112,7 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
   const backlog = useMemo(() => deriveBacklog(board, snapshot, now, backlogMatch(query)), [board, snapshot, now, query]);
   const { counts } = backlog;
   const filtering = query.trim() !== '';
-  const ranked = useRankedOrder({ backlog, snapshot, projectId, slug, onStatus });
+  const ranked = useRankedOrder({ backlog, snapshot, projectId, slug, query, onStatus });
   const { lists } = ranked;
   const nextRows = ranked.order('next');
   const soonRows = ranked.order('soon');
@@ -175,7 +175,8 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
   useKeepRowFocus(root, rowIds, titleRef);
   const insideOf = useMemo(() => openInsideIndex(snapshot.nodes), [snapshot.nodes]);
   const ids = rowIds.join(',');
-  const openIds = [...backlog.next, ...backlog.soon, ...backlog.someday, ...backlog.triage].map((r) => r.row.node.id).join(',');
+  // The unfiltered board: a row the filter hides is still here, so a delete in flight keeps waiting.
+  const openIds = [...board.next, ...board.backlog].map((r) => r.node.id).join(',');
   // A row that left (deleted here or elsewhere) no longer waits. An open row no longer shown (it left, or a change elsewhere
   // took it out of the filter) no longer has its panel open; if it took focus with it, useKeepRowFocus has moved it.
   useEffect(() => {
@@ -256,36 +257,55 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
     e.dataTransfer.setData('text/plain', String(id));
     setDragging(id);
   };
+  // A row remounted mid-drag never sends its dragend: the document's catches it, so no drag is left stuck.
+  useEffect(() => {
+    if (dragging === null) return;
+    document.addEventListener('dragend', endDrag);
+    document.addEventListener('drop', endDrag);
+    return () => {
+      document.removeEventListener('dragend', endDrag);
+      document.removeEventListener('drop', endDrag);
+    };
+  }, [dragging]);
   /** Over a row of a band: the top half drops before it, the bottom half before the step after it. */
   const overRow = (e: DragEvent, band: RankedBand, id: number) => {
     if (dragging === null) return;
     e.preventDefault();
     e.stopPropagation();
     setOverFold(false);
+    // The half is of the row's first line: an open inspector under a picked row is not part of it.
     const box = e.currentTarget.getBoundingClientRect();
-    setOver({ band, before: dropSlot(lists[band], id, e.clientY < box.top + box.height / 2, dragging) });
+    const before = dropSlot(lists[band], id, e.clientY < box.top + Math.min(box.height, 36) / 2, dragging);
+    setOver((p) => (p?.band === band && p.before === before ? p : { band, before }));
   };
   /** Over a band's empty area or below its last row: the end of the band. */
   const overBand = (e: DragEvent, band: RankedBand) => {
     if (dragging === null) return;
     e.preventDefault();
     setOverFold(false);
-    setOver({ band, before: null });
+    setOver((p) => (p?.band === band && p.before === null ? p : { band, before: null }));
   };
   const drop = (e: DragEvent) => {
     if (dragging === null) return;
     e.preventDefault();
     e.stopPropagation();
-    const target = overFold ? { band: 'someday' as const, before: bandOrder(snapshot.nodes, 'someday')[0]?.id ?? null } : over;
     const node = dragging;
+    let target = over;
+    // The folded head drops at the top of Someday. A queued step keeps its band, so the first member may be the dragged step itself.
+    let guess: RankOp | undefined;
+    if (overFold) {
+      target = { band: 'someday', before: bandOrder(snapshot.nodes, 'someday').find((n) => n.id !== node)?.id ?? null };
+      // The window may hold only the rows the filter keeps: its guess puts the step first among those.
+      guess = { node, to: 'someday', before: lists.someday.find((id) => id !== node) ?? null };
+    }
     endDrag();
     if (!target) return;
     const op: RankOp = { node, to: target.band, before: target.before };
     // A drop that leaves the lists as they are writes nothing.
-    const after = optimisticRank(lists, op);
+    const after = optimisticRank(lists, guess ?? op);
     if (after.next.join() === lists.next.join() && after.soon.join() === lists.soon.join() && after.someday.join() === lists.someday.join()) return;
     noteAction('backlog', 'drop');
-    void ranked.write(op);
+    void ranked.write(op, guess ?? true);
   };
   /** Alt+Up / Alt+Down on a focused unowned Ranked row moves it one place within its band; the ends do nothing. */
   const moveKey = (e: KeyboardEvent<HTMLElement>, band: RankedBand, id: number) => {
@@ -306,10 +326,28 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
   const parents = new Set(snapshot.nodes.map((n) => n.parentId));
   /** The server refuses a step with any step under it, done or dropped ones too. */
   const hasKids = (id: number) => parents.has(id);
-  const toNext = (id: number) => {
+  /** The row actions, by the element pressed (focus moves to the neighbour first, as the row leaves). */
+  const toNext = (id: number, from: HTMLElement | null) => {
     noteAction('backlog', 'to_next');
+    cursorAfter(from?.closest('li') ?? null)?.focus();
     void ranked.write({ node: id, to: 'next', before: null });
   };
+  const keep = (id: number, from: HTMLElement | null) => {
+    noteAction('backlog', 'keep');
+    const band = snapshot.nodes.find((n) => n.id === id)?.rankBand;
+    if (!band) return;
+    cursorAfter(from?.closest('li') ?? null)?.focus();
+    // A no-op move: it only stamps the step as touched, so it leaves Stale.
+    void ranked.write({ node: id, to: band, before: keepBefore(snapshot.nodes, id) }, false);
+  };
+  const openPark = (id: number, from: HTMLElement | null) => {
+    draft.current = { reason: '', where: '', focused: false };
+    const target = cursorAfter(from?.closest('li') ?? null);
+    afterPark.current = target?.matches('li[data-node]') ? (target.dataset.node ?? null) : null;
+    setPanel({ kind: 'park', id });
+  };
+  const askDelete = (id: number) => setPanel({ kind: 'delete', id });
+  const drawnBy = new Map(drawn.map((d) => [d.id, d]));
 
   const drawRow = (d: Drawn): ReactNode => {
     const { look } = d;
@@ -368,7 +406,11 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
         dragging={dragging === id}
         dropBefore={rank !== undefined && over?.band === rank && over.before === id}
         // Over a row of a band that takes drops: the drop line. An own-queue row is no target.
-        onDragOver={rank ? (e) => overRow(e, rank, id) : look.queued ? (e) => dragging !== null && e.stopPropagation() : undefined}
+        onDragOver={rank ? (e) => overRow(e, rank, id) : look.queued ? (e) => {
+          if (dragging === null) return;
+          e.stopPropagation();
+          setOver(undefined);
+        } : undefined}
         onDrop={rank ? drop : undefined}
         // An open confirm or form is the row's own: a click on the row around it opens nothing.
         onOpen={asking || parking ? () => undefined : rowClick('backlog', () => onOpenNode(id))}
@@ -397,29 +439,15 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
         acts={
           <>
             {!look.queued && (
-              <Button variant="ghost" size="sm" data-act onClick={(e) => {
-                cursorAfter(e.currentTarget.closest('li'))?.focus();
-                toNext(id);
-              }}>to Next</Button>
+              // A double-click's second press lands on whatever slid under the pointer: it does nothing.
+              <Button variant="ghost" size="sm" data-act onClick={(e) => e.detail <= 1 && toNext(id, e.currentTarget)}>to Next</Button>
             )}
             {look.stale && (
-              <Button variant="ghost" size="sm" data-act onClick={(e) => {
-                noteAction('backlog', 'keep');
-                const band = row.node.rankBand;
-                if (!band) return;
-                cursorAfter(e.currentTarget.closest('li'))?.focus();
-                // A no-op move: it only stamps the step as touched, so it leaves Stale.
-                void ranked.write({ node: id, to: band, before: keepBefore(snapshot.nodes, id) }, false);
-              }}>Keep</Button>
+              <Button variant="ghost" size="sm" data-act onClick={(e) => e.detail <= 1 && keep(id, e.currentTarget)}>Keep</Button>
             )}
-            <Button variant="ghost" size="sm" data-act data-park aria-haspopup="dialog" onClick={(e) => {
-              draft.current = { reason: '', where: '', focused: false };
-              const target = cursorAfter(e.currentTarget.closest('li'));
-              afterPark.current = target?.matches('li[data-node]') ? (target.dataset.node ?? null) : null;
-              setPanel({ kind: 'park', id });
-            }}>Park…</Button>
+            <Button variant="ghost" size="sm" data-act data-park aria-haspopup="dialog" onClick={(e) => openPark(id, e.currentTarget)}>Park…</Button>
             {!hasKids(id) && (
-              <Button variant="ghost" size="sm" data-act data-delete aria-haspopup="dialog" onClick={() => setPanel({ kind: 'delete', id })}>Delete…</Button>
+              <Button variant="ghost" size="sm" data-act data-delete aria-haspopup="dialog" onClick={() => askDelete(id)}>Delete…</Button>
             )}
           </>
         }
@@ -442,13 +470,11 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
               const free = active === null || active === document.body || here?.contains(active) === true || active.classList.contains('ip-page-title');
               setPanel((p) => (p?.id === id ? null : p));
               if (!owns || !free) return;
-              // The row's neighbours as they are now, while it is still among the open rows. Once the snapshot has
-              // moved it into Parked (the answer and the snapshot land in either order), the neighbour worked out
-              // when the form opened comes first, so focus stays where the row was.
-              const stillOpen = here instanceof HTMLElement && here.closest('.ip-bl-parked') === null;
+              // The row's neighbours as they are now, while it is still drawn. Once the snapshot has dropped it (the answer
+              // and the snapshot land in either order), the neighbour worked out when the form opened takes focus.
               const live = here instanceof HTMLElement ? cursorAfter(here) : null;
               const opened = afterPark.current ? root.current?.querySelector<HTMLElement>(`li[data-node="${afterPark.current}"]`) : null;
-              ((stillOpen ? live ?? opened : opened ?? live) ?? titleRef.current)?.focus();
+              (live ?? opened ?? titleRef.current)?.focus();
             }}
             onCancel={() => cancel(id)}
           />
@@ -468,9 +494,13 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
       </ViewRow>
     );
   };
-  const rowsOf = (list: BacklogRow[]) => list.map((r) => drawn.find((d) => d.id === r.row.node.id)).map((d) => (d ? drawRow(d) : null));
+  const rowsOf = (list: BacklogRow[]) => list.map((r) => drawnBy.get(r.row.node.id)).map((d) => (d ? drawRow(d) : null));
   const triageLink = (
-    <Button variant="ghost" size="sm" onClick={() => pickView('triage')}>Triage ›</Button>
+    <Button variant="ghost" size="sm" onClick={() => {
+      pickView('triage');
+      // The button leaves with the view: focus goes to the tab of the view it opened.
+      window.requestAnimationFrame(() => root.current?.querySelector<HTMLElement>('.ip-bl-tools .p-tab[aria-pressed="true"]')?.focus());
+    }}>Triage ›</Button>
   );
 
   /** The "+ Add a step…" box at a foot, which swaps for the quick-add field. */
@@ -497,11 +527,11 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
   const bandSection = (name: string, band: RankedBand, glyph: '[!]' | '>>', rows: BacklogRow[], hint: string, extra?: ReactNode) => {
     const volt = band === 'next';
     const here = over?.band === band;
-    const empty = rows.length === 0 && (!volt || ownedRows.length === 0);
+    const empty = rows.length === 0;
     return (
       <section
         key={band}
-        className={`ip-bl-band${here && empty ? ' drop-empty' : ''}`}
+        className={`ip-bl-band${here && over.before === null && empty ? ' drop-empty' : ''}`}
         aria-label={name}
         onDragOver={(e) => overBand(e, band)}
         onDrop={drop}
@@ -549,7 +579,7 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
           nextRows,
           'The next free session pulls #1',
           <>
-            {nextRows.length === 0 && ownedRows.length === 0 && <p className="ip-bl-none-line">Nothing is queued. Drag a step here, or open one and press To Next.</p>}
+            {board.next.length === 0 && <p className="ip-bl-none-line">Nothing is queued. Drag a step here, or open one and press To Next.</p>}
             {owned.map((g) => (
               <div key={g.key} className="ip-bl-own">
                 <Eyebrow glyph="//" className="ip-bl-ownhead">{`QUEUED BY ${g.title}`}</Eyebrow>
@@ -560,7 +590,7 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
         )}
         {bandSection('Soon', 'soon', '>>', soonRows, 'Drag to rank')}
         <section
-          className={`ip-bl-band${someday ? '' : ' ip-bl-fold'}${!someday && overFold ? ' drop-fold' : ''}`}
+          className={`ip-bl-band${someday ? '' : ' ip-bl-fold'}${!someday && overFold ? ' drop-fold' : ''}${someday && somedayRows.length === 0 && over?.band === 'someday' && over.before === null ? ' drop-empty' : ''}`}
           aria-label="Someday"
           onDragOver={someday ? (e) => overBand(e, 'someday') : (e) => {
             if (dragging === null) return;

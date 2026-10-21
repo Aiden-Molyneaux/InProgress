@@ -84,6 +84,12 @@
   .ip-bl-list.ranked .ip-bl-row > .ip-bl-title { grid-column: 4 / -1; }
   .ip-bl-list.ranked .ip-bl-row > .ip-bl-extras { grid-column: 4 / -1; }
 }
+/* Under 720 px the ranked tracks are number, id, title, actions: the title spans from the third. */
+@media (max-width: 719px) {
+  @container (max-width: 559px) {
+    .ip-bl-list.ranked .ip-bl-row > .ip-bl-title, .ip-bl-list.ranked .ip-bl-row > .ip-bl-extras { grid-column: 3 / -1; }
+  }
+}
 /* The Park… form, inside a Backlog box and in Details. */
 .ip-park { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-2); background: var(--canvas-1); border: 1px solid var(--line); }
 .ip-park-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); }
