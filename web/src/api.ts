@@ -1,6 +1,6 @@
 import type { BuildInfo } from '../../src/core/build';
 import type { StepHit } from '../../src/core/goto';
-import type { DeletedProject, NodeDetail, PageBody, Project, ProjectSnapshot, ProjectSummary, QueueOp, Resource } from '../../src/core/types';
+import type { DeletedProject, NodeDetail, PageBody, Project, ProjectSnapshot, ProjectSummary, QueueOp, RankOp, Resource } from '../../src/core/types';
 import type { ActionTarget, ProjectAction } from './projectActions';
 
 async function getJson<T>(path: string): Promise<T> {
@@ -77,9 +77,12 @@ export type WindowEventName = 'view' | 'shown' | 'first_action' | 'backlog_open'
 /** One change to the project's Next queue (spec 2.5), applied on the server to the queue as it stands. */
 export const queueOp = (projectId: number, slug: string, op: QueueOp): Promise<UiResult> => postUi(`/api/ui/projects/${projectId}/queue`, { slug, op });
 
-/** Quick-add: a todo step under `parent`, or under the root when null. */
-export const createStep = (projectId: number, slug: string, title: string, parent: number | null): Promise<UiResult> =>
-  postUi(`/api/ui/projects/${projectId}/nodes`, { slug, title, parent });
+/** One rank change (ranked Backlog spec section 2): to Next, or into Soon or Someday before a step of that band. */
+export const rankOp = (projectId: number, slug: string, op: RankOp): Promise<UiResult> => postUi(`/api/ui/projects/${projectId}/rank`, { slug, op });
+
+/** Quick-add: a todo step under `parent`, or under the root when null; with band 'soon', at the bottom of Soon. */
+export const createStep = (projectId: number, slug: string, title: string, parent: number | null, band?: 'soon'): Promise<UiResult> =>
+  postUi(`/api/ui/projects/${projectId}/nodes`, { slug, title, parent, ...(band ? { band } : {}) });
 
 /** Deletes a step from the tree, by id; the server refuses one with steps under it. */
 export const deleteStep = (projectId: number, slug: string, nodeId: number): Promise<UiResult> =>

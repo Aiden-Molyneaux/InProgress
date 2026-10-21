@@ -20,6 +20,11 @@ describe('project folds', () => {
     expect(loadFolds(2)).toEqual({});
   });
 
+  it('keeps the someday fold of the Backlog', () => {
+    saveFolds(1, { someday: true });
+    expect(loadFolds(1)).toEqual({ someday: true });
+  });
+
   it('ignores the old overrides and anything not a boolean', () => {
     data.set('ip.folds.1', JSON.stringify({ '12': 'open', '13': 'closed', 'section:5': 'open', 'done:x': true, 'section:6': false, 'done:0': true }));
     expect(loadFolds(1)).toEqual({ 'section:6': false, 'done:0': true });

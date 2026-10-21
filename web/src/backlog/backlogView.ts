@@ -1,12 +1,6 @@
-import type { TreeNode } from '../../../src/core/types';
-import { phaseOf, type Entry } from '../board/backlogOrder';
-
-/** A phase tab, shaped as the TabStrip's `TabItem`. */
-export interface PhaseTab {
-  id: string;
-  label: string;
-  count?: number;
-}
+import type { Backlog, BacklogMatch, BacklogView } from '../../../src/core/backlog';
+import type { RankOp, TreeNode } from '../../../src/core/types';
+import { filterWords } from '../board/backlogOrder';
 
 /** The Backlog page head's meta: open and parked, or while filtering how many of the open ones show. */
 export function backlogMeta(open: number, shown: number, parked: number, filtering: boolean): { label: string; value: number }[] {
@@ -15,20 +9,58 @@ export function backlogMeta(open: number, shown: number, parked: number, filteri
     : [{ value: open, label: 'OPEN' }, { value: parked, label: 'PARKED' }];
 }
 
-const cut = (title: string) => ([...title].length > 24 ? `${[...title].slice(0, 23).join('')}…` : title);
+const VIEWS: BacklogView[] = ['ranked', 'phase', 'triage', 'stale', 'parked'];
+const VIEW_LABELS: Record<BacklogView, string> = { ranked: 'Ranked', phase: 'By Phase', triage: 'Needs Triage', stale: 'Stale', parked: 'Parked' };
 
-/** The phase strip: All, then each phase in the order given, each with the open entries in it (not narrowed by other filters). */
-export function phaseTabs(phases: { value: number | 'none'; title: string }[], open: Entry[]): PhaseTab[] {
-  const counts = new Map<number | 'none', number>();
-  for (const e of open) {
-    if (!e.row) continue;
-    const key = phaseOf(e.row)?.id ?? 'none';
-    counts.set(key, (counts.get(key) ?? 0) + 1);
-  }
-  return [
-    { id: 'all', label: 'All', count: open.length },
-    ...phases.map((p) => ({ id: String(p.value), label: cut(p.title), count: counts.get(p.value) ?? 0 })),
-  ];
+/** Where the open view is kept, per project, as a plain view name. */
+export const viewKey = (projectId: number): string => `ip.backlogView.${projectId}`;
+
+/** Reads a stored view; anything unknown is Ranked. */
+export function parseView(raw: string | null): BacklogView {
+  return VIEWS.find((v) => v === raw) ?? 'ranked';
+}
+
+/** The views strip, shaped as the TabStrip's items: each view with the rows the filter leaves in it. */
+export function viewTabs(counts: Backlog['counts']): { id: BacklogView; label: string; count: number }[] {
+  return VIEWS.map((v) => ({ id: v, label: VIEW_LABELS[v], count: counts[v].shown }));
+}
+
+/**
+ * The Backlog's filter as deriveBacklog takes it (#453's rule, with the phase title): every word of the query must appear
+ * in the row's "#id", title, label, or the title of any ancestor (its parent and its phase). Undefined for a blank query.
+ */
+export function backlogMatch(query: string): BacklogMatch | undefined {
+  const words = filterWords(query);
+  if (words.length === 0) return undefined;
+  return ({ node, crumb }) => {
+    const text = `#${node.id} ${node.title} ${node.label ?? ''} ${crumb.map((c) => c.title).join(' ')}`.toLowerCase();
+    return words.every((w) => text.includes(w));
+  };
+}
+
+/** The ids of Ranked's three lists: Next up is the unowned queue only. */
+export interface RankLists {
+  next: number[];
+  soon: number[];
+  someday: number[];
+}
+
+/** The lists the window shows at once for a rank op, before the snapshot: the step out of all three, into `op.to` before `op.before` (the end when null or not there). */
+export function optimisticRank(lists: RankLists, op: RankOp): RankLists {
+  const out: RankLists = { next: lists.next.filter((id) => id !== op.node), soon: lists.soon.filter((id) => id !== op.node), someday: lists.someday.filter((id) => id !== op.node) };
+  const into = out[op.to];
+  const at = op.before === null ? -1 : into.indexOf(op.before);
+  if (at < 0) into.push(op.node);
+  else into.splice(at, 0, op.node);
+  return out;
+}
+
+/** The `before` for moving `id` one place within `list`: null when it goes to the end. Undefined at an end of the list, or when it is not there (no move). */
+export function altMove(list: number[], id: number, dir: 'up' | 'down'): number | null | undefined {
+  const at = list.indexOf(id);
+  if (at < 0) return undefined;
+  if (dir === 'up') return at === 0 ? undefined : list[at - 1];
+  return at === list.length - 1 ? undefined : (list[at + 2] ?? null);
 }
 
 const OPEN = new Set(['todo', 'active', 'blocked']);
