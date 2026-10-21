@@ -70,8 +70,75 @@ const MENTIONS = /\binprogress\b/i;
  * that opens like markup, to catch a new format.
  */
 const NOTICE =
-  /^\s*(?:<task-notification\b|<agent-message\b|<system-reminder\b|Another Claude session sent a message\b|\[SYSTEM NOTIFICATION\b|\[Subagent hand-back\])/;
+  /^\s*(?:<task-notification\b|<agent-message\b|Another Claude session sent a message\b|\[SYSTEM NOTIFICATION\b|\[Subagent hand-back\])/;
 const MARKUP_OPENING = /^\s*[<[]/;
+/** A system-reminder's tags; either may carry attributes (an id). */
+const REMINDER_OPEN = /^\s*<system-reminder\b([^>]*)>/;
+const REMINDER_CLOSE = /<\/system-reminder\b[^>]*>/g;
+const REMINDER_ID = /\bid="([^"]*)"/;
+
+/**
+ * Where a reminder ends in `inner` (the text after its opening tag): its closing tag's index and length, or null when
+ * it is unclosed. A notice quotes what it reports, closing tags included, so a closing tag naming the opening tag's id
+ * wins, then a notice runs to the last closing tag and any other reminder to the first.
+ */
+function reminderEnd(inner: string, attrs: string, notice: boolean): { index: number; length: number } | null {
+  const id = REMINDER_ID.exec(attrs)?.[1];
+  if (id !== undefined) {
+    const tag = `</system-reminder id="${id}">`;
+    const index = inner.indexOf(tag);
+    if (index >= 0) return { index, length: tag.length };
+  }
+  let found: { index: number; length: number } | null = null;
+  for (const m of inner.matchAll(REMINDER_CLOSE)) {
+    found = { index: m.index, length: m[0].length };
+    if (!notice) break;
+  }
+  return found;
+}
+
+/** What a prompt-submit's text holds once its leading system-reminder blocks are set aside (#547). */
+export interface PromptReading {
+  /** A background-task notice: the text after the reminders opens with a notice's words, or a reminder did and nothing follows. */
+  notice: boolean;
+  /** The text after the reminders: what was typed, when this is no notice. */
+  typed: string;
+  /** The reminders that opened with a notice's words, whose task blocks a typed prompt behind them still reports. */
+  noticeReminders: string[];
+  /** For the diagnostic log: the opening of a prompt counted as typed that looks like markup, or of a lone unknown reminder. */
+  unknownOpening?: string;
+}
+
+/**
+ * Reads a prompt's text. The desktop app opens every typed prompt in a linked session with a "Linked sessions now"
+ * reminder, and a notice can arrive wrapped whole in one, so a leading reminder alone says nothing; the text after
+ * the reminders decides. An unclosed reminder runs to the end.
+ */
+export function readPrompt(raw: string): PromptReading {
+  let rest = raw;
+  const noticeReminders: string[] = [];
+  let first: string | undefined;
+  for (let open = REMINDER_OPEN.exec(rest); open; open = REMINDER_OPEN.exec(rest)) {
+    const inner = rest.slice(open[0].length);
+    const wrapsNotice = NOTICE.test(inner);
+    const end = reminderEnd(inner, open[1], wrapsNotice);
+    const content = end ? inner.slice(0, end.index) : inner;
+    if (wrapsNotice) noticeReminders.push(content);
+    first ??= content;
+    rest = end ? inner.slice(end.index + end.length) : '';
+  }
+  const notice = NOTICE.test(rest) || (noticeReminders.length > 0 && !rest.trim());
+  const reading: PromptReading = { notice, typed: notice ? '' : rest, noticeReminders };
+  if (!notice) {
+    if (rest.trim()) {
+      if (MARKUP_OPENING.test(rest)) reading.unknownOpening = rest.trimStart();
+    } else if (first !== undefined) {
+      reading.unknownOpening = `<system-reminder> ${first.trimStart()}`;
+    }
+  }
+  return reading;
+}
+
 // A lone "status" may end in one "?"; the optional group keeps a long whitespace run linear, not quadratic.
 const ASKS_STATUS = /\b(where are we|where were we|what['’]?s next|what['’]?s left|what['’]?s the status|status update|status check|project status|progress so far)\b|^\s*status(?:\s*\?)?\s*$/i;
 
@@ -110,16 +177,16 @@ export function buildHookBody(name: Exclude<HookName, ToolHookName>, input: Hook
     const raw = typeof input.prompt === 'string' ? input.prompt : '';
     // A background agent finishing reaches UserPromptSubmit like a typed prompt; flagged only when true, so a
     // normal prompt's body stays exactly what an older server accepts.
-    const notice = NOTICE.test(raw);
+    const { notice, typed, noticeReminders } = readPrompt(raw);
     if (notice) body.notice = true;
-    const prompt = notice ? '' : stripPasted(raw);
+    // Only the typed text counts: the reminders' words are not Aiden's.
+    const prompt = stripPasted(typed);
     body.mentionsInProgress = MENTIONS.test(prompt);
     body.asksStatus = ASKS_STATUS.test(prompt);
-    // Only the notice's task blocks leave (id, status, exit code), never its text.
-    if (notice) {
-      const tasks = noticeTasks(stripPasted(raw));
-      if (tasks.length) body.tasks = tasks;
-    }
+    // Only the task blocks leave (id, status, exit code), never their text: a notice's, or those of a notice reminder
+    // ahead of a typed prompt.
+    const tasks = noticeTasks(stripPasted(notice ? raw : noticeReminders.join('\n')));
+    if (tasks.length) body.tasks = tasks;
   }
   // The session's running background tasks, so the server can end the rows that are gone. An empty array is sent too:
   // it says nothing is running.
@@ -413,9 +480,10 @@ export async function runHandler(name: HookName, input: HookStdin, deps: HookDep
   }
   if (name === 'session-start') await deps.ensureServer();
   const body = buildHookBody(name, input);
-  if (name === 'prompt-submit' && !body.notice && typeof input.prompt === 'string' && MARKUP_OPENING.test(input.prompt)) {
+  const opening = name === 'prompt-submit' && typeof input.prompt === 'string' ? readPrompt(input.prompt).unknownOpening : undefined;
+  if (opening !== undefined) {
     // Not a recognised notice but shaped like one: record its opening so a new notice format can be added.
-    appendLog(join(homeDir(), 'hooks.log'), `prompt-submit: counted a prompt that opens like markup: ${JSON.stringify(input.prompt.slice(0, 80))}`);
+    appendLog(join(homeDir(), 'hooks.log'), `prompt-submit: counted a prompt that opens like markup: ${JSON.stringify(opening.slice(0, 80))}`);
   }
   const result = await deps.post(`/api/sessions/${encodeURIComponent(input.session_id)}/hook`, body);
   if (CONTEXT_EVENT_NAME[name]) return result.context ? { context: result.context } : undefined;
