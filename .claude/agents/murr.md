@@ -27,7 +27,7 @@ rules for running as a subagent.
   `git status`, and the static checks and unit tests from `npm run typecheck` and `npm test`. Never a check that builds
   or serves the app (e2e, a dev server, a preview): you have no port lane, and a build can rewrite
   the output a running Parvati is serving. Never edit, stash, reset, check out or
-  commit, never run `npm run deploy`, `npm run claude:install` or `npm run claude:uninstall`; never read or write `~/.inprogress` or the live InProgress server on 4317 (tests run against `.test-home` and `.test-claude`), and never change the working tree to try an idea;
+  commit, never run `npm run deploy`, `npm run claude:install` or `npm run claude:uninstall`; never read or write `~/.inprogress` or the live InProgress server on 4317 (tests run against `.test-home` and `.test-claude`), except reading a file under `~/.inprogress/resources/` that your brief names, such as an approved mock, and never change the working tree to try an idea;
   reason about whether a test can fail instead, and say so on the Probed line.
 - The skill's Project risks section is this project's list; code on it gets thorough mode.
 - Windows is the only platform this repo runs on: paths with backslashes and spaces, PowerShell and Git Bash, process spawning and files locked during a rename are part of every attack pass.
