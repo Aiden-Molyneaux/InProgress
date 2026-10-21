@@ -221,6 +221,11 @@ textarea.p-field-input { field-sizing: content; resize: none; padding-block: 6px
 .p-menu-item .p-key { margin-left: auto; }
 .p-menu-sep { height: 1px; margin: var(--sp-1) 0; background: var(--line); }
 
+/* ---------- MenuButton ---------- */
+.p-menubtn { position: relative; display: inline-flex; }
+.p-menubtn-pop { position: absolute; top: 100%; right: 0; z-index: var(--z-popover); width: 320px; max-width: calc(100vw - 2 * var(--sp-4)); margin-top: var(--sp-2); }
+.p-menubtn-pop[data-align='start'] { left: 0; right: auto; width: max-content; min-width: 100%; }
+
 /* ---------- Confirm ---------- */
 .p-confirm { display: grid; gap: var(--sp-2); padding: var(--sp-3); background: var(--canvas-1); border: 1px solid var(--line-strong); }
 .p-confirm-q { margin: 0; font-size: var(--t-body); font-weight: var(--w-strong); color: var(--text-hi); }

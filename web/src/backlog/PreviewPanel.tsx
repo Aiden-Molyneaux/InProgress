@@ -3,7 +3,6 @@ import type { TaskBox as BoxData } from '../../../src/core/taskState';
 import { QuickAdd } from '../board/QuickAdd';
 import type { BandProps } from '../board/bandProps';
 import { BoardTile } from '../board/BoardTile';
-import { MenuButton } from '../board/MenuButton';
 import { focusTargetAfter } from '../board/focus';
 import { noteAction } from '../measure';
 import { Button } from '../parts/Button';
@@ -11,6 +10,7 @@ import { Chip } from '../parts/Chip';
 import { EmptyState } from '../parts/EmptyState';
 import { Eyebrow } from '../parts/Eyebrow';
 import { useListCursor } from '../parts/ListCursor';
+import { MenuButton } from '../parts/MenuButton';
 import { phaseCounts, previewRows, type PhaseChoice, type PreviewPhase } from './backlogPreview';
 
 /**
