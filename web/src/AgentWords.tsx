@@ -1,7 +1,7 @@
 import type { LineParts } from './live';
 
 /**
- * A subagent's line as text, `who · when` (agentLineParts or trailAgentParts), with `when` in --amber-ink for one that
+ * A subagent's line as text, `who · when` (agentLineParts or trailAgentParts), with `when` in --volt for one that
  * hit the usage limit: it waits for Aiden to resume it. Its text reads the same as agentLine or trailAgentLine.
  */
 export function AgentWords({ parts, limit }: { parts: LineParts; limit: boolean }) {

@@ -37,14 +37,14 @@
 .ip-noclaim-open { margin-left: auto; flex: none; }
 .ip-board ul, .ip-board ol { list-style: none; margin: 0; padding: 0; }
 .ip-board p { margin: 0; }
-.ip-quiet, .ip-role { color: var(--muted); }
-.ip-empty-line { font-size: var(--fs-m); line-height: 18px; }
-.ip-time { font-family: var(--font-mono); font-size: var(--fs-s); color: var(--muted); }
+.ip-quiet, .ip-role { color: var(--text-muted); }
+.ip-empty-line { font-size: var(--t-body); line-height: 18px; }
+.ip-time { font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-muted); }
 .ip-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
-.ip-link-btn { padding: 0; font-size: var(--fs-s); line-height: 14px; color: var(--link); text-decoration: underline dotted; }
+.ip-link-btn { padding: 0; font-size: var(--t-detail-sm); line-height: 14px; color: var(--text-hi); text-decoration: underline dotted; }
 .ip-link-btn:hover { text-decoration: underline; }
 .ip-link-btn:focus-visible, .ip-row-title:focus-visible, .ip-chip-handoff:focus-visible, .ip-btn:focus-visible { outline: 2px solid var(--volt); outline-offset: 1px; }
-.ip-code { display: block; max-width: 100%; padding: 3px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--fs-s); line-height: 14px; background: var(--panel-2); }
+.ip-code { display: block; max-width: 100%; padding: 3px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--t-detail-sm); line-height: 14px; background: var(--canvas-3); }
 /* Board tiles (BoardTile): the age, the foot's parts and the system line, in v3 type. */
 /* A tile's title reads stronger on the Board (Done keeps the part's body size); the #id a little stronger. */
 .ip-tile .p-tile-title { font-size: var(--t-h3); font-weight: var(--w-strong); color: var(--text-hi); }
@@ -85,16 +85,16 @@
 .ip-kin-count { width: fit-content; color: var(--text-dim); cursor: help; text-decoration: underline dotted; text-underline-offset: 2px; }
 .ip-term { display: block; padding: var(--sp-3); background: var(--canvas-0); border: 1px solid var(--line); font-family: var(--font-mono); font-size: var(--t-detail-sm); line-height: 1.4; color: var(--text); overflow-wrap: anywhere; }
 /* Row parts: the title that opens Details, the id, docs and marks. */
-.ip-id { color: var(--muted); font-family: var(--font-mono); }
-.ip-row-title { max-width: 100%; text-align: left; font-size: var(--fs-m); line-height: 18px; font-weight: var(--w-text); color: var(--text-2); overflow-wrap: anywhere; }
+.ip-id { color: var(--text-muted); font-family: var(--font-mono); }
+.ip-row-title { max-width: 100%; text-align: left; font-size: var(--t-body); line-height: 18px; font-weight: var(--w-body); color: var(--text); overflow-wrap: anywhere; }
 .ip-row-title:hover { color: var(--text); text-decoration: underline; }
-.ip-type { color: var(--muted); font-size: var(--fs-s); }
-.ip-docs { font-family: var(--font-mono); color: var(--muted); }
-.ip-mark { padding: 0 6px; font-size: var(--fs-s); line-height: 18px; }
-.ip-mark.ask { background: var(--amber-fill); color: var(--amber-ink); }
-.ip-mark.hygiene { border: 1px solid var(--border); color: var(--muted); }
-.ip-chip-handoff { height: 18px; padding: 0 6px; border: 1px solid var(--border); font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
-.ip-chip-handoff:hover { color: var(--text-2); background: var(--panel-2); }
+.ip-type { color: var(--text-muted); font-size: var(--t-detail-sm); }
+.ip-docs { font-family: var(--font-mono); color: var(--text-muted); }
+.ip-mark { padding: 0 6px; font-size: var(--t-detail-sm); line-height: 18px; }
+.ip-mark.ask { background: var(--volt-wash); color: var(--volt); }
+.ip-mark.hygiene { border: 1px solid var(--line); color: var(--text-muted); }
+.ip-chip-handoff { height: 18px; padding: 0 6px; border: 1px solid var(--line); font-size: var(--t-detail-sm); line-height: 14px; color: var(--text-muted); }
+.ip-chip-handoff:hover { color: var(--text); background: var(--canvas-3); }
 /* Done: the since-ruler crosses the list where the last look falls; older tiles fold under the one-column layout. */
 .ip-since { padding: var(--sp-1) 0; }
 .ip-done-outcome { font-size: 0.8667em; line-height: 1.45; color: var(--text-muted); }
@@ -118,45 +118,45 @@
 .ip-own-queue { display: grid; gap: var(--sp-3); }
 .ip-own-head { display: flex; }
 /* The task box: one skeleton in every Board cell (Needs me, Next, Now, Done, the Backlog fold). The hue sits on the left edge of a coloured
-   state; --active marks Working and --amber marks Needs you. */
+   state; --volt marks Working and Needs you. */
 .ip-list { display: flex; flex-direction: column; gap: 10px; }
-.ip-card { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 8px 10px 8px 14px; border: 1px solid var(--border); background: var(--card); min-width: 0; }
+.ip-card { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 8px 10px 8px 14px; border: 1px solid var(--line); background: var(--canvas-2); min-width: 0; }
 .ip-card::before { content: ''; position: absolute; left: -1px; top: -1px; bottom: -1px; width: 4px; background: var(--hue, transparent); }
 .ip-card[data-node] { cursor: pointer; }
-.ip-card:hover { background: var(--panel-2); }
-.ip-card.st-working { background: var(--active-fill); border-color: var(--active-line); }
-.ip-card.st-needs { background: var(--amber-fill); border-color: var(--amber); }
+.ip-card:hover { background: var(--canvas-3); }
+.ip-card.st-working { background: var(--volt-wash); border-color: var(--volt-soft); }
+.ip-card.st-needs { background: var(--volt-wash); border-color: var(--volt); }
 .ip-card.st-done, .ip-card.ip-backlog-row { padding-left: 10px; }
 .ip-card-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.ip-sid { font-family: var(--font-mono); font-size: var(--fs-s); font-weight: var(--w-heavy); line-height: 18px; color: var(--text-2); }
+.ip-sid { font-family: var(--font-mono); font-size: var(--t-detail-sm); font-weight: var(--w-display); line-height: 18px; color: var(--text); }
 .ip-card-right { margin-left: auto; display: flex; align-items: center; gap: 6px; flex: none; }
-.ip-card-title { max-width: 100%; text-align: left; font-size: var(--fs-m); line-height: 19px; font-weight: var(--w-text); color: var(--text); overflow-wrap: anywhere; }
+.ip-card-title { max-width: 100%; text-align: left; font-size: var(--t-body); line-height: 19px; font-weight: var(--w-body); color: var(--text); overflow-wrap: anywhere; }
 button.ip-card-title:hover { color: var(--text); text-decoration: underline; }
-.st-done .ip-card-title { color: var(--text-2); }
-.ip-sess { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: var(--fs-s); line-height: 16px; color: var(--muted); }
+.st-done .ip-card-title { color: var(--text); }
+.ip-sess { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: var(--t-detail-sm); line-height: 16px; color: var(--text-muted); }
 .ip-sess-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ip-sess-name::before { content: '◇ '; color: var(--faint); }
-.st-working .ip-sess-name::before { content: '◆ '; color: var(--active); }
+.ip-sess-name::before { content: '◇ '; color: var(--text-dim); }
+.st-working .ip-sess-name::before { content: '◆ '; color: var(--volt); }
 .ip-sess-cmd { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .ip-sess-cmd .ip-code { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: normal; }
-.ip-sys { font-size: var(--fs-s); line-height: 14px; color: var(--faint); }
-.ip-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-height: 18px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
+.ip-sys { font-size: var(--t-detail-sm); line-height: 14px; color: var(--text-dim); }
+.ip-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-height: 18px; font-size: var(--t-detail-sm); line-height: 14px; color: var(--text-muted); }
 .ip-foot .ip-type { margin-left: auto; }
 /* The state, top right, with how long it has been in it. */
-.ip-st { display: inline-flex; align-items: center; gap: 5px; height: 18px; padding: 0 7px; font-size: var(--fs-s); line-height: 16px; font-weight: var(--w-heavy); letter-spacing: .02em; white-space: nowrap; border: 1px solid var(--border); color: var(--muted); }
-.ip-st.working { color: var(--active-ink); border-color: var(--active-line); background: var(--active-fill); }
-.ip-st.working::before { content: ''; width: 6px; height: 6px; background: var(--active); animation: ip-pulse 2.4s ease-in-out infinite; }
-.ip-st.needs { color: var(--amber-ink); border-color: var(--amber); background: var(--amber-fill); }
-.ip-st.ready { color: var(--text-2); border-color: color-mix(in srgb, var(--text-2) 35%, transparent); }
-.ip-st.idle, .ip-st.unattended, .ip-st.done, .ip-st.backlog { font-weight: var(--w-text); }
+.ip-st { display: inline-flex; align-items: center; gap: 5px; height: 18px; padding: 0 7px; font-size: var(--t-detail-sm); line-height: 16px; font-weight: var(--w-display); letter-spacing: .02em; white-space: nowrap; border: 1px solid var(--line); color: var(--text-muted); }
+.ip-st.working { color: var(--volt); border-color: var(--volt-soft); background: var(--volt-wash); }
+.ip-st.working::before { content: ''; width: 6px; height: 6px; background: var(--volt); animation: ip-pulse 2.4s ease-in-out infinite; }
+.ip-st.needs { color: var(--volt); border-color: var(--volt); background: var(--volt-wash); }
+.ip-st.ready { color: var(--text); border-color: color-mix(in srgb, var(--text) 35%, transparent); }
+.ip-st.idle, .ip-st.unattended, .ip-st.done, .ip-st.backlog { font-weight: var(--w-body); }
 .ip-st.unattended { border-style: dashed; }
-.ip-st.blocked { color: var(--red); border-color: var(--red); background: var(--red-fill); }
-.ip-st.backlog { color: var(--faint); }
+.ip-st.blocked { color: var(--alarm); border-color: var(--alarm); background: var(--alarm-wash); }
+.ip-st.backlog { color: var(--text-dim); }
 /* The row's own buttons show on hover and whenever focus is inside the row, so Tab reaches them and shows them. */
-button.ip-hover-act:not(.p-btn) { margin-left: auto; height: 18px; padding: 0 6px; border: 1px solid var(--border); font-size: var(--fs-s); line-height: 14px; color: var(--muted); background: var(--bg); opacity: 0; }
+button.ip-hover-act:not(.p-btn) { margin-left: auto; height: 18px; padding: 0 6px; border: 1px solid var(--line); font-size: var(--t-detail-sm); line-height: 14px; color: var(--text-muted); background: var(--canvas-1); opacity: 0; }
 .ip-card:hover .ip-hover-act, .ip-card:focus-within .ip-hover-act, .ip-hover-act:focus-visible { opacity: 1; }
 button.ip-hover-act:not(.p-btn) + button.ip-hover-act:not(.p-btn) { margin-left: 4px; }
-button.ip-hover-act:not(.p-btn):hover { color: var(--text); background: var(--panel-2); }
+button.ip-hover-act:not(.p-btn):hover { color: var(--text); background: var(--canvas-3); }
 .ip-hover-act:focus-visible, .ip-quick-add:focus { outline: 2px solid var(--volt); outline-offset: 1px; }
 .ip-backlog { margin-top: var(--sp-3); padding-top: var(--sp-4); border-top: 1px dashed var(--line-strong); }
 .ip-backlog.drop-here { background: var(--canvas-2); box-shadow: inset 0 0 0 1px var(--volt); }
@@ -170,32 +170,21 @@ button.ip-hover-act:not(.p-btn):hover { color: var(--text); background: var(--pa
 .ip-preview .ip-backlog-list { gap: var(--sp-3); }
 .ip-tile.ip-backlog-row { padding: var(--sp-3); gap: var(--sp-2); }
 .ip-backlog-more { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1); font-family: var(--font-mono); font-size: var(--t-detail-sm); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
-.ip-backlog-groups { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
-.ip-group-line { margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-s); line-height: 14px; color: var(--faint); }
-/* The Backlog filter field and order control share one line (#453). */
-.ip-backlog-tools { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
-.ip-backlog-filter { flex: 0 1 160px; min-width: 0; height: 18px; padding: 0 6px; font: inherit; font-size: var(--fs-s); line-height: 14px; color: var(--text); background: var(--panel); border: 1px solid var(--border); }
-.ip-backlog-filter:focus-visible { outline: 2px solid var(--volt); outline-offset: -2px; }
-.ip-backlog-none { overflow-wrap: anywhere; }
-.ip-backlog-order { display: flex; flex: none; border: 1px solid var(--border); overflow: hidden; }
-.ip-backlog-order button { padding: 1px 8px; font-size: var(--fs-s); line-height: 14px; color: var(--muted); }
-.ip-backlog-order button + button { border-left: 1px solid var(--border); }
-.ip-backlog-order button[aria-pressed='true'] { background: var(--panel-2); color: var(--text); }
-.ip-backlog-order button:focus-visible { outline: 2px solid var(--volt); outline-offset: -2px; }
+.ip-group-line { margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--t-detail-sm); line-height: 14px; color: var(--text-dim); }
 .ip-box-parent { margin: 2px 0 0; }
-.ip-quick-add { display: block; width: 100%; margin-top: 8px; padding: 4px 8px; font: inherit; font-size: var(--fs-m); line-height: 18px; color: var(--text); background: var(--panel); border: 1px solid var(--border); }
+.ip-quick-add { display: block; width: 100%; margin-top: 8px; padding: 4px 8px; font: inherit; font-size: var(--t-body); line-height: 18px; color: var(--text); background: var(--canvas-1); border: 1px solid var(--line); }
 
-@keyframes ip-flash { 0% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--amber) 60%, transparent); } 100% { box-shadow: 0 0 0 0 transparent; } }
+@keyframes ip-flash { 0% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--volt) 60%, transparent); } 100% { box-shadow: 0 0 0 0 transparent; } }
 
 /* Text presentation, so ⚙ and ⚒ never turn into emoji. Details' glyph shares it. */
 .ip-glyph { font-variant-emoji: text; }
 /* ⛁ draws faint at text size. */
 .ip-glyph.l-data { font-size: 1.33em; }
 /* The YOU tag, on a card and in Details (NEEDS YOU, and YOU in its list of steps): amber ink on the amber tint. */
-.ip-you { flex: none; height: 18px; padding: 0 6px; background: var(--amber-fill); color: var(--amber-ink); font-size: var(--fs-s); font-weight: var(--w-heavy); line-height: 18px; letter-spacing: .04em; white-space: nowrap; }
+.ip-you { flex: none; height: 18px; padding: 0 6px; background: var(--volt-wash); color: var(--volt); font-size: var(--t-detail-sm); font-weight: var(--w-display); line-height: 18px; letter-spacing: .04em; white-space: nowrap; }
 
 /* Shared with Details' task rows (.ip-wt): the mark's colour. Details restyles it, and its trail rows, under .ip-wt in
    its own region. */
-.ip-work-mark { color: var(--muted); }
-.w-in_progress .ip-work-mark { color: var(--active-ink); }
+.ip-work-mark { color: var(--text-muted); }
+.w-in_progress .ip-work-mark { color: var(--volt); }
 }

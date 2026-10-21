@@ -50,6 +50,6 @@
 /* The Park… form, inside a Backlog box and in Details. */
 .ip-park { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-2); background: var(--canvas-1); border: 1px solid var(--line); }
 .ip-park-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); }
-.ip-dparked { margin: 4px 0 10px; padding: 6px 8px; border: 1px dashed var(--border); }
+.ip-dparked { margin: 4px 0 10px; padding: 6px 8px; border: 1px dashed var(--line); }
 .ip-dparked p { margin: 0 0 6px; overflow-wrap: anywhere; }
 }

@@ -11,7 +11,7 @@ body { font-family: var(--font-body); font-size: var(--t-body); font-weight: var
 :where(code, kbd, samp, pre, .ip-time, .ip-code, .ip-sid, .ip-cmd, .ip-kin-count, .ip-tab-count, .ip-mi-left, .ip-act-when,
   .ip-done-when, .ip-res .sub, .ip-log-time, .ip-frac) { font-variant-numeric: slashed-zero tabular-nums; }
 button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
-.muted { color: var(--muted); }
+.muted { color: var(--text-muted); }
 /* The one pulse: the tab dot, an active marker on a working card and an in-progress task's mark. */
 @keyframes ip-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 

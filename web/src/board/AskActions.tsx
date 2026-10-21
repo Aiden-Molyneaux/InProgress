@@ -46,7 +46,7 @@ export function AskActions({ ask, area }: { ask: Pick<Ask, 'id' | 'text'>; area:
       if (row?.isConnected) return focusTargetAfter(row);
       return (home ?? null)?.querySelector<HTMLElement>('h2') ?? null;
     };
-    const home = row?.closest<HTMLElement>('.ip-band, aside, .ip-backlogview') ?? null;
+    const home = row?.closest<HTMLElement>('.ip-band, aside') ?? null;
     setBusy(true);
     const result = await clearAsk(ask.id, answer);
     setBusy(false);
