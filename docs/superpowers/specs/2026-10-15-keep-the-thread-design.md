@@ -182,8 +182,11 @@ entries joined by `; `. A missing branch or cwd prints as `?`.
   - `answer_waiting`: name the step's driver if it is live (for example: a12 waits for the next prompt in "Cell form"), else offer to start a
     session on the step; the claim delivers the answer.
 - **What's next:** a step with a live driver is not ready (already true for any live session).
-- **Start a step:** the handoff names a stable worktree, `.claude/worktrees/<topic>` on the topic branch, never a chip's
-  folder, and says the chip's fresh worktree stays empty.
+- **Start a step:** a chip starts in a worktree of its own, and the desktop app refuses its writes anywhere else. For new
+  work the handoff names the branch to give that worktree (`git branch -m <topic>`, run only in the chip's worktree),
+  never a second worktree; for a branch already in flight it names its worktree by the absolute path `git worktree list`
+  prints for that branch (the folder name can differ from the branch), to enter with EnterWorktree `path` before the
+  first write (#565, 2026-10-21).
 
 ## 4. Sigmund in one session
 
@@ -205,8 +208,9 @@ entries joined by `; `. A missing branch or cwd prints as `?`.
 - **A broken session** (compaction lost the plan, a loop, a harness crash): a handoff from the plan file.
 - **A long wait with a large context** (days, over 200k): a handoff costs about what the cold wake would.
 
-Every handoff to a successor on the same step opens `Claim #<id> --take-over`, names `.claude/worktrees/<topic>`, and
-lists the step's undelivered answers. The context nudge, a review wait and a subagent run are never reasons to hand off.
+Every handoff to a successor on the same step opens `Claim #<id> --take-over`, names the worktree by the absolute path
+`git worktree list` prints for its branch, for the successor to enter with EnterWorktree `path` before its first write
+(#565), and lists the step's undelivered answers. The context nudge, a review wait and a subagent run are never reasons to hand off.
 
 ### 4.3 Waiting for the go-ahead (phase 7)
 

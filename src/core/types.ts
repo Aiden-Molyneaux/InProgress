@@ -275,6 +275,68 @@ export interface PageBody {
   fresh: PageFreshness | null;
 }
 
+export type SyncState = 'error' | 'gone' | 'missing' | 'pending' | 'behind' | 'current';
+export interface SyncCommit {
+  sha: string;
+  date: string;
+  subject: string;
+}
+export interface SyncFile {
+  template: string;
+  local: string;
+  base: string | null;
+  state: SyncState;
+  behind: number;
+  commits: SyncCommit[];
+  fills: Record<string, string>;
+  detail: string | null;
+}
+/** template-sync.mjs --check --json, as Shipwright prints it (#532). */
+export interface SyncCheck {
+  shipwright: { head: string; date: string; subject: string };
+  project: string;
+  lastSync: SyncCommit | null;
+  files: SyncFile[];
+  skip: string[];
+  notAdopted: string[];
+  fills: Record<string, string>;
+}
+export type SyncOutcome = { ok: true; result: SyncCheck } | { ok: false; error: string };
+export interface SyncRow {
+  projectId: number;
+  slug: string;
+  name: string;
+  dir: string;
+  check: SyncOutcome;
+}
+/** POST /api/ui/library/sync. `noManifest`: bound projects with no manifest; `source` marks Shipwright itself. */
+export interface LibrarySync {
+  projects: SyncRow[];
+  noManifest: { projectId: number; slug: string; name: string; source: boolean }[];
+}
+export interface LibraryPage {
+  id: number;
+  title: string;
+  path: string;
+  projectId: number;
+  projectSlug: string;
+  projectName: string;
+  format: 'markdown' | 'html' | null;
+  shelf: 'pages' | 'roster';
+  templates: string[];
+  /** Commits to covers since confirmed; null: confirm again; undefined: no covers. */
+  fresh?: number | null;
+  /** Why the page cannot be read now (gone, refused). */
+  error: string | null;
+  adaptedIn: { slug: string; name: string; template: string }[];
+}
+/** GET /api/library/pages. */
+export interface LibraryPages {
+  pages: LibraryPage[];
+  sourceProjectId: number | null;
+}
+export const projectBehind = (row: SyncRow): boolean => row.check.ok && row.check.result.files.some((f) => f.state === 'behind');
+
 export interface LogEntry {
   id: number;
   nodeId: number;
