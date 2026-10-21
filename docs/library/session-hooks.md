@@ -72,8 +72,8 @@ in.
 
 All of it runs in one write per event (`handleHookEvent`):
 
-- **start**: the session goes `idle` (a `compact` start leaves its state alone); a `clear` resets its role to worker; a `resume` ends the
-  background commands left over from before.
+- **start**: the session goes `idle` (a `compact` start leaves its state alone); a `clear`
+  resets its role to worker; a `resume` ends the background commands left over from before.
 - **prompt**: the session goes `working`. A background-task notice ends the commands it reports
   and is not counted as a prompt; a typed prompt counts toward the status nudge.
 - **stop**: the session goes `idle`, and the running-task list reconciles the session's commands
@@ -110,10 +110,11 @@ Every **typed prompt** can carry short lines, in this order:
 
 1. a **Title:** line, when the session's title prefix differs from the one InProgress expects
    (desktop sessions only); it is added last in the code so that it leads;
-2. `Answered: aN "…"` or `Cleared: aN, no answer` for each ask of this session's that Aiden
-   cleared since the last prompt, delivered once;
-3. a reminder for each of the three newest open asks the session holds, then
-   `+N more open asks: …` naming the rest;
+2. `Answered: aN "…"` or `Cleared: aN, no answer` for each ask Aiden cleared since the last
+   prompt, delivered once: the session's own asks, and asks on a step it drives whose asker no
+   longer holds them;
+3. a reminder for each of the three newest open asks on the same two routes, then
+   `+N more open asks: …` naming up to ten of the rest and counting the older ones;
 4. then the full briefing when one is owed, or else the answer to a status question, or a
    one-line status nudge once two prompts have passed without an update.
 
