@@ -4276,4 +4276,36 @@ test.describe('#542 ranked Backlog', () => {
     await expect(moved).toBeVisible();
     await expect(moved.getByRole('combobox', { name: 'Band' })).toBeFocused();
   });
+
+  test('a refused Band change says so in the open inspector, puts the old band back and keeps focus on the select', async ({ page, api, fresh, consoleErrors }) => {
+    consoleErrors.allow(/status of 409/);
+    const { view } = await openRankedWith(page, api, fresh, ['3 RevenueCat', '4 Build to GitHub']);
+    await rank(api, fresh, { node: fresh.ids['5 Store listing'], to: 'someday', before: null });
+    const someday = view.getByRole('region', { name: 'Someday' });
+    await someday.getByRole('button', { name: /^Show/ }).click();
+    await page.route('**/api/ui/projects/*/rank', (route) => route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'Refused for the test' }) }));
+    const inspector = await openInspector(blRow(page, view, '4 Build to GitHub'));
+    const bandSelect = inspector.getByRole('combobox', { name: 'Band' });
+    await bandSelect.focus();
+    await bandSelect.selectOption('someday');
+    const back = blRow(page, view.getByRole('region', { name: 'Soon' }), '4 Build to GitHub');
+    const again = back.getByRole('group', { name: /^Inspector for #/ });
+    await expect(again.getByRole('alert')).toHaveText(/Refused for the test/);
+    await expect(again.getByRole('combobox', { name: 'Band' })).toHaveValue('soon');
+    await expect(again.getByRole('combobox', { name: 'Band' })).toBeFocused();
+  });
+
+  test('a refused Band change whose inspector has closed says so in the status line', async ({ page, api, fresh, consoleErrors }) => {
+    consoleErrors.allow(/status of 409/);
+    const { view } = await openRankedWith(page, api, fresh, ['3 RevenueCat', '4 Build to GitHub']);
+    // Someday stays folded: the guess takes the row out of view, which closes its inspector before the answer.
+    await page.route('**/api/ui/projects/*/rank', async (route) => {
+      await new Promise((r) => setTimeout(r, 300));
+      await route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'Refused for the test' }) });
+    });
+    const inspector = await openInspector(blRow(page, view, '4 Build to GitHub'));
+    await inspector.getByRole('combobox', { name: 'Band' }).selectOption('someday');
+    await expect(statusLine(page).filter({ hasText: 'Refused for the test' })).toBeVisible();
+    await expect(blRow(page, view.getByRole('region', { name: 'Soon' }), '4 Build to GitHub')).toBeVisible();
+  });
 });

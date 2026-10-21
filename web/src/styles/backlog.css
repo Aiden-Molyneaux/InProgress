@@ -33,6 +33,8 @@
 .ip-bl-parkedrow { border: 1px dashed var(--line-strong); margin-top: var(--sp-1); }
 .ip-bl-row > :is(.ip-bl-why, .ip-bl-where) { grid-column: 2 / -1; margin: 0; overflow-wrap: anywhere; font-size: var(--t-detail-sm); color: var(--text-muted); }
 .ip-bl-row > .ip-bl-why { margin-top: var(--sp-2); }
+/* A picked parked row says its reason and where in its inspector: the row's own lines step aside. */
+.ip-bl-row.picked > :is(.ip-bl-why, .ip-bl-where) { display: none; }
 /* Ranked: a handle column and a number column in front of the id. Rows without them (an own queue) leave the columns empty. */
 .ip-bl-list.ranked .ip-bl-row { grid-template-columns: 2ch 3ch 6ch minmax(0, 1fr) auto; }
 .ip-bl-list.ranked .ip-bl-row > .ip-bl-handle { grid-column: 1; }

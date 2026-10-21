@@ -193,23 +193,23 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
   );
 
   useEffect(() => () => window.clearTimeout(wantTimer.current), []);
-  // After a Band change that redraws the row elsewhere: if focus fell to the page, it goes back to the select. A layout effect
-  // declared before useKeepRowFocus's, so it runs first and the row's `li` has not taken the focus.
+  // After a Band or Phase change that redraws the row elsewhere: if focus fell to the page, it goes back to the select. A layout
+  // effect declared before useKeepRowFocus's, so it runs first and the row's `li` has not taken the focus. It holds while focus
+  // stays in the step's row: the row may be redrawn more than once (the guess, then the snapshot, or a refusal's restore).
   useLayoutEffect(() => {
     const w = want.current;
     if (!w) return;
     const active = document.activeElement;
     const target = root.current?.querySelector<HTMLElement>(`li[data-node="${w.id}"]`);
-    // Gone from the view, or focus is somewhere on purpose: nothing to give back.
-    if (!rowIds.includes(w.id) || (active !== null && active !== document.body)) {
+    const lost = active === null || active === document.body;
+    // Gone from the view, or focus moved on out of the row: nothing to give back.
+    if (!rowIds.includes(w.id) || (!lost && !target?.contains(active))) {
       want.current = null;
       return;
     }
-    if (!target) return;
-    (target.querySelector<HTMLElement>(`[data-insp="${w.ctl}"]`) ?? target).focus();
-    want.current = null;
+    if (target && lost) (target.querySelector<HTMLElement>(`[data-insp="${w.ctl}"]`) ?? target).focus();
   });
-  /** Notes the control a Band change was made from, for the effect above; given up after 3 s. */
+  /** Notes the control a Band or Phase change was made from, for the effect above; given up after 3 s. */
   const follow = (id: number, ctl: string) => {
     want.current = { id, ctl };
     window.clearTimeout(wantTimer.current);
@@ -665,7 +665,11 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
                   return ranked.write({ node: id, to: v as 'next' | 'soon' | 'someday', before: null }, !owned, true);
                 });
               } else if (sel === 'phase') {
-                insp.change(id, sel, v, () => selectWrite(moveStep(projectId, slug, id, v === 'none' ? null : Number(v))));
+                insp.change(id, sel, v, () => {
+                  // By Phase regroups the row under its new parent once the snapshot lands.
+                  follow(id, 'phase');
+                  return selectWrite(moveStep(projectId, slug, id, v === 'none' ? null : Number(v)));
+                });
               } else {
                 insp.change(id, sel, v, () => selectWrite(labelStep(projectId, slug, id, v === 'none' ? null : (v as NodeLabel))));
               }
@@ -804,7 +808,7 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
             <Eyebrow glyph="//" glyphTone="dim" />
             <h3 className="ip-bl-bname">Someday</h3>
             <span className="ip-bl-bright">
-              {somedayRows.length > 0 && <Button variant="ghost" size="sm" aria-expanded={someday} onClick={toggleSomeday}>{someday ? 'Hide' : `Show ${somedayRows.length}`}</Button>}
+              {(someday || somedayRows.length > 0) && <Button variant="ghost" size="sm" aria-expanded={someday} onClick={toggleSomeday}>{someday ? 'Hide' : `Show ${somedayRows.length}`}</Button>}
               <Count size="h3" tone="muted" value={somedayRows.length} />
             </span>
             <p className="ip-bl-hint">{someday ? 'Drag to rank' : 'Folded'}</p>
