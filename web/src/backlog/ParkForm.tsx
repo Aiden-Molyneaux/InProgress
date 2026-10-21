@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { parkStep } from '../api';
 import { noteAction } from '../measure';
+import { Button } from '../parts/Button';
+import { Field } from '../parts/Field';
 
 /**
  * The Park… form (in a Backlog row and in Details): why the step is set aside (required) and where its work lives
@@ -45,7 +47,7 @@ export function ParkForm({ projectId, slug, nodeId, title, draft, onDone, onCanc
     setWhereState(v);
   };
   const [busy, setBusy] = useState(kept.current.sending === true);
-  const reasonField = useRef<HTMLInputElement>(null);
+  const reasonField = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
   useEffect(() => {
     const d = kept.current;
     d.settle = (refused) => {
@@ -98,17 +100,11 @@ export function ParkForm({ projectId, slug, nodeId, title, draft, onDone, onCanc
   };
   return (
     <div ref={root} className="ip-park" role="dialog" aria-modal={false} aria-label={`Park #${nodeId} ${title}`} data-act onKeyDown={onKeyDown}>
-      <label>
-        <span>Why is it set aside?</span>
-        <input ref={reasonField} type="text" className="ip-park-field" aria-label="Reason" maxLength={2000} value={reason} onChange={(e) => setReason(e.target.value)} />
-      </label>
-      <label>
-        <span>Where does the work live? (optional)</span>
-        <input type="text" className="ip-park-field" aria-label="Where" maxLength={500} placeholder="a branch, worktree or commit" value={where} onChange={(e) => setWhere(e.target.value)} />
-      </label>
+      <Field ref={reasonField} size="sm" label="Why is it set aside?" maxLength={2000} value={reason} onChange={(e) => setReason(e.target.value)} />
+      <Field size="sm" label="Where does the work live? (optional)" maxLength={500} placeholder="a branch, worktree or commit" value={where} onChange={(e) => setWhere(e.target.value)} />
       <div className="ip-park-actions">
-        <button type="button" className="ip-btn go" disabled={!ready} onClick={() => void submit()}>Park</button>
-        <button type="button" className="ip-btn" data-cancel disabled={busy} onClick={onCancel}>Cancel</button>
+        <Button variant="primary" size="sm" disabled={!ready} onClick={() => void submit()}>Park</Button>
+        <Button variant="ghost" size="sm" data-cancel disabled={busy} onClick={onCancel}>Cancel</Button>
       </div>
     </div>
   );

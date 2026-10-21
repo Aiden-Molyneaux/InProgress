@@ -115,8 +115,8 @@ const SCALE: Record<string, string> = {
 };
 const NARROW: Record<string, string> = { 't-h1': '1.625rem', 't-h2': '1.25rem', 't-h3': '1.0625rem', 'sp-section': '24px' };
 
-/** Quiet's names, each re-pointed at a v3 token until the last surface step deletes the block (spec 2.10). */
-const ALIASES: Record<string, string> = {
+/** Quiet's names, gone since every surface moved to v3 (spec 2.10): none may be declared or read. */
+const QUIET: Record<string, string> = {
   bg: 'var(--canvas-1)',
   bar: 'var(--canvas-0)',
   card: 'var(--canvas-2)',
@@ -171,10 +171,11 @@ describe('theme', () => {
     expect(narrow).toEqual(NARROW);
   });
 
-  it("re-points every Quiet name at a v3 token, and declares nothing beyond v3's tokens and the aliases", () => {
-    for (const [name, value] of Object.entries(ALIASES)) expect(root[name], `--${name}`).toBe(value);
-    const known = new Set([...Object.keys(COLOUR), ...HUES.map(([name]) => name), ...Object.keys(SCALE), ...Object.keys(ALIASES)]);
+  it("declares nothing beyond v3's tokens, and no sheet or component declares or reads a Quiet name", () => {
+    const known = new Set([...Object.keys(COLOUR), ...HUES.map(([name]) => name), ...Object.keys(SCALE)]);
     expect(Object.keys(root).filter((name) => !known.has(name))).toEqual([]);
+    const sources = filesUnder('web/src').filter((path) => /\.(css|tsx?)$/.test(path)).map((path) => readFileSync(path, 'utf8')).join('\n');
+    for (const name of Object.keys(QUIET)) expect(sources, `--${name}`).not.toMatch(new RegExp(`--${name}(?![\\w-])`));
   });
 
   it('neither declares nor reads a removed token', () => {
@@ -197,14 +198,14 @@ describe('theme', () => {
 describe('type', () => {
   it('asks only for the weight tokens', () => {
     const weights = [...rules.matchAll(/font-weight:\s*([^;}]+)/g)].map((m) => m[1].trim());
-    const allowed = ['var(--w-body)', 'var(--w-strong)', 'var(--w-brand)', 'var(--w-display)', 'var(--w-text)', 'var(--w-heavy)', 'inherit'];
+    const allowed = ['var(--w-body)', 'var(--w-strong)', 'var(--w-brand)', 'var(--w-display)', 'inherit'];
     expect(weights.filter((w) => !allowed.includes(w))).toEqual([]);
   });
 
   it('sizes text from the ramp, or relative to its parent', () => {
     const sizes = [...rules.matchAll(/font-size:\s*([^;}]+)/g)].map((m) => m[1].trim());
     const ramp = ['h1', 'h2', 'h3', 'title', 'body', 'detail-sm', 'micro'].map((t) => `var(--t-${t})`);
-    const allowed = [...ramp, 'var(--fs-l)', 'var(--fs-m)', 'var(--fs-s)', 'inherit'];
+    const allowed = [...ramp, 'inherit'];
     expect(sizes.filter((s) => !allowed.includes(s) && !/^[\d.]+em$/.test(s))).toEqual([]);
   });
 

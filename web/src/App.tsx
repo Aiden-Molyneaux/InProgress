@@ -70,7 +70,11 @@ export function App() {
     detailsOpener.current = null;
     // Only when focus went down with Details: a close Aiden did not cause (its step deleted) leaves his focus alone.
     if (!from || (document.activeElement && document.activeElement !== document.body)) return;
-    const target = from.element?.isConnected ? from.element : document.querySelector<HTMLElement>(`[data-node="${from.node}"] .ip-row-title`);
+    // A row's title when it is a control (the Board, the Project view); else the row itself where it is the list's item (the
+    // Backlog view and All done, whose titles are text).
+    const fallback = () =>
+      document.querySelector<HTMLElement>(`[data-node="${from.node}"] :is(button, a).ip-row-title`) ?? document.querySelector<HTMLElement>(`[data-node="${from.node}"][data-cursor]`);
+    const target = from.element?.isConnected ? from.element : fallback();
     target?.focus();
   }, [detailsOpen, selectedNode]);
   const [viewerResource, setViewerResource] = useState<number | null>(null);
@@ -372,9 +376,9 @@ export function App() {
                 {!snapshot ? (
                   <EmptyState className="ip-wait">Loading project…</EmptyState>
                 ) : view === 'backlog' ? (
-                  <BacklogList key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onStatus={fail} />
+                  <BacklogList key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onStatus={fail} codes={codes} />
                 ) : view === 'done' ? (
-                  <DoneList key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} />
+                  <DoneList key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} codes={codes} />
                 ) : view === 'board' ? (
                   <Board key={snapshot.project.id} snapshot={snapshot} now={now} selectedNode={selectedNode} onOpenNode={setSelectedNode} onOpenResource={openViewer} onOpenDone={() => openFromBoard('done')} onOpenBacklog={() => openFromBoard('backlog')} lastLook={lastLook} onStatus={fail} />
                 ) : (

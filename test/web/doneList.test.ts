@@ -35,6 +35,7 @@ describe('byTime', () => {
 });
 
 describe('byPhase', () => {
+  const root = node(9, 'Project', null);
   const phase = node(10, 'Phase A', null);
   const sub = node(11, 'Sub', null);
   const other = node(12, 'Phase B', null);
@@ -45,9 +46,15 @@ describe('byPhase', () => {
       row(3, at(2026, 10, 11), [other]),
       row(4, at(2026, 10, 10)),
     ];
-    const groups = byPhase(rows);
-    expect(groups.map((g) => g.path)).toEqual(['Phase B', 'Phase A › Sub', 'Top level']);
+    const groups = byPhase(rows, root);
+    expect(groups.map((g) => g.path)).toEqual(['#9 Project › #12 Phase B', '#9 Project › #10 Phase A › #11 Sub', '#9 Project']);
     expect(groups.map((g) => g.parent?.id ?? null)).toEqual([12, 11, null]);
     expect(groups.map((g) => ids(g.rows))).toEqual([[1, 3], [2], [4]]);
+  });
+  it('names just the crumb when the project has no root node', () => {
+    expect(byPhase([row(1, at(2026, 10, 13), [phase])], null).map((g) => g.path)).toEqual(['#10 Phase A']);
+  });
+  it('calls a top-level step "Top level" when there is no root node either', () => {
+    expect(byPhase([row(1, at(2026, 10, 13))], null).map((g) => g.path)).toEqual(['Top level']);
   });
 });

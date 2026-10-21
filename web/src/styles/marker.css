@@ -13,17 +13,17 @@
   height: 8px;
   border: 0;
   background: transparent;
-  color: var(--muted);
-  font-size: var(--fs-s);
-  font-weight: var(--w-text);
+  color: var(--text-muted);
+  font-size: var(--t-detail-sm);
+  font-weight: var(--w-body);
   line-height: 14px;
 }
-.ip-marker.m-todo { width: 9px; height: 9px; border: 1.5px solid var(--faint); }
-.ip-marker.m-active { background: var(--active); }
-.ip-marker.m-blocked { background: var(--red); }
-.ip-marker.m-dropped { background: var(--faint); }
+.ip-marker.m-todo { width: 9px; height: 9px; border: 1.5px solid var(--text-dim); }
+.ip-marker.m-active { background: var(--volt); }
+.ip-marker.m-blocked { background: var(--alarm); }
+.ip-marker.m-dropped { background: var(--text-dim); }
 /* Parked: set aside on purpose. A muted dashed ring with no hue and no fill, so it reads as neither blocked (red) nor dropped. */
-.ip-marker.m-parked { width: 9px; height: 9px; border: 1.5px dashed var(--muted); }
+.ip-marker.m-parked { width: 9px; height: 9px; border: 1.5px dashed var(--text-muted); }
 /* Done: a muted ✓, no dot. The ✓ and a question's ? are drawn here, not written into the DOM, so a step's name and
    Details' status word stay the first text; the empty alternative text after the slash keeps them out of accessible
    names. The plain content line is the fallback for an engine without that syntax. */
@@ -34,17 +34,17 @@
   width: 13px;
   height: 13px;
   border: 0;
-  background: var(--muted);
-  color: var(--bg);
-  font-weight: var(--w-heavy);
+  background: var(--text-muted);
+  color: var(--canvas-1);
+  font-weight: var(--w-display);
   line-height: 13px;
 }
 /* After the done ✓, so a done question keeps its ?. */
 .ip-marker.q::before { content: '?'; content: '?' / ''; }
 /* Paused: an active step nobody is on. A hollow sky ring; a question's ? takes the sky. */
-.ip-marker.m-paused { width: 9px; height: 9px; border: 1.5px solid var(--sky); background: transparent; color: var(--sky); }
-/* Needs you: an --amber square, whatever the status; a question's square turns --amber and keeps its ? in the ground colour. */
-.ip-marker.m-you { width: 8px; height: 8px; border: 0; background: var(--amber); }
+.ip-marker.m-paused { width: 9px; height: 9px; border: 1.5px solid var(--text-hi); background: transparent; color: var(--text-hi); }
+/* Needs you: a --volt square, whatever the status; a question's square turns --volt and keeps its ? in the ground colour. */
+.ip-marker.m-you { width: 8px; height: 8px; border: 0; background: var(--volt); }
 .ip-marker.q.m-paused, .ip-marker.q.m-you { width: 13px; height: 13px; }
 /* On a working card an active marker pulses. */
 .ip-marker.m-active.m-pulse { animation: ip-pulse 1.6s ease-in-out infinite; }
