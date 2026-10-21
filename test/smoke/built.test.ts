@@ -275,7 +275,7 @@ describe('built artifacts', () => {
       session_crons: [],
     });
     expect(stop).toMatchObject({ status: 0, stdout: '', stderr: '' });
-    // A body the server's strict schema rejected would leave the state as it was and put a line in hooks.log.
+    // A body the server's schema rejected (a bad value; unknown keys are dropped, not rejected) would leave the state as it was and put a line in hooks.log.
     expect(storedRows('sessions').find((r) => r.id === 'smoke-bg')).toMatchObject({ state: 'idle' });
     expect(logged().slice(before)).toBe('');
     // The built server stored the command the Bash call started, and the monitor only the Stop listed.

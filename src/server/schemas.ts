@@ -69,6 +69,8 @@ export const askBody = z
   .strict();
 export const clearAskBody = z.object({ answer: z.string().max(2000).optional() }).strict();
 export const logBody = z.object({ text: z.string().trim().min(1).max(2_000), sessionId: z.string().max(100).nullish() }).strict();
+// Unlike the other bodies, this one strips unknown keys instead of rejecting them: `npm run deploy` promotes the new
+// hooks a few seconds before the new server starts, and a strict old server would 400 every hook built with a new field.
 export const hookBody = z
   .object({
     event: z.enum(HOOK_EVENTS),
@@ -116,13 +118,12 @@ export const hookBody = z
     tasks: z
       .array(
         z
-          .object({ taskId: z.string().min(1).max(100), toolUseId: z.string().min(1).max(200).optional(), status: z.enum(['completed', 'failed', 'killed']), exitCode: z.number().int().optional() })
-          .strict(),
+          .object({ taskId: z.string().min(1).max(100), toolUseId: z.string().min(1).max(200).optional(), status: z.enum(['completed', 'failed', 'killed']), exitCode: z.number().int().optional() }),
       )
       .max(20)
       .optional(),
     background: z
-      .array(z.object({ taskId: z.string().min(1).max(100), type: z.string().min(1).max(40), description: z.string().max(200).optional(), commandHead: z.string().max(60).optional() }).strict())
+      .array(z.object({ taskId: z.string().min(1).max(100), type: z.string().min(1).max(40), description: z.string().max(200).optional(), commandHead: z.string().max(60).optional() }))
       .max(50)
       .optional(),
     backgroundTruncated: z.boolean().optional(),
@@ -130,8 +131,7 @@ export const hookBody = z
     stopHookActive: z.boolean().optional(),
     /** A prompt or a stop from a session in the Claude desktop app (CLAUDE_CODE_ENTRYPOINT), the only place the title channel runs. */
     desktop: z.boolean().optional(),
-  })
-  .strict();
+  });
 /**
  * A set_queue write. With `session` and without `unowned: true` it replaces that session's own entries (a `queue:`);
  * otherwise the unowned ones (a `later:`).
