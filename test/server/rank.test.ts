@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { buildApp } from '../../src/server/app';
 import { raiseAsk } from '../../src/server/repo/asks';
 import { listEventsSince, maxEventId } from '../../src/server/repo/events';
-import { addNodes, applyRankOp, parkNode, requireNode, unparkNode, updateNode } from '../../src/server/repo/nodes';
+import { addNodes, applyRankOp, listNodes, parkNode, requireNode, unparkNode, updateNode } from '../../src/server/repo/nodes';
 import { applyQueueOp, getProjectById, setQueue } from '../../src/server/repo/projects';
-import { bandOrder, listStepTouches } from '../../src/server/repo/rank';
+import { listStepTouches } from '../../src/server/repo/rank';
+import { getProjectSnapshot } from '../../src/server/repo/snapshot';
+import { bandOrder, deriveBacklog, keepBefore } from '../../src/core/backlog';
+import { deriveBoard } from '../../src/core/board';
 import { claimStep } from '../../src/server/session-flow';
 import type { RankOp } from '../../src/core/types';
 import { makeCtx } from '../helpers';
@@ -24,7 +27,7 @@ async function setup() {
   ctx.db.prepare("UPDATE nodes SET rank_band = 'soon' WHERE id IN (?, ?, ?, ?, ?)").run(a, b, c, d, e);
   const post = (url: string, payload: unknown) => app.inject({ method: 'POST', url, headers: UI, payload: payload as object });
   const rank = (op: RankOp, slug: string = p.slug) => post(`/api/ui/projects/${p.id}/rank`, { slug, op });
-  const band = (name: 'soon' | 'someday') => bandOrder(ctx, p.id, name).map((m) => m.id);
+  const band = (name: 'soon' | 'someday') => bandOrder(listNodes(ctx, p.id), name).map((m) => m.id);
   const of = (id: number) => ctx.db.prepare('SELECT rank_band AS band, rank, updated_at AS updatedAt FROM nodes WHERE id = ?').get(id) as { band: string | null; rank: number | null; updatedAt: string };
   const unowned = () => getProjectById(ctx, p.id)!.queue.filter((q) => q.sessionId === null).map((q) => q.nodeId);
   return { ctx, app, p, a, b, c, d, e, post, rank, band, of, unowned };
@@ -37,8 +40,7 @@ describe('the rank write (spec section 3)', () => {
     expect(res.statusCode).toBe(201);
     expect(res.json()[0]).toMatchObject({ rankBand: null, rank: null });
     const banded = await app.inject({ method: 'POST', url: '/api/nodes', headers: auth, payload: { parentId: p.rootNodeId, band: 'soon', nodes: [{ title: 'Sneaky' }] } });
-    if (banded.statusCode === 201) expect(banded.json()[0].rankBand).toBeNull();
-    else expect(banded.statusCode).toBe(400);
+    expect(banded.statusCode).toBe(400);
   });
 
   it("a step Aiden adds in the window lands at the bottom of Soon, the unranked ones given ranks first in tree order", async () => {
@@ -67,14 +69,14 @@ describe('the rank write (spec section 3)', () => {
   });
 
   it('Back to Backlog returns a step to its own band and rank, or unranked when it had none', async () => {
-    const { ctx, p, rank, band, of, unowned, a, b, c, d } = await setup();
+    const { ctx, p, rank, band, of, unowned, a, b, c, d, e } = await setup();
     await rank({ node: c, to: 'soon', before: a });
     const placed = of(c).rank;
     await rank({ node: c, to: 'next', before: null });
     applyQueueOp(ctx, 'window', p.id, { kind: 'remove', node: c });
     expect(unowned()).toEqual([]);
     expect(of(c)).toMatchObject({ band: 'soon', rank: placed });
-    expect(band('soon')).toEqual([c, a, b, d, expect.any(Number)]);
+    expect(band('soon')).toEqual([c, a, b, d, e]);
     // A triage step sent to Next and back stays unranked.
     ctx.db.prepare('UPDATE nodes SET rank_band = NULL WHERE id = ?').run(d);
     await rank({ node: d, to: 'next', before: null });
@@ -95,11 +97,13 @@ describe('the rank write (spec section 3)', () => {
     await rank({ node: a, to: 'soon', before: e });
     expect(getProjectById(ctx, p.id)!.queue).toEqual([]);
     expect(band('soon')).toEqual([c, d, a, e]);
-    // The queue's change is recorded first, then one node.updated.
-    expect(listEventsSince(ctx, mark).map((ev) => [ev.type, (ev.data as { op?: string }).op ?? null])).toEqual([
+    // The queue's change is recorded first, naming the step and the session it left, then one node.updated.
+    const events = listEventsSince(ctx, mark);
+    expect(events.map((ev) => [ev.type, (ev.data as { op?: string }).op ?? null])).toEqual([
       ['project.updated', 'rank'],
       ['node.updated', null],
     ]);
+    expect(events[0].data).toMatchObject({ op: 'rank', node: a, takenFrom: 's1' });
   });
 
   it('the Band select puts the step at the bottom of the band chosen, and moves updated_at', async () => {
@@ -182,6 +186,49 @@ describe('the rank write (spec section 3)', () => {
     expect(band('soon')).not.toContain(b);
   });
 
+  it('materialises in the order the Backlog shows: tree order, not id order', async () => {
+    const { ctx, p, post, band, a, b, c, d, e } = await setup();
+    // A phase added at the top of the tree after A to E: its child has a higher id but comes first in tree order.
+    const [phase] = addNodes(ctx, 'test', { parentId: p.rootNodeId, after: 'start', nodes: [{ title: 'Phase', kind: 'phase', children: [{ title: 'First' }, { title: 'Second' }] }] });
+    const [first, second] = ctx.db.prepare('SELECT id FROM nodes WHERE parent_id = ? ORDER BY position').pluck().all(phase.id) as number[];
+    ctx.db.prepare("UPDATE nodes SET rank_band = 'soon' WHERE id IN (?, ?)").run(first, second);
+    // Swap the children's places, so the higher id leads within the phase too.
+    ctx.db.prepare('UPDATE nodes SET position = 3 WHERE id = ?').run(first);
+    const shown = () => ids(deriveBacklog(deriveBoard(getProjectSnapshot(ctx, p.id), Date.parse(ctx.now())), getProjectSnapshot(ctx, p.id), Date.parse(ctx.now())).soon);
+    const ids = (rows: { row: { node: { id: number } } }[]) => rows.map((r) => r.row.node.id);
+    expect(shown()).toEqual([second, first, a, b, c, d, e]);
+    // The first rank write gives every unranked step its place in that order, then the new step goes last.
+    const mine = (await post(`/api/ui/projects/${p.id}/nodes`, { slug: p.slug, title: 'Mine', parent: null, band: 'soon' })).json().node.id;
+    expect(band('soon')).toEqual([second, first, a, b, c, d, e, mine]);
+    expect(shown()).toEqual([second, first, a, b, c, d, e, mine]);
+  });
+
+  it('Keep with keepBefore keeps the rank when a hidden step sits between it and the next shown row', async () => {
+    const { ctx, p, rank, of, a, b, c } = await setup();
+    // Soon is B, C, D, E, A once ranked; queuing C hides it, so the view shows B, D, E, A while C keeps its place.
+    await rank({ node: a, to: 'soon', before: null });
+    await rank({ node: c, to: 'next', before: null });
+    const was = of(b).rank;
+    const before = keepBefore(listNodes(ctx, p.id), b);
+    expect(before).toBe(c);
+    expect((await rank({ node: b, to: 'soon', before })).statusCode).toBe(200);
+    expect(of(b).rank).toBe(was);
+  });
+
+  it('a queued group stays movable within Next and out of it, as the Board keeps it a Next row', async () => {
+    const { ctx, rank, unowned, band, a, b } = await setup();
+    await rank({ node: a, to: 'next', before: null });
+    await rank({ node: b, to: 'next', before: null });
+    addNodes(ctx, 'test', { parentId: a, nodes: [{ title: 'Split off' }] });
+    expect((await rank({ node: a, to: 'next', before: null })).statusCode).toBe(200);
+    expect(unowned()).toEqual([b, a]);
+    expect((await rank({ node: a, to: 'someday', before: null })).statusCode).toBe(200);
+    expect(unowned()).toEqual([b]);
+    expect(band('someday')).toEqual([a]);
+    // Out of the queue it is a group again: no more rank changes.
+    expect((await rank({ node: a, to: 'soon', before: null })).statusCode).toBe(409);
+  });
+
   it('Keep is a no-op move: the rank stays and only updated_at moves', async () => {
     const { rank, of, band, a, b, c } = await setup();
     await rank({ node: b, to: 'soon', before: c });
@@ -217,8 +264,9 @@ describe('the rank write refuses (409)', () => {
     // A before that is not in the band named, or is the step itself.
     expect((await rank({ node: c, to: 'someday', before: d })).statusCode).toBe(409);
     expect((await rank({ node: c, to: 'soon', before: c })).statusCode).toBe(409);
+    expect((await rank({ node: c, to: 'next', before: c })).statusCode).toBe(409);
     // Nothing moved for any of them.
-    expect(bandOrder(ctx, p.id, 'someday')).toEqual([]);
+    expect(bandOrder(listNodes(ctx, p.id), 'someday')).toEqual([]);
   });
 
   it('a slug that does not match the id', async () => {

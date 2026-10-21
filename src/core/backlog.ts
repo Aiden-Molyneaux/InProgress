@@ -1,5 +1,32 @@
 import type { Board, BoardRow, ParkedRow } from './board';
+import { buildIndex, dfsOrder } from './tree';
 import { STALE_STEP_MS, type ProjectSnapshot, type RankBand, type TreeNode } from './types';
+
+const OPEN = new Set(['todo', 'active', 'blocked']);
+
+/**
+ * The open steps (todo, active or blocked) of `band` among a project's `nodes`, in the band's order: by rank, then the
+ * unranked ones in tree order. Queued, focused, grouped and shelved steps count too: every view shows a subset of this
+ * order, never another. The server places and materialises ranks by it (src/server/repo/rank.ts).
+ */
+export function bandOrder(nodes: TreeNode[], band: RankBand): TreeNode[] {
+  const tree = dfsOrder(buildIndex(nodes));
+  const at = (n: TreeNode) => tree.get(n.id) ?? Number.MAX_SAFE_INTEGER;
+  return nodes
+    .filter((n) => n.rankBand === band && OPEN.has(n.status))
+    .sort((a, b) => (a.rank === null ? 1 : 0) - (b.rank === null ? 1 : 0) || (a.rank ?? 0) - (b.rank ?? 0) || at(a) - at(b) || a.id - b.id);
+}
+
+/**
+ * The `before` that Keep sends for step `id` (a no-op move): the next step of its band in bandOrder, hidden ones
+ * included, or null when it is last or has no band. The next row the view shows would move it past hidden steps.
+ */
+export function keepBefore(nodes: TreeNode[], id: number): number | null {
+  const band = nodes.find((n) => n.id === id)?.rankBand;
+  if (!band) return null;
+  const order = bandOrder(nodes, band);
+  return order[order.findIndex((n) => n.id === id) + 1]?.id ?? null;
+}
 
 /** Where a Backlog row sits: next while it is queued (whatever band it keeps), else its band; null when unranked. */
 export type BacklogBand = 'next' | RankBand;

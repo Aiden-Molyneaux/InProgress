@@ -7,9 +7,8 @@ import { openInDesktop, resumeCommand, usableCwd, type DesktopSession, type Open
 import { findSession } from '../repo/sessions';
 import { deleteProject, listDeletedProjects, restoreProject } from '../project-lifecycle';
 import { clearAsk } from '../repo/asks';
-import { write } from '../db/tx';
 import { recordQuiet } from '../repo/events';
-import { addNodes, applyRankOp, deleteNode, finishNode, moveNode, parkNode, patchNode, requireNode, unparkNode } from '../repo/nodes';
+import { addNodes, applyRankOp, deleteNode, finishNode, labelNode, moveNode, parkNode, unparkNode } from '../repo/nodes';
 import { applyQueueOp, changeProject, getProjectById, isQueued, resolveProject } from '../repo/projects';
 import { shelvedAmong } from '../repo/shelved';
 import { idParam, sessionIdParam, windowClearBody, windowDoneBody, windowEventBody, windowLabelBody, windowMoveBody, windowNodeBody, windowParkBody, windowProjectBody, windowQueueBody, windowNodeParams, windowRankBody, windowRenameBody, windowUnparkBody, WINDOW_EVENT_KEYS } from '../schemas';
@@ -143,11 +142,8 @@ export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: 
     const projectId = targetBySlug(req.params, slug);
     resolveProject(ctx, projectId);
     return {
-      node: write(ctx, ACTOR, (record) => {
-        const n = requireNode(ctx, node);
+      node: labelNode(ctx, ACTOR, node, label, (n) => {
         if (n.projectId !== projectId) throw conflict(`#${node} is not in this project`, 'Reload the window.');
-        if (n.parentId === null) throw conflict(`#${node} is the project root`, 'Reload the window.');
-        return patchNode(ctx, record, n, { label });
       }),
     };
   });

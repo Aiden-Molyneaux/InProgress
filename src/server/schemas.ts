@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ASK_KINDS, ASSIGNEES, BRIEFING_MODES, COMMAND_KINDS, COMMAND_OUTCOMES, HOOK_EVENTS, NODE_KINDS, NODE_LABELS, NODE_STATUSES, PROJECT_NAME_MAX, RESOURCE_KINDS, RESOURCE_PURPOSES, TITLE_CHANNELS, WORK_STATUSES, unknownLabel, type NodeInput } from '../core/types';
+import { ASK_KINDS, ASSIGNEES, BRIEFING_MODES, COMMAND_KINDS, COMMAND_OUTCOMES, HOOK_EVENTS, NODE_KINDS, NODE_LABELS, NODE_STATUSES, PROJECT_NAME_MAX, RANK_BANDS, RESOURCE_KINDS, RESOURCE_PURPOSES, TITLE_CHANNELS, WORK_STATUSES, unknownLabel, type NodeInput } from '../core/types';
 
 const title = z.string().trim().min(1, 'title is empty').max(200);
 /** A step's type label; null leaves it unlabelled (or clears it on a patch). */
@@ -182,7 +182,7 @@ export const windowNodeBody = z
 export const windowRankBody = z
   .object({
     slug: windowProjectBody.shape.slug,
-    op: z.object({ node: z.number().int().positive(), to: z.enum(['next', 'soon', 'someday']), before: z.number().int().positive().nullable() }).strict(),
+    op: z.object({ node: z.number().int().positive(), to: z.enum(['next', ...RANK_BANDS]), before: z.number().int().positive().nullable() }).strict(),
   })
   .strict();
 /** The inspector's Label select: one of NODE_LABELS, or null for unlabelled. */

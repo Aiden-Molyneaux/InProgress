@@ -1,56 +1,20 @@
-import type { RankBand, StepTouch } from '../../core/types';
+import { bandOrder } from '../../core/backlog';
+import type { RankBand, StepTouch, TreeNode } from '../../core/types';
 import type { Ctx } from '../db/tx';
 import { conflict } from '../errors';
 
-/** One open step of a band, in the band's shown order. */
-interface Member {
-  id: number;
-  rank: number | null;
-}
-
-/** The project's step ids in tree order (parents before children, siblings by position then id), root first. */
-function treeOrder(ctx: Ctx, projectId: number): Map<number, number> {
-  const rows = ctx.db.prepare('SELECT id, parent_id, position FROM nodes WHERE project_id = ? ORDER BY position, id').all(projectId) as {
-    id: number;
-    parent_id: number | null;
-    position: number;
-  }[];
-  const kids = new Map<number | null, number[]>();
-  for (const r of rows) kids.set(r.parent_id, [...(kids.get(r.parent_id) ?? []), r.id]);
-  const order = new Map<number, number>();
-  const stack = [...(kids.get(null) ?? [])].reverse();
-  while (stack.length) {
-    const id = stack.pop()!;
-    order.set(id, order.size);
-    stack.push(...[...(kids.get(id) ?? [])].reverse());
-  }
-  return order;
-}
-
 /**
- * The open steps (todo, active or blocked) of `band` in the project, in its shown order: by rank, then the unranked ones
- * in tree order. Queued, focused and grouped steps count too: the Backlog shows a subset of this order, never another.
+ * The rank for step `nodeId` placed in `band` before `before` (null: at the end), inside a write already open, from
+ * `nodes`, the project's steps as read in this write. Gives every unranked step of the band a rank in its shown order
+ * (bandOrder) first, and renormalises the band to 1..n when the gap it would land in is under 1e-6; both write `rank`
+ * only, never `updated_at`, so only the moved step reads as touched. A step that already sits there keeps its rank
+ * (Keep is a no-op move: its `before` is keepBefore's). Refuses (409) a `before` that is not an open step of the band,
+ * or is the step itself. The caller stores the rank it returns.
  */
-export function bandOrder(ctx: Ctx, projectId: number, band: RankBand): Member[] {
-  const rows = ctx.db
-    .prepare("SELECT id, rank FROM nodes WHERE project_id = ? AND rank_band = ? AND status IN ('todo', 'active', 'blocked')")
-    .all(projectId, band) as Member[];
-  const tree = treeOrder(ctx, projectId);
-  const at = (id: number) => tree.get(id) ?? Number.MAX_SAFE_INTEGER;
-  return rows.sort((a, b) => (a.rank === null ? 1 : 0) - (b.rank === null ? 1 : 0) || (a.rank ?? 0) - (b.rank ?? 0) || at(a.id) - at(b.id) || a.id - b.id);
-}
-
-/**
- * The rank for step `nodeId` placed in `band` before `before` (null: at the end), inside a write already open. Gives
- * every unranked step of the band a rank in its shown order first, and renormalises the band to 1..n when the gap it
- * would land in is under 1e-6; both write `rank` only, never `updated_at`, so only the moved step reads as touched. A
- * step that already sits there keeps its rank (Keep is a no-op move). Refuses (409) a `before` that is not an open step of
- * the band, or is the step itself. The caller stores the rank it returns.
- */
-export function placeInBand(ctx: Ctx, projectId: number, nodeId: number, band: RankBand, before: number | null): number {
+export function placeInBand(ctx: Ctx, nodes: TreeNode[], nodeId: number, band: RankBand, before: number | null): number {
   if (before === nodeId) throw conflict(`#${nodeId} cannot be placed before itself`, 'Reload the window.');
   const setRank = ctx.db.prepare('UPDATE nodes SET rank = ? WHERE id = ?');
-  let members = bandOrder(ctx, projectId, band);
+  let members = bandOrder(nodes, band).map((n) => ({ id: n.id, rank: n.rank }));
   if (members.some((m) => m.rank === null)) {
     let top = members.reduce((max, m) => (m.rank !== null && m.rank > max ? m.rank : max), 0);
     members = members.map((m) => {
@@ -87,7 +51,7 @@ export function listStepTouches(ctx: Ctx, projectId: number): StepTouch[] {
       `SELECT * FROM (
          SELECT n.id AS nodeId,
            (SELECT MAX(CASE WHEN s.state = 'ended' THEN MIN(coalesce(s.ended_at, s.last_seen_at), s.last_seen_at) ELSE s.last_seen_at END)
-              FROM sessions s WHERE s.focus_node_id = n.id) AS sessionAt,
+              FROM sessions s WHERE s.project_id = n.project_id AND s.focus_node_id = n.id) AS sessionAt,
            (SELECT MAX(a.raised_at) FROM asks a WHERE a.node_id = n.id) AS askAt
          FROM nodes n WHERE n.project_id = ? AND n.rank_band IS NOT NULL AND n.status IN ('todo', 'active', 'blocked')
        ) WHERE sessionAt IS NOT NULL OR askAt IS NOT NULL ORDER BY nodeId`,

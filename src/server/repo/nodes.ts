@@ -4,7 +4,7 @@ import { write, type Ctx, type RecordEvent } from '../db/tx';
 import { badRequest, conflict, notFound } from '../errors';
 import { definedOnly } from '../util';
 import { clearNodeAsks } from './asks';
-import { appendUnowned, dropFromQueue, getProjectById, inLiveProject, moveInQueue } from './projects';
+import { appendUnowned, dropFromQueue, getProjectById, inLiveProject, isQueued, moveInQueue } from './projects';
 import { placeInBand } from './rank';
 import { parkedAncestor, shelvedAmong, subtreeIds } from './shelved';
 import { closeNodeTasks } from './work';
@@ -162,7 +162,7 @@ export function addNodes(
       const place = ctx.db.prepare('UPDATE nodes SET rank_band = ?, rank = ? WHERE id = ?');
       for (const [i, id] of top.entries()) {
         const status = input.nodes[i].status ?? 'todo';
-        if (status === 'todo' || status === 'active' || status === 'blocked') place.run(input.band, placeInBand(ctx, parent.projectId, id, input.band, null), id);
+        if (status === 'todo' || status === 'active' || status === 'blocked') place.run(input.band, placeInBand(ctx, listNodes(ctx, parent.projectId), id, input.band, null), id);
       }
     }
     record({ projectId: parent.projectId, type: 'node.created', entity: 'node', entityId: ids[0], data: { ids, parentId: parent.id } });
@@ -319,6 +319,19 @@ export function unparkNode(ctx: Ctx, actor: string, id: number, toNext: boolean,
 }
 
 /**
+ * The inspector's Label select: sets step `id`'s label, or clears it with null, as update_node does. `check` runs on the
+ * step as read inside the write. The project root has no label.
+ */
+export function labelNode(ctx: Ctx, actor: string, id: number, label: NodeLabel | null, check: (before: TreeNode) => void): TreeNode {
+  return write(ctx, actor, (record) => {
+    const before = requireNode(ctx, id);
+    check(before);
+    if (before.parentId === null) throw conflict(`#${id} is the project root`, 'Reload the window.');
+    return patchNode(ctx, record, before, { label });
+  });
+}
+
+/**
  * Sets or clears the session that drives `node`, inside a write() already open, and records node.updated with the
  * change. A driver change is not an edit of the step, so updatedAt (where the needs-you age counts from) stays. No-op
  * when the driver is already `sessionId`.
@@ -358,12 +371,17 @@ export function moveNode(ctx: Ctx, actor: string, id: number, input: { parentId:
   });
 }
 
-/** Why step `node` cannot take a rank change, or null when it can: open, not shelved, and not a group. */
+/**
+ * Why step `node` cannot take a rank change, or null when it can: open, not shelved, and not a group (a step with open
+ * steps under it), unless it is queued: the Board keeps a queued group as a Next row (deriveBoard), so it can still be
+ * moved within Next or out of it.
+ */
 function notRankable(ctx: Ctx, node: TreeNode): string | null {
   if (node.parentId === null) return 'is the project root';
   if (node.status !== 'todo' && node.status !== 'active' && node.status !== 'blocked') return `is ${node.status}`;
   if (shelvedAmong(ctx, [node.id]).size) return 'is under a parked step';
-  if (ctx.db.prepare("SELECT 1 FROM nodes WHERE parent_id = ? AND status IN ('todo', 'active', 'blocked')").get(node.id) !== undefined) return 'has open steps under it';
+  const group = ctx.db.prepare("SELECT 1 FROM nodes WHERE parent_id = ? AND status IN ('todo', 'active', 'blocked')").get(node.id) !== undefined;
+  if (group && !isQueued(ctx, node.projectId, node.id)) return 'has open steps under it';
   return null;
 }
 
@@ -381,10 +399,11 @@ export function applyRankOp(ctx: Ctx, actor: string, projectId: number, op: Rank
     const why = notRankable(ctx, node);
     if (why) throw conflict(`#${op.node} ${why}`, 'Reload the window.');
     if (op.to === 'next') {
+      if (op.before === op.node) throw conflict(`#${op.node} cannot be placed before itself`, 'Reload the window.');
       moveInQueue(ctx, record, projectId, op.node, op.before);
       return { node, project: getProjectById(ctx, projectId)! };
     }
-    const rank = placeInBand(ctx, projectId, op.node, op.to, op.before);
+    const rank = placeInBand(ctx, listNodes(ctx, projectId), op.node, op.to, op.before);
     dropFromQueue(ctx, record, projectId, [op.node], 'rank');
     ctx.db.prepare('UPDATE nodes SET rank_band = ?, rank = ?, updated_at = ? WHERE id = ?').run(op.to, rank, ctx.now(), op.node);
     const changes: Record<string, { from: unknown; to: unknown }> = {};

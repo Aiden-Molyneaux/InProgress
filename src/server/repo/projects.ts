@@ -156,7 +156,11 @@ export function dropFromQueue(ctx: Ctx, record: RecordEvent, projectId: number, 
   const row = ctx.db.prepare('SELECT queue FROM projects WHERE id = ?').get(projectId) as { queue: string } | undefined;
   if (!row) return;
   const gone = new Set(ids);
-  storeQueue(ctx, record, projectId, row.queue, parseQueue(row.queue).filter((e) => !gone.has(e.nodeId)), { op });
+  const stored = parseQueue(row.queue);
+  // A rank change names its one step, and the session whose own queue it left, as the queue route's move does.
+  const taken = op === 'rank' ? stored.find((e) => e.nodeId === ids[0]) : undefined;
+  const extra = op === 'rank' ? { node: ids[0], ...(taken?.sessionId ? { takenFrom: taken.sessionId } : {}) } : {};
+  storeQueue(ctx, record, projectId, row.queue, stored.filter((e) => !gone.has(e.nodeId)), { op, ...extra });
 }
 
 /**
