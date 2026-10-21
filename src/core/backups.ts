@@ -1,6 +1,18 @@
 // Types only: the window imports them, so nothing here may pull in node modules.
 export type BackupLevel = 'ok' | 'warn' | 'fail';
 
+/** The sentence for a backup that cannot start because another one holds the repo. */
+export const BACKUP_BUSY = 'Another backup is running: try again in a few minutes';
+
+/** One line of the Backups panel, worded and levelled by the server (backup-status.ts). */
+export interface BackupRow {
+  label: 'Snapshot' | 'Pushed' | 'Drill' | 'Repo';
+  value: string;
+  level: BackupLevel;
+  /** Why the row is not ok. */
+  note?: string;
+}
+
 /** What `inprogress doctor`'s Backups check reads, as rows the window can show. */
 export interface BackupStatus {
   backupsDir: string;
@@ -12,6 +24,8 @@ export interface BackupStatus {
   drill: { at: string; ok: boolean; detail: string; level: BackupLevel; note?: string } | null;
   repoBytes: number | null;
   repoLevel: BackupLevel;
+  /** The panel's rows, in order. */
+  rows: BackupRow[];
   busy: boolean;
   warnings: string[];
   fail: boolean;

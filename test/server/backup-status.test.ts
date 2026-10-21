@@ -104,6 +104,42 @@ describe('Backups doctor check', { timeout: 60_000 }, () => {
 });
 
 describe('backupStatus rows', { timeout: 60_000 }, () => {
+  it('words the rows as the panel shows them, with doctor floored ages', async () => {
+    const home = homeWith({ snapshotHoursAgo: 2, pushedHoursAgo: 6 * 24 + 5, drill: { at: hoursAgo(3), ok: false, detail: 'resource a differs' } });
+    const { rows } = await backupStatus(home, { serverUp: true, now });
+    expect(rows.map((r) => r.label)).toEqual(['Snapshot', 'Pushed', 'Drill', 'Repo']);
+    expect(rows[0]).toMatchObject({ level: 'ok', value: expect.stringMatching(/^inprogress-\d{8}-\d{6}\.db · 2 h ago$/) });
+    expect(rows[1]).toEqual({ label: 'Pushed', value: '6 d ago', level: 'warn', note: 'the newest pushed commit is over 3 days old' });
+    expect(rows[2]).toEqual({ label: 'Drill', value: 'FAILED (resource a differs) · 3 h ago', level: 'warn', note: 'the last drill failed' });
+    expect(rows[3]).toMatchObject({ label: 'Repo', value: expect.stringMatching(/^\d+\.\d MB$/), level: 'ok' });
+  });
+
+  it('words the empty cases, and has no drill or repo row without the off-machine copy', async () => {
+    const none = await backupStatus(homeWith({}), { serverUp: true, now });
+    expect(none.rows).toEqual([
+      { label: 'Snapshot', value: 'none yet', level: 'warn', note: 'no snapshot yet' },
+      { label: 'Pushed', value: 'not set up', level: 'warn', note: 'Run inprogress backup --init <remote url>' },
+    ]);
+    const unpushed = homeWith({ snapshotHoursAgo: 2 });
+    mkdirSync(join(unpushed, 'offsite'));
+    git(join(unpushed, 'offsite'), ['init', '-q']);
+    const rows = (await backupStatus(unpushed, { serverUp: true, now, drill: null })).rows;
+    expect(rows.slice(1, 3)).toEqual([
+      { label: 'Pushed', value: 'nothing pushed yet', level: 'warn', note: 'nothing is pushed yet' },
+      { label: 'Drill', value: 'no drill yet', level: 'warn', note: 'the backup has never been drilled' },
+    ]);
+  });
+
+  it('prints doctor Backups line exactly', async () => {
+    const check = await backupsCheck(homeWith({ snapshotHoursAgo: 30, pushedHoursAgo: 4 * 24, drill: { at: hoursAgo(15 * 24), ok: true, detail: 'fine' } }), true, now);
+    const detail = check.detail.replace(/inprogress-\d{8}-\d{6}\.db/, 'SNAP').replace(/repo \d+\.\d MB/, 'repo N MB');
+    expect(detail).toBe(
+      'the newest snapshot is over 26 hours old; the newest pushed commit is over 3 days old; the last drill is over 14 days old ' +
+        '(newest snapshot SNAP (1 d ago); newest pushed commit 4 d ago; last drill passed 15 d ago; repo N MB)',
+    );
+    expect(check).toMatchObject({ name: 'Backups', ok: false, warnOnly: true });
+  });
+
   it('gives each row its level, age and the warning it raised', async () => {
     const home = homeWith({ snapshotHoursAgo: 30, pushedHoursAgo: 4 * 24, drill: { ...goodDrill, at: hoursAgo(15 * 24) } });
     const status = await backupStatus(home, { serverUp: true, now });

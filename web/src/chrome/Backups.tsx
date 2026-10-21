@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
-import type { BackupLevel, BackupStatus } from '../../../src/core/backups';
+import { BACKUP_BUSY, type BackupLevel, type BackupStatus } from '../../../src/core/backups';
 import { api } from '../api';
 import { Eyebrow } from '../parts/Eyebrow';
 import { Frame } from '../parts/Frame';
-import { useNow } from '../useNow';
-import { backupRows, restoreCommands, worstLevel, worstNote } from './backupsLogic';
+import { restoreCommands, worstLevel, worstNote } from './backupsLogic';
 
 /** How often the open panel asks again while someone else's backup holds the lock. */
 const POLL_MS = 3000;
 /** How long a Copy button reads Copied. */
 const COPIED_MS = 1500;
-const BUSY = 'Another backup is running: try again in a few minutes';
+/** How often the footer's mark is read again while the window stays open. */
+const MARK_MS = 60 * 60 * 1000;
 
 const MARK: Record<BackupLevel, string> = { ok: '●', warn: '▲', fail: '✕' };
 
@@ -20,10 +20,11 @@ const MARK: Record<BackupLevel, string> = { ok: '●', warn: '▲', fail: '✕' 
  * commands that restore. Restoring is the CLI's: it needs InProgress stopped, so the window only shows the commands.
  */
 export function Backups() {
-  const now = useNow(30_000);
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<BackupStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** An open panel is waiting on a status read. */
+  const [reading, setReading] = useState(false);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<{ text: string; ok: boolean } | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
@@ -34,24 +35,37 @@ export function Backups() {
   const started = useRef(false);
   const copyTimer = useRef(0);
 
-  const refresh = useCallback(async () => {
+  /** Reads the status; `visible` shows "Reading…" meanwhile (an open panel's own read, not the mark's or the poll's). */
+  const refresh = useCallback(async (visible = false) => {
+    if (visible) setReading(true);
     try {
       setStatus(await api.backups());
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      if (visible) setReading(false);
     }
   }, []);
 
-  // For the footer's mark.
+  // For the footer's mark: once now, then hourly and whenever the window is shown again, so it never sits stale for days.
   useEffect(() => {
     void refresh();
+    const timer = window.setInterval(() => void refresh(), MARK_MS);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void refresh();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [refresh]);
 
+  // The last result stays through a close and reopen; only a new run clears it.
   const show = () => {
-    setResult(null);
     setOpen(true);
-    void refresh();
+    void refresh(true);
   };
 
   /** Closes the panel; focus goes back to the footer button. The dialog closes first: while modal, the rest of the window is inert. */
@@ -63,7 +77,11 @@ export function Backups() {
 
   useLayoutEffect(() => {
     const d = dialog.current;
-    if (open && d && !d.open) d.showModal();
+    if (open && d && !d.open) {
+      d.showModal();
+      // On the dialog itself, not its first button: Enter twice from the footer must not start a backup.
+      d.focus();
+    }
   }, [open]);
 
   useEffect(() => () => window.clearTimeout(copyTimer.current), []);
@@ -86,8 +104,10 @@ export function Backups() {
     const answer = await api.backUpNow();
     started.current = false;
     setRunning(false);
-    // Enabled again after this render; the run's answer reads from where the click was.
-    window.setTimeout(() => backUpButton.current?.focus(), 0);
+    // Enabled again after this render. Focus goes back to the button only if it is still where the run parked it.
+    window.setTimeout(() => {
+      if (document.activeElement === dialog.current) backUpButton.current?.focus();
+    }, 0);
     if (answer === 'reload') {
       setResult({ text: 'The server restarted: reload the window.', ok: false });
     } else if (typeof answer === 'string') {
@@ -124,22 +144,22 @@ export function Backups() {
     }
   };
 
-  const level = status ? worstLevel(status) : 'ok';
-  const rows = status ? backupRows(status, now) : [];
+  const level = status ? worstLevel(status) : null;
   const busy = running || !!status?.busy;
-  const line = running ? '' : (result?.text ?? (status?.busy ? BUSY : ''));
+  // A lock held now outranks an older result: the result is from before it.
+  const line = running ? '' : status?.busy ? BACKUP_BUSY : (result?.text ?? '');
   return (
     <>
       <button
         ref={button}
         className="ip-backups-btn"
-        data-level={level}
+        data-level={level ?? 'none'}
         aria-haspopup="dialog"
         aria-expanded={open}
         title={status ? (worstNote(status) ?? 'Backups: all well') : 'Backups'}
         onClick={() => (open ? close() : show())}
       >
-        <span aria-hidden="true">{MARK[level]} </span>
+        {level && <span aria-hidden="true">{MARK[level]} </span>}
         Backups
         {level === 'fail' && <span aria-hidden="true"> FAIL</span>}
       </button>
@@ -156,9 +176,11 @@ export function Backups() {
         }}
         // However the dialog closes, the state follows.
         onClose={() => setOpen(false)}
-        // A press on the backdrop is a press on the dialog itself.
+        // A press on the backdrop is a press on the dialog itself, outside its box; one on its own scrollbar is inside it.
         onMouseDown={(e) => {
-          if (e.target === e.currentTarget) {
+          const box = e.currentTarget.getBoundingClientRect();
+          const outside = e.clientX < box.left || e.clientX > box.right || e.clientY < box.top || e.clientY > box.bottom;
+          if (e.target === e.currentTarget && outside) {
             e.preventDefault();
             close();
           }
@@ -172,9 +194,10 @@ export function Backups() {
                 Backups
               </Eyebrow>
               {error && <p className="ip-backups-error">Could not read the backups: {error}</p>}
+              {reading && <p className="ip-backups-note">Reading…</p>}
               {status && (
                 <dl className="ip-backups-rows">
-                  {rows.map((r) => (
+                  {status.rows.map((r) => (
                     <div key={r.label} className="ip-backups-row" data-level={r.level}>
                       <dt>{r.label}</dt>
                       <dd>

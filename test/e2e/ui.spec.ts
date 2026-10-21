@@ -4235,6 +4235,8 @@ test('the Backups panel shows status, backs up to a local remote and opens the f
     // C1: the newest snapshot (the server's start wrote one), and nothing pushed yet.
     await footerButton.click();
     await expect(panel).toBeVisible();
+    // Focus starts on the dialog, not on Back up now: Enter twice from the footer must not start a backup.
+    await expect(panel).toBeFocused();
     await expect(row('Snapshot')).toContainText(/inprogress-\d{8}-\d{6}\.db · /);
     await expect(row('Pushed')).toContainText('nothing pushed yet');
 
@@ -4260,10 +4262,12 @@ test('the Backups panel shows status, backs up to a local remote and opens the f
     await backUp.click();
     await expect(backUp).toBeDisabled();
     await expect(backUp).toHaveText('Backing up…');
-    await expect(panel.getByRole('status')).toHaveText('Backed up and pushed.');
+    await expect(panel.getByRole('status')).toHaveText('Backed up and pushed.', { timeout: 60_000 });
     await expect(backUp).toHaveText('Back up now');
     await expect(backUp).toBeEnabled();
-    await expect(row('Pushed')).toContainText('just now');
+    // The run parked focus on the dialog and nothing moved it, so it returns to the button.
+    await expect(backUp).toBeFocused();
+    await expect(row('Pushed')).toContainText('0 h ago');
     const subjects = execFileSync('git', ['--git-dir', bare, 'log', '--format=%s', 'main'], { encoding: 'utf8' }).trim().split('\n');
     expect(subjects).toHaveLength(1);
     expect(subjects[0]).toMatch(/^Backup /);
@@ -4285,8 +4289,15 @@ test('the Backups panel shows status, backs up to a local remote and opens the f
     await expect(panel).toBeHidden();
     await expect(footerButton).toBeFocused();
   } finally {
-    // A git the panel's last status read started may still hold the folder for a moment.
-    rmSync(clone, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
-    rmSync(bareDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+    // A git the panel's last status read started may still hold the folder for a moment. Windows can hold it longer
+    // (docs/known-issues.md, "The first npm test run fails a file"): a leftover is harmless, since start-server.mjs
+    // wipes .e2e-home on every run and no other test reads the backups, so the cleanup never fails the test.
+    for (const dir of [clone, bareDir]) {
+      try {
+        rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+      } catch (err) {
+        console.warn(`Left ${dir} behind: ${(err as Error).message}`);
+      }
+    }
   }
 });

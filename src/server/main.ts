@@ -6,7 +6,7 @@ import { baseUrl, ensureToken, homeDir, port as configuredPort } from '../lib/ho
 import { readBuild, VERSION } from '../lib/version';
 import { createWatchState, watchAgents, watchCommandEnds, watchInterval } from './agent-watch';
 import { buildApp } from './app';
-import { snapshotDb, truncateIfLarge } from './backup';
+import { truncateIfLarge } from './backup';
 import { openDb } from './db/connection';
 import { createCtx } from './db/tx';
 import { createBackupRunner } from './backup-runner';
@@ -83,13 +83,10 @@ async function main(): Promise<void> {
   } catch (err) {
     app.log.error(`Could not write server.pid: ${(err as Error).message}`);
   }
-  // Back up only once we own the port, so two racing starts never write the same backup file.
-  const backups = join(home, 'backups');
-  await snapshotDb(db, backups).catch((err: Error) => app.log.error(err.message));
-  // After the backup, so the newest backup still holds a project the purge is about to remove; then on a timer, since
-  // the server can run for weeks. runMaintenance never throws.
-  runMaintenance(ctx, home, log);
-  // The off-machine copy and the drill start in the background: a slow push never delays the server's first answer.
+  // Back up only once we own the port, so two racing starts never write the same backup file. The runner snapshots first,
+  // so the newest backup still holds a project the purge is about to remove, then runs maintenance, the off-machine copy and
+  // the drill, in the background (a slow push never delays the server's first answer), and again on a timer, since the
+  // server can run for weeks. runMaintenance never throws.
   runner.startup();
   maintenance = setInterval(() => void runner.tick(), MAINTENANCE_MS);
   maintenance.unref();

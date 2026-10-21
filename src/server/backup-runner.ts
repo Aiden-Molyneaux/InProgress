@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import type { BackUpNowResult } from '../core/backups';
+import { BACKUP_BUSY, type BackUpNowResult } from '../core/backups';
 import { snapshotDb } from './backup';
 import type { DB } from './db/connection';
 import { lockHeld, offsiteDir, runOffsite, tickOffsite, type OffsiteLog } from './offsite';
@@ -17,8 +17,6 @@ export interface BackupRunner {
   backUpNow(): Promise<BackUpNowResult>;
 }
 
-const BUSY = 'Another backup is running: try again in a few minutes';
-
 /**
  * Serializes every backup the server runs through one flag: a push that takes minutes must not overlap the next tick's
  * snapshot or copy, nor a click on Back up now. tickOffsite and runOffsite never throw.
@@ -28,11 +26,24 @@ export function createBackupRunner(o: { db: DB; home: string; log: OffsiteLog; m
   const backups = join(home, 'backups');
   let busy = false;
 
+  /** The snapshot first, so the newest one still holds a project the purge in maintenance is about to remove; then the off-machine copy. Never throws. */
+  const cycle = async (): Promise<void> => {
+    await snapshotDb(db, backups).catch((err: Error) => log.error(err.message));
+    try {
+      o.maintenance();
+    } catch (err) {
+      log.error(`Could not run the maintenance: ${(err as Error).message}`);
+    }
+    await tickOffsite(db, home, log);
+  };
+
   return {
     running: () => busy,
     startup() {
+      // A run already going covers the startup work: the flag is only ever set by one of these.
+      if (busy) return;
       busy = true;
-      void tickOffsite(db, home, log).finally(() => {
+      void cycle().finally(() => {
         busy = false;
       });
     },
@@ -40,16 +51,14 @@ export function createBackupRunner(o: { db: DB; home: string; log: OffsiteLog; m
       if (busy) return;
       busy = true;
       try {
-        await snapshotDb(db, backups).catch((err: Error) => log.error(err.message));
-        o.maintenance();
-        await tickOffsite(db, home, log);
+        await cycle();
       } finally {
         busy = false;
       }
     },
     async backUpNow() {
       // The lock covers another process (the CLI's `backup --push`) working on the same repo.
-      if (busy || lockHeld(offsiteDir(home))) return { status: 'busy', message: BUSY };
+      if (busy || lockHeld(offsiteDir(home))) return { status: 'busy', message: BACKUP_BUSY };
       busy = true;
       try {
         let snapshot: 'written' | 'unchanged' | 'failed';
@@ -74,7 +83,7 @@ export function createBackupRunner(o: { db: DB; home: string; log: OffsiteLog; m
           outcome === 'ok'
             ? 'Backed up and pushed.'
             : outcome === 'busy'
-              ? BUSY
+              ? BACKUP_BUSY
               : outcome === 'not set up'
                 ? 'The off-machine copy is not set up: run inprogress backup --init <remote url>'
                 : lastError || 'The off-machine backup failed: see server.log';

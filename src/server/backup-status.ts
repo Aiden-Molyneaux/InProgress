@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
-import type { BackupLevel, BackupStatus } from '../core/backups';
+import type { BackupLevel, BackupRow, BackupStatus } from '../core/backups';
 import { parseStamp } from './backup';
 import { lockHeld, offsiteDir as offsiteOf } from './offsite';
 
@@ -54,6 +54,7 @@ export async function backupStatus(home: string, o: BackupStatusOptions): Promis
   const warnings: string[] = [];
   let fail = false;
   const parts: string[] = [];
+  const rows: BackupRow[] = [];
   /** Records a warning and returns it, so the row it belongs to can carry it as its note. */
   const warn = (text: string): string => {
     warnings.push(text);
@@ -69,22 +70,27 @@ export async function backupStatus(home: string, o: BackupStatusOptions): Promis
     const age = now.getTime() - at;
     parts.push(`newest snapshot ${newest} (${ago(age)} ago)`);
     const stale = age > 26 * HOUR_MS && serverUp;
+    rows.push({ label: 'Snapshot', value: `${newest} · ${ago(age)} ago`, level: stale ? 'warn' : 'ok', note: stale ? 'the newest snapshot is over 26 hours old' : undefined });
     snapshot = { name: newest, at: new Date(at).toISOString(), level: stale ? 'warn' : 'ok', note: stale ? warn('the newest snapshot is over 26 hours old') : undefined };
   } else {
     parts.push(`no snapshot in ${dir}`);
     if (serverUp) warn('no snapshot yet');
+    rows.push({ label: 'Snapshot', value: 'none yet', level: 'warn', note: 'no snapshot yet' });
   }
   // Pushed commit, drill and size
   const repo = offsiteOf(home);
   const setUp = existsSync(join(repo, '.git'));
-  const pushedAt = setUp ? await gitQuiet(repo, ['log', '-1', '--format=%cI', 'origin/main']) : undefined;
+  // The two git reads are independent and each costs a process start: run them together.
+  const [pushedAt, counts] = setUp ? await Promise.all([gitQuiet(repo, ['log', '-1', '--format=%cI', 'origin/main']), gitQuiet(repo, ['count-objects', '-v'])]) : [undefined, undefined];
   let pushed: BackupStatus['pushed'] = null;
   if (!setUp) {
     parts.push('not set up: run inprogress backup --init <remote url>');
     warn('the off-machine copy is not set up');
+    rows.push({ label: 'Pushed', value: 'not set up', level: 'warn', note: 'Run inprogress backup --init <remote url>' });
   } else if (!pushedAt) {
     parts.push('no pushed commit yet: run inprogress backup --push');
     warn('nothing is pushed yet');
+    rows.push({ label: 'Pushed', value: 'nothing pushed yet', level: 'warn', note: 'nothing is pushed yet' });
   } else {
     const age = now.getTime() - new Date(pushedAt).getTime();
     parts.push(`newest pushed commit ${ago(age)} ago`);
@@ -98,6 +104,7 @@ export async function backupStatus(home: string, o: BackupStatusOptions): Promis
       level = 'warn';
       note = warn('the newest pushed commit is over 3 days old');
     }
+    rows.push({ label: 'Pushed', value: `${ago(age)} ago`, level, note });
     pushed = { at: new Date(pushedAt).toISOString(), level, note };
   }
   let drillRow: BackupStatus['drill'] = null;
@@ -108,15 +115,16 @@ export async function backupStatus(home: string, o: BackupStatusOptions): Promis
     if (!drill) {
       parts.push('no drill yet');
       warn('the backup has never been drilled');
+      rows.push({ label: 'Drill', value: 'no drill yet', level: 'warn', note: 'the backup has never been drilled' });
     } else {
       const age = now.getTime() - Date.parse(drill.at);
       parts.push(`last drill ${drill.ok ? 'passed' : `FAILED (${drill.detail})`} ${ago(age)} ago`);
       let note: string | undefined;
       if (!drill.ok) note = warn('the last drill failed');
       else if (age > 14 * DAY_MS) note = warn('the last drill is over 14 days old');
+      rows.push({ label: 'Drill', value: `${drill.ok ? 'passed' : `FAILED (${drill.detail})`} · ${ago(age)} ago`, level: note ? 'warn' : 'ok', note });
       drillRow = { at: drill.at, ok: drill.ok, detail: drill.detail, level: note ? 'warn' : 'ok', note };
     }
-    const counts = await gitQuiet(repo, ['count-objects', '-v']);
     if (counts !== undefined) {
       const kib = (key: string) => Number(new RegExp(`^${key}: (\\d+)$`, 'm').exec(counts)?.[1] ?? 0);
       const total = kib('size-pack') + kib('size');
@@ -126,11 +134,12 @@ export async function backupStatus(home: string, o: BackupStatusOptions): Promis
         warn('the backup repo is over 500 MB');
         repoLevel = 'warn';
       }
+      rows.push({ label: 'Repo', value: `${(total / 1024).toFixed(1)} MB`, level: repoLevel, note: repoLevel === 'ok' ? undefined : 'the backup repo is over 500 MB' });
     }
   }
   const detail = parts.join('; ');
   const check: BackupStatus['check'] = warnings.length ? { name: 'Backups', ok: false, warnOnly: !fail, detail: `${warnings.join('; ')} (${detail})` } : { name: 'Backups', ok: true, detail };
-  return { backupsDir: dir, offsiteDir: repo, snapshot, setUp, pushed, drill: drillRow, repoBytes, repoLevel, busy: setUp && lockHeld(repo), warnings, fail, check };
+  return { backupsDir: dir, offsiteDir: repo, snapshot, setUp, pushed, drill: drillRow, rows, repoBytes, repoLevel, busy: setUp && lockHeld(repo), warnings, fail, check };
 }
 
 /** Doctor's Backups check. */

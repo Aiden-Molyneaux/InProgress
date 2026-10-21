@@ -65,6 +65,18 @@ describe('backup runner', { timeout: 120_000 }, () => {
     expect(maintenance).toHaveBeenCalledTimes(1);
   });
 
+  it('startup holds the flag until its snapshot, maintenance and copy are done, so Back up now answers busy', async () => {
+    const { home, runner, maintenance } = setup();
+    runner.startup();
+    expect(runner.running()).toBe(true);
+    expect(await runner.backUpNow()).toMatchObject({ status: 'busy' });
+    // A second startup while the first runs starts nothing.
+    runner.startup();
+    await vi.waitFor(() => expect(runner.running()).toBe(false), { timeout: 30_000 });
+    expect(maintenance).toHaveBeenCalledTimes(1);
+    expect(readdirSync(join(home, 'backups')).filter((f) => f.endsWith('.db'))).toHaveLength(1);
+  });
+
   it('answers busy while another process holds the repo lock', async () => {
     const { home, runner } = setup();
     await withRemote(home);
@@ -99,13 +111,12 @@ describe('backup runner', { timeout: 120_000 }, () => {
   });
 
   it('reports a failed snapshot with the offsite outcome', async () => {
-    const { home, db, runner } = setup();
+    const { db, runner } = setup();
     db.close();
     dbs.pop();
     const result = await runner.backUpNow();
     expect(result.status).toBe('failed');
     expect(result.snapshot).toBe('failed');
     expect(result.message).toMatch(/^The snapshot failed: /);
-    expect(home).toBeTruthy();
   });
 });
