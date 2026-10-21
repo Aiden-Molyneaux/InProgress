@@ -36,6 +36,18 @@ work. A re-hit bumps **Hits** and **Verified**. Entries seeded from the code and
   server only when the fix needs it, and say so in the receipt.
 - **Verified:** 2026-10-14, seeded from the code and the quiet-restyle plan · **Hits:** 0
 
+## The hook-wait smoke test reads "timed out after 750 ms" under a busy deploy
+- **Symptom:** `npm run deploy` goes red at "▸ Smoke tests" on `test/smoke/hook-wait.test.ts >
+  other hooks still give their POST only 500 ms`: `expected '… prompt-submit: timed out after 750
+  ms' to match /prompt-submit: InProgress server unreachable at .+ \(The operation was aborted due
+  to timeout\)/`.
+- **Diagnosis:** the hook's 750 ms process cap fired before its own 500 ms POST timeout could log,
+  because the machine was loaded (the deploy's unit run had just finished, and other sessions were
+  running suites). The same smoke suite passed 26/26 straight after, run alone from the worktree,
+  and the diff that hit it (#528) touched no hook code.
+- **Fix:** rerun `npm run deploy` once the machine is quieter.
+- **Verified:** 2026-10-20 · **Hits:** 1
+
 ## A red deploy or rollback
 - **Symptom:** `npm run deploy` exits non-zero. Before the "▸ Making ... live" step, the last
   thing printed is the failing step's own npm output. After it: "The new build did not start

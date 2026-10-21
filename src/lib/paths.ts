@@ -1,3 +1,5 @@
+import { isAbsolute } from 'node:path';
+
 /**
  * Normalize a filesystem path for storage and comparison: forward slashes, repeated separators
  * collapsed (a UNC path keeps its leading `//`), Git Bash `/c/x` converted to `C:/x`, upper-case
@@ -14,6 +16,16 @@ export function normalizePath(input: string): string {
   p = p.replace(/^([a-z]):/, (_m, drive: string) => `${drive.toUpperCase()}:`);
   while (p.length > 1 && p.endsWith('/') && !/^[A-Za-z]:\/$/.test(p)) p = p.slice(0, -1);
   return p;
+}
+
+/**
+ * A path on a local disk. UNC and device paths (\\host\share, //host/share, \\?\, \\.\) are refused
+ * before anything touches them: Windows would open an SMB session with the user's credentials,
+ * and a slow or unreachable host would stall the server.
+ */
+export function isLocalAbsolutePath(path: string): boolean {
+  if (path.startsWith('\\\\') || path.startsWith('//')) return false;
+  return process.platform === 'win32' ? /^[A-Za-z]:[\\/]/.test(path) : isAbsolute(path);
 }
 
 /** True when `child` is `parent` or inside it. Case-insensitive (Windows). */
