@@ -21,6 +21,9 @@
   --alarm: #f24723;
   --alarm-soft: rgba(242, 71, 35, 0.22);
   --alarm-wash: rgba(242, 71, 35, 0.08);
+  /* The Library's behind-Shipwright signal. Never volt: volt stays "your move". */
+  --behind: #ff6b00;
+  --behind-wash: rgba(255, 107, 0, 0.08);
   --violet: #5200ff;
   --violet-ink: #9f7bff;
   /* Edges are lines: no shadows, no translucent panels. */

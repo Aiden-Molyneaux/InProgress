@@ -1,0 +1,35 @@
+/* The Library (#529): Pages, Roster and Sync in the main pane, opened from the rail's Library row. */
+@layer components {
+.ip-library { container-type: inline-size; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow-x: hidden; overflow-y: auto; }
+.ip-lib-page { display: grid; align-content: start; gap: var(--sp-5); padding: var(--sp-4); }
+@container (min-width: 1160px) {
+  .ip-lib-page { padding: var(--sp-6); }
+}
+/* The Roster page opens in place: the page head stays, and the viewer takes the rest and scrolls inside. */
+.ip-lib-page[data-inline] { flex: 1; min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
+.ip-lib-sec { display: grid; gap: var(--sp-2); min-width: 0; }
+.ip-lib-sec h3 { margin: 0; }
+.ip-lib-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.ip-lib-row { display: grid; gap: var(--sp-1); min-width: 0; padding: var(--sp-2); border-bottom: 1px solid var(--line-soft); }
+.ip-lib-line { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; min-height: var(--sp-5); }
+.ip-lib-open { flex: none; max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--t-body); color: var(--text-hi); text-align: left; cursor: pointer; }
+.ip-lib-open:hover { color: var(--volt); }
+.ip-lib-open:focus-visible { outline: 2px solid var(--volt); outline-offset: 1px; }
+.ip-lib-path { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-muted); }
+.ip-lib-fresh { flex: none; font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-muted); white-space: nowrap; }
+.ip-lib-fresh[data-alarm], .ip-lib-error, .ip-lib-sync-state[data-alarm] { color: var(--alarm); }
+.ip-lib-error { margin: 0; font-size: var(--t-detail-sm); }
+.ip-lib-adapted { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.ip-lib-adapt { text-decoration: none; }
+.ip-lib-adapt:hover .p-chip { border-color: var(--volt); color: var(--volt); }
+.ip-lib-adapt:focus-visible { outline: 2px solid var(--volt); outline-offset: 1px; }
+.ip-lib-sha { font-family: var(--font-mono); font-size: var(--t-detail-sm); letter-spacing: 0.04em; color: var(--text-muted); }
+.ip-lib-pick { margin: 0; font-size: var(--t-body); color: var(--text); }
+.ip-lib-sync { display: flex; gap: var(--sp-3); margin: 0; font-size: var(--t-body); }
+.ip-lib-sync-name { color: var(--text-hi); }
+.ip-lib-sync-state { font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-muted); }
+@container (max-width: 559px) {
+  .ip-lib-line { flex-wrap: wrap; row-gap: var(--sp-1); }
+  .ip-lib-path { flex-basis: 100%; }
+}
+}
