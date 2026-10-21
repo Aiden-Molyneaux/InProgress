@@ -80,7 +80,7 @@ export function BoardTile({ box, now, area, band, docs = 0, cursor, rise, select
         hue={band === 'done' || band === 'backlog' ? null : hueOf(box)}
         data-node={node?.id}
         data-state={state}
-        id={node ? (typeof number === 'number' ? <><span className="ip-tile-num">{number}</span>{`#${node.id}`}</> : `#${node.id}`) : undefined}
+        id={node ? (typeof number === 'number' ? <><span className="ip-tile-num"><span aria-hidden="true">{number}</span><span className="ip-tile-num-sr">{`Rank ${number}, `}</span></span>{`#${node.id}`}</> : `#${node.id}`) : undefined}
         chips={
           <>
             {lead}

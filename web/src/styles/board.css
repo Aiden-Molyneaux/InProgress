@@ -166,6 +166,7 @@ button.ip-hover-act:not(.p-btn):hover { color: var(--text); background: var(--ca
 .ip-tile:is(:hover, :focus-within) .p-btn.ip-hover-act, .ip-tile .p-btn.ip-hover-act:focus-visible { opacity: 1; }
 .ip-preview .ip-backlog-list { gap: var(--sp-3); }
 .ip-tile-num { margin-right: var(--sp-2); font-family: var(--font-mono); color: var(--text-muted); }
+.ip-tile-num-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .ip-preview .ip-preview-triage { justify-self: start; }
 .ip-tile.ip-backlog-row { padding: var(--sp-3); gap: var(--sp-2); }
 .ip-backlog-more { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1); font-family: var(--font-mono); font-size: var(--t-detail-sm); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }

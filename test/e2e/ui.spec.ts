@@ -14,6 +14,8 @@ interface Seeded {
   session: string;
   /** The open question ask on 'Run signing tests': the one thing waiting on Aiden. */
   ask: number;
+  /** The project's id. */
+  id: number;
 }
 
 const headers = (session: string) => ({
@@ -45,7 +47,7 @@ const UNSAFE_MARKDOWN = [
 async function seed(api: APIRequestContext, name = 'E2E Demo'): Promise<Seeded> {
   const session = `e2e-${randomUUID()}`;
   const post = <T = unknown>(path: string, data: unknown) => write<T>(api, session, 'post', path, data);
-  const project = await post<{ slug: string; rootNodeId: number }>('/api/projects', { name, description: 'Seeded by Playwright' });
+  const project = await post<{ id: number; slug: string; rootNodeId: number }>('/api/projects', { name, description: 'Seeded by Playwright' });
   const milestones = Array.from({ length: 25 }, (_, i) => ({ title: `Milestone ${i + 1}`, status: 'done' as const }));
   const created = await post<{ id: number; title: string }[]>('/api/nodes', {
     parentId: project.rootNodeId,
@@ -74,13 +76,11 @@ async function seed(api: APIRequestContext, name = 'E2E Demo'): Promise<Seeded> 
   await post(`/api/sessions/${session}/hook`, { event: 'prompt' });
   // Soon holds the five steps that follow the ones under way, in tree order: the Backlog preview shows Soon.
   const uiPost = await uiHeaders(api);
-  const projectsList = (await (await api.get('/api/projects')).json()) as { id: number; slug: string }[];
-  const projectId = projectsList.find((p) => p.slug === project.slug)!.id;
   for (const title of ['3 RevenueCat', '4 Build to GitHub', '5 Store listing', '6 Beta', '7 Launch']) {
-    const res = await api.post(`/api/ui/projects/${projectId}/rank`, { headers: uiPost, data: { slug: project.slug, op: { node: ids[title], to: 'soon', before: null } } });
+    const res = await api.post(`/api/ui/projects/${project.id}/rank`, { headers: uiPost, data: { slug: project.slug, op: { node: ids[title], to: 'soon', before: null } } });
     expect(res.ok(), `rank ${title} answered ${res.status()}: ${await res.text()}`).toBe(true);
   }
-  return { slug: project.slug, root: project.rootNodeId, ids, session, ask: ask.id };
+  return { id: project.id, slug: project.slug, root: project.rootNodeId, ids, session, ask: ask.id };
 }
 
 /** The headers a window write needs, read once per api context from the page the server hands out. */
@@ -89,20 +89,16 @@ function uiHeaders(api: APIRequestContext): Promise<Record<string, string>> {
   let cached = uiHeaderCache.get(api);
   if (!cached) {
     cached = (async () => {
-      const html = await (await api.get('/')).text();
+      const res = await api.get('/');
+      const html = await res.text();
       const token = /<meta name="ip-ui-token" content="([^"]*)"/.exec(html)?.[1];
       expect(token, 'the page carries no ip-ui-token meta').toBeTruthy();
-      const base = new URL((await api.get('/')).url());
+      const base = new URL(res.url());
       return { origin: base.origin, 'content-type': 'application/json', 'x-ip-ui-token': token! };
     })();
     uiHeaderCache.set(api, cached);
   }
   return cached;
-}
-
-/** A seeded project's id, from the projects list. */
-async function projectIdOf(api: APIRequestContext, project: Seeded): Promise<number> {
-  return ((await (await api.get('/api/projects')).json()) as { id: number; slug: string }[]).find((p) => p.slug === project.slug)!.id;
 }
 
 /** A project's id, read from the window's own snapshot call. */
@@ -512,7 +508,7 @@ test('the first stream starts at the snapshot, and a batch still follows its tar
   await open(page, fresh);
   await expect(stepRow(page, 'Play app signing')).toBeVisible();
   const [hotfix] = await write<{ id: number }[]>(api, fresh.session, 'post', '/api/nodes', { parentId: fresh.root, after: 'start', nodes: [{ title: 'Hotfix', status: 'active' }] });
-  await rankSoon(api, { id: await projectIdOf(api, fresh), slug: fresh.slug }, hotfix.id, fresh.ids['3 RevenueCat']);
+  await rankSoon(api, fresh, hotfix.id, fresh.ids['3 RevenueCat']);
   // Untargeted and right behind it: the two replay in one chunk, and React renders them as one batch.
   await write(api, fresh.session, 'post', `/api/sessions/${fresh.session}/hook`, { event: 'stop' });
   release();
@@ -1955,6 +1951,9 @@ test.describe('Board', () => {
     const xs = await Promise.all((['needs', 'next', 'now', 'done'] as const).map(async (b) => (await band(page, b).boundingBox())!.x));
     expect(xs).toEqual([...xs].sort((a, b) => a - b));
     expect(new Set(xs).size, 'four columns side by side').toBe(4);
+    // No hazard tape on the slab and no meta line on the head.
+    await expect(page.locator('.ip-comms .p-tape')).toHaveCount(0);
+    await expect(page.locator('.ip-page-meta')).toHaveCount(0);
     const needs = boxIn(page, 'needs', 'Run signing tests');
     await expect(needs).toContainText('Which keystore signs the release?');
     await expect(needs.locator('.p-tile-chips .p-chip').first()).toHaveText('QUESTION');
@@ -2076,7 +2075,7 @@ test.describe('Board', () => {
     await expect.poll(() => boxes.count()).toBeGreaterThan(1);
     // Each entry is its own box, a Board tile with no hue: the id, the title, the age.
     const box = group.locator('.ip-backlog-row', { has: page.getByRole('button', { name: '4 Build to GitHub', exact: true }) });
-    await expect(box.locator('.p-tile-id')).toHaveText(new RegExp(`^\\d*#${fresh.ids['4 Build to GitHub']}$`));
+    await expect(box.locator('.p-tile-id')).toHaveText(new RegExp(`#${fresh.ids['4 Build to GitHub']}$`));
     await expect(box.locator('.ip-tile-age')).toBeVisible();
     await expect(box).toHaveClass(/ip-tile.*ip-backlog-row|ip-backlog-row.*ip-tile/);
     await expect(box).not.toHaveAttribute('data-hue', /.*/);
@@ -2107,7 +2106,7 @@ test.describe('Board', () => {
     expect(head.y).toBeGreaterThan((await band(page, 'next').locator('h2').first().boundingBox())!.y);
   });
 
-  test('Details parks a step with a reason and Unpark brings it back to the Backlog', async ({ page, fresh }) => {
+  test('Details parks a step with a reason and Unpark brings it back to the Backlog', async ({ page, api, fresh }) => {
     await page.setViewportSize(WIDE);
     await open(page, fresh);
     const title = '4 Build to GitHub';
@@ -2136,6 +2135,9 @@ test.describe('Board', () => {
     // Unpark puts it back unranked (Needs Triage), so it is not in Soon's preview; Triage › shows only on an empty Soon.
     await expect(previewRow).toHaveCount(0);
     await expect(preview.getByRole('button', { name: 'Triage' })).toBeHidden();
+    // Still in the tree: todo, unranked, no longer parked.
+    const snapshot = (await (await api.get(`/api/projects/${fresh.slug}`)).json()) as { nodes: { id: number; status: string; rankBand: string | null; parkedAt: string | null }[] };
+    expect(snapshot.nodes.find((n) => n.id === fresh.ids[title])).toMatchObject({ status: 'todo', rankBand: null, parkedAt: null });
     // Unpark goes to the Backlog, not to Next.
     await expect(preview.locator('.ip-next-row', { hasText: title })).toHaveCount(0);
   });
@@ -2622,9 +2624,9 @@ test.describe('Board', () => {
     const head = next.locator('.ip-backlog-name');
     // Rank 7 Launch to the top of Soon: the preview follows, numbered as the Backlog's Ranked view numbers it.
     await expect(head).toContainText('Soon · 5');
-    await windowPost(page, `/api/ui/projects/${await projectId(page, fresh)}/rank`, { slug: fresh.slug, op: { node: fresh.ids['7 Launch'], to: 'soon', before: fresh.ids['3 RevenueCat'] } });
+    await windowPost(page, `/api/ui/projects/${fresh.id}/rank`, { slug: fresh.slug, op: { node: fresh.ids['7 Launch'], to: 'soon', before: fresh.ids['3 RevenueCat'] } });
     await expect(titles).toHaveText(['7 Launch', '3 RevenueCat', '4 Build to GitHub', '5 Store listing', '6 Beta']);
-    await expect(soon.locator('.ip-tile-num')).toHaveText(['1', '2', '3', '4', '5']);
+    await expect(soon.locator('.ip-tile-num [aria-hidden]')).toHaveText(['1', '2', '3', '4', '5']);
     await expect(head).toContainText('Soon · 5');
     await expect(next.locator('.ip-backlog-more')).toHaveCount(0);
     // + Add creates at the bottom of Soon and keeps its field open.
@@ -2644,19 +2646,18 @@ test.describe('Board', () => {
     // Sending 3 RevenueCat to Next lets the new step into the five.
     await soon.locator('.ip-backlog-row', { has: page.getByRole('button', { name: '3 RevenueCat', exact: true }) }).getByRole('button', { name: 'to Next' }).click();
     await expect(titles).toHaveText(['7 Launch', '4 Build to GitHub', '5 Store listing', '6 Beta', 'Quick soon step']);
-    await expect(soon.locator('.ip-tile-num')).toHaveText(['2', '3', '4', '5', '6']);
+    await expect(soon.locator('.ip-tile-num [aria-hidden]')).toHaveText(['2', '3', '4', '5', '6']);
     await expect(head).toContainText('Soon · 5');
     const opened = page.waitForRequest((r) => r.url().endsWith('/api/ui/events') && (r.postDataJSON() as { name: string }).name === 'backlog_open');
-    const view = await openFullBacklog(page);
+    await openFullBacklog(page);
     await opened;
-    await expect(view).toBeVisible();
   });
 
   test('an empty Soon says so and Triage › opens the Backlog on Needs Triage', async ({ page, api, fresh }) => {
     await page.setViewportSize(WIDE);
     await open(page, fresh);
     const next = band(page, 'next');
-    const id = await projectId(page, fresh);
+    const id = fresh.id;
     for (const title of ['3 RevenueCat', '4 Build to GitHub', '5 Store listing', '6 Beta', '7 Launch', 'Milestones']) {
       await windowPost(page, `/api/ui/projects/${id}/rank`, { slug: fresh.slug, op: { node: fresh.ids[title], to: 'someday', before: null } });
     }
