@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 
 import type { BoardRow } from '../../../src/core/board';
 import type { TaskBox as BoxData } from '../../../src/core/taskState';
 import { PreviewPanel } from '../backlog/PreviewPanel';
-import { backlogViewKey, soonPreview } from '../backlog/backlogPreview';
+import { soonPreview } from '../backlog/backlogPreview';
+import { viewKey } from '../backlog/backlogView';
 import { deriveBacklog } from '../../../src/core/backlog';
 import { Button } from '../parts/Button';
 import { Chip } from '../parts/Chip';
@@ -48,7 +49,7 @@ export function NextColumn({ snapshot, board, now, selectedNode, onOpenNode, onO
   const preview = soonPreview(deriveBacklog(board, snapshot, now), backlog);
   const onTriage = () => {
     noteAction('backlog', 'triage');
-    save(backlogViewKey(project.id), 'triage');
+    save(viewKey(project.id), 'triage');
     onOpenBacklog?.();
   };
 

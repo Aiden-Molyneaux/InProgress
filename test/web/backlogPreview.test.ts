@@ -2,35 +2,9 @@ import { describe, expect, it } from 'vitest';
 import type { Backlog, BacklogRow } from '../../src/core/backlog';
 import type { TaskBox } from '../../src/core/taskState';
 import type { TreeNode } from '../../src/core/types';
-import { PREVIEW_SIZE, backlogPhases, backlogViewKey, soonPreview } from '../../web/src/backlog/backlogPreview';
+import { PREVIEW_SIZE, soonPreview } from '../../web/src/backlog/backlogPreview';
 
-const phase = (id: number, title: string) => ({ id, title, kind: 'phase', parentId: 1, position: id }) as unknown as TreeNode;
-const root = { id: 1, title: 'Root', kind: 'phase', parentId: null, position: 0 } as unknown as TreeNode;
 const row = (id: number, crumb: TreeNode[]) => ({ node: { id, title: `Step ${id}`, kind: 'task', parentId: crumb.length ? crumb[crumb.length - 1].id : 1, position: id }, crumb });
-
-const pa = phase(10, 'Phase A');
-const pb = phase(20, 'Phase B');
-const pc = phase(30, 'Phase C');
-// Tree order: A, B, C.
-const nodes = [root, pa, pb, pc];
-const board = (backlog: ReturnType<typeof row>[]) => ({ backlog });
-
-describe('backlogViewKey', () => {
-  it('keeps the view per project', () => {
-    expect(backlogViewKey(7)).toBe('ip.backlogView.7');
-  });
-});
-
-describe('backlogPhases', () => {
-  it('lists the phases that have entries in tree order, then No phase', () => {
-    const b = board([row(5, [pc]), row(6, [pa]), row(7, []), row(8, [pa])]);
-    expect(backlogPhases(b, nodes).map((c) => [c.value, c.title])).toEqual([[10, 'Phase A'], [30, 'Phase C'], ['none', 'No phase']]);
-  });
-  it('always offers No phase, even with an empty Backlog', () => {
-    expect(backlogPhases(board([]), nodes).map((c) => c.value)).toEqual(['none']);
-  });
-});
-
 
 describe('soonPreview', () => {
   const brow = (id: number, number: number | null): BacklogRow => ({ row: row(id, []) as unknown as BacklogRow['row'], band: 'soon', number, touchedAt: '' });
