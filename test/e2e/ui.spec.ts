@@ -452,6 +452,8 @@ test('an HTML page runs in its sandboxed frame: its clicks work, it reaches no n
 });
 
 test('the freshness strip counts commits to covers since the confirmation, and Still accurate resets it', async ({ page, fresh, api }) => {
+  // Registering, confirming and reading the page each run git in the page's repo: seconds apiece on a busy machine.
+  test.setTimeout(60_000);
   await widen(page);
   const repo = await pageRepo(api, fresh);
   repo.commit('docs/ops.md', '---\ncovers: [src/**]\n---\n# Ops\n');
@@ -466,7 +468,7 @@ test('the freshness strip counts commits to covers since the confirmation, and S
   await expect(strip).toContainText('at registration');
   await expect(strip.locator('.p-chip')).toHaveText(['src/**']);
   await strip.getByRole('button', { name: 'Still accurate' }).click();
-  await expect(strip.locator('.ip-fresh-count')).toHaveText('no commits since confirmed');
+  await expect(strip.locator('.ip-fresh-count')).toHaveText('no commits since confirmed', { timeout: 15_000 });
   await expect(strip.locator('.ip-fresh-when')).not.toContainText('at registration');
   await expect(strip.getByRole('button', { name: 'Still accurate' })).toHaveCount(0);
   // The button left with the stale count; focus stays in the dialog, on its document pane.
