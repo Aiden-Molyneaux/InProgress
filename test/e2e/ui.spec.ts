@@ -280,6 +280,7 @@ test('a long project name is cut short in the rail, whole in its title, and the 
   await expect(row).toHaveAttribute('title', name);
   await expect(row).toBeInViewport({ ratio: 0.99 });
   await expect(row.locator('.ip-rail-name')).toHaveText(name);
+  await expect(row.locator('.ip-rail-name')).toHaveCSS('font-size', '16px');
   expect((await page.locator('.ip-rail').boundingBox())!.width).toBe(216);
   expect(await page.evaluate<boolean>(`(() => { const n = document.querySelector('a[aria-current="page"] .ip-rail-name'); return n.scrollWidth > n.clientWidth; })()`)).toBe(true);
   expect(await page.evaluate<string>(`getComputedStyle(document.querySelector('a[aria-current="page"] .ip-rail-name')).textOverflow`)).toBe('ellipsis');
