@@ -17,6 +17,7 @@ import './styles/panels.css';
 import './styles/commandbar.css';
 import './styles/done.css';
 import './styles/library.css';
+import './styles/docs.css';
 import './styles/backlog.css';
 import './styles/marker.css';
 import { Root } from './Root';

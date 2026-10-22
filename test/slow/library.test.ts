@@ -184,6 +184,23 @@ describe('library: pages', GIT_TIMEOUT, () => {
     expect(doomed.error).toContain('gone');
     expect(doomed).toMatchObject({ format: 'markdown', shelf: 'pages', templates: [] });
   });
+
+  it('lists a page resource under its project only and a library one in the Library only, and answers an unknown slug 404', async () => {
+    const { app, a, b, dirs, register } = setup();
+    writeFileSync(join(dirs.dirA, 'own.md'), '# Own\n');
+    writeFileSync(join(dirs.dirA, 'shared.md'), '# Shared\n');
+    git(dirs.dirA, 'add', '.');
+    git(dirs.dirA, 'commit', '-q', '-m', 'pages');
+    expect((await register(a, join(dirs.dirA, 'own.md'), 'Own', { purpose: 'page' })).statusCode).toBe(201);
+    expect((await register(a, join(dirs.dirA, 'shared.md'), 'Shared')).statusCode).toBe(201);
+    const library = (await app.inject({ url: '/api/library/pages' })).json();
+    expect(library.pages.map((p: { title: string }) => p.title)).toEqual(['Shared']);
+    const own = await app.inject({ url: `/api/projects/${a.slug}/pages` });
+    expect(own.headers['cache-control']).toBe('no-store');
+    expect(own.json().pages.map((p: { title: string }) => p.title)).toEqual(['Own']);
+    expect((await app.inject({ url: `/api/projects/${b.slug}/pages` })).json()).toEqual({ pages: [] });
+    expect((await app.inject({ url: '/api/projects/no-such-project/pages' })).statusCode).toBe(404);
+  });
 });
 
 describe('library: the shape of a sync check', () => {

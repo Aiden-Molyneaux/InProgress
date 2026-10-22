@@ -12,8 +12,10 @@ import { Hud, HudEdge } from './chrome/Hud';
 import { askTarget } from './chrome/hudLogic';
 import { archivedProjects, loadTabOrder, moveTab, neighbourTab, projectTabs, pruneOrder, saveTabOrder, stepTab, TAB_ORDER_KEY } from './chrome/tabs';
 import { Rail } from './chrome/Rail';
-import { libraryBehind, libraryViews, railCodes, railViews } from './chrome/railLogic';
+import { docsCount, libraryBehind, libraryViews, railCodes, railViews } from './chrome/railLogic';
 import { BacklogList } from './backlog/BacklogList';
+import { DocsView } from './docs/DocsView';
+import { useProjectDocs } from './docs/useProjectDocs';
 import { DoneList } from './done/DoneList';
 import { LibraryView } from './library/LibraryView';
 import { libraryHash, parseLibraryHash, type LibraryRoute, type Shelf } from './library/route';
@@ -194,7 +196,11 @@ export function App() {
   const archived = useMemo(() => archivedProjects(projects), [projects]);
   const codes = useMemo(() => railCodes(tabs), [tabs]);
   // The views and their counts are the shown project's: not those of the one before it, while the next one loads.
-  const views = useMemo(() => railViews(snapshot && snapshot.project.slug === state.slug ? snapshot : null, now), [snapshot, state.slug, now]);
+  const projectDocs = useProjectDocs(state.slug, view === 'docs' && library === null);
+  const views = useMemo(
+    () => railViews(snapshot && snapshot.project.slug === state.slug ? snapshot : null, now, docsCount(projectDocs.pages, lib.sync, state.slug)),
+    [snapshot, state.slug, now, projectDocs.pages, lib.sync],
+  );
   // ASKS: the open project's Board with focus on Needs me, or the first project in tab order that has asks. The counter
   // moves focus after the Board shows.
   const libraryRail = useMemo(() => libraryViews(lib.pages, lib.sync), [lib.pages, lib.sync]);
@@ -431,6 +437,16 @@ export function App() {
                   <BacklogList key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} onStatus={fail} codes={codes} />
                 ) : view === 'done' ? (
                   <DoneList key={snapshot.project.id} snapshot={snapshot} now={now} onOpenNode={setSelectedNode} onOpenResource={openViewer} codes={codes} />
+                ) : view === 'docs' ? (
+                  <DocsView
+                    key={snapshot.project.id}
+                    project={snapshot.project}
+                    code={codes.get(snapshot.project.id) ?? snapshot.project.name.slice(0, 3).toUpperCase()}
+                    docs={projectDocs}
+                    sync={lib.sync?.projects.find((r) => r.slug === snapshot.project.slug) ?? null}
+                    syncLoaded={lib.sync !== null}
+                    syncError={lib.syncError}
+                  />
                 ) : view === 'board' ? (
                   <Board key={snapshot.project.id} snapshot={snapshot} now={now} selectedNode={selectedNode} onOpenNode={setSelectedNode} onOpenResource={openViewer} onOpenDone={() => openFromBoard('done')} onOpenBacklog={() => openFromBoard('backlog')} lastLook={lastLook} onStatus={fail} />
                 ) : (

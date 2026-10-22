@@ -5,7 +5,7 @@ import type { BuildInfo } from '../../lib/version';
 import type { Ctx } from '../db/tx';
 import { listBindings, listProjectSummaries, resolveProject } from '../repo/projects';
 import { badRequest } from '../errors';
-import { libraryPages } from '../library';
+import { libraryPages, projectPages } from '../library';
 import { frameHtml, PAGE_FRAME_HEADER_CSP, readPage } from '../pages';
 import { requireResource } from '../repo/resources';
 import { findSteps, search } from '../repo/search';
@@ -65,6 +65,10 @@ export function registerReadRoutes(app: FastifyInstance, ctx: Ctx, version: stri
   });
   // The Library group: its pages (read live, so a gone file is a row with its error) and the Sync check of every manifest.
   app.get('/api/library/pages', async (_req, reply) => reply.header('cache-control', 'no-store').send(await libraryPages(ctx)));
+  // A project's Docs view: its own pages, read live. An unknown slug is the same 404 as the project's other routes.
+  app.get('/api/projects/:ref/pages', async (req, reply) =>
+    reply.header('cache-control', 'no-store').send({ pages: await projectPages(ctx, resolveProject(ctx, (req.params as { ref: string }).ref).id) }),
+  );
   app.get('/api/bindings', async () => listBindings(ctx));
   app.get('/api/search', async (req) => {
     const q = searchQuery.parse(req.query);

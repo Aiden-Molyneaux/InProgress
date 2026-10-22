@@ -1,0 +1,24 @@
+/* A project's Docs view (#530): the index of its pages and adaptations at the left, the pick at the right. */
+@layer components {
+.ip-docs-page { flex: 1; min-width: 0; min-height: 0; display: grid; align-content: start; gap: var(--sp-5); padding: var(--sp-4); overflow-y: auto; container-type: inline-size; }
+.ip-docs-warn { color: var(--behind); }
+.ip-docs-cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-5); align-items: start; min-width: 0; }
+.ip-docs-index { display: grid; align-content: start; gap: var(--sp-5); min-width: 0; }
+.ip-docs-sec { display: grid; gap: var(--sp-2); min-width: 0; }
+.ip-docs-sechead { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); }
+.ip-docs-sechead h2 { margin: 0; }
+.ip-docs-note { font-family: var(--font-mono); font-size: var(--t-detail-sm); letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-dim); }
+.ip-docs-kind { flex: none; font-family: var(--font-mono); font-size: var(--t-detail-sm); letter-spacing: 0.04em; color: var(--text-dim); }
+.ip-docs-state { flex: none; font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-muted); white-space: nowrap; }
+.ip-docs-state[data-tone="behind"] { color: var(--behind); }
+.ip-docs-state[data-tone="alarm"] { color: var(--alarm); }
+.ip-lib-row[data-picked] { background: var(--behind-wash); box-shadow: inset 2px 0 0 var(--volt); }
+.ip-docs-none { margin: 0; padding: var(--sp-3); border: 1px dashed var(--line); font-size: var(--t-detail-sm); color: var(--text-muted); }
+.ip-docs-none a { color: var(--volt); }
+.ip-docs-pane { min-width: 0; display: grid; }
+.ip-docs-pick { margin: 0; padding: var(--sp-4); border: 1px dashed var(--line-soft); font-size: var(--t-body); color: var(--text-muted); }
+@container (min-width: 900px) {
+  .ip-docs-page { padding: var(--sp-6); }
+  .ip-docs-cols { grid-template-columns: minmax(280px, 2fr) minmax(0, 5fr); }
+}
+}

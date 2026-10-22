@@ -553,6 +553,34 @@ test('the Library group lists pages by project, opens the roster in place, and k
   await expect(page.getByRole('heading', { name: 'Now', exact: true })).toBeVisible();
 });
 
+test("Docs lists a project's pages and opens one", async ({ page, fresh, api }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const repo = await pageRepo(api, fresh);
+  repo.commit('docs/ops.md', ['---', 'covers: [src/app.ts]', '---', '# Ops notes', '', 'Read from the repo.', ''].join('\n'));
+  const title = `Ops notes ${randomUUID().slice(0, 8)}`;
+  await repo.register('docs/ops.md', title, 'page');
+  await open(page, fresh);
+  // The project keeps no manifest, so its Docs figure is the page count alone.
+  const docs = projectRail(page).getByRole('button', { name: /^Docs, 1$/ });
+  await expect(docs.locator('.ip-rail-vcode')).toHaveText('DOC');
+  await docs.click();
+  await expect(page.getByRole('heading', { level: 1, name: 'DOCS' })).toBeVisible();
+  await expect(page.locator('.ip-page-meta')).toContainText('1 PAGE');
+  const row = page.locator('.ip-lib-row', { hasText: title });
+  await expect(row.locator('.p-chip').first()).toHaveText('MD');
+  await expect(row.locator('.ip-lib-path')).toHaveText(join(repo.dir, 'docs', 'ops.md'));
+  await expect(row.locator('.ip-lib-fresh')).toHaveText('current');
+  await expect(page.locator('.ip-docs-pick')).toHaveText('Pick a page or an adaptation.');
+  const note = page.locator('.ip-docs-none');
+  await expect(note).toContainText(`E2E Demo keeps no .claude/shipwright.json yet.`);
+  await expect(note.getByRole('link', { name: 'Library · Sync ›' })).toHaveAttribute('href', '#/lib/sync');
+  await row.getByRole('button', { name: title }).click();
+  await expect(page.locator('section.ip-viewer[data-inline] .ip-md h1')).toHaveText('Ops notes');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await note.getByRole('link', { name: 'Library · Sync ›' }).click();
+  await expect(page).toHaveURL(/#\/lib\/sync$/);
+});
+
 test('the Library row is one more stop in the rail: arrows reach it, Space opens it, shelves hand focus back to the project views, and a chip lands on the Sync button', async ({ page, fresh, api }) => {
   await page.setViewportSize({ width: 1600, height: 900 });
   const { titles } = await libraryRepo(api, fresh);

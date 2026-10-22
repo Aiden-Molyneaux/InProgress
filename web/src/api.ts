@@ -1,6 +1,6 @@
 import type { BuildInfo } from '../../src/core/build';
 import type { StepHit } from '../../src/core/goto';
-import type { DeletedProject, LibraryPages, LibrarySync, NodeDetail, PageBody, Project, ProjectSnapshot, ProjectSummary, QueueOp, RankOp, Resource } from '../../src/core/types';
+import type { Binding, DeletedProject, LibraryPage, LibraryPages, LibrarySync, NodeDetail, PageBody, Project, ProjectSnapshot, ProjectSummary, QueueOp, RankOp, Resource } from '../../src/core/types';
 import type { ActionTarget, ProjectAction } from './projectActions';
 
 async function getJson<T>(path: string): Promise<T> {
@@ -43,6 +43,10 @@ export const api = {
   find: (q: string, here: string | null) => getJson<StepHit[]>(`/api/find?q=${encodeURIComponent(q)}${here ? `&here=${encodeURIComponent(here)}` : ''}`),
   /** The Library group: its pages (read live), and every manifest's Sync check. */
   libraryPages: () => getJson<LibraryPages>('/api/library/pages'),
+  /** A project's own pages (purpose page), read live: its Docs view. */
+  projectPages: (slug: string) => getJson<{ pages: LibraryPage[] }>(`/api/projects/${encodeURIComponent(slug)}/pages`),
+  /** Every folder binding, for the Docs head's "read live from". */
+  bindings: () => getJson<Binding[]>('/api/bindings'),
   /**
    * The Sync check: a UI POST, as it runs Shipwright's script. Rejects with the reason. It loads with the window, not on a
    * click, so a 401 says so rather than reloading: a page with no key (npm run dev) would reload for ever.
