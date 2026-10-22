@@ -5,15 +5,21 @@ import { noteAction, type MeasureArea } from '../measure';
 import { MARK_WORDS } from './Marks';
 import { ageShort } from './text';
 
+/**
+ * The hygiene words a tile shows. ended_open has its own line; no_why is Mip's to fill from Reconcile (#536), and on every
+ * new session step's tile it would be noise.
+ */
+const tileMarks = (row: BoardRow) => row.marks.filter((m) => m !== 'ended_open' && m !== 'no_why');
+
 /** Whether the foot has anything to show: a tile with none draws no foot row at all. */
 export function tileFootHas(row: BoardRow, docs: number, noLabel?: boolean): boolean {
-  return Boolean(row.handoff) || docs > 0 || Boolean(row.node.label && !noLabel) || row.node.origin === 'proposed' || row.marks.some((m) => m !== 'ended_open');
+  return Boolean(row.handoff) || docs > 0 || Boolean(row.node.label && !noLabel) || row.node.origin === 'proposed' || tileMarks(row).length > 0;
 }
 
 /** A tile's foot: the handoff (opens the viewer), the documents, the label, and the hygiene words, all as parts. */
 export function TileFoot({ row, now, area, docs, noLabel, onOpenResource }: { row: BoardRow; now: number; area: MeasureArea; docs: number; /** The label is already in the tile's top (Done). */ noLabel?: boolean; onOpenResource: (id: number) => void }) {
   const label = row.node.label;
-  const hygiene = row.marks.filter((m) => m !== 'ended_open');
+  const hygiene = tileMarks(row);
   return (
     <>
       {row.handoff && (
