@@ -165,7 +165,7 @@ export function Backups() {
       </button>
       <dialog
         ref={dialog}
-        className="ip-cmdbar ip-backups"
+        className="ip-backups"
         aria-label="Backups"
         tabIndex={-1}
         onKeyDown={onKeyDown}
