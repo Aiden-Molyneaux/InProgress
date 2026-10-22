@@ -107,6 +107,16 @@ describe('nodes route (quick-add)', () => {
     expect(ctx.db.prepare("SELECT actor FROM events WHERE type = 'node.created' ORDER BY id DESC").pluck().get()).toBe('window');
   });
 
+  it('stores notes as the body, leaves a blank note out, and refuses a note over 20 000 characters', async () => {
+    const { p, post } = await setup();
+    const url = `/api/ui/projects/${p.id}/nodes`;
+    const noted = await post(url, { slug: p.slug, title: 'With notes', parent: null, body: 'line one\nline two' });
+    expect(noted.json().node).toMatchObject({ body: 'line one\nline two', origin: 'me' });
+    const blank = await post(url, { slug: p.slug, title: 'Blank notes', parent: null, body: '  \n ' });
+    expect(blank.json().node.body).toBe('');
+    expect((await post(url, { slug: p.slug, title: 'Too long', parent: null, body: 'x'.repeat(20_001) })).statusCode).toBe(400);
+  });
+
   it('refuses a dropped parent (400) and allows a done one', async () => {
     const { ctx, p, post, a, b } = await setup();
     updateNode(ctx, 'test', a, { status: 'dropped' });

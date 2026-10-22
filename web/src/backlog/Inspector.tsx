@@ -8,6 +8,7 @@ import { Markdown } from '../panels/Markdown';
 import { Button } from '../parts/Button';
 import { ErrorLine } from '../parts/ErrorLine';
 import { Eyebrow } from '../parts/Eyebrow';
+import { WhatWhy } from '../parts/WhatWhy';
 import { DocsMenu } from '../project/DocsMenu';
 import type { InspSel as Sel, InspState } from './useInspectorWrites';
 
@@ -115,6 +116,7 @@ export function Inspector({ id, node, inside, band, parked, handoff, docs, lastS
   return (
     <div className="ip-insp" data-act role="group" aria-label={`Inspector for #${id}`}>
       <div className="ip-insp-main">
+        <WhatWhy node={node} />
         {text ? (
           <div className="ip-insp-body">
             <Markdown text={node.body} />

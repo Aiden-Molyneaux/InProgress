@@ -117,7 +117,7 @@ export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: 
   });
   // Quick-add: a todo step with no label under `parent`, or the root; with band 'soon', at the bottom of Soon.
   app.post('/api/ui/projects/:id/nodes', guarded, async (req) => {
-    const { slug, title, parent, band } = windowNodeBody.parse(req.body);
+    const { slug, title, parent, band, body } = windowNodeBody.parse(req.body);
     const projectId = targetBySlug(req.params, slug);
     const project = resolveProject(ctx, projectId);
     // A parent that does not exist reads as one outside this project; the rest is checked inside the write.
@@ -125,7 +125,7 @@ export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: 
     // The parent is checked inside addNodes' own write, so a parent dropped or moved in between cannot slip through.
     const [node] = addNodes(ctx, ACTOR, {
       parentId: parent ?? project.rootNodeId,
-      nodes: [{ title }],
+      nodes: [{ title, ...(body?.trim() ? { body } : {}) }],
       check: (home) => {
         if (parent === null) return;
         if (home.projectId !== projectId) throw badRequest(`#${parent} is not in this project`, 'Reload the window.');

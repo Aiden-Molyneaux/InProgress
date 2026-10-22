@@ -209,6 +209,13 @@ async function showsStep(details: Locator, id: number, title: string): Promise<v
   await expect(details.locator('.ip-dtitle')).toHaveText(title);
 }
 
+/** Opens Details' folded TRAIL (Claude's body, live work, the log) when it is shut. */
+async function openTrail(details: Locator): Promise<void> {
+  const trail = details.locator('details.ip-dtrailfold');
+  if ((await trail.getAttribute('open')) === null) await trail.locator('summary').click();
+  await expect(trail).toHaveAttribute('open', '');
+}
+
 /** A resource's row in Details, by its title. */
 const resourceRow = (page: Page, title: string) => page.locator('.ip-res', { hasText: title });
 
@@ -1832,7 +1839,7 @@ test("a tab's dot also shows while an idle session has a running worker, but not
 const RUNNING = '(<1 min|\\d+ min)';
 
 test.describe('Live work', () => {
-  test("Details lists the node's working tasks with who is on each, and the subagents on it, before its resources, each on its own row", async ({ page, api, fresh }) => {
+  test("Details lists the node's working tasks with who is on each, and the subagents on it, after its resources in the folded trail, each on its own row", async ({ page, api, fresh }) => {
     await subagent(api, fresh, 'agent-1', 'Draft the store notes', 'sonnet');
     await task(api, fresh, '1', 'Upload the key', 'in_progress');
     await task(api, fresh, '2', 'Check the release track');
@@ -1841,9 +1848,10 @@ test.describe('Live work', () => {
     await write(api, fresh.session, 'post', '/api/resources', { nodeId: fresh.ids['Play app signing'], kind: 'doc', title: 'Signing notes', content: '# Notes' });
     await open(page, fresh);
     const details = await openDetails(page, 'Play app signing');
-    // The live work reads before the step's resources: one LIVE WORK head counts the live tasks and subagents, and its
-    // sub-heads name the lists.
-    await expect(details.locator('h3.p-eyebrow')).toHaveText([/LIVE WORK · 4$/, /RESOURCES · 1$/]);
+    await openTrail(details);
+    // The step's resources read before the folded TRAIL that holds the live work: one LIVE WORK head counts the live tasks
+    // and subagents, and its sub-heads name the lists.
+    await expect(details.locator('h3.p-eyebrow')).toHaveText([/RESOURCES · 1$/, /LIVE WORK · 4$/]);
     await expect(details.locator('.ip-dsub')).toHaveText(['Working tasks', 'Subagents']);
     // Each entry is its own row.
     await expect(details.locator('.ip-dagents > li')).toHaveCount(1);
@@ -2752,6 +2760,7 @@ test.describe('Board', () => {
     await expect(meta.locator('.ip-marker.m-active')).toHaveCount(1);
     // The log: the time in Martian Mono, the text in ink, the session muted. The entry arrives live.
     await write(api, fresh.session, 'post', `/api/nodes/${fresh.ids['Play app signing']}/log`, { text: 'Uploaded the key', sessionId: fresh.session });
+    await openTrail(page.getByRole('complementary'));
     const entry = page.getByRole('complementary').locator('.ip-log li');
     await expect(entry).toHaveText('just now Uploaded the key · E2E session');
     await expect(entry.locator('.ip-log-time')).toHaveCSS('font-family', /Martian Mono/);
@@ -3542,6 +3551,133 @@ test.describe('Details: asks, handoff, add a step', () => {
     const detail = (await (await api.get(`/api/nodes/${id}`)).json()) as { children: { title: string }[] };
     expect(detail.children.map((c) => c.title)).toEqual(expect.arrayContaining(['Check the upload key', 'Second child']));
   });
+
+  test('quick-add takes notes: Enter on the title adds at once; Tab to Notes, two lines with Shift+Enter, Enter adds them as the body', async ({ page, api, fresh }) => {
+    const id = fresh.ids['Play app signing'];
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const details = await openDetails(page, 'Play app signing');
+    await details.getByRole('button', { name: `Add a step under #${id}` }).click();
+    const field = details.getByRole('textbox', { name: `Add a step under #${id}` });
+    const notes = details.getByRole('textbox', { name: 'Notes for the new step' });
+    await expect(field).toBeFocused();
+    await field.fill('Title only step');
+    await page.keyboard.press('Enter');
+    await expect(details.locator('.ip-kids')).toContainText('Title only step');
+    await expect(field).toBeFocused();
+    await expect(field).toHaveValue('');
+    await field.fill('Step with notes');
+    await page.keyboard.press('Tab');
+    await expect(notes).toBeFocused();
+    await page.keyboard.type('First line');
+    await page.keyboard.press('Shift+Enter');
+    await page.keyboard.type('Second line');
+    await expect(notes).toHaveValue('First line\nSecond line');
+    await page.keyboard.press('Enter');
+    await expect(details.locator('.ip-kids')).toContainText('Step with notes');
+    await expect(field).toBeFocused();
+    await expect(field).toHaveValue('');
+    await expect(notes).toHaveValue('');
+    const kids = ((await (await api.get(`/api/nodes/${id}`)).json()) as { children: { id: number; title: string }[] }).children;
+    const withNotes = kids.find((c) => c.title === 'Step with notes')!;
+    const plain = kids.find((c) => c.title === 'Title only step')!;
+    expect(((await (await api.get(`/api/nodes/${withNotes.id}`)).json()) as { node: { body: string; origin: string } }).node).toMatchObject({ body: 'First line\nSecond line', origin: 'me' });
+    expect(((await (await api.get(`/api/nodes/${plain.id}`)).json()) as { node: { body: string } }).node.body).toBe('');
+    // A step of yours shows its body unfolded, as NOTES.
+    await details.locator('.ip-kids').getByRole('button', { name: /Step with notes/ }).click();
+    await expect(details.locator('.ip-dtitle')).toHaveText('Step with notes');
+    await expect(details.locator('.ip-dnotes')).toContainText('First line');
+    // Escape in the notes closes the pair.
+    await details.getByRole('button', { name: /^Add a step under #/ }).click();
+    await details.getByRole('textbox', { name: 'Notes for the new step' }).focus();
+    await page.keyboard.press('Escape');
+    await expect(details.getByRole('textbox', { name: 'Notes for the new step' })).toHaveCount(0);
+  });
+
+  test('a proposed step shows a proposed chip on its Backlog row and Board tile; an asked one shows none', async ({ page, api, fresh }) => {
+    const [proposed, asked] = await write<{ id: number }[]>(api, fresh.session, 'post', '/api/nodes', {
+      parentId: fresh.root,
+      nodes: [{ title: 'Proposed by a session', origin: 'proposed' }, { title: 'Asked of a session', origin: 'asked' }],
+    });
+    // Ahead of the seeded Soon steps, so both show in the Board's preview.
+    await rankSoon(api, fresh, proposed.id, fresh.ids['3 RevenueCat']);
+    await rankSoon(api, fresh, asked.id, fresh.ids['3 RevenueCat']);
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const tile = (title: string) => page.locator('article.ip-tile', { has: page.getByRole('button', { name: title, exact: true }) });
+    await expect(tile('Proposed by a session').getByText('proposed', { exact: true })).toBeVisible();
+    await expect(tile('Asked of a session')).toBeVisible();
+    await expect(tile('Asked of a session').getByText('proposed', { exact: true })).toHaveCount(0);
+    const view = await openFullBacklog(page);
+    await expect(blRow(page, view, 'Proposed by a session').getByText('proposed', { exact: true })).toBeVisible();
+    await expect(blRow(page, view, 'Asked of a session')).toBeVisible();
+    await expect(blRow(page, view, 'Asked of a session').getByText('proposed', { exact: true })).toHaveCount(0);
+  });
+
+  test("the Backlog inspector shows What and Why above the body; a session's step without them says so, one of yours shows nothing", async ({ page, api, fresh }) => {
+    await write(api, fresh.session, 'post', '/api/nodes', {
+      parentId: fresh.root,
+      nodes: [
+        { title: 'Written up', origin: 'proposed', what: 'Rotate the upload key', why: 'The old one leaks in CI logs', body: 'Context for Claude' },
+        { title: 'Unwritten session step', origin: 'asked' },
+      ],
+    });
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const view = await openBacklogView(page, 'By Phase');
+    const written = await openInspector(blRow(page, view, 'Written up'));
+    await expect(written.locator('.ip-whatwhy-row[data-field="what"]')).toHaveText('WHATRotate the upload key');
+    await expect(written.locator('.ip-whatwhy-row[data-field="why"]')).toHaveText('WHYThe old one leaks in CI logs');
+    expect((await written.locator('.ip-whatwhy').boundingBox())!.y).toBeLessThan((await written.locator('.ip-insp-body').boundingBox())!.y);
+    const unwritten = await openInspector(blRow(page, view, 'Unwritten session step'));
+    await expect(unwritten.locator('.ip-whatwhy-none')).toHaveText('No What or Why yet');
+    expect((await windowPost(page, `/api/ui/projects/${fresh.id}/nodes`, { slug: fresh.slug, title: 'Mine, no What', parent: null })).status).toBe(200);
+    const mine = await openInspector(blRow(page, view, 'Mine, no What'));
+    await expect(mine.locator('.ip-whatwhy, .ip-whatwhy-none')).toHaveCount(0);
+  });
+
+  test("Details reads What, Why, the origin row, asks, outcome, resources (handoff first), steps, then a folded TRAIL with Claude's body and the log", async ({ page, api, fresh }) => {
+    const [step] = await write<{ id: number }[]>(api, fresh.session, 'post', '/api/nodes', {
+      parentId: fresh.root,
+      nodes: [{ title: 'Ordered step', origin: 'proposed', what: 'Reorder Details', why: 'The reader wants the point first', body: 'Claude context body', outcome: 'Reordered.' }],
+    });
+    await write(api, fresh.session, 'post', '/api/nodes', { parentId: step.id, nodes: [{ title: 'Child of ordered' }] });
+    await write(api, fresh.session, 'post', '/api/resources', { nodeId: step.id, kind: 'doc', title: 'Plain notes', content: '# Notes' });
+    await write(api, fresh.session, 'post', '/api/resources', { nodeId: step.id, kind: 'doc', title: 'The handoff', purpose: 'handoff', content: '# Handoff' });
+    await write(api, fresh.session, 'post', `/api/nodes/${step.id}/log`, { text: 'Did a thing', sessionId: fresh.session });
+    await write(api, fresh.session, 'post', `/api/nodes/${step.id}/asks`, { kind: 'question', text: 'Which order?' });
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    // The command bar reaches a step with children, which the Backlog preview does not list.
+    await expect(stepRow(page, '3 RevenueCat')).toBeVisible();
+    await page.keyboard.press('Control+k');
+    await page.keyboard.type(`#${step.id}`);
+    await page.keyboard.press('Enter');
+    const details = page.getByRole('complementary');
+    await expect(details.locator('.ip-dtop .p-eyebrow')).toHaveText(new RegExp(`^#${step.id} · `));
+    const top = async (sel: string) => (await details.locator(sel).first().boundingBox())!.y;
+    const tops = [
+      await top('.ip-whatwhy-row[data-field="what"]'),
+      await top('.ip-whatwhy-row[data-field="why"]'),
+      await top('.ip-meta'),
+      await top('.ip-dasks'),
+      await top('.ip-outcome'),
+      await top('.ip-ress'),
+      await top('.ip-kids'),
+      await top('details.ip-dtrailfold'),
+    ];
+    expect(tops).toEqual([...tops].sort((a, b) => a - b));
+    await expect(details.locator('.ip-meta .ip-meta-origin')).toHaveText('proposed');
+    await expect(details.locator('.ip-res-title')).toHaveText(['The handoff', 'Plain notes']);
+    // The trail is folded: its body and log are not shown until it opens.
+    await expect(details.locator('details.ip-dtrailfold summary')).toContainText('TRAIL');
+    await expect(details.locator('details.ip-dtrailfold summary')).toContainText('body · 1 log');
+    await expect(details.getByText('Claude context body')).toBeHidden();
+    await expect(details.locator('.ip-log')).toBeHidden();
+    await openTrail(details);
+    await expect(details.getByText('Claude context body')).toBeVisible();
+    await expect(details.locator('.ip-log li')).toContainText('Did a thing');
+  });
 });
 
 test.describe('Fix round 1', () => {
@@ -3859,6 +3995,7 @@ test.describe('v3 Details, viewer and command bar (#505)', () => {
     const details = await goToStep(page, step.id);
     // The body scrolls; the head and the strip do not.
     const scroller = details.locator('.ip-dbody');
+    await openTrail(details);
     await expect.poll(() => page.evaluate<number>(`(() => { const e = document.querySelector('.ip-dbody'); return e.scrollHeight - e.clientHeight; })()`)).toBeGreaterThan(200);
     const park = details.getByRole('button', { name: 'Park…' });
     await expect(park).toBeInViewport({ ratio: 1 });

@@ -9,13 +9,15 @@ import type { CursorItemProps } from '../parts/ListCursor';
  * full-width block under that line: the picked row's inspector (its Park form or Confirm sits inside it), or a parked row's
  * two lines. Ranked adds the `handle` (drag props for a grip drawn at the left) and the `number`; By Phase adds the `band` chip.
  */
-export function ViewRow({ id, title, cursor, phase, blocked, inside, label, age, acts, pending, confirming, parked, keepActs, handle, number, band, picked, dragging, dropBefore, onOpen, onMouseDown, onKeyDown, onDragOver, onDrop, children }: {
+export function ViewRow({ id, title, cursor, phase, blocked, proposed, inside, label, age, acts, pending, confirming, parked, keepActs, handle, number, band, picked, dragging, dropBefore, onOpen, onMouseDown, onKeyDown, onDragOver, onDrop, children }: {
   id: number;
   title: string;
   cursor: CursorItemProps;
   /** The parent's name, in mono dim: in every view but By Phase, and on a parked row. */
   phase?: string | null;
   blocked?: boolean;
+  /** A session proposed this step (origin `proposed`): a quiet dashed chip after the label. */
+  proposed?: boolean;
   /** Steps open below this one; none shown at 0. */
   inside: number;
   label: NodeLabel | null;
@@ -87,6 +89,7 @@ export function ViewRow({ id, title, cursor, phase, blocked, inside, label, age,
         {blocked && <Chip tone="blocked">BLOCKED</Chip>}
         {inside > 0 && <Chip tone="quiet">{`${inside} open inside`}</Chip>}
         {label && <Chip tone="label" glyph={LABEL_GLYPHS[label]}>{label}</Chip>}
+        {proposed && <Chip tone="quiet" dashed>proposed</Chip>}
         {age && <span className="ip-bl-age">{age}</span>}
         {!picked && (keepActs || (!pending && !confirming)) && <span className="ip-bl-acts" data-act>{acts}</span>}
       </span>
