@@ -1,8 +1,9 @@
 import { execFile } from 'node:child_process';
 import { readFile, stat } from 'node:fs/promises';
 import { isAbsolute, join, resolve as resolvePath, sep } from 'node:path';
+import { sectionAt, sideBySide, unapply } from '../core/sections';
 import { isSyncStep } from '../core/sync';
-import type { DiffHunk, LibrarySync, SyncCheck, SyncDiff, SyncFile, SyncOutcome, SyncRow, TreeNode } from '../core/types';
+import type { DiffHunk, LibrarySync, SyncAdaptation, SyncCheck, SyncDiff, SyncFile, SyncOutcome, SyncRow, TreeNode } from '../core/types';
 import { isLocalAbsolutePath, normalizePath } from '../lib/paths';
 import type { Ctx } from './db/tx';
 import { ApiError, badRequest, notFound } from './errors';
@@ -235,7 +236,7 @@ function parseHunks(diff: string): { hunk: DiffHunk; at: number }[] {
   for (const line of lines) {
     const h = HUNK.exec(line);
     if (h) {
-      out.push({ hunk: { header: line, section: null, located: false, conflict: false, added: 0, removed: 0, lines: [] }, start: Number(h[1]), count: h[2] === undefined ? 1 : Number(h[2]), leading: 0, first: null });
+      out.push({ hunk: { header: line, section: null, located: false, conflict: false, line: null, added: 0, removed: 0, lines: [] }, start: Number(h[1]), count: h[2] === undefined ? 1 : Number(h[2]), leading: 0, first: null });
       continue;
     }
     const cur = out[out.length - 1];
@@ -272,18 +273,6 @@ function uniqueRun(lines: string[], run: string[]): number {
       if (found >= 0) return -1;
       found = i;
     }
-  }
-  return found;
-}
-
-/** The last markdown heading at or above `line` (1-based) of `text`, ignoring fenced code; null when there is none. */
-function sectionAt(text: string, line: number): string | null {
-  let found: string | null = null;
-  let fenced = false;
-  for (const l of text.replace(/^﻿/, '').split('\n').slice(0, Math.max(line, 0))) {
-    if (/^\s*(```|~~~)/.test(l)) fenced = !fenced;
-    // Closing hashes are stripped only after a space, so `# C#` keeps its name.
-    else if (!fenced) found = /^#{1,6}\s+(.+?)(?:\s+#+)?\s*$/.exec(l.trimEnd())?.[1] ?? found;
   }
   return found;
 }
@@ -338,13 +327,13 @@ export async function syncDiff(ctx: Ctx, slug: string, template: string): Promis
   }
   const localLines = local === null ? null : local.replace(/^﻿/, '').split('\n').map((l) => l.trimEnd());
   // The adaptation's new side is the project's copy, so its line numbers read straight into it.
-  const adaptation = parseHunks(parsed.adaptation).map(({ hunk, at }) => (local === null ? hunk : { ...hunk, section: sectionAt(local, at), located: true }));
+  const adaptation = parseHunks(parsed.adaptation).map(({ hunk, at }) => (local === null ? hunk : { ...hunk, section: sectionAt(local, at), located: true, line: at }));
   // The upstream's new side is Shipwright's template, filled, so its numbers do not read into the copy: a hunk is found there by
   // its leading run of context and removed lines instead. Markdown repeats lines (fences, rules, table rows), so the run must
   // be found once and only once; a hunk with no run, or one found twice or not at all, is left unlocated.
   const upstream = parseHunks(parsed.upstream).map(({ hunk }, i) => {
     const row = localLines ? uniqueRun(localLines, leadingRun(hunk)) : -1;
-    return { ...hunk, conflict: conflicting.has(i), ...(row >= 0 && local !== null ? { section: sectionAt(local, row + 1), located: true } : {}) };
+    return { ...hunk, conflict: conflicting.has(i), ...(row >= 0 && local !== null ? { section: sectionAt(local, row + 1), located: true, line: row + 1 } : {}) };
   });
   const diff: SyncDiff = { ok: true, adaptation, upstream, commits: file?.commits ?? [] };
   // A copy that could not be read this once (an editor's save holding it) is not kept: the next open reads it again.
@@ -354,6 +343,38 @@ export async function syncDiff(ctx: Ctx, slug: string, template: string): Promis
     diffCache.set(kept, { at: now, diff });
   }
   return diff;
+}
+
+/**
+ * POST /api/ui/library/sync/adaptation: one adopted template side by side with the project's copy, for its Docs view. Built on
+ * `syncDiff` (its run, cache, placement and conflicts): the filled template at base is the copy with the adaptation's hunks
+ * put back, and Shipwright's raw text at base, placeholders kept, is `git show`n. A failure is `{ ok: false, error }`.
+ */
+export async function syncAdaptation(ctx: Ctx, slug: string, template: string): Promise<SyncAdaptation> {
+  const diff = await syncDiff(ctx, slug, template);
+  if (!diff.ok) return diff;
+  const { m, dirs } = await requireRow(ctx, slug);
+  const check = await checkRow(ctx, m, dirs);
+  if (!check.ok) return check;
+  const file = check.result.files.find((f) => f.template === template);
+  if (!file) return { ok: false, error: `${m.name} does not adopt ${template}` };
+  if (!file.base) return { ok: false, error: `${template} has no base in ${m.name}'s manifest` };
+  const where = localPathOf(m, file);
+  if (!where.ok) return where;
+  let local: string;
+  try {
+    // Line ends need no care here: the section reader reads CRLF as LF.
+    local = await readFile(where.path, 'utf8');
+  } catch (err) {
+    return { ok: false, error: `Cannot read ${m.name}'s copy ${file.local}: ${(err as Error).message}` };
+  }
+  const raw = await run('git', ['-C', m.shipwright, 'show', `${file.base}:${template}`], HEAD_TIMEOUT_MS, 'git');
+  if (!raw.ok) return { ok: false, error: `Cannot read ${template} at ${file.base}: ${raw.error}` };
+  const filled = unapply(local, diff.adaptation);
+  if (filled === null) return { ok: false, error: `${m.name}'s copy changed while it was read; open it again` };
+  const conflictLines = diff.upstream.flatMap((h) => (h.conflict && h.line !== null ? [h.line] : []));
+  const rows = sideBySide({ raw: raw.stdout, filled, local, fileFills: Object.keys(file.fills), conflictLines });
+  return { ok: true, project: m.name, template, base: file.base, head: check.result.shipwright.head, state: file.state, behind: file.behind, commits: file.commits, rows, adaptation: diff.adaptation };
 }
 
 /** POST /api/ui/library/sync/step: files the project's sync step at its root. A project that already has one is refused with 409, answering that step. */

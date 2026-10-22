@@ -9,7 +9,7 @@ import { badRequest } from '../errors';
 import { openInDefaultBrowser, openInEditorOrReveal } from '../open-path';
 import { pageHead } from '../pages';
 import { confirmPage, requireResource } from '../repo/resources';
-import { addSyncStep, librarySync, openCopy, syncDiff } from '../sync';
+import { addSyncStep, librarySync, openCopy, syncAdaptation, syncDiff } from '../sync';
 import { idParam, openBody, openUrlBody, syncBody, syncStepBody, syncTemplateBody } from '../schemas';
 
 const TOKEN_META = /<meta name="ip-ui-token" content="[^"]*"\s*\/?>/;
@@ -52,6 +52,11 @@ export function registerUi(app: FastifyInstance, opts: AppOptions, requireToken:
   app.post('/api/ui/library/sync/diff', { onRequest: requireUi }, async (req, reply) => {
     const { slug, template } = syncTemplateBody.parse(req.body);
     return reply.header('cache-control', 'no-store').send(await syncDiff(opts.ctx, slug, template));
+  });
+  // A project's Docs view of one adaptation: the same diff, lined up by section with the template.
+  app.post('/api/ui/library/sync/adaptation', { onRequest: requireUi }, async (req, reply) => {
+    const { slug, template } = syncTemplateBody.parse(req.body);
+    return reply.header('cache-control', 'no-store').send(await syncAdaptation(opts.ctx, slug, template));
   });
   app.post('/api/ui/library/sync/step', { onRequest: requireUi }, async (req, reply) => {
     return reply.code(201).send({ node: await addSyncStep(opts.ctx, syncStepBody.parse(req.body).slug) });

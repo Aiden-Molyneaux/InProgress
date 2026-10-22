@@ -287,6 +287,64 @@ describe('library: the sync dashboard', GIT_TIMEOUT, () => {
   });
 });
 
+describe('library: an adaptation side by side', GIT_TIMEOUT, () => {
+  beforeEach(() => clearSyncCache());
+  const post = (app: ReturnType<typeof setup>['app'], url: string, payload: unknown) => app.inject({ method: 'POST', url, headers: UI, payload: payload as Record<string, unknown> });
+
+  // The template at base, its copy (filled, with a line added under Rules), and a fake script whose check names Shipwright's
+  // HEAD as the base and whose diff matches the copy; its one upstream hunk changes a line under Rules and conflicts.
+  const TEMPLATE = '# Sev\n\n**Rule.** Be {{TONE}}.\n\n## Rules\n\nrule one\n';
+  const COPY = '# Sev\n\n**Rule.** Be kind.\n\n## Rules\n\nrule one\nrule two\n';
+  const SCRIPT = [
+    "import { execFileSync } from 'node:child_process';",
+    "import { fileURLToPath } from 'node:url';",
+    "const base = execFileSync('git', ['-C', fileURLToPath(new URL('..', import.meta.url)), 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();",
+    `const file = { template: 'agents/sev.md', local: 'agents/sev.md', base, state: 'behind', behind: 1, commits: [{ sha: 'c0ffee1', date: '2026-10-21', subject: 'reword' }], fills: { TONE: 'kind' }, detail: null };`,
+    `const diff = ${JSON.stringify({
+      adaptation: ['--- agents/sev.md', '+++ agents/sev.md', '@@ -5,3 +5,4 @@', ' ## Rules', ' ', ' rule one', '+rule two', ''].join('\n'),
+      upstream: ['--- agents/sev.md', '+++ agents/sev.md', '@@ -7 +7 @@', '-rule one', '+rule uno', ''].join('\n'),
+      conflicts: [{ base: { start: 7, lines: 1 }, upstream: { start: 7, lines: 1 }, local: { start: 7, lines: 2 }, hunks: [0] }],
+    })};`,
+    "console.log(JSON.stringify(process.argv.includes('--diff') ? diff : { shipwright: { head: 'abc1234', date: '2026-10-21', subject: 'x' }, project: 'A', lastSync: null, files: [file], skip: [], notAdopted: [], fills: {} }));",
+  ].join('\n');
+
+  const adaptationSetup = () => {
+    const s = setup(SCRIPT);
+    mkdirSync(join(s.dirs.shipwright, 'agents'));
+    writeFileSync(join(s.dirs.shipwright, 'agents', 'sev.md'), TEMPLATE);
+    git(s.dirs.shipwright, 'add', '.');
+    git(s.dirs.shipwright, 'commit', '-q', '-m', 'sev');
+    writeFileSync(join(s.dirs.dirA, 'agents', 'sev.md'), COPY);
+    return s;
+  };
+
+  it('lines the copy up with the template by section, with its tags, the placeholders and the conflict', async () => {
+    const { app, a } = adaptationSetup();
+    const res = await post(app, '/api/ui/library/sync/adaptation', { slug: a.slug, template: 'agents/sev.md' });
+    expect(res.statusCode, res.body).toBe(200);
+    const body = res.json();
+    expect(body.ok, JSON.stringify(body)).toBe(true);
+    expect(body.rows.map((r: { title: string; tag: string; conflict: boolean }) => [r.title, r.tag, r.conflict])).toEqual([
+      ['Opening', 'same', false],
+      ['Rule.', 'file fill', false],
+      ['Rules', 'rewritten', true],
+    ]);
+    const rule = body.rows[1];
+    expect([rule.template, rule.project, rule.placeholders]).toEqual(['**Rule.** Be {{TONE}}.', '**Rule.** Be kind.', ['TONE']]);
+    expect([body.project, body.state, body.behind, body.head, body.commits[0].sha]).toEqual(['Alpha', 'behind', 1, 'abc1234', 'c0ffee1']);
+    expect(body.adaptation.map((h: { line: number | null }) => h.line)).toEqual([8]);
+  });
+
+  it('says so when the copy no longer fits its diff, and runs only on the window POST', async () => {
+    const { app, a, dirs } = adaptationSetup();
+    writeFileSync(join(dirs.dirA, 'agents', 'sev.md'), '# Sev\n\nrewritten since\n');
+    const res = await post(app, '/api/ui/library/sync/adaptation', { slug: a.slug, template: 'agents/sev.md' });
+    expect(res.json()).toEqual({ ok: false, error: "Alpha's copy changed while it was read; open it again" });
+    const bare = await app.inject({ method: 'POST', url: '/api/ui/library/sync/adaptation', payload: { slug: a.slug, template: 'agents/sev.md' } });
+    expect(bare.statusCode).toBe(403);
+  });
+});
+
 describe('library: pages', GIT_TIMEOUT, () => {
   it('lists library pages with their shelf and Adapted in, leaves other purposes out, and keeps a gone file as an error row', async () => {
     const { app, a, sw, dirs, register } = setup();

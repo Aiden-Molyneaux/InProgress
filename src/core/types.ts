@@ -329,12 +329,33 @@ export interface DiffHunk {
   located: boolean;
   /** An upstream hunk the three-way merge cannot apply cleanly. */
   conflict: boolean;
+  /** The 1-based line of the project's copy the hunk is placed at; null when it is not `located`. */
+  line: number | null;
   added: number;
   removed: number;
   lines: { kind: '+' | '-' | ' '; text: string }[];
 }
 /** POST /api/ui/library/sync/diff. */
 export type SyncDiff = { ok: true; adaptation: DiffHunk[]; upstream: DiffHunk[]; commits: SyncCommit[] } | { ok: false; error: string };
+/** One row of an adaptation's side by side (`sideBySide` in core/sections.ts). */
+export interface AdaptRow {
+  key: string;
+  title: string;
+  /** 2 or 3 for a heading, 0 for a bold paragraph lead, -1 for the Opening, -2 for the text a lead leaves under its heading. */
+  level: number;
+  tag: 'same' | 'fill' | 'file fill' | 'rewritten' | 'added' | 'removed';
+  /** Shipwright's text at base, placeholders kept; null for an added section. */
+  template: string | null;
+  /** The copy's text; null for a removed section. */
+  project: string | null;
+  placeholders: string[];
+  /** The next sync conflicts in this section of the copy. */
+  conflict: boolean;
+}
+/** POST /api/ui/library/sync/adaptation: a project's Docs view of one adopted template. */
+export type SyncAdaptation =
+  | { ok: true; project: string; template: string; base: string; head: string; state: SyncState; behind: number; commits: SyncCommit[]; rows: AdaptRow[]; adaptation: DiffHunk[] }
+  | { ok: false; error: string };
 export interface LibraryPage {
   id: number;
   title: string;
