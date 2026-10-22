@@ -129,7 +129,7 @@ export function AdaptationView({ slug, project, template, pages, onOpenResource,
               Shipwright page ›
             </Button>
           )}
-          <a className="ip-adapt-link" href={sync}>
+          <a className="p-btn ip-adapt-link" data-variant="outline" data-size="sm" href={sync}>
             Sync cell ›
           </a>
         </div>

@@ -156,10 +156,11 @@
 .ip-fresh-covers .p-chip { text-transform: none; }
 .ip-fresh-confirm { margin-left: auto; }
 .ip-pframe { display: grid; }
-.ip-pframe-label { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--sp-2); padding: 6px var(--sp-3); border: 1px solid var(--line); border-bottom: 0; background: var(--canvas-0); font-family: var(--font-mono); font-size: var(--t-micro); color: var(--text-dim); }
+.ip-pframe-label { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--sp-2); padding: 6px var(--sp-3); border: 1px solid var(--line); background: var(--canvas-0); font-family: var(--font-mono); font-size: var(--t-micro); color: var(--text-dim); }
 .ip-pframe-path { min-width: 0; overflow-wrap: anywhere; }
-/* White under the frame (--text-hi's value): the paper a page with no background of its own expects. */
-.ip-pframe-frame { display: block; width: 100%; border: 1px solid var(--line); background: var(--text-hi); }
+/* White under the frame (--text-hi's value): the paper a page with no background of its own expects. No border: under
+   border-box sizing it would take two pixels from the height the page reports, and the frame would scroll by them. */
+.ip-pframe-frame { display: block; width: 100%; border: 0; background: var(--text-hi); }
 .ip-page-refused { display: grid; gap: var(--sp-2); }
 .ip-page-path { margin: 0; font-family: var(--font-mono); font-size: var(--t-body); color: var(--text); overflow-wrap: anywhere; }
 }
