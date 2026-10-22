@@ -135,3 +135,14 @@ INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key
 ### Checks
 
 From the worktree: `npm run typecheck`, `npm test`, `npm run test:smoke`. No em dashes anywhere (the repo test scans).
+
+## For the ui half (Aiden, 2026-10-22, phase 0)
+
+- What and Why are read-only in the window; editing comes with #568.
+- Quick-add notes is multi-line: Enter adds, Shift+Enter is a newline; Enter on the title still adds at once.
+- No What or Why: a muted "No What or Why yet" on `asked` and `proposed` steps; nothing on `me` steps.
+- Criteria, checked as a list on a check surface before the ui merge: C5 quick-add (Enter on the title adds at once;
+  Tab to notes, type, Enter adds with the notes as the body); C6 a `proposed` chip on Backlog rows and tiles, none on
+  other steps; C7 What and Why under the inspector's head; C8 Details in the spec's order (Head, What, Why,
+  status/label/origin, asks, outcome, resources with the handoff first, children, then Claude's body, the log and live
+  work folded).
