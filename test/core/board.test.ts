@@ -7,7 +7,7 @@ const T = '2026-10-13T11:00:00.000Z';
 const DAYS = (n: number) => new Date(NOW - n * 86_400_000).toISOString();
 
 function n(id: number, parentId: number | null, o: Partial<TreeNode> = {}): TreeNode {
-  return { id, projectId: 1, parentId, position: id, kind: 'task', title: `S${id}`, body: '', status: 'todo', assignee: 'claude', outcome: '', label: null, createdAt: T, updatedAt: T, completedAt: null, driverSessionId: null, boardState: null, stateSince: null, hue: null, parkedReason: '', parkedWhere: '', parkedAt: null, rankBand: null, rank: null, ...o };
+  return { id, projectId: 1, parentId, position: id, kind: 'task', title: `S${id}`, body: '', status: 'todo', assignee: 'claude', outcome: '', label: null, what: '', why: '', origin: 'asked', createdAt: T, updatedAt: T, completedAt: null, driverSessionId: null, boardState: null, stateSince: null, hue: null, parkedReason: '', parkedWhere: '', parkedAt: null, rankBand: null, rank: null, ...o };
 }
 function s(id: string, o: Partial<Session> = {}): Session {
   return { id, projectId: 1, title: id, cwd: null, branch: null, transcriptPath: null, state: 'working', focusNodeId: null, promptsSinceUpdate: 0, startedAt: T, lastSeenAt: T, lastPromptAt: null, endedAt: null, slot: 0, subagents: [], commands: [], role: 'worker', titleAsked: null, ...o };
@@ -90,6 +90,30 @@ describe('deriveBoard', () => {
     // node 3 is a group, so its stale ask shows on no row; a stale ask on a row:
     const c = deriveBoard(input({ nodes: [n(1, null), n(2, 1)], asks: [ask(1, 2, { raisedAt: DAYS(8) })] }), NOW);
     expect(c.byId.get(2)?.marks).toEqual(['stale_ask']);
+  });
+
+  it('no_why on an open session-filed step from the cutoff on that lacks a What or a Why', () => {
+    const AFTER = '2026-10-22T09:00:00.000Z';
+    const b = deriveBoard(input({
+      nodes: [
+        n(1, null),
+        n(2, 1, { createdAt: AFTER }),
+        n(3, 1, { createdAt: AFTER, what: 'Does it.' }),
+        n(4, 1, { createdAt: AFTER, why: 'Because.', origin: 'proposed' }),
+        n(5, 1, { createdAt: AFTER, what: 'Does it.', why: 'Because.' }),
+        n(6, 1, { createdAt: AFTER, what: ' ', why: 'Because.' }),
+        n(7, 1, { createdAt: AFTER, origin: 'me' }),
+        n(8, 1, { createdAt: '2026-10-21T23:59:59.999Z' }),
+        n(9, 1, { createdAt: AFTER, status: 'done', completedAt: AFTER, outcome: 'Shipped' }),
+        n(10, 1, { createdAt: '2026-10-22T00:00:00.000Z' }),
+      ],
+    }), NOW);
+    const marked = (id: number) => b.byId.get(id)!.marks.includes('no_why');
+    expect([2, 3, 4, 5, 6, 7, 8, 9, 10].filter(marked)).toEqual([2, 3, 4, 6, 10]);
+    // A group has no row, so it carries no mark of its own.
+    const g = deriveBoard(input({ nodes: [n(1, null), n(2, 1, { createdAt: AFTER }), n(3, 2, { createdAt: AFTER, what: 'a', why: 'b' })] }), NOW);
+    expect(g.groups.has(2)).toBe(true);
+    expect(g.byId.get(3)!.marks).toEqual([]);
   });
 
   it('stale_ask also marks a Done row with an old open review ask', () => {

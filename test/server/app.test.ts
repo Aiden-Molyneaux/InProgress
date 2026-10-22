@@ -206,6 +206,24 @@ describe('type labels over HTTP', () => {
   });
 });
 
+describe('what, why and origin over HTTP', () => {
+  it('refuses origin me and a 501-character why on add, and takes origin me on update', async () => {
+    const { app } = setup();
+    const p = (await app.inject({ method: 'POST', url: '/api/projects', headers: auth, payload: { name: 'InProgress' } })).json();
+    const add = (node: Record<string, unknown>) => app.inject({ method: 'POST', url: '/api/nodes', headers: auth, payload: { parentId: p.rootNodeId, nodes: [{ title: 'Step', ...node }] } });
+    expect((await add({ origin: 'me' })).statusCode).toBe(400);
+    expect((await add({ why: 'x'.repeat(501) })).statusCode).toBe(400);
+    const ok = await add({ what: ' Does it. ', why: 'y'.repeat(500), origin: 'proposed' });
+    expect(ok.statusCode).toBe(201);
+    const [n] = ok.json();
+    expect(n).toMatchObject({ what: 'Does it.', origin: 'proposed' });
+    const patched = await app.inject({ method: 'PATCH', url: `/api/nodes/${n.id}`, headers: auth, payload: { origin: 'me', why: ' Because. ' } });
+    expect(patched.statusCode).toBe(200);
+    expect(patched.json()).toMatchObject({ origin: 'me', why: 'Because.', what: 'Does it.' });
+    expect((await app.inject({ method: 'PATCH', url: `/api/nodes/${n.id}`, headers: auth, payload: { origin: 'other' } })).statusCode).toBe(400);
+  });
+});
+
 describe('session routes', () => {
   it('handles hook events, enrollment and focus', async () => {
     const { app } = setup();

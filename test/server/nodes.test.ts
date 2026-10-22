@@ -99,6 +99,39 @@ describe('nodes', () => {
     expect(lastChanges()).toEqual({ label: { from: 'fix', to: null } });
   });
 
+  it('decides origin on add: a window add is me whatever it says, a session add takes its own, its parent input, else asked', () => {
+    const { ctx, root } = setup();
+    const [mine] = addNodes(ctx, 'window', { parentId: root, nodes: [{ title: 'Mine', origin: 'proposed' }] });
+    expect(mine.origin).toBe('me');
+    const [asked] = addNodes(ctx, 'scribe:s1', { parentId: root, nodes: [{ title: 'Asked' }] });
+    expect(asked.origin).toBe('asked');
+    const plan = addNodes(ctx, 'scribe:s1', {
+      parentId: root,
+      nodes: [{ title: 'Follow-up', origin: 'proposed', children: [{ title: 'Inherits' }, { title: 'Own', origin: 'asked', children: [{ title: 'Deep' }] }] }],
+    });
+    expect(plan.map((n) => [n.title, n.origin])).toEqual([['Follow-up', 'proposed'], ['Inherits', 'proposed'], ['Own', 'asked'], ['Deep', 'asked']]);
+  });
+
+  it('stores what and why trimmed, empty when unset', () => {
+    const { ctx, root } = setup();
+    const [n, bare] = addNodes(ctx, 'scribe:s1', { parentId: root, nodes: [{ title: 'Export', what: '  Exports the board. ', why: ' Aiden shares it.  ' }, { title: 'Bare' }] });
+    expect(n).toMatchObject({ what: 'Exports the board.', why: 'Aiden shares it.' });
+    expect(requireNode(ctx, n.id)).toMatchObject({ what: 'Exports the board.', why: 'Aiden shares it.' });
+    expect(bare).toMatchObject({ what: '', why: '' });
+  });
+
+  it('sets what, why and origin on an existing step, leaving its other fields, with the change in node.updated', () => {
+    const { ctx, root } = setup();
+    const [n] = addNodes(ctx, 'scribe:s1', { parentId: root, nodes: [{ title: 'Older', body: 'Kept', label: 'ui', status: 'active' }] });
+    const after = updateNode(ctx, 'scribe:s1', n.id, { what: ' Fills a gap. ', why: 'Asked for.', origin: 'me' });
+    // Notes for Aiden are not progress: updatedAt (the Stale view's clock) stays where it was.
+    expect(after).toMatchObject({ what: 'Fills a gap.', why: 'Asked for.', origin: 'me', title: 'Older', body: 'Kept', label: 'ui', status: 'active', updatedAt: n.updatedAt });
+    const ev = ctx.db.prepare("SELECT data FROM events WHERE type = 'node.updated' ORDER BY id DESC LIMIT 1").get() as { data: string };
+    expect(JSON.parse(ev.data).changes).toEqual({ what: { from: '', to: 'Fills a gap.' }, why: { from: '', to: 'Asked for.' }, origin: { from: 'asked', to: 'me' } });
+    // Any other field with them is progress, and moves it.
+    expect(updateNode(ctx, 'scribe:s1', n.id, { why: 'Changed.', status: 'todo' }).updatedAt > n.updatedAt).toBe(true);
+  });
+
   it('refuses title and body edits on the root, which mirror the project', () => {
     const { ctx, root } = setup();
     expect(() => updateNode(ctx, 't', root, { title: 'X' })).toThrow('project root');

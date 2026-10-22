@@ -355,6 +355,25 @@ export const MIGRATIONS: string[] = [
   -- Only nullable columns: v1 to v16 builds can still read and write this schema, so a rollback across it works.
   INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
   `,
+  // 18: What, Why and origin on steps (#536, spec 2026-10-20-inprogress-redesign-design.md section 5). what: what the step
+  // implements, written for Aiden; why: why it is worth doing; both '' until set. origin: whose idea it was, me (Aiden's
+  // own), asked (work he asked for) or proposed (a session's follow-up). Backfill: me for every id a window node.created
+  // event names in data.ids, else asked. Events are pruned after 30 days, so an older window-filed step reads asked.
+  // updated_at is left alone.
+  `
+  ALTER TABLE nodes ADD COLUMN what TEXT NOT NULL DEFAULT '';
+  ALTER TABLE nodes ADD COLUMN why TEXT NOT NULL DEFAULT '';
+  ALTER TABLE nodes ADD COLUMN origin TEXT NOT NULL DEFAULT 'asked' CHECK (origin IN ('me','asked','proposed'));
+  UPDATE nodes SET origin = 'me' WHERE id IN (
+    SELECT CAST(j.value AS INTEGER)
+    FROM events e, json_each(CASE WHEN json_valid(e.data) THEN e.data ELSE '{}' END, '$.ids') j
+    WHERE e.type = 'node.created' AND e.actor = 'window' AND j.type = 'integer'
+      -- Array elements only, as the digest reads ids: json_each on a scalar ids yields the scalar itself, keyed NULL.
+      AND typeof(j.key) = 'integer'
+  );
+  -- Defaulted columns: v1 to v17 builds can still read and write this schema, so a rollback across it works.
+  INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+  `,
 ];
 
 /**

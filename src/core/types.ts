@@ -15,6 +15,13 @@ export const NODE_STATUSES = ['todo', 'active', 'done', 'blocked', 'dropped', 'p
 export type NodeStatus = (typeof NODE_STATUSES)[number];
 export const ASSIGNEES = ['claude', 'me'] as const;
 export type Assignee = (typeof ASSIGNEES)[number];
+/** Whose idea the step was: Aiden's own (`me`), work he asked a session for (`asked`), or a session's follow-up (`proposed`). */
+export const ORIGINS = ['me', 'asked', 'proposed'] as const;
+export type Origin = (typeof ORIGINS)[number];
+/** The longest a step's What or Why may be, once trimmed. */
+export const WHAT_WHY_MAX = 500;
+/** Steps created from this time on, by a session, owe a What and a Why: the `no_why` mark. */
+export const WHAT_WHY_SINCE = '2026-10-22T00:00:00.000Z';
 export const RESOURCE_KINDS = ['doc', 'test-suite', 'runbook', 'roadmap', 'diagram', 'link', 'other'] as const;
 export type ResourceKind = (typeof RESOURCE_KINDS)[number];
 export const SESSION_STATES = ['working', 'idle', 'permission', 'ended'] as const;
@@ -188,6 +195,12 @@ export interface TreeNode {
   outcome: string;
   /** What kind of work the step is; null when unlabelled. */
   label: NodeLabel | null;
+  /** What the step implements, a sentence or two written for Aiden; '' when unset. */
+  what: string;
+  /** Why it is worth doing, written for Aiden; '' when unset. */
+  why: string;
+  /** Whose idea the step was (ORIGINS). */
+  origin: Origin;
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
@@ -220,6 +233,10 @@ export interface NodeInput {
   outcome?: string;
   /** Omitted or null: unlabelled. */
   label?: NodeLabel | null;
+  what?: string;
+  why?: string;
+  /** Omitted: the parent input's origin, else `asked`. A window add is always `me`, whatever this says. */
+  origin?: Exclude<Origin, 'me'>;
   children?: NodeInput[];
 }
 

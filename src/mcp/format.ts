@@ -20,8 +20,10 @@ export function formatCreated(nodes: TreeNode[]): string {
 
 export function formatNodeDetail(d: NodeDetail): string {
   const n = d.node;
-  const lines = [`#${n.id} ${glyphTitle(n)} (${n.kind}${n.label ? `, ${n.label}` : ''}) · ${n.status}, ${n.assignee === 'me' ? 'assigned to Aiden' : 'Claude'}`];
+  const lines = [`#${n.id} ${glyphTitle(n)} (${n.kind}${n.label ? `, ${n.label}` : ''}, ${n.origin}) · ${n.status}, ${n.assignee === 'me' ? 'assigned to Aiden' : 'Claude'}`];
   if (d.parent) lines.push(`Parent: #${d.parent.id} ${d.parent.title}`);
+  if (n.what) lines.push(`What: ${n.what}`);
+  if (n.why) lines.push(`Why: ${n.why}`);
   if (n.body) lines.push(`Body:\n${n.body}`);
   if (n.outcome) lines.push(`Outcome: ${n.outcome}`);
   if (d.children.length) lines.push('Children:', ...d.children.map((c) => `  #${c.id} ${c.title} · ${c.status}${c.assignee === 'me' ? ' (you)' : ''}`));

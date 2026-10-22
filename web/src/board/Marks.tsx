@@ -10,6 +10,7 @@ export { endedLine } from './text';
 export const MARK_WORDS: Record<Mark, string> = {
   ended_open: 'ended without closing',
   no_outcome: 'no outcome',
+  no_why: 'no What/Why',
   stale_ask: 'ask open over 7 days',
   done_focus: 'a session is still on it',
   deep: 'deep',
