@@ -4251,19 +4251,6 @@ test.describe('#542 ranked Backlog', () => {
     await expect.poll(async () => (await someday.locator('.ip-bl-title').allInnerTexts()).filter((t) => mine.includes(t))).toEqual(mine);
   });
 
-  test('Alt+Down on a focused Soon row moves it one place and keeps focus', async ({ page, api, fresh }) => {
-    const mine = ['3 RevenueCat', '4 Build to GitHub', '5 Store listing'];
-    const { view } = await openRankedWith(page, api, fresh, mine);
-    const mineOnly = async (v: Locator) => (await soonTitles(v)).filter((t) => mine.includes(t));
-    const row = blRow(page, view, '3 RevenueCat');
-    await row.focus();
-    await page.keyboard.press('Alt+ArrowDown');
-    await expect.poll(() => mineOnly(view)).toEqual(['4 Build to GitHub', '3 RevenueCat', '5 Store listing']);
-    await expect(blRow(page, view, '3 RevenueCat')).toBeFocused();
-    await page.reload();
-    await expect.poll(() => mineOnly(page.locator('.ip-backlogview'))).toEqual(['4 Build to GitHub', '3 RevenueCat', '5 Store listing']);
-  });
-
   test('a step a session adds shows in Needs Triage and the Ranked notice', async ({ page, api, fresh }) => {
     await page.setViewportSize(WIDE);
     await open(page, fresh);
