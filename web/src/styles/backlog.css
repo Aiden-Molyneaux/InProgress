@@ -31,8 +31,12 @@
 /* The Park form and the Delete confirm take the inspector's full width under its content, in place of the buttons: a reason
    of a few hundred characters must read whole, which the 200 px button column cannot hold. */
 .ip-insp > :is(.ip-park, .ip-bl-panel) { grid-column: 1 / -1; min-width: 0; }
+/* While the form or confirm is open the button column is empty: the content takes the whole width. */
+.ip-bl-row > .ip-insp:has(> :is(.ip-park, .ip-bl-panel)) { grid-template-columns: minmax(0, 1fr); }
+/* The reason box starts at about three lines and grows with its text (field-sizing). */
+.ip-park textarea { min-height: 4.5lh; }
 .ip-bl-parkedrow { border: 1px dashed var(--line-strong); margin-top: var(--sp-1); }
-.ip-bl-row > :is(.ip-bl-why, .ip-bl-where) { grid-column: 2 / -1; margin: 0; overflow-wrap: anywhere; font-size: var(--t-detail-sm); color: var(--text-muted); }
+.ip-bl-row > :is(.ip-bl-why, .ip-bl-where) { grid-column: 2 / -1; margin: 0; overflow-wrap: anywhere; white-space: pre-line; font-size: var(--t-detail-sm); color: var(--text-muted); }
 .ip-bl-row > .ip-bl-why { margin-top: var(--sp-2); }
 /* A picked parked row says its reason and where in its inspector: the row's own lines step aside. */
 .ip-bl-row.picked > :is(.ip-bl-why, .ip-bl-where) { display: none; }
@@ -81,11 +85,11 @@
 @media (prefers-reduced-motion: reduce) {
   .ip-bl-row > .ip-insp { animation: none; }
 }
-.ip-insp-main { display: grid; gap: var(--sp-3); min-width: 0; align-content: start; }
-.ip-insp-body { max-width: 68ch; font-size: var(--t-body); color: var(--text-muted); }
+.ip-insp-main { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); min-width: 0; align-content: start; }
+.ip-insp-body { max-width: 68ch; min-width: 0; font-size: var(--t-body); color: var(--text-muted); }
 .ip-insp-nobody { margin: 0; color: var(--text-dim); }
 .ip-insp-facts { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-dim); }
-.ip-insp-why, .ip-insp-where { margin: 0; overflow-wrap: anywhere; font-size: var(--t-detail-sm); color: var(--text-muted); }
+.ip-insp-why, .ip-insp-where { margin: 0; overflow-wrap: anywhere; white-space: pre-line; font-size: var(--t-detail-sm); color: var(--text-muted); }
 .ip-insp-selects { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
 .ip-insp-sel { gap: var(--sp-1); min-width: 140px; }
 .ip-insp-sel .p-field-input { cursor: pointer; }
@@ -123,5 +127,5 @@
 .ip-park { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-2); background: var(--canvas-1); border: 1px solid var(--line); }
 .ip-park-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); }
 .ip-dparked { margin: 4px 0 10px; padding: 6px 8px; border: 1px dashed var(--line); }
-.ip-dparked p { margin: 0 0 6px; overflow-wrap: anywhere; }
+.ip-dparked p { margin: 0 0 6px; overflow-wrap: anywhere; white-space: pre-line; }
 }

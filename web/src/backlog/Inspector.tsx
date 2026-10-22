@@ -14,7 +14,7 @@ import type { InspSel as Sel, InspState } from './useInspectorWrites';
 /**
  * A Backlog row's inspector, drawn under the row in `ViewRow`'s `children`: the step's body, a facts line, the Phase, Label
  * and Band selects (each saves on change) and a column of buttons. The caller decides which buttons show (`can`) and what
- * each does; a Park form or a Delete confirm it passes as `panel` takes the button column's place.
+ * each does; a Park form or a Delete confirm it passes as `panel` takes the buttons' place, under the content across the full width.
  */
 export function Inspector({ id, node, inside, band, parked, handoff, docs, lastSession, phases, phase, can, panel, now, state, deleting, onChange, onToNext, onBackToBacklog, onMoveTop, onKeep, onPark, onDelete, onOpenDetails, onUnpark, onOpenResource }: {
   id: number;
@@ -36,7 +36,7 @@ export function Inspector({ id, node, inside, band, parked, handoff, docs, lastS
   phase: number | null;
   /** Which buttons show (the caller works these out). */
   can: { toNext: boolean; backToBacklog: boolean; moveTop: boolean; keep: boolean; park: boolean; remove: boolean; unpark: boolean };
-  /** The Park form or the Delete confirm, when one is open: drawn in place of the button column. */
+  /** The Park form or the Delete confirm, when one is open: drawn under the content across the full width, in place of the buttons. */
   panel: ReactNode;
   now: number;
   /** The selects' write state, kept above the rows so it outlives a remount. */

@@ -4333,11 +4333,16 @@ test.describe('#542 ranked Backlog', () => {
     await inspector.getByRole('button', { name: 'Park…' }).click();
     // A reason of 200 characters and more reads whole as it is typed: the box spans the inspector and grows with it.
     const reason = page.getByRole('textbox', { name: 'Why is it set aside?' });
-    const long = `Not this quarter: ${'waiting on the store review and the pricing call. '.repeat(5)}`.trim();
+    const long = `Not this quarter: ${'waiting on the store review and the pricing call. '.repeat(28)}`.trim();
     await reason.fill(long);
-    const box = await reason.evaluate((el: { clientWidth: number; scrollHeight: number; clientHeight: number }) => ({ width: el.clientWidth, hidden: el.scrollHeight - el.clientHeight }));
+    type Box = { tagName: string; clientWidth: number; clientHeight: number; scrollWidth: number; scrollHeight: number };
+    const box = await reason.evaluate((el: Box) => ({ tag: el.tagName, width: el.clientWidth, height: el.clientHeight, hiddenX: el.scrollWidth - el.clientWidth, hiddenY: el.scrollHeight - el.clientHeight }));
+    // A box across the inspector that wraps the reason and grows past its first three lines to show all of it.
+    expect(box.tag).toBe('TEXTAREA');
     expect(box.width).toBeGreaterThan(400);
-    expect(box.hidden).toBeLessThanOrEqual(1);
+    expect(box.hiddenX).toBeLessThanOrEqual(1);
+    expect(box.hiddenY).toBeLessThanOrEqual(1);
+    expect(box.height).toBeGreaterThan(120);
     await page.getByRole('button', { name: 'Park', exact: true }).click();
     await expect(blRow(page, soon, '4 Build to GitHub')).toHaveCount(0);
     await pickView(view, 'Parked');
@@ -4347,6 +4352,25 @@ test.describe('#542 ranked Backlog', () => {
     await expect(view.getByRole('region', { name: 'Parked' })).toHaveCount(0);
     await pickView(view, 'Needs Triage');
     await expect(blRow(page, view, '4 Build to GitHub')).toBeVisible();
+  });
+
+  test('the inspector shows the whole body, wrapped to its width at 400 px', async ({ page, api, fresh }) => {
+    const lines = Array.from({ length: 14 }, (_, i) => `Line ${i + 1} of a body long enough to have been cut at six lines before.`);
+    const body = ['# A long body', '', ...lines, '', '```', `const unbroken = '${'x'.repeat(160)}';`, '```', '', 'FINAL LINE'].join('\n');
+    await write(api, fresh.session, 'patch', `/api/nodes/${fresh.ids['4 Build to GitHub']}`, { body });
+    const { view } = await openRankedWith(page, api, fresh, ['4 Build to GitHub']);
+    await page.setViewportSize({ width: 400, height: 900 });
+    const inspector = await openInspector(blRow(page, view, '4 Build to GitHub'));
+    await expect(inspector.getByText('FINAL LINE')).toBeVisible();
+    await expect(inspector.getByRole('button', { name: 'Show all' })).toHaveCount(0);
+    type Box = { clientWidth: number; scrollWidth: number; clientHeight: number; scrollHeight: number; getBoundingClientRect(): { right: number } };
+    const fits = await inspector.evaluate((el: Box & { querySelector(s: string): Box | null }) => {
+      const b = el.querySelector('.ip-insp-body')!;
+      return { right: b.getBoundingClientRect().right - el.getBoundingClientRect().right, hiddenY: b.scrollHeight - b.clientHeight };
+    });
+    // The body ends inside the inspector (the code block scrolls in itself), and nothing is cut at the foot.
+    expect(fits.right).toBeLessThanOrEqual(0);
+    expect(fits.hiddenY).toBeLessThanOrEqual(1);
   });
 
   test('Enter opens the inspector and Escape closes it, with focus on its row', async ({ page, api, fresh }) => {
