@@ -194,9 +194,9 @@ async function readTemplates(shipwright: string): Promise<string[]> {
 }
 
 /** The project's open sync step (the lowest id), or null. */
-function openSyncStep(nodes: TreeNode[], adopted: string[]): { id: number; title: string } | null {
+function openSyncStep(nodes: TreeNode[]): { id: number; title: string } | null {
   const step = nodes
-    .filter((n) => n.parentId !== null && (n.status === 'todo' || n.status === 'active') && isSyncStep(n.title, adopted))
+    .filter((n) => n.parentId !== null && (n.status === 'todo' || n.status === 'active') && isSyncStep(n.title))
     .sort((a, b) => a.id - b.id)[0];
   return step ? { id: step.id, title: step.title } : null;
 }
@@ -206,7 +206,7 @@ export async function librarySync(ctx: Ctx, { force = false }: { force?: boolean
   const { rows, noManifest } = await manifests(ctx);
   const dirs = rows.map((r) => r.dir);
   const projects: SyncRow[] = await Promise.all(
-    rows.map(async (m) => ({ projectId: m.projectId, slug: m.slug, name: m.name, dir: m.dir, check: await checkRow(ctx, m, dirs, force), syncStep: openSyncStep(listNodes(ctx, m.projectId), m.adopted) })),
+    rows.map(async (m) => ({ projectId: m.projectId, slug: m.slug, name: m.name, dir: m.dir, check: await checkRow(ctx, m, dirs, force), syncStep: openSyncStep(listNodes(ctx, m.projectId)) })),
   );
   const usable = rows.find((m) => !refusal(ctx, m, dirs));
   const templates = usable ? await readTemplates(usable.shipwright) : [];
@@ -369,7 +369,7 @@ export async function addSyncStep(ctx: Ctx, slug: string): Promise<TreeNode> {
     nodes: [{ title: `Sync ${m.name} to Shipwright ${check.result.shipwright.head.slice(0, 7)}`, label: 'docs' }],
     // Inside the write, so two clicks cannot both pass.
     check: () => {
-      const existing = openSyncStep(listNodes(ctx, m.projectId), m.adopted);
+      const existing = openSyncStep(listNodes(ctx, m.projectId));
       if (existing) throw new ApiError(409, `${m.name} already has a sync step, #${existing.id}`, undefined, { step: existing });
     },
   });

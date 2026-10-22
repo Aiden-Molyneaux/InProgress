@@ -87,12 +87,10 @@ export function syncSentence(rows: SyncRow[]): string {
 }
 
 /**
- * Whether a project's open step is its sync step: the title says sync, and names Shipwright or one of the adopted
- * templates (its path or its file name).
+ * Whether a project's open step is its sync step: its title says sync, then "to Shipwright", as File sync step writes it
+ * ("Sync InThink to Shipwright fbdaaa7"). Aiden, 2026-10-22: narrower than the spec's first rule, which also took a step
+ * about the dashboard itself ("Sync dashboard: ... vs Shipwright").
  */
-export function isSyncStep(title: string, adopted: string[]): boolean {
-  if (!/\bsync\b/i.test(title)) return false;
-  if (/shipwright/i.test(title)) return true;
-  const lower = title.toLowerCase();
-  return adopted.some((t) => lower.includes(t.toLowerCase()) || lower.includes((t.split('/').pop() ?? t).toLowerCase()));
+export function isSyncStep(title: string): boolean {
+  return /\bsync\b.*\bto shipwright\b/i.test(title);
 }

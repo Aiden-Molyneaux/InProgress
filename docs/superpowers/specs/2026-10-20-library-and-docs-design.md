@@ -231,7 +231,9 @@ commit: InProgress's last touch to its manifest was a style refactor, so that da
 - how many projects are behind, and by which Shipwright commits;
 - for each behind project, whether it has a sync step.
 
-A project has a sync step when it has an open step whose title matches `/\bsync\b/i` and names Shipwright or a template.
+A project has a sync step when it has an open step whose title matches `/\bsync\b.*\bto shipwright\b/i`, the form File sync
+step writes (Aiden, 2026-10-22: the first rule, sync plus any mention of Shipwright or a template, also took a step about
+the dashboard itself).
 
 **File sync step** quick-adds `Sync <project> to Shipwright <sha>` with label `docs` to that project's root, through the
 existing add-step route, and the button becomes the new step's link.

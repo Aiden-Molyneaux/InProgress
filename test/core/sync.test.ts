@@ -62,17 +62,17 @@ describe('syncSentence', () => {
 });
 
 describe('isSyncStep', () => {
-  const adopted = ['agents/sev.md', 'skills/sigmund/SKILL.md'];
-  it('wants the word sync and either Shipwright or an adopted template', () => {
-    expect(isSyncStep('Sync InThink to Shipwright fbdaaa7', adopted)).toBe(true);
-    expect(isSyncStep('sync the roster', adopted)).toBe(false);
-    expect(isSyncStep('Sync sev.md', adopted)).toBe(true);
-    expect(isSyncStep('Sync skills/sigmund/SKILL.md', adopted)).toBe(true);
+  it('wants sync, then to Shipwright', () => {
+    expect(isSyncStep('Sync InThink to Shipwright fbdaaa7')).toBe(true);
+    expect(isSyncStep("Sync InThink's roster to Shipwright main with the retro diffs")).toBe(true);
+    expect(isSyncStep('sync the roster to shipwright')).toBe(true);
   });
-  it('misses near words and an unrelated sync', () => {
-    expect(isSyncStep('Resync with Shipwright', adopted)).toBe(false);
-    expect(isSyncStep('Synchronise Shipwright', adopted)).toBe(false);
-    expect(isSyncStep('Sync the database', adopted)).toBe(false);
-    expect(isSyncStep('Shipwright notes', adopted)).toBe(false);
+  it('misses a step about sync that is not one, near words and an unrelated sync', () => {
+    expect(isSyncStep("Sync dashboard: every project's state vs Shipwright, fills, diff")).toBe(false);
+    expect(isSyncStep('Sync sev.md')).toBe(false);
+    expect(isSyncStep('Resync to Shipwright')).toBe(false);
+    expect(isSyncStep('Synchronise to Shipwright')).toBe(false);
+    expect(isSyncStep('Sync the database')).toBe(false);
+    expect(isSyncStep('Shipwright notes')).toBe(false);
   });
 });
