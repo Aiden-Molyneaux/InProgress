@@ -461,6 +461,8 @@ test('an HTML page runs in its sandboxed frame: its clicks work, it reaches no n
   const height = (await frame.boundingBox())?.height ?? 0;
   expect(height).toBeGreaterThan(1400);
   expect(height).toBeLessThan(2000);
+  // The frame is the page's own height: nothing inside it scrolls (Aiden's walkthrough of #530 found a 2 px scroll).
+  expect(await inside.locator('html').evaluate((d) => { const el = d as unknown as { scrollHeight: number; clientHeight: number }; return el.scrollHeight - el.clientHeight; })).toBe(0);
 });
 
 test('the freshness strip counts commits to covers since the confirmation, and Still accurate resets it', async ({ page, fresh, api }) => {

@@ -20,8 +20,6 @@
 /* An adaptation side by side: Shipwright's template at left, the project's copy at right, tagged by what it did there. */
 .ip-adapt { min-width: 0; display: grid; align-content: start; border: 1px solid var(--line); background: var(--canvas-1); }
 .ip-adapt-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--line); }
-/* Sync cell is a link drawn as the outline button beside it. */
-.ip-adapt-link { text-decoration: none; }
 .ip-adapt-strip { display: grid; gap: var(--sp-1); padding: var(--sp-2) var(--sp-4); border-bottom: 1px solid var(--line); font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-muted); }
 .ip-adapt-body { min-width: 0; padding: var(--sp-4); overflow-x: auto; }
 /* Under its min width the table scrolls sideways in its body rather than crushing the Section column. */

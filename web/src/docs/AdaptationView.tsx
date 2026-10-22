@@ -129,6 +129,7 @@ export function AdaptationView({ slug, project, template, pages, onOpenResource,
               Shipwright page ›
             </Button>
           )}
+          {/* A link drawn as the outline button beside it (Button has no link mode); ip-adapt-link is the tests' hook. */}
           <a className="p-btn ip-adapt-link" data-variant="outline" data-size="sm" href={sync}>
             Sync cell ›
           </a>
