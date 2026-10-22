@@ -6,8 +6,8 @@ import type { CursorItemProps } from '../parts/ListCursor';
 /**
  * One row of the full Backlog, open or parked: `#id`, the title, then the extras (the parent's name, BLOCKED, how many
  * steps are open inside, the label, the age) and the actions, which show on hover and on focus. `children` is a
- * full-width block under that line: an open Park form or Confirm, or a parked row's reason. Ranked adds the `handle` (drag
- * props for a grip drawn at the left) and the `number`; By Phase adds the `band` chip.
+ * full-width block under that line: the picked row's inspector (its Park form or Confirm sits inside it), or a parked row's
+ * two lines. Ranked adds the `handle` (drag props for a grip drawn at the left) and the `number`; By Phase adds the `band` chip.
  */
 export function ViewRow({ id, title, cursor, phase, blocked, inside, label, age, acts, pending, confirming, parked, keepActs, handle, number, band, picked, dragging, dropBefore, onOpen, onMouseDown, onKeyDown, onDragOver, onDrop, children }: {
   id: number;
@@ -21,7 +21,7 @@ export function ViewRow({ id, title, cursor, phase, blocked, inside, label, age,
   label: NodeLabel | null;
   /** Already worded ("3d"); null when the step has none. */
   age: string | null;
-  /** The action buttons; they carry `data-act`. */
+  /** The action buttons; they carry `data-act`. A picked row hides them: its inspector has the same buttons, and Tab goes there next. */
   acts: ReactNode;
   pending?: boolean;
   confirming?: boolean;
@@ -64,6 +64,7 @@ export function ViewRow({ id, title, cursor, phase, blocked, inside, label, age,
       {handle && (
         <span
           className="ip-bl-handle"
+          data-act
           draggable
           aria-hidden="true"
           onDragStart={(e) => {
@@ -87,7 +88,7 @@ export function ViewRow({ id, title, cursor, phase, blocked, inside, label, age,
         {inside > 0 && <Chip tone="quiet">{`${inside} open inside`}</Chip>}
         {label && <Chip tone="label" glyph={LABEL_GLYPHS[label]}>{label}</Chip>}
         {age && <span className="ip-bl-age">{age}</span>}
-        {(keepActs || (!pending && !confirming)) && <span className="ip-bl-acts" data-act>{acts}</span>}
+        {!picked && (keepActs || (!pending && !confirming)) && <span className="ip-bl-acts" data-act>{acts}</span>}
       </span>
       {children}
     </li>
