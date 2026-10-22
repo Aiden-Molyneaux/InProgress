@@ -115,7 +115,7 @@ describe('the Docs figure', () => {
     const file = (template: string) => ({ template }) as SyncFile;
     const ok = { projectId: 1, slug: 'a', name: 'A', dir: '', check: { ok: true as const, result: { files: [file('agents/x.md'), file('skills/y/SKILL.md')] } as never } };
     const failed = { projectId: 2, slug: 'b', name: 'B', dir: '', check: { ok: false as const, error: 'boom' } };
-    const sync = { projects: [ok, failed], noManifest: [] } as LibrarySync;
+    const sync = { projects: [ok, failed], noManifest: [], templates: [], source: null } as unknown as LibrarySync;
     expect(docsCount([page(0), page(1)], sync, 'a')).toEqual({ pages: 2, stale: 1, adaptations: 2 });
     expect(docsCount([page()], sync, 'b')).toEqual({ pages: 1, stale: 0, adaptations: null });
     expect(docsCount([page()], sync, 'c')?.adaptations).toBeNull();
