@@ -90,3 +90,36 @@
   .ip-hud-rise, .ip-hud-sq { animation: none; }
 }
 }
+
+/* The Backups button in the footer, and its panel (a modal dialog shaped like the command bar, a little lower; its own class, so a .ip-cmdbar locator finds Find alone). Ok is muted; warn and fail are the alarm hue. */
+.ip-backups-btn { flex: none; display: inline-flex; align-items: center; gap: var(--sp-1); height: 24px; padding: 0 var(--sp-2); border: 1px solid var(--line); color: var(--text-muted); font: inherit; white-space: nowrap; transition: color var(--dur-1) var(--ease-std), border-color var(--dur-1) var(--ease-std); }
+.ip-backups-btn:hover, .ip-backups-btn[aria-expanded='true'], .ip-backups-btn:focus-visible { outline: none; color: var(--volt); border-color: var(--volt); }
+.ip-backups-btn:is([data-level='warn'], [data-level='fail']) { color: var(--alarm); border-color: var(--alarm); }
+/* white-space: normal because the dialog sits inside the footer, whose nowrap it would inherit and so never wrap. */
+.ip-backups { position: fixed; top: 10vh; margin: 0 auto; width: 640px; max-width: calc(100vw - 2 * var(--sp-4)); max-height: 80vh; padding: 0; border: 1px solid var(--line-strong); background: var(--canvas-1); color: var(--text); overflow-y: auto; overflow-x: hidden; white-space: normal; }
+.ip-backups[open] { animation: ip-cmdbar-in var(--dur-3) var(--ease-out); }
+.ip-backups::backdrop { background: var(--scrim); }
+.ip-backups-body > *, .ip-backups-rows > *, .ip-backups-restore > *, .ip-backups-cmd > *, .ip-backups-row > * { min-width: 0; }
+.ip-backups-body { display: grid; gap: var(--sp-3); padding: var(--sp-4); }
+.ip-backups-rows { display: grid; gap: var(--sp-2); margin: 0; }
+.ip-backups-row { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: var(--sp-3); font-family: var(--font-mono); font-size: var(--t-detail-sm); }
+.ip-backups-row dt { color: var(--text-dim); }
+.ip-backups-row dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
+.ip-backups-row:not([data-level='ok']) dd { color: var(--alarm); }
+.ip-backups-flag { font-weight: var(--w-strong); }
+.ip-backups-note { display: block; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-dim); }
+.ip-backups-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.ip-backups-actions .ip-btn, .ip-backups-cmd .ip-btn { height: 32px; }
+.ip-backups-actions .ip-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.ip-backups-actions .ip-btn:focus-visible, .ip-backups-cmd .ip-btn:focus-visible { outline: 2px solid var(--volt); outline-offset: 1px; }
+.ip-backups-result { min-height: 1.4em; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-muted); }
+.ip-backups-result[data-tone='alarm'], .ip-backups-error { color: var(--alarm); }
+.ip-backups-restore { display: grid; gap: var(--sp-2); padding-top: var(--sp-3); border-top: 1px solid var(--line); }
+.ip-backups-cmd { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-1) var(--sp-3); align-items: center; }
+.ip-backups-cmd code { font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text); overflow-wrap: anywhere; }
+.ip-backups-cmd .ip-backups-note { grid-column: 1; grid-row: 2; }
+.ip-backups-cmd .ip-btn { grid-column: 2; grid-row: 1 / span 2; }
+@media (max-width: 719px) {
+  .ip-backups { top: 0; width: 100%; max-width: none; border-left: 0; border-right: 0; }
+  .ip-backups-row { grid-template-columns: 70px minmax(0, 1fr); }
+}

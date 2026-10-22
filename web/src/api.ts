@@ -1,3 +1,4 @@
+import type { BackUpNowResult, BackupStatus } from '../../src/core/backups';
 import type { BuildInfo } from '../../src/core/build';
 import type { StepHit } from '../../src/core/goto';
 import type { DeletedProject, LibraryPages, LibrarySync, NodeDetail, NodeLabel, PageBody, Project, ProjectSnapshot, ProjectSummary, QueueOp, RankOp, Resource } from '../../src/core/types';
@@ -41,6 +42,11 @@ export const api = {
    * (the open project's slug) first within each tier.
    */
   find: (q: string, here: string | null) => getJson<StepHit[]>(`/api/find?q=${encodeURIComponent(q)}${here ? `&here=${encodeURIComponent(here)}` : ''}`),
+  /** The Backups panel: what doctor's Backups check reports, as rows. */
+  backups: () => getJson<BackupStatus>('/api/backups'),
+  /** Back up now: the same work as `inprogress backup --push`. Answers the result and the status after it. */
+  backUpNow: () => sendUi<{ result: BackUpNowResult; status: BackupStatus }>('/api/ui/backups/run', {}),
+  openBackupsFolder: () => postUi('/api/ui/backups/open-folder', {}),
   /** The Library group: its pages (read live), and every manifest's Sync check. */
   libraryPages: () => getJson<LibraryPages>('/api/library/pages'),
   /**
