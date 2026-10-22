@@ -54,7 +54,8 @@ describe('sideBySide', () => {
     .replace('Plain text under the opening.', '**Added rule.** Ours.\n\nPlain text under the opening.')
     .replace('Ship it.', 'Ship it on staging.')
     .replace('\n\n## Gone\nBye.', '');
-  const rows = sideBySide({ raw, filled, local, fileFills: ['CHECKS'], conflictLines: [local.split('\n').indexOf('Ship it on staging.') + 1] });
+  // The merge's range covers the line the copy rewrote: the copy's own text, which no upstream context could find.
+  const rows = sideBySide({ raw, filled, local, fills: ['PROJECT', 'RISK', 'CHECKS'], fileFills: ['CHECKS'], conflictRanges: [{ start: local.split('\n').indexOf('Ship it on staging.') + 1, lines: 1 }] });
 
   it('tags each template section by what the copy did with it', () => {
     expect(rows.map((r) => [r.title, r.tag])).toEqual([
@@ -80,5 +81,35 @@ describe('sideBySide', () => {
 
   it('marks the copy section a conflicting line falls in', () => {
     expect(rows.filter((r) => r.conflict).map((r) => r.title)).toEqual(['Ship']);
+  });
+
+  it('marks every section a conflict range spans, and a range of no lines at its place', () => {
+    const text = ['## A', 'a1', '', '## B', 'b1', '', '## C', 'c1'].join('\n');
+    const spans = sideBySide({ raw: text, filled: text, local: text, fills: [], fileFills: [], conflictRanges: [{ start: 2, lines: 4 }] });
+    expect(spans.filter((r) => r.conflict).map((r) => r.title)).toEqual(['A', 'B']);
+    const point = sideBySide({ raw: text, filled: text, local: text, fills: [], fileFills: [], conflictRanges: [{ start: 8, lines: 0 }] });
+    expect(point.filter((r) => r.conflict).map((r) => r.title)).toEqual(['C']);
+  });
+
+  it('calls a placeholder nobody filled the template\'s own text, not a fill', () => {
+    const text = '## A\n{{UNSET}}\n';
+    expect(sideBySide({ raw: text, filled: text, local: text, fills: [], fileFills: [], conflictRanges: [] }).map((r) => r.tag)).toEqual(['same', 'same']);
+  });
+});
+
+describe('unapply, at the edges', () => {
+  const add = (header: string, ...lines: [' ' | '+' | '-', string][]) => ({ header, lines: lines.map(([kind, text]) => ({ kind, text })) });
+
+  it('reads a CRLF copy with a BOM as the script does, LF and no BOM', () => {
+    expect(unapply('﻿a\r\nB\r\n', [add('@@ -1,2 +1,2 @@', [' ', 'a'], ['-', 'b'], ['+', 'B'])])).toBe('a\nb\n');
+  });
+
+  it('takes a hunk at the very end, and one at the very start with no new lines', () => {
+    expect(unapply('a\nb\nc', [add('@@ -3 +3 @@', ['-', 'x'], ['+', 'c'])])).toBe('a\nb\nx');
+    expect(unapply('b', [add('@@ -1 +0,0 @@', ['-', 'a'])])).toBe('a\nb');
+  });
+
+  it('answers the text as it is with no hunks', () => {
+    expect(unapply('a\nb\n', [])).toBe('a\nb\n');
   });
 });

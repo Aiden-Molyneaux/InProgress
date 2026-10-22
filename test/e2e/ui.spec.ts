@@ -612,7 +612,8 @@ test('Docs opens an adaptation side by side, with its tags, folded sections and 
   const diff = {
     adaptation: ['--- agents/sev.md', '+++ agents/sev.md', '@@ -13,3 +13,4 @@', ' ## Rules', ' ', ' rule one', '+rule two', ''].join('\n'),
     upstream: ['--- agents/sev.md', '+++ agents/sev.md', '@@ -15 +15 @@', '-rule one', '+rule uno', ''].join('\n'),
-    conflicts: [{ hunks: [0] }],
+    // The merge's range in the copy: its last two lines, under Rules.
+    conflicts: [{ local: { start: 15, lines: 2 }, hunks: [0] }],
   };
   const script = [
     "import { execFileSync } from 'node:child_process';",
@@ -657,6 +658,8 @@ test('Docs opens an adaptation side by side, with its tags, folded sections and 
   await expect(rows.nth(3).locator('.ip-adapt-conflict')).toHaveText('Shipwright changed this section in c0ffee1. The next sync conflicts here.');
   await rows.nth(2).getByRole('button').click();
   await expect(view.locator('tbody tr[data-tag="same"] th')).toHaveText(['Routing', 'Notes']);
+  // The fold's button left with it: focus goes to the first section it opened.
+  await expect(view.locator('tbody th', { hasText: 'Routing' })).toBeFocused();
   // The index now knows the local edit count.
   await expect(row.locator('.ip-lib-path')).toHaveText('1 local edit · 1 file fill');
   await view.getByRole('button', { name: 'Diff' }).click();

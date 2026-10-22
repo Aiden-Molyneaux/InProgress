@@ -336,7 +336,16 @@ export interface DiffHunk {
   lines: { kind: '+' | '-' | ' '; text: string }[];
 }
 /** POST /api/ui/library/sync/diff. */
-export type SyncDiff = { ok: true; adaptation: DiffHunk[]; upstream: DiffHunk[]; commits: SyncCommit[] } | { ok: false; error: string };
+export type SyncDiff =
+  | {
+      ok: true;
+      adaptation: DiffHunk[];
+      upstream: DiffHunk[];
+      commits: SyncCommit[];
+      /** Where the dry-run merge conflicts in the project's copy: 1-based first line and line count, as the script gives them. */
+      conflictRanges: { start: number; lines: number }[];
+    }
+  | { ok: false; error: string };
 /** One row of an adaptation's side by side (`sideBySide` in core/sections.ts). */
 export interface AdaptRow {
   key: string;

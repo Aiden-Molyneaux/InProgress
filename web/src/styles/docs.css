@@ -24,19 +24,27 @@
 .ip-adapt-link:hover, .ip-adapt-link:focus-visible { border-color: var(--volt); color: var(--volt); }
 .ip-adapt-strip { display: grid; gap: var(--sp-1); padding: var(--sp-2) var(--sp-4); border-bottom: 1px solid var(--line); font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-muted); }
 .ip-adapt-body { min-width: 0; padding: var(--sp-4); overflow-x: auto; }
-.ip-adapt-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: var(--t-detail-sm); }
+/* Under its min width the table scrolls sideways in its body rather than crushing the Section column. */
+.ip-adapt-table { width: 100%; min-width: 640px; border-collapse: collapse; table-layout: fixed; font-size: var(--t-detail-sm); }
+.ip-adapt-table tbody th:focus-visible { outline: 2px solid var(--volt); outline-offset: -2px; }
+.ip-adapt-pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: var(--t-detail-sm); }
+/* The title takes its own line, and the actions wrap below it, where the head is too narrow for both. */
+.ip-adapt-head .ip-vtitle-block { flex: 1 1 280px; }
+.ip-adapt-head .ip-vtitle { white-space: normal; }
+.ip-docs-meta { flex: 0 1 auto; min-width: 0; }
+.ip-docs-root { overflow-wrap: anywhere; }
 .ip-adapt-table th, .ip-adapt-table td { padding: var(--sp-3); border: 1px solid var(--line-soft); vertical-align: top; text-align: left; overflow-wrap: anywhere; }
 .ip-adapt-table thead th { font-family: var(--font-mono); font-weight: var(--w-body); letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-dim); background: var(--canvas-2); }
 .ip-adapt-table thead th:nth-child(1) { width: 18%; }
 .ip-adapt-table thead th:nth-child(2) { color: var(--behind); }
-.ip-adapt-table thead th:nth-child(3) { color: var(--violet); }
+.ip-adapt-table thead th:nth-child(3) { color: var(--violet-ink); }
 .ip-adapt-table tbody th { font-weight: var(--w-strong); color: var(--text-hi); }
 .ip-adapt-table tbody th[data-continued] { font-weight: var(--w-body); color: var(--text-muted); }
 .ip-adapt-table td > :first-child { margin-top: 0; }
 .ip-adapt-table td :is(p, ul, ol) { margin: 0 0 var(--sp-2); }
-.ip-adapt-table td:nth-child(2) code { color: var(--violet); border: 1px solid var(--violet); padding: 0 var(--sp-1); }
+.ip-adapt-table td:nth-child(2) code { color: var(--violet-ink); border: 1px solid var(--violet-ink); padding: 0 var(--sp-1); }
 .ip-adapt-tag { display: inline-block; margin-bottom: var(--sp-2); padding: 0 var(--sp-1); border: 1px solid var(--line-strong); font-family: var(--font-mono); font-size: var(--t-micro); letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
-tr[data-tag="rewritten"] .ip-adapt-tag { border-color: var(--violet); color: var(--violet); }
+tr[data-tag="rewritten"] .ip-adapt-tag { border-color: var(--violet-ink); color: var(--violet-ink); }
 tr[data-tag="added"] .ip-adapt-tag { border-color: var(--volt); color: var(--volt); }
 tr[data-tag="removed"] td:nth-child(3) { color: var(--alarm); }
 .ip-adapt-conflict { margin: var(--sp-2) 0 0; padding: var(--sp-2); border: 1px solid var(--behind); font-family: var(--font-mono); color: var(--behind); }

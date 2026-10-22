@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
@@ -294,16 +294,20 @@ describe('library: an adaptation side by side', GIT_TIMEOUT, () => {
   // The template at base, its copy (filled, with a line added under Rules), and a fake script whose check names Shipwright's
   // HEAD as the base and whose diff matches the copy; its one upstream hunk changes a line under Rules and conflicts.
   const TEMPLATE = '# Sev\n\n**Rule.** Be {{TONE}}.\n\n## Rules\n\nrule one\n';
-  const COPY = '# Sev\n\n**Rule.** Be kind.\n\n## Rules\n\nrule one\nrule two\n';
+  const COPY = '# Sev\n\n**Rule.** Be kind.\n\n## Rules\n\nrule one, ours\n';
   const SCRIPT = [
     "import { execFileSync } from 'node:child_process';",
     "import { fileURLToPath } from 'node:url';",
+    "import { appendFileSync } from 'node:fs';",
+    "if (process.argv.includes('--diff')) appendFileSync(new URL('diffs.txt', import.meta.url), 'run;');",
     "const base = execFileSync('git', ['-C', fileURLToPath(new URL('..', import.meta.url)), 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();",
     `const file = { template: 'agents/sev.md', local: 'agents/sev.md', base, state: 'behind', behind: 1, commits: [{ sha: 'c0ffee1', date: '2026-10-21', subject: 'reword' }], fills: { TONE: 'kind' }, detail: null };`,
     `const diff = ${JSON.stringify({
-      adaptation: ['--- agents/sev.md', '+++ agents/sev.md', '@@ -5,3 +5,4 @@', ' ## Rules', ' ', ' rule one', '+rule two', ''].join('\n'),
-      upstream: ['--- agents/sev.md', '+++ agents/sev.md', '@@ -7 +7 @@', '-rule one', '+rule uno', ''].join('\n'),
-      conflicts: [{ base: { start: 7, lines: 1 }, upstream: { start: 7, lines: 1 }, local: { start: 7, lines: 2 }, hunks: [0] }],
+      adaptation: ['--- agents/sev.md', '+++ agents/sev.md', '@@ -7 +7 @@', '-rule one', '+rule one, ours', ''].join('\n'),
+      // Three lines of context, as the script writes it: the copy rewrote the changed line, so no context finds the hunk in it,
+      // and only the merge's own range says where the conflict is.
+      upstream: ['--- agents/sev.md', '+++ agents/sev.md', '@@ -5,3 +5,3 @@', ' ## Rules', ' ', '-rule one', '+rule uno', ''].join('\n'),
+      conflicts: [{ base: { start: 7, lines: 1 }, upstream: { start: 7, lines: 1 }, local: { start: 7, lines: 1 }, hunks: [0] }],
     })};`,
     "console.log(JSON.stringify(process.argv.includes('--diff') ? diff : { shipwright: { head: 'abc1234', date: '2026-10-21', subject: 'x' }, project: 'A', lastSync: null, files: [file], skip: [], notAdopted: [], fills: {} }));",
   ].join('\n');
@@ -332,14 +336,33 @@ describe('library: an adaptation side by side', GIT_TIMEOUT, () => {
     const rule = body.rows[1];
     expect([rule.template, rule.project, rule.placeholders]).toEqual(['**Rule.** Be {{TONE}}.', '**Rule.** Be kind.', ['TONE']]);
     expect([body.project, body.state, body.behind, body.head, body.commits[0].sha]).toEqual(['Alpha', 'behind', 1, 'abc1234', 'c0ffee1']);
-    expect(body.adaptation.map((h: { line: number | null }) => h.line)).toEqual([8]);
+    expect(body.adaptation.map((h: { line: number | null }) => h.line)).toEqual([6]);
+  });
+
+  it('reads the diff again when the copy changes inside 60 s, and keeps it while it does not', async () => {
+    const { app, a, dirs } = adaptationSetup();
+    const diffs = () => {
+      try {
+        return readFileSync(join(dirs.shipwright, 'scripts', 'diffs.txt'), 'utf8').split(';').filter(Boolean).length;
+      } catch {
+        return 0;
+      }
+    };
+    const ask = () => post(app, '/api/ui/library/sync/adaptation', { slug: a.slug, template: 'agents/sev.md' });
+    expect((await ask()).json().ok).toBe(true);
+    expect((await ask()).json().ok).toBe(true);
+    expect(diffs()).toBe(1);
+    // Saved again with the same text: a new time is a new copy, read with a new diff.
+    utimesSync(join(dirs.dirA, 'agents', 'sev.md'), new Date(), new Date(Date.now() + 5_000));
+    expect((await ask()).json().ok).toBe(true);
+    expect(diffs()).toBe(2);
   });
 
   it('says so when the copy no longer fits its diff, and runs only on the window POST', async () => {
     const { app, a, dirs } = adaptationSetup();
     writeFileSync(join(dirs.dirA, 'agents', 'sev.md'), '# Sev\n\nrewritten since\n');
     const res = await post(app, '/api/ui/library/sync/adaptation', { slug: a.slug, template: 'agents/sev.md' });
-    expect(res.json()).toEqual({ ok: false, error: "Alpha's copy changed while it was read; open it again" });
+    expect(res.json()).toEqual({ ok: false, error: "The diff for agents/sev.md does not fit Alpha's copy; Check now reads both again" });
     const bare = await app.inject({ method: 'POST', url: '/api/ui/library/sync/adaptation', payload: { slug: a.slug, template: 'agents/sev.md' } });
     expect(bare.statusCode).toBe(403);
   });

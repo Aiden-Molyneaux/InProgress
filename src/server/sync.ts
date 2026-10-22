@@ -130,7 +130,7 @@ interface Cached {
 const cache = new Map<number, Cached>();
 const inFlight = new Map<string, Promise<SyncOutcome>>();
 /** A good diff for 60 s, keyed by the check it was read after (its cache key and time) and the template: Check now makes a new one. */
-const diffCache = new Map<string, { at: number; diff: SyncDiff }>();
+const diffCache = new Map<string, { at: number; diff: SyncDiff; local: string | null }>();
 
 /** For tests: forget cached checks and shared runs. */
 export const clearSyncCache = (): void => {
@@ -291,33 +291,39 @@ function localPathOf(m: ManifestRow, file: SyncFile): { ok: true; path: string }
   return { ok: true, path: target };
 }
 
-/** POST /api/ui/library/sync/diff: one adopted template's adaptation and upstream change. A script failure is `{ ok: false, error }`, never a throw. */
-export async function syncDiff(ctx: Ctx, slug: string, template: string): Promise<SyncDiff> {
+/**
+ * One adopted template's diff and the copy it was read against, as one snapshot: the Sync cell shows the diff, and a Docs
+ * adaptation lines the same copy up with it. Kept for 60 s, keyed by the check it was read after (its cache key and time), the
+ * template, and the copy's size and time, so Check now or an edit to the copy reads a new one.
+ */
+async function readDiff(ctx: Ctx, slug: string, template: string): Promise<{ diff: SyncDiff; local: string | null }> {
   const { m, dirs } = await requireRow(ctx, slug);
   const refused = refusal(ctx, m, dirs);
-  if (refused) return { ok: false, error: refused };
-  if (!(await readTemplates(m.shipwright)).includes(template)) return { ok: false, error: `${template} is not a template in Shipwright's templates.json` };
+  if (refused) return { diff: { ok: false, error: refused }, local: null };
+  if (!(await readTemplates(m.shipwright)).includes(template)) return { diff: { ok: false, error: `${template} is not a template in Shipwright's templates.json` }, local: null };
   const check = await checkRow(ctx, m, dirs);
-  if (!check.ok) return check;
-  const stamp = cache.get(m.projectId);
-  const kept = stamp ? `${stamp.key}|${stamp.at}|${template}` : null;
-  const hit = kept ? diffCache.get(kept) : undefined;
-  if (hit && Date.now() - hit.at < FRESH_MS) return hit.diff;
+  if (!check.ok) return { diff: check, local: null };
   const file = check.result.files.find((f) => f.template === template);
+  const where = file ? localPathOf(m, file) : null;
+  const copy = where?.ok ? await stat(where.path).then((s) => `${s.size}|${s.mtimeMs}`, () => 'unread') : 'none';
+  const stamp = cache.get(m.projectId);
+  const kept = stamp ? `${stamp.key}|${stamp.at}|${template}|${copy}` : null;
+  const hit = kept ? diffCache.get(kept) : undefined;
+  if (hit && Date.now() - hit.at < FRESH_MS) return hit;
   const out = await run(process.execPath, [join(m.shipwright, 'scripts', 'template-sync.mjs'), '--diff', template, '--json', '--project', m.dir], CHECK_TIMEOUT_MS);
-  if (!out.ok) return out;
+  if (!out.ok) return { diff: out, local: null };
   let parsed: { adaptation?: unknown; upstream?: unknown; conflicts?: unknown };
   try {
     parsed = JSON.parse(out.stdout);
   } catch (err) {
-    return { ok: false, error: `template-sync printed a diff that does not parse: ${(err as Error).message}` };
+    return { diff: { ok: false, error: `template-sync printed a diff that does not parse: ${(err as Error).message}` }, local: null };
   }
-  if (typeof parsed?.adaptation !== 'string' || typeof parsed.upstream !== 'string') return { ok: false, error: 'template-sync printed JSON that is not a diff (adaptation or upstream is not text)' };
-  const conflicting = new Set<number>(
-    Array.isArray(parsed.conflicts) ? (parsed.conflicts as { hunks?: unknown }[]).flatMap((c) => (Array.isArray(c?.hunks) ? c.hunks.filter((n): n is number => typeof n === 'number') : [])) : [],
-  );
+  if (typeof parsed?.adaptation !== 'string' || typeof parsed.upstream !== 'string') return { diff: { ok: false, error: 'template-sync printed JSON that is not a diff (adaptation or upstream is not text)' }, local: null };
+  const conflicts = Array.isArray(parsed.conflicts) ? (parsed.conflicts as { hunks?: unknown; local?: { start?: unknown; lines?: unknown } }[]) : [];
+  const conflicting = new Set<number>(conflicts.flatMap((c) => (Array.isArray(c?.hunks) ? c.hunks.filter((n): n is number => typeof n === 'number') : [])));
+  // Where the merge put each conflict in the copy: its own range, which a hunk's context does not give when the copy rewrote the lines.
+  const conflictRanges = conflicts.flatMap((c) => (typeof c?.local?.start === 'number' && typeof c.local.lines === 'number' ? [{ start: c.local.start, lines: c.local.lines }] : []));
   let local: string | null = null;
-  const where = file ? localPathOf(m, file) : null;
   if (where?.ok) {
     try {
       local = await readFile(where.path, 'utf8');
@@ -335,45 +341,47 @@ export async function syncDiff(ctx: Ctx, slug: string, template: string): Promis
     const row = localLines ? uniqueRun(localLines, leadingRun(hunk)) : -1;
     return { ...hunk, conflict: conflicting.has(i), ...(row >= 0 && local !== null ? { section: sectionAt(local, row + 1), located: true, line: row + 1 } : {}) };
   });
-  const diff: SyncDiff = { ok: true, adaptation, upstream, commits: file?.commits ?? [] };
+  const diff: SyncDiff = { ok: true, adaptation, upstream, commits: file?.commits ?? [], conflictRanges };
   // A copy that could not be read this once (an editor's save holding it) is not kept: the next open reads it again.
   if (kept && !(where?.ok && local === null)) {
     const now = Date.now();
     for (const [k, v] of diffCache) if (now - v.at >= FRESH_MS) diffCache.delete(k);
-    diffCache.set(kept, { at: now, diff });
+    diffCache.set(kept, { at: now, diff, local });
   }
-  return diff;
+  return { diff, local };
 }
+
+/** POST /api/ui/library/sync/diff: one adopted template's adaptation and upstream change. A script failure is `{ ok: false, error }`, never a throw. */
+export async function syncDiff(ctx: Ctx, slug: string, template: string): Promise<SyncDiff> {
+  return (await readDiff(ctx, slug, template)).diff;
+}
+
+const SHA = /^[0-9a-f]{7,40}$/i;
 
 /**
  * POST /api/ui/library/sync/adaptation: one adopted template side by side with the project's copy, for its Docs view. Built on
- * `syncDiff` (its run, cache, placement and conflicts): the filled template at base is the copy with the adaptation's hunks
- * put back, and Shipwright's raw text at base, placeholders kept, is `git show`n. A failure is `{ ok: false, error }`.
+ * the Sync cell's diff and the copy it was read against (one snapshot): the filled template at base is that copy with the
+ * adaptation's hunks put back, and Shipwright's raw text at base, placeholders kept, is `git show`n. A failure is
+ * `{ ok: false, error }`.
  */
 export async function syncAdaptation(ctx: Ctx, slug: string, template: string): Promise<SyncAdaptation> {
-  const diff = await syncDiff(ctx, slug, template);
+  const { diff, local } = await readDiff(ctx, slug, template);
   if (!diff.ok) return diff;
   const { m, dirs } = await requireRow(ctx, slug);
   const check = await checkRow(ctx, m, dirs);
   if (!check.ok) return check;
   const file = check.result.files.find((f) => f.template === template);
   if (!file) return { ok: false, error: `${m.name} does not adopt ${template}` };
-  if (!file.base) return { ok: false, error: `${template} has no base in ${m.name}'s manifest` };
-  const where = localPathOf(m, file);
-  if (!where.ok) return where;
-  let local: string;
-  try {
-    // Line ends need no care here: the section reader reads CRLF as LF.
-    local = await readFile(where.path, 'utf8');
-  } catch (err) {
-    return { ok: false, error: `Cannot read ${m.name}'s copy ${file.local}: ${(err as Error).message}` };
-  }
+  // The base is the script's word and goes to git as a revision: a sha only, so it can never read as an option.
+  if (!file.base || !SHA.test(file.base)) return { ok: false, error: `${template} has no base commit in ${m.name}'s manifest` };
+  if (local === null) return { ok: false, error: `Cannot read ${m.name}'s copy ${file.local ?? template}` };
   const raw = await run('git', ['-C', m.shipwright, 'show', `${file.base}:${template}`], HEAD_TIMEOUT_MS, 'git');
   if (!raw.ok) return { ok: false, error: `Cannot read ${template} at ${file.base}: ${raw.error}` };
+  // The copy is the one the diff was read against, so its hunks fit unless the script and the file disagreed.
   const filled = unapply(local, diff.adaptation);
-  if (filled === null) return { ok: false, error: `${m.name}'s copy changed while it was read; open it again` };
-  const conflictLines = diff.upstream.flatMap((h) => (h.conflict && h.line !== null ? [h.line] : []));
-  const rows = sideBySide({ raw: raw.stdout, filled, local, fileFills: Object.keys(file.fills), conflictLines });
+  if (filled === null) return { ok: false, error: `The diff for ${template} does not fit ${m.name}'s copy; Check now reads both again` };
+  const fills = [...Object.keys(check.result.fills), ...Object.keys(file.fills)];
+  const rows = sideBySide({ raw: raw.stdout, filled, local, fills, fileFills: Object.keys(file.fills), conflictRanges: diff.conflictRanges });
   return { ok: true, project: m.name, template, base: file.base, head: check.result.shipwright.head, state: file.state, behind: file.behind, commits: file.commits, rows, adaptation: diff.adaptation };
 }
 
