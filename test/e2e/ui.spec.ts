@@ -4295,3 +4295,95 @@ test.describe('#542 ranked Backlog', () => {
     await expect(foot).toBeFocused();
   });
 });
+
+test('the Backups panel shows status, backs up to a local remote and opens the folder', async ({ page, fresh }) => {
+  test.setTimeout(120_000);
+  const bareDir = mkdtempSync(join(tmpdir(), 'ip-e2e-remote-'));
+  const bare = join(bareDir, 'remote.git');
+  const clone = '.e2e-home/offsite';
+  // No hooks: the user's global ones cost seconds a git call; the clone's own config makes the server's commit and push skip them too.
+  execFileSync('git', ['init', '-q', '--bare', '--initial-branch=main', bare], { stdio: 'ignore' });
+  execFileSync('git', ['-c', `core.hooksPath=${join(bareDir, 'no-hooks')}`, 'clone', '-q', bare, clone], { stdio: 'ignore' });
+  execFileSync('git', ['-C', clone, 'config', 'core.autocrlf', 'false']);
+  // A detached auto-gc or a file-system monitor daemon would hold the folder open when the test removes it.
+  execFileSync('git', ['-C', clone, 'config', 'maintenance.auto', 'false']);
+  execFileSync('git', ['-C', clone, 'config', 'gc.auto', '0']);
+  execFileSync('git', ['-C', clone, 'config', 'core.fsmonitor', 'false']);
+  execFileSync('git', ['-C', clone, 'config', 'core.hooksPath', join(clone, '.git', 'no-hooks')]);
+  const lock = join(clone, '.git', 'inprogress-backup.lock');
+  try {
+    await open(page, fresh);
+    const footerButton = page.locator('.ip-footer').getByRole('button', { name: 'Backups' });
+    const panel = page.getByRole('dialog', { name: 'Backups' });
+    const row = (label: string) => panel.locator('.ip-backups-row', { has: page.getByText(label, { exact: true }) });
+    const backUp = panel.getByRole('button', { name: /^(Back up now|Backing up…)$/ });
+
+    // C1: the newest snapshot (the server's start wrote one), and nothing pushed yet.
+    await footerButton.click();
+    await expect(panel).toBeVisible();
+    // Focus starts on the dialog, not on Back up now: Enter twice from the footer must not start a backup.
+    await expect(panel).toBeFocused();
+    await expect(row('Snapshot')).toContainText(/inprogress-\d{8}-\d{6}\.db · /);
+    await expect(row('Pushed')).toContainText('nothing pushed yet');
+
+    // C4: Open backups folder asks the server once; the real one would open a file manager.
+    let opened = 0;
+    await page.route('**/api/ui/backups/open-folder', (route) => {
+      opened++;
+      return route.fulfill({ json: { ok: true } });
+    });
+    await panel.getByRole('button', { name: 'Open backups folder' }).click();
+    await expect.poll(() => opened).toBe(1);
+
+    // C5: the restore commands, the last naming the offsite clone. There is no restore button.
+    await expect(panel.locator('code')).toHaveCount(3);
+    await expect(panel.locator('code').nth(2)).toContainText('inprogress restore --from');
+    await expect(panel.locator('code').nth(2)).toContainText('offsite');
+    await expect(panel.getByRole('button', { name: /^Restore/ })).toHaveCount(0);
+    await panel.getByRole('button', { name: 'Copy inprogress stop' }).click();
+    await expect(panel.getByRole('button', { name: 'Copy inprogress stop' })).toHaveText('Copied');
+    expect(await page.evaluate('navigator.clipboard.readText()')).toBe('inprogress stop');
+
+    // C2: Back up now disables itself, then reports, and the remote holds one Backup commit.
+    await backUp.click();
+    await expect(backUp).toBeDisabled();
+    await expect(backUp).toHaveText('Backing up…');
+    await expect(panel.getByRole('status')).toHaveText('Backed up and pushed.', { timeout: 60_000 });
+    await expect(backUp).toHaveText('Back up now');
+    await expect(backUp).toBeEnabled();
+    // The run parked focus on the dialog and nothing moved it, so it returns to the button.
+    await expect(backUp).toBeFocused();
+    await expect(row('Pushed')).toContainText('0 h ago');
+    const subjects = execFileSync('git', ['--git-dir', bare, 'log', '--format=%s', 'main'], { encoding: 'utf8' }).trim().split('\n');
+    expect(subjects).toHaveLength(1);
+    expect(subjects[0]).toMatch(/^Backup /);
+
+    // C6: Escape closes, and focus returns to the footer button.
+    await page.keyboard.press('Escape');
+    await expect(panel).toBeHidden();
+    await expect(footerButton).toBeFocused();
+
+    // C3: another run holds the lock.
+    writeFileSync(lock, 'someone else');
+    await footerButton.click();
+    await expect(backUp).toBeDisabled();
+    await expect(panel.getByRole('status')).toContainText('Another backup is running');
+    rmSync(lock, { force: true });
+    // The panel looks again every 3 s while it is busy.
+    await expect(backUp).toBeEnabled({ timeout: 10_000 });
+    await panel.getByRole('button', { name: 'Close' }).click();
+    await expect(panel).toBeHidden();
+    await expect(footerButton).toBeFocused();
+  } finally {
+    // A git the panel's last status read started may still hold the folder for a moment. Windows can hold it longer
+    // (docs/known-issues.md, "The first npm test run fails a file"): a leftover is harmless, since start-server.mjs
+    // wipes .e2e-home on every run and no other test reads the backups, so the cleanup never fails the test.
+    for (const dir of [clone, bareDir]) {
+      try {
+        rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+      } catch (err) {
+        console.warn(`Left ${dir} behind: ${(err as Error).message}`);
+      }
+    }
+  }
+});
