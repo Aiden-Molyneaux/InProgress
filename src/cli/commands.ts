@@ -14,6 +14,7 @@ import { doctor } from './doctor';
 import { openAppWindow } from './open';
 import { runRestore } from './restore';
 import { runTasks } from './tasks';
+import { BACKUP_BUSY } from '../core/backups';
 
 const USAGE =
   'Usage: inprogress <start | stop | open | status | outline <project> [--full] | tasks [<step id>] --session <session id> [--done|--doing|--todo "<subject>"]... | claim <step id> --session <session id> | ask <step id> --session <session id> --question|--permission|--review "<text>" | orchestrate --session <session id> [--status] | digest <project> [--since <iso>] [--all] | usage <project> [--days <n>] | backup [--push | --drill | --init <remote url>] | restore [--from <backup>] | doctor | claude-install | claude-uninstall | claude-check>';
@@ -71,7 +72,7 @@ async function runBackup(args: string[], out: (line: string) => void, home: stri
     if (flags.includes('--push') || initAt >= 0) {
       const status = await runOffsite(db, home, log, { force: true });
       if (status === 'not set up') out('The backup repo is not set up: run inprogress backup --init <remote url>');
-      if (status === 'busy') out('Another backup is running: try again in a few minutes');
+      if (status === 'busy') out(BACKUP_BUSY);
       if (status !== 'ok') return 1;
       out('Pushed the backup.');
       return 0;

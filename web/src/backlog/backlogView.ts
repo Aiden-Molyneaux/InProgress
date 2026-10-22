@@ -1,4 +1,5 @@
-import type { Backlog, BacklogMatch, BacklogView } from '../../../src/core/backlog';
+import { bandOrder, type Backlog, type BacklogMatch, type BacklogView } from '../../../src/core/backlog';
+import { buildIndex, dfsOrder, shelvedIds } from '../../../src/core/tree';
 import type { RankOp, TreeNode } from '../../../src/core/types';
 import { filterWords } from '../board/backlogOrder';
 
@@ -61,6 +62,48 @@ export function altMove(list: number[], id: number, dir: 'up' | 'down'): number 
   if (at < 0) return undefined;
   if (dir === 'up') return at === 0 ? undefined : list[at - 1];
   return at === list.length - 1 ? undefined : (list[at + 2] ?? null);
+}
+
+/** The Phase select's current value: the root (and no parent) is "No phase", null. */
+export function phaseValue(rootId: number, parentId: number | null): number | null {
+  return parentId === null || parentId === rootId ? null : parentId;
+}
+
+/**
+ * The Phase select's options: the project's open, unparked phases in tree order, then "No phase" (value null). A parent that
+ * is none of those (a goal, a task group, a finished phase) is listed first under its own title, so the select tells the truth.
+ */
+export function phaseOptions(nodes: TreeNode[], rootId: number, parentId: number | null): { value: number | null; label: string }[] {
+  const index = buildIndex(nodes);
+  const shelved = shelvedIds(index);
+  const tree = dfsOrder(index);
+  const listed = nodes
+    .filter((n) => n.kind === 'phase' && OPEN.has(n.status) && !shelved.has(n.id))
+    .sort((a, b) => (tree.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (tree.get(b.id) ?? Number.MAX_SAFE_INTEGER));
+  const out: { value: number | null; label: string }[] = listed.map((n) => ({ value: n.id, label: n.title }));
+  const current = phaseValue(rootId, parentId);
+  if (current !== null && !listed.some((n) => n.id === current)) {
+    out.unshift({ value: current, label: nodes.find((n) => n.id === current)?.title ?? `#${current}` });
+  }
+  out.push({ value: null, label: 'No phase' });
+  return out;
+}
+
+/**
+ * The `before` for Move to top in Soon or Someday: the first member of the band that is not `id` (null, the end, when it is
+ * alone). Undefined (hide the button) when `id` is already the first member the window lists; `backlogIds` is the
+ * unfiltered backlog, so a queued member that heads the band in the tree order but is not drawn there does not count.
+ */
+export function moveTopBefore(nodes: TreeNode[], backlogIds: Set<number>, id: number, band: 'soon' | 'someday'): number | null | undefined {
+  const order = bandOrder(nodes, band);
+  if (order.find((n) => backlogIds.has(n.id))?.id === id) return undefined;
+  return order.find((n) => n.id !== id)?.id ?? null;
+}
+
+/** The `before` for Move to top on an unowned Next up row: the queue's first step. Undefined when `id` is first or not there. */
+export function nextTopBefore(unowned: number[], id: number): number | null | undefined {
+  const at = unowned.indexOf(id);
+  return at <= 0 ? undefined : unowned[0];
 }
 
 const OPEN = new Set(['todo', 'active', 'blocked']);

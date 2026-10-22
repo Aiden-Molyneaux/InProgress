@@ -258,6 +258,16 @@ async function unpushed(dir: string): Promise<boolean> {
   }
 }
 
+/** Whether another run holds the repo's lock: the file exists and is under 10 minutes old (an older one is a crashed run's). */
+export function lockHeld(dir: string): boolean {
+  try {
+    return Date.now() - statSync(join(dir, '.git', 'inprogress-backup.lock')).mtimeMs < LOCK_STALE_MS;
+  } catch {
+    // No lock file (or an unreadable one): nothing holds it.
+    return false;
+  }
+}
+
 /**
  * Takes the repo's lock; a lock older than 10 minutes belonged to a crashed run and is taken over. The lock holds a
  * nonce, and a release removes the file only while it still holds its own: a run that was taken over cannot delete its successor's lock.

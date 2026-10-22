@@ -185,6 +185,13 @@ async function openBacklogView(page: Page, name: string): Promise<Locator> {
 
 /** A full-view Backlog row (open, not parked) by its title text, inside `scope`. */
 const blRow = (page: Page, scope: Locator, title: string): Locator => scope.locator('li.ip-bl-row:not(.ip-bl-parkedrow)', { has: page.getByText(title, { exact: true }) });
+/** Opens a full-view row's inspector with a click on its title (when it is not open already) and answers it. */
+async function openInspector(row: Locator): Promise<Locator> {
+  if (!((await row.getAttribute('class')) ?? '').split(' ').includes('picked')) await row.locator('.ip-bl-title').click();
+  const inspector = row.getByRole('group', { name: /^Inspector for #/ });
+  await expect(inspector).toBeVisible();
+  return inspector;
+}
 /** The same for a row in the Parked group. */
 const pRow = (page: Page, scope: Locator, title: string): Locator => scope.locator('li.ip-bl-parkedrow', { has: page.getByText(title, { exact: true }) });
 
@@ -273,6 +280,7 @@ test('a long project name is cut short in the rail, whole in its title, and the 
   await expect(row).toHaveAttribute('title', name);
   await expect(row).toBeInViewport({ ratio: 0.99 });
   await expect(row.locator('.ip-rail-name')).toHaveText(name);
+  await expect(row.locator('.ip-rail-name')).toHaveCSS('font-size', '16px');
   expect((await page.locator('.ip-rail').boundingBox())!.width).toBe(216);
   expect(await page.evaluate<boolean>(`(() => { const n = document.querySelector('a[aria-current="page"] .ip-rail-name'); return n.scrollWidth > n.clientWidth; })()`)).toBe(true);
   expect(await page.evaluate<string>(`getComputedStyle(document.querySelector('a[aria-current="page"] .ip-rail-name')).textOverflow`)).toBe('ellipsis');
@@ -2861,16 +2869,14 @@ test.describe('Board', () => {
     const total = Number((await meta.textContent())!.match(/^(\d+) OPEN/)![1]);
     const rowOf = (t: string) => blRow(page, view, t);
     // Park… opens a form in the row: the reason is required, where is optional.
-    await rowOf('4 Build to GitHub').hover();
-    await rowOf('4 Build to GitHub').getByRole('button', { name: 'Park…' }).click();
+    await (await openInspector(rowOf('4 Build to GitHub'))).getByRole('button', { name: 'Park…' }).click();
     const form = page.getByRole('dialog', { name: `Park #${fresh.ids['4 Build to GitHub']} 4 Build to GitHub` });
     await expect(form.getByRole('textbox', { name: 'Why is it set aside?' })).toBeFocused();
     await expect(form.getByRole('button', { name: 'Park', exact: true })).toBeDisabled();
     await page.keyboard.press('Escape');
     await expect(form).toHaveCount(0);
     await expect(rowOf('4 Build to GitHub')).toBeVisible();
-    await rowOf('4 Build to GitHub').hover();
-    await rowOf('4 Build to GitHub').getByRole('button', { name: 'Park…' }).click();
+    await (await openInspector(rowOf('4 Build to GitHub'))).getByRole('button', { name: 'Park…' }).click();
     await form.getByRole('textbox', { name: 'Why is it set aside?' }).fill('Not merging this quarter');
     await form.getByRole('textbox', { name: 'Where does the work live?' }).fill('feat/build-to-github');
     await page.keyboard.press('Enter');
@@ -2883,10 +2889,14 @@ test.describe('Board', () => {
     const parkedRow = pRow(page, parked, '4 Build to GitHub');
     await expect(parkedRow.locator('.ip-bl-why')).toHaveText(/^Parked .+: Not merging this quarter$/);
     await expect(parkedRow.locator('.ip-bl-where')).toHaveText('where feat/build-to-github');
-    // The reason is not one of the row's controls: a click on it opens Details.
+    // The reason is not one of the row's controls: a click on it opens the inspector, and Open Details › opens Details.
     await parkedRow.locator('.ip-bl-why').click();
+    await parkedRow.getByRole('button', { name: 'Open Details ›' }).click();
     await expect(page.getByRole('complementary')).toHaveCount(1);
+    // Details took focus, so Escape closes Details and leaves the inspector open; Escape on the row would close the inspector instead.
     await page.keyboard.press('Escape');
+    await expect(page.getByRole('complementary')).toHaveCount(0);
+    await expect(parkedRow.getByRole('group', { name: /^Inspector for #/ })).toBeVisible();
     // "to Next" unparks it into Next in one write.
     await parkedRow.hover();
     await parkedRow.getByRole('button', { name: 'to Next' }).click();
@@ -2896,8 +2906,7 @@ test.describe('Board', () => {
     await expect(nextRow.locator('.p-tile-chips .p-chip')).toHaveText('READY');
     // Unpark sends a parked step back to the Backlog, not to Next.
     const again = await openBacklogView(page, 'By Phase');
-    await blRow(page, again, '5 Store listing').hover();
-    await blRow(page, again, '5 Store listing').getByRole('button', { name: 'Park…' }).click();
+    await (await openInspector(blRow(page, again, '5 Store listing'))).getByRole('button', { name: 'Park…' }).click();
     await page.getByRole('textbox', { name: 'Why is it set aside?' }).fill('Later');
     await page.getByRole('button', { name: 'Park', exact: true }).click();
     await pickView(again, 'Parked');
@@ -2952,8 +2961,7 @@ test.describe('Board', () => {
     await expect(next).toBeVisible();
     // A new filter closes an open Delete confirm.
     const beta = blRow(page, next, '6 Beta');
-    await beta.hover();
-    await beta.getByRole('button', { name: 'Delete…' }).click();
+    await (await openInspector(beta)).getByRole('button', { name: 'Delete…' }).click();
     await expect(next.locator('.p-confirm')).toBeVisible();
     await field.fill('beta');
     await expect(next.locator('.p-confirm')).toHaveCount(0);
@@ -3018,13 +3026,12 @@ test.describe('Board', () => {
     const del = row.getByRole('button', { name: 'Delete…' });
     const dialog = page.getByRole('group', { name: `Delete #${id} 6 Beta?` });
     await expect(acts).toHaveCSS('opacity', '0');
-    // The row is one Tab stop; Tab from it reaches its actions: to Next, Park…, Delete….
+    // The row is one Tab stop; Enter opens its inspector, and Delete… is among the buttons Tab reaches there.
     await row.focus();
-    await page.keyboard.press('Tab');
-    await page.keyboard.press('Tab');
-    await page.keyboard.press('Tab');
+    await page.keyboard.press('Enter');
+    await expect(del).toBeVisible();
+    for (let i = 0; i < 10 && (await page.locator(':focus').getAttribute('data-delete')) === null; i++) await page.keyboard.press('Tab');
     await expect(del).toBeFocused();
-    await expect(acts).toHaveCSS('opacity', '1');
     await page.keyboard.press('Enter');
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeFocused();
@@ -3038,10 +3045,15 @@ test.describe('Board', () => {
     await expect(row).toBeVisible();
     // A click on the question, or on the confirming row's own padding, does not open Details.
     await page.keyboard.press('Enter');
+    const inspectorOfRow = row.getByRole('group', { name: /^Inspector for #/ });
     await dialog.locator('.p-confirm-q').click();
     await expect(page.getByRole('complementary')).toHaveCount(0);
+    await expect(dialog).toBeVisible();
+    await expect(inspectorOfRow).toBeVisible();
     await next.locator(`li[data-node="${id}"]`).click({ position: { x: 2, y: 2 } });
     await expect(page.getByRole('complementary')).toHaveCount(0);
+    await expect(dialog).toBeVisible();
+    await expect(inspectorOfRow).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
     await expect(del).toBeFocused();
@@ -3062,7 +3074,7 @@ test.describe('Board', () => {
     await expect(next.locator(`li[data-node="${id}"]`)).not.toHaveClass(/pending/);
     await page.unroute(nodeDelete);
     // Details open on the step: deleting it closes Details.
-    await row.locator('.ip-bl-title').click();
+    await row.getByRole('button', { name: 'Open Details ›' }).click();
     await expect(page.getByRole('complementary')).toHaveCount(1);
     await del.focus();
     await page.keyboard.press('Enter');
@@ -3102,16 +3114,14 @@ test.describe('Board', () => {
     await expect(rowOf('3 RevenueCat').locator('.p-chip')).toHaveText('NEXT');
     await onNeighbourOf(revenue, before);
     before = await idsNow();
-    await rowOf('6 Beta').hover();
-    await rowOf('6 Beta').getByRole('button', { name: 'Delete…' }).click();
+    await (await openInspector(rowOf('6 Beta'))).getByRole('button', { name: 'Delete…' }).click();
     await page.getByRole('group', { name: /^Delete #\d+ 6 Beta\?$/ }).getByRole('button', { name: 'Delete', exact: true }).click();
     await expect(rowOf('6 Beta')).toHaveCount(0);
     await onNeighbourOf(fresh.ids['6 Beta'], before);
     // A refused Park keeps the form and its text and puts focus back on the reason.
     const parkUrl = '**/api/ui/projects/*/nodes/*/park';
     await page.route(parkUrl, (route) => route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'Refused for the test', hint: 'Reload the window.' }) }));
-    await rowOf('5 Store listing').hover();
-    await rowOf('5 Store listing').getByRole('button', { name: 'Park…' }).click();
+    await (await openInspector(rowOf('5 Store listing'))).getByRole('button', { name: 'Park…' }).click();
     const form = page.getByRole('dialog', { name: /^Park #\d+ 5 Store listing$/ });
     await form.getByRole('textbox', { name: 'Why is it set aside?' }).fill('Later');
     await form.getByRole('button', { name: 'Park', exact: true }).click();
@@ -3145,8 +3155,7 @@ test.describe('Board', () => {
     await expect(parked).toHaveCount(0);
     await expect(view.getByRole('heading', { level: 1 })).toBeFocused();
     await pickView(view, 'By Phase');
-    await rowOf('5 Store listing').hover();
-    await rowOf('5 Store listing').getByRole('button', { name: 'Park…' }).click();
+    await (await openInspector(rowOf('5 Store listing'))).getByRole('button', { name: 'Park…' }).click();
     await page.getByRole('textbox', { name: 'Why is it set aside?' }).fill('Again');
     await page.keyboard.press('Enter');
     await expect(rowOf('5 Store listing')).toHaveCount(0);
@@ -3185,8 +3194,7 @@ test.describe('Board', () => {
       await new Promise((resolve) => setTimeout(resolve, 1500));
       await route.continue();
     });
-    await rowOf('4 Build to GitHub').hover();
-    await rowOf('4 Build to GitHub').getByRole('button', { name: 'Park…' }).click();
+    await (await openInspector(rowOf('4 Build to GitHub'))).getByRole('button', { name: 'Park…' }).click();
     const first = page.getByRole('dialog', { name: /^Park #\d+ 4 Build to GitHub$/ });
     await first.getByRole('textbox', { name: 'Why is it set aside?' }).fill('Slow one');
     await page.keyboard.press('Enter');
@@ -3194,8 +3202,7 @@ test.describe('Board', () => {
     await page.keyboard.press('Escape');
     await expect(first).toBeVisible();
     // Another row's form opened while it is in flight keeps focus when the first one resolves.
-    await rowOf('5 Store listing').hover();
-    await rowOf('5 Store listing').getByRole('button', { name: 'Park…' }).click();
+    await (await openInspector(rowOf('5 Store listing'))).getByRole('button', { name: 'Park…' }).click();
     const second = page.getByRole('dialog', { name: /^Park #\d+ 5 Store listing$/ });
     await expect(second.getByRole('textbox', { name: 'Why is it set aside?' })).toBeFocused();
     await second.getByRole('textbox', { name: 'Why is it set aside?' }).fill('Typing');
@@ -3215,8 +3222,7 @@ test.describe('Board', () => {
     expect(groups.at(-1)).toBe('Backlog with no phase');
     expect(groups.length).toBeGreaterThan(1);
     const loose = blRow(page, view, 'Loose parked');
-    await loose.hover();
-    await loose.getByRole('button', { name: 'Park…' }).click();
+    await (await openInspector(loose)).getByRole('button', { name: 'Park…' }).click();
     await page.getByRole('textbox', { name: 'Why is it set aside?' }).fill('Not now');
     await page.keyboard.press('Enter');
     await pickView(view, 'Parked');
@@ -3984,7 +3990,7 @@ test.describe('#504 Backlog view and All done', () => {
     await expect(blRow(page, view, title)).toHaveCount(0);
   }
 
-  test('the Backlog rows are one Tab stop: Home and End cross the groups and Enter opens Details', async ({ page, fresh }) => {
+  test('the Backlog rows are one Tab stop: Home and End cross the groups, Enter opens the inspector and Open Details › opens Details', async ({ page, fresh }) => {
     await page.setViewportSize(WIDE);
     await open(page, fresh);
     const view = await openBacklogView(page, 'By Phase');
@@ -4006,9 +4012,10 @@ test.describe('#504 Backlog view and All done', () => {
     await expect(view.locator('li.ip-bl-row').first()).toBeFocused();
     await page.keyboard.press('End');
     await expect(last).toBeFocused();
-    // Enter opens Details on the focused row.
+    // Enter opens the inspector on the focused row, and its Open Details › opens Details.
     const title = await last.locator('.ip-bl-title').innerText();
     await page.keyboard.press('Enter');
+    await last.getByRole('button', { name: 'Open Details ›' }).click();
     await expect(page.getByRole('complementary').locator('.ip-dtitle')).toContainText(title);
   });
 
@@ -4361,4 +4368,218 @@ test.describe('#542 ranked Backlog', () => {
     await page.keyboard.press('Escape');
     await expect(foot).toBeFocused();
   });
+
+  test("picking Someday in the inspector's Band select moves the row to the bottom of Someday", async ({ page, api, fresh }) => {
+    const mine = ['3 RevenueCat', '4 Build to GitHub', '5 Store listing'];
+    const { view } = await openRankedWith(page, api, fresh, mine);
+    await rank(api, fresh, { node: fresh.ids['6 Beta'], to: 'someday', before: null });
+    const row = blRow(page, view, '4 Build to GitHub');
+    const inspector = await openInspector(row);
+    await expect(inspector).toBeVisible();
+    await inspector.getByRole('combobox', { name: 'Band' }).selectOption('someday');
+    await expect.poll(async () => (await soonTitles(view)).includes('4 Build to GitHub')).toBe(false);
+    const someday = view.getByRole('region', { name: 'Someday' });
+    await someday.getByRole('button', { name: /^Show/ }).click();
+    await expect.poll(async () => (await someday.locator('.ip-bl-title').allInnerTexts()).slice(-1)[0]).toBe('4 Build to GitHub');
+  });
+
+  test('Park then Unpark from the inspector lands the step in Needs Triage', async ({ page, api, fresh }) => {
+    const { view } = await openRankedWith(page, api, fresh, ['4 Build to GitHub']);
+    const soon = view.getByRole('region', { name: 'Soon' });
+    const inspector = await openInspector(blRow(page, soon, '4 Build to GitHub'));
+    await inspector.getByRole('button', { name: 'Park…' }).click();
+    // A reason of 200 characters and more reads whole as it is typed: the box spans the inspector and grows with it.
+    const reason = page.getByRole('textbox', { name: 'Why is it set aside?' });
+    const long = `Not this quarter: ${'waiting on the store review and the pricing call. '.repeat(28)}`.trim();
+    await reason.fill(long);
+    type Box = { tagName: string; clientWidth: number; clientHeight: number; scrollWidth: number; scrollHeight: number };
+    const box = await reason.evaluate((el: Box) => ({ tag: el.tagName, width: el.clientWidth, height: el.clientHeight, hiddenX: el.scrollWidth - el.clientWidth, hiddenY: el.scrollHeight - el.clientHeight }));
+    // A box across the inspector that wraps the reason and grows past its first three lines to show all of it.
+    expect(box.tag).toBe('TEXTAREA');
+    expect(box.width).toBeGreaterThan(400);
+    expect(box.hiddenX).toBeLessThanOrEqual(1);
+    expect(box.hiddenY).toBeLessThanOrEqual(1);
+    expect(box.height).toBeGreaterThan(120);
+    await page.getByRole('button', { name: 'Park', exact: true }).click();
+    await expect(blRow(page, soon, '4 Build to GitHub')).toHaveCount(0);
+    await pickView(view, 'Parked');
+    const parkedRow = pRow(page, view.getByRole('region', { name: 'Parked' }), '4 Build to GitHub');
+    await parkedRow.locator('.ip-bl-title').click();
+    await parkedRow.getByRole('group', { name: /^Inspector for #/ }).getByRole('button', { name: 'Unpark', exact: true }).click();
+    await expect(view.getByRole('region', { name: 'Parked' })).toHaveCount(0);
+    await pickView(view, 'Needs Triage');
+    await expect(blRow(page, view, '4 Build to GitHub')).toBeVisible();
+  });
+
+  test('the inspector shows the whole body, wrapped to its width at 400 px', async ({ page, api, fresh }) => {
+    const lines = Array.from({ length: 14 }, (_, i) => `Line ${i + 1} of a body long enough to have been cut at six lines before.`);
+    const body = ['# A long body', '', ...lines, '', '```', `const unbroken = '${'x'.repeat(160)}';`, '```', '', 'FINAL LINE'].join('\n');
+    await write(api, fresh.session, 'patch', `/api/nodes/${fresh.ids['4 Build to GitHub']}`, { body });
+    const { view } = await openRankedWith(page, api, fresh, ['4 Build to GitHub']);
+    await page.setViewportSize({ width: 400, height: 900 });
+    const inspector = await openInspector(blRow(page, view, '4 Build to GitHub'));
+    await expect(inspector.getByText('FINAL LINE')).toBeVisible();
+    await expect(inspector.getByRole('button', { name: 'Show all' })).toHaveCount(0);
+    type Box = { clientWidth: number; scrollWidth: number; clientHeight: number; scrollHeight: number; getBoundingClientRect(): { right: number } };
+    const fits = await inspector.evaluate((el: Box & { querySelector(s: string): Box | null }) => {
+      const b = el.querySelector('.ip-insp-body')!;
+      return { right: b.getBoundingClientRect().right - el.getBoundingClientRect().right, hiddenY: b.scrollHeight - b.clientHeight };
+    });
+    // The body ends inside the inspector (the code block scrolls in itself), and nothing is cut at the foot.
+    expect(fits.right).toBeLessThanOrEqual(0);
+    expect(fits.hiddenY).toBeLessThanOrEqual(1);
+  });
+
+  test('Enter opens the inspector and Escape closes it, with focus on its row', async ({ page, api, fresh }) => {
+    const { view } = await openRankedWith(page, api, fresh, ['4 Build to GitHub']);
+    const row = blRow(page, view, '4 Build to GitHub');
+    const inspector = row.getByRole('group', { name: /^Inspector for #/ });
+    await row.focus();
+    await page.keyboard.press('Enter');
+    await expect(inspector).toBeVisible();
+    await expect(row).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(inspector.locator(':focus')).toHaveCount(1);
+    await page.keyboard.press('Escape');
+    await expect(inspector).toHaveCount(0);
+    await expect(row).toBeFocused();
+  });
+
+  test("the Band select keeps focus when the row moves to another band's list", async ({ page, api, fresh }) => {
+    const { view } = await openRankedWith(page, api, fresh, ['3 RevenueCat', '4 Build to GitHub']);
+    await rank(api, fresh, { node: fresh.ids['5 Store listing'], to: 'someday', before: null });
+    const someday = view.getByRole('region', { name: 'Someday' });
+    await someday.getByRole('button', { name: /^Show/ }).click();
+    const inspector = await openInspector(blRow(page, view, '4 Build to GitHub'));
+    const bandSelect = inspector.getByRole('combobox', { name: 'Band' });
+    await bandSelect.focus();
+    await bandSelect.selectOption('someday');
+    const moved = blRow(page, someday, '4 Build to GitHub');
+    await expect(moved).toBeVisible();
+    await expect(moved.getByRole('combobox', { name: 'Band' })).toBeFocused();
+  });
+
+  test('a refused Band change says so in the open inspector, puts the old band back and keeps focus on the select', async ({ page, api, fresh, consoleErrors }) => {
+    consoleErrors.allow(/status of 409/);
+    const { view } = await openRankedWith(page, api, fresh, ['3 RevenueCat', '4 Build to GitHub']);
+    await rank(api, fresh, { node: fresh.ids['5 Store listing'], to: 'someday', before: null });
+    const someday = view.getByRole('region', { name: 'Someday' });
+    await someday.getByRole('button', { name: /^Show/ }).click();
+    await page.route('**/api/ui/projects/*/rank', (route) => route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'Refused for the test' }) }));
+    const inspector = await openInspector(blRow(page, view, '4 Build to GitHub'));
+    const bandSelect = inspector.getByRole('combobox', { name: 'Band' });
+    await bandSelect.focus();
+    await bandSelect.selectOption('someday');
+    const back = blRow(page, view.getByRole('region', { name: 'Soon' }), '4 Build to GitHub');
+    const again = back.getByRole('group', { name: /^Inspector for #/ });
+    await expect(again.getByRole('alert')).toHaveText(/Refused for the test/);
+    await expect(again.getByRole('combobox', { name: 'Band' })).toHaveValue('soon');
+    await expect(again.getByRole('combobox', { name: 'Band' })).toBeFocused();
+  });
+
+  test('a refused Band change whose inspector has closed says so in the status line', async ({ page, api, fresh, consoleErrors }) => {
+    consoleErrors.allow(/status of 409/);
+    const { view } = await openRankedWith(page, api, fresh, ['3 RevenueCat', '4 Build to GitHub']);
+    // Someday stays folded: the guess takes the row out of view, which closes its inspector before the answer.
+    await page.route('**/api/ui/projects/*/rank', async (route) => {
+      await new Promise((r) => setTimeout(r, 300));
+      await route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'Refused for the test' }) });
+    });
+    const inspector = await openInspector(blRow(page, view, '4 Build to GitHub'));
+    await inspector.getByRole('combobox', { name: 'Band' }).selectOption('someday');
+    await expect(statusLine(page).filter({ hasText: 'Refused for the test' })).toBeVisible();
+    await expect(blRow(page, view.getByRole('region', { name: 'Soon' }), '4 Build to GitHub')).toBeVisible();
+  });
+});
+
+test('the Backups panel shows status, backs up to a local remote and opens the folder', async ({ page, fresh }) => {
+  test.setTimeout(120_000);
+  const bareDir = mkdtempSync(join(tmpdir(), 'ip-e2e-remote-'));
+  const bare = join(bareDir, 'remote.git');
+  const clone = '.e2e-home/offsite';
+  // No hooks: the user's global ones cost seconds a git call; the clone's own config makes the server's commit and push skip them too.
+  execFileSync('git', ['init', '-q', '--bare', '--initial-branch=main', bare], { stdio: 'ignore' });
+  execFileSync('git', ['-c', `core.hooksPath=${join(bareDir, 'no-hooks')}`, 'clone', '-q', bare, clone], { stdio: 'ignore' });
+  execFileSync('git', ['-C', clone, 'config', 'core.autocrlf', 'false']);
+  // A detached auto-gc or a file-system monitor daemon would hold the folder open when the test removes it.
+  execFileSync('git', ['-C', clone, 'config', 'maintenance.auto', 'false']);
+  execFileSync('git', ['-C', clone, 'config', 'gc.auto', '0']);
+  execFileSync('git', ['-C', clone, 'config', 'core.fsmonitor', 'false']);
+  execFileSync('git', ['-C', clone, 'config', 'core.hooksPath', join(clone, '.git', 'no-hooks')]);
+  const lock = join(clone, '.git', 'inprogress-backup.lock');
+  try {
+    await open(page, fresh);
+    const footerButton = page.locator('.ip-footer').getByRole('button', { name: 'Backups' });
+    const panel = page.getByRole('dialog', { name: 'Backups' });
+    const row = (label: string) => panel.locator('.ip-backups-row', { has: page.getByText(label, { exact: true }) });
+    const backUp = panel.getByRole('button', { name: /^(Back up now|Backing up…)$/ });
+
+    // C1: the newest snapshot (the server's start wrote one), and nothing pushed yet.
+    await footerButton.click();
+    await expect(panel).toBeVisible();
+    // Focus starts on the dialog, not on Back up now: Enter twice from the footer must not start a backup.
+    await expect(panel).toBeFocused();
+    await expect(row('Snapshot')).toContainText(/inprogress-\d{8}-\d{6}\.db · /);
+    await expect(row('Pushed')).toContainText('nothing pushed yet');
+
+    // C4: Open backups folder asks the server once; the real one would open a file manager.
+    let opened = 0;
+    await page.route('**/api/ui/backups/open-folder', (route) => {
+      opened++;
+      return route.fulfill({ json: { ok: true } });
+    });
+    await panel.getByRole('button', { name: 'Open backups folder' }).click();
+    await expect.poll(() => opened).toBe(1);
+
+    // C5: the restore commands, the last naming the offsite clone. There is no restore button.
+    await expect(panel.locator('code')).toHaveCount(3);
+    await expect(panel.locator('code').nth(2)).toContainText('inprogress restore --from');
+    await expect(panel.locator('code').nth(2)).toContainText('offsite');
+    await expect(panel.getByRole('button', { name: /^Restore/ })).toHaveCount(0);
+    await panel.getByRole('button', { name: 'Copy inprogress stop' }).click();
+    await expect(panel.getByRole('button', { name: 'Copy inprogress stop' })).toHaveText('Copied');
+    expect(await page.evaluate('navigator.clipboard.readText()')).toBe('inprogress stop');
+
+    // C2: Back up now disables itself, then reports, and the remote holds one Backup commit.
+    await backUp.click();
+    await expect(backUp).toBeDisabled();
+    await expect(backUp).toHaveText('Backing up…');
+    await expect(panel.getByRole('status')).toHaveText('Backed up and pushed.', { timeout: 60_000 });
+    await expect(backUp).toHaveText('Back up now');
+    await expect(backUp).toBeEnabled();
+    // The run parked focus on the dialog and nothing moved it, so it returns to the button.
+    await expect(backUp).toBeFocused();
+    await expect(row('Pushed')).toContainText('0 h ago');
+    const subjects = execFileSync('git', ['--git-dir', bare, 'log', '--format=%s', 'main'], { encoding: 'utf8' }).trim().split('\n');
+    expect(subjects).toHaveLength(1);
+    expect(subjects[0]).toMatch(/^Backup /);
+
+    // C6: Escape closes, and focus returns to the footer button.
+    await page.keyboard.press('Escape');
+    await expect(panel).toBeHidden();
+    await expect(footerButton).toBeFocused();
+
+    // C3: another run holds the lock.
+    writeFileSync(lock, 'someone else');
+    await footerButton.click();
+    await expect(backUp).toBeDisabled();
+    await expect(panel.getByRole('status')).toContainText('Another backup is running');
+    rmSync(lock, { force: true });
+    // The panel looks again every 3 s while it is busy.
+    await expect(backUp).toBeEnabled({ timeout: 10_000 });
+    await panel.getByRole('button', { name: 'Close' }).click();
+    await expect(panel).toBeHidden();
+    await expect(footerButton).toBeFocused();
+  } finally {
+    // A git the panel's last status read started may still hold the folder for a moment. Windows can hold it longer
+    // (docs/known-issues.md, "The first npm test run fails a file"): a leftover is harmless, since start-server.mjs
+    // wipes .e2e-home on every run and no other test reads the backups, so the cleanup never fails the test.
+    for (const dir of [clone, bareDir]) {
+      try {
+        rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+      } catch (err) {
+        console.warn(`Left ${dir} behind: ${(err as Error).message}`);
+      }
+    }
+  }
 });

@@ -290,8 +290,8 @@ below.
 
 **Content column:**
 
-- **Body:** the step's body as Markdown in muted body text (`--t-body`, `--text-muted`), 68ch, cut at six lines with
-  **Show all**. No body: "No description", dim.
+- **Body:** the step's body as Markdown in muted body text (`--t-body`, `--text-muted`), 68ch, whole: no cut (Aiden,
+  2026-10-22, at #543's walkthrough; this spec first cut it at six lines with Show all). No body: "No description", dim.
 - **Facts line,** mono `--t-detail-sm`, `--text-dim`, items split by ` · `: `CREATED 12 OCT`, `LAST SESSION 3D AGO`
   (or `NO SESSION YET`), `▤ 2` (opens the docs Menu, as the Project view's), the handoff Chip when it has one (opens the
   viewer), `3 OPEN INSIDE` when it applies.
@@ -309,8 +309,9 @@ below.
 - **To Next** (`primary`): hidden on a Next up row, where **Back to Backlog** (outline) takes its place.
 - **Move to top** (outline): first in its band; hidden when it already is.
 - **Keep** (outline): Stale only.
-- **Park…** (outline): opens #504's Park form inside the inspector, replacing the button column (reason required, where
-  optional, **Park** `primary`, Cancel).
+- **Park…** (outline): opens #504's Park form inside the inspector in place of the button column, across the inspector's
+  full width under its content (reason required, in a box that grows with its text so a reason of 200 characters and
+  more reads whole; where optional; **Park** `primary`, Cancel). The Delete confirm sits the same way (Aiden, 2026-10-22).
 - **Delete…** (`danger`, `sm`, at the column's foot): only for a step with no children, #504's Confirm.
 - **Open Details ›** (ghost): opens Details beside the page; the inspector stays open.
 
