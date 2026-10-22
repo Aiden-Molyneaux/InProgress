@@ -56,7 +56,7 @@ running as a subagent in isolated-build mode.
 - Never click anything that writes data outside your scratch instance. Opening a confirm stage
   is fine; stop before the button that commits it.
 - Stop every server and browser you start, and say so in the report.
-- Never commit, stash, reset or check out. Never run `npm run deploy`, `npm run claude:install` or `npm run claude:uninstall`; never read or write `~/.inprogress` or the live InProgress server on 4317 (tests run against `.test-home` and `.test-claude`).
+- Never commit, stash, reset or check out. Never run `npm run deploy`, `npm run claude:install` or `npm run claude:uninstall`; never read or write `~/.inprogress` or the live InProgress server on 4317 (tests run against `.test-home` and `.test-claude`), except reading a file under `~/.inprogress/resources/` that your brief names, such as an approved mock.
 - No em dashes (U+2014) in anything you write.
 
 ## Report

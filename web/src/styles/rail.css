@@ -31,6 +31,10 @@
 /* How many asks and permission waits wait there. */
 .ip-rail-ask { padding: 3px 5px; background: var(--volt); color: var(--volt-ink); font-family: var(--font-mono); font-stretch: 75%; font-weight: var(--w-strong); font-size: var(--t-micro); line-height: 1; }
 .ip-rail-row[aria-current='page'] .ip-rail-ask { background: var(--volt-ink); color: var(--volt); }
+/* The Library row's count of projects behind Shipwright: outlined, in the behind colour. Its border comes out of the ask
+   count's padding, so both are one height: a row that grew when the count landed would make the strip jump. */
+.ip-rail-behind { padding: 2px 4px; border: 1px solid var(--behind); color: var(--behind); font-family: var(--font-mono); font-stretch: 75%; font-weight: var(--w-strong); font-size: var(--t-micro); line-height: 1; }
+.ip-rail-row[aria-current='page'] .ip-rail-behind { border-color: var(--volt-ink); color: var(--volt-ink); }
 /* Dragging a row: it dims, and a 2 px ink line shows the slot it would drop in. */
 .ip-rail-row.dragging { opacity: .5; }
 .ip-rail-row.drop-before { box-shadow: inset 0 2px 0 var(--volt); }
@@ -48,6 +52,7 @@
 .ip-rail-view[aria-current='page'] { color: var(--volt); }
 .ip-rail-view[aria-current='page']::before { content: '\203A'; position: absolute; left: var(--sp-3); }
 .ip-rail-n { color: var(--text-dim); font-stretch: 75%; }
+.ip-rail-n[data-warn] { color: var(--behind); }
 .ip-rail-vcode { display: none; }
 
 /* The foot: the archived and recently deleted projects. */
@@ -93,6 +98,7 @@
   .ip-rail-rule { left: 50%; translate: -50% 0; }
   .ip-rail-sig { position: absolute; top: 2px; right: 2px; }
   .ip-rail-ask { padding: 2px 3px; }
+  .ip-rail-behind { padding: 1px 2px; }
   .ip-rail-view { justify-content: center; padding: 0; font-family: var(--font-brand); font-stretch: 112.5%; font-size: var(--t-micro); font-weight: var(--w-brand); }
   .ip-rail-view[aria-current='page']::before { content: none; }
   .ip-rail-foot { padding-inline: 0; text-align: center; }
@@ -111,7 +117,8 @@
   .ip-rail-foot { position: sticky; z-index: 20; right: 0; width: 40px; display: flex; justify-content: center; margin: 0 0 0 auto; padding: 0; border: 0; background: var(--canvas-0); }
   /* The ⋯ covers the strip's right end, so keep-in-view and the rows' end padding clear its width. */
   .ip-rail { scroll-padding-inline-end: calc(40px + var(--sp-2)); }
-  .ip-rail-rows { padding-inline-end: calc(40px + var(--sp-2)); }
+  .ip-rail-rows { padding-inline-end: 0; }
+  .ip-rail-lib { padding-inline-end: calc(40px + var(--sp-2)); }
   .ip-main { flex-direction: column; }
   .ip-viewtabs { display: flex; flex: none; margin: var(--sp-3) var(--sp-4) 0; }
 }

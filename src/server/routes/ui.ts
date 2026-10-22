@@ -9,6 +9,7 @@ import { badRequest } from '../errors';
 import { openInDefaultBrowser, openInEditorOrReveal } from '../open-path';
 import { pageHead } from '../pages';
 import { confirmPage, requireResource } from '../repo/resources';
+import { librarySync } from '../sync';
 import { idParam, openBody, openUrlBody } from '../schemas';
 
 const TOKEN_META = /<meta name="ip-ui-token" content="[^"]*"\s*\/?>/;
@@ -44,6 +45,9 @@ export function registerUi(app: FastifyInstance, opts: AppOptions, requireToken:
     await (opts.openPath ?? openInEditorOrReveal)(resource.path);
     return { ok: true };
   });
+
+  // The Library's Sync check runs Shipwright's script, so it is the window's own POST, never a GET another page could fire.
+  app.post('/api/ui/library/sync', { onRequest: requireUi }, async (_req, reply) => reply.header('cache-control', 'no-store').send(await librarySync(opts.ctx)));
 
   // The viewer's Still accurate: the page's claim holds at its repo's HEAD now.
   app.post('/api/ui/resources/:id/confirm', { onRequest: requireUi }, async (req) => {

@@ -62,16 +62,18 @@ export function swapWithPrev({ repo, prev, rename = renameSync }) {
   rmSync(parked, { recursive: true, force: true });
 }
 
-// Which test suites a change needs. Typecheck and unit tests always run; these decide the slower two.
+// Which test suites a change needs. Typecheck and unit tests always run; these decide the slower three.
 const SMOKE_PATHS = [/^src\/(hooks|cli|mcp|server|lib)\//, /^claude\//, /^scripts\//, /^test\/smoke\//, /^(package\.json|package-lock\.json|tsup\.config\.ts|tsconfig\.json|vitest\.smoke\.config\.ts)$/];
+// The suites in test/slow spawn real git and node: they cover the backup, restore, pages and doctor code, and the context-nudge script.
+const SLOW_PATHS = [/^src\/(core|server|cli|lib)\//, /^scripts\//, /^test\/slow\//, /^test\/helpers\.ts$/, /^(package\.json|package-lock\.json|tsconfig\.json|vitest\.config\.ts|vitest\.slow\.config\.ts)$/];
 const E2E_PATHS = [/^web\//, /^src\/(core|server|lib)\//, /^test\/e2e\//, /^(package\.json|package-lock\.json|tsconfig\.json|playwright\.config\.ts)$/];
 
 /** `changed` is the paths changed since the deployed build, or null when that build is unknown (then run everything). */
 export function suitesFor(changed) {
-  if (changed === null) return { smoke: true, e2e: true };
+  if (changed === null) return { smoke: true, slow: true, e2e: true };
   const paths = changed.map((p) => p.replace(/\\/g, '/'));
   const any = (patterns) => paths.some((p) => patterns.some((re) => re.test(p)));
-  return { smoke: any(SMOKE_PATHS), e2e: any(E2E_PATHS) };
+  return { smoke: any(SMOKE_PATHS), slow: any(SLOW_PATHS), e2e: any(E2E_PATHS) };
 }
 
 /** A build.json as one line: `8b796d9+dirty (2026-10-16T19:31:58.000Z)`. Twin of src/core/build.ts buildLabel, which scripts/ can't import before a build. */

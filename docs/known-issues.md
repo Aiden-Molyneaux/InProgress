@@ -55,9 +55,10 @@ work. A re-hit bumps **Hits** and **Verified**. Entries seeded from the code and
   previous build did not start cleanly: run `npm run rollback` again to return to the newer
   one." and the same line.
 - **Diagnosis:** the deploy runs type checks, unit tests, smoke when hook, CLI, MCP, server or kit
-  files changed, e2e (or only the build) when UI, core or server files changed, then promotes the
-  new build (the old one moves to `.deploy/prev`), reinstalls the Claude kit when `claude-check`
-  asks for it, and restarts the server (scripts/deploy.mjs:75-118). A red before the promote
+  files changed, the slow suites in `test/slow` (real git and node processes) when core, server,
+  CLI, lib or script files changed, e2e (or only the build) when UI, core or server files changed,
+  then promotes the new build (the old one moves to `.deploy/prev`), reinstalls the Claude kit
+  when `claude-check` asks for it, and restarts the server (scripts/deploy.mjs:75-122). A red before the promote
   leaves the live build untouched. A red restart swaps the previous build back and restarts it.
   The restart check passes when `/api/health` reports the sha and builtAt in `dist/build.json`
   (scripts/deploy-lib.mjs:81-108). Its "Restart check:" line gives the build expected, the status,
@@ -126,7 +127,7 @@ work. A re-hit bumps **Hits** and **Verified**. Entries seeded from the code and
 - **Symptom:** `npm run deploy` red on e2e "the freshness strip counts commits to covers since the confirmation, and Still accurate resets it" (`test/e2e/ui.spec.ts`): `Test timeout of 30000ms exceeded`, at a click or at `toHaveText('no commits since confirmed')`. Fails 5 of 5 even on a commit whose own deploy passed it.
 - **Diagnosis:** `core.hooksPath = ~/.githooks` in `~/.gitconfig`. A Git LFS install (2026-10-21 08:54) added `post-commit`, `post-checkout`, `post-merge` and `pre-push` there; `git lfs post-commit` took 2.8 s and the identity-check `pre-commit` 0.7 s per commit. The test's `pageRepo` helper makes five commits, so it ran past 30 s. The server's answer was right: the body after Still accurate said `count: 0`.
 - **Fix:** the `pageRepo` helper passes `-c core.hooksPath=<repo>/.git/no-hooks` (a folder that does not exist), so no hooks run in its throwaway repo. A test that makes commits in a temp repo should do the same.
-- **Verified:** 2026-10-21 · **Hits:** 1
+- **Verified:** 2026-10-21 · **Hits:** 2 (a branch cut before the fix hit it; merging main cleared it)
 
 # Promoted
 
