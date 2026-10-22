@@ -104,7 +104,12 @@
 .ip-sync-fk { color: var(--hue-0); overflow-wrap: anywhere; }
 .ip-sync-fs { color: var(--text-dim); }
 .ip-sync-fs[data-file] { color: var(--volt); }
-.ip-sync-fv { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.ip-sync-fv { min-width: 0; }
+/* A value is one cut line until opened, then its whole text wraps in place. */
+.ip-sync-fvb { display: block; width: 100%; padding: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; color: var(--text); font: inherit; cursor: pointer; }
+.ip-sync-fvb:hover { color: var(--text-hi); }
+.ip-sync-fvb:focus-visible { outline: 1px solid var(--volt); outline-offset: 2px; }
+.ip-sync-fvb[aria-expanded='true'] { white-space: pre-wrap; overflow-wrap: anywhere; text-overflow: clip; }
 .ip-sync-more { color: var(--text-dim); cursor: pointer; font: inherit; }
 .ip-sync-more:hover { color: var(--volt); }
 .ip-sync-more:focus-visible { outline: 2px solid var(--volt); outline-offset: 2px; }

@@ -505,7 +505,7 @@ async function libraryRepo(api: APIRequestContext, project: Seeded) {
   const swDir = mkdtempSync(join(tmpdir(), 'ip-e2e-sw-'));
   pageDirs.push(swDir);
   mkdirSync(join(swDir, 'scripts'));
-  const check = { shipwright: { head: 'abc1234def', date: '2026-10-20', subject: 'x' }, project: 'p', lastSync: null, files: [{ template: 'agents/sev.md', local: 'agents/sev.md', base: null, state: 'behind', behind: 1, commits: [], fills: {}, detail: null }], skip: [], notAdopted: [], fills: {} };
+  const check = { shipwright: { head: 'abc1234def', date: '2026-10-20', subject: 'x' }, project: 'p', lastSync: null, files: [{ template: 'agents/sev.md', local: 'agents/sev.md', base: null, state: 'behind', behind: 1, commits: [], fills: { CHECKS: `npm run typecheck and npm test, then the e2e test the plan names, ${'and more words '.repeat(12)}to the end` }, detail: null }], skip: [], notAdopted: [], fills: {} };
   // --diff answers a fixed adaptation (under a heading of the project's copy) and an upstream whose only hunk conflicts. A project with .claude/fail exits 2.
   const diff = { adaptation: ['--- agents/sev.md @ b1', '+++ agents/sev.md', '@@ -1,3 +1,3 @@', ' # Sev', '-old intro', '+new intro', ' '].join('\n'), upstream: ['--- agents/sev.md @ b1', '+++ agents/sev.md @ abc1234', '@@ -3,1 +3,1 @@', '-intro', '+intro again'].join('\n'), conflicts: [{ hunks: [0] }] };
   const script = [
@@ -637,6 +637,14 @@ test('the Sync page draws a row of cells per project, opens a cell with its adap
   await expect(cell.locator('.ip-sync-hh').first()).toHaveText('Sev');
   await expect(cell.locator('.ip-sync-dl[data-kind="add"]')).toHaveText('+new intro');
   await expect(row.locator('.ip-sync-cell').nth(0)).toHaveAttribute('aria-pressed', 'true');
+  // A fill's value reads on one line until it is opened in place.
+  await cell.getByRole('tab', { name: /^Fills/ }).click();
+  const value = cell.getByRole('button', { name: /^CHECKS, / });
+  await expect(value).toHaveAttribute('aria-expanded', 'false');
+  await value.click();
+  await expect(value).toHaveAttribute('aria-expanded', 'true');
+  await expect(value).toHaveText(/to the end$/);
+  expect(await value.evaluate((el) => (el as unknown as { scrollWidth: number; clientWidth: number }).scrollWidth <= (el as unknown as { clientWidth: number }).clientWidth)).toBe(true);
   await cell.getByRole('tab', { name: /^Upstream/ }).click();
   await expect(cell).toContainText('expect a conflict');
   // Escape closes it, and focus returns to the cell.

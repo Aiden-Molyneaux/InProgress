@@ -64,6 +64,14 @@ function Hunks({ hunks, mark }: { hunks: DiffHunk[]; mark?: boolean }) {
 
 function FillsTable({ check, file }: { check: SyncCheck; file: SyncFile }) {
   const [all, setAll] = useState(false);
+  // The values read on one line until opened: a click (or Enter) on one shows its whole text in place, and again folds it.
+  const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
+  const flip = (id: string) =>
+    setOpen((cur) => {
+      const next = new Set(cur);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
   // Expanding replaces the button that had focus, so focus goes to the first row it added.
   const added = useRef<HTMLTableRowElement | null>(null);
   useEffect(() => {
@@ -79,8 +87,10 @@ function FillsTable({ check, file }: { check: SyncCheck; file: SyncFile }) {
       <td className="ip-sync-fs" data-file={scope === 'this file' || undefined}>
         {scope}
       </td>
-      <td className="ip-sync-fv" title={v}>
-        {v}
+      <td className="ip-sync-fv">
+        <button type="button" className="ip-sync-fvb" aria-expanded={open.has(`${scope}:${k}`)} aria-label={`${k}, ${open.has(`${scope}:${k}`) ? 'fold' : 'show the whole value'}`} onClick={() => flip(`${scope}:${k}`)}>
+          {v}
+        </button>
       </td>
     </tr>
   );
