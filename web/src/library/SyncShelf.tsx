@@ -32,11 +32,13 @@ export function SyncShelf({ route, lib, onPick, onOpenStep, onOpenResource, onSt
   const returnTo = useRef<string | null>(null);
   const pick = route.pick;
   useEffect(() => {
-    if (pick || !returnTo.current) return;
+    if (pick || errorSlug || !returnTo.current) return;
     const key = returnTo.current;
     returnTo.current = null;
-    [...(grid.current?.querySelectorAll<HTMLElement>('[data-cell]') ?? [])].find((el) => el.dataset.cell === key)?.focus();
-  }, [pick]);
+    const buttons = [...(grid.current?.querySelectorAll<HTMLElement>('[data-cell]') ?? [])];
+    // The cell's button; else its row's name button (a failed row has no cells); else the grid itself.
+    (buttons.find((el) => el.dataset.cell === key) ?? buttons.find((el) => el.dataset.cell === `${key.split('|')[0]}|`) ?? grid.current)?.focus();
+  }, [pick, errorSlug]);
 
   const head = sync?.projects.map((p) => (p.check.ok ? p.check.result : null)).find((c) => c !== null);
   const behind = sync ? sync.projects.filter((p) => p.check.ok && p.check.result.files.some((f) => f.state === 'behind')).length : 0;
@@ -44,6 +46,7 @@ export function SyncShelf({ route, lib, onPick, onOpenStep, onOpenResource, onSt
 
   const close = () => {
     if (pick) returnTo.current = `${pick.slug}|${pick.template}`;
+    else if (errorSlug) returnTo.current = `${errorSlug}|`;
     setErrorSlug(null);
     onPick(null);
   };
@@ -93,6 +96,7 @@ export function SyncShelf({ route, lib, onPick, onOpenStep, onOpenResource, onSt
             }}
             onOpenStep={onOpenStep}
             onFail={setStepError}
+            onReload={lib.reload}
           />
           {stepError && <ErrorLine message={stepError} />}
           {row ? (

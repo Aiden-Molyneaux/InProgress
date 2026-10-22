@@ -54,9 +54,7 @@ export function registerUi(app: FastifyInstance, opts: AppOptions, requireToken:
     return reply.header('cache-control', 'no-store').send(await syncDiff(opts.ctx, slug, template));
   });
   app.post('/api/ui/library/sync/step', { onRequest: requireUi }, async (req, reply) => {
-    const made = await addSyncStep(opts.ctx, syncStepBody.parse(req.body).slug);
-    if (made.created) return reply.code(201).send({ node: made.node });
-    return reply.code(409).send({ error: `This project already has a sync step, #${made.step.id}`, step: made.step });
+    return reply.code(201).send({ node: await addSyncStep(opts.ctx, syncStepBody.parse(req.body).slug) });
   });
   app.post('/api/ui/library/sync/open', { onRequest: requireUi }, async (req) => {
     const { slug, template } = syncTemplateBody.parse(req.body);

@@ -14,7 +14,10 @@ const FILLS_SHOWN = 5;
 type Tab = 'adaptation' | 'fills' | 'upstream';
 
 interface Section {
+  /** The heading above the hunks; null before the first heading. */
   title: string | null;
+  /** False: the hunks could not be placed in the project's copy, so there is no heading to give. */
+  located: boolean;
   hunks: DiffHunk[];
 }
 
@@ -23,8 +26,8 @@ function bySection(hunks: DiffHunk[]): Section[] {
   const out: Section[] = [];
   for (const h of hunks) {
     const last = out[out.length - 1];
-    if (last && last.title === h.section) last.hunks.push(h);
-    else out.push({ title: h.section, hunks: [h] });
+    if (last && last.located === h.located && (!h.located || last.title === h.section)) last.hunks.push(h);
+    else out.push({ title: h.section, located: h.located, hunks: [h] });
   }
   return out;
 }
@@ -39,10 +42,12 @@ function Hunks({ hunks, mark }: { hunks: DiffHunk[]; mark?: boolean }) {
         const hidden = Math.max(0, lines.length - GROUP_LINES);
         return (
           <div key={i} className="ip-sync-hunk" data-conflict={(mark && s.hunks.some((h) => h.conflict)) || undefined}>
-            <div className="ip-sync-hh">
-              <span>{s.title ?? 'Before the first heading'}</span>
-              {mark && s.hunks.some((h) => h.conflict) && <span className="ip-sync-expect">expect a conflict</span>}
-            </div>
+            {(s.located || (mark && s.hunks.some((h) => h.conflict))) && (
+              <div className="ip-sync-hh">
+                <span>{s.located ? (s.title ?? 'Before the first heading') : ''}</span>
+                {mark && s.hunks.some((h) => h.conflict) && <span className="ip-sync-expect">expect a conflict</span>}
+              </div>
+            )}
             {lines.slice(0, GROUP_LINES).map((l, j) => (
               <div key={j} className="ip-sync-dl" data-kind={l.kind === '+' ? 'add' : l.kind === '-' ? 'del' : 'ctx'}>
                 <span aria-hidden="true">{l.kind === '-' ? '−' : l.kind === '+' ? '+' : ' '}</span>
@@ -59,12 +64,17 @@ function Hunks({ hunks, mark }: { hunks: DiffHunk[]; mark?: boolean }) {
 
 function FillsTable({ check, file }: { check: SyncCheck; file: SyncFile }) {
   const [all, setAll] = useState(false);
+  // Expanding replaces the button that had focus, so focus goes to the first row it added.
+  const added = useRef<HTMLTableRowElement | null>(null);
+  useEffect(() => {
+    if (all) added.current?.focus();
+  }, [all]);
   const own = Object.entries(file.fills);
   const project = Object.entries(check.fills).filter(([k]) => !(k in file.fills));
   const shown = all ? project : project.slice(0, FILLS_SHOWN);
   if (own.length + project.length === 0) return <p className="ip-sync-lede">No fills recorded.</p>;
-  const row = (k: string, scope: string, v: string) => (
-    <tr key={`${scope}:${k}`}>
+  const row = (k: string, scope: string, v: string, first = false) => (
+    <tr key={`${scope}:${k}`} tabIndex={-1} ref={first ? added : undefined}>
       <td className="ip-sync-fk">{k}</td>
       <td className="ip-sync-fs" data-file={scope === 'this file' || undefined}>
         {scope}
@@ -85,7 +95,7 @@ function FillsTable({ check, file }: { check: SyncCheck; file: SyncFile }) {
       </thead>
       <tbody>
         {own.map(([k, v]) => row(k, 'this file', v))}
-        {shown.map(([k, v]) => row(k, 'project', v))}
+        {shown.map(([k, v], i) => row(k, 'project', v, all && i === FILLS_SHOWN))}
         {project.length > shown.length && (
           <tr>
             <td colSpan={3}>
@@ -249,7 +259,7 @@ export function SyncCell({ sync, pages, row, template, onClose, onOpenResource, 
           ) : (
             <span className="ip-sync-none">No library page for this template.</span>
           )}
-          {file && (
+          {file && file.local !== null && state !== 'missing' && state !== 'gone' && state !== 'error' && (
             <Button
               size="sm"
               variant="ghost"

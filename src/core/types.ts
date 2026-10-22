@@ -283,7 +283,8 @@ export interface SyncCommit {
 }
 export interface SyncFile {
   template: string;
-  local: string;
+  /** The project's copy, relative to its folder; null when Shipwright did not say. */
+  local: string | null;
   base: string | null;
   state: SyncState;
   behind: number;
@@ -322,8 +323,10 @@ export interface LibrarySync {
 }
 export interface DiffHunk {
   header: string;
-  /** The last markdown heading at or above the hunk's first line; null when there is none or the text could not be read. */
+  /** The last markdown heading above the hunk in the project's copy; null before the first heading. Only meaningful when `located`. */
   section: string | null;
+  /** Whether the hunk was found in the project's copy. False: the copy could not be read, or no line of the hunk is in it. */
+  located: boolean;
   /** An upstream hunk the three-way merge cannot apply cleanly. */
   conflict: boolean;
   added: number;

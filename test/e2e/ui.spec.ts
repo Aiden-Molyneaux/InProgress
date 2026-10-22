@@ -648,6 +648,8 @@ test('the Sync page draws a row of cells per project, opens a cell with its adap
   // File sync step turns into the step's link.
   await row.getByRole('button', { name: 'File sync step' }).click();
   await expect(row.locator('.ip-sync-act a')).toHaveText(/^#\d+ sync step ›$/);
+  // The link takes focus where the button was.
+  await expect(row.locator('.ip-sync-act a')).toBeFocused();
 });
 
 test('says so when the server is unreachable at first paint, then recovers', async ({ page, demo, consoleErrors }) => {

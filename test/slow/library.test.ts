@@ -54,8 +54,9 @@ const CHECK_JSON = {
 
 /** What the fake script answers to --diff: an adaptation of two hunks under different headings, an upstream of two with the second in conflict. */
 const DIFF_JSON = {
-  adaptation: ['--- agents/sev.md @ b1', '+++ agents/sev.md', '@@ -1,3 +1,3 @@', ' # Sev', '-old intro', '+new intro', ' ', '@@ -7,2 +7,3 @@', ' rule one', '+rule added', ' rule two', '\\ No newline at end of file', ''].join('\n'),
-  upstream: ['--- agents/sev.md @ b1', '+++ agents/sev.md @ abc1234', '@@ -3,2 +3,2 @@', '-intro', '+intro again', ' ', '@@ -7,2 +7,2 @@', '-rule one', '+rule one, reworded', ' rule two', ''].join('\n'),
+  adaptation: ['--- agents/sev.md @ b1', '+++ agents/sev.md', '@@ -1,3 +1,3 @@', ' # Sev', '-old intro', '+new intro', ' ', '@@ -4,4 +4,5 @@', ' ', ' ## Rules', ' ', '+rule added', ' rule one', '\\ No newline at end of file', ''].join('\n'),
+  // The upstream's line numbers are the filled template's, which are not the copy's: hunks are placed by their context. The last has none.
+  upstream: ['--- agents/sev.md @ b1', '+++ agents/sev.md @ abc1234', '@@ -30,2 +30,2 @@', '-intro', '+intro again', ' ', '@@ -50,3 +50,3 @@', ' rule one', '-rule two', '+rule two, reworded', '@@ -90,0 +91,1 @@', '+brand new', ''].join('\n'),
   conflicts: [{ base: { start: 7, lines: 1 }, upstream: { start: 7, lines: 1 }, local: { start: 7, lines: 2 }, hunks: [1] }],
 };
 const SEV_LOCAL = '# Sev\n\nintro\n\n## Rules\n\nrule one\nrule two\n';
@@ -191,18 +192,22 @@ describe('library: the sync dashboard', GIT_TIMEOUT, () => {
 
   it('parses the diff into hunks with the heading above each, marks only the conflicting upstream hunk, and refuses a template outside templates.json without a run', async () => {
     const { app, a, dirs, runCount } = setup();
-    mkdirSync(join(dirs.shipwright, 'agents'));
-    writeFileSync(join(dirs.shipwright, 'agents', 'sev.md'), SEV_LOCAL);
-    git(dirs.shipwright, 'add', '.');
-    git(dirs.shipwright, 'commit', '-q', '-m', 'template');
     const res = await post(app, '/api/ui/library/sync/diff', { slug: a.slug, template: 'agents/sev.md' });
     expect(res.statusCode, res.body).toBe(200);
     const diff = res.json();
     expect(diff.ok, JSON.stringify(diff)).toBe(true);
-    expect(diff.adaptation.map((h: { section: string; added: number; removed: number }) => [h.section, h.added, h.removed])).toEqual([['Sev', 1, 1], ['Rules', 1, 0]]);
-    expect(diff.adaptation[1].lines.map((l: { kind: string }) => l.kind)).toEqual([' ', '+', ' ']);
-    expect(diff.upstream.map((h: { section: string; conflict: boolean }) => [h.section, h.conflict])).toEqual([['Sev', false], ['Rules', true]]);
+    // The second adaptation hunk starts above the Rules heading: its section is where its first change is, not where it starts.
+    expect(diff.adaptation.map((h: { section: string; located: boolean; added: number; removed: number }) => [h.section, h.located, h.added, h.removed])).toEqual([['Sev', true, 1, 1], ['Rules', true, 1, 0]]);
+    expect(diff.adaptation[1].lines.map((l: { kind: string }) => l.kind)).toEqual([' ', ' ', ' ', '+', ' ']);
+    expect(diff.upstream.map((h: { section: string | null; located: boolean; conflict: boolean }) => [h.section, h.located, h.conflict])).toEqual([['Sev', true, false], ['Rules', true, true], [null, false, false]]);
     expect(diff.commits).toEqual([]);
+    // The same answer again inside 60 s is the kept one; Check now makes a new one.
+    const kept = runCount();
+    await post(app, '/api/ui/library/sync/diff', { slug: a.slug, template: 'agents/sev.md' });
+    expect(runCount()).toBe(kept);
+    await post(app, '/api/ui/library/sync', { force: true });
+    await post(app, '/api/ui/library/sync/diff', { slug: a.slug, template: 'agents/sev.md' });
+    expect(runCount()).toBe(kept + 2);
     const before = runCount();
     const refused = (await post(app, '/api/ui/library/sync/diff', { slug: a.slug, template: 'agents/other.md' })).json();
     expect(refused.ok).toBe(false);
@@ -216,7 +221,8 @@ describe('library: the sync dashboard', GIT_TIMEOUT, () => {
     rmSync(join(dirs.dirA, 'agents', 'sev.md'));
     const diff = (await post(app, '/api/ui/library/sync/diff', { slug: a.slug, template: 'agents/sev.md' })).json();
     expect(diff.ok).toBe(true);
-    expect(diff.adaptation.map((h: { section: string | null }) => h.section)).toEqual([null, null]);
+    expect(diff.adaptation.map((h: { located: boolean }) => h.located)).toEqual([false, false]);
+    expect(diff.upstream.map((h: { located: boolean }) => h.located)).toEqual([false, false, false]);
     const refused = (await post(app, '/api/ui/library/sync/diff', { slug: b.slug, template: 'agents/moh.md' })).json();
     expect(refused.ok).toBe(false);
     expect(refused.error).toContain('is not a folder bound to a project');
@@ -232,6 +238,7 @@ describe('library: the sync dashboard', GIT_TIMEOUT, () => {
     expect(rows[0].syncStep).toEqual({ id: node.id, title: node.title });
     const again = await post(app, '/api/ui/library/sync/step', { slug: a.slug });
     expect(again.statusCode).toBe(409);
+    expect(again.json().error).toContain('already has a sync step');
     expect(again.json().step).toEqual({ id: node.id, title: node.title });
     // A row whose check failed has nothing to file.
     expect((await post(app, '/api/ui/library/sync/step', { slug: b.slug })).statusCode).toBe(400);
@@ -262,10 +269,20 @@ describe('library: the sync dashboard', GIT_TIMEOUT, () => {
   });
 
   it('runs only on the window POST', async () => {
-    const { app, a } = setup();
+    const { app, a, runCount } = setup();
     for (const url of ['/api/ui/library/sync/diff', '/api/ui/library/sync/step', '/api/ui/library/sync/open']) {
-      expect((await app.inject({ method: 'POST', url, payload: { slug: a.slug, template: 'agents/sev.md' } })).statusCode, url).toBeGreaterThanOrEqual(400);
+      expect((await app.inject({ method: 'POST', url, payload: { slug: a.slug, template: 'agents/sev.md' } })).statusCode, url).toBe(403);
     }
+    expect(runCount()).toBe(0);
+  });
+
+  it('refuses to open a copy Shipwright gave no local path for', async () => {
+    const odd = { ...CHECK_JSON, files: [{ ...CHECK_JSON.files[0], local: 7, fills: [], commits: 'x' }] };
+    const { app, a, opened } = setup(`console.log(${JSON.stringify(JSON.stringify(odd))});`);
+    const res = await post(app, '/api/ui/library/sync/open', { slug: a.slug, template: 'agents/sev.md' });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toContain('no local file');
+    expect(opened).toEqual([]);
   });
 });
 
@@ -311,5 +328,8 @@ describe('library: the shape of a sync check', () => {
       expect(parseCheck(typeof bad === 'string' ? bad : JSON.stringify(bad)).ok).toBe(false);
     }
     expect(parseCheck('not json').ok).toBe(false);
+    // A file's local, fills and commits are put right rather than trusted.
+    const odd = parseCheck(JSON.stringify({ ...good, files: [{ ...file, local: 3, fills: [], commits: 'x' }] }));
+    expect(odd.ok && odd.result.files[0]).toMatchObject({ local: null, fills: {}, commits: [] });
   });
 });

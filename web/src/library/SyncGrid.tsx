@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { cellState, groupTemplates, rowSummary, type CellState } from '../../../src/core/sync';
 import type { LibrarySync, SyncCheck, SyncRow } from '../../../src/core/types';
 import { api } from '../api';
@@ -73,6 +73,8 @@ interface GridProps {
   onOpenStep: (slug: string, id: number) => void;
   /** Said under the grid; null clears it. */
   onFail: (message: string | null) => void;
+  /** A plain load of the sync, so every row and the sentence agree with a step just filed. */
+  onReload: () => void;
   setGridRef: (el: HTMLDivElement | null) => void;
 }
 
@@ -90,22 +92,44 @@ function Summary({ check }: { check: SyncCheck }) {
 }
 
 /** The grid: a row per project with a manifest, a column per template grouped as Shipwright groups them, and the No manifest line. */
-export function SyncGrid({ sync, pick, errorSlug, onPick, onError, onOpenStep, onFail, setGridRef }: GridProps) {
+export function SyncGrid({ sync, pick, errorSlug, onPick, onError, onOpenStep, onFail, onReload, setGridRef }: GridProps) {
   const groups = groupTemplates(columnsOf(sync));
   const columns = groups.flatMap((g) => g.templates);
-  const [filing, setFiling] = useState<string | null>(null);
+  const [filing, setFiling] = useState<Set<string>>(new Set());
   const [filed, setFiled] = useState<Record<string, { id: number; title: string }>>({});
+  // The step links by project, and the ones whose button just turned into one: the link takes focus where the button was.
+  const links = useRef(new Map<string, HTMLAnchorElement>());
+  const focusLink = useRef(new Set<string>());
+  useEffect(() => {
+    for (const slug of [...focusLink.current]) {
+      const link = links.current.get(slug);
+      if (!link) continue;
+      focusLink.current.delete(slug);
+      link.focus();
+    }
+  });
+  // A sync that lands is the server's word on every row's step: what the click answered is dropped, so a step done elsewhere shows File sync step again.
+  useEffect(() => setFiled({}), [sync]);
   const file = async (row: SyncRow) => {
-    setFiling(row.slug);
+    setFiling((s) => new Set(s).add(row.slug));
     onFail(null);
     const answer = await api.addSyncStep(row.slug);
-    setFiling(null);
-    if ('error' in answer) onFail(answer.error);
-    else setFiled((f) => ({ ...f, [row.slug]: answer.step }));
+    setFiling((s) => {
+      const next = new Set(s);
+      next.delete(row.slug);
+      return next;
+    });
+    if ('error' in answer) {
+      onFail(answer.error);
+      return;
+    }
+    focusLink.current.add(row.slug);
+    setFiled((f) => ({ ...f, [row.slug]: answer.step }));
+    onReload();
   };
   const first = new Set(groups.map((g) => g.templates[0]));
   return (
-    <div className="ip-sync-wrap" ref={setGridRef}>
+    <div className="ip-sync-wrap" ref={setGridRef} tabIndex={-1}>
       <table className="ip-sync" aria-label="Templates by project">
         <thead>
           <tr className="ip-sync-groups">
@@ -149,7 +173,7 @@ export function SyncGrid({ sync, pick, errorSlug, onPick, onError, onOpenStep, o
                   {row.check.ok ? (
                     row.name
                   ) : (
-                    <button type="button" className="ip-sync-namebtn" aria-pressed={errorSlug === row.slug} onClick={() => onError(row.slug)}>
+                    <button type="button" className="ip-sync-namebtn" data-cell={`${row.slug}|`} aria-pressed={errorSlug === row.slug} onClick={() => onError(row.slug)}>
                       {row.name}
                     </button>
                   )}
@@ -186,6 +210,10 @@ export function SyncGrid({ sync, pick, errorSlug, onPick, onError, onOpenStep, o
                 <td className="ip-sync-act">
                   {step ? (
                     <a
+                      ref={(el) => {
+                        if (el) links.current.set(row.slug, el);
+                        else links.current.delete(row.slug);
+                      }}
                       className="p-btn"
                       data-size="sm"
                       href={`#${step.id}`}
@@ -199,7 +227,7 @@ export function SyncGrid({ sync, pick, errorSlug, onPick, onError, onOpenStep, o
                     </a>
                   ) : (
                     behind && (
-                      <Button size="sm" busy={filing === row.slug} onClick={() => void file(row)}>
+                      <Button size="sm" busy={filing.has(row.slug)} onClick={() => void file(row)}>
                         File sync step
                       </Button>
                     )

@@ -2,10 +2,10 @@ import { execFile } from 'node:child_process';
 import { readFile, stat } from 'node:fs/promises';
 import { isAbsolute, join, resolve as resolvePath, sep } from 'node:path';
 import { isSyncStep } from '../core/sync';
-import type { DiffHunk, LibrarySync, SyncCheck, SyncDiff, SyncOutcome, SyncRow, TreeNode } from '../core/types';
+import type { DiffHunk, LibrarySync, SyncCheck, SyncDiff, SyncFile, SyncOutcome, SyncRow, TreeNode } from '../core/types';
 import { isLocalAbsolutePath, normalizePath } from '../lib/paths';
 import type { Ctx } from './db/tx';
-import { badRequest, notFound } from './errors';
+import { ApiError, badRequest, notFound } from './errors';
 import { addNodes, listNodes } from './repo/nodes';
 import { getProjectById, listBindings } from './repo/projects';
 
@@ -87,8 +87,8 @@ const boundSomewhere = (ctx: Ctx, path: string): boolean => listBindings(ctx).so
 
 const capped = (text: string): string => text.trim().slice(0, ERROR_CAP);
 
-/** Runs a command and answers its outcome. Never rejects. */
-function run(file: string, args: string[], timeout: number): Promise<{ ok: true; stdout: string } | { ok: false; error: string }> {
+/** Runs a command and answers its outcome; a timeout is reported under `label` and `timeout`. Never rejects. */
+function run(file: string, args: string[], timeout: number, label = 'template-sync'): Promise<{ ok: true; stdout: string } | { ok: false; error: string }> {
   return new Promise((resolve) => {
     execFile(file, args, { timeout, windowsHide: true, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }, (err, stdout, stderr) => {
       if (!err) return resolve({ ok: true, stdout: String(stdout) });
@@ -96,7 +96,7 @@ function run(file: string, args: string[], timeout: number): Promise<{ ok: true;
       const text = capped(String(stderr));
       // A kill at the timeout is said first, with whatever the script printed after it.
       // Over maxBuffer the child is killed too, but that is not a timeout.
-      if (e.code !== 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' && (e.killed || e.signal)) return resolve({ ok: false, error: `template-sync timed out after 20 s${text ? `\n${text}` : ''}` });
+      if (e.code !== 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' && (e.killed || e.signal)) return resolve({ ok: false, error: `${label} timed out after ${timeout / 1000} s${text ? `\n${text}` : ''}` });
       resolve({ ok: false, error: text || e.message });
     });
   });
@@ -107,6 +107,14 @@ export const parseCheck = (stdout: string): SyncOutcome => {
     const result = JSON.parse(stdout) as SyncCheck;
     const sound = result && typeof result.shipwright?.head === 'string' && Array.isArray(result.files) && result.files.every((f) => f && typeof f === 'object' && typeof f.state === 'string' && typeof f.template === 'string');
     if (!sound) return { ok: false, error: 'template-sync printed JSON that is not a sync check (shipwright.head, or a file with a template and state, is missing)' };
+    // The script's word is not trusted for shape: a file's local, fills and commits are put right, so nothing downstream throws on them.
+    for (const f of result.files as (Omit<SyncFile, 'local' | 'fills' | 'commits'> & { local: unknown; fills: unknown; commits: unknown })[]) {
+      if (typeof f.local !== 'string') f.local = null;
+      if (!f.fills || typeof f.fills !== 'object' || Array.isArray(f.fills)) f.fills = {};
+      if (!Array.isArray(f.commits)) f.commits = [];
+    }
+    if (!result.fills || typeof result.fills !== 'object' || Array.isArray(result.fills)) result.fills = {};
+    if (!Array.isArray(result.skip)) result.skip = [];
     return { ok: true, result };
   } catch (err) {
     return { ok: false, error: `template-sync printed output that does not parse: ${(err as Error).message}` };
@@ -120,16 +128,19 @@ interface Cached {
 }
 const cache = new Map<number, Cached>();
 const inFlight = new Map<string, Promise<SyncOutcome>>();
+/** A good diff for 60 s, keyed by the check it was read after (its cache key and time) and the template: Check now makes a new one. */
+const diffCache = new Map<string, { at: number; diff: SyncDiff }>();
 
 /** For tests: forget cached checks and shared runs. */
 export const clearSyncCache = (): void => {
   cache.clear();
   inFlight.clear();
+  diffCache.clear();
 };
 
 // The script compares against Shipwright's main by default, so main's sha is what a cached answer depends on.
 const headOf = async (shipwright: string): Promise<string> => {
-  const out = await run('git', ['-C', shipwright, 'rev-parse', 'main'], HEAD_TIMEOUT_MS);
+  const out = await run('git', ['-C', shipwright, 'rev-parse', 'main'], HEAD_TIMEOUT_MS, 'git');
   return out.ok ? out.stdout.trim() : '';
 };
 
@@ -211,39 +222,61 @@ const requireRow = async (ctx: Ctx, slug: string): Promise<{ m: ManifestRow; dir
   return { m, dirs: rows.map((r) => r.dir) };
 };
 
-const HUNK = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
+const HUNK = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/;
 
-/** A unified diff's hunks with the new-side line each starts at; the file headers before the first `@@` and `\ No newline` lines are dropped. */
-function parseHunks(diff: string): { hunk: DiffHunk; start: number }[] {
-  const out: { hunk: DiffHunk; start: number }[] = [];
+/**
+ * A unified diff's hunks; the file headers before the first `@@` and `\ No newline` lines are dropped. `at` is the new-side line
+ * (1-based) whose heading names the hunk: that of its first `+` or `-` line, past the leading context the script adds.
+ */
+function parseHunks(diff: string): { hunk: DiffHunk; at: number }[] {
+  const out: { hunk: DiffHunk; start: number; count: number; leading: number; first: '+' | '-' | null }[] = [];
   const lines = diff.split('\n');
   if (lines[lines.length - 1] === '') lines.pop();
   for (const line of lines) {
     const h = HUNK.exec(line);
     if (h) {
-      out.push({ hunk: { header: line, section: null, conflict: false, added: 0, removed: 0, lines: [] }, start: Number(h[1]) });
+      out.push({ hunk: { header: line, section: null, located: false, conflict: false, added: 0, removed: 0, lines: [] }, start: Number(h[1]), count: h[2] === undefined ? 1 : Number(h[2]), leading: 0, first: null });
       continue;
     }
-    const cur = out[out.length - 1]?.hunk;
+    const cur = out[out.length - 1];
     if (!cur || line.startsWith('\\')) continue;
     const kind = line[0] === '+' || line[0] === '-' ? line[0] : ' ';
-    if (kind === '+') cur.added++;
-    if (kind === '-') cur.removed++;
-    cur.lines.push({ kind, text: line.slice(1) });
+    if (kind === '+') cur.hunk.added++;
+    if (kind === '-') cur.hunk.removed++;
+    if (cur.first === null) {
+      if (kind === ' ') cur.leading++;
+      else cur.first = kind;
+    }
+    cur.hunk.lines.push({ kind, text: line.slice(1) });
   }
-  return out;
+  // A new side of no lines names the line before it; else a `-` line sits just before the line that follows it.
+  return out.map((o) => ({ hunk: o.hunk, at: o.count === 0 ? o.start : o.start + o.leading - (o.first === '-' ? 1 : 0) }));
 }
 
-/** The last markdown heading at or above `line` (1-based) of `text`, ignoring fenced code; null when none. */
-function sectionAt(text: string | null, line: number): string | null {
-  if (text === null) return null;
+/** The last markdown heading at or above `line` (1-based) of `text`, ignoring fenced code; null when there is none. */
+function sectionAt(text: string, line: number): string | null {
   let found: string | null = null;
   let fenced = false;
-  for (const l of text.split('\n').slice(0, Math.max(line, 0))) {
+  for (const l of text.replace(/^﻿/, '').split('\n').slice(0, Math.max(line, 0))) {
     if (/^\s*(```|~~~)/.test(l)) fenced = !fenced;
-    else if (!fenced) found = /^#{1,6}\s+(.+?)\s*#*\s*$/.exec(l.trimEnd())?.[1] ?? found;
+    // Closing hashes are stripped only after a space, so `# C#` keeps its name.
+    else if (!fenced) found = /^#{1,6}\s+(.+?)(?:\s+#+)?\s*$/.exec(l.trimEnd())?.[1] ?? found;
   }
   return found;
+}
+
+/**
+ * Where `rel` (a file's `local`) is inside the project's folder, or why it is refused. Shipwright names it, so a missing one,
+ * an absolute path and a `..` are all refused.
+ */
+function localPathOf(m: ManifestRow, file: SyncFile): { ok: true; path: string } | { ok: false; error: string } {
+  const rel = file.local;
+  if (rel === null) return { ok: false, error: `${file.template} has no local file in ${m.name}` };
+  const target = resolvePath(m.dir, rel);
+  if (isAbsolute(rel) || rel.split(/[\\/]/).includes('..') || !target.startsWith(resolvePath(m.dir) + sep)) {
+    return { ok: false, error: `Refusing ${rel}: it is not inside ${m.name}'s folder` };
+  }
+  return { ok: true, path: target };
 }
 
 /** POST /api/ui/library/sync/diff: one adopted template's adaptation and upstream change. A script failure is `{ ok: false, error }`, never a throw. */
@@ -254,6 +287,10 @@ export async function syncDiff(ctx: Ctx, slug: string, template: string): Promis
   if (!(await readTemplates(m.shipwright)).includes(template)) return { ok: false, error: `${template} is not a template in Shipwright's templates.json` };
   const check = await checkRow(ctx, m, dirs);
   if (!check.ok) return check;
+  const stamp = cache.get(m.projectId);
+  const kept = stamp ? `${stamp.key}|${stamp.at}|${template}` : null;
+  const hit = kept ? diffCache.get(kept) : undefined;
+  if (hit && Date.now() - hit.at < FRESH_MS) return hit.diff;
   const file = check.result.files.find((f) => f.template === template);
   const out = await run(process.execPath, [join(m.shipwright, 'scripts', 'template-sync.mjs'), '--diff', template, '--json', '--project', m.dir], CHECK_TIMEOUT_MS);
   if (!out.ok) return out;
@@ -268,46 +305,59 @@ export async function syncDiff(ctx: Ctx, slug: string, template: string): Promis
     Array.isArray(parsed.conflicts) ? (parsed.conflicts as { hunks?: unknown }[]).flatMap((c) => (Array.isArray(c?.hunks) ? c.hunks.filter((n): n is number => typeof n === 'number') : [])) : [],
   );
   let local: string | null = null;
-  if (file) {
+  const where = file ? localPathOf(m, file) : null;
+  if (where?.ok) {
     try {
-      local = await readFile(join(m.dir, file.local), 'utf8');
+      local = await readFile(where.path, 'utf8');
     } catch {
       // The project's copy is unreadable (gone, or a folder): the hunks still show, with no section headings.
     }
   }
-  const head = await run('git', ['-C', m.shipwright, 'show', `HEAD:${template}`], HEAD_TIMEOUT_MS);
-  const adaptation = parseHunks(parsed.adaptation).map(({ hunk, start }) => ({ ...hunk, section: sectionAt(local, start) }));
-  const upstream = parseHunks(parsed.upstream).map(({ hunk, start }, i) => ({ ...hunk, section: sectionAt(head.ok ? head.stdout : null, start), conflict: conflicting.has(i) }));
-  return { ok: true, adaptation, upstream, commits: file?.commits ?? [] };
+  const localLines = local === null ? null : local.replace(/^﻿/, '').split('\n').map((l) => l.trimEnd());
+  // The adaptation's new side is the project's copy, so its line numbers read straight into it.
+  const adaptation = parseHunks(parsed.adaptation).map(({ hunk, at }) => (local === null ? hunk : { ...hunk, section: sectionAt(local, at), located: true }));
+  // The upstream's new side is Shipwright's template, filled, so its numbers do not read into the copy: a hunk is found there by
+  // its first context or removed line instead, and a hunk with none is left unlocated.
+  const upstream = parseHunks(parsed.upstream).map(({ hunk }, i) => {
+    const anchor = hunk.lines.find((l) => l.kind !== '+' && l.text.trim() !== '');
+    const row = anchor && localLines ? localLines.indexOf(anchor.text.trimEnd()) : -1;
+    return { ...hunk, conflict: conflicting.has(i), ...(row >= 0 && local !== null ? { section: sectionAt(local, row + 1), located: true } : {}) };
+  });
+  const diff: SyncDiff = { ok: true, adaptation, upstream, commits: file?.commits ?? [] };
+  if (kept) diffCache.set(kept, { at: Date.now(), diff });
+  return diff;
 }
 
-/** POST /api/ui/library/sync/step: files the project's sync step at its root. Answers the step it already has, flagged, instead of a second. */
-export async function addSyncStep(ctx: Ctx, slug: string): Promise<{ created: true; node: TreeNode } | { created: false; step: { id: number; title: string } }> {
+/** POST /api/ui/library/sync/step: files the project's sync step at its root. A project that already has one is refused with 409, answering that step. */
+export async function addSyncStep(ctx: Ctx, slug: string): Promise<TreeNode> {
   const { m, dirs } = await requireRow(ctx, slug);
   const check = await checkRow(ctx, m, dirs);
   if (!check.ok) throw badRequest(`${m.name} has no sync to file: ${check.error}`);
   if (!check.result.files.some((f) => f.state === 'behind')) throw badRequest(`${m.name} is not behind Shipwright`);
-  // No await from here to the insert, so a second click cannot slip a duplicate in between.
-  const existing = openSyncStep(listNodes(ctx, m.projectId), m.adopted);
-  if (existing) return { created: false, step: existing };
   const project = getProjectById(ctx, m.projectId);
   if (!project) throw notFound(`Project ${slug} not found`);
-  const [node] = addNodes(ctx, 'window', { parentId: project.rootNodeId, nodes: [{ title: `Sync ${m.name} to Shipwright ${check.result.shipwright.head.slice(0, 7)}`, label: 'docs' }] });
-  return { created: true, node };
+  const [node] = addNodes(ctx, 'window', {
+    parentId: project.rootNodeId,
+    nodes: [{ title: `Sync ${m.name} to Shipwright ${check.result.shipwright.head.slice(0, 7)}`, label: 'docs' }],
+    // Inside the write, so two clicks cannot both pass.
+    check: () => {
+      const existing = openSyncStep(listNodes(ctx, m.projectId), m.adopted);
+      if (existing) throw new ApiError(409, `${m.name} already has a sync step, #${existing.id}`, undefined, { step: existing });
+    },
+  });
+  return node;
 }
 
-/** POST /api/ui/library/sync/open: the project's copy of a template, in the editor. `local` is Shipwright's word, so it is held inside the project's folder here. */
+/** POST /api/ui/library/sync/open: the project's copy of a template, in the editor. */
 export async function openCopy(ctx: Ctx, slug: string, template: string, open: (path: string) => Promise<void>): Promise<void> {
   const { m, dirs } = await requireRow(ctx, slug);
   const check = await checkRow(ctx, m, dirs);
   if (!check.ok) throw badRequest(check.error);
   const file = check.result.files.find((f) => f.template === template);
   if (!file) throw badRequest(`${m.name} does not adopt ${template}`);
-  const target = resolvePath(m.dir, file.local);
-  if (isAbsolute(file.local) || file.local.split(/[\\/]/).includes('..') || !target.startsWith(resolvePath(m.dir) + sep)) {
-    throw badRequest(`Refusing ${file.local}: it is not inside ${m.name}'s folder`);
-  }
-  await open(target);
+  const where = localPathOf(m, file);
+  if (!where.ok) throw badRequest(where.error);
+  await open(where.path);
 }
 
 /** The manifests' rows with what each adopts and the Shipwright folder it names, no script run: for a page's Adapted in. */

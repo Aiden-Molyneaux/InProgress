@@ -9,6 +9,8 @@ export interface LibraryData {
   syncError: string | null;
   /** Check now: the check again, whatever the cache holds. */
   checkNow: () => void;
+  /** A plain load of the check, as the Library opening makes one. */
+  reload: () => void;
   /** A forced check is running. */
   checking: boolean;
 }
@@ -26,14 +28,14 @@ export function useLibrary(open: boolean): LibraryData {
   const [checking, setChecking] = useState(false);
   const seq = useRef({ pages: 0, sync: 0 });
   const mounted = useRef(false);
+  // A forced load in flight: a load asked for meanwhile is forced too, so the later answer is Check now's and the flag stays honest.
+  const forcing = useRef(false);
   useEffect(() => {
     // The first run is the mount's; after it only the Library opening loads again, not its closing.
     if (mounted.current && !open) return;
     mounted.current = true;
     const pagesAt = ++seq.current.pages;
     const syncAt = ++seq.current.sync;
-    // A forced check this supersedes will not clear the flag itself.
-    setChecking(false);
     api.libraryPages().then(
       (p) => {
         if (pagesAt !== seq.current.pages) return;
@@ -45,8 +47,12 @@ export function useLibrary(open: boolean): LibraryData {
     loadSync(syncAt, false);
   }, [open]);
   /** The same sequence guards the forced load, so a late plain answer never lands over Check now's. */
-  function loadSync(at: number, force: boolean) {
-    if (force) setChecking(true);
+  function loadSync(at: number, asked: boolean) {
+    const force = asked || forcing.current;
+    if (force) {
+      forcing.current = true;
+      setChecking(true);
+    }
     api
       .librarySync(force)
       .then(
@@ -58,9 +64,13 @@ export function useLibrary(open: boolean): LibraryData {
         (e: Error) => at === seq.current.sync && setSyncError(e.message),
       )
       .finally(() => {
-        if (force && at === seq.current.sync) setChecking(false);
+        if (force && at === seq.current.sync) {
+          forcing.current = false;
+          setChecking(false);
+        }
       });
   }
   const checkNow = () => loadSync(++seq.current.sync, true);
-  return { pages, pagesError, sync, syncError, checkNow, checking };
+  const reload = () => loadSync(++seq.current.sync, false);
+  return { pages, pagesError, sync, syncError, checkNow, reload, checking };
 }
