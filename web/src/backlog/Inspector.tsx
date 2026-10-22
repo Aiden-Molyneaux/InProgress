@@ -1,4 +1,4 @@
-import { Fragment, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { Fragment, type MouseEvent, type ReactNode } from 'react';
 import { LABEL_GLYPHS, NODE_LABELS, type NodeLabel, type ResourceMeta, type TreeNode } from '../../../src/core/types';
 import type { BacklogBand } from '../../../src/core/backlog';
 import { ageShort } from '../board/text';
@@ -57,18 +57,8 @@ export function Inspector({ id, node, inside, band, parked, handoff, docs, lastS
   onOpenResource: (id: number) => void;
 }) {
   const { pending, busy, error } = state;
-  const body = useRef<HTMLDivElement>(null);
-  const [expanded, setExpanded] = useState(false);
-  const [overflows, setOverflows] = useState(false);
+  // The whole body shows, uncut (Aiden, 2026-10-22).
   const text = node.body.trim();
-
-  // The body is cut at six lines by CSS; the button shows only when the cut hides something. Measured clamped, so an
-  // expanded body keeps its button (as "Show less").
-  useLayoutEffect(() => {
-    const el = body.current;
-    if (!el || expanded) return;
-    setOverflows(el.scrollHeight > el.clientHeight);
-  }, [node.body, expanded]);
   const current: Record<Sel, string> = {
     phase: String(phase ?? 'none'),
     label: node.label ?? 'none',
@@ -126,16 +116,9 @@ export function Inspector({ id, node, inside, band, parked, handoff, docs, lastS
     <div className="ip-insp" data-act role="group" aria-label={`Inspector for #${id}`}>
       <div className="ip-insp-main">
         {text ? (
-          <>
-            <div ref={body} className={`ip-insp-body${expanded ? '' : ' clamped'}`}>
-              <Markdown text={node.body} />
-            </div>
-            {overflows && (
-              <Button variant="ghost" size="sm" className="ip-insp-more" aria-expanded={expanded} onClick={() => setExpanded((x) => !x)}>
-                {expanded ? 'Show less' : 'Show all'}
-              </Button>
-            )}
-          </>
+          <div className="ip-insp-body">
+            <Markdown text={node.body} />
+          </div>
         ) : (
           <p className="ip-insp-nobody">No description</p>
         )}

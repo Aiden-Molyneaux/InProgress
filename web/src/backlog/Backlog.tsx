@@ -617,10 +617,10 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
           const confirm = e.currentTarget.querySelector<HTMLElement>('.p-confirm');
           if (confirm && !confirm.contains(document.activeElement)) confirm.querySelector<HTMLElement>('.p-confirm-acts button:last-child')?.focus();
         } : parking ? (e) => {
-          if ((e.target as HTMLElement).closest('.ip-park input, .ip-park button, .ip-insp-main')) return;
+          if ((e.target as HTMLElement).closest('.ip-park :is(input, textarea, button), .ip-insp-main')) return;
           e.preventDefault();
           const form = e.currentTarget.querySelector<HTMLElement>('.ip-park');
-          if (form && !form.contains(document.activeElement)) form.querySelector<HTMLElement>('input')?.focus();
+          if (form && !form.contains(document.activeElement)) form.querySelector<HTMLElement>('textarea, input')?.focus();
         } : undefined}
         onKeyDown={(e) => {
           // Escape anywhere in the confirming row closes the confirm.

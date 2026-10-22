@@ -28,8 +28,9 @@
 /* The actions sit over the right of the first line on hover or focus, so a row keeps no room for them; hidden, they stay focusable (Tab and a refocus reach them) and let presses through. */
 .ip-bl-acts { position: absolute; top: var(--sp-1); right: var(--sp-2); display: flex; gap: var(--sp-1); padding-left: var(--sp-2); background: var(--canvas-3); opacity: 0; pointer-events: none; }
 .ip-bl-row:hover .ip-bl-acts, .ip-bl-row:focus-within .ip-bl-acts { opacity: 1; pointer-events: auto; }
-/* The Park form and the Delete confirm sit in the inspector's button column, in place of the buttons. */
-.ip-insp > :is(.ip-park, .ip-bl-panel) { min-width: 0; align-self: start; }
+/* The Park form and the Delete confirm take the inspector's full width under its content, in place of the buttons: a reason
+   of a few hundred characters must read whole, which the 200 px button column cannot hold. */
+.ip-insp > :is(.ip-park, .ip-bl-panel) { grid-column: 1 / -1; min-width: 0; }
 .ip-bl-parkedrow { border: 1px dashed var(--line-strong); margin-top: var(--sp-1); }
 .ip-bl-row > :is(.ip-bl-why, .ip-bl-where) { grid-column: 2 / -1; margin: 0; overflow-wrap: anywhere; font-size: var(--t-detail-sm); color: var(--text-muted); }
 .ip-bl-row > .ip-bl-why { margin-top: var(--sp-2); }
@@ -82,8 +83,6 @@
 }
 .ip-insp-main { display: grid; gap: var(--sp-3); min-width: 0; align-content: start; }
 .ip-insp-body { max-width: 68ch; font-size: var(--t-body); color: var(--text-muted); }
-.ip-insp-body.clamped { display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
-.ip-insp-more { justify-self: start; }
 .ip-insp-nobody { margin: 0; color: var(--text-dim); }
 .ip-insp-facts { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-dim); }
 .ip-insp-why, .ip-insp-where { margin: 0; overflow-wrap: anywhere; font-size: var(--t-detail-sm); color: var(--text-muted); }

@@ -4331,7 +4331,13 @@ test.describe('#542 ranked Backlog', () => {
     const soon = view.getByRole('region', { name: 'Soon' });
     const inspector = await openInspector(blRow(page, soon, '4 Build to GitHub'));
     await inspector.getByRole('button', { name: 'Park…' }).click();
-    await page.getByRole('textbox', { name: 'Why is it set aside?' }).fill('Not this quarter');
+    // A reason of 200 characters and more reads whole as it is typed: the box spans the inspector and grows with it.
+    const reason = page.getByRole('textbox', { name: 'Why is it set aside?' });
+    const long = `Not this quarter: ${'waiting on the store review and the pricing call. '.repeat(5)}`.trim();
+    await reason.fill(long);
+    const box = await reason.evaluate((el: { clientWidth: number; scrollHeight: number; clientHeight: number }) => ({ width: el.clientWidth, hidden: el.scrollHeight - el.clientHeight }));
+    expect(box.width).toBeGreaterThan(400);
+    expect(box.hidden).toBeLessThanOrEqual(1);
     await page.getByRole('button', { name: 'Park', exact: true }).click();
     await expect(blRow(page, soon, '4 Build to GitHub')).toHaveCount(0);
     await pickView(view, 'Parked');
