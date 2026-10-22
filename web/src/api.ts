@@ -1,6 +1,7 @@
+import type { BackUpNowResult, BackupStatus } from '../../src/core/backups';
 import type { BuildInfo } from '../../src/core/build';
 import type { StepHit } from '../../src/core/goto';
-import type { Binding, DeletedProject, LibraryPage, LibraryPages, LibrarySync, NodeDetail, PageBody, Project, ProjectSnapshot, ProjectSummary, QueueOp, RankOp, Resource } from '../../src/core/types';
+import type { Binding, DeletedProject, LibraryPage, LibraryPages, LibrarySync, NodeDetail, NodeLabel, PageBody, Project, ProjectSnapshot, ProjectSummary, QueueOp, RankOp, Resource, SyncDiff } from '../../src/core/types';
 import type { ActionTarget, ProjectAction } from './projectActions';
 
 async function getJson<T>(path: string): Promise<T> {
@@ -41,6 +42,11 @@ export const api = {
    * (the open project's slug) first within each tier.
    */
   find: (q: string, here: string | null) => getJson<StepHit[]>(`/api/find?q=${encodeURIComponent(q)}${here ? `&here=${encodeURIComponent(here)}` : ''}`),
+  /** The Backups panel: what doctor's Backups check reports, as rows. */
+  backups: () => getJson<BackupStatus>('/api/backups'),
+  /** Back up now: the same work as `inprogress backup --push`. Answers the result and the status after it. */
+  backUpNow: () => sendUi<{ result: BackUpNowResult; status: BackupStatus }>('/api/ui/backups/run', {}),
+  openBackupsFolder: () => postUi('/api/ui/backups/open-folder', {}),
   /** The Library group: its pages (read live), and every manifest's Sync check. */
   libraryPages: () => getJson<LibraryPages>('/api/library/pages'),
   /** A project's own pages (purpose page), read live: its Docs view. */
@@ -51,12 +57,33 @@ export const api = {
    * The Sync check: a UI POST, as it runs Shipwright's script. Rejects with the reason. It loads with the window, not on a
    * click, so a 401 says so rather than reloading: a page with no key (npm run dev) would reload for ever.
    */
-  librarySync: async (): Promise<LibrarySync> => {
-    const answer = await sendUi<LibrarySync>('/api/ui/library/sync', {});
+  librarySync: async (force = false): Promise<LibrarySync> => {
+    const answer = await sendUi<LibrarySync>('/api/ui/library/sync', force ? { force: true } : {});
     if (answer === 'reload') throw new Error("The window's key is out of date. Reload the page.");
     if (typeof answer === 'string') throw new Error(answer);
     return answer;
   },
+  /** One adopted template's adaptation and upstream change. Never rejects: a failure is { ok: false, error }. */
+  syncDiff: async (slug: string, template: string): Promise<SyncDiff> => {
+    const answer = await sendUi<SyncDiff>('/api/ui/library/sync/diff', { slug, template });
+    if (answer === 'reload') return { ok: false, error: "The window's key is out of date. Reload the page." };
+    return typeof answer === 'string' ? { ok: false, error: answer } : answer;
+  },
+  /** File sync step: the project's sync step as filed, or the one it already had (the server's 409 carries it). Never rejects. */
+  addSyncStep: async (slug: string): Promise<{ step: { id: number; title: string } } | { error: string }> => {
+    let res: Response;
+    try {
+      res = await fetch('/api/ui/library/sync/step', { method: 'POST', headers: { 'content-type': 'application/json', 'x-ip-ui-token': uiToken() }, body: JSON.stringify({ slug }) });
+    } catch {
+      return { error: 'Could not reach the InProgress server. Is it still running?' };
+    }
+    const payload = (await res.json().catch(() => ({}))) as { node?: { id: number; title: string }; step?: { id: number; title: string }; error?: string };
+    const step = res.ok ? payload.node : res.status === 409 ? payload.step : undefined;
+    if (step) return { step: { id: step.id, title: step.title } };
+    return { error: res.status === 401 ? "The window's key is out of date. Reload the page." : (payload.error ?? `HTTP ${res.status}`) };
+  },
+  /** Opens the project's copy of a template in the editor. */
+  openSyncCopy: (slug: string, template: string) => postUi('/api/ui/library/sync/open', { slug, template }),
   openResource: (id: number) => postUi('/api/ui/open', { resourceId: id }),
   /** Opens an http(s) link in the default browser: from the Edge app window a plain link would open in Edge. */
   openUrl: (url: string) => postUi('/api/ui/open-url', { url }),
@@ -95,6 +122,13 @@ export const queueOp = (projectId: number, slug: string, op: QueueOp): Promise<U
 
 /** One rank change (ranked Backlog spec section 2): to Next, or into Soon or Someday before a step of that band. */
 export const rankOp = (projectId: number, slug: string, op: RankOp): Promise<UiResult> => postUi(`/api/ui/projects/${projectId}/rank`, { slug, op });
+
+/** The inspector's Label select: sets the step's label, or clears it with null. */
+export const labelStep = (projectId: number, slug: string, nodeId: number, label: NodeLabel | null): Promise<UiResult> =>
+  postUi(`/api/ui/projects/${projectId}/nodes/${nodeId}/label`, { slug, label });
+/** The inspector's Phase select: moves the step to the end of `parent`'s steps (null: No phase, the root). */
+export const moveStep = (projectId: number, slug: string, nodeId: number, parent: number | null): Promise<UiResult> =>
+  postUi(`/api/ui/projects/${projectId}/nodes/${nodeId}/move`, { slug, parent });
 
 /** Quick-add: a todo step under `parent`, or under the root when null; with band 'soon', at the bottom of Soon. */
 export const createStep = (projectId: number, slug: string, title: string, parent: number | null, band?: 'soon'): Promise<UiResult> =>

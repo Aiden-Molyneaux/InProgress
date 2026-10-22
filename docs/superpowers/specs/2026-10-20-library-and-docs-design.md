@@ -206,11 +206,10 @@ The page is the Sync grid mock (r357):
   order.
 - A summary cell per row: files behind of adopted, base and last sync.
 - An action per row: the open sync step, or File sync step.
-- A "No manifest" line naming the projects with no manifest.
 - The open cell, with its Adaptation, Fills and Upstream tabs, and a side panel with facts and links.
 
 **Rows.** Every project with a bound folder holding `.claude/shipwright.json` gets a row, read from its first binding.
-Projects without one are named on the "No manifest" line. Shipwright itself is named there as "is the source".
+Projects without one are not shown (Aiden, 2026-10-22: the "No manifest" line came out).
 
 **Cell states**, from `--check --json`:
 
@@ -231,7 +230,9 @@ commit: InProgress's last touch to its manifest was a style refactor, so that da
 - how many projects are behind, and by which Shipwright commits;
 - for each behind project, whether it has a sync step.
 
-A project has a sync step when it has an open step whose title matches `/\bsync\b/i` and names Shipwright or a template.
+A project has a sync step when it has an open step whose title matches `/\bsync\b.*\bto shipwright\b/i`, the form File sync
+step writes (Aiden, 2026-10-22: the first rule, sync plus any mention of Shipwright or a template, also took a step about
+the dashboard itself).
 
 **File sync step** quick-adds `Sync <project> to Shipwright <sha>` with label `docs` to that project's root, through the
 existing add-step route, and the button becomes the new step's link.
@@ -401,7 +402,7 @@ Build order: #528, then #527, #532 and #533 in parallel, then #529 with #515, th
    sync step, and File sync step adds the step and turns into its link.
 3. A cell click opens Adaptation, Fills and Upstream as described. Upstream marks the conflicting hunk for InThink ×
    Sigmund.
-4. The No manifest line names InGame, cad-dev-loop and Shipwright.
+4. (Dropped, Aiden 2026-10-22: no No manifest line.)
 5. A failing script shows "check failed" on its row with stderr in the open cell, and the rest of the grid still renders.
 6. Check now re-runs the check. Otherwise a second load within 60 seconds does not run the script.
 

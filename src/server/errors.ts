@@ -4,7 +4,7 @@ export class ApiError extends Error {
     message: string,
     readonly hint?: string,
     /** Typed fields the answer carries beside error and hint, e.g. { code: 'page-missing' }. */
-    readonly extra?: Record<string, string | number>,
+    readonly extra?: Record<string, unknown>,
   ) {
     super(message);
     this.name = 'ApiError';

@@ -6,7 +6,7 @@ import { Field } from '../parts/Field';
 
 /**
  * The Park… form (in a Backlog row and in Details): why the step is set aside (required) and where its work lives
- * (optional). Enter in either field parks; Escape cancels. The buttons are disabled while the write is in flight, and a
+ * (optional). Enter in either field parks (Shift+Enter is a new line in the reason, a box that grows with it); Escape cancels. The buttons are disabled while the write is in flight, and a
  * refusal shows in the toast and keeps the text. `onDone` runs once the server has parked it.
  */
 /**
@@ -93,14 +93,15 @@ export function ParkForm({ projectId, slug, nodeId, title, draft, onDone, onCanc
       e.stopPropagation();
       // While the write is in flight the form stays: closing it would hide a refusal's cause.
       if (!kept.current.sending) onCancel();
-    } else if (e.key === 'Enter' && !e.nativeEvent.isComposing && (e.target as HTMLElement).tagName === 'INPUT') {
+    } else if (e.key === 'Enter' && !e.nativeEvent.isComposing && !e.shiftKey && ['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) {
       e.preventDefault();
       void submit();
     }
   };
   return (
     <div ref={root} className="ip-park" role="dialog" aria-modal={false} aria-label={`Park #${nodeId} ${title}`} data-act onKeyDown={onKeyDown}>
-      <Field ref={reasonField} size="sm" label="Why is it set aside?" maxLength={2000} value={reason} onChange={(e) => setReason(e.target.value)} />
+      {/* A reason runs to a few hundred characters: a box that grows with it, so it reads whole while typed. */}
+      <Field ref={reasonField} size="sm" multiline label="Why is it set aside?" maxLength={2000} value={reason} onChange={(e) => setReason(e.target.value)} />
       <Field size="sm" label="Where does the work live? (optional)" maxLength={500} placeholder="a branch, worktree or commit" value={where} onChange={(e) => setWhere(e.target.value)} />
       <div className="ip-park-actions">
         <Button variant="primary" size="sm" disabled={!ready} onClick={() => void submit()}>Park</Button>

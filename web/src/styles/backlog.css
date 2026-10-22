@@ -17,7 +17,7 @@
 .ip-bl-row { display: grid; grid-template-columns: 6ch minmax(0, 1fr) auto; column-gap: var(--sp-3); align-items: center; min-height: 36px; padding: var(--sp-1) var(--sp-2); border-bottom: 1px solid var(--line-soft); cursor: pointer; position: relative; }
 .ip-bl-row:hover, .ip-bl-row:focus-within, .ip-bl-row:focus { background: var(--canvas-3); }
 .ip-bl-row:focus-visible { outline: 2px solid var(--volt); outline-offset: -2px; }
-.ip-bl-row.pending { opacity: .5; }
+.ip-bl-row.pending > :not(.ip-insp) { opacity: .5; }
 .ip-bl-row.confirming { cursor: default; }
 .ip-bl-row > :is(.ip-bl-id, .ip-bl-title, .ip-bl-extras) { min-width: 0; }
 .ip-bl-id { font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -28,10 +28,18 @@
 /* The actions sit over the right of the first line on hover or focus, so a row keeps no room for them; hidden, they stay focusable (Tab and a refocus reach them) and let presses through. */
 .ip-bl-acts { position: absolute; top: var(--sp-1); right: var(--sp-2); display: flex; gap: var(--sp-1); padding-left: var(--sp-2); background: var(--canvas-3); opacity: 0; pointer-events: none; }
 .ip-bl-row:hover .ip-bl-acts, .ip-bl-row:focus-within .ip-bl-acts { opacity: 1; pointer-events: auto; }
-.ip-bl-row > :is(.ip-park, .ip-bl-panel) { grid-column: 1 / -1; margin-top: var(--sp-2); }
+/* The Park form and the Delete confirm take the inspector's full width under its content, in place of the buttons: a reason
+   of a few hundred characters must read whole, which the 200 px button column cannot hold. */
+.ip-insp > :is(.ip-park, .ip-bl-panel) { grid-column: 1 / -1; min-width: 0; }
+/* While the form or confirm is open the button column is empty: the content takes the whole width. */
+.ip-bl-row > .ip-insp:has(> :is(.ip-park, .ip-bl-panel)) { grid-template-columns: minmax(0, 1fr); }
+/* The reason box starts at about three lines and grows with its text (field-sizing). */
+.ip-park textarea { min-height: 4.5lh; }
 .ip-bl-parkedrow { border: 1px dashed var(--line-strong); margin-top: var(--sp-1); }
-.ip-bl-row > :is(.ip-bl-why, .ip-bl-where) { grid-column: 2 / -1; margin: 0; overflow-wrap: anywhere; font-size: var(--t-detail-sm); color: var(--text-muted); }
+.ip-bl-row > :is(.ip-bl-why, .ip-bl-where) { grid-column: 2 / -1; margin: 0; overflow-wrap: anywhere; white-space: pre-line; font-size: var(--t-detail-sm); color: var(--text-muted); }
 .ip-bl-row > .ip-bl-why { margin-top: var(--sp-2); }
+/* A picked parked row says its reason and where in its inspector: the row's own lines step aside. */
+.ip-bl-row.picked > :is(.ip-bl-why, .ip-bl-where) { display: none; }
 /* Ranked: a handle column and a number column in front of the id. Rows without them (an own queue) leave the columns empty. */
 .ip-bl-list.ranked .ip-bl-row { grid-template-columns: 2ch 3ch 6ch minmax(0, 1fr) auto; }
 .ip-bl-list.ranked .ip-bl-row > .ip-bl-handle { grid-column: 1; }
@@ -64,9 +72,34 @@
 .ip-bl-row.drop-before::after { top: -1px; }
 .ip-bl-list.drop-end > .ip-bl-row:last-child::after { bottom: -1px; }
 .ip-bl-band.drop-empty, .ip-bl-band.drop-fold { outline: 1px dashed var(--volt); outline-offset: 2px; }
-/* A row picked for its inspector: a volt left edge on the raised canvas. */
-.ip-bl-row.picked { background: var(--canvas-2); box-shadow: inset 2px 0 0 var(--volt); }
+/* A row picked for its inspector: a volt left edge on the raised canvas, joined to the panel under it. */
+.ip-bl-row.picked { background: var(--canvas-2); box-shadow: inset 2px 0 0 var(--volt); border-bottom-color: transparent; }
+/* The inspector: a panel that grows under its row, full width, with the row's volt edge continued down its left. */
+.ip-bl-row > .ip-insp {
+  grid-column: 1 / -1; margin: var(--sp-1) calc(-1 * var(--sp-2)) calc(-1 * var(--sp-1));
+  background: var(--canvas-2); box-shadow: inset 2px 0 0 var(--volt); border: 1px solid var(--line); border-left: 0;
+  padding: var(--sp-4); display: grid; grid-template-columns: minmax(0, 1fr) 200px; gap: var(--sp-4); cursor: default;
+  animation: ip-insp-in var(--dur-2) var(--ease-out);
+}
+@keyframes ip-insp-in { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0); } }
+@media (prefers-reduced-motion: reduce) {
+  .ip-bl-row > .ip-insp { animation: none; }
+}
+.ip-insp-main { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); min-width: 0; align-content: start; }
+.ip-insp-body { max-width: 68ch; min-width: 0; font-size: var(--t-body); color: var(--text-muted); }
+.ip-insp-nobody { margin: 0; color: var(--text-dim); }
+.ip-insp-facts { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-dim); }
+.ip-insp-why, .ip-insp-where { margin: 0; overflow-wrap: anywhere; white-space: pre-line; font-size: var(--t-detail-sm); color: var(--text-muted); }
+.ip-insp-selects { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
+.ip-insp-sel { gap: var(--sp-1); min-width: 140px; }
+.ip-insp-sel .p-field-input { cursor: pointer; }
+.ip-insp-sel .p-field-input option { background: var(--canvas-3); color: var(--text-hi); }
+.ip-insp-sel .p-field-input.busy { opacity: 0.6; }
+.ip-insp-acts { display: flex; flex-direction: column; gap: var(--sp-2); }
+.ip-insp-acts .p-btn { width: 100%; }
+.ip-insp-acts [data-delete] { margin-top: auto; }
 @media (max-width: 719px) {
+  .ip-bl-row > .ip-insp { grid-template-columns: minmax(0, 1fr); }
   .ip-bl-handle { display: none; }
   .ip-bl-list.ranked .ip-bl-row { grid-template-columns: 3ch 6ch minmax(0, 1fr) auto; }
   .ip-bl-list.ranked .ip-bl-row > .ip-bl-num { grid-column: 1; }
@@ -94,5 +127,5 @@
 .ip-park { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-2); background: var(--canvas-1); border: 1px solid var(--line); }
 .ip-park-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); }
 .ip-dparked { margin: 4px 0 10px; padding: 6px 8px; border: 1px dashed var(--line); }
-.ip-dparked p { margin: 0 0 6px; overflow-wrap: anywhere; }
+.ip-dparked p { margin: 0 0 6px; overflow-wrap: anywhere; white-space: pre-line; }
 }

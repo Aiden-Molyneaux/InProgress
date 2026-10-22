@@ -327,6 +327,12 @@ export function App() {
     if (hit.projectSlug !== state.slug) selectProject(hit.projectSlug);
     else leaveLibrary();
   };
+  /** A sync step's link on the Sync page: the step opens the way the Go to field opens one. */
+  const openStepOf = (slug: string, id: number) => {
+    const project = projects.find((p) => p.slug === slug);
+    if (!project) return fail(`No project ${slug}`);
+    goTo({ kind: 'step', hit: { id, title: '', status: 'todo', projectId: project.id, projectSlug: project.slug, projectName: project.name, projectStatus: project.status } });
+  };
   useEffect(() => {
     const going = goingTo;
     if (!going) return;
@@ -411,7 +417,7 @@ export function App() {
                   onChange={(id) => openLibrary({ shelf: id as Shelf, pick: null })}
                   className="ip-viewtabs"
                 />
-                <LibraryView route={library} lib={lib} tabs={tabs} codes={codes} onOpenResource={openViewer} onRoute={openFromChip} />
+                <LibraryView route={library} lib={lib} tabs={tabs} codes={codes} onOpenResource={openViewer} onRoute={openFromChip} onPick={openLibrary} onOpenStep={openStepOf} onStatus={fail} />
               </>
             ) : projects.length === 0 ? (
               <EmptyState className="ip-wait">

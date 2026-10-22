@@ -14,7 +14,7 @@
   position: relative; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
   min-height: 36px; padding: var(--sp-2) var(--sp-3);
   border: 1px solid transparent; color: var(--text); text-decoration: none; cursor: pointer;
-  font-family: var(--font-display); font-stretch: 125%; font-weight: var(--w-display); font-size: var(--t-h3); line-height: 0.9; text-transform: uppercase; white-space: nowrap;
+  font-family: var(--font-display); font-stretch: 125%; font-weight: var(--w-display); font-size: var(--t-title); line-height: 0.9; text-transform: uppercase; white-space: nowrap;
   transition: color var(--dur-1) var(--ease-std), background-color var(--dur-1) var(--ease-std), border-color var(--dur-1) var(--ease-std);
 }
 .ip-rail-rule { position: absolute; left: var(--sp-3); top: 3px; width: var(--sp-4); height: 2px; background: var(--rr, var(--line-bright)); }

@@ -82,3 +82,28 @@ describe.runIf(process.platform === 'win32')('openInEditorOrReveal on Windows', 
     ]);
   });
 });
+
+describe.runIf(process.platform === 'win32')('openFolder on Windows', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    cp.spawn.mockReset();
+    cp.spawn.mockImplementation(() => {
+      const child = Object.assign(new EventEmitter(), { unref: vi.fn() });
+      queueMicrotask(() => child.emit('spawn'));
+      return child;
+    });
+    vi.stubEnv('SystemRoot', 'D:\\Win');
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('opens the folder in a visible Explorer window', async () => {
+    const { openFolder } = await import('../../src/server/open-path');
+    await openFolder('C:\\Users\\a\\.inprogress\\backups');
+    expect(cp.spawn).toHaveBeenCalledOnce();
+    const [file, args, options] = cp.spawn.mock.calls[0];
+    expect([file, args]).toEqual(['D:\\Win\\explorer.exe', ['C:\\Users\\a\\.inprogress\\backups']]);
+    // windowsHide passes SW_HIDE, and Explorer opens the folder window hidden (#556's walkthrough: nothing appeared).
+    expect(options.windowsHide).toBe(false);
+  });
+});
