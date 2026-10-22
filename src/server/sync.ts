@@ -253,6 +253,29 @@ function parseHunks(diff: string): { hunk: DiffHunk; at: number }[] {
   return out.map((o) => ({ hunk: o.hunk, at: o.count === 0 ? o.start : o.start + o.leading - (o.first === '-' ? 1 : 0) }));
 }
 
+/** A hunk's lines before its first added line that are not added: the old side's text the copy should still hold, trimmed at the end. */
+function leadingRun(hunk: DiffHunk): string[] {
+  const run: string[] = [];
+  for (const l of hunk.lines) {
+    if (l.kind === '+') break;
+    run.push(l.text.trimEnd());
+  }
+  return run.some((t) => t.trim() !== '') ? run : [];
+}
+
+/** The 0-based line in `lines` where `run` starts, when it appears there exactly once; -1 when it is empty, absent or repeated. */
+function uniqueRun(lines: string[], run: string[]): number {
+  if (run.length === 0) return -1;
+  let found = -1;
+  for (let i = 0; i + run.length <= lines.length; i++) {
+    if (run.every((t, j) => lines[i + j] === t)) {
+      if (found >= 0) return -1;
+      found = i;
+    }
+  }
+  return found;
+}
+
 /** The last markdown heading at or above `line` (1-based) of `text`, ignoring fenced code; null when there is none. */
 function sectionAt(text: string, line: number): string | null {
   let found: string | null = null;
@@ -317,14 +340,19 @@ export async function syncDiff(ctx: Ctx, slug: string, template: string): Promis
   // The adaptation's new side is the project's copy, so its line numbers read straight into it.
   const adaptation = parseHunks(parsed.adaptation).map(({ hunk, at }) => (local === null ? hunk : { ...hunk, section: sectionAt(local, at), located: true }));
   // The upstream's new side is Shipwright's template, filled, so its numbers do not read into the copy: a hunk is found there by
-  // its first context or removed line instead, and a hunk with none is left unlocated.
+  // its leading run of context and removed lines instead. Markdown repeats lines (fences, rules, table rows), so the run must
+  // be found once and only once; a hunk with no run, or one found twice or not at all, is left unlocated.
   const upstream = parseHunks(parsed.upstream).map(({ hunk }, i) => {
-    const anchor = hunk.lines.find((l) => l.kind !== '+' && l.text.trim() !== '');
-    const row = anchor && localLines ? localLines.indexOf(anchor.text.trimEnd()) : -1;
+    const row = localLines ? uniqueRun(localLines, leadingRun(hunk)) : -1;
     return { ...hunk, conflict: conflicting.has(i), ...(row >= 0 && local !== null ? { section: sectionAt(local, row + 1), located: true } : {}) };
   });
   const diff: SyncDiff = { ok: true, adaptation, upstream, commits: file?.commits ?? [] };
-  if (kept) diffCache.set(kept, { at: Date.now(), diff });
+  // A copy that could not be read this once (an editor's save holding it) is not kept: the next open reads it again.
+  if (kept && !(where?.ok && local === null)) {
+    const now = Date.now();
+    for (const [k, v] of diffCache) if (now - v.at >= FRESH_MS) diffCache.delete(k);
+    diffCache.set(kept, { at: now, diff });
+  }
   return diff;
 }
 

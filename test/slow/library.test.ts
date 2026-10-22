@@ -55,11 +55,12 @@ const CHECK_JSON = {
 /** What the fake script answers to --diff: an adaptation of two hunks under different headings, an upstream of two with the second in conflict. */
 const DIFF_JSON = {
   adaptation: ['--- agents/sev.md @ b1', '+++ agents/sev.md', '@@ -1,3 +1,3 @@', ' # Sev', '-old intro', '+new intro', ' ', '@@ -4,4 +4,5 @@', ' ', ' ## Rules', ' ', '+rule added', ' rule one', '\\ No newline at end of file', ''].join('\n'),
-  // The upstream's line numbers are the filled template's, which are not the copy's: hunks are placed by their context. The last has none.
-  upstream: ['--- agents/sev.md @ b1', '+++ agents/sev.md @ abc1234', '@@ -30,2 +30,2 @@', '-intro', '+intro again', ' ', '@@ -50,3 +50,3 @@', ' rule one', '-rule two', '+rule two, reworded', '@@ -90,0 +91,1 @@', '+brand new', ''].join('\n'),
+  // The upstream's line numbers are the filled template's, which are not the copy's: hunks are placed by their context. The third
+  // has none, and the fourth's (a `---` rule) is in the copy twice, so neither is placed.
+  upstream: ['--- agents/sev.md @ b1', '+++ agents/sev.md @ abc1234', '@@ -30,2 +30,2 @@', '-intro', '+intro again', ' ', '@@ -50,3 +50,3 @@', ' rule one', '-rule two', '+rule two, reworded', '@@ -90,0 +91,1 @@', '+brand new', '@@ -95,2 +96,2 @@', ' ---', '-old note', '+new note', ''].join('\n'),
   conflicts: [{ base: { start: 7, lines: 1 }, upstream: { start: 7, lines: 1 }, local: { start: 7, lines: 2 }, hunks: [1] }],
 };
-const SEV_LOCAL = '# Sev\n\nintro\n\n## Rules\n\nrule one\nrule two\n';
+const SEV_LOCAL = '# Sev\n\nintro\n\n## Rules\n\nrule one\nrule two\n\n## Notes\n\n---\n\n---\n';
 const TEMPLATES_JSON = { templates: ['agents/sev.md', 'agents/moh.md', 'skills/sigmund/SKILL.md'] };
 
 /** Shipwright (a git repo bound to its own project), A (manifest pointing at it), B (manifest pointing at an unbound folder), C (no manifest). */
@@ -199,7 +200,7 @@ describe('library: the sync dashboard', GIT_TIMEOUT, () => {
     // The second adaptation hunk starts above the Rules heading: its section is where its first change is, not where it starts.
     expect(diff.adaptation.map((h: { section: string; located: boolean; added: number; removed: number }) => [h.section, h.located, h.added, h.removed])).toEqual([['Sev', true, 1, 1], ['Rules', true, 1, 0]]);
     expect(diff.adaptation[1].lines.map((l: { kind: string }) => l.kind)).toEqual([' ', ' ', ' ', '+', ' ']);
-    expect(diff.upstream.map((h: { section: string | null; located: boolean; conflict: boolean }) => [h.section, h.located, h.conflict])).toEqual([['Sev', true, false], ['Rules', true, true], [null, false, false]]);
+    expect(diff.upstream.map((h: { section: string | null; located: boolean; conflict: boolean }) => [h.section, h.located, h.conflict])).toEqual([['Sev', true, false], ['Rules', true, true], [null, false, false], [null, false, false]]);
     expect(diff.commits).toEqual([]);
     // The same answer again inside 60 s is the kept one; Check now makes a new one.
     const kept = runCount();
@@ -222,7 +223,7 @@ describe('library: the sync dashboard', GIT_TIMEOUT, () => {
     const diff = (await post(app, '/api/ui/library/sync/diff', { slug: a.slug, template: 'agents/sev.md' })).json();
     expect(diff.ok).toBe(true);
     expect(diff.adaptation.map((h: { located: boolean }) => h.located)).toEqual([false, false]);
-    expect(diff.upstream.map((h: { located: boolean }) => h.located)).toEqual([false, false, false]);
+    expect(diff.upstream.map((h: { located: boolean }) => h.located)).toEqual([false, false, false, false]);
     const refused = (await post(app, '/api/ui/library/sync/diff', { slug: b.slug, template: 'agents/moh.md' })).json();
     expect(refused.ok).toBe(false);
     expect(refused.error).toContain('is not a folder bound to a project');
