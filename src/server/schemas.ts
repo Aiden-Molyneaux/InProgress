@@ -210,3 +210,9 @@ export const windowEventBody = z
     data: z.record(z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
   })
   .strict();
+
+/** The Library's Sync routes: a project's slug, and a template path as Shipwright lists it. */
+const syncSlug = z.string().min(1).max(200);
+export const syncBody = z.object({ force: z.boolean().optional() }).strict();
+export const syncStepBody = z.object({ slug: syncSlug }).strict();
+export const syncTemplateBody = z.object({ slug: syncSlug, template: z.string().min(1).max(300).regex(/^[\w./-]+$/, 'template is not a template path') }).strict();

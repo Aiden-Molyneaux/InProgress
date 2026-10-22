@@ -52,6 +52,17 @@ const CHECK_JSON = {
   fills: {},
 };
 
+/** What the fake script answers to --diff: an adaptation of two hunks under different headings, an upstream of two with the second in conflict. */
+const DIFF_JSON = {
+  adaptation: ['--- agents/sev.md @ b1', '+++ agents/sev.md', '@@ -1,3 +1,3 @@', ' # Sev', '-old intro', '+new intro', ' ', '@@ -4,4 +4,5 @@', ' ', ' ## Rules', ' ', '+rule added', ' rule one', '\\ No newline at end of file', ''].join('\n'),
+  // The upstream's line numbers are the filled template's, which are not the copy's: hunks are placed by their context. The third
+  // has none, and the fourth's (a `---` rule) is in the copy twice, so neither is placed.
+  upstream: ['--- agents/sev.md @ b1', '+++ agents/sev.md @ abc1234', '@@ -30,2 +30,2 @@', '-intro', '+intro again', ' ', '@@ -50,3 +50,3 @@', ' rule one', '-rule two', '+rule two, reworded', '@@ -90,0 +91,1 @@', '+brand new', '@@ -95,2 +96,2 @@', ' ---', '-old note', '+new note', ''].join('\n'),
+  conflicts: [{ base: { start: 7, lines: 1 }, upstream: { start: 7, lines: 1 }, local: { start: 7, lines: 2 }, hunks: [1] }],
+};
+const SEV_LOCAL = '# Sev\n\nintro\n\n## Rules\n\nrule one\nrule two\n\n## Notes\n\n---\n\n---\n';
+const TEMPLATES_JSON = { templates: ['agents/sev.md', 'agents/moh.md', 'skills/sigmund/SKILL.md'] };
+
 /** Shipwright (a git repo bound to its own project), A (manifest pointing at it), B (manifest pointing at an unbound folder), C (no manifest). */
 function setup(script?: string) {
   const ctx = makeCtx();
@@ -60,8 +71,9 @@ function setup(script?: string) {
   const runs = join(shipwright, 'scripts', 'runs.txt');
   writeFileSync(
     join(shipwright, 'scripts', 'template-sync.mjs'),
-    script ?? `import { appendFileSync } from 'node:fs';\nappendFileSync(new URL('runs.txt', import.meta.url), 'run;');\nconsole.log(${JSON.stringify(JSON.stringify(CHECK_JSON))});\n`,
+    script ?? `import { appendFileSync } from 'node:fs';\nappendFileSync(new URL('runs.txt', import.meta.url), 'run;');\nconsole.log(process.argv.includes('--diff') ? ${JSON.stringify(JSON.stringify(DIFF_JSON))} : ${JSON.stringify(JSON.stringify(CHECK_JSON))});\n`,
   );
+  writeFileSync(join(shipwright, 'templates.json'), JSON.stringify(TEMPLATES_JSON));
   const sw = createProject(ctx, 'test', { name: 'Shipwright' });
   addBinding(ctx, 'test', sw.slug, shipwright);
   const dirA = repoDir('ip-lib-a-');
@@ -84,7 +96,10 @@ function setup(script?: string) {
   addBinding(ctx, 'test', b.slug, dirB);
   const c = createProject(ctx, 'test', { name: 'Charlie' });
   addBinding(ctx, 'test', c.slug, dirC);
-  const app = buildApp({ ctx, token: TOKEN, uiToken: 'ui-token', version: 'test' });
+  mkdirSync(join(dirA, 'agents'));
+  writeFileSync(join(dirA, 'agents', 'sev.md'), SEV_LOCAL);
+  const opened: string[] = [];
+  const app = buildApp({ ctx, token: TOKEN, uiToken: 'ui-token', version: 'test', openPath: async (p) => void opened.push(p) });
   const runCount = () => {
     try {
       return readFileSync(runs, 'utf8').split(';').filter(Boolean).length;
@@ -94,7 +109,7 @@ function setup(script?: string) {
   };
   const register = (project: { rootNodeId: number }, path: string, title: string, extra: Record<string, unknown> = {}) =>
     app.inject({ method: 'POST', url: '/api/resources', headers: auth, payload: { nodeId: project.rootNodeId, kind: 'doc', title, path, purpose: 'library', ...extra } });
-  return { ctx, app, sw, a, b, c, dirs: { shipwright, dirA, dirB, dirC, unbound }, runCount, unbound, register };
+  return { ctx, app, sw, a, b, c, dirs: { shipwright, dirA, dirB, dirC, unbound }, runCount, unbound, register, opened };
 }
 
 describe('library: sync', GIT_TIMEOUT, () => {
@@ -153,6 +168,125 @@ describe('library: sync', GIT_TIMEOUT, () => {
   });
 });
 
+describe('library: the sync dashboard', GIT_TIMEOUT, () => {
+  const post = (app: ReturnType<typeof setup>['app'], url: string, payload: unknown) => app.inject({ method: 'POST', url, headers: UI, payload: payload as Record<string, unknown> });
+
+  it('answers the template list and the source, and runs the check again for force inside 60 s', async () => {
+    const { app, sw, runCount } = setup();
+    const body = (await post(app, '/api/ui/library/sync', {})).json();
+    expect(body.templates).toEqual(TEMPLATES_JSON.templates);
+    expect(body.source).toEqual({ slug: sw.slug, name: 'Shipwright', head: 'abc1234' });
+    expect(body.projects.map((p: { syncStep: unknown }) => p.syncStep)).toEqual([null, null]);
+    expect(runCount()).toBe(1);
+    await post(app, '/api/ui/library/sync', { force: false });
+    expect(runCount()).toBe(1);
+    await post(app, '/api/ui/library/sync', { force: true });
+    expect(runCount()).toBe(2);
+    expect((await post(app, '/api/ui/library/sync', { force: 'yes' })).statusCode).toBe(400);
+  });
+
+  it('answers no templates when the source has no readable list', async () => {
+    const { app, dirs } = setup();
+    rmSync(join(dirs.shipwright, 'templates.json'));
+    expect((await post(app, '/api/ui/library/sync', {})).json().templates).toEqual([]);
+  });
+
+  it('parses the diff into hunks with the heading above each, marks only the conflicting upstream hunk, and refuses a template outside templates.json without a run', async () => {
+    const { app, a, dirs, runCount } = setup();
+    const res = await post(app, '/api/ui/library/sync/diff', { slug: a.slug, template: 'agents/sev.md' });
+    expect(res.statusCode, res.body).toBe(200);
+    const diff = res.json();
+    expect(diff.ok, JSON.stringify(diff)).toBe(true);
+    // The second adaptation hunk starts above the Rules heading: its section is where its first change is, not where it starts.
+    expect(diff.adaptation.map((h: { section: string; located: boolean; added: number; removed: number }) => [h.section, h.located, h.added, h.removed])).toEqual([['Sev', true, 1, 1], ['Rules', true, 1, 0]]);
+    expect(diff.adaptation[1].lines.map((l: { kind: string }) => l.kind)).toEqual([' ', ' ', ' ', '+', ' ']);
+    expect(diff.upstream.map((h: { section: string | null; located: boolean; conflict: boolean }) => [h.section, h.located, h.conflict])).toEqual([['Sev', true, false], ['Rules', true, true], [null, false, false], [null, false, false]]);
+    expect(diff.commits).toEqual([]);
+    // The same answer again inside 60 s is the kept one; Check now makes a new one.
+    const kept = runCount();
+    await post(app, '/api/ui/library/sync/diff', { slug: a.slug, template: 'agents/sev.md' });
+    expect(runCount()).toBe(kept);
+    await post(app, '/api/ui/library/sync', { force: true });
+    await post(app, '/api/ui/library/sync/diff', { slug: a.slug, template: 'agents/sev.md' });
+    expect(runCount()).toBe(kept + 2);
+    const before = runCount();
+    const refused = (await post(app, '/api/ui/library/sync/diff', { slug: a.slug, template: 'agents/other.md' })).json();
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toContain('templates.json');
+    expect(runCount()).toBe(before);
+    expect((await post(app, '/api/ui/library/sync/diff', { slug: a.slug, template: 'agents/sev.md --evil' })).statusCode).toBe(400);
+  });
+
+  it('gives a diff no sections when the copy is unreadable, and a refused row its refusal', async () => {
+    const { app, a, b, dirs } = setup();
+    rmSync(join(dirs.dirA, 'agents', 'sev.md'));
+    const diff = (await post(app, '/api/ui/library/sync/diff', { slug: a.slug, template: 'agents/sev.md' })).json();
+    expect(diff.ok).toBe(true);
+    expect(diff.adaptation.map((h: { located: boolean }) => h.located)).toEqual([false, false]);
+    expect(diff.upstream.map((h: { located: boolean }) => h.located)).toEqual([false, false, false, false]);
+    const refused = (await post(app, '/api/ui/library/sync/diff', { slug: b.slug, template: 'agents/moh.md' })).json();
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toContain('is not a folder bound to a project');
+  });
+
+  it('files a docs-labelled sync step once, names it on the next load, and answers 409 with it the second time', async () => {
+    const { app, a, b } = setup();
+    const made = await post(app, '/api/ui/library/sync/step', { slug: a.slug });
+    expect(made.statusCode, made.body).toBe(201);
+    const { node } = made.json();
+    expect(node).toMatchObject({ title: 'Sync Alpha to Shipwright abc1234', label: 'docs', parentId: a.rootNodeId });
+    const rows = (await post(app, '/api/ui/library/sync', {})).json().projects;
+    expect(rows[0].syncStep).toEqual({ id: node.id, title: node.title });
+    const again = await post(app, '/api/ui/library/sync/step', { slug: a.slug });
+    expect(again.statusCode).toBe(409);
+    expect(again.json().error).toContain('already has a sync step');
+    expect(again.json().step).toEqual({ id: node.id, title: node.title });
+    // A row whose check failed has nothing to file.
+    expect((await post(app, '/api/ui/library/sync/step', { slug: b.slug })).statusCode).toBe(400);
+  });
+
+  it('refuses a step for a project that is not behind', async () => {
+    const check = { ...CHECK_JSON, files: CHECK_JSON.files.map((f) => ({ ...f, state: 'current', behind: 0 })) };
+    const { app, a } = setup(`console.log(${JSON.stringify(JSON.stringify(check))});`);
+    const res = await post(app, '/api/ui/library/sync/step', { slug: a.slug });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toContain('not behind');
+  });
+
+  it('opens the project copy from the checked local path, and refuses a local path that leaves the folder', async () => {
+    const { app, a, dirs, opened } = setup();
+    const ok = await post(app, '/api/ui/library/sync/open', { slug: a.slug, template: 'agents/sev.md' });
+    expect(ok.statusCode, ok.body).toBe(200);
+    expect(opened).toEqual([join(dirs.dirA, 'agents', 'sev.md')]);
+    expect((await post(app, '/api/ui/library/sync/open', { slug: a.slug, template: 'agents/moh.md-not-adopted' })).statusCode).toBe(400);
+    for (const local of ['../escape.md', 'agents/../../escape.md', 'C:/Windows/win.ini']) {
+      const hostile = { ...CHECK_JSON, files: [{ ...CHECK_JSON.files[0], local }] };
+      const s = setup(`console.log(${JSON.stringify(JSON.stringify(hostile))});`);
+      const res = await post(s.app, '/api/ui/library/sync/open', { slug: s.a.slug, template: 'agents/sev.md' });
+      expect(res.statusCode, local).toBe(400);
+      expect(res.json().error).toContain('not inside');
+      expect(s.opened).toEqual([]);
+    }
+  });
+
+  it('runs only on the window POST', async () => {
+    const { app, a, runCount } = setup();
+    for (const url of ['/api/ui/library/sync/diff', '/api/ui/library/sync/step', '/api/ui/library/sync/open']) {
+      expect((await app.inject({ method: 'POST', url, payload: { slug: a.slug, template: 'agents/sev.md' } })).statusCode, url).toBe(403);
+    }
+    expect(runCount()).toBe(0);
+  });
+
+  it('refuses to open a copy Shipwright gave no local path for', async () => {
+    const odd = { ...CHECK_JSON, files: [{ ...CHECK_JSON.files[0], local: 7, fills: [], commits: 'x' }] };
+    const { app, a, opened } = setup(`console.log(${JSON.stringify(JSON.stringify(odd))});`);
+    const res = await post(app, '/api/ui/library/sync/open', { slug: a.slug, template: 'agents/sev.md' });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toContain('no local file');
+    expect(opened).toEqual([]);
+  });
+});
+
 describe('library: pages', GIT_TIMEOUT, () => {
   it('lists library pages with their shelf and Adapted in, leaves other purposes out, and keeps a gone file as an error row', async () => {
     const { app, a, sw, dirs, register } = setup();
@@ -195,5 +329,8 @@ describe('library: the shape of a sync check', () => {
       expect(parseCheck(typeof bad === 'string' ? bad : JSON.stringify(bad)).ok).toBe(false);
     }
     expect(parseCheck('not json').ok).toBe(false);
+    // A file's local, fills and commits are put right rather than trusted.
+    const odd = parseCheck(JSON.stringify({ ...good, files: [{ ...file, local: 3, fills: [], commits: 'x' }] }));
+    expect(odd.ok && odd.result.files[0]).toMatchObject({ local: null, fills: {}, commits: [] });
   });
 });

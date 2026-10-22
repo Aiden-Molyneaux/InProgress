@@ -1,7 +1,7 @@
 import type { BackUpNowResult, BackupStatus } from '../../src/core/backups';
 import type { BuildInfo } from '../../src/core/build';
 import type { StepHit } from '../../src/core/goto';
-import type { DeletedProject, LibraryPages, LibrarySync, NodeDetail, NodeLabel, PageBody, Project, ProjectSnapshot, ProjectSummary, QueueOp, RankOp, Resource } from '../../src/core/types';
+import type { DeletedProject, LibraryPages, LibrarySync, NodeDetail, NodeLabel, PageBody, Project, ProjectSnapshot, ProjectSummary, QueueOp, RankOp, Resource, SyncDiff } from '../../src/core/types';
 import type { ActionTarget, ProjectAction } from './projectActions';
 
 async function getJson<T>(path: string): Promise<T> {
@@ -53,12 +53,33 @@ export const api = {
    * The Sync check: a UI POST, as it runs Shipwright's script. Rejects with the reason. It loads with the window, not on a
    * click, so a 401 says so rather than reloading: a page with no key (npm run dev) would reload for ever.
    */
-  librarySync: async (): Promise<LibrarySync> => {
-    const answer = await sendUi<LibrarySync>('/api/ui/library/sync', {});
+  librarySync: async (force = false): Promise<LibrarySync> => {
+    const answer = await sendUi<LibrarySync>('/api/ui/library/sync', force ? { force: true } : {});
     if (answer === 'reload') throw new Error("The window's key is out of date. Reload the page.");
     if (typeof answer === 'string') throw new Error(answer);
     return answer;
   },
+  /** One adopted template's adaptation and upstream change. Never rejects: a failure is { ok: false, error }. */
+  syncDiff: async (slug: string, template: string): Promise<SyncDiff> => {
+    const answer = await sendUi<SyncDiff>('/api/ui/library/sync/diff', { slug, template });
+    if (answer === 'reload') return { ok: false, error: "The window's key is out of date. Reload the page." };
+    return typeof answer === 'string' ? { ok: false, error: answer } : answer;
+  },
+  /** File sync step: the project's sync step as filed, or the one it already had (the server's 409 carries it). Never rejects. */
+  addSyncStep: async (slug: string): Promise<{ step: { id: number; title: string } } | { error: string }> => {
+    let res: Response;
+    try {
+      res = await fetch('/api/ui/library/sync/step', { method: 'POST', headers: { 'content-type': 'application/json', 'x-ip-ui-token': uiToken() }, body: JSON.stringify({ slug }) });
+    } catch {
+      return { error: 'Could not reach the InProgress server. Is it still running?' };
+    }
+    const payload = (await res.json().catch(() => ({}))) as { node?: { id: number; title: string }; step?: { id: number; title: string }; error?: string };
+    const step = res.ok ? payload.node : res.status === 409 ? payload.step : undefined;
+    if (step) return { step: { id: step.id, title: step.title } };
+    return { error: res.status === 401 ? "The window's key is out of date. Reload the page." : (payload.error ?? `HTTP ${res.status}`) };
+  },
+  /** Opens the project's copy of a template in the editor. */
+  openSyncCopy: (slug: string, template: string) => postUi('/api/ui/library/sync/open', { slug, template }),
   openResource: (id: number) => postUi('/api/ui/open', { resourceId: id }),
   /** Opens an http(s) link in the default browser: from the Edge app window a plain link would open in Edge. */
   openUrl: (url: string) => postUi('/api/ui/open-url', { url }),

@@ -283,7 +283,8 @@ export interface SyncCommit {
 }
 export interface SyncFile {
   template: string;
-  local: string;
+  /** The project's copy, relative to its folder; null when Shipwright did not say. */
+  local: string | null;
   base: string | null;
   state: SyncState;
   behind: number;
@@ -308,12 +309,32 @@ export interface SyncRow {
   name: string;
   dir: string;
   check: SyncOutcome;
+  /** The project's open sync step (the lowest id), or null. */
+  syncStep: { id: number; title: string } | null;
 }
 /** POST /api/ui/library/sync. `noManifest`: bound projects with no manifest; `source` marks Shipwright itself. */
 export interface LibrarySync {
   projects: SyncRow[];
   noManifest: { projectId: number; slug: string; name: string; source: boolean }[];
+  /** Shipwright's `templates.json` list, in its order; empty when no source is readable. */
+  templates: string[];
+  /** The project that is Shipwright (the noManifest entry marked source), with the head the first ok row saw; null when none. */
+  source: { slug: string; name: string; head: string | null } | null;
 }
+export interface DiffHunk {
+  header: string;
+  /** The last markdown heading above the hunk in the project's copy; null before the first heading. Only meaningful when `located`. */
+  section: string | null;
+  /** Whether the hunk was found in the project's copy. False: the copy could not be read, or no line of the hunk is in it. */
+  located: boolean;
+  /** An upstream hunk the three-way merge cannot apply cleanly. */
+  conflict: boolean;
+  added: number;
+  removed: number;
+  lines: { kind: '+' | '-' | ' '; text: string }[];
+}
+/** POST /api/ui/library/sync/diff. */
+export type SyncDiff = { ok: true; adaptation: DiffHunk[]; upstream: DiffHunk[]; commits: SyncCommit[] } | { ok: false; error: string };
 export interface LibraryPage {
   id: number;
   title: string;

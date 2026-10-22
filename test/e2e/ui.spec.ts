@@ -513,11 +513,22 @@ async function libraryRepo(api: APIRequestContext, project: Seeded) {
   const swDir = mkdtempSync(join(tmpdir(), 'ip-e2e-sw-'));
   pageDirs.push(swDir);
   mkdirSync(join(swDir, 'scripts'));
-  const check = { shipwright: { head: 'abc1234def', date: '2026-10-20', subject: 'x' }, project: 'p', lastSync: null, files: [{ template: 'agents/sev.md', local: 'agents/sev.md', base: null, state: 'behind', behind: 1, commits: [], fills: {}, detail: null }], skip: [], notAdopted: [], fills: {} };
-  writeFileSync(join(swDir, 'scripts', 'template-sync.mjs'), `console.log(${JSON.stringify(JSON.stringify(check))});`);
+  const check = { shipwright: { head: 'abc1234def', date: '2026-10-20', subject: 'x' }, project: 'p', lastSync: null, files: [{ template: 'agents/sev.md', local: 'agents/sev.md', base: null, state: 'behind', behind: 1, commits: [], fills: { CHECKS: `npm run typecheck and npm test, then the e2e test the plan names, ${'and more words '.repeat(12)}to the end` }, detail: null }], skip: [], notAdopted: [], fills: {} };
+  // --diff answers a fixed adaptation (under a heading of the project's copy) and an upstream whose only hunk conflicts. A project with .claude/fail exits 2.
+  const diff = { adaptation: ['--- agents/sev.md @ b1', '+++ agents/sev.md', '@@ -1,3 +1,3 @@', ' # Sev', '-old intro', '+new intro', ' '].join('\n'), upstream: ['--- agents/sev.md @ b1', '+++ agents/sev.md @ abc1234', '@@ -3,1 +3,1 @@', '-intro', '+intro again'].join('\n'), conflicts: [{ hunks: [0] }] };
+  const script = [
+    "import { existsSync } from 'node:fs';",
+    "const project = process.argv[process.argv.indexOf('--project') + 1];",
+    "if (existsSync(project + '/.claude/fail')) { console.error('boom: bad project'); process.exit(2); }",
+    `console.log(process.argv.includes('--diff') ? ${JSON.stringify(JSON.stringify(diff))} : ${JSON.stringify(JSON.stringify(check))});`,
+  ].join('\n');
+  writeFileSync(join(swDir, 'scripts', 'template-sync.mjs'), script);
+  writeFileSync(join(swDir, 'templates.json'), JSON.stringify({ templates: ['agents/sev.md', 'agents/moh.md'] }));
   await write(api, `e2e-${randomUUID()}`, 'post', `/api/projects/${shipwright.slug}/bindings`, { path: swDir });
   const repo = await pageRepo(api, project);
   mkdirSync(join(repo.dir, '.claude'));
+  mkdirSync(join(repo.dir, 'agents'));
+  writeFileSync(join(repo.dir, 'agents', 'sev.md'), '# Sev\n\nintro\n');
   writeFileSync(join(repo.dir, '.claude', 'shipwright.json'), JSON.stringify({ shipwright: swDir, files: { 'agents/sev.md': {} }, skip: [] }));
   repo.commit('docs/guide.md', ['---', 'templates: [agents/sev.md]', '---', '# Guide', ''].join('\n'));
   repo.commit('docs/roster.md', ['---', 'shelf: roster', '---', '# Agent roster', '', 'Who owns what.', ''].join('\n'));
@@ -525,7 +536,7 @@ async function libraryRepo(api: APIRequestContext, project: Seeded) {
   const titles = { guide: `Agent guide ${randomUUID().slice(0, 8)}`, roster: `Agent roster ${randomUUID().slice(0, 8)}` };
   await repo.register('docs/guide.md', titles.guide, 'library');
   await repo.register('docs/roster.md', titles.roster, 'library');
-  return { ...repo, titles };
+  return { ...repo, titles, swDir };
 }
 
 test('the Library group lists pages by project, opens the roster in place, and keeps its route on reload', async ({ page, fresh, api }) => {
@@ -599,6 +610,62 @@ test('the Library row is one more stop in the rail: arrows reach it, Space opens
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/#\/lib\/sync\//);
   await expect(shelves.getByRole('button', { name: /^Sync/ })).toBeFocused();
+});
+
+test('the Sync page draws a row of cells per project, opens a cell with its adaptation and upstream, files the sync step, and keeps the grid when one project fails', async ({ page, fresh, api }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const { swDir } = await libraryRepo(api, fresh);
+  // A second project whose script exits 2.
+  const broken = await bare(api, 'Broken sync');
+  const brokenDir = mkdtempSync(join(tmpdir(), 'ip-e2e-broken-'));
+  pageDirs.push(brokenDir);
+  mkdirSync(join(brokenDir, '.claude'));
+  writeFileSync(join(brokenDir, '.claude', 'shipwright.json'), JSON.stringify({ shipwright: swDir, files: { 'agents/sev.md': {} }, skip: [] }));
+  writeFileSync(join(brokenDir, '.claude', 'fail'), '');
+  await write(api, `e2e-${randomUUID()}`, 'post', `/api/projects/${broken.slug}/bindings`, { path: brokenDir });
+  await open(page, fresh);
+  await page.evaluate("location.hash = '#/lib/sync'");
+  await expect(page.getByRole('heading', { level: 1, name: 'SYNC' })).toBeVisible();
+  const row = page.locator(`tr[data-project="${fresh.slug}"]`);
+  await expect(row.locator('.ip-sync-cell')).toHaveCount(2);
+  await expect(row.locator('.ip-sync-cell').nth(0)).toHaveAttribute('aria-label', /× agents\/sev\.md, 1 commit behind$/);
+  await expect(row.locator('.ip-sync-cell').nth(0)).toHaveAttribute('data-state', 'beh');
+  await expect(row.locator('.ip-sync-cell').nth(1)).toHaveAttribute('data-state', 'nad');
+  await expect(row.locator('.ip-sync-sum')).toContainText('1 of 1');
+  // The broken project says so on its row, the other row still renders, and its name opens the stderr.
+  const bad = page.locator(`tr[data-project="${broken.slug}"]`);
+  await expect(bad.locator('.ip-sync-failed')).toHaveText('check failed');
+  await expect(bad.locator('.ip-sync-cell')).toHaveCount(0);
+  await bad.getByRole('button', { name: 'Broken sync' }).click();
+  await expect(page.getByRole('region', { name: 'Open cell' })).toContainText('boom: bad project');
+  // A cell opens below the grid, with the adaptation under its heading and the upstream hunk marked.
+  await row.locator('.ip-sync-cell').nth(0).click();
+  await expect(page).toHaveURL(new RegExp(`#/lib/sync/${fresh.slug}/agents%2Fsev\\.md$`));
+  const cell = page.getByRole('region', { name: 'Open cell' });
+  await expect(cell.locator('.ip-sync-hh').first()).toHaveText('Sev');
+  await expect(cell.locator('.ip-sync-dl[data-kind="add"]')).toHaveText('+new intro');
+  await expect(row.locator('.ip-sync-cell').nth(0)).toHaveAttribute('aria-pressed', 'true');
+  // A fill's value reads on one line until it is opened in place.
+  await cell.getByRole('tab', { name: /^Fills/ }).click();
+  const value = cell.getByRole('button', { name: /^CHECKS, / });
+  await expect(value).toHaveAttribute('aria-expanded', 'false');
+  await value.click();
+  await expect(value).toHaveAttribute('aria-expanded', 'true');
+  await expect(value).toHaveText(/to the end$/);
+  expect(await value.evaluate((el) => (el as unknown as { scrollWidth: number; clientWidth: number }).scrollWidth <= (el as unknown as { clientWidth: number }).clientWidth)).toBe(true);
+  await cell.getByRole('tab', { name: /^Upstream/ }).click();
+  await expect(cell).toContainText('expect a conflict');
+  // Escape closes it, and focus returns to the cell.
+  await cell.getByRole('tab', { name: /^Upstream/ }).focus();
+  await page.keyboard.press('Escape');
+  await expect(page).toHaveURL(/#\/lib\/sync$/);
+  await expect(cell).toHaveCount(0);
+  await expect(row.locator('.ip-sync-cell').nth(0)).toBeFocused();
+  // File sync step turns into the step's link.
+  await row.getByRole('button', { name: 'File sync step' }).click();
+  await expect(row.locator('.ip-sync-act a')).toHaveText(/^#\d+ sync step ›$/);
+  // The link takes focus where the button was.
+  await expect(row.locator('.ip-sync-act a')).toBeFocused();
 });
 
 test('says so when the server is unreachable at first paint, then recovers', async ({ page, demo, consoleErrors }) => {
