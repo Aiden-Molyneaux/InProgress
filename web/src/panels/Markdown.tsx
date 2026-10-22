@@ -25,18 +25,21 @@ export interface StepRefs {
   open: (id: number) => void;
 }
 
-/** `stepRefs`: with it, a `#id` of a step that `has` knows is a link that calls `open` instead of leaving the app. */
-export function Markdown({ text, stepRefs }: { text: string; stepRefs?: StepRefs }) {
+/**
+ * `stepRefs`: with it, a `#id` of a step that `has` knows is a link that calls `open` instead of leaving the app.
+ * `breaks`: a single newline is a line break, for Aiden's quick-add notes, typed line by line (no `stepRefs` with it).
+ */
+export function Markdown({ text, stepRefs, breaks }: { text: string; stepRefs?: StepRefs; breaks?: boolean }) {
   const has = stepRefs?.has;
   const html = useMemo(() => {
     let parsed: string;
     if (has) {
       parsed = parseWithStepRefs(text, has);
     } else {
-      parsed = marked.parse(text, { async: false }) as string;
+      parsed = marked.parse(text, { async: false, breaks: breaks ?? false }) as string;
     }
     return DOMPurify.sanitize(parsed, SANITIZE);
-  }, [text, has]);
+  }, [text, has, breaks]);
   const click = (event: MouseEvent<HTMLDivElement>) => {
     const link = stepRefs && event.target instanceof Element ? event.target.closest<HTMLElement>('a[data-step]') : null;
     if (link && stepRefs) {

@@ -76,6 +76,8 @@
 /* The trail fold: Claude's body, live work and the log, shut by default. */
 .ip-dtrailfold > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2); list-style: none; }
 .ip-dtrailfold > summary::-webkit-details-marker { display: none; }
+.ip-dtrailfold > summary::before { content: '▸'; color: var(--text-dim); }
+.ip-dtrailfold[open] > summary::before { content: '▾'; }
 .ip-dtrailfold > summary:focus-visible { outline: 2px solid var(--volt); outline-offset: 2px; }
 .ip-dtrailfold[open] > summary { margin-bottom: var(--sp-3); }
 .ip-dtrailfold > summary .ip-dtrailnote { color: var(--text-dim); font-size: var(--t-detail-sm); }

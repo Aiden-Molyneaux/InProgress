@@ -97,10 +97,10 @@ function liveWorkData(nodeId: number, snapshot: ProjectSnapshot, now: number) {
   return { tasks, agents, commands, trail };
 }
 
-function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'>) {
-  const now = useNow(30_000);
+/** `live` and `now` come from Details, so the TRAIL's summary and this list read one clock and never disagree. */
+function LiveWork({ nodeId, snapshot, live, now }: Pick<DetailsProps, 'nodeId' | 'snapshot'> & { live: ReturnType<typeof liveWorkData>; now: number }) {
   const { pastSessions, trailAgents } = snapshot;
-  const { tasks, agents, commands, trail } = liveWorkData(nodeId, snapshot, now);
+  const { tasks, agents, commands, trail } = live;
   if (tasks.length + agents.length + commands.length + trail.length === 0) return null;
   return (
     <section className="ip-dsec ip-dlive">
@@ -408,7 +408,7 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
         {mine && node.body.trim() !== '' && (
           <section className="ip-dsec ip-dnotes">
             <Eyebrow>NOTES</Eyebrow>
-            <Markdown text={node.body} />
+            <Markdown text={node.body} breaks />
           </section>
         )}
         <div className="ip-meta">
@@ -502,7 +502,7 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
             </summary>
             <div className="ip-dtrailbody">
               {trailBody && <Markdown text={node.body} />}
-              <LiveWork nodeId={node.id} snapshot={snapshot} />
+              <LiveWork nodeId={node.id} snapshot={snapshot} live={live} now={now} />
               {detail.log.length > 0 && (
                 <section className="ip-dsec">
                   <Eyebrow as="h3" glyph="//">{`LOG · ${detail.log.length}`}</Eyebrow>

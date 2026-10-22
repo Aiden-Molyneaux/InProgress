@@ -18,7 +18,9 @@ export function QuickAdd({ projectId, slug, inputRef, onStatus, onClose, parent 
     const el = notes.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, NOTES_MAX)}px`;
+    // scrollHeight leaves out the border, which the border-box height includes.
+    const border = el.offsetHeight - el.clientHeight;
+    el.style.height = `${Math.min(el.scrollHeight + border, NOTES_MAX + border)}px`;
   };
   const onKeyDown = async (e: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     if (e.key === 'Escape') {
@@ -31,16 +33,26 @@ export function QuickAdd({ projectId, slug, inputRef, onStatus, onClose, parent 
     // Shift+Enter in the notes is a new line.
     if (e.shiftKey && e.currentTarget === notes.current) return;
     e.preventDefault();
-    const title = inputRef.current?.value.trim() ?? '';
-    if (!title || sending.current) return;
+    const sentTitle = inputRef.current?.value ?? '';
+    const sentNotes = notes.current?.value ?? '';
+    const title = sentTitle.trim();
+    // Notes with no title yet: the title is what is missing, so go there.
+    if (!title) {
+      inputRef.current?.focus();
+      return;
+    }
+    if (sending.current) return;
     sending.current = true;
-    const result = await createStep(projectId, slug, title, parent, band, notes.current?.value);
+    const result = await createStep(projectId, slug, title, parent, band, sentNotes);
     sending.current = false;
     if (result === 'ok') {
-      if (inputRef.current) inputRef.current.value = '';
-      if (notes.current) notes.current.value = '';
+      // Text typed while the create was in flight is the next step's: only what was sent is cleared, and focus moves only
+      // if it is still in the pair.
+      const pair = inputRef.current?.parentElement;
+      if (inputRef.current && inputRef.current.value === sentTitle) inputRef.current.value = '';
+      if (notes.current && notes.current.value === sentNotes) notes.current.value = '';
       grow();
-      inputRef.current?.focus();
+      if (pair?.contains(document.activeElement)) inputRef.current?.focus();
     } else if (result === 'reload') window.location.reload();
     else onStatus?.(result);
   };

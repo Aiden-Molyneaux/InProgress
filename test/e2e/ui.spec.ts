@@ -3586,10 +3586,23 @@ test.describe('Details: asks, handoff, add a step', () => {
     // A step of yours shows its body unfolded, as NOTES.
     await details.locator('.ip-kids').getByRole('button', { name: /Step with notes/ }).click();
     await expect(details.locator('.ip-dtitle')).toHaveText('Step with notes');
-    await expect(details.locator('.ip-dnotes')).toContainText('First line');
-    // Escape in the notes closes the pair.
+    // Each typed line stays its own line.
+    await expect(details.locator('.ip-dnotes br')).toHaveCount(1);
+    // Enter on the title adds the notes too; Enter in the notes with no title goes to the title.
     await details.getByRole('button', { name: /^Add a step under #/ }).click();
-    await details.getByRole('textbox', { name: 'Notes for the new step' }).focus();
+    const field2 = details.getByRole('textbox', { name: /^Add a step under #/ });
+    const notes2 = details.getByRole('textbox', { name: 'Notes for the new step' });
+    await notes2.fill('Notes first');
+    await notes2.press('Enter');
+    await expect(field2).toBeFocused();
+    await field2.fill('Titled after');
+    await page.keyboard.press('Enter');
+    await expect(details.locator('.ip-kids')).toContainText('Titled after');
+    await expect(notes2).toHaveValue('');
+    const titled = ((await (await api.get(`/api/nodes/${withNotes.id}`)).json()) as { children: { id: number; title: string }[] }).children.find((c) => c.title === 'Titled after')!;
+    expect(((await (await api.get(`/api/nodes/${titled.id}`)).json()) as { node: { body: string } }).node.body).toBe('Notes first');
+    // Escape in the notes closes the pair.
+    await notes2.focus();
     await page.keyboard.press('Escape');
     await expect(details.getByRole('textbox', { name: 'Notes for the new step' })).toHaveCount(0);
   });

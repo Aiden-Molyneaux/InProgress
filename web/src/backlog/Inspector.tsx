@@ -119,7 +119,7 @@ export function Inspector({ id, node, inside, band, parked, handoff, docs, lastS
         <WhatWhy node={node} />
         {text ? (
           <div className="ip-insp-body">
-            <Markdown text={node.body} />
+            <Markdown text={node.body} breaks={node.origin === 'me'} />
           </div>
         ) : (
           <p className="ip-insp-nobody">No description</p>
