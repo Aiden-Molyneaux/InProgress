@@ -1,4 +1,4 @@
-import type { AdaptRow, DiffHunk } from './types';
+import type { AdaptRow, ConflictRange, DiffHunk } from './types';
 
 /**
  * The one reader of a markdown file's sections (spec 2026-10-20-library-and-docs-design.md, "A project's Docs view"): the
@@ -161,14 +161,19 @@ const PLACEHOLDER = /\{\{([A-Z0-9_]+)\}\}/g;
  * - `fill` or `file fill`: the same, with a placeholder the project filled (a file fill when the file's own fills name one);
  * - `rewritten`: the copy says something else; `removed`: the copy has no such section;
  * - `added`: a section of the copy the template does not have, placed after the row it follows in the copy.
- * `conflict` marks a copy section that one of `conflictRanges` (the merge's 1-based first line and count in the copy) overlaps.
+ * `conflict` marks a row the merge conflicts on. `conflictRanges` give the merge's 1-based first line and count in the copy
+ * (`start`, `lines`) and, when the script says, in the template at base (`base`). A range with copy lines marks the copy
+ * sections it overlaps. One with none is a deletion in the copy, which has no lines to point at: its base range marks the
+ * template sections it covers, so a section the copy removed carries the note. The filled text stands in for the base
+ * here; a retired placeholder can shift its lines a little.
  */
-export function sideBySide({ raw, filled, local, fills, fileFills, conflictRanges }: { raw: string; filled: string; local: string; fills: readonly string[]; fileFills: readonly string[]; conflictRanges: readonly { start: number; lines: number }[] }): AdaptRow[] {
+export function sideBySide({ raw, filled, local, fills, fileFills, conflictRanges }: { raw: string; filled: string; local: string; fills: readonly string[]; fileFills: readonly string[]; conflictRanges: readonly ConflictRange[] }): AdaptRow[] {
   const rawParts = new Map(parts(raw).map((p) => [p.key, p]));
   const localParts = parts(local);
   const byKey = new Map(localParts.map((p) => [p.key, p]));
-  // A range of no lines is a point: the merge's place between two lines of the copy.
-  const conflicted = (p: Part): boolean => conflictRanges.some((r) => r.start <= p.to && r.start + Math.max(r.lines, 1) - 1 >= p.from);
+  const overlaps = (r: { start: number; lines: number }, p: Part): boolean => r.lines > 0 && r.start <= p.to && r.start + r.lines - 1 >= p.from;
+  const conflicted = (p: Part): boolean => conflictRanges.some((r) => overlaps(r, p));
+  const conflictedAtBase = (p: Part): boolean => conflictRanges.some((r) => r.lines === 0 && r.base !== undefined && overlaps(r.base, p));
   const rows: AdaptRow[] = [];
   const matched = new Set<string>();
   // Where each filled row landed, so an added section can follow the row it follows in the copy.
@@ -181,13 +186,13 @@ export function sideBySide({ raw, filled, local, fills, fileFills, conflictRange
     const l = byKey.get(f.key);
     const base = { key: f.key, title: f.title, level: f.level, template, placeholders };
     if (!l) {
-      rows.push({ ...base, tag: 'removed', project: null, conflict: false });
+      rows.push({ ...base, tag: 'removed', project: null, conflict: conflictedAtBase(f) });
       continue;
     }
     matched.add(f.key);
     const tag: AdaptRow['tag'] = l.body !== f.body ? 'rewritten' : filledHere.length === 0 ? 'same' : filledHere.some((p) => fileFills.includes(p)) ? 'file fill' : 'fill';
     rowOf.set(f.key, rows.length);
-    rows.push({ ...base, tag, project: l.body, conflict: conflicted(l) });
+    rows.push({ ...base, tag, project: l.body, conflict: conflicted(l) || conflictedAtBase(f) });
   }
   // Added sections, each after the last matched section above it in the copy (or at the top), in the copy's order.
   const inserts = new Map<number, AdaptRow[]>();

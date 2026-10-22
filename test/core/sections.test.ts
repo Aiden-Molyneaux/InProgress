@@ -87,8 +87,22 @@ describe('sideBySide', () => {
     const text = ['## A', 'a1', '', '## B', 'b1', '', '## C', 'c1'].join('\n');
     const spans = sideBySide({ raw: text, filled: text, local: text, fills: [], fileFills: [], conflictRanges: [{ start: 2, lines: 4 }] });
     expect(spans.filter((r) => r.conflict).map((r) => r.title)).toEqual(['A', 'B']);
+    // A range of no copy lines without a base range points nowhere: it marks nothing rather than the section after it.
     const point = sideBySide({ raw: text, filled: text, local: text, fills: [], fileFills: [], conflictRanges: [{ start: 8, lines: 0 }] });
-    expect(point.filter((r) => r.conflict).map((r) => r.title)).toEqual(['C']);
+    expect(point.filter((r) => r.conflict)).toEqual([]);
+  });
+
+  it('puts a conflict on a section the copy deleted by its base range, not on the section after it', () => {
+    const text = ['## A', 'a1', '', '## B', 'b1', '', '## C', 'c1'].join('\n');
+    const local = ['## A', 'a1', '', '## C', 'c1'].join('\n');
+    // The script's answer when the copy dropped B and Shipwright edited b1: no copy lines, at the line after the deletion.
+    const rows = sideBySide({ raw: text, filled: text, local, fills: [], fileFills: [], conflictRanges: [{ start: 4, lines: 0, base: { start: 4, lines: 3 } }] });
+    expect(rows.map((r) => [r.title, r.tag, r.conflict])).toEqual([
+      ['Opening', 'same', false],
+      ['A', 'same', false],
+      ['B', 'removed', true],
+      ['C', 'same', false],
+    ]);
   });
 
   it('calls a placeholder nobody filled the template\'s own text, not a fill', () => {

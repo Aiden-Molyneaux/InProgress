@@ -56,9 +56,10 @@ function withChips(text: string): string {
 const frontAsCode = (text: string): string => text.replace(/^---\n([\s\S]*?)\n---(?=\n|$)/, '```yaml\n---\n$1\n---\n```');
 
 /** One cell's text: Markdown for a Markdown template, else the file as it is (a script, a settings file). */
-function Cell({ text, markdown, chips }: { text: string; markdown: boolean; chips?: boolean }) {
+function Cell({ text, markdown, chips, opening }: { text: string; markdown: boolean; chips?: boolean; opening: boolean }) {
   if (!markdown) return <pre className="ip-adapt-pre">{text}</pre>;
-  const shown = frontAsCode(text);
+  // Only the Opening can start with front matter; anywhere else a `---` is a rule.
+  const shown = opening ? frontAsCode(text) : text;
   return <Markdown text={chips ? withChips(shown) : shown} />;
 }
 
@@ -93,7 +94,8 @@ export function AdaptationView({ slug, project, template, pages, onOpenResource,
   }, [slug, template]);
 
   useEffect(() => {
-    if (!focusKey) return;
+    // The Opening's key is '', so only null means nothing to focus.
+    if (focusKey === null) return;
     table.current?.querySelector<HTMLElement>(`th[data-key="${CSS.escape(focusKey)}"]`)?.focus();
     setFocusKey(null);
   }, [focusKey]);
@@ -177,10 +179,10 @@ export function AdaptationView({ slug, project, template, pages, onOpenResource,
                     <th scope="row" tabIndex={-1} data-key={line.row.key} data-continued={line.row.level === -2 || undefined}>
                       {sectionName(line.row)}
                     </th>
-                    <td>{line.row.template === null ? <p className="ip-vmuted">Not in the template.</p> : <Cell text={line.row.template} markdown={markdown} chips />}</td>
+                    <td>{line.row.template === null ? <p className="ip-vmuted">Not in the template.</p> : <Cell text={line.row.template} markdown={markdown} chips opening={line.row.level === -1} />}</td>
                     <td>
                       {line.row.tag !== 'same' && <span className="ip-adapt-tag">{line.row.tag}</span>}
-                      {line.row.project === null ? <p className="ip-vmuted">{`Removed in ${project}.`}</p> : <Cell text={line.row.project} markdown={markdown} />}
+                      {line.row.project === null ? <p className="ip-vmuted">{`Removed in ${project}.`}</p> : <Cell text={line.row.project} markdown={markdown} opening={line.row.level === -1} />}
                       {line.row.conflict && <p className="ip-adapt-conflict">{`Shipwright changed this section in ${conflictAt}. The next sync conflicts here.`}</p>}
                     </td>
                   </tr>

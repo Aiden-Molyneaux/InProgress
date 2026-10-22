@@ -31,6 +31,7 @@
 /* The title takes its own line, and the actions wrap below it, where the head is too narrow for both. */
 .ip-adapt-head .ip-vtitle-block { flex: 1 1 280px; }
 .ip-adapt-head .ip-vtitle { white-space: normal; }
+.ip-docs-page .ip-page-aside { flex: 0 1 auto; min-width: 0; max-width: 100%; }
 .ip-docs-meta { flex: 0 1 auto; min-width: 0; }
 .ip-docs-root { overflow-wrap: anywhere; }
 .ip-adapt-table th, .ip-adapt-table td { padding: var(--sp-3); border: 1px solid var(--line-soft); vertical-align: top; text-align: left; overflow-wrap: anywhere; }

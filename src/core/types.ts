@@ -342,10 +342,16 @@ export type SyncDiff =
       adaptation: DiffHunk[];
       upstream: DiffHunk[];
       commits: SyncCommit[];
-      /** Where the dry-run merge conflicts in the project's copy: 1-based first line and line count, as the script gives them. */
-      conflictRanges: { start: number; lines: number }[];
+      /** Where the dry-run merge conflicts, as the script gives it. */
+      conflictRanges: ConflictRange[];
     }
   | { ok: false; error: string };
+/** A conflict of the dry-run merge: its 1-based first line and line count in the project's copy, and in the template at base. */
+export interface ConflictRange {
+  start: number;
+  lines: number;
+  base?: { start: number; lines: number };
+}
 /** One row of an adaptation's side by side (`sideBySide` in core/sections.ts). */
 export interface AdaptRow {
   key: string;
