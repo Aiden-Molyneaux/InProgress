@@ -295,32 +295,52 @@ describe('library: an adaptation side by side', GIT_TIMEOUT, () => {
   // HEAD as the base and whose diff matches the copy; its one upstream hunk changes a line under Rules and conflicts.
   const TEMPLATE = '# Sev\n\n**Rule.** Be {{TONE}}.\n\n## Rules\n\nrule one\n';
   const COPY = '# Sev\n\n**Rule.** Be kind.\n\n## Rules\n\nrule one, ours\n';
-  const SCRIPT = [
-    "import { execFileSync } from 'node:child_process';",
-    "import { fileURLToPath } from 'node:url';",
-    "import { appendFileSync } from 'node:fs';",
-    "if (process.argv.includes('--diff')) appendFileSync(new URL('diffs.txt', import.meta.url), 'run;');",
-    "const base = execFileSync('git', ['-C', fileURLToPath(new URL('..', import.meta.url)), 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();",
-    `const file = { template: 'agents/sev.md', local: 'agents/sev.md', base, state: 'behind', behind: 1, commits: [{ sha: 'c0ffee1', date: '2026-10-21', subject: 'reword' }], fills: { TONE: 'kind' }, detail: null };`,
-    `const diff = ${JSON.stringify({
-      adaptation: ['--- agents/sev.md', '+++ agents/sev.md', '@@ -7 +7 @@', '-rule one', '+rule one, ours', ''].join('\n'),
-      // Three lines of context, as the script writes it: the copy rewrote the changed line, so no context finds the hunk in it,
-      // and only the merge's own range says where the conflict is.
-      upstream: ['--- agents/sev.md', '+++ agents/sev.md', '@@ -5,3 +5,3 @@', ' ## Rules', ' ', '-rule one', '+rule uno', ''].join('\n'),
-      conflicts: [{ base: { start: 7, lines: 1 }, upstream: { start: 7, lines: 1 }, local: { start: 7, lines: 1 }, hunks: [0] }],
-    })};`,
-    "console.log(JSON.stringify(process.argv.includes('--diff') ? diff : { shipwright: { head: 'abc1234', date: '2026-10-21', subject: 'x' }, project: 'A', lastSync: null, files: [file], skip: [], notAdopted: [], fills: {} }));",
-  ].join('\n');
+  /** The fake script, answering `diff` to --diff. */
+  const scriptFor = (diff: unknown) =>
+    [
+      "import { execFileSync } from 'node:child_process';",
+      "import { fileURLToPath } from 'node:url';",
+      "import { appendFileSync } from 'node:fs';",
+      "if (process.argv.includes('--diff')) appendFileSync(new URL('diffs.txt', import.meta.url), 'run;');",
+      "const base = execFileSync('git', ['-C', fileURLToPath(new URL('..', import.meta.url)), 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();",
+      `const file = { template: 'agents/sev.md', local: 'agents/sev.md', base, state: 'behind', behind: 1, commits: [{ sha: 'c0ffee1', date: '2026-10-21', subject: 'reword' }], fills: { TONE: 'kind' }, detail: null };`,
+      `const diff = ${JSON.stringify(diff)};`,
+      "console.log(JSON.stringify(process.argv.includes('--diff') ? diff : { shipwright: { head: 'abc1234', date: '2026-10-21', subject: 'x' }, project: 'A', lastSync: null, files: [file], skip: [], notAdopted: [], fills: {} }));",
+    ].join('\n');
+  const DIFF = {
+    adaptation: ['--- agents/sev.md', '+++ agents/sev.md', '@@ -7 +7 @@', '-rule one', '+rule one, ours', ''].join('\n'),
+    // Three lines of context, as the script writes it: the copy rewrote the changed line, so no context finds the hunk in it,
+    // and only the merge's own range says where the conflict is.
+    upstream: ['--- agents/sev.md', '+++ agents/sev.md', '@@ -5,3 +5,3 @@', ' ## Rules', ' ', '-rule one', '+rule uno', ''].join('\n'),
+    conflicts: [{ base: { start: 7, lines: 1 }, upstream: { start: 7, lines: 1 }, local: { start: 7, lines: 1 }, hunks: [0] }],
+  };
 
-  const adaptationSetup = () => {
-    const s = setup(SCRIPT);
+  const adaptationSetup = (diff: unknown = DIFF, copy = COPY) => {
+    const s = setup(scriptFor(diff));
     mkdirSync(join(s.dirs.shipwright, 'agents'));
     writeFileSync(join(s.dirs.shipwright, 'agents', 'sev.md'), TEMPLATE);
     git(s.dirs.shipwright, 'add', '.');
     git(s.dirs.shipwright, 'commit', '-q', '-m', 'sev');
-    writeFileSync(join(s.dirs.dirA, 'agents', 'sev.md'), COPY);
+    writeFileSync(join(s.dirs.dirA, 'agents', 'sev.md'), copy);
     return s;
   };
+
+  it('puts a conflict on a section the copy deleted, from the base range the script gives a deletion', async () => {
+    // The copy dropped Rules, and Shipwright edited it: the merge has no copy lines there, only the base's.
+    const deleted = {
+      adaptation: ['--- agents/sev.md', '+++ agents/sev.md', '@@ -3,5 +3,1 @@', ' **Rule.** Be kind.', '-', '-## Rules', '-', '-rule one', ''].join('\n'),
+      upstream: DIFF.upstream,
+      conflicts: [{ base: { start: 5, lines: 3 }, upstream: { start: 5, lines: 3 }, local: { start: 4, lines: 0 }, hunks: [0] }],
+    };
+    const { app, a } = adaptationSetup(deleted, '# Sev\n\n**Rule.** Be kind.\n');
+    const body = (await post(app, '/api/ui/library/sync/adaptation', { slug: a.slug, template: 'agents/sev.md' })).json();
+    expect(body.ok, JSON.stringify(body)).toBe(true);
+    expect(body.rows.map((r: { title: string; tag: string; conflict: boolean }) => [r.title, r.tag, r.conflict])).toEqual([
+      ['Opening', 'same', false],
+      ['Rule.', 'file fill', false],
+      ['Rules', 'removed', true],
+    ]);
+  });
 
   it('lines the copy up with the template by section, with its tags, the placeholders and the conflict', async () => {
     const { app, a } = adaptationSetup();
