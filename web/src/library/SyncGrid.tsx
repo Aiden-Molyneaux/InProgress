@@ -91,7 +91,7 @@ function Summary({ check }: { check: SyncCheck }) {
   );
 }
 
-/** The grid: a row per project with a manifest, a column per template grouped as Shipwright groups them, and the No manifest line. */
+/** The grid: a row per project with a manifest, a column per template grouped as Shipwright groups them. */
 export function SyncGrid({ sync, pick, errorSlug, onPick, onError, onOpenStep, onFail, onReload, setGridRef }: GridProps) {
   const groups = groupTemplates(columnsOf(sync));
   const columns = groups.flatMap((g) => g.templates);
@@ -238,15 +238,6 @@ export function SyncGrid({ sync, pick, errorSlug, onPick, onError, onOpenStep, o
           })}
         </tbody>
       </table>
-      <div className="ip-sync-nomani">
-        <Eyebrow>No manifest</Eyebrow>
-        {sync.noManifest.map((n) => (
-          <span key={n.projectId}>
-            <b>{n.name}</b>
-            {n.source ? ' is the source' : ''}
-          </span>
-        ))}
-      </div>
     </div>
   );
 }

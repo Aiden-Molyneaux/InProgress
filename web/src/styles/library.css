@@ -64,8 +64,6 @@
 .ip-sync-cell[data-state="skp"] { background: repeating-linear-gradient(-45deg, var(--line) 0 1px, transparent 1px 6px), var(--canvas-1); border-color: var(--line-soft); }
 .ip-sync-cell[data-state="nad"] { background: transparent; border: 1px dashed var(--line-bright); }
 .ip-sync-cell[aria-pressed="true"] { outline: 2px solid var(--volt); outline-offset: 3px; }
-.ip-sync-nomani { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2) var(--sp-5); padding: var(--sp-3) var(--sp-4); font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-muted); border-top: 1px dashed var(--line-strong); }
-.ip-sync-nomani b { color: var(--text); font-weight: var(--w-body); }
 .ip-sync-open { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 300px; border: 1px solid var(--line-strong); background: var(--canvas-2); }
 .ip-sync-open::before { content: ''; position: absolute; left: -1px; right: -1px; top: -1px; height: 2px; background: var(--behind); }
 .ip-sync-open[data-state="current"]::before, .ip-sync-open[data-state="skipped"]::before, .ip-sync-open[data-state="not-adopted"]::before { background: var(--line-bright); }

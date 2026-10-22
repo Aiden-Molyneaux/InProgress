@@ -56,7 +56,7 @@ export function SyncShelf({ route, lib, onPick, onOpenStep, onOpenResource, onSt
       <PageHead code="SYN" name="SYNC" decodeKey={-3} meta={sync && sync.projects.length > 0 ? [{ value: behind, label: `OF ${sync.projects.length} BEHIND` }] : undefined}>
         {head && (
           <span className="ip-lib-sha" title={head.shipwright.subject}>
-            {`SHIPWRIGHT ${head.shipwright.head.slice(0, 7)} · ${dayMon(head.shipwright.date)}`}
+            {`SHIPWRIGHT · ${dayMon(head.shipwright.date)}`}
           </span>
         )}
       </PageHead>
