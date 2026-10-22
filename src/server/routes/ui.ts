@@ -9,8 +9,8 @@ import { badRequest } from '../errors';
 import { openInDefaultBrowser, openInEditorOrReveal } from '../open-path';
 import { pageHead } from '../pages';
 import { confirmPage, requireResource } from '../repo/resources';
-import { librarySync } from '../sync';
-import { idParam, openBody, openUrlBody } from '../schemas';
+import { addSyncStep, librarySync, openCopy, syncDiff } from '../sync';
+import { idParam, openBody, openUrlBody, syncBody, syncStepBody, syncTemplateBody } from '../schemas';
 
 const TOKEN_META = /<meta name="ip-ui-token" content="[^"]*"\s*\/?>/;
 
@@ -47,7 +47,22 @@ export function registerUi(app: FastifyInstance, opts: AppOptions, requireToken:
   });
 
   // The Library's Sync check runs Shipwright's script, so it is the window's own POST, never a GET another page could fire.
-  app.post('/api/ui/library/sync', { onRequest: requireUi }, async (_req, reply) => reply.header('cache-control', 'no-store').send(await librarySync(opts.ctx)));
+  // The routes after it run the script too, so each is a UI-token POST: the diff, the sync step and the copy's open.
+  app.post('/api/ui/library/sync', { onRequest: requireUi }, async (req, reply) => reply.header('cache-control', 'no-store').send(await librarySync(opts.ctx, syncBody.parse(req.body ?? {}))));
+  app.post('/api/ui/library/sync/diff', { onRequest: requireUi }, async (req, reply) => {
+    const { slug, template } = syncTemplateBody.parse(req.body);
+    return reply.header('cache-control', 'no-store').send(await syncDiff(opts.ctx, slug, template));
+  });
+  app.post('/api/ui/library/sync/step', { onRequest: requireUi }, async (req, reply) => {
+    const made = await addSyncStep(opts.ctx, syncStepBody.parse(req.body).slug);
+    if (made.created) return reply.code(201).send({ node: made.node });
+    return reply.code(409).send({ error: `This project already has a sync step, #${made.step.id}`, step: made.step });
+  });
+  app.post('/api/ui/library/sync/open', { onRequest: requireUi }, async (req) => {
+    const { slug, template } = syncTemplateBody.parse(req.body);
+    await openCopy(opts.ctx, slug, template, opts.openPath ?? openInEditorOrReveal);
+    return { ok: true };
+  });
 
   // The viewer's Still accurate: the page's claim holds at its repo's HEAD now.
   app.post('/api/ui/resources/:id/confirm', { onRequest: requireUi }, async (req) => {

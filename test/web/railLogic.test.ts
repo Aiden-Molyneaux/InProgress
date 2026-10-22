@@ -120,9 +120,9 @@ describe('where a menu opens', () => {
 
 describe('the Library on the rail', () => {
   const file = (state: SyncFile['state']): SyncFile => ({ template: 't', local: 't', base: null, state, behind: state === 'behind' ? 1 : 0, commits: [], fills: {}, detail: null });
-  const row = (projectId: number, check: LibrarySync['projects'][number]['check']): LibrarySync['projects'][number] => ({ projectId, slug: `p${projectId}`, name: `P${projectId}`, dir: 'C:/x', check });
+  const row = (projectId: number, check: LibrarySync['projects'][number]['check']): LibrarySync['projects'][number] => ({ projectId, slug: `p${projectId}`, name: `P${projectId}`, dir: 'C:/x', check, syncStep: null });
   const ok = (...states: SyncFile['state'][]) => ({ ok: true as const, result: { shipwright: { head: 'h', date: 'd', subject: 's' }, project: 'x', lastSync: null, files: states.map(file), skip: [], notAdopted: [], fills: {} } });
-  const sync = (...projects: LibrarySync['projects']): LibrarySync => ({ projects, noManifest: [] });
+  const sync = (...projects: LibrarySync['projects']): LibrarySync => ({ projects, noManifest: [], templates: [], source: null });
   const page = (id: number, shelf: LibraryPage['shelf']): LibraryPage => ({ id, title: 't', path: 'C:/x.md', projectId: 1, projectSlug: 'a', projectName: 'A', format: 'markdown', shelf, templates: [], error: null, adaptedIn: [] });
   const pages = (...p: LibraryPage[]): LibraryPages => ({ pages: p, sourceProjectId: null });
 
