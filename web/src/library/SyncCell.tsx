@@ -32,14 +32,14 @@ function bySection(hunks: DiffHunk[]): Section[] {
   return out;
 }
 
-/** A section's lines, cut at 12 with the rest counted. */
-function Hunks({ hunks, mark }: { hunks: DiffHunk[]; mark?: boolean }) {
+/** A section's lines, cut at 12 with the rest counted (`limit` changes the cut). Docs' Diff tab shows an adaptation with it too. */
+export function Hunks({ hunks, mark, limit = GROUP_LINES }: { hunks: DiffHunk[]; mark?: boolean; limit?: number }) {
   const sections = bySection(hunks);
   return (
     <div className="ip-sync-diff">
       {sections.map((s, i) => {
         const lines = s.hunks.flatMap((h) => h.lines);
-        const hidden = Math.max(0, lines.length - GROUP_LINES);
+        const hidden = Math.max(0, lines.length - limit);
         return (
           <div key={i} className="ip-sync-hunk" data-conflict={(mark && s.hunks.some((h) => h.conflict)) || undefined}>
             {(s.located || (mark && s.hunks.some((h) => h.conflict))) && (
@@ -48,7 +48,7 @@ function Hunks({ hunks, mark }: { hunks: DiffHunk[]; mark?: boolean }) {
                 {mark && s.hunks.some((h) => h.conflict) && <span className="ip-sync-expect">expect a conflict</span>}
               </div>
             )}
-            {lines.slice(0, GROUP_LINES).map((l, j) => (
+            {lines.slice(0, limit).map((l, j) => (
               <div key={j} className="ip-sync-dl" data-kind={l.kind === '+' ? 'add' : l.kind === '-' ? 'del' : 'ctx'}>
                 <span aria-hidden="true">{l.kind === '-' ? '−' : l.kind === '+' ? '+' : ' '}</span>
                 <span>{l.text}</span>

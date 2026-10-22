@@ -452,6 +452,8 @@ export function App() {
                     sync={lib.sync?.projects.find((r) => r.slug === snapshot.project.slug) ?? null}
                     syncLoaded={lib.sync !== null}
                     syncError={lib.syncError}
+                    libraryPages={lib.pages?.pages ?? []}
+                    onOpenResource={openViewer}
                   />
                 ) : view === 'board' ? (
                   <Board key={snapshot.project.id} snapshot={snapshot} now={now} selectedNode={selectedNode} onOpenNode={setSelectedNode} onOpenResource={openViewer} onOpenDone={() => openFromBoard('done')} onOpenBacklog={() => openFromBoard('backlog')} lastLook={lastLook} onStatus={fail} />

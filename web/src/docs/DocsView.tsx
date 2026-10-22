@@ -7,14 +7,15 @@ import { ResourceViewer } from '../panels/ResourceViewer';
 import { EmptyState } from '../parts/EmptyState';
 import { ErrorLine } from '../parts/ErrorLine';
 import { Eyebrow } from '../parts/Eyebrow';
-import { adaptationName, adaptationRow } from './adaptations';
+import { AdaptationView } from './AdaptationView';
+import { adaptationRow } from './adaptations';
 import type { ProjectDocs } from './useProjectDocs';
 
 /** What the index has picked: a page (a resource id) or an adaptation (a template path). */
 type Picked = { kind: 'page'; id: number } | { kind: 'adaptation'; template: string };
 
 interface Props {
-  project: { id: number; name: string };
+  project: { id: number; name: string; slug: string };
   /** The project's code, as the rail shows it: the head reads `<code>-DOC`. */
   code: string;
   docs: ProjectDocs;
@@ -23,14 +24,19 @@ interface Props {
   /** Whether the Library's sync check has landed: before it, no row does not yet mean no manifest. */
   syncLoaded: boolean;
   syncError: string | null;
+  /** The Library's pages: an adaptation links to the Shipwright page that explains its template. */
+  libraryPages: LibraryPage[];
+  onOpenResource: (id: number) => void;
 }
 
 /**
  * A project's Docs view (#530): the index of its own pages and of its adaptations of Shipwright's templates on the left, the
  * pick on the right. The pick is the view's own state: the window mounts it per project, so a switch starts with none.
  */
-export function DocsView({ project, code, docs, sync, syncLoaded, syncError }: Props) {
+export function DocsView({ project, code, docs, sync, syncLoaded, syncError, libraryPages, onOpenResource }: Props) {
   const [pick, setPick] = useState<Picked | null>(null);
+  // Local edit counts, known once an adaptation has been opened: the diff behind them is a script run per file.
+  const [edits, setEdits] = useState<ReadonlyMap<string, number>>(new Map());
   const pages: LibraryPage[] = docs.pages ?? [];
   const stale = pages.filter(pageStale).length;
   const check = sync && sync.check.ok ? sync.check.result : null;
@@ -110,7 +116,7 @@ export function DocsView({ project, code, docs, sync, syncLoaded, syncError }: P
                         <button type="button" className="ip-lib-open" aria-current={picked === f.template || undefined} title={f.template} onClick={() => setPick({ kind: 'adaptation', template: f.template })}>
                           {row.name}
                         </button>
-                        <span className="ip-lib-path">{row.fills}</span>
+                        <span className="ip-lib-path">{[edits.has(f.template) ? `${edits.get(f.template)} local edit${edits.get(f.template) === 1 ? '' : 's'}` : null, row.fills].filter(Boolean).join(' · ')}</span>
                         <span className="ip-docs-state" data-tone={row.state.tone}>
                           {row.state.text}
                         </span>
@@ -133,8 +139,15 @@ export function DocsView({ project, code, docs, sync, syncLoaded, syncError }: P
           ) : pick.kind === 'page' ? (
             <ResourceViewer key={pick.id} resourceId={pick.id} inline onConfirmed={docs.reload} />
           ) : (
-            // Part B (the side by side, from the sync diff) takes this place.
-            <p className="ip-docs-pick">{`The side by side for ${adaptationName(pick.template)} (${pick.template}) is not built yet.`}</p>
+            <AdaptationView
+              key={pick.template}
+              slug={project.slug}
+              project={project.name}
+              template={pick.template}
+              pages={libraryPages}
+              onOpenResource={onOpenResource}
+              onEdits={(template, n) => setEdits((now) => new Map(now).set(template, n))}
+            />
           )}
         </div>
       </div>

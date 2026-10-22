@@ -17,6 +17,32 @@
 .ip-docs-none a { color: var(--volt); }
 .ip-docs-pane { min-width: 0; display: grid; }
 .ip-docs-pick { margin: 0; padding: var(--sp-4); border: 1px dashed var(--line-soft); font-size: var(--t-body); color: var(--text-muted); }
+/* An adaptation side by side: Shipwright's template at left, the project's copy at right, tagged by what it did there. */
+.ip-adapt { min-width: 0; display: grid; align-content: start; border: 1px solid var(--line); background: var(--canvas-1); }
+.ip-adapt-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--line); }
+.ip-adapt-link { font-family: var(--font-mono); font-size: var(--t-detail-sm); letter-spacing: 0.04em; text-transform: uppercase; color: var(--text); padding: var(--sp-1) var(--sp-2); border: 1px solid var(--line-strong); text-decoration: none; }
+.ip-adapt-link:hover, .ip-adapt-link:focus-visible { border-color: var(--volt); color: var(--volt); }
+.ip-adapt-strip { display: grid; gap: var(--sp-1); padding: var(--sp-2) var(--sp-4); border-bottom: 1px solid var(--line); font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-muted); }
+.ip-adapt-body { min-width: 0; padding: var(--sp-4); overflow-x: auto; }
+.ip-adapt-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: var(--t-detail-sm); }
+.ip-adapt-table th, .ip-adapt-table td { padding: var(--sp-3); border: 1px solid var(--line-soft); vertical-align: top; text-align: left; overflow-wrap: anywhere; }
+.ip-adapt-table thead th { font-family: var(--font-mono); font-weight: var(--w-body); letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-dim); background: var(--canvas-2); }
+.ip-adapt-table thead th:nth-child(1) { width: 18%; }
+.ip-adapt-table thead th:nth-child(2) { color: var(--behind); }
+.ip-adapt-table thead th:nth-child(3) { color: var(--violet); }
+.ip-adapt-table tbody th { font-weight: var(--w-strong); color: var(--text-hi); }
+.ip-adapt-table tbody th[data-continued] { font-weight: var(--w-body); color: var(--text-muted); }
+.ip-adapt-table td > :first-child { margin-top: 0; }
+.ip-adapt-table td :is(p, ul, ol) { margin: 0 0 var(--sp-2); }
+.ip-adapt-table td:nth-child(2) code { color: var(--violet); border: 1px solid var(--violet); padding: 0 var(--sp-1); }
+.ip-adapt-tag { display: inline-block; margin-bottom: var(--sp-2); padding: 0 var(--sp-1); border: 1px solid var(--line-strong); font-family: var(--font-mono); font-size: var(--t-micro); letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
+tr[data-tag="rewritten"] .ip-adapt-tag { border-color: var(--violet); color: var(--violet); }
+tr[data-tag="added"] .ip-adapt-tag { border-color: var(--volt); color: var(--volt); }
+tr[data-tag="removed"] td:nth-child(3) { color: var(--alarm); }
+.ip-adapt-conflict { margin: var(--sp-2) 0 0; padding: var(--sp-2); border: 1px solid var(--behind); font-family: var(--font-mono); color: var(--behind); }
+.ip-adapt-fold td { padding: 0; }
+.ip-adapt-fold button { width: 100%; padding: var(--sp-2) var(--sp-3); border: 0; background: transparent; text-align: left; font: inherit; color: var(--text-muted); cursor: pointer; }
+.ip-adapt-fold button:hover, .ip-adapt-fold button:focus-visible { color: var(--text); background: var(--volt-wash); }
 @container (min-width: 900px) {
   .ip-docs-page { padding: var(--sp-6); }
   .ip-docs-cols { grid-template-columns: minmax(280px, 2fr) minmax(0, 5fr); }

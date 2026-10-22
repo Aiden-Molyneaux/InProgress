@@ -1,7 +1,7 @@
 import type { BackUpNowResult, BackupStatus } from '../../src/core/backups';
 import type { BuildInfo } from '../../src/core/build';
 import type { StepHit } from '../../src/core/goto';
-import type { Binding, DeletedProject, LibraryPage, LibraryPages, LibrarySync, NodeDetail, NodeLabel, PageBody, Project, ProjectSnapshot, ProjectSummary, QueueOp, RankOp, Resource, SyncDiff } from '../../src/core/types';
+import type { Binding, DeletedProject, LibraryPage, LibraryPages, LibrarySync, NodeDetail, NodeLabel, PageBody, Project, ProjectSnapshot, ProjectSummary, QueueOp, RankOp, Resource, SyncAdaptation, SyncDiff } from '../../src/core/types';
 import type { ActionTarget, ProjectAction } from './projectActions';
 
 async function getJson<T>(path: string): Promise<T> {
@@ -66,6 +66,12 @@ export const api = {
   /** One adopted template's adaptation and upstream change. Never rejects: a failure is { ok: false, error }. */
   syncDiff: async (slug: string, template: string): Promise<SyncDiff> => {
     const answer = await sendUi<SyncDiff>('/api/ui/library/sync/diff', { slug, template });
+    if (answer === 'reload') return { ok: false, error: "The window's key is out of date. Reload the page." };
+    return typeof answer === 'string' ? { ok: false, error: answer } : answer;
+  },
+  /** One adopted template side by side with the project's copy, for its Docs view. Never rejects: a failure is { ok: false, error }. */
+  syncAdaptation: async (slug: string, template: string): Promise<SyncAdaptation> => {
+    const answer = await sendUi<SyncAdaptation>('/api/ui/library/sync/adaptation', { slug, template });
     if (answer === 'reload') return { ok: false, error: "The window's key is out of date. Reload the page." };
     return typeof answer === 'string' ? { ok: false, error: answer } : answer;
   },
