@@ -475,6 +475,24 @@ describe('orchestrate', () => {
     expect(lines.slice(at, at + 4)).toEqual(['Next:', `  #${step.id} Build tabs: ready`, `  #${other.id} Write guide: not ready`, `  #${third.id} Third: ready`]);
   });
 
+  it("prints a Next step's What and Why under its line, and only the ones written (#536)", () => {
+    const { ctx, project, step, other, join } = setup();
+    join('s1');
+    setQueue(ctx, 'scribe:s1', project.slug, [step.id, other.id], 'unowned');
+    updateNode(ctx, 'test', step.id, { what: 'Tabs across the top', why: 'Aiden switches views all day' });
+    updateNode(ctx, 'test', other.id, { why: 'Nobody can find the setup steps' });
+    const lines = orchestrate(ctx, 'session:s1', 's1', { status: true }).opening.split('\n');
+    const at = lines.indexOf('Next:');
+    expect(lines.slice(at, at + 6)).toEqual([
+      'Next:',
+      `  #${step.id} Build tabs: ready`,
+      '    What: Tabs across the top',
+      '    Why: Aiden switches views all day',
+      `  #${other.id} Write guide: ready`,
+      '    Why: Nobody can find the setup steps',
+    ]);
+  });
+
   it('refuses a session that is not tracked', () => {
     const { ctx } = setup();
     expect(() => orchestrate(ctx, 'session:ghost', 'ghost', { status: false })).toThrow(/is not tracked/);

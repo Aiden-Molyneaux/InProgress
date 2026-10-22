@@ -61,7 +61,7 @@ describe('boardFigures', () => {
   const T = '2026-10-13T11:00:00.000Z';
   const NOW = Date.parse('2026-10-13T12:00:00.000Z');
   const node = (id: number, parentId: number | null): TreeNode => ({
-    id, projectId: 1, parentId, position: id, kind: 'task', title: `S${id}`, body: '', status: 'todo', assignee: 'claude', outcome: '', label: null,
+    id, projectId: 1, parentId, position: id, kind: 'task', title: `S${id}`, body: '', status: 'todo', assignee: 'claude', outcome: '', label: null, what: '', why: '', origin: 'asked',
     createdAt: T, updatedAt: T, completedAt: null, driverSessionId: null, boardState: null, stateSince: null, hue: null, parkedReason: '', parkedWhere: '', parkedAt: null, rankBand: null, rank: null,
   });
   const ask = (nodeId: number): Ask => ({ id: nodeId, projectId: 1, nodeId, kind: 'question', text: 'Q', sessionId: null, raisedAt: T, clearedAt: null, clearedBy: null, answer: '', answerDeliveredAt: null });

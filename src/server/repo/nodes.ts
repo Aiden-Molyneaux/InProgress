@@ -1,5 +1,5 @@
 import type { TaskState } from '../../core/taskState';
-import type { After, Assignee, NodeInput, NodeKind, NodeLabel, NodeStatus, Project, RankBand, RankOp, TreeNode } from '../../core/types';
+import type { After, Assignee, NodeInput, NodeKind, NodeLabel, NodeStatus, Origin, Project, RankBand, RankOp, TreeNode } from '../../core/types';
 import { write, type Ctx, type RecordEvent } from '../db/tx';
 import { badRequest, conflict, notFound } from '../errors';
 import { definedOnly } from '../util';
@@ -21,6 +21,9 @@ interface NodeRow {
   assignee: Assignee;
   outcome: string;
   label: NodeLabel | null;
+  what: string;
+  why: string;
+  origin: Origin;
   created_at: string;
   updated_at: string;
   completed_at: string | null;
@@ -47,6 +50,9 @@ export const toNode = (r: NodeRow): TreeNode => ({
   assignee: r.assignee,
   outcome: r.outcome,
   label: r.label,
+  what: r.what,
+  why: r.why,
+  origin: r.origin,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
   completedAt: r.completed_at,
@@ -137,18 +143,24 @@ export function addNodes(
     const positions = insertPositions(siblings(ctx, parent.id), input.after ?? 'end', input.nodes.length);
     const ts = ctx.now();
     const insert = ctx.db.prepare(
-      'INSERT INTO nodes (project_id, parent_id, position, kind, title, body, status, assignee, outcome, label, created_at, updated_at, completed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      'INSERT INTO nodes (project_id, parent_id, position, kind, title, body, status, assignee, outcome, label, what, why, origin, created_at, updated_at, completed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
     );
     const ids: number[] = [];
-    const add = (n: NodeInput, parentId: number, position: number) => {
+    // Whose idea each step was: a window add is always Aiden's own; a session's takes its input's origin, else its parent
+    // input's, else asked. add_nodes cannot send me, so a session cannot dodge the no_why mark.
+    const add = (n: NodeInput, parentId: number, position: number, inherited?: Origin) => {
       const title = n.title.trim();
       if (!title) throw badRequest('A node title is empty');
       const status = n.status ?? 'todo';
       if (status === 'parked') throw badRequest('A new step cannot start parked', 'Add it, then park it with update_node: status "parked" and a parked_reason.');
-      const info = insert.run(parent.projectId, parentId, position, n.kind ?? 'task', title, n.body ?? '', status, n.assignee ?? 'claude', n.outcome ?? '', n.label ?? null, ts, ts, status === 'done' ? ts : null);
+      const origin: Origin = actor === 'window' ? 'me' : (n.origin ?? inherited ?? 'asked');
+      const info = insert.run(
+        parent.projectId, parentId, position, n.kind ?? 'task', title, n.body ?? '', status, n.assignee ?? 'claude', n.outcome ?? '', n.label ?? null,
+        (n.what ?? '').trim(), (n.why ?? '').trim(), origin, ts, ts, status === 'done' ? ts : null,
+      );
       const id = Number(info.lastInsertRowid);
       ids.push(id);
-      (n.children ?? []).forEach((child, i) => add(child, id, i + 1));
+      (n.children ?? []).forEach((child, i) => add(child, id, i + 1, origin));
     };
     const top = input.nodes.map((n, i) => {
       const at = ids.length;
@@ -183,6 +195,11 @@ export interface NodePatch {
   parkedReason?: string;
   /** Where its work lives (a branch, worktree or commit); only with `parked`. */
   parkedWhere?: string;
+  /** Trimmed; '' clears it. */
+  what?: string;
+  /** Trimmed; '' clears it. */
+  why?: string;
+  origin?: Origin;
 }
 
 /**
@@ -234,6 +251,8 @@ export function patchNode(ctx: Ctx, record: RecordEvent, before: TreeNode, patch
     throw badRequest(`#${id} is the project root; its title and body mirror the project`, 'Rename or re-describe it with update_project.');
   }
   if (changes.title !== undefined) changes.title = changes.title.trim();
+  if (changes.what !== undefined) changes.what = changes.what.trim();
+  if (changes.why !== undefined) changes.why = changes.why.trim();
   const next = { ...before, ...changes };
   if (!next.title) throw badRequest('title is empty');
   if (before.parentId === null && next.kind !== 'goal') throw badRequest(`#${id} is the project root; its kind stays "goal"`);
@@ -268,9 +287,9 @@ export function patchNode(ctx: Ctx, record: RecordEvent, before: TreeNode, patch
   if (parking) dropFromQueue(ctx, record, before.projectId, subtreeIds(ctx, id), 'park');
   ctx.db
     .prepare(
-      'UPDATE nodes SET title = ?, kind = ?, status = ?, assignee = ?, body = ?, outcome = ?, label = ?, updated_at = ?, completed_at = ?, driver_session_id = ?, parked_reason = ?, parked_where = ?, parked_at = ?, rank_band = ?, rank = ? WHERE id = ?',
+      'UPDATE nodes SET title = ?, kind = ?, status = ?, assignee = ?, body = ?, outcome = ?, label = ?, what = ?, why = ?, origin = ?, updated_at = ?, completed_at = ?, driver_session_id = ?, parked_reason = ?, parked_where = ?, parked_at = ?, rank_band = ?, rank = ? WHERE id = ?',
     )
-    .run(next.title, next.kind, next.status, next.assignee, next.body, next.outcome, next.label, ts, completedAt, driver, next.parkedReason, next.parkedWhere, next.parkedAt, next.rankBand, next.rank, id);
+    .run(next.title, next.kind, next.status, next.assignee, next.body, next.outcome, next.label, next.what, next.why, next.origin, ts, completedAt, driver, next.parkedReason, next.parkedWhere, next.parkedAt, next.rankBand, next.rank, id);
   // Before node.updated, which stays the project's newest event. Every path to done comes through here.
   if (next.status === 'done' && before.status !== 'done') closeNodeTasks(ctx, record, before.projectId, id);
   const diff: Record<string, { from: unknown; to: unknown }> = {};

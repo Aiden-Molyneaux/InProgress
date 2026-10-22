@@ -19,6 +19,8 @@ Changes:
 - #57 → done; outcome "Play app signing configured"
 - add under #55 after #57: "Run signing tests" (task, assignee me); body: run on a device build, report failures
 - add under #55: "Fix the upload-key check" (task, fix)
+- add under #55: "Retry failed uploads" (task, fix, proposed); what: retry an upload that fails on a network error, up to three times; why: a flaky network should not cost Aiden a release
+- #56 what: check the upload key before the build starts; why: a bad key now fails after a 20-minute build
 - ask on #55: question, Which store regions at launch?
 - a7 answered: EU and UK first
 - #56 label → fix

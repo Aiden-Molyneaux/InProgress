@@ -319,6 +319,7 @@ describe('briefing: live work', () => {
     const rules = updateRules({ home: 'C:/Users/me/.inprogress', sessionId: 's1' }).join('\n');
     expect(rules).toContain('"queue: #a, #b" is yours, "later: #c, #d" unowned');
     expect(rules).toContain('a request with a deliverable arrives (a new step with one label:');
+    expect(rules).toContain(`, a What and a Why; "proposed" when the step is your own follow-up, not Aiden's ask);`);
     expect(rules).toContain("Start an Agent description with its step's #id.");
     expect(rules).toContain("TaskCreate/TaskUpdate mirror on their own (start a task's subject with #id when its step is not your focus); else,");
   });
@@ -414,7 +415,7 @@ describe('briefing: type labels', () => {
   it('names the labels as words, once, inside the checkpoint bullet, with no glyph list', () => {
     const rules = updateRules({ home: 'C:/Users/me/.inprogress', sessionId: 's1' });
     const text = rules.join('\n');
-    expect(rules.find((l) => l.startsWith('- Brief when:'))).toContain(`(a new step with one label: ${NODE_LABELS.join(', ')})`);
+    expect(rules.find((l) => l.startsWith('- Brief when:'))).toContain(`(a new step with one label: ${NODE_LABELS.join(', ')}, a What and a Why;`);
     expect(text.split(NODE_LABELS.join(', '))).toHaveLength(2);
     for (const glyph of Object.values(LABEL_GLYPHS)) expect(text, glyph).not.toContain(glyph);
   });
@@ -424,12 +425,13 @@ describe('briefing: the rules block', () => {
   /** Real-length values: a Claude Code session id (a UUID), the deployed CLI and Aiden's data dir. */
   const real = { home: 'C:/Users/aiden.molyneaux/.inprogress', sessionId: '0f8c2a4e-5b7d-4c1e-9a3f-6d2b8e1c7a90', cli: 'C:/personal/InProgress/dist/cli/main.js' };
 
-  it('fits in 1,800 characters with real-length values and the tasks command written out in full', () => {
+  it('fits in 1,900 characters with real-length values and the tasks command written out in full', () => {
     expect(real.sessionId).toHaveLength(36);
     const text = updateRules(real).join('\n');
     // Was 1,600 before the ask clause (spec 3.4) replaced "something goes to Aiden (assignee me)" with its longer wording,
-    // and 1,750 before the rule that a step is named to Aiden with its title (#440).
-    expect(text.length).toBeLessThanOrEqual(1800);
+    // 1,750 before the rule that a step is named to Aiden with its title (#440), and 1,800 before a new step's What, Why
+    // and "proposed" (#536).
+    expect(text.length).toBeLessThanOrEqual(1900);
     expect(text).toContain(`\`node C:/personal/InProgress/dist/cli/main.js tasks <step id> --session ${real.sessionId} --done "…" --doing "…" --todo "…"\``);
   });
 
@@ -445,6 +447,7 @@ describe('briefing: the rules block', () => {
       'Never edit the tree another way, except tasks below.',
       // The checkpoints, with the labels and both orders (later: is Aiden's §8 clause).
       'a request with a deliverable arrives (a new step with one label:',
+      `a What and a Why; "proposed" when the step is your own follow-up, not Aiden's ask)`,
       'the plan or an order changes ("queue: #a, #b" is yours, "later: #c, #d" unowned)',
       'a step starts ("focus → #id"), finishes ("#id → done; outcome …") or blocks',
       'Aiden must answer, allow or look at something ("ask on #id: <question|permission|review>, <text>"; "assignee me" only for a step Aiden does himself) or he answers ("a7 answered: <answer>")',

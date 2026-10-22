@@ -2,7 +2,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import {
-  ASK_KINDS, ASSIGNEES, BRIEFING_MODES, NODE_KINDS, NODE_LABELS, NODE_STATUSES, RESOURCE_KINDS, RESOURCE_PURPOSES, TITLE_CHANNELS, askTag, glyphTitle, unknownLabel,
+  ASK_KINDS, ASSIGNEES, BRIEFING_MODES, NODE_KINDS, NODE_LABELS, NODE_STATUSES, ORIGINS, RESOURCE_KINDS, RESOURCE_PURPOSES, TITLE_CHANNELS, WHAT_WHY_MAX, askTag, glyphTitle, unknownLabel,
   type Ask, type Binding, type LogEntry, type NodeDetail, type NodeInput, type Project, type ProjectSnapshot, type ProjectSummary, type Resource, type SearchResult, type TreeNode,
 } from '../core/types';
 import { ApiClientError, type Client } from '../lib/client';
@@ -29,6 +29,8 @@ const label = z
   .describe('What kind of work the step is: only the label the brief gives, never an invented one. null leaves it unlabelled');
 /** The one line the node tools' descriptions spend on labels. */
 const LABELS = `Labels: ${NODE_LABELS.join(', ')}.`;
+const what = z.string().max(WHAT_WHY_MAX).describe('What this step implements, one or two sentences written for Aiden');
+const why = z.string().max(WHAT_WHY_MAX).describe('Why it is worth doing, for Aiden');
 const nodeInputSchema: z.ZodType<NodeInput> = z.lazy(() =>
   z.object({
     title: z.string().min(1).max(200),
@@ -38,6 +40,9 @@ const nodeInputSchema: z.ZodType<NodeInput> = z.lazy(() =>
     body: z.string().optional(),
     outcome: z.string().optional(),
     label: label.optional(),
+    what: what.optional(),
+    why: why.optional(),
+    origin: z.enum(['asked', 'proposed']).optional().describe('asked: work Aiden asked for (the default). proposed: a follow-up the session filed of its own'),
     children: z.array(nodeInputSchema).optional(),
   }),
 );
@@ -139,16 +144,18 @@ export function createMcpServer(client: Client, o: McpOptions = {}): McpServer {
       return `Removed binding ${a.binding_id}.`;
     });
 
-  tool('add_nodes', `Add one node or a whole nested plan under a parent #id. Defaults: kind task, status todo, assignee claude, no label. Use assignee "me" for anything Aiden must do. ${LABELS}`,
+  tool('add_nodes', `Add one node or a whole nested plan under a parent #id. Defaults: kind task, status todo, assignee claude, no label. Use assignee "me" for anything Aiden must do. Give every new step a what and a why. ${LABELS}`,
     { parent: id, nodes: z.array(nodeInputSchema).min(1), after, session },
     async (a: { parent: number; nodes: NodeInput[]; after?: number | 'start' | 'end'; session?: string }) =>
       formatCreated(await client.post<TreeNode[]>('/api/nodes', { parentId: a.parent, after: a.after, nodes: a.nodes }, { actor: actor(a.session) })));
 
-  tool('update_node', `Change a node's title, kind, status, assignee, body, outcome or label (null clears it). Set outcome when something finishes. Status "parked" needs parked_reason (why it is set aside) and takes an optional parked_where (branch, worktree or commit). ${LABELS}`,
+  tool('update_node', `Change a node's title, kind, status, assignee, body, outcome, label (null clears it), what, why or origin. Set outcome when something finishes. Set what and why on any step, older ones included. Status "parked" needs parked_reason (why it is set aside) and takes an optional parked_where (branch, worktree or commit). ${LABELS}`,
     {
       id, title: z.string().optional(), kind: z.enum(NODE_KINDS).optional(), status: z.enum(NODE_STATUSES).optional(), assignee: assignee.optional(), body: z.string().optional(), outcome: z.string().optional(), label: label.optional(),
       parked_reason: z.string().max(2_000).optional().describe('Why the step is set aside: required with status "parked"'),
       parked_where: z.string().max(500).optional().describe('Where the parked work lives: a branch, worktree or commit'),
+      what: what.optional(), why: why.optional(),
+      origin: z.enum(ORIGINS).optional().describe("me: Aiden's own idea. asked: work he asked for. proposed: a follow-up a session filed of its own"),
       session,
     },
     async ({ id: nodeId, session: s, parked_reason: parkedReason, parked_where: parkedWhere, ...rest }: { id: number; session?: string; parked_reason?: string; parked_where?: string } & Record<string, unknown>) => {

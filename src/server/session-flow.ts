@@ -590,7 +590,9 @@ export function orchestrate(ctx: Ctx, actor: string, sessionId: string, o: { sta
     const byYou = new Set(digest.marked.filter((m) => m.byYou).map((m) => m.id));
     // A no_outcome line on a step Aiden closed from the window ends " (you)", so Mip leaves it empty rather than asks him.
     if (board.marked.length) lines.push('Reconcile:', ...board.marked.flatMap((r) => r.marks.map((m) => `  ${reconcileLine(r, m, nowMs)}${m === 'no_outcome' && byYou.has(r.node.id) ? ' (you)' : ''}`)));
-    if (board.next.length) lines.push('Next:', ...board.next.slice(0, 3).map((r) => `  ${stepRef(r.node.id, r.node.title)}: ${r.ready ? 'ready' : 'not ready'}`));
+    // Each step's What and Why, when written, under its line, so Mip quotes them when he recommends it (#536).
+    const whatWhy = (n: (typeof board.next)[number]['node']) => [n.what && `    What: ${clipLine(n.what, 160)}`, n.why && `    Why: ${clipLine(n.why, 160)}`].filter((l): l is string => !!l);
+    if (board.next.length) lines.push('Next:', ...board.next.slice(0, 3).flatMap((r) => [`  ${stepRef(r.node.id, r.node.title)}: ${r.ready ? 'ready' : 'not ready'}`, ...whatWhy(r.node)]));
   }
   return { session, opening: lines.join('\n') };
 }
