@@ -28,6 +28,9 @@ function at17() {
   // A window event of another type naming a step, and one whose data is not JSON: neither makes a step Aiden's own.
   event.run(T, 'window', 'node.updated', '8', JSON.stringify({ ids: [8] }));
   event.run(T, 'window', 'node.created', '8', 'not json');
+  // ids that are not an array of integers (a scalar, strings) are not read either, as the digest reads them.
+  event.run(T, 'window', 'node.created', '8', JSON.stringify({ ids: 8 }));
+  event.run(T, 'window', 'node.created', '8', JSON.stringify({ ids: ['8'] }));
   migrate(db);
   return db;
 }

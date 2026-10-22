@@ -29,8 +29,8 @@ const label = z
   .describe('What kind of work the step is: only the label the brief gives, never an invented one. null leaves it unlabelled');
 /** The one line the node tools' descriptions spend on labels. */
 const LABELS = `Labels: ${NODE_LABELS.join(', ')}.`;
-const what = z.string().max(WHAT_WHY_MAX).describe('What this step implements, one or two sentences written for Aiden');
-const why = z.string().max(WHAT_WHY_MAX).describe('Why it is worth doing, for Aiden');
+const what = z.string().max(WHAT_WHY_MAX).describe('What this step implements, one or two sentences written for Aiden: only the what the brief gives, never an invented one; leave it out otherwise');
+const why = z.string().max(WHAT_WHY_MAX).describe('Why it is worth doing, for Aiden: only the why the brief gives, never an invented one; leave it out otherwise');
 const nodeInputSchema: z.ZodType<NodeInput> = z.lazy(() =>
   z.object({
     title: z.string().min(1).max(200),
@@ -144,7 +144,7 @@ export function createMcpServer(client: Client, o: McpOptions = {}): McpServer {
       return `Removed binding ${a.binding_id}.`;
     });
 
-  tool('add_nodes', `Add one node or a whole nested plan under a parent #id. Defaults: kind task, status todo, assignee claude, no label. Use assignee "me" for anything Aiden must do. Give every new step a what and a why. ${LABELS}`,
+  tool('add_nodes', `Add one node or a whole nested plan under a parent #id. Defaults: kind task, status todo, assignee claude, no label. Use assignee "me" for anything Aiden must do. Pass the brief's what and why on every new step. ${LABELS}`,
     { parent: id, nodes: z.array(nodeInputSchema).min(1), after, session },
     async (a: { parent: number; nodes: NodeInput[]; after?: number | 'start' | 'end'; session?: string }) =>
       formatCreated(await client.post<TreeNode[]>('/api/nodes', { parentId: a.parent, after: a.after, nodes: a.nodes }, { actor: actor(a.session) })));

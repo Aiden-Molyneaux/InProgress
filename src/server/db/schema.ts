@@ -367,7 +367,9 @@ export const MIGRATIONS: string[] = [
   UPDATE nodes SET origin = 'me' WHERE id IN (
     SELECT CAST(j.value AS INTEGER)
     FROM events e, json_each(CASE WHEN json_valid(e.data) THEN e.data ELSE '{}' END, '$.ids') j
-    WHERE e.type = 'node.created' AND e.actor = 'window'
+    WHERE e.type = 'node.created' AND e.actor = 'window' AND j.type = 'integer'
+      -- Array elements only, as the digest reads ids: json_each on a scalar ids yields the scalar itself, keyed NULL.
+      AND typeof(j.key) = 'integer'
   );
   -- Defaulted columns: v1 to v17 builds can still read and write this schema, so a rollback across it works.
   INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;

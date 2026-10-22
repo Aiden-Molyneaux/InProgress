@@ -208,7 +208,7 @@ describe('scribe MCP tools', () => {
       `#${older} Older step (task, me) · todo, Claude`, `Parent: #${rootId} What why`, 'What: Fills a gap.', 'Why: It was asked for.', 'Body:', 'Kept',
     ]);
     const { tools } = await mcp.listTools();
-    expect(tools.find((t) => t.name === 'add_nodes')!.description).toContain('Give every new step a what and a why.');
+    expect(tools.find((t) => t.name === 'add_nodes')!.description).toContain("Pass the brief's what and why on every new step.");
     expect(tools.find((t) => t.name === 'update_node')!.description).toContain('Set what and why on any step, older ones included.');
   });
 

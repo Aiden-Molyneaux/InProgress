@@ -124,9 +124,12 @@ describe('nodes', () => {
     const { ctx, root } = setup();
     const [n] = addNodes(ctx, 'scribe:s1', { parentId: root, nodes: [{ title: 'Older', body: 'Kept', label: 'ui', status: 'active' }] });
     const after = updateNode(ctx, 'scribe:s1', n.id, { what: ' Fills a gap. ', why: 'Asked for.', origin: 'me' });
-    expect(after).toMatchObject({ what: 'Fills a gap.', why: 'Asked for.', origin: 'me', title: 'Older', body: 'Kept', label: 'ui', status: 'active' });
+    // Notes for Aiden are not progress: updatedAt (the Stale view's clock) stays where it was.
+    expect(after).toMatchObject({ what: 'Fills a gap.', why: 'Asked for.', origin: 'me', title: 'Older', body: 'Kept', label: 'ui', status: 'active', updatedAt: n.updatedAt });
     const ev = ctx.db.prepare("SELECT data FROM events WHERE type = 'node.updated' ORDER BY id DESC LIMIT 1").get() as { data: string };
     expect(JSON.parse(ev.data).changes).toEqual({ what: { from: '', to: 'Fills a gap.' }, why: { from: '', to: 'Asked for.' }, origin: { from: 'asked', to: 'me' } });
+    // Any other field with them is progress, and moves it.
+    expect(updateNode(ctx, 'scribe:s1', n.id, { why: 'Changed.', status: 'todo' }).updatedAt > n.updatedAt).toBe(true);
   });
 
   it('refuses title and body edits on the root, which mirror the project', () => {

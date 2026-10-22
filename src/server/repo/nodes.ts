@@ -242,7 +242,9 @@ export function finishNode(ctx: Ctx, actor: string, id: number, outcome: string 
 /**
  * updateNode's work, inside a write() already open (write() never nests): applies `patch` to `before`, as read in this
  * write, and records node.updated with the changed fields. setFocus uses it to make a focused step active in its own
- * write. A patch moves `updatedAt`, which the needs-you age counts from; logs, resources and work items never do.
+ * write. A patch moves `updatedAt`, which the needs-you age counts from; logs, resources and work items never do, and
+ * neither does a patch of only What, Why or origin: notes for Aiden are not progress, and the #569 sweep writes them on
+ * old steps without making them look touched today (the Backlog's Stale view counts from `updatedAt`).
  */
 export function patchNode(ctx: Ctx, record: RecordEvent, before: TreeNode, patch: NodePatch): TreeNode {
   const id = before.id;
@@ -272,6 +274,8 @@ export function patchNode(ctx: Ctx, record: RecordEvent, before: TreeNode, patch
     next.parkedWhere = '';
   }
   const ts = ctx.now();
+  const notesOnly = Object.keys(changes).length > 0 && Object.keys(changes).every((k) => k === 'what' || k === 'why' || k === 'origin');
+  const updatedAt = notesOnly ? before.updatedAt : ts;
   next.parkedAt = next.status !== 'parked' ? null : parking ? ts : before.parkedAt;
   const completedAt = next.status === 'done' ? (before.status === 'done' ? before.completedAt : ts) : null;
   // A done, dropped or parked step has no driver (spec 1.1), cleared in the same UPDATE.
@@ -289,7 +293,7 @@ export function patchNode(ctx: Ctx, record: RecordEvent, before: TreeNode, patch
     .prepare(
       'UPDATE nodes SET title = ?, kind = ?, status = ?, assignee = ?, body = ?, outcome = ?, label = ?, what = ?, why = ?, origin = ?, updated_at = ?, completed_at = ?, driver_session_id = ?, parked_reason = ?, parked_where = ?, parked_at = ?, rank_band = ?, rank = ? WHERE id = ?',
     )
-    .run(next.title, next.kind, next.status, next.assignee, next.body, next.outcome, next.label, next.what, next.why, next.origin, ts, completedAt, driver, next.parkedReason, next.parkedWhere, next.parkedAt, next.rankBand, next.rank, id);
+    .run(next.title, next.kind, next.status, next.assignee, next.body, next.outcome, next.label, next.what, next.why, next.origin, updatedAt, completedAt, driver, next.parkedReason, next.parkedWhere, next.parkedAt, next.rankBand, next.rank, id);
   // Before node.updated, which stays the project's newest event. Every path to done comes through here.
   if (next.status === 'done' && before.status !== 'done') closeNodeTasks(ctx, record, before.projectId, id);
   const diff: Record<string, { from: unknown; to: unknown }> = {};
