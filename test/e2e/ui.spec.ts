@@ -3682,7 +3682,7 @@ test.describe('Module rail', () => {
     const base = (await code(first).textContent())!;
     await expect(code(second)).toHaveText(`${base.slice(0, 2)}2`);
     await expect(railRow(page, first).locator('.ip-rail-name')).toBeHidden();
-    await expect(projectRail(page).locator('.ip-rail-vcode')).toHaveText(['BRD', 'PRJ', 'BKL', 'DON']);
+    await expect(projectRail(page).locator('.ip-rail-vcode')).toHaveText(['BRD', 'PRJ', 'BKL', 'DON', 'DOC']);
     await expect(viewButton(page, 'Backlog')).toBeVisible();
     // Under 720: one row of full names, and the views a group named Views above the page.
     await page.setViewportSize({ width: 400, height: 900 });

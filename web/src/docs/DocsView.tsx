@@ -11,7 +11,7 @@ import { adaptationName, adaptationRow } from './adaptations';
 import type { ProjectDocs } from './useProjectDocs';
 
 /** What the index has picked: a page (a resource id) or an adaptation (a template path). */
-type Pick = { kind: 'page'; id: number } | { kind: 'adaptation'; template: string };
+type Picked = { kind: 'page'; id: number } | { kind: 'adaptation'; template: string };
 
 interface Props {
   project: { id: number; name: string };
@@ -30,7 +30,7 @@ interface Props {
  * pick on the right. The pick is the view's own state: the window mounts it per project, so a switch starts with none.
  */
 export function DocsView({ project, code, docs, sync, syncLoaded, syncError }: Props) {
-  const [pick, setPick] = useState<Pick | null>(null);
+  const [pick, setPick] = useState<Picked | null>(null);
   const pages: LibraryPage[] = docs.pages ?? [];
   const stale = pages.filter(pageStale).length;
   const check = sync && sync.check.ok ? sync.check.result : null;
@@ -62,7 +62,7 @@ export function DocsView({ project, code, docs, sync, syncLoaded, syncError }: P
             {pages.length > 0 && docs.root && (
               <>
                 <span className="ip-page-sep"> · </span>
-                <span>{`READ LIVE FROM ${docs.root.toUpperCase()}`}</span>
+                <span>READ LIVE FROM <span className="ip-docs-root">{docs.root}</span></span>
               </>
             )}
           </p>
@@ -93,6 +93,8 @@ export function DocsView({ project, code, docs, sync, syncLoaded, syncError }: P
               <Eyebrow as="h2">Adaptations</Eyebrow>
               <span className="ip-docs-note">from its manifest</span>
             </div>
+            {/* A later check that failed keeps the last rows: they show under its error. */}
+            {syncLoaded && syncError && <ErrorLine message={syncError} />}
             {!syncLoaded ? (
               syncError ? <ErrorLine message={syncError} /> : <EmptyState>Checking…</EmptyState>
             ) : sync && !sync.check.ok ? (
@@ -129,7 +131,7 @@ export function DocsView({ project, code, docs, sync, syncLoaded, syncError }: P
           {pick === null ? (
             <p className="ip-docs-pick">Pick a page or an adaptation.</p>
           ) : pick.kind === 'page' ? (
-            <ResourceViewer key={pick.id} resourceId={pick.id} inline />
+            <ResourceViewer key={pick.id} resourceId={pick.id} inline onConfirmed={docs.reload} />
           ) : (
             // Part B (the side by side, from the sync diff) takes this place.
             <p className="ip-docs-pick">{`The side by side for ${adaptationName(pick.template)} (${pick.template}) is not built yet.`}</p>
