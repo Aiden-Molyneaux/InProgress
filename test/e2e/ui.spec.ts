@@ -212,6 +212,20 @@ async function showsStep(details: Locator, id: number, title: string): Promise<v
 /** A resource's row in Details, by its title. */
 const resourceRow = (page: Page, title: string) => page.locator('.ip-res', { hasText: title });
 
+test("the window's icon is InThink's green mark, and it loads under the page's CSP", async ({ page, demo }) => {
+  await open(page, demo);
+  const href = await page.locator('link[rel="icon"]').getAttribute('href');
+  expect(decodeURIComponent(href ?? '')).toContain("fill='#c2fe0b'");
+  // Edge's app window takes its taskbar icon from this favicon, so it has to render, not only be declared.
+  // Drawn at 32 px, the diamond's centre is green: the mark draws, not only parses.
+  const centre = await page.evaluate<number[]>(
+    `new Promise((resolve) => { const img = new Image(); img.onerror = () => resolve([]); img.onload = () => {
+      const c = document.createElement('canvas'); c.width = c.height = 32; const g = c.getContext('2d'); g.drawImage(img, 0, 0, 32, 32);
+      resolve(Array.from(g.getImageData(16, 16, 1, 1).data)); }; img.src = ${JSON.stringify(href ?? '')}; })`,
+  );
+  expect(centre).toEqual([0xc2, 0xfe, 0x0b, 255]);
+});
+
 test('the view switch is remembered', async ({ page, demo }) => {
   await open(page, demo);
   const board = viewButton(page, 'Board');
