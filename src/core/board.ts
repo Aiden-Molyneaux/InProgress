@@ -1,10 +1,10 @@
 import { sessionActivity } from './activity';
 import { clipLine, stepRef } from './step-ref';
 import { ancestors, buildIndex, dfsOrder, kids, shelvedIds } from './tree';
-import { ASK_TRAIL_MS, STALE_SESSION_MS, STALL_MS, TRAIL_MS, sessionDisplayTitle, type Ask, type ProjectSnapshot, type ResourceMeta, type Session, type TreeNode } from './types';
+import { ASK_TRAIL_MS, STALE_SESSION_MS, STALL_MS, TRAIL_MS, WHAT_WHY_SINCE, sessionDisplayTitle, type Ask, type ProjectSnapshot, type ResourceMeta, type Session, type TreeNode } from './types';
 
 export type Column = 'now' | 'next' | 'backlog' | 'done';
-export const MARKS = ['ended_open', 'no_outcome', 'stale_ask', 'done_focus', 'deep', 'stalled', 'answer_waiting', 'answered_in_chat'] as const;
+export const MARKS = ['ended_open', 'no_outcome', 'no_why', 'stale_ask', 'done_focus', 'deep', 'stalled', 'answer_waiting', 'answered_in_chat'] as const;
 export type Mark = (typeof MARKS)[number];
 export type BoardInput = Pick<ProjectSnapshot, 'project' | 'nodes' | 'sessions' | 'pastSessions' | 'resources' | 'asks'>;
 
@@ -182,6 +182,8 @@ export function deriveBoard(input: BoardInput, now: number): Board {
       const handoff = handoffOf.get(node.id);
       if (past && now - Date.parse(past.endedAt) <= TRAIL_MS && !(handoff && handoff.createdAt > past.startedAt)) marks.push('ended_open');
     }
+    // A session-filed open step from the cutoff on owes Aiden a What and a Why (#536). Aiden's own steps never do.
+    if (column !== 'done' && node.origin !== 'me' && node.createdAt >= WHAT_WHY_SINCE && (!node.what.trim() || !node.why.trim())) marks.push('no_why');
     // Any row: a review ask may sit on a done step (spec 1.2).
     if (asks.some((a) => now - Date.parse(a.raisedAt) > ASK_TRAIL_MS)) marks.push('stale_ask');
     if (waiting.length < asks.length) marks.push('answered_in_chat');

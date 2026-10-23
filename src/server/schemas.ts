@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ASK_KINDS, ASSIGNEES, BRIEFING_MODES, COMMAND_KINDS, COMMAND_OUTCOMES, HOOK_EVENTS, NODE_KINDS, NODE_LABELS, NODE_STATUSES, PROJECT_NAME_MAX, RANK_BANDS, RESOURCE_KINDS, RESOURCE_PURPOSES, TITLE_CHANNELS, WORK_STATUSES, unknownLabel, type NodeInput } from '../core/types';
+import { ASK_KINDS, ASSIGNEES, BRIEFING_MODES, COMMAND_KINDS, COMMAND_OUTCOMES, HOOK_EVENTS, NODE_KINDS, NODE_LABELS, NODE_STATUSES, ORIGINS, PROJECT_NAME_MAX, RANK_BANDS, RESOURCE_KINDS, RESOURCE_PURPOSES, TITLE_CHANNELS, WHAT_WHY_MAX, WORK_STATUSES, unknownLabel, type NodeInput } from '../core/types';
 
 const title = z.string().trim().min(1, 'title is empty').max(200);
 /** A step's type label; null leaves it unlabelled (or clears it on a patch). */
@@ -8,6 +8,8 @@ const label = z.enum(NODE_LABELS, { errorMap: (_issue, ctx) => ({ message: unkno
 const parkedReason = z.string().trim().max(2_000).optional();
 /** Where a parked step's work lives: a branch, worktree or commit. */
 const parkedWhere = z.string().trim().max(500).optional();
+/** A step's What or Why: written for Aiden, trimmed, at most WHAT_WHY_MAX characters. */
+const whatWhy = z.string().trim().max(WHAT_WHY_MAX).optional();
 export const after = z.union([z.number().int().positive(), z.literal('start'), z.literal('end')]).optional();
 
 export const nodeInput: z.ZodType<NodeInput> = z.lazy(() =>
@@ -20,6 +22,10 @@ export const nodeInput: z.ZodType<NodeInput> = z.lazy(() =>
       body: z.string().max(20_000).optional(),
       outcome: z.string().max(2_000).optional(),
       label,
+      what: whatWhy,
+      why: whatWhy,
+      // Never me: a session cannot file a step as Aiden's own (a window add is me whatever it sends).
+      origin: z.enum(['asked', 'proposed']).optional(),
       children: z.array(nodeInput).max(200).optional(),
     })
     .strict(),
@@ -48,7 +54,7 @@ export const updateProjectBody = z
 export const bindingBody = z.object({ path: z.string().trim().min(1).max(500), branchPattern: z.string().trim().max(200).nullish() }).strict();
 export const addNodesBody = z.object({ parentId: z.number().int().positive(), after, nodes: z.array(nodeInput).min(1).max(200) }).strict();
 export const updateNodeBody = z
-  .object({ title: title.optional(), kind: z.enum(NODE_KINDS).optional(), status: z.enum(NODE_STATUSES).optional(), assignee: z.enum(ASSIGNEES).optional(), body: z.string().max(20_000).optional(), outcome: z.string().max(2_000).optional(), label, parkedReason, parkedWhere })
+  .object({ title: title.optional(), kind: z.enum(NODE_KINDS).optional(), status: z.enum(NODE_STATUSES).optional(), assignee: z.enum(ASSIGNEES).optional(), body: z.string().max(20_000).optional(), outcome: z.string().max(2_000).optional(), label, parkedReason, parkedWhere, what: whatWhy, why: whatWhy, origin: z.enum(ORIGINS).optional() })
   .strict();
 export const moveNodeBody = z.object({ parentId: z.number().int().positive(), after }).strict();
 export const resourceBody = z

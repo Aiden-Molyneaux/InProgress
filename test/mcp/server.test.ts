@@ -181,10 +181,35 @@ describe('scribe MCP tools', () => {
       `#${chip} ⧉ Glyph chip (task, todo, you) under #${phase}`,
     ]);
     expect((await call('get_outline', { project: 'labels' })).text.split('\n')).toContain(`    #${migration} ⛁ Migration 3 · todo`);
-    expect((await call('get_node', { id: migration })).text.split('\n')[0]).toBe(`#${migration} ⛁ Migration 3 (task, data) · todo, Claude`);
+    expect((await call('get_node', { id: migration })).text.split('\n')[0]).toBe(`#${migration} ⛁ Migration 3 (task, data, asked) · todo, Claude`);
     expect(await call('update_node', { id: migration, label: 'fix', session: 'l1' })).toEqual({ text: `#${migration} ⚑ Migration 3 · todo.`, isError: false });
     expect(await call('update_node', { id: migration, label: null, session: 'l1' })).toEqual({ text: `#${migration} Migration 3 · todo.`, isError: false });
-    expect((await call('get_node', { id: migration })).text.split('\n')[0]).toBe(`#${migration} Migration 3 (task) · todo, Claude`);
+    expect((await call('get_node', { id: migration })).text.split('\n')[0]).toBe(`#${migration} Migration 3 (task, asked) · todo, Claude`);
+  });
+
+  it('sets what, why and origin through add_nodes and update_node, and get_node prints them', async () => {
+    const rootId = ids((await call('create_project', { name: 'What why', description: 'x', session: 'w1' })).text)[0];
+    const [added] = lineIds((await call('add_nodes', {
+      parent: rootId, session: 'w1',
+      nodes: [{ title: 'Export button', label: 'ui', what: 'A button that exports the board.', why: 'Aiden shares it weekly.', origin: 'proposed' }],
+    })).text);
+    expect((await call('get_node', { id: added })).text.split('\n')).toEqual([
+      `#${added} ⧉ Export button (task, ui, proposed) · todo, Claude`,
+      `Parent: #${rootId} What why`,
+      'What: A button that exports the board.',
+      'Why: Aiden shares it weekly.',
+    ]);
+    // add_nodes cannot file a step as Aiden's own; update_node can correct it.
+    expect((await call('add_nodes', { parent: rootId, nodes: [{ title: 'Mine', origin: 'me' }], session: 'w1' })).isError).toBe(true);
+    const [older] = lineIds((await call('add_nodes', { parent: rootId, nodes: [{ title: 'Older step', body: 'Kept' }], session: 'w1' })).text);
+    expect((await call('get_node', { id: older })).text).not.toMatch(/^(What|Why):/m);
+    expect((await call('update_node', { id: older, what: ' Fills a gap. ', why: 'It was asked for.', origin: 'me', session: 'w1' })).isError).toBe(false);
+    expect((await call('get_node', { id: older })).text.split('\n')).toEqual([
+      `#${older} Older step (task, me) · todo, Claude`, `Parent: #${rootId} What why`, 'What: Fills a gap.', 'Why: It was asked for.', 'Body:', 'Kept',
+    ]);
+    const { tools } = await mcp.listTools();
+    expect(tools.find((t) => t.name === 'add_nodes')!.description).toContain("Pass the brief's what and why on every new step.");
+    expect(tools.find((t) => t.name === 'update_node')!.description).toContain('Set what and why on any step, older ones included.');
   });
 
   it('update_node parks with parked_reason and parked_where', async () => {

@@ -45,6 +45,7 @@ Summarize it for Aiden in a few lines. Sessions that the stale-session sweep end
 Work from the marks, `#id Title: mark` (the mark is the word after the title's colon; `stalled` is followed by its facts after another `: `). You cannot read a step's log, so you propose from what you can read: the step's handoff file if it has one, and `git log --oneline -E --grep "#<id>([^0-9]|$)"` in the project's repo.
 
 - `no_outcome`: a done step with an empty outcome. Propose an outcome from the handoff file or the git log, and put it in the batch for Aiden to approve. When nothing there says what was done, ask Aiden. Never make one up from the title. For a step Aiden closed from the window (its mark reads `no_outcome (you)`), propose from the handoff and git log as usual, and when nothing there says what was done leave it empty rather than ask him.
+- `no_why`: an open step a session filed without a What or a Why. Propose both from the step's handoff file and the git log, and put them in the batch for Aiden to approve (`#id what: … why: …`). When nothing there says what the step is for, ask Aiden. Never make them up from the title alone.
 - `done_focus`: a done step that a live session still has focus on. List the session (its title) and the step; do not try to clear the focus. Nothing you read gives that session's full id, and a focus write would keep an idle session live and change its next briefing. The mark goes when that session claims its next step, ends, or goes stale.
 - `ended_open`: a session ended on a step that is not done, within the last 7 days, with no handoff on the step since. The mechanical fix is for a step left `active` with no live session on it: set it back to `todo` (`#id → todo`). Closing the step (marking it done) is never mechanical; it is a question to Aiden. The mark stays until a handoff lands on the step, the step is done, or a session claims it, so mention it once per opening and do not ask again.
 - `stale_ask`: an ask open for more than 7 days. Judgment: whether to drop it or put it to Aiden again is his call.
@@ -58,7 +59,7 @@ Open tasks of ended sessions are listed in the digest. List them to Aiden; do no
 
 ## What's next
 
-Read the top of Next from the `Next:` lines of the `--status` output, or from the queue lines of your briefing. The printed `ready` flag checks open asks only. You also treat a step with a live session on it, or one that is Aiden's own, as not ready. For each of the first few steps say ready or not ready and why; a step with a live driver is not ready. Then recommend one step, with reasons.
+Read the top of Next from the `Next:` lines of the `--status` output, or from the queue lines of your briefing. The printed `ready` flag checks open asks only. You also treat a step with a live session on it, or one that is Aiden's own, as not ready. For each of the first few steps say ready or not ready and why; a step with a live driver is not ready. Then recommend one step, with reasons. When a `Next:` step has a What and a Why (the indented lines under it), quote them as your answer to what it is and why it is worth doing.
 
 ## Start a step
 
