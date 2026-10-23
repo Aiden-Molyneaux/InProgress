@@ -73,7 +73,7 @@ li.ip-orow:hover { background: var(--canvas-3); }
 .ip-done-fold-btn { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; font-family: var(--font-mono); font-size: var(--t-detail-sm); line-height: 1.4; color: var(--text-muted); }
 .ip-done-fold-btn:hover { color: var(--text-hi); }
 .ip-sec-foot { padding: var(--sp-1) var(--sp-4) var(--sp-1) calc(var(--sp-4) + 28px); }
-.ip-sec-foot .ip-quick-add { margin-top: var(--sp-1); }
+.ip-sec-foot :is(.ip-quick-wrap, .ip-quick-add) { margin-top: var(--sp-1); }
 
 /* The phase index (wide) and the Finished block (under the sections when narrow). */
 .ip-pindex { display: grid; gap: var(--sp-3); min-width: 0; }

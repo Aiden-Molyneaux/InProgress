@@ -468,6 +468,7 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
           phase={parentTitle({ row: d.parked }) ?? 'No phase'}
           inside={d.parked.openInside}
           label={node.label}
+          proposed={node.origin === 'proposed'}
           age={node.parkedAt ? ageShort(node.parkedAt, now) : null}
           pending={busy}
           keepActs
@@ -590,6 +591,7 @@ export function Backlog({ snapshot, now, projectId, slug, code, titleRef, onStat
         blocked={row.node.status === 'blocked'}
         inside={insideOf(id)}
         label={row.node.label}
+        proposed={row.node.origin === 'proposed'}
         age={look.stale ? `untouched ${ageShort(r.touchedAt, now)}` : ageShort(row.node.createdAt, now)}
         pending={waiting}
         confirming={asking || parking}

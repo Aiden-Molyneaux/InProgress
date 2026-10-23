@@ -13,7 +13,7 @@ const tileMarks = (row: BoardRow) => row.marks.filter((m) => m !== 'ended_open' 
 
 /** Whether the foot has anything to show: a tile with none draws no foot row at all. */
 export function tileFootHas(row: BoardRow, docs: number, noLabel?: boolean): boolean {
-  return Boolean(row.handoff) || docs > 0 || Boolean(row.node.label && !noLabel) || tileMarks(row).length > 0;
+  return Boolean(row.handoff) || docs > 0 || Boolean(row.node.label && !noLabel) || row.node.origin === 'proposed' || tileMarks(row).length > 0;
 }
 
 /** A tile's foot: the handoff (opens the viewer), the documents, the label, and the hygiene words, all as parts. */
@@ -38,6 +38,7 @@ export function TileFoot({ row, now, area, docs, noLabel, onOpenResource }: { ro
       )}
       {docs > 0 && <span className="ip-docs" title={`${docs} resource${docs > 1 ? 's' : ''}`}>{`▤ ${docs}`}</span>}
       {label && !noLabel && <Chip tone="label" glyph={LABEL_GLYPHS[label]} title={label}>{label}</Chip>}
+      {row.node.origin === 'proposed' && <Chip tone="quiet" dashed>proposed</Chip>}
       {hygiene.map((m) => <Chip key={m} tone="quiet">{MARK_WORDS[m]}</Chip>)}
     </>
   );

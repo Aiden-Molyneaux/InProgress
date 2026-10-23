@@ -67,6 +67,23 @@
 .ip-outcome { display: grid; justify-items: start; gap: var(--sp-2); padding: var(--sp-3); background: var(--canvas-2); border: 1px solid var(--line); }
 .ip-outcome p { margin: 0; color: var(--text); }
 
+/* What and Why: a labelled row each; the muted lines stand for what a session has not written. */
+.ip-whatwhy { display: grid; gap: var(--sp-2); min-width: 0; max-width: 68ch; }
+.ip-whatwhy-row { display: grid; gap: var(--sp-1); }
+.ip-whatwhy-row p, .ip-whatwhy-none { margin: 0; color: var(--text); overflow-wrap: anywhere; }
+.ip-whatwhy-row p.ip-whatwhy-none, p.ip-whatwhy-none { color: var(--text-dim); }
+
+/* The trail fold: Claude's body, live work and the log, shut by default. */
+.ip-dtrailfold > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2); list-style: none; }
+.ip-dtrailfold > summary::-webkit-details-marker { display: none; }
+.ip-dtrailfold > summary::before { content: '▸'; color: var(--text-dim); }
+.ip-dtrailfold[open] > summary::before { content: '▾'; }
+.ip-dtrailfold > summary:focus-visible { outline: 2px solid var(--volt); outline-offset: 2px; }
+.ip-dtrailfold[open] > summary { margin-bottom: var(--sp-3); }
+.ip-dtrailfold > summary .ip-dtrailnote { color: var(--text-dim); font-size: var(--t-detail-sm); }
+.ip-dtrailfold > .ip-dtrailbody { display: grid; gap: var(--sp-5); min-width: 0; }
+.ip-insp-main .ip-whatwhy { max-width: 68ch; }
+
 /* Live work: working tasks, subagents, background commands and ended work. */
 .ip-wts, .ip-dagents { list-style: none; margin: 0; padding: 0; }
 .ip-details .ip-wts > li, .ip-details .ip-dagents > li { padding: var(--sp-1) 0; }
@@ -109,7 +126,7 @@
 
 /* The action strip stays at the foot. A form opened in it scrolls inside half the panel, so it never pushes the head off. */
 .ip-dstrip { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); max-height: 50%; overflow-y: auto; padding: var(--sp-3) var(--sp-4); background: var(--canvas-1); border-top: 1px solid var(--line); }
-.ip-dstrip > :is(.ip-park, .ip-quick-add) { flex: 1 1 100%; min-width: 0; }
+.ip-dstrip > :is(.ip-park, .ip-quick-wrap) { flex: 1 1 100%; min-width: 0; }
 .ip-dupdated { margin-left: auto; font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-dim); }
 /* Forms in the strip use the md controls: 32 px buttons, small muted labels. */
 .ip-dstrip .ip-btn { height: 32px; }

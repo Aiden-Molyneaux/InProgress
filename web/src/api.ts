@@ -127,8 +127,8 @@ export const moveStep = (projectId: number, slug: string, nodeId: number, parent
   postUi(`/api/ui/projects/${projectId}/nodes/${nodeId}/move`, { slug, parent });
 
 /** Quick-add: a todo step under `parent`, or under the root when null; with band 'soon', at the bottom of Soon. */
-export const createStep = (projectId: number, slug: string, title: string, parent: number | null, band?: 'soon'): Promise<UiResult> =>
-  postUi(`/api/ui/projects/${projectId}/nodes`, { slug, title, parent, ...(band ? { band } : {}) });
+export const createStep = (projectId: number, slug: string, title: string, parent: number | null, band?: 'soon', body?: string): Promise<UiResult> =>
+  postUi(`/api/ui/projects/${projectId}/nodes`, { slug, title, parent, ...(band ? { band } : {}), ...(body?.trim() ? { body } : {}) });
 
 /** Deletes a step from the tree, by id; the server refuses one with steps under it. */
 export const deleteStep = (projectId: number, slug: string, nodeId: number): Promise<UiResult> =>
