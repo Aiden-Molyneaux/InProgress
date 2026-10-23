@@ -4114,13 +4114,14 @@ test.describe('v3 Details, viewer and command bar (#505)', () => {
     for (let i = 0; i < 30; i++) await write(api, fresh.session, 'post', `/api/nodes/${step.id}/log`, { text: `Log line ${i + 1}`, sessionId: fresh.session });
     await page.setViewportSize({ width: 1000, height: 700 });
     // toBeInViewport reads an IntersectionObserver, which counts clip-path: while Details' entrance animation
-    // (ip-details-in) runs, the panel reads as off screen whatever its layout. A loaded deploy run once held it there
-    // past the 5 s retry and read the title at ratio 0. This test is about layout, so the panel opens without motion.
+    // (ip-details-in) runs, the panel reads as off screen whatever its layout. A loaded deploy run once read the title at
+    // ratio 0 for the whole 5 s retry after Park opened, the entrance re-run or held by a trigger not found since. This
+    // test is about layout, so the panel has no entrance at all: reduced motion sets animation: none.
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await open(page, fresh);
     await expect(stepRow(page, 'Play app signing')).toBeVisible();
     const details = await goToStep(page, step.id);
-    await expect.poll(() => details.evaluate((e) => e.getAnimations().length)).toBe(0);
+    expect(await page.evaluate<string>(`getComputedStyle(document.querySelector('.ip-details')).animationName`)).toBe('none');
     // The body scrolls; the head and the strip do not.
     const scroller = details.locator('.ip-dbody');
     await openTrail(details);
