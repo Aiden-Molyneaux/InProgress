@@ -19,10 +19,13 @@ import { Button } from '../parts/Button';
 import { Chip } from '../parts/Chip';
 import { ErrorLine } from '../parts/ErrorLine';
 import { Eyebrow } from '../parts/Eyebrow';
+import { WhatWhy } from '../parts/WhatWhy';
 import { relativeTime } from '../time';
 import { useNow } from '../useNow';
 import { resourceSummary } from './format';
 import { Markdown } from './Markdown';
+
+const ORIGIN_WORDS = { me: 'yours', asked: 'asked', proposed: 'proposed' } as const;
 
 interface DetailsProps {
   nodeId: number;
@@ -76,8 +79,7 @@ function PurposeLine({ purpose }: { purpose: string | null }) {
  * homed here (running, or ended under five minutes ago) are listed under Background. One LIVE WORK head counts the
  * live tasks, subagents and commands over the four lists.
  */
-function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'>) {
-  const now = useNow(30_000);
+function liveWorkData(nodeId: number, snapshot: ProjectSnapshot, now: number) {
   const { pastSessions, trailAgents } = snapshot;
   const onNode = snapshot.workItems.filter((w) => w.nodeId === nodeId).sort((a, b) => a.position - b.position || a.id - b.id);
   const tasks = onNode.filter((w) => w.endedAt === null);
@@ -92,6 +94,13 @@ function LiveWork({ nodeId, snapshot }: Pick<DetailsProps, 'nodeId' | 'snapshot'
     .filter((t) => t.nodeId === nodeId)
     .map((t) => t.agent);
   const trail = trailGroups(snapshot, onNode.filter((w) => w.endedAt !== null), trailHere);
+  return { tasks, agents, commands, trail };
+}
+
+/** `live` and `now` come from Details, so the TRAIL's summary and this list read one clock and never disagree. */
+function LiveWork({ nodeId, snapshot, live, now }: Pick<DetailsProps, 'nodeId' | 'snapshot'> & { live: ReturnType<typeof liveWorkData>; now: number }) {
+  const { pastSessions, trailAgents } = snapshot;
+  const { tasks, agents, commands, trail } = live;
   if (tasks.length + agents.length + commands.length + trail.length === 0) return null;
   return (
     <section className="ip-dsec ip-dlive">
@@ -338,6 +347,17 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
   const { node } = detail;
   const marks = board.byId.get(node.id)?.marks ?? [];
   const handoff = snapshot.resources.filter((r) => r.nodeId === node.id && r.purpose === 'handoff').sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null;
+  // The handoffs lead (newest first); the rest keep the order they came in.
+  const resources = [
+    ...detail.resources.filter((r) => r.purpose === 'handoff').sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+    ...detail.resources.filter((r) => r.purpose !== 'handoff'),
+  ];
+  // A step of Aiden's own keeps its body (his notes) up top; a session's body is Claude's context and folds into the trail.
+  const mine = node.origin === 'me';
+  const live = liveWorkData(node.id, snapshot, now);
+  const hasLive = live.tasks.length + live.agents.length + live.commands.length + live.trail.length > 0;
+  const trailBody = !mine && node.body.trim() !== '';
+  const trailNote = [trailBody && 'body', detail.log.length > 0 && `${detail.log.length} log`, hasLive && 'live work'].filter(Boolean).join(' · ');
   /** A step's marker as its card draws it, the sky ring and its tooltip too when paused, but never pulsing. */
   const marker = (n: Pick<TreeNode, 'id' | 'status' | 'kind' | 'assignee'>) => {
     const step = byId.get(n.id);
@@ -384,6 +404,13 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
         <h2 ref={title} tabIndex={-1} className="ip-dtitle">{node.title}</h2>
       </header>
       <div className="ip-dbody">
+        <WhatWhy node={node} />
+        {mine && node.body.trim() !== '' && (
+          <section className="ip-dsec ip-dnotes">
+            <Eyebrow>NOTES</Eyebrow>
+            <Markdown text={node.body} breaks />
+          </section>
+        )}
         <div className="ip-meta">
           {/* The canvas's marker, then the status as a chip. A paused step draws the sky ring here too; nothing pulses here. */}
           {marker(node)}
@@ -394,6 +421,7 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
             </Chip>
           )}
           {node.assignee === 'me' ? <Chip tone="needs">YOU</Chip> : <span className="ip-dwho">Claude</span>}
+          <Chip tone="quiet" dashed className="ip-meta-origin">{ORIGIN_WORDS[node.origin]}</Chip>
           {detail.parent && (
             <span className="ip-dparent">
               in{' '}
@@ -412,7 +440,7 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
           </div>
         )}
         <AsksSection nodeId={node.id} snapshot={snapshot} now={now} />
-        {(handoff || marks.length > 0 || node.body || node.outcome) && (
+        {(handoff || marks.length > 0 || node.outcome) && (
           <section className="ip-dsec ip-dstep">
             {(handoff || marks.length > 0) && (
               <div className="ip-dmarks">
@@ -428,7 +456,6 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
                 ))}
               </div>
             )}
-            {node.body && <Markdown text={node.body} />}
             {node.outcome && (
               <div className="ip-outcome">
                 <Eyebrow glyph="[✓]">OUTCOME</Eyebrow>
@@ -437,12 +464,11 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
             )}
           </section>
         )}
-        <LiveWork nodeId={node.id} snapshot={snapshot} />
-        {detail.resources.length > 0 && (
+        {resources.length > 0 && (
           <section className="ip-dsec">
-            <Eyebrow as="h3" glyph="//">{`RESOURCES · ${detail.resources.length}`}</Eyebrow>
+            <Eyebrow as="h3" glyph="//">{`RESOURCES · ${resources.length}`}</Eyebrow>
             <div className="ip-ress">
-              {detail.resources.map((r) => (
+              {resources.map((r) => (
                 <button key={r.id} className="ip-res" onClick={() => onOpenResource(r.id)}>
                   <span className="ip-res-title">{r.title}</span>
                   <span className="sub">{resourceSummary(r)}</span>
@@ -468,18 +494,30 @@ export function Details({ nodeId, snapshot, onClose, onSelectNode, onOpenResourc
             </ul>
           </section>
         )}
-        {detail.log.length > 0 && (
-          <section className="ip-dsec">
-            <Eyebrow as="h3" glyph="//">{`LOG · ${detail.log.length}`}</Eyebrow>
-            <ul className="ip-log">
-              {detail.log.map((l) => (
-                <li key={l.id}>
-                  <span className="ip-log-time">{relativeTime(l.createdAt)}</span> <span className="ip-log-text">{l.text}</span>
-                  {l.sessionTitle ? <span className="ip-log-session"> · {l.sessionTitle}</span> : null}
-                </li>
-              ))}
-            </ul>
-          </section>
+        {trailNote && (
+          <details className="ip-dsec ip-dtrailfold">
+            <summary>
+              <Eyebrow>TRAIL</Eyebrow>
+              <span className="ip-dtrailnote">{trailNote}</span>
+            </summary>
+            <div className="ip-dtrailbody">
+              {trailBody && <Markdown text={node.body} />}
+              <LiveWork nodeId={node.id} snapshot={snapshot} live={live} now={now} />
+              {detail.log.length > 0 && (
+                <section className="ip-dsec">
+                  <Eyebrow as="h3" glyph="//">{`LOG · ${detail.log.length}`}</Eyebrow>
+                  <ul className="ip-log">
+                    {detail.log.map((l) => (
+                      <li key={l.id}>
+                        <span className="ip-log-time">{relativeTime(l.createdAt)}</span> <span className="ip-log-text">{l.text}</span>
+                        {l.sessionTitle ? <span className="ip-log-session"> · {l.sessionTitle}</span> : null}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+            </div>
+          </details>
         )}
       </div>
       <div className="ip-dstrip">

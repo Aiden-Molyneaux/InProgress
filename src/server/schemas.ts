@@ -182,6 +182,7 @@ export const windowNodeBody = z
     title: z.string().trim().min(1).max(200),
     parent: z.number().int().positive().nullable(),
     band: z.literal('soon').optional(),
+    body: z.string().max(20_000).optional(),
   })
   .strict();
 /** The window's rank change (ranked Backlog spec section 2): one RankOp, applied to the steps as stored. */
