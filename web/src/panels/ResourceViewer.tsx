@@ -78,7 +78,7 @@ function PageRefused({ refusal, path }: { refusal: PageRefusal; path: string }) 
  * The viewer over the window, or with `inline` a section in place (the Library's Roster): no dialog, no ×, and it leaves
  * focus where it is.
  */
-export function ResourceViewer({ resourceId, onClose, inline }: { resourceId: number; onClose?: () => void; inline?: boolean }) {
+export function ResourceViewer({ resourceId, onClose, inline, onConfirmed }: { resourceId: number; onClose?: () => void; inline?: boolean; onConfirmed?: () => void }) {
   const [resource, setResource] = useState<Resource | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [said, setSaid] = useState<Say | null>(null);
@@ -138,6 +138,8 @@ export function ResourceViewer({ resourceId, onClose, inline }: { resourceId: nu
     // Still accurate leaves with the stale count: focus goes to the document pane, not to the page behind the modal.
     body.current?.focus();
     say('Confirmed');
+    // A list beside the viewer (Docs) counts this page as stale until it reads again.
+    onConfirmed?.();
   };
   const isPage = !!resource?.path && isPagePurpose(resource.purpose);
   const pageBody = page && 'format' in page ? page : null;

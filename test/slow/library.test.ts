@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
@@ -287,6 +287,107 @@ describe('library: the sync dashboard', GIT_TIMEOUT, () => {
   });
 });
 
+describe('library: an adaptation side by side', GIT_TIMEOUT, () => {
+  beforeEach(() => clearSyncCache());
+  const post = (app: ReturnType<typeof setup>['app'], url: string, payload: unknown) => app.inject({ method: 'POST', url, headers: UI, payload: payload as Record<string, unknown> });
+
+  // The template at base, its copy (filled, with a line added under Rules), and a fake script whose check names Shipwright's
+  // HEAD as the base and whose diff matches the copy; its one upstream hunk changes a line under Rules and conflicts.
+  const TEMPLATE = '# Sev\n\n**Rule.** Be {{TONE}}.\n\n## Rules\n\nrule one\n';
+  const COPY = '# Sev\n\n**Rule.** Be kind.\n\n## Rules\n\nrule one, ours\n';
+  /** The fake script, answering `diff` to --diff. */
+  const scriptFor = (diff: unknown) =>
+    [
+      "import { execFileSync } from 'node:child_process';",
+      "import { fileURLToPath } from 'node:url';",
+      "import { appendFileSync } from 'node:fs';",
+      "if (process.argv.includes('--diff')) appendFileSync(new URL('diffs.txt', import.meta.url), 'run;');",
+      "const base = execFileSync('git', ['-C', fileURLToPath(new URL('..', import.meta.url)), 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();",
+      `const file = { template: 'agents/sev.md', local: 'agents/sev.md', base, state: 'behind', behind: 1, commits: [{ sha: 'c0ffee1', date: '2026-10-21', subject: 'reword' }], fills: { TONE: 'kind' }, detail: null };`,
+      `const diff = ${JSON.stringify(diff)};`,
+      "console.log(JSON.stringify(process.argv.includes('--diff') ? diff : { shipwright: { head: 'abc1234', date: '2026-10-21', subject: 'x' }, project: 'A', lastSync: null, files: [file], skip: [], notAdopted: [], fills: {} }));",
+    ].join('\n');
+  const DIFF = {
+    adaptation: ['--- agents/sev.md', '+++ agents/sev.md', '@@ -7 +7 @@', '-rule one', '+rule one, ours', ''].join('\n'),
+    // Three lines of context, as the script writes it: the copy rewrote the changed line, so no context finds the hunk in it,
+    // and only the merge's own range says where the conflict is.
+    upstream: ['--- agents/sev.md', '+++ agents/sev.md', '@@ -5,3 +5,3 @@', ' ## Rules', ' ', '-rule one', '+rule uno', ''].join('\n'),
+    conflicts: [{ base: { start: 7, lines: 1 }, upstream: { start: 7, lines: 1 }, local: { start: 7, lines: 1 }, hunks: [0] }],
+  };
+
+  const adaptationSetup = (diff: unknown = DIFF, copy = COPY) => {
+    const s = setup(scriptFor(diff));
+    mkdirSync(join(s.dirs.shipwright, 'agents'));
+    writeFileSync(join(s.dirs.shipwright, 'agents', 'sev.md'), TEMPLATE);
+    git(s.dirs.shipwright, 'add', '.');
+    git(s.dirs.shipwright, 'commit', '-q', '-m', 'sev');
+    writeFileSync(join(s.dirs.dirA, 'agents', 'sev.md'), copy);
+    return s;
+  };
+
+  it('puts a conflict on a section the copy deleted, from the base range the script gives a deletion', async () => {
+    // The copy dropped Rules, and Shipwright edited it: the merge has no copy lines there, only the base's.
+    const deleted = {
+      adaptation: ['--- agents/sev.md', '+++ agents/sev.md', '@@ -3,5 +3,1 @@', ' **Rule.** Be kind.', '-', '-## Rules', '-', '-rule one', ''].join('\n'),
+      upstream: DIFF.upstream,
+      conflicts: [{ base: { start: 5, lines: 3 }, upstream: { start: 5, lines: 3 }, local: { start: 4, lines: 0 }, hunks: [0] }],
+    };
+    const { app, a } = adaptationSetup(deleted, '# Sev\n\n**Rule.** Be kind.\n');
+    const body = (await post(app, '/api/ui/library/sync/adaptation', { slug: a.slug, template: 'agents/sev.md' })).json();
+    expect(body.ok, JSON.stringify(body)).toBe(true);
+    expect(body.rows.map((r: { title: string; tag: string; conflict: boolean }) => [r.title, r.tag, r.conflict])).toEqual([
+      ['Opening', 'same', false],
+      ['Rule.', 'file fill', false],
+      ['Rules', 'removed', true],
+    ]);
+  });
+
+  it('lines the copy up with the template by section, with its tags, the placeholders and the conflict', async () => {
+    const { app, a } = adaptationSetup();
+    const res = await post(app, '/api/ui/library/sync/adaptation', { slug: a.slug, template: 'agents/sev.md' });
+    expect(res.statusCode, res.body).toBe(200);
+    const body = res.json();
+    expect(body.ok, JSON.stringify(body)).toBe(true);
+    expect(body.rows.map((r: { title: string; tag: string; conflict: boolean }) => [r.title, r.tag, r.conflict])).toEqual([
+      ['Opening', 'same', false],
+      ['Rule.', 'file fill', false],
+      ['Rules', 'rewritten', true],
+    ]);
+    const rule = body.rows[1];
+    expect([rule.template, rule.project, rule.placeholders]).toEqual(['**Rule.** Be {{TONE}}.', '**Rule.** Be kind.', ['TONE']]);
+    expect([body.project, body.state, body.behind, body.head, body.commits[0].sha]).toEqual(['Alpha', 'behind', 1, 'abc1234', 'c0ffee1']);
+    expect(body.adaptation.map((h: { line: number | null }) => h.line)).toEqual([6]);
+  });
+
+  it('reads the diff again when the copy changes inside 60 s, and keeps it while it does not', async () => {
+    const { app, a, dirs } = adaptationSetup();
+    const diffs = () => {
+      try {
+        return readFileSync(join(dirs.shipwright, 'scripts', 'diffs.txt'), 'utf8').split(';').filter(Boolean).length;
+      } catch {
+        return 0;
+      }
+    };
+    const ask = () => post(app, '/api/ui/library/sync/adaptation', { slug: a.slug, template: 'agents/sev.md' });
+    expect((await ask()).json().ok).toBe(true);
+    expect((await ask()).json().ok).toBe(true);
+    expect(diffs()).toBe(1);
+    // Saved again with the same text: a new time is a new copy, read with a new diff.
+    utimesSync(join(dirs.dirA, 'agents', 'sev.md'), new Date(), new Date(Date.now() + 5_000));
+    expect((await ask()).json().ok).toBe(true);
+    expect(diffs()).toBe(2);
+  });
+
+  it('says so when the copy no longer fits its diff, and runs only on the window POST', async () => {
+    const { app, a, dirs } = adaptationSetup();
+    writeFileSync(join(dirs.dirA, 'agents', 'sev.md'), '# Sev\n\nrewritten since\n');
+    const res = await post(app, '/api/ui/library/sync/adaptation', { slug: a.slug, template: 'agents/sev.md' });
+    expect(res.json()).toEqual({ ok: false, error: "The diff for agents/sev.md does not fit Alpha's copy; Check now reads both again" });
+    const bare = await app.inject({ method: 'POST', url: '/api/ui/library/sync/adaptation', payload: { slug: a.slug, template: 'agents/sev.md' } });
+    expect(bare.statusCode).toBe(403);
+  });
+});
+
 describe('library: pages', GIT_TIMEOUT, () => {
   it('lists library pages with their shelf and Adapted in, leaves other purposes out, and keeps a gone file as an error row', async () => {
     const { app, a, sw, dirs, register } = setup();
@@ -317,6 +418,23 @@ describe('library: pages', GIT_TIMEOUT, () => {
     expect(roster).toMatchObject({ shelf: 'roster', adaptedIn: [] });
     expect(doomed.error).toContain('gone');
     expect(doomed).toMatchObject({ format: 'markdown', shelf: 'pages', templates: [] });
+  });
+
+  it('lists a page resource under its project only and a library one in the Library only, and answers an unknown slug 404', async () => {
+    const { app, a, b, dirs, register } = setup();
+    writeFileSync(join(dirs.dirA, 'own.md'), '# Own\n');
+    writeFileSync(join(dirs.dirA, 'shared.md'), '# Shared\n');
+    git(dirs.dirA, 'add', '.');
+    git(dirs.dirA, 'commit', '-q', '-m', 'pages');
+    expect((await register(a, join(dirs.dirA, 'own.md'), 'Own', { purpose: 'page' })).statusCode).toBe(201);
+    expect((await register(a, join(dirs.dirA, 'shared.md'), 'Shared')).statusCode).toBe(201);
+    const library = (await app.inject({ url: '/api/library/pages' })).json();
+    expect(library.pages.map((p: { title: string }) => p.title)).toEqual(['Shared']);
+    const own = await app.inject({ url: `/api/projects/${a.slug}/pages` });
+    expect(own.headers['cache-control']).toBe('no-store');
+    expect(own.json().pages.map((p: { title: string }) => p.title)).toEqual(['Own']);
+    expect((await app.inject({ url: `/api/projects/${b.slug}/pages` })).json()).toEqual({ pages: [] });
+    expect((await app.inject({ url: '/api/projects/no-such-project/pages' })).statusCode).toBe(404);
   });
 });
 

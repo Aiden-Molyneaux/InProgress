@@ -172,6 +172,10 @@ button.ip-hover-act:not(.p-btn):hover { color: var(--text); background: var(--ca
 .ip-backlog-more { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1); font-family: var(--font-mono); font-size: var(--t-detail-sm); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
 .ip-group-line { margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--t-detail-sm); line-height: 14px; color: var(--text-dim); }
 .ip-box-parent { margin: 2px 0 0; }
+.ip-quick-wrap { display: grid; gap: 4px; margin-top: 8px; min-width: 0; }
+.ip-quick-wrap > .ip-quick-add { margin-top: 0; }
+.ip-quick-notes { display: block; width: 100%; box-sizing: border-box; resize: none; overflow-y: auto; padding: 4px 8px; font: inherit; font-size: var(--t-body); line-height: 18px; color: var(--text); background: var(--canvas-1); border: 1px solid var(--line); }
+.ip-quick-notes:focus { outline: 2px solid var(--volt); outline-offset: 1px; }
 .ip-quick-add { display: block; width: 100%; margin-top: 8px; padding: 4px 8px; font: inherit; font-size: var(--t-body); line-height: 18px; color: var(--text); background: var(--canvas-1); border: 1px solid var(--line); }
 
 @keyframes ip-flash { 0% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--volt) 60%, transparent); } 100% { box-shadow: 0 0 0 0 transparent; } }

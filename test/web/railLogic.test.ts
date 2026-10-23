@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { LibraryPage, LibraryPages, LibrarySync, ProjectSnapshot, SyncFile, TreeNode } from '../../src/core/types';
-import { footMenuAt, libraryBehind, libraryViews, MENU_MARGIN, railCodes, railStep, railViews, rowMenuAt, viewTitle } from '../../web/src/chrome/railLogic';
+import { docsCount, docsFigure, footMenuAt, libraryBehind, libraryViews, MENU_MARGIN, pageStale, railCodes, railStep, railViews, rowMenuAt, viewTitle } from '../../web/src/chrome/railLogic';
 
 const NOW = Date.parse('2026-10-13T12:00:00Z');
 let n = 0;
@@ -43,22 +43,24 @@ describe('railViews', () => {
     node(8, 5, 'finished', 'done'),
   ]);
 
-  it('lists the four views in order, with their codes', () => {
+  it('lists the five views in order, with their codes', () => {
     const views = railViews(s, NOW);
     expect(views.map((v) => [v.view, v.label, v.code])).toEqual([
       ['board', 'Board', 'BRD'],
       ['project', 'Project', 'PRJ'],
       ['backlog', 'Backlog', 'BKL'],
       ['done', 'All done', 'DON'],
+      ['docs', 'Docs', 'DOC'],
     ]);
   });
 
   it('counts the phases, the open Backlog entries without the parked ones, and the done steps', () => {
-    const [board, project, backlog, done] = railViews(s, NOW);
+    const [board, project, backlog, done, docs] = railViews(s, NOW);
     expect(board.count).toBeUndefined();
     expect([project.count, project.unit]).toEqual([2, 'phases']);
     expect(backlog.count).toBe(3);
     expect(done.count).toBe(1);
+    expect([docs.count, docs.text]).toEqual([undefined, undefined]);
   });
 
   it('titles a view with its count', () => {
@@ -69,10 +71,56 @@ describe('railViews', () => {
 });
 
 describe('railViews with no snapshot', () => {
-  it('still lists the four views, with no counts', () => {
+  it('still lists the five views, with no counts', () => {
     const views = railViews(null, NOW);
-    expect(views.map((v) => v.view)).toEqual(['board', 'project', 'backlog', 'done']);
-    expect(views.every((v) => v.count === undefined)).toBe(true);
+    expect(views.map((v) => v.view)).toEqual(['board', 'project', 'backlog', 'done', 'docs']);
+    expect(views.every((v) => v.count === undefined && v.text === undefined)).toBe(true);
+  });
+});
+
+describe('the Docs figure', () => {
+  const docs = (count: Parameters<typeof docsFigure>[0]) => railViews(null, NOW, count)[4];
+  const figure = (count: Parameters<typeof docsFigure>[0]) => {
+    const { count: n, text, warn } = docs(count);
+    return { count: n, text, warn };
+  };
+
+  it('says "pages · N stale" in the behind colour when a page is stale, with or without a manifest', () => {
+    expect(figure({ pages: 3, stale: 1, adaptations: 2 })).toEqual({ text: '3 · 1 stale', warn: true });
+    expect(figure({ pages: 3, stale: 2, adaptations: null })).toEqual({ text: '3 · 2 stale', warn: true });
+  });
+
+  it('says "pages · adaptations" with a manifest and nothing stale, and the page count alone without one', () => {
+    expect(figure({ pages: 3, stale: 0, adaptations: 5 })).toEqual({ text: '3 · 5' });
+    expect(figure({ pages: 0, stale: 0, adaptations: 0 })).toEqual({ text: '0 · 0' });
+    expect(figure({ pages: 3, stale: 0, adaptations: null })).toEqual({ count: 3 });
+  });
+
+  it('carries no figure before the pages have loaded, and titles with the text', () => {
+    expect(docsFigure(null)).toEqual({});
+    expect(docsFigure(undefined)).toEqual({});
+    expect(viewTitle(docs({ pages: 3, stale: 1, adaptations: null }))).toBe('Docs, 3 · 1 stale');
+    expect(viewTitle(docs({ pages: 3, stale: 0, adaptations: null }))).toBe('Docs, 3');
+  });
+
+  it('counts a page as stale when commits touched its covers or the confirmation left history, and not without covers', () => {
+    expect(pageStale({ fresh: 2 })).toBe(true);
+    expect(pageStale({ fresh: null })).toBe(true);
+    expect(pageStale({ fresh: 0 })).toBe(false);
+    expect(pageStale({})).toBe(false);
+  });
+
+  it('takes the adaptations from its row of the sync check: a manifest with files, else none', () => {
+    const page = (fresh?: number | null) => ({ fresh }) as LibraryPage;
+    const file = (template: string) => ({ template }) as SyncFile;
+    const ok = { projectId: 1, slug: 'a', name: 'A', dir: '', check: { ok: true as const, result: { files: [file('agents/x.md'), file('skills/y/SKILL.md')] } as never } };
+    const failed = { projectId: 2, slug: 'b', name: 'B', dir: '', check: { ok: false as const, error: 'boom' } };
+    const sync = { projects: [ok, failed], noManifest: [], templates: [], source: null } as unknown as LibrarySync;
+    expect(docsCount([page(0), page(1)], sync, 'a')).toEqual({ pages: 2, stale: 1, adaptations: 2 });
+    expect(docsCount([page()], sync, 'b')).toEqual({ pages: 1, stale: 0, adaptations: null });
+    expect(docsCount([page()], sync, 'c')?.adaptations).toBeNull();
+    expect(docsCount([page()], null, 'a')?.adaptations).toBeNull();
+    expect(docsCount(null, sync, 'a')).toBeNull();
   });
 });
 

@@ -351,7 +351,13 @@ export function Rail({ tabs, archived, deleted: listed, current, onSelect, onMov
                         >
                           <span className="ip-rail-vlabel">{v.label}</span>
                           <span className="ip-rail-vcode">{v.code}</span>
-                          {v.count !== undefined && <span className="ip-rail-n">{v.unit ? `${v.count} ${v.unit}` : v.count}</span>}
+                          {v.text !== undefined ? (
+                            <span className="ip-rail-n" data-warn={v.warn || undefined}>
+                              {v.text}
+                            </span>
+                          ) : (
+                            v.count !== undefined && <span className="ip-rail-n">{v.unit ? `${v.count} ${v.unit}` : v.count}</span>
+                          )}
                         </button>
                       </li>
                     ))}

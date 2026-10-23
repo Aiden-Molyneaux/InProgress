@@ -209,6 +209,13 @@ async function showsStep(details: Locator, id: number, title: string): Promise<v
   await expect(details.locator('.ip-dtitle')).toHaveText(title);
 }
 
+/** Opens Details' folded TRAIL (Claude's body, live work, the log) when it is shut. */
+async function openTrail(details: Locator): Promise<void> {
+  const trail = details.locator('details.ip-dtrailfold');
+  if ((await trail.getAttribute('open')) === null) await trail.locator('summary').click();
+  await expect(trail).toHaveAttribute('open', '');
+}
+
 /** A resource's row in Details, by its title. */
 const resourceRow = (page: Page, title: string) => page.locator('.ip-res', { hasText: title });
 
@@ -383,8 +390,12 @@ test.afterAll(() => {
   for (const dir of pageDirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
 });
 
-/** A git repo bound to the project, for its pages, in a temp folder the file's afterAll removes. */
-async function pageRepo(api: APIRequestContext, project: Seeded) {
+/**
+ * A git repo bound to the project, for its pages, in a temp folder the file's afterAll removes. A bare project (no seeded
+ * steps, no session) can hold one but cannot register a page.
+ */
+async function pageRepo(api: APIRequestContext, project: Pick<Seeded, 'slug'> & Partial<Pick<Seeded, 'session' | 'ids'>>) {
+  const session = project.session ?? `e2e-${randomUUID()}`;
   const dir = mkdtempSync(join(tmpdir(), 'ip-e2e-pages-'));
   pageDirs.push(dir);
   // No hooks: the user's global ones (Git LFS, an identity check) cost seconds a commit and would run the test past its timeout.
@@ -399,9 +410,9 @@ async function pageRepo(api: APIRequestContext, project: Seeded) {
     git('commit', '-q', '-m', `edit ${file}`);
   };
   commit('src/app.ts', 'export {};\n');
-  await write(api, project.session, 'post', `/api/projects/${project.slug}/bindings`, { path: dir });
+  await write(api, session, 'post', `/api/projects/${project.slug}/bindings`, { path: dir });
   const register = (file: string, title: string, purpose = 'page') =>
-    write<{ id: number }>(api, project.session, 'post', '/api/resources', { nodeId: project.ids['Upload keystore'], kind: 'doc', title, path: join(dir, file), purpose });
+    write<{ id: number }>(api, session, 'post', '/api/resources', { nodeId: project.ids!['Upload keystore'], kind: 'doc', title, path: join(dir, file), purpose });
   return { dir, commit, register };
 }
 
@@ -471,6 +482,8 @@ test('an HTML page runs in its sandboxed frame: its clicks work, it reaches no n
   const height = (await frame.boundingBox())?.height ?? 0;
   expect(height).toBeGreaterThan(1400);
   expect(height).toBeLessThan(2000);
+  // The frame is the page's own height: nothing inside it scrolls (Aiden's walkthrough of #530 found a 2 px scroll).
+  expect(await inside.locator('html').evaluate((d) => { const el = d as unknown as { scrollHeight: number; clientHeight: number }; return el.scrollHeight - el.clientHeight; })).toBe(0);
 });
 
 test('the freshness strip counts commits to covers since the confirmation, and Still accurate resets it', async ({ page, fresh, api }) => {
@@ -584,6 +597,96 @@ test('the Library group lists pages by project, opens the roster in place, and k
   await projectRail(page).locator(`a[href="#/p/${fresh.slug}"]`).click();
   await expect(page).toHaveURL(hereIs(fresh.slug));
   await expect(page.getByRole('heading', { name: 'Now', exact: true })).toBeVisible();
+});
+
+test("Docs lists a project's pages and opens one", async ({ page, fresh, api }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const repo = await pageRepo(api, fresh);
+  repo.commit('docs/ops.md', ['---', 'covers: [src/app.ts]', '---', '# Ops notes', '', 'Read from the repo.', ''].join('\n'));
+  const title = `Ops notes ${randomUUID().slice(0, 8)}`;
+  await repo.register('docs/ops.md', title, 'page');
+  await open(page, fresh);
+  // The project keeps no manifest, so its Docs figure is the page count alone.
+  const docs = projectRail(page).getByRole('button', { name: /^Docs, 1$/ });
+  await expect(docs.locator('.ip-rail-vcode')).toHaveText('DOC');
+  await docs.click();
+  await expect(page.getByRole('heading', { level: 1, name: 'DOCS' })).toBeVisible();
+  await expect(page.locator('.ip-page-meta')).toContainText('1 PAGE');
+  const row = page.locator('.ip-lib-row', { hasText: title });
+  await expect(row.locator('.p-chip').first()).toHaveText('MD');
+  await expect(row.locator('.ip-lib-path')).toHaveText(join(repo.dir, 'docs', 'ops.md'));
+  await expect(row.locator('.ip-lib-fresh')).toHaveText('current');
+  await expect(page.locator('.ip-docs-pick')).toHaveText('Pick a page or an adaptation.');
+  const note = page.locator('.ip-docs-none');
+  await expect(note).toContainText(`E2E Demo keeps no .claude/shipwright.json yet.`);
+  await expect(note.getByRole('link', { name: 'Library · Sync ›' })).toHaveAttribute('href', '#/lib/sync');
+  await row.getByRole('button', { name: title }).click();
+  await expect(page.locator('section.ip-viewer[data-inline] .ip-md h1')).toHaveText('Ops notes');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await note.getByRole('link', { name: 'Library · Sync ›' }).click();
+  await expect(page).toHaveURL(/#\/lib\/sync$/);
+});
+
+test('Docs opens an adaptation side by side, with its tags, folded sections and conflict note, and Diff shows the raw diff', async ({ page, fresh, api }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  // Shipwright: a git repo bound to a project of its own, holding the template and a sync script whose check names its HEAD as
+  // the base, and whose diff matches the copy below: one line added under Rules, which the one upstream hunk conflicts with.
+  const sw = await pageRepo(api, await bare(api, 'Shipwright'));
+  const diff = {
+    adaptation: ['--- agents/sev.md', '+++ agents/sev.md', '@@ -13,3 +13,4 @@', ' ## Rules', ' ', ' rule one', '+rule two', ''].join('\n'),
+    upstream: ['--- agents/sev.md', '+++ agents/sev.md', '@@ -15 +15 @@', '-rule one', '+rule uno', ''].join('\n'),
+    // The merge's range in the copy: its last two lines, under Rules.
+    conflicts: [{ local: { start: 15, lines: 2 }, hunks: [0] }],
+  };
+  const script = [
+    "import { execFileSync } from 'node:child_process';",
+    "import { fileURLToPath } from 'node:url';",
+    "const base = execFileSync('git', ['-C', fileURLToPath(new URL('..', import.meta.url)), 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();",
+    "const file = { template: 'agents/sev.md', local: 'agents/sev.md', base, state: 'behind', behind: 1, commits: [{ sha: 'c0ffee1', date: '2026-10-21', subject: 'reword' }], fills: { TONE: 'kind' }, detail: null };",
+    `const diff = ${JSON.stringify(diff)};`,
+    "console.log(JSON.stringify(process.argv.includes('--diff') ? diff : { shipwright: { head: 'abc1234', date: '2026-10-21', subject: 'x' }, project: 'p', lastSync: null, files: [file], skip: [], notAdopted: [], fills: {} }));",
+  ].join('\n');
+  mkdirSync(join(sw.dir, 'scripts'));
+  mkdirSync(join(sw.dir, 'agents'));
+  writeFileSync(join(sw.dir, 'scripts', 'template-sync.mjs'), script);
+  writeFileSync(join(sw.dir, 'templates.json'), JSON.stringify({ templates: ['agents/sev.md'] }));
+  const template = '# Sev\n\n**Rule.** Be {{TONE}}.\n\n## Routing\n\nSame here.\n\n## Notes\n\nKeep notes.\n\n## Rules\n\nrule one\n';
+  sw.commit('agents/sev.md', template);
+  const repo = await pageRepo(api, fresh);
+  mkdirSync(join(repo.dir, '.claude'));
+  mkdirSync(join(repo.dir, 'agents'));
+  writeFileSync(join(repo.dir, 'agents', 'sev.md'), `${template.replace('{{TONE}}', 'kind')}rule two\n`);
+  writeFileSync(join(repo.dir, '.claude', 'shipwright.json'), JSON.stringify({ shipwright: sw.dir, files: { 'agents/sev.md': { fills: { TONE: 'kind' } } }, skip: [] }));
+  await open(page, fresh);
+  // No pages and one adaptation.
+  await projectRail(page).getByRole('button', { name: /^Docs, 0 · 1$/ }).click();
+  await expect(page.locator('.ip-page-meta')).toContainText('1 ADAPTATION');
+  const row = page.locator('.ip-lib-row', { hasText: 'sev' });
+  await expect(row.locator('.ip-docs-state')).toHaveText('1 behind');
+  await row.getByRole('button', { name: 'sev' }).click();
+  const view = page.getByRole('region', { name: 'sev in E2E Demo' });
+  await expect(view.locator('.ip-adapt-strip')).toContainText("computed live from E2E Demo's copy, its manifest and Shipwright at base");
+  await expect(view.locator('.ip-adapt-strip')).toContainText('Shipwright is 1 commit ahead: c0ffee1');
+  await expect(view.locator('a.ip-adapt-link')).toHaveAttribute('href', `#/lib/sync/${fresh.slug}/agents%2Fsev.md`);
+  // The Opening and the two untouched sections fold; the lead with a file fill and the rewritten Rules show.
+  const rows = view.locator('tbody tr');
+  await expect(rows).toHaveCount(4);
+  await expect(rows.nth(0)).toHaveText('1 section E2E Demo left alone: Opening');
+  await expect(rows.nth(1).locator('th')).toHaveText('Rule');
+  await expect(rows.nth(1).locator('.ip-adapt-tag')).toHaveText('file fill');
+  await expect(rows.nth(1).locator('td').nth(0).locator('code')).toHaveText('{{TONE}}');
+  await expect(rows.nth(1).locator('td').nth(1)).toContainText('Be kind.');
+  await expect(rows.nth(2)).toHaveText('2 sections E2E Demo left alone: Routing, Notes');
+  await expect(rows.nth(3).locator('.ip-adapt-tag')).toHaveText('rewritten');
+  await expect(rows.nth(3).locator('.ip-adapt-conflict')).toHaveText('Shipwright changed this section in c0ffee1. The next sync conflicts here.');
+  await rows.nth(2).getByRole('button').click();
+  await expect(view.locator('tbody tr[data-tag="same"] th')).toHaveText(['Routing', 'Notes']);
+  // The fold's button left with it: focus goes to the first section it opened.
+  await expect(view.locator('tbody th', { hasText: 'Routing' })).toBeFocused();
+  // The index now knows the local edit count.
+  await expect(row.locator('.ip-lib-path')).toHaveText('1 local edit · 1 file fill');
+  await view.getByRole('button', { name: 'Diff' }).click();
+  await expect(view.locator('.ip-sync-dl[data-kind="add"]')).toHaveText(['+rule two']);
 });
 
 test('the Library row is one more stop in the rail: arrows reach it, Space opens it, shelves hand focus back to the project views, and a chip lands on the Sync button', async ({ page, fresh, api }) => {
@@ -1846,7 +1949,7 @@ test("a tab's dot also shows while an idle session has a running worker, but not
 const RUNNING = '(<1 min|\\d+ min)';
 
 test.describe('Live work', () => {
-  test("Details lists the node's working tasks with who is on each, and the subagents on it, before its resources, each on its own row", async ({ page, api, fresh }) => {
+  test("Details lists the node's working tasks with who is on each, and the subagents on it, after its resources in the folded trail, each on its own row", async ({ page, api, fresh }) => {
     await subagent(api, fresh, 'agent-1', 'Draft the store notes', 'sonnet');
     await task(api, fresh, '1', 'Upload the key', 'in_progress');
     await task(api, fresh, '2', 'Check the release track');
@@ -1855,9 +1958,10 @@ test.describe('Live work', () => {
     await write(api, fresh.session, 'post', '/api/resources', { nodeId: fresh.ids['Play app signing'], kind: 'doc', title: 'Signing notes', content: '# Notes' });
     await open(page, fresh);
     const details = await openDetails(page, 'Play app signing');
-    // The live work reads before the step's resources: one LIVE WORK head counts the live tasks and subagents, and its
-    // sub-heads name the lists.
-    await expect(details.locator('h3.p-eyebrow')).toHaveText([/LIVE WORK · 4$/, /RESOURCES · 1$/]);
+    await openTrail(details);
+    // The step's resources read before the folded TRAIL that holds the live work: one LIVE WORK head counts the live tasks
+    // and subagents, and its sub-heads name the lists.
+    await expect(details.locator('h3.p-eyebrow')).toHaveText([/RESOURCES · 1$/, /LIVE WORK · 4$/]);
     await expect(details.locator('.ip-dsub')).toHaveText(['Working tasks', 'Subagents']);
     // Each entry is its own row.
     await expect(details.locator('.ip-dagents > li')).toHaveCount(1);
@@ -2766,6 +2870,7 @@ test.describe('Board', () => {
     await expect(meta.locator('.ip-marker.m-active')).toHaveCount(1);
     // The log: the time in Martian Mono, the text in ink, the session muted. The entry arrives live.
     await write(api, fresh.session, 'post', `/api/nodes/${fresh.ids['Play app signing']}/log`, { text: 'Uploaded the key', sessionId: fresh.session });
+    await openTrail(page.getByRole('complementary'));
     const entry = page.getByRole('complementary').locator('.ip-log li');
     await expect(entry).toHaveText('just now Uploaded the key · E2E session');
     await expect(entry.locator('.ip-log-time')).toHaveCSS('font-family', /Martian Mono/);
@@ -3556,6 +3661,146 @@ test.describe('Details: asks, handoff, add a step', () => {
     const detail = (await (await api.get(`/api/nodes/${id}`)).json()) as { children: { title: string }[] };
     expect(detail.children.map((c) => c.title)).toEqual(expect.arrayContaining(['Check the upload key', 'Second child']));
   });
+
+  test('quick-add takes notes: Enter on the title adds at once; Tab to Notes, two lines with Shift+Enter, Enter adds them as the body', async ({ page, api, fresh }) => {
+    const id = fresh.ids['Play app signing'];
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const details = await openDetails(page, 'Play app signing');
+    await details.getByRole('button', { name: `Add a step under #${id}` }).click();
+    const field = details.getByRole('textbox', { name: `Add a step under #${id}` });
+    const notes = details.getByRole('textbox', { name: 'Notes for the new step' });
+    await expect(field).toBeFocused();
+    await field.fill('Title only step');
+    await page.keyboard.press('Enter');
+    await expect(details.locator('.ip-kids')).toContainText('Title only step');
+    await expect(field).toBeFocused();
+    await expect(field).toHaveValue('');
+    await field.fill('Step with notes');
+    await page.keyboard.press('Tab');
+    await expect(notes).toBeFocused();
+    await page.keyboard.type('First line');
+    await page.keyboard.press('Shift+Enter');
+    await page.keyboard.type('Second line');
+    await expect(notes).toHaveValue('First line\nSecond line');
+    await page.keyboard.press('Enter');
+    await expect(details.locator('.ip-kids')).toContainText('Step with notes');
+    await expect(field).toBeFocused();
+    await expect(field).toHaveValue('');
+    await expect(notes).toHaveValue('');
+    const kids = ((await (await api.get(`/api/nodes/${id}`)).json()) as { children: { id: number; title: string }[] }).children;
+    const withNotes = kids.find((c) => c.title === 'Step with notes')!;
+    const plain = kids.find((c) => c.title === 'Title only step')!;
+    expect(((await (await api.get(`/api/nodes/${withNotes.id}`)).json()) as { node: { body: string; origin: string } }).node).toMatchObject({ body: 'First line\nSecond line', origin: 'me' });
+    expect(((await (await api.get(`/api/nodes/${plain.id}`)).json()) as { node: { body: string } }).node.body).toBe('');
+    // A step of yours shows its body unfolded, as NOTES.
+    await details.locator('.ip-kids').getByRole('button', { name: /Step with notes/ }).click();
+    await expect(details.locator('.ip-dtitle')).toHaveText('Step with notes');
+    // Each typed line stays its own line.
+    await expect(details.locator('.ip-dnotes br')).toHaveCount(1);
+    // Enter on the title adds the notes too; Enter in the notes with no title goes to the title.
+    await details.getByRole('button', { name: /^Add a step under #/ }).click();
+    const field2 = details.getByRole('textbox', { name: /^Add a step under #/ });
+    const notes2 = details.getByRole('textbox', { name: 'Notes for the new step' });
+    await notes2.fill('Notes first');
+    await notes2.press('Enter');
+    await expect(field2).toBeFocused();
+    await field2.fill('Titled after');
+    await page.keyboard.press('Enter');
+    await expect(details.locator('.ip-kids')).toContainText('Titled after');
+    await expect(notes2).toHaveValue('');
+    const titled = ((await (await api.get(`/api/nodes/${withNotes.id}`)).json()) as { children: { id: number; title: string }[] }).children.find((c) => c.title === 'Titled after')!;
+    expect(((await (await api.get(`/api/nodes/${titled.id}`)).json()) as { node: { body: string } }).node.body).toBe('Notes first');
+    // Escape in the notes closes the pair.
+    await notes2.focus();
+    await page.keyboard.press('Escape');
+    await expect(details.getByRole('textbox', { name: 'Notes for the new step' })).toHaveCount(0);
+  });
+
+  test('a proposed step shows a proposed chip on its Backlog row and Board tile; an asked one shows none', async ({ page, api, fresh }) => {
+    const [proposed, asked] = await write<{ id: number }[]>(api, fresh.session, 'post', '/api/nodes', {
+      parentId: fresh.root,
+      nodes: [{ title: 'Proposed by a session', origin: 'proposed' }, { title: 'Asked of a session', origin: 'asked' }],
+    });
+    // Ahead of the seeded Soon steps, so both show in the Board's preview.
+    await rankSoon(api, fresh, proposed.id, fresh.ids['3 RevenueCat']);
+    await rankSoon(api, fresh, asked.id, fresh.ids['3 RevenueCat']);
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const tile = (title: string) => page.locator('article.ip-tile', { has: page.getByRole('button', { name: title, exact: true }) });
+    await expect(tile('Proposed by a session').getByText('proposed', { exact: true })).toBeVisible();
+    await expect(tile('Asked of a session')).toBeVisible();
+    await expect(tile('Asked of a session').getByText('proposed', { exact: true })).toHaveCount(0);
+    const view = await openFullBacklog(page);
+    await expect(blRow(page, view, 'Proposed by a session').getByText('proposed', { exact: true })).toBeVisible();
+    await expect(blRow(page, view, 'Asked of a session')).toBeVisible();
+    await expect(blRow(page, view, 'Asked of a session').getByText('proposed', { exact: true })).toHaveCount(0);
+  });
+
+  test("the Backlog inspector shows What and Why above the body; a session's step without them says so, one of yours shows nothing", async ({ page, api, fresh }) => {
+    await write(api, fresh.session, 'post', '/api/nodes', {
+      parentId: fresh.root,
+      nodes: [
+        { title: 'Written up', origin: 'proposed', what: 'Rotate the upload key', why: 'The old one leaks in CI logs', body: 'Context for Claude' },
+        { title: 'Unwritten session step', origin: 'asked' },
+      ],
+    });
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    const view = await openBacklogView(page, 'By Phase');
+    const written = await openInspector(blRow(page, view, 'Written up'));
+    await expect(written.locator('.ip-whatwhy-row[data-field="what"]')).toHaveText('WHATRotate the upload key');
+    await expect(written.locator('.ip-whatwhy-row[data-field="why"]')).toHaveText('WHYThe old one leaks in CI logs');
+    expect((await written.locator('.ip-whatwhy').boundingBox())!.y).toBeLessThan((await written.locator('.ip-insp-body').boundingBox())!.y);
+    const unwritten = await openInspector(blRow(page, view, 'Unwritten session step'));
+    await expect(unwritten.locator('.ip-whatwhy-none')).toHaveText('No What or Why yet');
+    expect((await windowPost(page, `/api/ui/projects/${fresh.id}/nodes`, { slug: fresh.slug, title: 'Mine, no What', parent: null })).status).toBe(200);
+    const mine = await openInspector(blRow(page, view, 'Mine, no What'));
+    await expect(mine.locator('.ip-whatwhy, .ip-whatwhy-none')).toHaveCount(0);
+  });
+
+  test("Details reads What, Why, the origin row, asks, outcome, resources (handoff first), steps, then a folded TRAIL with Claude's body and the log", async ({ page, api, fresh }) => {
+    const [step] = await write<{ id: number }[]>(api, fresh.session, 'post', '/api/nodes', {
+      parentId: fresh.root,
+      nodes: [{ title: 'Ordered step', origin: 'proposed', what: 'Reorder Details', why: 'The reader wants the point first', body: 'Claude context body', outcome: 'Reordered.' }],
+    });
+    await write(api, fresh.session, 'post', '/api/nodes', { parentId: step.id, nodes: [{ title: 'Child of ordered' }] });
+    await write(api, fresh.session, 'post', '/api/resources', { nodeId: step.id, kind: 'doc', title: 'Plain notes', content: '# Notes' });
+    await write(api, fresh.session, 'post', '/api/resources', { nodeId: step.id, kind: 'doc', title: 'The handoff', purpose: 'handoff', content: '# Handoff' });
+    await write(api, fresh.session, 'post', `/api/nodes/${step.id}/log`, { text: 'Did a thing', sessionId: fresh.session });
+    await write(api, fresh.session, 'post', `/api/nodes/${step.id}/asks`, { kind: 'question', text: 'Which order?' });
+    await page.setViewportSize(WIDE);
+    await open(page, fresh);
+    // The command bar reaches a step with children, which the Backlog preview does not list.
+    await expect(stepRow(page, '3 RevenueCat')).toBeVisible();
+    await page.keyboard.press('Control+k');
+    await page.keyboard.type(`#${step.id}`);
+    await page.keyboard.press('Enter');
+    const details = page.getByRole('complementary');
+    await expect(details.locator('.ip-dtop .p-eyebrow')).toHaveText(new RegExp(`^#${step.id} · `));
+    const top = async (sel: string) => (await details.locator(sel).first().boundingBox())!.y;
+    const tops = [
+      await top('.ip-whatwhy-row[data-field="what"]'),
+      await top('.ip-whatwhy-row[data-field="why"]'),
+      await top('.ip-meta'),
+      await top('.ip-dasks'),
+      await top('.ip-outcome'),
+      await top('.ip-ress'),
+      await top('.ip-kids'),
+      await top('details.ip-dtrailfold'),
+    ];
+    expect(tops).toEqual([...tops].sort((a, b) => a - b));
+    await expect(details.locator('.ip-meta .ip-meta-origin')).toHaveText('proposed');
+    await expect(details.locator('.ip-res-title')).toHaveText(['The handoff', 'Plain notes']);
+    // The trail is folded: its body and log are not shown until it opens.
+    await expect(details.locator('details.ip-dtrailfold summary')).toContainText('TRAIL');
+    await expect(details.locator('details.ip-dtrailfold summary')).toContainText('body · 1 log');
+    await expect(details.getByText('Claude context body')).toBeHidden();
+    await expect(details.locator('.ip-log')).toBeHidden();
+    await openTrail(details);
+    await expect(details.getByText('Claude context body')).toBeVisible();
+    await expect(details.locator('.ip-log li')).toContainText('Did a thing');
+  });
 });
 
 test.describe('Fix round 1', () => {
@@ -3741,7 +3986,7 @@ test.describe('Module rail', () => {
     const base = (await code(first).textContent())!;
     await expect(code(second)).toHaveText(`${base.slice(0, 2)}2`);
     await expect(railRow(page, first).locator('.ip-rail-name')).toBeHidden();
-    await expect(projectRail(page).locator('.ip-rail-vcode')).toHaveText(['BRD', 'PRJ', 'BKL', 'DON']);
+    await expect(projectRail(page).locator('.ip-rail-vcode')).toHaveText(['BRD', 'PRJ', 'BKL', 'DON', 'DOC']);
     await expect(viewButton(page, 'Backlog')).toBeVisible();
     // Under 720: one row of full names, and the views a group named Views above the page.
     await page.setViewportSize({ width: 400, height: 900 });
@@ -3873,6 +4118,7 @@ test.describe('v3 Details, viewer and command bar (#505)', () => {
     const details = await goToStep(page, step.id);
     // The body scrolls; the head and the strip do not.
     const scroller = details.locator('.ip-dbody');
+    await openTrail(details);
     await expect.poll(() => page.evaluate<number>(`(() => { const e = document.querySelector('.ip-dbody'); return e.scrollHeight - e.clientHeight; })()`)).toBeGreaterThan(200);
     const park = details.getByRole('button', { name: 'Park…' });
     await expect(park).toBeInViewport({ ratio: 1 });
