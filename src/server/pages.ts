@@ -345,11 +345,14 @@ export const PAGE_FRAME_HEADER_CSP = `${PAGE_CSP}; base-uri 'none'; form-action 
 
 /**
  * Posts the page's height to the window, as a number, whenever it changes. A page sized to its frame (height: 100% with
- * a body margin) grows by the same few pixels on every report; after three such steps in a row the small growths stop.
+ * a body margin) grows by the same few pixels on every report; after three such steps in a row the small growths stop. A page
+ * wider than its frame gets a horizontal scrollbar that takes height from the frame (`innerHeight` less the root's
+ * `clientHeight`, 0 without one), so that height is reported too, or the frame would scroll by it.
  */
 const HEIGHT_SCRIPT =
   '<script>(()=>{const b=document.body;if(!b)return;let last=-1,creep=0;const post=()=>{const s=getComputedStyle(b);' +
-  'const h=Math.ceil(b.scrollHeight+parseFloat(s.marginTop)+parseFloat(s.marginBottom));if(h===last)return;' +
+  'const bar=Math.max(0,innerHeight-document.documentElement.clientHeight);' +
+  'const h=Math.ceil(b.scrollHeight+parseFloat(s.marginTop)+parseFloat(s.marginBottom)+bar);if(h===last)return;' +
   'const step=h-last;if(last>0&&step>0&&step<=32){if(++creep>3)return;}else creep=0;' +
   'last=h;parent.postMessage(h,"*");};addEventListener("load",post);new ResizeObserver(post).observe(b);post();})()</script>';
 

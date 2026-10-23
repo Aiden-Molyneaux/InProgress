@@ -376,8 +376,12 @@ test.afterAll(() => {
   for (const dir of pageDirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
 });
 
-/** A git repo bound to the project, for its pages, in a temp folder the file's afterAll removes. */
-async function pageRepo(api: APIRequestContext, project: Seeded) {
+/**
+ * A git repo bound to the project, for its pages, in a temp folder the file's afterAll removes. A bare project (no seeded
+ * steps, no session) can hold one but cannot register a page.
+ */
+async function pageRepo(api: APIRequestContext, project: Pick<Seeded, 'slug'> & Partial<Pick<Seeded, 'session' | 'ids'>>) {
+  const session = project.session ?? `e2e-${randomUUID()}`;
   const dir = mkdtempSync(join(tmpdir(), 'ip-e2e-pages-'));
   pageDirs.push(dir);
   // No hooks: the user's global ones (Git LFS, an identity check) cost seconds a commit and would run the test past its timeout.
@@ -392,9 +396,9 @@ async function pageRepo(api: APIRequestContext, project: Seeded) {
     git('commit', '-q', '-m', `edit ${file}`);
   };
   commit('src/app.ts', 'export {};\n');
-  await write(api, project.session, 'post', `/api/projects/${project.slug}/bindings`, { path: dir });
+  await write(api, session, 'post', `/api/projects/${project.slug}/bindings`, { path: dir });
   const register = (file: string, title: string, purpose = 'page') =>
-    write<{ id: number }>(api, project.session, 'post', '/api/resources', { nodeId: project.ids['Upload keystore'], kind: 'doc', title, path: join(dir, file), purpose });
+    write<{ id: number }>(api, session, 'post', '/api/resources', { nodeId: project.ids!['Upload keystore'], kind: 'doc', title, path: join(dir, file), purpose });
   return { dir, commit, register };
 }
 
@@ -464,6 +468,8 @@ test('an HTML page runs in its sandboxed frame: its clicks work, it reaches no n
   const height = (await frame.boundingBox())?.height ?? 0;
   expect(height).toBeGreaterThan(1400);
   expect(height).toBeLessThan(2000);
+  // The frame is the page's own height: nothing inside it scrolls (Aiden's walkthrough of #530 found a 2 px scroll).
+  expect(await inside.locator('html').evaluate((d) => { const el = d as unknown as { scrollHeight: number; clientHeight: number }; return el.scrollHeight - el.clientHeight; })).toBe(0);
 });
 
 test('the freshness strip counts commits to covers since the confirmation, and Still accurate resets it', async ({ page, fresh, api }) => {
@@ -577,6 +583,96 @@ test('the Library group lists pages by project, opens the roster in place, and k
   await projectRail(page).locator(`a[href="#/p/${fresh.slug}"]`).click();
   await expect(page).toHaveURL(hereIs(fresh.slug));
   await expect(page.getByRole('heading', { name: 'Now', exact: true })).toBeVisible();
+});
+
+test("Docs lists a project's pages and opens one", async ({ page, fresh, api }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const repo = await pageRepo(api, fresh);
+  repo.commit('docs/ops.md', ['---', 'covers: [src/app.ts]', '---', '# Ops notes', '', 'Read from the repo.', ''].join('\n'));
+  const title = `Ops notes ${randomUUID().slice(0, 8)}`;
+  await repo.register('docs/ops.md', title, 'page');
+  await open(page, fresh);
+  // The project keeps no manifest, so its Docs figure is the page count alone.
+  const docs = projectRail(page).getByRole('button', { name: /^Docs, 1$/ });
+  await expect(docs.locator('.ip-rail-vcode')).toHaveText('DOC');
+  await docs.click();
+  await expect(page.getByRole('heading', { level: 1, name: 'DOCS' })).toBeVisible();
+  await expect(page.locator('.ip-page-meta')).toContainText('1 PAGE');
+  const row = page.locator('.ip-lib-row', { hasText: title });
+  await expect(row.locator('.p-chip').first()).toHaveText('MD');
+  await expect(row.locator('.ip-lib-path')).toHaveText(join(repo.dir, 'docs', 'ops.md'));
+  await expect(row.locator('.ip-lib-fresh')).toHaveText('current');
+  await expect(page.locator('.ip-docs-pick')).toHaveText('Pick a page or an adaptation.');
+  const note = page.locator('.ip-docs-none');
+  await expect(note).toContainText(`E2E Demo keeps no .claude/shipwright.json yet.`);
+  await expect(note.getByRole('link', { name: 'Library · Sync ›' })).toHaveAttribute('href', '#/lib/sync');
+  await row.getByRole('button', { name: title }).click();
+  await expect(page.locator('section.ip-viewer[data-inline] .ip-md h1')).toHaveText('Ops notes');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await note.getByRole('link', { name: 'Library · Sync ›' }).click();
+  await expect(page).toHaveURL(/#\/lib\/sync$/);
+});
+
+test('Docs opens an adaptation side by side, with its tags, folded sections and conflict note, and Diff shows the raw diff', async ({ page, fresh, api }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  // Shipwright: a git repo bound to a project of its own, holding the template and a sync script whose check names its HEAD as
+  // the base, and whose diff matches the copy below: one line added under Rules, which the one upstream hunk conflicts with.
+  const sw = await pageRepo(api, await bare(api, 'Shipwright'));
+  const diff = {
+    adaptation: ['--- agents/sev.md', '+++ agents/sev.md', '@@ -13,3 +13,4 @@', ' ## Rules', ' ', ' rule one', '+rule two', ''].join('\n'),
+    upstream: ['--- agents/sev.md', '+++ agents/sev.md', '@@ -15 +15 @@', '-rule one', '+rule uno', ''].join('\n'),
+    // The merge's range in the copy: its last two lines, under Rules.
+    conflicts: [{ local: { start: 15, lines: 2 }, hunks: [0] }],
+  };
+  const script = [
+    "import { execFileSync } from 'node:child_process';",
+    "import { fileURLToPath } from 'node:url';",
+    "const base = execFileSync('git', ['-C', fileURLToPath(new URL('..', import.meta.url)), 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();",
+    "const file = { template: 'agents/sev.md', local: 'agents/sev.md', base, state: 'behind', behind: 1, commits: [{ sha: 'c0ffee1', date: '2026-10-21', subject: 'reword' }], fills: { TONE: 'kind' }, detail: null };",
+    `const diff = ${JSON.stringify(diff)};`,
+    "console.log(JSON.stringify(process.argv.includes('--diff') ? diff : { shipwright: { head: 'abc1234', date: '2026-10-21', subject: 'x' }, project: 'p', lastSync: null, files: [file], skip: [], notAdopted: [], fills: {} }));",
+  ].join('\n');
+  mkdirSync(join(sw.dir, 'scripts'));
+  mkdirSync(join(sw.dir, 'agents'));
+  writeFileSync(join(sw.dir, 'scripts', 'template-sync.mjs'), script);
+  writeFileSync(join(sw.dir, 'templates.json'), JSON.stringify({ templates: ['agents/sev.md'] }));
+  const template = '# Sev\n\n**Rule.** Be {{TONE}}.\n\n## Routing\n\nSame here.\n\n## Notes\n\nKeep notes.\n\n## Rules\n\nrule one\n';
+  sw.commit('agents/sev.md', template);
+  const repo = await pageRepo(api, fresh);
+  mkdirSync(join(repo.dir, '.claude'));
+  mkdirSync(join(repo.dir, 'agents'));
+  writeFileSync(join(repo.dir, 'agents', 'sev.md'), `${template.replace('{{TONE}}', 'kind')}rule two\n`);
+  writeFileSync(join(repo.dir, '.claude', 'shipwright.json'), JSON.stringify({ shipwright: sw.dir, files: { 'agents/sev.md': { fills: { TONE: 'kind' } } }, skip: [] }));
+  await open(page, fresh);
+  // No pages and one adaptation.
+  await projectRail(page).getByRole('button', { name: /^Docs, 0 · 1$/ }).click();
+  await expect(page.locator('.ip-page-meta')).toContainText('1 ADAPTATION');
+  const row = page.locator('.ip-lib-row', { hasText: 'sev' });
+  await expect(row.locator('.ip-docs-state')).toHaveText('1 behind');
+  await row.getByRole('button', { name: 'sev' }).click();
+  const view = page.getByRole('region', { name: 'sev in E2E Demo' });
+  await expect(view.locator('.ip-adapt-strip')).toContainText("computed live from E2E Demo's copy, its manifest and Shipwright at base");
+  await expect(view.locator('.ip-adapt-strip')).toContainText('Shipwright is 1 commit ahead: c0ffee1');
+  await expect(view.locator('a.ip-adapt-link')).toHaveAttribute('href', `#/lib/sync/${fresh.slug}/agents%2Fsev.md`);
+  // The Opening and the two untouched sections fold; the lead with a file fill and the rewritten Rules show.
+  const rows = view.locator('tbody tr');
+  await expect(rows).toHaveCount(4);
+  await expect(rows.nth(0)).toHaveText('1 section E2E Demo left alone: Opening');
+  await expect(rows.nth(1).locator('th')).toHaveText('Rule');
+  await expect(rows.nth(1).locator('.ip-adapt-tag')).toHaveText('file fill');
+  await expect(rows.nth(1).locator('td').nth(0).locator('code')).toHaveText('{{TONE}}');
+  await expect(rows.nth(1).locator('td').nth(1)).toContainText('Be kind.');
+  await expect(rows.nth(2)).toHaveText('2 sections E2E Demo left alone: Routing, Notes');
+  await expect(rows.nth(3).locator('.ip-adapt-tag')).toHaveText('rewritten');
+  await expect(rows.nth(3).locator('.ip-adapt-conflict')).toHaveText('Shipwright changed this section in c0ffee1. The next sync conflicts here.');
+  await rows.nth(2).getByRole('button').click();
+  await expect(view.locator('tbody tr[data-tag="same"] th')).toHaveText(['Routing', 'Notes']);
+  // The fold's button left with it: focus goes to the first section it opened.
+  await expect(view.locator('tbody th', { hasText: 'Routing' })).toBeFocused();
+  // The index now knows the local edit count.
+  await expect(row.locator('.ip-lib-path')).toHaveText('1 local edit · 1 file fill');
+  await view.getByRole('button', { name: 'Diff' }).click();
+  await expect(view.locator('.ip-sync-dl[data-kind="add"]')).toHaveText(['+rule two']);
 });
 
 test('the Library row is one more stop in the rail: arrows reach it, Space opens it, shelves hand focus back to the project views, and a chip lands on the Sync button', async ({ page, fresh, api }) => {
@@ -3876,7 +3972,7 @@ test.describe('Module rail', () => {
     const base = (await code(first).textContent())!;
     await expect(code(second)).toHaveText(`${base.slice(0, 2)}2`);
     await expect(railRow(page, first).locator('.ip-rail-name')).toBeHidden();
-    await expect(projectRail(page).locator('.ip-rail-vcode')).toHaveText(['BRD', 'PRJ', 'BKL', 'DON']);
+    await expect(projectRail(page).locator('.ip-rail-vcode')).toHaveText(['BRD', 'PRJ', 'BKL', 'DON', 'DOC']);
     await expect(viewButton(page, 'Backlog')).toBeVisible();
     // Under 720: one row of full names, and the views a group named Views above the page.
     await page.setViewportSize({ width: 400, height: 900 });

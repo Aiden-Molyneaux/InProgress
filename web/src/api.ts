@@ -1,7 +1,7 @@
 import type { BackUpNowResult, BackupStatus } from '../../src/core/backups';
 import type { BuildInfo } from '../../src/core/build';
 import type { StepHit } from '../../src/core/goto';
-import type { DeletedProject, LibraryPages, LibrarySync, NodeDetail, NodeLabel, PageBody, Project, ProjectSnapshot, ProjectSummary, QueueOp, RankOp, Resource, SyncDiff } from '../../src/core/types';
+import type { Binding, DeletedProject, LibraryPage, LibraryPages, LibrarySync, NodeDetail, NodeLabel, PageBody, Project, ProjectSnapshot, ProjectSummary, QueueOp, RankOp, Resource, SyncAdaptation, SyncDiff } from '../../src/core/types';
 import type { ActionTarget, ProjectAction } from './projectActions';
 
 async function getJson<T>(path: string): Promise<T> {
@@ -49,6 +49,10 @@ export const api = {
   openBackupsFolder: () => postUi('/api/ui/backups/open-folder', {}),
   /** The Library group: its pages (read live), and every manifest's Sync check. */
   libraryPages: () => getJson<LibraryPages>('/api/library/pages'),
+  /** A project's own pages (purpose page), read live: its Docs view. */
+  projectPages: (slug: string) => getJson<{ pages: LibraryPage[] }>(`/api/projects/${encodeURIComponent(slug)}/pages`),
+  /** Every folder binding, for the Docs head's "read live from". */
+  bindings: () => getJson<Binding[]>('/api/bindings'),
   /**
    * The Sync check: a UI POST, as it runs Shipwright's script. Rejects with the reason. It loads with the window, not on a
    * click, so a 401 says so rather than reloading: a page with no key (npm run dev) would reload for ever.
@@ -62,6 +66,12 @@ export const api = {
   /** One adopted template's adaptation and upstream change. Never rejects: a failure is { ok: false, error }. */
   syncDiff: async (slug: string, template: string): Promise<SyncDiff> => {
     const answer = await sendUi<SyncDiff>('/api/ui/library/sync/diff', { slug, template });
+    if (answer === 'reload') return { ok: false, error: "The window's key is out of date. Reload the page." };
+    return typeof answer === 'string' ? { ok: false, error: answer } : answer;
+  },
+  /** One adopted template side by side with the project's copy, for its Docs view. Never rejects: a failure is { ok: false, error }. */
+  syncAdaptation: async (slug: string, template: string): Promise<SyncAdaptation> => {
+    const answer = await sendUi<SyncAdaptation>('/api/ui/library/sync/adaptation', { slug, template });
     if (answer === 'reload') return { ok: false, error: "The window's key is out of date. Reload the page." };
     return typeof answer === 'string' ? { ok: false, error: answer } : answer;
   },

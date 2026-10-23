@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { LibraryPage, LibraryPages, ProjectSummary } from '../../../src/core/types';
 import { PageHead } from '../page/PageHead';
 import { Chip } from '../parts/Chip';
@@ -17,6 +18,31 @@ interface ListProps {
   onRoute: (route: LibraryRoute) => void;
 }
 
+/** One page's row: format, title, path and freshness, its error when it cannot be read, and `children` under them. */
+export function PageRow({ page: p, onOpen, picked, children }: { page: LibraryPage; onOpen: () => void; picked?: boolean; children?: ReactNode }) {
+  const fresh = freshText(p.fresh);
+  return (
+    <li className="ip-lib-row" data-page={p.id} data-picked={picked || undefined}>
+      <div className="ip-lib-line">
+        {p.format && <Chip tone="label">{p.format === 'html' ? 'HTML' : 'MD'}</Chip>}
+        <button type="button" className="ip-lib-open" aria-current={picked || undefined} onClick={onOpen}>
+          {p.title}
+        </button>
+        <span className="ip-lib-path" title={p.path}>
+          {p.path}
+        </span>
+        {fresh && (
+          <span className="ip-lib-fresh" data-alarm={fresh.alarm || undefined}>
+            {fresh.text}
+          </span>
+        )}
+      </div>
+      {p.error && <p className="ip-lib-error">{p.error}</p>}
+      {children}
+    </li>
+  );
+}
+
 /** The pages as sections per project, each row a page: format, title, path, freshness and where it is adapted. */
 export function PageList({ pages, shown, tabs, codes, onOpenResource, onRoute }: ListProps) {
   const groups = groupPages(shown, pages.sourceProjectId, tabs.map((t) => t.id));
@@ -26,52 +52,34 @@ export function PageList({ pages, shown, tabs, codes, onOpenResource, onRoute }:
         <section key={g.projectId} className="ip-lib-sec" aria-label={g.projectName}>
           <Eyebrow as="h3">{`${codes.get(g.projectId) ?? g.projectName.slice(0, 3).toUpperCase()} · ${g.projectName}`}</Eyebrow>
           <ul className="ip-lib-list">
-            {g.pages.map((p) => {
-              const fresh = freshText(p.fresh);
-              return (
-                <li key={p.id} className="ip-lib-row" data-page={p.id}>
-                  <div className="ip-lib-line">
-                    {p.format && <Chip tone="label">{p.format === 'html' ? 'HTML' : 'MD'}</Chip>}
-                    <button type="button" className="ip-lib-open" onClick={() => onOpenResource(p.id)}>
-                      {p.title}
-                    </button>
-                    <span className="ip-lib-path" title={p.path}>
-                      {p.path}
-                    </span>
-                    {fresh && (
-                      <span className="ip-lib-fresh" data-alarm={fresh.alarm || undefined}>
-                        {fresh.text}
-                      </span>
-                    )}
+            {g.pages.map((p) => (
+              <PageRow key={p.id} page={p} onOpen={() => onOpenResource(p.id)}>
+                {p.adaptedIn.length > 0 && (
+                  <div className="ip-lib-adapted">
+                    <Eyebrow>Adapted in</Eyebrow>
+                    {p.adaptedIn.map((a) => {
+                      const route: LibraryRoute = { shelf: 'sync', pick: { slug: a.slug, template: a.template } };
+                      const project = tabs.find((t) => t.slug === a.slug);
+                      return (
+                        <a
+                          key={`${a.slug}:${a.template}`}
+                          className="ip-lib-adapt"
+                          href={libraryHash(route)}
+                          title={`${a.name}'s adaptation of ${a.template}`}
+                          onClick={(e) => {
+                            if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return;
+                            e.preventDefault();
+                            onRoute(route);
+                          }}
+                        >
+                          <Chip>{project ? (codes.get(project.id) ?? a.name) : a.name}</Chip>
+                        </a>
+                      );
+                    })}
                   </div>
-                  {p.error && <p className="ip-lib-error">{p.error}</p>}
-                  {p.adaptedIn.length > 0 && (
-                    <div className="ip-lib-adapted">
-                      <Eyebrow>Adapted in</Eyebrow>
-                      {p.adaptedIn.map((a) => {
-                        const route: LibraryRoute = { shelf: 'sync', pick: { slug: a.slug, template: a.template } };
-                        const project = tabs.find((t) => t.slug === a.slug);
-                        return (
-                          <a
-                            key={`${a.slug}:${a.template}`}
-                            className="ip-lib-adapt"
-                            href={libraryHash(route)}
-                            title={`${a.name}'s adaptation of ${a.template}`}
-                            onClick={(e) => {
-                              if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return;
-                              e.preventDefault();
-                              onRoute(route);
-                            }}
-                          >
-                            <Chip>{project ? (codes.get(project.id) ?? a.name) : a.name}</Chip>
-                          </a>
-                        );
-                      })}
-                    </div>
-                  )}
-                </li>
-              );
-            })}
+                )}
+              </PageRow>
+            ))}
           </ul>
         </section>
       ))}
