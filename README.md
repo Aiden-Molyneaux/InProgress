@@ -5,10 +5,10 @@ I usually have several Claude Code sessions going at once, across more than one 
 InProgress is a small local window that sits beside Claude and keeps that picture in one place. For each project it shows what needs me, what is in flight and which session is on it, what comes next, and what got done. Claude keeps it up to date while it works. My part is reading it, answering whatever is waiting, and choosing the order of the work.
 
 <p align="center">
-  <img src="docs/images/desktop.jpg" width="600" alt="The InProgress board in a wide window, on a sample project">
+  <img src="docs/images/desktop.jpg" width="600" alt="The InProgress board in a wide window">
   <img src="docs/images/split.jpg" width="195" alt="The same board in the narrow window beside Claude">
 </p>
-<p align="center"><em>Wide and narrow, on a sample project.</em></p>
+<p align="center"><em>Wide and narrow.</em></p>
 
 ## What you see and do
 
