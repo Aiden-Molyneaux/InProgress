@@ -26,6 +26,8 @@ writeFileSync(
   `${root}/dist/build.json`,
   `${JSON.stringify({ sha: git(['rev-parse', '--short', 'HEAD']) || 'unknown', dirty: git(['status', '--porcelain']) !== '', builtAt: new Date().toISOString() }, null, 2)}\n`,
 );
+// The desktop app's window and shortcut icon sits beside its main.js, so a deploy replaces both together.
+cpSync(`${repo}/assets/inprogress.ico`, `${root}/dist/desktop/inprogress.ico`);
 if (!nodeOnly) run('npx', ['vite', 'build', '--config', 'web/vite.config.ts', '--outDir', `${root}/web/dist`, '--emptyOutDir']);
 // repoRoot() in the built CLI resolves to <root>, so install and doctor find their kit templates here.
 rmSync(`${root}/claude`, { recursive: true, force: true });

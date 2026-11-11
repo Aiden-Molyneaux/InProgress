@@ -6,6 +6,7 @@ export default defineConfig({
     'mcp/main': 'src/mcp/main.ts',
     'cli/main': 'src/cli/main.ts',
     'hooks/hook': 'src/hooks/main.ts',
+    'desktop/main': 'src/desktop/main.ts',
   },
   format: ['esm'],
   platform: 'node',
@@ -16,8 +17,10 @@ export default defineConfig({
   outDir: 'dist',
   // Bundle the pure-JS dependencies: a cold start then reads a handful of files instead of ~325 from node_modules
   // (#60). better-sqlite3 loads a native binding from its own folder, so it stays outside; noExternal wins over
-  // external in tsup, hence the exclusion inside the pattern.
-  noExternal: [/^(?!better-sqlite3(\/|$))/],
+  // external in tsup, hence the exclusion inside the pattern. electron stays outside too: inside the desktop app
+  // `import 'electron'` resolves to the built-in module, and a bundled copy would be the npm stub that only returns
+  // the binary's path.
+  noExternal: [/^(?!(better-sqlite3|electron)(\/|$))/],
   // Bundled CommonJS code calls require() and reads __filename/__dirname, which ESM output lacks.
   banner: {
     js: [

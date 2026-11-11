@@ -489,8 +489,8 @@ of any checkout by pattern.
 
 - `start`: start the server detached if not running.
 - `stop`: `POST /api/admin/shutdown`.
-- `open`: start if needed, then launch `msedge --app=http://127.0.0.1:4317 --window-size=520,1000`;
-  fall back to the default browser.
+- `open`: start the server if needed, then the desktop app (Electron, `dist/desktop/main.js`); with Electron missing,
+  a Chrome `--app=http://127.0.0.1:4317 --window-size=520,1000` window; else the default browser.
 - `status`: health, projects with needs-you counts, live sessions.
 - `outline <project> [--full]`: print the text outline (read-only, no token), for status
   questions from a Claude session and for Aiden in a terminal.

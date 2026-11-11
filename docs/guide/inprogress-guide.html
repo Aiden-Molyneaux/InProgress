@@ -275,7 +275,7 @@ footer p { max-width: 80ch; }
   <text x="418" y="276" class="dg-l">every tree write</text>
 
   <rect x="96" y="486" width="368" height="84" rx="8" class="dg-box"/>
-  <text x="108" y="508" class="dg-h">Web UI, Edge app window 520 × 1000</text>
+  <text x="108" y="508" class="dg-h">Web UI, desktop app window 520 × 1000</text>
   <text x="108" y="526" class="dg-t">Board and Project view, no canvas</text>
   <text x="108" y="540" class="dg-t">a few guarded writes, behind a per-process UI token</text>
   <text x="108" y="554" class="dg-t">reloads itself when a deploy changes the build</text>
@@ -336,7 +336,7 @@ node dist\cli\main.js open</code></pre>
 </dd>
 <dt>You see</dt>
 <dd>
-<p><code>doctor</code> starts the server if it is down (and says so), then prints one line per check: Server (health, version and build match the deployed <code>dist\build.json</code>), Token, Database (<code>PRAGMA quick_check</code>), Hooks (present, node binary and script exist), Scribe agent (frontmatter), Skill, Allow rules, MCP server (starts and answers <code>list_projects</code>), and Edge. Edge is a warning only; everything else must pass. <code>open</code> launches a chromeless Edge window, 520 by 1000 px, at <code>http://127.0.0.1:4317</code>, or the default browser if Edge is missing. Snap it beside Claude. An empty window says: No projects yet. In a Claude session, say "track this in InProgress".</p>
+<p><code>doctor</code> starts the server if it is down (and says so), then prints one line per check: Server (health, version and build match the deployed <code>dist\build.json</code>), Token, Database (<code>PRAGMA quick_check</code>), Hooks (present, node binary and script exist), Scribe agent (frontmatter), Skill, Allow rules, MCP server (starts and answers <code>list_projects</code>), and App window. App window is a warning only; everything else must pass. <code>open</code> starts the desktop app (Electron, with the same 520 by 1000 px window) on <code>http://127.0.0.1:4317</code>; with Electron missing it opens a chromeless Chrome window, or the default browser if Chrome is missing too. To pin it, run <code>inprogress open</code> once, then right-click its taskbar button and choose Pin to taskbar, or pin InProgress from the Start Menu. Closing the window quits the app and leaves the server running. Snap it beside Claude. An empty window says: No projects yet. In a Claude session, say "track this in InProgress".</p>
 </dd>
 </dl>
 </div>
@@ -344,7 +344,7 @@ node dist\cli\main.js open</code></pre>
 <aside class="spec">
   <span class="eyebrow">From your spec</span>
   <blockquote>"Local web app (Recommended)"</blockquote>
-  <p>Your first choice in the brainstorm. The server is Node 20, Fastify and better-sqlite3 on this laptop; the window is Edge in app mode. Nothing leaves the machine, which is what ruled out a module inside InThink.</p>
+  <p>Your first choice in the brainstorm. The server is Node 20, Fastify and better-sqlite3 on this laptop; the window is an Electron desktop app (Chrome in app mode as the fallback). Nothing leaves the machine, which is what ruled out a module inside InThink.</p>
   <p class="where">src/server/main.ts · src/cli/open.ts · spec D1</p>
 </aside>
 <aside class="spec">
@@ -954,7 +954,7 @@ Playbook:
 <tbody>
 <tr><td><code>inprogress start</code></td><td>Starts the server detached if it is not answering; waits up to 5 s.</td></tr>
 <tr><td><code>inprogress stop</code></td><td>POST <code>/api/admin/shutdown</code>; waits up to 3 s for it to stop answering.</td></tr>
-<tr><td><code>inprogress open</code></td><td>Starts if needed, then <code>msedge --app=http://127.0.0.1:4317 --window-size=520,1000</code>, else the default browser.</td></tr>
+<tr><td><code>inprogress open</code></td><td>Starts if needed, then the desktop app (<code>dist\desktop\main.js</code> in Electron), else Chrome <code>--app=http://127.0.0.1:4317 --window-size=520,1000</code>, else the default browser. Pin it from its taskbar button or the Start Menu.</td></tr>
 <tr><td><code>inprogress status</code></td><td>Projects with open-ask counts ("need you") and working / live session counts. No token.</td></tr>
 <tr><td><code>inprogress outline &lt;project&gt; [--full]</code></td><td>The text outline by slug, name or id. No token.</td></tr>
 <tr><td><code>inprogress tasks [&lt;step id&gt;] --session &lt;id&gt; [--done|--doing|--todo "…"]...</code></td><td>A session's own working tasks, where the task tools are absent. Run by the session, with an allow rule from install.</td></tr>

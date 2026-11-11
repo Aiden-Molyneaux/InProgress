@@ -126,8 +126,8 @@ export async function runCli(args: string[], out: (line: string) => void = conso
         out(notStarted());
         return 1;
       }
-      openAppWindow(url);
-      out(`Opened ${url}`);
+      const used = openAppWindow(url);
+      out(`Opened ${url} in ${{ desktop: 'the desktop app', chrome: 'Chrome', browser: 'your browser' }[used]}`);
       return 0;
     }
     case 'status': {

@@ -85,6 +85,8 @@ describe('which test suites a deploy runs', () => {
     expect(suitesFor(['src/core/layout.ts'])).toMatchObject({ smoke: false, e2e: true });
     expect(suitesFor(['src/server/routes/read.ts'])).toMatchObject({ smoke: true, e2e: true });
     expect(suitesFor(['package.json'])).toMatchObject({ smoke: true, e2e: true });
+    expect(suitesFor(['src/desktop/main.ts'])).toMatchObject({ smoke: true, e2e: false });
+    expect(suitesFor(['assets/inprogress.ico'])).toMatchObject({ smoke: true, e2e: false });
     expect(suitesFor(['docs/guide/inprogress-guide.html', 'README.md'])).toMatchObject({ smoke: false, e2e: false });
     expect(suitesFor(['src\\hooks\\main.ts'])).toMatchObject({ smoke: true });
   });

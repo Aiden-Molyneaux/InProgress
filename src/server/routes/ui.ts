@@ -73,7 +73,7 @@ export function registerUi(app: FastifyInstance, opts: AppOptions, requireToken:
     return confirmPage(opts.ctx, 'window', id, await pageHead(opts.ctx, requireResource(opts.ctx, id)));
   });
 
-  // The UI runs in an Edge app window, where a plain link opens in Edge: links go through here to the default browser.
+  // The UI runs in the desktop app or a Chrome app window, where a plain link would open inside it or in the wrong browser: links go through here to the default browser.
   app.post('/api/ui/open-url', { onRequest: requireUi }, async (req) => {
     const { url } = openUrlBody.parse(req.body);
     let parsed: URL;
