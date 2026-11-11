@@ -50,10 +50,22 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   let win: BrowserWindow | undefined;
   let showingFailure = false;
-  const node = nodeForServer({ argNode: parseDesktopArgs(process.argv).node, platform: process.platform });
+  const findNode = () => nodeForServer({ argNode: parseDesktopArgs(process.argv).node, platform: process.platform });
+  let node = findNode();
+  /** The load under way: a double-clicked Retry or a second launch joins it rather than racing it. */
+  let loading: Promise<void> | undefined;
+
+  function load(window: BrowserWindow): Promise<void> {
+    loading ??= loadOnce(window).finally(() => {
+      loading = undefined;
+    });
+    return loading;
+  }
 
   /** Starts the server if it is down and loads the board, or the failure page saying why it could not. */
-  async function load(window: BrowserWindow): Promise<void> {
+  async function loadOnce(window: BrowserWindow): Promise<void> {
+    // Look again on a Retry: node may have been installed or put on PATH since launch.
+    node ??= findNode();
     let failure = failurePage('No node.exe was found to run the server.');
     try {
       if (node) {
