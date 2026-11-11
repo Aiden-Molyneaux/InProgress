@@ -7,19 +7,23 @@ import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, Menu, screen, shell } from 'electron';
 import { ensureServer } from '../lib/ensure-server';
 import { baseUrl, homeDir } from '../lib/home';
-import { DESKTOP_APP_ID, externalTarget, isAppUrl, launchDetails, nodeForServer, parseDesktopArgs, readBounds, shortcutPath, visibleBounds, writeBounds } from './logic';
+import { appUserModelId, externalTarget, isAppUrl, isLiveInstance, launchDetails, nodeForServer, parseDesktopArgs, readBounds, RETRY_URL, shortcutPath, visibleBounds, writeBounds } from './logic';
 
 const home = homeDir();
 mkdirSync(home, { recursive: true });
 // Windows locks a process's cwd: the app must never pin dist/ (a deploy renames it) or a project folder.
 process.chdir(home);
 
+const main = fileURLToPath(import.meta.url);
+// Only the installed app takes the shortcut and the shared taskbar identity; a scratch or worktree run must not hijack them.
+const live = isLiveInstance({ main, env: process.env });
+const appId = appUserModelId(live, home, main);
+
 app.setName('InProgress');
 // Under the data dir so a scratch INPROGRESS_HOME gets its own single-instance lock and profile.
 app.setPath('userData', join(home, 'desktop'));
-app.setAppUserModelId(DESKTOP_APP_ID);
+app.setAppUserModelId(appId);
 
-const main = fileURLToPath(import.meta.url);
 const icon = join(dirname(main), 'inprogress.ico');
 const boundsFile = join(home, 'desktop.json');
 const quote = (path: string) => `"${path}"`;
@@ -32,7 +36,7 @@ function failurePage(reason: string): string {
     `<body style="background:#111111;color:#f2f2f2;font:14px Segoe UI,sans-serif;padding:24px">` +
     `<h1 style="font-size:18px">InProgress did not start</h1><p>${esc(reason)}</p>` +
     `<p>The server log is ${esc(join(home, 'server.log'))}.</p>` +
-    `<p><a style="color:#c2fe0b" href="${esc(baseUrl())}">Retry</a></p></body>`;
+    `<p><a style="color:#c2fe0b" href="${RETRY_URL}">Retry</a></p></body>`;
   return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
 
@@ -45,13 +49,41 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   let win: BrowserWindow | undefined;
+  let showingFailure = false;
+  const node = nodeForServer({ argNode: parseDesktopArgs(process.argv).node, platform: process.platform });
+
+  /** Starts the server if it is down and loads the board, or the failure page saying why it could not. */
+  async function load(window: BrowserWindow): Promise<void> {
+    let failure = failurePage('No node.exe was found to run the server.');
+    try {
+      if (node) {
+        failure = failurePage('The server did not answer in time.');
+        if (await ensureServer({ baseUrl: baseUrl(), waitMs: 8000, execPath: node })) {
+          showingFailure = false;
+          await window.loadURL(baseUrl());
+          return;
+        }
+      }
+    } catch (err) {
+      // A throw (a spawn that cannot start, a log file that cannot open) or a failed load: show it rather than a blank window.
+      failure = failurePage(`The server could not be started: ${(err as Error).message}`);
+    }
+    if (window.isDestroyed()) return;
+    showingFailure = true;
+    await window.loadURL(failure).catch(() => undefined);
+  }
+
   app.on('second-instance', () => {
-    if (!win) return;
+    if (!win || win.isDestroyed()) return;
     if (win.isMinimized()) win.restore();
     win.show();
     win.focus();
+    if (showingFailure) void load(win);
   });
-  app.on('window-all-closed', () => app.quit());
+  app.on('window-all-closed', () => {
+    app.releaseSingleInstanceLock();
+    app.quit();
+  });
 
   void app.whenReady().then(async () => {
     Menu.setApplicationMenu(null);
@@ -68,14 +100,13 @@ if (!app.requestSingleInstanceLock()) {
       webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false },
     });
     win = window;
-    const node = nodeForServer({ argNode: parseDesktopArgs(process.argv).node, platform: process.platform });
     const details = launchDetails({ electron: process.execPath, main, node, icon, home });
 
-    if (process.platform === 'win32') {
+    if (live && process.platform === 'win32') {
       // Pinning the running taskbar button then relaunches the app, not bare electron.exe.
-      window.setAppDetails({ appId: DESKTOP_APP_ID, appIconPath: icon, appIconIndex: 0, relaunchCommand: `${quote(details.target)} ${details.args}`, relaunchDisplayName: 'InProgress' });
+      window.setAppDetails({ appId, appIconPath: icon, appIconIndex: 0, relaunchCommand: `${quote(details.target)} ${details.args}`, relaunchDisplayName: 'InProgress' });
     }
-    const lnk = shortcutPath();
+    const lnk = live ? shortcutPath() : undefined;
     if (lnk) {
       try {
         mkdirSync(dirname(lnk), { recursive: true });
@@ -97,6 +128,11 @@ if (!app.requestSingleInstanceLock()) {
       return { action: 'deny' };
     });
     window.webContents.on('will-navigate', (event, url) => {
+      if (url === RETRY_URL) {
+        event.preventDefault();
+        void load(window);
+        return;
+      }
       if (isAppUrl(url, baseUrl())) return;
       event.preventDefault();
       openExternally(url);
@@ -109,16 +145,18 @@ if (!app.requestSingleInstanceLock()) {
       } else if (input.control && input.shift && input.key.toLowerCase() === 'i') {
         window.webContents.toggleDevTools();
         event.preventDefault();
+      } else if (input.control && (input.key === '=' || input.key === '+')) {
+        window.webContents.setZoomLevel(window.webContents.getZoomLevel() + 0.5);
+        event.preventDefault();
+      } else if (input.control && input.key === '-') {
+        window.webContents.setZoomLevel(window.webContents.getZoomLevel() - 0.5);
+        event.preventDefault();
+      } else if (input.control && input.key === '0') {
+        window.webContents.setZoomLevel(0);
+        event.preventDefault();
       }
     });
 
-    const up = node ? await ensureServer({ baseUrl: baseUrl(), waitMs: 8000, execPath: node }) : false;
-    const failure = failurePage(node ? 'The server did not answer in time.' : 'No node.exe was found to run the server.');
-    try {
-      await window.loadURL(up ? baseUrl() : failure);
-    } catch {
-      // The page failed to load (the server went away, or the window closed meanwhile): say so unless the window is gone.
-      if (!window.isDestroyed()) await window.loadURL(failure).catch(() => undefined);
-    }
+    await load(window);
   });
 }

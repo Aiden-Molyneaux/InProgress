@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homeDir } from '../lib/home';
+import { nodeBinary } from './claude-config';
 
 export function findChrome(): string | undefined {
   const bases = [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.LOCALAPPDATA].filter((b): b is string => !!b);
@@ -51,7 +52,7 @@ export function openAppWindow(url: string, deps: OpenDeps = {}): AppWindow {
   if (electron && existsSync(main)) {
     // ELECTRON_RUN_AS_NODE would make electron.exe behave as plain node, never opening a window.
     const { ELECTRON_RUN_AS_NODE: _drop, ...env } = process.env;
-    child = start(electron, [main, `--node=${process.execPath}`], { ...detached, cwd: homeDir(), env });
+    child = start(electron, [main, `--node=${nodeBinary()}`], { ...detached, cwd: homeDir(), env });
     used = 'desktop';
   } else if (chrome) {
     child = start(chrome, chromeArgs(url), detached);

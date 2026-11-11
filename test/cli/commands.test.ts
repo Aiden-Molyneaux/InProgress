@@ -170,13 +170,13 @@ describe('runCli', () => {
       const main = fileURLToPath(import.meta.url); // any file that exists stands in for dist/desktop/main.js
       process.env.ELECTRON_RUN_AS_NODE = '1';
       try {
-        expect(openAppWindow('http://127.0.0.1:4317', { findElectron: () => 'C:\e\electron.exe', findChrome: () => 'C:\c\chrome.exe', desktopMain: () => main, spawn: r.spawn })).toBe('desktop');
+        expect(openAppWindow('http://127.0.0.1:4317', { findElectron: () => 'C:/e/electron.exe', findChrome: () => 'C:/c/chrome.exe', desktopMain: () => main, spawn: r.spawn })).toBe('desktop');
       } finally {
         delete process.env.ELECTRON_RUN_AS_NODE;
       }
       expect(r.calls).toHaveLength(1);
-      expect(r.calls[0].file).toBe('C:\e\electron.exe');
-      expect(r.calls[0].args).toEqual([main, `--node=${process.execPath}`]);
+      expect(r.calls[0].file).toBe('C:/e/electron.exe');
+      expect(r.calls[0].args).toEqual([main, `--node=${nodeBinary()}`]);
       expect(r.calls[0].options.cwd).toBe(homeDir());
       expect(r.calls[0].options.env).toBeDefined();
       expect(r.calls[0].options.env).not.toHaveProperty('ELECTRON_RUN_AS_NODE');
@@ -184,13 +184,14 @@ describe('runCli', () => {
 
     it('uses Chrome when Electron is found but the built main.js is missing', () => {
       const r = recorder();
-      expect(openAppWindow('http://x', { findElectron: () => 'C:\e\electron.exe', findChrome: () => 'C:\c\chrome.exe', desktopMain: () => join(tmpdir(), 'no-such-main.js'), spawn: r.spawn })).toBe('chrome');
+      expect(openAppWindow('http://x', { findElectron: () => 'C:/e/electron.exe', findChrome: () => 'C:/c/chrome.exe', desktopMain: () => join(tmpdir(), 'no-such-main.js'), spawn: r.spawn })).toBe('chrome');
+      expect(r.calls.map((c) => c.file)).toEqual(['C:/c/chrome.exe']);
     });
 
     it('falls back to a Chrome --app window, then to the default browser', () => {
       const chrome = recorder();
-      expect(openAppWindow('http://127.0.0.1:4317', { findElectron: () => undefined, findChrome: () => 'C:\c\chrome.exe', spawn: chrome.spawn })).toBe('chrome');
-      expect(chrome.calls).toEqual([{ file: 'C:\c\chrome.exe', args: ['--app=http://127.0.0.1:4317', '--window-size=520,1000'], options: { detached: true, stdio: 'ignore' } }]);
+      expect(openAppWindow('http://127.0.0.1:4317', { findElectron: () => undefined, findChrome: () => 'C:/c/chrome.exe', spawn: chrome.spawn })).toBe('chrome');
+      expect(chrome.calls).toEqual([{ file: 'C:/c/chrome.exe', args: ['--app=http://127.0.0.1:4317', '--window-size=520,1000'], options: { detached: true, stdio: 'ignore' } }]);
       const none = recorder();
       expect(openAppWindow('http://127.0.0.1:4317', { findElectron: () => undefined, findChrome: () => undefined, spawn: none.spawn })).toBe('browser');
       expect(none.calls[0].args).toEqual(['http://127.0.0.1:4317']);

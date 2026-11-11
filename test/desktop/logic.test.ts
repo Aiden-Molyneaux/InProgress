@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { DESKTOP_APP_ID, externalTarget, isAppUrl, launchDetails, nodeForServer, parseDesktopArgs, readBounds, shortcutPath, visibleBounds, writeBounds } from '../../src/desktop/logic';
+import { appUserModelId, DESKTOP_APP_ID, externalTarget, isLiveInstance, isAppUrl, launchDetails, nodeForServer, parseDesktopArgs, readBounds, shortcutPath, visibleBounds, writeBounds } from '../../src/desktop/logic';
 
 const dir = mkdtempSync(join(tmpdir(), 'ip-desktop-'));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -98,5 +98,32 @@ describe('Start Menu shortcut', () => {
       description: 'InProgress',
     });
     expect(launchDetails(base).args).toBe('"C:\\my repo\\dist\\desktop\\main.js"');
+  });
+});
+
+describe('live instance', () => {
+  const main = String.raw`C:\repo\dist\desktop\main.js`;
+  it('is the deployed dist on the live home and port', () => {
+    expect(isLiveInstance({ main, env: {} })).toBe(true);
+    expect(isLiveInstance({ main: 'C:/repo/dist/desktop/main.js', env: { INPROGRESS_HOME: '', INPROGRESS_PORT: '4317' } })).toBe(true);
+  });
+  it('is not live with a data dir, another port, a build folder or a worktree', () => {
+    expect(isLiveInstance({ main, env: { INPROGRESS_HOME: 'C:/scratch' } })).toBe(false);
+    expect(isLiveInstance({ main, env: { INPROGRESS_PORT: '4411' } })).toBe(false);
+    expect(isLiveInstance({ main: String.raw`C:\repo\.build\dist\desktop\main.js`, env: {} })).toBe(false);
+    expect(isLiveInstance({ main: String.raw`C:\repo\.claude\worktrees\x\dist\desktop\main.js`, env: {} })).toBe(false);
+    expect(isLiveInstance({ main: 'C:/repo/.Claude/Worktrees/x/dist/desktop/main.js', env: {} })).toBe(false);
+    expect(isLiveInstance({ main: 'C:/repo/src/desktop/main.js', env: {} })).toBe(false);
+  });
+});
+
+describe('AppUserModelID', () => {
+  it('is shared when live and per data dir and main.js otherwise', () => {
+    expect(appUserModelId(true, 'h', 'm')).toBe(DESKTOP_APP_ID);
+    const a = appUserModelId(false, 'C:/h1', 'C:/m.js');
+    expect(a).toMatch(/^InProgress[.]Desktop[.][0-9a-f]{8}$/);
+    expect(appUserModelId(false, 'C:/h1', 'C:/m.js')).toBe(a);
+    expect(appUserModelId(false, 'C:/h2', 'C:/m.js')).not.toBe(a);
+    expect(appUserModelId(false, 'C:/h1', 'C:/other.js')).not.toBe(a);
   });
 });

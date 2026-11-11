@@ -69,7 +69,7 @@ describe.skipIf(process.platform !== 'win32' || !electronPath)('desktop app (bui
     rmSync(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
-  it('starts the stopped server, opens one window on it, writes the Start Menu shortcut, and a second launch hands over and exits', async () => {
+  it('starts the stopped server, opens one window on it, leaves the Start Menu shortcut alone, and a second launch hands over and exits', async () => {
     app = await electron.launch({ executablePath: electronPath, args: args(), env: env as Record<string, string> });
     const page = await app.firstWindow();
     await page.waitForLoadState('domcontentloaded');
@@ -77,7 +77,8 @@ describe.skipIf(process.platform !== 'win32' || !electronPath)('desktop app (bui
     expect(await isServerUp(base)).toBe(true);
     expect(existsSync(join(home, 'server.pid'))).toBe(true);
     await page.waitForSelector('#root', { state: 'attached' });
-    expect(existsSync(join(appdata, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'InProgress.lnk'))).toBe(true);
+    // A scratch home is not the live instance, so it must leave the real Start Menu shortcut alone.
+    expect(existsSync(join(appdata, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'InProgress.lnk'))).toBe(false);
 
     const second = spawn(electronPath!, args(), { env, stdio: 'ignore' });
     const exited = await new Promise<boolean>((resolve) => {

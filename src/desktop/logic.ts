@@ -1,12 +1,35 @@
 // The desktop shell's decisions, kept free of electron so they can be unit-tested: which node runs the server, which
 // links stay in the window, where the window was last, and what the Start Menu shortcut says.
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { systemRoot } from '../server/open-path';
 
 /** The AppUserModelID shared by the window and the shortcut, so the pin and the window are one taskbar button. */
 export const DESKTOP_APP_ID = 'InProgress.Desktop';
+
+/** The link on the failure page's Retry: never loaded, the window intercepts it and starts the server again. */
+export const RETRY_URL = 'http://inprogress.invalid/retry';
+
+/**
+ * Whether this is the installed app: the live data dir, the live port, and a main.js in the repo's deployed dist/ (not
+ * .build or a worktree). Only the live instance may write the Start Menu shortcut or take the shared taskbar identity.
+ */
+export function isLiveInstance(o: { main: string; env: NodeJS.ProcessEnv }): boolean {
+  if (o.env.INPROGRESS_HOME) return false;
+  const rawPort = Number(o.env.INPROGRESS_PORT);
+  const port = Number.isInteger(rawPort) && rawPort > 0 && rawPort < 65536 ? rawPort : 4317;
+  if (port !== 4317) return false;
+  const path = o.main.replace(/\\/g, '/');
+  if (!/\/dist\/desktop\/main\.js$/i.test(path)) return false;
+  return !/(^|\/)\.build(\/|$)/i.test(path) && !/\/\.claude\/worktrees\//i.test(path);
+}
+
+/** The shared id when live, else one per data dir and main.js, so a scratch run never joins the live taskbar group. */
+export function appUserModelId(live: boolean, home: string, main: string): string {
+  return live ? DESKTOP_APP_ID : `${DESKTOP_APP_ID}.${createHash('sha1').update(`${home}|${main}`).digest('hex').slice(0, 8)}`;
+}
 
 /** `--node=<path>` from the command line: the node.exe that starts the server (Electron's own cannot load better-sqlite3). */
 export function parseDesktopArgs(argv: string[]): { node?: string } {
@@ -19,8 +42,15 @@ export function parseDesktopArgs(argv: string[]): { node?: string } {
 export function lookUpNode(platform: string = process.platform): string | undefined {
   if (platform === 'win32') {
     const where = spawnSync(join(systemRoot(), 'System32', 'where.exe'), ['node'], { cwd: systemRoot(), encoding: 'utf8', windowsHide: true, timeout: 3000 });
-    const found = where.status === 0 ? where.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean) : [];
-    return found.find((p) => existsSync(p));
+    const found = where.status === 0 ? where.stdout.split(/\r?\n/).map((l) => l.trim()).filter((l) => /\.exe$/i.test(l)) : [];
+    for (const p of found) {
+      try {
+        return realpathSync(p); // the real node.exe: an nvm symlink would follow `nvm use` to another version
+      } catch {
+        // Gone or unreadable: try the next hit.
+      }
+    }
+    return undefined;
   }
   const which = spawnSync('which', ['node'], { encoding: 'utf8', timeout: 3000 });
   return which.status === 0 ? which.stdout.trim() || undefined : undefined;
