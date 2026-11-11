@@ -21,6 +21,8 @@ export default defineConfig({
   // `import 'electron'` resolves to the built-in module, and a bundled copy would be the npm stub that only returns
   // the binary's path.
   noExternal: [/^(?!(better-sqlite3|electron)(\/|$))/],
+  // electron is an optionalDependency, which tsup does not externalize by itself (only dependencies and peers).
+  external: ['electron'],
   // Bundled CommonJS code calls require() and reads __filename/__dirname, which ESM output lacks.
   banner: {
     js: [
