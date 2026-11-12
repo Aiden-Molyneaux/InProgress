@@ -63,7 +63,7 @@ export function swapWithPrev({ repo, prev, rename = renameSync }) {
 }
 
 // Which test suites a change needs. Typecheck and unit tests always run; these decide the slower three.
-const SMOKE_PATHS = [/^src\/(hooks|cli|mcp|server|lib)\//, /^claude\//, /^scripts\//, /^test\/smoke\//, /^(package\.json|package-lock\.json|tsup\.config\.ts|tsconfig\.json|vitest\.smoke\.config\.ts)$/];
+const SMOKE_PATHS = [/^src\/(hooks|cli|mcp|server|lib)\//, /^src\/desktop\//, /^assets\//, /^claude\//, /^scripts\//, /^test\/smoke\//, /^(package\.json|package-lock\.json|tsup\.config\.ts|tsconfig\.json|vitest\.smoke\.config\.ts)$/];
 // The suites in test/slow spawn real git and node: they cover the backup, restore, pages and doctor code, and the context-nudge script.
 const SLOW_PATHS = [/^src\/(core|server|cli|lib)\//, /^scripts\//, /^test\/slow\//, /^test\/helpers\.ts$/, /^(package\.json|package-lock\.json|tsconfig\.json|vitest\.config\.ts|vitest\.slow\.config\.ts)$/];
 const E2E_PATHS = [/^web\//, /^src\/(core|server|lib)\//, /^test\/e2e\//, /^(package\.json|package-lock\.json|tsconfig\.json|playwright\.config\.ts)$/];

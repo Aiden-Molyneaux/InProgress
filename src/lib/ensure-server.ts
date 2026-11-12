@@ -22,8 +22,11 @@ export function serverEntry(): string {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Start the server detached if it is not answering, then wait up to `waitMs` for health. */
-export async function ensureServer(o: { baseUrl: string; entry?: string; waitMs?: number }): Promise<boolean> {
+/**
+ * Start the server detached if it is not answering, then wait up to `waitMs` for health. `execPath` is the program
+ * that runs the entry (default: this process's node); the desktop app passes a real node.exe, as its own is Electron.
+ */
+export async function ensureServer(o: { baseUrl: string; entry?: string; waitMs?: number; execPath?: string }): Promise<boolean> {
   if (await isServerUp(o.baseUrl)) return true;
   const home = homeDir();
   mkdirSync(home, { recursive: true });
@@ -32,7 +35,7 @@ export async function ensureServer(o: { baseUrl: string; entry?: string; waitMs?
     // Run from the data dir: Windows locks a process's cwd, and a long-lived server must not pin the
     // caller's project folder (no rename, delete or worktree removal until it stops). The absolute
     // home keeps a relative INPROGRESS_HOME pointing at the same directory from the new cwd.
-    const child = spawn(process.execPath, [o.entry ?? serverEntry()], { detached: true, cwd: home, stdio: ['ignore', out, out], windowsHide: true, env: { ...process.env, INPROGRESS_HOME: home } });
+    const child = spawn(o.execPath ?? process.execPath, [o.entry ?? serverEntry()], { detached: true, cwd: home, stdio: ['ignore', out, out], windowsHide: true, env: { ...process.env, INPROGRESS_HOME: home } });
     child.on('error', () => undefined);
     child.unref();
   } finally {

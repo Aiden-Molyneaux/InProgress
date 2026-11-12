@@ -49,5 +49,8 @@
     "typescript": "^5.9.3",
     "vite": "^6.4.3",
     "vitest": "^2.1.9"
+  },
+  "optionalDependencies": {
+    "electron": "45.1.0"
   }
 }

@@ -3,14 +3,15 @@ import { createServer } from 'node:http';
 import { createServer as createNetServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { allowRules, install, nodeBinary } from '../../src/cli/claude-config';
 import { runCli } from '../../src/cli/commands';
 import { runTasks, TASKS_NOT_RUNNING_HINT, TASKS_TIMEOUT_HINT, TASKS_USAGE } from '../../src/cli/tasks';
 import { doctor, runChecks, type Check } from '../../src/cli/doctor';
-import { edgeArgs } from '../../src/cli/open';
+import { chromeArgs, openAppWindow } from '../../src/cli/open';
 import { isServerUp } from '../../src/lib/ensure-server';
-import { ensureToken } from '../../src/lib/home';
+import { ensureToken, homeDir } from '../../src/lib/home';
 import { VERSION } from '../../src/lib/version';
 import { buildApp } from '../../src/server/app';
 import { openDb, type DB } from '../../src/server/db/connection';
@@ -149,8 +150,52 @@ describe('runCli', () => {
     }
   });
 
-  it('builds the Edge app-window arguments', () => {
-    expect(edgeArgs('http://127.0.0.1:4317')).toEqual(['--app=http://127.0.0.1:4317', '--window-size=520,1000']);
+  it('builds the Chrome app-window arguments', () => {
+    expect(chromeArgs('http://127.0.0.1:4317')).toEqual(['--app=http://127.0.0.1:4317', '--window-size=520,1000']);
+  });
+
+  describe('which window open launches', () => {
+    /** A stand-in spawn that records what it was asked to start. */
+    const recorder = () => {
+      const calls: { file: string; args: string[]; options: { cwd?: string; env?: NodeJS.ProcessEnv } }[] = [];
+      const spawn = ((file: string, args: string[], options: object) => {
+        calls.push({ file, args, options });
+        return { on: () => ({ unref: () => undefined }) };
+      }) as never;
+      return { calls, spawn };
+    };
+
+    it('starts the desktop app when Electron is installed, with the node to run the server and no ELECTRON_RUN_AS_NODE', () => {
+      const r = recorder();
+      const main = fileURLToPath(import.meta.url); // any file that exists stands in for dist/desktop/main.js
+      process.env.ELECTRON_RUN_AS_NODE = '1';
+      try {
+        expect(openAppWindow('http://127.0.0.1:4317', { findElectron: () => 'C:/e/electron.exe', findChrome: () => 'C:/c/chrome.exe', desktopMain: () => main, spawn: r.spawn })).toBe('desktop');
+      } finally {
+        delete process.env.ELECTRON_RUN_AS_NODE;
+      }
+      expect(r.calls).toHaveLength(1);
+      expect(r.calls[0].file).toBe('C:/e/electron.exe');
+      expect(r.calls[0].args).toEqual([main, `--node=${nodeBinary()}`]);
+      expect(r.calls[0].options.cwd).toBe(homeDir());
+      expect(r.calls[0].options.env).toBeDefined();
+      expect(r.calls[0].options.env).not.toHaveProperty('ELECTRON_RUN_AS_NODE');
+    });
+
+    it('uses Chrome when Electron is found but the built main.js is missing', () => {
+      const r = recorder();
+      expect(openAppWindow('http://x', { findElectron: () => 'C:/e/electron.exe', findChrome: () => 'C:/c/chrome.exe', desktopMain: () => join(tmpdir(), 'no-such-main.js'), spawn: r.spawn })).toBe('chrome');
+      expect(r.calls.map((c) => c.file)).toEqual(['C:/c/chrome.exe']);
+    });
+
+    it('falls back to a Chrome --app window, then to the default browser', () => {
+      const chrome = recorder();
+      expect(openAppWindow('http://127.0.0.1:4317', { findElectron: () => undefined, findChrome: () => 'C:/c/chrome.exe', spawn: chrome.spawn })).toBe('chrome');
+      expect(chrome.calls).toEqual([{ file: 'C:/c/chrome.exe', args: ['--app=http://127.0.0.1:4317', '--window-size=520,1000'], options: { detached: true, stdio: 'ignore' } }]);
+      const none = recorder();
+      expect(openAppWindow('http://127.0.0.1:4317', { findElectron: () => undefined, findChrome: () => undefined, spawn: none.spawn })).toBe('browser');
+      expect(none.calls[0].args).toEqual(['http://127.0.0.1:4317']);
+    });
   });
 
   it('stop exits 1 when the server is still answering after 3 s', async () => {

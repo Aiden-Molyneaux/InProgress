@@ -7,7 +7,7 @@ import { readToken } from '../lib/home';
 import { backupsCheck } from '../server/backup-status';
 import { buildLabel, readBuild, sameBuild, VERSION, type BuildInfo } from '../lib/version';
 import { allowRules, HOOK_DEFS, isInProgressHook, nodeBinary, settingsShapeError, SKILL_NAMES } from './claude-config';
-import { findEdge } from './open';
+import { findChrome, findElectron } from './open';
 
 export interface Check {
   name: string;
@@ -179,8 +179,13 @@ export async function runChecks(o: DoctorOptions): Promise<Check[]> {
     // Without a working server the MCP server cannot answer either: it would take seconds to fail and blame the build.
     checks.push(server.ok ? await mcpCheck(join(o.repo, 'dist', 'mcp', 'main.js')) : { name: 'MCP server', ok: false, warnOnly: true, detail: 'skipped: server check failed' });
   }
-  const edge = findEdge();
-  checks.push({ name: 'Edge', ok: !!edge, detail: edge ?? 'not found: `inprogress open` will use the default browser', warnOnly: true });
+  const electron = findElectron();
+  checks.push({
+    name: 'App window',
+    ok: !!electron,
+    detail: electron ? `Electron ${electron}` : `Electron not installed: run npm install; inprogress open will use ${findChrome() ? 'Chrome' : 'the default browser'}`,
+    warnOnly: true,
+  });
   return checks;
 }
 
