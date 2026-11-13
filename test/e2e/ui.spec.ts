@@ -350,7 +350,14 @@ const RECORD_TITLES = `(() => {
   new MutationObserver(() => window.__titles.push(document.title)).observe(document.head, { subtree: true, childList: true, characterData: true });
 })()`;
 
-test('the resource viewer neutralises unsafe Markdown', async ({ page, demo }) => {
+/**
+ * Edge 157 logs a CSP violation whenever any parser meets an inline handler, even DOMPurify's inert DOMParser, so a test
+ * that feeds the viewer an onerror on purpose sees it. The handler never runs: the CSP blocks it and DOMPurify strips it.
+ */
+const PARSED_INLINE_HANDLER = /^Executing inline event handler violates the following Content Security Policy directive/;
+
+test('the resource viewer neutralises unsafe Markdown', async ({ page, demo, consoleErrors }) => {
+  consoleErrors.allow(PARSED_INLINE_HANDLER);
   // The sample's <img src=x> would 404 and log a console error. An empty 204 still fails to load, so an onerror would fire.
   await page.route('**/x', (route) => route.fulfill({ status: 204 }));
   await widen(page);
@@ -840,7 +847,8 @@ test('keeps the view current under a steady stream of events', async ({ page, ap
   }
 });
 
-test('links open in the default browser through the server, not in this window', async ({ page, demo }) => {
+test('links open in the default browser through the server, not in this window', async ({ page, demo, consoleErrors }) => {
+  consoleErrors.allow(PARSED_INLINE_HANDLER);
   const opened: string[] = [];
   await page.route('**/api/ui/open-url', async (route) => {
     opened.push((route.request().postDataJSON() as { url: string }).url);
