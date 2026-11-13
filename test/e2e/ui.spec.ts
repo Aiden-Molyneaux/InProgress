@@ -351,10 +351,15 @@ const RECORD_TITLES = `(() => {
 })()`;
 
 /**
- * Edge 157 logs a CSP violation whenever any parser meets an inline handler, even DOMPurify's inert DOMParser, so a test
- * that feeds the viewer an onerror on purpose sees it. The handler never runs: the CSP blocks it and DOMPurify strips it.
+ * Edge 157 logs a CSP violation when DOMPurify parses an inline handler (as it does for a bare DOMParser or a <template>),
+ * so a test that feeds the viewer an onerror on purpose sees it. The allow hides a handler that reached the page too, so
+ * each such test also checks that no on* attribute is left in the viewer.
  */
 const PARSED_INLINE_HANDLER = /^Executing inline event handler violates the following Content Security Policy directive/;
+
+/** How many elements in the open viewer still carry an inline handler (any on* attribute). */
+const inlineHandlers = (page: Page) =>
+  page.evaluate<number>(`[...document.querySelectorAll('[role="dialog"] *')].filter((el) => [...el.attributes].some((a) => /^on/i.test(a.name))).length`);
 
 test('the resource viewer neutralises unsafe Markdown', async ({ page, demo, consoleErrors }) => {
   consoleErrors.allow(PARSED_INLINE_HANDLER);
@@ -373,6 +378,7 @@ test('the resource viewer neutralises unsafe Markdown', async ({ page, demo, con
   // Checked only now, so a viewer that has not rendered yet can't pass them.
   const viewer = page.getByRole('dialog');
   await expect(viewer.locator('[onerror]')).toHaveCount(0);
+  expect(await inlineHandlers(page)).toBe(0);
   await expect(viewer.locator('a[href^="javascript:"]')).toHaveCount(0);
   await expect(viewer.locator('style')).toHaveCount(0);
   await expect(viewer.locator('.ip-md [class]')).toHaveCount(0);
@@ -863,6 +869,7 @@ test('links open in the default browser through the server, not in this window',
   await resourceRow(page, 'Unsafe Markdown').click();
   await page.getByRole('dialog').getByRole('link', { name: 'Signing docs' }).click();
   await expect.poll(() => opened).toEqual(['https://example.com/signing']);
+  expect(await inlineHandlers(page)).toBe(0);
   expect(popups).toHaveLength(0);
 });
 
