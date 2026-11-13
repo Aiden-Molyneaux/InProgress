@@ -350,7 +350,19 @@ const RECORD_TITLES = `(() => {
   new MutationObserver(() => window.__titles.push(document.title)).observe(document.head, { subtree: true, childList: true, characterData: true });
 })()`;
 
-test('the resource viewer neutralises unsafe Markdown', async ({ page, demo }) => {
+/**
+ * Edge 157 logs a CSP violation when DOMPurify parses an inline handler (as it does for a bare DOMParser or a <template>),
+ * so a test that feeds the viewer an onerror on purpose sees it. The allow hides a handler that reached the page too, so
+ * each such test also checks that no on* attribute is left in the viewer.
+ */
+const PARSED_INLINE_HANDLER = /^Executing inline event handler violates the following Content Security Policy directive/;
+
+/** How many elements in the open viewer still carry an inline handler (any on* attribute). */
+const inlineHandlers = (page: Page) =>
+  page.evaluate<number>(`[...document.querySelectorAll('[role="dialog"] *')].filter((el) => [...el.attributes].some((a) => /^on/i.test(a.name))).length`);
+
+test('the resource viewer neutralises unsafe Markdown', async ({ page, demo, consoleErrors }) => {
+  consoleErrors.allow(PARSED_INLINE_HANDLER);
   // The sample's <img src=x> would 404 and log a console error. An empty 204 still fails to load, so an onerror would fire.
   await page.route('**/x', (route) => route.fulfill({ status: 204 }));
   await widen(page);
@@ -366,6 +378,7 @@ test('the resource viewer neutralises unsafe Markdown', async ({ page, demo }) =
   // Checked only now, so a viewer that has not rendered yet can't pass them.
   const viewer = page.getByRole('dialog');
   await expect(viewer.locator('[onerror]')).toHaveCount(0);
+  expect(await inlineHandlers(page)).toBe(0);
   await expect(viewer.locator('a[href^="javascript:"]')).toHaveCount(0);
   await expect(viewer.locator('style')).toHaveCount(0);
   await expect(viewer.locator('.ip-md [class]')).toHaveCount(0);
@@ -840,7 +853,8 @@ test('keeps the view current under a steady stream of events', async ({ page, ap
   }
 });
 
-test('links open in the default browser through the server, not in this window', async ({ page, demo }) => {
+test('links open in the default browser through the server, not in this window', async ({ page, demo, consoleErrors }) => {
+  consoleErrors.allow(PARSED_INLINE_HANDLER);
   const opened: string[] = [];
   await page.route('**/api/ui/open-url', async (route) => {
     opened.push((route.request().postDataJSON() as { url: string }).url);
@@ -855,6 +869,7 @@ test('links open in the default browser through the server, not in this window',
   await resourceRow(page, 'Unsafe Markdown').click();
   await page.getByRole('dialog').getByRole('link', { name: 'Signing docs' }).click();
   await expect.poll(() => opened).toEqual(['https://example.com/signing']);
+  expect(await inlineHandlers(page)).toBe(0);
   expect(popups).toHaveLength(0);
 });
 
