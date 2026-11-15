@@ -57,12 +57,15 @@ export function driverOf(env: Record<string, string | undefined>): Driver;
 
 // src/server/t3.ts
 export interface T3Thread { threadId: string; projectId: string; title: string; link: string; status: string;
-  runtimeMode: string; settled: boolean; archived: boolean; pendingRequestCount: number; updatedAt: string }
+  runtimeMode: string; settled: boolean; archived: boolean; pendingRequestCount: number; updatedAt: string;
+  createdBy: string; creationSource: string }
+// threadId is text: a thread started through the CLI has the id `mcp:<uuid>`
 export interface T3Message { role: 'user' | 'assistant'; text: string }
 export class T3Unavailable extends Error {}
 export function t3List(project?: string): Promise<T3Thread[]>;
 export function t3Show(threadId: string): Promise<{ thread: T3Thread; messages: T3Message[] }>;
-export function t3Start(project: string, message: string, opts?: { title?: string; worktree?: string; branch?: string }): Promise<{ threadId: string }>;
+export function t3Start(project: string, message: string, opts: { provider: string; model: string; title?: string; worktree?: string; branch?: string }): Promise<{ threadId: string }>;
+// provider and model are required: a project with no default model refuses a start without them (the proof, step 1)
 export function t3Send(threadId: string, message: string): Promise<void>;
 ```
 
@@ -72,7 +75,7 @@ export function t3Send(threadId: string, message: string): Promise<void>;
 - The CLI path is `T3CODE_CLI_PATH`, else `~/.t3/bin/t3` (`t3.cmd` on Windows). Every call passes `--json`, has a
   10 second limit, parses with zod, and throws `T3Unavailable` on any failure.
 
-- [ ] **Step 1: Prove the route.** Write `scripts/t3-proof.mjs`: it starts one thread in a scratch folder with the
+- [x] **Step 1: Prove the route.** Done 2026-11-14, see `docs/superpowers/rulings/2026-11-t3-cli-proof.md`. Write `scripts/t3-proof.mjs`: it starts one thread in a scratch folder with the
   message "Reply READY and stop", sends "Reply DONE and stop", shows the thread, and prints the thread id, its
   `runtimeMode` and both replies. Run it once from a shell with every `T3*` variable unset.
   Expected: exit 0, two replies, and the mode printed. Record the output in
