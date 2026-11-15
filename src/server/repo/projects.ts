@@ -438,6 +438,18 @@ export function setProjectLead(ctx: Ctx, actor: string, ref: string | number, na
 }
 
 /**
+ * Replaces the project's intent record, inside a write() already open: the lead's `intent` command stores it and logs it in
+ * one write. Sets intent_updated_at and updated_at to now, records project.updated (the text itself is in the lead's log,
+ * not the event), and answers the time.
+ */
+export function setProjectIntentInWrite(ctx: Ctx, record: RecordEvent, projectId: number, intent: string): string {
+  const ts = ctx.now();
+  ctx.db.prepare('UPDATE projects SET intent = ?, intent_updated_at = ?, updated_at = ? WHERE id = ?').run(intent, ts, ts, projectId);
+  record({ projectId, type: 'project.updated', entity: 'project', entityId: projectId, data: { changes: { intent: 'replaced' } } });
+  return ts;
+}
+
+/**
  * Spec 2.5: one window change applied to the queue as stored, inside one write. A move takes the node out wherever it
  * sits and places it in the unowned part before `before`; null, or a `before` no longer unowned, appends. A remove takes
  * it out. A node taken from a session's own queue records `takenFrom`. Done, dropped and shelved nodes are refused.

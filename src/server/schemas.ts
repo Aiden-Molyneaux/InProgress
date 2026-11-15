@@ -237,5 +237,24 @@ export const leadBriefQuery = z
   .refine((q) => q.as === undefined || q.instructions !== undefined, { message: 'instructions: needed with as', path: ['instructions'] });
 /** The lead marking its brief as read: who it is, the instructions version it holds, and the time of the brief it read. */
 export const leadSeenBody = z.object({ as: z.string().min(1).max(200), instructions: z.number().int().min(0), at: z.string().datetime().optional() }).strict();
+/** Who sends a lead command, and the instructions version it holds: every command's body has both. */
+const leadWho = { as: z.string().min(1).max(200), instructions: z.number().int().min(0) };
+const leadId = z.number().int().positive();
+/** `lead answer`: Aiden's words, carried as the answer to a question of his. */
+export const leadAnswerBody = z.object({ ...leadWho, askId: leadId, aidenWords: z.string().trim().min(1).max(2_000) }).strict();
+/** `lead park`: the step, why (optional), and Aiden's words (needed for a step of his). */
+export const leadParkBody = z
+  .object({ ...leadWho, stepId: leadId, reason: z.string().trim().min(1).max(500).optional(), aidenWords: z.string().trim().min(1).max(2_000).optional() })
+  .strict();
+/** `lead drop`: the step, why (kept in the lead's log), and Aiden's words (needed for a step of his). */
+export const leadDropBody = z
+  .object({ ...leadWho, stepId: leadId, reason: z.string().trim().min(1).max(500), aidenWords: z.string().trim().min(1).max(2_000).optional() })
+  .strict();
+/** `lead promise`: what the lead will do, by when, and on which step (none: the project's root). */
+export const leadPromiseBody = z.object({ ...leadWho, text: z.string().trim().min(1).max(500), dueAt: z.string().datetime(), stepId: leadId.optional() }).strict();
+/** `lead kept`: the promise kept, with a note for the log. */
+export const leadKeptBody = z.object({ ...leadWho, askId: leadId, note: z.string().trim().max(500).optional() }).strict();
+/** `lead intent`: the whole intent record, Markdown. */
+export const leadIntentBody = z.object({ ...leadWho, intent: z.string().min(1).max(8_000) }).strict();
 /** The window's change of a project's lead: the slug it shows, and a name (trimmed, 1 to 40 characters) or null for none. */
 export const windowLeadBody = z.object({ slug: windowProjectBody.shape.slug, name: z.string().trim().min(1).max(40).nullable() }).strict();

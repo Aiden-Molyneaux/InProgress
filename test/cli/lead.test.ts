@@ -2,21 +2,26 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { runCli } from '../../src/cli/commands';
-import { LEAD_USAGE, runLead } from '../../src/cli/lead';
+import { LEAD_TIMEOUT, LEAD_USAGE, runLead } from '../../src/cli/lead';
+import { TASKS_NOT_RUNNING_HINT } from '../../src/cli/tasks';
 import { ApiClientError } from '../../src/lib/client';
 import { ensureToken } from '../../src/lib/home';
 import { buildApp } from '../../src/server/app';
 import { openDb, type DB } from '../../src/server/db/connection';
 import { createCtx } from '../../src/server/db/tx';
 import { noLeadNamed } from '../../src/server/lead';
+import { raiseAsk } from '../../src/server/repo/asks';
+import { addNodes } from '../../src/server/repo/nodes';
 import { createProject, setProjectLead } from '../../src/server/repo/projects';
 
 let dir = '';
 let db: DB;
 let close: () => Promise<unknown>;
 let conn: { baseUrl: string; token: string };
+let steps: { first: number; second: number; third: number; fourth: number };
+let asks: { stdin: number; plain: number };
 const saved = { port: process.env.INPROGRESS_PORT, home: process.env.INPROGRESS_HOME };
 
 beforeAll(async () => {
@@ -24,9 +29,23 @@ beforeAll(async () => {
   const token = ensureToken(dir);
   db = openDb(join(dir, 'inprogress.db'));
   const ctx = createCtx(db);
-  createProject(ctx, 'test', { name: 'InGame' });
+  const game = createProject(ctx, 'test', { name: 'InGame' });
   createProject(ctx, 'test', { name: 'Leaderless' });
   setProjectLead(ctx, 'window', 'ingame', 'Progresser');
+  const [first, second, third, fourth] = addNodes(ctx, 'test', {
+    parentId: game.rootNodeId,
+    nodes: [
+      { title: 'Dark mode', origin: 'proposed' },
+      { title: 'Sound', origin: 'proposed' },
+      { title: 'Play app signing' },
+      { title: 'Privacy page' },
+    ],
+  });
+  steps = { first: first.id, second: second.id, third: third.id, fourth: fourth.id };
+  asks = {
+    stdin: raiseAsk(ctx, 'test', { nodeId: third.id, kind: 'question', text: 'Which keystore?' }).id,
+    plain: raiseAsk(ctx, 'test', { nodeId: fourth.id, kind: 'question', text: 'Which host?' }).id,
+  };
   const app = buildApp({ ctx, token, uiToken: 'u', version: 'test' });
   await app.listen({ port: 0, host: '127.0.0.1' });
   const port = (app.server.address() as AddressInfo).port;
@@ -146,5 +165,134 @@ describe('inprogress lead brief', () => {
     const usage = capture();
     await runCli(['nonsense'], usage.out);
     expect(usage.lines[0]).toContain('lead brief <project> --as <name> --instructions <n> [--mark] [--json]');
+  });
+});
+
+describe("inprogress lead's commands", () => {
+  const WHO = ['--as', 'Progresser', '--instructions', '1'];
+  /** An io whose stdin is `text` and whose files are `files`; it counts the reads. */
+  const io = (text = '', files: Record<string, string> = {}) => {
+    const reads = { stdin: 0, files: [] as string[] };
+    return {
+      reads,
+      io: {
+        stdin: async () => (reads.stdin++, text),
+        readFile: (path: string) => {
+          reads.files.push(path);
+          if (!(path in files)) throw new Error(`ENOENT: no such file, open '${path}'`);
+          return files[path];
+        },
+      },
+    };
+  };
+  const run = async (args: string[], i = io().io) => {
+    const c = capture();
+    const code = await runLead(args, c.out, conn, i);
+    return { code, lines: c.lines };
+  };
+  const row = (sql: string, id: number) => db.prepare(sql).get(id) as Record<string, unknown>;
+
+  it("answer: reads Aiden's words from stdin with --aiden -, prints the sentence and exits 0", async () => {
+    const stdin = io('Use the release keystore.\n');
+    const res = await run(['answer', 'ingame', `a${asks.stdin}`, '--aiden', '-', ...WHO], stdin.io);
+    expect(res).toEqual({ code: 0, lines: [`Answered a${asks.stdin} with Aiden's words.`] });
+    expect(stdin.reads.stdin).toBe(1);
+    expect(row('SELECT answer, answered_via FROM asks WHERE id = ?', asks.stdin)).toEqual({ answer: 'Use the release keystore.', answered_via: 'lead' });
+  });
+
+  it('answer: 7 and a7 name the same ask, and a refusal prints its sentence and exits 1', async () => {
+    expect(await run(['answer', 'ingame', String(asks.plain), '--aiden', 'Netlify.', ...WHO])).toEqual({ code: 0, lines: [`Answered a${asks.plain} with Aiden's words.`] });
+    expect(await run(['answer', 'ingame', `a${asks.plain}`, '--aiden', 'Vercel.', ...WHO])).toEqual({ code: 1, lines: ['Already answered: "Netlify.".'] });
+  });
+
+  it('park: 5 and #5 name the same step', async () => {
+    expect(await run(['park', 'ingame', `#${steps.first}`, '--reason', 'Later', ...WHO])).toEqual({ code: 0, lines: [`Parked #${steps.first} Dark mode.`] });
+    expect(await run(['park', 'ingame', String(steps.first), ...WHO])).toEqual({ code: 1, lines: [`#${steps.first} is already parked.`] });
+  });
+
+  it('drop: prints the sentence, with the reason from stdin', async () => {
+    const stdin = io('Nobody wants it.');
+    expect(await run(['drop', 'ingame', String(steps.second), '--reason', '-', ...WHO], stdin.io)).toEqual({ code: 0, lines: [`Dropped #${steps.second} Sound.`] });
+    expect(db.prepare("SELECT text FROM lead_events WHERE kind = 'drop' ORDER BY id DESC").pluck().get()).toBe('Nobody wants it.');
+  });
+
+  it('promise and kept: 7 and a7 name the same ask', async () => {
+    const due = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const promised = await run(['promise', 'ingame', 'Send Aiden the draft', '--due', due, '--step', `#${steps.fourth}`, ...WHO]);
+    expect(promised.code).toBe(0);
+    const m = /^Promised a(\d+), due \d{4}-\d\d-\d\d \d\d:\d\d\.$/.exec(promised.lines[0]);
+    expect(m, promised.lines[0]).not.toBeNull();
+    const id = Number(m![1]);
+    expect(row('SELECT owner, node_id FROM asks WHERE id = ?', id)).toEqual({ owner: 'lead', node_id: steps.fourth });
+    expect(await run(['kept', 'ingame', String(id), '--note', 'Sent.', ...WHO])).toEqual({ code: 0, lines: [`Kept a${id}.`] });
+    expect(await run(['kept', 'ingame', `a${id}`, ...WHO])).toEqual({ code: 1, lines: [`a${id} is already cleared.`] });
+  });
+
+  it('intent: reads the record from a file, or from stdin with -', async () => {
+    const record = '## Goal\nShip the game.\n\n## Phase\nBeta.\n';
+    const files = io('', { 'C:/notes/intent.md': record });
+    expect(await run(['intent', 'ingame', 'C:/notes/intent.md', ...WHO], files.io)).toEqual({ code: 0, lines: [`Intent record replaced (${record.length} characters).`] });
+    expect(files.reads.files).toEqual(['C:/notes/intent.md']);
+    const piped = `${record}More.\n`;
+    const stdin = io(piped);
+    expect(await run(['intent', 'ingame', '-', ...WHO], stdin.io)).toEqual({ code: 0, lines: [`Intent record replaced (${piped.length} characters).`] });
+    expect(db.prepare("SELECT intent FROM projects WHERE slug = 'ingame'").pluck().get()).toBe(piped);
+  });
+
+  it('intent: a file it cannot read says so and exits 1', async () => {
+    const res = await run(['intent', 'ingame', 'C:/nowhere.md', ...WHO]);
+    expect(res.code).toBe(1);
+    expect(res.lines[0]).toContain('C:/nowhere.md');
+  });
+
+  it('prints the usage and exits 1 for arguments it cannot use, reading no stdin', async () => {
+    for (const args of [
+      ['answer', 'ingame', 'a1', ...WHO],
+      ['answer', 'ingame', '--aiden', 'Yes.', ...WHO],
+      ['answer', 'ingame', 'x7', '--aiden', 'Yes.', ...WHO],
+      ['park', 'ingame', ...WHO],
+      ['park', 'ingame', '5', '--note', 'x', ...WHO],
+      ['drop', 'ingame', '5', ...WHO],
+      ['drop', 'ingame', '5', '--reason', '-', '--aiden', '-', ...WHO],
+      ['promise', 'ingame', 'Send it', ...WHO],
+      ['promise', 'ingame', 'Send it', '--due', 'x', '--step', 'a5', ...WHO],
+      ['kept', 'ingame', '#5', ...WHO],
+      ['intent', 'ingame', ...WHO],
+      ['park', 'ingame', '5', '--as', 'Progresser'],
+      ['bogus', 'ingame'],
+    ]) {
+      const stdin = io('words');
+      const res = await run(args, stdin.io);
+      expect(res.code, args.join(' ')).toBe(1);
+      expect(res.lines.at(-1), args.join(' ')).toBe(LEAD_USAGE);
+      expect(stdin.reads.stdin, args.join(' ')).toBe(0);
+    }
+  });
+
+  it('says a write that timed out may still have been applied, and exits 1 with no hint; brief and other failures are as before', async () => {
+    // The client reads a fetch that throws a TimeoutError as its timeout (code TIMEOUT), as AbortSignal.timeout does.
+    const timeout = Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+    vi.stubGlobal('fetch', async () => {
+      throw timeout;
+    });
+    try {
+      expect(await run(['park', 'ingame', String(steps.third), '--aiden', 'Park it.', ...WHO])).toEqual({ code: 1, lines: [LEAD_TIMEOUT] });
+      expect(LEAD_TIMEOUT).toBe('InProgress did not answer in time. The command may still have been applied: read the brief before you try again.');
+      // The brief changes nothing, so its timeout is rethrown for main.ts to print, as before.
+      await expect(run(['brief', 'ingame', ...WHO])).rejects.toMatchObject({ status: 0, code: 'TIMEOUT' });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    // Nothing listening is not a timeout: a write rethrows it with the not-running hint, as before.
+    await expect(runLead(['kept', 'ingame', 'a1', ...WHO], () => {}, { baseUrl: 'http://127.0.0.1:1', token: 'x' }, io().io)).rejects.toMatchObject({
+      status: 0,
+      hint: TASKS_NOT_RUNNING_HINT,
+    });
+  });
+
+  it('lists brief and the six commands in the usage, one line each', () => {
+    const lines = LEAD_USAGE.split('\n');
+    expect(lines).toHaveLength(8);
+    expect(lines.slice(1).map((l) => l.trim().split(' ')[2])).toEqual(['brief', 'answer', 'park', 'drop', 'promise', 'kept', 'intent']);
   });
 });

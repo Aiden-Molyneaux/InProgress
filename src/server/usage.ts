@@ -1,3 +1,4 @@
+import { aidensAskSql } from './repo/asks';
 import { resolveProject } from './repo/projects';
 import type { Ctx } from './db/tx';
 
@@ -130,8 +131,9 @@ export function readUsage(ctx: Ctx, ref: string | number, days: number): Usage {
     rows.get(day)!.firstBand = { area, count };
   }
 
+  // Aiden's asks only: a promise of the lead's is neither an ask of his by kind nor a clear of his.
   const asks = ctx.db
-    .prepare('SELECT kind, raised_at, cleared_at FROM asks WHERE project_id = ? AND (raised_at >= ? OR cleared_at >= ?)')
+    .prepare(`SELECT kind, raised_at, cleared_at FROM asks WHERE project_id = ? AND ${aidensAskSql()} AND (raised_at >= ? OR cleared_at >= ?)`)
     .all(project.id, from, from) as { kind: string; raised_at: string; cleared_at: string | null }[];
   const clears = new Map<string, number[]>();
   for (const a of asks) {

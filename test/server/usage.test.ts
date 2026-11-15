@@ -91,6 +91,25 @@ describe('readUsage', () => {
     expect(d.marks).toBe(2);
   });
 
+  it("leaves a lead's promise, raised and kept, out of the asks by kind and the median clear", () => {
+    const { ctx, project, step } = setup();
+    const today = noon(NOW, 0);
+    setClock(ctx, today);
+    const q = raiseAsk(ctx, 'scribe', { nodeId: step.id, kind: 'question', text: 'q1' });
+    const promise = raiseAsk(ctx, 'lead:Progresser', { nodeId: step.id, kind: 'review', text: 'Send the draft', owner: 'lead', dueAt: new Date(Date.parse(today) + 9 * HOUR).toISOString() });
+    ctx.db.prepare('UPDATE asks SET raised_at = ? WHERE id IN (?, ?)').run(today, q.id, promise.id);
+    setClock(ctx, new Date(Date.parse(today) + 2 * HOUR).toISOString());
+    clearAsk(ctx, 'window', q.id);
+    setClock(ctx, new Date(Date.parse(today) + 8 * HOUR).toISOString());
+    clearAsk(ctx, 'lead:Progresser', promise.id);
+
+    setClock(ctx, today);
+    const d = readUsage(ctx, project.slug, 2).days[1];
+    expect(d.asks).toEqual({ question: 1, permission: 0, review: 0 });
+    // With the promise counted, the median of 2h and 8h would be 5h.
+    expect(d.medianClearMs).toBe(2 * HOUR);
+  });
+
   it('keeps one day from leaking into another, and ignores another project', () => {
     const { ctx, project, event } = setup();
     const other = createProject(ctx, 'test', { name: 'Other' });

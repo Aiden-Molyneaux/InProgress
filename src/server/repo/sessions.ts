@@ -1,9 +1,20 @@
 import { SESSION_APPS, type SessionApp } from '../../core/session-app';
-import { STALE_SESSION_MS, TRAIL_MS, type PastSession, type Session, type SessionState } from '../../core/types';
+import { STALE_SESSION_MS, TRAIL_MS, type PastSession, type Session, type SessionState, type TreeNode } from '../../core/types';
 import { write, type Ctx } from '../db/tx';
 import { endSessionCommands, listCommands } from './commands';
 import { releaseQueue } from './projects';
 import { NOT_READER_SQL, endSubagents, listSubagents } from './subagents';
+
+/**
+ * The session driving `n` now, or null: the one its driver column names, if it still has `n` as its focus and is live
+ * (not ended, seen within STALE_SESSION_MS). The window's Done and the lead's drop both refuse a step that has one.
+ */
+export function liveDriver(ctx: Ctx, n: TreeNode): string | null {
+  if (n.driverSessionId === null) return null;
+  const cutoff = new Date(Date.parse(ctx.now()) - STALE_SESSION_MS).toISOString();
+  const live = ctx.db.prepare("SELECT 1 FROM sessions WHERE id = ? AND focus_node_id = ? AND state != 'ended' AND last_seen_at >= ?").get(n.driverSessionId, n.id, cutoff) !== undefined;
+  return live ? n.driverSessionId : null;
+}
 
 interface SessionRow {
   id: string;
