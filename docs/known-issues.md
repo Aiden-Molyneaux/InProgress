@@ -75,7 +75,21 @@ work. A re-hit bumps **Hits** and **Verified**. Entries seeded from the code and
   failed; the deploy then printed nothing on why. That build ran fine on a scratch copy, and
   `npm run rollback` swapped it back in and passed the check. Cause not proven; the "Restart
   check:" line was added so the next one says what health returned.
-- **Verified:** 2026-10-16 · **Hits:** 1
+- **Hit 2026-11-15 (#725, a3c4c15):** red restart after every gate passed, and the install was left split. The restart
+  landed seven minutes after the daily off-machine copy came due (the last one was committed 24 h 7 min earlier). The
+  new server logged `Ready in 1373 ms` and went straight into that copy (`runner.startup()`, src/server/main.ts:90),
+  whose dump and check took 17458 ms; `Backup committed` came 22 s after Ready. `/api/health` answered none of the
+  deploy's probes in the 11 s it kept trying (the reading, not yet proven by a profile: the dump and check runs on the
+  server's own thread). `start` waits 5 s, so it printed `InProgress did not start`; the deploy swapped the old build
+  back onto disk; its `stop` printed `InProgress is not running.` after a 1 s probe; and its second `start` timed out
+  the same way, while the old build it spawned logged `could not listen on 4317: listen EADDRINUSE`. Left behind: the
+  new build's server still running, its migration applied, over the old build in `dist/`. `npm run rollback` swapped
+  the new build back in and its restart check passed (`Ready in 413 ms`, no copy due). So on a red restart, first ask
+  `/api/health` which build answers: when it is the new one, wait for `Backup committed` in `server.log`, then run
+  `npm run rollback`. Candidate fixes (proposed, not built): the deploy waits for a server that is listening before it
+  calls a start failed, and never swaps while the candidate build answers; the copy's dump and check comes off the
+  server's thread. The 2026-10-16 hit may be this one too.
+- **Verified:** 2026-11-15 · **Hits:** 2
 
 ## A deploy refused: another deploy is running
 - **Symptom:** `npm run deploy` or `npm run rollback` exits 1 at once with "Another deploy is
@@ -129,7 +143,7 @@ work. A re-hit bumps **Hits** and **Verified**. Entries seeded from the code and
   only after the `rmdir` had failed. That is a Windows pending delete: a handle was still open on the file (who held it
   is not proven; a scan of a new `.exe` is the likely holder), so its removal finished late. `rmSync` retries
   `ENOTEMPTY` only when `maxRetries` is set, and the teardowns leave it at 0. Candidate fix (proposed, not built): one
-  shared teardown helper that removes a temp folder with `maxRetries`.
+  shared teardown helper that removes a temp folder with `maxRetries`. A rerun of the deploy passed the unit step.
 - **Verified:** 2026-11-15 · **Hits:** 4
 
 ## Global git hooks make the page-repo e2e tests time out
