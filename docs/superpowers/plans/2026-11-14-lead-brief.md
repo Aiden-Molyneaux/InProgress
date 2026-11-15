@@ -151,6 +151,39 @@ Built inline by Sigmund on top of Sev's round, each with its test:
   (`#729, in order.`) is text.
 - **F12, separators.** U+2028 and U+2029 are cleaned too.
 
+## Fixes after the C4 check (2026-11-15)
+
+Aiden's word on C4, after two trials with Progresser: "Critique the brief, also fixing the fails, then continue". #725 is
+merged and live at a3c4c15, so this is a new branch off main, `lead-brief-c4`, in the same worktree. Built inline by
+Sigmund. Files: `src/core/lead.ts`, `src/server/lead.ts`, `src/server/lead-text.ts`, their two tests, and the shape in
+the stage plan. No migration, no route change, no CLI change.
+
+The critique, against the live record (a copy of the database, 2026-11-15): every line the brief printed was true but
+one heading, and four kinds of fact were missing or lost.
+
+- **G1, open work in nobody's hands.** A step that is active or blocked, with no live session on it and no place in
+  the queue, was in no section: #561 and #435 here, and 14 active steps in InGame, which has no session at all. Under
+  Stale they now read `blocked, last changed <age> ago` or `active with no session on it, last changed <age> ago`
+  (marks `blocked` and `no_session`; the second is left out when `ended_open` already says it). They are the Board's
+  backlog rows whose status is not `todo`. A step Aiden does himself that is active with no session (the Board's Now
+  row with no session) is in his hands, not stale: `aidensOwn`, printed at the end of Waiting on Aiden and counted in
+  its heading.
+- **G2, reasons in words.** A Stale row printed mark names (`stale_ask`, `answered_in_chat`), which neither Aiden nor
+  the Bot could act on. `stale[].reasons` holds one sentence per mark, in the same order as `marks`, built in
+  `readLeadBrief` from the Board's row: which ask has waited and how long, which asks may be answered already, how
+  long ago its session ended, how long its session has been idle. The text prints the reasons joined with `; `.
+- **G3, the limit on its own line.** `41 of 5 across all projects` sat inside a heading and Progresser dropped it both
+  times. It is now the line after the Waiting on Aiden section, and says how far over the limit it is.
+- **G4, a true heading.** With no look on record the brief counts seven days back, and said "since your last look".
+  It now says `in the last 7 days` until a look is marked (`LEAD_LOOK_BACK_DAYS` in `src/core/lead.ts`).
+- **G5, the rest of the backlog.** `backlog` is the count of the Board's backlog rows that are `todo`, printed as one
+  line after Next up. With it every open step that is a row is in the brief once: in flight, Aiden's own, next up,
+  stale, or counted in the backlog. Test: on a seeded tree with one step of each kind, those five add up to the open
+  rows.
+
+Criteria added: C5 (G1 and G5, on the copy of the live data: #435, #516, #561 and #709 are under Stale and the counts
+add up), C6 (G2: no mark name in the text), C7 (G3), C8 (G4). C2 is checked again. C4 is Aiden's again after the gate.
+
 For #726: when `dueAt` and `owner` reach a route, check the due time there with `z.string().datetime()` as
 `leadSeenBody` does (`Date.parse` in `raiseAskDetailed` takes `11/15/2026` too). The digest's "Asks raised" and "Asks cleared" lists (`src/server/digest.ts:293-303`) read every owner, so
 once `promise` exists a lead's ask needs its label there. And `kept` must clear a lead's ask without answer text, or the `answer_waiting` mark and the delivery of

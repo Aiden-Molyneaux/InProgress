@@ -102,10 +102,12 @@ export interface LeadBrief {
   intent: { goal: string; phase: string; updatedAt: string | null };
   inFlight: { stepId: number | null; title: string; sessionId: string; app: SessionApp; state: string; lastSeenAt: string }[];
   waitingOnAiden: { askId: number; kind: AskKind; stepId: number; stepTitle: string; text: string; raisedAt: string }[];
+  aidensOwn: { stepId: number; title: string; updatedAt: string }[];   // active steps Aiden does himself, no session
   aidenOpenAcrossProjects: number;
   forTheLead: { askId: number; stepId: number; stepTitle: string; text: string; dueAt: string | null; overdue: boolean }[];
   nextUp: { stepId: number; title: string; status: string }[];
-  stale: { stepId: number; title: string; marks: string[] }[];
+  backlog: number;                                                     // todo steps in no session's hands, not queued
+  stale: { stepId: number; title: string; marks: string[]; reasons: string[] }[];  // one reason in words per mark
   landedSince: { stepId: number; title: string; outcome: string; completedAt: string }[];
   saidInAidensName: { at: string; kind: LeadEventKind; ref: string; words: string }[];
   links: { t3: 'ok' | 'unavailable' | 'not checked'; t3At: string | null; lastSeenAt: string | null };
@@ -138,7 +140,9 @@ export function logLeadEvent(ctx: Ctx, e: { projectId: number; lead: string; ins
   With `write` true it also refuses a lower `instructions` with:
   `Your instructions are version <n>; version <current> is needed to change anything. Ask Aiden to paste the new ones.`
 
-**The brief's text, exactly this shape** (every section always present, in this order):
+**The brief's text, exactly this shape** (every section always present, in this order). Changed on 2026-11-15 after
+Aiden's check of the first one (`2026-11-14-lead-brief.md`, "Fixes after the C4 check"): the limit line, the Backlog
+line, reasons in words under Stale, and the two headings that name their span.
 
 ```
 Lead brief · <project name> · <local date and time> · instructions v<current> (yours: v<yours>)
@@ -146,17 +150,20 @@ Goal: <goal, or "No intent record yet.">
 Phase: <phase, or "none">
 In flight (<n> of 3):
   #<step id> <title> · <state> · <app> · seen <age> ago
-Waiting on Aiden (<n> here, <m> of 5 across all projects):
+Waiting on Aiden (<n>):
   a<ask id> <kind> on #<step id> <step title>: "<text, cut to 120>" · <age>
+  #<step id> <title> · Aiden's own step, active, last changed <age> ago
+Aiden's open asks across all projects: <m> of 5[, <k> over the limit]
 For the lead (<n>):
   a<ask id> on #<step id> <step title>: "<text>" · due <date and time> [· OVERDUE]
 Next up (<n>):
   #<step id> <title> · <status>
+Backlog: <n> open steps not in the queue
 Stale (<n>):
-  #<step id> <title> · <marks>
-Landed since your last look (<n>):
+  #<step id> <title> · <why, in words>[; <why>]
+Landed <since your last look | in the last 7 days> (<n>):
   #<step id> <title>: "<outcome, cut to 120>"
-Said in Aiden's name since your last look (<n>):
+Said in Aiden's name <since your last look | in the last 7 days> (<n>):
   <date and time> <kind> <ref>: "<his words, cut to 120>"
 Links: T3 Code <ok | unavailable | not checked> · your last look <age> ago
 ```
@@ -164,6 +171,11 @@ Links: T3 Code <ok | unavailable | not checked> · your last look <age> ago
 An empty section prints its heading with `(0)` and one line, `  none`. A list longer than eight prints eight lines
 and `  and <k> more`. When `yours` is lower than `current`, a second line says
 `Your instructions are out of date: you can read, you cannot change anything.`
+
+Every open step that is a row on the Board is in the brief once: under In flight (a session is on it), under Waiting
+on Aiden (his own step), under Next up, under Stale, or counted in the Backlog line. Stale holds the Board's marks
+that mean something is owed, and open work in nobody's hands: a blocked step, or an active one with no session on it
+and no place in the queue. The two headings say `in the last 7 days` until the lead has marked a look.
 
 - [ ] **Step 1: Failing tests.** `renderLeadBrief` on a full fixture equals the shape above line for line; on an
   empty brief every section prints `(0)` and `none`; a list of sixty prints eight lines and `and 52 more` (Review

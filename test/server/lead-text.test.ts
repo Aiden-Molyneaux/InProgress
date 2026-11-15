@@ -16,9 +16,11 @@ const empty: LeadBrief = {
   intent: { goal: '', phase: '', updatedAt: null },
   inFlight: [],
   waitingOnAiden: [],
+  aidensOwn: [],
   aidenOpenAcrossProjects: 0,
   forTheLead: [],
   nextUp: [],
+  backlog: 0,
   stale: [],
   landedSince: [],
   saidInAidensName: [],
@@ -33,13 +35,15 @@ const full: LeadBrief = {
     { stepId: null, title: 'no step claimed', sessionId: 's2', app: 'cli', state: 'idle', lastSeenAt: ago(2 * HOUR) },
   ],
   waitingOnAiden: [{ askId: 7, kind: 'question', stepId: 12, stepTitle: 'Play app signing', text: 'Which keystore?', raisedAt: ago(3 * DAY) }],
+  aidensOwn: [{ stepId: 18, title: 'Buy the domain', updatedAt: ago(2 * HOUR) }],
   aidenOpenAcrossProjects: 4,
+  backlog: 12,
   forTheLead: [
     { askId: 9, stepId: 14, stepTitle: 'Release notes', text: 'Send Aiden the draft', dueAt: ago(HOUR), overdue: true },
     { askId: 10, stepId: 14, stepTitle: 'Release notes', text: 'Check the store listing', dueAt: new Date(Date.parse(AT) + DAY).toISOString(), overdue: false },
   ],
   nextUp: [{ stepId: 15, title: 'Add the privacy page', status: 'todo' }],
-  stale: [{ stepId: 16, title: 'Old spike', marks: ['stale_ask', 'deep'] }],
+  stale: [{ stepId: 16, title: 'Old spike', marks: ['no_session', 'stale_ask'], reasons: ['active with no session on it, last changed 9d ago', 'a8 has waited 9d'] }],
   landedSince: [{ stepId: 11, title: 'Upload the key', outcome: 'Key uploaded to the vault.', completedAt: ago(DAY) }],
   saidInAidensName: [{ at: ago(5 * HOUR), kind: 'answer', ref: 'a6', words: 'Use the release keystore.' }],
   links: { t3: 'ok', t3At: ago(MIN), lastSeenAt: ago(2 * DAY) },
@@ -54,15 +58,18 @@ describe('renderLeadBrief', () => {
       'In flight (2 of 3):',
       '  #12 Play app signing · working · t3 · seen 3m ago',
       '  no step claimed · idle · cli · seen 2h ago',
-      'Waiting on Aiden (1 here, 4 of 5 across all projects):',
+      'Waiting on Aiden (2):',
       '  a7 question on #12 Play app signing: "Which keystore?" · 3d',
+      "  #18 Buy the domain · Aiden's own step, active, last changed 2h ago",
+      "Aiden's open asks across all projects: 4 of 5",
       'For the lead (2):',
       `  a9 on #14 Release notes: "Send Aiden the draft" · due ${stamp(ago(HOUR))} · OVERDUE`,
       `  a10 on #14 Release notes: "Check the store listing" · due ${stamp(new Date(Date.parse(AT) + DAY).toISOString())}`,
       'Next up (1):',
       '  #15 Add the privacy page · todo',
+      'Backlog: 12 open steps not in the queue',
       'Stale (1):',
-      '  #16 Old spike · stale_ask, deep',
+      '  #16 Old spike · active with no session on it, last changed 9d ago; a8 has waited 9d',
       'Landed since your last look (1):',
       '  #11 Upload the key: "Key uploaded to the vault."',
       "Said in Aiden's name since your last look (1):",
@@ -84,28 +91,44 @@ describe('renderLeadBrief', () => {
       'Phase: none',
       'In flight (0 of 3):',
       '  none',
-      'Waiting on Aiden (0 here, 0 of 5 across all projects):',
+      'Waiting on Aiden (0):',
       '  none',
+      "Aiden's open asks across all projects: 0 of 5",
       'For the lead (0):',
       '  none',
       'Next up (0):',
       '  none',
+      'Backlog: 0 open steps not in the queue',
       'Stale (0):',
       '  none',
-      'Landed since your last look (0):',
+      // No look is on record, so the brief says how far back it counted, not "since your last look".
+      'Landed in the last 7 days (0):',
       '  none',
-      "Said in Aiden's name since your last look (0):",
+      "Said in Aiden's name in the last 7 days (0):",
       '  none',
       'Links: T3 Code not checked · your last look never',
     ]);
   });
 
   it('cuts a list of sixty to eight lines and "and 52 more"', () => {
-    const stale = Array.from({ length: 60 }, (_, i) => ({ stepId: 100 + i, title: `Step ${i}`, marks: ['deep'] }));
+    const stale = Array.from({ length: 60 }, (_, i) => ({ stepId: 100 + i, title: `Step ${i}`, marks: ['blocked'], reasons: ['blocked, last changed 3d ago'] }));
     const lines = renderLeadBrief({ ...empty, stale }).split('\n');
     const at = lines.indexOf('Stale (60):');
     expect(at).toBeGreaterThan(0);
-    expect(lines.slice(at + 1, at + 11)).toEqual([...stale.slice(0, 8).map((s) => `  #${s.stepId} ${s.title} · deep`), '  and 52 more', 'Landed since your last look (0):']);
+    expect(lines.slice(at + 1, at + 11)).toEqual([...stale.slice(0, 8).map((s) => `  #${s.stepId} ${s.title} · blocked, last changed 3d ago`), '  and 52 more', 'Landed in the last 7 days (0):']);
+  });
+
+  it('gives the limit on Aiden\'s open asks a line of its own, and says how far over it is', () => {
+    const limit = (n: number) => renderLeadBrief({ ...empty, aidenOpenAcrossProjects: n }).split('\n').find((l) => l.startsWith("Aiden's open asks"));
+    expect(limit(41)).toBe("Aiden's open asks across all projects: 41 of 5, 36 over the limit");
+    expect(limit(5)).toBe("Aiden's open asks across all projects: 5 of 5");
+    // No heading carries the count: a heading is the line a reader skips.
+    expect(renderLeadBrief({ ...empty, aidenOpenAcrossProjects: 41 })).not.toMatch(/\(.*41.*\):/);
+  });
+
+  it('counts one step in the backlog as one step, and prints no mark name under Stale', () => {
+    expect(renderLeadBrief({ ...empty, backlog: 1 })).toContain('\nBacklog: 1 open step not in the queue\n');
+    expect(renderLeadBrief(full)).not.toMatch(/no_session|stale_ask/);
   });
 
   it('cuts a long ask text to 120 characters', () => {

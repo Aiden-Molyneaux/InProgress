@@ -8,12 +8,14 @@ import { createCtx } from '../../src/server/db/tx';
 import { deleteProject, purgeDeletedProjects } from '../../src/server/project-lifecycle';
 import { LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
 import { renderLeadBrief } from '../../src/server/lead-text';
-import { logLeadEvent, markLeadSeen, noLeadNamed, outOfDate, readLeadBrief, requireLead } from '../../src/server/lead';
+import { logLeadEvent, markLeadSeen, noLeadNamed, outOfDate, readLeadBrief, requireLead, staleReasons } from '../../src/server/lead';
 import { raiseAsk } from '../../src/server/repo/asks';
 import { maxEventId } from '../../src/server/repo/events';
 import { addNodes, parkNode, updateNode } from '../../src/server/repo/nodes';
 import { addBinding, changeProject, createProject, listProjectSummaries, setProjectLead, setQueue } from '../../src/server/repo/projects';
-import { handleHookEvent } from '../../src/server/session-flow';
+import { claimStep, handleHookEvent } from '../../src/server/session-flow';
+import type { BoardRow } from '../../src/core/board';
+import type { Ask, Session, TreeNode } from '../../src/core/types';
 import { makeCtx } from '../helpers';
 
 const UI = { origin: 'http://localhost:80', 'x-ip-ui-token': 'ui-token' };
@@ -125,20 +127,54 @@ describe('readLeadBrief', () => {
     const second = render('2026-11-15T15:07:30.000Z');
     // The times are what differs: stamps and ages.
     expect(second).not.toBe(first);
-    const mask = (text: string) => text.replace(/\d{4}-\d\d-\d\d \d\d:\d\d/g, '<time>').replace(/(seen |· |look )(<1m|\d+[mhdw])/g, '$1<age>');
+    const mask = (text: string) => text.replace(/\d{4}-\d\d-\d\d \d\d:\d\d/g, '<time>').replace(/(seen |· |look |changed |waited |ended |idle )(<1m|\d+[mhdw])/g, '$1<age>');
     expect(mask(second)).toBe(mask(first));
   });
 
   it('puts only the Board\'s next rows in Next up, in its order, and only stale marks in Stale', () => {
-    const { ctx, project, a, b, c, brief } = setup();
+    const { ctx, project, a, b, c, aidenAsk, brief } = setup();
     setQueue(ctx, 'test', project.slug, [c.id, b.id], 'unowned');
     expect(brief().nextUp.map((n) => n.stepId)).toEqual([c.id, b.id]);
     // A done step with no outcome carries no_outcome, which is housekeeping: it is not Stale.
     updateNode(ctx, 'scribe:s1', a.id, { status: 'done' });
     expect(brief().stale).toEqual([]);
-    // An ask of Aiden's left over a week is stale_ask, and is listed with only that mark.
+    // An ask of Aiden's left over a week is stale_ask, and is listed with only that mark and its reason in words.
     const later = new Date(Date.parse(ctx.now()) + 10 * 24 * 60 * 60 * 1000);
-    expect(readLeadBrief(ctx, project.slug, 1, later).stale).toEqual([{ stepId: a.id, title: 'Play app signing', marks: ['stale_ask'] }]);
+    expect(readLeadBrief(ctx, project.slug, 1, later).stale).toEqual([
+      { stepId: a.id, title: 'Play app signing', marks: ['stale_ask'], reasons: [`a${aidenAsk.id} has waited 10d`] },
+    ]);
+  });
+
+  it('has every open step that is a row in it once: in flight, Aiden\'s own, next up, stale or counted in the backlog', () => {
+    const { ctx, project, a, b, c, brief } = setup();
+    const [blocked, own, parked, phase, pressKit, done, flying] = addNodes(ctx, 'test', {
+      parentId: project.rootNodeId,
+      nodes: [
+        { title: 'Wait for the store', status: 'blocked' },
+        { title: 'Buy the domain', status: 'active', assignee: 'me' },
+        { title: 'Dark mode' },
+        { title: 'Launch', children: [{ title: 'Press kit' }] },
+        { title: 'Upload the key', status: 'done', outcome: 'Uploaded.' },
+        { title: 'Signing fix', status: 'active' },
+      ],
+    });
+    parkNode(ctx, 'test', parked.id, { reason: 'later' }, () => {});
+    claimStep(ctx, 'test', 's1', flying.id);
+    const r = brief();
+    expect(r.inFlight.map((s) => s.stepId)).toEqual([flying.id]);
+    expect(r.aidensOwn.map((s) => [s.stepId, s.title])).toEqual([[own.id, 'Buy the domain']]);
+    expect(r.nextUp.map((n) => n.stepId)).toEqual([b.id]);
+    // Started or blocked, with no session on it and no place in the queue: each says so in words.
+    // The test clock moves with every read, so the age is masked.
+    expect(r.stale.map((s) => ({ ...s, reasons: s.reasons.map((x) => x.replace(/(<1m|\d+m) ago$/, '<age> ago')) }))).toEqual([
+      { stepId: a.id, title: 'Play app signing', marks: ['no_session'], reasons: ['active with no session on it, last changed <age> ago'] },
+      { stepId: blocked.id, title: 'Wait for the store', marks: ['blocked'], reasons: ['blocked, last changed <age> ago'] },
+    ]);
+    // The rest of the backlog is counted: Old spike and Press kit. Launch only groups its step, and Dark mode is parked.
+    expect(r.backlog).toBe(2);
+    const open = ctx.db.prepare("SELECT COUNT(*) FROM nodes WHERE project_id = ? AND parent_id IS NOT NULL AND status IN ('todo', 'active', 'blocked')").pluck().get(project.id) as number;
+    expect(r.inFlight.length + r.aidensOwn.length + r.nextUp.length + r.stale.length + r.backlog).toBe(open - 1);
+    expect([c.id, phase.id, pressKit.id, done.id].every((id) => !r.stale.some((s) => s.stepId === id))).toBe(true);
   });
 
   it('leaves an ask on a shelved step out of Waiting on Aiden', () => {
@@ -157,6 +193,54 @@ describe('readLeadBrief', () => {
       ['park', `#${a.id}`, 'Park it.'],
       ['answer', `a${aidenAsk.id}`, 'Use the release keystore.'],
     ]);
+  });
+});
+
+describe('staleReasons', () => {
+  const NOW = Date.parse('2026-11-15T12:00:00.000Z');
+  const ago = (ms: number) => new Date(NOW - ms).toISOString();
+  const HOUR = 60 * 60 * 1000;
+  const DAY = 24 * HOUR;
+  const ask = (id: number, raisedAt: string) => ({ id, raisedAt }) as Ask;
+  const row = (o: Partial<Pick<BoardRow, 'column' | 'sessions' | 'driver' | 'asks' | 'waiting' | 'marks'>> & { status?: string; updatedAt?: string }) => ({
+    node: { status: o.status ?? 'active', updatedAt: o.updatedAt ?? ago(3 * DAY) } as TreeNode,
+    column: o.column ?? 'backlog',
+    sessions: o.sessions ?? [],
+    driver: o.driver ?? null,
+    asks: o.asks ?? [],
+    waiting: o.waiting ?? o.asks ?? [],
+    marks: o.marks ?? [],
+  });
+
+  it('says in words why each mark is there, naming the asks and the ages', () => {
+    const old = ask(107, ago(27 * DAY));
+    const fresh = [ask(323, ago(4 * HOUR)), ask(324, ago(4 * HOUR))];
+    const idle = { id: 's1', lastSeenAt: ago(2 * HOUR) } as Session;
+    const text = (r: ReturnType<typeof row>, ended: string | null = null) => staleReasons(r, NOW, ended).map((w) => w.text);
+    expect(text(row({ column: 'now', sessions: [idle], asks: [old], marks: ['stale_ask'] }))).toEqual(['a107 has waited 27d']);
+    expect(text(row({ column: 'now', sessions: [idle], asks: [old, ...fresh], waiting: [old], marks: ['answered_in_chat'] }))).toEqual([
+      'a323 and a324 may be answered already: Aiden has typed in its session since',
+    ]);
+    expect(text(row({ column: 'now', sessions: [idle], driver: idle, marks: ['stalled'] }))).toEqual(['its session has been idle 2h with nothing waiting on Aiden']);
+    expect(text(row({ column: 'now', sessions: [idle], marks: ['stalled'] }))).toEqual(['sessions are on it but none drives it']);
+    expect(text(row({ column: 'done', status: 'done', sessions: [idle], marks: ['done_focus'] }))).toEqual(['done, but a session still has it claimed']);
+    expect(text(row({ column: 'next', status: 'todo', marks: ['answer_waiting'] }))).toEqual(["Aiden's answer has not reached a session yet"]);
+    // A housekeeping mark is no reason: it stays out, as before.
+    expect(text(row({ column: 'next', status: 'todo', marks: ['deep', 'no_why'] }))).toEqual([]);
+  });
+
+  it('lists a started or blocked step with no session and no queue place, and lets ended_open speak for an active one', () => {
+    const marks = (r: ReturnType<typeof row>, ended: string | null = null) => staleReasons(r, NOW, ended).map((w) => [w.mark, w.text]);
+    expect(marks(row({}))).toEqual([['no_session', 'active with no session on it, last changed 3d ago']]);
+    expect(marks(row({ status: 'blocked' }))).toEqual([['blocked', 'blocked, last changed 3d ago']]);
+    expect(marks(row({ marks: ['ended_open'] }), ago(5 * HOUR))).toEqual([['ended_open', 'its session ended 5h ago and left it open']]);
+    expect(marks(row({ status: 'blocked', marks: ['ended_open'] }), ago(5 * HOUR))).toEqual([
+      ['blocked', 'blocked, last changed 3d ago'],
+      ['ended_open', 'its session ended 5h ago and left it open'],
+    ]);
+    // In the queue it is in Next up with its status, and a todo step in the backlog is only counted.
+    expect(marks(row({ column: 'next' }))).toEqual([]);
+    expect(marks(row({ status: 'todo' }))).toEqual([]);
   });
 });
 
