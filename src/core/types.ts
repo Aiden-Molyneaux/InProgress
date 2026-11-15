@@ -1,3 +1,4 @@
+import type { Driver } from './driver';
 import type { TaskState } from './taskState';
 
 export const NODE_KINDS = ['goal', 'phase', 'task', 'question'] as const;
@@ -564,6 +565,10 @@ export interface Session {
   role: SessionRole;
   /** The full title the session's last Stop block demanded (migration 16); null before any. */
   titleAsked: string | null;
+  /** The app that drives the session (migration 19): T3 Code, the Claude desktop app, or a plain terminal. */
+  driver: Driver;
+  /** Under T3 Code, the T3 thread the session runs in (migration 19); null otherwise. */
+  t3ThreadId: string | null;
   subagents: SubagentInfo[];
   /** Its background commands: running ones and those that ended in the last five minutes, at most 30. */
   commands: CommandInfo[];

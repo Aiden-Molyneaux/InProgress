@@ -45,7 +45,11 @@ afterAll(async () => {
 
 const run = (name: HookName, input: Record<string, unknown>) => runHandler(name, input, deps);
 
-beforeEach(() => vi.stubEnv('CLAUDE_CODE_ENTRYPOINT', ''));
+beforeEach(() => {
+  vi.stubEnv('CLAUDE_CODE_ENTRYPOINT', '');
+  // The suite may itself run inside a T3 Code thread.
+  vi.stubEnv('T3CODE_THREAD_ID', '');
+});
 afterEach(() => vi.unstubAllEnvs());
 
 describe('parseHookInput', () => {
@@ -587,6 +591,31 @@ describe('buildHookBody: desktop', () => {
     expect(buildHookBody('session-start', { session_id: SESSION })).not.toHaveProperty('desktop');
     vi.stubEnv('CLAUDE_CODE_ENTRYPOINT', 'cli');
     expect(buildHookBody('stop', { session_id: SESSION })).not.toHaveProperty('desktop');
+  });
+});
+
+describe('buildHookBody: driver', () => {
+  it("flags a start, a prompt and a stop under T3 Code with the driver and the thread, and a session end with neither", () => {
+    vi.stubEnv('T3CODE_THREAD_ID', 'mcp:abc');
+    for (const name of ['session-start', 'prompt-submit', 'stop'] as const) {
+      expect(buildHookBody(name, { session_id: SESSION, prompt: 'hi' }), name).toMatchObject({ driver: 't3', t3ThreadId: 'mcp:abc' });
+    }
+    const end = buildHookBody('session-end', { session_id: SESSION });
+    expect(end).not.toHaveProperty('driver');
+    expect(end).not.toHaveProperty('t3ThreadId');
+  });
+
+  it('flags the desktop app as a driver without a thread, and keeps desktop: true on a stop', () => {
+    vi.stubEnv('CLAUDE_CODE_ENTRYPOINT', 'claude-desktop');
+    const body = buildHookBody('stop', { session_id: SESSION });
+    expect(body).toMatchObject({ driver: 'desktop', desktop: true });
+    expect(body).not.toHaveProperty('t3ThreadId');
+  });
+
+  it('leaves a plain CLI body without a driver key', () => {
+    for (const name of ['session-start', 'prompt-submit', 'stop'] as const) {
+      expect(buildHookBody(name, { session_id: SESSION, prompt: 'hi' }), name).not.toHaveProperty('driver');
+    }
   });
 });
 

@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { driverOf } from '../core/driver';
 import { ID_MAX, TASK_ID_MAX, noticeTasks, text } from '../core/notices';
 import type { TitleDemand } from '../core/title';
 import { SCRIBE_AGENT, WORK_STATUSES, type HookEvent } from '../core/types';
@@ -202,6 +203,12 @@ export function buildHookBody(name: Exclude<HookName, ToolHookName>, input: Hook
   // The title channel runs only in the desktop app, where set_session_title exists; a CLI session can carry a /rename
   // title too. Claude Code hands its hooks its own environment. Flagged only when true, as above.
   if ((name === 'prompt-submit' || name === 'stop') && process.env.CLAUDE_CODE_ENTRYPOINT === 'claude-desktop') body.desktop = true;
+  // The app that drives the session, and under T3 Code its thread. Flagged only when not the default, as desktop is.
+  if (name === 'session-start' || name === 'prompt-submit' || name === 'stop') {
+    const driver = driverOf(process.env);
+    if (driver !== 'cli') body.driver = driver;
+    if (driver === 't3') body.t3ThreadId = process.env.T3CODE_THREAD_ID;
+  }
   if (name === 'subagent-start' || name === 'subagent-stop') {
     if (input.agent_id) body.agentId = input.agent_id;
     if (typeof input.agent_type === 'string') body.agentType = input.agent_type;

@@ -21,8 +21,8 @@ Nothing here depends on a session remembering to do something.
 - No em dashes (U+2014) or their HTML entities in any file.
 - Schema changes only add. `min_reader_version` stays 1.
 - One branch per change off main, in its own worktree under `.claude/worktrees/`. Gates by label, from the playbook.
-- A hook never calls T3 Code and never waits on it. Only the server does, with a limit per call: 10 seconds to
-  read, 30 to start or send.
+- A hook never calls T3 Code and never waits on it. Only the server does, with a limit per call: 30 seconds to
+  read, 60 to start or send. On a loaded machine a list has taken 17 seconds.
 - A T3 failure never ends a session, clears an ask or blocks a hook. It leaves the state as it was.
 - The desktop app keeps working exactly as it does today.
 - No Bot, no lead command and no new rule a session must remember.
@@ -63,7 +63,7 @@ export interface T3Thread { threadId: string; projectId: string; title: string; 
 // threadId is text: a thread started through the CLI has the id `mcp:<uuid>`
 export interface T3Message { role: 'user' | 'assistant'; text: string }
 export class T3Unavailable extends Error {}
-export function t3List(project?: string): Promise<T3Thread[]>;
+export function t3List(project: string): Promise<T3Thread[]>; // always named: the CLI otherwise uses the server's folder
 export function t3Show(threadId: string): Promise<{ thread: T3Thread; messages: T3Message[] }>;
 export function t3Start(project: string, message: string, opts: { provider: string; model: string; title?: string; worktree?: string; branch?: string }): Promise<{ threadId: string }>;
 // provider and model are required: a project with no default model refuses a start without them (the proof, step 1)

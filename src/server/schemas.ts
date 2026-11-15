@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DRIVERS } from '../core/driver';
 import { ASK_KINDS, ASSIGNEES, BRIEFING_MODES, COMMAND_KINDS, COMMAND_OUTCOMES, HOOK_EVENTS, NODE_KINDS, NODE_LABELS, NODE_STATUSES, ORIGINS, PROJECT_NAME_MAX, RANK_BANDS, RESOURCE_KINDS, RESOURCE_PURPOSES, TITLE_CHANNELS, WHAT_WHY_MAX, WORK_STATUSES, unknownLabel, type NodeInput } from '../core/types';
 
 const title = z.string().trim().min(1, 'title is empty').max(200);
@@ -137,6 +138,10 @@ export const hookBody = z
     stopHookActive: z.boolean().optional(),
     /** A prompt or a stop from a session in the Claude desktop app (CLAUDE_CODE_ENTRYPOINT), the only place the title channel runs. */
     desktop: z.boolean().optional(),
+    /** The app that drives the session; sent by a start, a prompt and a stop when it is not a plain terminal. */
+    driver: z.enum(DRIVERS).optional(),
+    /** Under T3 Code, the T3 thread the session runs in (T3CODE_THREAD_ID). */
+    t3ThreadId: z.string().min(1).max(200).optional(),
   });
 /**
  * A set_queue write. With `session` and without `unowned: true` it replaces that session's own entries (a `queue:`);
