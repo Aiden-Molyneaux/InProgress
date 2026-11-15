@@ -166,7 +166,7 @@ one heading, and four kinds of fact were missing or lost.
   Stale they now read `blocked, last changed <age> ago` or `active with no session on it, last changed <age> ago`
   (marks `blocked` and `no_session`; the second is left out when `ended_open` already says it). They are the Board's
   backlog rows whose status is not `todo`. A step Aiden does himself that is active with no session (the Board's Now
-  row with no session) is in his hands, not stale: `aidensOwn`, printed at the end of Waiting on Aiden and counted in
+  row with no session) is in his hands, not stale: `aidensOwn`, printed first in Waiting on Aiden and counted in
   its heading.
 - **G2, reasons in words.** A Stale row printed mark names (`stale_ask`, `answered_in_chat`), which neither Aiden nor
   the Bot could act on. `stale[].reasons` holds one sentence per mark, in the same order as `marks`, built in
@@ -178,7 +178,7 @@ one heading, and four kinds of fact were missing or lost.
   It now says `in the last 7 days` until a look is marked (`LEAD_LOOK_BACK_DAYS` in `src/core/lead.ts`).
 - **G5, the rest of the backlog.** `backlog` is the count of the Board's backlog rows that are `todo`, printed as one
   line after Next up (`Backlog: <n> steps not started and not in the queue`). With it every open step that is a row is in the brief: in flight, Aiden's own, next up,
-  stale, or counted in the backlog (a row with a mark is under Stale as well as where it sits).
+  stale, or counted in the backlog (a row with a stale mark is under Stale as well as where it sits).
   Test: on a seeded tree with one step of each kind, those five add up to the open
   rows.
 

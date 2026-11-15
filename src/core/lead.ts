@@ -41,7 +41,7 @@ export interface LeadBrief {
   aidenOpenAcrossProjects: number;
   forTheLead: { askId: number; stepId: number; stepTitle: string; text: string; dueAt: string | null; overdue: boolean }[];
   nextUp: { stepId: number; title: string; status: string }[];
-  /** Steps not started (todo), in no session's hands and not in the queue. One with a mark is under Stale as well. */
+  /** Steps not started (todo), in no session's hands and not in the queue. One with a stale mark (LEAD_STALE_MARKS) is under Stale as well. */
   backlog: number;
   /** `marks` are LEAD_STALE_MARKS and LEAD_IDLE_MARKS; `reasons` says each in words, one per mark, in the same order. */
   stale: { stepId: number; title: string; marks: string[]; reasons: string[] }[];
