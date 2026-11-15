@@ -4,8 +4,13 @@ import { PROJECT_NAME_MAX, askTag } from '../core/types';
 import { spanAgo } from './briefing';
 import { clip, stamp } from './digest';
 
-/** How much of Aiden's words, an ask's text or an outcome a brief line keeps. */
+/** How much of Aiden's words or an outcome a brief line keeps. */
 const TEXT_CUT = 120;
+/**
+ * How much of an ask's text a line keeps. An ask often ends with the reply it wants ("Say ship the note"), and a reader
+ * who retells a cut ask fills in the end: at 120, 35 of Aiden's 41 open asks were cut (2026-11-15), the longest 551.
+ */
+const ASK_CUT = 600;
 /** How much of the intent record's Goal or Phase paragraph the brief keeps. */
 const HEADLINE_CUT = 300;
 
@@ -76,13 +81,13 @@ export function renderLeadBrief(b: LeadBrief): string {
     // His own steps first: they are few, and after a long list of asks the cap would cut them.
     ...section(`Waiting on Aiden (${b.waitingOnAiden.length + b.aidensOwn.length}):`, [
       ...b.aidensOwn.map((s) => `${step(s.stepId, s.title)} · Aiden's own step, active, last changed ${spanAgo(s.updatedAt, now)} ago`),
-      ...b.waitingOnAiden.map((a) => `${askTag(a.askId)} ${a.kind} on ${step(a.stepId, a.stepTitle)}: "${line(a.text, TEXT_CUT)}" · ${spanAgo(a.raisedAt, now)}`),
+      ...b.waitingOnAiden.map((a) => `${askTag(a.askId)} ${a.kind} on ${step(a.stepId, a.stepTitle)}: "${line(a.text, ASK_CUT)}" · ${spanAgo(a.raisedAt, now)}`),
     ]),
     // A line of its own, not part of a heading: a reader who retells the brief keeps a line and drops a heading's detail.
     `Aiden's open asks across all projects: ${b.aidenOpenAcrossProjects} of ${AIDEN_OPEN_LIMIT}${over > 0 ? `, ${over} over the limit` : ''}`,
     ...section(
       `For the lead (${b.forTheLead.length}):`,
-      b.forTheLead.map((a) => `${askTag(a.askId)} on ${step(a.stepId, a.stepTitle)}: "${line(a.text, TEXT_CUT)}" · ${a.dueAt === null ? 'no due time' : `due ${stamp(a.dueAt)}`}${a.overdue ? ' · OVERDUE' : ''}`),
+      b.forTheLead.map((a) => `${askTag(a.askId)} on ${step(a.stepId, a.stepTitle)}: "${line(a.text, ASK_CUT)}" · ${a.dueAt === null ? 'no due time' : `due ${stamp(a.dueAt)}`}${a.overdue ? ' · OVERDUE' : ''}`),
     ),
     ...section(`Next up (${b.nextUp.length}):`, b.nextUp.map((n) => `${step(n.stepId, n.title)} · ${n.status}`)),
     `Backlog: ${b.backlog} ${b.backlog === 1 ? 'step' : 'steps'} not started and not in the queue`,

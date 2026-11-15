@@ -152,10 +152,10 @@ In flight (<n> of 3):
   #<step id> <title> · <state> · <app> · seen <age> ago
 Waiting on Aiden (<n>):
   #<step id> <title> · Aiden's own step, active, last changed <age> ago
-  a<ask id> <kind> on #<step id> <step title>: "<text, cut to 120>" · <age>
+  a<ask id> <kind> on #<step id> <step title>: "<text, cut to 600>" · <age>
 Aiden's open asks across all projects: <m> of 5[, <k> over the limit]
 For the lead (<n>):
-  a<ask id> on #<step id> <step title>: "<text>" · due <date and time> [· OVERDUE]
+  a<ask id> on #<step id> <step title>: "<text, cut to 600>" · due <date and time> [· OVERDUE]
 Next up (<n>):
   #<step id> <title> · <status>
 Backlog: <n> steps not started and not in the queue

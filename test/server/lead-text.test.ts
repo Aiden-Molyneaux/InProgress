@@ -131,12 +131,18 @@ describe('renderLeadBrief', () => {
     expect(renderLeadBrief(full)).not.toMatch(/no_session|stale_ask/);
   });
 
-  it('cuts a long ask text to 120 characters', () => {
-    const text = 'x'.repeat(300);
-    const line = renderLeadBrief({ ...full, waitingOnAiden: [{ ...full.waitingOnAiden[0], text }] })
+  it('prints an ask whole up to 600 characters, so the reply it asks for is not cut, and cuts a longer one', () => {
+    const ask = (text: string) => renderLeadBrief({ ...full, waitingOnAiden: [{ ...full.waitingOnAiden[0], text }], forTheLead: [{ ...full.forTheLead[0], text }] }).split('\n');
+    const whole = `${'x'.repeat(560)} Say "ship the note" to land it.`;
+    expect(whole.length).toBeLessThanOrEqual(600);
+    expect(ask(whole).find((l) => l.startsWith('  a7'))).toContain(`"${whole}"`);
+    expect(ask(whole).find((l) => l.startsWith('  a9'))).toContain(`"${whole}"`);
+    expect(ask('y'.repeat(700)).find((l) => l.startsWith('  a7'))).toContain(`"${'y'.repeat(599)}…"`);
+    // An outcome keeps the short cut: it is history, not something to act on.
+    const landed = renderLeadBrief({ ...full, landedSince: [{ ...full.landedSince[0], outcome: 'z'.repeat(300) }] })
       .split('\n')
-      .find((l) => l.startsWith('  a7'))!;
-    expect(line).toContain(`"${'x'.repeat(119)}…"`);
+      .find((l) => l.startsWith('  #11'))!;
+    expect(landed).toContain(`"${'z'.repeat(119)}…"`);
   });
 
   it('says on the second line when the instructions are out of date, and not otherwise', () => {
