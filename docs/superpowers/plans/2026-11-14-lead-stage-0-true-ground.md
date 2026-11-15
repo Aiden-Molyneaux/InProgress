@@ -7,7 +7,7 @@
 **Goal:** InProgress knows a session's T3 thread, shows only what is true, and can park a project, with no Bot
 involved.
 
-**Architecture:** A session gets a `driver` and a T3 thread id from its hooks. One thin server module wraps the `t3`
+**Architecture:** A session gets its `app` (the desktop app, T3 Code or a plain terminal) and a T3 thread id from its hooks. One thin server module wraps the `t3`
 CLI and is the only code that talks to T3 Code. The title channel, Open session and the truth pass read through it.
 Nothing here depends on a session remembering to do something.
 
@@ -21,7 +21,8 @@ Nothing here depends on a session remembering to do something.
 - No em dashes (U+2014) or their HTML entities in any file.
 - Schema changes only add. `min_reader_version` stays 1.
 - One branch per change off main, in its own worktree under `.claude/worktrees/`. Gates by label, from the playbook.
-- A hook never calls T3 Code and never waits on it. Only the server does, with a 10 second limit per call.
+- A hook never calls T3 Code and never waits on it. Only the server does, with a limit per call: 30 seconds to
+  read, 60 to start or send. On a loaded machine a list has taken 17 seconds.
 - A T3 failure never ends a session, clears an ask or blocks a hook. It leaves the state as it was.
 - The desktop app keeps working exactly as it does today.
 - No Bot, no lead command and no new rule a session must remember.
@@ -43,46 +44,52 @@ Nothing here depends on a session remembering to do something.
 ### Task 1: InProgress knows T3 Code (label: integration)
 
 **Files:**
-- Create: `src/core/driver.ts`, `src/server/t3.ts`, `scripts/t3-proof.mjs`
+- Create: `src/core/session-app.ts`, `src/server/t3.ts`, `scripts/t3-proof.mjs`
 - Modify: `src/hooks/handlers.ts:200-204`, `src/server/schemas.ts:138-139`, `src/server/db/schema.ts:64-77`
-- Test: `test/core/driver.test.ts`, `test/server/t3.test.ts`, `test/hooks/t3-thread-id.test.ts`
+- Test: `test/core/session-app.test.ts`, `test/server/t3.test.ts`, `test/hooks/t3-thread-id.test.ts`
 
 **Interfaces (produced for tasks 2 and 3):**
 
 ```ts
-// src/core/driver.ts
-export type Driver = 'desktop' | 't3' | 'cli';
-export function driverOf(env: Record<string, string | undefined>): Driver;
+// src/core/session-app.ts ("driver" already means the session that drives a step, so the field is `app`)
+export type SessionApp = 'desktop' | 't3' | 'cli';
+export function appOf(env: Record<string, string | undefined>): SessionApp;
 // 't3' when T3CODE_THREAD_ID is set; else 'desktop' when CLAUDE_CODE_ENTRYPOINT === 'claude-desktop'; else 'cli'
 
 // src/server/t3.ts
 export interface T3Thread { threadId: string; projectId: string; title: string; link: string; status: string;
-  runtimeMode: string; settled: boolean; archived: boolean; pendingRequestCount: number; updatedAt: string }
+  runtimeMode: string; settled: boolean; archived: boolean; pendingRequestCount: number; updatedAt: string;
+  createdBy: string; creationSource: string }
+// threadId is text: a thread started through the CLI has the id `mcp:<uuid>`
 export interface T3Message { role: 'user' | 'assistant'; text: string }
-export class T3Unavailable extends Error {}
-export function t3List(project?: string): Promise<T3Thread[]>;
+export class T3Timeout extends Error {}
+export class T3Unavailable extends Error { readonly outcomeUnknown: boolean }
+// outcomeUnknown: a start or send timed out, so the thread may exist; never retry blindly. A bad argument is a TypeError.
+export function t3List(project: string): Promise<T3Thread[]>; // always named: the CLI otherwise uses the server's folder
 export function t3Show(threadId: string): Promise<{ thread: T3Thread; messages: T3Message[] }>;
-export function t3Start(project: string, message: string, opts?: { title?: string; worktree?: string; branch?: string }): Promise<{ threadId: string }>;
+export function t3Start(project: string, message: string, opts: { provider: string; model: string; title?: string; worktree?: string; branch?: string }): Promise<{ threadId: string }>;
+// provider and model are required: a project with no default model refuses a start without them (the proof, step 1)
 export function t3Send(threadId: string, message: string): Promise<void>;
 ```
 
-- Hook body, on `session-start`, `prompt-submit` and `stop`: `driver: Driver` and, when set, `t3ThreadId: string`.
+- Hook body, on `session-start`, `prompt-submit` and `stop`: `app: SessionApp` when it is not `'cli'`, and `t3ThreadId: string` under T3 Code.
+  A start carries the whole truth; a prompt or a stop only fills in.
   The old `desktop: true` is still sent and still accepted for one version.
-- `sessions.driver TEXT NOT NULL DEFAULT 'cli'`, `sessions.t3_thread_id TEXT NULL`, with an index on the second.
+- `sessions.app TEXT NOT NULL DEFAULT 'cli'` and `sessions.t3_thread_id TEXT NULL`. No index yet.
 - The CLI path is `T3CODE_CLI_PATH`, else `~/.t3/bin/t3` (`t3.cmd` on Windows). Every call passes `--json`, has a
   10 second limit, parses with zod, and throws `T3Unavailable` on any failure.
 
-- [ ] **Step 1: Prove the route.** Write `scripts/t3-proof.mjs`: it starts one thread in a scratch folder with the
+- [x] **Step 1: Prove the route.** Done 2026-11-14, see `docs/superpowers/rulings/2026-11-t3-cli-proof.md`. Write `scripts/t3-proof.mjs`: it starts one thread in a scratch folder with the
   message "Reply READY and stop", sends "Reply DONE and stop", shows the thread, and prints the thread id, its
   `runtimeMode` and both replies. Run it once from a shell with every `T3*` variable unset.
   Expected: exit 0, two replies, and the mode printed. Record the output in
   `docs/superpowers/rulings/2026-11-t3-cli-proof.md`. If it fails, stop and report: stage 3 of the spec rests on it.
-- [ ] **Step 2: Failing tests.** `driverOf` returns `'t3'`, `'desktop'` and `'cli'` for the three environments, and
+- [ ] **Step 2: Failing tests.** `appOf` returns `'t3'`, `'desktop'` and `'cli'` for the three environments, and
   `'t3'` when both variables are set. `t3Show` parses a recorded fixture; a missing binary, a timeout and bad JSON
   each throw `T3Unavailable` (Review Focus 1). A `session-start` carrying `t3ThreadId` stores it; a second
   `session-start` for the same thread with a new session id makes one more row and no duplicate of the first
   (Review Focus 3).
-- [ ] **Step 3: Run them.** `npx vitest run test/core/driver.test.ts test/server/t3.test.ts test/hooks/t3-thread-id.test.ts`. Expected: fail, nothing defined.
+- [ ] **Step 3: Run them.** `npx vitest run test/core/session-app.test.ts test/server/t3.test.ts test/server/t3-session.test.ts`. Expected: fail, nothing defined.
 - [ ] **Step 4: Implement** the interfaces above.
 - [ ] **Step 5: Gate.** `npm run typecheck && npm test && npm run test:smoke`. Expected: green.
 - [ ] **Step 6: Commit.**
@@ -100,16 +107,16 @@ session with that id.
   one e2e test in `test/e2e/`
 
 **Interfaces:**
-- Consumes: `Driver`, `t3Show`, `sessions.driver`, `sessions.t3_thread_id` from task 1.
+- Consumes: `SessionApp`, `t3Show`, `sessions.app`, `sessions.t3_thread_id` from task 1.
 - Produces:
 
 ```ts
 // src/core/title.ts
-export function renameToolFor(driver: Driver): string | null;
+export function renameToolFor(app: SessionApp): string | null;
 // 'desktop' -> 'mcp__ccd_session_mgmt__set_session_title'; 't3' -> 'mcp__t3-code__t3_thread_update'; 'cli' -> null
 
 // src/server/open-session.ts
-export function openSession(session: { driver: Driver; t3ThreadId: string | null; id: string }): Promise<void>;
+export function openSession(session: { app: SessionApp; t3ThreadId: string | null; id: string }): Promise<void>;
 // 't3' opens thread.link from t3Show; 'desktop' calls the existing open-desktop code; 'cli' is a 409
 ```
 

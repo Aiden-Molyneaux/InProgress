@@ -1,3 +1,4 @@
+import { SESSION_APPS, type SessionApp } from '../../core/session-app';
 import { STALE_SESSION_MS, TRAIL_MS, type PastSession, type Session, type SessionState } from '../../core/types';
 import { write, type Ctx } from '../db/tx';
 import { endSessionCommands, listCommands } from './commands';
@@ -22,6 +23,9 @@ interface SessionRow {
   role: string;
   /** Migration 16. */
   title_asked: string | null;
+  /** Migration 19. */
+  app: string;
+  t3_thread_id: string | null;
 }
 
 const toSession = (ctx: Ctx, r: SessionRow): Session => ({
@@ -41,6 +45,8 @@ const toSession = (ctx: Ctx, r: SessionRow): Session => ({
   slot: r.slot,
   role: r.role === 'orchestrator' ? 'orchestrator' : 'worker',
   titleAsked: r.title_asked,
+  app: (SESSION_APPS as readonly string[]).includes(r.app) ? (r.app as SessionApp) : 'cli',
+  t3ThreadId: r.t3_thread_id,
   subagents: listSubagents(ctx, r.id),
   commands: listCommands(ctx, r.id),
 });
@@ -53,8 +59,8 @@ export function findSession(ctx: Ctx, id: string): Session | undefined {
 /** Persist every column except subagents (which live in session_subagents). */
 export function saveSession(ctx: Ctx, s: Session): void {
   ctx.db
-    .prepare('UPDATE sessions SET project_id = ?, title = ?, cwd = ?, branch = ?, transcript_path = ?, state = ?, focus_node_id = ?, prompts_since_update = ?, last_seen_at = ?, last_prompt_at = ?, ended_at = ?, slot = ?, role = ?, title_asked = ? WHERE id = ?')
-    .run(s.projectId, s.title, s.cwd, s.branch, s.transcriptPath, s.state, s.focusNodeId, s.promptsSinceUpdate, s.lastSeenAt, s.lastPromptAt, s.endedAt, s.slot, s.role, s.titleAsked, s.id);
+    .prepare('UPDATE sessions SET project_id = ?, title = ?, cwd = ?, branch = ?, transcript_path = ?, state = ?, focus_node_id = ?, prompts_since_update = ?, last_seen_at = ?, last_prompt_at = ?, ended_at = ?, slot = ?, role = ?, title_asked = ?, app = ?, t3_thread_id = ? WHERE id = ?')
+    .run(s.projectId, s.title, s.cwd, s.branch, s.transcriptPath, s.state, s.focusNodeId, s.promptsSinceUpdate, s.lastSeenAt, s.lastPromptAt, s.endedAt, s.slot, s.role, s.titleAsked, s.app, s.t3ThreadId, s.id);
 }
 
 /*

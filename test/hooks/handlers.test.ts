@@ -45,7 +45,11 @@ afterAll(async () => {
 
 const run = (name: HookName, input: Record<string, unknown>) => runHandler(name, input, deps);
 
-beforeEach(() => vi.stubEnv('CLAUDE_CODE_ENTRYPOINT', ''));
+beforeEach(() => {
+  vi.stubEnv('CLAUDE_CODE_ENTRYPOINT', '');
+  // The suite may itself run inside a T3 Code thread.
+  vi.stubEnv('T3CODE_THREAD_ID', '');
+});
 afterEach(() => vi.unstubAllEnvs());
 
 describe('parseHookInput', () => {
@@ -587,6 +591,43 @@ describe('buildHookBody: desktop', () => {
     expect(buildHookBody('session-start', { session_id: SESSION })).not.toHaveProperty('desktop');
     vi.stubEnv('CLAUDE_CODE_ENTRYPOINT', 'cli');
     expect(buildHookBody('stop', { session_id: SESSION })).not.toHaveProperty('desktop');
+  });
+});
+
+describe('buildHookBody: app', () => {
+  it("flags a start, a prompt and a stop under T3 Code with the app and the thread, and a session end with neither", () => {
+    vi.stubEnv('T3CODE_THREAD_ID', 'mcp:abc');
+    for (const name of ['session-start', 'prompt-submit', 'stop'] as const) {
+      expect(buildHookBody(name, { session_id: SESSION, prompt: 'hi' }), name).toMatchObject({ app: 't3', t3ThreadId: 'mcp:abc' });
+    }
+    const end = buildHookBody('session-end', { session_id: SESSION });
+    expect(end).not.toHaveProperty('app');
+    expect(end).not.toHaveProperty('t3ThreadId');
+  });
+
+  it('flags the desktop app as the app without a thread, and keeps desktop: true on a stop', () => {
+    vi.stubEnv('CLAUDE_CODE_ENTRYPOINT', 'claude-desktop');
+    const body = buildHookBody('stop', { session_id: SESSION });
+    expect(body).toMatchObject({ app: 'desktop', desktop: true });
+    expect(body).not.toHaveProperty('t3ThreadId');
+  });
+
+  it('leaves out a thread id past the server limit, never clipping it, and sets desktop only for the desktop app', () => {
+    vi.stubEnv('T3CODE_THREAD_ID', 'x'.repeat(201));
+    // Both set: T3 Code wins, and that is what keeps desktop out of the body.
+    vi.stubEnv('CLAUDE_CODE_ENTRYPOINT', 'claude-desktop');
+    const body = buildHookBody('stop', { session_id: SESSION });
+    expect(body).toMatchObject({ app: 't3' });
+    expect(body).not.toHaveProperty('t3ThreadId');
+    expect(body).not.toHaveProperty('desktop');
+    vi.stubEnv('T3CODE_THREAD_ID', 'x'.repeat(200));
+    expect(buildHookBody('stop', { session_id: SESSION }).t3ThreadId).toBe('x'.repeat(200));
+  });
+
+  it('leaves a plain CLI body without an app key', () => {
+    for (const name of ['session-start', 'prompt-submit', 'stop'] as const) {
+      expect(buildHookBody(name, { session_id: SESSION, prompt: 'hi' }), name).not.toHaveProperty('app');
+    }
   });
 });
 

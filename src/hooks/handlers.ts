@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { appOf } from '../core/session-app';
 import { ID_MAX, TASK_ID_MAX, noticeTasks, text } from '../core/notices';
 import type { TitleDemand } from '../core/title';
 import { SCRIBE_AGENT, WORK_STATUSES, type HookEvent } from '../core/types';
@@ -160,6 +161,7 @@ export function stripPasted(prompt: string): string {
 
 export function buildHookBody(name: Exclude<HookName, ToolHookName>, input: HookStdin): Record<string, unknown> {
   const body: Record<string, unknown> = { event: EVENT_FOR[name] };
+  const app = appOf(process.env);
   if (input.transcript_path) body.transcriptPath = input.transcript_path;
   if (name === 'session-start' && input.source) body.source = input.source;
   // Prompts carry the folder too, so the server can still pick up a session whose start it missed. Values past the
@@ -201,7 +203,14 @@ export function buildHookBody(name: Exclude<HookName, ToolHookName>, input: Hook
   if (name === 'stop' && input.stop_hook_active === true) body.stopHookActive = true;
   // The title channel runs only in the desktop app, where set_session_title exists; a CLI session can carry a /rename
   // title too. Claude Code hands its hooks its own environment. Flagged only when true, as above.
-  if ((name === 'prompt-submit' || name === 'stop') && process.env.CLAUDE_CODE_ENTRYPOINT === 'claude-desktop') body.desktop = true;
+  if ((name === 'prompt-submit' || name === 'stop') && app === 'desktop') body.desktop = true;
+  // The app that runs the session, and under T3 Code its thread. Flagged only when not the default, as desktop is. A thread
+  // id past the server's limit is left out, never clipped (a clipped id names another thread).
+  if (name === 'session-start' || name === 'prompt-submit' || name === 'stop') {
+    if (app !== 'cli') body.app = app;
+    const thread = process.env.T3CODE_THREAD_ID;
+    if (app === 't3' && thread && thread.length <= ID_MAX) body.t3ThreadId = thread;
+  }
   if (name === 'subagent-start' || name === 'subagent-stop') {
     if (input.agent_id) body.agentId = input.agent_id;
     if (typeof input.agent_type === 'string') body.agentType = input.agent_type;

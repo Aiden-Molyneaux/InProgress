@@ -112,9 +112,9 @@ event.
 - Sigmund sets the bar in chat, and Murr's and Parvati's verdicts live in chat (`.claude/skills/sigmund/SKILL.md`
   151 to 168, 250 to 266). His merge rule needs the owner's explicit go-ahead (298 to 299).
 - T3 Code, on this machine: `t3 thread list` and `show` were run from a shell with every T3 variable unset and
-  answered with no sign-in. `start` and `send` have only been read from their help; neither has been run. `start` has
-  no flag for the mode, so a thread InProgress starts is expected to run at the environment's default, which here is
-  Full access. A thread record carries its status, mode, settled flag and a link; a message carries its role and text,
+  answered with no sign-in. `start` and `send` were run on 2026-11-14 for #720 and answer the same way
+  (`docs/superpowers/rulings/2026-11-t3-cli-proof.md`): a start must name a provider and a model, the thread runs at
+  Full access with no flag to change it, and T3 records it as created by an agent, not by the user. A thread record carries its status, mode, settled flag and a link; a message carries its role and text,
   not who sent it. An outside app's access level caps the mode of any thread it starts, and approvals cannot be
   answered over MCP, so a Bot with Supervised access cannot run unattended work.
 - Grok Bot: connected to T3 Code at Read only and read the InProgress threads correctly. Its connectors are shared by
