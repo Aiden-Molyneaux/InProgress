@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { T3Timeout, T3Unavailable, t3CliPath, t3CommandLine, t3List, t3Send, t3Show, t3Start, type T3Run } from '../../src/server/t3';
+import { readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { T3Timeout, T3Unavailable, execRun, t3CliPath, t3CommandLine, t3List, t3Send, t3Show, t3Start, type T3Run } from '../../src/server/t3';
 
 const thread = (extra: Record<string, unknown> = {}) => ({
   threadId: 'mcp:abc',
@@ -159,4 +162,19 @@ describe('t3CliPath', () => {
     expect(t3CliPath({ T3CODE_CLI_PATH: '/x/t3' })).toBe('/x/t3');
     expect(t3CliPath({})).toMatch(/\.t3[\\/]bin[\\/]t3(\.cmd)?$/);
   });
+});
+
+describe('execRun', () => {
+  it('rejects with T3Timeout when the time is up and stops the child', async () => {
+    const pidFile = join(tmpdir(), `inprogress-t3-timeout-${process.pid}-${Date.now()}.pid`);
+    const script = `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setTimeout(() => {}, 60000);`;
+    try {
+      await expect(execRun(process.execPath, ['-e', script], { timeoutMs: 5000, verbatim: false })).rejects.toBeInstanceOf(T3Timeout);
+      const pid = Number(readFileSync(pidFile, 'utf8'));
+      // Signal 0 only asks whether the process exists: it throws once the child is gone.
+      await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 8000, interval: 100 });
+    } finally {
+      rmSync(pidFile, { force: true });
+    }
+  }, 20_000);
 });

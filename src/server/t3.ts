@@ -102,7 +102,7 @@ function childEnv(): NodeJS.ProcessEnv {
  * The real runner: execFile, as `run` in sync.ts, with its own timer. On Windows the CLI is a grandchild of cmd.exe, so
  * killing cmd.exe would leave it running: taskkill takes the whole tree.
  */
-const execRun: T3Run = (file, args, { timeoutMs, input, verbatim }) =>
+export const execRun: T3Run = (file, args, { timeoutMs, input, verbatim }) =>
   new Promise((resolve, reject) => {
     let timer: NodeJS.Timeout | undefined;
     const child = execFile(
@@ -120,7 +120,10 @@ const execRun: T3Run = (file, args, { timeoutMs, input, verbatim }) =>
       },
     );
     timer = setTimeout(() => {
-      if (process.platform === 'win32' && child.pid !== undefined) execFile('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true }, () => undefined);
+      if (process.platform === 'win32' && child.pid !== undefined) execFile('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true }, (killErr) => {
+          // The caller is told it timed out either way; a tree that could not be stopped is said in the server log.
+          if (killErr) console.error(`InProgress: could not stop a timed-out t3 process (pid ${child.pid}): ${(killErr as NodeJS.ErrnoException).code ?? killErr.name}`);
+        });
       else child.kill('SIGKILL');
       reject(new T3Timeout(`timed out after ${timeoutMs / 1000} s`));
     }, timeoutMs);
@@ -182,7 +185,7 @@ export async function t3Start(
   // A title is cleaned, not refused: unsafe characters become spaces, leading space and dashes and closing backslashes go,
   // it is cut to 120 code points, and a blank one is left out.
   const title = Array.from(opts.title?.replace(UNSAFE_EACH, ' ').replace(/^[\s-]+/, '') ?? '').slice(0, TITLE_MAX).join('').replace(/\\+$/, '');
-  if (title?.trim()) args.push('--title', title);
+  if (title.trim()) args.push('--title', title);
   if (opts.worktree !== undefined) args.push('--worktree', safe('worktree', opts.worktree));
   if (opts.branch !== undefined) args.push('--branch', safe('branch', opts.branch));
   args.push('--json');

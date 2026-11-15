@@ -614,6 +614,8 @@ describe('buildHookBody: app', () => {
 
   it('leaves out a thread id past the server limit, never clipping it, and sets desktop only for the desktop app', () => {
     vi.stubEnv('T3CODE_THREAD_ID', 'x'.repeat(201));
+    // Both set: T3 Code wins, and that is what keeps desktop out of the body.
+    vi.stubEnv('CLAUDE_CODE_ENTRYPOINT', 'claude-desktop');
     const body = buildHookBody('stop', { session_id: SESSION });
     expect(body).toMatchObject({ app: 't3' });
     expect(body).not.toHaveProperty('t3ThreadId');
