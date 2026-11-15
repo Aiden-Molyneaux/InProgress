@@ -73,9 +73,10 @@ export function renderLeadBrief(b: LeadBrief): string {
       `In flight (${b.inFlight.length} of ${IN_FLIGHT_LIMIT}):`,
       b.inFlight.map((s) => `${s.stepId === null ? line(s.title, 50) : step(s.stepId, s.title)} · ${s.state} · ${s.app} · seen ${spanAgo(s.lastSeenAt, now)} ago`),
     ),
+    // His own steps first: they are few, and after a long list of asks the cap would cut them.
     ...section(`Waiting on Aiden (${b.waitingOnAiden.length + b.aidensOwn.length}):`, [
-      ...b.waitingOnAiden.map((a) => `${askTag(a.askId)} ${a.kind} on ${step(a.stepId, a.stepTitle)}: "${line(a.text, TEXT_CUT)}" · ${spanAgo(a.raisedAt, now)}`),
       ...b.aidensOwn.map((s) => `${step(s.stepId, s.title)} · Aiden's own step, active, last changed ${spanAgo(s.updatedAt, now)} ago`),
+      ...b.waitingOnAiden.map((a) => `${askTag(a.askId)} ${a.kind} on ${step(a.stepId, a.stepTitle)}: "${line(a.text, TEXT_CUT)}" · ${spanAgo(a.raisedAt, now)}`),
     ]),
     // A line of its own, not part of a heading: a reader who retells the brief keeps a line and drops a heading's detail.
     `Aiden's open asks across all projects: ${b.aidenOpenAcrossProjects} of ${AIDEN_OPEN_LIMIT}${over > 0 ? `, ${over} over the limit` : ''}`,
@@ -84,7 +85,7 @@ export function renderLeadBrief(b: LeadBrief): string {
       b.forTheLead.map((a) => `${askTag(a.askId)} on ${step(a.stepId, a.stepTitle)}: "${line(a.text, TEXT_CUT)}" · ${a.dueAt === null ? 'no due time' : `due ${stamp(a.dueAt)}`}${a.overdue ? ' · OVERDUE' : ''}`),
     ),
     ...section(`Next up (${b.nextUp.length}):`, b.nextUp.map((n) => `${step(n.stepId, n.title)} · ${n.status}`)),
-    `Backlog: ${b.backlog} open ${b.backlog === 1 ? 'step' : 'steps'} not in the queue`,
+    `Backlog: ${b.backlog} ${b.backlog === 1 ? 'step' : 'steps'} not started and not in the queue`,
     ...section(`Stale (${b.stale.length}):`, b.stale.map((s) => `${step(s.stepId, s.title)} · ${s.reasons.map(clean).join('; ')}`)),
     ...section(
       `Landed ${span} (${b.landedSince.length}):`,

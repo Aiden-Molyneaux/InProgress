@@ -151,14 +151,14 @@ Phase: <phase, or "none">
 In flight (<n> of 3):
   #<step id> <title> · <state> · <app> · seen <age> ago
 Waiting on Aiden (<n>):
-  a<ask id> <kind> on #<step id> <step title>: "<text, cut to 120>" · <age>
   #<step id> <title> · Aiden's own step, active, last changed <age> ago
+  a<ask id> <kind> on #<step id> <step title>: "<text, cut to 120>" · <age>
 Aiden's open asks across all projects: <m> of 5[, <k> over the limit]
 For the lead (<n>):
   a<ask id> on #<step id> <step title>: "<text>" · due <date and time> [· OVERDUE]
 Next up (<n>):
   #<step id> <title> · <status>
-Backlog: <n> open steps not in the queue
+Backlog: <n> steps not started and not in the queue
 Stale (<n>):
   #<step id> <title> · <why, in words>[; <why>]
 Landed <since your last look | in the last 7 days> (<n>):

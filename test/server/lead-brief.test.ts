@@ -224,7 +224,7 @@ describe('staleReasons', () => {
     expect(text(row({ column: 'now', sessions: [idle], driver: idle, marks: ['stalled'] }))).toEqual(['its session has been idle 2h with nothing waiting on Aiden']);
     expect(text(row({ column: 'now', sessions: [idle], marks: ['stalled'] }))).toEqual(['sessions are on it but none drives it']);
     expect(text(row({ column: 'done', status: 'done', sessions: [idle], marks: ['done_focus'] }))).toEqual(['done, but a session still has it claimed']);
-    expect(text(row({ column: 'next', status: 'todo', marks: ['answer_waiting'] }))).toEqual(["Aiden's answer has not reached a session yet"]);
+    expect(text(row({ column: 'next', status: 'todo', marks: ['answer_waiting'] }))).toEqual(['an answer has not reached a session yet']);
     // A housekeeping mark is no reason: it stays out, as before.
     expect(text(row({ column: 'next', status: 'todo', marks: ['deep', 'no_why'] }))).toEqual([]);
   });

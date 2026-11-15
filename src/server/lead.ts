@@ -89,11 +89,12 @@ export function staleReasons(
     if (mark === 'ended_open') text = `its session ended${lastEnded === null ? '' : ` ${spanAgo(lastEnded, now)} ago`} and left it open`;
     else if (mark === 'stale_ask') {
       const old = r.asks.filter((a) => now - Date.parse(a.raisedAt) > ASK_TRAIL_MS);
-      text = old.map((a) => `${askTag(a.id)} has waited ${spanAgo(a.raisedAt, now)}`).join(', ');
-    } else if (mark === 'answered_in_chat') text = `${askList(r.asks.filter((a) => !r.waiting.includes(a)))} may be answered already: Aiden has typed in its session since`;
+      // The Board set the mark by the same rule, so the list is never empty; if the rules ever part, the row still says why.
+      text = old.map((a) => `${askTag(a.id)} has waited ${spanAgo(a.raisedAt, now)}`).join(', ') || 'an ask has waited over a week';
+    } else if (mark === 'answered_in_chat') text = `${askList(r.asks.filter((a) => !r.waiting.includes(a))) || 'an ask'} may be answered already: Aiden has typed in its session since`;
     else if (mark === 'done_focus') text = 'done, but a session still has it claimed';
     else if (mark === 'stalled') text = r.driver === null ? 'sessions are on it but none drives it' : `its session has been idle ${spanAgo(r.driver.lastSeenAt, now)} with nothing waiting on Aiden`;
-    else text = "Aiden's answer has not reached a session yet";
+    else text = 'an answer has not reached a session yet';
     why.push({ mark, text });
   }
   return why;

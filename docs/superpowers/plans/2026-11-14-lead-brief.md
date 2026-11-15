@@ -177,7 +177,7 @@ one heading, and four kinds of fact were missing or lost.
 - **G4, a true heading.** With no look on record the brief counts seven days back, and said "since your last look".
   It now says `in the last 7 days` until a look is marked (`LEAD_LOOK_BACK_DAYS` in `src/core/lead.ts`).
 - **G5, the rest of the backlog.** `backlog` is the count of the Board's backlog rows that are `todo`, printed as one
-  line after Next up. With it every open step that is a row is in the brief: in flight, Aiden's own, next up,
+  line after Next up (`Backlog: <n> steps not started and not in the queue`). With it every open step that is a row is in the brief: in flight, Aiden's own, next up,
   stale, or counted in the backlog (a row with a mark is under Stale as well as where it sits).
   Test: on a seeded tree with one step of each kind, those five add up to the open
   rows.

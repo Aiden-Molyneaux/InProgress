@@ -59,15 +59,15 @@ describe('renderLeadBrief', () => {
       '  #12 Play app signing · working · t3 · seen 3m ago',
       '  no step claimed · idle · cli · seen 2h ago',
       'Waiting on Aiden (2):',
-      '  a7 question on #12 Play app signing: "Which keystore?" · 3d',
       "  #18 Buy the domain · Aiden's own step, active, last changed 2h ago",
+      '  a7 question on #12 Play app signing: "Which keystore?" · 3d',
       "Aiden's open asks across all projects: 4 of 5",
       'For the lead (2):',
       `  a9 on #14 Release notes: "Send Aiden the draft" · due ${stamp(ago(HOUR))} · OVERDUE`,
       `  a10 on #14 Release notes: "Check the store listing" · due ${stamp(new Date(Date.parse(AT) + DAY).toISOString())}`,
       'Next up (1):',
       '  #15 Add the privacy page · todo',
-      'Backlog: 12 open steps not in the queue',
+      'Backlog: 12 steps not started and not in the queue',
       'Stale (1):',
       '  #16 Old spike · active with no session on it, last changed 9d ago; a8 has waited 9d',
       'Landed since your last look (1):',
@@ -98,7 +98,7 @@ describe('renderLeadBrief', () => {
       '  none',
       'Next up (0):',
       '  none',
-      'Backlog: 0 open steps not in the queue',
+      'Backlog: 0 steps not started and not in the queue',
       'Stale (0):',
       '  none',
       // No look is on record, so the brief says how far back it counted, not "since your last look".
@@ -127,7 +127,7 @@ describe('renderLeadBrief', () => {
   });
 
   it('counts one step in the backlog as one step, and prints no mark name under Stale', () => {
-    expect(renderLeadBrief({ ...empty, backlog: 1 })).toContain('\nBacklog: 1 open step not in the queue\n');
+    expect(renderLeadBrief({ ...empty, backlog: 1 })).toContain('\nBacklog: 1 step not started and not in the queue\n');
     expect(renderLeadBrief(full)).not.toMatch(/no_session|stale_ask/);
   });
 
