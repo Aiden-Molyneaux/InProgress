@@ -158,8 +158,8 @@ event.
 
 ### 6.2 The record
 
-- **Project.** Status gains `parked`: no lead, no counts, nothing nagging. An **intent record**, a page in the owning
-  repo shown in the Library: the goal, the current phase and what done means for it, what is out of scope, what Aiden
+- **Project.** Status gains `parked`: no lead, no counts, nothing nagging. An **intent record**, kept in InProgress and shown on
+  the lead's desk (not a page in a repo, so the lead never commits): the goal, the current phase and what done means for it, what is out of scope, what Aiden
   cares about, standing rulings. The lead writes it from one conversation with him. Without it a lead can read a
   project but nothing can be commissioned. A lead is switched on per project by Aiden, and every lead command that
   writes, commissions or relays is refused on a project without one. Work projects never get one: they are read and
@@ -272,14 +272,14 @@ Each is one change through Sigmund and is worth having alone. Rich can already a
    parked projects. *Accept:* no project shows "need you" without a live session or an open decision behind it; a
    thread's title shows its marker and step id within one turn; a thread started from the server appears as a
    session with its T3 thread id.
-1. **The lead reads and talks.** The lead brief; the read commands plus answer, park, drop and promise; the Bot route
+1. **The lead reads and talks.** The lead brief; the read commands plus answer (a question only, until stage 2), park, drop, promise (an ask the lead owns, with a due time) and relay; the Bot route
    Aiden picked, proven; instructions v1; the intent record for InProgress; triage of what stage 0 left. *Accept:* asked "where are
    we" twice, the lead gives the same facts in the same shape as the brief; with the Bot off, the window answers it.
 2. **The bar and the gate.** Bars, classes, evidence, asks as cards with accept and park, the approval check in the
    landing commands, Sigmund rewritten, confirm mode. *Accept:* a step with no Murr verdict cannot land; a held step
    cannot land; a needs-Aiden step cannot land on a message alone; a lands-alone step lands on one click, no chat; a commit put
    on main around the check shows in the window as landed without a record.
-3. **The lead acts and comes to you.** Commission and relay, the limits, the watcher and webhook, the daily note,
+3. **The lead acts and comes to you.** Commission, the limits, the watcher and webhook, the daily note,
    automatic mode on offer. *Accept:* with the Bot off for a day nothing lands that should not and everything waiting
    shows in the window; a promise past its time shows as overdue.
 4. **Spread.** A second project, then a primary Bot as one front door across projects.
