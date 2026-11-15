@@ -2,14 +2,15 @@ import type { FastifyInstance } from 'fastify';
 import type { Guard } from '../app';
 import type { Ctx } from '../db/tx';
 import { listLeadEvents, markLeadSeen, readLeadBrief, requireLead } from '../lead';
+import { leadAnswer, leadDrop, leadIntent, leadKept, leadPark, leadPromise } from '../lead-commands';
 import { renderLeadBrief } from '../lead-text';
-import { leadBriefQuery, leadSeenBody } from '../schemas';
+import { leadAnswerBody, leadBriefQuery, leadDropBody, leadIntentBody, leadKeptBody, leadParkBody, leadPromiseBody, leadSeenBody } from '../schemas';
 
 /**
  * The lead's reads, and its one write. The reads are plain GETs like the other reads: no CORS headers, so a page on another
  * site cannot read them. With `as` the brief is a lead's: the project must have that lead, or the answer is a 409 and
- * nothing is written. Without `as` it is the window's: no lead check, and it never marks. Marking the brief as read is a
- * write, so it is a POST behind the bearer token guard.
+ * nothing is written. Without `as` it is the window's: no lead check, and it never marks. Marking the brief as read and the
+ * lead's six commands are writes, so they are POSTs behind the bearer token guard.
  */
 export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken: Guard): void {
   app.get('/api/lead/:ref/brief', async (req) => {
@@ -34,5 +35,32 @@ export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken:
     // in the next one. A time ahead of the clock would hide what lands until then: it counts as now.
     const at = body.at !== undefined && Date.parse(body.at) < now.getTime() ? new Date(body.at) : now;
     return { seenAt: markLeadSeen(ctx, project.slug, at) };
+  });
+  // The lead's commands: each a POST behind the bearer token guard, checked, performed and logged in one write. Each answers
+  // what its command returns, `text` being the sentence the CLI prints.
+  const ref = (req: { params: unknown }): string => (req.params as { ref: string }).ref;
+  app.post('/api/lead/:ref/answer', { onRequest: requireToken }, async (req) => {
+    const { as, instructions, ...input } = leadAnswerBody.parse(req.body);
+    return leadAnswer(ctx, ref(req), as, instructions, input);
+  });
+  app.post('/api/lead/:ref/park', { onRequest: requireToken }, async (req) => {
+    const { as, instructions, ...input } = leadParkBody.parse(req.body);
+    return leadPark(ctx, ref(req), as, instructions, input);
+  });
+  app.post('/api/lead/:ref/drop', { onRequest: requireToken }, async (req) => {
+    const { as, instructions, ...input } = leadDropBody.parse(req.body);
+    return leadDrop(ctx, ref(req), as, instructions, input);
+  });
+  app.post('/api/lead/:ref/promise', { onRequest: requireToken }, async (req) => {
+    const { as, instructions, ...input } = leadPromiseBody.parse(req.body);
+    return leadPromise(ctx, ref(req), as, instructions, input);
+  });
+  app.post('/api/lead/:ref/kept', { onRequest: requireToken }, async (req) => {
+    const { as, instructions, ...input } = leadKeptBody.parse(req.body);
+    return leadKept(ctx, ref(req), as, instructions, input);
+  });
+  app.post('/api/lead/:ref/intent', { onRequest: requireToken }, async (req) => {
+    const { as, instructions, ...input } = leadIntentBody.parse(req.body);
+    return leadIntent(ctx, ref(req), as, instructions, input);
   });
 }

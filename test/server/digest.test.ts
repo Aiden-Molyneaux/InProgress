@@ -131,6 +131,21 @@ describe('readDigest: done, asks, documents', () => {
     expect(formatDigest(d, Date.parse(ctx.now()))).toContain(`on #${step.id} Pick a port: "Which port?"`);
   });
 
+  it("labels a lead's own ask in Asks raised and in Asks cleared, and no ask of Aiden's", () => {
+    const { ctx, project, group, t0 } = setup();
+    const [step] = addNodes(ctx, 'test', { parentId: group.id, nodes: [{ title: 'Pick a port' }] });
+    setClock(ctx, t0 + 3 * DAY);
+    const promise = raiseAsk(ctx, 'lead:Progresser', { nodeId: step.id, kind: 'review', text: 'Send the draft', owner: 'lead', dueAt: iso(t0 + 5 * DAY) });
+    const kept = raiseAsk(ctx, 'lead:Progresser', { nodeId: step.id, kind: 'review', text: 'Check the page', owner: 'lead' });
+    const his = raiseAsk(ctx, 'scribe', { nodeId: step.id, kind: 'question', text: 'Which port?' });
+    clearAsk(ctx, 'lead:Progresser', kept.id);
+    const text = formatDigest(readDigest(ctx, project.slug, iso(t0 + 2 * DAY)), Date.parse(ctx.now()), { all: true });
+    expect(text).toContain(`a${promise.id} (the lead's) `);
+    expect(text).toMatch(new RegExp(`Asks cleared \\(1\\): a${kept.id} \\(the lead's\\) on #${step.id} Pick a port: no answer`));
+    expect(text).not.toContain(`a${his.id} (the lead's)`);
+    expect(text).toContain(`a${his.id} `);
+  });
+
   it('names the session that raised an ask by its title, clipped to 30 characters', () => {
     const { ctx, project, group, t0 } = setup();
     const [step] = addNodes(ctx, 'test', { parentId: group.id, nodes: [{ title: 'Pick a port' }] });

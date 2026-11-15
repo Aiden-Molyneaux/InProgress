@@ -208,7 +208,12 @@ export interface NodePatch {
  * and hue predate this write. Only a snapshot (or a read after the write) carries the current values.
  */
 export function updateNode(ctx: Ctx, actor: string, id: number, patch: NodePatch): TreeNode {
-  return write(ctx, actor, (record) => patchWithAsks(ctx, record, actor, requireNode(ctx, id), patch));
+  return write(ctx, actor, (record) => updateNodeInWrite(ctx, record, actor, id, patch));
+}
+
+/** updateNode's work, inside a write() already open (write() never nests): a lead command drops a step and logs it in one write. */
+export function updateNodeInWrite(ctx: Ctx, record: RecordEvent, actor: string, id: number, patch: NodePatch): TreeNode {
+  return patchWithAsks(ctx, record, actor, requireNode(ctx, id), patch);
 }
 
 /** The body of updateNode, inside a write() already open: the drop, park and question-node ask clearing, then patchNode. */
@@ -314,11 +319,19 @@ export function patchNode(ctx: Ctx, record: RecordEvent, before: TreeNode, patch
  */
 export function parkNode(ctx: Ctx, actor: string, id: number, input: { reason: string; where?: string }, check: (before: TreeNode) => void): TreeNode {
   return write(ctx, actor, (record) => {
-    const before = requireNode(ctx, id);
-    check(before);
-    if (before.status === 'parked') return before;
-    return patchWithAsks(ctx, record, actor, before, { status: 'parked', parkedReason: input.reason, parkedWhere: input.where ?? '' });
+    check(requireNode(ctx, id));
+    return parkNodeInWrite(ctx, record, actor, id, input);
   });
+}
+
+/**
+ * parkNode's work without its `check`, inside a write() already open (write() never nests): a lead command parks a step
+ * and logs it in one write. A step already parked answers as it stands, writing nothing.
+ */
+export function parkNodeInWrite(ctx: Ctx, record: RecordEvent, actor: string, id: number, input: { reason: string; where?: string }): TreeNode {
+  const before = requireNode(ctx, id);
+  if (before.status === 'parked') return before;
+  return patchWithAsks(ctx, record, actor, before, { status: 'parked', parkedReason: input.reason, parkedWhere: input.where ?? '' });
 }
 
 /**

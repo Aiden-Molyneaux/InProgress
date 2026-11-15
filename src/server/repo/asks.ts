@@ -84,6 +84,16 @@ export function raiseAsk(ctx: Ctx, actor: string, input: RaiseAskInput): Ask {
 
 /** raiseAsk, also saying whether the ask joined an existing one and whether the raising session was untracked. */
 export function raiseAskDetailed(ctx: Ctx, actor: string, input: RaiseAskInput): RaisedAsk {
+  return write(ctx, actor, (record) => raiseAskInWrite(ctx, record, actor, input));
+}
+
+/**
+ * raiseAskDetailed's work, inside a write() already open (write() never nests): a lead command raises its promise and logs
+ * it in one write. An ask of Aiden's on the project root is refused; the lead's own ask (a promise about the whole
+ * project) may sit there. `actor` is the write's own: the events are recorded under it.
+ */
+export function raiseAskInWrite(ctx: Ctx, record: RecordEvent, actor: string, input: RaiseAskInput): RaisedAsk {
+  void actor; // The signature names the actor for the caller's sake; record() already carries the write's own.
   if (!(ASK_KINDS as readonly string[]).includes(input.kind)) {
     throw badRequest(`Unknown ask kind ${JSON.stringify(input.kind)}. Use one of: ${ASK_KINDS.join(', ')}.`);
   }
@@ -96,45 +106,47 @@ export function raiseAskDetailed(ctx: Ctx, actor: string, input: RaiseAskInput):
     if (Number.isNaN(parsed)) throw badRequest('The due time is not a date', 'Send an ISO time.');
     dueAt = new Date(parsed).toISOString();
   }
-  return write(ctx, actor, (record): RaisedAsk => {
-    const node = requireNode(ctx, input.nodeId);
-    if (node.parentId === null) throw badRequest(`#${node.id} is the project root`, 'Raise the ask on the step it concerns.');
-    if (node.status === 'dropped') throw badRequest(`#${node.id} is dropped`, 'Reopen it first.');
-    if (node.status === 'parked') throw badRequest(`#${node.id} is parked`, 'Unpark it first.');
-    const parkedAbove = parkedAncestor(ctx, node.id);
-    if (parkedAbove !== null) throw badRequest(`#${node.id} is under parked #${parkedAbove}`, `Unpark #${parkedAbove} first.`);
-    // The column references sessions(id): a session id InProgress does not track is stored as no session. A lead's ask has
-    // no session: nothing is sent back to one when it clears.
-    const tracked = input.sessionId && owner !== 'lead' ? ctx.db.prepare('SELECT 1 FROM sessions WHERE id = ?').get(input.sessionId) !== undefined : false;
-    const info = ctx.db
-      .prepare('INSERT INTO asks (project_id, node_id, kind, text, session_id, raised_at, owner, due_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING')
-      .run(node.projectId, node.id, input.kind, text, tracked ? input.sessionId : null, ctx.now(), owner, dueAt);
-    let row = ctx.db.prepare('SELECT * FROM asks WHERE node_id = ? AND kind = ? AND text = ? AND owner = ? AND cleared_at IS NULL').get(node.id, input.kind, text, owner) as AskRow;
-    // A session that asks again after a real prompt (Aiden answered in its chat, #522) is asking anew: the joined ask's
-    // age restarts, or the Board would still read it as answered in chat. A re-raise before any prompt keeps its age.
-    let bumped = false;
-    if (!info.changes && tracked) {
-      const prompted = ctx.db.prepare('SELECT last_prompt_at FROM sessions WHERE id = ?').pluck().get(input.sessionId) as string | null;
-      if (prompted !== null && Date.parse(prompted) > Date.parse(row.raised_at)) {
-        ctx.db.prepare('UPDATE asks SET raised_at = ? WHERE id = ?').run(ctx.now(), row.id);
-        row = ctx.db.prepare('SELECT * FROM asks WHERE id = ?').get(row.id) as AskRow;
-        bumped = true;
-      }
+  const node = requireNode(ctx, input.nodeId);
+  if (node.parentId === null && owner !== 'lead') throw badRequest(`#${node.id} is the project root`, 'Raise the ask on the step it concerns.');
+  if (node.status === 'dropped') throw badRequest(`#${node.id} is dropped`, 'Reopen it first.');
+  if (node.status === 'parked') throw badRequest(`#${node.id} is parked`, 'Unpark it first.');
+  const parkedAbove = parkedAncestor(ctx, node.id);
+  if (parkedAbove !== null) throw badRequest(`#${node.id} is under parked #${parkedAbove}`, `Unpark #${parkedAbove} first.`);
+  // The column references sessions(id): a session id InProgress does not track is stored as no session. A lead's ask has
+  // no session: nothing is sent back to one when it clears.
+  const tracked = input.sessionId && owner !== 'lead' ? ctx.db.prepare('SELECT 1 FROM sessions WHERE id = ?').get(input.sessionId) !== undefined : false;
+  const info = ctx.db
+    .prepare('INSERT INTO asks (project_id, node_id, kind, text, session_id, raised_at, owner, due_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING')
+    .run(node.projectId, node.id, input.kind, text, tracked ? input.sessionId : null, ctx.now(), owner, dueAt);
+  let row = ctx.db.prepare('SELECT * FROM asks WHERE node_id = ? AND kind = ? AND text = ? AND owner = ? AND cleared_at IS NULL').get(node.id, input.kind, text, owner) as AskRow;
+  // A session that asks again after a real prompt (Aiden answered in its chat, #522) is asking anew: the joined ask's
+  // age restarts, or the Board would still read it as answered in chat. A re-raise before any prompt keeps its age.
+  let bumped = false;
+  if (!info.changes && tracked) {
+    const prompted = ctx.db.prepare('SELECT last_prompt_at FROM sessions WHERE id = ?').pluck().get(input.sessionId) as string | null;
+    if (prompted !== null && Date.parse(prompted) > Date.parse(row.raised_at)) {
+      ctx.db.prepare('UPDATE asks SET raised_at = ? WHERE id = ?').run(ctx.now(), row.id);
+      row = ctx.db.prepare('SELECT * FROM asks WHERE id = ?').get(row.id) as AskRow;
+      bumped = true;
     }
-    const ask = toAsk(row);
-    if (info.changes || bumped) record({ projectId: node.projectId, type: 'ask.raised', entity: 'ask', entityId: ask.id, data: { ask } });
-    return { ask, joined: !info.changes, untracked: owner !== 'lead' && !!input.sessionId && !tracked };
-  });
+  }
+  const ask = toAsk(row);
+  if (info.changes || bumped) record({ projectId: node.projectId, type: 'ask.raised', entity: 'ask', entityId: ask.id, data: { ask } });
+  return { ask, joined: !info.changes, untracked: owner !== 'lead' && !!input.sessionId && !tracked };
 }
 
-/** Inside an open write: the idempotent clear of spec 1.2. */
-function clearInWrite(ctx: Ctx, record: RecordEvent, actor: string, before: Ask, answer: string, completeQuestion = true): Ask {
+/**
+ * Inside an open write: the idempotent clear of spec 1.2. `via` is how the answer came (`lead`: the lead carried Aiden's
+ * words), written to answered_via on the first clear only.
+ */
+export function clearInWrite(ctx: Ctx, record: RecordEvent, actor: string, before: Ask, answer: string, completeQuestion = true, via: string | null = null): Ask {
   const first = before.clearedAt === null;
   const takesAnswer = before.answer === '' && answer !== '';
   if (!first && !takesAnswer) return before;
   ctx.db
     .prepare("UPDATE asks SET cleared_at = COALESCE(cleared_at, ?), cleared_by = COALESCE(cleared_by, ?), answer = CASE WHEN answer = '' THEN ? ELSE answer END WHERE id = ?")
     .run(ctx.now(), actor, answer, before.id);
+  if (first && via !== null) ctx.db.prepare('UPDATE asks SET answered_via = ? WHERE id = ?').run(via, before.id);
   const ask = requireAsk(ctx, before.id);
   if (first) {
     record({ projectId: ask.projectId, type: 'ask.cleared', entity: 'ask', entityId: ask.id, data: { ask } });

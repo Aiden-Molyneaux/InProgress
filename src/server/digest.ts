@@ -281,6 +281,9 @@ function sessionItems(d: Digest, now: number): string[] {
   return items;
 }
 
+/** What follows an ask's tag in the digest: ` (the lead's)` for the lead's own promise, nothing for an ask of Aiden's. */
+const leads = (a: Ask): string => (a.owner === 'lead' ? " (the lead's)" : '');
+
 function sections(d: Digest, now: number): Section[] {
   const titleOf = new Map(d.sessions.map((s) => [s.id, s.title]));
   const step = (id: number): string => stepRef(id, d.stepTitles[id]);
@@ -293,14 +296,14 @@ function sections(d: Digest, now: number): Section[] {
       title: 'Asks raised',
       items: d.asksRaised.map((a) => {
         const who = a.sessionId ? titleOf.get(a.sessionId) : undefined;
-        return `${askTag(a.id)} ${ASK_GLYPHS[a.kind]} on ${step(a.nodeId)}: "${clip(a.text)}" (${who ? `"${clip(who, 30)}", ` : ''}${ago(a.raisedAt, now)})`;
+        return `${askTag(a.id)}${leads(a)} ${ASK_GLYPHS[a.kind]} on ${step(a.nodeId)}: "${clip(a.text)}" (${who ? `"${clip(who, 30)}", ` : ''}${ago(a.raisedAt, now)})`;
       }),
     },
     {
       title: 'Asks cleared',
       items: d.asksCleared.map((a) => {
         const by = (a.clearedBy ?? 'unknown').replace(/^(scribe|session):.*$/, '$1');
-        return `${askTag(a.id)} on ${step(a.nodeId)}: ${a.answer ? `"${clip(a.answer)}"` : 'no answer'} (${by})`;
+        return `${askTag(a.id)}${leads(a)} on ${step(a.nodeId)}: ${a.answer ? `"${clip(a.answer)}"` : 'no answer'} (${by})`;
       }),
     },
     { title: 'Sessions', items: sessionItems(d, now) },
