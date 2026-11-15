@@ -1,5 +1,5 @@
 import { commandLabel, sessionActivity } from '../core/activity';
-import type { Driver } from '../core/driver';
+import type { SessionApp } from '../core/session-app';
 import { clipLine, stepRef } from '../core/step-ref';
 import type { TitleDemand } from '../core/title';
 import { SCRIBE_AGENT, type CommandKind, type CommandOutcome, type HookEvent, type Session, type TreeNode, type WorkStatus } from '../core/types';
@@ -33,7 +33,7 @@ export interface HookEventInput {
   mentionsInProgress?: boolean;
   asksStatus?: boolean;
   notice?: boolean;
-  driver?: Driver;
+  app?: SessionApp;
   t3ThreadId?: string;
   toolUseId?: string;
   description?: string;
@@ -145,10 +145,14 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
     if (input.branch !== undefined) next.branch = input.branch;
     if (input.transcriptPath) next.transcriptPath = input.transcriptPath;
     if (input.title?.trim()) next.title = input.title.trim();
-    // The app that drives the session, from a start, a prompt or a stop; an absent field never clears what is stored.
-    if (input.event === 'start' || input.event === 'prompt' || input.event === 'stop') {
-      if (input.driver) next.driver = input.driver;
-      if (input.t3ThreadId) next.t3ThreadId = input.t3ThreadId;
+    // The app that runs the session. A start carries the whole truth (no app means a plain terminal); a prompt or a stop
+    // that names an app replaces it, and one that names none changes nothing. Only a T3 session keeps a thread id.
+    if (input.event === 'start') {
+      next.app = input.app ?? 'cli';
+      next.t3ThreadId = input.app === 't3' ? (input.t3ThreadId ?? null) : null;
+    } else if ((input.event === 'prompt' || input.event === 'stop') && input.app) {
+      next.app = input.app;
+      next.t3ThreadId = input.app === 't3' ? (input.t3ThreadId ?? next.t3ThreadId) : null;
     }
     switch (input.event) {
       case 'start':

@@ -17,11 +17,11 @@ function at18() {
 }
 
 describe('migration 19', () => {
-  it("reads an existing session as driver 'cli' with no thread, and keeps min_reader_version 1", () => {
+  it("reads an existing session as app 'cli' with no thread, and keeps min_reader_version 1", () => {
     const db = at18();
     expect(schemaVersion(db)).toBe(MIGRATIONS.length);
     expect(MIGRATIONS.length).toBeGreaterThanOrEqual(19);
-    expect(db.prepare("SELECT driver, t3_thread_id FROM sessions WHERE id = 's1'").get()).toEqual({ driver: 'cli', t3_thread_id: null });
+    expect(db.prepare("SELECT app, t3_thread_id FROM sessions WHERE id = 's1'").get()).toEqual({ app: 'cli', t3_thread_id: null });
     expect(db.prepare("SELECT value FROM meta WHERE key = 'min_reader_version'").pluck().get()).toBe('1');
   });
 });

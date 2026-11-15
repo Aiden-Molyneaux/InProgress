@@ -58,7 +58,7 @@ beforeAll(async () => {
   const port = await freePort();
   base = `http://127.0.0.1:${port}`;
   // Not the desktop app unless a test says so: the suite may itself run inside a desktop session.
-  env = { ...process.env, INPROGRESS_HOME: home, INPROGRESS_PORT: String(port), INPROGRESS_CLAUDE_DIR: claude, CLAUDE_CODE_ENTRYPOINT: '' };
+  env = { ...process.env, INPROGRESS_HOME: home, INPROGRESS_PORT: String(port), INPROGRESS_CLAUDE_DIR: claude, CLAUDE_CODE_ENTRYPOINT: '', T3CODE_THREAD_ID: '' };
   server = spawn(process.execPath, [bin('server/main.js')], { env, stdio: 'ignore' });
   for (let i = 0; i < 80 && !(await isServerUp(base)); i++) await new Promise((r) => setTimeout(r, 100));
   expect(await isServerUp(base)).toBe(true);

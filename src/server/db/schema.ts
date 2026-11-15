@@ -374,10 +374,10 @@ export const MIGRATIONS: string[] = [
   -- Defaulted columns: v1 to v17 builds can still read and write this schema, so a rollback across it works.
   INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
   `,
-  // 19: which app drives a session, and under T3 Code its thread (#720). driver: desktop, t3 or cli (every existing row is
+  // 19: which app runs a session, and under T3 Code its thread (#720). app: desktop, t3 or cli (every existing row is
   // cli); t3_thread_id: the T3 thread id, NULL outside T3 Code. No index: nothing queries by it yet.
   `
-  ALTER TABLE sessions ADD COLUMN driver TEXT NOT NULL DEFAULT 'cli';
+  ALTER TABLE sessions ADD COLUMN app TEXT NOT NULL DEFAULT 'cli';
   ALTER TABLE sessions ADD COLUMN t3_thread_id TEXT;
   -- A defaulted column and a nullable one: v1 to v18 builds can still read and write this schema, so a rollback across it
   -- works.

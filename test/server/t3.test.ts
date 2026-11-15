@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { T3Unavailable, t3CliPath, t3CommandLine, t3List, t3Send, t3Show, t3Start, type T3Run } from '../../src/server/t3';
+import { T3Timeout, T3Unavailable, t3CliPath, t3CommandLine, t3List, t3Send, t3Show, t3Start, type T3Run } from '../../src/server/t3';
 
 const thread = (extra: Record<string, unknown> = {}) => ({
   threadId: 'mcp:abc',
@@ -57,7 +57,7 @@ describe('t3Start and t3Send', () => {
   it('cleans a title: bad characters become spaces, cut to 120', async () => {
     const run = runs({ threadId: 'mcp:abc' });
     await t3Start('proj', 'm', { provider: 'p', model: 'm', title: 'Fix "it" & 100%' }, opts(run));
-    expect((run as ReturnType<typeof vi.fn>).mock.calls[0][1]).toContain('Fix  it    100 ');
+    expect((run as ReturnType<typeof vi.fn>).mock.calls[0][1]).toContain('Fix  it  & 100 ');
     const long = runs({ threadId: 'mcp:abc' });
     await t3Start('proj', 'm', { provider: 'p', model: 'm', title: 'x'.repeat(200) }, opts(long));
     expect((long as ReturnType<typeof vi.fn>).mock.calls[0][1]).toContain('x'.repeat(120));
@@ -75,7 +75,6 @@ describe('t3Start and t3Send', () => {
 describe('failures', () => {
   it.each<[string, T3Run]>([
     ['a rejecting runner', async () => { throw new Error('ENOENT'); }],
-    ['a timeout', async () => { throw new Error('timed out after 10 s'); }],
     ['bad JSON', async () => 'not json'],
     ['the wrong shape', async () => '{}'],
   ])('throws T3Unavailable on %s', async (_n, run) => {
@@ -83,21 +82,71 @@ describe('failures', () => {
     await expect(t3Start('p', 'm', { provider: 'a', model: 'b' }, opts(run))).rejects.toBeInstanceOf(T3Unavailable);
   });
 
-  it('throws TypeError for an argument the shell would read, and runs nothing', async () => {
+  it('marks a timed out start or send as outcome unknown, and a timed out read as not', async () => {
+    const run: T3Run = async () => { throw new T3Timeout('timed out after 60 s'); };
+    await expect(t3Start('p', 'm', { provider: 'a', model: 'b' }, opts(run))).rejects.toMatchObject({ outcomeUnknown: true });
+    await expect(t3Send('mcp:abc', 'm', opts(run))).rejects.toMatchObject({ outcomeUnknown: true });
+    await expect(t3Show('mcp:abc', opts(run))).rejects.toMatchObject({ outcomeUnknown: false });
+    const plain: T3Run = async () => { throw new Error('exit 1'); };
+    await expect(t3Start('p', 'm', { provider: 'a', model: 'b' }, opts(plain))).rejects.toMatchObject({ outcomeUnknown: false });
+  });
+
+  it('refuses a CLI path cmd.exe would read, and runs nothing', async () => {
     const run = vi.fn(async () => '[]');
-    await expect(t3List('C:\a"&calc', opts(run))).rejects.toBeInstanceOf(TypeError);
-    await expect(t3Show('a\nb', opts(run))).rejects.toBeInstanceOf(TypeError);
-    await expect(t3Start('p', 'm', { provider: 'a|b', model: 'm' }, opts(run))).rejects.toBeInstanceOf(TypeError);
-    await expect(t3Send('a%b', 'm', opts(run))).rejects.toBeInstanceOf(TypeError);
+    await expect(t3List('p', { run, cliPath: String.raw`C:\a"b\t3.cmd`, platform: 'win32' })).rejects.toBeInstanceOf(T3Unavailable);
     expect(run).not.toHaveBeenCalled();
+  });
+
+  const UNSAFE_CHARS = ['"', '%', '^', '|', '<', '>', '!', '\n', '\u0001'];
+  const callers: [string, (v: string, run: T3Run) => Promise<unknown>][] = [
+    ['project', (v, run) => t3List(v, opts(run))],
+    ['thread id', (v, run) => t3Show(v, opts(run))],
+    ['provider', (v, run) => t3Start('p', 'm', { provider: v, model: 'm' }, opts(run))],
+    ['model', (v, run) => t3Start('p', 'm', { provider: 'a', model: v }, opts(run))],
+    ['worktree', (v, run) => t3Start('p', 'm', { provider: 'a', model: 'm', worktree: v }, opts(run))],
+    ['branch', (v, run) => t3Start('p', 'm', { provider: 'a', model: 'm', branch: v }, opts(run))],
+  ];
+  it.each(callers.flatMap(([name, fn]) => UNSAFE_CHARS.map((c) => [name, c, fn] as const)))('throws TypeError for %s holding %j, and runs nothing', async (_name, c, fn) => {
+    const run = vi.fn(async () => '[]');
+    await expect(fn('a' + c + 'b', run)).rejects.toBeInstanceOf(TypeError);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it.each(callers)('refuses a leading dash and a closing backslash in %s', async (_name, fn) => {
+    const run = vi.fn(async () => '[]');
+    await expect(fn('--x', run)).rejects.toBeInstanceOf(TypeError);
+    await expect(fn(String.raw`C:\dir` + '\\', run)).rejects.toBeInstanceOf(TypeError);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('accepts an ampersand in a project and keeps it in a title', async () => {
+    const folder = String.raw`C:\R&D\app`;
+    const run = runs([]);
+    await t3List(folder, opts(run));
+    expect((run as ReturnType<typeof vi.fn>).mock.calls[0][1]).toContain(folder);
+    const start = runs({ threadId: 'mcp:abc' });
+    await t3Start('p', 'm', { provider: 'a', model: 'm', title: 'R&D plan' }, opts(start));
+    expect((start as ReturnType<typeof vi.fn>).mock.calls[0][1]).toContain('R&D plan');
+  });
+
+  it('strips leading dashes and space from a title, and cuts it by code points', async () => {
+    const dash = runs({ threadId: 'mcp:abc' });
+    await t3Start('p', 'm', { provider: 'a', model: 'm', title: '--rm  plan' }, opts(dash));
+    expect((dash as ReturnType<typeof vi.fn>).mock.calls[0][1]).toContain('rm  plan');
+    const emoji = runs({ threadId: 'mcp:abc' });
+    await t3Start('p', 'm', { provider: 'a', model: 'm', title: 'x'.repeat(119) + '\u{1F600}\u{1F600}' }, opts(emoji));
+    const argv = (emoji as ReturnType<typeof vi.fn>).mock.calls[0][1] as string[];
+    const title = argv[argv.indexOf('--title') + 1];
+    expect(title).toBe('x'.repeat(119) + '\u{1F600}');
+    expect(Array.from(title)).toHaveLength(120);
   });
 });
 
 describe('t3CommandLine', () => {
   it('wraps the batch file in cmd.exe on win32', () => {
-    const line = t3CommandLine('C:\t3.cmd', ['thread', 'list'], 'win32');
+    const line = t3CommandLine(String.raw`C:\t3.cmd`, ['thread', 'list'], 'win32');
     expect(line.verbatim).toBe(true);
-    expect(line.args).toEqual(['/d', '/s', '/c', '""C:\t3.cmd" "thread" "list""']);
+    expect(line.args).toEqual(['/d', '/v:off', '/s', '/c', String.raw`""C:\t3.cmd" "thread" "list""`]);
     expect(line.file.toLowerCase()).toMatch(/cmd(\.exe)?$/);
   });
   it('leaves the args alone elsewhere', () => {
