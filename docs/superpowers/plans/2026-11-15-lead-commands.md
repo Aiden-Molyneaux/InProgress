@@ -70,8 +70,19 @@ every column), `src/server/lead.ts` beyond an export, `src/server/lead-text.ts`,
    | `leadKept` `{ askId, note? }` | in this project; Aiden's: `a<id> is Aiden's. The lead clears only its own promises.`; cleared: `a<id> is already cleared.` | `clearInWrite(ctx, record, actor, ask, '', false)`: no answer text, so no session is owed one | `kept`, `askId`, `nodeId`, `text` the note | `Kept a<id>.` |
    | `leadIntent` `{ intent }` | `intentHeadlines(intent)` has an empty goal or phase: 400 `The intent record needs a line under a Goal heading and a line under a Phase heading.` | `setProjectIntentInWrite` | `intent`, `text` the whole intent | `Intent record replaced (<n> characters).` |
 
-   A refusal the repo function itself makes (the project's root, a done step being parked) passes through as it is.
+   A refusal the repo function itself makes (a done step being parked) passes through as it is.
    A drop's reason is kept in the lead's log only: a step has no field for it.
+
+   **The root step** (Sev stopped on these; Sigmund's rulings):
+   - A promise with no `--step` sits on the project's root step: a promise is often about the project, not one
+     step. `raiseAskInWrite` keeps its refusal of the root for an ask of Aiden's, word for word, and lets a
+     lead-owned ask through. That is a new case, not a change: no caller raised a lead-owned ask before this step.
+   - `leadPark` and `leadDrop` refuse the root before anything else, with `The project itself cannot be parked.`
+     and `The project itself cannot be dropped.` Nothing in `updateNode` stops a drop of the root.
+   - `leadDrop` refuses a step with open steps under it (children whose status is not `done`, `dropped` or
+     `parked`, as the window's remove counts them): `<step> has open steps under it. Drop or park those first.`
+   - The top-level `USAGE` in `src/cli/commands.ts` stays as it is. `inprogress lead` with no command, or a bad
+     one, prints `LEAD_USAGE`: `brief` and the six, one line each.
 
 4. **Schemas** (`src/server/schemas.ts`), each `.strict()`, each with `as: z.string().min(1).max(200)` and
    `instructions: z.number().int().min(0)` as `leadSeenBody` has: `leadAnswerBody` (`askId` a positive int,
@@ -121,6 +132,9 @@ stage plan's step 1, plus:
   stays as it was; with words it parks, the reason is his words when none was given, and the event holds them; a
   parked step is refused; its open asks are cleared as a park from the window clears them.
 - **drop:** the same origin rule; the step is dropped and its open asks cleared; the event's text is the reason.
+- **the root:** `leadPark` and `leadDrop` on the root are refused with their sentences and nothing is written; a
+  drop of a step with an open child is refused, and goes through once the child is done; `raiseAsk` for Aiden on the
+  root is still refused as before, and `leadPromise` with no step raises its ask on the root.
 - **promise:** an ask with owner `lead`, kind `review` and `due_at` as an ISO time, on the root step when no step is
   given; a past due time is refused; a text of 501 characters is a 400; the brief lists it under For the lead;
   `listProjectSummaries(...).openAsks` does not move; the same promise twice is one ask and one event.
