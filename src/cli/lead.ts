@@ -15,6 +15,9 @@ export const LEAD_USAGE = [
   `  inprogress lead intent <project> <file | -> ${WHO}`,
 ].join('\n');
 
+/** What a write command prints when the server did not answer in time: it may have been applied all the same. */
+export const LEAD_TIMEOUT = 'InProgress did not answer in time. The command may still have been applied: read the brief before you try again.';
+
 interface Conn {
   baseUrl: string;
   token?: string;
@@ -172,7 +175,7 @@ function draft(command: string, p: Parsed): Draft {
  * cannot use print the usage and exit 1, before anything is read from stdin; a refusal from the server prints its sentence
  * and exits 1. The lead is how Aiden reaches a project, so unlike claim and ask a stopped server is started first
  * (`bringUp`), once the arguments are good; one that will not start prints why and exits 1. Without `bringUp`, nothing
- * answering is rethrown with a hint.
+ * answering is rethrown with a hint, except that a write command that timed out prints LEAD_TIMEOUT and exits 1.
  */
 export async function runLead(args: string[], out: (line: string) => void, o: Conn, io: LeadIo = REAL_IO): Promise<number> {
   const usage = (why?: string): number => {
@@ -225,6 +228,11 @@ export async function runLead(args: string[], out: (line: string) => void, o: Co
     if (p.bools.has('--mark')) await client.post(`${path}/seen`, { as: p.as, instructions: p.instructions, at: res.brief.at });
     return 0;
   } catch (err) {
+    // A write that timed out may have been carried out after all: say so, so the lead reads the brief before trying again.
+    if (payload !== undefined && err instanceof ApiClientError && err.status === 0 && err.code === 'TIMEOUT') {
+      out(LEAD_TIMEOUT);
+      return 1;
+    }
     if (err instanceof ApiClientError && err.status === 0) throw new ApiClientError(0, err.message, TASKS_NOT_RUNNING_HINT, err.code);
     if (err instanceof ApiClientError) {
       out(err.message);

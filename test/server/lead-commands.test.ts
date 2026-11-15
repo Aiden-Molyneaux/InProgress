@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { deriveBoard } from '../../src/core/board';
 import { buildApp } from '../../src/server/app';
+import { stamp } from '../../src/server/digest';
 import { ARCHIVED, noLeadNamed, outOfDate, readLeadBrief } from '../../src/server/lead';
 import { leadAnswer, leadDrop, leadIntent, leadKept, leadPark, leadPromise } from '../../src/server/lead-commands';
 import { clearAsk, raiseAsk, requireAsk, undeliveredAnswers } from '../../src/server/repo/asks';
 import { maxEventId } from '../../src/server/repo/events';
 import { addNodes, requireNode, updateNode } from '../../src/server/repo/nodes';
-import { addBinding, changeProject, createProject, listProjectSummaries, resolveProject, setProjectLead } from '../../src/server/repo/projects';
+import { addBinding, changeProject, createProject, listProjectSummaries, resolveProject, setProjectLead, setQueue } from '../../src/server/repo/projects';
 import { getProjectSnapshot } from '../../src/server/repo/snapshot';
-import { handleHookEvent } from '../../src/server/session-flow';
+import { claimStep, handleHookEvent } from '../../src/server/session-flow';
 import { makeCtx } from '../helpers';
 
 const BEARER = { authorization: 'Bearer t' };
@@ -138,12 +139,25 @@ describe('leadPark', () => {
     expect(said[0]).toMatchObject({ kind: 'park', ref: `#${mine.id}`, words: 'Not now.' });
   });
 
+  it('takes a queued step out of the queue', () => {
+    const { ctx, project, proposed, other } = setup();
+    setQueue(ctx, 'test', project.slug, [proposed.id, other.id], 'unowned');
+    const queued = () => resolveProject(ctx, project.slug).queue.map((e) => e.nodeId);
+    expect(queued()).toEqual([proposed.id, other.id]);
+    leadPark(ctx, project.slug, 'Progresser', 1, { stepId: proposed.id });
+    expect(queued()).toEqual([other.id]);
+  });
+
   it('refuses a parked step, a done one and a step of another project', () => {
     const { ctx, project, proposed, other, refused } = setup();
     leadPark(ctx, project.slug, 'Progresser', 1, { stepId: proposed.id });
     expect(refused(() => leadPark(ctx, project.slug, 'Progresser', 1, { stepId: proposed.id }))).toMatchObject({ status: 409, message: `#${proposed.id} is already parked.` });
     updateNode(ctx, 'test', other.id, { status: 'done' });
+    // A done step keeps its review ask open; the refused park must leave it so, which proves its write rolled back.
+    const look = raiseAsk(ctx, 'session:s1', { nodeId: other.id, kind: 'review', text: 'Look at the page' });
     expect(refused(() => leadPark(ctx, project.slug, 'Progresser', 1, { stepId: other.id, aidenWords: 'Park it.' })).status).toBe(400);
+    expect(requireAsk(ctx, look.id).clearedAt).toBeNull();
+    expect(requireNode(ctx, other.id).status).toBe('done');
     const elsewhere = createProject(ctx, 'test', { name: 'Elsewhere' });
     const [step] = addNodes(ctx, 'test', { parentId: elsewhere.rootNodeId, nodes: [{ title: 'Theirs', origin: 'proposed' }] });
     expect(refused(() => leadPark(ctx, project.slug, 'Progresser', 1, { stepId: step.id }))).toMatchObject({ status: 409, message: `#${step.id} is not in this project.` });
@@ -174,6 +188,27 @@ describe('leadDrop', () => {
     expect(refused(() => leadDrop(ctx, project.slug, 'Progresser', 1, { stepId: proposed.id, reason: 'Again' }))).toMatchObject({ status: 409, message: `#${proposed.id} is dropped.` });
     updateNode(ctx, 'test', other.id, { status: 'done' });
     expect(refused(() => leadDrop(ctx, project.slug, 'Progresser', 1, { stepId: other.id, reason: 'x', aidenWords: 'Drop.' }))).toMatchObject({ status: 409, message: `#${other.id} is done.` });
+  });
+
+  it('refuses a step a live session drives, and drops it once that session has ended', () => {
+    const { ctx, project, proposed, refused } = setup();
+    claimStep(ctx, 'test', 's1', proposed.id);
+    expect(requireNode(ctx, proposed.id).driverSessionId).toBe('s1');
+    const drop = () => leadDrop(ctx, project.slug, 'Progresser', 1, { stepId: proposed.id, reason: 'Not wanted' });
+    expect(refused(drop)).toMatchObject({ status: 409, message: `#${proposed.id} Dark mode has a session working on it. Park it, or wait for the session to end.` });
+    expect(requireNode(ctx, proposed.id).status).not.toBe('dropped');
+    handleHookEvent(ctx, 's1', { event: 'end' });
+    expect(drop().text).toBe(`Dropped #${proposed.id} Dark mode.`);
+  });
+
+  it('checks a live driver after the words for a step of Aiden\'s, and before the open steps under it', () => {
+    const { ctx, project, other, refused } = setup();
+    addNodes(ctx, 'test', { parentId: other.id, nodes: [{ title: 'Write the page' }] });
+    claimStep(ctx, 'test', 's1', other.id);
+    expect(refused(() => leadDrop(ctx, project.slug, 'Progresser', 1, { stepId: other.id, reason: 'Moot' })).message).toBe(aidens('asked'));
+    expect(refused(() => leadDrop(ctx, project.slug, 'Progresser', 1, { stepId: other.id, reason: 'Moot', aidenWords: 'Drop it.' })).message).toBe(
+      `#${other.id} Privacy page has a session working on it. Park it, or wait for the session to end.`,
+    );
   });
 
   it('refuses a step with open steps under it, and drops it once they are done', () => {
@@ -229,9 +264,26 @@ describe('leadPromise', () => {
     const first = leadPromise(ctx, project.slug, 'Progresser', 1, { text: 'Check the page', dueAt: DUE, stepId: other.id });
     expect(first.ask.nodeId).toBe(other.id);
     const again = leadPromise(ctx, project.slug, 'Progresser', 1, { text: 'Check the page', dueAt: DUE, stepId: other.id });
-    expect(again.text).toBe(`Already promised: a${first.ask.id}.`);
+    expect(again.text).toBe(`Already promised: a${first.ask.id}, due ${stamp(DUE)}.`);
     expect(again.ask.id).toBe(first.ask.id);
     expect(leadEvents()).toBe(1);
+  });
+
+  it('answers a promise made again with a later due time with the time on record, which stays', () => {
+    const { ctx, project, other, leadEvents, askRow } = setup();
+    const first = leadPromise(ctx, project.slug, 'Progresser', 1, { text: 'Check the page', dueAt: DUE, stepId: other.id });
+    const again = leadPromise(ctx, project.slug, 'Progresser', 1, { text: 'Check the page', dueAt: '2026-12-01T09:00:00.000Z', stepId: other.id });
+    expect(again.text).toBe(`Already promised: a${first.ask.id}, due ${stamp(DUE)}.`);
+    expect(askRow(first.ask.id).due_at).toBe(DUE);
+    expect(leadEvents()).toBe(1);
+  });
+
+  it('says so when the open promise it joins has no due time', () => {
+    const { ctx, project, other, leadEvents } = setup();
+    const open = raiseAsk(ctx, 'lead', { nodeId: other.id, kind: 'review', text: 'Check the page', owner: 'lead' });
+    const again = leadPromise(ctx, project.slug, 'Progresser', 1, { text: 'Check the page', dueAt: DUE, stepId: other.id });
+    expect(again.text).toBe(`Already promised: a${open.id}, with no due time.`);
+    expect(leadEvents()).toBe(0);
   });
 
   it('refuses a due time that has passed, and a step of another project', () => {
@@ -296,6 +348,30 @@ describe('leadIntent', () => {
       message: 'The intent record needs a line under a Goal heading and a line under a Phase heading.',
     });
     expect(resolveProject(ctx, project.slug).intent).toBe('');
+  });
+
+  it('reads the goal and phase of a record with CRLF line endings, and stores it as sent', () => {
+    const { ctx, project } = setup();
+    const crlf = INTENT.replace(/\n/g, '\r\n');
+    leadIntent(ctx, project.slug, 'Progresser', 1, { intent: crlf });
+    expect(resolveProject(ctx, project.slug).intent).toBe(crlf);
+    expect(readLeadBrief(ctx, project.slug, 1, new Date(ctx.now())).intent).toMatchObject({ goal: 'Ship the game to the store.', phase: 'Closed beta with friends.' });
+  });
+
+  it('takes a record of exactly 8,000 characters through the route, and answers one of 8,001 with a 400', async () => {
+    const { ctx, app, project, leadEvents } = setup();
+    const post = (intent: string) =>
+      app.inject({ method: 'POST', url: `/api/lead/${project.slug}/intent`, headers: BEARER, payload: { as: 'Progresser', instructions: 1, intent } });
+    const exact = INTENT + 'x'.repeat(8_000 - INTENT.length);
+    expect(exact).toHaveLength(8_000);
+    const ok = await post(exact);
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json().text).toBe('Intent record replaced (8000 characters).');
+    expect(resolveProject(ctx, project.slug).intent).toBe(exact);
+    const over = await post(`${exact}x`);
+    expect(over.statusCode).toBe(400);
+    expect(resolveProject(ctx, project.slug).intent).toBe(exact);
+    expect(leadEvents()).toBe(1);
   });
 });
 

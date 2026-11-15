@@ -4,7 +4,7 @@ import type { Ctx } from '../db/tx';
 import { STALE_SESSION_MS, type TreeNode } from '../../core/types';
 import { badRequest, conflict, notFound } from '../errors';
 import { openInDesktop, resumeCommand, usableCwd, type DesktopSession, type OpenDesktopResult } from '../open-desktop';
-import { findSession } from '../repo/sessions';
+import { findSession, liveDriver } from '../repo/sessions';
 import { deleteProject, listDeletedProjects, restoreProject } from '../project-lifecycle';
 import { clearAsk } from '../repo/asks';
 import { recordQuiet } from '../repo/events';
@@ -29,17 +29,6 @@ function notInBacklog(ctx: Ctx, projectId: number, n: TreeNode): string | null {
   if (focused || (n.assignee === 'me' && n.status === 'active')) return 'is being worked on';
   if (isQueued(ctx, projectId, n.id)) return 'is in Next';
   return null;
-}
-
-/**
- * The session driving `n` now, or null: the one its driver column names, if it still has `n` as its focus and is live
- * (not ended, seen within STALE_SESSION_MS). The same live rule as notInBacklog.
- */
-function liveDriver(ctx: Ctx, n: TreeNode): string | null {
-  if (n.driverSessionId === null) return null;
-  const cutoff = new Date(Date.parse(ctx.now()) - STALE_SESSION_MS).toISOString();
-  const live = ctx.db.prepare("SELECT 1 FROM sessions WHERE id = ? AND focus_node_id = ? AND state != 'ended' AND last_seen_at >= ?").get(n.driverSessionId, n.id, cutoff) !== undefined;
-  return live ? n.driverSessionId : null;
 }
 
 /**

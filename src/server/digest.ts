@@ -1,4 +1,5 @@
 import { deriveBoard, type Mark } from '../core/board';
+import { isAidens } from '../core/lead';
 import { clipLine, stepRef } from '../core/step-ref';
 import { ASK_GLYPHS, STALE_SESSION_MS, TRAIL_MS, askTag, sessionDisplayTitle, type Ask, type ProjectSnapshot } from '../core/types';
 import type { Ctx } from './db/tx';
@@ -231,10 +232,12 @@ export function formatCounts(d: Digest, now: number): string {
   const parts: string[] = [];
   if (d.done.length) parts.push(`${d.done.length} done`);
   const answered = d.asksCleared.filter((a) => a.answer !== '').length;
-  if (d.asksRaised.length || answered) {
+  // A promise of the lead's is not one of Aiden's asks: the counts leave it out (the sections still list it, labelled).
+  const raised = d.asksRaised.filter(isAidens).length;
+  if (raised || answered) {
     const clauses = [];
-    if (d.asksRaised.length) clauses.push(`${plural(d.asksRaised.length, 'ask', 'asks')} raised`);
-    if (answered) clauses.push(d.asksRaised.length ? `${answered} answered` : `${plural(answered, 'ask', 'asks')} answered`);
+    if (raised) clauses.push(`${plural(raised, 'ask', 'asks')} raised`);
+    if (answered) clauses.push(raised ? `${answered} answered` : `${plural(answered, 'ask', 'asks')} answered`);
     parts.push(clauses.join(', '));
   }
   const ended = d.sessions.filter((s) => s.endedAt !== null).length;

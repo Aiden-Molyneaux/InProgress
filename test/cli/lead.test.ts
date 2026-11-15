@@ -2,9 +2,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { runCli } from '../../src/cli/commands';
-import { LEAD_USAGE, runLead } from '../../src/cli/lead';
+import { LEAD_TIMEOUT, LEAD_USAGE, runLead } from '../../src/cli/lead';
+import { TASKS_NOT_RUNNING_HINT } from '../../src/cli/tasks';
 import { ApiClientError } from '../../src/lib/client';
 import { ensureToken } from '../../src/lib/home';
 import { buildApp } from '../../src/server/app';
@@ -266,6 +267,27 @@ describe("inprogress lead's commands", () => {
       expect(res.lines.at(-1), args.join(' ')).toBe(LEAD_USAGE);
       expect(stdin.reads.stdin, args.join(' ')).toBe(0);
     }
+  });
+
+  it('says a write that timed out may still have been applied, and exits 1 with no hint; brief and other failures are as before', async () => {
+    // The client reads a fetch that throws a TimeoutError as its timeout (code TIMEOUT), as AbortSignal.timeout does.
+    const timeout = Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+    vi.stubGlobal('fetch', async () => {
+      throw timeout;
+    });
+    try {
+      expect(await run(['park', 'ingame', String(steps.third), '--aiden', 'Park it.', ...WHO])).toEqual({ code: 1, lines: [LEAD_TIMEOUT] });
+      expect(LEAD_TIMEOUT).toBe('InProgress did not answer in time. The command may still have been applied: read the brief before you try again.');
+      // The brief changes nothing, so its timeout is rethrown for main.ts to print, as before.
+      await expect(run(['brief', 'ingame', ...WHO])).rejects.toMatchObject({ status: 0, code: 'TIMEOUT' });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    // Nothing listening is not a timeout: a write rethrows it with the not-running hint, as before.
+    await expect(runLead(['kept', 'ingame', 'a1', ...WHO], () => {}, { baseUrl: 'http://127.0.0.1:1', token: 'x' }, io().io)).rejects.toMatchObject({
+      status: 0,
+      hint: TASKS_NOT_RUNNING_HINT,
+    });
   });
 
   it('lists brief and the six commands in the usage, one line each', () => {

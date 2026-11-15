@@ -9,6 +9,7 @@ import { intentHeadlines } from './lead-text';
 import { clearInWrite, raiseAskInWrite, requireAsk } from './repo/asks';
 import { parkNodeInWrite, requireNode, updateNodeInWrite } from './repo/nodes';
 import { setProjectIntentInWrite } from './repo/projects';
+import { liveDriver } from './repo/sessions';
 
 /**
  * The lead's six commands. Each one is checked, performed and logged in a single write: requireLead first (outside it, a
@@ -91,8 +92,8 @@ export function leadPark(
 }
 
 /**
- * Drops a step and clears its open asks, as a drop from anywhere does. A step of Aiden's needs his words, and a step with
- * open steps under it is refused. The reason is kept in the lead's log only: a step has no field for it.
+ * Drops a step and clears its open asks, as a drop from anywhere does. A step of Aiden's needs his words, and a step a
+ * live session drives, or with open steps under it, is refused. The reason is kept in the lead's log only: a step has no field for it.
  */
 export function leadDrop(
   ctx: Ctx,
@@ -107,6 +108,8 @@ export function leadDrop(
     if (before.parentId === null) throw conflict('The project itself cannot be dropped.');
     if (before.status === 'done' || before.status === 'dropped') throw conflict(`#${before.id} is ${before.status}.`);
     requireWordsFor(before, input.aidenWords);
+    // The window's Done refuses a step a live session drives by the same test: its work would go on under a dropped step.
+    if (liveDriver(ctx, before) !== null) throw conflict(`${stepRef(before.id, before.title)} has a session working on it. Park it, or wait for the session to end.`);
     // Direct children only, as the window's Done counts them: a parked child is set aside, not open.
     const open = ctx.db.prepare("SELECT 1 FROM nodes WHERE parent_id = ? AND status NOT IN ('done', 'dropped', 'parked')").get(before.id) !== undefined;
     if (open) throw conflict(`${stepRef(before.id, before.title)} has open steps under it. Drop or park those first.`);
@@ -132,7 +135,8 @@ export function leadPromise(
     const nodeId = input.stepId !== undefined ? requireInProject(requireNode(ctx, input.stepId), project).id : project.rootNodeId;
     if (!(Date.parse(input.dueAt) > Date.parse(ctx.now()))) throw conflict('The due time is in the past.');
     const { ask, joined } = raiseAskInWrite(ctx, record, actor, { nodeId, kind: 'review', text: input.text, owner: 'lead', dueAt: input.dueAt });
-    if (joined) return { text: `Already promised: ${askTag(ask.id)}.`, ask, joined };
+    // A joined promise keeps the due time on record (the new one is not stored), so the reply names that one.
+    if (joined) return { text: `Already promised: ${askTag(ask.id)}, ${ask.dueAt === null ? 'with no due time' : `due ${stamp(ask.dueAt)}`}.`, ask, joined };
     logLeadEvent(ctx, { projectId: project.id, lead: name, instructions, kind: 'promise', askId: ask.id, nodeId: ask.nodeId, text: ask.text });
     return { text: `Promised ${askTag(ask.id)}, due ${stamp(ask.dueAt as string)}.`, ask, joined };
   });

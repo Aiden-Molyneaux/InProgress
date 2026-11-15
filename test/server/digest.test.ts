@@ -294,8 +294,12 @@ describe('formatDigest and formatCounts', () => {
     insertSession(ctx, project.id, 's-1', { startedAt: iso(t0 + 2 * DAY), endedAt: iso(t0 + 2 * DAY + HOUR) });
     insertSession(ctx, project.id, 's-2', { startedAt: iso(t0 + 2 * DAY), endedAt: iso(t0 + 2 * DAY + 2 * HOUR) });
     addResource(ctx, 'scribe', { nodeId: group.id, kind: 'doc', title: 'H', content: 'x', purpose: 'handoff', sessionId: 's-2' });
-    const text = formatCounts(readDigest(ctx, project.slug, iso(t0)), now);
-    expect(text).toBe('Since your last look (3d): 4 done · 2 asks raised, 1 answered · 2 sessions ended, 1 without a handoff.');
+    const counts = () => formatCounts(readDigest(ctx, project.slug, iso(t0)), now);
+    expect(counts()).toBe('Since your last look (3d): 4 done · 2 asks raised, 1 answered · 2 sessions ended, 1 without a handoff.');
+    // A promise of the lead's, raised and kept, is not one of Aiden's asks: the counts do not move.
+    const promise = raiseAsk(ctx, 'lead:Progresser', { nodeId: q.id, kind: 'review', text: 'Send the draft', owner: 'lead', dueAt: iso(t0 + 5 * DAY) });
+    clearAsk(ctx, 'lead:Progresser', promise.id);
+    expect(counts()).toBe('Since your last look (3d): 4 done · 2 asks raised, 1 answered · 2 sessions ended, 1 without a handoff.');
   });
 });
 
