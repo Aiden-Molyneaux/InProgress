@@ -32,6 +32,23 @@ Everyone else thinks, or is a place. Aiden holds the intent. The lead talks, rec
 and check. T3 Code is where threads run. The lead has no hand on the workers or on main. InProgress does not think,
 talk to Aiden, write code or judge code.
 
+### 0.2 One step, end to end
+
+A made-up step that Aiden will see, with where he is at each point.
+
+| | What happens | Where Aiden is |
+|---|---|---|
+| 1 | He tells the lead what he wants. | Grok |
+| 2 | The lead files the step. InProgress stores its What and Why. | Nowhere |
+| 3 | The lead asks to start it. InProgress checks the limits and starts the T3 thread. | Nowhere; the thread appears in T3 Code with the step id in its title |
+| 4 | The worker drafts the bar. It has a visible criterion, so he confirms it. | Grok or the InProgress window |
+| 5 | The worker builds. The checks, Murr and Parvati write their verdicts into InProgress. | Nowhere; T3 Code only if the worker needs design talk |
+| 6 | InProgress derives that the step needs him and raises a card with the evidence. | Grok or the InProgress window |
+| 7 | He says yes. InProgress records it with his words. | The InProgress window (a click), the T3 Code thread (typed), or Grok (to the lead) |
+| 8 | The worker lands it. The landing command asks InProgress first. The step closes. | Nowhere; it shows in the daily note, in Grok |
+
+A step he would never see skips rows 4, 6 and 7: one click in the window in confirm mode, nothing in automatic mode.
+
 ## 1. Intent and the why
 
 ### Aiden said
@@ -184,8 +201,9 @@ It wakes when Aiden messages it, when InProgress wakes it, or on a morning round
 2. **Handle what is the lead's.** Answer a worker's question from the record, push back on a failed bar, re-commission
    or park a step whose session died, sort out stale items.
 3. **Bring Aiden his decisions** as cards, and record his answers.
-4. **Commission** the next step. InProgress checks the intent record, the What, Why and bar, the limits and holds,
-   then starts the T3 thread with a handoff rendered from a template.
+4. **Commission** the next step. InProgress checks the intent record, the What and Why, the limits and holds, then
+   starts the T3 thread with a handoff rendered from a template. The worker's first act is to draft the bar from the
+   intent record and record it. A bar with a visible criterion waits for Aiden's confirm before the build goes on.
 5. **Promise.** Anything it will come back on is an ask it owns, with a due time.
 
 It never judges code, never approves work that needs Aiden, and does not hold design conversations: it raises a card
