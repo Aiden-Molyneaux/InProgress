@@ -148,8 +148,10 @@ describe('renderLeadBrief on free text', () => {
     expect(lines).toHaveLength(renderLeadBrief(full).split('\n').length);
   });
 
-  it('says the record has no Goal heading when it is set and has none, and no record yet otherwise', () => {
-    expect(renderLeadBrief({ ...empty, intent: { goal: '', phase: 'Signing', updatedAt: ago(DAY) } }).split('\n')[1]).toBe('Goal: The intent record has no Goal heading.');
+  it('says the record has no goal under a Goal heading when it is set and the goal is empty, and no record yet otherwise', () => {
+    expect(renderLeadBrief({ ...empty, intent: { goal: '', phase: 'Signing', updatedAt: ago(DAY) } }).split('\n')[1]).toBe('Goal: The intent record has no goal under a Goal heading.');
+    // A heading with nothing under it reads the same as a missing one, and the sentence is true of both.
+    expect(intentHeadlines('## Goal\n\n## Phase\nSigning')).toEqual({ goal: '', phase: 'Signing' });
     expect(renderLeadBrief(empty).split('\n')[1]).toBe('Goal: No intent record yet.');
   });
 });

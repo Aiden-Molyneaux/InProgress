@@ -403,8 +403,9 @@ export const MIGRATIONS: string[] = [
   DROP INDEX asks_open_once;
   CREATE UNIQUE INDEX asks_open_once ON asks (node_id, kind, text, owner) WHERE cleared_at IS NULL;
   -- Defaulted and nullable columns, a new table and a wider unique index: v1 to v19 builds can still read and write this
-  -- schema, so a rollback across it works. An older build inserts without an owner (so aiden) and joins on node, kind and
-  -- text, which the wider index still holds unique for its own rows.
+  -- schema, so a rollback across it works. An older build inserts without an owner (so aiden), and its ON CONFLICT names
+  -- no index, so the wider one serves it. It does not read owner: once a lead's ask can exist (#726), an older build
+  -- shows an open one as Aiden's until it clears, which asks him too much and hides nothing.
   INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
   `,
 ];

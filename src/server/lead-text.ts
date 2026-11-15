@@ -62,7 +62,8 @@ export function renderLeadBrief(b: LeadBrief): string {
   const { current, yours } = b.instructions;
   const lines = [`Lead brief · ${line(b.project.name, PROJECT_NAME_MAX)} · ${stamp(b.at)} · instructions v${current} (yours: ${yours === null ? 'none' : `v${yours}`})`];
   if (yours !== null && yours < current) lines.push('Your instructions are out of date: you can read, you cannot change anything.');
-  const noGoal = b.intent.updatedAt !== null ? 'The intent record has no Goal heading.' : 'No intent record yet.';
+  // True whether the heading is missing or has nothing under it: both read as an empty goal here.
+  const noGoal = b.intent.updatedAt !== null ? 'The intent record has no goal under a Goal heading.' : 'No intent record yet.';
   lines.push(`Goal: ${line(b.intent.goal, HEADLINE_CUT) || noGoal}`, `Phase: ${line(b.intent.phase, HEADLINE_CUT) || 'none'}`);
   lines.push(
     ...section(

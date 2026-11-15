@@ -134,7 +134,8 @@ filter each), `src/server/briefing.ts`, `src/server/briefing-scoped.ts`, `src/co
   `This project is archived, so it has no lead.`
 - **F11, headings.** `intentHeadlines` matches a heading with `/^#{1,6}\s*goal\s*:?\s*#*$/i` (and `phase`), and a
   paragraph ends at any line that starts with `#`. `renderLeadBrief` prints
-  `Goal: The intent record has no Goal heading.` when `intent.updatedAt` is set and the goal is empty.
+  `Goal: The intent record has no goal under a Goal heading.` when `intent.updatedAt` is set and the goal is empty
+  (Murr, round 2: the first wording, "has no Goal heading", was false for a heading with nothing under it).
 - **F12, one line stays one line.** In `renderLeadBrief` every piece of free text (the project name, titles, ask
   text, outcomes, Aiden's words, goal, phase) has C0 and C1 control characters and newlines replaced by a space, then
   is cut. Test: a project named `InGame\nv2` and an ask holding an escape character each stay on one line.
@@ -150,6 +151,7 @@ Built inline by Sigmund on top of Sev's round, each with its test:
   (`#729, in order.`) is text.
 - **F12, separators.** U+2028 and U+2029 are cleaned too.
 
-For #726: the digest's "Asks raised" and "Asks cleared" lists (`src/server/digest.ts:293-303`) read every owner, so
+For #726: when `dueAt` and `owner` reach a route, check the due time there with `z.string().datetime()` as
+`leadSeenBody` does (`Date.parse` in `raiseAskDetailed` takes `11/15/2026` too). The digest's "Asks raised" and "Asks cleared" lists (`src/server/digest.ts:293-303`) read every owner, so
 once `promise` exists a lead's ask needs its label there. And `kept` must clear a lead's ask without answer text, or the `answer_waiting` mark and the delivery of
 answers (`src/core/board.ts:132`, `src/server/repo/asks.ts:201-227`) will treat it as owed to a session.
