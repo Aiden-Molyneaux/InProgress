@@ -1,4 +1,5 @@
 import type { Board, BoardRow } from '../../../src/core/board';
+import { isAidens } from '../../../src/core/lead';
 import { buildIndex, kids, type TreeIndex } from '../../../src/core/tree';
 import type { ProjectSnapshot, ResourceMeta, TreeNode } from '../../../src/core/types';
 
@@ -63,7 +64,7 @@ export function projectSections(snapshot: ProjectSnapshot, board: Board): Sectio
   const index = buildIndex(snapshot.nodes);
   const root = index.root;
   if (!root) return [];
-  const openAsk = new Set(snapshot.asks.filter((a) => a.clearedAt === null).map((a) => a.nodeId));
+  const openAsk = new Set(snapshot.asks.filter((a) => a.clearedAt === null && isAidens(a)).map((a) => a.nodeId));
   const make = (group: TreeNode | null, title: string, allMembers: TreeNode[], lines: OutlineLine[]): Section => {
     const ids = new Set(allMembers.map((n) => n.id));
     if (group) ids.add(group.id);

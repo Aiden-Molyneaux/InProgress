@@ -232,8 +232,10 @@ export const syncTemplateBody = z.object({ slug: syncSlug, template: z.string().
 
 /** The lead brief route: with `as` it is a lead's read (and needs the instructions version it holds); without, the window's. */
 export const leadBriefQuery = z
-  .object({ as: z.string().min(1).max(200).optional(), instructions: z.coerce.number().int().min(0).optional(), mark: z.enum(['1']).optional() })
+  .object({ as: z.string().min(1).max(200).optional(), instructions: z.coerce.number().int().min(0).optional() })
   .strict()
   .refine((q) => q.as === undefined || q.instructions !== undefined, { message: 'instructions: needed with as', path: ['instructions'] });
+/** The lead marking its brief as read: who it is, the instructions version it holds, and the time of the brief it read. */
+export const leadSeenBody = z.object({ as: z.string().min(1).max(200), instructions: z.number().int().min(0), at: z.string().datetime().optional() }).strict();
 /** The window's change of a project's lead: the slug it shows, and a name (trimmed, 1 to 40 characters) or null for none. */
 export const windowLeadBody = z.object({ slug: windowProjectBody.shape.slug, name: z.string().trim().min(1).max(40).nullable() }).strict();

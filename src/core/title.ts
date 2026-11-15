@@ -1,4 +1,5 @@
 import { sessionActivity } from './activity';
+import { isAidens } from './lead';
 import type { ProjectSnapshot, Session } from './types';
 
 /** The status words a Claude Desktop session title may start with, in no order of precedence. */
@@ -30,7 +31,7 @@ export function expectedPrefix(
     if (focus.status === 'done') return 'DONE';
     // A parked step is set aside: its asks and its leftover work say nothing about where the session stands.
     if (focus.status === 'parked') return 'PARKED';
-    const open = snapshot.asks.filter((a) => a.clearedAt === null && a.nodeId === focus.id && a.sessionId === session.id);
+    const open = snapshot.asks.filter((a) => a.clearedAt === null && isAidens(a) && a.nodeId === focus.id && a.sessionId === session.id);
     if (open.some((a) => a.kind === 'question' || a.kind === 'permission')) return 'BLOCKED';
     if (open.some((a) => a.kind === 'review')) return 'REVIEW';
   }

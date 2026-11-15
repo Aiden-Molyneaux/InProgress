@@ -117,7 +117,7 @@ export function buildApp(opts: AppOptions): FastifyInstance {
   registerWriteRoutes(app, opts.ctx, requireToken);
   registerSessionRoutes(app, opts.ctx, requireToken);
   registerAskRoutes(app, opts.ctx, requireToken);
-  registerLeadRoutes(app, opts.ctx);
+  registerLeadRoutes(app, opts.ctx, requireToken);
   registerSse(app, opts.ctx);
   registerWindowRoutes(app, opts.ctx, requireUi, opts.openDesktop);
   registerUi(app, opts, requireToken, requireUi);

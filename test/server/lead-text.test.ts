@@ -129,10 +129,42 @@ describe('renderLeadBrief', () => {
   });
 });
 
+
+describe('renderLeadBrief on free text', () => {
+  const ESC = String.fromCharCode(27);
+  const NEL = String.fromCharCode(0x85);
+  it('keeps a project name with a newline and an ask with an escape character on one line each', () => {
+    const lines = renderLeadBrief({
+      ...full,
+      project: { ...full.project, name: 'InGame\nv2' },
+      waitingOnAiden: [{ ...full.waitingOnAiden[0], text: `Delete ${ESC}[31mall${ESC}[0m${NEL} now\r\nreally?` }],
+      landedSince: [{ ...full.landedSince[0], title: 'Two\nlines', outcome: 'Done\tand\nsaid\u2028so\u2029.' }],
+    }).split('\n');
+    expect(lines[0]).toBe(`Lead brief · InGame v2 · ${stamp(AT)} · instructions v1 (yours: v1)`);
+    expect(lines.find((l) => l.startsWith('  a7'))).toBe('  a7 question on #12 Play app signing: "Delete [31mall [0m now really?" · 3d');
+    expect(lines.find((l) => l.startsWith('  #11'))).toBe('  #11 Two lines: "Done and said so ."');
+    // Every line of the text is a line of the shape: no control character or line separator survives.
+    for (const l of lines) expect(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/.test(l), l).toBe(false);
+    expect(lines).toHaveLength(renderLeadBrief(full).split('\n').length);
+  });
+
+  it('says the record has no Goal heading when it is set and has none, and no record yet otherwise', () => {
+    expect(renderLeadBrief({ ...empty, intent: { goal: '', phase: 'Signing', updatedAt: ago(DAY) } }).split('\n')[1]).toBe('Goal: The intent record has no Goal heading.');
+    expect(renderLeadBrief(empty).split('\n')[1]).toBe('Goal: No intent record yet.');
+  });
+});
+
 describe('intentHeadlines', () => {
   it('reads the first paragraph under Goal and under Phase', () => {
     const md = '# Intent\n\n## Goal\n\nShip the build\nthis month.\n\nA second paragraph.\n\n## Phase\n\nSigning.\n\n## Risks\n\nNone.\n';
     expect(intentHeadlines(md)).toEqual({ goal: 'Ship the build this month.', phase: 'Signing.' });
+  });
+
+  it('finds a heading at any level, with no space, a colon or closing hashes, in any case', () => {
+    for (const heading of ['# Goal', '### goal', '##Goal', '## GOAL:', '## Goal ##', '#### Goal :  ']) {
+      expect(intentHeadlines(`${heading}\nThe aim.\n`).goal, heading).toBe('The aim.');
+    }
+    expect(intentHeadlines('## Goals\nNot it.\n').goal).toBe('');
   });
 
   it('returns an empty string for a missing heading, and cuts to 300 characters', () => {
@@ -141,7 +173,9 @@ describe('intentHeadlines', () => {
     expect(intentHeadlines(`## Phase\n${'y'.repeat(500)}\n`).phase).toHaveLength(300);
   });
 
-  it('stops a paragraph at the next heading', () => {
+  it('ends a paragraph at a heading, however it is written, but not at a line that opens with a step', () => {
     expect(intentHeadlines('## Goal\nOne line\n## Phase\nTwo')).toEqual({ goal: 'One line', phase: 'Two' });
+    expect(intentHeadlines('## Goal\nOne line\n#Risks\nTwo')).toEqual({ goal: 'One line', phase: '' });
+    expect(intentHeadlines('## Goal\nShip the lead: #725 to\n#729, in order.\n##Phase\nStage 1')).toEqual({ goal: 'Ship the lead: #725 to #729, in order.', phase: 'Stage 1' });
   });
 });

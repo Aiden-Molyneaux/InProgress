@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { deriveBoard, isLive } from '../../src/core/board';
+import { isAidens } from '../../src/core/lead';
 import { buildIndex, shelvedIds } from '../../src/core/tree';
 import type { ProjectSnapshot } from '../../src/core/types';
 import { api, postEvent } from './api';
@@ -122,7 +123,7 @@ export function App() {
       if (!snapshot) return 0;
       // An ask on a shelved step (parked, or under a parked one) is not waiting on Aiden: the Board's Needs me leaves it out too.
       const shelved = shelvedIds(buildIndex(snapshot.nodes));
-      return snapshot.asks.filter((a) => a.clearedAt === null && !shelved.has(a.nodeId)).length + snapshot.sessions.filter((s) => s.state === 'permission' && isLive(s, now)).length;
+      return snapshot.asks.filter((a) => a.clearedAt === null && isAidens(a) && !shelved.has(a.nodeId)).length + snapshot.sessions.filter((s) => s.state === 'permission' && isLive(s, now)).length;
     },
     [snapshot, now],
   );

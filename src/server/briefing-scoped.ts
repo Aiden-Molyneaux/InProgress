@@ -1,6 +1,7 @@
 import { ancestors, buildIndex, kids } from '../core/tree';
 import { sessionActivity } from '../core/activity';
 import { deriveBoard } from '../core/board';
+import { isAidens } from '../core/lead';
 import { clipLine } from '../core/step-ref';
 import { ASK_GLYPHS, askTag, glyphTitle, sessionDisplayTitle, type ProjectSnapshot, type Session, type TreeNode } from '../core/types';
 import { claimCommand } from '../lib/task-command';
@@ -54,7 +55,7 @@ export function stepBlock(snapshot: ProjectSnapshot, nodeId: number, session: Se
   if (resources.length) lines.push(`Resources on #${nodeId}: ${resources.map((r) => `r${r.id} ${r.title}`).join(' · ')}`);
 
   // Open asks, oldest first, then those cleared since this session began, with what Aiden said.
-  const asks = snapshot.asks.filter((a) => a.nodeId === nodeId);
+  const asks = snapshot.asks.filter((a) => a.nodeId === nodeId && isAidens(a));
   const openAsks = asks.filter((a) => a.clearedAt === null).sort((a, b) => a.raisedAt.localeCompare(b.raisedAt) || a.id - b.id);
   const cleared = asks.filter((a) => a.clearedAt !== null && a.clearedAt >= session.startedAt).sort((a, b) => a.clearedAt!.localeCompare(b.clearedAt!) || a.id - b.id);
   const askParts = [

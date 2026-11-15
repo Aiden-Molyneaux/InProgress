@@ -73,6 +73,13 @@ describe('inprogress lead brief', () => {
     expect(seen()).not.toBe(before);
   });
 
+  it('prints the brief first, then posts seen; a failure there prints its sentence and exits 1', async () => {
+    const c = capture();
+    expect(await runLead(['brief', 'ingame', '--as', 'Progresser', '--instructions', '1', '--mark'], c.out, { ...conn, token: 'wrong' })).toBe(1);
+    expect(c.lines[0]).toContain('Lead brief · InGame');
+    expect(c.lines[1]).toBe('Missing or invalid InProgress token');
+  });
+
   it('prints the usage and exits 1 for a missing --as or --instructions, a bad number or another subcommand', async () => {
     for (const args of [
       ['brief', 'ingame', '--instructions', '1'],
@@ -98,6 +105,38 @@ describe('inprogress lead brief', () => {
 
   it('rethrows an unreachable server for main.ts to print', async () => {
     await expect(runLead(['brief', 'ingame', '--as', 'Progresser', '--instructions', '1'], () => {}, { baseUrl: 'http://127.0.0.1:1', token: 'x' })).rejects.toBeInstanceOf(ApiClientError);
+  });
+
+  it('says why and exits 1 when the server will not start, without asking it anything', async () => {
+    const c = capture();
+    const down = { baseUrl: 'http://127.0.0.1:1', token: 'x', bringUp: async () => 'InProgress did not start. See server.log' };
+    expect(await runLead(['brief', 'ingame', '--as', 'Progresser', '--instructions', '1'], c.out, down)).toBe(1);
+    expect(c.lines).toEqual(['InProgress did not start. See server.log']);
+  });
+
+  it('starts a stopped server through runCli, but not for arguments it cannot use', async () => {
+    const port = process.env.INPROGRESS_PORT;
+    process.env.INPROGRESS_PORT = '1';
+    try {
+      let started = 0;
+      const stopped = capture();
+      expect(await runCli(['lead', 'brief', 'ingame', '--as', 'Progresser', '--instructions', '1'], stopped.out, { ensureServer: async () => (started++, false) })).toBe(1);
+      expect(started).toBe(1);
+      expect(stopped.lines[0]).toMatch(/^InProgress did not start\. See /);
+      const bad = capture();
+      expect(await runCli(['lead', 'brief', 'ingame'], bad.out, { ensureServer: async () => (started++, false) })).toBe(1);
+      expect(started).toBe(1);
+      expect(bad.lines.at(-1)).toBe(LEAD_USAGE);
+    } finally {
+      process.env.INPROGRESS_PORT = port;
+    }
+  });
+
+  it('leaves a running server alone', async () => {
+    let started = 0;
+    const c = capture();
+    expect(await runCli(['lead', 'brief', 'ingame', '--as', 'Progresser', '--instructions', '1'], c.out, { ensureServer: async () => (started++, true) })).toBe(0);
+    expect(started).toBe(0);
   });
 
   it('is dispatched by runCli, and the usage names lead', async () => {

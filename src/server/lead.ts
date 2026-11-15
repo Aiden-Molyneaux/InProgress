@@ -1,5 +1,6 @@
 import { deriveBoard } from '../core/board';
-import { LEAD_INSTRUCTIONS_VERSION, type LeadBrief, type LeadEventKind } from '../core/lead';
+import { LEAD_INSTRUCTIONS_VERSION, LEAD_STALE_MARKS, isAidens, type LeadBrief, type LeadEventKind } from '../core/lead';
+import { buildIndex, shelvedIds } from '../core/tree';
 import type { Project } from '../core/types';
 import { write, type Ctx } from './db/tx';
 import { conflict } from './errors';
@@ -16,6 +17,8 @@ const NO_STEP = 'no step claimed';
 
 /** The refusal of a lead command on a project that has no lead, or another one. */
 export const noLeadNamed = (as: string): string => `This project has no lead named ${as}. Only Aiden can give a project a lead, from its actions in the window.`;
+/** The refusal of a lead command on an archived project: it keeps no lead. */
+export const ARCHIVED = 'This project is archived, so it has no lead.';
 /** The refusal of a change from instructions older than the current ones. */
 export const outOfDate = (yours: number): string =>
   `Your instructions are version ${yours}; version ${LEAD_INSTRUCTIONS_VERSION} is needed to change anything. Ask Aiden to paste the new ones.`;
@@ -23,11 +26,12 @@ export const outOfDate = (yours: number): string =>
 /**
  * The project `ref`, when its lead is the one named `as` (ignoring case and surrounding spaces). A project with no lead,
  * or another one's, is refused with a 409. With `write` true, instructions older than LEAD_INSTRUCTIONS_VERSION are
- * refused too. It changes nothing.
+ * refused too. An archived project has no lead and is refused with its own sentence. It changes nothing.
  */
 export function requireLead(ctx: Ctx, ref: string, as: string, instructions: number, write: boolean): Project {
   const project = resolveProject(ctx, ref);
   const name = as.trim();
+  if (project.status === 'archived') throw conflict(ARCHIVED);
   if (project.lead === null || project.lead.trim().toLowerCase() !== name.toLowerCase()) throw conflict(noLeadNamed(name));
   if (write && instructions < LEAD_INSTRUCTIONS_VERSION) throw conflict(outOfDate(instructions));
   return project;
@@ -80,8 +84,10 @@ export function readLeadBrief(ctx: Ctx, ref: string, yours: number | null, now: 
   }));
 
   const open = snapshot.asks.filter((a) => a.clearedAt === null);
+  // An ask on a shelved step (parked, or under a parked one) is not waiting on Aiden, as the need-you count leaves it out.
+  const shelved = shelvedIds(buildIndex(snapshot.nodes));
   const waitingOnAiden = open
-    .filter((a) => a.owner === 'aiden')
+    .filter((a) => isAidens(a) && !shelved.has(a.nodeId))
     .map((a) => ({ askId: a.id, kind: a.kind, stepId: a.nodeId, stepTitle: titleOf(a.nodeId), text: a.text, raisedAt: a.raisedAt }));
   const aidenOpenAcrossProjects = listProjectSummaries(ctx)
     .filter((p) => p.status === 'active')
@@ -92,12 +98,13 @@ export function readLeadBrief(ctx: Ctx, ref: string, yours: number | null, now: 
     .sort((a, b) => (a.dueAt === null ? 1 : 0) - (b.dueAt === null ? 1 : 0) || (a.dueAt ?? '').localeCompare(b.dueAt ?? '') || a.id - b.id)
     .map((a) => ({ askId: a.id, stepId: a.nodeId, stepTitle: titleOf(a.nodeId), text: a.text, dueAt: a.dueAt, overdue: a.dueAt !== null && Date.parse(a.dueAt) < nowMs }));
 
-  const nextUp = project.queue.flatMap((e) => {
-    const n = byId.get(e.nodeId);
-    return n ? [{ stepId: n.id, title: n.title, status: n.status }] : [];
+  // One Board for both: Next up is its next column in the Board's order, Stale its marked rows.
+  const board = deriveBoard(snapshot, nowMs);
+  const nextUp = board.next.map((r) => ({ stepId: r.node.id, title: r.node.title, status: r.node.status }));
+  const stale = board.marked.flatMap((r) => {
+    const marks = r.marks.filter((m) => (LEAD_STALE_MARKS as readonly string[]).includes(m));
+    return marks.length ? [{ stepId: r.node.id, title: r.node.title, marks }] : [];
   });
-
-  const stale = deriveBoard(snapshot, nowMs).marked.map((r) => ({ stepId: r.node.id, title: r.node.title, marks: [...r.marks] }));
 
   const landedSince = snapshot.nodes
     .filter((n): n is typeof n & { completedAt: string } => n.parentId !== null && n.status === 'done' && n.completedAt !== null && n.completedAt >= since)
@@ -122,11 +129,16 @@ export function readLeadBrief(ctx: Ctx, ref: string, yours: number | null, now: 
   };
 }
 
-/** The lead has read the brief at `now`: the next one counts what landed and what was said from here. */
-export function markLeadSeen(ctx: Ctx, ref: string, now: Date): void {
+/**
+ * The lead has read the brief built at `at`: the next one counts what landed and what was said from here. The look never
+ * moves back, so two looks marked out of order keep the later one. Answers the look now on record.
+ */
+export function markLeadSeen(ctx: Ctx, ref: string, at: Date): string {
   const project = resolveProject(ctx, ref);
-  write(ctx, 'lead', () => {
-    ctx.db.prepare('UPDATE projects SET lead_seen_at = ? WHERE id = ?').run(now.toISOString(), project.id);
+  return write(ctx, 'lead', (): string => {
+    const iso = at.toISOString();
+    ctx.db.prepare('UPDATE projects SET lead_seen_at = ? WHERE id = ? AND (lead_seen_at IS NULL OR lead_seen_at < ?)').run(iso, project.id, iso);
+    return ctx.db.prepare('SELECT lead_seen_at FROM projects WHERE id = ?').pluck().get(project.id) as string;
   });
 }
 

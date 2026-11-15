@@ -3,6 +3,8 @@ import type { AskKind } from './types';
 
 /** The version of the lead's written instructions. A write command from a lower version is refused. */
 export const LEAD_INSTRUCTIONS_VERSION = 1;
+/** The marks that make a step Stale in the lead's brief: it was left open, an ask went unanswered, or an answer is owed. */
+export const LEAD_STALE_MARKS = ['ended_open', 'stale_ask', 'done_focus', 'stalled', 'answer_waiting', 'answered_in_chat'] as const;
 /** The most lines one section of the brief prints; the rest read as `and <k> more`. */
 export const LEAD_LIST_CAP = 8;
 /** The most open asks of Aiden's, across all projects, the lead lets stand (the brief's `<m> of 5`). */
@@ -11,6 +13,12 @@ export const AIDEN_OPEN_LIMIT = 5;
 export const IN_FLIGHT_LIMIT = 3;
 /** Who an ask is for: Aiden, or the lead (a promise it made). */
 export type AskOwner = 'aiden' | 'lead';
+/**
+ * Whether an ask is Aiden's to answer: every ask but the lead's own promise. Every reader of open asks that means "needs
+ * Aiden" uses this (and aidensAskSql in src/server/repo/asks.ts for SQL), so a lead-owned ask reaches no briefing, no
+ * title, no count and no Board row.
+ */
+export const isAidens = (a: { owner: AskOwner }): boolean => a.owner !== 'lead';
 export type LeadEventKind = 'answer' | 'park' | 'drop' | 'promise' | 'kept' | 'intent' | 'relay' | 'relay_unknown' | 'relay_failed';
 
 /** Where a project stands, as plain code builds it from the record: one fixed shape, whatever the project holds. */

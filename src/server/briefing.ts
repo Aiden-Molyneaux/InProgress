@@ -1,4 +1,5 @@
 import { sessionActivity } from '../core/activity';
+import { isAidens } from '../core/lead';
 import { clipLine, stepRef } from '../core/step-ref';
 import { deriveBoard, isLive } from '../core/board';
 import { formatUpNext, type QueueView } from '../core/layout';
@@ -109,7 +110,7 @@ export function frontierLines(snapshot: ProjectSnapshot, sessionId?: string, opt
   for (const s of live) if (s.focusNodeId !== null) focusOf.set(s.focusNodeId, [...(focusOf.get(s.focusNodeId) ?? []), s]);
   const chain = new Set<number>();
   // Active steps, and steps with an open ask, which the Needs you line names.
-  const asked = new Set(snapshot.asks.filter((a) => a.clearedAt === null && a.owner !== 'lead').map((a) => a.nodeId));
+  const asked = new Set(snapshot.asks.filter((a) => a.clearedAt === null && isAidens(a)).map((a) => a.nodeId));
   // A shelved step (parked, or under a parked one) is set aside: it is no frontier of its own, only its focus shows.
   const shelved = shelvedIds(index);
   const targets = snapshot.nodes.filter((n) => n.parentId !== null && !shelved.has(n.id) && (n.status === 'active' || asked.has(n.id)));
@@ -174,7 +175,7 @@ const MAX_NEEDS_YOU = 8;
 function openAsks(snapshot: ProjectSnapshot): Ask[] {
   // An ask on a shelved step stays stored, and comes back on unpark.
   const shelved = shelvedIds(buildIndex(snapshot.nodes));
-  return snapshot.asks.filter((a) => a.clearedAt === null && a.owner !== 'lead' && !shelved.has(a.nodeId)).sort((a, b) => a.raisedAt.localeCompare(b.raisedAt) || a.id - b.id);
+  return snapshot.asks.filter((a) => a.clearedAt === null && isAidens(a) && !shelved.has(a.nodeId)).sort((a, b) => a.raisedAt.localeCompare(b.raisedAt) || a.id - b.id);
 }
 
 /** How long ago, whole days from one day old, then whole weeks from two weeks ("1d" … "13d", "2w"); null under 24 hours or for a time it cannot read. */
@@ -424,7 +425,7 @@ export function renderStatusLine(snapshot: ProjectSnapshot, session: Session): s
   if (session.role !== 'orchestrator' && snapshot.project.briefingMode === 'scoped') {
     const step = claimedStep(snapshot, session);
     // A session's own claimed step is not set aside from it: its asks show even under a parked phase, as stepBlock lists them.
-    const mine = step ? snapshot.asks.filter((a) => a.clearedAt === null && a.nodeId === step.id) : [];
+    const mine = step ? snapshot.asks.filter((a) => a.clearedAt === null && isAidens(a) && a.nodeId === step.id) : [];
     const where = step ? `on #${step.id}${mine.length ? ` (${mine.map((a) => askTag(a.id)).join(', ')} open)` : ''}` : 'no step claimed';
     return `[InProgress] ${snapshot.project.name} · ${where} · last scribe update ${session.promptsSinceUpdate} prompts ago. ${NUDGE}`;
   }

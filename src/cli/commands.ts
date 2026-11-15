@@ -163,7 +163,12 @@ export async function runCli(args: string[], out: (line: string) => void = conso
     case 'digest':
       return runDigest(rest, out, { baseUrl: url, probeMs: FIRST_PROBE_MS });
     case 'lead':
-      return runLead(rest, out, { baseUrl: url, token: readToken() });
+      // The lead's commands start a stopped server, as `open` does: a lead that cannot reach InProgress cannot answer Aiden.
+      return runLead(rest, out, {
+        baseUrl: url,
+        token: readToken(),
+        bringUp: async () => ((await isServerUp(url, FIRST_PROBE_MS)) || (await ensure({ baseUrl: url, waitMs: 5000 })) ? null : notStarted()),
+      });
     case 'usage':
       return runUsage(rest, out, { baseUrl: url, probeMs: FIRST_PROBE_MS });
     case 'tasks':

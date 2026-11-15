@@ -1,11 +1,18 @@
 import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { buildApp } from '../../src/server/app';
+import { openDb } from '../../src/server/db/connection';
+import { createCtx } from '../../src/server/db/tx';
+import { deleteProject, purgeDeletedProjects } from '../../src/server/project-lifecycle';
 import { LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
+import { renderLeadBrief } from '../../src/server/lead-text';
 import { logLeadEvent, markLeadSeen, noLeadNamed, outOfDate, readLeadBrief, requireLead } from '../../src/server/lead';
 import { raiseAsk } from '../../src/server/repo/asks';
 import { maxEventId } from '../../src/server/repo/events';
-import { addNodes, updateNode } from '../../src/server/repo/nodes';
-import { addBinding, createProject, listProjectSummaries, setProjectLead, setQueue } from '../../src/server/repo/projects';
+import { addNodes, parkNode, updateNode } from '../../src/server/repo/nodes';
+import { addBinding, changeProject, createProject, listProjectSummaries, setProjectLead, setQueue } from '../../src/server/repo/projects';
 import { handleHookEvent } from '../../src/server/session-flow';
 import { makeCtx } from '../helpers';
 
@@ -110,11 +117,35 @@ describe('readLeadBrief', () => {
     expect(brief().forTheLead.map((x) => x.text)).toEqual(['Send Aiden the draft', 'Much later', 'No time given']);
   });
 
-  it('is the same twice running, apart from its time', () => {
+  it('is the same twice running, apart from its times', () => {
     const { ctx, project, setLead } = setup();
     setLead('Progresser');
-    const at = new Date('2026-11-14T12:00:00.000Z');
-    expect(readLeadBrief(ctx, project.slug, 1, at)).toEqual(readLeadBrief(ctx, project.slug, 1, at));
+    const render = (now: string) => renderLeadBrief(readLeadBrief(ctx, project.slug, 1, new Date(now)));
+    const first = render('2026-11-14T12:00:00.000Z');
+    const second = render('2026-11-15T15:07:30.000Z');
+    // The times are what differs: stamps and ages.
+    expect(second).not.toBe(first);
+    const mask = (text: string) => text.replace(/\d{4}-\d\d-\d\d \d\d:\d\d/g, '<time>').replace(/(seen |· |look )(<1m|\d+[mhdw])/g, '$1<age>');
+    expect(mask(second)).toBe(mask(first));
+  });
+
+  it('puts only the Board\'s next rows in Next up, in its order, and only stale marks in Stale', () => {
+    const { ctx, project, a, b, c, brief } = setup();
+    setQueue(ctx, 'test', project.slug, [c.id, b.id], 'unowned');
+    expect(brief().nextUp.map((n) => n.stepId)).toEqual([c.id, b.id]);
+    // A done step with no outcome carries no_outcome, which is housekeeping: it is not Stale.
+    updateNode(ctx, 'scribe:s1', a.id, { status: 'done' });
+    expect(brief().stale).toEqual([]);
+    // An ask of Aiden's left over a week is stale_ask, and is listed with only that mark.
+    const later = new Date(Date.parse(ctx.now()) + 10 * 24 * 60 * 60 * 1000);
+    expect(readLeadBrief(ctx, project.slug, 1, later).stale).toEqual([{ stepId: a.id, title: 'Play app signing', marks: ['stale_ask'] }]);
+  });
+
+  it('leaves an ask on a shelved step out of Waiting on Aiden', () => {
+    const { ctx, a, aidenAsk, brief } = setup();
+    expect(brief().waitingOnAiden.map((x) => x.askId)).toEqual([aidenAsk.id]);
+    parkNode(ctx, 'test', a.id, { reason: 'later' }, () => {});
+    expect(brief().waitingOnAiden).toEqual([]);
   });
 
   it('cites what the lead said in Aiden\'s name since the last look, newest first, by ask or by step', () => {
@@ -133,7 +164,7 @@ describe('the brief route', () => {
   it('answers a project with no lead 409 when `as` is given, and writes nothing', async () => {
     const { ctx, app, project, leadEvents, seenAt } = setup();
     const before = maxEventId(ctx);
-    const res = await app.inject({ url: `/api/lead/${project.slug}/brief?as=Progresser&instructions=1&mark=1` });
+    const res = await app.inject({ url: `/api/lead/${project.slug}/brief?as=Progresser&instructions=1` });
     expect(res.statusCode).toBe(409);
     expect(res.json().error).toBe(noLeadNamed('Progresser'));
     expect(maxEventId(ctx)).toBe(before);
@@ -151,9 +182,9 @@ describe('the brief route', () => {
     expect(ok.json().text.split('\n')[0]).toMatch(/^Lead brief · InGame · .* · instructions v1 \(yours: v1\)$/);
   });
 
-  it('answers the window without `as`: no lead check, yours null, and never marks', async () => {
+  it('answers the window without `as`: no lead check, yours null, and never marks, whatever the query says', async () => {
     const { app, project, seenAt } = setup();
-    const res = await app.inject({ url: `/api/lead/${project.slug}/brief?mark=1` });
+    const res = await app.inject({ url: `/api/lead/${project.slug}/brief` });
     expect(res.statusCode).toBe(200);
     expect(res.json().brief.instructions.yours).toBeNull();
     expect(res.json().text).toContain('(yours: none)');
@@ -164,27 +195,23 @@ describe('the brief route', () => {
     const { app, project } = setup();
     expect((await app.inject({ url: `/api/lead/${project.slug}/brief?as=Progresser` })).statusCode).toBe(400);
     expect((await app.inject({ url: `/api/lead/${project.slug}/brief?bogus=1` })).statusCode).toBe(400);
+    // Marking is a write of its own: the GET takes no mark.
+    expect((await app.inject({ url: `/api/lead/${project.slug}/brief?as=Progresser&instructions=1&mark=1` })).statusCode).toBe(400);
   });
 
-  it('marks the look after building the brief, so the next brief counts from it', async () => {
-    const { ctx, app, project, a, setLead, seenAt } = setup();
+  it('a GET never marks the look', async () => {
+    const { app, project, setLead, seenAt } = setup();
     setLead('Progresser');
-    updateNode(ctx, 'scribe:s1', a.id, { status: 'done', outcome: 'Signed.' });
-    const first = await app.inject({ url: `/api/lead/${project.slug}/brief?as=Progresser&instructions=1&mark=1` });
-    expect(first.json().brief.landedSince.map((n: { stepId: number }) => n.stepId)).toEqual([a.id]);
-    const marked = seenAt();
-    expect(marked).not.toBeNull();
-    const second = await app.inject({ url: `/api/lead/${project.slug}/brief?as=Progresser&instructions=1` });
-    expect(second.json().brief.landedSince).toEqual([]);
-    expect(second.json().brief.links.lastSeenAt).toBe(marked);
-    // Without mark the look stays where it was.
-    expect(seenAt()).toBe(marked);
+    await app.inject({ url: `/api/lead/${project.slug}/brief?as=Progresser&instructions=1` });
+    expect(seenAt()).toBeNull();
   });
 
-  it('markLeadSeen sets lead_seen_at to the time given', () => {
+  it('markLeadSeen sets lead_seen_at to the time given, answers the look on record, and never moves it back', () => {
     const { ctx, project, seenAt } = setup();
-    markLeadSeen(ctx, project.slug, new Date('2026-11-14T10:00:00.000Z'));
+    expect(markLeadSeen(ctx, project.slug, new Date('2026-11-14T10:00:00.000Z'))).toBe('2026-11-14T10:00:00.000Z');
+    expect(markLeadSeen(ctx, project.slug, new Date('2026-11-14T09:00:00.000Z'))).toBe('2026-11-14T10:00:00.000Z');
     expect(seenAt()).toBe('2026-11-14T10:00:00.000Z');
+    expect(markLeadSeen(ctx, project.slug, new Date('2026-11-14T11:00:00.000Z'))).toBe('2026-11-14T11:00:00.000Z');
   });
 
   it('answers the log, newest first', async () => {
@@ -194,6 +221,107 @@ describe('the brief route', () => {
     const { events } = (await app.inject({ url: `/api/lead/${project.slug}/events` })).json();
     expect(events.map((e: { kind: string }) => e.kind)).toEqual(['park', 'answer']);
     expect(events[1]).toMatchObject({ lead: 'Progresser', instructions: 1, askId: aidenAsk.id, aidenWords: 'Yes.', nodeId: null, sessionId: null, text: '' });
+  });
+});
+
+describe('the seen route', () => {
+  const BEARER = { authorization: 'Bearer t' };
+  const seen = (app: ReturnType<typeof setup>['app'], slug: string, payload: unknown, headers: Record<string, string> = BEARER) =>
+    app.inject({ method: 'POST', url: `/api/lead/${slug}/seen`, headers, payload: payload as object });
+
+  it('marks the look behind the bearer guard, answers { seenAt }, and the next brief counts from it', async () => {
+    const { ctx, app, project, a, setLead, seenAt } = setup();
+    setLead('Progresser');
+    updateNode(ctx, 'scribe:s1', a.id, { status: 'done', outcome: 'Signed.' });
+    const first = await app.inject({ url: `/api/lead/${project.slug}/brief?as=Progresser&instructions=1` });
+    expect(first.json().brief.landedSince.map((n: { stepId: number }) => n.stepId)).toEqual([a.id]);
+    expect(seenAt()).toBeNull();
+    const res = await seen(app, project.slug, { as: 'progresser', instructions: 1 });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().seenAt).toBe(seenAt());
+    const second = await app.inject({ url: `/api/lead/${project.slug}/brief?as=Progresser&instructions=1` });
+    expect(second.json().brief.landedSince).toEqual([]);
+    expect(second.json().brief.links.lastSeenAt).toBe(seenAt());
+  });
+
+  it('refuses a request with no bearer token, a project with no lead or another lead, and writes nothing', async () => {
+    const { ctx, app, project, setLead, seenAt } = setup();
+    expect((await seen(app, project.slug, { as: 'Progresser', instructions: 1 }, {})).statusCode).toBe(401);
+    const before = maxEventId(ctx);
+    const none = await seen(app, project.slug, { as: 'Progresser', instructions: 1 });
+    expect(none.statusCode).toBe(409);
+    expect(none.json().error).toBe(noLeadNamed('Progresser'));
+    setLead('Progresser');
+    expect((await seen(app, project.slug, { as: 'Rich', instructions: 1 })).statusCode).toBe(409);
+    expect(seenAt()).toBeNull();
+    expect(maxEventId(ctx)).toBe(before + 1);
+  });
+
+  it('takes the time of the brief the lead read, so a step that landed after that brief is in the next one', async () => {
+    const { ctx, app, project, a, setLead, seenAt } = setup();
+    setLead('Progresser');
+    const first = (await app.inject({ url: `/api/lead/${project.slug}/brief?as=Progresser&instructions=1` })).json().brief;
+    updateNode(ctx, 'scribe:s1', a.id, { status: 'done', outcome: 'Signed.' });
+    const res = await seen(app, project.slug, { as: 'Progresser', instructions: 1, at: first.at });
+    expect(res.json().seenAt).toBe(first.at);
+    expect(seenAt()).toBe(first.at);
+    const second = (await app.inject({ url: `/api/lead/${project.slug}/brief?as=Progresser&instructions=1` })).json().brief;
+    expect(second.landedSince.map((n: { stepId: number }) => n.stepId)).toEqual([a.id]);
+  });
+
+  it('counts a time ahead of the clock as now, and refuses one that is no time', async () => {
+    const { ctx, app, project, setLead, seenAt } = setup();
+    setLead('Progresser');
+    const ahead = new Date(Date.parse(ctx.now()) + 3_600_000).toISOString();
+    const res = await seen(app, project.slug, { as: 'Progresser', instructions: 1, at: ahead });
+    expect(res.statusCode).toBe(200);
+    expect(seenAt()! < ahead).toBe(true);
+    expect((await seen(app, project.slug, { as: 'Progresser', instructions: 1, at: 'yesterday' })).statusCode).toBe(400);
+  });
+
+  it('takes a strict body: as, instructions and the time only', async () => {
+    const { app, project, setLead } = setup();
+    setLead('Progresser');
+    expect((await seen(app, project.slug, { as: 'Progresser' })).statusCode).toBe(400);
+    expect((await seen(app, project.slug, { as: 'Progresser', instructions: 1, extra: true })).statusCode).toBe(400);
+    expect((await seen(app, project.slug, { as: 'Progresser', instructions: 'one' })).statusCode).toBe(400);
+  });
+});
+
+describe('an archived project', () => {
+  it('has no lead: requireLead refuses it with its own sentence, as a 409', () => {
+    const { ctx, project, setLead } = setup();
+    setLead('Progresser');
+    changeProject(ctx, 'test', project.slug, { status: 'archived' });
+    let caught: unknown;
+    try {
+      requireLead(ctx, project.slug, 'Progresser', 1, false);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toMatchObject({ status: 409, message: 'This project is archived, so it has no lead.' });
+  });
+});
+
+describe('purging a project that has lead events', () => {
+  it('succeeds and the lead_events rows go with the project', () => {
+    let now = Date.parse('2026-10-06T09:00:00.000Z');
+    const ctx = createCtx(openDb(':memory:'), () => new Date(now).toISOString());
+    const project = createProject(ctx, 'test', { name: 'Old Site' });
+    setProjectLead(ctx, 'window', project.slug, 'Progresser');
+    logLeadEvent(ctx, { projectId: project.id, lead: 'Progresser', instructions: 1, kind: 'answer', aidenWords: 'Yes.' });
+    changeProject(ctx, 'window', project.slug, { status: 'archived' });
+    deleteProject(ctx, 'window', project.id);
+    now += 31 * 24 * 60 * 60 * 1000;
+    const logged: string[] = [];
+    const home = mkdtempSync(join(tmpdir(), 'ip-purge-'));
+    try {
+      expect(purgeDeletedProjects(ctx, home, { info: (m) => logged.push(m), error: (m) => logged.push(m) })).toEqual({ projects: 1, files: 0 });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+    expect(ctx.db.prepare('SELECT COUNT(*) FROM lead_events').pluck().get()).toBe(0);
+    expect(ctx.db.prepare('SELECT COUNT(*) FROM projects').pluck().get()).toBe(0);
   });
 });
 

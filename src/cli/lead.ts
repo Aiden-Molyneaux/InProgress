@@ -7,6 +7,8 @@ export const LEAD_USAGE = 'Usage: inprogress lead brief <project> --as <name> --
 interface Conn {
   baseUrl: string;
   token?: string;
+  /** Brings the server up when it is down: null once it answers, or the line to print when it would not start. */
+  bringUp?: () => Promise<string | null>;
 }
 
 /** `brief <project> --as <name> --instructions <n> [--mark] [--json]`, parsed; or what is wrong with it. */
@@ -40,7 +42,9 @@ function parseBriefArgs(args: string[]): { project: string; as: string; instruct
 /**
  * `inprogress lead <subcommand>`. Only `brief` exists so far: it prints the server's text, or with --json the brief. Any
  * other subcommand, or a missing --as or --instructions, prints the usage and exits 1; a refusal from the server prints its
- * sentence and exits 1. Like claim and ask, it never starts the server: nothing answering is rethrown with a hint.
+ * sentence and exits 1. The lead is how Aiden reaches a project, so unlike claim and ask a stopped server is started
+ * first (`bringUp`), once the arguments are good; one that will not start prints why and exits 1. Without `bringUp`,
+ * nothing answering is rethrown with a hint.
  */
 export async function runLead(args: string[], out: (line: string) => void, o: Conn): Promise<number> {
   const [sub, ...rest] = args;
@@ -54,10 +58,19 @@ export async function runLead(args: string[], out: (line: string) => void, o: Co
     out(LEAD_USAGE);
     return 1;
   }
-  const query = `as=${encodeURIComponent(parsed.as)}&instructions=${parsed.instructions}${parsed.mark ? '&mark=1' : ''}`;
+  const down = o.bringUp ? await o.bringUp() : null;
+  if (down !== null) {
+    out(down);
+    return 1;
+  }
+  const client = createClient(o);
+  const path = `/api/lead/${encodeURIComponent(parsed.project)}`;
   try {
-    const res = await createClient(o).get<{ brief: LeadBrief; text: string }>(`/api/lead/${encodeURIComponent(parsed.project)}/brief?${query}`);
+    const res = await client.get<{ brief: LeadBrief; text: string }>(`${path}/brief?as=${encodeURIComponent(parsed.as)}&instructions=${parsed.instructions}`);
     out(parsed.json ? JSON.stringify(res.brief, null, 2) : res.text);
+    // The look is marked after the brief is printed, by a write of its own: a failure there says so and exits 1. It
+    // carries the brief's own time, so a step that lands between the two requests is still in the next brief.
+    if (parsed.mark) await client.post(`${path}/seen`, { as: parsed.as, instructions: parsed.instructions, at: res.brief.at });
     return 0;
   } catch (err) {
     if (err instanceof ApiClientError && err.status === 0) throw new ApiClientError(0, err.message, TASKS_NOT_RUNNING_HINT, err.code);

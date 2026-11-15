@@ -4,6 +4,7 @@ import { globMatch } from '../../lib/glob';
 import { isUnder, normalizePath } from '../../lib/paths';
 import { msAgo, write, type Ctx, type RecordEvent } from '../db/tx';
 import { ApiError, badRequest, conflict, notFound } from '../errors';
+import { aidensAskSql } from './asks';
 import { countsAsWorkSql, endSessionCommands } from './commands';
 import { shelvedAmong } from './shelved';
 import { endSubagents, NOT_READER_SQL } from './subagents';
@@ -560,7 +561,7 @@ export function listProjectSummaries(ctx: Ctx): ProjectSummary[] {
   const rows = ctx.db
     .prepare(
       `SELECT p.*,
-        (SELECT COUNT(*) FROM asks a WHERE a.project_id = p.id AND a.cleared_at IS NULL AND a.owner = 'aiden'
+        (SELECT COUNT(*) FROM asks a WHERE a.project_id = p.id AND a.cleared_at IS NULL AND ${aidensAskSql('a.')}
           AND NOT EXISTS (
             WITH RECURSIVE up(id) AS (SELECT a.node_id UNION ALL SELECT n.parent_id FROM up JOIN nodes n ON n.id = up.id WHERE n.parent_id IS NOT NULL)
             SELECT 1 FROM up JOIN nodes sp ON sp.id = up.id WHERE sp.status = 'parked')) AS open_asks,

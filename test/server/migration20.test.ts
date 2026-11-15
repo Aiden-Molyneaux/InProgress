@@ -35,4 +35,21 @@ describe('migration 20', () => {
     expect(db.prepare('SELECT text, aiden_words, node_id, ask_id, session_id FROM lead_events').get()).toEqual({ text: '', aiden_words: null, node_id: null, ask_id: null, session_id: null });
     expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'lead_events_project_at'").pluck().get()).toBe('lead_events_project_at');
   });
+  it('widens asks_open_once to the owner, so a lead ask and an Aiden ask with the same text coexist but two of one owner do not', () => {
+    const db = at19();
+    expect(db.prepare("SELECT name FROM pragma_index_info('asks_open_once') ORDER BY seqno").pluck().all()).toEqual(['node_id', 'kind', 'text', 'owner']);
+    const insert = db.prepare("INSERT INTO asks (project_id, node_id, kind, text, raised_at, owner) VALUES (1, 2, 'question', 'Which port?', ?, ?)");
+    insert.run(T, 'lead');
+    expect(() => insert.run(T, 'lead')).toThrow(/UNIQUE/);
+    expect(() => insert.run(T, 'aiden')).toThrow(/UNIQUE/);
+  });
+
+  it('cascades a purged project to its lead_events', () => {
+    const db = at19();
+    db.pragma('foreign_keys = ON');
+    db.prepare("INSERT INTO lead_events (project_id, at, lead, instructions, kind) VALUES (1, ?, 'Progresser', 1, 'answer')").run(T);
+    db.exec('DELETE FROM asks; DELETE FROM nodes WHERE parent_id IS NOT NULL;');
+    db.prepare('DELETE FROM projects WHERE id = 1').run();
+    expect(db.prepare('SELECT COUNT(*) FROM lead_events').pluck().get()).toBe(0);
+  });
 });
