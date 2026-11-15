@@ -74,8 +74,29 @@ describe('renderLeadBrief', () => {
       '  #11 Upload the key: "Key uploaded to the vault."',
       "Said in Aiden's name since your last look (1):",
       `  ${stamp(ago(5 * HOUR))} answer a6: "Use the release keystore."`,
-      'Links: T3 Code ok · your last look 2d ago',
+      'Links: T3 Code ok, last relay 1m ago · your last look 2d ago',
     ]);
+  });
+
+  it('says in the Links line how the last relay went, in each of the three states', () => {
+    const links = (l: LeadBrief['links']) => renderLeadBrief({ ...empty, links: l }).split('\n').at(-1);
+    expect(links({ t3: 'not checked', t3At: null, lastSeenAt: null })).toBe('Links: T3 Code not checked · your last look never');
+    expect(links({ t3: 'ok', t3At: ago(3 * HOUR), lastSeenAt: ago(DAY) })).toBe('Links: T3 Code ok, last relay 3h ago · your last look 1d ago');
+    expect(links({ t3: 'unavailable', t3At: ago(5 * MIN), lastSeenAt: null })).toBe('Links: T3 Code unavailable, last relay 5m ago · your last look never');
+  });
+
+  it('warns under the header of a relay that may not have got through since the last look, and not otherwise', () => {
+    const WARN = 'The last relay may not have reached its session (5m ago): read the thread before you send it again.';
+    const lines = (l: LeadBrief['links'], b: LeadBrief = empty) => renderLeadBrief({ ...b, links: l }).split('\n');
+    const noLook = lines({ t3: 'unavailable', t3At: ago(5 * MIN), lastSeenAt: null });
+    expect(noLook[1]).toBe(WARN);
+    expect(noLook[2]).toBe('Goal: No intent record yet.');
+    // After the out-of-date line, before Goal.
+    const old = lines({ t3: 'unavailable', t3At: ago(5 * MIN), lastSeenAt: null }, { ...empty, instructions: { current: 2, yours: 1 } });
+    expect(old.slice(1, 4)).toEqual(['Your instructions are out of date: you can read, you cannot change anything.', WARN, 'Goal: No intent record yet.']);
+    expect(lines({ t3: 'unavailable', t3At: ago(5 * MIN), lastSeenAt: ago(HOUR) })).toContain(WARN);
+    expect(lines({ t3: 'unavailable', t3At: ago(5 * MIN), lastSeenAt: ago(MIN) }).some((l) => l.startsWith('The last relay'))).toBe(false);
+    expect(lines({ t3: 'ok', t3At: ago(5 * MIN), lastSeenAt: null }).some((l) => l.startsWith('The last relay'))).toBe(false);
   });
 
   it('renders the same text twice for the same brief, whatever the clock says', () => {

@@ -132,7 +132,7 @@ export function logLeadEvent(ctx: Ctx, e: { projectId: number; lead: string; ins
 - The brief reads what exists: in flight from `readProjectSessions`; waiting on Aiden from open asks with owner
   `aiden`; for the lead from open asks with owner `lead` (`overdue` when `due_at` is past); next up from
   `projects.queue`; stale from `deriveBoard`'s marks; landed and said-in-his-name since `lead_seen_at`, or seven days
-  when it is NULL. It does not call T3: `links.t3` is the outcome of the server's last `t3` call, kept in memory.
+  when it is NULL. It does not call T3: `links.t3` is the outcome of the server's last `t3` call, read from the lead's log, per project.
 - A lead-owned ask is left out of `open_asks`, out of the `needs` list in `taskBoxes`, and out of the `stale_ask`
   mark. `raiseAskDetailed` takes an optional `owner` and `dueAt`.
 - `requireLead` throws an `ApiError` 409 with this text when the project has no lead or another name:
@@ -247,7 +247,7 @@ with only the times changed.
 **Interfaces:**
 - Consumes: `t3Send`, `T3Unavailable` from `src/server/t3.ts`; `readProjectSessions`; `Session.app`,
   `Session.t3ThreadId`, `Session.focusNodeId`; `requireLead`, `logLeadEvent`.
-- Produces: `inprogress lead relay <step id> <message | -> --as <name> --instructions <n>`, calling
+- Produces: `inprogress lead relay <project> <step id> <message | -> --as <name> --instructions <n>`, calling
   `POST /api/lead/:ref/relay` with `{ stepId, message }` (message 1 to 4,000 characters).
 - The step must have exactly one live session in the lead's project, with `app` `t3` and a thread id. Otherwise the
   answer is 409 with one of: `No live session is working on #<id>.` · `#<id> has <n> live sessions. A relay to

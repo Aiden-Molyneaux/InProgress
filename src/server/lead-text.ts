@@ -67,6 +67,11 @@ export function renderLeadBrief(b: LeadBrief): string {
   const { current, yours } = b.instructions;
   const lines = [`Lead brief · ${line(b.project.name, PROJECT_NAME_MAX)} · ${stamp(b.at)} · instructions v${current} (yours: ${yours === null ? 'none' : `v${yours}`})`];
   if (yours !== null && yours < current) lines.push('Your instructions are out of date: you can read, you cannot change anything.');
+  const { t3, t3At, lastSeenAt } = b.links;
+  // A relay that did not get through is news once: until the lead marks a look after it.
+  if (t3 === 'unavailable' && t3At !== null && (lastSeenAt === null || t3At > lastSeenAt)) {
+    lines.push(`The last relay may not have reached its session (${spanAgo(t3At, now)} ago): read the thread before you send it again.`);
+  }
   // True whether the heading is missing or has nothing under it: both read as an empty goal here.
   const noGoal = b.intent.updatedAt !== null ? 'The intent record has no goal under a Goal heading.' : 'No intent record yet.';
   lines.push(`Goal: ${line(b.intent.goal, HEADLINE_CUT) || noGoal}`, `Phase: ${line(b.intent.phase, HEADLINE_CUT) || 'none'}`);
@@ -100,7 +105,7 @@ export function renderLeadBrief(b: LeadBrief): string {
       `Said in Aiden's name ${span} (${b.saidInAidensName.length}):`,
       b.saidInAidensName.map((e) => `${stamp(e.at)} ${e.kind} ${e.ref}: "${line(e.words, TEXT_CUT)}"`),
     ),
-    `Links: T3 Code ${b.links.t3} · your last look ${b.links.lastSeenAt === null ? 'never' : `${spanAgo(b.links.lastSeenAt, now)} ago`}`,
+    `Links: T3 Code ${t3}${t3At === null ? '' : `, last relay ${spanAgo(t3At, now)} ago`} · your last look ${b.links.lastSeenAt === null ? 'never' : `${spanAgo(b.links.lastSeenAt, now)} ago`}`,
   );
   return lines.join('\n');
 }

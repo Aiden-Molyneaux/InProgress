@@ -1,5 +1,6 @@
 import { commandLabel, sessionActivity } from '../core/activity';
 import type { SessionApp } from '../core/session-app';
+import { relayedLine } from '../core/relay';
 import { clipLine, stepRef } from '../core/step-ref';
 import type { TitleDemand } from '../core/title';
 import { SCRIBE_AGENT, type CommandKind, type CommandOutcome, type HookEvent, type Session, type TreeNode, type WorkStatus } from '../core/types';
@@ -33,6 +34,8 @@ export interface HookEventInput {
   mentionsInProgress?: boolean;
   asksStatus?: boolean;
   notice?: boolean;
+  /** A prompt that opens with the relay header: honoured only in a project with a lead. */
+  relayed?: boolean;
   app?: SessionApp;
   t3ThreadId?: string;
   toolUseId?: string;
@@ -121,6 +124,11 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
    * session this event created, or a real prompt, which gets it in place of a status answer or nudge.
    */
   let briefingOwed = false;
+  /**
+   * The lead's name, when this prompt is a relay from it: flagged by the hook, no notice, and the session's project has a
+   * lead. It is not Aiden typing: lastPromptAt stays, and the Relayed line replaces the open-ask reminder.
+   */
+  let relayedBy: string | null = null;
   const session = write(ctx, `hook:${input.event}`, (record): Session | undefined => {
     let before = findSession(ctx, sessionId);
     // A session whose project is archived or deleted is not tracked: nothing it does is recorded, so it never comes back
@@ -139,6 +147,10 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
     }
     const now = ctx.now();
     const next: Session = { ...before, lastSeenAt: now };
+    if (input.event === 'prompt' && input.relayed === true && input.notice !== true) {
+      const lead = before.projectId === null ? null : (getProjectById(ctx, before.projectId)?.lead ?? null);
+      if (lead?.trim()) relayedBy = lead;
+    }
     /** Nodes whose working tasks this event changed: one work.updated each. */
     const worked: number[] = [];
     if (input.cwd) next.cwd = input.cwd;
@@ -170,7 +182,8 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
         // A background-task notice (the scribe finishing, say) is not a prompt Aiden typed: no stale count.
         if (!input.notice) {
           next.promptsSinceUpdate += 1;
-          next.lastPromptAt = now;
+          // A relay is the lead's words, not Aiden's: an open ask is not answered in chat by it.
+          if (relayedBy === null) next.lastPromptAt = now;
         }
         break;
       case 'stop':
@@ -355,14 +368,17 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
   // answered one on a step it drives whose asker no longer holds it (undeliveredAnswers says which route applies).
   if (input.event === 'prompt' && !input.notice) {
     const answers = undeliveredAnswers(ctx, sessionId);
-    const lines: string[] = [];
+    // A relay opens with the line that says whose words these are. The answers still follow: they are InProgress's
+    // record of Aiden's words, not the lead's claim.
+    const lines: string[] = relayedBy === null ? [] : [relayedLine(relayedBy)];
     if (answers.length) {
       lines.push(...answers.map((a) => (a.answer ? `Answered: ${askTag(a.id)} "${oneLine(a.answer)}" (yours: act on it, or add it to your tasks)` : `Cleared: ${askTag(a.id)}, no answer`)));
       markAnswersDelivered(ctx, answers.map((a) => a.id));
     }
     // The reminder (#522): every real prompt, while an ask this session holds is open, in case this prompt answers it.
-    // At most the 3 newest, oldest first among themselves; the rest are named by tag in one line.
-    const reminders = asksToRemind(ctx, sessionId);
+    // At most the 3 newest, oldest first among themselves; the rest are named by tag in one line. A relay answers no ask,
+    // so it gets none.
+    const reminders = relayedBy === null ? asksToRemind(ctx, sessionId) : [];
     for (const a of reminders.slice(-REMINDERS)) {
       lines.push(`Open ask ${askTag(a.id)} on ${stepRef(a.nodeId, findNode(ctx, a.nodeId)?.title)}: "${oneLine(a.text)}". If this prompt answers it, put "${askTag(a.id)} answered: ..." in your next scribe brief.`);
     }

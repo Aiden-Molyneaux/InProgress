@@ -89,6 +89,30 @@ function resolveLead(ctx: ReturnType<typeof makeCtx>, slug: string): string | nu
   return ctx.db.prepare('SELECT lead FROM projects WHERE slug = ?').pluck().get(slug) as string | null;
 }
 
+describe('readLeadBrief: the T3 link', () => {
+  it("reads the newest of this project's relay events: none, a relay, then a later failure; another project's are not counted", () => {
+    const { ctx, project, brief, a } = setup();
+    expect(brief().links).toMatchObject({ t3: 'not checked', t3At: null });
+    const other = createProject(ctx, 'test', { name: 'Elsewhere' });
+    const log = (projectId: number, kind: 'relay' | 'relay_failed' | 'relay_unknown' | 'park') =>
+      logLeadEvent(ctx, { projectId, lead: 'Progresser', instructions: 1, kind, nodeId: a.id, text: 'hi' });
+    log(other.id, 'relay_failed');
+    log(project.id, 'park');
+    expect(brief().links).toMatchObject({ t3: 'not checked', t3At: null });
+    log(project.id, 'relay');
+    const relayAt = ctx.db.prepare("SELECT at FROM lead_events WHERE kind = 'relay'").pluck().get() as string;
+    expect(brief().links).toMatchObject({ t3: 'ok', t3At: relayAt });
+    log(project.id, 'relay_failed');
+    const failedAt = ctx.db.prepare("SELECT at FROM lead_events WHERE kind = 'relay_failed' AND project_id = ?").pluck().get(project.id) as string;
+    expect(failedAt > relayAt).toBe(true);
+    expect(brief().links).toMatchObject({ t3: 'unavailable', t3At: failedAt });
+    log(other.id, 'relay');
+    expect(brief().links).toMatchObject({ t3: 'unavailable', t3At: failedAt });
+    log(project.id, 'relay_unknown');
+    expect(brief().links.t3).toBe('unavailable');
+  });
+});
+
 describe('readLeadBrief', () => {
   it('lists a lead-owned ask under For the lead, not Waiting on Aiden, and keeps it out of open_asks', () => {
     const { ctx, project, brief, aidenAsk, leadAsk, a, b } = setup();

@@ -5,6 +5,7 @@ import type { BuildInfo } from '../lib/version';
 import type { Ctx } from './db/tx';
 import type { BackupRunner } from './backup-runner';
 import { ApiError } from './errors';
+import type { RelaySend } from './lead-relay';
 import type { DesktopSession, OpenDesktopResult } from './open-desktop';
 import { registerAskRoutes } from './routes/asks';
 import { registerBackupRoutes } from './routes/backups';
@@ -35,6 +36,8 @@ export interface AppOptions {
   backups?: BackupRunner;
   /** Opens a folder in the file manager. Replaceable so tests never open one. */
   openFolder?: (path: string) => Promise<void>;
+  /** Sends a message to a T3 Code thread. Replaceable so tests never run the t3 CLI. */
+  t3Send?: RelaySend;
 }
 
 export type Guard = (req: FastifyRequest, reply: FastifyReply) => Promise<unknown>;
@@ -117,7 +120,7 @@ export function buildApp(opts: AppOptions): FastifyInstance {
   registerWriteRoutes(app, opts.ctx, requireToken);
   registerSessionRoutes(app, opts.ctx, requireToken);
   registerAskRoutes(app, opts.ctx, requireToken);
-  registerLeadRoutes(app, opts.ctx, requireToken);
+  registerLeadRoutes(app, opts.ctx, requireToken, opts.t3Send);
   registerSse(app, opts.ctx);
   registerWindowRoutes(app, opts.ctx, requireUi, opts.openDesktop);
   registerUi(app, opts, requireToken, requireUi);

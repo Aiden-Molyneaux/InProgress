@@ -47,5 +47,9 @@ export interface LeadBrief {
   stale: { stepId: number; title: string; marks: string[]; reasons: string[] }[];
   landedSince: { stepId: number; title: string; outcome: string; completedAt: string }[];
   saidInAidensName: { at: string; kind: LeadEventKind; ref: string; words: string }[];
+  /**
+   * `t3` and `t3At` are read from the lead's log, per project: the newest relay, relay_unknown or relay_failed event.
+   * `ok` for a relay, `unavailable` for the other two, `not checked` (and null) with none.
+   */
   links: { t3: 'ok' | 'unavailable' | 'not checked'; t3At: string | null; lastSeenAt: string | null };
 }

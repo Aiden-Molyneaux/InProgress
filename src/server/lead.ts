@@ -175,9 +175,20 @@ export function readLeadBrief(ctx: Ctx, ref: string, yours: number | null, now: 
     stale,
     landedSince,
     saidInAidensName: saidSince(ctx, project.id, since),
-    // Task 3 fills in T3: until then the brief says it did not check.
-    links: { t3: 'not checked', t3At: null, lastSeenAt: project.leadSeenAt },
+    links: { ...lastRelay(ctx, project.id), lastSeenAt: project.leadSeenAt },
   };
+}
+
+/**
+ * How the project's last relay went, read from the lead's log so it survives a restart: `ok` when it was delivered,
+ * `unavailable` when it failed or may not have got through, `not checked` with no relay on record. `t3At` is its time.
+ */
+function lastRelay(ctx: Ctx, projectId: number): Pick<LeadBrief['links'], 't3' | 't3At'> {
+  const last = ctx.db
+    .prepare("SELECT kind, at FROM lead_events WHERE project_id = ? AND kind IN ('relay', 'relay_unknown', 'relay_failed') ORDER BY at DESC, id DESC LIMIT 1")
+    .get(projectId) as { kind: string; at: string } | undefined;
+  if (last === undefined) return { t3: 'not checked', t3At: null };
+  return { t3: last.kind === 'relay' ? 'ok' : 'unavailable', t3At: last.at };
 }
 
 /**

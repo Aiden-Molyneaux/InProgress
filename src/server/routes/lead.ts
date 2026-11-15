@@ -3,16 +3,18 @@ import type { Guard } from '../app';
 import type { Ctx } from '../db/tx';
 import { listLeadEvents, markLeadSeen, readLeadBrief, requireLead } from '../lead';
 import { leadAnswer, leadDrop, leadIntent, leadKept, leadPark, leadPromise } from '../lead-commands';
+import { leadRelay, type RelaySend } from '../lead-relay';
 import { renderLeadBrief } from '../lead-text';
-import { leadAnswerBody, leadBriefQuery, leadDropBody, leadIntentBody, leadKeptBody, leadParkBody, leadPromiseBody, leadSeenBody } from '../schemas';
+import { leadAnswerBody, leadBriefQuery, leadDropBody, leadIntentBody, leadKeptBody, leadParkBody, leadPromiseBody, leadRelayBody, leadSeenBody } from '../schemas';
 
 /**
- * The lead's reads, and its one write. The reads are plain GETs like the other reads: no CORS headers, so a page on another
+ * The lead's reads, and its writes. The reads are plain GETs like the other reads: no CORS headers, so a page on another
  * site cannot read them. With `as` the brief is a lead's: the project must have that lead, or the answer is a 409 and
  * nothing is written. Without `as` it is the window's: no lead check, and it never marks. Marking the brief as read and the
- * lead's six commands are writes, so they are POSTs behind the bearer token guard.
+ * lead's seven commands are writes, so they are POSTs behind the bearer token guard. `send` is how a relay reaches a T3
+ * Code thread: the t3 CLI unless the app was given another.
  */
-export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken: Guard): void {
+export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken: Guard, send?: RelaySend): void {
   app.get('/api/lead/:ref/brief', async (req) => {
     const { ref } = req.params as { ref: string };
     const query = leadBriefQuery.parse(req.query);
@@ -62,5 +64,10 @@ export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken:
   app.post('/api/lead/:ref/intent', { onRequest: requireToken }, async (req) => {
     const { as, instructions, ...input } = leadIntentBody.parse(req.body);
     return leadIntent(ctx, ref(req), as, instructions, input);
+  });
+  // The relay is checked, then sent, then logged: the send runs outside any write, and is logged whatever it did.
+  app.post('/api/lead/:ref/relay', { onRequest: requireToken }, async (req) => {
+    const { as, instructions, ...input } = leadRelayBody.parse(req.body);
+    return leadRelay(ctx, ref(req), as, instructions, input, send);
   });
 }

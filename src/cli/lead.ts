@@ -13,10 +13,15 @@ export const LEAD_USAGE = [
   `  inprogress lead promise <project> <text> --due <iso time> [--step <step id>] ${WHO}`,
   `  inprogress lead kept <project> <ask id> [--note <text>] ${WHO}`,
   `  inprogress lead intent <project> <file | -> ${WHO}`,
+  `  inprogress lead relay <project> <step id> <message | -> ${WHO}`,
 ].join('\n');
 
 /** What a write command prints when the server did not answer in time: it may have been applied all the same. */
 export const LEAD_TIMEOUT = 'InProgress did not answer in time. The command may still have been applied: read the brief before you try again.';
+/** How long a relay waits for the server: longer than the server's own wait on the t3 CLI's send (60 s). */
+export const RELAY_TIMEOUT_MS = 75_000;
+/** What a relay prints when the server did not answer in time: the message may be in the thread already. */
+export const RELAY_TIMEOUT = 'InProgress did not answer in time. The message may have been delivered: do not send it again.';
 
 interface Conn {
   baseUrl: string;
@@ -54,6 +59,7 @@ const COMMANDS: Record<string, CommandSpec> = {
   promise: { positionals: 1, flags: ['--due', '--step'] },
   kept: { positionals: 1, flags: ['--note'] },
   intent: { positionals: 1, flags: [] },
+  relay: { positionals: 2, flags: [] },
 };
 
 interface Parsed {
@@ -164,18 +170,24 @@ function draft(command: string, p: Parsed): Draft {
     }
     case 'intent':
       return first === '-' ? { fields: { intent: { stdin: true } } } : { fields: {}, file: first };
+    case 'relay': {
+      const id = stepId(first);
+      if (id === undefined) return { error: `${first} is not a step: give it as #42 or 42` };
+      return { fields: { stepId: id, message: valueOf(p.positionals[1])! } };
+    }
     default:
       return { error: `Unknown command ${command}` };
   }
 }
 
 /**
- * `inprogress lead <command>`. `brief` prints the server's text, or with --json the brief; the six commands (answer, park,
- * drop, promise, kept, intent) each post to their route and print its sentence. No command, an unknown one, or arguments it
- * cannot use print the usage and exit 1, before anything is read from stdin; a refusal from the server prints its sentence
- * and exits 1. The lead is how Aiden reaches a project, so unlike claim and ask a stopped server is started first
- * (`bringUp`), once the arguments are good; one that will not start prints why and exits 1. Without `bringUp`, nothing
- * answering is rethrown with a hint, except that a write command that timed out prints LEAD_TIMEOUT and exits 1.
+ * `inprogress lead <command>`. `brief` prints the server's text, or with --json the brief; the seven commands (answer, park,
+ * drop, promise, kept, intent, relay) each post to their route and print its sentence. No command, an unknown one, or
+ * arguments it cannot use print the usage and exit 1, before anything is read from stdin; a refusal from the server prints
+ * its sentence and exits 1. The lead is how Aiden reaches a project, so unlike claim and ask a stopped server is started
+ * first (`bringUp`), once the arguments are good; one that will not start prints why and exits 1. Without `bringUp`,
+ * nothing answering is rethrown with a hint, except that a write command that timed out prints LEAD_TIMEOUT and exits 1. A
+ * relay waits RELAY_TIMEOUT_MS, as the server waits on the t3 CLI, and its own timeout prints RELAY_TIMEOUT.
  */
 export async function runLead(args: string[], out: (line: string) => void, o: Conn, io: LeadIo = REAL_IO): Promise<number> {
   const usage = (why?: string): number => {
@@ -217,7 +229,7 @@ export async function runLead(args: string[], out: (line: string) => void, o: Co
   const path = `/api/lead/${encodeURIComponent(p.project)}`;
   try {
     if (payload !== undefined) {
-      const res = await client.post<{ text: string }>(`${path}/${command}`, payload);
+      const res = await client.post<{ text: string }>(`${path}/${command}`, payload, command === 'relay' ? { timeoutMs: RELAY_TIMEOUT_MS } : {});
       out(res.text);
       return 0;
     }
@@ -228,9 +240,10 @@ export async function runLead(args: string[], out: (line: string) => void, o: Co
     if (p.bools.has('--mark')) await client.post(`${path}/seen`, { as: p.as, instructions: p.instructions, at: res.brief.at });
     return 0;
   } catch (err) {
-    // A write that timed out may have been carried out after all: say so, so the lead reads the brief before trying again.
+    // A write that timed out may have been carried out after all: say so, so the lead reads the brief before trying again,
+    // and does not send a relay twice.
     if (payload !== undefined && err instanceof ApiClientError && err.status === 0 && err.code === 'TIMEOUT') {
-      out(LEAD_TIMEOUT);
+      out(command === 'relay' ? RELAY_TIMEOUT : LEAD_TIMEOUT);
       return 1;
     }
     if (err instanceof ApiClientError && err.status === 0) throw new ApiClientError(0, err.message, TASKS_NOT_RUNNING_HINT, err.code);
