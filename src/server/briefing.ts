@@ -1,5 +1,6 @@
 import { sessionActivity } from '../core/activity';
 import { isAidens } from '../core/lead';
+import { spanAgo } from '../core/span';
 import { clipLine, stepRef } from '../core/step-ref';
 import { deriveBoard, isLive } from '../core/board';
 import { formatUpNext, type QueueView } from '../core/layout';
@@ -187,14 +188,8 @@ export function askAge(raisedAt: string, now: number): string | null {
   return days < 14 ? `${days}d` : `${Math.floor(days / 7)}w`;
 }
 
-/** Shorter spans too: "2m", "3h", "4d"; "<1m" under a minute. */
-export function spanAgo(iso: string, now: number): string {
-  const age = now - Date.parse(iso);
-  if (!(age >= 60_000)) return '<1m';
-  if (age < 60 * 60_000) return `${Math.floor(age / 60_000)}m`;
-  if (age < DAY_MS) return `${Math.floor(age / (60 * 60_000))}h`;
-  return `${Math.floor(age / DAY_MS)}d`;
-}
+// Moved to src/core/span.ts so the window can use it; re-exported so no server import changes.
+export { spanAgo };
 
 /** `a7 ? on #42 Pick a port: "Which port?" (3d)`: an open ask as the Needs you line names it, with its age once it is a day old. */
 export function askItem(a: Ask, now: number, stepTitle?: string): string {

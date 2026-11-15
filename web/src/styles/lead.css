@@ -1,0 +1,32 @@
+/* A project's Lead view (#728): the brief regrouped, needs you first, at the left; the lead's log at the right. */
+@layer components {
+.ip-lead-page { flex: 1; min-width: 0; min-height: 0; display: grid; align-content: start; gap: var(--sp-5); padding: var(--sp-4); overflow-y: auto; container-type: inline-size; }
+.ip-lead-head { display: grid; gap: var(--sp-1); min-width: 0; }
+.ip-lead-head p { margin: 0; overflow-wrap: anywhere; }
+.ip-lead-who { font-size: var(--t-body); color: var(--text-hi); }
+.ip-lead-line { font-size: var(--t-detail-sm); color: var(--text-muted); }
+.ip-lead-warn { font-size: var(--t-detail-sm); color: var(--behind); }
+.ip-lead-cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-5); align-items: start; min-width: 0; }
+.ip-lead-desk { display: grid; align-content: start; gap: var(--sp-5); min-width: 0; }
+.ip-lead-sec { display: grid; gap: var(--sp-2); min-width: 0; align-content: start; }
+.ip-lead-sechead { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); }
+.ip-lead-sechead h2 { margin: 0; }
+.ip-lead-count { font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-dim); }
+.ip-lead-note { margin: 0; font-family: var(--font-mono); font-size: var(--t-detail-sm); letter-spacing: 0.04em; color: var(--text-dim); }
+.ip-lead-none { margin: 0; padding: var(--sp-3); border: 1px dashed var(--line-soft); font-size: var(--t-detail-sm); color: var(--text-muted); }
+.ip-lead-list { margin: 0; padding: 0; list-style: none; display: grid; }
+.ip-lead-row { border-bottom: 1px solid var(--line-soft); min-width: 0; }
+.ip-lead-open { display: grid; gap: var(--sp-1); width: 100%; padding: var(--sp-2) var(--sp-3); border: 0; background: transparent; text-align: left; font: inherit; color: inherit; min-width: 0; }
+button.ip-lead-open { cursor: pointer; }
+button.ip-lead-open:hover, button.ip-lead-open:focus-visible { background: var(--volt-wash); }
+.ip-lead-text { font-size: var(--t-body); color: var(--text-hi); overflow-wrap: anywhere; }
+.ip-lead-detail { font-size: var(--t-detail-sm); color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ip-lead-meta { font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-muted); overflow-wrap: anywhere; }
+.ip-lead-meta[data-overdue] { color: var(--alarm); }
+.ip-lead-step { justify-self: start; padding: 0; border: 0; background: transparent; font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--volt); cursor: pointer; }
+.ip-lead-links { margin: 0; font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-dim); overflow-wrap: anywhere; }
+@container (min-width: 900px) {
+  .ip-lead-page { padding: var(--sp-6); }
+  .ip-lead-cols { grid-template-columns: minmax(0, 3fr) minmax(280px, 2fr); }
+}
+}

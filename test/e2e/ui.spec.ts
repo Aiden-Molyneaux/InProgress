@@ -1223,7 +1223,7 @@ test('a right-click on a tab opens its menu under it without switching, and Arch
   const menu = tabMenu(page, shelfName);
   const items = menu.getByRole('menuitem');
   await expect(menu).toBeVisible();
-  await expect(items).toHaveText(['Archive', 'Rename…', 'Delete…']);
+  await expect(items).toHaveText(['Archive', 'Rename…', 'Lead…', 'Delete…']);
   await expect(items.first()).toHaveAccessibleName('Archive');
   await expect(items.first()).toBeFocused();
   // The tab says whose menu it is, and is not opened by it.
@@ -1599,12 +1599,13 @@ test("an active tab's Delete… says how many sessions it stops tracking, and de
   await busyTab.click({ button: 'right' });
   const menu = tabMenu(page, busyName);
   const items = menu.getByRole('menuitem');
-  await expect(items).toHaveCount(3);
+  await expect(items).toHaveCount(4);
   await expect(items.nth(0)).toHaveAccessibleName('Archive');
   await expect(items.nth(0)).toHaveAccessibleDescription('Stops tracking 1 session');
   await expect(items.nth(1)).toHaveAccessibleName('Rename…');
-  await expect(items.nth(2)).toHaveAccessibleName('Delete…');
-  await items.nth(2).click();
+  await expect(items.nth(2)).toHaveAccessibleName('Lead…');
+  await expect(items.nth(3)).toHaveAccessibleName('Delete…');
+  await items.nth(3).click();
   // The confirm Delete always asks, with Archive's line under it.
   const confirm = page.getByRole('group', { name: `Delete ${busyName}?` });
   const go = confirm.getByRole('button', { name: 'Delete', exact: true });
@@ -1644,7 +1645,7 @@ test('deleting the open active project from its tab opens the tab beside it with
   await middle.focus();
   await page.keyboard.press('Shift+F10');
   const menu = tabMenu(page, names[1]);
-  await expect(menu.getByRole('menuitem')).toHaveText(['Archive', 'Rename…', 'Delete…']);
+  await expect(menu.getByRole('menuitem')).toHaveText(['Archive', 'Rename…', 'Lead…', 'Delete…']);
   await page.keyboard.press('End');
   await expect(menu.getByRole('menuitem', { name: 'Delete…', exact: true })).toBeFocused();
   await page.keyboard.press('Enter');
@@ -1776,6 +1777,43 @@ test('Rename… turns a tab menu into a field: Escape and leaving cancel, Enter 
   const stale = await windowPost(page, `/api/ui/projects/${made.id}/rename`, { slug: `${made.slug}-old`, name: 'Stale rename' });
   expect(stale).toEqual({ status: 409, body: { error: 'This project changed; reload', hint: 'Reload the window: another project has this id now.' } });
   expect((await listedById(api, made.id))?.name).toBe(newName);
+});
+
+test("Lead… gives a project a lead, the Lead view shows the brief and the log live, and clearing it reads No lead", async ({ page, api }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const name = unique('Lead desk');
+  const made = await bare(api, name);
+  const [step] = await write<{ id: number }[]>(api, `e2e-${randomUUID()}`, 'post', '/api/nodes', { parentId: made.rootNodeId, nodes: [{ title: 'Park me' }] });
+  await page.goto(`/#/p/${made.slug}`);
+  const tab = railRow(page, name);
+  await expect(tab).toHaveAttribute('aria-current', 'page');
+  const lead = async (text: string) => {
+    await tab.click({ button: 'right' });
+    await tabMenu(page, name).getByRole('menuitem', { name: 'Lead…', exact: true }).click();
+    const field = page.getByRole('textbox', { name: `Lead of ${name}`, exact: true });
+    await expect(field).toBeFocused();
+    await field.fill(text);
+    await page.keyboard.press('Enter');
+    await expect(field).toBeHidden();
+  };
+  await lead('Progresser');
+  await viewButton(page, 'Lead').click();
+  await expect(page.getByRole('heading', { level: 1, name: 'LEAD' })).toBeVisible();
+  await expect(page.locator('.ip-lead-who')).toHaveText('Progresser · instructions v1');
+  await expect(page.locator('.ip-lead-sec h2')).toContainText(['Needs you', 'Moving', 'Stuck', 'Next', "The lead's promises", /^Landed /, /^Said in your name /, 'Log']);
+  // C4: the lead parks a step through its own command, and the open view shows the log line with Aiden's words, no reload.
+  const res = await api.post(`/api/lead/${made.slug}/park`, {
+    headers: { authorization: `Bearer ${readFileSync('.e2e-home/token', 'utf8').trim()}` },
+    data: { as: 'Progresser', instructions: 1, stepId: step.id, aidenWords: 'park it for now' },
+  });
+  expect(res.ok(), `park answered ${res.status()}: ${await res.text()}`).toBe(true);
+  const log = page.locator('.ip-lead-log');
+  await expect(log).toContainText('park');
+  await expect(log).toContainText('"park it for now"');
+  // Cleared: the view reads the no-lead line and still shows its groups.
+  await lead('');
+  await expect(page.locator('.ip-lead-who')).toHaveText('No lead. Give this project one from its actions.');
+  await expect(page.locator('.ip-lead-sec[data-group]')).toHaveCount(7);
 });
 
 test('the open archived project can be renamed from its tab, and ⋯ shows the new name', async ({ page, api }) => {

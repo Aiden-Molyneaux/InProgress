@@ -1,5 +1,5 @@
 import { deriveBoard, type BoardRow, type Mark } from '../core/board';
-import { LEAD_IDLE_MARKS, LEAD_INSTRUCTIONS_VERSION, LEAD_LOOK_BACK_DAYS, LEAD_STALE_MARKS, isAidens, type LeadBrief, type LeadEventKind } from '../core/lead';
+import { LEAD_IDLE_MARKS, LEAD_INSTRUCTIONS_VERSION, LEAD_LOOK_BACK_DAYS, LEAD_STALE_MARKS, isAidens, type LeadBrief, type LeadEventKind, type LeadEventOut } from '../core/lead';
 import { buildIndex, dfsOrder, shelvedIds } from '../core/tree';
 import { ASK_TRAIL_MS, askTag, type Ask, type Project } from '../core/types';
 import { spanAgo } from './briefing';
@@ -245,15 +245,5 @@ export function listLeadEvents(ctx: Ctx, ref: string, limit = 100): LeadEventOut
   }));
 }
 
-export interface LeadEventOut {
-  id: number;
-  at: string;
-  lead: string;
-  instructions: number;
-  kind: LeadEventKind;
-  nodeId: number | null;
-  askId: number | null;
-  sessionId: string | null;
-  text: string;
-  aidenWords: string | null;
-}
+// Moved to src/core/lead.ts so the window can use it; re-exported so no server import changes.
+export type { LeadEventOut };

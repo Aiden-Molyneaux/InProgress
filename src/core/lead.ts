@@ -28,6 +28,20 @@ export type AskOwner = 'aiden' | 'lead';
 export const isAidens = (a: { owner: AskOwner }): boolean => a.owner !== 'lead';
 export type LeadEventKind = 'answer' | 'park' | 'drop' | 'promise' | 'kept' | 'intent' | 'relay' | 'relay_unknown' | 'relay_failed';
 
+/** One line of the lead's log, as the log's read answers it. */
+export interface LeadEventOut {
+  id: number;
+  at: string;
+  lead: string;
+  instructions: number;
+  kind: LeadEventKind;
+  nodeId: number | null;
+  askId: number | null;
+  sessionId: string | null;
+  text: string;
+  aidenWords: string | null;
+}
+
 /** Where a project stands, as plain code builds it from the record: one fixed shape, whatever the project holds. */
 export interface LeadBrief {
   project: { slug: string; name: string; lead: string | null };

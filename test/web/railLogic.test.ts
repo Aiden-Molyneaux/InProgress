@@ -43,7 +43,7 @@ describe('railViews', () => {
     node(8, 5, 'finished', 'done'),
   ]);
 
-  it('lists the five views in order, with their codes', () => {
+  it('lists the six views in order, with their codes', () => {
     const views = railViews(s, NOW);
     expect(views.map((v) => [v.view, v.label, v.code])).toEqual([
       ['board', 'Board', 'BRD'],
@@ -51,6 +51,7 @@ describe('railViews', () => {
       ['backlog', 'Backlog', 'BKL'],
       ['done', 'All done', 'DON'],
       ['docs', 'Docs', 'DOC'],
+      ['lead', 'Lead', 'LED'],
     ]);
   });
 
@@ -71,9 +72,9 @@ describe('railViews', () => {
 });
 
 describe('railViews with no snapshot', () => {
-  it('still lists the five views, with no counts', () => {
+  it('still lists the six views, with no counts', () => {
     const views = railViews(null, NOW);
-    expect(views.map((v) => v.view)).toEqual(['board', 'project', 'backlog', 'done', 'docs']);
+    expect(views.map((v) => v.view)).toEqual(['board', 'project', 'backlog', 'done', 'docs', 'lead']);
     expect(views.every((v) => v.count === undefined && v.text === undefined)).toBe(true);
   });
 });

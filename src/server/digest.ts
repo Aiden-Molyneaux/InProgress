@@ -1,5 +1,6 @@
 import { deriveBoard, type Mark } from '../core/board';
 import { isAidens } from '../core/lead';
+import { stamp } from '../core/span';
 import { clipLine, stepRef } from '../core/step-ref';
 import { ASK_GLYPHS, STALE_SESSION_MS, TRAIL_MS, askTag, sessionDisplayTitle, type Ask, type ProjectSnapshot } from '../core/types';
 import type { Ctx } from './db/tx';
@@ -210,11 +211,8 @@ function ago(iso: string, now: number): string {
 }
 
 const pad = (n: number): string => String(n).padStart(2, '0');
-/** Local `2026-10-10 12:15`. */
-export function stamp(iso: string): string {
-  const d = new Date(iso);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
+// Moved to src/core/span.ts so the window can use it; re-exported so no server import changes.
+export { stamp };
 /** Local `12:52`. */
 const clock = (iso: string): string => {
   const d = new Date(iso);

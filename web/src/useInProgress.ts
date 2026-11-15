@@ -37,6 +37,8 @@ export interface InProgressState {
    * reload. A 401 reloads the page. Answers 'ok', 'reload', or the server's message.
    */
   rename: (target: ActionTarget, name: string) => Promise<'ok' | 'reload' | string>;
+  /** Gives a project a lead by name, or takes it away with null. */
+  setLead: (target: ActionTarget, name: string | null) => Promise<'ok' | 'reload' | string>;
 }
 
 export function useInProgress(): InProgressState {
@@ -275,5 +277,20 @@ export function useInProgress(): InProgressState {
     [loadProjects],
   );
 
-  return { projects, deleted, slug, snapshot, lastEvent, liveEvent, connection, loaded, selectProject: setSlug, act, rename };
+  const setLead = useCallback(
+    async (target: ActionTarget, name: string | null) => {
+      const answer = await api.setProjectLead(target, name);
+      if (answer === 'reload') window.location.reload();
+      if (typeof answer === 'string') return answer;
+      const lead = answer.project.lead;
+      // So a list fetched before the change never undoes the patch.
+      listApplied.current = listSeq.current;
+      setProjects((cur) => cur.map((p) => (p.id === target.id ? { ...p, lead } : p)));
+      void loadProjects();
+      return 'ok' as const;
+    },
+    [loadProjects],
+  );
+
+  return { projects, deleted, slug, snapshot, lastEvent, liveEvent, connection, loaded, selectProject: setSlug, act, rename, setLead };
 }

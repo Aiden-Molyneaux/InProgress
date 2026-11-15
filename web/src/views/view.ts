@@ -1,11 +1,11 @@
 import { load, save } from '../storage';
 
-/** The views of a project: the Board (default), the Project view, the full Backlog, All done and Docs. */
-export type View = 'board' | 'project' | 'backlog' | 'done' | 'docs';
+/** The views of a project: the Board (default), the Project view, the full Backlog, All done, Docs and Lead. */
+export type View = 'board' | 'project' | 'backlog' | 'done' | 'docs' | 'lead';
 
 const KEY = 'ip.view';
 
-const VIEWS: readonly View[] = ['board', 'project', 'backlog', 'done', 'docs'];
+const VIEWS: readonly View[] = ['board', 'project', 'backlog', 'done', 'docs', 'lead'];
 
 /** The view picked last, or the Board: nothing stored, storage blocked, or a value that is none of the views. */
 export function loadView(): View {
