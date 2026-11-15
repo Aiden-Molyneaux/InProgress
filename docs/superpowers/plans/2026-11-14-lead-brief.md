@@ -182,8 +182,15 @@ one heading, and four kinds of fact were missing or lost.
   Test: on a seeded tree with one step of each kind, those five add up to the open
   rows.
 
+- **G6, an ask is printed whole (after the second C4 trial).** The fixed brief went live at 5425f80 and Progresser
+  relayed the limit line, the Backlog line and the five Stale rows. He also told Aiden to say "ship it" for a324,
+  whose text ends `Say "ship the note"`: the brief had cut the ask at 120 characters and he filled in the end. On the
+  live data 35 of Aiden's 41 open asks were longer than 120, the longest 551. An ask's text is now cut at 600
+  (`ASK_CUT`), under Waiting on Aiden and under For the lead; an outcome and Aiden's words keep 120. Branch
+  `lead-brief-asks`. Criterion C9: on the live data a324 and a326 print whole.
+
 Criteria added: C5 (G1 and G5, on the copy of the live data: #435, #516, #561 and #709 are under Stale and the counts
-add up), C6 (G2: no mark name in the text), C7 (G3), C8 (G4). C2 is checked again. C4 is Aiden's again after the gate.
+add up), C6 (G2: no mark name in the text), C7 (G3), C8 (G4), C9 (G6). C2 is checked again. C4 is Aiden's again after the gate.
 
 For #726: when `dueAt` and `owner` reach a route, check the due time there with `z.string().datetime()` as
 `leadSeenBody` does (`Date.parse` in `raiseAskDetailed` takes `11/15/2026` too). The digest's "Asks raised" and "Asks cleared" lists (`src/server/digest.ts:293-303`) read every owner, so
