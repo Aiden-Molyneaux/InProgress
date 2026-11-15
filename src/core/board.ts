@@ -1,4 +1,5 @@
 import { sessionActivity } from './activity';
+import { isAidens } from './lead';
 import { clipLine, stepRef } from './step-ref';
 import { ancestors, buildIndex, dfsOrder, kids, shelvedIds } from './tree';
 import { ASK_TRAIL_MS, STALE_SESSION_MS, STALL_MS, TRAIL_MS, WHAT_WHY_SINCE, sessionDisplayTitle, type Ask, type ProjectSnapshot, type ResourceMeta, type Session, type TreeNode } from './types';
@@ -124,7 +125,8 @@ export function deriveBoard(input: BoardInput, now: number): Board {
   for (const s of live) if (s.focusNodeId !== null) focusOf.set(s.focusNodeId, [...(focusOf.get(s.focusNodeId) ?? []), s]);
   for (const list of focusOf.values()) list.sort((a, b) => (STATE_ORDER[a.state] ?? 3) - (STATE_ORDER[b.state] ?? 3) || (a.slot ?? 0) - (b.slot ?? 0));
   const openAsks = new Map<number, Ask[]>();
-  for (const a of input.asks) if (a.clearedAt === null) openAsks.set(a.nodeId, [...(openAsks.get(a.nodeId) ?? []), a]);
+  // A lead-owned ask is the lead's promise, not Aiden's to answer: it stays out of waiting, the needs list and the ask marks.
+  for (const a of input.asks) if (a.clearedAt === null && isAidens(a)) openAsks.set(a.nodeId, [...(openAsks.get(a.nodeId) ?? []), a]);
   for (const list of openAsks.values()) list.sort((a, b) => a.raisedAt.localeCompare(b.raisedAt) || a.id - b.id);
   // Steps with an answer no session has been handed yet (spec 2.4); the snapshot keeps cleared asks for ASK_TRAIL_MS.
   const answerWaiting = new Set<number>();

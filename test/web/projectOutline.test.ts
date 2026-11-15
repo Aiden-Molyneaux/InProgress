@@ -53,6 +53,13 @@ describe('projectSections', () => {
     expect(Object.fromEntries(sections(s).map((x) => [x.title, x.startsOpen]))).toEqual({ Queued: true, Quiet: false, Asked: true });
   });
 
+  it("does not start a section open for a lead-owned ask, and does for Aiden's", () => {
+    const s = snap([root, node(2, 1, 'Promised', 'active'), node(3, 2, 'p'), node(4, 1, 'Asked', 'active'), node(5, 4, 'a')], {
+      asks: [{ id: 1, nodeId: 3, clearedAt: null, owner: 'lead' }, { id: 2, nodeId: 5, clearedAt: null, owner: 'aiden' }] as never,
+    });
+    expect(Object.fromEntries(sections(s).map((x) => [x.title, x.startsOpen]))).toEqual({ Promised: false, Asked: true });
+  });
+
   it('folds done children per parent into one line with the latest', () => {
     const s = snap([
       root, node(2, 1, 'Alpha', 'active'), node(3, 2, 'old', 'done', { completedAt: '2026-10-01T00:00:00Z' }), node(4, 2, 'new', 'done', { completedAt: '2026-10-12T00:00:00Z' }),

@@ -187,7 +187,7 @@ export function parkProject(slug: string): void;    // status 'active' -> 'parke
 export function unparkProject(slug: string): void;  // status 'parked' -> 'active'
 ```
 
-- `projects.status` gains `'parked'`. Routes `POST /api/window/projects/:slug/park` and `.../unpark` sit beside
+- `projects.status` gains `'parked'`. Routes `POST /api/ui/projects/:id/park` and `.../unpark` sit beside
   archive and unarchive, behind the same guard.
 - A parked project adds nothing to Needs me or to any count. The window lists it under "Parked", closed by default.
   `status` prints parked projects on one line after the active ones.

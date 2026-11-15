@@ -4,6 +4,7 @@ import { globMatch } from '../../lib/glob';
 import { isUnder, normalizePath } from '../../lib/paths';
 import { msAgo, write, type Ctx, type RecordEvent } from '../db/tx';
 import { ApiError, badRequest, conflict, notFound } from '../errors';
+import { aidensAskSql } from './asks';
 import { countsAsWorkSql, endSessionCommands } from './commands';
 import { shelvedAmong } from './shelved';
 import { endSubagents, NOT_READER_SQL } from './subagents';
@@ -22,6 +23,11 @@ interface ProjectRow {
   briefing_mode: string;
   /** Migration 16. */
   title_channel: string;
+  /** Migration 20. */
+  lead: string | null;
+  lead_seen_at: string | null;
+  intent: string;
+  intent_updated_at: string | null;
   /** When it was deleted (it is archived then); null while it is not. Migration 8. */
   deleted_at: string | null;
 }
@@ -187,6 +193,10 @@ export const toProject = (r: ProjectRow, queue: QueueEntry[] = parseQueue(r.queu
   queue,
   briefingMode: r.briefing_mode === 'scoped' ? 'scoped' : 'full',
   titleChannel: r.title_channel === 'enforce' ? 'enforce' : 'nudge',
+  lead: r.lead,
+  leadSeenAt: r.lead_seen_at,
+  intent: r.intent,
+  intentUpdatedAt: r.intent_updated_at,
 });
 
 const readProject = (ctx: Ctx, r: ProjectRow): Project => toProject(r, liveQueue(ctx, r.id, r.queue));
@@ -404,6 +414,29 @@ export function applyProjectChange(ctx: Ctx, record: RecordEvent, before: Projec
   return { project: getProjectById(ctx, before.id)!, endedSessions };
 }
 
+/** The longest a lead's name may be, once trimmed. */
+export const LEAD_NAME_MAX = 40;
+
+/**
+ * Gives the project a lead, or takes it away (null). Only the window's route calls this: the CLI and MCP have no way to
+ * set a lead. The name is trimmed, 1 to 40 characters. Records project.updated only when the lead changes, as
+ * updateProject does.
+ */
+export function setProjectLead(ctx: Ctx, actor: string, ref: string | number, name: string | null): Project {
+  const lead = name === null ? null : name.trim();
+  if (lead !== null && (lead.length < 1 || lead.length > LEAD_NAME_MAX)) {
+    throw badRequest(`A lead's name is 1 to ${LEAD_NAME_MAX} characters`, 'Send null to take the lead away.');
+  }
+  return write(ctx, actor, (record) => {
+    const before = resolveProject(ctx, ref);
+    if (before.lead !== lead) {
+      ctx.db.prepare('UPDATE projects SET lead = ?, updated_at = ? WHERE id = ?').run(lead, ctx.now(), before.id);
+      record({ projectId: before.id, type: 'project.updated', entity: 'project', entityId: before.id, data: { changes: { lead: { from: before.lead, to: lead } } } });
+    }
+    return getProjectById(ctx, before.id)!;
+  });
+}
+
 /**
  * Spec 2.5: one window change applied to the queue as stored, inside one write. A move takes the node out wherever it
  * sits and places it in the unowned part before `before`; null, or a `before` no longer unowned, appends. A remove takes
@@ -528,7 +561,7 @@ export function listProjectSummaries(ctx: Ctx): ProjectSummary[] {
   const rows = ctx.db
     .prepare(
       `SELECT p.*,
-        (SELECT COUNT(*) FROM asks a WHERE a.project_id = p.id AND a.cleared_at IS NULL
+        (SELECT COUNT(*) FROM asks a WHERE a.project_id = p.id AND a.cleared_at IS NULL AND ${aidensAskSql('a.')}
           AND NOT EXISTS (
             WITH RECURSIVE up(id) AS (SELECT a.node_id UNION ALL SELECT n.parent_id FROM up JOIN nodes n ON n.id = up.id WHERE n.parent_id IS NOT NULL)
             SELECT 1 FROM up JOIN nodes sp ON sp.id = up.id WHERE sp.status = 'parked')) AS open_asks,

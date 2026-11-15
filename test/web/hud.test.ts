@@ -64,9 +64,9 @@ describe('boardFigures', () => {
     id, projectId: 1, parentId, position: id, kind: 'task', title: `S${id}`, body: '', status: 'todo', assignee: 'claude', outcome: '', label: null, what: '', why: '', origin: 'asked',
     createdAt: T, updatedAt: T, completedAt: null, driverSessionId: null, boardState: null, stateSince: null, hue: null, parkedReason: '', parkedWhere: '', parkedAt: null, rankBand: null, rank: null,
   });
-  const ask = (nodeId: number): Ask => ({ id: nodeId, projectId: 1, nodeId, kind: 'question', text: 'Q', sessionId: null, raisedAt: T, clearedAt: null, clearedBy: null, answer: '', answerDeliveredAt: null });
+  const ask = (nodeId: number): Ask => ({ id: nodeId, projectId: 1, nodeId, kind: 'question', text: 'Q', sessionId: null, raisedAt: T, clearedAt: null, clearedBy: null, answer: '', answerDeliveredAt: null, owner: 'aiden', dueAt: null, answeredVia: null });
   const input = (queue: number[], asks: Ask[]): BoardInput => ({
-    project: { id: 1, slug: 'p', name: 'P', description: '', playbook: '', status: 'active', rootNodeId: 1, createdAt: T, updatedAt: T, queue: queue.map((nodeId) => ({ nodeId, sessionId: null })), briefingMode: 'full', titleChannel: 'nudge' },
+    project: { id: 1, slug: 'p', name: 'P', description: '', playbook: '', status: 'active', rootNodeId: 1, createdAt: T, updatedAt: T, queue: queue.map((nodeId) => ({ nodeId, sessionId: null })), briefingMode: 'full', titleChannel: 'nudge', lead: null, leadSeenAt: null, intent: '', intentUpdatedAt: null },
     nodes: [node(1, null), node(2, 1), node(3, 1), node(4, 1), node(5, 1)], sessions: [], pastSessions: [], resources: [], asks,
   });
 

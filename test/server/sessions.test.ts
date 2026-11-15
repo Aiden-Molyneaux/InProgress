@@ -107,6 +107,28 @@ describe('handleHookEvent', () => {
     expect(findSession(ctx, 's1')).toMatchObject({ title: 'InGame launch status', state: 'idle', cwd: 'C:\\personal\\InGame\\docs' });
   });
 
+  it('leaves a lead-owned ask out of the briefing, and keeps an ask of Aiden\'s in it', () => {
+    const { ctx, project, a3 } = setup();
+    const [promised] = addNodes(ctx, 'test', { parentId: project.rootNodeId, nodes: [{ title: 'Send the store draft' }] });
+    const promise = raiseAsk(ctx, 'lead', { nodeId: promised.id, kind: 'question', text: 'Send Aiden the draft', owner: 'lead' });
+    const text = handleHookEvent(ctx, 's1', start()).context!;
+    // The Needs you line does not name the lead's promise.
+    expect(text).not.toContain(`a${promise.id} `);
+    expect(text).not.toContain('Send Aiden the draft');
+    expect(text).toContain(`Needs you (1): a1 ⚿ on #${a3.id} Run signing tests: "Run the signing tests"`);
+  });
+
+  it('shows no Needs you line when the only open ask is the lead\'s', () => {
+    const ctx = makeCtx();
+    const project = createProject(ctx, 'test', { name: 'InGame' });
+    addBinding(ctx, 'test', project.slug, 'C:/personal/InGame');
+    const [step] = addNodes(ctx, 'test', { parentId: project.rootNodeId, nodes: [{ title: 'Send the store draft' }] });
+    raiseAsk(ctx, 'lead', { nodeId: step.id, kind: 'question', text: 'Send Aiden the draft', owner: 'lead' });
+    const text = handleHookEvent(ctx, 's1', start()).context!;
+    expect(text).not.toContain('Needs you');
+    expect(text).not.toContain('Send Aiden the draft');
+  });
+
   it('names the resources folder by its absolute path, which the Write tool needs', () => {
     const { ctx } = setup();
     const text = handleHookEvent(ctx, 's1', start()).context!;

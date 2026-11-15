@@ -1,3 +1,4 @@
+import type { AskOwner } from '../../core/lead';
 import { ASK_KINDS, ASK_TRAIL_MS, STALE_SESSION_MS, type Ask, type AskKind } from '../../core/types';
 import { msAgo, write, type Ctx, type RecordEvent } from '../db/tx';
 import { badRequest, notFound } from '../errors';
@@ -10,6 +11,10 @@ export interface RaiseAskInput {
   kind: AskKind;
   text: string;
   sessionId?: string | null;
+  /** Who the ask is for; omitted: Aiden. */
+  owner?: AskOwner;
+  /** When a lead-owned ask is due (ISO); omitted: no time. */
+  dueAt?: string | null;
 }
 
 interface AskRow {
@@ -24,6 +29,10 @@ interface AskRow {
   cleared_by: string | null;
   answer: string;
   answer_delivered_at: string | null;
+  /** Migration 20. */
+  owner: string;
+  due_at: string | null;
+  answered_via: string | null;
 }
 
 const toAsk = (r: AskRow): Ask => ({
@@ -38,7 +47,17 @@ const toAsk = (r: AskRow): Ask => ({
   clearedBy: r.cleared_by,
   answer: r.answer,
   answerDeliveredAt: r.answer_delivered_at,
+  // An owner this build does not know reads as Aiden's, so the ask is never hidden from him.
+  owner: r.owner === 'lead' ? 'lead' : 'aiden',
+  dueAt: r.due_at,
+  answeredVia: r.answered_via,
 });
+
+/**
+ * SQL for "this ask is Aiden's" over the owner column, `prefix` being the table alias with its dot (`a.`) or none. The same
+ * test as isAidens in src/core/lead.ts: an owner this build does not know counts as Aiden's.
+ */
+export const aidensAskSql = (prefix = ''): string => `${prefix}owner != 'lead'`;
 
 const getRow = (ctx: Ctx, id: number) =>
   ctx.db.prepare(`SELECT * FROM asks WHERE id = ? AND ${inLiveProject('asks.project_id')}`).get(id) as AskRow | undefined;
@@ -70,6 +89,13 @@ export function raiseAskDetailed(ctx: Ctx, actor: string, input: RaiseAskInput):
   }
   const text = input.text.trim();
   if (!text) throw badRequest('An ask needs text: it is empty', 'Say what Aiden should answer, allow or look at.');
+  const owner: AskOwner = input.owner ?? 'aiden';
+  let dueAt: string | null = null;
+  if (input.dueAt !== undefined && input.dueAt !== null) {
+    const parsed = Date.parse(input.dueAt);
+    if (Number.isNaN(parsed)) throw badRequest('The due time is not a date', 'Send an ISO time.');
+    dueAt = new Date(parsed).toISOString();
+  }
   return write(ctx, actor, (record): RaisedAsk => {
     const node = requireNode(ctx, input.nodeId);
     if (node.parentId === null) throw badRequest(`#${node.id} is the project root`, 'Raise the ask on the step it concerns.');
@@ -77,12 +103,13 @@ export function raiseAskDetailed(ctx: Ctx, actor: string, input: RaiseAskInput):
     if (node.status === 'parked') throw badRequest(`#${node.id} is parked`, 'Unpark it first.');
     const parkedAbove = parkedAncestor(ctx, node.id);
     if (parkedAbove !== null) throw badRequest(`#${node.id} is under parked #${parkedAbove}`, `Unpark #${parkedAbove} first.`);
-    // The column references sessions(id): a session id InProgress does not track is stored as no session.
-    const tracked = input.sessionId ? ctx.db.prepare('SELECT 1 FROM sessions WHERE id = ?').get(input.sessionId) !== undefined : false;
+    // The column references sessions(id): a session id InProgress does not track is stored as no session. A lead's ask has
+    // no session: nothing is sent back to one when it clears.
+    const tracked = input.sessionId && owner !== 'lead' ? ctx.db.prepare('SELECT 1 FROM sessions WHERE id = ?').get(input.sessionId) !== undefined : false;
     const info = ctx.db
-      .prepare('INSERT INTO asks (project_id, node_id, kind, text, session_id, raised_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING')
-      .run(node.projectId, node.id, input.kind, text, tracked ? input.sessionId : null, ctx.now());
-    let row = ctx.db.prepare('SELECT * FROM asks WHERE node_id = ? AND kind = ? AND text = ? AND cleared_at IS NULL').get(node.id, input.kind, text) as AskRow;
+      .prepare('INSERT INTO asks (project_id, node_id, kind, text, session_id, raised_at, owner, due_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING')
+      .run(node.projectId, node.id, input.kind, text, tracked ? input.sessionId : null, ctx.now(), owner, dueAt);
+    let row = ctx.db.prepare('SELECT * FROM asks WHERE node_id = ? AND kind = ? AND text = ? AND owner = ? AND cleared_at IS NULL').get(node.id, input.kind, text, owner) as AskRow;
     // A session that asks again after a real prompt (Aiden answered in its chat, #522) is asking anew: the joined ask's
     // age restarts, or the Board would still read it as answered in chat. A re-raise before any prompt keeps its age.
     let bumped = false;
@@ -96,7 +123,7 @@ export function raiseAskDetailed(ctx: Ctx, actor: string, input: RaiseAskInput):
     }
     const ask = toAsk(row);
     if (info.changes || bumped) record({ projectId: node.projectId, type: 'ask.raised', entity: 'ask', entityId: ask.id, data: { ask } });
-    return { ask, joined: !info.changes, untracked: !!input.sessionId && !tracked };
+    return { ask, joined: !info.changes, untracked: owner !== 'lead' && !!input.sessionId && !tracked };
   });
 }
 
@@ -142,7 +169,7 @@ export function listProjectAsks(ctx: Ctx, projectId: number): Ask[] {
 
 /** The open asks session `sessionId` raised on node `nodeId`, oldest raised first: all the title rules read. */
 export function openAsksBy(ctx: Ctx, sessionId: string, nodeId: number): Ask[] {
-  return (ctx.db.prepare('SELECT * FROM asks WHERE cleared_at IS NULL AND session_id = ? AND node_id = ? ORDER BY raised_at, id').all(sessionId, nodeId) as AskRow[]).map(toAsk);
+  return (ctx.db.prepare(`SELECT * FROM asks WHERE cleared_at IS NULL AND ${aidensAskSql()} AND session_id = ? AND node_id = ? ORDER BY raised_at, id`).all(sessionId, nodeId) as AskRow[]).map(toAsk);
 }
 
 /** Asks of the project raised at or after `since` (ISO), oldest first, cleared or not: the digest reads the table, not the 7-day snapshot. */
@@ -221,7 +248,7 @@ export function owedAnswers(ctx: Ctx, nodeId: number): Ask[] {
 export function asksToRemind(ctx: Ctx, sessionId: string): Ask[] {
   return (ctx.db
     .prepare(
-      `SELECT * FROM asks WHERE cleared_at IS NULL AND ${inLiveProject('asks.project_id')}` +
+      `SELECT * FROM asks WHERE cleared_at IS NULL AND ${aidensAskSql()} AND ${inLiveProject('asks.project_id')}` +
         ` AND (session_id = ?` +
         ` OR (node_id IN (SELECT id FROM nodes WHERE driver_session_id = ?) AND node_id = (SELECT focus_node_id FROM sessions WHERE id = ?)` +
         ` AND session_id IS NOT NULL AND session_id != ?` +

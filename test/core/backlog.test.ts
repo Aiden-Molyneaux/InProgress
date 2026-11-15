@@ -15,7 +15,7 @@ function s(id: string, o: Partial<Session> = {}): Session {
 }
 function input(nodes: TreeNode[], queue: { nodeId: number; sessionId: string | null }[] = [], sessions: Session[] = []): BoardInput {
   return {
-    project: { id: 1, slug: 'p', name: 'P', description: '', playbook: '', status: 'active', rootNodeId: 1, createdAt: T, updatedAt: T, queue, briefingMode: 'full', titleChannel: 'nudge' },
+    project: { id: 1, slug: 'p', name: 'P', description: '', playbook: '', status: 'active', rootNodeId: 1, createdAt: T, updatedAt: T, queue, briefingMode: 'full', titleChannel: 'nudge', lead: null, leadSeenAt: null, intent: '', intentUpdatedAt: null },
     nodes, sessions, pastSessions: [], resources: [], asks: [],
   };
 }

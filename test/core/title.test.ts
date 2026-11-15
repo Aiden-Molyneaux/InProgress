@@ -13,7 +13,7 @@ function s(o: Partial<Session> = {}): Session {
   return { id: 'sess', projectId: 1, title: null, cwd: null, branch: null, transcriptPath: null, state: 'idle', focusNodeId: 12, promptsSinceUpdate: 0, startedAt: T, lastSeenAt: T, lastPromptAt: null, endedAt: null, slot: 0, subagents: [], commands: [], role: 'worker', ...o } as Session;
 }
 function ask(id: number, o: Partial<Ask> = {}): Ask {
-  return { id, projectId: 1, nodeId: 12, kind: 'question', text: 'Q', sessionId: 'sess', raisedAt: T, clearedAt: null, clearedBy: null, answer: '', answerDeliveredAt: null, ...o };
+  return { id, projectId: 1, nodeId: 12, kind: 'question', text: 'Q', sessionId: 'sess', raisedAt: T, clearedAt: null, clearedBy: null, answer: '', answerDeliveredAt: null, owner: 'aiden', dueAt: null, answeredVia: null, ...o };
 }
 const agent = (o: Partial<SubagentInfo> = {}): SubagentInfo => ({
   agentId: 'x1', agentType: 'general-purpose', startedAt: MINS(1), runStartedAt: MINS(1), description: null, model: null, nodeId: null,

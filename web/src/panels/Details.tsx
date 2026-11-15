@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { commandShown } from '../../../src/core/activity';
 import { deriveBoard } from '../../../src/core/board';
 import { agentHome, agentVisible, atLimit, homedTrailAgents, isPaused, occupiedSteps } from '../../../src/core/layout';
+import { isAidens } from '../../../src/core/lead';
 import { buildIndex, isNeedsYou, shelvedIds } from '../../../src/core/tree';
 import { LABEL_GLYPHS, isReader, sessionDisplayTitle, type NodeDetail, type ProjectSnapshot, type TrailAgent, type TreeNode, type WorkItem } from '../../../src/core/types';
 import { AgentWords } from '../AgentWords';
@@ -203,7 +204,7 @@ function LiveWork({ nodeId, snapshot, live, now }: Pick<DetailsProps, 'nodeId' |
  */
 function AsksSection({ nodeId, snapshot, now }: { nodeId: number; snapshot: ProjectSnapshot; now: number }) {
   const here = snapshot.asks.filter((a) => a.nodeId === nodeId);
-  const open = here.filter((a) => a.clearedAt === null);
+  const open = here.filter((a) => a.clearedAt === null && isAidens(a));
   const answered = here.filter((a) => a.clearedAt !== null && a.answer !== '').sort((a, b) => b.clearedAt!.localeCompare(a.clearedAt!));
   if (open.length === 0 && answered.length === 0) return null;
   // An ask from before sessions were recorded has no session; one whose session ended names it from the past sessions.

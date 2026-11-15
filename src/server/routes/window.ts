@@ -9,9 +9,9 @@ import { deleteProject, listDeletedProjects, restoreProject } from '../project-l
 import { clearAsk } from '../repo/asks';
 import { recordQuiet } from '../repo/events';
 import { addNodes, applyRankOp, deleteNode, finishNode, labelNode, moveNode, parkNode, unparkNode } from '../repo/nodes';
-import { applyQueueOp, changeProject, getProjectById, isQueued, resolveProject } from '../repo/projects';
+import { applyQueueOp, changeProject, getProjectById, isQueued, resolveProject, setProjectLead } from '../repo/projects';
 import { shelvedAmong } from '../repo/shelved';
-import { idParam, sessionIdParam, windowClearBody, windowDoneBody, windowEventBody, windowLabelBody, windowMoveBody, windowNodeBody, windowParkBody, windowProjectBody, windowQueueBody, windowNodeParams, windowRankBody, windowRenameBody, windowUnparkBody, WINDOW_EVENT_KEYS } from '../schemas';
+import { idParam, sessionIdParam, windowClearBody, windowDoneBody, windowEventBody, windowLabelBody, windowLeadBody, windowMoveBody, windowNodeBody, windowParkBody, windowProjectBody, windowQueueBody, windowNodeParams, windowRankBody, windowRenameBody, windowUnparkBody, WINDOW_EVENT_KEYS } from '../schemas';
 
 /** Who the window's writes are recorded as: fixed here, never taken from a header. */
 const ACTOR = 'window';
@@ -97,6 +97,11 @@ export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: 
   app.post('/api/ui/projects/:id/rename', guarded, async (req) => {
     const { slug, name } = windowRenameBody.parse(req.body);
     return { project: changeProject(ctx, ACTOR, targetBySlug(req.params, slug), { name }).project };
+  });
+  // Gives the project a lead by name, or takes it away (null). The only way a lead is set: the CLI and MCP cannot.
+  app.post('/api/ui/projects/:id/lead', guarded, async (req) => {
+    const { slug, name } = windowLeadBody.parse(req.body);
+    return { project: setProjectLead(ctx, ACTOR, targetBySlug(req.params, slug), name) };
   });
   // One queue operation applied to the stored queue (spec 2.5), never the list the window last saw.
   app.post('/api/ui/projects/:id/queue', guarded, async (req) => {
