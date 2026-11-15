@@ -18,6 +18,20 @@ InProgress is what makes the lead trustworthy. It holds the record, decides who 
 mechanical act itself. The Bot reasons and talks. If the Bot is off, nothing on the board goes untrue: you lose the
 voice, not the picture.
 
+### 0.1 What InProgress is in this
+
+InProgress is the part with no model in it: the project's memory, its rulebook and its hands.
+
+- **It remembers.** Each step and its bar, each thread and what it waits on, each decision with Aiden's words, each
+  verdict, what landed.
+- **It rules.** What needs Aiden and what lands alone, who may approve what, how much may be in flight. Code checks
+  these where work lands.
+- **It acts.** It starts and messages threads, wakes the lead, raises Aiden's cards and writes the daily note.
+
+Everyone else thinks, or is a place. Aiden holds the intent. The lead talks, recommends and asks. The workers build
+and check. T3 Code is where threads run. The lead has no hand on the workers or on main. InProgress does not think,
+talk to Aiden, write code or judge code.
+
 ## 1. Intent and the why
 
 ### Aiden said
