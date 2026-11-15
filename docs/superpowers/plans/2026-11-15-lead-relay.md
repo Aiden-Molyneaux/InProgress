@@ -228,3 +228,31 @@ is newer or the state is `ok`.
 From the worktree: `npm run typecheck`, `npm test`, `npm run test:slow`, `npm run test:smoke`. All green. Report the
 files changed and the raw tail of each command. Do not commit. Stop and report, without guessing, if the code
 contradicts this plan.
+
+## Fixes after Murr (round 1, verdict SOUND: 0 blocker, 0 major, 3 minor)
+
+Built at 4fafc9b. Sigmund makes these inline, then reruns the four checks, then one proportional Murr.
+
+- **F1, a send that ran but printed something unreadable.** `src/server/t3.ts`, `call`: the two parse failures (not
+  JSON, wrong shape) carry `outcomeUnknown` true when the command is `start` or `send`: the CLI exited 0, so the
+  thread or message exists. `leadRelay` then logs `relay_unknown` and answers `RELAY_UNKNOWN`, never "Not
+  delivered". Test in `test/server/t3.test.ts`.
+- **F2, the CLI when the server goes away mid-send.** `src/cli/lead.ts`: for `relay`, any status-0 failure except
+  `ECONNREFUSED` prints the no-answer sentence and exits 1. The sentence becomes
+  `InProgress did not answer. The message may have been delivered: do not send it again.` and its constant is
+  `RELAY_NO_ANSWER` (was `RELAY_TIMEOUT`).
+- **F3, the log write after the send.** `src/server/lead-relay.ts`: the `write` is in a `try`; if it throws,
+  `console.error` one line and still answer by `kind`.
+- **F4, the flag only counts in a T3 session.** `src/server/session-flow.ts`: `relayed` is honoured only when
+  `(input.app ?? before.app) === 't3'`. A relay only ever reaches a T3 thread, so the header in any other session
+  was pasted by Aiden, and that is him typing.
+- **F5, tests.** The smoke test sets a lead on its project (a direct write to the scratch database) and asserts
+  `last_prompt_at` is unchanged after the relayed prompt, so it proves the built hook sends the flag. The
+  relayed-prompt test raises four asks, so the overflow line is covered. A tie in `at` picks the higher id in
+  `lastRelay`.
+- **Not fixed, named in the receipt:** no test creates a session by a relayed prompt (the code reads correctly);
+  `links.t3` is the newest relay only, by decision 6; the version 1 instructions block in the stage plan still
+  lacks `<project>` (#729 rewrites it).
+- **Still to prove with the real send:** that T3 Code hands the text to the prompt hook with the header first.
+  The installed hooks are the old build until the deploy, so `lastPromptAt` and the `Relayed:` line can only be
+  seen on the live record after it.
