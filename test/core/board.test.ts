@@ -13,11 +13,11 @@ function s(id: string, o: Partial<Session> = {}): Session {
   return { id, projectId: 1, title: id, cwd: null, branch: null, transcriptPath: null, state: 'working', focusNodeId: null, promptsSinceUpdate: 0, startedAt: T, lastSeenAt: T, lastPromptAt: null, endedAt: null, slot: 0, subagents: [], commands: [], role: 'worker', titleAsked: null, app: 'cli', t3ThreadId: null, ...o };
 }
 function ask(id: number, nodeId: number, o: Partial<Ask> = {}): Ask {
-  return { id, projectId: 1, nodeId, kind: 'question', text: 'Q', sessionId: null, raisedAt: T, clearedAt: null, clearedBy: null, answer: '', answerDeliveredAt: null, ...o };
+  return { id, projectId: 1, nodeId, kind: 'question', text: 'Q', sessionId: null, raisedAt: T, clearedAt: null, clearedBy: null, answer: '', answerDeliveredAt: null, owner: 'aiden', dueAt: null, answeredVia: null, ...o };
 }
 function input(o: Partial<BoardInput> & { queue?: { nodeId: number; sessionId: string | null }[] }): BoardInput {
   return {
-    project: { id: 1, slug: 'p', name: 'P', description: '', playbook: '', status: 'active', rootNodeId: 1, createdAt: T, updatedAt: T, queue: o.queue ?? [], briefingMode: 'full', titleChannel: 'nudge' },
+    project: { id: 1, slug: 'p', name: 'P', description: '', playbook: '', status: 'active', rootNodeId: 1, createdAt: T, updatedAt: T, queue: o.queue ?? [], briefingMode: 'full', titleChannel: 'nudge', lead: null, leadSeenAt: null, intent: '', intentUpdatedAt: null },
     nodes: o.nodes ?? [n(1, null)], sessions: o.sessions ?? [], pastSessions: o.pastSessions ?? [], resources: o.resources ?? [], asks: o.asks ?? [],
   };
 }

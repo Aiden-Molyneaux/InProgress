@@ -220,7 +220,7 @@ const clock = (iso: string): string => {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 
-const clip = (text: string, max = TEXT_MAX): string => clipLine(text, max);
+export const clip = (text: string, max = TEXT_MAX): string => clipLine(text, max);
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
 /** Sessions that ended without a handoff. */

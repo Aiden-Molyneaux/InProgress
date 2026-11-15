@@ -383,6 +383,26 @@ export const MIGRATIONS: string[] = [
   -- works.
   INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
   `,
+  // 20: the project lead (#725, spec 2026-11-14-project-lead-design.md). projects.lead: the lead's name, NULL for none;
+  // lead_seen_at: when the lead last marked a brief as read; intent: the intent record, Markdown, with intent_updated_at.
+  // asks.owner: aiden or lead (a promise the lead made); due_at: when a lead-owned ask is due; answered_via: lead when the
+  // lead carried Aiden's words. lead_events: what the lead did, one line each, with the instructions version it held.
+  `
+  ALTER TABLE projects ADD COLUMN lead TEXT;
+  ALTER TABLE projects ADD COLUMN lead_seen_at TEXT;
+  ALTER TABLE projects ADD COLUMN intent TEXT NOT NULL DEFAULT '';
+  ALTER TABLE projects ADD COLUMN intent_updated_at TEXT;
+  ALTER TABLE asks ADD COLUMN owner TEXT NOT NULL DEFAULT 'aiden';
+  ALTER TABLE asks ADD COLUMN due_at TEXT;
+  ALTER TABLE asks ADD COLUMN answered_via TEXT;
+  CREATE TABLE lead_events (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id),
+    at TEXT NOT NULL, lead TEXT NOT NULL, instructions INTEGER NOT NULL, kind TEXT NOT NULL, node_id INTEGER,
+    ask_id INTEGER, session_id TEXT, text TEXT NOT NULL DEFAULT '', aiden_words TEXT);
+  CREATE INDEX lead_events_project_at ON lead_events (project_id, at);
+  -- Defaulted and nullable columns and a new table: v1 to v19 builds can still read and write this schema, so a rollback
+  -- across it works.
+  INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+  `,
 ];
 
 /**

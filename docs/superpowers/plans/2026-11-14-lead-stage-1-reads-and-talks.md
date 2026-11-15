@@ -121,7 +121,7 @@ export function markLeadSeen(ctx: Ctx, ref: string, now: Date): void;
 export function logLeadEvent(ctx: Ctx, e: { projectId: number; lead: string; instructions: number; kind: LeadEventKind; nodeId?: number; askId?: number; sessionId?: string; text?: string; aidenWords?: string }): void;
 ```
 
-- Routes, behind the same token guard as the other API routes: `GET /api/lead/:ref/brief?as=&instructions=&mark=`
+- Routes, unguarded like every other read (the window has no bearer token): `GET /api/lead/:ref/brief?as=&instructions=&mark=`
   returns `{ brief, text }`; `GET /api/lead/:ref/events` returns the last 100 `lead_events`, newest first. With
   `as`, the brief route calls `requireLead`, so a Bot cannot read a project it does not lead. Without `as` it
   answers the window: no lead check, and it never marks.
@@ -278,7 +278,7 @@ the header above, and the lead's log shows it.
 - Produces: a sixth view, `lead` (rail code `LED`, label `Lead`), built the way `web/src/docs/DocsView.tsx` is. It
   shows the brief's sections in the brief's order, then the lead's log. It never marks the brief as read.
 - A project action, `Lead…`, sets or clears the project's lead through
-  `POST /api/window/projects/:slug/lead` with `{ name: string | null }`, behind the same guard as archive. A name is
+  `POST /api/ui/projects/:id/lead` with `name: string | null` in its body, written like the rename route beside it. A name is
   1 to 40 characters.
 - With no lead, the view still shows the brief, under one line: `No lead. Give this project one from its actions.`
 

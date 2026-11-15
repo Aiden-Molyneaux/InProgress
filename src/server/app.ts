@@ -8,6 +8,7 @@ import { ApiError } from './errors';
 import type { DesktopSession, OpenDesktopResult } from './open-desktop';
 import { registerAskRoutes } from './routes/asks';
 import { registerBackupRoutes } from './routes/backups';
+import { registerLeadRoutes } from './routes/lead';
 import { registerReadRoutes } from './routes/read';
 import { registerSessionRoutes } from './routes/sessions';
 import { registerSse } from './routes/sse';
@@ -116,6 +117,7 @@ export function buildApp(opts: AppOptions): FastifyInstance {
   registerWriteRoutes(app, opts.ctx, requireToken);
   registerSessionRoutes(app, opts.ctx, requireToken);
   registerAskRoutes(app, opts.ctx, requireToken);
+  registerLeadRoutes(app, opts.ctx);
   registerSse(app, opts.ctx);
   registerWindowRoutes(app, opts.ctx, requireUi, opts.openDesktop);
   registerUi(app, opts, requireToken, requireUi);

@@ -1,3 +1,4 @@
+import type { AskOwner } from '../../core/lead';
 import { ASK_KINDS, ASK_TRAIL_MS, STALE_SESSION_MS, type Ask, type AskKind } from '../../core/types';
 import { msAgo, write, type Ctx, type RecordEvent } from '../db/tx';
 import { badRequest, notFound } from '../errors';
@@ -10,6 +11,10 @@ export interface RaiseAskInput {
   kind: AskKind;
   text: string;
   sessionId?: string | null;
+  /** Who the ask is for; omitted: Aiden. */
+  owner?: AskOwner;
+  /** When a lead-owned ask is due (ISO); omitted: no time. */
+  dueAt?: string | null;
 }
 
 interface AskRow {
@@ -24,6 +29,10 @@ interface AskRow {
   cleared_by: string | null;
   answer: string;
   answer_delivered_at: string | null;
+  /** Migration 20. */
+  owner: string;
+  due_at: string | null;
+  answered_via: string | null;
 }
 
 const toAsk = (r: AskRow): Ask => ({
@@ -38,6 +47,10 @@ const toAsk = (r: AskRow): Ask => ({
   clearedBy: r.cleared_by,
   answer: r.answer,
   answerDeliveredAt: r.answer_delivered_at,
+  // An owner this build does not know reads as Aiden's, so the ask is never hidden from him.
+  owner: r.owner === 'lead' ? 'lead' : 'aiden',
+  dueAt: r.due_at,
+  answeredVia: r.answered_via,
 });
 
 const getRow = (ctx: Ctx, id: number) =>
@@ -80,8 +93,8 @@ export function raiseAskDetailed(ctx: Ctx, actor: string, input: RaiseAskInput):
     // The column references sessions(id): a session id InProgress does not track is stored as no session.
     const tracked = input.sessionId ? ctx.db.prepare('SELECT 1 FROM sessions WHERE id = ?').get(input.sessionId) !== undefined : false;
     const info = ctx.db
-      .prepare('INSERT INTO asks (project_id, node_id, kind, text, session_id, raised_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING')
-      .run(node.projectId, node.id, input.kind, text, tracked ? input.sessionId : null, ctx.now());
+      .prepare('INSERT INTO asks (project_id, node_id, kind, text, session_id, raised_at, owner, due_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING')
+      .run(node.projectId, node.id, input.kind, text, tracked ? input.sessionId : null, ctx.now(), input.owner ?? 'aiden', input.dueAt ?? null);
     let row = ctx.db.prepare('SELECT * FROM asks WHERE node_id = ? AND kind = ? AND text = ? AND cleared_at IS NULL').get(node.id, input.kind, text) as AskRow;
     // A session that asks again after a real prompt (Aiden answered in its chat, #522) is asking anew: the joined ask's
     // age restarts, or the Board would still read it as answered in chat. A re-raise before any prompt keeps its age.

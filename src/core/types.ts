@@ -1,3 +1,4 @@
+import type { AskOwner } from './lead';
 import type { SessionApp } from './session-app';
 import type { TaskState } from './taskState';
 
@@ -81,6 +82,12 @@ export interface Ask {
   clearedBy: string | null;
   answer: string;
   answerDeliveredAt: string | null;
+  /** Who the ask is for (migration 20): Aiden, or the lead, whose promise it is. */
+  owner: AskOwner;
+  /** When a lead-owned ask is due; null for Aiden's asks and for a promise with no time. */
+  dueAt: string | null;
+  /** 'lead' when the lead carried Aiden's words as the answer; null otherwise. */
+  answeredVia: string | null;
 }
 /** "a7": how sessions, the briefing and the window name an ask. */
 export const askTag = (id: number): string => `a${id}`;
@@ -120,6 +127,13 @@ export interface Project {
   queue: QueueEntry[];
   briefingMode: BriefingMode;
   titleChannel: TitleChannel;
+  /** The project's lead, by name (migration 20); null when it has none. Only the window sets it. */
+  lead: string | null;
+  /** When the lead last marked a brief as read; null until it does. */
+  leadSeenAt: string | null;
+  /** The intent record, Markdown; '' until one is written. */
+  intent: string;
+  intentUpdatedAt: string | null;
 }
 
 /**

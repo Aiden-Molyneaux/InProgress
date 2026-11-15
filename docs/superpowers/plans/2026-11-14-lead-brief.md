@@ -26,7 +26,7 @@ you". C4, after the gate: Aiden asks Progresser "where are we" and gets the brie
 3. **Setting a lead.** `setProjectLead(ctx: Ctx, actor: string, ref: string, name: string | null): Project` in
    `src/server/repo/projects.ts`: trims the name, 1 to 40 characters or `null`, writes `projects.lead`, and records
    the change the way `updateProject` records one. The only route that calls it is
-   `POST /api/window/projects/:slug/lead` with `{ name: string | null }` in `src/server/routes/window.ts`, behind
+   `POST /api/ui/projects/:id/lead` (body `name: string | null`) in `src/server/routes/window.ts`, written like the rename route beside it, behind
    the same guard as that file's archive route. The CLI and the MCP server get no way to call it.
 4. **One place hides a lead-owned ask from the board.** In `deriveBoard` (`src/core/board.ts:126-127`) the
    `openAsks` map is built from asks with `clearedAt === null` and `owner !== 'lead'`. That keeps them out of

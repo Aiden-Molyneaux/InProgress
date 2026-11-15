@@ -120,7 +120,10 @@ work. A re-hit bumps **Hits** and **Verified**. Entries seeded from the code and
   `ENOTEMPTY: directory not empty, rmdir '...\Temp\ip-open-desktop-<id>\sessions-8\account-uuid\org-uuid'`; all 1760
   tests passed, 1 of 96 files failed. A rerun of the deploy was green. So at least one cause is a Windows temp-folder
   removal racing a handle still open on it during a file's cleanup.
-- **Verified:** 2026-10-20 · **Hits:** 2
+- **Third hit (2026-11-14, #724, inside `npm run deploy`):** `test/cli/claude-config.test.ts` failed at file level with
+  `ENOTEMPTY: directory not empty, rmdir '...Tempip-repo-<id>claudemodsinprogress-step.claude-plugin'`; all 1990
+  tests passed, 1 of 116 files failed. The merge was docs only. A rerun of the deploy was green.
+- **Verified:** 2026-11-14 · **Hits:** 3
 
 ## Global git hooks make the page-repo e2e tests time out
 
