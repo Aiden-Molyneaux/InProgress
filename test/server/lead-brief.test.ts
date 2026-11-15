@@ -110,6 +110,12 @@ describe('readLeadBrief: the T3 link', () => {
     expect(brief().links).toMatchObject({ t3: 'unavailable', t3At: failedAt });
     log(project.id, 'relay_unknown');
     expect(brief().links.t3).toBe('unavailable');
+    // Two events at the same instant: the one logged later is the newest.
+    const at = '2099-01-01T00:00:00.000Z';
+    const insert = ctx.db.prepare("INSERT INTO lead_events (project_id, at, lead, instructions, kind, text) VALUES (?, ?, 'Progresser', 1, ?, 'hi')");
+    insert.run(project.id, at, 'relay_failed');
+    insert.run(project.id, at, 'relay');
+    expect(brief().links).toMatchObject({ t3: 'ok', t3At: at });
   });
 });
 

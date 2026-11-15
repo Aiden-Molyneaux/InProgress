@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { runCli } from '../../src/cli/commands';
-import { LEAD_TIMEOUT, LEAD_USAGE, RELAY_TIMEOUT, RELAY_TIMEOUT_MS, runLead } from '../../src/cli/lead';
+import { LEAD_TIMEOUT, LEAD_USAGE, RELAY_NO_ANSWER, RELAY_TIMEOUT_MS, runLead } from '../../src/cli/lead';
 import { TASKS_NOT_RUNNING_HINT } from '../../src/cli/tasks';
 import { ApiClientError } from '../../src/lib/client';
 import { ensureToken } from '../../src/lib/home';
@@ -362,18 +362,35 @@ describe('inprogress lead relay', () => {
     expect(missing.lines.at(-1)).toBe(LEAD_USAGE);
   });
 
-  it('says on its own timeout that the message may have been delivered, and exits 1', async () => {
+  it('says the message may have been delivered when no answer comes back, and exits 1', async () => {
     const timeout = Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+    // The server went away mid-send (a restart): the request had arrived, so the send may have happened.
+    const reset = Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } });
+    for (const failure of [timeout, reset]) {
+      stubbed(async () => {
+        throw failure;
+      });
+      try {
+        expect(await run(['relay', 'inprogress', '42', 'hi', ...WHO]), failure.message).toEqual({ code: 1, lines: [RELAY_NO_ANSWER], reads: 0 });
+      } finally {
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+      }
+    }
+    expect(RELAY_NO_ANSWER).toBe('InProgress did not answer. The message may have been delivered: do not send it again.');
+  });
+
+  it('rethrows a refused connection: the relay never arrived', async () => {
+    const refused = Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } });
     stubbed(async () => {
-      throw timeout;
+      throw refused;
     });
     try {
-      expect(await run(['relay', 'inprogress', '42', 'hi', ...WHO])).toEqual({ code: 1, lines: [RELAY_TIMEOUT], reads: 0 });
+      await expect(run(['relay', 'inprogress', '42', 'hi', ...WHO])).rejects.toMatchObject({ status: 0, code: 'ECONNREFUSED' });
     } finally {
       vi.unstubAllGlobals();
       vi.restoreAllMocks();
     }
-    expect(RELAY_TIMEOUT).toBe('InProgress did not answer in time. The message may have been delivered: do not send it again.');
   });
 
   it("prints the server's refusal and exits 1", async () => {

@@ -30,7 +30,8 @@ export interface T3Message {
 export class T3Timeout extends Error {}
 export class T3Unavailable extends Error {
   /**
-   * True when a start or a send timed out: the thread, or the message, may exist, so a caller must not retry blindly.
+   * True when a start or a send timed out, or exited 0 and printed something unreadable: the thread, or the message, may
+   * exist, so a caller must not retry blindly.
    */
   readonly outcomeUnknown: boolean;
   constructor(message: string, outcomeUnknown = false) {
@@ -145,21 +146,23 @@ async function call<S extends z.ZodTypeAny>(schema: S, args: string[], timeoutMs
   const cli = o.cliPath ?? t3CliPath();
   if (UNSAFE.test(cli)) throw new T3Unavailable('the t3 CLI path holds a character that cannot go on a command line');
   const line = t3CommandLine(cli, args, o.platform ?? process.platform);
+  // A start or a send changes something in T3 Code: when it may have run, the caller is told the outcome is unknown.
+  const changes = args[1] === 'start' || args[1] === 'send';
   let out: string;
   try {
     out = await run(line.file, line.args, { timeoutMs, verbatim: line.verbatim, ...(input !== undefined ? { input } : {}) });
   } catch (err) {
-    const unknown = err instanceof T3Timeout && (args[1] === 'start' || args[1] === 'send');
-    throw new T3Unavailable(`t3 ${args.slice(0, 2).join(' ')} failed: ${err instanceof Error ? err.message : String(err)}`, unknown);
+    throw new T3Unavailable(`t3 ${args.slice(0, 2).join(' ')} failed: ${err instanceof Error ? err.message : String(err)}`, changes && err instanceof T3Timeout);
   }
+  // Past this point the CLI exited 0: a start or a send it printed unreadably has still happened.
   let json: unknown;
   try {
     json = JSON.parse(out);
   } catch (err) {
-    throw new T3Unavailable(`t3 ${args.slice(0, 2).join(' ')} printed text that is not JSON: ${err instanceof Error ? err.message : String(err)}`);
+    throw new T3Unavailable(`t3 ${args.slice(0, 2).join(' ')} printed text that is not JSON: ${err instanceof Error ? err.message : String(err)}`, changes);
   }
   const parsed = schema.safeParse(json);
-  if (!parsed.success) throw new T3Unavailable(`t3 ${args.slice(0, 2).join(' ')} printed JSON of an unexpected shape: ${parsed.error.issues[0]?.message ?? 'invalid'}`);
+  if (!parsed.success) throw new T3Unavailable(`t3 ${args.slice(0, 2).join(' ')} printed JSON of an unexpected shape: ${parsed.error.issues[0]?.message ?? 'invalid'}`, changes);
   return parsed.data;
 }
 

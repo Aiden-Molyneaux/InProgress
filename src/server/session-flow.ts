@@ -147,7 +147,8 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
     }
     const now = ctx.now();
     const next: Session = { ...before, lastSeenAt: now };
-    if (input.event === 'prompt' && input.relayed === true && input.notice !== true) {
+    // A relay only ever reaches a T3 Code thread: the header in any other session was pasted by Aiden, and that is him typing.
+    if (input.event === 'prompt' && input.relayed === true && input.notice !== true && (input.app ?? before.app) === 't3') {
       const lead = before.projectId === null ? null : (getProjectById(ctx, before.projectId)?.lead ?? null);
       if (lead?.trim()) relayedBy = lead;
     }

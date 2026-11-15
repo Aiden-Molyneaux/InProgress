@@ -16,25 +16,28 @@ const REMINDER = 'If this prompt answers it';
  * A project (led by Progresser unless `lead` is null) with a step that session s1 claimed, a prompt typed on it, then an
  * open question s1 raised there.
  */
-function setup(lead: string | null = 'Progresser') {
+function setup(lead: string | null = 'Progresser', app: 't3' | 'cli' = 't3') {
   const ctx = makeCtx();
   const project = createProject(ctx, 'test', { name: 'InGame' });
   addBinding(ctx, 'test', project.slug, BOUND);
   const [step] = addNodes(ctx, 'test', { parentId: project.rootNodeId, nodes: [{ title: 'Play app signing', status: 'active' }] });
   if (lead !== null) setProjectLead(ctx, 'window', project.slug, lead);
-  handleHookEvent(ctx, 's1', { event: 'start', source: 'startup', cwd: BOUND });
+  // A relay only reaches a T3 Code thread, so the session is one unless a test says otherwise.
+  handleHookEvent(ctx, 's1', { event: 'start', source: 'startup', cwd: BOUND, ...(app === 't3' ? { app: 't3' as const, t3ThreadId: 'mcp:abc' } : {}) });
   claimStep(ctx, 'session:s1', 's1', step.id);
   handleHookEvent(ctx, 's1', { event: 'prompt', cwd: BOUND });
   const ask = raiseAsk(ctx, 'session:s1', { nodeId: step.id, kind: 'question', text: 'Which keystore?', sessionId: 's1' });
   const session = () => findSession(ctx, 's1')!;
   const row = () => deriveBoard(getProjectSnapshot(ctx, project.id), Date.parse(ctx.now())).byId.get(step.id)!;
-  const prompt = (extra: { relayed?: boolean; notice?: boolean } = {}, id = 's1') => handleHookEvent(ctx, id, { event: 'prompt', cwd: BOUND, ...extra }).context ?? '';
+  const prompt = (extra: { relayed?: boolean; notice?: boolean; app?: 't3'; t3ThreadId?: string } = {}, id = 's1') => handleHookEvent(ctx, id, { event: 'prompt', cwd: BOUND, ...extra }).context ?? '';
   return { ctx, project, step, ask, session, row, prompt };
 }
 
 describe('a relayed prompt', () => {
   it('is not Aiden typing: lastPromptAt stays, the ask stays waiting, and the Relayed line replaces the reminder', () => {
     const t = setup();
+    // Four open asks, so a typed prompt would print three reminders and the overflow line.
+    for (const text of ['Second?', 'Third?', 'Fourth?']) raiseAsk(t.ctx, 'session:s1', { nodeId: t.step.id, kind: 'question', text, sessionId: 's1' });
     const before = t.session();
     expect(before.lastPromptAt).not.toBeNull();
     const context = t.prompt({ relayed: true });
@@ -47,8 +50,21 @@ describe('a relayed prompt', () => {
     expect(lines.some((l) => l.includes(REMINDER))).toBe(false);
     expect(context).not.toContain('more open asks');
     const row = t.row();
-    expect(row.waiting.map((a) => a.id)).toEqual([t.ask.id]);
+    expect(row.waiting).toHaveLength(4);
     expect(row.marks).not.toContain('answered_in_chat');
+    // The contrast: the next typed prompt prints both.
+    const typed = t.prompt();
+    expect(typed).toContain(REMINDER);
+    expect(typed).toContain('+1 more open asks');
+  });
+
+  it('counts as Aiden typing in a session that is not in T3 Code: he pasted it', () => {
+    const t = setup('Progresser', 'cli');
+    const before = t.session();
+    const context = t.prompt({ relayed: true });
+    expect(t.session().lastPromptAt).not.toBe(before.lastPromptAt);
+    expect(context).not.toContain('Relayed:');
+    expect(context).toContain(REMINDER);
   });
 
   it('differs from a typed one, which moves lastPromptAt, prints the reminder and marks the ask answered in chat', () => {
@@ -96,7 +112,8 @@ describe('a relayed prompt', () => {
     const t = setup();
     enrollSession(t.ctx, 'scribe:s2', 's2', t.project.slug);
     expect(briefingDue(t.ctx, 's2')).toBe(true);
-    const context = t.prompt({ relayed: true }, 's2');
+    // An enrolled session has no app on record yet: the prompt's own hook names T3 Code.
+    const context = t.prompt({ relayed: true, app: 't3', t3ThreadId: 'mcp:s2' }, 's2');
     expect(briefingDue(t.ctx, 's2')).toBe(false);
     const lines = context.split('\n');
     expect(lines[0]).toBe(relayedLine('Progresser'));

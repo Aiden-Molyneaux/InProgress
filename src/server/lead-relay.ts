@@ -65,7 +65,12 @@ export async function leadRelay(
       console.error(`InProgress: a relay to session ${session.id} was not delivered: ${reason}`);
     }
   }
-  write(ctx, actor, () => logLeadEvent(ctx, { projectId: project.id, lead: name, instructions, kind, nodeId: node.id, sessionId: session.id, text: input.message }));
+  try {
+    write(ctx, actor, () => logLeadEvent(ctx, { projectId: project.id, lead: name, instructions, kind, nodeId: node.id, sessionId: session.id, text: input.message }));
+  } catch (err) {
+    // The send has happened (or not) whatever the log says: the lead is still told which.
+    console.error(`InProgress: a relay to session ${session.id} (${kind}) could not be logged: ${reasonOf(err)}`);
+  }
   if (kind === 'relay_unknown') throw badGateway(RELAY_UNKNOWN);
   if (kind === 'relay_failed') throw badGateway(`Not delivered: ${reason}.`);
   return { text: `Delivered to "${clipLine(sessionDisplayTitle(session), 60)}".`, sessionId: session.id };

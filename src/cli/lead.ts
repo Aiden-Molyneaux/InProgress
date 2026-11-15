@@ -21,7 +21,7 @@ export const LEAD_TIMEOUT = 'InProgress did not answer in time. The command may 
 /** How long a relay waits for the server: longer than the server's own wait on the t3 CLI's send (60 s). */
 export const RELAY_TIMEOUT_MS = 75_000;
 /** What a relay prints when the server did not answer in time: the message may be in the thread already. */
-export const RELAY_TIMEOUT = 'InProgress did not answer in time. The message may have been delivered: do not send it again.';
+export const RELAY_NO_ANSWER = 'InProgress did not answer. The message may have been delivered: do not send it again.';
 
 interface Conn {
   baseUrl: string;
@@ -187,7 +187,7 @@ function draft(command: string, p: Parsed): Draft {
  * its sentence and exits 1. The lead is how Aiden reaches a project, so unlike claim and ask a stopped server is started
  * first (`bringUp`), once the arguments are good; one that will not start prints why and exits 1. Without `bringUp`,
  * nothing answering is rethrown with a hint, except that a write command that timed out prints LEAD_TIMEOUT and exits 1. A
- * relay waits RELAY_TIMEOUT_MS, as the server waits on the t3 CLI, and its own timeout prints RELAY_TIMEOUT.
+ * relay waits RELAY_TIMEOUT_MS, as the server waits on the t3 CLI, and when no answer comes back (its own timeout, or the server going away mid-send) it prints RELAY_NO_ANSWER.
  */
 export async function runLead(args: string[], out: (line: string) => void, o: Conn, io: LeadIo = REAL_IO): Promise<number> {
   const usage = (why?: string): number => {
@@ -242,8 +242,11 @@ export async function runLead(args: string[], out: (line: string) => void, o: Co
   } catch (err) {
     // A write that timed out may have been carried out after all: say so, so the lead reads the brief before trying again,
     // and does not send a relay twice.
-    if (payload !== undefined && err instanceof ApiClientError && err.status === 0 && err.code === 'TIMEOUT') {
-      out(command === 'relay' ? RELAY_TIMEOUT : LEAD_TIMEOUT);
+    // A relay whose request reached the server may have been sent even when the answer never came back (a timeout, or a
+    // server restarted mid-send): only a refused connection means it never arrived.
+    const noAnswer = err instanceof ApiClientError && err.status === 0 && (err.code === 'TIMEOUT' || (command === 'relay' && err.code !== 'ECONNREFUSED'));
+    if (payload !== undefined && noAnswer) {
+      out(command === 'relay' ? RELAY_NO_ANSWER : LEAD_TIMEOUT);
       return 1;
     }
     if (err instanceof ApiClientError && err.status === 0) throw new ApiClientError(0, err.message, TASKS_NOT_RUNNING_HINT, err.code);
