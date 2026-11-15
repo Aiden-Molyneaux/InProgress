@@ -123,7 +123,14 @@ work. A re-hit bumps **Hits** and **Verified**. Entries seeded from the code and
 - **Third hit (2026-11-14, #724, inside `npm run deploy`):** `test/cli/claude-config.test.ts` failed at file level with
   `ENOTEMPTY: directory not empty, rmdir '...Tempip-repo-<id>claudemodsinprogress-step.claude-plugin'`; all 1990
   tests passed, 1 of 116 files failed. The merge was docs only. A rerun of the deploy was green.
-- **Verified:** 2026-11-14 · **Hits:** 3
+- **Fourth hit (2026-11-15, #725, inside `npm run deploy`):** `test/desktop/logic.test.ts` failed at file level, in its
+  `afterAll`, with `ENOTEMPTY: directory not empty, rmdir '...\Temp\ip-desktop-<id>'`; all 2057 tests passed, 1 of 122
+  files failed. The folder was still there afterwards, and empty: its one file, a zero-byte `node-stand-in.exe`, went
+  only after the `rmdir` had failed. That is a Windows pending delete: a handle was still open on the file (who held it
+  is not proven; a scan of a new `.exe` is the likely holder), so its removal finished late. `rmSync` retries
+  `ENOTEMPTY` only when `maxRetries` is set, and the teardowns leave it at 0. Candidate fix (proposed, not built): one
+  shared teardown helper that removes a temp folder with `maxRetries`.
+- **Verified:** 2026-11-15 · **Hits:** 4
 
 ## Global git hooks make the page-repo e2e tests time out
 
