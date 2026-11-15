@@ -2,6 +2,7 @@ import { ancestors, buildIndex, kids } from '../core/tree';
 import { sessionActivity } from '../core/activity';
 import { deriveBoard } from '../core/board';
 import { isAidens } from '../core/lead';
+import { leadBriefingLine } from '../core/relay';
 import { clipLine } from '../core/step-ref';
 import { ASK_GLYPHS, askTag, glyphTitle, sessionDisplayTitle, type ProjectSnapshot, type Session, type TreeNode } from '../core/types';
 import { claimCommand } from '../lib/task-command';
@@ -85,9 +86,12 @@ export function unclaimedLines(snapshot: ProjectSnapshot, session: Session, now:
 
 /** A worker's briefing in a scoped project, once it has claimed a step. */
 export function renderWorkerBriefing(snapshot: ProjectSnapshot, session: Session, now: number, cli?: string): string {
+  // In a project with a lead, the worker learns its name and how to tell its messages from Aiden's.
+  const lead = snapshot.project.lead;
   const lines = [
     headerLine(snapshot, session.id),
     `Role: worker on #${session.focusNodeId}.`,
+    ...(lead?.trim() ? [leadBriefingLine(lead)] : []),
     PLAN_EDIT_LINE,
     ...playbookLines(snapshot),
     ...updateRules({ sessionId: session.id, cli, mode: { scoped: true, orchestrator: false } }),

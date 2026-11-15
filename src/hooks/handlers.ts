@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { appOf } from '../core/session-app';
 import { ID_MAX, TASK_ID_MAX, noticeTasks, text } from '../core/notices';
+import { RELAYED } from '../core/relay';
 import type { TitleDemand } from '../core/title';
 import { SCRIBE_AGENT, WORK_STATUSES, type HookEvent } from '../core/types';
 import { detectBranch } from '../lib/git';
@@ -132,7 +133,8 @@ export function readPrompt(raw: string): PromptReading {
   const reading: PromptReading = { notice, typed: notice ? '' : rest, noticeReminders };
   if (!notice) {
     if (rest.trim()) {
-      if (MARKUP_OPENING.test(rest)) reading.unknownOpening = rest.trimStart();
+      // A relay header opens with a bracket and is a known format: nothing to record.
+      if (MARKUP_OPENING.test(rest) && !RELAYED.test(rest)) reading.unknownOpening = rest.trimStart();
     } else if (first !== undefined) {
       reading.unknownOpening = `<system-reminder> ${first.trimStart()}`;
     }
@@ -181,6 +183,7 @@ export function buildHookBody(name: Exclude<HookName, ToolHookName>, input: Hook
     // normal prompt's body stays exactly what an older server accepts.
     const { notice, typed, noticeReminders } = readPrompt(raw);
     if (notice) body.notice = true;
+    if (!notice && RELAYED.test(typed)) body.relayed = true;
     // Only the typed text counts: the reminders' words are not Aiden's.
     const prompt = stripPasted(typed);
     body.mentionsInProgress = MENTIONS.test(prompt);

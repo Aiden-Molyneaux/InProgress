@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { runCli } from '../../src/cli/commands';
-import { LEAD_TIMEOUT, LEAD_USAGE, runLead } from '../../src/cli/lead';
+import { LEAD_TIMEOUT, LEAD_USAGE, RELAY_NO_ANSWER, RELAY_TIMEOUT_MS, runLead } from '../../src/cli/lead';
 import { TASKS_NOT_RUNNING_HINT } from '../../src/cli/tasks';
 import { ApiClientError } from '../../src/lib/client';
 import { ensureToken } from '../../src/lib/home';
@@ -290,9 +290,116 @@ describe("inprogress lead's commands", () => {
     });
   });
 
-  it('lists brief and the six commands in the usage, one line each', () => {
+  it('lists brief and the seven commands in the usage, one line each', () => {
     const lines = LEAD_USAGE.split('\n');
-    expect(lines).toHaveLength(8);
-    expect(lines.slice(1).map((l) => l.trim().split(' ')[2])).toEqual(['brief', 'answer', 'park', 'drop', 'promise', 'kept', 'intent']);
+    expect(lines).toHaveLength(9);
+    expect(lines.slice(1).map((l) => l.trim().split(' ')[2])).toEqual(['brief', 'answer', 'park', 'drop', 'promise', 'kept', 'intent', 'relay']);
+    expect(lines[8]).toBe('  inprogress lead relay <project> <step id> <message | -> --as <name> --instructions <n>');
+  });
+});
+
+describe('inprogress lead relay', () => {
+  const WHO = ['--as', 'Progresser', '--instructions', '1'];
+  type Sent = { url: string; body: unknown; timeoutMs: number | undefined };
+  /** Stubs fetch to answer `text` and records what was posted, with the timeout the client asked for. */
+  function stubbed(answer: () => Promise<Response>): Sent[] {
+    const sent: Sent[] = [];
+    let timeoutMs: number | undefined;
+    const real = AbortSignal.timeout.bind(AbortSignal);
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms: number) => {
+      timeoutMs = ms;
+      return real(ms);
+    });
+    vi.stubGlobal('fetch', async (url: string, init: { body?: string }) => {
+      sent.push({ url, body: init.body === undefined ? undefined : JSON.parse(init.body), timeoutMs });
+      return answer();
+    });
+    return sent;
+  }
+  const delivered = async () => new Response(JSON.stringify({ text: 'Delivered to "Signing work".', sessionId: 's1' }), { status: 200, headers: { 'content-type': 'application/json' } });
+  const run = async (args: string[], stdin = '') => {
+    const c = capture();
+    let reads = 0;
+    const code = await runLead(args, c.out, conn, { stdin: async () => (reads++, stdin), readFile: () => '' });
+    return { code, lines: c.lines, reads };
+  };
+
+  it('posts the step and the message to the relay route, waiting RELAY_TIMEOUT_MS, and prints the sentence', async () => {
+    const sent = stubbed(delivered);
+    try {
+      expect(await run(['relay', 'inprogress', '42', 'hi', ...WHO])).toEqual({ code: 0, lines: ['Delivered to "Signing work".'], reads: 0 });
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+    expect(sent).toEqual([{ url: `${conn.baseUrl}/api/lead/inprogress/relay`, body: { as: 'Progresser', instructions: 1, stepId: 42, message: 'hi' }, timeoutMs: RELAY_TIMEOUT_MS }]);
+    expect(RELAY_TIMEOUT_MS).toBe(75_000);
+  });
+
+  it('sends what stdin held for -, with the step given as #42', async () => {
+    const sent = stubbed(delivered);
+    let res;
+    try {
+      res = await run(['relay', 'inprogress', '#42', '-', ...WHO], 'Use the release keystore.\n');
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+    expect(res).toMatchObject({ code: 0, reads: 1 });
+    expect(sent.map((s) => s.body)).toEqual([{ as: 'Progresser', instructions: 1, stepId: 42, message: 'Use the release keystore.\n' }]);
+  });
+
+  it('prints the not-a-step sentence and the usage for a step that is not one, reading no stdin', async () => {
+    for (const args of [
+      ['relay', 'inprogress', 'x', 'hi', ...WHO],
+      ['relay', 'inprogress', 'x', '-', ...WHO],
+    ]) {
+      const res = await run(args, 'words');
+      expect(res, args.join(' ')).toEqual({ code: 1, lines: ['x is not a step: give it as #42 or 42', LEAD_USAGE], reads: 0 });
+    }
+    const missing = await run(['relay', 'inprogress', '42', ...WHO]);
+    expect(missing.code).toBe(1);
+    expect(missing.lines.at(-1)).toBe(LEAD_USAGE);
+  });
+
+  it('says the message may have been delivered when no answer comes back, and exits 1', async () => {
+    const timeout = Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+    // The server went away mid-send (a restart): the request had arrived, so the send may have happened.
+    const reset = Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } });
+    for (const failure of [timeout, reset]) {
+      stubbed(async () => {
+        throw failure;
+      });
+      try {
+        expect(await run(['relay', 'inprogress', '42', 'hi', ...WHO]), failure.message).toEqual({ code: 1, lines: [RELAY_NO_ANSWER], reads: 0 });
+      } finally {
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+      }
+    }
+    expect(RELAY_NO_ANSWER).toBe('InProgress did not answer. The message may have been delivered: do not send it again.');
+  });
+
+  it('rethrows a refused connection: the relay never arrived', async () => {
+    const refused = Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } });
+    stubbed(async () => {
+      throw refused;
+    });
+    try {
+      await expect(run(['relay', 'inprogress', '42', 'hi', ...WHO])).rejects.toMatchObject({ status: 0, code: 'ECONNREFUSED' });
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("prints the server's refusal and exits 1", async () => {
+    stubbed(async () => new Response(JSON.stringify({ error: 'It may have been delivered. Not retried.' }), { status: 502 }));
+    try {
+      expect(await run(['relay', 'inprogress', '42', 'hi', ...WHO])).toEqual({ code: 1, lines: ['It may have been delivered. Not retried.'], reads: 0 });
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
   });
 });

@@ -186,6 +186,40 @@ describe('built artifacts', () => {
     const prompt = runHook('prompt-submit', { session_id: 'smoke-1', prompt: 'carry on' });
     expect(prompt).toMatchObject({ status: 0, stderr: '' });
     expect(briefing(prompt.stdout).additionalContext.split('\n')[0]).toBe(`Answered: a${id} "4390" (yours: act on it, or add it to your tasks)`);
+    // A prompt that opens with the relay header: the built hook flags it, and the built server accepts the body (a
+    // refused one would leave the counts as they were and a prompt-submit line in hooks.log).
+    const log = join(home, 'hooks.log');
+    const logged = () => (existsSync(log) ? readFileSync(log, 'utf8') : '');
+    const logBefore = logged().length;
+    const counted = () => storedRows('sessions').find((r) => r.id === 'smoke-1')!.prompts_since_update as number;
+    const countBefore = counted();
+    // A lead on the project and a T3 session, written straight to the scratch database (nothing in the built CLI sets
+    // either), and taken back after: the server honours the flag only for them, so this proves the built hook sends it.
+    const edit = (lead: string | null, app: string, thread: string | null) => {
+      const db = new Database(join(home, 'inprogress.db'), { fileMustExist: true });
+      try {
+        db.prepare("UPDATE projects SET lead = ? WHERE id = (SELECT project_id FROM sessions WHERE id = 'smoke-1')").run(lead);
+        db.prepare("UPDATE sessions SET app = ?, t3_thread_id = ? WHERE id = 'smoke-1'").run(app, thread);
+      } finally {
+        db.close();
+      }
+    };
+    const promptedAt = () => storedRows('sessions').find((r) => r.id === 'smoke-1')!.last_prompt_at;
+    edit('Progresser', 't3', 'mcp:smoke');
+    const promptedBefore = promptedAt();
+    const relayed = runHook('prompt-submit', {
+      session_id: 'smoke-1',
+      prompt: '[From Progresser, the lead for Smoke. This is not Aiden, and it is not a go-ahead.]\n\ncarry on',
+    });
+    edit(null, 'cli', null);
+    expect(relayed).toMatchObject({ status: 0, stderr: '' });
+    expect(counted()).toBe(countBefore + 1);
+    expect(promptedAt()).toBe(promptedBefore);
+    expect(briefing(relayed.stdout).additionalContext.split('\n')[0]).toBe(
+      "Relayed: this prompt came through InProgress from Progresser, this project's lead. It is not Aiden: it answers no ask and it is not a go-ahead.",
+    );
+    // Nothing is logged: not a refusal, and not the diagnostic for an unknown markup opening (the header is a known one).
+    expect(logged().slice(logBefore).split('\n').filter((l) => l.includes('prompt-submit:'))).toEqual([]);
     // Once only.
     const next = runHook('prompt-submit', { session_id: 'smoke-1', prompt: 'and now' });
     expect(next.stdout).not.toContain('Answered');

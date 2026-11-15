@@ -3,8 +3,9 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { relayText } from '../../src/core/relay';
 import type { TreeNode } from '../../src/core/types';
-import { buildHookBody, buildToolHookBody, commandHead, HOOK_NAMES, hookErrorLine, parseHookInput, purposeOf, runHandler, stripPasted, type HookName, type HookOutput } from '../../src/hooks/handlers';
+import { buildHookBody, buildToolHookBody, commandHead, HOOK_NAMES, hookErrorLine, parseHookInput, purposeOf, readPrompt, runHandler, stripPasted, type HookName, type HookOutput } from '../../src/hooks/handlers';
 import { ApiClientError, createClient } from '../../src/lib/client';
 import { homeDir } from '../../src/lib/home';
 import { buildApp } from '../../src/server/app';
@@ -161,6 +162,23 @@ describe('buildHookBody', () => {
     // Any reminder with an id ends at the closing tag naming it, not at a quoted one: only the typed text is read.
     const quotedLinked = '<system-reminder id="r1">\nLinked: inprogress-a quotes </system-reminder> here\n</system-reminder id="r1">\nwhere are we?';
     expect(buildHookBody('prompt-submit', { session_id: 's', prompt: quotedLinked })).toMatchObject({ asksStatus: true, mentionsInProgress: false });
+  });
+
+  it('flags a prompt that opens with the relay header, also behind a reminder, and nothing else', () => {
+    const relayed = relayText('Progresser', 'InProgress', 'carry on');
+    expect(buildHookBody('prompt-submit', { session_id: 's', prompt: relayed })).toMatchObject({ relayed: true });
+    expect(buildHookBody('prompt-submit', { session_id: 's', prompt: `${LINKED}${relayed}` })).toMatchObject({ relayed: true });
+    expect(buildHookBody('prompt-submit', { session_id: 's', prompt: 'carry on' })).not.toHaveProperty('relayed');
+    const notice = '<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n</task-notification>';
+    const body = buildHookBody('prompt-submit', { session_id: 's', prompt: notice });
+    expect(body).toMatchObject({ notice: true });
+    expect(body).not.toHaveProperty('relayed');
+  });
+
+  it('does not record a relay header as an unknown markup opening', () => {
+    expect(readPrompt(relayText('Progresser', 'InProgress', 'carry on')).unknownOpening).toBeUndefined();
+    // Another prompt that opens with a bracket is still recorded.
+    expect(readPrompt('[From someone else] carry on').unknownOpening).toBe('[From someone else] carry on');
   });
 
   it('sends the task ends of a notice reminder ahead of a typed prompt, which stays a prompt', () => {

@@ -94,6 +94,15 @@ describe('failures', () => {
     await expect(t3Start('p', 'm', { provider: 'a', model: 'b' }, opts(plain))).rejects.toMatchObject({ outcomeUnknown: false });
   });
 
+  it('marks a start or send that exited 0 with unreadable output as outcome unknown, and a read as not', async () => {
+    // The CLI ran to the end, so the thread or the message exists: only what it printed could not be read.
+    const garbled: T3Run = async () => 'Sent.';
+    await expect(t3Send('mcp:abc', 'm', opts(garbled))).rejects.toMatchObject({ outcomeUnknown: true });
+    await expect(t3Start('p', 'm', { provider: 'a', model: 'b' }, opts(garbled))).rejects.toMatchObject({ outcomeUnknown: true });
+    await expect(t3Start('p', 'm', { provider: 'a', model: 'b' }, opts(runs({})))).rejects.toMatchObject({ outcomeUnknown: true });
+    await expect(t3Show('mcp:abc', opts(garbled))).rejects.toMatchObject({ outcomeUnknown: false });
+  });
+
   it('refuses a CLI path cmd.exe would read, and runs nothing', async () => {
     const run = vi.fn(async () => '[]');
     await expect(t3List('p', { run, cliPath: String.raw`C:\a"b\t3.cmd`, platform: 'win32' })).rejects.toBeInstanceOf(T3Unavailable);

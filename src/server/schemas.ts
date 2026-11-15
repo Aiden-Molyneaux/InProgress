@@ -93,6 +93,8 @@ export const hookBody = z
     asksStatus: z.boolean().optional(),
     /** A prompt event that is really a background-task notice: the session works, but nothing was typed. */
     notice: z.boolean().optional(),
+    /** A prompt that opens with the relay header: the lead's message, passed on through InProgress, not Aiden typing. */
+    relayed: z.boolean().optional(),
     // Live work (pre-tool and post-tool hooks). agent-dispatch: toolUseId, agentType (subagent_type), description,
     // model, purpose (the prompt's first sentence, clipped to 200). agent-launched: toolUseId, agentId (the launched
     // agent), model (as the launch reported it). task-created / task-updated: agentId (the subagent whose task list it
@@ -256,5 +258,7 @@ export const leadPromiseBody = z.object({ ...leadWho, text: z.string().trim().mi
 export const leadKeptBody = z.object({ ...leadWho, askId: leadId, note: z.string().trim().max(500).optional() }).strict();
 /** `lead intent`: the whole intent record, Markdown. */
 export const leadIntentBody = z.object({ ...leadWho, intent: z.string().min(1).max(8_000) }).strict();
+/** `lead relay`: the step whose session gets the message, and the message. */
+export const leadRelayBody = z.object({ ...leadWho, stepId: leadId, message: z.string().trim().min(1).max(4_000) }).strict();
 /** The window's change of a project's lead: the slug it shows, and a name (trimmed, 1 to 40 characters) or null for none. */
 export const windowLeadBody = z.object({ slug: windowProjectBody.shape.slug, name: z.string().trim().min(1).max(40).nullable() }).strict();
