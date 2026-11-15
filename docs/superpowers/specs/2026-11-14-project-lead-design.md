@@ -1,7 +1,9 @@
 # A lead on every project: InProgress under a Grok Bot lead
 
-Date: 2026-11-14. Status: draft v2 for Aiden's approval. Design only, no code; one plan per stage follows approval.
-Step #716. Version 1 was reviewed the same day from seven angles; section 4 lists what that changed.
+Date: 2026-11-14. Status: draft v2.1 for Aiden's approval. Design only, no code; one plan per stage follows approval.
+Step #716. Version 1 was reviewed the same day from seven angles; section 4 lists what that changed. Version 2.1
+corrects two claims in version 2: which T3 commands were run (section 3), and how hard the approval check and the
+Read only level are (6.3, 6.6, 7 and 11).
 
 Builds on `2026-10-20-inprogress-redesign-design.md` (the mirror, the backlog, project memory). Test results are in
 the resource "Grok Bot as project lead: feasibility tests" (r706).
@@ -76,13 +78,16 @@ event.
   A session row has no T3 thread id; T3 provides one as `T3CODE_THREAD_ID`.
 - Sigmund sets the bar in chat, and Murr's and Parvati's verdicts live in chat (`.claude/skills/sigmund/SKILL.md`
   151 to 168, 250 to 266). His merge rule needs the owner's explicit go-ahead (298 to 299).
-- T3 Code, tested on this machine: `t3 thread list | start | send | show` work from a plain shell with no sign-in.
-  A thread record carries its status, mode, settled flag and a link. An outside app's access level caps the mode of any
-  thread it starts, and approvals cannot be answered over MCP, so a Bot with Supervised access cannot run unattended
-  work.
+- T3 Code, on this machine: `t3 thread list` and `show` were run from a shell with every T3 variable unset and
+  answered with no sign-in. `start` and `send` have only been read from their help; neither has been run. `start` has
+  no flag for the mode, so a thread InProgress starts is expected to run at the environment's default, which here is
+  Full access. A thread record carries its status, mode, settled flag and a link; a message carries its role and text,
+  not who sent it. An outside app's access level caps the mode of any thread it starts, and approvals cannot be
+  answered over MCP, so a Bot with Supervised access cannot run unattended work.
 - Grok Bot: connected to T3 Code at Read only and read the InProgress threads correctly. Its connectors are shared by
   every Bot on the account. A routine can be woken by a webhook whose key the Bot cannot read itself. Its local tool
-  permission on this machine is set to `always`.
+  permission on this machine is set to `always`, read here as: a Bot's commands run on this laptop as Aiden, without
+  asking.
 - Cost: the first turn of a new Claude thread is about 18 cents; waking a long idle thread is about a dollar.
 - Others running Grok Bot over coding agents: one Bot per project holds up. The Bot is unreliable at follow-ups (4 of
   24 finished threads never reported; a hold on merges never reached the threads), its memory is hidden, and every
@@ -142,9 +147,15 @@ event.
 | Held | Nothing |
 | A backlog item parked or dropped | The lead when its origin is `proposed`; Aiden when it is `me` or `asked` |
 
-The check lives in the commands that land work (the deploy script and a pre-push hook on main), so it holds for any
-agent and for Aiden's own hands. Sigmund's merge rule is rewritten to read it. Because the Bot cannot write to a
-thread, a go-ahead typed there can only be Aiden's.
+The check lives in the commands that land work (the deploy script and a pre-push hook on main), so it applies to any
+agent and to Aiden's own hands. It is a guard, not a lock. Workers run at Full access, and one that skips the hook or
+merges without the deploy script is not stopped. So InProgress also compares main with its approval records on its
+own, and a commit on main with no record behind it shows in the window and in the daily note. Sigmund's merge rule is
+rewritten to read the check.
+
+A go-ahead typed in a thread counts as Aiden's only when InProgress did not send that message itself: it logs every
+message it relays, and the prompt hook sees every message a worker receives. Through T3 the Bot cannot write to a
+thread. Whether anything else on the laptop can is section 11.
 
 ### 6.4 The lead's job
 
@@ -191,7 +202,7 @@ in play.
 
 | Link | Route |
 |---|---|
-| Bot to InProgress | The lead commands, run on this machine through Grok Bot's local tools. If that proves unreliable: a small T3 thread whose permissions allow only those commands. |
+| Bot to InProgress | The lead commands. Simplest: run on this machine through Grok Bot's local tools, which today is an open shell. Confined: InProgress serves only those commands as its own connector, or a small T3 thread whose permissions allow only those commands. Aiden picks (section 11); stage 1 proves the one picked. |
 | Bot to T3 Code | Read only |
 | InProgress to T3 Code | `t3 thread start`, `send`, `show`, `list` |
 | InProgress to Bot | A watcher with no model in it posts a batch to the Bot's routine webhook |
@@ -203,6 +214,7 @@ in play.
 |---|---|
 | The Bot goes quiet | Its items stay open; the watcher wakes it once more, then shows them to Aiden in the window |
 | A hold never reaches the workers | A hold is data the landing commands read |
+| A worker goes around the landing commands | InProgress compares main with its approval records; a landing with no record shows in the window and the daily note |
 | Bot memory drifts | It reads the brief on every wake; its memory holds nothing the record lacks |
 | A verdict is never recorded | The step cannot land |
 | The Bot records a yes Aiden did not give | His words are stored, and the daily note lists what was said in his name |
@@ -211,22 +223,26 @@ in play.
 | T3 sign-in expires after 30 days | The brief carries the date; the lead warns a week ahead |
 | T3 Code or Grok Bot changes under us | Four thin links (6.6), each replaceable; the Bot-off test |
 
-These guards are against a Bot that is wrong, not one that is hostile. Section 11 covers the second.
+These guards are against a Bot or a worker that is wrong. They do not stop one that is hostile, or one that works
+around a refusal on purpose. Section 11 covers that.
 
 ## 8. Stages
 
 Each is one change through Sigmund and is worth having alone. Rich can already answer from T3 threads today.
 
-0. **True ground under T3 Code. No Bot involved.** The T3 thread id on a session; the title channel and Open session
+0. **True ground under T3 Code. No Bot involved.** First, `t3 thread start` and `send` run once from the InProgress
+   server, since stage 3 rests on them. Then the T3 thread id on a session; the title channel and Open session
    under T3; waiting state from hooks, and ended or settled sessions clearing their asks (this finishes #537);
    parked projects. *Accept:* no project shows "need you" without a live session or an open decision behind it; a
-   thread's title shows its marker and step id within one turn.
+   thread's title shows its marker and step id within one turn; a thread started from the server appears as a
+   session with its T3 thread id.
 1. **The lead reads and talks.** The lead brief; the read commands plus answer, park, drop and promise; the Bot route
-   proven; instructions v1; the intent record for InProgress; triage of what stage 0 left. *Accept:* asked "where are
+   Aiden picked, proven; instructions v1; the intent record for InProgress; triage of what stage 0 left. *Accept:* asked "where are
    we" twice, the lead gives the same facts in the same shape as the brief; with the Bot off, the window answers it.
 2. **The bar and the gate.** Bars, classes, evidence, asks as cards with accept and park, the approval check in the
    landing commands, Sigmund rewritten, confirm mode. *Accept:* a step with no Murr verdict cannot land; a held step
-   cannot land; a needs-Aiden step cannot land on a message alone; a lands-alone step lands on one click, no chat.
+   cannot land; a needs-Aiden step cannot land on a message alone; a lands-alone step lands on one click, no chat; a commit put
+   on main around the check shows in the window as landed without a record.
 3. **The lead acts and comes to you.** Commission and relay, the limits, the watcher and webhook, the daily note,
    automatic mode on offer. *Accept:* with the Bot off for a day nothing lands that should not and everything waiting
    shows in the window; a promise past its time shows as overdue.
@@ -249,8 +265,15 @@ approval check sits in each project's landing commands; how Murr and Parvati wri
 
 - **Work repos are in reach of the Bots.** This T3 Code environment holds `C:\work\vRepos` and
   `vps-claude-skills` beside the personal projects, and the T3 connector is shared by every Bot on the account,
-  including ones that read untrusted pages. At Read only that means their threads can be read. Separately, a Bot's
-  local tools on this laptop are set to `always`. This design adds no authority beyond what is already granted, but
-  it makes those links load-bearing. Whether work projects stay in this environment is his call, and perhaps his
-  employer's.
+  including ones that read untrusted pages. At Read only that means their threads can be read. Whether work projects
+  stay in this environment is his call, and perhaps his employer's.
+- **Read only limits the T3 connector, not the Bot.** Grok Bot's local tools on this laptop are set to `always`, so a
+  Bot has a shell that runs as Aiden. From that shell `t3 thread list` answers with no sign-in (tested), `start` and
+  `send` are expected to, and InProgress's own CLI runs. So a Bot could start a Full access thread, message a worker,
+  or run any InProgress command, and nothing on this laptop could tell it from him. This is true today, with or
+  without this design. What the design adds is that its simplest route (6.6) needs that shell left open. The confined
+  routes cost more: InProgress as its own connector needs an https address and a sign-in; the T3 thread route needs
+  the Bot's T3 access raised so that it can send. My recommendation: a confined route, and local tools off `always`,
+  before any project is switched to automatic mode. Whether Grok Bot can limit local tools to named commands has not
+  been checked; if it can, that is the cheapest confined route.
 - Grok Bot's cost and weekly limit under this use are unmeasured. Stage 1 measures them.
