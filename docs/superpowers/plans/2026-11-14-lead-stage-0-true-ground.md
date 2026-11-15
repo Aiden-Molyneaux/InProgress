@@ -21,7 +21,8 @@ Nothing here depends on a session remembering to do something.
 - No em dashes (U+2014) or their HTML entities in any file.
 - Schema changes only add. `min_reader_version` stays 1.
 - One branch per change off main, in its own worktree under `.claude/worktrees/`. Gates by label, from the playbook.
-- A hook never calls T3 Code and never waits on it. Only the server does, with a 10 second limit per call.
+- A hook never calls T3 Code and never waits on it. Only the server does, with a limit per call: 10 seconds to
+  read, 30 to start or send.
 - A T3 failure never ends a session, clears an ask or blocks a hook. It leaves the state as it was.
 - The desktop app keeps working exactly as it does today.
 - No Bot, no lead command and no new rule a session must remember.
