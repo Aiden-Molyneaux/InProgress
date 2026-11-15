@@ -36,6 +36,8 @@ voice, not the picture.
   walkthrough.
 - The leads are Grok Bots, one per project, from day one. He drives Claude Code through T3 Code.
 - Version 1 read sound to him. He asked for it to be criticised so the build is right on the first pass.
+- Work repos may stay in reach of the Bots. The Bots must not touch them.
+- He is somewhat comfortable with a Bot holding full access on the laptop, and asked what the confined routes cost.
 
 ### My calls (correct them)
 
@@ -128,7 +130,9 @@ event.
 - **Project.** Status gains `parked`: no lead, no counts, nothing nagging. An **intent record**, a page in the owning
   repo shown in the Library: the goal, the current phase and what done means for it, what is out of scope, what Aiden
   cares about, standing rulings. The lead writes it from one conversation with him. Without it a lead can read a
-  project but nothing can be commissioned.
+  project but nothing can be commissioned. A lead is switched on per project by Aiden, and every lead command that
+  writes, commissions or relays is refused on a project without one. Work projects never get one: they are read and
+  never acted on.
 - **Step.** A **bar**: criteria, each marked visible or not. A **hold** flag. A **class** that is derived, never
   declared: a visible criterion, or a diff that touches the surfaces the project lists as ones Aiden sees, makes it
   "needs Aiden"; otherwise "lands alone". **Evidence**: checks, Murr's verdict, Parvati's verdict per criterion, the
@@ -202,7 +206,7 @@ in play.
 
 | Link | Route |
 |---|---|
-| Bot to InProgress | The lead commands. Simplest: run on this machine through Grok Bot's local tools, which today is an open shell. Confined: InProgress serves only those commands as its own connector, or a small T3 thread whose permissions allow only those commands. Aiden picks (section 11); stage 1 proves the one picked. |
+| Bot to InProgress | The lead commands. Simplest: run on this machine through Grok Bot's local tools, which today is an open shell. Middle: the same shell set to ask, with a saved rule for each lead command, if Grok's rules match narrowly. Confined: InProgress serves only those commands as its own connector, or a small T3 thread whose permissions allow only those commands. Aiden picks (section 11); stage 1 proves the one picked. |
 | Bot to T3 Code | Read only |
 | InProgress to T3 Code | `t3 thread start`, `send`, `show`, `list` |
 | InProgress to Bot | A watcher with no model in it posts a batch to the Bot's routine webhook |
@@ -263,17 +267,27 @@ approval check sits in each project's landing commands; how Murr and Parvati wri
 
 ## 11. Open, and Aiden's to decide
 
-- **Work repos are in reach of the Bots.** This T3 Code environment holds `C:\work\vRepos` and
-  `vps-claude-skills` beside the personal projects, and the T3 connector is shared by every Bot on the account,
-  including ones that read untrusted pages. At Read only that means their threads can be read. Whether work projects
-  stay in this environment is his call, and perhaps his employer's.
+- **Work repos are in reach of the Bots. Decided 2026-11-14: they stay, and the Bots must not touch them.** This T3
+  Code environment holds `C:\work\vRepos` and `vps-claude-skills` beside the personal projects, and the T3 connector
+  is shared by every Bot on the account, including ones that read untrusted pages. At Read only their threads can be
+  read. InProgress enforces its half: no lead command acts on a project without a lead (6.2). With the shell below
+  left open, the rest is a rule the Bots follow, not a wall.
 - **Read only limits the T3 connector, not the Bot.** Grok Bot's local tools on this laptop are set to `always`, so a
   Bot has a shell that runs as Aiden. From that shell `t3 thread list` answers with no sign-in (tested), `start` and
   `send` are expected to, and InProgress's own CLI runs. So a Bot could start a Full access thread, message a worker,
   or run any InProgress command, and nothing on this laptop could tell it from him. This is true today, with or
   without this design. What the design adds is that its simplest route (6.6) needs that shell left open. The confined
   routes cost more: InProgress as its own connector needs an https address and a sign-in; the T3 thread route needs
-  the Bot's T3 access raised so that it can send. My recommendation: a confined route, and local tools off `always`,
-  before any project is switched to automatic mode. Whether Grok Bot can limit local tools to named commands has not
-  been checked; if it can, that is the cheapest confined route.
+  the Bot's T3 access raised so that it can send, and then it can message other threads too.
+- **The middle route.** Grok Bot's local policy has three settings: Ask every time (its default; the approval card
+  shows the exact command), Always allow, and Never allow, which xAI recommends unless a Bot needs local files.
+  Approving a command with Always allow can save a matching rule. So the shell may be narrowed for nothing: Ask every
+  time, with a saved rule for each lead command. How narrowly a rule matches, and what an unattended routine does at
+  a command with no rule, are not documented and have to be tried. Users also report local tools failing on Grok Bot
+  0.71.2 on Windows 11 whatever the setting, a risk to every route that uses the shell.
+- **My recommendation**, after Aiden said he is somewhat comfortable with full access: start on the open shell. Build
+  each lead command as one function behind the CLI, so a connector can be added later without a redesign. Try the
+  middle route while the route is proven in stage 1 and keep it if it holds. Build the connector only if it fails and
+  a project is to go automatic. No route is a wall while the lead can commission a Full access worker with a step it
+  wrote; what stands behind every route is the worker's own judgement, the landing check and the daily note.
 - Grok Bot's cost and weekly limit under this use are unmeasured. Stage 1 measures them.
