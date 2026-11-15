@@ -1,7 +1,8 @@
-import { deriveBoard } from '../core/board';
-import { LEAD_INSTRUCTIONS_VERSION, LEAD_STALE_MARKS, isAidens, type LeadBrief, type LeadEventKind } from '../core/lead';
-import { buildIndex, shelvedIds } from '../core/tree';
-import type { Project } from '../core/types';
+import { deriveBoard, type BoardRow, type Mark } from '../core/board';
+import { LEAD_IDLE_MARKS, LEAD_INSTRUCTIONS_VERSION, LEAD_LOOK_BACK_DAYS, LEAD_STALE_MARKS, isAidens, type LeadBrief, type LeadEventKind } from '../core/lead';
+import { buildIndex, dfsOrder, shelvedIds } from '../core/tree';
+import { ASK_TRAIL_MS, askTag, type Ask, type Project } from '../core/types';
+import { spanAgo } from './briefing';
 import { write, type Ctx } from './db/tx';
 import { conflict } from './errors';
 import { intentHeadlines } from './lead-text';
@@ -11,7 +12,7 @@ import { getProjectSnapshot } from './repo/snapshot';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** With no last look on record, the brief looks back this far for what landed and what was said. */
-const DEFAULT_LOOK_BACK_MS = 7 * DAY_MS;
+const DEFAULT_LOOK_BACK_MS = LEAD_LOOK_BACK_DAYS * DAY_MS;
 /** What a session with no focus step is called in the brief. */
 const NO_STEP = 'no step claimed';
 
@@ -61,6 +62,44 @@ function saidSince(ctx: Ctx, projectId: number, since: string): LeadBrief['saidI
   }));
 }
 
+/** Asks as a sentence names them: `a7`, `a7 and a9`, `a7, a8 and a9`. */
+function askList(asks: readonly Ask[]): string {
+  const tags = asks.map((a) => askTag(a.id));
+  return tags.length < 2 ? tags.join('') : `${tags.slice(0, -1).join(', ')} and ${tags[tags.length - 1]}`;
+}
+
+/**
+ * Why a Board row is under Stale in the lead's brief, in words: one entry per mark, none when it is not stale. First the
+ * open work in nobody's hands (LEAD_IDLE_MARKS): a backlog row that is blocked, or active with no session on it. An active
+ * one whose session ended in the last week says so through `ended_open` alone. Then the Board's marks that are
+ * LEAD_STALE_MARKS, in the Board's order. `lastEnded` is when the newest ended session on the step ended, if one is known.
+ */
+export function staleReasons(
+  r: Pick<BoardRow, 'node' | 'column' | 'sessions' | 'driver' | 'asks' | 'waiting' | 'marks'>,
+  now: number,
+  lastEnded: string | null,
+): { mark: Mark | (typeof LEAD_IDLE_MARKS)[number]; text: string }[] {
+  const why: ReturnType<typeof staleReasons> = [];
+  const changed = `last changed ${spanAgo(r.node.updatedAt, now)} ago`;
+  if (r.column === 'backlog' && r.node.status === 'blocked') why.push({ mark: 'blocked', text: `blocked, ${changed}` });
+  if (r.column === 'backlog' && r.node.status === 'active' && !r.marks.includes('ended_open')) why.push({ mark: 'no_session', text: `active with no session on it, ${changed}` });
+  for (const mark of r.marks) {
+    if (!(LEAD_STALE_MARKS as readonly string[]).includes(mark)) continue;
+    let text: string;
+    if (mark === 'ended_open') text = `its session ended${lastEnded === null ? '' : ` ${spanAgo(lastEnded, now)} ago`} and left it open`;
+    else if (mark === 'stale_ask') {
+      const old = r.asks.filter((a) => now - Date.parse(a.raisedAt) > ASK_TRAIL_MS);
+      // The Board set the mark by the same rule, so the list is never empty; if the rules ever part, the row still says why.
+      text = old.map((a) => `${askTag(a.id)} has waited ${spanAgo(a.raisedAt, now)}`).join(', ') || 'an ask has waited over a week';
+    } else if (mark === 'answered_in_chat') text = `${askList(r.asks.filter((a) => !r.waiting.includes(a))) || 'an ask'} may be answered already: Aiden has typed in its session since`;
+    else if (mark === 'done_focus') text = 'done, but a session still has it claimed';
+    else if (mark === 'stalled') text = r.driver === null ? 'sessions are on it but none drives it' : `its session has been idle ${spanAgo(r.driver.lastSeenAt, now)} with nothing waiting on Aiden`;
+    else text = 'an answer has not reached a session yet';
+    why.push({ mark, text });
+  }
+  return why;
+}
+
 /**
  * Where the project stands, built from the record: every row, uncut (only renderLeadBrief cuts a list). `yours` is the
  * instructions version the reader holds, null for the window. Never call it inside a write(): the snapshot read may expire
@@ -85,7 +124,8 @@ export function readLeadBrief(ctx: Ctx, ref: string, yours: number | null, now: 
 
   const open = snapshot.asks.filter((a) => a.clearedAt === null);
   // An ask on a shelved step (parked, or under a parked one) is not waiting on Aiden, as the need-you count leaves it out.
-  const shelved = shelvedIds(buildIndex(snapshot.nodes));
+  const index = buildIndex(snapshot.nodes);
+  const shelved = shelvedIds(index);
   const waitingOnAiden = open
     .filter((a) => isAidens(a) && !shelved.has(a.nodeId))
     .map((a) => ({ askId: a.id, kind: a.kind, stepId: a.nodeId, stepTitle: titleOf(a.nodeId), text: a.text, raisedAt: a.raisedAt }));
@@ -98,13 +138,22 @@ export function readLeadBrief(ctx: Ctx, ref: string, yours: number | null, now: 
     .sort((a, b) => (a.dueAt === null ? 1 : 0) - (b.dueAt === null ? 1 : 0) || (a.dueAt ?? '').localeCompare(b.dueAt ?? '') || a.id - b.id)
     .map((a) => ({ askId: a.id, stepId: a.nodeId, stepTitle: titleOf(a.nodeId), text: a.text, dueAt: a.dueAt, overdue: a.dueAt !== null && Date.parse(a.dueAt) < nowMs }));
 
-  // One Board for both: Next up is its next column in the Board's order, Stale its marked rows.
+  // One Board for all of it, so every open row is in the brief: a session's (In flight), Aiden's own, Next up in the
+  // Board's order, Stale, or counted in the backlog. A row with a stale mark is under Stale as well as where it sits.
   const board = deriveBoard(snapshot, nowMs);
   const nextUp = board.next.map((r) => ({ stepId: r.node.id, title: r.node.title, status: r.node.status }));
-  const stale = board.marked.flatMap((r) => {
-    const marks = r.marks.filter((m) => (LEAD_STALE_MARKS as readonly string[]).includes(m));
-    return marks.length ? [{ stepId: r.node.id, title: r.node.title, marks }] : [];
-  });
+  // A Now row with no session on it is a step Aiden does himself.
+  const aidensOwn = board.now.filter((r) => !r.sessions.length).map((r) => ({ stepId: r.node.id, title: r.node.title, updatedAt: r.node.updatedAt }));
+  const backlog = board.backlog.filter((r) => r.node.status === 'todo').length;
+  const lastEnded = new Map<number, string>();
+  for (const p of snapshot.pastSessions) if (p.focusNodeId !== null && p.endedAt > (lastEnded.get(p.focusNodeId) ?? '')) lastEnded.set(p.focusNodeId, p.endedAt);
+  const order = dfsOrder(index);
+  const stale = [...board.byId.values()]
+    .sort((a, b) => (order.get(a.node.id) ?? 0) - (order.get(b.node.id) ?? 0))
+    .flatMap((r) => {
+      const why = staleReasons(r, nowMs, lastEnded.get(r.node.id) ?? null);
+      return why.length ? [{ stepId: r.node.id, title: r.node.title, marks: why.map((w) => w.mark as string), reasons: why.map((w) => w.text) }] : [];
+    });
 
   const landedSince = snapshot.nodes
     .filter((n): n is typeof n & { completedAt: string } => n.parentId !== null && n.status === 'done' && n.completedAt !== null && n.completedAt >= since)
@@ -118,9 +167,11 @@ export function readLeadBrief(ctx: Ctx, ref: string, yours: number | null, now: 
     intent: { ...intentHeadlines(project.intent), updatedAt: project.intentUpdatedAt },
     inFlight,
     waitingOnAiden,
+    aidensOwn,
     aidenOpenAcrossProjects,
     forTheLead,
     nextUp,
+    backlog,
     stale,
     landedSince,
     saidInAidensName: saidSince(ctx, project.id, since),

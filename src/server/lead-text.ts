@@ -1,4 +1,4 @@
-import { IN_FLIGHT_LIMIT, AIDEN_OPEN_LIMIT, LEAD_LIST_CAP, type LeadBrief } from '../core/lead';
+import { IN_FLIGHT_LIMIT, AIDEN_OPEN_LIMIT, LEAD_LIST_CAP, LEAD_LOOK_BACK_DAYS, type LeadBrief } from '../core/lead';
 import { clipLine, stepRef } from '../core/step-ref';
 import { PROJECT_NAME_MAX, askTag } from '../core/types';
 import { spanAgo } from './briefing';
@@ -65,27 +65,34 @@ export function renderLeadBrief(b: LeadBrief): string {
   // True whether the heading is missing or has nothing under it: both read as an empty goal here.
   const noGoal = b.intent.updatedAt !== null ? 'The intent record has no goal under a Goal heading.' : 'No intent record yet.';
   lines.push(`Goal: ${line(b.intent.goal, HEADLINE_CUT) || noGoal}`, `Phase: ${line(b.intent.phase, HEADLINE_CUT) || 'none'}`);
+  const over = b.aidenOpenAcrossProjects - AIDEN_OPEN_LIMIT;
+  // Until a look is marked the brief counts LEAD_LOOK_BACK_DAYS back, and says so: there is no last look to count from.
+  const span = b.links.lastSeenAt === null ? `in the last ${LEAD_LOOK_BACK_DAYS} days` : 'since your last look';
   lines.push(
     ...section(
       `In flight (${b.inFlight.length} of ${IN_FLIGHT_LIMIT}):`,
       b.inFlight.map((s) => `${s.stepId === null ? line(s.title, 50) : step(s.stepId, s.title)} · ${s.state} · ${s.app} · seen ${spanAgo(s.lastSeenAt, now)} ago`),
     ),
-    ...section(
-      `Waiting on Aiden (${b.waitingOnAiden.length} here, ${b.aidenOpenAcrossProjects} of ${AIDEN_OPEN_LIMIT} across all projects):`,
-      b.waitingOnAiden.map((a) => `${askTag(a.askId)} ${a.kind} on ${step(a.stepId, a.stepTitle)}: "${line(a.text, TEXT_CUT)}" · ${spanAgo(a.raisedAt, now)}`),
-    ),
+    // His own steps first: they are few, and after a long list of asks the cap would cut them.
+    ...section(`Waiting on Aiden (${b.waitingOnAiden.length + b.aidensOwn.length}):`, [
+      ...b.aidensOwn.map((s) => `${step(s.stepId, s.title)} · Aiden's own step, active, last changed ${spanAgo(s.updatedAt, now)} ago`),
+      ...b.waitingOnAiden.map((a) => `${askTag(a.askId)} ${a.kind} on ${step(a.stepId, a.stepTitle)}: "${line(a.text, TEXT_CUT)}" · ${spanAgo(a.raisedAt, now)}`),
+    ]),
+    // A line of its own, not part of a heading: a reader who retells the brief keeps a line and drops a heading's detail.
+    `Aiden's open asks across all projects: ${b.aidenOpenAcrossProjects} of ${AIDEN_OPEN_LIMIT}${over > 0 ? `, ${over} over the limit` : ''}`,
     ...section(
       `For the lead (${b.forTheLead.length}):`,
       b.forTheLead.map((a) => `${askTag(a.askId)} on ${step(a.stepId, a.stepTitle)}: "${line(a.text, TEXT_CUT)}" · ${a.dueAt === null ? 'no due time' : `due ${stamp(a.dueAt)}`}${a.overdue ? ' · OVERDUE' : ''}`),
     ),
     ...section(`Next up (${b.nextUp.length}):`, b.nextUp.map((n) => `${step(n.stepId, n.title)} · ${n.status}`)),
-    ...section(`Stale (${b.stale.length}):`, b.stale.map((s) => `${step(s.stepId, s.title)} · ${s.marks.join(', ')}`)),
+    `Backlog: ${b.backlog} ${b.backlog === 1 ? 'step' : 'steps'} not started and not in the queue`,
+    ...section(`Stale (${b.stale.length}):`, b.stale.map((s) => `${step(s.stepId, s.title)} · ${s.reasons.map(clean).join('; ')}`)),
     ...section(
-      `Landed since your last look (${b.landedSince.length}):`,
+      `Landed ${span} (${b.landedSince.length}):`,
       b.landedSince.map((n) => `${step(n.stepId, n.title)}${line(n.outcome, TEXT_CUT) ? `: "${line(n.outcome, TEXT_CUT)}"` : ''}`),
     ),
     ...section(
-      `Said in Aiden's name since your last look (${b.saidInAidensName.length}):`,
+      `Said in Aiden's name ${span} (${b.saidInAidensName.length}):`,
       b.saidInAidensName.map((e) => `${stamp(e.at)} ${e.kind} ${e.ref}: "${line(e.words, TEXT_CUT)}"`),
     ),
     `Links: T3 Code ${b.links.t3} · your last look ${b.links.lastSeenAt === null ? 'never' : `${spanAgo(b.links.lastSeenAt, now)} ago`}`,
