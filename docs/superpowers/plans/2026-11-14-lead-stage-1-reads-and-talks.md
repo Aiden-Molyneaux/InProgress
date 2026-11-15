@@ -172,8 +172,9 @@ An empty section prints its heading with `(0)` and one line, `  none`. A list lo
 and `  and <k> more`. When `yours` is lower than `current`, a second line says
 `Your instructions are out of date: you can read, you cannot change anything.`
 
-Every open step that is a row on the Board is in the brief once: under In flight (a session is on it), under Waiting
-on Aiden (his own step), under Next up, under Stale, or counted in the Backlog line. Stale holds the Board's marks
+Every open step that is a row on the Board is in the brief: under In flight (a session is on it), under Waiting
+on Aiden (his own step), under Next up, under Stale, or counted in the Backlog line. A step in flight or next up that
+has something owed is under Stale as well. Stale holds the Board's marks
 that mean something is owed, and open work in nobody's hands: a blocked step, or an active one with no session on it
 and no place in the queue. The two headings say `in the last 7 days` until the lead has marked a look.
 

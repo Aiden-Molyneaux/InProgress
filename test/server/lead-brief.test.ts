@@ -145,7 +145,7 @@ describe('readLeadBrief', () => {
     ]);
   });
 
-  it('has every open step that is a row in it once: in flight, Aiden\'s own, next up, stale or counted in the backlog', () => {
+  it('has every open step that is a row in it: in flight, Aiden\'s own, next up, stale or counted in the backlog', () => {
     const { ctx, project, a, b, c, brief } = setup();
     const [blocked, own, parked, phase, pressKit, done, flying] = addNodes(ctx, 'test', {
       parentId: project.rootNodeId,

@@ -137,8 +137,8 @@ export function readLeadBrief(ctx: Ctx, ref: string, yours: number | null, now: 
     .sort((a, b) => (a.dueAt === null ? 1 : 0) - (b.dueAt === null ? 1 : 0) || (a.dueAt ?? '').localeCompare(b.dueAt ?? '') || a.id - b.id)
     .map((a) => ({ askId: a.id, stepId: a.nodeId, stepTitle: titleOf(a.nodeId), text: a.text, dueAt: a.dueAt, overdue: a.dueAt !== null && Date.parse(a.dueAt) < nowMs }));
 
-  // One Board for all of it, so every open row is in the brief once: a session's (In flight), Aiden's own, Next up in the
-  // Board's order, Stale, or counted in the backlog.
+  // One Board for all of it, so every open row is in the brief: a session's (In flight), Aiden's own, Next up in the
+  // Board's order, Stale, or counted in the backlog. A row with a mark is under Stale as well as where it sits.
   const board = deriveBoard(snapshot, nowMs);
   const nextUp = board.next.map((r) => ({ stepId: r.node.id, title: r.node.title, status: r.node.status }));
   // A Now row with no session on it is a step Aiden does himself.
