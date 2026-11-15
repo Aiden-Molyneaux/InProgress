@@ -190,7 +190,7 @@ one heading, and four kinds of fact were missing or lost.
   `lead-brief-asks`. Criterion C9: on the live data a324 and a326 print whole.
 
 Criteria added: C5 (G1 and G5, on the copy of the live data: #435, #516, #561 and #709 are under Stale and the counts
-add up), C6 (G2: no mark name in the text), C7 (G3), C8 (G4). C2 is checked again. C4 is Aiden's again after the gate.
+add up), C6 (G2: no mark name in the text), C7 (G3), C8 (G4), C9 (G6). C2 is checked again. C4 is Aiden's again after the gate.
 
 For #726: when `dueAt` and `owner` reach a route, check the due time there with `z.string().datetime()` as
 `leadSeenBody` does (`Date.parse` in `raiseAskDetailed` takes `11/15/2026` too). The digest's "Asks raised" and "Asks cleared" lists (`src/server/digest.ts:293-303`) read every owner, so

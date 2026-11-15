@@ -138,6 +138,9 @@ describe('renderLeadBrief', () => {
     expect(ask(whole).find((l) => l.startsWith('  a7'))).toContain(`"${whole}"`);
     expect(ask(whole).find((l) => l.startsWith('  a9'))).toContain(`"${whole}"`);
     expect(ask('y'.repeat(700)).find((l) => l.startsWith('  a7'))).toContain(`"${'y'.repeat(599)}…"`);
+    // The edge, under For the lead: 600 characters are whole, 601 are cut to 599 and the mark.
+    expect(ask('w'.repeat(600)).find((l) => l.startsWith('  a9'))).toContain(`"${'w'.repeat(600)}"`);
+    expect(ask('w'.repeat(601)).find((l) => l.startsWith('  a9'))).toContain(`"${'w'.repeat(599)}…"`);
     // An outcome keeps the short cut: it is history, not something to act on.
     const landed = renderLeadBrief({ ...full, landedSince: [{ ...full.landedSince[0], outcome: 'z'.repeat(300) }] })
       .split('\n')
