@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { LEAD_INSTRUCTIONS_VERSION, type LeadBrief, type LeadEventOut } from '../../src/core/lead';
 import { stamp } from '../../src/core/span';
-import { deskGroups, deskHead, logLines } from '../../web/src/lead/leadDesk';
+import { deskDecided, deskGroups, deskHead, logLines } from '../../web/src/lead/leadDesk';
 
 const NOW = Date.parse('2026-11-15T12:00:00.000Z');
 const ago = (ms: number): string => new Date(NOW - ms).toISOString();
@@ -158,6 +158,43 @@ describe('deskHead: the intent record', () => {
     expect(head.intentLine).toBe('Intent record: written 1d ago · 2 steps landed since · every step the Phase names is finished');
     expect(head.intentLine).not.toContain('ask Aiden');
     expect(head.intentText).toBe('## Goal\nShip it\n');
+  });
+});
+
+describe('deskDecided', () => {
+  const d = (o: Partial<LeadBrief['decided'][number]>): LeadBrief['decided'][number] => ({
+    tag: 'd12',
+    at: ago(2 * HOUR),
+    by: 'Progresser',
+    stepId: 9,
+    stepTitle: 'Pick  a port',
+    what: 'answered a7: "4410"',
+    why: 'The lane is fixed.',
+    isNew: true,
+    ...o,
+  });
+  it('is empty with nothing decided', () => {
+    expect(deskDecided(empty(), NOW)).toEqual([]);
+  });
+  it('words the lead\'s decision with its step, reason, age and the words that undo it', () => {
+    const [row] = deskDecided({ ...empty(), decided: [d({})] }, NOW);
+    expect(row).toEqual({
+      key: 'd12',
+      line: 'Progresser answered a7: "4410" on #9 Pick a port',
+      why: 'The lane is fixed.',
+      undo: 'Say: undo d12',
+      isNew: true,
+      age: '2h ago',
+    });
+  });
+  it('leaves the step out when there is none, and the reason empty when there is none', () => {
+    const [row] = deskDecided({ ...empty(), decided: [d({ stepId: null, stepTitle: '', why: '', isNew: false })] }, NOW);
+    expect(row).toMatchObject({ line: 'Progresser answered a7: "4410"', why: '', isNew: false, undo: 'Say: undo d12' });
+  });
+  it("words a session's decision with no undo, and keys it by its place", () => {
+    const rows = deskDecided({ ...empty(), decided: [d({}), d({ tag: '', by: 'a session', what: 'kept the old port', why: '', at: ago(3 * DAY) })] }, NOW);
+    expect(rows[1]).toMatchObject({ key: 's1', line: 'a session on #9 Pick a port: kept the old port', why: '', undo: null, age: '3d ago' });
+    expect(rows.map((r) => r.key)).toEqual(['d12', 's1']);
   });
 });
 

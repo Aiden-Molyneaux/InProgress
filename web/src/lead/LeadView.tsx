@@ -3,7 +3,8 @@ import { PageHead } from '../page/PageHead';
 import { EmptyState } from '../parts/EmptyState';
 import { ErrorLine } from '../parts/ErrorLine';
 import { Eyebrow } from '../parts/Eyebrow';
-import { NO_LEAD, deskGroups, deskHead, logLines, type DeskRow } from './leadDesk';
+import { LEAD_MANDATE } from '../../../src/core/lead-mandate';
+import { NO_LEAD, deskDecided, deskGroups, deskHead, logLines, type DeskRow } from './leadDesk';
 import type { LeadDesk } from './useLeadDesk';
 
 interface Props {
@@ -49,6 +50,7 @@ export function LeadView({ project, code, desk, now, onOpenNode }: Props) {
   const { brief, events, error } = desk;
   const head = brief ? deskHead(brief, now) : null;
   const groups = brief ? deskGroups(brief, now) : [];
+  const decided = brief ? deskDecided(brief, now) : [];
   const lines = events ? logLines(events) : null;
   return (
     <div className="ip-page ip-lead-page">
@@ -69,7 +71,11 @@ export function LeadView({ project, code, desk, now, onOpenNode }: Props) {
                 <pre>{head.intentText}</pre>
               </details>
             )}
-            {head.warning && <p className="ip-lead-warn">{head.warning}</p>}
+            <details className="ip-lead-intent">
+              <summary>The mandate, as the lead reads it</summary>
+              <pre>{LEAD_MANDATE.join('\n')}</pre>
+            </details>
+            {head.warning &&<p className="ip-lead-warn">{head.warning}</p>}
           </div>
           <div className="ip-lead-cols">
             <div className="ip-lead-desk">
@@ -91,6 +97,28 @@ export function LeadView({ project, code, desk, now, onOpenNode }: Props) {
                   )}
                 </section>
               ))}
+              <section className="ip-lead-sec" aria-label="Decided for you">
+                <div className="ip-lead-sechead">
+                  <Eyebrow as="h2">Decided for you</Eyebrow>
+                  <span className="ip-lead-count">{decided.length}</span>
+                </div>
+                {decided.length === 0 ? (
+                  <p className="ip-lead-none">Nothing decided for you in the last 7 days.</p>
+                ) : (
+                  <ul className="ip-lead-list">
+                    {decided.map((d) => (
+                      <li key={d.key} className="ip-lead-row">
+                        <div className="ip-lead-open">
+                          <span className="ip-lead-text">{d.line}</span>
+                          {d.why && <span className="ip-lead-detail">{`Why: ${d.why}`}</span>}
+                          <span className="ip-lead-meta">{d.age}</span>
+                          {d.undo && <span className="ip-lead-meta">{d.undo}</span>}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
               <p className="ip-lead-links">{`Links: ${head.links}`}</p>
             </div>
             <section className="ip-lead-sec ip-lead-log" aria-label="Log">

@@ -1863,12 +1863,46 @@ test('The Lead view shows the whole intent record and when it was written', asyn
   expect(res.ok(), `intent answered ${res.status()}: ${await res.text()}`).toBe(true);
   await viewButton(page, 'Lead').click();
   await expect(page.locator('.ip-lead-line').filter({ hasText: /^Intent record: written/ })).toBeVisible();
-  const whole = page.locator('details.ip-lead-intent');
+  const whole = page.locator('details.ip-lead-intent').filter({ has: page.locator('summary', { hasText: 'The whole intent record' }) });
   await expect(whole.locator('summary')).toHaveText('The whole intent record');
   await expect(whole).not.toHaveAttribute('open', '');
   await whole.locator('summary').click();
   await expect(whole.getByText('## Standing rulings')).toBeVisible();
   await expect(whole.getByText('Keep it small.')).toBeVisible();
+});
+
+test('The Lead view lists what was decided for Aiden, and shows the mandate', async ({ page, api }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const name = unique('Lead decided');
+  const made = await bare(api, name);
+  const session = `e2e-${randomUUID()}`;
+  const [step] = await write<{ id: number }[]>(api, session, 'post', '/api/nodes', { parentId: made.rootNodeId, nodes: [{ title: 'Pick a port' }] });
+  const ask = await write<{ id: number }>(api, session, 'post', `/api/nodes/${step.id}/asks`, { kind: 'question', text: 'Which port do the tests use?' });
+  await page.goto(`/#/p/${made.slug}`);
+  const tab = railRow(page, name);
+  await expect(tab).toHaveAttribute('aria-current', 'page');
+  await tab.click({ button: 'right' });
+  await tabMenu(page, name).getByRole('menuitem', { name: 'Lead…', exact: true }).click();
+  const field = page.getByRole('textbox', { name: `Lead of ${name}`, exact: true });
+  await field.fill('Progresser');
+  await page.keyboard.press('Enter');
+  await expect(field).toBeHidden();
+  await viewButton(page, 'Lead').click();
+  const decided = page.getByRole('region', { name: 'Decided for you', exact: true });
+  await expect(decided).toContainText('Nothing decided for you in the last 7 days.');
+  const res = await api.post(`/api/lead/${made.slug}/decide`, {
+    headers: { authorization: `Bearer ${readFileSync('.e2e-home/token', 'utf8').trim()}` },
+    data: { as: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION, askId: ask.id, answer: 'Use 4410', reason: 'The e2e lane is fixed.' },
+  });
+  expect(res.ok(), `decide answered ${res.status()}: ${await res.text()}`).toBe(true);
+  // The open view picks the decision up live, no reload.
+  await expect(decided).toContainText('Use 4410');
+  await expect(decided).toContainText('Why: The e2e lane is fixed.');
+  await expect(decided).toContainText('Say: undo d');
+  const mandate = page.locator('details.ip-lead-intent').filter({ has: page.locator('summary', { hasText: 'The mandate, as the lead reads it' }) });
+  await expect(mandate).not.toHaveAttribute('open', '');
+  await mandate.locator('summary').click();
+  await expect(mandate).toContainText("Aiden's, always:");
 });
 
 test('the open archived project can be renamed from its tab, and ⋯ shows the new name', async ({ page, api }) => {
