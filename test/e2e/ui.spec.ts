@@ -1804,9 +1804,15 @@ test("Lead… gives a project a lead, the Lead view shows the brief and the log 
   await page.keyboard.press('Escape');
   await expect(leadItem).toBeFocused();
   await page.keyboard.press('Escape');
+  // Every save is a POST to the lead route: counted, so a save that should not happen is seen.
+  let saves = 0;
+  page.on('request', (r) => {
+    if (r.method() === 'POST' && /\/api\/ui\/projects\/\d+\/lead$/.test(new URL(r.url()).pathname)) saves += 1;
+  });
   await lead('Progresser');
-  // The same name closes the menu and says nothing: wait out the toast of the save, then a second Enter adds none.
-  await expect(statusLine(page)).not.toContainText('leads', { timeout: 10_000 });
+  await expect(statusLine(page)).toContainText('Progresser leads');
+  expect(saves).toBe(1);
+  // The same name closes the menu and saves nothing.
   await tab.click({ button: 'right' });
   await tabMenu(page, name).getByRole('menuitem', { name: 'Lead…', exact: true }).click();
   const same = page.getByRole('textbox', { name: `Lead of ${name}`, exact: true });
@@ -1814,10 +1820,11 @@ test("Lead… gives a project a lead, the Lead view shows the brief and the log 
   await page.keyboard.press('Enter');
   await expect(same).toBeHidden();
   await expect(page.locator('.ip-rail-menu')).toBeHidden();
-  await expect(statusLine(page)).not.toContainText('leads');
   await viewButton(page, 'Lead').click();
   await expect(page.getByRole('heading', { level: 1, name: 'LEAD' })).toBeVisible();
   await expect(page.locator('.ip-lead-who')).toHaveText('Progresser · instructions v1');
+  // The view has loaded since that Enter: a save it caused would have gone out by now.
+  expect(saves).toBe(1);
   await expect(page.locator('.ip-lead-sec h2')).toContainText(['Needs you', 'Moving', 'Stuck', 'Next', "The lead's promises", /^Landed /, /^Said in your name /, 'Log']);
   // C4: the lead parks a step through its own command, and the open view shows the log line with Aiden's words, no reload.
   const res = await api.post(`/api/lead/${made.slug}/park`, {
