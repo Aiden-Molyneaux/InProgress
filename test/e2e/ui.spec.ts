@@ -1616,7 +1616,7 @@ test("an active tab's Delete… says how many sessions it stops tracking, and de
   // Escape goes back to the menu, on Delete….
   await page.keyboard.press('Escape');
   await expect(confirm).toBeHidden();
-  await expect(items.nth(2)).toBeFocused();
+  await expect(items.nth(3)).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(go).toBeFocused();
   await page.keyboard.press('Enter');
@@ -1796,7 +1796,25 @@ test("Lead… gives a project a lead, the Lead view shows the brief and the log 
     await page.keyboard.press('Enter');
     await expect(field).toBeHidden();
   };
+  // Escape goes back to the items, on Lead…, and saves nothing.
+  await tab.click({ button: 'right' });
+  const leadItem = tabMenu(page, name).getByRole('menuitem', { name: 'Lead…', exact: true });
+  await leadItem.click();
+  await expect(page.getByRole('textbox', { name: `Lead of ${name}`, exact: true })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(leadItem).toBeFocused();
+  await page.keyboard.press('Escape');
   await lead('Progresser');
+  // The same name closes the menu and says nothing: wait out the toast of the save, then a second Enter adds none.
+  await expect(statusLine(page)).not.toContainText('leads', { timeout: 10_000 });
+  await tab.click({ button: 'right' });
+  await tabMenu(page, name).getByRole('menuitem', { name: 'Lead…', exact: true }).click();
+  const same = page.getByRole('textbox', { name: `Lead of ${name}`, exact: true });
+  await expect(same).toHaveValue('Progresser');
+  await page.keyboard.press('Enter');
+  await expect(same).toBeHidden();
+  await expect(page.locator('.ip-rail-menu')).toBeHidden();
+  await expect(statusLine(page)).not.toContainText('leads');
   await viewButton(page, 'Lead').click();
   await expect(page.getByRole('heading', { level: 1, name: 'LEAD' })).toBeVisible();
   await expect(page.locator('.ip-lead-who')).toHaveText('Progresser · instructions v1');
@@ -4039,7 +4057,7 @@ test.describe('Module rail', () => {
     const base = (await code(first).textContent())!;
     await expect(code(second)).toHaveText(`${base.slice(0, 2)}2`);
     await expect(railRow(page, first).locator('.ip-rail-name')).toBeHidden();
-    await expect(projectRail(page).locator('.ip-rail-vcode')).toHaveText(['BRD', 'PRJ', 'BKL', 'DON', 'DOC']);
+    await expect(projectRail(page).locator('.ip-rail-vcode')).toHaveText(['BRD', 'PRJ', 'BKL', 'DON', 'DOC', 'LED']);
     await expect(viewButton(page, 'Backlog')).toBeVisible();
     // Under 720: one row of full names, and the views a group named Views above the page.
     await page.setViewportSize({ width: 400, height: 900 });

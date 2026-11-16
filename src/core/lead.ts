@@ -16,6 +16,8 @@ export const LEAD_LOOK_BACK_DAYS = 7;
 export const LEAD_LIST_CAP = 8;
 /** The most open asks of Aiden's, across all projects, the lead lets stand (the brief's `<m> of 5`). */
 export const AIDEN_OPEN_LIMIT = 5;
+/** The longest a lead's name may be, once trimmed. */
+export const LEAD_NAME_MAX = 40;
 /** The most sessions in flight the lead lets a project have (the brief's `<n> of 3`). */
 export const IN_FLIGHT_LIMIT = 3;
 /** Who an ask is for: Aiden, or the lead (a promise it made). */

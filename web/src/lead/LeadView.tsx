@@ -31,7 +31,7 @@ function Row({ row, onOpenNode }: { row: DeskRow; onOpenNode: (id: number) => vo
   return (
     <li className="ip-lead-row">
       {row.nodeId !== undefined ? (
-        <button type="button" className="ip-lead-open" onClick={() => onOpenNode(row.nodeId!)}>
+        <button type="button" className="ip-lead-open" data-node={row.nodeId} data-cursor="" onClick={() => onOpenNode(row.nodeId!)}>
           {inner}
         </button>
       ) : (
@@ -102,7 +102,7 @@ export function LeadView({ project, code, desk, now, onOpenNode }: Props) {
                         {l.words && <span className="ip-lead-detail">{`"${l.words}"`}</span>}
                         <span className="ip-lead-meta">{l.by}</span>
                         {l.nodeId !== undefined && (
-                          <button type="button" className="ip-lead-step" onClick={() => onOpenNode(l.nodeId!)}>
+                          <button type="button" className="ip-lead-step" data-node={l.nodeId} data-cursor="" onClick={() => onOpenNode(l.nodeId!)}>
                             {`Open #${l.nodeId}`}
                           </button>
                         )}

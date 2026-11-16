@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { LeadBrief, LeadEventOut } from '../../src/core/lead';
 import { stamp } from '../../src/core/span';
-import { NO_LEAD, deskGroups, deskHead, logLines } from '../../web/src/lead/leadDesk';
+import { deskGroups, deskHead, logLines } from '../../web/src/lead/leadDesk';
 
 const NOW = Date.parse('2026-11-15T12:00:00.000Z');
 const ago = (ms: number): string => new Date(NOW - ms).toISOString();
@@ -123,7 +123,7 @@ describe('deskHead', () => {
     expect(deskHead(full(), NOW)).toMatchObject({ lead: 'Progresser', goal: 'Ship it', phase: 'Building' });
   });
 
-  it('warns once about a relay that did not get through', () => {
+  it('shows the relay warning only under its rule: unavailable, and not yet followed by a look', () => {
     const b = empty();
     b.links = { t3: 'unavailable', t3At: ago(2 * HOUR), lastSeenAt: null };
     expect(deskHead(b, NOW).warning).toBe('The last relay may not have reached its session (2h ago).');
@@ -178,8 +178,5 @@ describe('logLines', () => {
     ]);
     expect(lines[0].text).toBe('the intent record, 14 characters');
     expect(lines[1]).toMatchObject({ text: '', words: 'Park it, for now.' });
-  });
-  it('exports the no-lead line', () => {
-    expect(NO_LEAD).toBe('No lead. Give this project one from its actions.');
   });
 });

@@ -1,4 +1,5 @@
 import { COMMAND_WORK_MS } from '../../core/activity';
+import { LEAD_NAME_MAX } from '../../core/lead';
 import { BRIEFING_MODES, DELETED_RETENTION_MS, STALE_SESSION_MS, TITLE_CHANNELS, type Binding, type BriefingMode, type Project, type ProjectSummary, type QueueEntry, type QueueOp, type TitleChannel } from '../../core/types';
 import { globMatch } from '../../lib/glob';
 import { isUnder, normalizePath } from '../../lib/paths';
@@ -413,9 +414,6 @@ export function applyProjectChange(ctx: Ctx, record: RecordEvent, before: Projec
   if (Object.keys(changes).length) record({ projectId: before.id, type: 'project.updated', entity: 'project', entityId: before.id, data: { changes } });
   return { project: getProjectById(ctx, before.id)!, endedSessions };
 }
-
-/** The longest a lead's name may be, once trimmed. */
-export const LEAD_NAME_MAX = 40;
 
 /**
  * Gives the project a lead, or takes it away (null). Only the window's route calls this: the CLI and MCP have no way to

@@ -1,4 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { LEAD_NAME_MAX } from '../../../src/core/lead';
 import { PROJECT_NAME_MAX, type DeletedProject, type ProjectSummary } from '../../../src/core/types';
 import { Button } from '../parts/Button';
 import { Confirm } from '../parts/Confirm';
@@ -23,9 +24,6 @@ export type RunRename = (target: ActionTarget, name: string, opener: HTMLElement
 
 /** Runs a lead saved in a row's menu (null takes the lead away), focus moving afterwards as for Run. */
 export type RunLead = (target: ActionTarget, name: string | null, opener: HTMLElement | null) => void;
-
-/** The longest lead name the server takes. */
-const LEAD_NAME_MAX = 40;
 
 /** The project a Delete… item asks about. Its live sessions, which the delete stops tracking, give the confirm a line. */
 type Confirming = ActionTarget & Pick<ProjectSummary, 'activeSessions'>;
@@ -55,8 +53,9 @@ export function Signals({ p }: { p: ProjectSummary }) {
 /** Shift+F10 or the Menu key: the keyboard's way to a row's menu, as a right-click is the mouse's. */
 export const isMenuKey = (e: KeyboardEvent) => (e.key === 'F10' && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) || e.key === 'ContextMenu';
 
-/** The rename field's project: its name now, and what Enter does with the text. */
+/** What the row menu's text field edits, a project's name (Rename…) or its lead (Lead…): the text it starts with, and what Enter does with it. */
 interface Renaming {
+  /** The text the field starts with. */
   name: string;
   /** The field's name for a screen reader; `Rename <name>` when unset. */
   label?: string;
@@ -88,8 +87,8 @@ interface MenuSurfaceProps {
 }
 
 /**
- * The rename field: the name selected, so typing replaces it. Enter saves; Escape (MenuSurface's) and a blur cancel.
- * Up to 120 characters, the server's rule.
+ * The row menu's text field, for Rename… and Lead…: the text selected, so typing replaces it. Enter saves; Escape
+ * (MenuSurface's) and a blur cancel. Up to `max` characters: 120 for a name, 40 for a lead, the server's rules.
  */
 function RenameField({ rename, onCancel }: { rename: Renaming; onCancel: () => void }) {
   const [text, setText] = useState(rename.name);
@@ -272,9 +271,10 @@ interface RowMenuProps {
 }
 
 /**
- * A row's menu: Archive, Rename… and Delete… on an active project's row, Unarchive, Rename… and Delete… on the open
- * archived project's. Delete… on an active project archives and deletes it in one step, behind the same confirm.
+ * A row's menu: Archive, Rename…, Lead… and Delete… on an active project's row, Unarchive, Rename… and Delete… on the
+ * open archived project's. Delete… on an active project archives and deletes it in one step, behind the same confirm.
  * Rename… turns the menu into a field holding the name: Enter saves a new one (the slug, so the project's links, stays),
+ * Lead… does the same with the lead's name (an empty field takes the lead away, the same name changes nothing).
  * Escape goes back to the items, and leaving it cancels. The menu floats right of its row in the column and under it in
  * the strip, fixed and outside the rail (whose overflow would clip it), and closes when the rail scrolls either way or
  * the window resizes, since it would point at nothing.
@@ -283,7 +283,7 @@ export function RowMenu({ project, row, rail, onClose, run, runRename, runLead }
   const surface = useRef<HTMLDivElement>(null);
   const noteId = useId();
   /**
-   * What stands in for the items: Delete…'s confirm, or Rename…'s field. The confirm reads the project as it is now, so
+   * What stands in for the items: Delete…'s confirm, or the text field of Rename… or Lead…. The confirm reads the project as it is now, so
    * its line follows the live sessions.
    */
   const [panel, setPanel] = useState<'confirm' | 'rename' | 'lead' | null>(null);
