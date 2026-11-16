@@ -97,7 +97,8 @@ function saidSince(ctx: Ctx, projectId: number, since: string): LeadBrief['saidI
 
 /**
  * What was decided for Aiden since `cutoff`, newest first: the lead's `decide` events, his `park` and `drop` events made
- * with no words of Aiden's, and step logs a session opened with DECIDED_PREFIX. A decision with an `undo` event is left out.
+ * with no words of Aiden's while the step is still parked or dropped, and step logs a session opened with DECIDED_PREFIX
+ * that say something. A decision with an `undo` event is left out.
  * `lastSeen` is the lead's last look: a decision at or after it is new (with no look on record, all are).
  */
 function decidedSince(ctx: Ctx, projectId: number, cutoff: string, lastSeen: string | null, titleOf: (id: number) => string): LeadBrief['decided'] {
@@ -105,8 +106,10 @@ function decidedSince(ctx: Ctx, projectId: number, cutoff: string, lastSeen: str
   const events = ctx.db
     .prepare(
       `SELECT e.id, e.at, e.lead, e.kind, e.node_id, e.text, a.answer AS answer, e.ask_id
-         FROM lead_events e LEFT JOIN asks a ON a.id = e.ask_id
-        WHERE e.project_id = ? AND e.at >= ? AND (e.kind = 'decide' OR (e.kind IN ('park', 'drop') AND e.aiden_words IS NULL))
+         FROM lead_events e LEFT JOIN asks a ON a.id = e.ask_id LEFT JOIN nodes n ON n.id = e.node_id
+        WHERE e.project_id = ? AND e.at >= ?
+          AND (e.kind = 'decide' OR (e.aiden_words IS NULL AND ((e.kind = 'park' AND n.status = 'parked') OR (e.kind = 'drop' AND n.status = 'dropped'))))
+          -- An undo line's text is the decision's tag: decisionTag (lead-commands.ts) names the other site.
           AND NOT EXISTS (SELECT 1 FROM lead_events u WHERE u.project_id = e.project_id AND u.kind = 'undo' AND u.text = 'd' || e.id)
         ORDER BY e.at DESC, e.id DESC`,
     )
@@ -130,7 +133,7 @@ function decidedSince(ctx: Ctx, projectId: number, cutoff: string, lastSeen: str
     isNew: isNew(e.at),
   }));
   const fromLogs: LeadBrief['decided'] = logs
-    .filter((l) => isDecisionLog(l.text))
+    .filter((l) => isDecisionLog(l.text) && decisionText(l.text) !== '')
     .map((l) => ({ tag: '', at: l.at, by: 'a session', stepId: l.node_id, stepTitle: titleOf(l.node_id), what: decisionText(l.text), why: '', isNew: isNew(l.at) }));
   // Equal times keep the lead's lines first: the sort is stable.
   return [...fromEvents, ...fromLogs].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));

@@ -68,6 +68,11 @@ function setup() {
   return { ctx, app, project, mine, asked, proposed, other, question, review, permission, events, leadEvents, askRow, refused };
 }
 
+/** The fixture's proposed step has a review ask open; a park or drop on the lead's own judgment needs it answered first. */
+const settle = (t: { ctx: Parameters<typeof clearAsk>[0]; review: { id: number } }): void => {
+  clearAsk(t.ctx, 'window', t.review.id);
+};
+
 describe('leadAnswer', () => {
   it("clears the question with Aiden's words, logs one line, hands it to the asker and cites it in the brief", () => {
     const { ctx, project, question, events, askRow } = setup();
@@ -114,14 +119,14 @@ describe('leadAnswer', () => {
 });
 
 describe('leadPark', () => {
-  it('parks a proposed step with no words, and clears its open asks as a park from the window does', () => {
-    const { ctx, project, proposed, review, events, askRow } = setup();
+  it('parks a proposed step with no words once nothing waits on it', () => {
+    const t = setup();
+    const { ctx, project, proposed, events } = t;
+    settle(t);
     const res = leadPark(ctx, project.slug, 'Progresser', LEAD_INSTRUCTIONS_VERSION, { stepId: proposed.id });
     expect(res.text).toBe(`Parked #${proposed.id} Dark mode. Decision d${res.decision}.`);
     expect(res.decision).toBe(1);
     expect(requireNode(ctx, proposed.id)).toMatchObject({ status: 'parked', parkedReason: 'Parked by Progresser.' });
-    expect(askRow(review.id)).toMatchObject({ cleared_by: 'lead:Progresser', answer: '' });
-    expect(askRow(review.id).cleared_at).not.toBeNull();
     expect(events()).toEqual([{ kind: 'park', node_id: proposed.id, ask_id: null, instructions: LEAD_INSTRUCTIONS_VERSION, lead: 'Progresser', text: 'Parked by Progresser.', aiden_words: null }]);
   });
 
@@ -143,7 +148,9 @@ describe('leadPark', () => {
   });
 
   it('takes a queued step out of the queue', () => {
-    const { ctx, project, proposed, other } = setup();
+    const t = setup();
+    const { ctx, project, proposed, other } = t;
+    settle(t);
     setQueue(ctx, 'test', project.slug, [proposed.id, other.id], 'unowned');
     const queued = () => resolveProject(ctx, project.slug).queue.map((e) => e.nodeId);
     expect(queued()).toEqual([proposed.id, other.id]);
@@ -152,7 +159,9 @@ describe('leadPark', () => {
   });
 
   it('refuses a parked step, a done one and a step of another project', () => {
-    const { ctx, project, proposed, other, refused } = setup();
+    const t = setup();
+    const { ctx, project, proposed, other, refused } = t;
+    settle(t);
     leadPark(ctx, project.slug, 'Progresser', LEAD_INSTRUCTIONS_VERSION, { stepId: proposed.id });
     expect(refused(() => leadPark(ctx, project.slug, 'Progresser', LEAD_INSTRUCTIONS_VERSION, { stepId: proposed.id }))).toMatchObject({ status: 409, message: `#${proposed.id} is already parked.` });
     updateNode(ctx, 'test', other.id, { status: 'done' });
@@ -185,7 +194,9 @@ describe('leadDrop', () => {
   });
 
   it('drops a proposed step with no words, and refuses one already done or dropped', () => {
-    const { ctx, project, proposed, other, refused } = setup();
+    const t = setup();
+    const { ctx, project, proposed, other, refused } = t;
+    settle(t);
     leadDrop(ctx, project.slug, 'Progresser', LEAD_INSTRUCTIONS_VERSION, { stepId: proposed.id, reason: 'Not wanted' });
     expect(requireNode(ctx, proposed.id).status).toBe('dropped');
     expect(refused(() => leadDrop(ctx, project.slug, 'Progresser', LEAD_INSTRUCTIONS_VERSION, { stepId: proposed.id, reason: 'Again' }))).toMatchObject({ status: 409, message: `#${proposed.id} is dropped.` });
@@ -194,7 +205,9 @@ describe('leadDrop', () => {
   });
 
   it('refuses a step a live session drives, and drops it once that session has ended', () => {
-    const { ctx, project, proposed, refused } = setup();
+    const t = setup();
+    const { ctx, project, proposed, refused } = t;
+    settle(t);
     claimStep(ctx, 'test', 's1', proposed.id);
     expect(requireNode(ctx, proposed.id).driverSessionId).toBe('s1');
     const drop = () => leadDrop(ctx, project.slug, 'Progresser', LEAD_INSTRUCTIONS_VERSION, { stepId: proposed.id, reason: 'Not wanted' });
@@ -445,6 +458,7 @@ describe('the routes', () => {
     const answered = await post('answer', { askId: s.question.id, aidenWords: 'Use the release keystore.' });
     expect(answered.statusCode).toBe(200);
     expect(answered.json().text).toBe(`Answered a${s.question.id} with Aiden's words.`);
+    clearAsk(s.ctx, 'window', s.review.id);
     const parked = await post('park', { stepId: s.proposed.id });
     expect(parked.statusCode).toBe(200);
     expect(parked.json().text).toMatch(/^Parked #\d+ Dark mode\. Decision d\d+\.$/);
@@ -524,7 +538,8 @@ describe('leadDecide', () => {
 
 describe('leadPark on his own judgment', () => {
   it("parks a step of Aiden's with a reason when nobody is working on it, and says its decision number", () => {
-    const { ctx, project, asked, events } = setup();
+    const { ctx, project, asked, events, question } = setup();
+    clearAsk(ctx, 'window', question.id, 'Done.');
     const res = leadPark(ctx, project.slug, 'Progresser', V, { stepId: asked.id, reason: 'Waiting on the store' });
     expect(res.decision).toBe(1);
     expect(res.text).toBe(`Parked #${asked.id} Play app signing. Decision d1.`);
@@ -570,7 +585,9 @@ describe('leadUndo', () => {
   });
 
   it('puts a parked step back in the backlog, and refuses once it is no longer parked', () => {
-    const { ctx, project, proposed, refused } = setup();
+    const t = setup();
+    const { ctx, project, proposed, refused } = t;
+    settle(t);
     leadPark(ctx, project.slug, 'Progresser', V, { stepId: proposed.id });
     expect(leadUndo(ctx, project.slug, 'Progresser', V, { eventId: 1, aidenWords: 'undo d1' }).text).toBe(`Undid d1: #${proposed.id} Dark mode is back in the backlog.`);
     expect(requireNode(ctx, proposed.id).status).toBe('todo');
@@ -584,7 +601,9 @@ describe('leadUndo', () => {
   });
 
   it('puts a dropped step back in the backlog, and refuses once it is no longer dropped', () => {
-    const { ctx, project, proposed, other, refused } = setup();
+    const t = setup();
+    const { ctx, project, proposed, other, refused } = t;
+    settle(t);
     leadDrop(ctx, project.slug, 'Progresser', V, { stepId: proposed.id, reason: 'Not wanted' });
     expect(leadUndo(ctx, project.slug, 'Progresser', V, { eventId: 1, aidenWords: 'undo d1' }).text).toBe(`Undid d1: #${proposed.id} Dark mode is back in the backlog.`);
     expect(requireNode(ctx, proposed.id).status).toBe('todo');
@@ -609,9 +628,118 @@ describe('leadUndo', () => {
   });
 
   it('is refused for an old rules version, writing nothing', () => {
-    const { ctx, project, proposed, refused } = setup();
+    const t = setup();
+    const { ctx, project, proposed, refused } = t;
+    settle(t);
     leadPark(ctx, project.slug, 'Progresser', V, { stepId: proposed.id });
     expect(refused(() => leadUndo(ctx, project.slug, 'Progresser', V - 1, { eventId: 1, aidenWords: 'x' })).status).toBe(409);
     expect(requireNode(ctx, proposed.id).status).toBe('parked');
+  });
+});
+
+type T = ReturnType<typeof setup>;
+/** Points session s1's focus at a step, as a helper working below the one the lead means to park. */
+const focusOn = (t: T, nodeId: number): void => {
+  t.ctx.db.prepare("UPDATE sessions SET focus_node_id = ? WHERE id = 's1'").run(nodeId);
+};
+
+describe('the fix round after review', () => {
+  const decideQ = (t: T) => leadDecide(t.ctx, t.project.slug, 'Progresser', V, { askId: t.question.id, answer: 'Inter', reason: 'In use' });
+  const undo = (t: T, eventId: number) => () => leadUndo(t.ctx, t.project.slug, 'Progresser', V, { eventId, aidenWords: 'undo' });
+
+  it('A.1: undo of a decide refuses when the question step has since been parked or dropped', () => {
+    const t = setup();
+    decideQ(t);
+    updateNode(t.ctx, 'window', t.asked.id, { status: 'parked', parkedReason: 'later' });
+    expect(t.refused(undo(t, 1))).toMatchObject({ status: 409, message: `#${t.asked.id} is parked now, so its question cannot be asked again. Tell Aiden.` });
+    updateNode(t.ctx, 'window', t.asked.id, { status: 'dropped' });
+    expect(t.refused(undo(t, 1)).message).toBe(`#${t.asked.id} is dropped now, so its question cannot be asked again. Tell Aiden.`);
+  });
+
+  it('A.2: undo of a decide reopens a question step it finished, and refuses a finished step whose outcome moved on', () => {
+    const t = setup();
+    const [q] = addNodes(t.ctx, 'test', { parentId: t.project.rootNodeId, nodes: [{ title: 'Pick a font', kind: 'question' }] });
+    const ask = raiseAsk(t.ctx, 'session:s1', { nodeId: q.id, kind: 'question', text: 'Which font?', sessionId: 's1' });
+    const first = leadDecide(t.ctx, t.project.slug, 'Progresser', V, { askId: ask.id, answer: 'Inter', reason: 'In use' });
+    expect(requireNode(t.ctx, q.id)).toMatchObject({ status: 'done', outcome: 'Inter' });
+    leadUndo(t.ctx, t.project.slug, 'Progresser', V, { eventId: first.decision, aidenWords: 'undo' });
+    expect(requireNode(t.ctx, q.id)).toMatchObject({ status: 'todo', outcome: '' });
+    expect(t.ctx.db.prepare('SELECT COUNT(*) FROM asks WHERE node_id = ? AND cleared_at IS NULL').pluck().get(q.id)).toBe(1);
+    // A step finished on someone else's outcome stays finished.
+    const again = t.ctx.db.prepare('SELECT id FROM asks WHERE node_id = ? AND cleared_at IS NULL').pluck().get(q.id) as number;
+    const second = leadDecide(t.ctx, t.project.slug, 'Progresser', V, { askId: again, answer: 'Roboto', reason: 'Why' });
+    updateNode(t.ctx, 'window', q.id, { outcome: 'Something else' });
+    expect(t.refused(undo(t, second.decision))).toMatchObject({ status: 409, message: `#${q.id} is finished, so its question cannot be asked again. Tell Aiden.` });
+    // A done step that is not a question step is refused too.
+    const decided = decideQ(t);
+    updateNode(t.ctx, 'window', t.asked.id, { status: 'done' });
+    expect(t.refused(undo(t, decided.decision)).message).toBe(`#${t.asked.id} is finished, so its question cannot be asked again. Tell Aiden.`);
+  });
+
+  it('A.3: undo withdraws an answer its session has not read yet', () => {
+    const t = setup();
+    const d = decideQ(t);
+    leadUndo(t.ctx, t.project.slug, 'Progresser', V, { eventId: d.decision, aidenWords: 'undo' });
+    expect(handleHookEvent(t.ctx, 's1', prompt).context ?? '').not.toContain('Decided by');
+  });
+
+  it('B.1: a park or drop on his own judgment is refused while a session works on the step or any step under it', () => {
+    const t = setup();
+    clearAsk(t.ctx, 'window', t.review.id);
+    const [child] = addNodes(t.ctx, 'test', { parentId: t.proposed.id, nodes: [{ title: 'Child' }] });
+    focusOn(t, child.id);
+    const sentence = `#${t.proposed.id} Dark mode has a session working on it. Wait for it to end, or pass Aiden's words with --aiden.`;
+    expect(t.refused(() => leadPark(t.ctx, t.project.slug, 'Progresser', V, { stepId: t.proposed.id, reason: 'x' })).message).toBe(sentence);
+    expect(t.refused(() => leadDrop(t.ctx, t.project.slug, 'Progresser', V, { stepId: t.proposed.id, reason: 'x' })).message).toBe(sentence);
+    // His own words lift it, as before.
+    expect(leadPark(t.ctx, t.project.slug, 'Progresser', V, { stepId: t.proposed.id, aidenWords: 'Park it.' }).decision).toBeNull();
+  });
+
+  it("B.1: a step under a step of Aiden's counts for the check too", () => {
+    const t = setup();
+    const [child] = addNodes(t.ctx, 'test', { parentId: t.other.id, nodes: [{ title: 'Child' }] });
+    focusOn(t, child.id);
+    expect(t.refused(() => leadPark(t.ctx, t.project.slug, 'Progresser', V, { stepId: t.other.id, reason: 'x' })).message).toBe(
+      `#${t.other.id} Privacy page has a session working on it, and it is Aiden's (origin asked). Parking it needs his words: pass them with --aiden.`,
+    );
+  });
+
+  it('B.2: a park or drop on his own judgment is refused while a question waits on Aiden on the step or under it', () => {
+    const t = setup();
+    const [child] = addNodes(t.ctx, 'test', { parentId: t.other.id, nodes: [{ title: 'Child' }] });
+    const q = raiseAsk(t.ctx, 'session:s1', { nodeId: child.id, kind: 'question', text: 'Which?' });
+    expect(t.refused(() => leadPark(t.ctx, t.project.slug, 'Progresser', V, { stepId: t.other.id, reason: 'x' })).message).toBe(
+      `#${t.other.id} Privacy page has a question waiting on Aiden (a${q.id}). Bring it to him first, or pass his words with --aiden.`,
+    );
+    const p = t.proposed;
+    expect(t.refused(() => leadDrop(t.ctx, t.project.slug, 'Progresser', V, { stepId: p.id, reason: 'x' })).message).toBe(
+      `#${p.id} Dark mode has a question waiting on Aiden (a${t.review.id}). Bring it to him first, or pass his words with --aiden.`,
+    );
+    expect(leadDrop(t.ctx, t.project.slug, 'Progresser', V, { stepId: p.id, reason: 'x', aidenWords: 'Drop it.' }).decision).toBeNull();
+  });
+
+  it('C: undo of a park refuses when the step was parked again since, and says when it stays under a parked step', () => {
+    const t = setup();
+    clearAsk(t.ctx, 'window', t.review.id);
+    leadPark(t.ctx, t.project.slug, 'Progresser', V, { stepId: t.proposed.id, reason: 'Later' });
+    updateNode(t.ctx, 'window', t.proposed.id, { status: 'todo' });
+    updateNode(t.ctx, 'window', t.proposed.id, { status: 'parked', parkedReason: 'Aiden parked it' });
+    expect(t.refused(undo(t, 1))).toMatchObject({ status: 409, message: `#${t.proposed.id} was parked again since d1: that park is not yours to undo.` });
+    const u = setup();
+    clearAsk(u.ctx, 'window', u.review.id);
+    const [kid] = addNodes(u.ctx, 'test', { parentId: u.proposed.id, nodes: [{ title: 'Kid' }] });
+    leadPark(u.ctx, u.project.slug, 'Progresser', V, { stepId: kid.id, reason: 'Kid later' });
+    updateNode(u.ctx, 'window', u.proposed.id, { status: 'parked', parkedReason: 'Parent later' });
+    expect(leadUndo(u.ctx, u.project.slug, 'Progresser', V, { eventId: 1, aidenWords: 'undo' }).text).toBe(
+      `Undid d1: #${kid.id} Kid is unparked, but it stays set aside under parked #${u.proposed.id}.`,
+    );
+  });
+
+  it('E: decide on an ask no session holds says no session is waiting', () => {
+    const t = setup();
+    const ask = raiseAsk(t.ctx, 'test', { nodeId: t.other.id, kind: 'question', text: 'Which colour?' });
+    expect(leadDecide(t.ctx, t.project.slug, 'Progresser', V, { askId: ask.id, answer: 'Blue', reason: 'Brand' }).text).toBe(
+      `Decided a${ask.id}: decision d1. No session is waiting on it.`,
+    );
   });
 });

@@ -79,6 +79,28 @@ export function LeadView({ project, code, desk, now, onOpenNode }: Props) {
           </div>
           <div className="ip-lead-cols">
             <div className="ip-lead-desk">
+              {/* First on the desk: what was decided in his stead is what Aiden reads before anything else. */}
+              <section className="ip-lead-sec" aria-label="Decided for you">
+                <div className="ip-lead-sechead">
+                  <Eyebrow as="h2">Decided for you</Eyebrow>
+                  <span className="ip-lead-count">{decided.length}</span>
+                </div>
+                {decided.length === 0 ? (
+                  <p className="ip-lead-none">Nothing decided for you in the last 7 days.</p>
+                ) : (
+                  <ul className="ip-lead-list">
+                    {decided.map((d) => (
+                      <li key={d.key} className="ip-lead-row">
+                        <div className="ip-lead-open">
+                          <span className="ip-lead-text">{d.line}</span>
+                          {d.why && <span className="ip-lead-detail">{`Why: ${d.why}`}</span>}
+                          <span className="ip-lead-meta">{d.undo ? `${d.age} · ${d.undo}` : d.age}</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
               {groups.map((g) => (
                 <section key={g.id} className="ip-lead-sec" aria-label={g.title} data-group={g.id}>
                   <div className="ip-lead-sechead">
@@ -97,28 +119,6 @@ export function LeadView({ project, code, desk, now, onOpenNode }: Props) {
                   )}
                 </section>
               ))}
-              <section className="ip-lead-sec" aria-label="Decided for you">
-                <div className="ip-lead-sechead">
-                  <Eyebrow as="h2">Decided for you</Eyebrow>
-                  <span className="ip-lead-count">{decided.length}</span>
-                </div>
-                {decided.length === 0 ? (
-                  <p className="ip-lead-none">Nothing decided for you in the last 7 days.</p>
-                ) : (
-                  <ul className="ip-lead-list">
-                    {decided.map((d) => (
-                      <li key={d.key} className="ip-lead-row">
-                        <div className="ip-lead-open">
-                          <span className="ip-lead-text">{d.line}</span>
-                          {d.why && <span className="ip-lead-detail">{`Why: ${d.why}`}</span>}
-                          <span className="ip-lead-meta">{d.age}</span>
-                          {d.undo && <span className="ip-lead-meta">{d.undo}</span>}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </section>
               <p className="ip-lead-links">{`Links: ${head.links}`}</p>
             </div>
             <section className="ip-lead-sec ip-lead-log" aria-label="Log">

@@ -272,7 +272,7 @@ describe("inprogress lead's commands", () => {
   it('decide and undo: a7 and 7, d12 and 12, print the route sentence; a second undo prints its refusal', async () => {
     const ask = raiseAsk(createCtx(db), 'test', { nodeId: steps.fourth, kind: 'question', text: 'Which font?' });
     const decided = await run(['decide', 'ingame', `a${ask.id}`, '--answer', 'Inter', '--reason', 'Already in use', ...WHO]);
-    const m = /^Decided a(\d+): decision d(\d+)\. Its session reads your answer on its next prompt\.$/.exec(decided.lines[0]);
+    const m = /^Decided a(\d+): decision d(\d+)\. No session is waiting on it\.$/.exec(decided.lines[0]);
     expect(decided.code).toBe(0);
     expect(m, decided.lines[0]).not.toBeNull();
     expect(Number(m![1])).toBe(ask.id);

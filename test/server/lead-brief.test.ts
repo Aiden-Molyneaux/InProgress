@@ -275,6 +275,21 @@ describe('readLeadBrief', () => {
     expect(renderLeadBrief(brief())).toContain('Decided for Aiden in the last 7 days (0, 0 new):\n  none');
   });
 
+  it('leaves out a park whose step is no longer parked, a drop whose step is no longer dropped, and an empty session log', () => {
+    const { ctx, project, a, b, c, brief, setLead } = setup();
+    setLead('Progresser');
+    ctx.db.prepare("UPDATE nodes SET origin = 'proposed' WHERE id IN (?, ?)").run(b.id, c.id);
+    ctx.db.prepare('UPDATE asks SET cleared_at = ? WHERE cleared_at IS NULL').run(ctx.now());
+    const V = LEAD_INSTRUCTIONS_VERSION;
+    leadPark(ctx, project.slug, 'Progresser', V, { stepId: b.id, reason: 'Later' });
+    leadDrop(ctx, project.slug, 'Progresser', V, { stepId: c.id, reason: 'Moot' });
+    addLog(ctx, 'session:s1', a.id, 'Decided for Aiden:   ');
+    expect(brief().decided.map((d) => d.tag)).toEqual(['d2', 'd1']);
+    updateNode(ctx, 'window', b.id, { status: 'todo' });
+    updateNode(ctx, 'window', c.id, { status: 'todo' });
+    expect(brief().decided).toEqual([]);
+  });
+
   it('counts only the last seven days', () => {
     const { ctx, project, b, brief, setLead } = setup();
     setLead('Progresser');
