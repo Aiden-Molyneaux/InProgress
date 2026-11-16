@@ -709,11 +709,11 @@ describe('the fix round after review', () => {
     const [child] = addNodes(t.ctx, 'test', { parentId: t.other.id, nodes: [{ title: 'Child' }] });
     const q = raiseAsk(t.ctx, 'session:s1', { nodeId: child.id, kind: 'question', text: 'Which?' });
     expect(t.refused(() => leadPark(t.ctx, t.project.slug, 'Progresser', V, { stepId: t.other.id, reason: 'x' })).message).toBe(
-      `#${t.other.id} Privacy page has a question waiting on Aiden (a${q.id}). Bring it to him first, or pass his words with --aiden.`,
+      `#${t.other.id} Privacy page has an ask waiting on Aiden (a${q.id}). Bring it to him first, or pass his words with --aiden.`,
     );
     const p = t.proposed;
     expect(t.refused(() => leadDrop(t.ctx, t.project.slug, 'Progresser', V, { stepId: p.id, reason: 'x' })).message).toBe(
-      `#${p.id} Dark mode has a question waiting on Aiden (a${t.review.id}). Bring it to him first, or pass his words with --aiden.`,
+      `#${p.id} Dark mode has an ask waiting on Aiden (a${t.review.id}). Bring it to him first, or pass his words with --aiden.`,
     );
     expect(leadDrop(t.ctx, t.project.slug, 'Progresser', V, { stepId: p.id, reason: 'x', aidenWords: 'Drop it.' }).decision).toBeNull();
   });

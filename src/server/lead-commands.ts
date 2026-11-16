@@ -73,7 +73,7 @@ function requireQuiet(ctx: Ctx, node: TreeNode, session: string): void {
     .pluck()
     .all(...ids) as number[];
   if (open.length) {
-    throw conflict(`${stepRef(node.id, node.title)} has a question waiting on Aiden (${open.map(askTag).join(', ')}). Bring it to him first, or pass his words with --aiden.`);
+    throw conflict(`${stepRef(node.id, node.title)} has an ask waiting on Aiden (${open.map(askTag).join(', ')}). Bring it to him first, or pass his words with --aiden.`);
   }
 }
 
