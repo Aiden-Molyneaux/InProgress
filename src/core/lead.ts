@@ -2,7 +2,7 @@ import type { SessionApp } from './session-app';
 import type { AskKind } from './types';
 
 /** The version of the lead's written instructions. A write command from a lower version is refused. */
-export const LEAD_INSTRUCTIONS_VERSION = 1;
+export const LEAD_INSTRUCTIONS_VERSION = 2;
 /** The marks that make a step Stale in the lead's brief: it was left open, an ask went unanswered, or an answer is owed. */
 export const LEAD_STALE_MARKS = ['ended_open', 'stale_ask', 'done_focus', 'stalled', 'answer_waiting', 'answered_in_chat'] as const;
 /**

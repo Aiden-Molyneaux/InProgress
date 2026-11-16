@@ -93,7 +93,7 @@ describe('renderLeadBrief', () => {
     expect(noLook[2]).toBe('Goal: No intent record yet.');
     // After the out-of-date line, before Goal.
     const old = lines({ t3: 'unavailable', t3At: ago(5 * MIN), lastSeenAt: null }, { ...empty, instructions: { current: 2, yours: 1 } });
-    expect(old.slice(1, 4)).toEqual(['Your instructions are out of date: you can read, you cannot change anything.', WARN, 'Goal: No intent record yet.']);
+    expect(old.slice(1, 4)).toEqual(['Your rules are out of date: you can read, you cannot change anything. Run the rules command again.', WARN, 'Goal: No intent record yet.']);
     expect(lines({ t3: 'unavailable', t3At: ago(5 * MIN), lastSeenAt: ago(HOUR) })).toContain(WARN);
     expect(lines({ t3: 'unavailable', t3At: ago(5 * MIN), lastSeenAt: ago(MIN) }).some((l) => l.startsWith('The last relay'))).toBe(false);
     expect(lines({ t3: 'ok', t3At: ago(5 * MIN), lastSeenAt: null }).some((l) => l.startsWith('The last relay'))).toBe(false);
@@ -172,7 +172,7 @@ describe('renderLeadBrief', () => {
   it('says on the second line when the instructions are out of date, and not otherwise', () => {
     const old = renderLeadBrief({ ...empty, instructions: { current: 2, yours: 1 } }).split('\n');
     expect(old[0]).toContain('instructions v2 (yours: v1)');
-    expect(old[1]).toBe('Your instructions are out of date: you can read, you cannot change anything.');
+    expect(old[1]).toBe('Your rules are out of date: you can read, you cannot change anything. Run the rules command again.');
     expect(old[2]).toBe('Goal: No intent record yet.');
     expect(renderLeadBrief(empty)).not.toContain('out of date');
     // The window reads with no instructions of its own: nothing to be out of date.

@@ -8,7 +8,7 @@ import { createCtx } from '../../src/server/db/tx';
 import { deleteProject, purgeDeletedProjects } from '../../src/server/project-lifecycle';
 import { LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
 import { renderLeadBrief } from '../../src/server/lead-text';
-import { logLeadEvent, markLeadSeen, noLeadNamed, outOfDate, readLeadBrief, requireLead, staleReasons } from '../../src/server/lead';
+import { logLeadEvent, markLeadSeen, noLeadNamed, outOfDate, readLeadBrief, readLeadRules, requireLead, staleReasons } from '../../src/server/lead';
 import { raiseAsk } from '../../src/server/repo/asks';
 import { maxEventId } from '../../src/server/repo/events';
 import { addNodes, parkNode, updateNode } from '../../src/server/repo/nodes';
@@ -43,7 +43,7 @@ describe('requireLead', () => {
     const { ctx, project, setLead } = setup();
     setLead('Progresser');
     expect(requireLead(ctx, project.slug, 'progresser', 1, false).slug).toBe(project.slug);
-    expect(requireLead(ctx, project.slug, 'Progresser ', 1, true).lead).toBe('Progresser');
+    expect(requireLead(ctx, project.slug, 'Progresser ', LEAD_INSTRUCTIONS_VERSION, true).lead).toBe('Progresser');
     expect(() => requireLead(ctx, project.slug, 'Rich', 1, false)).toThrow(noLeadNamed('Rich'));
   });
 
@@ -65,8 +65,8 @@ describe('requireLead', () => {
     const { ctx, project, setLead } = setup();
     setLead('Progresser');
     expect(requireLead(ctx, project.slug, 'Progresser', LEAD_INSTRUCTIONS_VERSION - 1, false).lead).toBe('Progresser');
-    expect(() => requireLead(ctx, project.slug, 'Progresser', LEAD_INSTRUCTIONS_VERSION - 1, true)).toThrow(outOfDate(LEAD_INSTRUCTIONS_VERSION - 1));
-    expect(outOfDate(0)).toBe('Your instructions are version 0; version 1 is needed to change anything. Ask Aiden to paste the new ones.');
+    expect(() => requireLead(ctx, project.slug, 'Progresser', LEAD_INSTRUCTIONS_VERSION - 1, true)).toThrow(outOfDate(LEAD_INSTRUCTIONS_VERSION - 1, project.slug, 'Progresser'));
+    expect(outOfDate(1, 'ingame', 'Progresser')).toBe('Your rules are version 1; version 2 is current. Run "lead rules ingame --as Progresser" again and follow what it prints.');
   });
 });
 
@@ -95,7 +95,7 @@ describe('readLeadBrief: the T3 link', () => {
     expect(brief().links).toMatchObject({ t3: 'not checked', t3At: null });
     const other = createProject(ctx, 'test', { name: 'Elsewhere' });
     const log = (projectId: number, kind: 'relay' | 'relay_failed' | 'relay_unknown' | 'park') =>
-      logLeadEvent(ctx, { projectId, lead: 'Progresser', instructions: 1, kind, nodeId: a.id, text: 'hi' });
+      logLeadEvent(ctx, { projectId, lead: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION, kind, nodeId: a.id, text: 'hi' });
     log(other.id, 'relay_failed');
     log(project.id, 'park');
     expect(brief().links).toMatchObject({ t3: 'not checked', t3At: null });
@@ -216,9 +216,9 @@ describe('readLeadBrief', () => {
 
   it('cites what the lead said in Aiden\'s name since the last look, newest first, by ask or by step', () => {
     const { ctx, project, aidenAsk, a, brief } = setup();
-    logLeadEvent(ctx, { projectId: project.id, lead: 'Progresser', instructions: 1, kind: 'answer', askId: aidenAsk.id, aidenWords: 'Use the release keystore.' });
-    logLeadEvent(ctx, { projectId: project.id, lead: 'Progresser', instructions: 1, kind: 'park', nodeId: a.id, text: 'parked', aidenWords: 'Park it.' });
-    logLeadEvent(ctx, { projectId: project.id, lead: 'Progresser', instructions: 1, kind: 'relay', nodeId: a.id, text: 'no words of his' });
+    logLeadEvent(ctx, { projectId: project.id, lead: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION, kind: 'answer', askId: aidenAsk.id, aidenWords: 'Use the release keystore.' });
+    logLeadEvent(ctx, { projectId: project.id, lead: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION, kind: 'park', nodeId: a.id, text: 'parked', aidenWords: 'Park it.' });
+    logLeadEvent(ctx, { projectId: project.id, lead: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION, kind: 'relay', nodeId: a.id, text: 'no words of his' });
     expect(brief().saidInAidensName.map((e) => [e.kind, e.ref, e.words])).toEqual([
       ['park', `#${a.id}`, 'Park it.'],
       ['answer', `a${aidenAsk.id}`, 'Use the release keystore.'],
@@ -278,7 +278,7 @@ describe('the brief route', () => {
   it('answers a project with no lead 409 when `as` is given, and writes nothing', async () => {
     const { ctx, app, project, leadEvents, seenAt } = setup();
     const before = maxEventId(ctx);
-    const res = await app.inject({ url: `/api/lead/${project.slug}/brief?as=Progresser&instructions=1` });
+    const res = await app.inject({ url: `/api/lead/${project.slug}/brief?as=Progresser&instructions=${LEAD_INSTRUCTIONS_VERSION}` });
     expect(res.statusCode).toBe(409);
     expect(res.json().error).toBe(noLeadNamed('Progresser'));
     expect(maxEventId(ctx)).toBe(before);
@@ -289,11 +289,11 @@ describe('the brief route', () => {
   it('answers another lead\'s name 409, and the named lead with { brief, text }', async () => {
     const { app, project, setLead } = setup();
     setLead('Progresser');
-    expect((await app.inject({ url: `/api/lead/${project.slug}/brief?as=Rich&instructions=1` })).statusCode).toBe(409);
-    const ok = await app.inject({ url: `/api/lead/${project.slug}/brief?as=progresser&instructions=1` });
+    expect((await app.inject({ url: `/api/lead/${project.slug}/brief?as=Rich&instructions=${LEAD_INSTRUCTIONS_VERSION}` })).statusCode).toBe(409);
+    const ok = await app.inject({ url: `/api/lead/${project.slug}/brief?as=progresser&instructions=${LEAD_INSTRUCTIONS_VERSION}` });
     expect(ok.statusCode).toBe(200);
     expect(ok.json().brief.project).toEqual({ slug: 'ingame', name: 'InGame', lead: 'Progresser' });
-    expect(ok.json().text.split('\n')[0]).toMatch(/^Lead brief · InGame · .* · instructions v1 \(yours: v1\)$/);
+    expect(ok.json().text.split('\n')[0]).toMatch(/^Lead brief · InGame · .* · instructions v2 \(yours: v2\)$/);
   });
 
   it('answers the window without `as`: no lead check, yours null, and never marks, whatever the query says', async () => {
@@ -310,13 +310,13 @@ describe('the brief route', () => {
     expect((await app.inject({ url: `/api/lead/${project.slug}/brief?as=Progresser` })).statusCode).toBe(400);
     expect((await app.inject({ url: `/api/lead/${project.slug}/brief?bogus=1` })).statusCode).toBe(400);
     // Marking is a write of its own: the GET takes no mark.
-    expect((await app.inject({ url: `/api/lead/${project.slug}/brief?as=Progresser&instructions=1&mark=1` })).statusCode).toBe(400);
+    expect((await app.inject({ url: `/api/lead/${project.slug}/brief?as=Progresser&instructions=${LEAD_INSTRUCTIONS_VERSION}&mark=1` })).statusCode).toBe(400);
   });
 
   it('a GET never marks the look', async () => {
     const { app, project, setLead, seenAt } = setup();
     setLead('Progresser');
-    await app.inject({ url: `/api/lead/${project.slug}/brief?as=Progresser&instructions=1` });
+    await app.inject({ url: `/api/lead/${project.slug}/brief?as=Progresser&instructions=${LEAD_INSTRUCTIONS_VERSION}` });
     expect(seenAt()).toBeNull();
   });
 
@@ -330,11 +330,11 @@ describe('the brief route', () => {
 
   it('answers the log, newest first', async () => {
     const { ctx, app, project, aidenAsk } = setup();
-    logLeadEvent(ctx, { projectId: project.id, lead: 'Progresser', instructions: 1, kind: 'answer', askId: aidenAsk.id, aidenWords: 'Yes.' });
-    logLeadEvent(ctx, { projectId: project.id, lead: 'Progresser', instructions: 1, kind: 'park', text: 'later' });
+    logLeadEvent(ctx, { projectId: project.id, lead: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION, kind: 'answer', askId: aidenAsk.id, aidenWords: 'Yes.' });
+    logLeadEvent(ctx, { projectId: project.id, lead: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION, kind: 'park', text: 'later' });
     const { events } = (await app.inject({ url: `/api/lead/${project.slug}/events` })).json();
     expect(events.map((e: { kind: string }) => e.kind)).toEqual(['park', 'answer']);
-    expect(events[1]).toMatchObject({ lead: 'Progresser', instructions: 1, askId: aidenAsk.id, aidenWords: 'Yes.', nodeId: null, sessionId: null, text: '' });
+    expect(events[1]).toMatchObject({ lead: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION, askId: aidenAsk.id, aidenWords: 'Yes.', nodeId: null, sessionId: null, text: '' });
   });
 });
 
@@ -347,26 +347,26 @@ describe('the seen route', () => {
     const { ctx, app, project, a, setLead, seenAt } = setup();
     setLead('Progresser');
     updateNode(ctx, 'scribe:s1', a.id, { status: 'done', outcome: 'Signed.' });
-    const first = await app.inject({ url: `/api/lead/${project.slug}/brief?as=Progresser&instructions=1` });
+    const first = await app.inject({ url: `/api/lead/${project.slug}/brief?as=Progresser&instructions=${LEAD_INSTRUCTIONS_VERSION}` });
     expect(first.json().brief.landedSince.map((n: { stepId: number }) => n.stepId)).toEqual([a.id]);
     expect(seenAt()).toBeNull();
-    const res = await seen(app, project.slug, { as: 'progresser', instructions: 1 });
+    const res = await seen(app, project.slug, { as: 'progresser', instructions: LEAD_INSTRUCTIONS_VERSION });
     expect(res.statusCode).toBe(200);
     expect(res.json().seenAt).toBe(seenAt());
-    const second = await app.inject({ url: `/api/lead/${project.slug}/brief?as=Progresser&instructions=1` });
+    const second = await app.inject({ url: `/api/lead/${project.slug}/brief?as=Progresser&instructions=${LEAD_INSTRUCTIONS_VERSION}` });
     expect(second.json().brief.landedSince).toEqual([]);
     expect(second.json().brief.links.lastSeenAt).toBe(seenAt());
   });
 
   it('refuses a request with no bearer token, a project with no lead or another lead, and writes nothing', async () => {
     const { ctx, app, project, setLead, seenAt } = setup();
-    expect((await seen(app, project.slug, { as: 'Progresser', instructions: 1 }, {})).statusCode).toBe(401);
+    expect((await seen(app, project.slug, { as: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION }, {})).statusCode).toBe(401);
     const before = maxEventId(ctx);
-    const none = await seen(app, project.slug, { as: 'Progresser', instructions: 1 });
+    const none = await seen(app, project.slug, { as: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION });
     expect(none.statusCode).toBe(409);
     expect(none.json().error).toBe(noLeadNamed('Progresser'));
     setLead('Progresser');
-    expect((await seen(app, project.slug, { as: 'Rich', instructions: 1 })).statusCode).toBe(409);
+    expect((await seen(app, project.slug, { as: 'Rich', instructions: LEAD_INSTRUCTIONS_VERSION })).statusCode).toBe(409);
     expect(seenAt()).toBeNull();
     expect(maxEventId(ctx)).toBe(before + 1);
   });
@@ -374,12 +374,12 @@ describe('the seen route', () => {
   it('takes the time of the brief the lead read, so a step that landed after that brief is in the next one', async () => {
     const { ctx, app, project, a, setLead, seenAt } = setup();
     setLead('Progresser');
-    const first = (await app.inject({ url: `/api/lead/${project.slug}/brief?as=Progresser&instructions=1` })).json().brief;
+    const first = (await app.inject({ url: `/api/lead/${project.slug}/brief?as=Progresser&instructions=${LEAD_INSTRUCTIONS_VERSION}` })).json().brief;
     updateNode(ctx, 'scribe:s1', a.id, { status: 'done', outcome: 'Signed.' });
-    const res = await seen(app, project.slug, { as: 'Progresser', instructions: 1, at: first.at });
+    const res = await seen(app, project.slug, { as: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION, at: first.at });
     expect(res.json().seenAt).toBe(first.at);
     expect(seenAt()).toBe(first.at);
-    const second = (await app.inject({ url: `/api/lead/${project.slug}/brief?as=Progresser&instructions=1` })).json().brief;
+    const second = (await app.inject({ url: `/api/lead/${project.slug}/brief?as=Progresser&instructions=${LEAD_INSTRUCTIONS_VERSION}` })).json().brief;
     expect(second.landedSince.map((n: { stepId: number }) => n.stepId)).toEqual([a.id]);
   });
 
@@ -387,17 +387,17 @@ describe('the seen route', () => {
     const { ctx, app, project, setLead, seenAt } = setup();
     setLead('Progresser');
     const ahead = new Date(Date.parse(ctx.now()) + 3_600_000).toISOString();
-    const res = await seen(app, project.slug, { as: 'Progresser', instructions: 1, at: ahead });
+    const res = await seen(app, project.slug, { as: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION, at: ahead });
     expect(res.statusCode).toBe(200);
     expect(seenAt()! < ahead).toBe(true);
-    expect((await seen(app, project.slug, { as: 'Progresser', instructions: 1, at: 'yesterday' })).statusCode).toBe(400);
+    expect((await seen(app, project.slug, { as: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION, at: 'yesterday' })).statusCode).toBe(400);
   });
 
   it('takes a strict body: as, instructions and the time only', async () => {
     const { app, project, setLead } = setup();
     setLead('Progresser');
     expect((await seen(app, project.slug, { as: 'Progresser' })).statusCode).toBe(400);
-    expect((await seen(app, project.slug, { as: 'Progresser', instructions: 1, extra: true })).statusCode).toBe(400);
+    expect((await seen(app, project.slug, { as: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION, extra: true })).statusCode).toBe(400);
     expect((await seen(app, project.slug, { as: 'Progresser', instructions: 'one' })).statusCode).toBe(400);
   });
 });
@@ -423,7 +423,7 @@ describe('purging a project that has lead events', () => {
     const ctx = createCtx(openDb(':memory:'), () => new Date(now).toISOString());
     const project = createProject(ctx, 'test', { name: 'Old Site' });
     setProjectLead(ctx, 'window', project.slug, 'Progresser');
-    logLeadEvent(ctx, { projectId: project.id, lead: 'Progresser', instructions: 1, kind: 'answer', aidenWords: 'Yes.' });
+    logLeadEvent(ctx, { projectId: project.id, lead: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION, kind: 'answer', aidenWords: 'Yes.' });
     changeProject(ctx, 'window', project.slug, { status: 'archived' });
     deleteProject(ctx, 'window', project.id);
     now += 31 * 24 * 60 * 60 * 1000;
@@ -459,5 +459,71 @@ describe('the window route that sets a lead', () => {
     const { app, project } = setup();
     const res = await app.inject({ method: 'POST', url: `/api/ui/projects/${project.id}/lead`, headers: { authorization: 'Bearer t' }, payload: { slug: project.slug, name: 'Progresser' } });
     expect(res.statusCode).toBe(403);
+  });
+});
+
+describe('the rules route', () => {
+  const CLI = 'node C:/x/dist/cli/main.js';
+
+  it('answers version 2 and the text for the stored lead name, whatever case `as` is given in', async () => {
+    const { app, project, setLead } = setup();
+    setLead('Progresser');
+    for (const as of ['Progresser', 'progresser', 'PROGRESSER']) {
+      const res = await app.inject({ url: `/api/lead/${project.slug}/rules?as=${as}` });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { version: number; text: string; bootstrap: string };
+      expect(body.version).toBe(2);
+      expect(body.text.split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 2.');
+      expect(body.text).toContain('lead brief ingame --as Progresser --instructions 2');
+      expect(body.bootstrap.split('\n')).toHaveLength(3);
+      expect(body.bootstrap).toContain('lead rules ingame --as Progresser');
+    }
+  });
+
+  it('refuses no lead, another name and an archived project with their sentences, and writes nothing', async () => {
+    const { ctx, app, project, setLead, leadEvents } = setup();
+    const none = await app.inject({ url: `/api/lead/${project.slug}/rules?as=Progresser` });
+    expect([none.statusCode, none.json().error]).toEqual([409, noLeadNamed('Progresser')]);
+    setLead('Progresser');
+    const other = await app.inject({ url: `/api/lead/${project.slug}/rules?as=Rich` });
+    expect([other.statusCode, other.json().error]).toEqual([409, noLeadNamed('Rich')]);
+    changeProject(ctx, 'test', project.slug, { status: 'archived' });
+    const archived = await app.inject({ url: `/api/lead/${project.slug}/rules?as=Progresser` });
+    expect([archived.statusCode, archived.json().error]).toEqual([409, 'This project is archived, so it has no lead.']);
+    expect(leadEvents()).toBe(0);
+  });
+
+  it('takes `as` and nothing else', async () => {
+    const { app, project } = setup();
+    expect((await app.inject({ url: `/api/lead/${project.slug}/rules` })).statusCode).toBe(400);
+    expect((await app.inject({ url: `/api/lead/${project.slug}/rules?as=Progresser&instructions=2` })).statusCode).toBe(400);
+  });
+
+  it('readLeadRules prints the command prefix it is given and the stored name', () => {
+    const { ctx, project, setLead } = setup();
+    setLead('Progresser');
+    const r = readLeadRules(ctx, project.slug, ' progresser ', CLI);
+    expect(r.version).toBe(LEAD_INSTRUCTIONS_VERSION);
+    expect(r.text).toContain(`\n  ${CLI}\n`);
+    expect(r.bootstrap).toBe(`You are Progresser, the lead for InGame.\nBefore anything else in every conversation, run this on Aiden's laptop and follow exactly what it prints:\n${CLI} lead rules ingame --as Progresser`);
+  });
+});
+
+describe('a lead on older rules', () => {
+  it('is refused a change with the sentence that names the rules command, and still reads, with the second line', async () => {
+    const { app, project, setLead, brief } = setup();
+    setLead('Progresser');
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/lead/${project.slug}/kept`,
+      headers: { authorization: 'Bearer t' },
+      payload: { as: 'Progresser', instructions: 1, askId: 1 },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe('Your rules are version 1; version 2 is current. Run "lead rules ingame --as Progresser" again and follow what it prints.');
+    const read = await app.inject({ url: `/api/lead/${project.slug}/brief?as=Progresser&instructions=1` });
+    expect(read.statusCode).toBe(200);
+    expect(read.json().text.split('\n')[1]).toBe('Your rules are out of date: you can read, you cannot change anything. Run the rules command again.');
+    expect(brief().instructions.yours).toBe(1);
   });
 });

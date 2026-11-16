@@ -238,6 +238,8 @@ export const leadBriefQuery = z
   .object({ as: z.string().min(1).max(200).optional(), instructions: z.coerce.number().int().min(0).optional() })
   .strict()
   .refine((q) => q.as === undefined || q.instructions !== undefined, { message: 'instructions: needed with as', path: ['instructions'] });
+/** The lead's rules route: who is asking. */
+export const leadRulesQuery = z.object({ as: z.string().trim().min(1).max(40) }).strict();
 /** The lead marking its brief as read: who it is, the instructions version it holds, and the time of the brief it read. */
 export const leadSeenBody = z.object({ as: z.string().min(1).max(200), instructions: z.number().int().min(0), at: z.string().datetime().optional() }).strict();
 /** Who sends a lead command, and the instructions version it holds: every command's body has both. */

@@ -66,7 +66,7 @@ export function renderLeadBrief(b: LeadBrief): string {
   const now = Date.parse(b.at);
   const { current, yours } = b.instructions;
   const lines = [`Lead brief · ${line(b.project.name, PROJECT_NAME_MAX)} · ${stamp(b.at)} · instructions v${current} (yours: ${yours === null ? 'none' : `v${yours}`})`];
-  if (yours !== null && yours < current) lines.push('Your instructions are out of date: you can read, you cannot change anything.');
+  if (yours !== null && yours < current) lines.push('Your rules are out of date: you can read, you cannot change anything. Run the rules command again.');
   const { t3, t3At, lastSeenAt } = b.links;
   // A relay that did not get through is news once: until the lead marks a look after it.
   if (t3 === 'unavailable' && t3At !== null && (lastSeenAt === null || t3At > lastSeenAt)) {

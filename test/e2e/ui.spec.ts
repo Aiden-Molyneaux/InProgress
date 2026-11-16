@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
 import { test as base, expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 
 interface Seeded {
@@ -1822,14 +1823,14 @@ test("Lead… gives a project a lead, the Lead view shows the brief and the log 
   await expect(page.locator('.ip-rail-menu')).toBeHidden();
   await viewButton(page, 'Lead').click();
   await expect(page.getByRole('heading', { level: 1, name: 'LEAD' })).toBeVisible();
-  await expect(page.locator('.ip-lead-who')).toHaveText('Progresser · instructions v1');
+  await expect(page.locator('.ip-lead-who')).toHaveText(`Progresser · instructions v${LEAD_INSTRUCTIONS_VERSION}`);
   // The view has loaded since that Enter: a save it caused would have gone out by now.
   expect(saves).toBe(1);
   await expect(page.locator('.ip-lead-sec h2')).toContainText(['Needs you', 'Moving', 'Stuck', 'Next', "The lead's promises", /^Landed /, /^Said in your name /, 'Log']);
   // C4: the lead parks a step through its own command, and the open view shows the log line with Aiden's words, no reload.
   const res = await api.post(`/api/lead/${made.slug}/park`, {
     headers: { authorization: `Bearer ${readFileSync('.e2e-home/token', 'utf8').trim()}` },
-    data: { as: 'Progresser', instructions: 1, stepId: step.id, aidenWords: 'park it for now' },
+    data: { as: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION, stepId: step.id, aidenWords: 'park it for now' },
   });
   expect(res.ok(), `park answered ${res.status()}: ${await res.text()}`).toBe(true);
   const log = page.locator('.ip-lead-log');
