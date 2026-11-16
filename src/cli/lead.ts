@@ -6,6 +6,7 @@ import { TASKS_NOT_RUNNING_HINT } from './tasks';
 const WHO = '--as <name> --instructions <n>';
 export const LEAD_USAGE = [
   'Usage:',
+  '  inprogress lead rules <project> --as <name> [--bootstrap]',
   `  inprogress lead brief <project> ${WHO} [--mark] [--json]`,
   `  inprogress lead answer <project> <ask id> --aiden <words> ${WHO}`,
   `  inprogress lead park <project> <step id> [--reason <text>] [--aiden <words>] ${WHO}`,
@@ -49,9 +50,12 @@ interface CommandSpec {
   positionals: number;
   flags: readonly string[];
   bools?: readonly string[];
+  /** The command can be run without --instructions (the lead does not know the version until it has read the rules). */
+  noInstructions?: boolean;
 }
 
 const COMMANDS: Record<string, CommandSpec> = {
+  rules: { positionals: 0, flags: [], bools: ['--bootstrap'], noInstructions: true },
   brief: { positionals: 0, flags: [], bools: ['--mark', '--json'] },
   answer: { positionals: 1, flags: ['--aiden'] },
   park: { positionals: 1, flags: ['--reason', '--aiden'] },
@@ -98,8 +102,8 @@ function parseArgs(args: string[], spec: CommandSpec): Parsed | { error: string 
   if (rest.length < spec.positionals) return { error: 'Missing a value after <project>' };
   if (rest.length > spec.positionals) return { error: `Unexpected ${rest[spec.positionals]}` };
   if (as === undefined) return { error: 'Missing --as <name>' };
-  if (instructions === undefined) return { error: 'Missing --instructions <n>' };
-  return { project, positionals: rest, flags, bools, as, instructions };
+  if (instructions === undefined && !spec.noInstructions) return { error: 'Missing --instructions <n>' };
+  return { project, positionals: rest, flags, bools, as, instructions: instructions ?? 0 };
 }
 
 /** An ask as the brief names it, `a7`, or as a bare number, `7`. */
@@ -181,7 +185,8 @@ function draft(command: string, p: Parsed): Draft {
 }
 
 /**
- * `inprogress lead <command>`. `brief` prints the server's text, or with --json the brief; the seven commands (answer, park,
+ * `inprogress lead <command>`. `rules` prints the lead's rules (or with --bootstrap the three lines to paste) and needs no
+ * --instructions. `brief` prints the server's text, or with --json the brief; the seven commands (answer, park,
  * drop, promise, kept, intent, relay) each post to their route and print its sentence. No command, an unknown one, or
  * arguments it cannot use print the usage and exit 1, before anything is read from stdin; a refusal from the server prints
  * its sentence and exits 1. The lead is how Aiden reaches a project, so unlike claim and ask a stopped server is started
@@ -199,7 +204,7 @@ export async function runLead(args: string[], out: (line: string) => void, o: Co
   if (command === undefined || !Object.hasOwn(COMMANDS, command)) return usage();
   const p = parseArgs(rest, COMMANDS[command]);
   if ('error' in p) return usage(p.error);
-  const body = command === 'brief' ? undefined : draft(command, p);
+  const body = command === 'brief' || command === 'rules' ? undefined : draft(command, p);
   if (body !== undefined && 'error' in body) return usage(body.error);
   if (body !== undefined && Object.values(body.fields).filter((v) => typeof v === 'object' && 'stdin' in v).length > 1) {
     return usage('Only one value can be read from stdin (-)');
@@ -231,6 +236,11 @@ export async function runLead(args: string[], out: (line: string) => void, o: Co
     if (payload !== undefined) {
       const res = await client.post<{ text: string }>(`${path}/${command}`, payload, command === 'relay' ? { timeoutMs: RELAY_TIMEOUT_MS } : {});
       out(res.text);
+      return 0;
+    }
+    if (command === 'rules') {
+      const rules = await client.get<{ text: string; bootstrap: string }>(`${path}/rules?as=${encodeURIComponent(p.as)}`);
+      out(p.bools.has('--bootstrap') ? rules.bootstrap : rules.text);
       return 0;
     }
     const res = await client.get<{ brief: LeadBrief; text: string }>(`${path}/brief?as=${encodeURIComponent(p.as)}&instructions=${p.instructions}`);

@@ -1,5 +1,6 @@
 import { deriveBoard, type BoardRow, type Mark } from '../core/board';
 import { LEAD_IDLE_MARKS, LEAD_INSTRUCTIONS_VERSION, LEAD_LOOK_BACK_DAYS, LEAD_STALE_MARKS, isAidens, type LeadBrief, type LeadEventKind, type LeadEventOut } from '../core/lead';
+import { leadBootstrap, leadRules } from '../core/lead-rules';
 import { buildIndex, dfsOrder, shelvedIds } from '../core/tree';
 import { ASK_TRAIL_MS, askTag, type Ask, type Project } from '../core/types';
 import { spanAgo } from './briefing';
@@ -21,8 +22,8 @@ export const noLeadNamed = (as: string): string => `This project has no lead nam
 /** The refusal of a lead command on an archived project: it keeps no lead. */
 export const ARCHIVED = 'This project is archived, so it has no lead.';
 /** The refusal of a change from instructions older than the current ones. */
-export const outOfDate = (yours: number): string =>
-  `Your instructions are version ${yours}; version ${LEAD_INSTRUCTIONS_VERSION} is needed to change anything. Ask Aiden to paste the new ones.`;
+export const outOfDate = (yours: number, slug: string, lead: string): string =>
+  `Your rules are version ${yours}; version ${LEAD_INSTRUCTIONS_VERSION} is current. Run "lead rules ${slug} --as ${lead}" again and follow what it prints.`;
 
 /**
  * The project `ref`, when its lead is the one named `as` (ignoring case and surrounding spaces). A project with no lead,
@@ -34,8 +35,15 @@ export function requireLead(ctx: Ctx, ref: string, as: string, instructions: num
   const name = as.trim();
   if (project.status === 'archived') throw conflict(ARCHIVED);
   if (project.lead === null || project.lead.trim().toLowerCase() !== name.toLowerCase()) throw conflict(noLeadNamed(name));
-  if (write && instructions < LEAD_INSTRUCTIONS_VERSION) throw conflict(outOfDate(instructions));
+  if (write && instructions < LEAD_INSTRUCTIONS_VERSION) throw conflict(outOfDate(instructions, project.slug, project.lead.trim()));
   return project;
+}
+
+/** The rules and the bootstrap for the project's lead, as the rules command prints them. `cli` is `node <path>`. A read: it changes nothing. */
+export function readLeadRules(ctx: Ctx, ref: string, as: string, cli: string): { version: number; text: string; bootstrap: string } {
+  const project = requireLead(ctx, ref, as, LEAD_INSTRUCTIONS_VERSION, false);
+  const v = { lead: project.lead!.trim(), projectName: project.name, slug: project.slug, cli };
+  return { version: LEAD_INSTRUCTIONS_VERSION, text: leadRules(v), bootstrap: leadBootstrap(v) };
 }
 
 interface LeadEventRow {

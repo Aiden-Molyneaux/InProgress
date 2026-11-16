@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { runCli } from '../../src/cli/commands';
+import { LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
 import { LEAD_TIMEOUT, LEAD_USAGE, RELAY_NO_ANSWER, RELAY_TIMEOUT_MS, runLead } from '../../src/cli/lead';
 import { TASKS_NOT_RUNNING_HINT } from '../../src/cli/tasks';
 import { ApiClientError } from '../../src/lib/client';
@@ -72,39 +73,39 @@ function capture() {
 describe('inprogress lead brief', () => {
   it("prints the route's text, and with --json the brief", async () => {
     const text = capture();
-    expect(await runLead(['brief', 'ingame', '--as', 'Progresser', '--instructions', '1'], text.out, conn)).toBe(0);
+    expect(await runLead(['brief', 'ingame', '--as', 'Progresser', '--instructions', String(LEAD_INSTRUCTIONS_VERSION)], text.out, conn)).toBe(0);
     expect(text.lines).toHaveLength(1);
-    expect(text.lines[0].split('\n')[0]).toMatch(/^Lead brief · InGame · .* · instructions v1 \(yours: v1\)$/);
+    expect(text.lines[0].split('\n')[0]).toMatch(/^Lead brief · InGame · .* · instructions v2 \(yours: v2\)$/);
     expect(text.lines[0]).toContain('In flight (0 of 3):');
 
     const json = capture();
-    expect(await runLead(['brief', 'ingame', '--as', 'Progresser', '--instructions', '1', '--json', '--mark'], json.out, conn)).toBe(0);
+    expect(await runLead(['brief', 'ingame', '--as', 'Progresser', '--instructions', String(LEAD_INSTRUCTIONS_VERSION), '--json', '--mark'], json.out, conn)).toBe(0);
     const brief = JSON.parse(json.lines[0]);
-    expect(brief).toMatchObject({ project: { slug: 'ingame', lead: 'Progresser' }, instructions: { current: 1, yours: 1 }, inFlight: [] });
+    expect(brief).toMatchObject({ project: { slug: 'ingame', lead: 'Progresser' }, instructions: { current: LEAD_INSTRUCTIONS_VERSION, yours: LEAD_INSTRUCTIONS_VERSION }, inFlight: [] });
   });
 
   it('marks the look only with --mark', async () => {
     const seen = () => db.prepare("SELECT lead_seen_at FROM projects WHERE slug = 'ingame'").pluck().get();
     const before = seen();
-    await runLead(['brief', 'ingame', '--as', 'Progresser', '--instructions', '1'], () => {}, conn);
+    await runLead(['brief', 'ingame', '--as', 'Progresser', '--instructions', String(LEAD_INSTRUCTIONS_VERSION)], () => {}, conn);
     expect(seen()).toBe(before);
-    await runLead(['brief', 'ingame', '--as', 'Progresser', '--instructions', '1', '--mark'], () => {}, conn);
+    await runLead(['brief', 'ingame', '--as', 'Progresser', '--instructions', String(LEAD_INSTRUCTIONS_VERSION), '--mark'], () => {}, conn);
     expect(seen()).not.toBe(before);
   });
 
   it('prints the brief first, then posts seen; a failure there prints its sentence and exits 1', async () => {
     const c = capture();
-    expect(await runLead(['brief', 'ingame', '--as', 'Progresser', '--instructions', '1', '--mark'], c.out, { ...conn, token: 'wrong' })).toBe(1);
+    expect(await runLead(['brief', 'ingame', '--as', 'Progresser', '--instructions', String(LEAD_INSTRUCTIONS_VERSION), '--mark'], c.out, { ...conn, token: 'wrong' })).toBe(1);
     expect(c.lines[0]).toContain('Lead brief · InGame');
     expect(c.lines[1]).toBe('Missing or invalid InProgress token');
   });
 
   it('prints the usage and exits 1 for a missing --as or --instructions, a bad number or another subcommand', async () => {
     for (const args of [
-      ['brief', 'ingame', '--instructions', '1'],
+      ['brief', 'ingame', '--instructions', String(LEAD_INSTRUCTIONS_VERSION)],
       ['brief', 'ingame', '--as', 'Progresser'],
       ['brief', 'ingame', '--as', 'Progresser', '--instructions', 'x'],
-      ['brief', '--as', 'Progresser', '--instructions', '1'],
+      ['brief', '--as', 'Progresser', '--instructions', String(LEAD_INSTRUCTIONS_VERSION)],
       ['answer', 'ingame'],
       [],
     ]) {
@@ -117,19 +118,19 @@ describe('inprogress lead brief', () => {
   it("prints the server's refusal and exits 1 for a project with no lead or another lead", async () => {
     for (const [project, as] of [['leaderless', 'Progresser'], ['ingame', 'Rich']]) {
       const c = capture();
-      expect(await runLead(['brief', project, '--as', as, '--instructions', '1'], c.out, conn)).toBe(1);
+      expect(await runLead(['brief', project, '--as', as, '--instructions', String(LEAD_INSTRUCTIONS_VERSION)], c.out, conn)).toBe(1);
       expect(c.lines[0]).toBe(noLeadNamed(as));
     }
   });
 
   it('rethrows an unreachable server for main.ts to print', async () => {
-    await expect(runLead(['brief', 'ingame', '--as', 'Progresser', '--instructions', '1'], () => {}, { baseUrl: 'http://127.0.0.1:1', token: 'x' })).rejects.toBeInstanceOf(ApiClientError);
+    await expect(runLead(['brief', 'ingame', '--as', 'Progresser', '--instructions', String(LEAD_INSTRUCTIONS_VERSION)], () => {}, { baseUrl: 'http://127.0.0.1:1', token: 'x' })).rejects.toBeInstanceOf(ApiClientError);
   });
 
   it('says why and exits 1 when the server will not start, without asking it anything', async () => {
     const c = capture();
     const down = { baseUrl: 'http://127.0.0.1:1', token: 'x', bringUp: async () => 'InProgress did not start. See server.log' };
-    expect(await runLead(['brief', 'ingame', '--as', 'Progresser', '--instructions', '1'], c.out, down)).toBe(1);
+    expect(await runLead(['brief', 'ingame', '--as', 'Progresser', '--instructions', String(LEAD_INSTRUCTIONS_VERSION)], c.out, down)).toBe(1);
     expect(c.lines).toEqual(['InProgress did not start. See server.log']);
   });
 
@@ -139,7 +140,7 @@ describe('inprogress lead brief', () => {
     try {
       let started = 0;
       const stopped = capture();
-      expect(await runCli(['lead', 'brief', 'ingame', '--as', 'Progresser', '--instructions', '1'], stopped.out, { ensureServer: async () => (started++, false) })).toBe(1);
+      expect(await runCli(['lead', 'brief', 'ingame', '--as', 'Progresser', '--instructions', String(LEAD_INSTRUCTIONS_VERSION)], stopped.out, { ensureServer: async () => (started++, false) })).toBe(1);
       expect(started).toBe(1);
       expect(stopped.lines[0]).toMatch(/^InProgress did not start\. See /);
       const bad = capture();
@@ -154,13 +155,13 @@ describe('inprogress lead brief', () => {
   it('leaves a running server alone', async () => {
     let started = 0;
     const c = capture();
-    expect(await runCli(['lead', 'brief', 'ingame', '--as', 'Progresser', '--instructions', '1'], c.out, { ensureServer: async () => (started++, true) })).toBe(0);
+    expect(await runCli(['lead', 'brief', 'ingame', '--as', 'Progresser', '--instructions', String(LEAD_INSTRUCTIONS_VERSION)], c.out, { ensureServer: async () => (started++, true) })).toBe(0);
     expect(started).toBe(0);
   });
 
   it('is dispatched by runCli, and the usage names lead', async () => {
     const c = capture();
-    expect(await runCli(['lead', 'brief', 'ingame', '--as', 'progresser', '--instructions', '1'], c.out)).toBe(0);
+    expect(await runCli(['lead', 'brief', 'ingame', '--as', 'progresser', '--instructions', String(LEAD_INSTRUCTIONS_VERSION)], c.out)).toBe(0);
     expect(c.lines[0]).toContain('Lead brief · InGame');
     const usage = capture();
     await runCli(['nonsense'], usage.out);
@@ -168,8 +169,50 @@ describe('inprogress lead brief', () => {
   });
 });
 
+describe('inprogress lead rules', () => {
+  it('GETs the rules for the named lead and prints the text, with no --instructions', async () => {
+    const c = capture();
+    expect(await runLead(['rules', 'ingame', '--as', 'Progresser'], c.out, conn)).toBe(0);
+    expect(c.lines).toHaveLength(1);
+    expect(c.lines[0].split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 2.');
+    expect(c.lines[0]).toContain(`lead brief ingame --as Progresser --instructions ${LEAD_INSTRUCTIONS_VERSION}`);
+    // --instructions, when given, is ignored.
+    const given = capture();
+    expect(await runLead(['rules', 'ingame', '--as', 'progresser', '--instructions', '1'], given.out, conn)).toBe(0);
+    expect(given.lines[0].split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 2.');
+  });
+
+  it('prints the three lines to paste with --bootstrap', async () => {
+    const c = capture();
+    expect(await runLead(['rules', 'ingame', '--as', 'Progresser', '--bootstrap'], c.out, conn)).toBe(0);
+    const lines = c.lines[0].split('\n');
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toBe('You are Progresser, the lead for InGame.');
+    expect(lines[2]).toMatch(/^node .*main\.js lead rules ingame --as Progresser$/);
+  });
+
+  it('refuses a name that is not the lead, with the no-lead sentence', async () => {
+    const c = capture();
+    expect(await runLead(['rules', 'ingame', '--as', 'Rich'], c.out, conn)).toBe(1);
+    expect(c.lines[0]).toBe(noLeadNamed('Rich'));
+  });
+
+  it('prints the usage without --as, and a write command still needs --instructions', async () => {
+    const c = capture();
+    expect(await runLead(['rules', 'ingame'], c.out, conn)).toBe(1);
+    expect(c.lines.at(-1)).toBe(LEAD_USAGE);
+    const park = capture();
+    expect(await runLead(['park', 'ingame', String(steps.first), '--as', 'Progresser'], park.out, conn)).toBe(1);
+    expect(park.lines).toEqual(['Missing --instructions <n>', LEAD_USAGE]);
+  });
+
+  it('has the rules line first in the usage', () => {
+    expect(LEAD_USAGE.split('\n')[1]).toBe('  inprogress lead rules <project> --as <name> [--bootstrap]');
+  });
+});
+
 describe("inprogress lead's commands", () => {
-  const WHO = ['--as', 'Progresser', '--instructions', '1'];
+  const WHO = ['--as', 'Progresser', '--instructions', String(LEAD_INSTRUCTIONS_VERSION)];
   /** An io whose stdin is `text` and whose files are `files`; it counts the reads. */
   const io = (text = '', files: Record<string, string> = {}) => {
     const reads = { stdin: 0, files: [] as string[] };
@@ -292,14 +335,14 @@ describe("inprogress lead's commands", () => {
 
   it('lists brief and the seven commands in the usage, one line each', () => {
     const lines = LEAD_USAGE.split('\n');
-    expect(lines).toHaveLength(9);
-    expect(lines.slice(1).map((l) => l.trim().split(' ')[2])).toEqual(['brief', 'answer', 'park', 'drop', 'promise', 'kept', 'intent', 'relay']);
-    expect(lines[8]).toBe('  inprogress lead relay <project> <step id> <message | -> --as <name> --instructions <n>');
+    expect(lines).toHaveLength(10);
+    expect(lines.slice(1).map((l) => l.trim().split(' ')[2])).toEqual(['rules', 'brief', 'answer', 'park', 'drop', 'promise', 'kept', 'intent', 'relay']);
+    expect(lines[9]).toBe('  inprogress lead relay <project> <step id> <message | -> --as <name> --instructions <n>');
   });
 });
 
 describe('inprogress lead relay', () => {
-  const WHO = ['--as', 'Progresser', '--instructions', '1'];
+  const WHO = ['--as', 'Progresser', '--instructions', String(LEAD_INSTRUCTIONS_VERSION)];
   type Sent = { url: string; body: unknown; timeoutMs: number | undefined };
   /** Stubs fetch to answer `text` and records what was posted, with the timeout the client asked for. */
   function stubbed(answer: () => Promise<Response>): Sent[] {
@@ -332,7 +375,7 @@ describe('inprogress lead relay', () => {
       vi.unstubAllGlobals();
       vi.restoreAllMocks();
     }
-    expect(sent).toEqual([{ url: `${conn.baseUrl}/api/lead/inprogress/relay`, body: { as: 'Progresser', instructions: 1, stepId: 42, message: 'hi' }, timeoutMs: RELAY_TIMEOUT_MS }]);
+    expect(sent).toEqual([{ url: `${conn.baseUrl}/api/lead/inprogress/relay`, body: { as: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION, stepId: 42, message: 'hi' }, timeoutMs: RELAY_TIMEOUT_MS }]);
     expect(RELAY_TIMEOUT_MS).toBe(75_000);
   });
 
@@ -346,7 +389,7 @@ describe('inprogress lead relay', () => {
       vi.restoreAllMocks();
     }
     expect(res).toMatchObject({ code: 0, reads: 1 });
-    expect(sent.map((s) => s.body)).toEqual([{ as: 'Progresser', instructions: 1, stepId: 42, message: 'Use the release keystore.\n' }]);
+    expect(sent.map((s) => s.body)).toEqual([{ as: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION, stepId: 42, message: 'Use the release keystore.\n' }]);
   });
 
   it('prints the not-a-step sentence and the usage for a step that is not one, reading no stdin', async () => {

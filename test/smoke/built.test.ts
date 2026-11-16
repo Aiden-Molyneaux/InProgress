@@ -368,6 +368,12 @@ describe('built artifacts', () => {
     }
   });
 
+  it('the built CLI refuses the lead rules for a name that is not the project\'s lead', () => {
+    const r = spawnSync(process.execPath, [bin('cli/main.js'), 'lead', 'rules', 'smoke', '--as', 'Nobody'], { env, encoding: 'utf8' });
+    expect(r.status).toBe(1);
+    expect(`${r.stdout}${r.stderr}`).toContain('This project has no lead named Nobody. Only Aiden can give a project a lead, from its actions in the window.');
+  });
+
   it('CLI prints the client hint under an error', () => {
     const r = spawnSync(process.execPath, [bin('cli/main.js'), 'outline', 'smoke'], { env: { ...env, INPROGRESS_PORT: '1' }, encoding: 'utf8' });
     expect(r.status).toBe(1);

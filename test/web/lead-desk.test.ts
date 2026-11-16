@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { LeadBrief, LeadEventOut } from '../../src/core/lead';
+import { LEAD_INSTRUCTIONS_VERSION, type LeadBrief, type LeadEventOut } from '../../src/core/lead';
 import { stamp } from '../../src/core/span';
 import { deskGroups, deskHead, logLines } from '../../web/src/lead/leadDesk';
 
@@ -12,7 +12,7 @@ const DAY = 24 * HOUR;
 const empty = (): LeadBrief => ({
   project: { slug: 'p', name: 'P', lead: null },
   at: new Date(NOW).toISOString(),
-  instructions: { current: 1, yours: null },
+  instructions: { current: LEAD_INSTRUCTIONS_VERSION, yours: null },
   intent: { goal: '', phase: '', updatedAt: null },
   inFlight: [],
   waitingOnAiden: [],
@@ -117,7 +117,7 @@ describe('deskGroups', () => {
 
 describe('deskHead', () => {
   it('reads a project with no lead and each goal fallback', () => {
-    expect(deskHead(empty(), NOW)).toMatchObject({ lead: null, instructions: 1, goal: 'No intent record yet.', phase: 'none', warning: null });
+    expect(deskHead(empty(), NOW)).toMatchObject({ lead: null, instructions: LEAD_INSTRUCTIONS_VERSION, goal: 'No intent record yet.', phase: 'none', warning: null });
     const written = { ...empty(), intent: { goal: '', phase: '', updatedAt: ago(DAY) } };
     expect(deskHead(written, NOW).goal).toBe('The intent record has no goal under a Goal heading.');
     expect(deskHead(full(), NOW)).toMatchObject({ lead: 'Progresser', goal: 'Ship it', phase: 'Building' });
@@ -150,7 +150,7 @@ describe('logLines', () => {
     id: 1,
     at: ago(HOUR),
     lead: 'Progresser',
-    instructions: 1,
+    instructions: LEAD_INSTRUCTIONS_VERSION,
     kind: 'answer',
     nodeId: null,
     askId: null,
@@ -166,7 +166,7 @@ describe('logLines', () => {
       ev({ id: 1, kind: 'relay_unknown' }),
     ]);
     expect(lines.map((l) => l.key)).toEqual([3, 2, 1]);
-    expect(lines[0]).toMatchObject({ at: stamp(ago(HOUR)), kind: 'answer', ref: 'a4', text: 'said yes', words: 'go', by: 'Progresser · v1', nodeId: 9 });
+    expect(lines[0]).toMatchObject({ at: stamp(ago(HOUR)), kind: 'answer', ref: 'a4', text: 'said yes', words: 'go', by: `Progresser · v${LEAD_INSTRUCTIONS_VERSION}`, nodeId: 9 });
     expect(lines[1]).toMatchObject({ kind: 'park', ref: '#5', words: null, nodeId: 5 });
     expect(lines[2]).toMatchObject({ kind: 'relay unknown', ref: '', text: '' });
     expect(lines[2].nodeId).toBeUndefined();

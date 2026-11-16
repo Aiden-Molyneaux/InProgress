@@ -1,11 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import type { Guard } from '../app';
 import type { Ctx } from '../db/tx';
-import { listLeadEvents, markLeadSeen, readLeadBrief, requireLead } from '../lead';
+import { cliBesideServer, nodeCli } from '../../lib/task-command';
+import { listLeadEvents, markLeadSeen, readLeadBrief, readLeadRules, requireLead } from '../lead';
 import { leadAnswer, leadDrop, leadIntent, leadKept, leadPark, leadPromise } from '../lead-commands';
 import { leadRelay, type RelaySend } from '../lead-relay';
 import { renderLeadBrief } from '../lead-text';
-import { leadAnswerBody, leadBriefQuery, leadDropBody, leadIntentBody, leadKeptBody, leadParkBody, leadPromiseBody, leadRelayBody, leadSeenBody } from '../schemas';
+import { leadAnswerBody, leadBriefQuery, leadDropBody, leadIntentBody, leadKeptBody, leadParkBody, leadPromiseBody, leadRelayBody, leadRulesQuery, leadSeenBody } from '../schemas';
 
 /**
  * The lead's reads, and its writes. The reads are plain GETs like the other reads: no CORS headers, so a page on another
@@ -26,6 +27,12 @@ export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken:
     const project = requireLead(ctx, ref, query.as, query.instructions!, false);
     const brief = readLeadBrief(ctx, project.slug, query.instructions!, now);
     return { brief, text: renderLeadBrief(brief) };
+  });
+  // The lead's rules, with its name and the project's filled in: a read like the brief, with the same lead check.
+  app.get('/api/lead/:ref/rules', async (req) => {
+    const { ref } = req.params as { ref: string };
+    const query = leadRulesQuery.parse(req.query);
+    return readLeadRules(ctx, ref, query.as, nodeCli(cliBesideServer()));
   });
   app.get('/api/lead/:ref/events', async (req) => ({ events: listLeadEvents(ctx, (req.params as { ref: string }).ref) }));
   // The lead has read the brief: the next one counts what landed and what was said from here.

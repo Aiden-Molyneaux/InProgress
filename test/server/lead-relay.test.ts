@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
 import { relayText } from '../../src/core/relay';
 import { buildApp } from '../../src/server/app';
 import { listLeadEvents, noLeadNamed, outOfDate } from '../../src/server/lead';
@@ -34,7 +35,7 @@ function setup(send: RelaySend = vi.fn<RelaySend>(async () => undefined)) {
   };
   const leadEvents = () => ctx.db.prepare('SELECT COUNT(*) FROM lead_events').pluck().get() as number;
   const app = buildApp({ ctx, token: 't', uiToken: 'ui-token', version: 'test', t3Send: send });
-  const relay = (stepId: number, message = 'carry on', as = 'Progresser', instructions = 1) => leadRelay(ctx, project.slug, as, instructions, { stepId, message }, send);
+  const relay = (stepId: number, message = 'carry on', as = 'Progresser', instructions = LEAD_INSTRUCTIONS_VERSION) => leadRelay(ctx, project.slug, as, instructions, { stepId, message }, send);
   /** Runs `fn`, which must reject; answers what it threw, having checked that nothing was sent or written. */
   const refused = async (fn: () => Promise<unknown>): Promise<{ status: number; message: string }> => {
     const mark = maxEventId(ctx);
@@ -69,7 +70,7 @@ describe('leadRelay', () => {
     expect(res).toEqual({ text: 'Delivered to "Signing work".', sessionId: 's1' });
     const events = listLeadEvents(s.ctx, s.project.slug);
     expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({ kind: 'relay', lead: 'Progresser', instructions: 1, nodeId: s.step.id, askId: null, sessionId: 's1', text: 'Use the release keystore.', aidenWords: null });
+    expect(events[0]).toMatchObject({ kind: 'relay', lead: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION, nodeId: s.step.id, askId: null, sessionId: 's1', text: 'Use the release keystore.', aidenWords: null });
   });
 
   it("names the lead as stored, whatever case it is called by, and clips a long title to 60", async () => {
@@ -119,7 +120,7 @@ describe('leadRelay', () => {
     expect(await s.refused(() => s.relay(s.foreign.id))).toMatchObject({ status: 409, message: `#${s.foreign.id} is not in this project.` });
     expect(await s.refused(() => s.relay(999_999))).toMatchObject({ status: 404 });
     expect(await s.refused(() => s.relay(s.step.id, 'hi', 'Rich'))).toMatchObject({ status: 409, message: noLeadNamed('Rich') });
-    expect(await s.refused(() => s.relay(s.step.id, 'hi', 'Progresser', 0))).toMatchObject({ status: 409, message: outOfDate(0) });
+    expect(await s.refused(() => s.relay(s.step.id, 'hi', 'Progresser', 0))).toMatchObject({ status: 409, message: outOfDate(0, s.project.slug, 'Progresser') });
     setProjectLead(s.ctx, 'window', s.project.slug, null);
     expect(await s.refused(() => s.relay(s.step.id))).toMatchObject({ status: 409, message: noLeadNamed('Progresser') });
   });
@@ -185,10 +186,10 @@ describe('the relay route', () => {
   it('is refused without the bearer token, and for a message too long or of spaces only', async () => {
     const s = setup();
     s.session('s1', s.step.id);
-    expect((await post(s, { as: 'Progresser', instructions: 1, stepId: s.step.id, message: 'hi' }, {})).statusCode).toBe(401);
-    expect((await post(s, { as: 'Progresser', instructions: 1, stepId: s.step.id, message: 'x'.repeat(4_001) })).statusCode).toBe(400);
-    expect((await post(s, { as: 'Progresser', instructions: 1, stepId: s.step.id, message: '   ' })).statusCode).toBe(400);
-    expect((await post(s, { as: 'Progresser', instructions: 1, stepId: s.step.id, message: 'hi', extra: true })).statusCode).toBe(400);
+    expect((await post(s, { as: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION, stepId: s.step.id, message: 'hi' }, {})).statusCode).toBe(401);
+    expect((await post(s, { as: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION, stepId: s.step.id, message: 'x'.repeat(4_001) })).statusCode).toBe(400);
+    expect((await post(s, { as: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION, stepId: s.step.id, message: '   ' })).statusCode).toBe(400);
+    expect((await post(s, { as: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION, stepId: s.step.id, message: 'hi', extra: true })).statusCode).toBe(400);
     expect(s.send).not.toHaveBeenCalled();
     expect(s.leadEvents()).toBe(0);
   });
@@ -196,7 +197,7 @@ describe('the relay route', () => {
   it("answers 200 with the sentence for a good one, sending through the app's t3Send", async () => {
     const s = setup();
     s.session('s1', s.step.id, { title: 'Signing work' });
-    const res = await post(s, { as: 'Progresser', instructions: 1, stepId: s.step.id, message: 'x'.repeat(4_000) });
+    const res = await post(s, { as: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION, stepId: s.step.id, message: 'x'.repeat(4_000) });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ text: 'Delivered to "Signing work".', sessionId: 's1' });
     expect(s.send).toHaveBeenCalledWith(THREAD, relayText('Progresser', 'InGame', 'x'.repeat(4_000)));
@@ -209,7 +210,7 @@ describe('the relay route', () => {
       }),
     );
     s.session('s1', s.step.id);
-    const res = await post(s, { as: 'Progresser', instructions: 1, stepId: s.step.id, message: 'hi' });
+    const res = await post(s, { as: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION, stepId: s.step.id, message: 'hi' });
     expect(res.statusCode).toBe(502);
     expect(res.json().error).toBe(RELAY_UNKNOWN);
   });

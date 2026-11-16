@@ -2,7 +2,7 @@ import type { SessionApp } from './session-app';
 import type { AskKind } from './types';
 
 /** The version of the lead's written instructions. A write command from a lower version is refused. */
-export const LEAD_INSTRUCTIONS_VERSION = 1;
+export const LEAD_INSTRUCTIONS_VERSION = 2;
 /** The marks that make a step Stale in the lead's brief: it was left open, an ask went unanswered, or an answer is owed. */
 export const LEAD_STALE_MARKS = ['ended_open', 'stale_ask', 'done_focus', 'stalled', 'answer_waiting', 'answered_in_chat'] as const;
 /**
@@ -18,6 +18,9 @@ export const LEAD_LIST_CAP = 8;
 export const AIDEN_OPEN_LIMIT = 5;
 /** The longest a lead's name may be, once trimmed. */
 export const LEAD_NAME_MAX = 40;
+/** A lead's name: one plain word, because the rules print it unquoted on every command line. */
+export const LEAD_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$/;
+export const LEAD_NAME_RULE = "A lead's name is 1 to 40 letters, digits, dots, dashes or underscores, and starts with a letter or a digit.";
 /** The most sessions in flight the lead lets a project have (the brief's `<n> of 3`). */
 export const IN_FLIGHT_LIMIT = 3;
 /** Who an ask is for: Aiden, or the lead (a promise it made). */
