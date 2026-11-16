@@ -342,16 +342,24 @@ export function parkNodeInWrite(ctx: Ctx, record: RecordEvent, actor: string, id
  */
 export function unparkNode(ctx: Ctx, actor: string, id: number, toNext: boolean, check: (before: TreeNode) => void): TreeNode {
   return write(ctx, actor, (record) => {
-    const before = requireNode(ctx, id);
-    check(before);
-    if (before.status !== 'parked') return before;
-    const above = toNext ? parkedAncestor(ctx, id) : null;
-    if (above !== null) throw badRequest(`#${id} is under parked #${above}`, `Unpark #${above} first.`);
-    const node = patchNode(ctx, record, before, { status: 'todo' });
-    // After the status change, so the queue event reads the step as open again.
-    if (toNext) appendUnowned(ctx, record, before.projectId, id);
-    return node;
+    check(requireNode(ctx, id));
+    return unparkNodeInWrite(ctx, record, id, toNext);
   });
+}
+
+/**
+ * unparkNode's work without its `check`, inside a write() already open (write() never nests): a lead command puts a
+ * parked step back and logs it in one write. A step that is not parked answers as it stands, writing nothing.
+ */
+export function unparkNodeInWrite(ctx: Ctx, record: RecordEvent, id: number, toNext: boolean): TreeNode {
+  const before = requireNode(ctx, id);
+  if (before.status !== 'parked') return before;
+  const above = toNext ? parkedAncestor(ctx, id) : null;
+  if (above !== null) throw badRequest(`#${id} is under parked #${above}`, `Unpark #${above} first.`);
+  const node = patchNode(ctx, record, before, { status: 'todo' });
+  // After the status change, so the queue event reads the step as open again.
+  if (toNext) appendUnowned(ctx, record, before.projectId, id);
+  return node;
 }
 
 /**

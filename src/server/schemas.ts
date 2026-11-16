@@ -248,7 +248,13 @@ export const leadSeenBody = z.object({ as: z.string().min(1).max(200), instructi
 const leadWho = { as: z.string().min(1).max(200), instructions: z.number().int().min(0) };
 const leadId = z.number().int().positive();
 /** `lead answer`: Aiden's words, carried as the answer to a question of his. */
-export const leadAnswerBody = z.object({ ...leadWho, askId: leadId, aidenWords: z.string().trim().min(1).max(2_000) }).strict();
+export const leadAnswerBody = z.object({ ...leadWho, askId: leadId, aidenWords: z.string().trim().min(1).max(2_000), says: z.string().trim().min(1).max(2_000).optional() }).strict();
+/** `lead decide`: the question, the lead's answer and why, and Aiden's words when he told the lead to decide. */
+export const leadDecideBody = z
+  .object({ ...leadWho, askId: leadId, answer: z.string().trim().min(1).max(2_000), reason: z.string().trim().min(1).max(2_000), aidenWords: z.string().trim().min(1).max(2_000).optional() })
+  .strict();
+/** `lead undo`: the decision (a lead_events id) and Aiden's words. */
+export const leadUndoBody = z.object({ ...leadWho, eventId: leadId, aidenWords: z.string().trim().min(1).max(2_000) }).strict();
 /** `lead park`: the step, why (optional), and Aiden's words (needed for a step of his). */
 export const leadParkBody = z
   .object({ ...leadWho, stepId: leadId, reason: z.string().trim().min(1).max(500).optional(), aidenWords: z.string().trim().min(1).max(2_000).optional() })

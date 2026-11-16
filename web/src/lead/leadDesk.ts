@@ -31,6 +31,14 @@ export interface DeskHead {
   warning: string | null;
   links: string;
 }
+export interface DeskDecided {
+  key: string;
+  line: string;
+  why: string;
+  undo: string | null;
+  isNew: boolean;
+  age: string;
+}
 export interface LogLine {
   key: number;
   at: string;
@@ -140,6 +148,22 @@ export function deskGroups(b: LeadBrief, now: number): DeskGroup[] {
       rows: b.saidInAidensName.map((e, i) => ({ key: String(i), text: `${stamp(e.at)} ${e.kind} ${e.ref}`, detail: `"${flat(e.words)}"` })),
     },
   ];
+}
+
+/** What was decided for Aiden, newest first as the brief gives it. */
+export function deskDecided(b: LeadBrief, now: number): DeskDecided[] {
+  return b.decided.map((d, i) => {
+    const on = d.stepId === null ? '' : ` on ${step(d.stepId, d.stepTitle)}`;
+    const mine = d.tag !== '';
+    return {
+      key: mine ? d.tag : `s${i}`,
+      line: mine ? `${d.by} ${flat(d.what)}${on}` : `a session${on}: ${flat(d.what)}`,
+      why: flat(d.why),
+      undo: mine ? `Say: undo ${d.tag}` : null,
+      isNew: d.isNew,
+      age: `${spanAgo(d.at, now)} ago`,
+    };
+  });
 }
 
 export function logLines(events: readonly LeadEventOut[]): LogLine[] {

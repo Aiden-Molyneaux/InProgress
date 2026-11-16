@@ -3,6 +3,7 @@ import { STALE_SESSION_MS, TRAIL_MS, type PastSession, type Session, type Sessio
 import { write, type Ctx } from '../db/tx';
 import { endSessionCommands, listCommands } from './commands';
 import { releaseQueue } from './projects';
+import { subtreeIds } from './shelved';
 import { NOT_READER_SQL, endSubagents, listSubagents } from './subagents';
 
 /**
@@ -14,6 +15,18 @@ export function liveDriver(ctx: Ctx, n: TreeNode): string | null {
   const cutoff = new Date(Date.parse(ctx.now()) - STALE_SESSION_MS).toISOString();
   const live = ctx.db.prepare("SELECT 1 FROM sessions WHERE id = ? AND focus_node_id = ? AND state != 'ended' AND last_seen_at >= ?").get(n.driverSessionId, n.id, cutoff) !== undefined;
   return live ? n.driverSessionId : null;
+}
+
+/**
+ * True when a session that has not ended, seen within STALE_SESSION_MS, has `nodeId`, or any step under it, as its focus:
+ * a driver or a helper, on the step or below it.
+ */
+export function liveSessionUnder(ctx: Ctx, nodeId: number): boolean {
+  const cutoff = new Date(Date.parse(ctx.now()) - STALE_SESSION_MS).toISOString();
+  const ids = subtreeIds(ctx, nodeId);
+  return (
+    ctx.db.prepare(`SELECT 1 FROM sessions WHERE focus_node_id IN (${ids.map(() => '?').join(', ')}) AND state != 'ended' AND last_seen_at >= ?`).get(...ids, cutoff) !== undefined
+  );
 }
 
 interface SessionRow {

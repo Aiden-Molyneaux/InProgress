@@ -3,7 +3,7 @@ import { spanAgo } from './span';
 import type { AskKind } from './types';
 
 /** The version of the lead's written instructions. A write command from a lower version is refused. */
-export const LEAD_INSTRUCTIONS_VERSION = 3;
+export const LEAD_INSTRUCTIONS_VERSION = 4;
 /** The marks that make a step Stale in the lead's brief: it was left open, an ask went unanswered, or an answer is owed. */
 export const LEAD_STALE_MARKS = ['ended_open', 'stale_ask', 'done_focus', 'stalled', 'answer_waiting', 'answered_in_chat'] as const;
 /**
@@ -32,7 +32,7 @@ export type AskOwner = 'aiden' | 'lead';
  * title, no count and no Board row.
  */
 export const isAidens = (a: { owner: AskOwner }): boolean => a.owner !== 'lead';
-export type LeadEventKind = 'answer' | 'park' | 'drop' | 'promise' | 'kept' | 'intent' | 'relay' | 'relay_unknown' | 'relay_failed';
+export type LeadEventKind = 'answer' | 'decide' | 'undo' | 'park' | 'drop' | 'promise' | 'kept' | 'intent' | 'relay' | 'relay_unknown' | 'relay_failed';
 
 /** One line of the lead's log, as the log's read answers it. */
 export interface LeadEventOut {
@@ -72,6 +72,13 @@ export interface LeadBrief {
   stale: { stepId: number; title: string; marks: string[]; reasons: string[] }[];
   landedSince: { stepId: number; title: string; outcome: string; completedAt: string }[];
   saidInAidensName: { at: string; kind: LeadEventKind; ref: string; words: string }[];
+  /**
+   * What was decided for Aiden in the last LEAD_LOOK_BACK_DAYS days, newest first: the lead's `decide` events, his `park`
+   * and `drop` events made with no words of Aiden's, and step logs a session opened with DECIDED_PREFIX. A decision that
+   * has an `undo` event is left out. `tag` is `d<event id>`, or '' for a session's. `isNew`: at or after the last look
+   * (always true with no look on record).
+   */
+  decided: { tag: string; at: string; by: string; stepId: number | null; stepTitle: string; what: string; why: string; isNew: boolean }[];
   /**
    * `t3` and `t3At` are read from the lead's log, per project: the newest relay, relay_unknown or relay_failed event.
    * `ok` for a relay, `unavailable` for the other two, `not checked` (and null) with none.

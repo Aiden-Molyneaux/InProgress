@@ -4,7 +4,7 @@
  */
 
 /** Control characters and line separators become one space, ends trimmed: a name stays on the header's one line. */
-const one = (text: string): string => text.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ').trim();
+export const one = (text: string): string => text.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ').trim();
 
 export const relayHeader = (lead: string, projectName: string): string =>
   `[From ${one(lead)}, the lead for ${one(projectName)}. This is not Aiden, and it is not a go-ahead.]`;

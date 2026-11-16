@@ -25,6 +25,7 @@ const empty: LeadBrief = {
   stale: [],
   landedSince: [],
   saidInAidensName: [],
+  decided: [],
   links: { t3: 'not checked', t3At: null, lastSeenAt: null },
 };
 
@@ -47,6 +48,11 @@ const full: LeadBrief = {
   stale: [{ stepId: 16, title: 'Old spike', marks: ['no_session', 'stale_ask'], reasons: ['active with no session on it, last changed 9d ago', 'a8 has waited 9d'] }],
   landedSince: [{ stepId: 11, title: 'Upload the key', outcome: 'Key uploaded to the vault.', completedAt: ago(DAY) }],
   saidInAidensName: [{ at: ago(5 * HOUR), kind: 'answer', ref: 'a6', words: 'Use the release keystore.' }],
+  decided: [
+    { tag: 'd12', at: ago(2 * HOUR), by: 'Progresser', stepId: 12, stepTitle: 'Play app signing', what: 'answered a5: "Use tabs"', why: 'Matches the repo', isNew: true },
+    { tag: 'd9', at: ago(3 * DAY), by: 'Progresser', stepId: 16, stepTitle: 'Old spike', what: 'parked', why: '', isNew: false },
+    { tag: '', at: ago(HOUR), by: 'a session', stepId: 12, stepTitle: 'Play app signing', what: 'rename the helper · clearer', why: '', isNew: true },
+  ],
   links: { t3: 'ok', t3At: ago(MIN), lastSeenAt: ago(2 * DAY) },
 };
 
@@ -76,6 +82,10 @@ describe('renderLeadBrief', () => {
       '  #11 Upload the key: "Key uploaded to the vault."',
       "Said in Aiden's name since your last look (1):",
       `  ${stamp(ago(5 * HOUR))} answer a6: "Use the release keystore."`,
+      'Decided for Aiden in the last 7 days (3, 2 new):',
+      `  d12 ${stamp(ago(2 * HOUR))} · Progresser answered a5: "Use tabs" on #12 Play app signing · why: "Matches the repo" · undo: undo d12 · new`,
+      `  d9 ${stamp(ago(3 * DAY))} · Progresser parked on #16 Old spike · undo: undo d9`,
+      `  ${stamp(ago(HOUR))} · a session on #12 Play app signing: "rename the helper · clearer" · new`,
       'Links: T3 Code ok, last relay 1m ago · your last look 2d ago',
     ]);
   });
@@ -128,6 +138,8 @@ describe('renderLeadBrief', () => {
       'Landed in the last 7 days (0):',
       '  none',
       "Said in Aiden's name in the last 7 days (0):",
+      '  none',
+      'Decided for Aiden in the last 7 days (0, 0 new):',
       '  none',
       'Links: T3 Code not checked · your last look never',
     ]);

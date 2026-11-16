@@ -75,7 +75,7 @@ describe('inprogress lead brief', () => {
     const text = capture();
     expect(await runLead(['brief', 'ingame', '--as', 'Progresser', '--instructions', String(LEAD_INSTRUCTIONS_VERSION)], text.out, conn)).toBe(0);
     expect(text.lines).toHaveLength(1);
-    expect(text.lines[0].split('\n')[0]).toMatch(/^Lead brief · InGame · .* · instructions v3 \(yours: v3\)$/);
+    expect(text.lines[0].split('\n')[0]).toMatch(/^Lead brief · InGame · .* · instructions v4 \(yours: v4\)$/);
     expect(text.lines[0]).toContain('In flight (0 of 3):');
 
     const json = capture();
@@ -174,12 +174,12 @@ describe('inprogress lead rules', () => {
     const c = capture();
     expect(await runLead(['rules', 'ingame', '--as', 'Progresser'], c.out, conn)).toBe(0);
     expect(c.lines).toHaveLength(1);
-    expect(c.lines[0].split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 3.');
+    expect(c.lines[0].split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 4.');
     expect(c.lines[0]).toContain(`lead brief ingame --as Progresser --instructions ${LEAD_INSTRUCTIONS_VERSION}`);
     // --instructions, when given, is ignored.
     const given = capture();
     expect(await runLead(['rules', 'ingame', '--as', 'progresser', '--instructions', '1'], given.out, conn)).toBe(0);
-    expect(given.lines[0].split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 3.');
+    expect(given.lines[0].split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 4.');
   });
 
   it('prints the three lines to paste with --bootstrap', async () => {
@@ -249,14 +249,38 @@ describe("inprogress lead's commands", () => {
   });
 
   it('park: 5 and #5 name the same step', async () => {
-    expect(await run(['park', 'ingame', `#${steps.first}`, '--reason', 'Later', ...WHO])).toEqual({ code: 0, lines: [`Parked #${steps.first} Dark mode.`] });
+    const parked = await run(['park', 'ingame', `#${steps.first}`, '--reason', 'Later', ...WHO]);
+    expect(parked.code).toBe(0);
+    expect(parked.lines).toEqual([`Parked #${steps.first} Dark mode. Decision d${db.prepare("SELECT MAX(id) FROM lead_events WHERE kind = 'park'").pluck().get()}.`]);
     expect(await run(['park', 'ingame', String(steps.first), ...WHO])).toEqual({ code: 1, lines: [`#${steps.first} is already parked.`] });
   });
 
   it('drop: prints the sentence, with the reason from stdin', async () => {
     const stdin = io('Nobody wants it.');
-    expect(await run(['drop', 'ingame', String(steps.second), '--reason', '-', ...WHO], stdin.io)).toEqual({ code: 0, lines: [`Dropped #${steps.second} Sound.`] });
+    const dropped = await run(['drop', 'ingame', String(steps.second), '--reason', '-', ...WHO], stdin.io);
+    expect(dropped.code).toBe(0);
+    expect(dropped.lines[0]).toMatch(/^Dropped #\d+ Sound\. Decision d\d+\.$/);
     expect(db.prepare("SELECT text FROM lead_events WHERE kind = 'drop' ORDER BY id DESC").pluck().get()).toBe('Nobody wants it.');
+  });
+
+  it('answer --says: stores the answer his words accepted beside his words', async () => {
+    const ask = raiseAsk(createCtx(db), 'test', { nodeId: steps.fourth, kind: 'question', text: 'Which region?' });
+    expect(await run(['answer', 'ingame', String(ask.id), '--aiden', 'yes', '--says', 'eu-west', ...WHO])).toEqual({ code: 0, lines: [`Answered a${ask.id} with Aiden's words.`] });
+    expect(row('SELECT answer FROM asks WHERE id = ?', ask.id)).toEqual({ answer: 'eu-west (Aiden said: "yes")' });
+  });
+
+  it('decide and undo: a7 and 7, d12 and 12, print the route sentence; a second undo prints its refusal', async () => {
+    const ask = raiseAsk(createCtx(db), 'test', { nodeId: steps.fourth, kind: 'question', text: 'Which font?' });
+    const decided = await run(['decide', 'ingame', `a${ask.id}`, '--answer', 'Inter', '--reason', 'Already in use', ...WHO]);
+    const m = /^Decided a(\d+): decision d(\d+)\. No session is waiting on it\.$/.exec(decided.lines[0]);
+    expect(decided.code).toBe(0);
+    expect(m, decided.lines[0]).not.toBeNull();
+    expect(Number(m![1])).toBe(ask.id);
+    expect(row('SELECT answer, answered_via FROM asks WHERE id = ?', ask.id)).toEqual({ answer: 'Inter', answered_via: 'lead_decided' });
+    const undone = await run(['undo', 'ingame', `d${m![2]}`, '--aiden', 'undo it', ...WHO]);
+    expect(undone.code).toBe(0);
+    expect(undone.lines[0]).toMatch(/^Undid d\d+: the question is Aiden's again as a\d+\. Your answer was: "Inter"\.$/);
+    expect(await run(['undo', 'ingame', m![2], '--aiden', 'again', ...WHO])).toEqual({ code: 1, lines: [`d${m![2]} is already undone.`] });
   });
 
   it('promise and kept: 7 and a7 name the same ask', async () => {
@@ -288,7 +312,7 @@ describe("inprogress lead's commands", () => {
     expect(res.code).toBe(0);
     expect(res.lines).toEqual([db.prepare("SELECT intent FROM projects WHERE slug = 'ingame'").pluck().get()]);
     expect(stdin.reads.stdin).toBe(0);
-    expect(await run(['intent', 'ingame', '--as', 'Rich', '--instructions', '3'])).toEqual({ code: 1, lines: [noLeadNamed('Rich')] });
+    expect(await run(['intent', 'ingame', '--as', 'Rich', '--instructions', '4'])).toEqual({ code: 1, lines: [noLeadNamed('Rich')] });
   });
 
   it('step: prints the step record, as #5 or as 5, and refuses another name or a missing step', async () => {
@@ -298,7 +322,7 @@ describe("inprogress lead's commands", () => {
     expect(a.lines[0].split('\n')[0]).toBe(`#${steps.fourth} Privacy page · todo · origin asked`);
     expect(a.lines[0]).toContain('Asks (');
     expect(await run(['step', 'ingame', String(steps.fourth), ...WHO])).toEqual(a);
-    expect(await run(['step', 'ingame', String(steps.fourth), '--as', 'Rich', '--instructions', '3'])).toEqual({ code: 1, lines: [noLeadNamed('Rich')] });
+    expect(await run(['step', 'ingame', String(steps.fourth), '--as', 'Rich', '--instructions', '4'])).toEqual({ code: 1, lines: [noLeadNamed('Rich')] });
     expect((await run(['step', 'ingame', '999999', ...WHO])).code).toBe(1);
   });
 
@@ -321,6 +345,12 @@ describe("inprogress lead's commands", () => {
       ['answer', 'ingame', '--aiden', 'Yes.', ...WHO],
       ['answer', 'ingame', 'x7', '--aiden', 'Yes.', ...WHO],
       ['park', 'ingame', ...WHO],
+      ['decide', 'ingame', 'a1', '--answer', 'x', ...WHO],
+      ['decide', 'ingame', 'a1', '--reason', 'x', ...WHO],
+      ['decide', 'ingame', 'x1', '--answer', 'x', '--reason', 'y', ...WHO],
+      ['undo', 'ingame', 'd1', ...WHO],
+      ['undo', 'ingame', 'a1', '--aiden', 'x', ...WHO],
+      ['undo', 'ingame', '--aiden', 'x', ...WHO],
       ['park', 'ingame', '5', '--note', 'x', ...WHO],
       ['drop', 'ingame', '5', ...WHO],
       ['drop', 'ingame', '5', '--reason', '-', '--aiden', '-', ...WHO],
@@ -366,13 +396,16 @@ describe("inprogress lead's commands", () => {
 
   it('lists the reads and the commands in the usage, one line each (intent has a read and a write form)', () => {
     const lines = LEAD_USAGE.split('\n');
-    expect(lines).toHaveLength(13);
-    expect(lines.slice(1).map((l) => l.trim().split(' ')[2])).toEqual(['rules', 'brief', 'step', 'resource', 'answer', 'park', 'drop', 'promise', 'kept', 'intent', 'intent', 'relay']);
+    expect(lines).toHaveLength(15);
+    expect(lines.slice(1).map((l) => l.trim().split(' ')[2])).toEqual(['rules', 'brief', 'step', 'resource', 'answer', 'decide', 'undo', 'park', 'drop', 'promise', 'kept', 'intent', 'intent', 'relay']);
     expect(lines[3]).toBe('  inprogress lead step <project> <step id> --as <name> --instructions <n>');
     expect(lines[4]).toBe('  inprogress lead resource <project> <document id> --as <name> --instructions <n>');
-    expect(lines[10]).toBe('  inprogress lead intent <project> --as <name> --instructions <n>');
-    expect(lines[11]).toBe('  inprogress lead intent <project> <file | -> --as <name> --instructions <n>');
-    expect(lines[12]).toBe('  inprogress lead relay <project> <step id> <message | -> --as <name> --instructions <n>');
+    expect(lines[5]).toBe('  inprogress lead answer <project> <ask id> --aiden <words> [--says <text>] --as <name> --instructions <n>');
+    expect(lines[6]).toBe('  inprogress lead decide <project> <ask id> --answer <text> --reason <text> [--aiden <words>] --as <name> --instructions <n>');
+    expect(lines[7]).toBe('  inprogress lead undo <project> <decision> --aiden <words> --as <name> --instructions <n>');
+    expect(lines[12]).toBe('  inprogress lead intent <project> --as <name> --instructions <n>');
+    expect(lines[13]).toBe('  inprogress lead intent <project> <file | -> --as <name> --instructions <n>');
+    expect(lines[14]).toBe('  inprogress lead relay <project> <step id> <message | -> --as <name> --instructions <n>');
   });
 });
 
