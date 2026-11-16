@@ -75,7 +75,7 @@ describe('inprogress lead brief', () => {
     const text = capture();
     expect(await runLead(['brief', 'ingame', '--as', 'Progresser', '--instructions', String(LEAD_INSTRUCTIONS_VERSION)], text.out, conn)).toBe(0);
     expect(text.lines).toHaveLength(1);
-    expect(text.lines[0].split('\n')[0]).toMatch(/^Lead brief · InGame · .* · instructions v2 \(yours: v2\)$/);
+    expect(text.lines[0].split('\n')[0]).toMatch(/^Lead brief · InGame · .* · instructions v3 \(yours: v3\)$/);
     expect(text.lines[0]).toContain('In flight (0 of 3):');
 
     const json = capture();
@@ -174,12 +174,12 @@ describe('inprogress lead rules', () => {
     const c = capture();
     expect(await runLead(['rules', 'ingame', '--as', 'Progresser'], c.out, conn)).toBe(0);
     expect(c.lines).toHaveLength(1);
-    expect(c.lines[0].split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 2.');
+    expect(c.lines[0].split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 3.');
     expect(c.lines[0]).toContain(`lead brief ingame --as Progresser --instructions ${LEAD_INSTRUCTIONS_VERSION}`);
     // --instructions, when given, is ignored.
     const given = capture();
     expect(await runLead(['rules', 'ingame', '--as', 'progresser', '--instructions', '1'], given.out, conn)).toBe(0);
-    expect(given.lines[0].split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 2.');
+    expect(given.lines[0].split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 3.');
   });
 
   it('prints the three lines to paste with --bootstrap', async () => {
@@ -282,6 +282,33 @@ describe("inprogress lead's commands", () => {
     expect(db.prepare("SELECT intent FROM projects WHERE slug = 'ingame'").pluck().get()).toBe(piped);
   });
 
+  it('intent: with no file it reads the stored record back and sends nothing', async () => {
+    const stdin = io('never read');
+    const res = await run(['intent', 'ingame', ...WHO], stdin.io);
+    expect(res.code).toBe(0);
+    expect(res.lines).toEqual([db.prepare("SELECT intent FROM projects WHERE slug = 'ingame'").pluck().get()]);
+    expect(stdin.reads.stdin).toBe(0);
+    expect(await run(['intent', 'ingame', '--as', 'Rich', '--instructions', '3'])).toEqual({ code: 1, lines: [noLeadNamed('Rich')] });
+  });
+
+  it('step: prints the step record, as #5 or as 5, and refuses another name or a missing step', async () => {
+    const a = await run(['step', 'ingame', `#${steps.fourth}`, ...WHO]);
+    expect(a.code).toBe(0);
+    expect(a.lines).toHaveLength(1);
+    expect(a.lines[0].split('\n')[0]).toBe(`#${steps.fourth} Privacy page · todo · origin asked`);
+    expect(a.lines[0]).toContain('Asks (');
+    expect(await run(['step', 'ingame', String(steps.fourth), ...WHO])).toEqual(a);
+    expect(await run(['step', 'ingame', String(steps.fourth), '--as', 'Rich', '--instructions', '3'])).toEqual({ code: 1, lines: [noLeadNamed('Rich')] });
+    expect((await run(['step', 'ingame', '999999', ...WHO])).code).toBe(1);
+  });
+
+  it('resource: r5 and 5 name the same document, and a missing one is refused', async () => {
+    const res = await run(['resource', 'ingame', 'r999999', ...WHO]);
+    expect(res.code).toBe(1);
+    expect(res.lines[0]).toBe("r999999 not found.");
+    expect(await run(['resource', 'ingame', '999999', ...WHO])).toEqual(res);
+  });
+
   it('intent: a file it cannot read says so and exits 1', async () => {
     const res = await run(['intent', 'ingame', 'C:/nowhere.md', ...WHO]);
     expect(res.code).toBe(1);
@@ -300,7 +327,11 @@ describe("inprogress lead's commands", () => {
       ['promise', 'ingame', 'Send it', ...WHO],
       ['promise', 'ingame', 'Send it', '--due', 'x', '--step', 'a5', ...WHO],
       ['kept', 'ingame', '#5', ...WHO],
-      ['intent', 'ingame', ...WHO],
+      ['step', 'ingame', ...WHO],
+      ['step', 'ingame', 'x5', ...WHO],
+      ['step', 'ingame', '5', '6', ...WHO],
+      ['resource', 'ingame', '#5', ...WHO],
+      ['resource', 'ingame', ...WHO],
       ['park', 'ingame', '5', '--as', 'Progresser'],
       ['bogus', 'ingame'],
     ]) {
@@ -333,11 +364,15 @@ describe("inprogress lead's commands", () => {
     });
   });
 
-  it('lists brief and the seven commands in the usage, one line each', () => {
+  it('lists the reads and the commands in the usage, one line each (intent has a read and a write form)', () => {
     const lines = LEAD_USAGE.split('\n');
-    expect(lines).toHaveLength(10);
-    expect(lines.slice(1).map((l) => l.trim().split(' ')[2])).toEqual(['rules', 'brief', 'answer', 'park', 'drop', 'promise', 'kept', 'intent', 'relay']);
-    expect(lines[9]).toBe('  inprogress lead relay <project> <step id> <message | -> --as <name> --instructions <n>');
+    expect(lines).toHaveLength(13);
+    expect(lines.slice(1).map((l) => l.trim().split(' ')[2])).toEqual(['rules', 'brief', 'step', 'resource', 'answer', 'park', 'drop', 'promise', 'kept', 'intent', 'intent', 'relay']);
+    expect(lines[3]).toBe('  inprogress lead step <project> <step id> --as <name> --instructions <n>');
+    expect(lines[4]).toBe('  inprogress lead resource <project> <document id> --as <name> --instructions <n>');
+    expect(lines[10]).toBe('  inprogress lead intent <project> --as <name> --instructions <n>');
+    expect(lines[11]).toBe('  inprogress lead intent <project> <file | -> --as <name> --instructions <n>');
+    expect(lines[12]).toBe('  inprogress lead relay <project> <step id> <message | -> --as <name> --instructions <n>');
   });
 });
 

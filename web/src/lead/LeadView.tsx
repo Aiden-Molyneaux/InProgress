@@ -62,6 +62,13 @@ export function LeadView({ project, code, desk, now, onOpenNode }: Props) {
             <p className="ip-lead-who">{head.lead === null ? NO_LEAD : `${head.lead} · instructions v${head.instructions}`}</p>
             <p className="ip-lead-line">{`Goal: ${head.goal}`}</p>
             <p className="ip-lead-line">{`Phase: ${head.phase}`}</p>
+            {head.intentLine !== null && <p className="ip-lead-line">{head.intentLine}</p>}
+            {head.intentText !== '' && (
+              <details className="ip-lead-intent">
+                <summary>The whole intent record</summary>
+                <pre>{head.intentText}</pre>
+              </details>
+            )}
             {head.warning && <p className="ip-lead-warn">{head.warning}</p>}
           </div>
           <div className="ip-lead-cols">

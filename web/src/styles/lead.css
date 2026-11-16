@@ -5,6 +5,9 @@
 .ip-lead-head p { margin: 0; overflow-wrap: anywhere; }
 .ip-lead-who { font-size: var(--t-body); color: var(--text-hi); }
 .ip-lead-line { font-size: var(--t-detail-sm); color: var(--text-muted); }
+.ip-lead-intent { min-width: 0; font-size: var(--t-detail-sm); color: var(--text-muted); }
+.ip-lead-intent summary { cursor: pointer; }
+.ip-lead-intent pre { margin: var(--sp-2) 0 0; padding: var(--sp-3); border: 1px solid var(--line-soft); font: inherit; font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: hidden; }
 .ip-lead-warn { font-size: var(--t-detail-sm); color: var(--behind); }
 .ip-lead-cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-5); align-items: start; min-width: 0; }
 .ip-lead-desk { display: grid; align-content: start; gap: var(--sp-5); min-width: 0; }

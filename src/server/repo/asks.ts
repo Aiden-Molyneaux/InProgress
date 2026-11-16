@@ -179,6 +179,11 @@ export function listProjectAsks(ctx: Ctx, projectId: number): Ask[] {
     .all(projectId, msAgo(ctx, ASK_TRAIL_MS)) as AskRow[]).map(toAsk);
 }
 
+/** Every ask on the node, open and cleared, oldest raised first. */
+export function listNodeAsks(ctx: Ctx, nodeId: number): Ask[] {
+  return (ctx.db.prepare('SELECT * FROM asks WHERE node_id = ? ORDER BY raised_at, id').all(nodeId) as AskRow[]).map(toAsk);
+}
+
 /** The open asks session `sessionId` raised on node `nodeId`, oldest raised first: all the title rules read. */
 export function openAsksBy(ctx: Ctx, sessionId: string, nodeId: number): Ask[] {
   return (ctx.db.prepare(`SELECT * FROM asks WHERE cleared_at IS NULL AND ${aidensAskSql()} AND session_id = ? AND node_id = ? ORDER BY raised_at, id`).all(sessionId, nodeId) as AskRow[]).map(toAsk);

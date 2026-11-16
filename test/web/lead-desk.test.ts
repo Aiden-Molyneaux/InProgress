@@ -13,7 +13,7 @@ const empty = (): LeadBrief => ({
   project: { slug: 'p', name: 'P', lead: null },
   at: new Date(NOW).toISOString(),
   instructions: { current: LEAD_INSTRUCTIONS_VERSION, yours: null },
-  intent: { goal: '', phase: '', updatedAt: null },
+  intent: { goal: '', phase: '', updatedAt: null, text: '', landedSince: 0, phaseFinished: false },
   inFlight: [],
   waitingOnAiden: [],
   aidensOwn: [],
@@ -31,7 +31,7 @@ const longText = 'x'.repeat(600);
 const full = (): LeadBrief => ({
   ...empty(),
   project: { slug: 'p', name: 'P', lead: 'Progresser' },
-  intent: { goal: 'Ship it', phase: 'Building', updatedAt: ago(DAY) },
+  intent: { goal: 'Ship it', phase: 'Building', updatedAt: ago(DAY), text: '## Goal\nShip it\n', landedSince: 2, phaseFinished: false },
   inFlight: [
     { stepId: 4, title: 'Build', sessionId: 's1', app: 'cli', state: 'working', lastSeenAt: ago(5 * MIN) },
     { stepId: null, title: 'Chat', sessionId: 's2', app: 'cli', state: 'idle', lastSeenAt: ago(2 * HOUR) },
@@ -118,7 +118,7 @@ describe('deskGroups', () => {
 describe('deskHead', () => {
   it('reads a project with no lead and each goal fallback', () => {
     expect(deskHead(empty(), NOW)).toMatchObject({ lead: null, instructions: LEAD_INSTRUCTIONS_VERSION, goal: 'No intent record yet.', phase: 'none', warning: null });
-    const written = { ...empty(), intent: { goal: '', phase: '', updatedAt: ago(DAY) } };
+    const written = { ...empty(), intent: { goal: '', phase: '', updatedAt: ago(DAY), text: '', landedSince: 0, phaseFinished: false } };
     expect(deskHead(written, NOW).goal).toBe('The intent record has no goal under a Goal heading.');
     expect(deskHead(full(), NOW)).toMatchObject({ lead: 'Progresser', goal: 'Ship it', phase: 'Building' });
   });
@@ -142,6 +142,21 @@ describe('deskHead', () => {
     expect(deskHead(b, NOW).links).toBe("T3 Code ok, last relay 3h ago · the lead's last look 2d ago");
     b.links = { t3: 'unavailable', t3At: ago(5 * MIN), lastSeenAt: null };
     expect(deskHead(b, NOW).links).toBe("T3 Code unavailable, last relay 5m ago · the lead's last look never");
+  });
+});
+
+describe('deskHead: the intent record', () => {
+  it('has no line and no text with no record', () => {
+    expect(deskHead(empty(), NOW)).toMatchObject({ intentLine: null, intentText: '' });
+  });
+
+  it('gives the line without the instruction to the lead, and the whole stored text', () => {
+    const b = full();
+    b.intent.phaseFinished = true;
+    const head = deskHead(b, NOW);
+    expect(head.intentLine).toBe('Intent record: written 1d ago · 2 steps landed since · every step the Phase names is finished');
+    expect(head.intentLine).not.toContain('ask Aiden');
+    expect(head.intentText).toBe('## Goal\nShip it\n');
   });
 });
 

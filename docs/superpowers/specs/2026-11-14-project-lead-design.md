@@ -69,6 +69,19 @@ A step he would never see skips rows 4, 6 and 7: one click in the window in conf
 - Version 1 read sound to him. He asked for it to be criticised so the build is right on the first pass.
 - Work repos may stay in reach of the Bots. The Bots must not touch them.
 - He is somewhat comfortable with a Bot holding full access on the laptop, and asked what the confined routes cost.
+- 2026-11-16, at the first triage: "I don't want his recommendations to be thin. The point of using an AI lead is so
+  that he can figure things out." InProgress will not always hold all the context, and "the lead is supposed to know
+  more than me". So the lead finds out where a stuck step really stands before he recommends: he may read the step's
+  whole record, the project's repo with read-only git, and the project's threads. He still changes nothing there, and
+  work repos stay off limits.
+- 2026-11-16, the outcome in his words: the lead is "someone I talk to and trust to make all sorts of judgement calls
+  in my stead". "I get asked too many questions by AI, and sometimes I want to give my detailed intentional answers,
+  but sometimes I don't know and I don't have capacity to know the best path forward and I need the AI to act for me,
+  only keeping important make or break questions for me." He confirmed the order the rest is built in: he knows (reads
+  the record, the repo and the threads), he decides (a written mandate, sessions' questions go to him first, a daily
+  list of what he decided, all of it undoable), he acts (starts threads, lets routine work land). Make-or-break stays
+  Aiden's: what cannot be undone, touches his real data, goes out to other people, or changes direction or what he
+  would see and feel. Section 8's stages are the parts list; this is the order.
 
 ### My calls (correct them)
 

@@ -4,15 +4,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildApp } from '../../src/server/app';
 import { openDb } from '../../src/server/db/connection';
-import { createCtx } from '../../src/server/db/tx';
+import { createCtx, write } from '../../src/server/db/tx';
 import { deleteProject, purgeDeletedProjects } from '../../src/server/project-lifecycle';
 import { LEAD_INSTRUCTIONS_VERSION, LEAD_NAME_RULE } from '../../src/core/lead';
 import { renderLeadBrief } from '../../src/server/lead-text';
-import { logLeadEvent, markLeadSeen, noLeadNamed, outOfDate, readLeadBrief, readLeadRules, requireLead, staleReasons } from '../../src/server/lead';
+import { leadFolders, logLeadEvent, markLeadSeen, noLeadNamed, outOfDate, readLeadBrief, readLeadIntent, readLeadRules, requireLead, staleReasons } from '../../src/server/lead';
 import { raiseAsk } from '../../src/server/repo/asks';
 import { maxEventId } from '../../src/server/repo/events';
 import { addNodes, parkNode, updateNode } from '../../src/server/repo/nodes';
-import { addBinding, changeProject, createProject, listProjectSummaries, setProjectLead, setQueue } from '../../src/server/repo/projects';
+import { addBinding, changeProject, createProject, listProjectSummaries, setProjectIntentInWrite, setProjectLead, setQueue } from '../../src/server/repo/projects';
 import { claimStep, handleHookEvent } from '../../src/server/session-flow';
 import type { BoardRow } from '../../src/core/board';
 import type { Ask, Session, TreeNode } from '../../src/core/types';
@@ -66,7 +66,7 @@ describe('requireLead', () => {
     setLead('Progresser');
     expect(requireLead(ctx, project.slug, 'Progresser', LEAD_INSTRUCTIONS_VERSION - 1, false).lead).toBe('Progresser');
     expect(() => requireLead(ctx, project.slug, 'Progresser', LEAD_INSTRUCTIONS_VERSION - 1, true)).toThrow(outOfDate(LEAD_INSTRUCTIONS_VERSION - 1, project.slug, 'Progresser'));
-    expect(outOfDate(1, 'ingame', 'Progresser')).toBe('Your rules are version 1; version 2 is current. Run "lead rules ingame --as Progresser" again and follow what it prints.');
+    expect(outOfDate(1, 'ingame', 'Progresser')).toBe('Your rules are version 1; version 3 is current. Run "lead rules ingame --as Progresser" again and follow what it prints.');
   });
 });
 
@@ -301,7 +301,7 @@ describe('the brief route', () => {
     const ok = await app.inject({ url: `/api/lead/${project.slug}/brief?as=progresser&instructions=${LEAD_INSTRUCTIONS_VERSION}` });
     expect(ok.statusCode).toBe(200);
     expect(ok.json().brief.project).toEqual({ slug: 'ingame', name: 'InGame', lead: 'Progresser' });
-    expect(ok.json().text.split('\n')[0]).toMatch(/^Lead brief · InGame · .* · instructions v2 \(yours: v2\)$/);
+    expect(ok.json().text.split('\n')[0]).toMatch(/^Lead brief · InGame · .* · instructions v3 \(yours: v3\)$/);
   });
 
   it('answers the window without `as`: no lead check, yours null, and never marks, whatever the query says', async () => {
@@ -473,16 +473,16 @@ describe('the window route that sets a lead', () => {
 describe('the rules route', () => {
   const CLI = 'node C:/x/dist/cli/main.js';
 
-  it('answers version 2 and the text for the stored lead name, whatever case `as` is given in', async () => {
+  it('answers version 3 and the text for the stored lead name, whatever case `as` is given in', async () => {
     const { app, project, setLead } = setup();
     setLead('Progresser');
     for (const as of ['Progresser', 'progresser', 'PROGRESSER']) {
       const res = await app.inject({ url: `/api/lead/${project.slug}/rules?as=${as}` });
       expect(res.statusCode).toBe(200);
       const body = res.json() as { version: number; text: string; bootstrap: string };
-      expect(body.version).toBe(2);
-      expect(body.text.split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 2.');
-      expect(body.text).toContain('lead brief ingame --as Progresser --instructions 2');
+      expect(body.version).toBe(3);
+      expect(body.text.split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 3.');
+      expect(body.text).toContain('lead brief ingame --as Progresser --instructions 3');
       expect(body.bootstrap.split('\n')).toHaveLength(3);
       expect(body.bootstrap).toContain('lead rules ingame --as Progresser');
     }
@@ -528,10 +528,127 @@ describe('a lead on older rules', () => {
       payload: { as: 'Progresser', instructions: 1, askId: 1 },
     });
     expect(res.statusCode).toBe(409);
-    expect(res.json().error).toBe('Your rules are version 1; version 2 is current. Run "lead rules ingame --as Progresser" again and follow what it prints.');
+    expect(res.json().error).toBe('Your rules are version 1; version 3 is current. Run "lead rules ingame --as Progresser" again and follow what it prints.');
     const read = await app.inject({ url: `/api/lead/${project.slug}/brief?as=Progresser&instructions=1` });
     expect(read.statusCode).toBe(200);
     expect(read.json().text.split('\n')[1]).toBe('Your rules are out of date: you can read, you cannot change anything. Run the rules command again.');
     expect(brief().instructions.yours).toBe(1);
+  });
+});
+
+describe('the intent record on the brief', () => {
+  const RECORD = '## Goal\nShip it.\n\n## Phase\nFinish #1 and #2.\n\n## Out of scope\nNothing.\n\n## What Aiden cares about\nSpeed.\n\n## Standing rulings\nNone.\n';
+  const store = (ctx: ReturnType<typeof setup>['ctx'], projectId: number, text: string) => write(ctx, 'lead', (record) => setProjectIntentInWrite(ctx, record, projectId, text));
+
+  it('carries the whole record as text, and nothing with no record', () => {
+    const { ctx, project, brief } = setup();
+    expect(brief().intent).toMatchObject({ text: '', landedSince: 0, phaseFinished: false, updatedAt: null });
+    store(ctx, project.id, RECORD);
+    expect(brief().intent.text).toBe(RECORD);
+    expect(brief().intent.updatedAt).not.toBeNull();
+  });
+
+  it('counts only the steps done at or after the record was written, never the root', () => {
+    const { ctx, project, a, b, brief } = setup();
+    updateNode(ctx, 'scribe:s1', a.id, { status: 'done', outcome: 'Signed.' });
+    store(ctx, project.id, RECORD);
+    expect(brief().intent.landedSince).toBe(0);
+    updateNode(ctx, 'scribe:s1', b.id, { status: 'done', outcome: 'Published.' });
+    expect(brief().intent.landedSince).toBe(1);
+    updateNode(ctx, 'scribe:s1', project.rootNodeId, { status: 'done' });
+    expect(brief().intent.landedSince).toBe(1);
+  });
+
+  it('phaseFinished is false when the Phase names no step, false while a named step is open, and true when all are done or dropped', () => {
+    const { ctx, project, a, b, c, brief } = setup();
+    store(ctx, project.id, `## Goal\nShip it.\n\n## Phase\nPolish.\n`);
+    expect(brief().intent.phaseFinished).toBe(false);
+    store(ctx, project.id, `## Goal\nShip it.\n\n## Phase\nFinish #${a.id} and #${b.id}.\n`);
+    expect(brief().intent.phaseFinished).toBe(false);
+    updateNode(ctx, 'scribe:s1', a.id, { status: 'done', outcome: 'Signed.' });
+    expect(brief().intent.phaseFinished).toBe(false);
+    updateNode(ctx, 'scribe:s1', b.id, { status: 'dropped' });
+    expect(brief().intent.phaseFinished).toBe(true);
+    // Only ids written out count: a range names its two ends.
+    store(ctx, project.id, `## Goal\nShip it.\n\n## Phase\n#${a.id} to #${c.id}.\n`);
+    expect(brief().intent.phaseFinished).toBe(false);
+  });
+
+  it('phaseFinished ignores an id that is not a step of this project, and is false when only those are named', () => {
+    const { ctx, project, a, brief } = setup();
+    const other = createProject(ctx, 'test', { name: 'Elsewhere' });
+    const [foreign] = addNodes(ctx, 'test', { parentId: other.rootNodeId, nodes: [{ title: 'Unfinished elsewhere' }] });
+    updateNode(ctx, 'scribe:s1', a.id, { status: 'done', outcome: 'Signed.' });
+    store(ctx, project.id, `## Goal\nShip it.\n\n## Phase\nFinish #${a.id} with #${foreign.id}.\n`);
+    expect(brief().intent.phaseFinished).toBe(true);
+    store(ctx, project.id, `## Goal\nShip it.\n\n## Phase\nOnly #${foreign.id} and #999999.\n`);
+    expect(brief().intent.phaseFinished).toBe(false);
+  });
+
+  it('reads the Phase in full, whatever its length, for the finished check', () => {
+    const { ctx, project, a, b, brief } = setup();
+    updateNode(ctx, 'scribe:s1', a.id, { status: 'done', outcome: 'Signed.' });
+    // The step that is still open is named past the 300 characters the brief's headline keeps.
+    store(ctx, project.id, `## Goal\nShip it.\n\n## Phase\nFinish #${a.id}, ${'and keep going '.repeat(30)}then #${b.id}.\n`);
+    expect(brief().intent.phase.length).toBeLessThan(310);
+    expect(brief().intent.phaseFinished).toBe(false);
+  });
+});
+
+describe('the intent route', () => {
+  it('reads the stored record back for the named lead, any instructions version, and says so when there is none', async () => {
+    const { ctx, app, project, setLead } = setup();
+    setLead('Progresser');
+    const none = await app.inject({ url: `/api/lead/${project.slug}/intent?as=Progresser&instructions=1` });
+    expect(none.json()).toEqual({ text: 'No intent record yet.', updatedAt: null });
+    const text = '## Goal\nShip it.\n\n## Phase\nBeta.\n';
+    write(ctx, 'lead', (record) => setProjectIntentInWrite(ctx, record, project.id, text));
+    const res = await app.inject({ url: `/api/lead/${project.slug}/intent?as=progresser&instructions=1` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().text).toBe(text);
+    expect(readLeadIntent(ctx, project.slug, 'Progresser', 1).updatedAt).toBe(res.json().updatedAt);
+  });
+
+  it('refuses another name, a missing name and a missing version', async () => {
+    const { app, project, setLead } = setup();
+    setLead('Progresser');
+    const other = await app.inject({ url: `/api/lead/${project.slug}/intent?as=Rich&instructions=3` });
+    expect([other.statusCode, other.json().error]).toEqual([409, noLeadNamed('Rich')]);
+    expect((await app.inject({ url: `/api/lead/${project.slug}/intent?as=Progresser` })).statusCode).toBe(400);
+    expect((await app.inject({ url: `/api/lead/${project.slug}/intent` })).statusCode).toBe(400);
+  });
+});
+
+describe('leadFolders', () => {
+  it('gives forward slashes, no trailing slash, each folder once ignoring case, sorted, and none under C:/work or of another project', () => {
+    const { ctx, project } = setup();
+    const other = createProject(ctx, 'test', { name: 'Elsewhere' });
+    for (const path of ['D:\\Zed\\Repo\\', 'c:/personal/ingame', 'C:/Personal/InGame/', 'C:\\work\\x', 'c:/work']) addBinding(ctx, 'test', project.slug, path);
+    addBinding(ctx, 'test', other.slug, 'C:/personal/other');
+    const folders = leadFolders(ctx, project.id);
+    expect(folders).toEqual(['C:/personal/InGame', 'D:/Zed/Repo']);
+    expect(folders.filter((f) => f.toLowerCase() === 'c:/personal/ingame')).toHaveLength(1);
+    expect(folders).toContain('D:/Zed/Repo');
+    expect(folders.some((f) => f.toLowerCase().startsWith('c:/work'))).toBe(false);
+    expect(folders.some((f) => f.includes('\\') || f.endsWith('/'))).toBe(false);
+    expect(folders).toEqual([...folders].sort((x, y) => (x.toLowerCase() < y.toLowerCase() ? -1 : x.toLowerCase() > y.toLowerCase() ? 1 : 0)));
+  });
+
+  it('leaves out a folder that holds C:/work and a network path, and keeps an ordinary one', () => {
+    const { ctx, project } = setup();
+    const insert = ctx.db.prepare("INSERT INTO bindings (project_id, path, branch_pattern, created_at) VALUES (?, ?, '', ?)");
+    // Inserted directly: addBinding may normalise or refuse some of these.
+    for (const path of ['C:/', '//localhost/c$/work', 'C:/personal/x']) insert.run(project.id, path, ctx.now());
+    expect(leadFolders(ctx, project.id)).toEqual(['C:/personal/InGame', 'C:/personal/x']);
+  });
+
+  it('is empty for a project with no folder, and the rules route prints those folders', async () => {
+    const { ctx, project, setLead } = setup();
+    setLead('Progresser');
+    expect(readLeadRules(ctx, project.slug, 'Progresser', 'node x').text).toContain('You may read, and never change, anything inside:\n  C:/personal/InGame\n');
+    const bare = createProject(ctx, 'test', { name: 'Bare' });
+    setProjectLead(ctx, 'window', bare.slug, 'Progresser');
+    expect(leadFolders(ctx, bare.id)).toEqual([]);
+    expect(readLeadRules(ctx, bare.slug, 'Progresser', 'node x').text).toContain('This project has no folder on record.');
   });
 });

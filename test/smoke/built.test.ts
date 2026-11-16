@@ -374,6 +374,14 @@ describe('built artifacts', () => {
     expect(`${r.stdout}${r.stderr}`).toContain('This project has no lead named Nobody. Only Aiden can give a project a lead, from its actions in the window.');
   });
 
+  it('the built CLI has the lead reads step, resource and intent, and refuses them for a name that is not the lead', () => {
+    for (const args of [['step', 'smoke', '1'], ['resource', 'smoke', 'r1'], ['intent', 'smoke']]) {
+      const r = spawnSync(process.execPath, [bin('cli/main.js'), 'lead', ...args, '--as', 'Nobody', '--instructions', '3'], { env, encoding: 'utf8' });
+      expect(r.status, args.join(' ')).toBe(1);
+      expect(`${r.stdout}${r.stderr}`, args.join(' ')).toContain('This project has no lead named Nobody.');
+    }
+  });
+
   it('CLI prints the client hint under an error', () => {
     const r = spawnSync(process.execPath, [bin('cli/main.js'), 'outline', 'smoke'], { env: { ...env, INPROGRESS_PORT: '1' }, encoding: 'utf8' });
     expect(r.status).toBe(1);

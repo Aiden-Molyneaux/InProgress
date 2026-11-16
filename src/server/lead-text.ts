@@ -1,4 +1,4 @@
-import { IN_FLIGHT_LIMIT, AIDEN_OPEN_LIMIT, LEAD_LIST_CAP, LEAD_LOOK_BACK_DAYS, type LeadBrief } from '../core/lead';
+import { IN_FLIGHT_LIMIT, AIDEN_OPEN_LIMIT, LEAD_LIST_CAP, LEAD_LOOK_BACK_DAYS, intentLine, type LeadBrief } from '../core/lead';
 import { clipLine, stepRef } from '../core/step-ref';
 import { PROJECT_NAME_MAX, askTag } from '../core/types';
 import { spanAgo } from './briefing';
@@ -14,11 +14,17 @@ const ASK_CUT = 600;
 /** How much of the intent record's Goal or Phase paragraph the brief keeps. */
 const HEADLINE_CUT = 300;
 
-/**
- * The first paragraph under `## Goal` and under `## Phase`, each cut to 300 characters; '' when absent. A paragraph runs
- * to the next blank line or the next heading, and its lines are joined with a space.
- */
+/** The Goal and Phase paragraphs, each cut to 300 characters; '' when absent. */
 export function intentHeadlines(intent: string): { goal: string; phase: string } {
+  const { goal, phase } = intentParagraphs(intent);
+  return { goal: clipLine(goal, HEADLINE_CUT), phase: clipLine(phase, HEADLINE_CUT) };
+}
+
+/**
+ * The first paragraph under `## Goal` and under `## Phase`, uncut; '' when absent. A paragraph runs to the next blank line
+ * or the next heading, and its lines are joined with a space.
+ */
+export function intentParagraphs(intent: string): { goal: string; phase: string } {
   const lines = intent.split(/\r?\n/);
   const under = (heading: string): string => {
     const start = lines.findIndex((l) => new RegExp('^#{1,6}\\s*' + heading + '\\s*:?\\s*#*$', 'i').test(l.trim()));
@@ -35,7 +41,7 @@ export function intentHeadlines(intent: string): { goal: string; phase: string }
       }
       paragraph.push(line);
     }
-    return clipLine(paragraph.join(' '), HEADLINE_CUT);
+    return paragraph.join(' ');
   };
   return { goal: under('goal'), phase: under('phase') };
 }
@@ -44,9 +50,9 @@ export function intentHeadlines(intent: string): { goal: string; phase: string }
  * Text with every C0 and C1 control character and the Unicode line and paragraph separators, newlines included, turned
  * into a space: one piece of free text stays on one line.
  */
-const clean = (text: string): string => text.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ');
+export const clean = (text: string): string => text.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ');
 /** Free text as one line cut to `max`: cleaned of control characters, flattened and clipped. */
-const line = (text: string, max: number): string => clip(clean(text), max);
+export const line = (text: string, max: number): string => clip(clean(text), max);
 /** A step as a line names it, its title cleaned first. */
 const step = (id: number, title: string): string => stepRef(id, clean(title));
 
@@ -75,6 +81,8 @@ export function renderLeadBrief(b: LeadBrief): string {
   // True whether the heading is missing or has nothing under it: both read as an empty goal here.
   const noGoal = b.intent.updatedAt !== null ? 'The intent record has no goal under a Goal heading.' : 'No intent record yet.';
   lines.push(`Goal: ${line(b.intent.goal, HEADLINE_CUT) || noGoal}`, `Phase: ${line(b.intent.phase, HEADLINE_CUT) || 'none'}`);
+  const record = intentLine(b.intent, now, true);
+  if (record !== null) lines.push(record);
   const over = b.aidenOpenAcrossProjects - AIDEN_OPEN_LIMIT;
   // Until a look is marked the brief counts LEAD_LOOK_BACK_DAYS back, and says so: there is no last look to count from.
   const span = b.links.lastSeenAt === null ? `in the last ${LEAD_LOOK_BACK_DAYS} days` : 'since your last look';

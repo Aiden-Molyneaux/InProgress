@@ -6,8 +6,8 @@ import { ASK_TRAIL_MS, askTag, type Ask, type Project } from '../core/types';
 import { spanAgo } from './briefing';
 import { write, type Ctx } from './db/tx';
 import { conflict } from './errors';
-import { intentHeadlines } from './lead-text';
-import { listProjectSummaries, resolveProject } from './repo/projects';
+import { intentHeadlines, intentParagraphs } from './lead-text';
+import { listBindings, listProjectSummaries, resolveProject } from './repo/projects';
 import { readProjectSessions } from './repo/sessions';
 import { getProjectSnapshot } from './repo/snapshot';
 
@@ -39,11 +39,35 @@ export function requireLead(ctx: Ctx, ref: string, as: string, instructions: num
   return project;
 }
 
+/**
+ * The folders the lead may read: the paths of the project's bindings with forward slashes and no trailing slash, each
+ * once (ignoring case), sorted, and never one at or under C:/work (no project's), one that holds it, or a network path.
+ */
+export function leadFolders(ctx: Ctx, projectId: number): string[] {
+  const seen = new Map<string, string>();
+  for (const b of listBindings(ctx)) {
+    if (b.projectId !== projectId) continue;
+    const slashed = b.path.replace(/\\/g, '/');
+    const path = slashed.replace(/\/+$/, '');
+    const key = path.toLowerCase();
+    // C:/work is no project's: leave out it, what is under it, and a folder that holds it (C:/, C:). A network path is no folder of this laptop.
+    if (path === '' || slashed.startsWith('//') || key === 'c:/work' || key.startsWith('c:/work/') || 'c:/work'.startsWith(key + '/')) continue;
+    if (!seen.has(key)) seen.set(key, path);
+  }
+  return [...seen.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([, path]) => path);
+}
+
 /** The rules and the bootstrap for the project's lead, as the rules command prints them. `cli` is `node <path>`. A read: it changes nothing. */
 export function readLeadRules(ctx: Ctx, ref: string, as: string, cli: string): { version: number; text: string; bootstrap: string } {
   const project = requireLead(ctx, ref, as, LEAD_INSTRUCTIONS_VERSION, false);
-  const v = { lead: project.lead!.trim(), projectName: project.name, slug: project.slug, cli };
+  const v = { lead: project.lead!.trim(), projectName: project.name, slug: project.slug, cli, folders: leadFolders(ctx, project.id) };
   return { version: LEAD_INSTRUCTIONS_VERSION, text: leadRules(v), bootstrap: leadBootstrap(v) };
+}
+
+/** The intent record as stored, for the lead to read back: `No intent record yet.` when there is none. A read: it changes nothing. */
+export function readLeadIntent(ctx: Ctx, ref: string, as: string, instructions: number): { text: string; updatedAt: string | null } {
+  const project = requireLead(ctx, ref, as, instructions, false);
+  return { text: project.intent.trim() ? project.intent : 'No intent record yet.', updatedAt: project.intentUpdatedAt };
 }
 
 interface LeadEventRow {
@@ -163,6 +187,12 @@ export function readLeadBrief(ctx: Ctx, ref: string, yours: number | null, now: 
       return why.length ? [{ stepId: r.node.id, title: r.node.title, marks: why.map((w) => w.mark as string), reasons: why.map((w) => w.text) }] : [];
     });
 
+  const intentAt = project.intentUpdatedAt;
+  const landedOnRecord = intentAt === null ? 0 : snapshot.nodes.filter((n) => n.parentId !== null && n.status === 'done' && n.completedAt !== null && n.completedAt >= intentAt).length;
+  // Only ids written out count (`#725 to #729` names 725 and 729), and only those that are steps of this project.
+  const named = [...intentParagraphs(project.intent).phase.matchAll(/#(\d+)/g)].map((m) => byId.get(Number(m[1]))).filter((n) => n !== undefined);
+  const phaseFinished = named.length > 0 && named.every((n) => n.status === 'done' || n.status === 'dropped');
+
   const landedSince = snapshot.nodes
     .filter((n): n is typeof n & { completedAt: string } => n.parentId !== null && n.status === 'done' && n.completedAt !== null && n.completedAt >= since)
     .sort((a, b) => b.completedAt.localeCompare(a.completedAt) || b.id - a.id)
@@ -172,7 +202,7 @@ export function readLeadBrief(ctx: Ctx, ref: string, yours: number | null, now: 
     project: { slug: project.slug, name: project.name, lead: project.lead },
     at: now.toISOString(),
     instructions: { current: LEAD_INSTRUCTIONS_VERSION, yours },
-    intent: { ...intentHeadlines(project.intent), updatedAt: project.intentUpdatedAt },
+    intent: { ...intentHeadlines(project.intent), updatedAt: project.intentUpdatedAt, text: project.intent, landedSince: landedOnRecord, phaseFinished },
     inFlight,
     waitingOnAiden,
     aidensOwn,
