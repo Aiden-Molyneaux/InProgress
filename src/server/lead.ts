@@ -41,7 +41,7 @@ export function requireLead(ctx: Ctx, ref: string, as: string, instructions: num
 
 /**
  * The folders the lead may read: the paths of the project's bindings with forward slashes and no trailing slash, each
- * once (ignoring case), sorted, and never one at or under C:/work, which is no project's.
+ * once (ignoring case), sorted, and never one at or under C:/work (no project's), one that holds it, or a network path.
  */
 export function leadFolders(ctx: Ctx, projectId: number): string[] {
   const seen = new Map<string, string>();

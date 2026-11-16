@@ -6,7 +6,7 @@ export interface LeadRulesFor {
   projectName: string;
   slug: string;
   cli: string;
-  /** The project's folders as `leadFolders` gives them: forward slashes, none under C:/work; empty when it has none. */
+  /** The project's folders as `leadFolders` gives them: forward slashes, none at, under or holding C:/work; empty when it has none. */
   folders: string[];
 }
 

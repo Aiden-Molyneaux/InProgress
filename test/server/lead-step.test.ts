@@ -151,6 +151,20 @@ describe('readLeadStep', () => {
     expect([res.statusCode, res.json().error]).toEqual([409, `#${foreign.id} is not in this project.`]);
   });
 
+  it('keeps the asks cleared last, not the ones raised last', () => {
+    const { ctx, step, read } = setup();
+    const ids: number[] = [];
+    for (let i = 1; i <= 22; i++) ids.push(raiseAsk(ctx, 'session:s1', { nodeId: step.id, kind: 'question', text: `old ${i}` }).id);
+    for (const id of ids.slice(1)) clearAsk(ctx, 'window', id, 'ok');
+    clearAsk(ctx, 'window', ids[0], 'late');
+    const lines = read().split('\n');
+    const at = lines.indexOf('Asks (22):');
+    expect(at).toBeGreaterThan(0);
+    expect(lines[at + 1]).toMatch(/: "old 1" -> "late"$/);
+    expect(lines[at + 2]).toMatch(/: "old 4" -> "ok"$/);
+    expect(lines[at + 21]).toBe('  and 2 more, cleared earlier');
+  });
+
   it('prints every open ask and the newest 20 cleared ones, and says how many it left out', () => {
     const { ctx, step, read } = setup();
     for (let i = 1; i <= 25; i++) clearAsk(ctx, 'window', raiseAsk(ctx, 'session:s1', { nodeId: step.id, kind: 'question', text: `old ${i}` }).id, 'ok');

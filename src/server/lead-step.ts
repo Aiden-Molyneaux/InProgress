@@ -80,7 +80,14 @@ export function readLeadStep(ctx: Ctx, ref: string, as: string, instructions: nu
   if (asks.length) {
     // Every open ask, then the newest cleared ones, each group oldest first.
     const cleared = asks.filter((a) => a.clearedAt !== null);
-    const kept = cleared.slice(Math.max(0, cleared.length - LEAD_STEP_ASK_CAP));
+    // Kept by when they were cleared, not raised: an old ask answered yesterday is the newest decision on the step.
+    const last = new Set(
+      [...cleared]
+        .sort((a, b) => (b.clearedAt as string).localeCompare(a.clearedAt as string) || b.id - a.id)
+        .slice(0, LEAD_STEP_ASK_CAP)
+        .map((a) => a.id),
+    );
+    const kept = cleared.filter((a) => last.has(a.id));
     const shown = [...asks.filter((a) => a.clearedAt === null), ...kept];
     out.push(`Asks (${asks.length}):`, ...shown.map((a) => `  ${askLine(a, nowMs)}`));
     if (cleared.length > kept.length) out.push(`  and ${cleared.length - kept.length} more, cleared earlier`);
