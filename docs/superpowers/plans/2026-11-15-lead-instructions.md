@@ -197,3 +197,34 @@ Names are put in with control characters and line breaks turned into one space, 
 From the worktree: `npm run typecheck`, `npm test`, `npm run test:smoke`, and the e2e test that uses the lead
 (`INPROGRESS_E2E_PORT=4410`, `-g "Lead… gives a project"`). All green. Report the files changed and the raw tail of
 each command. Do not commit. Stop and report, without guessing, if the code contradicts this plan.
+
+## Fixes after Murr (round 1: NEEDS FIXES, 0 blocker, 1 major)
+
+Built at 8b788be. On the check surface C1 and C2 already hold.
+
+- **F1 (major), a lead's name is one plain word.** It goes on every command line the rules print, unquoted. In
+  `src/core/lead.ts`: `export const LEAD_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$/;` and
+  `export const LEAD_NAME_RULE = "A lead's name is 1 to 40 letters, digits, dots, dashes or underscores, and starts with a letter or a digit.";`
+  `setProjectLead` in `src/server/repo/projects.ts` refuses any other name with that sentence (a 400), in place of
+  its length check; null still takes the lead away. `windowLeadBody` keeps its length limits. Tests: `Lead Bot`,
+  `a"b`, `$x`, a name with a backtick, `-x`, `Zoë` and a name of 41 characters are each refused with the sentence;
+  `Progresser`, `lead-2` and `A.b_c` are accepted.
+- **F2, the rules name their own command.** Rule 1 says to run only the commands listed, so the list must hold the
+  rules command. The first entry under `Read, whenever you need to:` becomes:
+
+```
+  lead rules <slug> --as <Lead>
+      your rules, again: at the start of every conversation, and whenever a command says they are out of date
+```
+
+- **F3, the test.** `test/core/lead-rules.test.ts`: the copy gains those two lines; the case of a lead named with a
+  line break goes (it can no longer be stored); a project named with a line break still stays on one line.
+- **F4 (debt), one way to write the prefix.** `src/lib/task-command.ts` exports `nodeCli(path: string): string`
+  (`node <path>`, quoted the way `cliPrefix` quotes it); `cliPrefix` and the rules route both use it.
+- **F5, the document.** `docs/lead/instructions.md`: an archived project is refused with its own sentence; it
+  states the name rule and lists the rules command.
+- **F6 (debt).** `test/web/lead-desk.test.ts`: the fixtures' `current` is `LEAD_INSTRUCTIONS_VERSION`.
+- **Checks:** `npm run typecheck`, `npm test` (rerun once if the runner itself crashes with no failing test),
+  `npm run test:smoke`, and the e2e test `-g "Lead… gives a project"` with `INPROGRESS_E2E_PORT=4410`.
+- **Not fixed, named in the receipt:** a lead on old rules can still mark its look (`--mark`), as before this
+  step.
