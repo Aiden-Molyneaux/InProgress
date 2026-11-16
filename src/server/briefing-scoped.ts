@@ -2,7 +2,7 @@ import { ancestors, buildIndex, kids } from '../core/tree';
 import { sessionActivity } from '../core/activity';
 import { deriveBoard } from '../core/board';
 import { isAidens } from '../core/lead';
-import { sessionMandateLines } from '../core/lead-mandate';
+import { SESSION_LANDING_LINE, sessionMandateLines } from '../core/lead-mandate';
 import { leadBriefingLine, one } from '../core/relay';
 import { clipLine } from '../core/step-ref';
 import { ASK_GLYPHS, askTag, glyphTitle, sessionDisplayTitle, type ProjectSnapshot, type Session, type TreeNode } from '../core/types';
@@ -85,14 +85,23 @@ export function unclaimedLines(snapshot: ProjectSnapshot, session: Session, now:
   return [`Ready to claim: ${chosen.map((r) => name(r.node)).join(' · ')}`, `Claim one: ${claimCommand(session.id, { cli })}`, 'Inheriting a step from a session that handed it to you: add --take-over.'];
 }
 
+/**
+ * What a session in a project with a lead is told about it: the Lead line, the two mandate lines, and the Landing line when
+ * Aiden has turned Landing on. None with no lead. The worker briefing and the claim's answer both print it.
+ */
+export function leadLines(lead: string | null, landing: boolean): string[] {
+  return lead?.trim() ? [leadBriefingLine(lead), ...sessionMandateLines(one(lead)), ...(landing ? [SESSION_LANDING_LINE] : [])] : [];
+}
+
 /** A worker's briefing in a scoped project, once it has claimed a step. */
-export function renderWorkerBriefing(snapshot: ProjectSnapshot, session: Session, now: number, cli?: string): string {
-  // In a project with a lead, the worker learns its name and how to tell its messages from Aiden's.
+export function renderWorkerBriefing(snapshot: ProjectSnapshot, session: Session, now: number, cli?: string, landing = false): string {
+  // In a project with a lead, the worker learns its name and how to tell its messages from Aiden's. The Landing line
+  // follows the mandate when Aiden has turned Landing on; with no lead there is none, whatever the log says.
   const lead = snapshot.project.lead;
   const lines = [
     headerLine(snapshot, session.id),
     `Role: worker on #${session.focusNodeId}.`,
-    ...(lead?.trim() ? [leadBriefingLine(lead), ...sessionMandateLines(one(lead))] : []),
+    ...leadLines(lead, landing),
     PLAN_EDIT_LINE,
     ...playbookLines(snapshot),
     ...updateRules({ sessionId: session.id, cli, mode: { scoped: true, orchestrator: false } }),

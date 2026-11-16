@@ -1,10 +1,10 @@
-import { isAidens } from '../core/lead';
+import { isAidens, type LeadSwitch } from '../core/lead';
 import { stepRef } from '../core/step-ref';
 import { askTag, type Ask, type Project, type TreeNode } from '../core/types';
 import { write, type Ctx } from './db/tx';
 import { clip, stamp } from './digest';
 import { badRequest, conflict, notFound } from './errors';
-import { logLeadEvent, requireLead } from './lead';
+import { leadSwitches, logLeadEvent, requireLead } from './lead';
 import { intentHeadlines } from './lead-text';
 import { aidensAskSql, clearInWrite, markAnswersDelivered, raiseAskInWrite, requireAsk } from './repo/asks';
 import { parkNodeInWrite, requireNode, unparkNodeInWrite, updateNodeInWrite } from './repo/nodes';
@@ -283,6 +283,32 @@ export function leadKept(ctx: Ctx, ref: string, as: string, instructions: number
     const ask = clearInWrite(ctx, record, actor, before, '', false);
     logLeadEvent(ctx, { projectId: project.id, lead: name, instructions, kind: 'kept', askId: ask.id, nodeId: ask.nodeId, text: input.note ?? '' });
     return { text: `Kept ${tag}.`, ask };
+  });
+}
+
+/** A switch as a sentence names it: `Starts`, `Landing`. */
+const switchName = (s: LeadSwitch): string => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** Turns a switch on, on Aiden's words: the log's newest allow line for it is what the project reads. Already on is refused. */
+export function leadAllow(ctx: Ctx, ref: string, as: string, instructions: number, input: { switch: LeadSwitch; aidenWords: string }): { text: string } {
+  const { project, name, actor } = leadOf(ctx, ref, as, instructions);
+  return write(ctx, actor, (record) => {
+    if (leadSwitches(ctx, project.id)[input.switch].on) throw conflict(`${switchName(input.switch)} is already on.`);
+    logLeadEvent(ctx, { projectId: project.id, lead: name, instructions, kind: 'allow', text: input.switch, aidenWords: input.aidenWords });
+    // The log line alone moves nothing on the project's stream: this is what makes an open Lead view read the brief again.
+    record({ projectId: project.id, type: 'project.updated', entity: 'project', entityId: project.id, data: { changes: { [input.switch]: 'on' } } });
+    return { text: `${switchName(input.switch)} is on for ${project.name}.` };
+  });
+}
+
+/** Turns a switch off. Already off, or never on, is refused. Aiden's words are kept when given. */
+export function leadDisallow(ctx: Ctx, ref: string, as: string, instructions: number, input: { switch: LeadSwitch; aidenWords?: string }): { text: string } {
+  const { project, name, actor } = leadOf(ctx, ref, as, instructions);
+  return write(ctx, actor, (record) => {
+    if (!leadSwitches(ctx, project.id)[input.switch].on) throw conflict(`${switchName(input.switch)} is already off.`);
+    logLeadEvent(ctx, { projectId: project.id, lead: name, instructions, kind: 'disallow', text: input.switch, aidenWords: input.aidenWords });
+    record({ projectId: project.id, type: 'project.updated', entity: 'project', entityId: project.id, data: { changes: { [input.switch]: 'off' } } });
+    return { text: `${switchName(input.switch)} is off for ${project.name}.` };
   });
 }
 

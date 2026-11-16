@@ -7,10 +7,12 @@ import { SCRIBE_AGENT, type CommandKind, type CommandOutcome, type HookEvent, ty
 import { write, type Ctx, type RecordEvent } from './db/tx';
 import { badRequest } from './errors';
 import { renderBriefing, renderStatusAnswer, renderStatusLine, untrackedHint } from './briefing';
-import { renderOrchestratorBriefing, stepBlock } from './briefing-scoped';
+import { leadLines, renderOrchestratorBriefing, stepBlock } from './briefing-scoped';
 import { deriveBoard, isLive, reconcileLine } from '../core/board';
 import { askTag, sessionDisplayTitle } from '../core/types';
 import { formatCounts, formatDigest, readDigest } from './digest';
+import { landingOffAt, leadSwitches } from './lead';
+import { landingOffLine } from '../core/lead-mandate';
 import { asksToRemind, markAnswersDelivered, owedAnswers, undeliveredAnswers } from './repo/asks';
 import { endCommand, endSessionCommands, pruneCommands, reconcileCommands, startCommand, type BackgroundEntry } from './repo/commands';
 import { findNode, leadingNode, patchNode, requireNode, setDriver } from './repo/nodes';
@@ -116,6 +118,9 @@ const REMINDERS = 3;
 const REMINDER_TAGS = 10;
 
 const clean = (text: string | undefined): string | null => text?.trim() || null;
+
+/** Whether Aiden has turned Landing on for the project: a plain read of the lead's log, for the briefing's Landing line. */
+const landingOn = (ctx: Ctx, projectId: number): boolean => leadSwitches(ctx, projectId).landing.on;
 
 export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInput): HookEventResult {
   let created = false;
@@ -360,7 +365,7 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
     const checkOld = briefingOwed || !(input.event === 'start' && input.source === 'compact');
     // The orchestrator's counts line reads the digest, outside any write as the snapshot is.
     const counts = session.role === 'orchestrator' ? formatCounts(readDigest(ctx, projectId), nowMs) : undefined;
-    context = renderBriefing(getProjectSnapshot(ctx, projectId), sessionId, nowMs, { checkOld, ...(counts === undefined ? {} : { counts }) });
+    context = renderBriefing(getProjectSnapshot(ctx, projectId), sessionId, nowMs, { checkOld, landing: landingOn(ctx, projectId), ...(counts === undefined ? {} : { counts }) });
   } else if (input.event === 'prompt' && !input.notice) {
     if (input.asksStatus) context = renderStatusAnswer(getProjectSnapshot(ctx, projectId), sessionId, nowMs);
     else if (session.promptsSinceUpdate >= 2) context = renderStatusLine(getProjectSnapshot(ctx, projectId), session);
@@ -376,6 +381,9 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
       lines.push(...answers.map((a) => (a.answeredVia === 'lead_decided' ? `Decided by this project's lead, not Aiden: ${askTag(a.id)} "${oneLine(a.answer)}" (yours: act on it; Aiden may still undo it)` : a.answer ? `Answered: ${askTag(a.id)} "${oneLine(a.answer)}" (yours: act on it, or add it to your tasks)` : `Cleared: ${askTag(a.id)}, no answer`)));
       markAnswersDelivered(ctx, answers.map((a) => a.id));
     }
+    // Landing went off after this session started: its briefing may hold the Landing line, so every prompt says it no longer stands.
+    const landingOff = landingOffAt(ctx, projectId);
+    if (landingOff !== null && landingOff > session.startedAt) lines.push(landingOffLine(landingOff));
     // The reminder (#522): every real prompt, while an ask this session holds is open, in case this prompt answers it.
     // At most the 3 newest, oldest first among themselves; the rest are named by tag in one line. A relay answers no ask,
     // so it gets none.
@@ -428,7 +436,7 @@ export function enrollSession(ctx: Ctx, actor: string, sessionId: string, projec
   // Re-read after commit: write() resets prompts_since_update for scribe actors after fn() runs. An enroll's briefing is
   // fresh, so it asks about old needs-you items.
   const session = findSession(ctx, sessionId)!;
-  return { session, briefing: renderBriefing(getProjectSnapshot(ctx, session.projectId!), sessionId, Date.parse(ctx.now()), { checkOld: true }) };
+  return { session, briefing: renderBriefing(getProjectSnapshot(ctx, session.projectId!), sessionId, Date.parse(ctx.now()), { checkOld: true, landing: landingOn(ctx, session.projectId!) }) };
 }
 
 /** How a focus change left the step's driver (spec 1.2): null for no step. */
@@ -584,7 +592,9 @@ export function claimStep(ctx: Ctx, actor: string, sessionId: string, nodeId: nu
   if (driveLine) notes.push(driveLine);
   const session = findSession(ctx, sessionId)!;
   const snapshot = getProjectSnapshot(ctx, session.projectId!);
-  return { session, notes, block: [...stepBlock(snapshot, nodeId, session, Date.parse(ctx.now())), ...owedLines] };
+  // A fresh session is unclaimed when it starts, so its briefing carries no word of the lead: the claim's answer does.
+  const lead = leadLines(snapshot.project.lead, landingOn(ctx, session.projectId!));
+  return { session, notes, block: [...stepBlock(snapshot, nodeId, session, Date.parse(ctx.now())), ...owedLines, ...lead] };
 }
 
 /**

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { LEAD_INSTRUCTIONS_VERSION, type LeadBrief, type LeadEventOut } from '../../src/core/lead';
 import { stamp } from '../../src/core/span';
-import { deskDecided, deskGroups, deskHead, logLines } from '../../web/src/lead/leadDesk';
+import { deskDecided, deskGroups, deskHead, deskStarted, deskSwitches, logLines } from '../../web/src/lead/leadDesk';
 
 const NOW = Date.parse('2026-11-15T12:00:00.000Z');
 const ago = (ms: number): string => new Date(NOW - ms).toISOString();
@@ -25,6 +25,8 @@ const empty = (): LeadBrief => ({
   landedSince: [],
   saidInAidensName: [],
   decided: [],
+  switches: { starts: { on: false, at: null, words: null }, landing: { on: false, at: null, words: null } },
+  started: [],
   links: { t3: 'not checked', t3At: null, lastSeenAt: null },
 });
 
@@ -195,6 +197,46 @@ describe('deskDecided', () => {
     const rows = deskDecided({ ...empty(), decided: [d({}), d({ tag: '', by: 'a session', what: 'kept the old port', why: '', at: ago(3 * DAY) })] }, NOW);
     expect(rows[1]).toMatchObject({ key: 's1', line: 'a session on #9 Pick a port: kept the old port', why: '', undo: null, age: '3d ago' });
     expect(rows.map((r) => r.key)).toEqual(['d12', 's1']);
+  });
+});
+
+describe('deskSwitches', () => {
+  it('says off for both, Starts first', () => {
+    expect(deskSwitches(empty(), NOW)).toEqual([
+      { key: 'starts', line: 'Starts: off' },
+      { key: 'landing', line: 'Landing: off' },
+    ]);
+  });
+  it('says on with its age and the words that turned it on', () => {
+    const b = { ...empty(), switches: { starts: { on: true, at: ago(2 * HOUR), words: 'turn starts on' }, landing: { on: false, at: null, words: null } } };
+    expect(deskSwitches(b, NOW).map((s) => s.line)).toEqual(['Starts: on, since 2h ago, on Aiden\'s words "turn starts on"', 'Landing: off']);
+  });
+  it('leaves the words out when there are none', () => {
+    const b = { ...empty(), switches: { starts: { on: false, at: null, words: null }, landing: { on: true, at: ago(3 * DAY), words: null } } };
+    expect(deskSwitches(b, NOW).map((s) => s.line)).toEqual(['Starts: off', 'Landing: on, since 3d ago']);
+  });
+});
+
+describe('deskStarted', () => {
+  const s = (o: Partial<LeadBrief['started'][number]>): LeadBrief['started'][number] => ({
+    at: ago(HOUR),
+    stepId: 9,
+    stepTitle: 'Pick  a port',
+    threadId: 't-1',
+    onAidensWord: true,
+    claimed: true,
+    ...o,
+  });
+  it('is empty with nothing started', () => {
+    expect(deskStarted(empty(), NOW)).toEqual([]);
+  });
+  it("words a start on Aiden's word that its thread has claimed", () => {
+    expect(deskStarted({ ...empty(), started: [s({})] }, NOW)).toEqual([{ key: 't-1', line: "#9 Pick a port · on Aiden's word · claimed", age: '1h ago' }]);
+  });
+  it("words a start on the lead's own judgment not yet claimed, and keeps the order given", () => {
+    const rows = deskStarted({ ...empty(), started: [s({}), s({ threadId: 't-2', onAidensWord: false, claimed: false, at: ago(2 * DAY) })] }, NOW);
+    expect(rows[1]).toEqual({ key: 't-2', line: "#9 Pick a port · on the lead's own judgment · not claimed yet", age: '2d ago' });
+    expect(rows.map((r) => r.key)).toEqual(['t-1', 't-2']);
   });
 });
 

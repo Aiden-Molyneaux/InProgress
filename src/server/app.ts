@@ -6,6 +6,7 @@ import type { Ctx } from './db/tx';
 import type { BackupRunner } from './backup-runner';
 import { ApiError } from './errors';
 import type { RelaySend } from './lead-relay';
+import type { StartThread } from './lead-start';
 import type { DesktopSession, OpenDesktopResult } from './open-desktop';
 import { registerAskRoutes } from './routes/asks';
 import { registerBackupRoutes } from './routes/backups';
@@ -38,6 +39,8 @@ export interface AppOptions {
   openFolder?: (path: string) => Promise<void>;
   /** Sends a message to a T3 Code thread. Replaceable so tests never run the t3 CLI. */
   t3Send?: RelaySend;
+  /** Starts a T3 Code thread. Replaceable so tests never run the t3 CLI. */
+  t3Start?: StartThread;
 }
 
 export type Guard = (req: FastifyRequest, reply: FastifyReply) => Promise<unknown>;
@@ -120,7 +123,7 @@ export function buildApp(opts: AppOptions): FastifyInstance {
   registerWriteRoutes(app, opts.ctx, requireToken);
   registerSessionRoutes(app, opts.ctx, requireToken);
   registerAskRoutes(app, opts.ctx, requireToken);
-  registerLeadRoutes(app, opts.ctx, requireToken, opts.t3Send);
+  registerLeadRoutes(app, opts.ctx, requireToken, opts.t3Send, opts.t3Start);
   registerSse(app, opts.ctx);
   registerWindowRoutes(app, opts.ctx, requireUi, opts.openDesktop);
   registerUi(app, opts, requireToken, requireUi);

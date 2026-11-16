@@ -52,6 +52,14 @@ describe('t3Start and t3Send', () => {
       { timeoutMs: 60_000, input: 'do the thing', verbatim: false },
     );
   });
+  it('passes neither --provider nor --model unless both are set', async () => {
+    const none = runs({ threadId: 'mcp:abc' });
+    await t3Start('proj', 'go', { title: 'T' }, opts(none));
+    expect(none).toHaveBeenCalledWith('/bin/t3', ['thread', 'start', 'proj', '-', '--title', 'T', '--json'], { timeoutMs: 60_000, input: 'go', verbatim: false });
+    const one = runs({ threadId: 'mcp:abc' });
+    await t3Start('proj', 'go', { provider: 'claudeAgent' }, opts(one));
+    expect((one as ReturnType<typeof vi.fn>).mock.calls[0][1]).toEqual(['thread', 'start', 'proj', '-', '--json']);
+  });
   it('sends to a thread with the message on stdin', async () => {
     const run = runs({});
     await t3Send('mcp:abc', 'more', opts(run));

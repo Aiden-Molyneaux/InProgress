@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DECIDED_PREFIX, LEAD_MANDATE, decisionText, isDecisionLog, sessionMandateLines } from '../../src/core/lead-mandate';
+import { DECIDED_PREFIX, LEAD_MANDATE, SESSION_LANDING_LINE, decisionText, isDecisionLog, sessionMandateLines } from '../../src/core/lead-mandate';
 
 const MANDATE = [
   'Your mandate',
@@ -9,6 +9,7 @@ const MANDATE = [
   '- the bar for work that nothing shows on a screen: fixes, refactors, tests, docs, internal scripts;',
   '- what is next inside the current Phase, and in what order;',
   '- setting aside (parking) a step nobody is working on, with the reason; dropping a step only when its origin is proposed;',
+  '- starting a thread for the next step inside the current Phase, when Starts is on for this project and the limits allow it;',
   '- your own promises.',
   "Aiden's, always:",
   '- what cannot be undone: deleting data, a branch or a step he asked for; rewriting history; a release;',
@@ -42,6 +43,15 @@ describe('sessionMandateLines', () => {
     );
     // eslint-disable-next-line no-control-regex
     expect(b).toMatch(/^[ -~]*$/);
+  });
+});
+
+describe('SESSION_LANDING_LINE', () => {
+  it('is exactly the Landing line, with the middle dot as its only character outside plain ASCII', () => {
+    expect(SESSION_LANDING_LINE).toBe(
+      'Landing: in this project work lands without Aiden when all of this holds: nothing in its bar shows on a screen, its diff touches nothing on the risk list (the database, the hooks and installer, the deploy scripts), the checks are green, the reviewer\'s verdict is sound, and the deploy is green. Then merge, deploy and push, and record it in your next scribe brief as "log on #<id>: Decided for Aiden: landed <sha> · <the evidence in one line>". Everything else waits for his go-ahead.',
+    );
+    expect(SESSION_LANDING_LINE.replace('·', '')).toMatch(/^[ -~]*$/);
   });
 });
 

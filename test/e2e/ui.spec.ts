@@ -1905,6 +1905,35 @@ test('The Lead view lists what was decided for Aiden, and shows the mandate', as
   await expect(mandate).toContainText("Aiden's, always:");
 });
 
+test('The Lead view shows the switches and what was started', async ({ page, api }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const name = unique('Lead switches');
+  const made = await bare(api, name);
+  await page.goto(`/#/p/${made.slug}`);
+  const tab = railRow(page, name);
+  await expect(tab).toHaveAttribute('aria-current', 'page');
+  await tab.click({ button: 'right' });
+  await tabMenu(page, name).getByRole('menuitem', { name: 'Lead…', exact: true }).click();
+  const field = page.getByRole('textbox', { name: `Lead of ${name}`, exact: true });
+  await field.fill('Progresser');
+  await page.keyboard.press('Enter');
+  await expect(field).toBeHidden();
+  await viewButton(page, 'Lead').click();
+  const switches = page.getByLabel('Switches', { exact: true });
+  await expect(switches).toContainText('Starts: off');
+  await expect(switches).toContainText('Landing: off');
+  await expect(page.getByRole('region', { name: 'Started', exact: true })).toContainText('Nothing started in the last 7 days.');
+  const res = await api.post(`/api/lead/${made.slug}/allow`, {
+    headers: { authorization: `Bearer ${readFileSync('.e2e-home/token', 'utf8').trim()}` },
+    data: { as: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION, switch: 'starts', aidenWords: 'turn starts on' },
+  });
+  expect(res.ok(), `allow answered ${res.status()}: ${await res.text()}`).toBe(true);
+  // The open view picks the switch up live, no reload.
+  await expect(switches).toContainText('Starts: on');
+  await expect(switches).toContainText('turn starts on');
+  await expect(switches).toContainText('Landing: off');
+});
+
 test('the open archived project can be renamed from its tab, and ⋯ shows the new name', async ({ page, api }) => {
   const keptName = unique('Rename kept');
   const oldName = unique('Rename shelved');

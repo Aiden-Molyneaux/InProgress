@@ -4,11 +4,12 @@ import type { Ctx } from '../db/tx';
 import { badRequest } from '../errors';
 import { cliBesideServer, nodeCli } from '../../lib/task-command';
 import { listLeadEvents, markLeadSeen, readLeadBrief, readLeadIntent, readLeadRules, requireLead } from '../lead';
-import { leadAnswer, leadDecide, leadUndo, leadDrop, leadIntent, leadKept, leadPark, leadPromise } from '../lead-commands';
+import { leadAllow, leadDisallow, leadAnswer, leadDecide, leadUndo, leadDrop, leadIntent, leadKept, leadPark, leadPromise } from '../lead-commands';
 import { leadRelay, type RelaySend } from '../lead-relay';
+import { leadStart, type StartThread } from '../lead-start';
 import { readLeadResource, readLeadStep } from '../lead-step';
 import { renderLeadBrief } from '../lead-text';
-import { leadAnswerBody, leadBriefQuery, leadDecideBody, leadUndoBody, leadDropBody, leadIntentBody, leadKeptBody, leadParkBody, leadPromiseBody, leadReadQuery, leadRelayBody, leadRulesQuery, leadSeenBody } from '../schemas';
+import { leadAllowBody, leadDisallowBody, leadAnswerBody,leadBriefQuery, leadDecideBody, leadUndoBody, leadDropBody, leadIntentBody, leadKeptBody, leadParkBody, leadPromiseBody, leadReadQuery, leadRelayBody, leadStartBody, leadRulesQuery, leadSeenBody } from '../schemas';
 
 /** A route's `:id`: a whole number above 0, or a 400. */
 function positiveId(text: string): number {
@@ -23,7 +24,7 @@ function positiveId(text: string): number {
  * lead's seven commands are writes, so they are POSTs behind the bearer token guard. `send` is how a relay reaches a T3
  * Code thread: the t3 CLI unless the app was given another.
  */
-export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken: Guard, send?: RelaySend): void {
+export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken: Guard, send?: RelaySend, start?: StartThread): void {
   app.get('/api/lead/:ref/brief', async (req) => {
     const { ref } = req.params as { ref: string };
     const query = leadBriefQuery.parse(req.query);
@@ -103,9 +104,23 @@ export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken:
     const { as, instructions, ...input } = leadIntentBody.parse(req.body);
     return leadIntent(ctx, ref(req), as, instructions, input);
   });
+  // The two switches: only ever on Aiden's words, turned on by the lead on his word and logged with it.
+  app.post('/api/lead/:ref/allow', { onRequest: requireToken }, async (req) => {
+    const { as, instructions, ...input } = leadAllowBody.parse(req.body);
+    return leadAllow(ctx, ref(req), as, instructions, input);
+  });
+  app.post('/api/lead/:ref/disallow', { onRequest: requireToken }, async (req) => {
+    const { as, instructions, ...input } = leadDisallowBody.parse(req.body);
+    return leadDisallow(ctx, ref(req), as, instructions, input);
+  });
   // The relay is checked, then sent, then logged: the send runs outside any write, and is logged whatever it did.
   app.post('/api/lead/:ref/relay', { onRequest: requireToken }, async (req) => {
     const { as, instructions, ...input } = leadRelayBody.parse(req.body);
     return leadRelay(ctx, ref(req), as, instructions, input, send);
+  });
+  // A start is checked, then made, then logged, as a relay is: the t3 call runs outside any write and is never repeated.
+  app.post('/api/lead/:ref/start', { onRequest: requireToken }, async (req) => {
+    const { as, instructions, ...input } = leadStartBody.parse(req.body);
+    return leadStart(ctx, ref(req), as, instructions, input, start);
   });
 }

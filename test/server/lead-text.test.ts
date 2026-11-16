@@ -26,6 +26,8 @@ const empty: LeadBrief = {
   landedSince: [],
   saidInAidensName: [],
   decided: [],
+  switches: { starts: { on: false, at: null, words: null }, landing: { on: false, at: null, words: null } },
+  started: [],
   links: { t3: 'not checked', t3At: null, lastSeenAt: null },
 };
 
@@ -52,6 +54,11 @@ const full: LeadBrief = {
     { tag: 'd12', at: ago(2 * HOUR), by: 'Progresser', stepId: 12, stepTitle: 'Play app signing', what: 'answered a5: "Use tabs"', why: 'Matches the repo', isNew: true },
     { tag: 'd9', at: ago(3 * DAY), by: 'Progresser', stepId: 16, stepTitle: 'Old spike', what: 'parked', why: '', isNew: false },
     { tag: '', at: ago(HOUR), by: 'a session', stepId: 12, stepTitle: 'Play app signing', what: 'rename the helper · clearer', why: '', isNew: true },
+  ],
+  switches: { starts: { on: true, at: ago(DAY), words: 'start them' }, landing: { on: false, at: null, words: null } },
+  started: [
+    { at: ago(HOUR), stepId: 15, stepTitle: 'Add the privacy page', threadId: 'mcp:t1', onAidensWord: true, claimed: true },
+    { at: ago(5 * MIN), stepId: 16, stepTitle: 'Old spike', threadId: 'mcp:t2', onAidensWord: false, claimed: false },
   ],
   links: { t3: 'ok', t3At: ago(MIN), lastSeenAt: ago(2 * DAY) },
 };
@@ -86,6 +93,10 @@ describe('renderLeadBrief', () => {
       `  d12 ${stamp(ago(2 * HOUR))} · Progresser answered a5: "Use tabs" on #12 Play app signing · why: "Matches the repo" · undo: undo d12 · new`,
       `  d9 ${stamp(ago(3 * DAY))} · Progresser parked on #16 Old spike · undo: undo d9`,
       `  ${stamp(ago(HOUR))} · a session on #12 Play app signing: "rename the helper · clearer" · new`,
+      'Started in the last 7 days (2):',
+      `  ${stamp(ago(HOUR))} · #15 Add the privacy page · thread mcp:t1 · on Aiden's word · claimed`,
+      `  ${stamp(ago(5 * MIN))} · #16 Old spike · thread mcp:t2 · on your own judgment · not claimed yet`,
+      `Switches: starts on since ${stamp(ago(DAY))} ("start them") · landing off`,
       'Links: T3 Code ok, last relay 1m ago · your last look 2d ago',
     ]);
   });
@@ -109,6 +120,15 @@ describe('renderLeadBrief', () => {
     expect(lines({ t3: 'unavailable', t3At: ago(5 * MIN), lastSeenAt: ago(HOUR) })).toContain(WARN);
     expect(lines({ t3: 'unavailable', t3At: ago(5 * MIN), lastSeenAt: ago(MIN) }).some((l) => l.startsWith('The last relay'))).toBe(false);
     expect(lines({ t3: 'ok', t3At: ago(5 * MIN), lastSeenAt: null }).some((l) => l.startsWith('The last relay'))).toBe(false);
+  });
+
+  it('prints a switch that is on with since when and the words, and leaves the parenthesis out with no words', () => {
+    const sw = (starts: LeadBrief['switches']['starts'], landing: LeadBrief['switches']['landing']) =>
+      renderLeadBrief({ ...empty, switches: { starts, landing } }).split('\n').find((l) => l.startsWith('Switches:'));
+    const off = { on: false, at: null, words: null };
+    expect(sw(off, { on: true, at: ago(HOUR), words: 'land it' })).toBe(`Switches: starts off · landing on since ${stamp(ago(HOUR))} ("land it")`);
+    expect(sw({ on: true, at: ago(HOUR), words: null }, off)).toBe(`Switches: starts on since ${stamp(ago(HOUR))} · landing off`);
+    expect(sw({ on: true, at: ago(HOUR), words: 'a\nb' }, off)).toBe(`Switches: starts on since ${stamp(ago(HOUR))} ("a b") · landing off`);
   });
 
   it('renders the same text twice for the same brief, whatever the clock says', () => {
@@ -141,6 +161,9 @@ describe('renderLeadBrief', () => {
       '  none',
       'Decided for Aiden in the last 7 days (0, 0 new):',
       '  none',
+      'Started in the last 7 days (0):',
+      '  none',
+      'Switches: starts off · landing off',
       'Links: T3 Code not checked · your last look never',
     ]);
   });

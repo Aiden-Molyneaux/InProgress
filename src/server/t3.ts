@@ -181,10 +181,12 @@ export async function t3Show(threadId: string, o: T3Options = {}): Promise<{ thr
 export async function t3Start(
   project: string,
   message: string,
-  opts: { provider: string; model: string; title?: string; worktree?: string; branch?: string },
+  opts: { provider?: string; model?: string; title?: string; worktree?: string; branch?: string },
   o: T3Options = {},
 ): Promise<{ threadId: string }> {
-  const args = ['thread', 'start', safe('project', project), '-', '--provider', safe('provider', opts.provider), '--model', safe('model', opts.model)];
+  const args = ['thread', 'start', safe('project', project), '-'];
+  // The two flags go together or not at all: with neither, T3 Code picks its own defaults.
+  if (opts.provider !== undefined && opts.model !== undefined) args.push('--provider', safe('provider', opts.provider), '--model', safe('model', opts.model));
   // A title is cleaned, not refused: unsafe characters become spaces, leading space and dashes and closing backslashes go,
   // it is cut to 120 code points, and a blank one is left out.
   const title = Array.from(opts.title?.replace(UNSAFE_EACH, ' ').replace(/^[\s-]+/, '') ?? '').slice(0, TITLE_MAX).join('').replace(/\\+$/, '');

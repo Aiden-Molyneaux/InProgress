@@ -56,6 +56,13 @@ export const line = (text: string, max: number): string => clip(clean(text), max
 /** A step as a line names it, its title cleaned first. */
 const step = (id: number, title: string): string => stepRef(id, clean(title));
 
+/** A switch as the brief says it: `off`, or `on since <stamp>` with Aiden's words in quotes when it has them. */
+function switchText(s: LeadBrief['switches']['starts']): string {
+  if (!s.on) return 'off';
+  const words = s.words === null || !line(s.words, TEXT_CUT) ? '' : ` ("${line(s.words, TEXT_CUT)}")`;
+  return `on${s.at === null ? '' : ` since ${stamp(s.at)}`}${words}`;
+}
+
 /** A section: its heading and its lines, `  none` when there are none, at most LEAD_LIST_CAP then `  and <k> more`. */
 function section(heading: string, items: string[]): string[] {
   if (!items.length) return [heading, '  none'];
@@ -123,6 +130,11 @@ export function renderLeadBrief(b: LeadBrief): string {
         return `${d.tag} ${stamp(d.at)} · ${line(d.by, TEXT_CUT)} ${line(d.what, TEXT_CUT * 2)}${on}${d.why === '' ? '' : ` · why: "${line(d.why, TEXT_CUT)}"`} · undo: undo ${d.tag}${fresh}`;
       }),
     ),
+    ...section(
+      `Started in the last ${LEAD_LOOK_BACK_DAYS} days (${b.started.length}):`,
+      b.started.map((s) => `${stamp(s.at)} · ${step(s.stepId, s.stepTitle)} · thread ${line(s.threadId, TEXT_CUT)} · ${s.onAidensWord ? "on Aiden's word" : 'on your own judgment'} · ${s.claimed ? 'claimed' : 'not claimed yet'}`),
+    ),
+    `Switches: starts ${switchText(b.switches.starts)} · landing ${switchText(b.switches.landing)}`,
     `Links: T3 Code ${t3}${t3At === null ? '' : `, last relay ${spanAgo(t3At, now)} ago`} · your last look ${b.links.lastSeenAt === null ? 'never' : `${spanAgo(b.links.lastSeenAt, now)} ago`}`,
   );
   return lines.join('\n');
