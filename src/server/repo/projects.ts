@@ -1,5 +1,5 @@
 import { COMMAND_WORK_MS } from '../../core/activity';
-import { LEAD_NAME_MAX } from '../../core/lead';
+import { LEAD_NAME, LEAD_NAME_RULE } from '../../core/lead';
 import { BRIEFING_MODES, DELETED_RETENTION_MS, STALE_SESSION_MS, TITLE_CHANNELS, type Binding, type BriefingMode, type Project, type ProjectSummary, type QueueEntry, type QueueOp, type TitleChannel } from '../../core/types';
 import { globMatch } from '../../lib/glob';
 import { isUnder, normalizePath } from '../../lib/paths';
@@ -417,13 +417,13 @@ export function applyProjectChange(ctx: Ctx, record: RecordEvent, before: Projec
 
 /**
  * Gives the project a lead, or takes it away (null). Only the window's route calls this: the CLI and MCP have no way to
- * set a lead. The name is trimmed, 1 to 40 characters. Records project.updated only when the lead changes, as
+ * set a lead. The name is trimmed, then must match LEAD_NAME (one plain word). Records project.updated only when the lead changes, as
  * updateProject does.
  */
 export function setProjectLead(ctx: Ctx, actor: string, ref: string | number, name: string | null): Project {
   const lead = name === null ? null : name.trim();
-  if (lead !== null && (lead.length < 1 || lead.length > LEAD_NAME_MAX)) {
-    throw badRequest(`A lead's name is 1 to ${LEAD_NAME_MAX} characters`, 'Send null to take the lead away.');
+  if (lead !== null && !LEAD_NAME.test(lead)) {
+    throw badRequest(LEAD_NAME_RULE, 'Send null to take the lead away.');
   }
   return write(ctx, actor, (record) => {
     const before = resolveProject(ctx, ref);

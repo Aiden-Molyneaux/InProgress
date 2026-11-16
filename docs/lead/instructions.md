@@ -8,7 +8,9 @@ The rules are not pasted. The lead fetches them with a command:
 
     lead rules <project> --as <name>
 
-It prints the rules for that lead on that project: version, name, the project, the full command prefix and every command. A name that is not the project's lead is refused with the no-lead sentence. The command needs no `--instructions`, because the lead does not know the version until it has read the rules.
+It prints the rules for that lead on that project: version, name, the project, the full command prefix and every command, the rules command itself first among the reads. A name that is not the project's lead is refused with the no-lead sentence, and an archived project is refused with its own sentence (it has no lead).
+
+A lead's name is one plain word: 1 to 40 letters, digits, dots, dashes or underscores, starting with a letter or a digit. The rules print it unquoted on every command line, so Aiden cannot give a lead any other name. The command needs no `--instructions`, because the lead does not know the version until it has read the rules.
 
 Every other lead command carries `--instructions <n>`, the version the lead read. The current version is `LEAD_INSTRUCTIONS_VERSION` in `src/core/lead.ts`. A lead on an older version can still read (`lead brief` answers, and its second line says the rules are out of date) but cannot change anything: a change is refused with a sentence that tells it to run the rules command again. Bumping the constant is how a rule change reaches every lead with a deploy.
 

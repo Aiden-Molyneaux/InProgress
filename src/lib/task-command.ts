@@ -25,13 +25,18 @@ const hasSpace = (path: string): boolean => /\s/.test(path);
 export const CLI_SUBCOMMANDS = ['tasks', 'claim', 'ask', 'orchestrate', 'digest', 'outline'] as const;
 export type CliSubcommand = (typeof CLI_SUBCOMMANDS)[number];
 
+/** `node <path>`, the path with forward slashes and quoted when it holds a space: what every printed command starts with. */
+export function nodeCli(path: string): string {
+  const p = normalizePath(path);
+  return `node ${hasSpace(p) ? `"${p}"` : p}`;
+}
+
 /**
  * `node C:/…/dist/cli/main.js claim`: the start of every command of that subcommand and of its allow rules. A path with
  * a space is quoted so the command still runs; no rule can allow it, so it asks for permission.
  */
 export function cliPrefix(cli: string, sub: CliSubcommand): string {
-  const path = normalizePath(cli);
-  return `node ${hasSpace(path) ? `"${path}"` : path} ${sub}`;
+  return `${nodeCli(cli)} ${sub}`;
 }
 
 /** `node C:/…/dist/cli/main.js tasks`: cliPrefix for the working-tasks command. */

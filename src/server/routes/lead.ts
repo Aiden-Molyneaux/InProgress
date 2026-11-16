@@ -1,8 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Guard } from '../app';
 import type { Ctx } from '../db/tx';
-import { cliBesideServer } from '../../lib/task-command';
-import { normalizePath } from '../../lib/paths';
+import { cliBesideServer, nodeCli } from '../../lib/task-command';
 import { listLeadEvents, markLeadSeen, readLeadBrief, readLeadRules, requireLead } from '../lead';
 import { leadAnswer, leadDrop, leadIntent, leadKept, leadPark, leadPromise } from '../lead-commands';
 import { leadRelay, type RelaySend } from '../lead-relay';
@@ -33,8 +32,7 @@ export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken:
   app.get('/api/lead/:ref/rules', async (req) => {
     const { ref } = req.params as { ref: string };
     const query = leadRulesQuery.parse(req.query);
-    const path = normalizePath(cliBesideServer());
-    return readLeadRules(ctx, ref, query.as, `node ${/\s/.test(path) ? `"${path}"` : path}`);
+    return readLeadRules(ctx, ref, query.as, nodeCli(cliBesideServer()));
   });
   app.get('/api/lead/:ref/events', async (req) => ({ events: listLeadEvents(ctx, (req.params as { ref: string }).ref) }));
   // The lead has read the brief: the next one counts what landed and what was said from here.

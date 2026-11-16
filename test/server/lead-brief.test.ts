@@ -6,7 +6,7 @@ import { buildApp } from '../../src/server/app';
 import { openDb } from '../../src/server/db/connection';
 import { createCtx } from '../../src/server/db/tx';
 import { deleteProject, purgeDeletedProjects } from '../../src/server/project-lifecycle';
-import { LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
+import { LEAD_INSTRUCTIONS_VERSION, LEAD_NAME_RULE } from '../../src/core/lead';
 import { renderLeadBrief } from '../../src/server/lead-text';
 import { logLeadEvent, markLeadSeen, noLeadNamed, outOfDate, readLeadBrief, readLeadRules, requireLead, staleReasons } from '../../src/server/lead';
 import { raiseAsk } from '../../src/server/repo/asks';
@@ -82,6 +82,14 @@ describe('setProjectLead', () => {
     expect(() => setLead('   ')).toThrow(/1 to 40/);
     expect(() => setLead('x'.repeat(41))).toThrow(/1 to 40/);
     expect(resolveLead(ctx, project.slug)).toBeNull();
+  });
+
+  it("takes one plain word as a name and refuses any other with the rule's sentence", () => {
+    const { setLead } = setup();
+    for (const bad of ['Lead Bot', 'a"b', '$x', 'a`b', '-x', 'Zoë', 'x'.repeat(41)]) {
+      expect(() => setLead(bad), bad).toThrow(LEAD_NAME_RULE);
+    }
+    for (const good of ['Progresser', 'lead-2', 'A.b_c']) expect(setLead(good).lead).toBe(good);
   });
 });
 

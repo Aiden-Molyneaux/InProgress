@@ -13,6 +13,8 @@ const EXPECTED = [
   '  node C:/x/dist/cli/main.js',
   '',
   'Read, whenever you need to:',
+  '  lead rules inprogress --as Progresser',
+  '      your rules, again: at the start of every conversation, and whenever a command says they are out of date',
   `  lead brief inprogress ${W}`,
   '      where the project stands: your source for "where are we"',
   `  lead brief inprogress --mark ${W}`,
@@ -82,11 +84,10 @@ describe('leadRules', () => {
     expect(text.endsWith('\n')).toBe(false);
   });
 
-  it('keeps a lead whose name holds a line break on one line', () => {
-    const text = leadRules({ ...V, lead: ' Pro\ngresser ' });
-    expect(text.split('\n')[0]).toBe('Rules for Pro gresser, the lead for InProgress. Version 2.');
-    expect(text).toContain('--as Pro gresser --instructions 2');
-    expect(text).not.toContain('Pro\ngresser');
+  it('keeps a project whose name holds a line break on one line', () => {
+    const text = leadRules({ ...V, projectName: ' In\nProgress ' });
+    expect(text.split('\n')[0]).toBe('Rules for Progresser, the lead for In Progress. Version 2.');
+    expect(text).not.toContain('In\nProgress');
   });
 });
 
@@ -99,7 +100,7 @@ describe('leadBootstrap', () => {
     ]);
   });
 
-  it('keeps a name with a line break on one line', () => {
-    expect(leadBootstrap({ ...V, lead: 'Pro\ngresser' }).split('\n')).toHaveLength(3);
+  it('keeps a project name with a line break on one line', () => {
+    expect(leadBootstrap({ ...V, projectName: 'In\nProgress' }).split('\n')).toHaveLength(3);
   });
 });

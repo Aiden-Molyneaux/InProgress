@@ -28,6 +28,8 @@ export function leadRules(v: LeadRulesFor): string {
     `  ${cli}`,
     '',
     'Read, whenever you need to:',
+    `  lead rules ${slug} --as ${Lead}`,
+    '      your rules, again: at the start of every conversation, and whenever a command says they are out of date',
     `  lead brief ${slug} ${W}`,
     '      where the project stands: your source for "where are we"',
     `  lead brief ${slug} --mark ${W}`,
