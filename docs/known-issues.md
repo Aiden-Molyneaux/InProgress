@@ -143,7 +143,9 @@ work. A re-hit bumps **Hits** and **Verified**. Entries seeded from the code and
 - **Symptom:** `npm run deploy` red at `▸ Unit tests`: the vitest output stops mid-run with no failing test and no summary, then `Error: Command failed: npm run test` with `status: 3221225477` (0xC0000005, an access violation). Two deploys of 4260abb in a row, about 60 s in.
 - **Diagnosis:** a native crash in a vitest worker, not a test failure: the same suite passed 1845 of 1845 run straight in the main checkout (`npx vitest run` and `npm test`) between the two red deploys. It began after #550 moved the unit suite to the threads pool; better-sqlite3 in worker threads under load is the suspect, unconfirmed.
 - **Fix:** run the deploy again; the third went green. If it recurs, look at #550's pool choice (forks) before retrying further.
-- **Verified:** 2026-10-22 · **Hits:** 1
+  Second hit, 2026-11-15: the first deploy of 888154d died the same way about 60 s in, and the second went green. The
+  same day a plain `npm test` in a worktree ended with `Segmentation fault` from npm at exit. #732 proposes the forks pool.
+- **Verified:** 2026-11-15 · **Hits:** 2
 
 # Promoted
 
