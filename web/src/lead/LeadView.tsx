@@ -4,7 +4,7 @@ import { EmptyState } from '../parts/EmptyState';
 import { ErrorLine } from '../parts/ErrorLine';
 import { Eyebrow } from '../parts/Eyebrow';
 import { LEAD_MANDATE } from '../../../src/core/lead-mandate';
-import { NO_LEAD, deskDecided, deskGroups, deskHead, logLines, type DeskRow } from './leadDesk';
+import { NO_LEAD, deskDecided, deskGroups, deskHead, deskStarted, deskSwitches, logLines, type DeskRow } from './leadDesk';
 import type { LeadDesk } from './useLeadDesk';
 
 interface Props {
@@ -51,6 +51,8 @@ export function LeadView({ project, code, desk, now, onOpenNode }: Props) {
   const head = brief ? deskHead(brief, now) : null;
   const groups = brief ? deskGroups(brief, now) : [];
   const decided = brief ? deskDecided(brief, now) : [];
+  const switches = brief ? deskSwitches(brief, now) : [];
+  const started = brief ? deskStarted(brief, now) : [];
   const lines = events ? logLines(events) : null;
   return (
     <div className="ip-page ip-lead-page">
@@ -77,6 +79,13 @@ export function LeadView({ project, code, desk, now, onOpenNode }: Props) {
             </details>
             {head.warning &&<p className="ip-lead-warn">{head.warning}</p>}
           </div>
+          <div className="ip-lead-switches" aria-label="Switches">
+            {switches.map((s) => (
+              <p key={s.key} className="ip-lead-note" data-switch={s.key}>
+                {s.line}
+              </p>
+            ))}
+          </div>
           <div className="ip-lead-cols">
             <div className="ip-lead-desk">
               {/* First on the desk: what was decided in his stead is what Aiden reads before anything else. */}
@@ -95,6 +104,26 @@ export function LeadView({ project, code, desk, now, onOpenNode }: Props) {
                           <span className="ip-lead-text">{d.line}</span>
                           {d.why && <span className="ip-lead-detail">{`Why: ${d.why}`}</span>}
                           <span className="ip-lead-meta">{d.undo ? `${d.age} · ${d.undo}` : d.age}</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+              <section className="ip-lead-sec" aria-label="Started">
+                <div className="ip-lead-sechead">
+                  <Eyebrow as="h2">Started</Eyebrow>
+                  <span className="ip-lead-count">{started.length}</span>
+                </div>
+                {started.length === 0 ? (
+                  <p className="ip-lead-none">Nothing started in the last 7 days.</p>
+                ) : (
+                  <ul className="ip-lead-list">
+                    {started.map((s) => (
+                      <li key={s.key} className="ip-lead-row">
+                        <div className="ip-lead-open">
+                          <span className="ip-lead-text">{s.line}</span>
+                          <span className="ip-lead-meta">{s.age}</span>
                         </div>
                       </li>
                     ))}

@@ -166,6 +166,27 @@ export function deskDecided(b: LeadBrief, now: number): DeskDecided[] {
   });
 }
 
+/** The two switches, Starts then Landing: off, or on since when and on which words of Aiden's. */
+export function deskSwitches(b: LeadBrief, now: number): { key: 'starts' | 'landing'; line: string }[] {
+  return (['starts', 'landing'] as const).map((key) => {
+    const s = b.switches[key];
+    const name = key === 'starts' ? 'Starts' : 'Landing';
+    if (!s.on) return { key, line: `${name}: off` };
+    const since = s.at === null ? '' : `, since ${spanAgo(s.at, now)} ago`;
+    const words = s.words === null ? '' : `, on Aiden's words "${flat(s.words)}"`;
+    return { key, line: `${name}: on${since}${words}` };
+  });
+}
+
+/** What the lead started in the last days, newest first as the brief gives it. */
+export function deskStarted(b: LeadBrief, now: number): { key: string; line: string; age: string }[] {
+  return b.started.map((s) => ({
+    key: s.threadId,
+    line: `${step(s.stepId, s.stepTitle)} · ${s.onAidensWord ? 'on Aiden\'s word' : "on the lead's own judgment"} · ${s.claimed ? 'claimed' : 'not claimed yet'}`,
+    age: `${spanAgo(s.at, now)} ago`,
+  }));
+}
+
 export function logLines(events: readonly LeadEventOut[]): LogLine[] {
   return events.map((e) => ({
     key: e.id,
