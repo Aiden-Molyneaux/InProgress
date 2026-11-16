@@ -1,5 +1,5 @@
 import { COMMAND_WORK_MS } from '../../core/activity';
-import { LEAD_NAME, LEAD_NAME_RULE } from '../../core/lead';
+import { LEAD_INSTRUCTIONS_VERSION, LEAD_NAME, LEAD_NAME_RULE, LEAD_SWITCHES } from '../../core/lead';
 import { BRIEFING_MODES, DELETED_RETENTION_MS, STALE_SESSION_MS, TITLE_CHANNELS, type Binding, type BriefingMode, type Project, type ProjectSummary, type QueueEntry, type QueueOp, type TitleChannel } from '../../core/types';
 import { globMatch } from '../../lib/glob';
 import { isUnder, normalizePath } from '../../lib/paths';
@@ -429,6 +429,20 @@ export function setProjectLead(ctx: Ctx, actor: string, ref: string | number, na
     const before = resolveProject(ctx, ref);
     if (before.lead !== lead) {
       ctx.db.prepare('UPDATE projects SET lead = ?, updated_at = ? WHERE id = ?').run(lead, ctx.now(), before.id);
+      // What Aiden switched on was switched on for the lead he had: each switch still on is turned off in this write, under
+      // the outgoing lead's name, so a new lead (or none) starts with both off. Read as leadSwitches (server/lead.ts) does.
+      if (before.lead !== null) {
+        for (const name of LEAD_SWITCHES) {
+          const newest = ctx.db
+            .prepare("SELECT kind FROM lead_events WHERE project_id = ? AND kind IN ('allow', 'disallow') AND text = ? ORDER BY at DESC, id DESC LIMIT 1")
+            .pluck()
+            .get(before.id, name) as string | undefined;
+          if (newest !== 'allow') continue;
+          ctx.db
+            .prepare("INSERT INTO lead_events (project_id, at, lead, instructions, kind, text, aiden_words) VALUES (?, ?, ?, ?, 'disallow', ?, NULL)")
+            .run(before.id, ctx.now(), before.lead, LEAD_INSTRUCTIONS_VERSION, name);
+        }
+      }
       record({ projectId: before.id, type: 'project.updated', entity: 'project', entityId: before.id, data: { changes: { lead: { from: before.lead, to: lead } } } });
     }
     return getProjectById(ctx, before.id)!;

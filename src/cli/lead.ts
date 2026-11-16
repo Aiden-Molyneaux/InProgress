@@ -32,7 +32,7 @@ export const RELAY_TIMEOUT_MS = 75_000;
 /** What a relay prints when the server did not answer in time: the message may be in the thread already. */
 export const RELAY_NO_ANSWER = 'InProgress did not answer. The message may have been delivered: do not send it again.';
 /** What a start prints when the server did not answer in time: a thread may have been started already. */
-export const START_NO_ANSWER = 'InProgress did not answer. A thread may have been started: look in T3 Code before you try again, and do not run it again.';
+export const START_NO_ANSWER = 'InProgress did not answer, and a thread may have been started. Do not run it again: read the brief and tell Aiden.';
 
 interface Conn {
   baseUrl: string;

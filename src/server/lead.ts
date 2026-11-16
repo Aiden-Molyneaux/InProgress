@@ -332,6 +332,14 @@ export function leadSwitches(ctx: Ctx, projectId: number): Record<LeadSwitch, Le
   return { starts: read('starts'), landing: read('landing') };
 }
 
+/** When Landing was turned off, if the newest allow or disallow line for it is a disallow; null when it is on or never was. */
+export function landingOffAt(ctx: Ctx, projectId: number): string | null {
+  const row = ctx.db
+    .prepare("SELECT kind, at FROM lead_events WHERE project_id = ? AND kind IN ('allow', 'disallow') AND text = 'landing' ORDER BY at DESC, id DESC LIMIT 1")
+    .get(projectId) as { kind: string; at: string } | undefined;
+  return row !== undefined && row.kind === 'disallow' ? row.at : null;
+}
+
 /** The last `limit` lines of the project's log, newest first. */
 export function listLeadEvents(ctx: Ctx, ref: string, limit = 100): LeadEventOut[] {
   const project = resolveProject(ctx, ref);

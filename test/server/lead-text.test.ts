@@ -96,7 +96,7 @@ describe('renderLeadBrief', () => {
       'Started in the last 7 days (2):',
       `  ${stamp(ago(HOUR))} · #15 Add the privacy page · thread mcp:t1 · on Aiden's word · claimed`,
       `  ${stamp(ago(5 * MIN))} · #16 Old spike · thread mcp:t2 · on your own judgment · not claimed yet`,
-      'Switches: starts on · landing off',
+      `Switches: starts on since ${stamp(ago(DAY))} ("start them") · landing off`,
       'Links: T3 Code ok, last relay 1m ago · your last look 2d ago',
     ]);
   });
@@ -120,6 +120,15 @@ describe('renderLeadBrief', () => {
     expect(lines({ t3: 'unavailable', t3At: ago(5 * MIN), lastSeenAt: ago(HOUR) })).toContain(WARN);
     expect(lines({ t3: 'unavailable', t3At: ago(5 * MIN), lastSeenAt: ago(MIN) }).some((l) => l.startsWith('The last relay'))).toBe(false);
     expect(lines({ t3: 'ok', t3At: ago(5 * MIN), lastSeenAt: null }).some((l) => l.startsWith('The last relay'))).toBe(false);
+  });
+
+  it('prints a switch that is on with since when and the words, and leaves the parenthesis out with no words', () => {
+    const sw = (starts: LeadBrief['switches']['starts'], landing: LeadBrief['switches']['landing']) =>
+      renderLeadBrief({ ...empty, switches: { starts, landing } }).split('\n').find((l) => l.startsWith('Switches:'));
+    const off = { on: false, at: null, words: null };
+    expect(sw(off, { on: true, at: ago(HOUR), words: 'land it' })).toBe(`Switches: starts off · landing on since ${stamp(ago(HOUR))} ("land it")`);
+    expect(sw({ on: true, at: ago(HOUR), words: null }, off)).toBe(`Switches: starts on since ${stamp(ago(HOUR))} · landing off`);
+    expect(sw({ on: true, at: ago(HOUR), words: 'a\nb' }, off)).toBe(`Switches: starts on since ${stamp(ago(HOUR))} ("a b") · landing off`);
   });
 
   it('renders the same text twice for the same brief, whatever the clock says', () => {

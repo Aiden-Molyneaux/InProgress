@@ -161,7 +161,7 @@ work. A re-hit bumps **Hits** and **Verified**. Entries seeded from the code and
   same day a plain `npm test` in a worktree ended with `Segmentation fault` from npm at exit. #732 proposes the forks pool.
   Third hit, the same evening: `npm test` in a worktree died mid-run (exit 139, `Segmentation fault "$NODE_EXE"
   "$NPM_CLI_JS"`, no summary) and passed 2169 of 2169 on the rerun.
-- **Verified:** 2026-11-15 · **Hits:** 4
+- **Verified:** 2026-11-16 · **Hits:** 5
 
 # Promoted
 

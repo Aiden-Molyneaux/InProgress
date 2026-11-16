@@ -2,6 +2,7 @@
  * What the lead decides for Aiden, and what stays his. One source for the lead's rules, the window and (in short) the
  * session briefing, so no lead can widen it. Plain ASCII.
  */
+import { stamp } from './span';
 
 /** The mandate as the lead reads it: one source for the rules, the window and (in short) the session briefing. */
 export const LEAD_MANDATE: readonly string[] = [
@@ -38,6 +39,13 @@ export const decisionText = (text: string): string => text.replace(/^\s*decided 
  */
 export const SESSION_LANDING_LINE =
   'Landing: in this project work lands without Aiden when all of this holds: nothing in its bar shows on a screen, its diff touches nothing on the risk list (the database, the hooks and installer, the deploy scripts), the checks are green, the reviewer\'s verdict is sound, and the deploy is green. Then merge, deploy and push, and record it in your next scribe brief as "log on #<id>: Decided for Aiden: landed <sha> · <the evidence in one line>". Everything else waits for his go-ahead.';
+
+/**
+ * The line a prompt carries, every time, for a session that started before Aiden turned Landing off (or the lead changed):
+ * its briefing still holds the Landing line, so it is told that line no longer stands. `at` is when Landing went off.
+ */
+export const landingOffLine = (at: string): string =>
+  `Landing is off for this project since ${stamp(at)}: land nothing without Aiden's go-ahead, whatever an earlier briefing said.`;
 
 /** The two lines a session's briefing carries after the lead line. `lead` is cleaned to one line by the caller's `one()`. */
 export const sessionMandateLines = (lead: string): string[] => [

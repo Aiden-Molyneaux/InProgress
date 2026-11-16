@@ -4,7 +4,7 @@ import { startHandoff, startTitle } from '../../src/core/lead-start';
 import { buildApp } from '../../src/server/app';
 import { listLeadEvents, noLeadNamed, outOfDate } from '../../src/server/lead';
 import { leadAllow, leadIntent } from '../../src/server/lead-commands';
-import { START_UNKNOWN, leadStart, type StartThread } from '../../src/server/lead-start';
+import { START_UNDER_WAY, START_UNKNOWN, leadStart, type StartThread } from '../../src/server/lead-start';
 import { raiseAsk } from '../../src/server/repo/asks';
 import { maxEventId } from '../../src/server/repo/events';
 import { addNodes, updateNode } from '../../src/server/repo/nodes';
@@ -111,7 +111,7 @@ describe('leadStart: the start', () => {
     });
     const s = setup(start);
     await expect(s.run(s.signing.id, WORDS)).rejects.toMatchObject({ status: 502, message: START_UNKNOWN });
-    expect(START_UNKNOWN).toBe('A thread may have been started. Not retried: look in T3 Code before you try again.');
+    expect(START_UNKNOWN).toBe('A thread may have been started. Do not run it again: read the brief and tell Aiden.');
     expect(start).toHaveBeenCalledTimes(1);
     expect(listLeadEvents(s.ctx, s.project.slug).filter((e) => e.kind.startsWith('start')).map((e) => [e.kind, e.nodeId, e.aidenWords])).toEqual([['start_unknown', s.signing.id, WORDS]]);
     // The unknown start holds the step for ten minutes, as a start does.
@@ -174,7 +174,34 @@ describe('leadStart: the refusals, each with its sentence and nothing started or
     expect(await s.refused(() => s.run(parent.id, WORDS))).toMatchObject({ status: 409, message: `#${parent.id} Group already has a session working on it.` });
   });
 
-  it('a step started in the last 10 minutes (the second of two at once), but not one started 11 minutes ago', async () => {
+  it('the second of two starts at once, while the first waits on T3 Code: refused, and start ran once', async () => {
+    let release: (v: { threadId: string }) => void = () => undefined;
+    const slow = vi.fn<StartThread>(() => new Promise((resolve) => (release = resolve)));
+    const s = setup(slow);
+    // Same step and another step of the project: each is refused while the first is under way.
+    const first = s.run(s.signing.id, WORDS);
+    const [second, third] = await Promise.allSettled([s.run(s.signing.id, WORDS), s.run(s.privacy.id, WORDS)]);
+    expect(second).toMatchObject({ status: 'rejected', reason: { status: 409, message: START_UNDER_WAY } });
+    expect(third).toMatchObject({ status: 'rejected', reason: { status: 409, message: START_UNDER_WAY } });
+    expect(slow).toHaveBeenCalledTimes(1);
+    release({ threadId: 'mcp:slow' });
+    await expect(first).resolves.toMatchObject({ threadId: 'mcp:slow' });
+    // Once it has answered and logged, the project is free again, and the step waits on the thread it started.
+    expect(await s.refused(() => s.run(s.signing.id, WORDS))).toMatchObject({ status: 409, message: expect.stringContaining('A thread was started for #') });
+  });
+
+  it('is free again after a start that failed', async () => {
+    const boom = vi.fn<StartThread>(async () => {
+      throw new Error('nope');
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const s = setup(boom);
+    await expect(s.run(s.signing.id, WORDS)).rejects.toMatchObject({ status: 502 });
+    await expect(s.run(s.signing.id, WORDS)).rejects.toMatchObject({ status: 502 });
+    expect(boom).toHaveBeenCalledTimes(2);
+  });
+
+  it('a step started in the last 10 minutes, but not one started 11 minutes ago', async () => {
     const s = setup();
     await s.run(s.signing.id, WORDS);
     expect(await s.refused(() => s.run(s.signing.id, WORDS))).toMatchObject({
@@ -216,14 +243,43 @@ describe('leadStart: the refusals, each with its sentence and nothing started or
 
   it('a project with three sessions in flight, counting a started thread that no session carries yet (and not one that is carried)', async () => {
     const s = setup();
-    const limit = (n: number) => `${n} sessions are in flight, and the limit is 3. Wait for one to end.`;
+    const limit = (n: number, k: number) => `${n} sessions are in flight (${k} started and not claimed yet), and the limit is 3. Wait for one to end.`;
     // Two started threads, none claimed.
     const a = await s.run(s.signing.id, WORDS);
     await s.run(s.privacy.id, WORDS);
     // The first thread claims its step: one live session, one thread still unclaimed.
     s.session('s1', s.signing.id, a.threadId);
     await s.run(s.dark.id, WORDS);
-    expect(await s.refused(() => s.run(s.sound.id, WORDS))).toMatchObject({ status: 409, message: limit(3) });
+    expect(await s.refused(() => s.run(s.sound.id, WORDS))).toMatchObject({ status: 409, message: limit(3, 2) });
+  });
+
+  it('counts a start that timed out (start_unknown) as in flight for 10 minutes, and in the daily cap', async () => {
+    const unknown = vi.fn<StartThread>(async () => {
+      throw new T3Unavailable('t3 thread start failed: timed out after 60 s', true);
+    });
+    const s = setup(unknown);
+    s.on();
+    for (const step of [s.signing, s.privacy, s.dark]) await expect(s.run(step.id)).rejects.toMatchObject({ status: 502, message: START_UNKNOWN });
+    expect(await s.refused(() => s.run(s.sound.id, WORDS))).toMatchObject({
+      status: 409,
+      message: '3 sessions are in flight (3 started and not claimed yet), and the limit is 3. Wait for one to end.',
+    });
+    s.ctx.db.prepare("UPDATE lead_events SET at = ? WHERE kind = 'start_unknown'").run(new Date(Date.parse(s.ctx.now()) - 11 * 60 * 1000).toISOString());
+    expect(await s.refused(() => s.run(s.sound.id))).toMatchObject({
+      status: 409,
+      message: 'You have started 3 threads on your own judgment in the last 24 hours, and the limit is 3. Ask Aiden.',
+    });
+  });
+
+  it('refuses a step while a live session carries the thread it was started with, whatever that session has claimed', async () => {
+    const s = setup();
+    const started = await s.run(s.signing.id, WORDS);
+    s.ctx.db.prepare("UPDATE lead_events SET at = ? WHERE kind = 'start'").run(new Date(Date.parse(s.ctx.now()) - 11 * 60 * 1000).toISOString());
+    s.session('s1', s.dark.id, started.threadId);
+    expect(await s.refused(() => s.run(s.signing.id, WORDS))).toMatchObject({
+      status: 409,
+      message: `#${s.signing.id} Play app signing already has a thread open (${started.threadId}) that has not claimed it. Look at that thread first.`,
+    });
   });
 
   it('three live sessions', async () => {
@@ -233,6 +289,7 @@ describe('leadStart: the refusals, each with its sentence and nothing started or
     s.session('s2', y.id);
     s.session('s3', z.id);
     expect(await s.refused(() => s.run(s.signing.id, WORDS))).toMatchObject({ status: 409, message: '3 sessions are in flight, and the limit is 3. Wait for one to end.' });
+    expect(START_UNDER_WAY).toBe('A start for this project is under way. Wait for it to answer.');
   });
 });
 

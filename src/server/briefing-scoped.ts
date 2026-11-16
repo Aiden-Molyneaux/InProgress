@@ -85,6 +85,14 @@ export function unclaimedLines(snapshot: ProjectSnapshot, session: Session, now:
   return [`Ready to claim: ${chosen.map((r) => name(r.node)).join(' · ')}`, `Claim one: ${claimCommand(session.id, { cli })}`, 'Inheriting a step from a session that handed it to you: add --take-over.'];
 }
 
+/**
+ * What a session in a project with a lead is told about it: the Lead line, the two mandate lines, and the Landing line when
+ * Aiden has turned Landing on. None with no lead. The worker briefing and the claim's answer both print it.
+ */
+export function leadLines(lead: string | null, landing: boolean): string[] {
+  return lead?.trim() ? [leadBriefingLine(lead), ...sessionMandateLines(one(lead)), ...(landing ? [SESSION_LANDING_LINE] : [])] : [];
+}
+
 /** A worker's briefing in a scoped project, once it has claimed a step. */
 export function renderWorkerBriefing(snapshot: ProjectSnapshot, session: Session, now: number, cli?: string, landing = false): string {
   // In a project with a lead, the worker learns its name and how to tell its messages from Aiden's. The Landing line
@@ -93,7 +101,7 @@ export function renderWorkerBriefing(snapshot: ProjectSnapshot, session: Session
   const lines = [
     headerLine(snapshot, session.id),
     `Role: worker on #${session.focusNodeId}.`,
-    ...(lead?.trim() ? [leadBriefingLine(lead), ...sessionMandateLines(one(lead)), ...(landing ? [SESSION_LANDING_LINE] : [])] : []),
+    ...leadLines(lead, landing),
     PLAN_EDIT_LINE,
     ...playbookLines(snapshot),
     ...updateRules({ sessionId: session.id, cli, mode: { scoped: true, orchestrator: false } }),

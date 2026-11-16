@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
 import { buildApp } from '../../src/server/app';
 import { leadSwitches, noLeadNamed, outOfDate, readLeadBrief } from '../../src/server/lead';
+import { stamp } from '../../src/server/digest';
 import { renderLeadBrief } from '../../src/server/lead-text';
 import { addNodes } from '../../src/server/repo/nodes';
 import { handleHookEvent } from '../../src/server/session-flow';
@@ -115,7 +116,7 @@ describe('the brief: switches and started', () => {
       ['mcp:new', step.id, 'Dark mode', false, false],
       ['mcp:carried', step.id, 'Dark mode', true, true],
     ]);
-    expect(renderLeadBrief(brief)).toContain('Switches: starts on · landing off');
+    expect(renderLeadBrief(brief)).toContain(`Switches: starts on since ${stamp(brief.switches.starts.at as string)} ("go") · landing off`);
   });
 });
 

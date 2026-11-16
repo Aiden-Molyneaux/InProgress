@@ -9,6 +9,13 @@ export const LEAD_SWITCHES = ['starts', 'landing'] as const;
 export type LeadSwitch = (typeof LEAD_SWITCHES)[number];
 /** The most threads the lead starts on its own judgment (no words of Aiden's) in one project in 24 hours. */
 export const LEAD_STARTS_PER_DAY = 3;
+/**
+ * The provider and model a thread the lead starts names: a T3 start fails with "Pass modelSelection" without them, and no
+ * project has a default. The ones the CLI proof (docs/superpowers/rulings/2026-11-t3-cli-proof.md) started a thread with.
+ * INPROGRESS_LEAD_PROVIDER and INPROGRESS_LEAD_MODEL replace them.
+ */
+export const LEAD_START_PROVIDER = 'claudeAgent';
+export const LEAD_START_MODEL = 'claude-opus-5-5';
 /** One switch as the log reads it: on when the newest allow or disallow line for it is an allow; when, and Aiden's words for it. */
 export interface LeadSwitchState {
   on: boolean;

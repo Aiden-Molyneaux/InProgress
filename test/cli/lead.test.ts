@@ -550,6 +550,7 @@ describe('inprogress lead relay', () => {
     });
     try {
       expect(await run(['start', 'inprogress', '42', ...WHO])).toEqual({ code: 1, lines: [START_NO_ANSWER], reads: 0 });
+      expect(START_NO_ANSWER).toBe('InProgress did not answer, and a thread may have been started. Do not run it again: read the brief and tell Aiden.');
     } finally {
       vi.unstubAllGlobals();
       vi.restoreAllMocks();
