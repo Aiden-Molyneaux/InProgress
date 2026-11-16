@@ -130,7 +130,7 @@ work. A re-hit bumps **Hits** and **Verified**. Entries seeded from the code and
   is not proven; a scan of a new `.exe` is the likely holder), so its removal finished late. `rmSync` retries
   `ENOTEMPTY` only when `maxRetries` is set, and the teardowns leave it at 0. Candidate fix (proposed, not built): one
   shared teardown helper that removes a temp folder with `maxRetries`.
-- **Verified:** 2026-11-15 · **Hits:** 4
+- **Verified:** 2026-11-15 · **Hits:** 5
 
 ## Global git hooks make the page-repo e2e tests time out
 

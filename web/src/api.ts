@@ -1,6 +1,7 @@
 import type { BackUpNowResult, BackupStatus } from '../../src/core/backups';
 import type { BuildInfo } from '../../src/core/build';
 import type { StepHit } from '../../src/core/goto';
+import type { LeadBrief, LeadEventOut } from '../../src/core/lead';
 import type { Binding, DeletedProject, LibraryPage, LibraryPages, LibrarySync, NodeDetail, NodeLabel, PageBody, Project, ProjectSnapshot, ProjectSummary, QueueOp, RankOp, Resource, SyncAdaptation, SyncDiff } from '../../src/core/types';
 import type { ActionTarget, ProjectAction } from './projectActions';
 
@@ -103,6 +104,12 @@ export const api = {
   },
   /** Renames a project, by id, the slug going along as for projectAction. Done, it answers the project as renamed. */
   renameProject: (p: ActionTarget, name: string) => sendUi<{ project: Project }>(`/api/ui/projects/${p.id}/rename`, { slug: p.slug, name }),
+  /** The lead's brief as the window reads it (no `as`: no lead check, and it never marks a look). */
+  leadBrief: (slug: string) => getJson<{ brief: LeadBrief; text: string }>(`/api/lead/${encodeURIComponent(slug)}/brief`),
+  /** The lead's log, newest first, at most 100 lines. */
+  leadEvents: (slug: string) => getJson<{ events: LeadEventOut[] }>(`/api/lead/${encodeURIComponent(slug)}/events`),
+  /** Gives a project a lead by name, or takes it away with null. Done, it answers the project as it now stands. */
+  setProjectLead: (p: ActionTarget, name: string | null) => sendUi<{ project: Project }>(`/api/ui/projects/${p.id}/lead`, { slug: p.slug, name }),
 };
 
 /** Why a page cannot be shown: the server's typed refusal, e.g. { code: 'page-has-secret', line: 4 }. */

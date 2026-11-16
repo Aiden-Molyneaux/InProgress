@@ -5,7 +5,7 @@ import { Eyebrow } from '../parts/Eyebrow';
 import type { ActionTarget, ProjectAction } from '../projectActions';
 import { useNow } from '../useNow';
 import type { View } from '../views/view';
-import { fallbackFocus, FootMenu, isMenuKey, RowMenu, Signals, type RailLayout, type Run, type RunRename } from './projectMenus';
+import { fallbackFocus, FootMenu, isMenuKey, RowMenu, Signals, type RailLayout, type Run, type RunLead, type RunRename } from './projectMenus';
 import type { Shelf } from '../library/route';
 import { railStep, viewTitle, type LibraryRailView, type RailView } from './railLogic';
 import { moveTab, projectLabel, recentlyDeleted, tabDropSlot } from './tabs';
@@ -26,6 +26,8 @@ export interface RailProps {
   onAction: (action: ProjectAction, target: ActionTarget) => Promise<boolean>;
   /** Renames a project (its name only: the slug stays). Resolves true when it went through. */
   onRename: (target: ActionTarget, name: string) => Promise<boolean>;
+  /** Gives a project a lead by name, or takes it away with null. Resolves true when it went through. */
+  onLead: (target: ActionTarget, name: string | null) => Promise<boolean>;
   /** The view shown, and the pick of another. */
   view: View;
   onView: (v: View) => void;
@@ -68,7 +70,7 @@ function useLayout(): RailLayout {
  * The module rail: a row per active project (and the open archived one, at the end), under the current one its views,
  * and a foot for the archived and recently deleted projects. A column at the left of the page; under 720 px a strip.
  */
-export function Rail({ tabs, archived, deleted: listed, current, onSelect, onMove, onAction, onRename, view, onView, views, codes, library, onLibrary, libraryViews, behind }: RailProps) {
+export function Rail({ tabs, archived, deleted: listed, current, onSelect, onMove, onAction, onRename, onLead, view, onView, views, codes, library, onLibrary, libraryViews, behind }: RailProps) {
   const layout = useLayout();
   const rail = useRef<HTMLElement>(null);
   const list = useRef<HTMLUListElement>(null);
@@ -165,6 +167,9 @@ export function Rail({ tabs, archived, deleted: listed, current, onSelect, onMov
   };
   const runRename: RunRename = async (target, name, opener) => {
     if (await onRename(target, name)) setRefocus({ opener });
+  };
+  const runLead: RunLead = async (target, name, opener) => {
+    if (await onLead(target, name)) setRefocus({ opener });
   };
 
   /** The rows' keys: the menu key, Alt with an arrow to reorder, a bare arrow, Home or End to move focus, Space to open. */
@@ -432,7 +437,7 @@ export function Rail({ tabs, archived, deleted: listed, current, onSelect, onMov
           )}
         </li>
       </ul>
-      {rowMenu && menuProject && !menuGone && <RowMenu key={rowMenu.id} project={menuProject} row={rowMenu.row} rail={rail.current} onClose={closeRowMenu} run={run} runRename={runRename} />}
+      {rowMenu && menuProject && !menuGone && <RowMenu key={rowMenu.id} project={menuProject} row={rowMenu.row} rail={rail.current} onClose={closeRowMenu} run={run} runRename={runRename} runLead={runLead} />}
       {hasFoot && <FootMenu archived={archived} deleted={deleted} current={current} onSelect={onSelect} run={run} rail={rail} button={foot} />}
     </nav>
   );

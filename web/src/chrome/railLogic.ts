@@ -79,7 +79,7 @@ export function railCodes(rows: readonly { id: number; name: string }[]): Map<nu
 
 /**
  * The views under the current row, with the figures the Board already shows: the Project view's phases, the Backlog
- * preview's "N ›" (parked steps excluded) and the Done column's count, then Docs with its pages. Always the five views: with
+ * preview's "N ›" (parked steps excluded) and the Done column's count, then Docs with its pages, then Lead with no figure. Always the six views: with
  * no snapshot (the next project's has not landed) they carry no counts, so the list never unmounts on a switch.
  */
 export function railViews(snapshot: ProjectSnapshot | null, now: number, docs?: DocsCount | null): RailView[] {
@@ -90,6 +90,7 @@ export function railViews(snapshot: ProjectSnapshot | null, now: number, docs?: 
     { view: 'backlog', label: 'Backlog', code: 'BKL', count: snapshot && board ? taskBoxes(board, snapshot, now).backlog.length : undefined },
     { view: 'done', label: 'All done', code: 'DON', count: board?.done.length },
     { view: 'docs', label: 'Docs', code: 'DOC', ...docsFigure(docs) },
+    { view: 'lead', label: 'Lead', code: 'LED' },
   ];
 }
 

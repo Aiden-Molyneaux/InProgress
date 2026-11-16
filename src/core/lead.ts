@@ -16,6 +16,8 @@ export const LEAD_LOOK_BACK_DAYS = 7;
 export const LEAD_LIST_CAP = 8;
 /** The most open asks of Aiden's, across all projects, the lead lets stand (the brief's `<m> of 5`). */
 export const AIDEN_OPEN_LIMIT = 5;
+/** The longest a lead's name may be, once trimmed. */
+export const LEAD_NAME_MAX = 40;
 /** The most sessions in flight the lead lets a project have (the brief's `<n> of 3`). */
 export const IN_FLIGHT_LIMIT = 3;
 /** Who an ask is for: Aiden, or the lead (a promise it made). */
@@ -27,6 +29,20 @@ export type AskOwner = 'aiden' | 'lead';
  */
 export const isAidens = (a: { owner: AskOwner }): boolean => a.owner !== 'lead';
 export type LeadEventKind = 'answer' | 'park' | 'drop' | 'promise' | 'kept' | 'intent' | 'relay' | 'relay_unknown' | 'relay_failed';
+
+/** One line of the lead's log, as the log's read answers it. */
+export interface LeadEventOut {
+  id: number;
+  at: string;
+  lead: string;
+  instructions: number;
+  kind: LeadEventKind;
+  nodeId: number | null;
+  askId: number | null;
+  sessionId: string | null;
+  text: string;
+  aidenWords: string | null;
+}
 
 /** Where a project stands, as plain code builds it from the record: one fixed shape, whatever the project holds. */
 export interface LeadBrief {

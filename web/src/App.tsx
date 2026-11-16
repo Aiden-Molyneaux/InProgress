@@ -17,6 +17,8 @@ import { docsCount, libraryBehind, libraryViews, railCodes, railViews } from './
 import { BacklogList } from './backlog/BacklogList';
 import { DocsView } from './docs/DocsView';
 import { useProjectDocs } from './docs/useProjectDocs';
+import { LeadView } from './lead/LeadView';
+import { useLeadDesk } from './lead/useLeadDesk';
 import { DoneList } from './done/DoneList';
 import { LibraryView } from './library/LibraryView';
 import { libraryHash, parseLibraryHash, type LibraryRoute, type Shelf } from './library/route';
@@ -198,6 +200,7 @@ export function App() {
   const codes = useMemo(() => railCodes(tabs), [tabs]);
   // The views and their counts are the shown project's: not those of the one before it, while the next one loads.
   const projectDocs = useProjectDocs(state.slug, view === 'docs' && library === null);
+  const leadDesk = useLeadDesk(state.slug, view === 'lead' && library === null, snapshot);
   const views = useMemo(
     () => railViews(snapshot && snapshot.project.slug === state.slug ? snapshot : null, now, docsCount(projectDocs.pages, lib.sync, state.slug)),
     [snapshot, state.slug, now, projectDocs.pages, lib.sync],
@@ -257,6 +260,12 @@ export function App() {
     const result = await state.rename(target, name);
     if (result === 'reload') return false;
     say(result === 'ok' ? renameMessage(name) : result, result === 'ok' ? 'neutral' : 'alarm');
+    return result === 'ok';
+  };
+  const onLead = async (target: ActionTarget, name: string | null): Promise<boolean> => {
+    const result = await state.setLead(target, name);
+    if (result === 'reload') return false;
+    say(result === 'ok' ? (name === null ? `${target.name} has no lead now.` : `${name} leads ${target.name}.`) : result, result === 'ok' ? 'neutral' : 'alarm');
     return result === 'ok';
   };
 
@@ -405,7 +414,7 @@ export function App() {
       <div className="ip-app" ref={app}>
         {hud(true)}
         <div className="ip-shell">
-          <Rail tabs={tabs} archived={archived} deleted={state.deleted} current={library ? null : state.slug} onSelect={selectProject} onAction={onAction} onRename={onRename} onMove={onMoveTab} view={view} onView={pickView} views={views} codes={codes} library={library?.shelf ?? null} onLibrary={(shelf) => openLibrary({ shelf, pick: null })} libraryViews={libraryRail} behind={libraryBehind(lib.sync)} />
+          <Rail tabs={tabs} archived={archived} deleted={state.deleted} current={library ? null : state.slug} onSelect={selectProject} onAction={onAction} onRename={onRename} onLead={onLead} onMove={onMoveTab} view={view} onView={pickView} views={views} codes={codes} library={library?.shelf ?? null} onLibrary={(shelf) => openLibrary({ shelf, pick: null })} libraryViews={libraryRail} behind={libraryBehind(lib.sync)} />
           <main className="ip-main">
             {library ? (
               <>
@@ -455,6 +464,15 @@ export function App() {
                     syncError={lib.syncError}
                     libraryPages={lib.pages?.pages ?? []}
                     onOpenResource={openViewer}
+                  />
+                ) : view === 'lead' ? (
+                  <LeadView
+                    key={snapshot.project.id}
+                    project={snapshot.project}
+                    code={codes.get(snapshot.project.id) ?? snapshot.project.name.slice(0, 3).toUpperCase()}
+                    desk={leadDesk}
+                    now={now}
+                    onOpenNode={setSelectedNode}
                   />
                 ) : view === 'board' ? (
                   <Board key={snapshot.project.id} snapshot={snapshot} now={now} selectedNode={selectedNode} onOpenNode={setSelectedNode} onOpenResource={openViewer} onOpenDone={() => openFromBoard('done')} onOpenBacklog={() => openFromBoard('backlog')} lastLook={lastLook} onStatus={fail} />

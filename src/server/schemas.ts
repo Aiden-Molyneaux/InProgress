@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { SESSION_APPS } from '../core/session-app';
+import { LEAD_NAME_MAX } from '../core/lead';
 import { ID_MAX } from '../core/notices';
 import { ASK_KINDS, ASSIGNEES, BRIEFING_MODES, COMMAND_KINDS, COMMAND_OUTCOMES, HOOK_EVENTS, NODE_KINDS, NODE_LABELS, NODE_STATUSES, ORIGINS, PROJECT_NAME_MAX, RANK_BANDS, RESOURCE_KINDS, RESOURCE_PURPOSES, TITLE_CHANNELS, WHAT_WHY_MAX, WORK_STATUSES, unknownLabel, type NodeInput } from '../core/types';
 
@@ -261,4 +262,4 @@ export const leadIntentBody = z.object({ ...leadWho, intent: z.string().min(1).m
 /** `lead relay`: the step whose session gets the message, and the message. */
 export const leadRelayBody = z.object({ ...leadWho, stepId: leadId, message: z.string().trim().min(1).max(4_000) }).strict();
 /** The window's change of a project's lead: the slug it shows, and a name (trimmed, 1 to 40 characters) or null for none. */
-export const windowLeadBody = z.object({ slug: windowProjectBody.shape.slug, name: z.string().trim().min(1).max(40).nullable() }).strict();
+export const windowLeadBody = z.object({ slug: windowProjectBody.shape.slug, name: z.string().trim().min(1).max(LEAD_NAME_MAX).nullable() }).strict();
