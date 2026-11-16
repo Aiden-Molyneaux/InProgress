@@ -257,6 +257,48 @@ in play.
 | InProgress to Bot | A watcher with no model in it posts a batch to the Bot's routine webhook |
 | Fallback | The mip-orc skill, on the same brief and commands |
 
+### 6.7 The mandate (2026-11-16, #734)
+
+**The rule.** If Aiden can undo it in one word and nothing is lost in the meantime, the lead decides and tells him
+afterwards. If not, it is Aiden's, and it reaches him with a recommendation he can accept in one word.
+
+**The lead decides, and tells Aiden afterwards:** how a thing gets built (the approach, names, files, tests, the order
+of work inside a step), answering a session's question from the intent record, the specs, the repo and the threads;
+the bar for work that nothing shows on a screen; what is next inside the current Phase; parking any step nobody is
+working on, with the reason, and dropping a step only when nobody asked for it; filing a follow-up as a proposed step;
+his own promises.
+
+**Aiden's, always:** what cannot be undone (deleting data, a branch or a step he asked for; rewriting history; a
+release); what touches his real data (the live home and window, a merge to main, a deploy, a migration, an installer,
+anything outside the project's folders); what goes out to other people (a push, a PR, a message, an email, anything
+published or sent in his name); what changes direction (the Goal, the Phase, what is out of scope, a standing ruling,
+dropping or reshaping a step he asked for); what he would see or feel, and the bar for it; what costs money, adds an
+account or a service, or changes what an agent may do (permissions, access, the lead's rules, this mandate); and
+anything he has marked as his.
+
+**How a call reaches him.** The one that blocks the most first, never more than five waiting across all projects. Each
+says what it is, what the lead found, what he would do, and the word that accepts it. Aiden answers in one word, in
+detail, or with "you decide", which is his answer: the lead decides, records it and tells him in one line. If he says
+nothing, nothing of his happens: the work that depends on it waits, and other work goes on.
+
+**How he finds out.** Every decision is on the record with its reason, who made it, and a number. He sees the list when
+he asks "where are we", and in the Lead view. "Undo d12" puts one back and makes it his question; when he says why, the
+lead records the reason as a standing ruling and does not make that call again.
+
+**When the lead is not sure.** If it can be undone, he decides and says he was not sure. If it cannot, it is Aiden's. He
+never guesses at a fact.
+
+**Who it binds.** The lead, and every session working on the project: a session decides what the mandate allows, records
+the call on its step, and carries on. A question it cannot settle is an ask, which the lead sees first. Landing work
+(merge, deploy, push) stays Aiden's until "he acts" is built.
+
+How it is built: the text the lead and the sessions read is code (`src/core/lead-mandate.ts`), printed by the rules
+command, the session briefing and the window, so a lead can make his mandate narrower through the intent record but never
+wider. A question stays Aiden's in the data until someone answers it, so with the Bot off he still sees it and can
+answer it himself (principle 1). A decision is a line in the lead's log, or a step log a session opened with
+`Decided for Aiden:`. This replaces the last row of 6.3's table: the lead may park a step of Aiden's when nobody is
+working on it; a drop of one still needs his words.
+
 ## 7. What can go wrong, and the guard
 
 | Failure | Guard |

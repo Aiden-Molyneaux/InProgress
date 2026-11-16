@@ -113,6 +113,16 @@ export function renderLeadBrief(b: LeadBrief): string {
       `Said in Aiden's name ${span} (${b.saidInAidensName.length}):`,
       b.saidInAidensName.map((e) => `${stamp(e.at)} ${e.kind} ${e.ref}: "${line(e.words, TEXT_CUT)}"`),
     ),
+    ...section(
+      `Decided for Aiden in the last ${LEAD_LOOK_BACK_DAYS} days (${b.decided.length}, ${b.decided.filter((d) => d.isNew).length} new):`,
+      b.decided.map((d) => {
+        const on = d.stepId === null ? '' : ` on ${step(d.stepId, d.stepTitle)}`;
+        const fresh = d.isNew ? ' · new' : '';
+        // A session's call has no number and no undo: only the lead's own decisions are Aiden's to put back by word.
+        if (d.tag === '') return `${stamp(d.at)} · a session${on}: "${line(d.what, TEXT_CUT)}"${fresh}`;
+        return `${d.tag} ${stamp(d.at)} · ${line(d.by, TEXT_CUT)} ${line(d.what, TEXT_CUT * 2)}${on}${d.why === '' ? '' : ` · why: "${line(d.why, TEXT_CUT)}"`} · undo: undo ${d.tag}${fresh}`;
+      }),
+    ),
     `Links: T3 Code ${t3}${t3At === null ? '' : `, last relay ${spanAgo(t3At, now)} ago`} · your last look ${b.links.lastSeenAt === null ? 'never' : `${spanAgo(b.links.lastSeenAt, now)} ago`}`,
   );
   return lines.join('\n');

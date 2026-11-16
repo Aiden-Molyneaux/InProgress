@@ -1,5 +1,6 @@
 import { deriveBoard, type BoardRow, type Mark } from '../core/board';
 import { LEAD_IDLE_MARKS, LEAD_INSTRUCTIONS_VERSION, LEAD_LOOK_BACK_DAYS, LEAD_STALE_MARKS, isAidens, type LeadBrief, type LeadEventKind, type LeadEventOut } from '../core/lead';
+import { decisionText, isDecisionLog } from '../core/lead-mandate';
 import { leadBootstrap, leadRules } from '../core/lead-rules';
 import { buildIndex, dfsOrder, shelvedIds } from '../core/tree';
 import { ASK_TRAIL_MS, askTag, type Ask, type Project } from '../core/types';
@@ -92,6 +93,47 @@ function saidSince(ctx: Ctx, projectId: number, since: string): LeadBrief['saidI
     ref: r.ask_id !== null ? `a${r.ask_id}` : `#${r.node_id}`,
     words: r.aiden_words,
   }));
+}
+
+/**
+ * What was decided for Aiden since `cutoff`, newest first: the lead's `decide` events, his `park` and `drop` events made
+ * with no words of Aiden's, and step logs a session opened with DECIDED_PREFIX. A decision with an `undo` event is left out.
+ * `lastSeen` is the lead's last look: a decision at or after it is new (with no look on record, all are).
+ */
+function decidedSince(ctx: Ctx, projectId: number, cutoff: string, lastSeen: string | null, titleOf: (id: number) => string): LeadBrief['decided'] {
+  const isNew = (at: string): boolean => lastSeen === null || at >= lastSeen;
+  const events = ctx.db
+    .prepare(
+      `SELECT e.id, e.at, e.lead, e.kind, e.node_id, e.text, a.answer AS answer, e.ask_id
+         FROM lead_events e LEFT JOIN asks a ON a.id = e.ask_id
+        WHERE e.project_id = ? AND e.at >= ? AND (e.kind = 'decide' OR (e.kind IN ('park', 'drop') AND e.aiden_words IS NULL))
+          AND NOT EXISTS (SELECT 1 FROM lead_events u WHERE u.project_id = e.project_id AND u.kind = 'undo' AND u.text = 'd' || e.id)
+        ORDER BY e.at DESC, e.id DESC`,
+    )
+    .all(projectId, cutoff) as { id: number; at: string; lead: string; kind: string; node_id: number | null; text: string; answer: string | null; ask_id: number | null }[];
+  const logs = ctx.db
+    .prepare(
+      `SELECT l.id, l.created_at AS at, l.node_id, l.text
+         FROM log_entries l JOIN nodes n ON n.id = l.node_id
+        WHERE n.project_id = ? AND l.created_at >= ? AND lower(l.text) LIKE '%decided for aiden:%'
+        ORDER BY l.created_at DESC, l.id DESC`,
+    )
+    .all(projectId, cutoff) as { id: number; at: string; node_id: number; text: string }[];
+  const fromEvents: LeadBrief['decided'] = events.map((e) => ({
+    tag: `d${e.id}`,
+    at: e.at,
+    by: e.lead,
+    stepId: e.node_id,
+    stepTitle: e.node_id === null ? '' : titleOf(e.node_id),
+    what: e.kind === 'decide' ? `answered ${askTag(e.ask_id as number)}: "${e.answer ?? ''}"` : e.kind === 'park' ? 'parked' : 'dropped',
+    why: e.text,
+    isNew: isNew(e.at),
+  }));
+  const fromLogs: LeadBrief['decided'] = logs
+    .filter((l) => isDecisionLog(l.text))
+    .map((l) => ({ tag: '', at: l.at, by: 'a session', stepId: l.node_id, stepTitle: titleOf(l.node_id), what: decisionText(l.text), why: '', isNew: isNew(l.at) }));
+  // Equal times keep the lead's lines first: the sort is stable.
+  return [...fromEvents, ...fromLogs].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
 }
 
 /** Asks as a sentence names them: `a7`, `a7 and a9`, `a7, a8 and a9`. */
@@ -213,6 +255,7 @@ export function readLeadBrief(ctx: Ctx, ref: string, yours: number | null, now: 
     stale,
     landedSince,
     saidInAidensName: saidSince(ctx, project.id, since),
+    decided: decidedSince(ctx, project.id, new Date(nowMs - DEFAULT_LOOK_BACK_MS).toISOString(), project.leadSeenAt, titleOf),
     links: { ...lastRelay(ctx, project.id), lastSeenAt: project.leadSeenAt },
   };
 }
@@ -242,14 +285,15 @@ export function markLeadSeen(ctx: Ctx, ref: string, at: Date): string {
   });
 }
 
-/** One line in the lead's log. A plain insert: a command that changes something calls it inside its own write. */
+/** One line in the lead's log, answering its id. A plain insert: a command that changes something calls it inside its own write. */
 export function logLeadEvent(
   ctx: Ctx,
   e: { projectId: number; lead: string; instructions: number; kind: LeadEventKind; nodeId?: number; askId?: number; sessionId?: string; text?: string; aidenWords?: string },
-): void {
-  ctx.db
+): number {
+  const info = ctx.db
     .prepare('INSERT INTO lead_events (project_id, at, lead, instructions, kind, node_id, ask_id, session_id, text, aiden_words) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .run(e.projectId, ctx.now(), e.lead, e.instructions, e.kind, e.nodeId ?? null, e.askId ?? null, e.sessionId ?? null, e.text ?? '', e.aidenWords ?? null);
+  return Number(info.lastInsertRowid);
 }
 
 /** The last `limit` lines of the project's log, newest first. */

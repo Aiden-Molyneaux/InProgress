@@ -148,6 +148,9 @@ answer: read the code, or send Moh. Do not ask about things the project's rules 
 If the request is unambiguous, say so in one line and go. A request that changes behaviour the
 project specs is a spec change first, per the project's working rules.
 
+In a project with a lead, the mandate in the session briefing decides which of these reach the
+owner: decide the rest, record each call as the briefing says, and name it in the receipt.
+
 **The bar.** For a step the owner will see or feel, write one to five criteria with the
 restatement, numbered C1 to Cn, each in the form "do X, expect Y". Where the step has a feel,
 include how long it takes and what a repeated action does ("click Open session twice: one

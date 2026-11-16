@@ -376,9 +376,43 @@ describe('built artifacts', () => {
 
   it('the built CLI has the lead reads step, resource and intent, and refuses them for a name that is not the lead', () => {
     for (const args of [['step', 'smoke', '1'], ['resource', 'smoke', 'r1'], ['intent', 'smoke']]) {
-      const r = spawnSync(process.execPath, [bin('cli/main.js'), 'lead', ...args, '--as', 'Nobody', '--instructions', '3'], { env, encoding: 'utf8' });
+      const r = spawnSync(process.execPath, [bin('cli/main.js'), 'lead', ...args, '--as', 'Nobody', '--instructions', '4'], { env, encoding: 'utf8' });
       expect(r.status, args.join(' ')).toBe(1);
       expect(`${r.stdout}${r.stderr}`, args.join(' ')).toContain('This project has no lead named Nobody.');
+    }
+  });
+
+  it('the built CLI decides a question, lists it in the brief under Decided for Aiden, and undoes it', async () => {
+    const client = createClient({ baseUrl: base, token: readToken(home) });
+    const step = (await client.get<ProjectSnapshot>('/api/projects/smoke')).nodes.find((n) => n.title === 'Smoke the hooks')!;
+    const cli = (...args: string[]) => spawnSync(process.execPath, [bin('cli/main.js'), ...args], { env, encoding: 'utf8' });
+    const setLead = (lead: string | null) => {
+      const db = new Database(join(home, 'inprogress.db'), { fileMustExist: true });
+      try {
+        db.prepare("UPDATE projects SET lead = ? WHERE slug = 'smoke'").run(lead);
+      } finally {
+        db.close();
+      }
+    };
+    const asked = cli('ask', String(step.id), '--session', 'smoke-1', '--question', 'Which font does the smoke use?');
+    expect(asked).toMatchObject({ status: 0, stderr: '' });
+    const id = Number(/^a(\d+) raised on #/.exec(lines(asked.stdout)[0])![1]);
+    setLead('Progresser');
+    try {
+      const WHO = ['--as', 'Progresser', '--instructions', '4'];
+      const decided = cli('lead', 'decide', 'smoke', `a${id}`, '--answer', 'Inter', '--reason', 'Already in the repo', ...WHO);
+      expect(decided).toMatchObject({ status: 0, stderr: '' });
+      const decision = /^Decided a\d+: decision (d\d+)\./.exec(lines(decided.stdout)[0]);
+      expect(decision, decided.stdout).not.toBeNull();
+      const brief = cli('lead', 'brief', 'smoke', ...WHO);
+      expect(brief.stdout).toContain('Decided for Aiden in the last 7 days (1, 1 new):');
+      expect(brief.stdout).toContain(`${decision![1]} `);
+      expect(brief.stdout).toContain(`undo: undo ${decision![1]}`);
+      const undone = cli('lead', 'undo', 'smoke', decision![1], '--aiden', 'undo it', ...WHO);
+      expect(undone).toMatchObject({ status: 0, stderr: '' });
+      expect(lines(undone.stdout)[0]).toMatch(/^Undid d\d+: /);
+    } finally {
+      setLead(null);
     }
   });
 

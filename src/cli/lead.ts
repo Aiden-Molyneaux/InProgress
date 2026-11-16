@@ -10,7 +10,9 @@ export const LEAD_USAGE = [
   `  inprogress lead brief <project> ${WHO} [--mark] [--json]`,
   `  inprogress lead step <project> <step id> ${WHO}`,
   `  inprogress lead resource <project> <document id> ${WHO}`,
-  `  inprogress lead answer <project> <ask id> --aiden <words> ${WHO}`,
+  `  inprogress lead answer <project> <ask id> --aiden <words> [--says <text>] ${WHO}`,
+  `  inprogress lead decide <project> <ask id> --answer <text> --reason <text> [--aiden <words>] ${WHO}`,
+  `  inprogress lead undo <project> <decision> --aiden <words> ${WHO}`,
   `  inprogress lead park <project> <step id> [--reason <text>] [--aiden <words>] ${WHO}`,
   `  inprogress lead drop <project> <step id> --reason <text> [--aiden <words>] ${WHO}`,
   `  inprogress lead promise <project> <text> --due <iso time> [--step <step id>] ${WHO}`,
@@ -64,7 +66,9 @@ const COMMANDS: Record<string, CommandSpec> = {
   brief: { positionals: 0, flags: [], bools: ['--mark', '--json'] },
   step: { positionals: 1, flags: [] },
   resource: { positionals: 1, flags: [] },
-  answer: { positionals: 1, flags: ['--aiden'] },
+  answer: { positionals: 1, flags: ['--aiden', '--says'] },
+  decide: { positionals: 1, flags: ['--answer', '--reason', '--aiden'] },
+  undo: { positionals: 1, flags: ['--aiden'] },
   park: { positionals: 1, flags: ['--reason', '--aiden'] },
   drop: { positionals: 1, flags: ['--reason', '--aiden'] },
   promise: { positionals: 1, flags: ['--due', '--step'] },
@@ -118,6 +122,11 @@ const askId = (text: string): number | undefined => {
   const m = /^a?(\d+)$/i.exec(text.trim());
   return m && Number(m[1]) > 0 ? Number(m[1]) : undefined;
 };
+/** A decision as the brief names it, `d12`, or as a bare number, `12`. */
+const decisionId = (text: string): number | undefined => {
+  const m = /^d?(\d+)$/i.exec(text.trim());
+  return m && Number(m[1]) > 0 ? Number(m[1]) : undefined;
+};
 /** A step as the brief names it, `#42`, or as a bare number, `42` (a shell reads an unquoted `#42` as a comment). */
 const stepId = (text: string): number | undefined => {
   const m = /^#?(\d+)$/.exec(text.trim());
@@ -154,7 +163,32 @@ function draft(command: string, p: Parsed): Draft {
       if (id === undefined) return { error: `${first} is not an ask: give it as a7 or 7` };
       const words = needed('--aiden');
       if ('error' in words) return words;
-      return { fields: { askId: id, aidenWords: words } };
+      fields.askId = id;
+      fields.aidenWords = words;
+      put('says', flag('--says'));
+      return { fields };
+    }
+    case 'decide': {
+      const id = askId(first);
+      if (id === undefined) return { error: `${first} is not an ask: give it as a7 or 7` };
+      const answer = needed('--answer');
+      if ('error' in answer) return answer;
+      const reason = needed('--reason');
+      if ('error' in reason) return reason;
+      fields.askId = id;
+      fields.answer = answer;
+      fields.reason = reason;
+      put('aidenWords', flag('--aiden'));
+      return { fields };
+    }
+    case 'undo': {
+      const id = decisionId(first);
+      if (id === undefined) return { error: `${first} is not a decision: give it as d12 or 12` };
+      const words = needed('--aiden');
+      if ('error' in words) return words;
+      fields.eventId = id;
+      fields.aidenWords = words;
+      return { fields };
     }
     case 'park':
     case 'drop': {
@@ -200,7 +234,7 @@ function draft(command: string, p: Parsed): Draft {
 /**
  * `inprogress lead <command>`. `rules` prints the lead's rules (or with --bootstrap the three lines to paste) and needs no
  * --instructions. `brief` prints the server's text, or with --json the brief. `rules`, `brief`, `step`, `resource` and `intent`
- * with no file are the reads: GETs that print the route's text. The seven commands (answer, park, drop, promise, kept, intent with a file or
+ * with no file are the reads: GETs that print the route's text. The nine commands (answer, decide, undo, park, drop, promise, kept, intent with a file or
  * `-`, relay) each post to their route and print its sentence. No command, an unknown one, or
  * arguments it cannot use print the usage and exit 1, before anything is read from stdin; a refusal from the server prints
  * its sentence and exits 1. The lead is how Aiden reaches a project, so unlike claim and ask a stopped server is started

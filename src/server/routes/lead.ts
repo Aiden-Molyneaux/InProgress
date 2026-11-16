@@ -4,11 +4,11 @@ import type { Ctx } from '../db/tx';
 import { badRequest } from '../errors';
 import { cliBesideServer, nodeCli } from '../../lib/task-command';
 import { listLeadEvents, markLeadSeen, readLeadBrief, readLeadIntent, readLeadRules, requireLead } from '../lead';
-import { leadAnswer, leadDrop, leadIntent, leadKept, leadPark, leadPromise } from '../lead-commands';
+import { leadAnswer, leadDecide, leadUndo, leadDrop, leadIntent, leadKept, leadPark, leadPromise } from '../lead-commands';
 import { leadRelay, type RelaySend } from '../lead-relay';
 import { readLeadResource, readLeadStep } from '../lead-step';
 import { renderLeadBrief } from '../lead-text';
-import { leadAnswerBody, leadBriefQuery, leadDropBody, leadIntentBody, leadKeptBody, leadParkBody, leadPromiseBody, leadReadQuery, leadRelayBody, leadRulesQuery, leadSeenBody } from '../schemas';
+import { leadAnswerBody, leadBriefQuery, leadDecideBody, leadUndoBody, leadDropBody, leadIntentBody, leadKeptBody, leadParkBody, leadPromiseBody, leadReadQuery, leadRelayBody, leadRulesQuery, leadSeenBody } from '../schemas';
 
 /** A route's `:id`: a whole number above 0, or a 400. */
 function positiveId(text: string): number {
@@ -74,6 +74,14 @@ export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken:
   app.post('/api/lead/:ref/answer', { onRequest: requireToken }, async (req) => {
     const { as, instructions, ...input } = leadAnswerBody.parse(req.body);
     return leadAnswer(ctx, ref(req), as, instructions, input);
+  });
+  app.post('/api/lead/:ref/decide', { onRequest: requireToken }, async (req) => {
+    const { as, instructions, ...input } = leadDecideBody.parse(req.body);
+    return leadDecide(ctx, ref(req), as, instructions, input);
+  });
+  app.post('/api/lead/:ref/undo', { onRequest: requireToken }, async (req) => {
+    const { as, instructions, ...input } = leadUndoBody.parse(req.body);
+    return leadUndo(ctx, ref(req), as, instructions, input);
   });
   app.post('/api/lead/:ref/park', { onRequest: requireToken }, async (req) => {
     const { as, instructions, ...input } = leadParkBody.parse(req.body);

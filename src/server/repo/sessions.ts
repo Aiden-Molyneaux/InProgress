@@ -16,6 +16,12 @@ export function liveDriver(ctx: Ctx, n: TreeNode): string | null {
   return live ? n.driverSessionId : null;
 }
 
+/** True when a session that has not ended, seen within STALE_SESSION_MS, has `nodeId` as its focus: a driver or a helper. */
+export function liveSessionOn(ctx: Ctx, nodeId: number): boolean {
+  const cutoff = new Date(Date.parse(ctx.now()) - STALE_SESSION_MS).toISOString();
+  return ctx.db.prepare("SELECT 1 FROM sessions WHERE focus_node_id = ? AND state != 'ended' AND last_seen_at >= ?").get(nodeId, cutoff) !== undefined;
+}
+
 interface SessionRow {
   id: string;
   project_id: number | null;

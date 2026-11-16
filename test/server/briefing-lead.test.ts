@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { sessionMandateLines } from '../../src/core/lead-mandate';
 import { leadBriefingLine } from '../../src/core/relay';
 import { renderBriefing } from '../../src/server/briefing';
 import { addNodes } from '../../src/server/repo/nodes';
@@ -35,8 +36,11 @@ describe('the Lead line in a worker briefing', () => {
     const lines = t.brief('s1');
     expect(lines[1]).toBe(`Role: worker on #${t.step.id}.`);
     expect(lines[2]).toBe(leadBriefingLine('Progresser'));
-    expect(lines[3]).toMatch(PLAN_EDIT);
+    expect(lines[3]).toBe(sessionMandateLines('Progresser')[0]);
+    expect(lines[4]).toBe(sessionMandateLines('Progresser')[1]);
+    expect(lines[5]).toMatch(PLAN_EDIT);
     expect(lines.filter((l) => l.startsWith('Lead:'))).toHaveLength(1);
+    expect(lines.filter((l) => l.startsWith('Mandate:'))).toHaveLength(1);
   });
 
   it('is absent with no lead: the plan-edit line is third', () => {
@@ -46,6 +50,7 @@ describe('the Lead line in a worker briefing', () => {
     const lines = t.brief('s1');
     expect(lines[2]).toMatch(PLAN_EDIT);
     expect(lines.some((l) => l.startsWith('Lead:'))).toBe(false);
+    expect(lines.some((l) => l.startsWith('Mandate:') || l.startsWith("Aiden's, always:"))).toBe(false);
   });
 
   it('is absent for an unclaimed worker and an orchestrator in a led project', () => {

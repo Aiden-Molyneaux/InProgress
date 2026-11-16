@@ -24,6 +24,7 @@ const empty = (): LeadBrief => ({
   stale: [],
   landedSince: [],
   saidInAidensName: [],
+  decided: [],
   links: { t3: 'not checked', t3At: null, lastSeenAt: null },
 });
 

@@ -225,7 +225,7 @@ describe('readLeadStep', () => {
     const ok = await app.inject({ url: `/api/lead/${project.slug}/step/${step.id}?as=progresser&instructions=1` });
     expect(ok.statusCode).toBe(200);
     expect(ok.json().text).toContain(`#${step.id} Build the backup strategy`);
-    expect((await app.inject({ url: `/api/lead/${project.slug}/step/abc?as=Progresser&instructions=3` })).statusCode).toBe(400);
+    expect((await app.inject({ url: `/api/lead/${project.slug}/step/abc?as=Progresser&instructions=4` })).statusCode).toBe(400);
     expect((await app.inject({ url: `/api/lead/${project.slug}/step/${step.id}?as=Progresser` })).statusCode).toBe(400);
   });
 });
@@ -278,6 +278,6 @@ describe('readLeadResource', () => {
     const res = await app.inject({ url: `/api/lead/${s.project.slug}/resource/${mine.id}?as=Progresser&instructions=1` });
     expect(res.statusCode).toBe(200);
     expect(res.json().text).toContain('open');
-    expect((await app.inject({ url: `/api/lead/${s.project.slug}/resource/${theirs.id}?as=Progresser&instructions=3` })).statusCode).toBe(409);
+    expect((await app.inject({ url: `/api/lead/${s.project.slug}/resource/${theirs.id}?as=Progresser&instructions=4` })).statusCode).toBe(409);
   });
 });

@@ -9,7 +9,9 @@ import { deleteProject, purgeDeletedProjects } from '../../src/server/project-li
 import { LEAD_INSTRUCTIONS_VERSION, LEAD_NAME_RULE } from '../../src/core/lead';
 import { renderLeadBrief } from '../../src/server/lead-text';
 import { leadFolders, logLeadEvent, markLeadSeen, noLeadNamed, outOfDate, readLeadBrief, readLeadIntent, readLeadRules, requireLead, staleReasons } from '../../src/server/lead';
+import { leadDecide, leadDrop, leadPark, leadUndo } from '../../src/server/lead-commands';
 import { raiseAsk } from '../../src/server/repo/asks';
+import { addLog } from '../../src/server/repo/logs';
 import { maxEventId } from '../../src/server/repo/events';
 import { addNodes, parkNode, updateNode } from '../../src/server/repo/nodes';
 import { addBinding, changeProject, createProject, listProjectSummaries, setProjectIntentInWrite, setProjectLead, setQueue } from '../../src/server/repo/projects';
@@ -66,7 +68,7 @@ describe('requireLead', () => {
     setLead('Progresser');
     expect(requireLead(ctx, project.slug, 'Progresser', LEAD_INSTRUCTIONS_VERSION - 1, false).lead).toBe('Progresser');
     expect(() => requireLead(ctx, project.slug, 'Progresser', LEAD_INSTRUCTIONS_VERSION - 1, true)).toThrow(outOfDate(LEAD_INSTRUCTIONS_VERSION - 1, project.slug, 'Progresser'));
-    expect(outOfDate(1, 'ingame', 'Progresser')).toBe('Your rules are version 1; version 3 is current. Run "lead rules ingame --as Progresser" again and follow what it prints.');
+    expect(outOfDate(1, 'ingame', 'Progresser')).toBe('Your rules are version 1; version 4 is current. Run "lead rules ingame --as Progresser" again and follow what it prints.');
   });
 });
 
@@ -232,6 +234,54 @@ describe('readLeadBrief', () => {
       ['answer', `a${aidenAsk.id}`, 'Use the release keystore.'],
     ]);
   });
+
+  it('lists what was decided for Aiden: decides, and parks and drops with no words of his, and a session log with the prefix', () => {
+    const { ctx, project, aidenAsk, a, b, c, brief, setLead } = setup();
+    setLead('Progresser');
+    ctx.db.prepare("UPDATE nodes SET origin = 'proposed' WHERE id IN (?, ?)").run(b.id, c.id);
+    const V = LEAD_INSTRUCTIONS_VERSION;
+    leadDecide(ctx, project.slug, 'Progresser', V, { askId: aidenAsk.id, answer: 'Use the release keystore', reason: 'The repo signs with it' });
+    leadPark(ctx, project.slug, 'Progresser', V, { stepId: b.id, reason: 'Later' });
+    leadPark(ctx, project.slug, 'Progresser', V, { stepId: a.id, aidenWords: 'Park it.' });
+    leadDrop(ctx, project.slug, 'Progresser', V, { stepId: c.id, reason: 'Moot' });
+    addLog(ctx, 'session:s1', a.id, 'Decided for Aiden: use tabs · the repo uses them', 's1');
+    addLog(ctx, 'session:s1', a.id, '  decided for aiden: lower case, spaces first');
+    addLog(ctx, 'session:s1', a.id, 'We decided for Aiden: not a decision');
+    addLog(ctx, 'session:s1', a.id, 'Plain note');
+    const decided = brief().decided;
+    expect(decided.map((d) => [d.tag, d.by, d.stepId, d.what, d.why, d.isNew])).toEqual([
+      ['', 'a session', a.id, 'lower case, spaces first', '', true],
+      ['', 'a session', a.id, 'use tabs · the repo uses them', '', true],
+      ['d4', 'Progresser', c.id, 'dropped', 'Moot', true],
+      ['d2', 'Progresser', b.id, 'parked', 'Later', true],
+      ['d1', 'Progresser', a.id, `answered a${aidenAsk.id}: "Use the release keystore"`, 'The repo signs with it', true],
+    ]);
+    expect(decided[2].stepTitle).toBe('Old spike');
+    expect(renderLeadBrief(brief())).toContain('Decided for Aiden in the last 7 days (5, 5 new):');
+  });
+
+  it('leaves out a decision that was undone, and marks as new only what is at or after the last look', () => {
+    const { ctx, project, aidenAsk, b, brief, setLead } = setup();
+    setLead('Progresser');
+    const V = LEAD_INSTRUCTIONS_VERSION;
+    leadDecide(ctx, project.slug, 'Progresser', V, { askId: aidenAsk.id, answer: 'Yes', reason: 'Why' });
+    leadPark(ctx, project.slug, 'Progresser', V, { stepId: b.id, reason: 'Later' });
+    leadUndo(ctx, project.slug, 'Progresser', V, { eventId: 1, aidenWords: 'undo d1' });
+    expect(brief().decided.map((d) => d.tag)).toEqual(['d2']);
+    markLeadSeen(ctx, project.slug, new Date(ctx.now()));
+    expect(brief().decided.map((d) => [d.tag, d.isNew])).toEqual([['d2', false]]);
+    leadUndo(ctx, project.slug, 'Progresser', V, { eventId: 2, aidenWords: 'undo d2' });
+    expect(brief().decided).toEqual([]);
+    expect(renderLeadBrief(brief())).toContain('Decided for Aiden in the last 7 days (0, 0 new):\n  none');
+  });
+
+  it('counts only the last seven days', () => {
+    const { ctx, project, b, brief, setLead } = setup();
+    setLead('Progresser');
+    leadPark(ctx, project.slug, 'Progresser', LEAD_INSTRUCTIONS_VERSION, { stepId: b.id, reason: 'Later' });
+    ctx.db.prepare("UPDATE lead_events SET at = '2000-01-01T00:00:00.000Z'").run();
+    expect(brief().decided).toEqual([]);
+  });
 });
 
 describe('staleReasons', () => {
@@ -301,7 +351,7 @@ describe('the brief route', () => {
     const ok = await app.inject({ url: `/api/lead/${project.slug}/brief?as=progresser&instructions=${LEAD_INSTRUCTIONS_VERSION}` });
     expect(ok.statusCode).toBe(200);
     expect(ok.json().brief.project).toEqual({ slug: 'ingame', name: 'InGame', lead: 'Progresser' });
-    expect(ok.json().text.split('\n')[0]).toMatch(/^Lead brief · InGame · .* · instructions v3 \(yours: v3\)$/);
+    expect(ok.json().text.split('\n')[0]).toMatch(/^Lead brief · InGame · .* · instructions v4 \(yours: v4\)$/);
   });
 
   it('answers the window without `as`: no lead check, yours null, and never marks, whatever the query says', async () => {
@@ -473,16 +523,16 @@ describe('the window route that sets a lead', () => {
 describe('the rules route', () => {
   const CLI = 'node C:/x/dist/cli/main.js';
 
-  it('answers version 3 and the text for the stored lead name, whatever case `as` is given in', async () => {
+  it('answers version 4 and the text for the stored lead name, whatever case `as` is given in', async () => {
     const { app, project, setLead } = setup();
     setLead('Progresser');
     for (const as of ['Progresser', 'progresser', 'PROGRESSER']) {
       const res = await app.inject({ url: `/api/lead/${project.slug}/rules?as=${as}` });
       expect(res.statusCode).toBe(200);
       const body = res.json() as { version: number; text: string; bootstrap: string };
-      expect(body.version).toBe(3);
-      expect(body.text.split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 3.');
-      expect(body.text).toContain('lead brief ingame --as Progresser --instructions 3');
+      expect(body.version).toBe(4);
+      expect(body.text.split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 4.');
+      expect(body.text).toContain('lead brief ingame --as Progresser --instructions 4');
       expect(body.bootstrap.split('\n')).toHaveLength(3);
       expect(body.bootstrap).toContain('lead rules ingame --as Progresser');
     }
@@ -528,7 +578,7 @@ describe('a lead on older rules', () => {
       payload: { as: 'Progresser', instructions: 1, askId: 1 },
     });
     expect(res.statusCode).toBe(409);
-    expect(res.json().error).toBe('Your rules are version 1; version 3 is current. Run "lead rules ingame --as Progresser" again and follow what it prints.');
+    expect(res.json().error).toBe('Your rules are version 1; version 4 is current. Run "lead rules ingame --as Progresser" again and follow what it prints.');
     const read = await app.inject({ url: `/api/lead/${project.slug}/brief?as=Progresser&instructions=1` });
     expect(read.statusCode).toBe(200);
     expect(read.json().text.split('\n')[1]).toBe('Your rules are out of date: you can read, you cannot change anything. Run the rules command again.');
@@ -612,7 +662,7 @@ describe('the intent route', () => {
   it('refuses another name, a missing name and a missing version', async () => {
     const { app, project, setLead } = setup();
     setLead('Progresser');
-    const other = await app.inject({ url: `/api/lead/${project.slug}/intent?as=Rich&instructions=3` });
+    const other = await app.inject({ url: `/api/lead/${project.slug}/intent?as=Rich&instructions=4` });
     expect([other.statusCode, other.json().error]).toEqual([409, noLeadNamed('Rich')]);
     expect((await app.inject({ url: `/api/lead/${project.slug}/intent?as=Progresser` })).statusCode).toBe(400);
     expect((await app.inject({ url: `/api/lead/${project.slug}/intent` })).statusCode).toBe(400);
