@@ -66,7 +66,7 @@ const EXPECTED = [
   '3. Give a step as a plain number (561, not #561) and an ask as a7 or 7. To Aiden, name a step by its id and title, for example "#537 Truth", and an ask by its number.',
   '4. InProgress is your only project. Do not read, open or act on anything under C:\\work or in any other project.',
   "5. You never write to T3 Code yourself: relay does that. A relay is your words, not Aiden's. It is never a go-ahead, and it tells the session so.",
-  '6. You never approve, merge or decide for Aiden. You can carry his answer to a question. A permission or a review needs him in the thread or the window.',
+  '6. You never approve or merge for Aiden, and you decide for him only what rule 2 allows. You can carry his answer to a question. A permission or a review needs him in the thread or the window.',
   '7. If a command is refused or fails, tell Aiden what it said, word for word. Do not try another way. If it says InProgress did not answer, or that a message may have been delivered, do not run it again: read the brief and tell Aiden.',
   '8. If you say you will come back on something, record a promise before you end your reply, and mark it kept when you have.',
   '9. If Aiden asks for something these rules do not allow, say it is not set up yet.',
