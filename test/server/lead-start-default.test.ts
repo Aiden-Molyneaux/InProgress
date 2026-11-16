@@ -7,7 +7,7 @@ const run = (): T3Run => vi.fn(async () => JSON.stringify({ threadId: 'mcp:abc' 
 const t3 = (r: T3Run) => ({ run: r, cliPath: '/bin/t3', platform: 'linux' as const });
 
 describe('the default start', () => {
-  it('names the proof provider and model', async () => {
+  it('names the provider the proof used, and Opus', async () => {
     expect([LEAD_START_PROVIDER, LEAD_START_MODEL]).toEqual(['claudeAgent', 'claude-opus-5-5']);
     const r = run();
     await expect(defaultStart(t3(r), {})('C:/proj', 'go', { title: 'T' })).resolves.toEqual({ threadId: 'mcp:abc' });

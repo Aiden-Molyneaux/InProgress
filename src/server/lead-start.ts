@@ -76,7 +76,7 @@ export async function leadStart(
     .pluck()
     .all(project.id, node.id) as string[];
   const holder = readProjectSessions(ctx, project.id).find((s) => isLive(s, nowMs) && s.t3ThreadId !== null && carried.includes(s.t3ThreadId));
-  if (holder !== undefined) throw conflict(`${ref_} already has a thread open (${holder.t3ThreadId}) that has not claimed it. Look at that thread first.`);
+  if (holder !== undefined) throw conflict(`${ref_} already has a thread open (${holder.t3ThreadId}) that has not claimed it. Tell Aiden.`);
   const recent = ctx.db
     .prepare("SELECT at FROM lead_events WHERE project_id = ? AND node_id = ? AND kind IN ('start', 'start_unknown') AND at >= ? ORDER BY at DESC, id DESC LIMIT 1")
     .get(project.id, node.id, new Date(nowMs - CLAIM_WINDOW_MS).toISOString()) as { at: string } | undefined;
@@ -150,7 +150,7 @@ export async function leadStart(
       }
     }
     try {
-      write(ctx, actor, () =>
+      write(ctx, actor, (record) => {
         logLeadEvent(ctx, {
           projectId: project.id,
           lead: name,
@@ -159,8 +159,10 @@ export async function leadStart(
           nodeId: node.id,
           text: kind === 'start' ? threadId : reason,
           ...(input.aidenWords === undefined ? {} : { aidenWords: input.aidenWords }),
-        }),
-      );
+        });
+        // The log line alone moves nothing on the project's stream: this is what makes an open Lead view read the brief again.
+        record({ projectId: project.id, type: 'project.updated', entity: 'project', entityId: project.id, data: { changes: { started: kind } } });
+      });
     } catch (err) {
       // The start has happened (or not) whatever the log says: the lead is still told which.
       console.error(`InProgress: a start for #${node.id} (${kind}) could not be logged: ${reasonOf(err)}`);

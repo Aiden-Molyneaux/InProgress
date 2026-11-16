@@ -431,7 +431,8 @@ export function setProjectLead(ctx: Ctx, actor: string, ref: string | number, na
       ctx.db.prepare('UPDATE projects SET lead = ?, updated_at = ? WHERE id = ?').run(lead, ctx.now(), before.id);
       // What Aiden switched on was switched on for the lead he had: each switch still on is turned off in this write, under
       // the outgoing lead's name, so a new lead (or none) starts with both off. Read as leadSwitches (server/lead.ts) does.
-      if (before.lead !== null) {
+      // A new spelling of the same name (requireLead matches ignoring case) is the same lead: the switches stay.
+      if (before.lead !== null && before.lead.toLowerCase() !== lead?.toLowerCase()) {
         for (const name of LEAD_SWITCHES) {
           const newest = ctx.db
             .prepare("SELECT kind FROM lead_events WHERE project_id = ? AND kind IN ('allow', 'disallow') AND text = ? ORDER BY at DESC, id DESC LIMIT 1")

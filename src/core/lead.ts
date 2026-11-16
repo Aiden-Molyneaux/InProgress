@@ -11,7 +11,7 @@ export type LeadSwitch = (typeof LEAD_SWITCHES)[number];
 export const LEAD_STARTS_PER_DAY = 3;
 /**
  * The provider and model a thread the lead starts names: a T3 start fails with "Pass modelSelection" without them, and no
- * project has a default. The ones the CLI proof (docs/superpowers/rulings/2026-11-t3-cli-proof.md) started a thread with.
+ * project has a default. The provider is the one the CLI proof (docs/superpowers/rulings/2026-11-t3-cli-proof.md) used. The model is Opus, because a started thread runs the whole change workflow: the proof used the Haiku slug of the same family, so this slug is unproven until the first real start.
  * INPROGRESS_LEAD_PROVIDER and INPROGRESS_LEAD_MODEL replace them.
  */
 export const LEAD_START_PROVIDER = 'claudeAgent';

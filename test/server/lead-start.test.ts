@@ -278,7 +278,7 @@ describe('leadStart: the refusals, each with its sentence and nothing started or
     s.session('s1', s.dark.id, started.threadId);
     expect(await s.refused(() => s.run(s.signing.id, WORDS))).toMatchObject({
       status: 409,
-      message: `#${s.signing.id} Play app signing already has a thread open (${started.threadId}) that has not claimed it. Look at that thread first.`,
+      message: `#${s.signing.id} Play app signing already has a thread open (${started.threadId}) that has not claimed it. Tell Aiden.`,
     });
   });
 
