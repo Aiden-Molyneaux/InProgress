@@ -634,6 +634,14 @@ describe('leadFolders', () => {
     expect(folders).toEqual([...folders].sort((x, y) => (x.toLowerCase() < y.toLowerCase() ? -1 : x.toLowerCase() > y.toLowerCase() ? 1 : 0)));
   });
 
+  it('leaves out a folder that holds C:/work and a network path, and keeps an ordinary one', () => {
+    const { ctx, project } = setup();
+    const insert = ctx.db.prepare("INSERT INTO bindings (project_id, path, branch_pattern, created_at) VALUES (?, ?, '', ?)");
+    // Inserted directly: addBinding may normalise or refuse some of these.
+    for (const path of ['C:/', '//localhost/c$/work', 'C:/personal/x']) insert.run(project.id, path, ctx.now());
+    expect(leadFolders(ctx, project.id)).toEqual(['C:/personal/InGame', 'C:/personal/x']);
+  });
+
   it('is empty for a project with no folder, and the rules route prints those folders', async () => {
     const { ctx, project, setLead } = setup();
     setLead('Progresser');

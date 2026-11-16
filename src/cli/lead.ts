@@ -199,8 +199,9 @@ function draft(command: string, p: Parsed): Draft {
 
 /**
  * `inprogress lead <command>`. `rules` prints the lead's rules (or with --bootstrap the three lines to paste) and needs no
- * --instructions. `brief` prints the server's text, or with --json the brief; the seven commands (answer, park,
- * drop, promise, kept, intent, relay) each post to their route and print its sentence. No command, an unknown one, or
+ * --instructions. `brief` prints the server's text, or with --json the brief. `rules`, `brief`, `step`, `resource` and `intent`
+ * with no file are the reads: GETs that print the route's text. The seven commands (answer, park, drop, promise, kept, intent with a file or
+ * `-`, relay) each post to their route and print its sentence. No command, an unknown one, or
  * arguments it cannot use print the usage and exit 1, before anything is read from stdin; a refusal from the server prints
  * its sentence and exits 1. The lead is how Aiden reaches a project, so unlike claim and ask a stopped server is started
  * first (`bringUp`), once the arguments are good; one that will not start prints why and exits 1. Without `bringUp`,

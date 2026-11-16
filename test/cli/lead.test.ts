@@ -305,7 +305,7 @@ describe("inprogress lead's commands", () => {
   it('resource: r5 and 5 name the same document, and a missing one is refused', async () => {
     const res = await run(['resource', 'ingame', 'r999999', ...WHO]);
     expect(res.code).toBe(1);
-    expect(res.lines[0]).toBe("Resource r999999 not found");
+    expect(res.lines[0]).toBe("r999999 not found.");
     expect(await run(['resource', 'ingame', '999999', ...WHO])).toEqual(res);
   });
 

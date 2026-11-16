@@ -151,6 +151,48 @@ describe('readLeadStep', () => {
     expect([res.statusCode, res.json().error]).toEqual([409, `#${foreign.id} is not in this project.`]);
   });
 
+  it('prints every open ask and the newest 20 cleared ones, and says how many it left out', () => {
+    const { ctx, step, read } = setup();
+    for (let i = 1; i <= 25; i++) clearAsk(ctx, 'window', raiseAsk(ctx, 'session:s1', { nodeId: step.id, kind: 'question', text: `old ${i}` }).id, 'ok');
+    raiseAsk(ctx, 'session:s1', { nodeId: step.id, kind: 'review', text: 'still open' });
+    const lines = read().split('\n');
+    const at = lines.indexOf('Asks (26):');
+    expect(at).toBeGreaterThan(0);
+    const asks = lines.slice(at + 1, at + 1 + 22);
+    expect(asks[0]).toMatch(/review · open, raised 27d ago: "still open"$/);
+    expect(asks[1]).toMatch(/: "old 6" -> "ok"$/);
+    expect(asks[20]).toMatch(/: "old 25" -> "ok"$/);
+    expect(asks[21]).toBe('  and 5 more, cleared earlier');
+    expect(lines.some((l) => l.includes('"old 5"'))).toBe(false);
+  });
+
+  it('prints at most 40 steps under it, with the full count in the heading', () => {
+    const { ctx, step, read } = setup();
+    addNodes(ctx, 'test', { parentId: step.id, nodes: Array.from({ length: 45 }, (_, i) => ({ title: `Child ${i + 1}` })) });
+    const lines = read().split('\n');
+    const at = lines.indexOf('Steps under it (45):');
+    expect(at).toBeGreaterThan(0);
+    expect(lines.slice(at + 1)).toHaveLength(41);
+    expect(lines.at(-1)).toBe('  and 5 more');
+  });
+
+  it('says how many sessions it left out, and only then', () => {
+    const { ctx, step, read } = setup();
+    const insert = ctx.db.prepare("INSERT INTO sessions (id, project_id, state, focus_node_id, started_at, last_seen_at) VALUES (?, (SELECT project_id FROM nodes WHERE id = ?), 'idle', ?, ?, ?)");
+    for (let i = 0; i < 3; i++) insert.run(`few${i}`, step.id, step.id, ctx.now(), ctx.now());
+    expect(read()).toContain('Sessions (3):');
+    for (let i = 3; i < 25; i++) insert.run(`few${i}`, step.id, step.id, ctx.now(), ctx.now());
+    expect(read()).toContain('Sessions (10 of 25):');
+  });
+
+  it('answers a missing step and a missing document with a 404 and a hint of the lead\'s own', () => {
+    const { ctx, project, read } = setup();
+    expect(() => read(999999)).toThrowError(expect.objectContaining({ status: 404, message: '#999999 not found.', hint: `Run "outline ${project.slug}" to see this project's steps.` }));
+    expect(() => readLeadResource(ctx, project.slug, 'Progresser', LEAD_INSTRUCTIONS_VERSION, 999999)).toThrowError(
+      expect.objectContaining({ status: 404, message: 'r999999 not found.', hint: "lead step lists a step's documents." }),
+    );
+  });
+
   it('refuses a project with no lead, and another lead\'s name', () => {
     const { ctx, project, step, read } = setup();
     expect(() => read(step.id, 'Rich')).toThrow(noLeadNamed('Rich'));

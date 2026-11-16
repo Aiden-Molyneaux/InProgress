@@ -47,9 +47,11 @@ export function leadFolders(ctx: Ctx, projectId: number): string[] {
   const seen = new Map<string, string>();
   for (const b of listBindings(ctx)) {
     if (b.projectId !== projectId) continue;
-    const path = b.path.replace(/\\/g, '/').replace(/\/+$/, '');
+    const slashed = b.path.replace(/\\/g, '/');
+    const path = slashed.replace(/\/+$/, '');
     const key = path.toLowerCase();
-    if (path === '' || key === 'c:/work' || key.startsWith('c:/work/')) continue;
+    // C:/work is no project's: leave out it, what is under it, and a folder that holds it (C:/, C:). A network path is no folder of this laptop.
+    if (path === '' || slashed.startsWith('//') || key === 'c:/work' || key.startsWith('c:/work/') || 'c:/work'.startsWith(key + '/')) continue;
     if (!seen.has(key)) seen.set(key, path);
   }
   return [...seen.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([, path]) => path);

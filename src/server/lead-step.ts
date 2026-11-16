@@ -1,15 +1,15 @@
 import { LEAD_INSTRUCTIONS_VERSION } from '../core/lead';
 import { spanAgo, stamp } from '../core/span';
 import type { Ask } from '../core/types';
-import { conflict } from './errors';
+import { conflict, notFound } from './errors';
 import { requireLead } from './lead';
 import { clean, line } from './lead-text';
 import type { Ctx } from './db/tx';
 import { listNodeAsks } from './repo/asks';
 import { listLogs } from './repo/logs';
-import { requireNode } from './repo/nodes';
+import { findNode, requireNode } from './repo/nodes';
 import { listNodeResources, requireResource } from './repo/resources';
-import { listStepSessions } from './repo/sessions';
+import { countStepSessions, listStepSessions } from './repo/sessions';
 import { listWorkItems } from './repo/work';
 
 /** The most log lines `lead step` prints, newest first. */
@@ -18,6 +18,10 @@ export const LEAD_STEP_LOG_CAP = 60;
 export const LEAD_STEP_TEXT_CUT = 4_000;
 /** How much of a stored document `lead resource` prints. */
 export const LEAD_RESOURCE_CUT = 120_000;
+/** The most cleared asks `lead step` prints: the newest ones; every open ask is printed. */
+export const LEAD_STEP_ASK_CAP = 20;
+/** The most steps under a step `lead step` prints. */
+export const LEAD_STEP_CHILD_CAP = 40;
 /** How much of one log line `lead step` keeps. */
 const LOG_LINE_CUT = 1_000;
 /** The most open working tasks `lead step` names. */
@@ -44,7 +48,8 @@ function askLine(a: Ask, now: number): string {
 /** Everything on record about one step of the lead's project, as text. A read: it changes nothing. */
 export function readLeadStep(ctx: Ctx, ref: string, as: string, instructions: number, stepId: number, now: Date): { text: string } {
   const project = requireLead(ctx, ref, as, instructions, false);
-  const node = requireNode(ctx, stepId);
+  const node = findNode(ctx, stepId);
+  if (!node) throw notFound(`#${stepId} not found.`, `Run "outline ${project.slug}" to see this project's steps.`);
   if (node.projectId !== project.id) notInProject('#', stepId);
   const nowMs = now.getTime();
   const out: string[] = [];
@@ -62,7 +67,8 @@ export function readLeadStep(ctx: Ctx, ref: string, as: string, instructions: nu
 
   const sessions = listStepSessions(ctx, node.id);
   if (sessions.length) {
-    out.push(`Sessions (${sessions.length}):`);
+    const all = countStepSessions(ctx, node.id);
+    out.push(`Sessions (${all > sessions.length ? `${sessions.length} of ${all}` : sessions.length}):`);
     for (const s of sessions) {
       const title = line(s.title ?? '', 80) || `Session ${s.id.slice(0, 6)}`;
       const when = s.endedAt !== null ? `ended ${spanAgo(s.endedAt, nowMs)} ago` : `${s.state}, seen ${spanAgo(s.lastSeenAt, nowMs)} ago`;
@@ -71,7 +77,14 @@ export function readLeadStep(ctx: Ctx, ref: string, as: string, instructions: nu
   }
 
   const asks = listNodeAsks(ctx, node.id);
-  if (asks.length) out.push(`Asks (${asks.length}):`, ...asks.map((a) => `  ${askLine(a, nowMs)}`));
+  if (asks.length) {
+    // Every open ask, then the newest cleared ones, each group oldest first.
+    const cleared = asks.filter((a) => a.clearedAt !== null);
+    const kept = cleared.slice(Math.max(0, cleared.length - LEAD_STEP_ASK_CAP));
+    const shown = [...asks.filter((a) => a.clearedAt === null), ...kept];
+    out.push(`Asks (${asks.length}):`, ...shown.map((a) => `  ${askLine(a, nowMs)}`));
+    if (cleared.length > kept.length) out.push(`  and ${cleared.length - kept.length} more, cleared earlier`);
+  }
 
   const work = listWorkItems(ctx, project.id).filter((w) => w.nodeId === node.id);
   if (work.length) {
@@ -94,7 +107,8 @@ export function readLeadStep(ctx: Ctx, ref: string, as: string, instructions: nu
   }
 
   const children = ctx.db.prepare('SELECT id, title, status FROM nodes WHERE parent_id = ? ORDER BY position, id').all(node.id) as { id: number; title: string; status: string }[];
-  if (children.length) out.push(`Steps under it (${children.length}):`, ...children.map((c) => `  #${c.id} ${line(c.title, 120)} · ${c.status}`));
+  if (children.length) out.push(`Steps under it (${children.length}):`, ...children.slice(0, LEAD_STEP_CHILD_CAP).map((c) => `  #${c.id} ${line(c.title, 120)} · ${c.status}`));
+  if (children.length > LEAD_STEP_CHILD_CAP) out.push(`  and ${children.length - LEAD_STEP_CHILD_CAP} more`);
 
   const total = ctx.db.prepare('SELECT COUNT(*) FROM log_entries WHERE node_id = ?').pluck().get(node.id) as number;
   if (total > 0) {
@@ -108,7 +122,14 @@ export function readLeadStep(ctx: Ctx, ref: string, as: string, instructions: nu
 /** One document of the lead's project: its stored content, or where to read it. A read: it changes nothing. */
 export function readLeadResource(ctx: Ctx, ref: string, as: string, instructions: number, resourceId: number): { text: string } {
   const project = requireLead(ctx, ref, as, instructions, false);
-  const r = requireResource(ctx, resourceId);
+  let r;
+  try {
+    r = requireResource(ctx, resourceId);
+  } catch (err) {
+    // requireResource's hint names an MCP tool the lead has no use for; only its not-found is reworded.
+    if ((err as { status?: number }).status === 404) throw notFound(`r${resourceId} not found.`, "lead step lists a step's documents.");
+    throw err;
+  }
   if (r.projectId !== project.id) notInProject('r', resourceId);
   const node = requireNode(ctx, r.nodeId);
   const head = `r${r.id} ${r.purpose ?? r.kind} "${line(r.title, 120)}" on #${node.id} ${clean(node.title)}`;

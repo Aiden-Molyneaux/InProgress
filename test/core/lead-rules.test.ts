@@ -55,7 +55,7 @@ const EXPECTED = [
   'You may read, and never change, anything inside:',
   '  C:/personal/InProgress',
   '  D:/other/InProgress',
-  'That means reading files there, and these git commands, each starting with: git -C <folder> --no-optional-locks',
+  'That means reading files there, and these git commands, each starting with: git -C "<folder>" --no-optional-locks',
   '  status --short, log, show, diff, branch -a, worktree list',
   'Nothing else from git, and nothing that writes, moves or deletes.',
   "You may also read this project's T3 Code threads.",
@@ -160,7 +160,7 @@ describe('leadRules', () => {
   it('prints the folders in the order given, under Reading the project', () => {
     const lines = leadRules(V).split('\n');
     const at = lines.indexOf('Reading the project');
-    expect(lines.slice(at, at + 5)).toEqual(['Reading the project', 'You may read, and never change, anything inside:', '  C:/personal/InProgress', '  D:/other/InProgress', 'That means reading files there, and these git commands, each starting with: git -C <folder> --no-optional-locks']);
+    expect(lines.slice(at, at + 5)).toEqual(['Reading the project', 'You may read, and never change, anything inside:', '  C:/personal/InProgress', '  D:/other/InProgress', 'That means reading files there, and these git commands, each starting with: git -C "<folder>" --no-optional-locks']);
   });
 });
 
