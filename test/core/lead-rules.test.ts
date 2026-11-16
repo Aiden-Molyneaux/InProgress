@@ -68,7 +68,7 @@ const EXPECTED = [
   '  D:/other/InProgress',
   'That means reading files there, and these git commands, each starting with: git -C "<folder>" --no-optional-locks',
   '  status --short, log, show, diff, branch -a, worktree list',
-  'If a file will not open, read it through git: show HEAD:<its path inside the folder>.',
+  'If a file will not open, read its committed copy through git: show HEAD:./<its path inside the folder>.',
   'Nothing else from git, and nothing that writes, moves or deletes.',
   "You may also read this project's T3 Code threads.",
   '',

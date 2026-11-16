@@ -62,8 +62,8 @@ function requireWordsFor(node: TreeNode, aidenWords: string | undefined): void {
 
 /**
  * A park or drop made on the lead's own judgment (no words of Aiden's) is refused while a session works on the step or any
- * step under it, and while a question waits on Aiden on the step or under it: parking or dropping clears those asks with
- * no answer, and an undo does not bring them back. `session` is the refusal for a live session.
+ * step under it, and while an ask waits on Aiden on the step or under it: a park or drop clears the step's own asks with
+ * no answer and hides the ones under it, and an undo does not bring a cleared one back. `session` is the refusal for a live session.
  */
 function requireQuiet(ctx: Ctx, node: TreeNode, session: string): void {
   if (liveSessionUnder(ctx, node.id)) throw conflict(session);
