@@ -69,6 +69,11 @@ A step he would never see skips rows 4, 6 and 7: one click in the window in conf
 - Version 1 read sound to him. He asked for it to be criticised so the build is right on the first pass.
 - Work repos may stay in reach of the Bots. The Bots must not touch them.
 - He is somewhat comfortable with a Bot holding full access on the laptop, and asked what the confined routes cost.
+- 2026-11-16, at the first triage: "I don't want his recommendations to be thin. The point of using an AI lead is so
+  that he can figure things out." InProgress will not always hold all the context, and "the lead is supposed to know
+  more than me". So the lead finds out where a stuck step really stands before he recommends: he may read the step's
+  whole record, the project's repo with read-only git, and the project's threads. He still changes nothing there, and
+  work repos stay off limits.
 
 ### My calls (correct them)
 

@@ -130,7 +130,7 @@ work. A re-hit bumps **Hits** and **Verified**. Entries seeded from the code and
   is not proven; a scan of a new `.exe` is the likely holder), so its removal finished late. `rmSync` retries
   `ENOTEMPTY` only when `maxRetries` is set, and the teardowns leave it at 0. Candidate fix (proposed, not built): one
   shared teardown helper that removes a temp folder with `maxRetries`.
-- **Verified:** 2026-11-15 · **Hits:** 5
+- **Verified:** 2026-11-15 · **Hits:** 6
 
 ## Global git hooks make the page-repo e2e tests time out
 
@@ -147,7 +147,7 @@ work. A re-hit bumps **Hits** and **Verified**. Entries seeded from the code and
   same day a plain `npm test` in a worktree ended with `Segmentation fault` from npm at exit. #732 proposes the forks pool.
   Third hit, the same evening: `npm test` in a worktree died mid-run (exit 139, `Segmentation fault "$NODE_EXE"
   "$NPM_CLI_JS"`, no summary) and passed 2169 of 2169 on the rerun.
-- **Verified:** 2026-11-15 · **Hits:** 3
+- **Verified:** 2026-11-15 · **Hits:** 4
 
 # Promoted
 
