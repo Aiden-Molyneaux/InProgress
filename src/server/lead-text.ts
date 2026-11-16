@@ -123,6 +123,11 @@ export function renderLeadBrief(b: LeadBrief): string {
         return `${d.tag} ${stamp(d.at)} · ${line(d.by, TEXT_CUT)} ${line(d.what, TEXT_CUT * 2)}${on}${d.why === '' ? '' : ` · why: "${line(d.why, TEXT_CUT)}"`} · undo: undo ${d.tag}${fresh}`;
       }),
     ),
+    ...section(
+      `Started in the last ${LEAD_LOOK_BACK_DAYS} days (${b.started.length}):`,
+      b.started.map((s) => `${stamp(s.at)} · ${step(s.stepId, s.stepTitle)} · thread ${line(s.threadId, TEXT_CUT)} · ${s.onAidensWord ? "on Aiden's word" : 'on your own judgment'} · ${s.claimed ? 'claimed' : 'not claimed yet'}`),
+    ),
+    `Switches: starts ${b.switches.starts.on ? 'on' : 'off'} · landing ${b.switches.landing.on ? 'on' : 'off'}`,
     `Links: T3 Code ${t3}${t3At === null ? '' : `, last relay ${spanAgo(t3At, now)} ago`} · your last look ${b.links.lastSeenAt === null ? 'never' : `${spanAgo(b.links.lastSeenAt, now)} ago`}`,
   );
   return lines.join('\n');

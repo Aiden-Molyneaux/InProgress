@@ -11,6 +11,7 @@ import { renderOrchestratorBriefing, stepBlock } from './briefing-scoped';
 import { deriveBoard, isLive, reconcileLine } from '../core/board';
 import { askTag, sessionDisplayTitle } from '../core/types';
 import { formatCounts, formatDigest, readDigest } from './digest';
+import { leadSwitches } from './lead';
 import { asksToRemind, markAnswersDelivered, owedAnswers, undeliveredAnswers } from './repo/asks';
 import { endCommand, endSessionCommands, pruneCommands, reconcileCommands, startCommand, type BackgroundEntry } from './repo/commands';
 import { findNode, leadingNode, patchNode, requireNode, setDriver } from './repo/nodes';
@@ -116,6 +117,9 @@ const REMINDERS = 3;
 const REMINDER_TAGS = 10;
 
 const clean = (text: string | undefined): string | null => text?.trim() || null;
+
+/** Whether Aiden has turned Landing on for the project: a plain read of the lead's log, for the briefing's Landing line. */
+const landingOn = (ctx: Ctx, projectId: number): boolean => leadSwitches(ctx, projectId).landing.on;
 
 export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInput): HookEventResult {
   let created = false;
@@ -360,7 +364,7 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
     const checkOld = briefingOwed || !(input.event === 'start' && input.source === 'compact');
     // The orchestrator's counts line reads the digest, outside any write as the snapshot is.
     const counts = session.role === 'orchestrator' ? formatCounts(readDigest(ctx, projectId), nowMs) : undefined;
-    context = renderBriefing(getProjectSnapshot(ctx, projectId), sessionId, nowMs, { checkOld, ...(counts === undefined ? {} : { counts }) });
+    context = renderBriefing(getProjectSnapshot(ctx, projectId), sessionId, nowMs, { checkOld, landing: landingOn(ctx, projectId), ...(counts === undefined ? {} : { counts }) });
   } else if (input.event === 'prompt' && !input.notice) {
     if (input.asksStatus) context = renderStatusAnswer(getProjectSnapshot(ctx, projectId), sessionId, nowMs);
     else if (session.promptsSinceUpdate >= 2) context = renderStatusLine(getProjectSnapshot(ctx, projectId), session);
@@ -428,7 +432,7 @@ export function enrollSession(ctx: Ctx, actor: string, sessionId: string, projec
   // Re-read after commit: write() resets prompts_since_update for scribe actors after fn() runs. An enroll's briefing is
   // fresh, so it asks about old needs-you items.
   const session = findSession(ctx, sessionId)!;
-  return { session, briefing: renderBriefing(getProjectSnapshot(ctx, session.projectId!), sessionId, Date.parse(ctx.now()), { checkOld: true }) };
+  return { session, briefing: renderBriefing(getProjectSnapshot(ctx, session.projectId!), sessionId, Date.parse(ctx.now()), { checkOld: true, landing: landingOn(ctx, session.projectId!) }) };
 }
 
 /** How a focus change left the step's driver (spec 1.2): null for no step. */

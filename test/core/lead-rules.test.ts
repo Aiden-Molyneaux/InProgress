@@ -4,10 +4,10 @@ import { LEAD_MANDATE } from '../../src/core/lead-mandate';
 import { leadBootstrap, leadRules } from '../../src/core/lead-rules';
 
 const V = { lead: 'Progresser', projectName: 'InProgress', slug: 'inprogress', cli: 'node C:/x/dist/cli/main.js', folders: ['C:/personal/InProgress', 'D:/other/InProgress'] };
-const W = '--as Progresser --instructions 4';
+const W = '--as Progresser --instructions 5';
 
 const EXPECTED = [
-  'Rules for Progresser, the lead for InProgress. Version 4.',
+  'Rules for Progresser, the lead for InProgress. Version 5.',
   '',
   'You are Progresser, the lead for one project: InProgress. Your job is to know where the project stands, tell Aiden, and record what he decides. You hold no state of your own: the record is InProgress. Before you answer anything about the project, read the record again. Never answer from memory.',
   '',
@@ -53,6 +53,14 @@ const EXPECTED = [
   '      drop a step whose origin is proposed, on your own judgment',
   `  lead undo inprogress <decision number> --aiden "<his words>" ${W}`,
   "      put a decision back: a parked or dropped step returns, a decided question becomes Aiden's again",
+  `  lead start inprogress <step number> ${W}`,
+  '      start a thread in T3 Code for a step, on your own judgment, when Starts is on',
+  `  lead start inprogress <step number> --aiden "<his words>" ${W}`,
+  '      the same, on his word',
+  `  lead allow inprogress starts|landing --aiden "<his words>" ${W}`,
+  '      turn a switch on: only ever on his word',
+  `  lead disallow inprogress starts|landing ${W}`,
+  '      turn a switch off',
   `  lead relay inprogress <step number> "<message>" ${W}`,
   '      pass a message to the session working on a step',
   `  lead intent inprogress - ${W}`,
@@ -95,6 +103,7 @@ const EXPECTED = [
   '- First line: how many things need him in this project, and his open asks across all projects against the limit.',
   '- Then what needs him, one line each, those on a step in flight first, with the exact reply the ask wants in quotes.',
   '- Then what was decided for him since your last look, one line each, with the words that undo it, like "undo d12".',
+  '- Then what was started since your last look, and on whose word.',
   '- Then what is moving, what is stuck and what is next, one line each.',
   '- Last line: the one thing you would do.',
   'If the brief says every step the Phase names is finished, ask Aiden what the Phase is now, and replace the intent record when he tells you.',
@@ -114,6 +123,9 @@ const EXPECTED = [
   'A step you would park and nobody is working on: park it yourself with --reason, and tell Aiden in one line what you parked, why, and its decision number.',
   'For every other one, give him your recommendation so that he can answer in one word, and record what he decides: park and drop with their commands. Keep changes nothing; if he gives a date, record a promise for it.',
   '',
+  'When you start work',
+  "Start a step only when it is next inside the current Phase, it has a What and a Why, and nobody is working on it: run lead step on it first. After a start tell Aiden in one line what you started and why. On your next turn read the brief: if the thread has not claimed its step, say so. A started thread works under the same mandate as you, and it lands nothing that is Aiden's.",
+  '',
   'When Aiden says undo',
   "Run lead undo with the decision's number and his words, and tell him what InProgress answered. If it was a question you had answered, relay to its session that the answer was withdrawn and the question is Aiden's again. If he says why, add his reason under Standing rulings in the intent record (read the record, add the line, send the whole record back), and do not make that call again.",
   '',
@@ -127,15 +139,15 @@ describe('leadRules', () => {
     EXPECTED.forEach((line, i) => expect(lines[i], `line ${i + 1}`).toBe(line));
   });
 
-  it('is version 4, and the constant says so', () => {
-    expect(LEAD_INSTRUCTIONS_VERSION).toBe(4);
-    expect(leadRules(V).split('\n')[0]).toBe('Rules for Progresser, the lead for InProgress. Version 4.');
+  it('is version 5, and the constant says so', () => {
+    expect(LEAD_INSTRUCTIONS_VERSION).toBe(5);
+    expect(leadRules(V).split('\n')[0]).toBe('Rules for Progresser, the lead for InProgress. Version 5.');
   });
 
   it('has the relay line, eleven numbered rules, no placeholder left, plain ASCII and no trailing newline', () => {
     const text = leadRules(V);
     const lines = text.split('\n');
-    expect(lines).toContain('  lead relay inprogress <step number> "<message>" --as Progresser --instructions 4');
+    expect(lines).toContain('  lead relay inprogress <step number> "<message>" --as Progresser --instructions 5');
     expect(lines.filter((l) => /^\d+\. /.test(l)).map((l) => l.split('.')[0])).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11']);
     for (const mark of ['<Lead>', '<Project>', '<slug>', '<cli>', '<n>', '<W>']) expect(text).not.toContain(mark);
     expect(text.endsWith('\n')).toBe(false);
@@ -174,7 +186,7 @@ describe('leadRules', () => {
 
   it('keeps a project whose name holds a line break on one line', () => {
     const text = leadRules({ ...V, projectName: ' In\nProgress ' });
-    expect(text.split('\n')[0]).toBe('Rules for Progresser, the lead for In Progress. Version 4.');
+    expect(text.split('\n')[0]).toBe('Rules for Progresser, the lead for In Progress. Version 5.');
     expect(text).not.toContain('In\nProgress');
   });
 

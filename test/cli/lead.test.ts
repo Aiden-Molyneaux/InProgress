@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { runCli } from '../../src/cli/commands';
 import { LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
-import { LEAD_TIMEOUT, LEAD_USAGE, RELAY_NO_ANSWER, RELAY_TIMEOUT_MS, runLead } from '../../src/cli/lead';
+import { LEAD_TIMEOUT, LEAD_USAGE, RELAY_NO_ANSWER, RELAY_TIMEOUT_MS, START_NO_ANSWER, runLead } from '../../src/cli/lead';
 import { TASKS_NOT_RUNNING_HINT } from '../../src/cli/tasks';
 import { ApiClientError } from '../../src/lib/client';
 import { ensureToken } from '../../src/lib/home';
@@ -75,7 +75,7 @@ describe('inprogress lead brief', () => {
     const text = capture();
     expect(await runLead(['brief', 'ingame', '--as', 'Progresser', '--instructions', String(LEAD_INSTRUCTIONS_VERSION)], text.out, conn)).toBe(0);
     expect(text.lines).toHaveLength(1);
-    expect(text.lines[0].split('\n')[0]).toMatch(/^Lead brief · InGame · .* · instructions v4 \(yours: v4\)$/);
+    expect(text.lines[0].split('\n')[0]).toMatch(/^Lead brief · InGame · .* · instructions v5 \(yours: v5\)$/);
     expect(text.lines[0]).toContain('In flight (0 of 3):');
 
     const json = capture();
@@ -174,12 +174,12 @@ describe('inprogress lead rules', () => {
     const c = capture();
     expect(await runLead(['rules', 'ingame', '--as', 'Progresser'], c.out, conn)).toBe(0);
     expect(c.lines).toHaveLength(1);
-    expect(c.lines[0].split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 4.');
+    expect(c.lines[0].split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 5.');
     expect(c.lines[0]).toContain(`lead brief ingame --as Progresser --instructions ${LEAD_INSTRUCTIONS_VERSION}`);
     // --instructions, when given, is ignored.
     const given = capture();
     expect(await runLead(['rules', 'ingame', '--as', 'progresser', '--instructions', '1'], given.out, conn)).toBe(0);
-    expect(given.lines[0].split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 4.');
+    expect(given.lines[0].split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 5.');
   });
 
   it('prints the three lines to paste with --bootstrap', async () => {
@@ -396,8 +396,11 @@ describe("inprogress lead's commands", () => {
 
   it('lists the reads and the commands in the usage, one line each (intent has a read and a write form)', () => {
     const lines = LEAD_USAGE.split('\n');
-    expect(lines).toHaveLength(15);
-    expect(lines.slice(1).map((l) => l.trim().split(' ')[2])).toEqual(['rules', 'brief', 'step', 'resource', 'answer', 'decide', 'undo', 'park', 'drop', 'promise', 'kept', 'intent', 'intent', 'relay']);
+    expect(lines).toHaveLength(18);
+    expect(lines.slice(1).map((l) => l.trim().split(' ')[2])).toEqual(['rules', 'brief', 'step', 'resource', 'answer', 'decide', 'undo', 'park', 'drop', 'promise', 'kept', 'intent', 'intent', 'relay', 'start', 'allow', 'disallow']);
+    expect(lines[15]).toBe('  inprogress lead start <project> <step id> [--aiden <words>] --as <name> --instructions <n>');
+    expect(lines[16]).toBe('  inprogress lead allow <project> starts|landing --aiden <words> --as <name> --instructions <n>');
+    expect(lines[17]).toBe('  inprogress lead disallow <project> starts|landing [--aiden <words>] --as <name> --instructions <n>');
     expect(lines[3]).toBe('  inprogress lead step <project> <step id> --as <name> --instructions <n>');
     expect(lines[4]).toBe('  inprogress lead resource <project> <document id> --as <name> --instructions <n>');
     expect(lines[5]).toBe('  inprogress lead answer <project> <ask id> --aiden <words> [--says <text>] --as <name> --instructions <n>');
@@ -498,6 +501,55 @@ describe('inprogress lead relay', () => {
     });
     try {
       await expect(run(['relay', 'inprogress', '42', 'hi', ...WHO])).rejects.toMatchObject({ status: 0, code: 'ECONNREFUSED' });
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('posts allow and disallow with the switch, and refuses a switch that is not one, or an allow with no words, before posting', async () => {
+    const sent = stubbed(async () => new Response(JSON.stringify({ text: 'Starts is on for InGame.' }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    try {
+      expect(await run(['allow', 'inprogress', 'starts', '--aiden', 'yes, go', ...WHO])).toEqual({ code: 0, lines: ['Starts is on for InGame.'], reads: 0 });
+      expect(await run(['disallow', 'inprogress', 'landing', ...WHO])).toMatchObject({ code: 0 });
+      expect(await run(['disallow', 'inprogress', 'landing', '--aiden', 'stop it', ...WHO])).toMatchObject({ code: 0 });
+      const bad = await run(['allow', 'inprogress', 'deploys', '--aiden', 'go', ...WHO]);
+      expect(bad).toEqual({ code: 1, lines: ['deploys is not a switch: give starts or landing', LEAD_USAGE], reads: 0 });
+      const noWords = await run(['allow', 'inprogress', 'starts', ...WHO]);
+      expect(noWords).toEqual({ code: 1, lines: ['Missing --aiden', LEAD_USAGE], reads: 0 });
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+    const who = { as: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION };
+    expect(sent.map((s) => [s.url.replace(conn.baseUrl, ''), s.body])).toEqual([
+      ['/api/lead/inprogress/allow', { ...who, switch: 'starts', aidenWords: 'yes, go' }],
+      ['/api/lead/inprogress/disallow', { ...who, switch: 'landing' }],
+      ['/api/lead/inprogress/disallow', { ...who, switch: 'landing', aidenWords: 'stop it' }],
+    ]);
+  });
+
+  it('posts start with its step and optional words, waiting RELAY_TIMEOUT_MS, and says a thread may have been started when no answer comes back', async () => {
+    const sent = stubbed(async () => new Response(JSON.stringify({ text: 'Started a thread for #42 Dark mode: t3-1. It claims the step on its first turn.', threadId: 't3-1' }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    try {
+      expect(await run(['start', 'inprogress', '#42', ...WHO])).toMatchObject({ code: 0 });
+      expect(await run(['start', 'inprogress', '42', '--aiden', 'go on', ...WHO])).toMatchObject({ code: 0 });
+      expect(await run(['start', 'inprogress', 'x', ...WHO])).toEqual({ code: 1, lines: ['x is not a step: give it as #42 or 42', LEAD_USAGE], reads: 0 });
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+    const who = { as: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION };
+    expect(sent.map((s) => [s.url.replace(conn.baseUrl, ''), s.body, s.timeoutMs])).toEqual([
+      ['/api/lead/inprogress/start', { ...who, stepId: 42 }, RELAY_TIMEOUT_MS],
+      ['/api/lead/inprogress/start', { ...who, stepId: 42, aidenWords: 'go on' }, RELAY_TIMEOUT_MS],
+    ]);
+    const timeout = Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+    stubbed(async () => {
+      throw timeout;
+    });
+    try {
+      expect(await run(['start', 'inprogress', '42', ...WHO])).toEqual({ code: 1, lines: [START_NO_ANSWER], reads: 0 });
     } finally {
       vi.unstubAllGlobals();
       vi.restoreAllMocks();

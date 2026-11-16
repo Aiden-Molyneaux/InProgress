@@ -1,5 +1,5 @@
 import { deriveBoard, type BoardRow, type Mark } from '../core/board';
-import { LEAD_IDLE_MARKS, LEAD_INSTRUCTIONS_VERSION, LEAD_LOOK_BACK_DAYS, LEAD_STALE_MARKS, isAidens, type LeadBrief, type LeadEventKind, type LeadEventOut } from '../core/lead';
+import { LEAD_IDLE_MARKS, LEAD_INSTRUCTIONS_VERSION, LEAD_LOOK_BACK_DAYS, LEAD_STALE_MARKS, isAidens, type LeadBrief, type LeadEventKind, type LeadEventOut, type LeadSwitch, type LeadSwitchState } from '../core/lead';
 import { decisionText, isDecisionLog } from '../core/lead-mandate';
 import { leadBootstrap, leadRules } from '../core/lead-rules';
 import { buildIndex, dfsOrder, shelvedIds } from '../core/tree';
@@ -259,8 +259,26 @@ export function readLeadBrief(ctx: Ctx, ref: string, yours: number | null, now: 
     landedSince,
     saidInAidensName: saidSince(ctx, project.id, since),
     decided: decidedSince(ctx, project.id, new Date(nowMs - DEFAULT_LOOK_BACK_MS).toISOString(), project.leadSeenAt, titleOf),
+    switches: leadSwitches(ctx, project.id),
+    started: startedSince(ctx, project.id, new Date(nowMs - DEFAULT_LOOK_BACK_MS).toISOString(), titleOf),
     links: { ...lastRelay(ctx, project.id), lastSeenAt: project.leadSeenAt },
   };
+}
+
+/**
+ * The threads the lead started since `cutoff`, newest first: the project's `start` events. A thread is claimed when a
+ * session (live or ended) carries its T3 thread id.
+ */
+function startedSince(ctx: Ctx, projectId: number, cutoff: string, titleOf: (id: number) => string): LeadBrief['started'] {
+  const rows = ctx.db
+    .prepare(
+      `SELECT e.at, e.node_id, e.text, e.aiden_words, EXISTS (SELECT 1 FROM sessions s WHERE s.t3_thread_id = e.text) AS claimed
+         FROM lead_events e
+        WHERE e.project_id = ? AND e.kind = 'start' AND e.at >= ?
+        ORDER BY e.at DESC, e.id DESC`,
+    )
+    .all(projectId, cutoff) as { at: string; node_id: number; text: string; aiden_words: string | null; claimed: number }[];
+  return rows.map((r) => ({ at: r.at, stepId: r.node_id, stepTitle: titleOf(r.node_id), threadId: r.text, onAidensWord: r.aiden_words !== null, claimed: r.claimed === 1 }));
 }
 
 /**
@@ -297,6 +315,21 @@ export function logLeadEvent(
     .prepare('INSERT INTO lead_events (project_id, at, lead, instructions, kind, node_id, ask_id, session_id, text, aiden_words) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .run(e.projectId, ctx.now(), e.lead, e.instructions, e.kind, e.nodeId ?? null, e.askId ?? null, e.sessionId ?? null, e.text ?? '', e.aidenWords ?? null);
   return Number(info.lastInsertRowid);
+}
+
+/**
+ * Each switch as the project's log reads it: the newest `allow` or `disallow` line whose text is the switch's name, on when
+ * it is an allow. A switch with no line is off. `words` are Aiden's words on the line (an allow always has them).
+ */
+export function leadSwitches(ctx: Ctx, projectId: number): Record<LeadSwitch, LeadSwitchState> {
+  const read = (name: LeadSwitch): LeadSwitchState => {
+    const row = ctx.db
+      .prepare("SELECT kind, at, aiden_words FROM lead_events WHERE project_id = ? AND kind IN ('allow', 'disallow') AND text = ? ORDER BY at DESC, id DESC LIMIT 1")
+      .get(projectId, name) as { kind: string; at: string; aiden_words: string | null } | undefined;
+    if (row === undefined || row.kind !== 'allow') return { on: false, at: null, words: null };
+    return { on: true, at: row.at, words: row.aiden_words };
+  };
+  return { starts: read('starts'), landing: read('landing') };
 }
 
 /** The last `limit` lines of the project's log, newest first. */

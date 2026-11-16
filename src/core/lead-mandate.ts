@@ -12,6 +12,7 @@ export const LEAD_MANDATE: readonly string[] = [
   '- the bar for work that nothing shows on a screen: fixes, refactors, tests, docs, internal scripts;',
   '- what is next inside the current Phase, and in what order;',
   '- setting aside (parking) a step nobody is working on, with the reason; dropping a step only when its origin is proposed;',
+  '- starting a thread for the next step inside the current Phase, when Starts is on for this project and the limits allow it;',
   '- your own promises.',
   "Aiden's, always:",
   '- what cannot be undone: deleting data, a branch or a step he asked for; rewriting history; a release;',
@@ -30,6 +31,13 @@ export const DECIDED_PREFIX = 'Decided for Aiden:';
 export const isDecisionLog = (text: string): boolean => /^\s*decided for aiden:/i.test(text);
 /** The log text after the prefix, trimmed. */
 export const decisionText = (text: string): string => text.replace(/^\s*decided for aiden:\s*/i, '').trim();
+
+/**
+ * The line a session's briefing carries after the two mandate lines when Aiden has turned Landing on for the project: the
+ * only case in which a session merges, deploys and pushes without his go-ahead. Plain ASCII, but for the middle dot.
+ */
+export const SESSION_LANDING_LINE =
+  'Landing: in this project work lands without Aiden when all of this holds: nothing in its bar shows on a screen, its diff touches nothing on the risk list (the database, the hooks and installer, the deploy scripts), the checks are green, the reviewer\'s verdict is sound, and the deploy is green. Then merge, deploy and push, and record it in your next scribe brief as "log on #<id>: Decided for Aiden: landed <sha> · <the evidence in one line>". Everything else waits for his go-ahead.';
 
 /** The two lines a session's briefing carries after the lead line. `lead` is cleaned to one line by the caller's `one()`. */
 export const sessionMandateLines = (lead: string): string[] => [

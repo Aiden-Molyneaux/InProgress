@@ -3,7 +3,18 @@ import { spanAgo } from './span';
 import type { AskKind } from './types';
 
 /** The version of the lead's written instructions. A write command from a lower version is refused. */
-export const LEAD_INSTRUCTIONS_VERSION = 4;
+export const LEAD_INSTRUCTIONS_VERSION = 5;
+/** The two per-project switches only Aiden turns on: whether the lead may start a thread on its own judgment, and whether a session may land routine work. */
+export const LEAD_SWITCHES = ['starts', 'landing'] as const;
+export type LeadSwitch = (typeof LEAD_SWITCHES)[number];
+/** The most threads the lead starts on its own judgment (no words of Aiden's) in one project in 24 hours. */
+export const LEAD_STARTS_PER_DAY = 3;
+/** One switch as the log reads it: on when the newest allow or disallow line for it is an allow; when, and Aiden's words for it. */
+export interface LeadSwitchState {
+  on: boolean;
+  at: string | null;
+  words: string | null;
+}
 /** The marks that make a step Stale in the lead's brief: it was left open, an ask went unanswered, or an answer is owed. */
 export const LEAD_STALE_MARKS = ['ended_open', 'stale_ask', 'done_focus', 'stalled', 'answer_waiting', 'answered_in_chat'] as const;
 /**
@@ -32,7 +43,7 @@ export type AskOwner = 'aiden' | 'lead';
  * title, no count and no Board row.
  */
 export const isAidens = (a: { owner: AskOwner }): boolean => a.owner !== 'lead';
-export type LeadEventKind = 'answer' | 'decide' | 'undo' | 'park' | 'drop' | 'promise' | 'kept' | 'intent' | 'relay' | 'relay_unknown' | 'relay_failed';
+export type LeadEventKind = 'answer' | 'decide' | 'undo' | 'park' | 'drop' | 'promise' | 'kept' | 'intent' | 'relay' | 'relay_unknown' | 'relay_failed' | 'allow' | 'disallow' | 'start' | 'start_unknown' | 'start_failed';
 
 /** One line of the lead's log, as the log's read answers it. */
 export interface LeadEventOut {
@@ -79,6 +90,13 @@ export interface LeadBrief {
    * (always true with no look on record).
    */
   decided: { tag: string; at: string; by: string; stepId: number | null; stepTitle: string; what: string; why: string; isNew: boolean }[];
+  /** Each switch: on or off, since when, and Aiden's words when he turned it on. */
+  switches: Record<LeadSwitch, LeadSwitchState>;
+  /**
+   * The project's `start` events of the last LEAD_LOOK_BACK_DAYS days, newest first. `claimed` when a session carries
+   * that T3 thread id; `onAidensWord` when the start had his words.
+   */
+  started: { at: string; stepId: number; stepTitle: string; threadId: string; onAidensWord: boolean; claimed: boolean }[];
   /**
    * `t3` and `t3At` are read from the lead's log, per project: the newest relay, relay_unknown or relay_failed event.
    * `ok` for a relay, `unavailable` for the other two, `not checked` (and null) with none.

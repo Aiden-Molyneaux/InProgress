@@ -10,6 +10,10 @@ Every decision gets a number (`d12`). The brief and the Lead view list the last 
 
 The mandate binds sessions too. In a project with a lead the session briefing carries it in two lines: a session decides what can be undone, records the call as a step log that starts `Decided for Aiden:`, and carries on. Those logs are in the same list.
 
+What it may do (version 5): start a thread. `lead start <project> <step>` opens a T3 Code thread in the project's folder with a handoff (the step's What and Why, the Goal and the Phase, "Run this through Sigmund"). It is refused for a step that is finished, parked, already being worked on or missing its What and Why, for a project with no intent record or no folder, and past the limits: 3 sessions in flight per project, and on the lead's own judgment 3 starts in 24 hours and none while 5 asks wait on Aiden.
+
+Two switches per project decide what happens without Aiden's word. Both are off until he turns them on, and only his words turn one on (`lead allow <project> starts|landing --aiden "<his words>"`); the brief and the Lead view show each switch, since when, and those words. **Starts** on: the lead may start the next step inside the Phase himself. Off: he starts one only on Aiden's word. **Landing** on: the session briefing carries a Landing line, and a session lands work itself when nothing in its bar shows on a screen, its diff touches nothing on the risk list, the checks are green, the reviewer's verdict is sound and the deploy is green; it records the landing as `Decided for Aiden: landed <sha>`. Off: every landing waits for him. A switch is not a column: its state is the newest `allow` or `disallow` line in the lead's log.
+
 The mandate is code: `src/core/lead-mandate.ts`. A lead cannot widen it. A question a lead has not decided stays Aiden's in the data, so with the Bot off he still sees it and answers it in the window.
 
 ## How the rules reach it
@@ -44,7 +48,8 @@ The rules and the three lines are code: `src/core/lead-rules.ts`. The built serv
 
 Run in Grok after the gate, in a new conversation:
 
-1. Paste the three lines. Progresser runs the rules command and says he has version 4.
+1. Paste the three lines. Progresser runs the rules command and says he has version 5.
+1a. Say "start #n" for a step that is next. A thread opens in T3 Code, claims the step within a minute, and the brief lists it under Started. Say "turn starts on" and later "where are we": he says what he started himself, and why.
 2. Say "where are we". He first decides the open questions his mandate lets him decide. The answer is twelve lines or fewer: the first line has Aiden's open asks across all projects, then what was decided for him with the words that undo each, then what needs him, each with a recommendation one word answers.
 2a. Say "undo d<n>" for one of them. It is put back, and he says what InProgress answered.
 2b. Start a new session on a step. It decides routine calls itself, records them as "Decided for Aiden:", and asks only what is Aiden's.

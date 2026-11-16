@@ -25,6 +25,8 @@ const empty = (): LeadBrief => ({
   landedSince: [],
   saidInAidensName: [],
   decided: [],
+  switches: { starts: { on: false, at: null, words: null }, landing: { on: false, at: null, words: null } },
+  started: [],
   links: { t3: 'not checked', t3At: null, lastSeenAt: null },
 });
 

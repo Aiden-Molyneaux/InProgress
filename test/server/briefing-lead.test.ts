@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sessionMandateLines } from '../../src/core/lead-mandate';
+import { SESSION_LANDING_LINE, sessionMandateLines } from '../../src/core/lead-mandate';
 import { leadBriefingLine } from '../../src/core/relay';
 import { renderBriefing } from '../../src/server/briefing';
 import { addNodes } from '../../src/server/repo/nodes';
@@ -27,6 +27,42 @@ function setup(lead: string | null = 'Progresser') {
   const brief = (id: string) => renderBriefing(getProjectSnapshot(ctx, project.slug), id, Date.parse(ctx.now()), { checkOld: true, cli: CLI }).split('\n');
   return { ctx, project, step, join, brief };
 }
+
+describe('the Landing line in a worker briefing', () => {
+  const turnOn = (t: ReturnType<typeof setup>) =>
+    t.ctx.db
+      .prepare("INSERT INTO lead_events (project_id, at, lead, instructions, kind, text, aiden_words) VALUES (?, ?, 'Progresser', 5, 'allow', 'landing', 'land routine work')")
+      .run(t.project.id, t.ctx.now());
+
+  it('follows the two mandate lines when the project has a lead and Landing is on, and is absent with it off or after a disallow', () => {
+    const t = setup();
+    expect(enrolledBrief(t).some((l) => l.startsWith('Landing:'))).toBe(false);
+    turnOn(t);
+    const lines = enrolledBrief(t);
+    const at = lines.indexOf(sessionMandateLines('Progresser')[1]);
+    expect(at).toBeGreaterThan(0);
+    expect(lines[at + 1]).toBe(SESSION_LANDING_LINE);
+    t.ctx.db
+      .prepare("INSERT INTO lead_events (project_id, at, lead, instructions, kind, text) VALUES (?, ?, 'Progresser', 5, 'disallow', 'landing')")
+      .run(t.project.id, t.ctx.now());
+    expect(enrolledBrief(t).some((l) => l.startsWith('Landing:'))).toBe(false);
+  });
+
+  it('is absent with no lead, whatever the log says', () => {
+    const t = setup(null);
+    turnOn(t);
+    expect(enrolledBrief(t).some((l) => l.startsWith('Landing:'))).toBe(false);
+  });
+});
+
+/** A claimed worker's briefing through enrollSession, which reads the Landing switch as the hooks do. */
+function enrolledBrief(t: ReturnType<typeof setup>): string[] {
+  const id = `e${++seq}`;
+  enrollSession(t.ctx, `scribe:${id}`, id, t.project.slug);
+  claimStep(t.ctx, `session:${id}`, id, t.step.id);
+  return enrollSession(t.ctx, `scribe:${id}`, id, t.project.slug).briefing.split('\n');
+}
+let seq = 0;
 
 describe('the Lead line in a worker briefing', () => {
   it("follows the Role line of a claimed worker in a led project, before the plan-edit line", () => {

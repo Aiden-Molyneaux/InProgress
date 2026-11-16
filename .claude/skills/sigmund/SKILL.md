@@ -334,6 +334,9 @@ git -c credential.helper= -c 'credential.helper=!f() { echo username=x-access-to
 
 A PR only when Aiden asks. Deploy and `claude:install` never run from a worktree: the installed hooks bake in the main checkout's absolute path.
 
+In a project whose session briefing carries a Landing line, that line is the owner's standing go-ahead for the work it
+describes: land it, record it as the line says, and say so in the receipt. Everything else still waits for his word.
+
 **After the gate.** Criteria marked *after the gate*, and a walkthrough whose check surface
 follows a landing: once the landing or deploy puts the change in front of the owner, hand them
 over as a `review` ask through the scribe (in a tracked session; otherwise in your closing message) with the

@@ -20,7 +20,7 @@ export const RELAY_UNKNOWN = 'It may have been delivered. Not retried.';
 const REASON_CUT = 300;
 
 /** A failure's message as the reply quotes it: one line, at most 300 characters, no closing full stops or spaces. */
-function reasonOf(err: unknown): string {
+export function reasonOf(err: unknown): string {
   const text = err instanceof Error ? err.message : String(err);
   return text.replace(/\s+/g, ' ').trim().slice(0, REASON_CUT).replace(/[.\s]+$/, '');
 }

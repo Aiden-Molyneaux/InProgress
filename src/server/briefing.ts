@@ -325,6 +325,8 @@ export interface BriefingOptions {
   counts?: string;
   /** The CLI the commands in the rules run (default: the one beside the running server); tests pass one. */
   cli?: string;
+  /** The project's Landing switch is on (read from the lead's log by the caller): a claimed worker in a led project then gets the Landing line. */
+  landing?: boolean;
 }
 
 export const PLAN_EDIT_LINE =
@@ -384,7 +386,7 @@ export function renderBriefing(snapshot: ProjectSnapshot, sessionId: string, now
   const session = snapshot.sessions.find((s) => s.id === sessionId);
   if (session?.role === 'orchestrator') return renderOrchestratorBriefing(snapshot, session, now, opts.counts ?? '', opts);
   if (snapshot.project.briefingMode === 'scoped' && session) {
-    return claimedStep(snapshot, session) ? renderWorkerBriefing(snapshot, session, now, opts.cli) : renderUnclaimedBriefing(snapshot, session, now, opts.cli);
+    return claimedStep(snapshot, session) ? renderWorkerBriefing(snapshot, session, now, opts.cli, opts.landing === true) : renderUnclaimedBriefing(snapshot, session, now, opts.cli);
   }
   return [
     headerLine(snapshot, sessionId),

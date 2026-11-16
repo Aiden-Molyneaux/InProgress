@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import type { LeadBrief } from '../core/lead';
+import { LEAD_SWITCHES, type LeadBrief } from '../core/lead';
 import { ApiClientError, createClient } from '../lib/client';
 import { TASKS_NOT_RUNNING_HINT } from './tasks';
 
@@ -20,6 +20,9 @@ export const LEAD_USAGE = [
   `  inprogress lead intent <project> ${WHO}`,
   `  inprogress lead intent <project> <file | -> ${WHO}`,
   `  inprogress lead relay <project> <step id> <message | -> ${WHO}`,
+  `  inprogress lead start <project> <step id> [--aiden <words>] ${WHO}`,
+  `  inprogress lead allow <project> starts|landing --aiden <words> ${WHO}`,
+  `  inprogress lead disallow <project> starts|landing [--aiden <words>] ${WHO}`,
 ].join('\n');
 
 /** What a write command prints when the server did not answer in time: it may have been applied all the same. */
@@ -28,6 +31,8 @@ export const LEAD_TIMEOUT = 'InProgress did not answer in time. The command may 
 export const RELAY_TIMEOUT_MS = 75_000;
 /** What a relay prints when the server did not answer in time: the message may be in the thread already. */
 export const RELAY_NO_ANSWER = 'InProgress did not answer. The message may have been delivered: do not send it again.';
+/** What a start prints when the server did not answer in time: a thread may have been started already. */
+export const START_NO_ANSWER = 'InProgress did not answer. A thread may have been started: look in T3 Code before you try again, and do not run it again.';
 
 interface Conn {
   baseUrl: string;
@@ -75,6 +80,9 @@ const COMMANDS: Record<string, CommandSpec> = {
   kept: { positionals: 1, flags: ['--note'] },
   intent: { positionals: 1, minPositionals: 0, flags: [] },
   relay: { positionals: 2, flags: [] },
+  start: { positionals: 1, flags: ['--aiden'] },
+  allow: { positionals: 1, flags: ['--aiden'] },
+  disallow: { positionals: 1, flags: ['--aiden'] },
 };
 
 interface Parsed {
@@ -226,6 +234,24 @@ function draft(command: string, p: Parsed): Draft {
       if (id === undefined) return { error: `${first} is not a step: give it as #42 or 42` };
       return { fields: { stepId: id, message: valueOf(p.positionals[1])! } };
     }
+    case 'start': {
+      const id = stepId(first);
+      if (id === undefined) return { error: `${first} is not a step: give it as #42 or 42` };
+      fields.stepId = id;
+      put('aidenWords', flag('--aiden'));
+      return { fields };
+    }
+    case 'allow':
+    case 'disallow': {
+      if (!(LEAD_SWITCHES as readonly string[]).includes(first)) return { error: `${first} is not a switch: give starts or landing` };
+      fields.switch = { text: first };
+      if (command === 'allow') {
+        const words = needed('--aiden');
+        if ('error' in words) return words;
+        fields.aidenWords = words;
+      } else put('aidenWords', flag('--aiden'));
+      return { fields };
+    }
     default:
       return { error: `Unknown command ${command}` };
   }
@@ -289,7 +315,7 @@ export async function runLead(args: string[], out: (line: string) => void, o: Co
   const path = `/api/lead/${encodeURIComponent(p.project)}`;
   try {
     if (payload !== undefined) {
-      const res = await client.post<{ text: string }>(`${path}/${command}`, payload, command === 'relay' ? { timeoutMs: RELAY_TIMEOUT_MS } : {});
+      const res = await client.post<{ text: string }>(`${path}/${command}`, payload, command === 'relay' || command === 'start' ? { timeoutMs: RELAY_TIMEOUT_MS } : {});
       out(res.text);
       return 0;
     }
@@ -318,9 +344,9 @@ export async function runLead(args: string[], out: (line: string) => void, o: Co
     // and does not send a relay twice.
     // A relay whose request reached the server may have been sent even when the answer never came back (a timeout, or a
     // server restarted mid-send): only a refused connection means it never arrived.
-    const noAnswer = err instanceof ApiClientError && err.status === 0 && (err.code === 'TIMEOUT' || (command === 'relay' && err.code !== 'ECONNREFUSED'));
+    const noAnswer = err instanceof ApiClientError && err.status === 0 && (err.code === 'TIMEOUT' || ((command === 'relay' || command === 'start') && err.code !== 'ECONNREFUSED'));
     if (payload !== undefined && noAnswer) {
-      out(command === 'relay' ? RELAY_NO_ANSWER : LEAD_TIMEOUT);
+      out(command === 'relay' ? RELAY_NO_ANSWER : command === 'start' ? START_NO_ANSWER : LEAD_TIMEOUT);
       return 1;
     }
     if (err instanceof ApiClientError && err.status === 0) throw new ApiClientError(0, err.message, TASKS_NOT_RUNNING_HINT, err.code);

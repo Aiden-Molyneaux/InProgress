@@ -376,7 +376,7 @@ describe('built artifacts', () => {
 
   it('the built CLI has the lead reads step, resource and intent, and refuses them for a name that is not the lead', () => {
     for (const args of [['step', 'smoke', '1'], ['resource', 'smoke', 'r1'], ['intent', 'smoke']]) {
-      const r = spawnSync(process.execPath, [bin('cli/main.js'), 'lead', ...args, '--as', 'Nobody', '--instructions', '4'], { env, encoding: 'utf8' });
+      const r = spawnSync(process.execPath, [bin('cli/main.js'), 'lead', ...args, '--as', 'Nobody', '--instructions', '5'], { env, encoding: 'utf8' });
       expect(r.status, args.join(' ')).toBe(1);
       expect(`${r.stdout}${r.stderr}`, args.join(' ')).toContain('This project has no lead named Nobody.');
     }
@@ -399,7 +399,7 @@ describe('built artifacts', () => {
     const id = Number(/^a(\d+) raised on #/.exec(lines(asked.stdout)[0])![1]);
     setLead('Progresser');
     try {
-      const WHO = ['--as', 'Progresser', '--instructions', '4'];
+      const WHO = ['--as', 'Progresser', '--instructions', '5'];
       const decided = cli('lead', 'decide', 'smoke', `a${id}`, '--answer', 'Inter', '--reason', 'Already in the repo', ...WHO);
       expect(decided).toMatchObject({ status: 0, stderr: '' });
       const decision = /^Decided a\d+: decision (d\d+)\./.exec(lines(decided.stdout)[0]);
