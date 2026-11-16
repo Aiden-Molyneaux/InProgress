@@ -74,6 +74,14 @@ A step he would never see skips rows 4, 6 and 7: one click in the window in conf
   more than me". So the lead finds out where a stuck step really stands before he recommends: he may read the step's
   whole record, the project's repo with read-only git, and the project's threads. He still changes nothing there, and
   work repos stay off limits.
+- 2026-11-16, the outcome in his words: the lead is "someone I talk to and trust to make all sorts of judgement calls
+  in my stead". "I get asked too many questions by AI, and sometimes I want to give my detailed intentional answers,
+  but sometimes I don't know and I don't have capacity to know the best path forward and I need the AI to act for me,
+  only keeping important make or break questions for me." He confirmed the order the rest is built in: he knows (reads
+  the record, the repo and the threads), he decides (a written mandate, sessions' questions go to him first, a daily
+  list of what he decided, all of it undoable), he acts (starts threads, lets routine work land). Make-or-break stays
+  Aiden's: what cannot be undone, touches his real data, goes out to other people, or changes direction or what he
+  would see and feel. Section 8's stages are the parts list; this is the order.
 
 ### My calls (correct them)
 

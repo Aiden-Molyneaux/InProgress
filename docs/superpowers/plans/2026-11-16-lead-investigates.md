@@ -22,7 +22,7 @@ His rulings, same day: the lead may read the step's whole record, the project's 
 - **C10** `lead intent inprogress --as Progresser --instructions 3` prints the stored record. The Lead view shows the whole record under "The whole intent record". *Sigmund for the CLI; e2e and Parvati for the window.*
 - **C11** The brief and the Lead view say when the record was written and how many steps landed since, and say so when every step the Phase names is finished. *Unit tests; Sigmund.*
 - **C12** `lead rules` prints version 3 with the project's folders under "Reading the project" and the triage section. A version 2 lead can still read, and is told to fetch the rules again when it tries to change something. *Sigmund.*
-- **C13** *Aiden, in Grok, after the gate.* Say "triage": for each stuck step and ask Progresser says where the work really stands and what he would do, from having read its record, its documents, its thread and git, and names what he could not find. Keep, park or drop is recorded.
+- **C13** *Aiden, in Grok, after the gate.* Say "triage": for each stuck step and ask Progresser says where the work really stands, from having read its record, its documents, its thread and git, and names what he could not find. He parks the proposed ones he would park himself and says why. For the rest he gives a recommendation Aiden can answer in one word, and records the answer.
 - **C14** *Aiden, in Grok, after the gate.* Give him a new Phase in one sentence: he rewrites the record with the other four headings unchanged, and the Lead view shows the new Phase.
 
 Depth: a list, after the gate (it needs the deployed build and the real Bot).
@@ -197,6 +197,21 @@ Reading the project
 This project has no folder on record. Read it through the commands above and its T3 Code threads.
 ```
 
+**He decides what is already his, and brings drafts, not questions** (Aiden, 2026-11-16: "I need the AI to act for me, only keeping important make or break questions for me"). The code already lets the lead park a step of origin `proposed` without Aiden's words (`requireWordsFor` in `src/server/lead-commands.ts`, and section 6.3 of the spec); version 2's text forbade it. Only the text changes:
+
+The heading `Change the record, only when Aiden tells you to in this chat:` becomes `Change the record:`, and one command is added straight after the `lead park ... --aiden` pair:
+
+```
+  lead park <slug> <step number> --reason "<why>" <W>
+      set aside a step whose origin is proposed, on your own judgment
+```
+
+Rule 2 becomes: `2. What you may decide yourself: parking a step whose origin is proposed (lead step prints the origin), and your own promises. Everything else you change only on Aiden's word in this chat: an answer, a step that is his (origin me or asked), any drop, a relay, the intent record. --aiden carries his exact words, inside double quotes. If his words hold a double quote, write it as a single quote. Never pass words he did not say. If he says you decide, that is his word: decide, pass "you decide" as his words, and tell him in one line what you chose and why.`
+
+A rule 11 after rule 10: `11. Never ask Aiden an open question. Find out what you can first, then bring him a draft or a recommendation he can accept in one word.`
+
+The intent paragraph becomes: `The intent record has five headings, each a line starting with "## ": Goal, Phase, Out of scope, What Aiden cares about, Standing rulings. Do not ask Aiden to write it. Draft it yourself from the specs, plans and record you can read, show him the draft, and store it once he has corrected or accepted it. Never store a ruling he has not made.`
+
 Rule 1 becomes: `1. On Aiden's laptop, run only the commands above and what Reading the project allows. No file edits, no installs, no other program.`
 
 Rule 5's first sentence (`You may read the T3 Code threads of this project.`) is removed, since Reading the project now says it; the rest of rule 5 stays.
@@ -221,10 +236,11 @@ Then tell Aiden, for each one, in a few lines:
 - why it stopped;
 - what you would do (keep, park or drop, or a message you would relay to its session), and the exact words he can say.
 Say what you could not find out. Never guess, and never fill a gap from memory.
-Record what he decides: park and drop with their commands. Keep changes nothing; if he gives a date, record a promise for it.
+A step whose origin is proposed, and that you would park: park it yourself with --reason, and tell Aiden in one line what you parked and why.
+For every other one, give him your recommendation so that he can answer in one word, and record what he decides: park and drop with their commands. Keep changes nothing; if he gives a date, record a promise for it.
 ```
 
-- [ ] **Step 1: Failing tests** in `test/core/lead-rules.test.ts`: the title says `Version 3.`; the three new read commands with their `<W>`; the folders printed in order under `Reading the project`; the no-folder sentence with `folders: []`; rule 1's new sentence; the triage section's heading and its last line; the Phase line in the where-are-we section; every line is plain ASCII. And for `leadFolders`: forward slashes, no trailing slash, deduplicated ignoring case, sorted, `C:\work\x` and `c:/work` left out, another project's binding left out.
+- [ ] **Step 1: Failing tests** in `test/core/lead-rules.test.ts`: the heading `Change the record:`; the `lead park ... --reason` pair; rule 2's first sentence and its `you decide` sentence; rule 11; `Do not ask Aiden to write it.` in the intent paragraph; `park it yourself with --reason` in the triage section. In the file that tests `leadPark`: a `proposed` step parks without Aiden's words and an `asked` one is refused (add the two tests only where they are missing). Then: the title says `Version 3.`; the three new read commands with their `<W>`; the folders printed in order under `Reading the project`; the no-folder sentence with `folders: []`; rule 1's new sentence; the triage section's heading and its last line; the Phase line in the where-are-we section; every line is plain ASCII. And for `leadFolders`: forward slashes, no trailing slash, deduplicated ignoring case, sorted, `C:\work\x` and `c:/work` left out, another project's binding left out.
 - [ ] **Step 2: Run and see them fail.**
 - [ ] **Step 3: Implement,** then bring every test that pins `2` to the constant or to `3` (`grep -rn "instructions 2\|Version 2\|instructions: 2\|v2" test/`), the smoke test included.
 - [ ] **Step 4: Run** `npm run typecheck` and `npm test` and see them pass.
