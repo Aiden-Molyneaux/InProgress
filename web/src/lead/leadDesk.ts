@@ -1,4 +1,4 @@
-import { AIDEN_OPEN_LIMIT, IN_FLIGHT_LIMIT, LEAD_LOOK_BACK_DAYS, type LeadBrief, type LeadEventOut } from '../../../src/core/lead';
+import { AIDEN_OPEN_LIMIT, IN_FLIGHT_LIMIT, LEAD_LOOK_BACK_DAYS, intentLine, type LeadBrief, type LeadEventOut } from '../../../src/core/lead';
 import { spanAgo, stamp } from '../../../src/core/span';
 
 /** What the view says for a project with no lead. */
@@ -24,6 +24,10 @@ export interface DeskHead {
   instructions: number;
   goal: string;
   phase: string;
+  /** When the record was written and how many steps landed since, or null with no record. */
+  intentLine: string | null;
+  /** The whole stored record, '' with none. */
+  intentText: string;
   warning: string | null;
   links: string;
 }
@@ -52,6 +56,8 @@ export function deskHead(b: LeadBrief, now: number): DeskHead {
     instructions: b.instructions.current,
     goal: flat(b.intent.goal) || noGoal,
     phase: flat(b.intent.phase) || 'none',
+    intentLine: intentLine(b.intent, now, false),
+    intentText: b.intent.text,
     warning: warn ? `The last relay may not have reached its session (${spanAgo(t3At, now)} ago).` : null,
     links: `T3 Code ${t3}${t3At === null ? '' : `, last relay ${spanAgo(t3At, now)} ago`} · the lead's last look ${lastSeenAt === null ? 'never' : `${spanAgo(lastSeenAt, now)} ago`}`,
   };

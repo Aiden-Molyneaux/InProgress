@@ -1,12 +1,20 @@
 import type { FastifyInstance } from 'fastify';
 import type { Guard } from '../app';
 import type { Ctx } from '../db/tx';
+import { badRequest } from '../errors';
 import { cliBesideServer, nodeCli } from '../../lib/task-command';
-import { listLeadEvents, markLeadSeen, readLeadBrief, readLeadRules, requireLead } from '../lead';
+import { listLeadEvents, markLeadSeen, readLeadBrief, readLeadIntent, readLeadRules, requireLead } from '../lead';
 import { leadAnswer, leadDrop, leadIntent, leadKept, leadPark, leadPromise } from '../lead-commands';
 import { leadRelay, type RelaySend } from '../lead-relay';
+import { readLeadResource, readLeadStep } from '../lead-step';
 import { renderLeadBrief } from '../lead-text';
-import { leadAnswerBody, leadBriefQuery, leadDropBody, leadIntentBody, leadKeptBody, leadParkBody, leadPromiseBody, leadRelayBody, leadRulesQuery, leadSeenBody } from '../schemas';
+import { leadAnswerBody, leadBriefQuery, leadDropBody, leadIntentBody, leadKeptBody, leadParkBody, leadPromiseBody, leadReadQuery, leadRelayBody, leadRulesQuery, leadSeenBody } from '../schemas';
+
+/** A route's `:id`: a whole number above 0, or a 400. */
+function positiveId(text: string): number {
+  if (!/^\d+$/.test(text) || Number(text) < 1) throw badRequest(`${text} is not an id`);
+  return Number(text);
+}
 
 /**
  * The lead's reads, and its writes. The reads are plain GETs like the other reads: no CORS headers, so a page on another
@@ -33,6 +41,21 @@ export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken:
     const { ref } = req.params as { ref: string };
     const query = leadRulesQuery.parse(req.query);
     return readLeadRules(ctx, ref, query.as, nodeCli(cliBesideServer()));
+  });
+  // The lead's reads of one step, one document and the intent record: the same lead check, any instructions version.
+  app.get('/api/lead/:ref/step/:id', async (req) => {
+    const { ref, id } = req.params as { ref: string; id: string };
+    const query = leadReadQuery.parse(req.query);
+    return readLeadStep(ctx, ref, query.as, query.instructions, positiveId(id), new Date(ctx.now()));
+  });
+  app.get('/api/lead/:ref/resource/:id', async (req) => {
+    const { ref, id } = req.params as { ref: string; id: string };
+    const query = leadReadQuery.parse(req.query);
+    return readLeadResource(ctx, ref, query.as, query.instructions, positiveId(id));
+  });
+  app.get('/api/lead/:ref/intent', async (req) => {
+    const query = leadReadQuery.parse(req.query);
+    return readLeadIntent(ctx, (req.params as { ref: string }).ref, query.as, query.instructions);
   });
   app.get('/api/lead/:ref/events', async (req) => ({ events: listLeadEvents(ctx, (req.params as { ref: string }).ref) }));
   // The lead has read the brief: the next one counts what landed and what was said from here.

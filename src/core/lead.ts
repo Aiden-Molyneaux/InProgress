@@ -1,8 +1,9 @@
 import type { SessionApp } from './session-app';
+import { spanAgo } from './span';
 import type { AskKind } from './types';
 
 /** The version of the lead's written instructions. A write command from a lower version is refused. */
-export const LEAD_INSTRUCTIONS_VERSION = 2;
+export const LEAD_INSTRUCTIONS_VERSION = 3;
 /** The marks that make a step Stale in the lead's brief: it was left open, an ask went unanswered, or an answer is owed. */
 export const LEAD_STALE_MARKS = ['ended_open', 'stale_ask', 'done_focus', 'stalled', 'answer_waiting', 'answered_in_chat'] as const;
 /**
@@ -52,7 +53,12 @@ export interface LeadBrief {
   project: { slug: string; name: string; lead: string | null };
   at: string;
   instructions: { current: number; yours: number | null };
-  intent: { goal: string; phase: string; updatedAt: string | null };
+  /**
+   * `goal` and `phase` are the headline paragraphs, cut; `text` is the whole stored record ('' with none). `landedSince` is
+   * how many steps (never the root) finished at or after `updatedAt`, 0 with no record. `phaseFinished`: the Phase
+   * paragraph names at least one step of this project as `#<digits>`, and every one it names there is done or dropped.
+   */
+  intent: { goal: string; phase: string; updatedAt: string | null; text: string; landedSince: number; phaseFinished: boolean };
   inFlight: { stepId: number | null; title: string; sessionId: string; app: SessionApp; state: string; lastSeenAt: string }[];
   waitingOnAiden: { askId: number; kind: AskKind; stepId: number; stepTitle: string; text: string; raisedAt: string }[];
   /** Steps Aiden does himself that are active with no session on them: in his hands, so listed with what waits on him. */
@@ -71,4 +77,16 @@ export interface LeadBrief {
    * `ok` for a relay, `unavailable` for the other two, `not checked` (and null) with none.
    */
   links: { t3: 'ok' | 'unavailable' | 'not checked'; t3At: string | null; lastSeenAt: string | null };
+}
+
+/**
+ * The line under the Phase that says how old the intent record is, in the lead's brief and in the window; null with no
+ * record. `forLead` adds what the lead does when every step the Phase names is finished.
+ */
+export function intentLine(i: LeadBrief['intent'], now: number, forLead: boolean): string | null {
+  if (i.updatedAt === null) return null;
+  const n = i.landedSince;
+  let text = `Intent record: written ${spanAgo(i.updatedAt, now)} ago · ${n} ${n === 1 ? 'step' : 'steps'} landed since`;
+  if (i.phaseFinished) text += ` · every step the Phase names is finished${forLead ? ': ask Aiden what the Phase is now' : ''}`;
+  return text;
 }

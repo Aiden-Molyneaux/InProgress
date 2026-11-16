@@ -8,11 +8,14 @@ export const LEAD_USAGE = [
   'Usage:',
   '  inprogress lead rules <project> --as <name> [--bootstrap]',
   `  inprogress lead brief <project> ${WHO} [--mark] [--json]`,
+  `  inprogress lead step <project> <step id> ${WHO}`,
+  `  inprogress lead resource <project> <document id> ${WHO}`,
   `  inprogress lead answer <project> <ask id> --aiden <words> ${WHO}`,
   `  inprogress lead park <project> <step id> [--reason <text>] [--aiden <words>] ${WHO}`,
   `  inprogress lead drop <project> <step id> --reason <text> [--aiden <words>] ${WHO}`,
   `  inprogress lead promise <project> <text> --due <iso time> [--step <step id>] ${WHO}`,
   `  inprogress lead kept <project> <ask id> [--note <text>] ${WHO}`,
+  `  inprogress lead intent <project> ${WHO}`,
   `  inprogress lead intent <project> <file | -> ${WHO}`,
   `  inprogress lead relay <project> <step id> <message | -> ${WHO}`,
 ].join('\n');
@@ -48,6 +51,8 @@ const REAL_IO: LeadIo = { stdin: readStdin, readFile: (path) => readFileSync(pat
 /** What each command takes after its project: how many positional values, its flags with a value, and its bare flags. */
 interface CommandSpec {
   positionals: number;
+  /** At least this many positional values, when fewer than `positionals` is allowed (default: `positionals`). */
+  minPositionals?: number;
   flags: readonly string[];
   bools?: readonly string[];
   /** The command can be run without --instructions (the lead does not know the version until it has read the rules). */
@@ -57,12 +62,14 @@ interface CommandSpec {
 const COMMANDS: Record<string, CommandSpec> = {
   rules: { positionals: 0, flags: [], bools: ['--bootstrap'], noInstructions: true },
   brief: { positionals: 0, flags: [], bools: ['--mark', '--json'] },
+  step: { positionals: 1, flags: [] },
+  resource: { positionals: 1, flags: [] },
   answer: { positionals: 1, flags: ['--aiden'] },
   park: { positionals: 1, flags: ['--reason', '--aiden'] },
   drop: { positionals: 1, flags: ['--reason', '--aiden'] },
   promise: { positionals: 1, flags: ['--due', '--step'] },
   kept: { positionals: 1, flags: ['--note'] },
-  intent: { positionals: 1, flags: [] },
+  intent: { positionals: 1, minPositionals: 0, flags: [] },
   relay: { positionals: 2, flags: [] },
 };
 
@@ -99,7 +106,7 @@ function parseArgs(args: string[], spec: CommandSpec): Parsed | { error: string 
   }
   const [project, ...rest] = positionals;
   if (project === undefined) return { error: 'Missing <project>' };
-  if (rest.length < spec.positionals) return { error: 'Missing a value after <project>' };
+  if (rest.length < (spec.minPositionals ?? spec.positionals)) return { error: 'Missing a value after <project>' };
   if (rest.length > spec.positionals) return { error: `Unexpected ${rest[spec.positionals]}` };
   if (as === undefined) return { error: 'Missing --as <name>' };
   if (instructions === undefined && !spec.noInstructions) return { error: 'Missing --instructions <n>' };
@@ -114,6 +121,12 @@ const askId = (text: string): number | undefined => {
 /** A step as the brief names it, `#42`, or as a bare number, `42` (a shell reads an unquoted `#42` as a comment). */
 const stepId = (text: string): number | undefined => {
   const m = /^#?(\d+)$/.exec(text.trim());
+  return m && Number(m[1]) > 0 ? Number(m[1]) : undefined;
+};
+
+/** A document as `lead step` names it, `r42`, or as a bare number, `42`. */
+const resourceId = (text: string): number | undefined => {
+  const m = /^r?(\d+)$/i.exec(text.trim());
   return m && Number(m[1]) > 0 ? Number(m[1]) : undefined;
 };
 
@@ -204,7 +217,14 @@ export async function runLead(args: string[], out: (line: string) => void, o: Co
   if (command === undefined || !Object.hasOwn(COMMANDS, command)) return usage();
   const p = parseArgs(rest, COMMANDS[command]);
   if ('error' in p) return usage(p.error);
-  const body = command === 'brief' || command === 'rules' ? undefined : draft(command, p);
+  // The reads: brief, rules, step, resource, and intent with no file. They are GETs and send nothing.
+  const [first] = p.positionals;
+  const reads = command === 'brief' || command === 'rules' || command === 'step' || command === 'resource' || (command === 'intent' && first === undefined);
+  const readId = command === 'step' ? stepId(first) : command === 'resource' ? resourceId(first) : undefined;
+  if ((command === 'step' || command === 'resource') && readId === undefined) {
+    return usage(command === 'step' ? `${first} is not a step: give it as #42 or 42` : `${first} is not a document: give it as r42 or 42`);
+  }
+  const body = reads ? undefined : draft(command, p);
   if (body !== undefined && 'error' in body) return usage(body.error);
   if (body !== undefined && Object.values(body.fields).filter((v) => typeof v === 'object' && 'stdin' in v).length > 1) {
     return usage('Only one value can be read from stdin (-)');
@@ -236,6 +256,15 @@ export async function runLead(args: string[], out: (line: string) => void, o: Co
     if (payload !== undefined) {
       const res = await client.post<{ text: string }>(`${path}/${command}`, payload, command === 'relay' ? { timeoutMs: RELAY_TIMEOUT_MS } : {});
       out(res.text);
+      return 0;
+    }
+    const asked = `as=${encodeURIComponent(p.as)}&instructions=${p.instructions}`;
+    if (command === 'step' || command === 'resource') {
+      out((await client.get<{ text: string }>(`${path}/${command}/${readId}?${asked}`)).text);
+      return 0;
+    }
+    if (command === 'intent') {
+      out((await client.get<{ text: string }>(`${path}/intent?${asked}`)).text);
       return 0;
     }
     if (command === 'rules') {

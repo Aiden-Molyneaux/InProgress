@@ -1842,6 +1842,35 @@ test("Lead… gives a project a lead, the Lead view shows the brief and the log 
   await expect(page.locator('.ip-lead-sec[data-group]')).toHaveCount(7);
 });
 
+test('The Lead view shows the whole intent record and when it was written', async ({ page, api }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const name = unique('Lead intent');
+  const made = await bare(api, name);
+  await page.goto(`/#/p/${made.slug}`);
+  const tab = railRow(page, name);
+  await expect(tab).toHaveAttribute('aria-current', 'page');
+  await tab.click({ button: 'right' });
+  await tabMenu(page, name).getByRole('menuitem', { name: 'Lead…', exact: true }).click();
+  const field = page.getByRole('textbox', { name: `Lead of ${name}`, exact: true });
+  await field.fill('Progresser');
+  await page.keyboard.press('Enter');
+  await expect(field).toBeHidden();
+  const intent = '## Goal\nShip the window.\n\n## Phase\nBuilding.\n\n## Out of scope\nNothing.\n\n## What Aiden cares about\nSpeed.\n\n## Standing rulings\nKeep it small.\n';
+  const res = await api.post(`/api/lead/${made.slug}/intent`, {
+    headers: { authorization: `Bearer ${readFileSync('.e2e-home/token', 'utf8').trim()}` },
+    data: { as: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION, intent },
+  });
+  expect(res.ok(), `intent answered ${res.status()}: ${await res.text()}`).toBe(true);
+  await viewButton(page, 'Lead').click();
+  await expect(page.locator('.ip-lead-line').filter({ hasText: /^Intent record: written/ })).toBeVisible();
+  const whole = page.locator('details.ip-lead-intent');
+  await expect(whole.locator('summary')).toHaveText('The whole intent record');
+  await expect(whole).not.toHaveAttribute('open', '');
+  await whole.locator('summary').click();
+  await expect(whole.getByText('## Standing rulings')).toBeVisible();
+  await expect(whole.getByText('Keep it small.')).toBeVisible();
+});
+
 test('the open archived project can be renamed from its tab, and ⋯ shows the new name', async ({ page, api }) => {
   const keptName = unique('Rename kept');
   const oldName = unique('Rename shelved');

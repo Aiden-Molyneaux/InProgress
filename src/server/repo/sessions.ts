@@ -162,6 +162,12 @@ export function readProjectSessions(ctx: Ctx, projectId: number): Session[] {
     .map((r) => toSession(ctx, r));
 }
 
+/** The sessions whose focus is the node, live and ended, the one heard from last first. A plain read. */
+export function listStepSessions(ctx: Ctx, nodeId: number, limit = 10): Session[] {
+  return (ctx.db.prepare('SELECT * FROM sessions WHERE focus_node_id = ? ORDER BY COALESCE(ended_at, last_seen_at) DESC, id LIMIT ?').all(nodeId, limit) as SessionRow[])
+    .map((r) => toSession(ctx, r));
+}
+
 /**
  * The project's ended sessions that the trail names, newest first: ones that ended less than 7 days ago leaving working
  * tasks here, or whose subagents (readers aside) stopped less than 7 days ago. A plain read.

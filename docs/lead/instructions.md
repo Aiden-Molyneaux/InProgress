@@ -1,6 +1,10 @@
 # The lead's instructions
 
-A project's lead is a chat Bot. It reads where the project stands and tells Aiden. It records what Aiden decides, in his words. It can run only `inprogress lead ...` commands, plus `outline`, `digest` and `status` to read. It never approves, merges or decides for Aiden. It never touches another project, git, files or T3 Code except through `lead relay`.
+A project's lead is a chat Bot. It finds out where the project stands and tells Aiden. It records what Aiden decides, in his words, and brings him drafts and recommendations, never open questions. It never approves or merges for Aiden, and it never touches another project.
+
+What it may read (version 3): the `inprogress lead ...` reads, with `outline`, `digest` and `status`; the project's folders, with a short list of read-only git commands; and the project's T3 Code threads. `lead step` prints everything on record about one step, `lead resource` a document stored in InProgress, and `lead intent` with no file the whole intent record. It changes nothing in a folder, and writes to T3 Code only through `lead relay`.
+
+What it may decide alone (version 3): parking a step whose origin is `proposed`, and its own promises. Everything else it changes only on Aiden's word in the chat, "you decide" included. The mandate for more than that is the next step, #734.
 
 ## How the rules reach it
 
@@ -34,9 +38,10 @@ The rules and the three lines are code: `src/core/lead-rules.ts`. The built serv
 
 Run in Grok after the gate, in a new conversation:
 
-1. Paste the three lines. Progresser runs the rules command and says he has version 2.
+1. Paste the three lines. Progresser runs the rules command and says he has version 3.
 2. Say "where are we". The answer is ten lines or fewer: the first line has Aiden's open asks across all projects, then what needs him with the reply each ask wants.
-3. Talk through the five headings of the intent record. Progresser writes it, and the Lead view shows the Goal and the Phase.
-4. For the first triage, say keep, park or drop for each stuck step and each ask. It is recorded.
-5. Say "Tell the session on #n: ...". It arrives in that thread under the header, and the log shows the relay.
-6. Say "where are we" twice, a few minutes apart. Both answers give the same facts as the Lead view.
+3. The intent record. Progresser drafts it from the specs, plans and record, shows the draft, and stores it once Aiden has corrected or accepted it. The Lead view shows the Goal, the Phase, when the record was written, and the whole record.
+4. Say "triage". For each stuck step and ask he says where the work really stands, from its record, its documents, its thread and git, and names what he could not find. He parks the proposed ones he would park and says why. For the rest he gives a recommendation that one word answers, and records the answer.
+5. Give him a new Phase in one sentence. He rewrites the record with the other four headings unchanged.
+6. Say "Tell the session on #n: ...". It arrives in that thread under the header, and the log shows the relay.
+7. Say "where are we" twice, a few minutes apart. Both answers give the same facts as the Lead view.

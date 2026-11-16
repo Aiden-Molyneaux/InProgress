@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { LeadBrief } from '../../src/core/lead';
 import { stamp } from '../../src/server/digest';
-import { intentHeadlines, renderLeadBrief } from '../../src/server/lead-text';
+import { intentLine } from '../../src/core/lead';
+import { intentHeadlines, intentParagraphs, renderLeadBrief } from '../../src/server/lead-text';
 
 const AT = '2026-11-14T12:00:00.000Z';
 const ago = (ms: number) => new Date(Date.parse(AT) - ms).toISOString();
@@ -13,7 +14,7 @@ const empty: LeadBrief = {
   project: { slug: 'ingame', name: 'InGame', lead: 'Progresser' },
   at: AT,
   instructions: { current: 1, yours: 1 },
-  intent: { goal: '', phase: '', updatedAt: null },
+  intent: { goal: '', phase: '', updatedAt: null, text: '', landedSince: 0, phaseFinished: false },
   inFlight: [],
   waitingOnAiden: [],
   aidensOwn: [],
@@ -29,7 +30,7 @@ const empty: LeadBrief = {
 
 const full: LeadBrief = {
   ...empty,
-  intent: { goal: 'Ship the Play Store build.', phase: 'Signing', updatedAt: ago(DAY) },
+  intent: { goal: 'Ship the Play Store build.', phase: 'Signing', updatedAt: ago(DAY), text: '## Goal\nShip it\n', landedSince: 2, phaseFinished: false },
   inFlight: [
     { stepId: 12, title: 'Play app signing', sessionId: 's1', app: 't3', state: 'working', lastSeenAt: ago(3 * MIN) },
     { stepId: null, title: 'no step claimed', sessionId: 's2', app: 'cli', state: 'idle', lastSeenAt: ago(2 * HOUR) },
@@ -55,6 +56,7 @@ describe('renderLeadBrief', () => {
       `Lead brief · InGame · ${stamp(AT)} · instructions v1 (yours: v1)`,
       'Goal: Ship the Play Store build.',
       'Phase: Signing',
+      'Intent record: written 1d ago · 2 steps landed since',
       'In flight (2 of 3):',
       '  #12 Play app signing · working · t3 · seen 3m ago',
       '  no step claimed · idle · cli · seen 2h ago',
@@ -202,7 +204,7 @@ describe('renderLeadBrief on free text', () => {
   });
 
   it('says the record has no goal under a Goal heading when it is set and the goal is empty, and no record yet otherwise', () => {
-    expect(renderLeadBrief({ ...empty, intent: { goal: '', phase: 'Signing', updatedAt: ago(DAY) } }).split('\n')[1]).toBe('Goal: The intent record has no goal under a Goal heading.');
+    expect(renderLeadBrief({ ...empty, intent: { goal: '', phase: 'Signing', updatedAt: ago(DAY), text: '', landedSince: 0, phaseFinished: false } }).split('\n')[1]).toBe('Goal: The intent record has no goal under a Goal heading.');
     // A heading with nothing under it reads the same as a missing one, and the sentence is true of both.
     expect(intentHeadlines('## Goal\n\n## Phase\nSigning')).toEqual({ goal: '', phase: 'Signing' });
     expect(renderLeadBrief(empty).split('\n')[1]).toBe('Goal: No intent record yet.');
@@ -232,5 +234,46 @@ describe('intentHeadlines', () => {
     expect(intentHeadlines('## Goal\nOne line\n## Phase\nTwo')).toEqual({ goal: 'One line', phase: 'Two' });
     expect(intentHeadlines('## Goal\nOne line\n#Risks\nTwo')).toEqual({ goal: 'One line', phase: '' });
     expect(intentHeadlines('## Goal\nShip the lead: #725 to\n#729, in order.\n##Phase\nStage 1')).toEqual({ goal: 'Ship the lead: #725 to #729, in order.', phase: 'Stage 1' });
+  });
+});
+
+describe('intentParagraphs', () => {
+  it('returns the Goal and Phase paragraphs uncut, where intentHeadlines cuts them', () => {
+    const long = 'word '.repeat(100).trim();
+    const record = `## Goal\n${long}\n\n## Phase\nFinish #725 to #729.\nThen rest.\n\n## Out of scope\nNothing.\n`;
+    const p = intentParagraphs(record);
+    expect(p.goal).toBe(long);
+    expect(p.phase).toBe('Finish #725 to #729. Then rest.');
+    expect(intentHeadlines(record).goal.length).toBeLessThan(long.length);
+    expect(intentParagraphs('## Phase\n')).toEqual({ goal: '', phase: '' });
+  });
+});
+
+describe('intentLine', () => {
+  const NOW_MS = Date.parse(AT);
+  const base = { goal: 'g', phase: 'p', updatedAt: ago(2 * DAY), text: 't', landedSince: 2, phaseFinished: false };
+
+  it('is null with no record', () => {
+    expect(intentLine({ ...base, updatedAt: null, landedSince: 0 }, NOW_MS, true)).toBeNull();
+  });
+
+  it('says how old the record is and how many steps landed since, in the singular and the plural', () => {
+    expect(intentLine({ ...base, landedSince: 1 }, NOW_MS, true)).toBe('Intent record: written 2d ago · 1 step landed since');
+    expect(intentLine({ ...base, landedSince: 2 }, NOW_MS, true)).toBe('Intent record: written 2d ago · 2 steps landed since');
+    expect(intentLine({ ...base, landedSince: 0 }, NOW_MS, false)).toBe('Intent record: written 2d ago · 0 steps landed since');
+  });
+
+  it('says when every step the Phase names is finished, and tells the lead, not the window, what to do', () => {
+    const done = { ...base, phaseFinished: true };
+    expect(intentLine(done, NOW_MS, true)).toBe('Intent record: written 2d ago · 2 steps landed since · every step the Phase names is finished: ask Aiden what the Phase is now');
+    expect(intentLine(done, NOW_MS, false)).toBe('Intent record: written 2d ago · 2 steps landed since · every step the Phase names is finished');
+  });
+
+  it('is printed by the brief straight after the Phase line, and not at all with no record', () => {
+    const lines = renderLeadBrief({ ...full, intent: { ...full.intent, phaseFinished: true } }).split('\n');
+    const at = lines.findIndex((l) => l.startsWith('Phase:'));
+    expect(lines[at + 1]).toContain('Intent record: written 1d ago');
+    expect(lines[at + 1]).toContain(': ask Aiden what the Phase is now');
+    expect(renderLeadBrief(empty).includes('Intent record:')).toBe(false);
   });
 });
