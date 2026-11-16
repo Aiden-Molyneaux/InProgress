@@ -71,7 +71,7 @@ export function deskGroups(b: LeadBrief, now: number): DeskGroup[] {
       key: `ask-${a.askId}`,
       text: `a${a.askId} ${a.kind} · ${step(a.stepId, a.stepTitle)}`,
       detail: a.text,
-      meta: spanAgo(a.raisedAt, now),
+      meta: `raised ${spanAgo(a.raisedAt, now)} ago`,
       nodeId: a.stepId,
     })),
   ];
@@ -142,7 +142,9 @@ export function logLines(events: readonly LeadEventOut[]): LogLine[] {
     at: stamp(e.at),
     kind: e.kind.replace(/_/g, ' '),
     ref: e.askId !== null ? `a${e.askId}` : e.nodeId !== null ? `#${e.nodeId}` : '',
-    text: flat(e.text),
+    // The intent record is long and has headings of its own: the log names it and does not print it. A park whose reason
+    // is Aiden's words would print them twice: the words alone say it.
+    text: e.kind === 'intent' ? `the intent record, ${e.text.length} characters` : e.aidenWords !== null && flat(e.text) === flat(e.aidenWords) ? '' : flat(e.text),
     words: e.aidenWords,
     by: `${e.lead} · v${e.instructions}`,
     ...(e.nodeId !== null ? { nodeId: e.nodeId } : {}),

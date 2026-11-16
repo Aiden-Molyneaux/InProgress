@@ -78,8 +78,9 @@ describe('deskGroups', () => {
     const needs = deskGroups(full(), NOW)[0];
     expect(needs.rows[0]).toMatchObject({ text: '#3 Sign it', meta: 'your own step, active · last changed 1h ago', nodeId: 3 });
     expect(needs.rows[1].text).toBe('a7 question · #9 Pick a port');
+    expect(needs.rows[1].meta).toMatch(/^raised \S+ ago$/);
     expect(needs.rows[1].detail).toBe(longText);
-    expect(needs.rows[1].meta).toBe('3d');
+    expect(needs.rows[1].meta).toBe('raised 3d ago');
   });
 
   it('words the other groups', () => {
@@ -169,6 +170,14 @@ describe('logLines', () => {
     expect(lines[1]).toMatchObject({ kind: 'park', ref: '#5', words: null, nodeId: 5 });
     expect(lines[2]).toMatchObject({ kind: 'relay unknown', ref: '', text: '' });
     expect(lines[2].nodeId).toBeUndefined();
+  });
+  it('names the intent record instead of printing it, and prints words that are also the reason once', () => {
+    const lines = logLines([
+      ev({ id: 2, kind: 'intent', text: '# Goal\nShip it' }),
+      ev({ id: 1, kind: 'park', nodeId: 5, text: 'Park it,  for now.', aidenWords: 'Park it, for now.' }),
+    ]);
+    expect(lines[0].text).toBe('the intent record, 14 characters');
+    expect(lines[1]).toMatchObject({ text: '', words: 'Park it, for now.' });
   });
   it('exports the no-lead line', () => {
     expect(NO_LEAD).toBe('No lead. Give this project one from its actions.');
