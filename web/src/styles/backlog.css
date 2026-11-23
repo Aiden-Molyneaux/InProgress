@@ -92,9 +92,6 @@
 .ip-insp-why, .ip-insp-where { margin: 0; overflow-wrap: anywhere; white-space: pre-line; font-size: var(--t-detail-sm); color: var(--text-muted); }
 .ip-insp-selects { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
 .ip-insp-sel { gap: var(--sp-1); min-width: 140px; }
-.ip-insp-sel .p-field-input { cursor: pointer; }
-.ip-insp-sel .p-field-input option { background: var(--canvas-3); color: var(--text-hi); }
-.ip-insp-sel .p-field-input.busy { opacity: 0.6; }
 .ip-insp-acts { display: flex; flex-direction: column; gap: var(--sp-2); }
 .ip-insp-acts .p-btn { width: 100%; }
 .ip-insp-acts [data-delete] { margin-top: auto; }

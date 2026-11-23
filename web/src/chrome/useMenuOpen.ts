@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-const MENU = '.ip-menu, .p-menu, [role="menu"]';
+const MENU = '.ip-menu, .p-menu, [role="menu"], .p-pick-pop';
 
 /** Whether any menu is open anywhere in the page: it watches the document for one coming and going, and sets state only when the answer changes. */
 export function useMenuOpen(): boolean {
