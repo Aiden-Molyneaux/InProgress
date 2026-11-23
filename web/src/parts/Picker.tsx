@@ -50,7 +50,9 @@ export function Picker({ label, caption, value, options, busy, ctl, onChange }: 
     const all = items();
     const target = all.find((el) => el.getAttribute('aria-selected') === 'true') ?? all[0];
     if (!target) return shut(true);
-    target.focus();
+    // The panel comes into view first (it may open under the footer), then the option inside its own scroll.
+    surface.current?.scrollIntoView({ block: 'nearest' });
+    target.focus({ preventScroll: true });
     target.scrollIntoView({ block: 'nearest' });
   };
   // On open, focus goes into the list.
@@ -58,10 +60,12 @@ export function Picker({ label, caption, value, options, busy, ctl, onChange }: 
     if (open) focusChosen();
     // `focusChosen` reads refs only: it is safe to leave out.
   }, [open]);
-  // When the focused option goes away under a live update, focus would fall to the page: keep it in the list.
+  // When the focused option goes away under a live update, focus falls to the page or a row takes it: keep it in the list.
+  // Focus on the button is not lost: a press on it, mid-close, puts it there.
   const keys = offered(options).map((o) => o.value).join('|');
   useEffect(() => {
-    if (open && document.activeElement === document.body) focusChosen();
+    const active = document.activeElement;
+    if (open && !surface.current?.contains(active) && active !== opener.current) focusChosen();
   }, [keys]);
   usePressOutside(open, [surface, opener], () => {
     setOpen(false);
@@ -92,11 +96,12 @@ export function Picker({ label, caption, value, options, busy, ctl, onChange }: 
       pick(el.dataset.value ?? '');
       return;
     }
+    // Every other key stays in the list: the window's own keys (a tab's number, `[`, `]`, `/`) wait until it closes.
+    if (e.key !== 'Tab') e.stopPropagation();
     const all = items();
     const next = menuStep(e.key, all.indexOf(document.activeElement as HTMLElement), all.length);
     if (next === null) return;
     e.preventDefault();
-    e.stopPropagation();
     all[next].focus();
   };
   const buttonKeys = (e: KeyboardEvent<HTMLButtonElement>) => {
@@ -139,7 +144,8 @@ export function Picker({ label, caption, value, options, busy, ctl, onChange }: 
       </button>
       {open && (
         <div ref={surface} className="p-pick-pop" onKeyDown={listKeys} onBlur={onBlur}>
-          <div className="p-pick-cap" aria-hidden="true">
+          {/* A press on the caption keeps focus where it is: it would otherwise go to the row and close the list. */}
+          <div className="p-pick-cap" aria-hidden="true" onMouseDown={(e) => e.preventDefault()}>
             <span className="p-pick-cap-glyph">//</span> {caption}
           </div>
           <div ref={list} id={listId} role="listbox" aria-label={label} className="p-pick-list">

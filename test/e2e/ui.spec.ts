@@ -4836,9 +4836,12 @@ test.describe('#542 ranked Backlog', () => {
       await expect(list).toBeVisible();
       await expect(button).toHaveAttribute('aria-expanded', 'true');
       // Dark, not the browser's white list: the panel and its options draw on the canvas, in the mono face.
-      const look = await list.evaluate((el) => {
-        const pop = getComputedStyle(el.parentElement!);
-        const opt = getComputedStyle(el.querySelector('[role="option"]')!);
+      type Styled = { backgroundColor: string; borderTopColor: string; fontFamily: string };
+      type El = { parentElement: unknown; querySelector(s: string): unknown };
+      const look = await list.evaluate((el: El) => {
+        const css = (globalThis as unknown as { getComputedStyle(e: unknown): Styled }).getComputedStyle;
+        const pop = css(el.parentElement);
+        const opt = css(el.querySelector('[role="option"]'));
         return { bg: pop.backgroundColor, top: pop.borderTopColor, font: opt.fontFamily };
       });
       expect(look.bg).toBe('rgb(17, 17, 17)');
@@ -4851,16 +4854,18 @@ test.describe('#542 ranked Backlog', () => {
       await expect(button).toBeFocused();
       await expect(inspector).toBeVisible();
     }
-    // The keys pick: Down opens the Label list, End and Enter pick its last choice, which saves.
+    // The keys pick: Down opens the Label list on Unlabelled, Home and Enter pick its first choice, ui, which saves.
     const label = inspector.getByRole('combobox', { name: 'Label' });
+    await expect(label).toHaveAttribute('data-value', 'none');
     await label.focus();
     await page.keyboard.press('ArrowDown');
-    await page.keyboard.press('End');
+    await expect(inspector.getByRole('option', { name: 'Unlabelled' })).toBeFocused();
+    await page.keyboard.press('Home');
     await page.keyboard.press('Enter');
     await expect(inspector.getByRole('listbox')).toHaveCount(0);
     await expect(label).toBeFocused();
-    await expect(label).toHaveAttribute('data-value', 'none');
-    await expect(label).toHaveText(/Unlabelled/);
+    await expect(label).toHaveText(/ui/);
+    await expect.poll(async () => ((await (await api.get(`/api/nodes/${fresh.ids['4 Build to GitHub']}`)).json()) as { node: { label: string | null } }).node.label).toBe('ui');
     // A press outside closes an open list without a change.
     await inspector.getByRole('combobox', { name: 'Band' }).click();
     await inspector.locator('.ip-insp-facts').click({ position: { x: 2, y: 2 } });
