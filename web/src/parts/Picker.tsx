@@ -96,8 +96,9 @@ export function Picker({ label, caption, value, options, busy, ctl, onChange }: 
       pick(el.dataset.value ?? '');
       return;
     }
-    // Every other key stays in the list: the window's own keys (a tab's number, `[`, `]`, `/`) wait until it closes.
-    if (e.key !== 'Tab') e.stopPropagation();
+    // Every other plain key stays in the list: the window's own keys (a tab's number, `[`, `]`, `/`) wait until it closes.
+    // A chord (Ctrl+K for Go to) still reaches the window, whose focus move closes the list.
+    if (e.key !== 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) e.stopPropagation();
     const all = items();
     const next = menuStep(e.key, all.indexOf(document.activeElement as HTMLElement), all.length);
     if (next === null) return;
