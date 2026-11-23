@@ -193,6 +193,11 @@ async function openInspector(row: Locator): Promise<Locator> {
   await expect(inspector).toBeVisible();
   return inspector;
 }
+/** Picks `option` in an inspector's themed `name` picker (Phase, Label or Band): opens its list and clicks the option. */
+async function pickIn(inspector: Locator, name: string, option: string): Promise<void> {
+  await inspector.getByRole('combobox', { name }).click();
+  await inspector.getByRole('listbox', { name }).getByRole('option', { name: option, exact: true }).click();
+}
 /** The same for a row in the Parked group. */
 const pRow = (page: Page, scope: Locator, title: string): Locator => scope.locator('li.ip-bl-parkedrow', { has: page.getByText(title, { exact: true }) });
 
@@ -4813,11 +4818,59 @@ test.describe('#542 ranked Backlog', () => {
     const row = blRow(page, view, '4 Build to GitHub');
     const inspector = await openInspector(row);
     await expect(inspector).toBeVisible();
-    await inspector.getByRole('combobox', { name: 'Band' }).selectOption('someday');
+    await pickIn(inspector, 'Band', 'Someday');
     await expect.poll(async () => (await soonTitles(view)).includes('4 Build to GitHub')).toBe(false);
     const someday = view.getByRole('region', { name: 'Someday' });
     await someday.getByRole('button', { name: /^Show/ }).click();
     await expect.poll(async () => (await someday.locator('.ip-bl-title').allInnerTexts()).slice(-1)[0]).toBe('4 Build to GitHub');
+  });
+
+  test('the Phase, Label and Band pickers open a dark list, move with the keys and close back on their button', async ({ page, api, fresh }) => {
+    const { view } = await openRankedWith(page, api, fresh, ['4 Build to GitHub']);
+    const row = blRow(page, view, '4 Build to GitHub');
+    const inspector = await openInspector(row);
+    for (const name of ['Phase', 'Label', 'Band']) {
+      const button = inspector.getByRole('combobox', { name });
+      await button.click();
+      const list = inspector.getByRole('listbox', { name });
+      await expect(list).toBeVisible();
+      await expect(button).toHaveAttribute('aria-expanded', 'true');
+      // Dark, not the browser's white list: the panel and its options draw on the canvas, in the mono face.
+      type Styled = { backgroundColor: string; borderTopColor: string; fontFamily: string };
+      type El = { parentElement: unknown; querySelector(s: string): unknown };
+      const look = await list.evaluate((el: El) => {
+        const css = (globalThis as unknown as { getComputedStyle(e: unknown): Styled }).getComputedStyle;
+        const pop = css(el.parentElement);
+        const opt = css(el.querySelector('[role="option"]'));
+        return { bg: pop.backgroundColor, top: pop.borderTopColor, font: opt.fontFamily };
+      });
+      expect(look.bg).toBe('rgb(17, 17, 17)');
+      expect(look.top).toBe('rgb(192, 254, 4)');
+      expect(look.font).toMatch(/Martian Mono/);
+      // Focus is on the chosen option; Escape closes the list only, with focus on the button and the inspector still open.
+      await expect(list.locator('[aria-selected="true"]')).toBeFocused();
+      await page.keyboard.press('Escape');
+      await expect(list).toHaveCount(0);
+      await expect(button).toBeFocused();
+      await expect(inspector).toBeVisible();
+    }
+    // The keys pick: Down opens the Label list on Unlabelled, Home and Enter pick its first choice, ui, which saves.
+    const label = inspector.getByRole('combobox', { name: 'Label' });
+    await expect(label).toHaveAttribute('data-value', 'none');
+    await label.focus();
+    await page.keyboard.press('ArrowDown');
+    await expect(inspector.getByRole('option', { name: 'Unlabelled' })).toBeFocused();
+    await page.keyboard.press('Home');
+    await page.keyboard.press('Enter');
+    await expect(inspector.getByRole('listbox')).toHaveCount(0);
+    await expect(label).toBeFocused();
+    await expect(label).toHaveText(/ui/);
+    await expect.poll(async () => ((await (await api.get(`/api/nodes/${fresh.ids['4 Build to GitHub']}`)).json()) as { node: { label: string | null } }).node.label).toBe('ui');
+    // A press outside closes an open list without a change.
+    await inspector.getByRole('combobox', { name: 'Band' }).click();
+    await inspector.locator('.ip-insp-facts').click({ position: { x: 2, y: 2 } });
+    await expect(inspector.getByRole('listbox')).toHaveCount(0);
+    await expect(inspector.getByRole('combobox', { name: 'Band' })).toHaveAttribute('data-value', 'soon');
   });
 
   test('Park then Unpark from the inspector lands the step in Needs Triage', async ({ page, api, fresh }) => {
@@ -4888,9 +4941,7 @@ test.describe('#542 ranked Backlog', () => {
     const someday = view.getByRole('region', { name: 'Someday' });
     await someday.getByRole('button', { name: /^Show/ }).click();
     const inspector = await openInspector(blRow(page, view, '4 Build to GitHub'));
-    const bandSelect = inspector.getByRole('combobox', { name: 'Band' });
-    await bandSelect.focus();
-    await bandSelect.selectOption('someday');
+    await pickIn(inspector, 'Band', 'Someday');
     const moved = blRow(page, someday, '4 Build to GitHub');
     await expect(moved).toBeVisible();
     await expect(moved.getByRole('combobox', { name: 'Band' })).toBeFocused();
@@ -4904,13 +4955,11 @@ test.describe('#542 ranked Backlog', () => {
     await someday.getByRole('button', { name: /^Show/ }).click();
     await page.route('**/api/ui/projects/*/rank', (route) => route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'Refused for the test' }) }));
     const inspector = await openInspector(blRow(page, view, '4 Build to GitHub'));
-    const bandSelect = inspector.getByRole('combobox', { name: 'Band' });
-    await bandSelect.focus();
-    await bandSelect.selectOption('someday');
+    await pickIn(inspector, 'Band', 'Someday');
     const back = blRow(page, view.getByRole('region', { name: 'Soon' }), '4 Build to GitHub');
     const again = back.getByRole('group', { name: /^Inspector for #/ });
     await expect(again.getByRole('alert')).toHaveText(/Refused for the test/);
-    await expect(again.getByRole('combobox', { name: 'Band' })).toHaveValue('soon');
+    await expect(again.getByRole('combobox', { name: 'Band' })).toHaveAttribute('data-value', 'soon');
     await expect(again.getByRole('combobox', { name: 'Band' })).toBeFocused();
   });
 
@@ -4923,7 +4972,7 @@ test.describe('#542 ranked Backlog', () => {
       await route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'Refused for the test' }) });
     });
     const inspector = await openInspector(blRow(page, view, '4 Build to GitHub'));
-    await inspector.getByRole('combobox', { name: 'Band' }).selectOption('someday');
+    await pickIn(inspector, 'Band', 'Someday');
     await expect(statusLine(page).filter({ hasText: 'Refused for the test' })).toBeVisible();
     await expect(blRow(page, view.getByRole('region', { name: 'Soon' }), '4 Build to GitHub')).toBeVisible();
   });

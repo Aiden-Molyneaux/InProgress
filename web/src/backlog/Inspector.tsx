@@ -1,5 +1,5 @@
 import { Fragment, type MouseEvent, type ReactNode } from 'react';
-import { LABEL_GLYPHS, NODE_LABELS, type NodeLabel, type ResourceMeta, type TreeNode } from '../../../src/core/types';
+import { LABEL_GLYPHS, NODE_LABELS, type ResourceMeta, type TreeNode } from '../../../src/core/types';
 import type { BacklogBand } from '../../../src/core/backlog';
 import { ageShort } from '../board/text';
 import { shortDate } from '../done/doneGroups';
@@ -8,6 +8,7 @@ import { Markdown } from '../panels/Markdown';
 import { Button } from '../parts/Button';
 import { ErrorLine } from '../parts/ErrorLine';
 import { Eyebrow } from '../parts/Eyebrow';
+import { Picker, type PickerOption } from '../parts/Picker';
 import { WhatWhy } from '../parts/WhatWhy';
 import { DocsMenu } from '../project/DocsMenu';
 import type { InspSel as Sel, InspState } from './useInspectorWrites';
@@ -91,22 +92,12 @@ export function Inspector({ id, node, inside, band, parked, handoff, docs, lastS
   }
   if (inside > 0) facts.push(<span key="inside">{`${inside} OPEN INSIDE`}</span>);
 
-  const select = (sel: Sel, label: string, options: ReactNode) => (
-    <label className="ip-insp-sel p-field" data-size="sm">
-      <Eyebrow>{label}</Eyebrow>
-      <span className="p-field-box">
-        <select
-          className={`p-field-input${busy[sel] ? ' busy' : ''}`}
-          aria-label={label}
-          aria-busy={busy[sel] || undefined}
-          data-insp={sel}
-          value={value(sel)}
-          onChange={(e) => onChange(sel, e.target.value)}
-        >
-          {options}
-        </select>
-      </span>
-    </label>
+  // Themed pickers, not native selects: an open native list draws white on Windows (Aiden, 2026-11-23, #740).
+  const select = (sel: Sel, label: string, options: PickerOption[]) => (
+    <div className="ip-insp-sel p-field" data-size="sm">
+      <Eyebrow aria-hidden="true">{label}</Eyebrow>
+      <Picker label={label} caption={label.toUpperCase()} ctl={sel} busy={busy[sel]} value={value(sel)} options={options} onChange={(v) => onChange(sel, v)} />
+    </div>
   );
   // A double click's second press lands on whatever slid under the pointer: it does nothing.
   const press = (fn: (from: HTMLElement) => void) => (e: MouseEvent<HTMLButtonElement>) => {
@@ -140,25 +131,14 @@ export function Inspector({ id, node, inside, band, parked, handoff, docs, lastS
         ) : (
           <>
             <div className="ip-insp-selects">
-              {select('phase', 'Phase', phases.map((p) => <option key={String(p.value ?? 'none')} value={String(p.value ?? 'none')}>{p.label}</option>))}
-              {select(
-                'label',
-                'Label',
-                <>
-                  {NODE_LABELS.map((l) => <option key={l} value={l}>{`${LABEL_GLYPHS[l]} ${l}`}</option>)}
-                  <option value="none">Unlabelled</option>
-                </>,
-              )}
-              {select(
-                'band',
-                'Band',
-                <>
-                  {band === null && <option value="" disabled>Choose a band</option>}
-                  <option value="next">Next up</option>
-                  <option value="soon">Soon</option>
-                  <option value="someday">Someday</option>
-                </>,
-              )}
+              {select('phase', 'Phase', phases.map((p) => ({ value: String(p.value ?? 'none'), label: p.label })))}
+              {select('label', 'Label', [...NODE_LABELS.map((l) => ({ value: l, label: l, mark: LABEL_GLYPHS[l] })), { value: 'none', label: 'Unlabelled' }])}
+              {select('band', 'Band', [
+                { value: '', label: 'Choose a band', hidden: true },
+                { value: 'next', label: 'Next up' },
+                { value: 'soon', label: 'Soon' },
+                { value: 'someday', label: 'Someday' },
+              ])}
             </div>
             {error && <ErrorLine role="alert" message={error} />}
           </>

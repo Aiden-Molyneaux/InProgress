@@ -221,6 +221,48 @@ textarea.p-field-input { field-sizing: content; resize: none; padding-block: 6px
 .p-menu-item .p-key { margin-left: auto; }
 .p-menu-sep { height: 1px; margin: var(--sp-1) 0; background: var(--line); }
 
+/* ---------- Picker: a themed select (InThink's label picker, #740) ---------- */
+.p-pick { position: relative; display: flex; min-width: 0; }
+.p-pick-btn {
+  display: flex; align-items: center; gap: var(--sp-2); flex: 1; min-width: 0; min-height: 26px; padding: 0 var(--sp-2);
+  background: var(--canvas-3); border: 1px solid var(--line-strong); color: var(--text-hi);
+  font-family: var(--font-body); font-size: var(--t-body); text-align: left; cursor: pointer;
+  transition: border-color var(--dur-1) var(--ease-std);
+}
+.p-pick-btn:hover { border-color: var(--line-bright); }
+.p-pick-btn:focus-visible, .p-pick-btn[aria-expanded='true'] { border-color: var(--volt); box-shadow: 0 0 0 2px var(--volt-soft); outline: none; }
+.p-pick-btn.busy { opacity: 0.6; }
+.p-pick-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.p-pick-caret { flex: none; color: var(--text-muted); font-size: var(--t-detail-sm); }
+.p-pick-btn .p-pick-mark { flex: none; color: var(--text-dim); }
+.p-pick-pop {
+  position: absolute; top: 100%; left: 0; z-index: var(--z-popover); margin-top: var(--sp-1);
+  width: max-content; min-width: 100%; max-width: min(420px, calc(100vw - 2 * var(--sp-4)));
+  background: var(--canvas-1); border: 1px solid var(--line-strong); border-top: 2px solid var(--volt);
+}
+.p-pick-cap {
+  padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--line);
+  font-family: var(--font-mono); font-size: var(--t-micro); font-weight: var(--w-strong); letter-spacing: 0.08em; color: var(--text-muted);
+}
+.p-pick-cap-glyph { color: var(--volt); }
+.p-pick-list {
+  max-height: 264px; overflow-y: auto; padding: var(--sp-1) 0;
+  scrollbar-width: thin; scrollbar-color: var(--canvas-4) transparent;
+}
+.p-pick-list::-webkit-scrollbar { width: 6px; }
+.p-pick-list::-webkit-scrollbar-thumb { background: var(--canvas-4); }
+.p-pick-list::-webkit-scrollbar-track { background: transparent; }
+.p-pick-opt {
+  display: flex; align-items: baseline; gap: var(--sp-2); padding: 6px var(--sp-3); cursor: pointer;
+  font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-muted);
+}
+.p-pick-opt:hover, .p-pick-opt:focus { background: var(--canvas-3); color: var(--text-hi); outline: none; }
+.p-pick-opt:focus-visible { box-shadow: inset 2px 0 0 var(--volt); }
+.p-pick-opt[aria-selected='true'] { color: var(--volt); }
+.p-pick-opt .p-pick-mark { flex: none; width: 10px; text-align: center; color: var(--text-dim); }
+.p-pick-sq { flex: none; width: 10px; height: 10px; align-self: center; }
+.p-pick-label { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+
 /* ---------- MenuButton ---------- */
 .p-menubtn { position: relative; display: inline-flex; }
 .p-menubtn-pop { position: absolute; top: 100%; right: 0; z-index: var(--z-popover); width: 320px; max-width: calc(100vw - 2 * var(--sp-4)); margin-top: var(--sp-2); }
