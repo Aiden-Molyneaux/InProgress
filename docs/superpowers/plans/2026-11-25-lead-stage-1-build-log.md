@@ -113,3 +113,9 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   that is the desk's, and only asks older than the first switch-on are task 17's old asks.
 - Left for task 14: the window's switch list and the brief's switch line are written by hand (`web/src/lead/leadDesk.ts`,
   `src/server/lead-text.ts:137`) and show no round yet; the rules text gains the round with version 7 (task 11).
+- Murr on task 3 (Sonnet: not on the risk list): sound, 0 blocker, 0 major, 2 minor (git found inside the repo's tree
+  on Windows; a branch name matched in another case). Fixes sent to the same Sev with the debt worth doing now.
+- Task 3, from Murr's owner-calls: the tools check that a home is given, not that the port's server serves that home.
+  The runner (task 4) passes both from the server's own settings, so they come from one place. "No repository" and
+  "Not a branch name" are plain answers, not errors: the turn reads the words. The trunk is `main`, as on every
+  project with a lead in this stage.
