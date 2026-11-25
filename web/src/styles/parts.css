@@ -232,7 +232,11 @@ textarea.p-field-input { field-sizing: content; resize: none; padding-block: 6px
 .p-pick-btn:hover { border-color: var(--line-bright); }
 .p-pick-btn:focus-visible, .p-pick-btn[aria-expanded='true'] { border-color: var(--volt); box-shadow: 0 0 0 2px var(--volt-soft); outline: none; }
 .p-pick-btn.busy { opacity: 0.6; }
-.p-pick-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* One cell holds a face for every option and shows the chosen one: the button is as wide as its longest option. */
+.p-pick-value { display: grid; grid-template-columns: minmax(0, 1fr); flex: 1; min-width: 0; }
+.p-pick-face { grid-area: 1 / 1; display: flex; align-items: center; gap: var(--sp-2); min-width: 0; visibility: hidden; }
+.p-pick-face[data-shown] { visibility: visible; }
+.p-pick-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .p-pick-caret { flex: none; color: var(--text-muted); font-size: var(--t-detail-sm); }
 .p-pick-btn .p-pick-mark { flex: none; color: var(--text-dim); }
 .p-pick-pop {

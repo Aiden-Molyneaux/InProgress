@@ -18,7 +18,8 @@ const offered = (options: PickerOption[]) => options.filter((o) => !o.hidden);
 
 /**
  * A themed stand-in for a native select: a button that shows the value and opens a dark list of the options under it, with a
- * thin volt line on top, a small mono caption and a slim scrollbar. Down, Up, Home and End move between the options (Down
+ * thin volt line on top, a small mono caption and a slim scrollbar. The button is as wide as its longest option, whichever
+ * one is the value, up to what its container allows. Down, Up, Home and End move between the options (Down
  * or Up on the button opens the list); Enter or Space picks the focused option, which closes the list with focus on the
  * button and then calls `onChange` when the value changed. Escape and Shift+Tab close with focus on the button; Tab out
  * closes it; a press outside closes it. `ctl` lands on the button as `data-insp`, so a caller can find it again.
@@ -39,7 +40,6 @@ export function Picker({ label, caption, value, options, busy, ctl, onChange }: 
   const surface = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const listId = useId();
-  const shown = options.find((o) => o.value === value);
   const shut = (restoreFocus: boolean) => {
     setOpen(false);
     if (restoreFocus) opener.current?.focus();
@@ -133,12 +133,20 @@ export function Picker({ label, caption, value, options, busy, ctl, onChange }: 
         onClick={() => setOpen((o) => !o)}
         onKeyDown={buttonKeys}
       >
-        {shown?.mark && (
-          <span className="p-pick-mark" aria-hidden="true">
-            {shown.mark}
-          </span>
-        )}
-        <span className="p-pick-value">{shown?.label ?? ''}</span>
+        {/* Every choice is laid out in the one cell and only the chosen one shows, so the box is as wide as its longest
+            choice from the first paint and a pick moves nothing around it (Aiden, 2026-11-25, #740). */}
+        <span className="p-pick-value">
+          {options.map((o) => (
+            <span key={o.value} className="p-pick-face" data-shown={o.value === value || undefined} aria-hidden={o.value === value ? undefined : true}>
+              {o.mark && (
+                <span className="p-pick-mark" aria-hidden="true">
+                  {o.mark}
+                </span>
+              )}
+              <span className="p-pick-text">{o.label}</span>
+            </span>
+          ))}
+        </span>
         <span className="p-pick-caret" aria-hidden="true">
           ▾
         </span>
