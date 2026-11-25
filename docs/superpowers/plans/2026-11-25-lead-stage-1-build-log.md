@@ -227,3 +227,10 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   plus CLAUDE_CODE_SESSION*, CLAUDE_CODE_MESSAGING* and T3CODE_*. The scheduler's SQL moved to repo functions
   (`answeredTurns`, `expiredLeases`, `openItemsInLane`, `liveProjectsWithRound`, `isLiveWithRound`), the last two shared
   with the minute watch.
+- Murr's re-check of task 6 (Sonnet, proportional): sound, 3 minors, each a narrow false clear, fixed inline by
+  Sigmund (lines no reviewer has seen; they go in the receipt): a push is "nothing to push" only with no commits, so a
+  commit and its revert still go to the remote read (tested); every diff takes `--no-relative`; every push URL of
+  origin is read (`get-url --push --all`), any public one public, any unread one held. Also `gh repo view` gets the
+  full github.com URL so gh's default host cannot answer for it. Accepted as known: a private read is kept 10 minutes;
+  a deploy is judged on main's commits, not the main checkout's working tree; a hostile branch's odd paths (short names,
+  trailing dots) are not caught. "forget security for now" covers the last.

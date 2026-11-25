@@ -17,8 +17,11 @@ const BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
 const SHA = /^[0-9a-f]{7,64}$/;
 /** The most output git is given for a diff: a bigger change does not finish, and the check answers could not tell. */
 const DIFF_MAX_BYTES = 16 * 1024 * 1024;
-/** Every diff here: a rename is a delete and an add (so the old path is seen), and no external diff or textconv program runs. */
-const DIFF = ['diff', '--no-renames', '--no-ext-diff', '--no-textconv'];
+/**
+ * Every diff here: a rename is a delete and an add (so the old path is seen), no external diff or textconv program runs,
+ * and paths are the repo's whole, whatever diff.relative says (a folder below the root would otherwise hide the rest).
+ */
+const DIFF = ['diff', '--no-renames', '--no-ext-diff', '--no-textconv', '--no-relative'];
 
 export type { GitResult };
 
@@ -84,7 +87,8 @@ export function ghVisibility(remoteUrl: string): Promise<boolean | null> {
   const repo = githubRepoOf(remoteUrl);
   if (repo === null) return Promise.resolve(null);
   return new Promise((resolve) => {
-    execFile('gh', ['repo', 'view', repo, '--json', 'visibility', '-q', '.visibility'], { timeout: GH_TIMEOUT_MS, windowsHide: true }, (err, stdout) => {
+    // The full URL pins the host: `owner/name` alone is read on gh's default host, which may not be github.com.
+    execFile('gh', ['repo', 'view', `https://github.com/${repo}`, '--json', 'visibility', '-q', '.visibility'], { timeout: GH_TIMEOUT_MS, windowsHide: true }, (err, stdout) => {
       if (err) return resolve(null);
       const v = stdout.trim().toUpperCase();
       resolve(v === 'PUBLIC' ? true : v === 'PRIVATE' || v === 'INTERNAL' ? false : null);
@@ -212,7 +216,12 @@ export async function checkLanding(ctx: Ctx, ask: LandingAsk, deps: LandingDeps 
   if (diff.code !== 0) throw conflict(couldNotTell(`what ${range} changes`, diff));
   const empty = files.length === 0 && diff.stdout === '';
   if (empty && ask.action === 'merge') throw conflict(`Nothing to compare: ${branch} has no change against main.`);
-  if (empty && ask.action === 'push') return { clear: true, text: 'Clear to land', why: 'nothing to push', action: ask.action, range, files: 0, patchId: null };
+  if (ask.action === 'push') {
+    // Nothing to push means no commits, not no change: a commit and its revert change nothing and still go out.
+    const commits = await git(['rev-list', '--count', range.replace('...', '..'), '--']);
+    if (commits.code !== 0) throw conflict(couldNotTell(`what ${range} adds`, commits));
+    if (Number(commits.stdout.trim()) === 0) return { clear: true, text: 'Clear to land', why: 'nothing to push', action: ask.action, range, files: 0, patchId: null };
+  }
 
   let patchId: string | null = null;
   if (ask.action === 'publish') {
@@ -231,11 +240,14 @@ export async function checkLanding(ctx: Ctx, ask: LandingAsk, deps: LandingDeps 
   let remotePublic: boolean | null = null;
   let remote: string | undefined;
   if (ask.action === 'push') {
-    const url = await git(['remote', 'get-url', '--push', 'origin']);
-    if (url.code === 0 && url.stdout.trim() !== '') {
-      remote = remoteLabel(url.stdout);
+    // --all: a push goes to every push URL, so each is read; any public one makes it public, any unread one could not tell.
+    const url = await git(['remote', 'get-url', '--push', '--all', 'origin']);
+    const urls = url.code === 0 ? url.stdout.split(/\r?\n/).map((u) => u.trim()).filter((u) => u !== '') : [];
+    if (urls.length > 0) {
+      remote = remoteLabel(urls[0]);
       // Only a github.com remote can be read; any other place is held as could not tell.
-      remotePublic = githubRepoOf(url.stdout) === null ? null : await publicRemote(deps, url.stdout.trim());
+      const reads = await Promise.all(urls.map((u) => (githubRepoOf(u) === null ? Promise.resolve(null) : publicRemote(deps, u))));
+      remotePublic = reads.some((r) => r === true) ? true : reads.some((r) => r === null) ? null : false;
     } else remote = 'origin';
   }
 

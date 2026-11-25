@@ -272,6 +272,17 @@ describe('push, push-public and publish', () => {
     expect(await t.check('push')).toMatchObject({ clear: false, range: 'refs/heads/main...refs/heads/fresh', text: `${HELD} (it touches src/hooks/x.ts)` });
   });
 
+  it('a push of commits that change nothing (a commit and its revert) still goes out, so it is judged, not clear', async () => {
+    const t = setup(true);
+    t.landingOn();
+    write(repo.wt, 'web/app.ts', lines(7, 'feature'));
+    commit(repo.wt, 'feature');
+    git(repo.wt, 'revert', '--no-edit', 'HEAD');
+    const verdict = await t.check('push');
+    expect(verdict.clear).toBe(false);
+    expect(verdict.why).not.toBe('nothing to push');
+  });
+
   it('publish is held without a yes whatever the change, never asks the reader, and clears with a yes for it', async () => {
     const t = setup(true);
     t.landingOn();
