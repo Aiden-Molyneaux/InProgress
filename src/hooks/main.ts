@@ -6,6 +6,8 @@ import { appendLog } from '../lib/log';
 import { hookBudget } from './budget';
 import { captureHookInput } from './capture';
 import { CONTEXT_EVENT_NAME, HOOK_NAMES, hookErrorLine, parseHookInput, runHandler, type HookName } from './handlers';
+import { heldAction } from '../core/hold';
+import { commandOf, preToolDeny, readHeldLines, unansweredReason } from './hold';
 
 // Claude may stop reading before the briefing is written (say after a timeout): an EPIPE must not reach stderr.
 process.stdout.on('error', () => undefined);
@@ -40,8 +42,15 @@ async function main(): Promise<void> {
   }
   // session-start: up to 5 s for a server it had to start + 2 s for the POST; every other hook: one 500 ms POST.
   const budget = hookBudget(name);
+  // What the hold hook prints if its limit passes first: a command on the list is held, never let through by a timeout.
+  let fallback: object | undefined;
   const work = (async () => {
     const input = parseHookInput(await readStdin(1000));
+    if (name === 'hold') {
+      const command = commandOf(input);
+      const match = command === undefined ? undefined : heldAction(command, readHeldLines(homeDir()));
+      if (match) fallback = preToolDeny(unansweredReason(match.what));
+    }
     // Task 0 capture (src/hooks/capture.ts): a redacted copy of this input, for the hooks the activity design reads.
     // Synchronous and silent; it never throws. Off with INPROGRESS_HOOK_CAPTURE=0 or a file ~/.inprogress/capture/off.
     captureHookInput(name, input);
@@ -50,7 +59,17 @@ async function main(): Promise<void> {
       ensureServer: () => ensureServer({ baseUrl: url, waitMs: budget.serverWaitMs }),
       // Read the token lazily: the first server start creates it.
       post: (path, body) => createClient({ baseUrl: url, token: readToken(), timeoutMs: budget.postTimeoutMs }).post(path, body),
+      lead: {
+        post: (path, body, timeoutMs) => createClient({ baseUrl: url, token: readToken(), timeoutMs }).post(path, body),
+        heldLines: () => readHeldLines(homeDir()),
+      },
     });
+    if (output?.json) {
+      fallback = undefined;
+      await writeStdout(JSON.stringify(output.json));
+      return;
+    }
+    fallback = undefined;
     const eventName = CONTEXT_EVENT_NAME[name];
     // A stop's block sends the session back for one more pass; Claude Code reads one JSON object, so never both.
     if (name === 'stop' && output?.block) await writeStdout(JSON.stringify({ decision: 'block', reason: output.block }));
@@ -61,6 +80,8 @@ async function main(): Promise<void> {
   const limit = budget.limitMs;
   const timedOut = await Promise.race([work.then(() => false, () => false), new Promise<boolean>((r) => setTimeout(() => r(true), limit))]);
   if (timedOut) appendLog(logFile, `${name}: timed out after ${limit} ms`);
+  // Still set: the hold hook timed out or failed before it printed its answer, so the command is held.
+  if (fallback) await writeStdout(JSON.stringify(fallback));
 }
 
 main()

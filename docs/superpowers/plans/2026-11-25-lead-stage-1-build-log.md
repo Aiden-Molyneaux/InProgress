@@ -258,3 +258,20 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   session's permission ask (the plan's decision kinds include it; the rule judges it by what it will do). Left for
   task 10: an answer Aiden gives in the window after the lead decided is dropped today (the clear is first-wins); task
   10's undo makes his late answer an undo plus his answer. Product rulings first in the list: task 10.
+
+## Task 7: held before the act
+
+- Built by Sev (Opus; resumed once at its 60-turn limit). typecheck, 2584 unit and 35 smoke tests green. The hold
+  hook starts only for the watched families (14 handlers with `if` rules); the permission hook for every prompt, the
+  server answering at once for a project whose round is off. Sev's calls, accepted: a compound command asks about each
+  held part in turn; a merge is into main only when the checkout is on main; a push naming another branch is checked
+  as that branch, and an odd push (another remote, a rename, a delete, several refspecs, --all, --tags) is held as could
+  not tell; `git -C <dir>` is read in that folder; no focus step means held; the stuck request's tool and input live in
+  a `stuck` lead_events row; a permission DECIDE is its own event kind, so undo and the decided list never meet an ask
+  that is not there; AIDEN on a stuck item waits unbrought (it has no ask).
+- Calls on his open questions: `pnpm publish`, `yarn publish`, `cargo publish` and `twine upload` get `if` rules too;
+  `git merge --abort` is not held (`--continue` is). Not yet proven: the deny shapes and a hook's timeout on a real
+  `claude -p`; Sigmund proves them on the copy with a scratch Claude config before landing.
+- A permission prompt the lead did not answer in time still raises the notification hook's permission ask, which
+  would make a second desk item for the same prompt: fixed in the next round (no desk item for that ask while the
+  session has a stuck item from the last ten minutes).

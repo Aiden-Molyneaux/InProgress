@@ -6,12 +6,13 @@ import { cliBesideServer, nodeCli } from '../../lib/task-command';
 import { listLeadEvents, markLeadSeen, readLeadBrief, readLeadIntent, readLeadRules, requireLead } from '../lead';
 import { leadAllow, leadDisallow, leadAnswer, leadDecide, leadUndo, leadDrop, leadIntent, leadKept, leadPark, leadPromise } from '../lead-commands';
 import { readDesk } from '../lead/desk';
-import { checkLanding } from '../lead/landing';
+import { holdCheck, stuckWait } from '../lead/hold';
+import { checkLanding, type LandingDeps } from '../lead/landing';
 import { leadRelay, type RelaySend } from '../lead-relay';
 import { leadStart, type StartThread } from '../lead-start';
 import { readLeadResource, readLeadStep } from '../lead-step';
 import { renderLeadBrief } from '../lead-text';
-import { leadAllowBody, leadDisallowBody, leadAnswerBody,leadBriefQuery, leadDecideBody, leadUndoBody, leadDropBody, leadIntentBody, leadKeptBody, leadLandingBody, leadParkBody, leadPromiseBody, leadReadQuery, leadRelayBody, leadStartBody, leadRulesQuery, leadSeenBody } from '../schemas';
+import { leadAllowBody, leadDisallowBody, leadAnswerBody, leadBriefQuery, leadHoldBody, leadStuckBody, leadDecideBody, leadUndoBody, leadDropBody, leadIntentBody, leadKeptBody, leadLandingBody, leadParkBody, leadPromiseBody, leadReadQuery, leadRelayBody, leadStartBody, leadRulesQuery, leadSeenBody } from '../schemas';
 
 /** A route's `:id`: a whole number above 0, or a 400. */
 function positiveId(text: string): number {
@@ -26,7 +27,7 @@ function positiveId(text: string): number {
  * lead's seven commands are writes, so they are POSTs behind the bearer token guard. `send` is how a relay reaches a T3
  * Code thread: the t3 CLI unless the app was given another.
  */
-export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken: Guard, send?: RelaySend, start?: StartThread): void {
+export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken: Guard, send?: RelaySend, start?: StartThread, landing?: LandingDeps): void {
   app.get('/api/lead/:ref/brief', async (req) => {
     const { ref } = req.params as { ref: string };
     const query = leadBriefQuery.parse(req.query);
@@ -113,6 +114,11 @@ export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken:
     const body = leadLandingBody.parse(req.body);
     return checkLanding(ctx, { ref: ref(req), ...body });
   });
+  // The hold and permission hooks (task 7): the project is the session's, else the folder's, so these take no :ref. Each
+  // says nothing when that project has no lead or its round is off. A held command is answered in seconds; a permission
+  // request waits up to 170 s for the lead's verdict.
+  app.post('/api/lead/hold', { onRequest: requireToken }, async (req) => holdCheck(ctx, leadHoldBody.parse(req.body), landing));
+  app.post('/api/lead/stuck', { onRequest: requireToken }, async (req) => stuckWait(ctx, leadStuckBody.parse(req.body)));
   // The two switches: only ever on Aiden's words, turned on by the lead on his word and logged with it.
   app.post('/api/lead/:ref/allow', { onRequest: requireToken }, async (req) => {
     const { as, instructions, ...input } = leadAllowBody.parse(req.body);

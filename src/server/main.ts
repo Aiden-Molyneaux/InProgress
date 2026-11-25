@@ -11,6 +11,7 @@ import { openDb } from './db/connection';
 import { createCtx } from './db/tx';
 import { watchDesk } from './lead/desk';
 import { applyVerdict } from './lead/apply';
+import { watchHeldLines } from './lead/hold';
 import { createRunner, headlessWay, LEAD_MODEL, leadToolsEntry, type Runner } from './lead/runner';
 import { createBackupRunner } from './backup-runner';
 import { runMaintenance } from './project-lifecycle';
@@ -94,6 +95,8 @@ async function main(): Promise<void> {
   // the drill, in the background (a slow push never delays the server's first answer), and again on a timer, since the
   // server can run for weeks. runMaintenance never throws.
   runner.startup();
+  // The playbooks' Held lines, for the hold hook to read: written now and after each change to a playbook or a lead.
+  watchHeldLines(ctx, home, { error: (message) => app.log.error(message) });
   maintenance = setInterval(() => void runner.tick(), MAINTENANCE_MS);
   maintenance.unref();
   // The transcript watcher, and the lead's desk (src/server/lead/desk.ts): once now, so subagents that died while the

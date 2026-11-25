@@ -9,14 +9,19 @@ import { homeDir } from '../lib/home';
 import { appendLog } from '../lib/log';
 import { readTranscriptTitle } from '../lib/transcript';
 import { scrub } from './capture';
+import { runHold, type LeadHookDeps } from './hold';
+import { runPermission } from './permission';
 
-export const HOOK_NAMES = ['session-start', 'prompt-submit', 'stop', 'notification', 'subagent-start', 'subagent-stop', 'session-end', 'pre-tool', 'post-tool'] as const;
+export const HOOK_NAMES = ['session-start', 'prompt-submit', 'stop', 'notification', 'subagent-start', 'subagent-stop', 'session-end', 'pre-tool', 'post-tool', 'hold', 'permission'] as const;
 export type HookName = (typeof HOOK_NAMES)[number];
+/** The lead's hooks (lead stage 1, task 7): they print a decision of their own, and post to the lead's routes, not the session's. */
+export type LeadHookName = 'hold' | 'permission';
+export const isLeadHook = (name: HookName): name is LeadHookName => name === 'hold' || name === 'permission';
 /** PreToolUse and PostToolUse: what they post (if anything) depends on the tool. */
 export type ToolHookName = 'pre-tool' | 'post-tool';
 export const isToolHook = (name: HookName): name is ToolHookName => name === 'pre-tool' || name === 'post-tool';
 
-const EVENT_FOR: Record<Exclude<HookName, ToolHookName>, HookEvent> = {
+const EVENT_FOR: Record<Exclude<HookName, ToolHookName | LeadHookName>, HookEvent> = {
   'session-start': 'start',
   'prompt-submit': 'prompt',
   stop: 'stop',
@@ -51,12 +56,15 @@ export interface HookStdin {
 export interface HookDeps {
   post: (path: string, body: unknown) => Promise<{ tracked: boolean; context?: string; title?: TitleDemand }>;
   ensureServer: () => Promise<boolean>;
+  /** The hold and permission hooks' way to the server and the Held lines; without it a held command fails closed. */
+  lead?: LeadHookDeps;
 }
 
-/** What a hook prints: a context event's briefing, or a stop's block reason. Never both. */
+/** What a hook prints: a context event's briefing, a stop's block reason, or a lead hook's decision as it is printed. One of them. */
 export interface HookOutput {
   context?: string;
   block?: string;
+  json?: object;
 }
 
 /** Mirrors the `title` max in the server's hookBody zod schema: a longer title gets the whole hook POST rejected. */
@@ -161,7 +169,7 @@ export function stripPasted(prompt: string): string {
   return prompt.replace(/<pasted_content\b[^>]*>[\s\S]*?<\/pasted_content>/gi, '');
 }
 
-export function buildHookBody(name: Exclude<HookName, ToolHookName>, input: HookStdin): Record<string, unknown> {
+export function buildHookBody(name: Exclude<HookName, ToolHookName | LeadHookName>, input: HookStdin): Record<string, unknown> {
   const body: Record<string, unknown> = { event: EVENT_FOR[name] };
   const app = appOf(process.env);
   if (input.transcript_path) body.transcriptPath = input.transcript_path;
@@ -483,6 +491,11 @@ function stoppedBackground(tasks: unknown[]): { tasks: Record<string, unknown>[]
 }
 
 export async function runHandler(name: HookName, input: HookStdin, deps: HookDeps): Promise<HookOutput | undefined> {
+  if (isLeadHook(name)) {
+    // Before the session id check: a command on the hold list is held even when the input names no session.
+    const json = name === 'hold' ? await runHold(input, deps.lead) : await runPermission(input, deps.lead);
+    return json === undefined ? undefined : { json };
+  }
   if (!input.session_id) return undefined;
   if (isToolHook(name)) {
     // Silent: a tool hook never prints, so it can never steer the tool call.

@@ -80,7 +80,7 @@ const staleTaskRules = ['Bash(node D:/old/InProgress/dist/cli/main.js tasks *)',
 function withInstall(settings: object) {
   const s = JSON.parse(JSON.stringify(settings));
   s.permissions.allow.push(...allowRules(repo));
-  for (const d of HOOK_DEFS) (s.hooks[d.event] ??= []).push({ ...(d.matcher ? { matcher: d.matcher } : {}), hooks: [hookEntry(repo, d.name, d.timeout, d.async)] });
+  for (const d of HOOK_DEFS) (s.hooks[d.event] ??= []).push({ ...(d.matcher ? { matcher: d.matcher } : {}), hooks: [hookEntry(repo, d.name, d.timeout, d.async, d.if)] });
   return s;
 }
 
@@ -93,6 +93,11 @@ describe('isInProgressHook', () => {
     expect(isInProgressHook(foreignExec)).toBe(false);
   });
 
+  it('knows the hold and permission hooks', () => {
+    expect(isInProgressHook(hookEntry(repo, 'hold', 30, false, 'Bash(git push*)'))).toBe(true);
+    expect(isInProgressHook(hookEntry(repo, 'permission', 180))).toBe(true);
+  });
+
   it('knows the tool hooks', () => {
     expect(isInProgressHook(hookEntry(repo, 'pre-tool', 5))).toBe(true);
     expect(isInProgressHook(hookEntry(repo, 'post-tool', 5))).toBe(true);
@@ -101,12 +106,13 @@ describe('isInProgressHook', () => {
 
 describe('HOOK_DEFS', () => {
   it('hooks the Agent tool before it runs; the Agent and task tools after, in step; and the command tools after, async', () => {
-    expect(HOOK_DEFS.filter((d) => d.event === 'PreToolUse' || d.event === 'PostToolUse')).toEqual([
+    // The hold hook's PreToolUse handlers have their own test below.
+    expect(HOOK_DEFS.filter((d) => (d.event === 'PreToolUse' || d.event === 'PostToolUse') && d.name !== 'hold')).toEqual([
       { event: 'PreToolUse', name: 'pre-tool', matcher: '^(Agent|Task)$', timeout: 5 },
       { event: 'PostToolUse', name: 'post-tool', matcher: '^(Agent|Task|TaskCreate|TaskUpdate)$', timeout: 5 },
       { event: 'PostToolUse', name: 'post-tool', matcher: '^(Bash|PowerShell|Monitor|SendMessage|TaskStop)$', timeout: 5, async: true },
     ]);
-    const matching = (event: string, tool: string) => HOOK_DEFS.filter((d) => d.event === event && new RegExp(d.matcher!).test(tool));
+    const matching = (event: string, tool: string) => HOOK_DEFS.filter((d) => d.event === event && d.name !== 'hold' && new RegExp(d.matcher!).test(tool));
     const matches = (event: string, tool: string) => matching(event, tool).length > 0;
     expect(['Agent', 'Task', 'TaskCreate', 'Bash'].map((t) => matches('PreToolUse', t))).toEqual([true, true, false, false]);
     expect(['Agent', 'Task', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet', 'AgentX'].map((t) => matches('PostToolUse', t))).toEqual([true, true, true, true, false, false, false]);
@@ -115,6 +121,53 @@ describe('HOOK_DEFS', () => {
     expect(['BashOutput', 'TaskStopX', 'Read', 'mcp__x__Bash'].map((t) => matches('PostToolUse', t))).toEqual([false, false, false, false]);
     // No tool runs two InProgress PostToolUse hooks: the groups' matchers never overlap.
     for (const t of ['Agent', 'Task', 'TaskCreate', 'TaskUpdate', ...commandTools]) expect(matching('PostToolUse', t), t).toHaveLength(1);
+  });
+});
+
+describe('the hold and permission hooks', () => {
+  const holdRules = [
+    ...['git push*', 'git merge*', 'npm publish*', 'npm run deploy*', 'node scripts/deploy*', 'gh *', 'rm *'].map((r) => `Bash(${r})`),
+    ...['git push*', 'git merge*', 'npm publish*', 'npm run deploy*', 'node scripts/deploy*', 'gh *', 'Remove-Item *'].map((r) => `PowerShell(${r})`),
+  ];
+
+  it('hold: one PreToolUse handler per watched family with its if rule, 30 s, never async; permission: PermissionRequest, 180 s', () => {
+    const hold = HOOK_DEFS.filter((d) => d.name === 'hold');
+    expect(hold.map((d) => d.if)).toEqual(holdRules);
+    for (const d of hold) {
+      expect(d).toMatchObject({ event: 'PreToolUse', timeout: 30, matcher: d.if!.startsWith('Bash(') ? '^Bash$' : '^PowerShell$' });
+      expect(d.async).toBeUndefined();
+      // Beside pre-tool, never on the same call.
+      expect(new RegExp(d.matcher!).test('Agent') || new RegExp(d.matcher!).test('Task')).toBe(false);
+    }
+    expect(HOOK_DEFS.filter((d) => d.name === 'permission')).toEqual([{ event: 'PermissionRequest', name: 'permission', timeout: 180 }]);
+  });
+
+  it('are written once with their if fields, kept on a second install, removed on uninstall; a user hook is untouched', () => {
+    const userHook = { type: 'command', command: 'my-guard.sh' };
+    const dir = claudeDirWithSettings({ ...existing, hooks: { ...existing.hooks, PreToolUse: [{ matcher: '^Bash$', hooks: [userHook] }] } });
+    const written = (s: { hooks: Record<string, { matcher?: string; hooks: { if?: string; args?: string[] }[] }[]> }) =>
+      Object.entries(s.hooks).flatMap(([event, groups]) => groups.flatMap((g) => g.hooks.filter((h) => isInProgressHook(h) && ['hold', 'permission'].includes(h.args![1])).map((h) => `${event} ${g.matcher ?? ''} ${h.args![1]} ${h.if ?? ''}`)));
+    const expected = [...holdRules.map((r) => `PreToolUse ^${r.slice(0, r.indexOf('('))}$ hold ${r}`), 'PermissionRequest  permission '];
+    install({ repo, claudeDir: dir, stamp: 'h1' });
+    const once = readSettings(dir);
+    expect(written(once)).toEqual(expected);
+    install({ repo, claudeDir: dir, stamp: 'h2' });
+    expect(readSettings(dir)).toEqual(once);
+    expect(once.hooks.PreToolUse[0]).toEqual({ matcher: '^Bash$', hooks: [userHook] });
+    uninstall({ claudeDir: dir, stamp: 'h3' });
+    const after = readSettings(dir);
+    expect(after.hooks.PreToolUse).toEqual([{ matcher: '^Bash$', hooks: [userHook] }]);
+    expect(after.hooks.PermissionRequest).toBeUndefined();
+  });
+
+  it('reports a Held line outside the watched families as not watched', () => {
+    const home = tempDir('ip-home-');
+    mkdirSync(join(home, 'lead'));
+    writeFileSync(join(home, 'lead', 'held.json'), JSON.stringify(['gh pr merge', 'npm run seed-prod', 'git push --tags']));
+    const { log } = install({ repo, claudeDir: claudeDirWithSettings(existing), stamp: 'h4', home });
+    expect(log.filter((l) => l.startsWith('not watched'))).toEqual(['not watched: npm run seed-prod']);
+    const none = install({ repo, claudeDir: claudeDirWithSettings(existing), stamp: 'h5', home: tempDir('ip-home-') });
+    expect(none.log.filter((l) => l.startsWith('not watched'))).toEqual([]);
   });
 });
 
@@ -177,8 +230,8 @@ describe('install', () => {
     expect(s.hooks.Stop).toHaveLength(2);
     expect(s.hooks.Stop[0].hooks[0].command).toBe('other-tool --stop');
     for (const def of HOOK_DEFS) {
-      const group = s.hooks[def.event].find((g: { matcher?: string; hooks: object[] }) => g.matcher === def.matcher && g.hooks.some(isInProgressHook));
-      const entry = { type: 'command', command: nodeBinary(), args: [`${repo}/dist/hooks/hook.js`, def.name], timeout: def.timeout };
+      const group = s.hooks[def.event].find((g: { matcher?: string; hooks: { if?: string }[] }) => g.matcher === def.matcher && g.hooks.some((h) => isInProgressHook(h) && h.if === def.if));
+      const entry = { type: 'command', command: nodeBinary(), args: [`${repo}/dist/hooks/hook.js`, def.name], timeout: def.timeout, ...(def.if ? { if: def.if } : {}) };
       expect(group.hooks).toEqual([def.async ? { ...entry, async: true } : entry]);
     }
     // The command tools' group is the one async entry, written as Claude Code reads it.
@@ -377,7 +430,10 @@ describe('install', () => {
     expect(readSettings(dir)).toEqual(once);
     expect(once).toEqual(withInstall(existing));
     for (const d of HOOK_DEFS) {
-      const ours = once.hooks[d.event].filter((g: { matcher?: string }) => g.matcher === d.matcher).flatMap((g: { hooks: object[] }) => g.hooks).filter(isInProgressHook);
+      const ours = once.hooks[d.event]
+        .filter((g: { matcher?: string }) => g.matcher === d.matcher)
+        .flatMap((g: { hooks: { if?: string }[] }) => g.hooks)
+        .filter((h: { if?: string }) => isInProgressHook(h) && h.if === d.if);
       expect(ours, `${d.event} ${d.matcher ?? ''}`).toHaveLength(1);
     }
     for (const rule of allowRules(repo)) expect(once.permissions.allow.filter((r: string) => r === rule), rule).toHaveLength(1);

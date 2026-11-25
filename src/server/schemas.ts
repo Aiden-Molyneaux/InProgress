@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { SESSION_APPS } from '../core/session-app';
 import { LEAD_NAME_MAX, LEAD_SWITCHES } from '../core/lead';
+import { HELD_ACTIONS } from '../core/hold';
 import { LANDING_ACTIONS } from '../core/landing';
 import { ID_MAX } from '../core/notices';
 import { ASK_KINDS, ASSIGNEES, BRIEFING_MODES, COMMAND_KINDS, COMMAND_OUTCOMES, HOOK_EVENTS, NODE_KINDS, NODE_LABELS, NODE_STATUSES, ORIGINS, PROJECT_NAME_MAX, RANK_BANDS, RESOURCE_KINDS, RESOURCE_PURPOSES, TITLE_CHANNELS, WHAT_WHY_MAX, WORK_STATUSES, unknownLabel, type NodeInput } from '../core/types';
@@ -279,6 +280,14 @@ export const leadDisallowBody = z.object({ ...leadWho, switch: z.enum(LEAD_SWITC
 /** The landing check: the step asked about, the action, the session's folder (a git checkout) and, for a branch other than the one checked out, its name. */
 export const leadLandingBody = z
   .object({ stepId: leadId, action: z.enum(LANDING_ACTIONS, { errorMap: (_issue, ctx) => ({ message: `${String(ctx.data)} is not an action: give merge, deploy, push, publish or push-public` }) }), folder: z.string().min(1).max(1_000), branch: z.string().min(1).max(200).optional() })
+  .strict();
+/** The hold hook's call: the session (when the hook knew it), its folder, the whole command, and the action the hook named. */
+export const leadHoldBody = z
+  .object({ sessionId: z.string().max(ID_MAX).nullable().optional(), cwd: z.string().max(1_000), command: z.string().min(1).max(100_000), action: z.enum(HELD_ACTIONS) })
+  .strict();
+/** The permission hook's call: the session, its folder, and the tool and input it asks permission for. */
+export const leadStuckBody = z
+  .object({ sessionId: z.string().max(ID_MAX).nullable().optional(), cwd: z.string().max(1_000), toolName: z.string().max(200), toolInput: z.unknown() })
   .strict();
 /** `lead start`: the step to start a thread for, and Aiden's words when he told the lead to. */
 export const leadStartBody = z.object({ ...leadWho, stepId: leadId, aidenWords: z.string().trim().min(1).max(2_000).optional() }).strict();

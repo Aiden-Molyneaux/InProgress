@@ -9,8 +9,10 @@ import type { DeskItem } from '../repo/desk';
 import { AIDEN_BROUGHT_LIMIT, bringItem, bringNext as bringNextIn, broughtOpen, DECISION_LINE_CUT, t3ThreadOf } from '../repo/deskBring';
 import { addDecision, type DecisionKind } from '../repo/leadDecisions';
 import type { LeadTurn, TurnEffect } from '../repo/leadTurns';
+import { insertLeadEvent } from '../repo/leadEvents';
 import { intendSend } from '../repo/leadSends';
 import { getProjectById } from '../repo/projects';
+import { permissionLine, stuckRequestOf } from './hold';
 
 export { AIDEN_BROUGHT_LIMIT } from '../repo/deskBring';
 
@@ -44,6 +46,7 @@ export function applyVerdict(ctx: Ctx, turn: LeadTurn, item: DeskItem, record: R
   const name = project.lead;
   const actor = `lead:${name}`;
   const verdict = turn.verdict ?? '';
+  if (item.kind === 'stuck') return applyStuck(ctx, turn, item, name);
   if (item.kind !== 'question' && item.kind !== 'permission') return { itemState: 'done', outcome: `${verdict} (no action in this task)` };
   const ask = askOf(ctx, item);
   if (ask === undefined || ask.clearedAt !== null) return { itemState: 'done', outcome: 'ask cleared' };
@@ -86,6 +89,48 @@ export function applyVerdict(ctx: Ctx, turn: LeadTurn, item: DeskItem, record: R
     return { itemState: 'done', outcome: 'CARD' };
   }
   return { itemState: 'done', outcome: `${verdict} (no action in this task)` };
+}
+
+/**
+ * A verdict on a `stuck` item, a permission request the permission hook is waiting on (task 7). DECIDE with an ANSWER that
+ * starts `ALLOW:` or `DENY:` is the lead's decision: a `permission` line in his log and its decisions row, and the outcome
+ * `ALLOW <reason>` or `DENY <reason>` the waiting request reads. Any other ANSWER is `unclear`: the request says nothing.
+ * AIDEN leaves it waiting on Aiden: it has no ask to bring, so nothing is brought. Anything else is done with no action.
+ */
+function applyStuck(ctx: Ctx, turn: LeadTurn, item: DeskItem, name: string): TurnEffect {
+  const verdict = turn.verdict ?? '';
+  if (verdict === 'AIDEN') return { itemState: 'waiting_aiden', outcome: 'AIDEN (not brought: a stuck request has no ask)' };
+  if (verdict !== 'DECIDE') return { itemState: 'done', outcome: `${verdict} (no action in this task)` };
+  const m = /^(ALLOW|DENY):\s*(.*)$/s.exec((turn.answer ?? '').trim());
+  if (!m) return { itemState: 'done', outcome: 'unclear' };
+  const behavior = m[1] === 'ALLOW' ? 'allow' : 'deny';
+  const reason = m[2].trim();
+  const now = ctx.now();
+  const request = stuckRequestOf(ctx, item);
+  const id = insertLeadEvent(
+    ctx.db,
+    {
+      projectId: item.projectId,
+      lead: name,
+      instructions: LEAD_INSTRUCTIONS_VERSION,
+      kind: 'permission',
+      ...(item.nodeId === null ? {} : { nodeId: item.nodeId }),
+      ...(request?.sessionId ? { sessionId: request.sessionId } : {}),
+      text: `${behavior}: ${reason}`,
+    },
+    now,
+  );
+  addDecision(ctx.db, {
+    eventId: id,
+    itemId: item.id,
+    turnId: turn.id,
+    kind: 'permission',
+    productRuling: false,
+    line: permissionLine(request?.toolName ?? '(tool unknown)', request?.input ?? '', behavior),
+    saidWhere: 'desk',
+    saidAt: now,
+  });
+  return { itemState: 'done', outcome: `${behavior === 'allow' ? 'ALLOW' : 'DENY'} ${reason}`.trim() };
 }
 
 /** Brings the project's next waiting items to Aiden while it has room (src/server/repo/deskBring.ts), in one write of its own. */

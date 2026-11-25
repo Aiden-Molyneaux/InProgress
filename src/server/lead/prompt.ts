@@ -2,6 +2,7 @@ import { stamp } from '../../core/span';
 import type { Project } from '../../core/types';
 import type { Ctx } from '../db/tx';
 import type { DeskItem } from '../repo/desk';
+import { stuckRequestOf } from './hold';
 
 /**
  * The project's standing rulings, as the desk turn's last section reads them. '' until task 10 of lead stage 1 (#743)
@@ -84,10 +85,16 @@ export function deskUserMessage(ctx: Ctx, item: DeskItem): string {
   const lines = [`${KIND_WORDS[item.kind] ?? `A desk item of kind ${item.kind}.`} (Desk item #${item.id}, ${item.kind}.)`];
   let sessionId: string | null = null;
   let raisedAt = item.createdAt;
+  // A permission request the permission hook waits on (task 7): its tool and input are in the lead's log.
+  const stuck = item.kind === 'stuck' ? stuckRequestOf(ctx, item) : undefined;
   if (item.kind === 'stopped') {
     const at = item.ref.indexOf('@');
     sessionId = at > 0 ? item.ref.slice(0, at) : item.ref;
     if (at > 0) raisedAt = item.ref.slice(at + 1);
+  } else if (stuck !== undefined) {
+    lines.push('It waits on a permission prompt to use a tool, and runs it or not by your verdict.', `The tool: ${stuck.toolName}`, `Its input: ${stuck.input}`);
+    lines.push('Answer DECIDE with ANSWER starting ALLOW: or DENY: and your reason, or AIDEN.');
+    sessionId = stuck.sessionId;
   } else if (/^\d+$/.test(item.ref)) {
     const ask = ctx.db.prepare('SELECT id, kind, text, session_id, raised_at, owner FROM asks WHERE id = ?').get(Number(item.ref)) as AskLine | undefined;
     if (ask === undefined) {
