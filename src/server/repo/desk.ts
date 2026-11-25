@@ -90,13 +90,14 @@ export function openDeskItems(db: DB, projectId: number): DeskItem[] {
 
 /**
  * Compare-and-set: moves the item to `to` only while its state is one of `from`. A move to done sets done_at to `now`
- * and the outcome. Returns whether the row changed.
+ * and the outcome; a move to any other state clears both, so an item reopened carries no stale outcome. Returns
+ * whether the row changed.
  */
 export function moveDeskItem(db: DB, id: number, from: DeskItemState[], to: DeskItemState, opts: { outcome?: string; now: string }): boolean {
   if (from.length === 0) return false;
-  const marks = from.map(() => '?').join(', ');
-  const info = to === 'done'
-    ? db.prepare(`UPDATE desk_items SET state = ?, done_at = ?, outcome = ? WHERE id = ? AND state IN (${marks})`).run(to, opts.now, opts.outcome ?? null, id, ...from)
-    : db.prepare(`UPDATE desk_items SET state = ? WHERE id = ? AND state IN (${marks})`).run(to, id, ...from);
+  const done = to === 'done';
+  const info = db
+    .prepare(`UPDATE desk_items SET state = ?, done_at = ?, outcome = ? WHERE id = ? AND state IN (${from.map(() => '?').join(', ')})`)
+    .run(to, done ? opts.now : null, done ? (opts.outcome ?? null) : null, id, ...from);
   return info.changes > 0;
 }

@@ -64,7 +64,10 @@ export interface IntendSendInput {
   body?: string;
 }
 
-/** Writes the send as intended, before the action. A retry key used before throws (lead_sends_retry_once). */
+/**
+ * Writes the send as intended, before the action. A retry key used before throws (lead_sends_retry_once);
+ * sendByRetryKey finds the earlier send.
+ */
 export function intendSend(db: DB, input: IntendSendInput, now: string): LeadSend {
   const info = db
     .prepare('INSERT INTO lead_sends (project_id, item_id, kind, target, retry_key, created_at, body) VALUES (?, ?, ?, ?, ?, ?, ?)')
@@ -74,6 +77,12 @@ export function intendSend(db: DB, input: IntendSendInput, now: string): LeadSen
 
 export function getSend(db: DB, id: number): LeadSend | undefined {
   const row = db.prepare('SELECT * FROM lead_sends WHERE id = ?').get(id) as LeadSendRow | undefined;
+  return row ? toLeadSend(row) : undefined;
+}
+
+/** The send written under this retry key, or undefined. */
+export function sendByRetryKey(db: DB, retryKey: string): LeadSend | undefined {
+  const row = db.prepare('SELECT * FROM lead_sends WHERE retry_key = ?').get(retryKey) as LeadSendRow | undefined;
   return row ? toLeadSend(row) : undefined;
 }
 

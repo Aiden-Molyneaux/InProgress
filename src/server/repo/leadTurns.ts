@@ -73,9 +73,9 @@ const toLeadTurn = (r: LeadTurnRow): LeadTurn => ({
   refusedTools: r.refused_tools === null ? null : (JSON.parse(r.refused_tools) as string[]),
 });
 
+/** A turn to lease. Its project is its desk item's. */
 export interface InsertTurnInput {
   itemId: number;
-  projectId: number;
   way: TurnWay;
   model?: string | null;
   /** How long the lease runs from `now`. */
@@ -83,14 +83,16 @@ export interface InsertTurnInput {
 }
 
 /**
- * A new turn, leased until now + leaseMs. An item with a live turn (leased or answered) refuses a second one: the
- * unique index lead_turns_live_once throws, and the caller decides what that means.
+ * A new turn on the item's project, leased until now + leaseMs. Throws when the item does not exist. An item with a
+ * live turn (leased or answered) refuses a second one: the unique index lead_turns_live_once throws, and the caller
+ * decides what that means.
  */
 export function insertTurn(db: DB, input: InsertTurnInput, now: string): LeadTurn {
   const leaseUntil = new Date(Date.parse(now) + input.leaseMs).toISOString();
   const info = db
-    .prepare('INSERT INTO lead_turns (item_id, project_id, way, model, leased_at, lease_until) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(input.itemId, input.projectId, input.way, input.model ?? null, now, leaseUntil);
+    .prepare('INSERT INTO lead_turns (item_id, project_id, way, model, leased_at, lease_until) SELECT id, project_id, ?, ?, ?, ? FROM desk_items WHERE id = ?')
+    .run(input.way, input.model ?? null, now, leaseUntil, input.itemId);
+  if (info.changes === 0) throw new Error(`No desk item ${input.itemId}: a turn is leased on an item`);
   return getTurn(db, Number(info.lastInsertRowid))!;
 }
 

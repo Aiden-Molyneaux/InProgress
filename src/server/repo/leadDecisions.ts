@@ -22,7 +22,8 @@ export interface LeadDecision {
   aidenAnswer: string | null;
   aidenWords: string | null;
   saidWhere: SaidWhere | null;
-  saidAt: string | null;
+  /** When the decision was said: by the lead for his own, by Aiden for one brought to him. */
+  saidAt: string;
   shownAt: string | null;
 }
 
@@ -39,7 +40,7 @@ interface LeadDecisionRow {
   aiden_answer: string | null;
   aiden_words: string | null;
   said_where: string | null;
-  said_at: string | null;
+  said_at: string;
   shown_at: string | null;
 }
 
@@ -60,9 +61,9 @@ const toLeadDecision = (r: LeadDecisionRow): LeadDecision => ({
   shownAt: r.shown_at,
 });
 
+/** A decision to write. Its project is its lead_events row's. */
 export interface AddDecisionInput {
   eventId: number;
-  projectId: number;
   itemId?: number | null;
   turnId?: number | null;
   kind: DecisionKind;
@@ -72,20 +73,22 @@ export interface AddDecisionInput {
   aidenAnswer?: string | null;
   aidenWords?: string | null;
   saidWhere?: SaidWhere | null;
-  saidAt?: string | null;
+  /** When the decision was said: by the lead for his own, by Aiden for one brought to him. */
+  saidAt: string;
   shownAt?: string | null;
 }
 
-/** Writes the decision for its lead_events row; a second one for the same event throws (event_id is unique). */
+/**
+ * Writes the decision for its lead_events row, on that row's project. Throws when no such event exists, and on a second
+ * decision for the same event (event_id is unique).
+ */
 export function addDecision(db: DB, row: AddDecisionInput): LeadDecision {
   const info = db
     .prepare(
       'INSERT INTO lead_decisions (event_id, project_id, item_id, turn_id, kind, product_ruling, line, would_have, aiden_answer, aiden_words, said_where, said_at, shown_at)' +
-        ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        ' SELECT id, project_id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM lead_events WHERE id = ?',
     )
     .run(
-      row.eventId,
-      row.projectId,
       row.itemId ?? null,
       row.turnId ?? null,
       row.kind,
@@ -95,9 +98,11 @@ export function addDecision(db: DB, row: AddDecisionInput): LeadDecision {
       row.aidenAnswer ?? null,
       row.aidenWords ?? null,
       row.saidWhere ?? null,
-      row.saidAt ?? null,
+      row.saidAt,
       row.shownAt ?? null,
+      row.eventId,
     );
+  if (info.changes === 0) throw new Error(`No lead_events row ${row.eventId}: a decision is written beside its event`);
   return toLeadDecision(db.prepare('SELECT * FROM lead_decisions WHERE id = ?').get(Number(info.lastInsertRowid)) as LeadDecisionRow);
 }
 

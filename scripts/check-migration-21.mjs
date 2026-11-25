@@ -4,7 +4,7 @@
 // Usage: node scripts/check-migration-21.mjs <scratch dir>
 import { existsSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, relative, resolve, isAbsolute } from 'node:path';
+import { basename, dirname, join, relative, resolve, isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import Database from 'better-sqlite3';
 import { build } from 'esbuild';
@@ -23,14 +23,29 @@ function inside(path, home) {
   const rel = relative(fold(home), fold(path));
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 }
+/**
+ * `path` in its long, link-resolved form: its nearest existing ancestor through realpathSync.native (which, unlike plain
+ * realpathSync, expands 8.3 short names such as AIDEN~1.MOL), with the parts not made yet joined back on.
+ */
+function longForm(path) {
+  let base = resolve(path);
+  const rest = [];
+  while (!existsSync(base)) {
+    const parent = dirname(base);
+    if (parent === base) return resolve(path);
+    rest.unshift(basename(base));
+    base = parent;
+  }
+  return join(realpathSync.native(base), ...rest);
+}
 const scratch = resolve(dir);
-const realHome = existsSync(liveHome) ? realpathSync(liveHome) : liveHome;
-if (inside(scratch, liveHome) || inside(scratch, realHome)) {
+const realHome = longForm(liveHome);
+if (inside(scratch, liveHome) || inside(scratch, realHome) || inside(longForm(scratch), realHome)) {
   throw new Error(`The scratch dir ${scratch} is inside the live home ${liveHome}; give a dir outside it`);
 }
 mkdirSync(scratch, { recursive: true });
 // The made dir resolved through any link: a link that leads into the live home is refused too.
-if (inside(realpathSync(scratch), realHome)) {
+if (inside(realpathSync.native(scratch), realHome)) {
   throw new Error(`The scratch dir ${scratch} resolves inside the live home ${liveHome}; give a dir outside it`);
 }
 const copy = join(scratch, 'inprogress-copy.db');

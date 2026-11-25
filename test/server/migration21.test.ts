@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { MIGRATIONS } from '../../src/server/db/schema';
-import { migrate, schemaVersion } from '../../src/server/db/connection';
+import { schemaVersion } from '../../src/server/db/connection';
 
 const T = '2026-11-01T00:00:00.000Z';
 
@@ -12,14 +12,22 @@ const NEW_INDEXES = [
   'lead_turns_applied_once',
   'lead_turns_live_once',
   'lead_turns_project_leased',
+  'lead_turns_item',
   'lead_decisions_project',
+  'lead_decisions_item',
+  'lead_decisions_turn',
   'lead_sends_retry_once',
   'lead_sends_project_state',
+  'lead_sends_item',
   'usage_readings_at',
+  'usage_readings_turn',
   'usage_readings_import_once',
 ];
 
-/** A database at schema 20 with one project, one step, one ask and one lead_events row, then migrated. */
+/**
+ * A database at schema 20 with one project, one step, one ask and one lead_events row, then migration 21 alone applied,
+ * as the runner applies it: so a later migration that raises min_reader_version leaves this test standing.
+ */
 function at20() {
   const db = new Database(':memory:');
   db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
@@ -36,7 +44,10 @@ function at20() {
     asks: db.prepare('SELECT * FROM asks').all(),
     leadEvents: db.prepare('SELECT * FROM lead_events').all(),
   };
-  migrate(db);
+  db.transaction(() => {
+    db.exec(MIGRATIONS[20]);
+    db.prepare("UPDATE meta SET value = '21' WHERE key = 'schema_version'").run();
+  })();
   return { db, before };
 }
 
@@ -44,16 +55,16 @@ function at20() {
 function fill(db: Database.Database) {
   db.prepare("INSERT INTO desk_items (id, project_id, kind, ref, created_at) VALUES (1, 1, 'question', 'a1', ?)").run(T);
   db.prepare("INSERT INTO lead_turns (id, item_id, project_id, way, leased_at, lease_until) VALUES (1, 1, 1, 'headless', ?, ?)").run(T, T);
-  db.prepare("INSERT INTO lead_decisions (event_id, project_id, item_id, turn_id, kind, line) VALUES (1, 1, 1, 1, 'technical', 'Port 4317')").run();
+  db.prepare("INSERT INTO lead_decisions (event_id, project_id, item_id, turn_id, kind, line, said_at) VALUES (1, 1, 1, 1, 'technical', 'Port 4317', ?)").run(T);
   db.prepare("INSERT INTO lead_sends (project_id, item_id, kind, target, created_at) VALUES (1, 1, 'relay', 'thread-1', ?)").run(T);
   db.prepare("INSERT INTO usage_readings (at, source, turn_id) VALUES (?, 'turn', 1)").run(T);
 }
 
 describe('migration 21', () => {
-  it('migrates to the latest schema and keeps min_reader_version 1', () => {
+  it('migrates to v21 and keeps min_reader_version 1', () => {
     const { db } = at20();
     expect(MIGRATIONS.length).toBeGreaterThanOrEqual(21);
-    expect(schemaVersion(db)).toBe(MIGRATIONS.length);
+    expect(schemaVersion(db)).toBe(21);
     expect(db.prepare("SELECT value FROM meta WHERE key = 'min_reader_version'").pluck().get()).toBe('1');
   });
 
@@ -80,6 +91,11 @@ describe('migration 21', () => {
     expect(db.prepare('SELECT state FROM lead_turns').pluck().get()).toBe('leased');
     expect(db.prepare('SELECT state, body FROM lead_sends').get()).toEqual({ state: 'intended', body: '' });
     expect(db.prepare('SELECT product_ruling FROM lead_decisions').pluck().get()).toBe(0);
+  });
+
+  it('refuses a decision with no said_at', () => {
+    const { db } = at20();
+    expect(() => db.prepare("INSERT INTO lead_decisions (event_id, project_id, kind, line) VALUES (1, 1, 'technical', 'x')").run()).toThrow(/NOT NULL/);
   });
 
   it('cascades a purged project to every new table that has a project_id, and leaves the account-wide readings', () => {
