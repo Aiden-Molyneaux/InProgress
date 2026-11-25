@@ -166,3 +166,13 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   watched family with an `if` rule (push, merge, publish, deploy, gh, delete), so an ordinary command starts no hook at
   all. Because about 2,700 shell commands a day would otherwise each wait on a Node start. A playbook's `Held:` lines
   refine within those families; a line outside them is reported by the installer, not watched.
+
+## Murr on task 4 (Opus, risk list)
+
+- Needs fixes: 0 blocker, 2 major. A run that cannot start or ends in error put the whole desk behind for good (now a
+  runner fault: no count against the item, a back-off); a failed run lost its cost and usage readings (now kept). Minors
+  and debt sent with them: a stop deadline, a result read before an abort wins, per-turn prompt files, a guarded tick,
+  the scheduler's SQL in repo functions, and applyTurn under `write()` so a verdict's writes record their events (task 5
+  needs it). Accepted from his owner-calls: the env filter keeps user settings (an explicit list, as P1's script had);
+  a run whose item is no longer leased is aborted at the next tick. Left for task 9: a leased stopped item whose session
+  moved on.
