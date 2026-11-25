@@ -373,3 +373,9 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   refusal `lead start` has (in flight, a parked or done step, a live session on the step) besides the two restarts,
   the day's limit and the reserve; refused, it becomes PARK with the reason. Queued with task 8's fixes. The thread way
   (task 12) must mark a run that read an answer.
+- Murr on task 9 (Opus): needs fixes, 0 blocker, 3 major: a session that answered was asked again at every later
+  stop; G1's reopen let one bad item fault again and back off the whole project; the restart's first message read as
+  Aiden's own prompt, with no claim line and no "not a go-ahead". Queued after task 8's fix round (same files). Calls on
+  his owner-calls: a session is asked once per step, then left alone; a non-T3 session gets the same 30-minute grace
+  before its turn; the ask moves into the minute watch so a back-off never delays it; a promise turn that says KEPT
+  clears the promise. To check live after landing: what T3's --worktree does with an existing worktree path.
