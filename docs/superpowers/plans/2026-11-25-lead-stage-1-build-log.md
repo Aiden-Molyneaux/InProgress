@@ -176,3 +176,14 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   needs it). Accepted from his owner-calls: the env filter keeps user settings (an explicit list, as P1's script had);
   a run whose item is no longer leased is aborted at the next tick. Left for task 9: a leased stopped item whose session
   moved on.
+
+## Murr on task 6 (Sonnet), before its commit
+
+- Needs fixes: 2 blocker, 3 major, each a way to a false "Clear to land": a rename hid a risk file; a merge asked from
+  the main checkout compared main with itself; the glob escape escaped nothing; an unreadable remote read as private;
+  a publish of a pushed head could never be cleared. All sent back, every doubt resolving to held.
+- Calls made on his owner-calls (Sigmund's, for Aiden to undo with a word): a deploy is held when the live build is not
+  behind main or was built from uncommitted work; a first push of a new branch is checked against main; `Risk:` lines
+  add to the defaults and never replace them; the patch id counts whitespace (`--verbatim`); a remote that cannot be
+  read as private, or is not on GitHub, is held; "changed since his yes" only for a yes on the same step; a check
+  writes a log line only when it holds.
