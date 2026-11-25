@@ -6,10 +6,12 @@ import { LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
 import { openDb } from '../../src/server/db/connection';
 import { createCtx, type Ctx } from '../../src/server/db/tx';
 import { leadAllow, leadDisallow } from '../../src/server/lead-commands';
-import { createRunner, headlessWay, standInApply, type Runner, type TurnInput, type TurnOutput, type TurnWay } from '../../src/server/lead/runner';
+import {
+  ABORT_BEFORE_LEASE_END_MS, createRunner, FAULT_BACKOFF_MS, headlessWay, resolveProgram, standInApply, TurnRunError, type Runner, type TurnInput, type TurnOutput, type TurnWay,
+} from '../../src/server/lead/runner';
 import { clearAsk, raiseAskDetailed } from '../../src/server/repo/asks';
 import { addDeskItem, getDeskItem, type DeskItem, type DeskItemKind } from '../../src/server/repo/desk';
-import { applyTurn, getTurn, leaseItem, saveAnswer, type LeadTurn } from '../../src/server/repo/leadTurns';
+import { applyTurn, getTurn, insertTurn, leaseItem, saveAnswer, type LeadTurn } from '../../src/server/repo/leadTurns';
 import { addNodes } from '../../src/server/repo/nodes';
 import { addBinding, createProject, setProjectLead } from '../../src/server/repo/projects';
 import { handleHookEvent } from '../../src/server/session-flow';
@@ -88,7 +90,7 @@ function heldWay(): TurnWay & { calls: TurnInput[]; release(i: number, out?: Tur
   };
 }
 
-function runnerOn(ctx: Ctx, way: TurnWay, over: { apply?: (ctx: Ctx, turn: LeadTurn, item: DeskItem) => ReturnType<typeof standInApply> } = {}) {
+function runnerOn(ctx: Ctx, way: TurnWay, over: { apply?: (ctx: Ctx, turn: LeadTurn, item: DeskItem) => ReturnType<typeof standInApply>; leaseMs?: number } = {}) {
   const lines: string[] = [];
   const runner: Runner = createRunner(ctx, {
     way,
@@ -96,6 +98,7 @@ function runnerOn(ctx: Ctx, way: TurnWay, over: { apply?: (ctx: Ctx, turn: LeadT
     home: 'C:/home',
     port: 4410,
     tickMs: 60 * 60 * 1000,
+    ...(over.leaseMs === undefined ? {} : { leaseMs: over.leaseMs }),
     apply: over.apply ?? standInApply,
     log: { info: (m) => lines.push(m), error: (m) => lines.push(`ERROR ${m}`) },
   });
@@ -220,7 +223,11 @@ describe('the turn runner', () => {
     runner.kick(w.project.id);
     await vi.waitFor(() => expect(turnsOf(w.ctx, item.id)[0]!.state).toBe('failed'));
     expect(turnsOf(w.ctx, item.id)[0]).toMatchObject({ costUsd: 0.12, tokensIn: 1000, why: expect.stringContaining('the answer did not parse: the verdict line is "decide"') });
-    // The kick after the failure takes the reopened item again, and its second failure leaves it behind.
+    expect(getDeskItem(w.ctx.db, item.id)!.state).toBe('open');
+    // A failed item is not leased again at once: the next tick takes it, and its second failure leaves it behind.
+    await new Promise((r) => setImmediate(r));
+    expect(way.calls).toHaveLength(1);
+    runner.tick();
     await vi.waitFor(() => expect(getDeskItem(w.ctx.db, item.id)!.state).toBe('behind'));
     expect(way.calls).toHaveLength(2);
   });
@@ -305,7 +312,7 @@ describe('the turn runner', () => {
     expect(turnsOf(w.ctx, item.id)).toHaveLength(0);
   });
 
-  it('stopped mid-turn, aborts the run and abandons the turn, the item open for the next start', async () => {
+  it('stopped mid-turn, aborts the run and interrupts the turn, the item open for the next start and not counted', async () => {
     const w = world();
     const item = w.add();
     const way = heldWay();
@@ -313,21 +320,120 @@ describe('the turn runner', () => {
     runner.kick(w.project.id);
     expect(way.calls).toHaveLength(1);
     await runner.stop();
-    expect(turnsOf(w.ctx, item.id)[0]).toMatchObject({ state: 'abandoned', why: 'the server stopped during the turn' });
+    expect(turnsOf(w.ctx, item.id)[0]).toMatchObject({ state: 'interrupted', why: 'the server stopped during the turn' });
     expect(getDeskItem(w.ctx.db, item.id)!.state).toBe('open');
     runner.kick(w.project.id);
     expect(way.calls).toHaveLength(1);
+  });
+
+  it('stops within its deadline a run that ignores the abort', async () => {
+    const w = world();
+    w.add();
+    const way: TurnWay = { name: 'headless', run: () => new Promise<TurnOutput>(() => undefined) };
+    const { runner, lines } = runnerOn(w.ctx, way);
+    runner.kick(w.project.id);
+    const t0 = Date.now();
+    await runner.stop();
+    expect(Date.now() - t0).toBeLessThan(5000);
+    expect(lines.some((l) => l.includes('did not end within'))).toBe(true);
+  });
+
+  it('fails a run still going 30 seconds before its lease ends, which counts against the item', async () => {
+    const w = world();
+    const item = w.add();
+    const way = heldWay();
+    const { runner } = runnerOn(w.ctx, way, { leaseMs: ABORT_BEFORE_LEASE_END_MS + 50 });
+    runner.kick(w.project.id);
+    await vi.waitFor(() => expect(turnsOf(w.ctx, item.id)[0]!.state).toBe('failed'));
+    expect(turnsOf(w.ctx, item.id)[0]!.why).toContain('seconds before its lease ends');
+    expect(getDeskItem(w.ctx.db, item.id)!.state).toBe('open');
+  });
+
+  it('a runner fault interrupts the turn with its cost and readings, never puts items behind, and backs the project off', async () => {
+    const w = world();
+    const [a, b] = [w.add(), w.add()];
+    const way = quickWay(() => {
+      throw new TurnRunError('the turn ended with error_during_execution: Not logged in', { rateLimits: [RATE], costUsd: 0.05, tokensIn: 10, tokensOut: 2, durationMs: 700, model: 'm' }, true);
+    });
+    const { runner, lines } = runnerOn(w.ctx, way);
+    runner.kick(w.project.id);
+    await vi.waitFor(() => expect(way.calls).toHaveLength(2));
+    await vi.waitFor(() => expect(turnsOf(w.ctx, b.id)[0]?.state).toBe('interrupted'));
+    const [t] = turnsOf(w.ctx, a.id);
+    expect(t).toMatchObject({ state: 'interrupted', costUsd: 0.05, tokensIn: 10, tokensOut: 2, durationMs: 700, why: expect.stringContaining('Not logged in') });
+    expect(w.ctx.db.prepare('SELECT COUNT(*) FROM usage_readings WHERE turn_id = ?').pluck().get(t!.id)).toBe(1);
+    expect([a, b].map((i) => getDeskItem(w.ctx.db, i.id)!.state)).toEqual(['open', 'open']);
+    expect(lines.filter((l) => l.includes('backs off'))).toHaveLength(1);
+    // Backed off: no lease for five minutes.
+    runner.tick();
+    w.tick(FAULT_BACKOFF_MS - 1000);
+    runner.tick();
+    await new Promise((r) => setImmediate(r));
+    expect(way.calls).toHaveLength(2);
+    // Then one try, not two at once.
+    w.tick(2000);
+    runner.tick();
+    expect(way.calls).toHaveLength(3);
+    await vi.waitFor(() => expect(turnsOf(w.ctx, a.id).length + turnsOf(w.ctx, b.id).length).toBe(3));
+    await new Promise((r) => setImmediate(r));
+    // However often it faults, no item goes behind.
+    for (let i = 0; i < 3; i++) {
+      w.tick(FAULT_BACKOFF_MS + 1000);
+      runner.tick();
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    expect([a, b].map((i) => getDeskItem(w.ctx.db, i.id)!.state)).toEqual(['open', 'open']);
+  });
+
+  it('stops at the next tick a run whose item left the desk, interrupting its turn', async () => {
+    const w = world();
+    handleHookEvent(w.ctx, 's1', { event: 'start', source: 'startup', cwd: BOUND });
+    w.tick(1000);
+    const { ask } = raiseAskDetailed(w.ctx, 'scribe:s1', { nodeId: w.step.id, kind: 'question', text: 'Which port?', sessionId: 's1' });
+    const item = w.ctx.db.prepare("SELECT id FROM desk_items WHERE kind = 'question' AND ref = ?").pluck().get(String(ask.id)) as number;
+    const way = heldWay();
+    const { runner } = runnerOn(w.ctx, way);
+    runner.kick(w.project.id);
+    clearAsk(w.ctx, 'window', ask.id, '4410');
+    runner.tick();
+    await vi.waitFor(() => expect(turnsOf(w.ctx, item)[0]!.state).toBe('interrupted'));
+    expect(turnsOf(w.ctx, item)[0]!.why).toBe('the item left the desk during the turn');
+    expect(getDeskItem(w.ctx.db, item)).toMatchObject({ state: 'done', outcome: 'cleared by window' });
+  });
+
+  it('stops at the next tick a run whose project had its round switched off, the item open again', async () => {
+    const w = world();
+    const item = w.add();
+    const way = heldWay();
+    const { runner } = runnerOn(w.ctx, way);
+    runner.kick(w.project.id);
+    leadDisallow(w.ctx, w.project.slug, 'Progresser', V, { switch: 'round' });
+    runner.tick();
+    await vi.waitFor(() => expect(turnsOf(w.ctx, item.id)[0]!.state).toBe('interrupted'));
+    expect(getDeskItem(w.ctx.db, item.id)!.state).toBe('open');
+  });
+});
+
+describe('leaseItem', () => {
+  it('refuses an open item that already has a live turn, and leaves the item open', () => {
+    const w = world();
+    const item = w.add();
+    insertTurn(w.ctx.db, { itemId: item.id, way: 'headless', leaseMs: MIN }, w.clock());
+    expect(leaseItem(w.ctx.db, item.id, { way: 'headless', leaseMs: MIN }, w.clock())).toBeUndefined();
+    expect(getDeskItem(w.ctx.db, item.id)!.state).toBe('open');
   });
 });
 
 /** A stand-in for `claude`: records its argv, env, cwd and stdin, then prints a canned stream, fails, or hangs. */
 const STUB = `
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 let stdin = '';
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', (d) => (stdin += d));
 process.stdin.on('end', () => {
-  writeFileSync(process.env.STUB_RECORD, JSON.stringify({ argv: process.argv.slice(2), env: process.env, cwd: process.cwd(), stdin, pid: process.pid }));
+  const argv = process.argv.slice(2);
+  const file = (flag) => (argv.includes(flag) ? readFileSync(argv[argv.indexOf(flag) + 1], 'utf8') : null);
+  writeFileSync(process.env.STUB_RECORD, JSON.stringify({ argv, env: process.env, cwd: process.cwd(), stdin, pid: process.pid, prompt: file('--system-prompt-file'), tools: file('--mcp-config') }));
   const mode = process.env.STUB_MODE;
   if (mode === 'noresult') {
     process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', model: 'x' }) + '\\n');
@@ -336,6 +442,11 @@ process.stdin.on('end', () => {
   }
   if (mode === 'hang') {
     setInterval(() => undefined, 1000);
+    return;
+  }
+  if (mode === 'iserror') {
+    process.stdout.write(JSON.stringify({ type: 'rate_limit_event', rate_limit_info: ${JSON.stringify(RATE)} }) + '\\n');
+    process.stdout.write(JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'Not logged in', total_cost_usd: 0.01, duration_ms: 90, usage: { input_tokens: 5, output_tokens: 1 } }) + '\\n');
     return;
   }
   const out = [
@@ -347,12 +458,14 @@ process.stdin.on('end', () => {
     { type: 'result', subtype: 'success', is_error: false, result: ${JSON.stringify(ANSWER)}, total_cost_usd: 0.23, duration_ms: 4100,
       usage: { input_tokens: 1500, output_tokens: 300 }, permission_denials: [{ tool_name: 'Bash', tool_use_id: 't1', tool_input: {} }] },
   ];
-  process.stdout.write(out.map((o) => (typeof o === 'string' ? o : JSON.stringify(o))).join('\\n'));
+  process.stdout.write(out.map((o) => (typeof o === 'string' ? o : JSON.stringify(o))).join('\\n') + (mode === 'linger' ? '\\n' : ''));
+  // linger: the answer is out, but the program does not exit (an MCP server holding it open).
+  if (mode === 'linger') setInterval(() => undefined, 1000);
 });
 `;
 
 describe('the headless way', () => {
-  function stubSetup(mode: string) {
+  function stubSetup(mode: string, claude?: (dir: string, stub: string) => string) {
     const dir = mkdtempSync(join(tmpdir(), 'lead-headless-'));
     cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
     const stub = join(dir, 'claude-stub.mjs');
@@ -366,15 +479,19 @@ describe('the headless way', () => {
       CLAUDECODE: '1',
       CLAUDE_CODE_SESSION_ID: 'abc',
       CLAUDE_CODE_ENTRYPOINT: 'cli',
-      claude_code_lowercase: 'x',
+      claude_code_session_lowercase: 'x',
+      CLAUDE_CODE_MESSAGING_EXTRA: 'x',
+      CLAUDE_CODE_GIT_BASH_PATH: 'C:/git/bash.exe',
+      CLAUDE_CODE_OAUTH_TOKEN: 'token',
       CLAUDE_AGENT_SDK_VERSION: '1.0',
       T3CODE_THREAD_ID: 't',
       CLAUDE_PID: '123',
       CLAUDE_EFFORT: 'high',
     };
     const leadDir = (slug: string) => join(dir, 'home', 'lead', slug);
-    const way = headlessWay({ claudePath: stub, leadDir, toolsEntry: 'C:/dist/lead/tools.js', env });
+    const way = headlessWay({ claudePath: claude ? claude(dir, stub) : stub, leadDir, toolsEntry: 'C:/dist/lead/tools.js', env });
     const input: TurnInput = {
+      turnId: 7,
       slug: 'ingame',
       item: { id: 1, projectId: 1, kind: 'question', ref: '5', nodeId: 2, createdAt: '2026-11-25T09:00:00.000Z', dueAt: null, state: 'leased', doneAt: null, outcome: null },
       systemPrompt: 'You are the lead.\nAnswer in four lines.',
@@ -382,7 +499,8 @@ describe('the headless way', () => {
       model: 'claude-opus-5-5',
       toolsEnv: { INPROGRESS_HOME: 'C:/home', INPROGRESS_PORT: '4410', INPROGRESS_LEAD_AS: 'Progresser', INPROGRESS_LEAD_REPO: BOUND },
     };
-    const read = () => JSON.parse(readFileSync(record, 'utf8')) as { argv: string[]; env: Record<string, string>; cwd: string; stdin: string; pid: number };
+    const read = () =>
+      JSON.parse(readFileSync(record, 'utf8')) as { argv: string[]; env: Record<string, string>; cwd: string; stdin: string; pid: number; prompt: string | null; tools: string | null };
     return { dir, way, input, read, lead: leadDir('ingame'), record };
   }
 
@@ -390,8 +508,8 @@ describe('the headless way', () => {
     const s = stubSetup('ok');
     const out = await s.way.run(s.input, new AbortController().signal);
     const rec = s.read();
-    const promptFile = join(s.lead, 'desk-turn.md');
-    const toolsFile = join(s.lead, 'tools.json');
+    const promptFile = join(s.lead, 'desk-turn-7.md');
+    const toolsFile = join(s.lead, 'tools-7.json');
     expect(rec.argv).toEqual([
       '-p', '--model', 'claude-opus-5-5', '--system-prompt-file', promptFile, '--setting-sources', 'project', '--strict-mcp-config',
       '--mcp-config', toolsFile, '--tools', '', '--allowedTools', 'mcp__inprogress-lead', '--output-format', 'stream-json', '--verbose',
@@ -400,12 +518,14 @@ describe('the headless way', () => {
     expect(rec.cwd.toLowerCase()).toBe(s.lead.toLowerCase());
     expect(rec.stdin).toBe(s.input.userMessage);
     const names = Object.keys(rec.env).map((k) => k.toUpperCase());
-    for (const gone of ['CLAUDECODE', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_LOWERCASE', 'CLAUDE_AGENT_SDK_VERSION', 'T3CODE_THREAD_ID', 'CLAUDE_PID', 'CLAUDE_EFFORT']) {
-      expect(names).not.toContain(gone);
-    }
-    expect(rec.env.KEEP_ME).toBe('yes');
-    expect(readFileSync(promptFile, 'utf8')).toBe(s.input.systemPrompt);
-    expect(JSON.parse(readFileSync(toolsFile, 'utf8'))).toEqual({
+    const gone = ['CLAUDECODE', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SESSION_LOWERCASE', 'CLAUDE_CODE_MESSAGING_EXTRA', 'CLAUDE_AGENT_SDK_VERSION', 'T3CODE_THREAD_ID', 'CLAUDE_PID', 'CLAUDE_EFFORT'];
+    for (const name of gone) expect(names).not.toContain(name);
+    expect(rec.env).toMatchObject({ KEEP_ME: 'yes', CLAUDE_CODE_GIT_BASH_PATH: 'C:/git/bash.exe', CLAUDE_CODE_OAUTH_TOKEN: 'token' });
+    expect(rec.prompt).toBe(s.input.systemPrompt);
+    // The turn's own files are gone once it ends; the settings file stays for the next.
+    expect(existsSync(promptFile)).toBe(false);
+    expect(existsSync(toolsFile)).toBe(false);
+    expect(JSON.parse(rec.tools!)).toEqual({
       mcpServers: { 'inprogress-lead': { command: process.execPath, args: ['C:/dist/lead/tools.js', 'ingame'], env: s.input.toolsEnv } },
     });
     expect(JSON.parse(readFileSync(join(s.lead, '.claude', 'settings.json'), 'utf8'))).toEqual({});
@@ -421,9 +541,54 @@ describe('the headless way', () => {
     });
   });
 
-  it('fails a run that exits without a result line, with the stderr tail', async () => {
+  it('fails a run that exits without a result line, with the stderr tail, as a runner fault', async () => {
     const s = stubSetup('noresult');
-    await expect(s.way.run(s.input, new AbortController().signal)).rejects.toThrow(/exited with code 3 and no result line: starting\s+Error: not logged in/);
+    const err = await s.way.run(s.input, new AbortController().signal).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(TurnRunError);
+    expect((err as TurnRunError).message).toMatch(/exited with code 3 and no result line: starting\s+Error: not logged in/);
+    expect((err as TurnRunError).runnerFault).toBe(true);
+  });
+
+  it('fails an is_error result as a runner fault, keeping its cost and rate limits', async () => {
+    const s = stubSetup('iserror');
+    const err = (await s.way.run(s.input, new AbortController().signal).catch((e: unknown) => e)) as TurnRunError;
+    expect(err).toBeInstanceOf(TurnRunError);
+    expect(err.message).toBe('the turn ended with error_during_execution: Not logged in');
+    expect(err.runnerFault).toBe(true);
+    expect(err.partial).toMatchObject({ rateLimits: [RATE], costUsd: 0.01, durationMs: 90, tokensIn: 5, tokensOut: 1 });
+  });
+
+  it('fails a program that cannot start as a runner fault, and removes the turn files', async () => {
+    const s = stubSetup('ok', (dir) => join(dir, 'no-such-claude.exe'));
+    const err = (await s.way.run(s.input, new AbortController().signal).catch((e: unknown) => e)) as TurnRunError;
+    expect(err).toBeInstanceOf(TurnRunError);
+    expect(err.message).toContain('could not start');
+    expect(err.runnerFault).toBe(true);
+    expect(existsSync(join(s.lead, 'desk-turn-7.md'))).toBe(false);
+  });
+
+  it('answers from the result line of a run that lingers, killing it after', async () => {
+    const s = stubSetup('linger');
+    const out = await s.way.run(s.input, new AbortController().signal);
+    expect(out.text).toBe(ANSWER);
+    const { pid } = s.read();
+    await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 10_000 });
+  }, 20_000);
+
+  it.runIf(process.platform === 'win32')('runs a .cmd through cmd.exe with the same argv, and finds claude.cmd on PATH', async () => {
+    const s = stubSetup('ok', (dir, stub) => {
+      const cmd = join(dir, 'claude.cmd');
+      writeFileSync(cmd, `@"${process.execPath}" "${stub}" %*\r\n`);
+      return cmd;
+    });
+    const out = await s.way.run(s.input, new AbortController().signal);
+    expect(out.text).toBe(ANSWER);
+    expect(s.read().argv).toEqual([
+      '-p', '--model', 'claude-opus-5-5', '--system-prompt-file', join(s.lead, 'desk-turn-7.md'), '--setting-sources', 'project', '--strict-mcp-config',
+      '--mcp-config', join(s.lead, 'tools-7.json'), '--tools', '', '--allowedTools', 'mcp__inprogress-lead', '--output-format', 'stream-json', '--verbose',
+      '--max-turns', '14', '--no-session-persistence',
+    ]);
+    expect(resolveProgram('claude', { PATH: s.dir }, 'win32')).toEqual({ command: join(s.dir, 'claude.cmd'), prefix: [], viaCmd: true });
   });
 
   it('kills the run on abort', async () => {

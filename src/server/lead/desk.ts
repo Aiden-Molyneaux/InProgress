@@ -7,7 +7,7 @@ import { openDeskItems, type DeskItem } from '../repo/desk';
 import { DESK_ASK_DUE_MS, itemEverMade, plusMs, produceDeskItem } from '../repo/deskProducers';
 import { resolveProject } from '../repo/projects';
 import { findSession } from '../repo/sessions';
-import { roundBound } from '../repo/switches';
+import { liveProjectsWithRound, roundBound } from '../repo/switches';
 
 export { DESK_ASK_DUE_MS, onDeskItem } from '../repo/deskProducers';
 
@@ -33,9 +33,7 @@ export interface DeskWatchResult {
  */
 export function watchDesk(ctx: Ctx): DeskWatchResult {
   const result: DeskWatchResult = { stopped: 0, promiseDue: 0, swept: 0 };
-  const projects = ctx.db.prepare("SELECT id FROM projects WHERE status = 'active' AND deleted_at IS NULL ORDER BY id").pluck().all() as number[];
-  for (const projectId of projects) {
-    if (roundBound(ctx.db, projectId) === null) continue;
+  for (const projectId of liveProjectsWithRound(ctx.db)) {
     result.stopped += write(ctx, 'system', () => stoppedPass(ctx, projectId));
     result.promiseDue += write(ctx, 'system', () => promiseDuePass(ctx, projectId));
     result.swept += write(ctx, 'system', () => sweepPass(ctx, projectId));

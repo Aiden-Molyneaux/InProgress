@@ -145,7 +145,7 @@ export function deskGroups(b: LeadBrief, now: number): DeskGroup[] {
       id: 'said',
       title: `Said in your name ${span}`,
       count: b.saidInAidensName.length,
-      rows: b.saidInAidensName.map((e, i) => ({ key: String(i), text: `${stamp(e.at)} ${e.kind} ${e.ref}`, detail: `"${flat(e.words)}"` })),
+      rows: b.saidInAidensName.map((e, i) => ({ key: String(i), text: `${stamp(e.at)} ${e.kind}${e.ref === '' ? '' : ` ${e.ref}`}`, detail: `"${flat(e.words)}"` })),
     },
   ];
 }

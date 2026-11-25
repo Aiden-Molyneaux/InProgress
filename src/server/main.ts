@@ -10,7 +10,8 @@ import { truncateIfLarge } from './backup';
 import { openDb } from './db/connection';
 import { createCtx } from './db/tx';
 import { watchDesk } from './lead/desk';
-import { createRunner, headlessWay, LEAD_MODEL, leadToolsEntry, standInApply, type Runner } from './lead/runner';
+import { applyVerdict } from './lead/apply';
+import { createRunner, headlessWay, LEAD_MODEL, leadToolsEntry, type Runner } from './lead/runner';
 import { createBackupRunner } from './backup-runner';
 import { runMaintenance } from './project-lifecycle';
 import { reconcileProjects } from './repo/taskState';
@@ -133,7 +134,7 @@ async function main(): Promise<void> {
         model: LEAD_MODEL,
         home,
         port,
-        apply: standInApply,
+        apply: applyVerdict,
         log: { info: (message) => app.log.info(message), error: (message) => app.log.error(message) },
       });
       leadRunner.start();

@@ -187,3 +187,43 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   add to the defaults and never replace them; the patch id counts whitespace (`--verbatim`); a remote that cannot be
   read as private, or is not on GitHub, is held; "changed since his yes" only for a yes on the same step; a check
   writes a log line only when it holds.
+
+## Task 5: what a verdict does (Sev, Opus)
+
+- Built: `src/server/lead/apply.ts` (`applyVerdict`, the runner's `apply` in main.ts), `decideInWrite` shared by
+  `lead decide` and the desk, the bring (`src/server/repo/deskBring.ts`: `bringItem`, `bringNext`, `broughtOpen`), the
+  brief's "Brought to Aiden by the desk" section.
+- From Murr's task 4 debt: the apply runs in `write(ctx, 'lead:<name>', ..., { immediate: true })` with applyTurn's
+  compare-and-set inside it (a savepoint), and the effect gets the write's `record`, so ask.cleared and the rest reach
+  the window after the commit. `write()` gained the `immediate` option.
+- Plan said "five open per project". Did: AIDEN_BROUGHT_LIMIT counts the items the lead brought (a `bring` line) still
+  waiting on Aiden, old asks left out. Because InProgress's 6 old asks would otherwise stop the desk from bringing
+  anything.
+- Brought across from `lead-first-run`: 2922a4a by hand (the brief and the Lead view name the switch a line turned on,
+  never `#null`; its tests applied as they were), on this branch's switch reader. From plan d392eec, Task 1 only:
+  `aidenOpenAsks` (this project and across projects), the start gate and the brief read it, the brief's line reads
+  `Aiden's open asks in this project: <n> of 5 · across all projects: <m>`. Not brought: its rules text and version bump
+  (rules version 7, task 11) and its Task 2 (the Lead view's note still reads across all projects).
+- The application keeps an item's outcome on waiting_aiden too (`AIDEN d<id>`, `AIDEN waiting (limit)`); only a reopen
+  drops it.
+- applyTurn's item move is from leased or done: the effect's own clear closes the item (deskOnAskCleared) in the same
+  transaction, and the effect's outcome replaces `cleared by lead:...`.
+- An item past the limit tells its session nothing until it is brought: the message's retry key needs the bring's
+  d-number. bringNext does nothing while the round is off.
+- CARD on a permission item is left as `CARD (no action in this task)` with the ask open for Aiden: the brief names CARD
+  on a question only.
+- CARD's line names the ask's step: `inprogress landing <step id> --action <...>`.
+- An apply that throws twice for one turn fails it (`failAnsweredTurn`, answered to failed, the item back as failTurn
+  moves it).
+- Task 4 fixes from Murr in the same change: a runner fault (claude would not start, no result line, an is_error result
+  other than error_max_turns) moves the turn to a new state `interrupted`, which does not count toward behind, and backs
+  the project off 5 minutes, then one try; a stop and an item that left the desk mid-run (cleared, step deleted, round
+  off: checked every tick) interrupt too. A run killed at its lease's end and an answer that does not parse still count.
+  After a failure the next lease waits for the tick. A failed or faulted run keeps its cost, tokens and readings.
+  `claude` on Windows is found as .exe, then .cmd or .bat on PATH, and a .cmd runs through `cmd.exe /d /s /c` with each
+  argument quoted (one with a quote, % or ! is refused). The turn's prompt and tools files are per turn and removed after;
+  the settings file is written once. stop() waits at most 2 seconds; a taskkill that fails falls back to kill; a result
+  line wins over a later abort, and a run that lingers 5 seconds past its result is killed. The env filter is P1's list
+  plus CLAUDE_CODE_SESSION*, CLAUDE_CODE_MESSAGING* and T3CODE_*. The scheduler's SQL moved to repo functions
+  (`answeredTurns`, `expiredLeases`, `openItemsInLane`, `liveProjectsWithRound`, `isLiveWithRound`), the last two shared
+  with the minute watch.

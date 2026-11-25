@@ -303,14 +303,17 @@ describe('leadStart: on the lead own judgment (no words of Aiden)', () => {
     await expect(s.run(s.signing.id, WORDS)).resolves.toBeDefined();
   });
 
-  it('is refused when Aiden has five open asks across all projects, naming the count', async () => {
+  it('is held by five open asks in this project, never by asks in another', async () => {
     const s = setup();
     s.on();
     const [q] = addNodes(s.ctx, 'test', { parentId: s.elsewhere.rootNodeId, nodes: [{ title: 'Asker' }] });
     for (let i = 0; i < 5; i++) raiseAsk(s.ctx, 'test', { nodeId: q.id, kind: 'question', text: `Question ${i}?` });
-    expect(await s.refused(() => s.run(s.signing.id))).toMatchObject({ status: 409, message: 'Aiden has 5 open asks, and the limit is 5. Bring those to him first.' });
+    await expect(s.run(s.signing.id)).resolves.toBeDefined();
+    const [here] = addNodes(s.ctx, 'test', { parentId: s.project.rootNodeId, nodes: [{ title: 'Asker here' }] });
+    for (let i = 0; i < 5; i++) raiseAsk(s.ctx, 'test', { nodeId: here.id, kind: 'question', text: `Question ${i}?` });
+    expect(await s.refused(() => s.run(s.privacy.id))).toMatchObject({ status: 409, message: 'Aiden has 5 open asks in this project, and the limit is 5. Bring those to him first.' });
     // His words are not held by it.
-    await expect(s.run(s.signing.id, WORDS)).resolves.toBeDefined();
+    await expect(s.run(s.privacy.id, WORDS)).resolves.toBeDefined();
   });
 
   it('is capped at three a day, counting only starts with no words of his, in this project, in the last 24 hours', async () => {

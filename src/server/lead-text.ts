@@ -1,4 +1,4 @@
-import { IN_FLIGHT_LIMIT, AIDEN_OPEN_LIMIT, LEAD_LIST_CAP, LEAD_LOOK_BACK_DAYS, intentLine, type LeadBrief } from '../core/lead';
+import { IN_FLIGHT_LIMIT, AIDEN_BROUGHT_LIMIT, AIDEN_OPEN_LIMIT, LEAD_LIST_CAP, LEAD_LOOK_BACK_DAYS, intentLine, type LeadBrief } from '../core/lead';
 import { clipLine, stepRef } from '../core/step-ref';
 import { PROJECT_NAME_MAX, askTag } from '../core/types';
 import { spanAgo } from './briefing';
@@ -90,7 +90,7 @@ export function renderLeadBrief(b: LeadBrief): string {
   lines.push(`Goal: ${line(b.intent.goal, HEADLINE_CUT) || noGoal}`, `Phase: ${line(b.intent.phase, HEADLINE_CUT) || 'none'}`);
   const record = intentLine(b.intent, now, true);
   if (record !== null) lines.push(record);
-  const over = b.aidenOpenAcrossProjects - AIDEN_OPEN_LIMIT;
+  const over = b.aidenOpenInProject - AIDEN_OPEN_LIMIT;
   // Until a look is marked the brief counts LEAD_LOOK_BACK_DAYS back, and says so: there is no last look to count from.
   const span = b.links.lastSeenAt === null ? `in the last ${LEAD_LOOK_BACK_DAYS} days` : 'since your last look';
   lines.push(
@@ -104,10 +104,14 @@ export function renderLeadBrief(b: LeadBrief): string {
       ...b.waitingOnAiden.map((a) => `${askTag(a.askId)} ${a.kind} on ${step(a.stepId, a.stepTitle)}: "${line(a.text, ASK_CUT)}" · ${spanAgo(a.raisedAt, now)}`),
     ]),
     // A line of its own, not part of a heading: a reader who retells the brief keeps a line and drops a heading's detail.
-    `Aiden's open asks across all projects: ${b.aidenOpenAcrossProjects} of ${AIDEN_OPEN_LIMIT}${over > 0 ? `, ${over} over the limit` : ''}`,
+    `Aiden's open asks in this project: ${b.aidenOpenInProject} of ${AIDEN_OPEN_LIMIT}${over > 0 ? `, ${over} over the limit` : ''} · across all projects: ${b.aidenOpenAcrossProjects}`,
     ...section(
       `For the lead (${b.forTheLead.length}):`,
       b.forTheLead.map((a) => `${askTag(a.askId)} on ${step(a.stepId, a.stepTitle)}: "${line(a.text, ASK_CUT)}" · ${a.dueAt === null ? 'no due time' : `due ${stamp(a.dueAt)}`}${a.overdue ? ' · OVERDUE' : ''}`),
+    ),
+    ...section(
+      `Brought to Aiden by the desk, waiting (${b.brought.length} of ${AIDEN_BROUGHT_LIMIT}):`,
+      b.brought.map((d) => `${d.tag} ${stamp(d.at)}${d.askId === null ? '' : ` ${askTag(d.askId)}`}${d.stepId === null ? '' : ` on ${step(d.stepId, d.stepTitle)}`}: "${line(d.line, TEXT_CUT)}" · you would: "${line(d.wouldHave, TEXT_CUT)}"`),
     ),
     ...section(`Next up (${b.nextUp.length}):`, b.nextUp.map((n) => `${step(n.stepId, n.title)} · ${n.status}`)),
     `Backlog: ${b.backlog} ${b.backlog === 1 ? 'step' : 'steps'} not started and not in the queue`,
@@ -118,7 +122,8 @@ export function renderLeadBrief(b: LeadBrief): string {
     ),
     ...section(
       `Said in Aiden's name ${span} (${b.saidInAidensName.length}):`,
-      b.saidInAidensName.map((e) => `${stamp(e.at)} ${e.kind} ${e.ref}: "${line(e.words, TEXT_CUT)}"`),
+      // A line that names no ask, step or switch has no ref: the kind alone, never a `#null`.
+      b.saidInAidensName.map((e) => `${stamp(e.at)} ${e.kind}${e.ref === '' ? '' : ` ${e.ref}`}: "${line(e.words, TEXT_CUT)}"`),
     ),
     ...section(
       `Decided for Aiden in the last ${LEAD_LOOK_BACK_DAYS} days (${b.decided.length}, ${b.decided.filter((d) => d.isNew).length} new):`,

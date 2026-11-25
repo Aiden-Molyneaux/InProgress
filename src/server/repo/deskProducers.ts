@@ -1,6 +1,7 @@
 import type { Ask } from '../../core/types';
 import type { DB } from '../db/connection';
 import { addDeskItem, type AddDeskItemInput, type DeskItem, type DeskItemKind } from './desk';
+import { bringNext, broughtProjectsOfAsk } from './deskBring';
 import { roundBound } from './switches';
 
 /** How long after it is raised a session's question or permission ask is due on the desk. */
@@ -75,10 +76,14 @@ function closeAskItems(db: DB, askIds: readonly number[], outcome: string, now: 
 
 /**
  * Inside the write that first clears ask `askId`: every desk item about it that is not done moves to done, with the
- * outcome `cleared by <by>`. A leased item too: the runner treats an apply on an item no longer leased as abandoned.
+ * outcome `cleared by <by>`. A leased item too: the runner treats an apply on an item no longer leased as abandoned. When
+ * one of them was brought to Aiden, the next waiting item of its project is brought (bringNext).
  */
 export function deskOnAskCleared(db: DB, askId: number, by: string, now: string): void {
+  // An item the lead brought to Aiden frees its place when its ask clears: the next waiting one is brought in this write.
+  const freed = broughtProjectsOfAsk(db, askId);
   closeAskItems(db, [askId], `cleared by ${by}`, now);
+  for (const projectId of freed) bringNext(db, projectId, now);
 }
 
 /**

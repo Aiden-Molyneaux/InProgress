@@ -1,7 +1,7 @@
 import { isAidens, type LeadSwitch } from '../core/lead';
 import { stepRef } from '../core/step-ref';
 import { askTag, type Ask, type Project, type TreeNode } from '../core/types';
-import { write, type Ctx } from './db/tx';
+import { write, type Ctx, type RecordEvent } from './db/tx';
 import { clip, stamp } from './digest';
 import { badRequest, conflict, notFound } from './errors';
 import { leadSwitches, logLeadEvent, requireLead } from './lead';
@@ -110,17 +110,33 @@ export function leadDecide(
   const { project, name, actor } = leadOf(ctx, ref, as, instructions);
   return write(ctx, actor, (record) => {
     const before = askIn(ctx, project, input.askId);
-    const tag = askTag(before.id);
-    if (!isAidens(before)) throw conflict(`${tag} is the lead's own promise. Clear it with kept.`);
-    if (before.kind !== 'question') throw conflict(DECIDE_QUESTION_ONLY);
-    if (before.clearedAt !== null) {
-      throw conflict(before.answer !== '' ? `Already answered: "${clip(before.answer, ANSWER_CUT)}".` : `${tag} is already cleared, with no answer.`);
-    }
-    const ask = clearInWrite(ctx, record, actor, before, input.answer, true, 'lead_decided');
-    const decision = logLeadEvent(ctx, { projectId: project.id, lead: name, instructions, kind: 'decide', askId: ask.id, nodeId: ask.nodeId, text: input.reason, aidenWords: input.aidenWords });
+    if (isAidens(before) && before.kind !== 'question') throw conflict(DECIDE_QUESTION_ONLY);
+    const decision = decideInWrite(ctx, record, { project, name, actor, instructions, ask: before, answer: input.answer, reason: input.reason, aidenWords: input.aidenWords });
+    const ask = requireAsk(ctx, before.id);
     const heard = ask.sessionId === null ? 'No session is waiting on it.' : 'Its session reads your answer on its next prompt.';
-    return { text: `Decided ${tag}: decision ${decisionTag(decision)}. ${heard}`, ask, decision };
+    return { text: `Decided ${askTag(ask.id)}: decision ${decisionTag(decision)}. ${heard}`, ask, decision };
   });
+}
+
+/**
+ * A decision on an open ask of Aiden's, inside an open write: the ask cleared with the lead's answer (`answered_via`
+ * `lead_decided`) and its `decide` line in the lead's log, whose id it answers (the `d12` undo takes). `lead decide` and the
+ * desk (src/server/lead/apply.ts) both decide through here; only `lead decide` refuses a permission. Refuses the lead's
+ * own promise, and an ask already cleared.
+ */
+export function decideInWrite(
+  ctx: Ctx,
+  record: RecordEvent,
+  input: { project: Project; name: string; actor: string; instructions: number; ask: Ask; answer: string; reason: string; aidenWords?: string },
+): number {
+  const before = input.ask;
+  const tag = askTag(before.id);
+  if (!isAidens(before)) throw conflict(`${tag} is the lead's own promise. Clear it with kept.`);
+  if (before.clearedAt !== null) {
+    throw conflict(before.answer !== '' ? `Already answered: "${clip(before.answer, ANSWER_CUT)}".` : `${tag} is already cleared, with no answer.`);
+  }
+  const ask = clearInWrite(ctx, record, input.actor, before, input.answer, true, 'lead_decided');
+  return logLeadEvent(ctx, { projectId: input.project.id, lead: input.name, instructions: input.instructions, kind: 'decide', askId: ask.id, nodeId: ask.nodeId, text: input.reason, aidenWords: input.aidenWords });
 }
 
 /** Parks a step: the reason given, else Aiden's words, else that the lead parked it. A step of Aiden's needs his words. */

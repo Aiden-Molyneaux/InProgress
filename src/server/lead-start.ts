@@ -4,11 +4,10 @@ import { startHandoff, startTitle } from '../core/lead-start';
 import { stepRef } from '../core/step-ref';
 import { write, type Ctx } from './db/tx';
 import { badGateway, conflict } from './errors';
-import { leadFolders, leadSwitches, logLeadEvent, requireLead } from './lead';
+import { aidenOpenAsks, leadFolders, leadSwitches, logLeadEvent, requireLead } from './lead';
 import { reasonOf } from './lead-relay';
 import { intentHeadlines } from './lead-text';
 import { requireNode } from './repo/nodes';
-import { listProjectSummaries } from './repo/projects';
 import { liveSessionUnder, readProjectSessions } from './repo/sessions';
 import { parkedAncestor } from './repo/shelved';
 import { T3Unavailable, t3Start, type T3Options } from './t3';
@@ -108,10 +107,8 @@ export async function leadStart(
 
   if (input.aidenWords === undefined) {
     if (!leadSwitches(ctx, project.id).starts.on) throw conflict("Starts is off for this project: starting a thread needs Aiden's words. Pass them with --aiden.");
-    const open = listProjectSummaries(ctx)
-      .filter((p) => p.status === 'active')
-      .reduce((sum, p) => sum + p.openAsks, 0);
-    if (open >= AIDEN_OPEN_LIMIT) throw conflict(`Aiden has ${open} open asks, and the limit is ${AIDEN_OPEN_LIMIT}. Bring those to him first.`);
+    const open = aidenOpenAsks(ctx, project.id).project;
+    if (open >= AIDEN_OPEN_LIMIT) throw conflict(`Aiden has ${open} open asks in this project, and the limit is ${AIDEN_OPEN_LIMIT}. Bring those to him first.`);
     const own = ctx.db
       .prepare("SELECT COUNT(*) FROM lead_events WHERE project_id = ? AND kind IN ('start', 'start_unknown') AND aiden_words IS NULL AND at >= ?")
       .pluck()

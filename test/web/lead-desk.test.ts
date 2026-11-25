@@ -17,8 +17,10 @@ const empty = (): LeadBrief => ({
   inFlight: [],
   waitingOnAiden: [],
   aidensOwn: [],
+  aidenOpenInProject: 0,
   aidenOpenAcrossProjects: 0,
   forTheLead: [],
+  brought: [],
   nextUp: [],
   backlog: 0,
   stale: [],
@@ -41,6 +43,7 @@ const full = (): LeadBrief => ({
   ],
   waitingOnAiden: [{ askId: 7, kind: 'question', stepId: 9, stepTitle: 'Pick a port', text: longText, raisedAt: ago(3 * DAY) }],
   aidensOwn: [{ stepId: 3, title: 'Sign it', updatedAt: ago(HOUR) }],
+  aidenOpenInProject: 7,
   aidenOpenAcrossProjects: 7,
   forTheLead: [
     { askId: 11, stepId: 5, stepTitle: 'Late', text: 'Do it', dueAt: ago(DAY), overdue: true },
@@ -108,6 +111,13 @@ describe('deskGroups', () => {
     expect(g[3].note).toBe('Backlog: 1 step not started and not in the queue');
     expect(g[5].title).toBe('Landed in the last 7 days');
     expect(g[6].title).toBe('Said in your name in the last 7 days');
+  });
+
+  it('names a switch said in his name, and leaves a line with no ref without one', () => {
+    const said = (ref: string) => deskGroups({ ...empty(), saidInAidensName: [{ at: ago(DAY), kind: 'allow', ref, words: 'Turn on the switches' }] }, NOW)[6].rows[0];
+    expect(said('starts').text).toBe(`${stamp(ago(DAY))} allow starts`);
+    expect(said('').text).toBe(`${stamp(ago(DAY))} allow`);
+    expect(said('starts').detail).toBe('"Turn on the switches"');
   });
 
   it('gives seven groups with no rows for an empty brief', () => {

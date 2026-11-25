@@ -139,6 +139,17 @@ describe('readLeadBrief', () => {
     expect(r.forTheLead[0]).toMatchObject({ stepId: b.id, stepTitle: 'Privacy page', overdue: true });
     expect(listProjectSummaries(ctx).find((p) => p.id === project.id)!.openAsks).toBe(1);
     expect(r.aidenOpenAcrossProjects).toBe(1);
+    expect(r.aidenOpenInProject).toBe(1);
+  });
+
+  it("counts Aiden's open asks in this project apart from those across all projects", () => {
+    const { ctx, brief } = setup();
+    const other = createProject(ctx, 'test', { name: 'Elsewhere' });
+    const [q] = addNodes(ctx, 'test', { parentId: other.rootNodeId, nodes: [{ title: 'Asker' }] });
+    raiseAsk(ctx, 'test', { nodeId: q!.id, kind: 'question', text: 'Which one?' });
+    const r = brief();
+    expect(r.aidenOpenAcrossProjects).toBe(2);
+    expect(r.aidenOpenInProject).toBe(1);
   });
 
   it('reads in flight, next up and the project from what is there', () => {
@@ -232,6 +243,20 @@ describe('readLeadBrief', () => {
     expect(brief().saidInAidensName.map((e) => [e.kind, e.ref, e.words])).toEqual([
       ['park', `#${a.id}`, 'Park it.'],
       ['answer', `a${aidenAsk.id}`, 'Use the release keystore.'],
+    ]);
+  });
+
+  it('cites a switch turned on in his name by the switch, never as a step with no number', () => {
+    const { ctx, project, brief } = setup();
+    const V = LEAD_INSTRUCTIONS_VERSION;
+    logLeadEvent(ctx, { projectId: project.id, lead: 'Progresser', instructions: V, kind: 'allow', text: 'starts', aidenWords: 'Turn on the switches' });
+    logLeadEvent(ctx, { projectId: project.id, lead: 'Progresser', instructions: V, kind: 'disallow', text: 'landing', aidenWords: 'Landing off.' });
+    // A line with his words that names no ask, step or switch has an empty ref.
+    logLeadEvent(ctx, { projectId: project.id, lead: 'Progresser', instructions: V, kind: 'allow', text: 'no such switch', aidenWords: 'Odd.' });
+    expect(brief().saidInAidensName.map((e) => [e.kind, e.ref, e.words])).toEqual([
+      ['allow', '', 'Odd.'],
+      ['disallow', 'landing', 'Landing off.'],
+      ['allow', 'starts', 'Turn on the switches'],
     ]);
   });
 

@@ -51,3 +51,17 @@ export function roundFirstOn(db: DB, projectId: number): string | null {
 export function roundBound(db: DB, projectId: number): string | null {
   return roundSince(db, projectId) === null ? null : roundFirstOn(db, projectId);
 }
+
+/** SQL for a project the lead works on: active and not deleted. */
+const LIVE_PROJECT_SQL = "status = 'active' AND deleted_at IS NULL";
+
+/** The projects that are active, not deleted, and have the round on, by id: the desk's and the runner's. */
+export function liveProjectsWithRound(db: DB): number[] {
+  const ids = db.prepare(`SELECT id FROM projects WHERE ${LIVE_PROJECT_SQL} ORDER BY id`).pluck().all() as number[];
+  return ids.filter((id) => roundSince(db, id) !== null);
+}
+
+/** Whether the project is active, not deleted, and has the round on. */
+export function isLiveWithRound(db: DB, projectId: number): boolean {
+  return db.prepare(`SELECT 1 FROM projects WHERE id = ? AND ${LIVE_PROJECT_SQL}`).get(projectId) !== undefined && roundSince(db, projectId) !== null;
+}

@@ -1,5 +1,5 @@
 import { deriveBoard, type BoardRow, type Mark } from '../core/board';
-import { LEAD_IDLE_MARKS, LEAD_INSTRUCTIONS_VERSION, LEAD_LOOK_BACK_DAYS, LEAD_STALE_MARKS, isAidens, type LeadBrief, type LeadEventKind, type LeadEventOut, type LeadSwitch, type LeadSwitchState } from '../core/lead';
+import { LEAD_IDLE_MARKS, LEAD_INSTRUCTIONS_VERSION, LEAD_LOOK_BACK_DAYS, LEAD_STALE_MARKS, LEAD_SWITCHES, isAidens, type LeadBrief, type LeadEventKind, type LeadEventOut, type LeadSwitch, type LeadSwitchState } from '../core/lead';
 import { decisionText, isDecisionLog } from '../core/lead-mandate';
 import { leadBootstrap, leadRules } from '../core/lead-rules';
 import { buildIndex, dfsOrder, shelvedIds } from '../core/tree';
@@ -11,6 +11,7 @@ import { intentHeadlines, intentParagraphs } from './lead-text';
 import { listBindings, listProjectSummaries, resolveProject } from './repo/projects';
 import { readProjectSessions } from './repo/sessions';
 import { switchLine } from './repo/switches';
+import { insertLeadEvent, type LeadEventInput } from './repo/leadEvents';
 import { getProjectSnapshot } from './repo/snapshot';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -77,21 +78,27 @@ interface LeadEventRow {
   kind: string;
   ask_id: number | null;
   node_id: number | null;
+  text: string | null;
   aiden_words: string;
 }
 
+/** The switch an allow or disallow line names; '' for any other line, or a name that is no switch. */
+const switchNamed = (kind: string, text: string | null): string =>
+  (kind === 'allow' || kind === 'disallow') && text !== null && (LEAD_SWITCHES as readonly string[]).includes(text) ? text : '';
+
 /**
  * Where Aiden's words are cited from: the project's lead_events with his words, `at` or after `since`, newest first. The
- * ref is the ask (`a7`) when the line names one, else the step (`#42`).
+ * ref is the ask (`a7`) when the line names one, else the step (`#42`), else the switch it turned on or off (`starts`);
+ * '' when the line names none of them.
  */
 function saidSince(ctx: Ctx, projectId: number, since: string): LeadBrief['saidInAidensName'] {
   const rows = ctx.db
-    .prepare('SELECT at, kind, ask_id, node_id, aiden_words FROM lead_events WHERE project_id = ? AND aiden_words IS NOT NULL AND at >= ? ORDER BY at DESC, id DESC')
+    .prepare('SELECT at, kind, ask_id, node_id, text, aiden_words FROM lead_events WHERE project_id = ? AND aiden_words IS NOT NULL AND at >= ? ORDER BY at DESC, id DESC')
     .all(projectId, since) as LeadEventRow[];
   return rows.map((r) => ({
     at: r.at,
     kind: r.kind as LeadEventKind,
-    ref: r.ask_id !== null ? `a${r.ask_id}` : `#${r.node_id}`,
+    ref: r.ask_id !== null ? `a${r.ask_id}` : r.node_id !== null ? `#${r.node_id}` : switchNamed(r.kind, r.text),
     words: r.aiden_words,
   }));
 }
@@ -179,6 +186,19 @@ export function staleReasons(
 }
 
 /**
+ * Aiden's open asks, from one read of the project summaries: `project` is this project's (whatever its status; 0 when it
+ * is not listed), `all` the sum over active projects. The start gate and the brief both read it, so the line the lead reads
+ * and the refusal he meets cannot disagree.
+ */
+export function aidenOpenAsks(ctx: Ctx, projectId: number): { project: number; all: number } {
+  const summaries = listProjectSummaries(ctx);
+  return {
+    project: summaries.find((p) => p.id === projectId)?.openAsks ?? 0,
+    all: summaries.filter((p) => p.status === 'active').reduce((sum, p) => sum + p.openAsks, 0),
+  };
+}
+
+/**
  * Where the project stands, built from the record: every row, uncut (only renderLeadBrief cuts a list). `yours` is the
  * instructions version the reader holds, null for the window. Never call it inside a write(): the snapshot read may expire
  * stale sessions.
@@ -207,9 +227,7 @@ export function readLeadBrief(ctx: Ctx, ref: string, yours: number | null, now: 
   const waitingOnAiden = open
     .filter((a) => isAidens(a) && !shelved.has(a.nodeId))
     .map((a) => ({ askId: a.id, kind: a.kind, stepId: a.nodeId, stepTitle: titleOf(a.nodeId), text: a.text, raisedAt: a.raisedAt }));
-  const aidenOpenAcrossProjects = listProjectSummaries(ctx)
-    .filter((p) => p.status === 'active')
-    .reduce((sum, p) => sum + p.openAsks, 0);
+  const { project: aidenOpenInProject, all: aidenOpenAcrossProjects } = aidenOpenAsks(ctx, project.id);
 
   const forTheLead = open
     .filter((a) => a.owner === 'lead')
@@ -252,8 +270,10 @@ export function readLeadBrief(ctx: Ctx, ref: string, yours: number | null, now: 
     inFlight,
     waitingOnAiden,
     aidensOwn,
+    aidenOpenInProject,
     aidenOpenAcrossProjects,
     forTheLead,
+    brought: broughtWaiting(ctx, project.id, titleOf),
     nextUp,
     backlog,
     stale,
@@ -264,6 +284,27 @@ export function readLeadBrief(ctx: Ctx, ref: string, yours: number | null, now: 
     started: startedSince(ctx, project.id, new Date(nowMs - DEFAULT_LOOK_BACK_MS).toISOString(), titleOf),
     links: { ...lastRelay(ctx, project.id), lastSeenAt: project.leadSeenAt },
   };
+}
+
+/** What the desk brought to Aiden that still waits on him, oldest first: its bring line, decision and would-have. */
+function broughtWaiting(ctx: Ctx, projectId: number, titleOf: (id: number) => string): LeadBrief['brought'] {
+  const rows = ctx.db
+    .prepare(
+      `SELECT e.id, e.at, e.ask_id, e.node_id, ld.line, ld.would_have
+         FROM lead_decisions ld JOIN lead_events e ON e.id = ld.event_id JOIN desk_items d ON d.id = ld.item_id
+        WHERE ld.project_id = ? AND e.kind = 'bring' AND d.state = 'waiting_aiden'
+        ORDER BY e.at, e.id`,
+    )
+    .all(projectId) as { id: number; at: string; ask_id: number | null; node_id: number | null; line: string; would_have: string | null }[];
+  return rows.map((r) => ({
+    tag: `d${r.id}`,
+    at: r.at,
+    askId: r.ask_id,
+    stepId: r.node_id,
+    stepTitle: r.node_id === null ? '' : titleOf(r.node_id),
+    line: r.line,
+    wouldHave: r.would_have ?? '',
+  }));
 }
 
 /**
@@ -308,14 +349,8 @@ export function markLeadSeen(ctx: Ctx, ref: string, at: Date): string {
 }
 
 /** One line in the lead's log, answering its id. A plain insert: a command that changes something calls it inside its own write. */
-export function logLeadEvent(
-  ctx: Ctx,
-  e: { projectId: number; lead: string; instructions: number; kind: LeadEventKind; nodeId?: number; askId?: number; sessionId?: string; text?: string; aidenWords?: string },
-): number {
-  const info = ctx.db
-    .prepare('INSERT INTO lead_events (project_id, at, lead, instructions, kind, node_id, ask_id, session_id, text, aiden_words) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(e.projectId, ctx.now(), e.lead, e.instructions, e.kind, e.nodeId ?? null, e.askId ?? null, e.sessionId ?? null, e.text ?? '', e.aidenWords ?? null);
-  return Number(info.lastInsertRowid);
+export function logLeadEvent(ctx: Ctx, e: LeadEventInput): number {
+  return insertLeadEvent(ctx.db, e, ctx.now());
 }
 
 /**

@@ -36,8 +36,13 @@ export const LEAD_IDLE_MARKS = ['blocked', 'no_session'] as const;
 export const LEAD_LOOK_BACK_DAYS = 7;
 /** The most lines one section of the brief prints; the rest read as `and <k> more`. */
 export const LEAD_LIST_CAP = 8;
-/** The most open asks of Aiden's, across all projects, the lead lets stand (the brief's `<m> of 5`). */
+/** The most open asks of Aiden's in one project its lead lets stand (the brief's `<m> of 5`): at the limit he starts nothing on his own judgment. */
 export const AIDEN_OPEN_LIMIT = 5;
+/**
+ * The most items the desk brings to Aiden and leaves open per project. It counts what the lead brought (an item waiting on
+ * Aiden with a `bring` line), not Aiden's open asks, and the old asks have a lane of their own outside it.
+ */
+export const AIDEN_BROUGHT_LIMIT = 5;
 /** The longest a lead's name may be, once trimmed. */
 export const LEAD_NAME_MAX = 40;
 /** A lead's name: one plain word, because the rules print it unquoted on every command line. */
@@ -53,7 +58,7 @@ export type AskOwner = 'aiden' | 'lead';
  * title, no count and no Board row.
  */
 export const isAidens = (a: { owner: AskOwner }): boolean => a.owner !== 'lead';
-export type LeadEventKind = 'answer' | 'decide' | 'undo' | 'park' | 'drop' | 'promise' | 'kept' | 'intent' | 'relay' | 'relay_unknown' | 'relay_failed' | 'allow' | 'disallow' | 'start' | 'start_unknown' | 'start_failed';
+export type LeadEventKind = 'answer' | 'decide' | 'undo' | 'park' | 'drop' | 'promise' | 'kept' | 'intent' | 'relay' | 'relay_unknown' | 'relay_failed' | 'allow' | 'disallow' | 'start' | 'start_unknown' | 'start_failed' | 'yes' | 'landing_check' | 'bring' | 'card';
 
 /** One line of the lead's log, as the log's read answers it. */
 export interface LeadEventOut {
@@ -84,8 +89,16 @@ export interface LeadBrief {
   waitingOnAiden: { askId: number; kind: AskKind; stepId: number; stepTitle: string; text: string; raisedAt: string }[];
   /** Steps Aiden does himself that are active with no session on them: in his hands, so listed with what waits on him. */
   aidensOwn: { stepId: number; title: string; updatedAt: string }[];
+  /** Aiden's open asks in this project: what the limit counts. */
+  aidenOpenInProject: number;
+  /** Aiden's open asks across all active projects: information, with no limit. */
   aidenOpenAcrossProjects: number;
   forTheLead: { askId: number; stepId: number; stepTitle: string; text: string; dueAt: string | null; overdue: boolean }[];
+  /**
+   * What the desk brought to Aiden and still waits on him, oldest first: the bring's d-number, the ask, the decision's line
+   * and the lead's would-have (what he would choose).
+   */
+  brought: { tag: string; at: string; askId: number | null; stepId: number | null; stepTitle: string; line: string; wouldHave: string }[];
   nextUp: { stepId: number; title: string; status: string }[];
   /** Steps not started (todo), in no session's hands and not in the queue. One with a stale mark (LEAD_STALE_MARKS) is under Stale as well. */
   backlog: number;

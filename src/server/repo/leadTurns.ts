@@ -4,7 +4,11 @@ import { getDeskItem, moveDeskItem, type DeskItem } from './desk';
 /** How a turn runs (migration 21): a headless run, or a message in the lead's thread. */
 export type TurnWay = 'headless' | 'thread';
 
-export type TurnState = 'leased' | 'answered' | 'applied' | 'failed' | 'abandoned';
+/**
+ * A turn's state. `interrupted`: ended by the runner, not by the item (the runner could not run claude, the server
+ * stopped, the item left the desk mid-run); unlike failed and abandoned it does not count toward an item's behind.
+ */
+export type TurnState = 'leased' | 'answered' | 'applied' | 'failed' | 'abandoned' | 'interrupted';
 
 /** A turn of the lead on one desk item. */
 export interface LeadTurn {
@@ -220,7 +224,9 @@ export function applyTurn(db: DB, turnId: number, now: string, effect: (turn: Le
     }
     const result = effect(turn, item);
     if (!moveTurn(db, turnId, ['answered'], 'applied')) throw new Error(`Turn ${turnId} left answered inside its own apply`);
-    if (!moveDeskItem(db, item.id, ['leased'], result.itemState, { outcome: result.outcome, now })) {
+    // From done too: the effect's own clear of the item's ask closes the item (deskOnAskCleared) in this transaction, and
+    // the effect's outcome is the one to keep. Nothing else can have moved it: the item was leased when the effect began.
+    if (!moveDeskItem(db, item.id, ['leased', 'done'], result.itemState, { outcome: result.outcome, now })) {
       throw new Error(`Desk item ${item.id} left leased inside its own apply`);
     }
     return true;
@@ -232,15 +238,43 @@ export const TURN_FAILURES_BEHIND = 2;
 
 /**
  * In one immediate transaction: the turn leased to `state` with `why` (and any further fields, such as a failed turn's
- * cost), and its item leased back to open, or to behind when it now has TURN_FAILURES_BEHIND turns failed or abandoned.
- * An item no longer leased (cleared meanwhile) is left as it is. False when the turn was no longer leased.
+ * cost), and its item leased back to open, or to behind when it now has TURN_FAILURES_BEHIND turns failed or abandoned
+ * (an interrupted turn is not counted). An item no longer leased (cleared meanwhile) is left as it is. False when the turn
+ * was no longer leased.
  */
-export function failTurn(db: DB, turnId: number, state: 'failed' | 'abandoned', why: string, now: string, fields: TurnFields = {}): boolean {
+export function failTurn(db: DB, turnId: number, state: 'failed' | 'abandoned' | 'interrupted', why: string, now: string, fields: TurnFields = {}): boolean {
   return db.transaction((): boolean => {
     if (!moveTurn(db, turnId, ['leased'], state, { finishedAt: now, ...fields, why })) return false;
-    const itemId = getTurn(db, turnId)!.itemId;
-    const failures = db.prepare("SELECT COUNT(*) FROM lead_turns WHERE item_id = ? AND state IN ('failed', 'abandoned')").pluck().get(itemId) as number;
-    moveDeskItem(db, itemId, ['leased'], failures >= TURN_FAILURES_BEHIND ? 'behind' : 'open', { now });
+    releaseItem(db, turnId, now);
     return true;
   }).immediate();
+}
+
+/**
+ * In one immediate transaction: an answered turn whose apply keeps throwing moves to failed with `why` (its verdict and
+ * answer stay on the row), and its item leased back to open or behind, as failTurn does. False when it was no longer answered.
+ */
+export function failAnsweredTurn(db: DB, turnId: number, why: string, now: string): boolean {
+  return db.transaction((): boolean => {
+    if (!moveTurn(db, turnId, ['answered'], 'failed', { why })) return false;
+    releaseItem(db, turnId, now);
+    return true;
+  }).immediate();
+}
+
+/** The failed turn's item, leased back to open, or to behind at TURN_FAILURES_BEHIND failed or abandoned turns. */
+function releaseItem(db: DB, turnId: number, now: string): void {
+  const itemId = getTurn(db, turnId)!.itemId;
+  const failures = db.prepare("SELECT COUNT(*) FROM lead_turns WHERE item_id = ? AND state IN ('failed', 'abandoned')").pluck().get(itemId) as number;
+  moveDeskItem(db, itemId, ['leased'], failures >= TURN_FAILURES_BEHIND ? 'behind' : 'open', { now });
+}
+
+/** Turns with an answer saved and not applied, oldest first: recovery applies them without running again. */
+export function answeredTurns(db: DB): { id: number; itemId: number }[] {
+  return db.prepare("SELECT id, item_id AS itemId FROM lead_turns WHERE state = 'answered' ORDER BY id").all() as { id: number; itemId: number }[];
+}
+
+/** Leased turns whose lease ran out before `now`, oldest first. */
+export function expiredLeases(db: DB, now: string): { id: number; itemId: number }[] {
+  return db.prepare("SELECT id, item_id AS itemId FROM lead_turns WHERE state = 'leased' AND lease_until < ? ORDER BY id").all(now) as { id: number; itemId: number }[];
 }
