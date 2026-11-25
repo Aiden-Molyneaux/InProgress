@@ -318,3 +318,8 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   `if` families cover `git -P`, `git -p`, `git.exe` and a path to git; only `deploy` and `release` themselves are
   deploys; a held.json read is retried once. 2715 unit and 35 smoke tests green. Task 7 has had its two re-check
   rounds; what is left goes in the receipt.
+- Murr's round 2 re-check of task 7 (Sonnet): 1 major: the new deploy terminator let `npm run deploy>log` through.
+  Past the two rounds, fixed inline by Sigmund (lines for the receipt): `<` and `>` end a script name too; `npm run
+  rollback` (and pnpm and yarn) is held like a deploy, since it swaps the live build; a held.json still busy after
+  the second look counts as there and unread, so a held command fails closed when the server is down. One last
+  proportional Murr runs on these lines; whatever he finds goes to the receipt as an owner-call.

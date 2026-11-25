@@ -90,10 +90,10 @@ export const HOLD_RULES: readonly HoldRule[] = [
     action: 'deploy',
     what: 'a deploy',
     test: (s) =>
-      /\b(?:npm|pnpm)\s+run\s+(?:deploy|release)(?=[\s&;|]|$)|\byarn\s+(?:run\s+)?(?:deploy|release)(?=[\s&;|]|$)/i.test(s.masked) ||
+      /\b(?:npm|pnpm)\s+run\s+(?:deploy|release|rollback)(?=[\s&;|<>]|$)|\byarn\s+(?:run\s+)?(?:deploy|release|rollback)(?=[\s&;|<>]|$)/i.test(s.masked) ||
       (program(s.argv) === 'node' && s.argv.slice(1).some((a) => /(?:^|[\\/])scripts[\\/]deploy[^\\/]*$/i.test(a))),
-    families: both(['npm run deploy*', 'npm run release*', 'pnpm run deploy*', 'pnpm run release*', 'yarn run deploy*', 'yarn run release*', 'yarn deploy*', 'yarn release*', 'node *deploy*']),
-    examples: both(['npm run deploy', 'npm run release', 'pnpm run deploy', 'yarn deploy', 'yarn run release', 'node scripts/deploy.mjs', 'node scripts\\deploy-web.mjs', 'node C:/personal/InProgress/scripts/deploy.mjs']),
+    families: both(['npm run deploy*', 'npm run release*', 'npm run rollback*', 'pnpm run deploy*', 'pnpm run release*', 'pnpm run rollback*', 'yarn run deploy*', 'yarn run release*', 'yarn run rollback*', 'yarn deploy*', 'yarn release*', 'yarn rollback*', 'node *deploy*']),
+    examples: both(['npm run deploy', 'npm run release', 'npm run rollback', 'npm run deploy>deploy.log', 'yarn deploy<in', 'pnpm run deploy', 'yarn deploy', 'yarn run release', 'node scripts/deploy.mjs', 'node scripts\\deploy-web.mjs', 'node C:/personal/InProgress/scripts/deploy.mjs']),
   },
   {
     action: 'repo',

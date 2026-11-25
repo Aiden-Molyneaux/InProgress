@@ -45,16 +45,20 @@ const pause = (ms: number): void => {
  */
 export function readHeld(home: string): HeldFile {
   let text: string | undefined;
+  let busy = false;
   for (let attempt = 0; attempt < 2 && text === undefined; attempt++) {
     try {
       text = readFileSync(heldFile(home), 'utf8');
     } catch (e) {
       const code = (e as NodeJS.ErrnoException).code;
       // The server may be replacing the file at this moment (Windows says EPERM or EBUSY): look once more.
-      if (attempt === 0 && (code === 'EPERM' || code === 'EBUSY')) pause(50);
+      busy = code === 'EPERM' || code === 'EBUSY';
+      if (attempt === 0 && busy) pause(50);
       else break;
     }
   }
+  // Still busy after the second look: the file is there but unread, so any folder counts (held when the server is down).
+  if (text === undefined && busy) return { present: true, lines: [], folders: null };
   if (text === undefined) {
     // No file: the server never wrote one, so no project here has the round on.
     return { present: false, lines: [], folders: null };

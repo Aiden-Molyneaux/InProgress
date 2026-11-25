@@ -193,7 +193,8 @@ describe('held.json read while the server replaces it', () => {
       expect(readFaults.calls).toBe(2);
       readFaults.calls = 0;
       readFaults.next = [eperm(code), eperm(code), eperm(code)];
-      expect(readHeld(home)).toEqual({ present: false, lines: [], folders: null });
+      // Still busy after the second look: there but unread, so it fails closed.
+      expect(readHeld(home)).toEqual({ present: true, lines: [], folders: null });
       expect(readFaults.calls).toBe(2);
       readFaults.next = [];
       readFaults.calls = 0;
