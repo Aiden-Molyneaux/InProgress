@@ -38,7 +38,6 @@ export const ROUND_FIRST_ON_SQL = "SELECT at FROM lead_events WHERE project_id =
  * later are taken once it is back on.
  */
 export function roundFirstOn(db: DB, projectId: number): string | null {
-  // The kind IN term matches lead_events_switch's own WHERE, so the partial index serves this read too.
   return (db
     .prepare(ROUND_FIRST_ON_SQL)
     .pluck()

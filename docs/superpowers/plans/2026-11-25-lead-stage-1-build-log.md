@@ -137,3 +137,7 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   index test plans the real SQL). Accepted as is: the round's first switch-on is the first ever, across lead changes;
   migration 21's added indexes exist only where 21 runs fresh, which is every home, since no home but scratch copies
   has run 21.
+- Murr's round 2 re-check (Haiku, proportional): sound, no findings. Two debt lines fixed inline by Sigmund (unseen by
+  a reviewer, both one line): a deleted step's stopped items are looked up within its project (the index serves it), and
+  a repeated comment in `switches.ts` removed. Accepted: the raise path's archived check relies on a deleted project
+  being archived first, which `deleteProject` does; an ask raised while archived is swept as overdue on unarchive.

@@ -90,5 +90,5 @@ export function deskOnStepsDeleted(db: DB, nodeIds: readonly number[], now: stri
   if (nodeIds.length === 0) return;
   const askIds = db.prepare(`SELECT id FROM asks WHERE node_id IN (${nodeIds.map(() => '?').join(', ')})`).pluck().all(...nodeIds) as number[];
   closeAskItems(db, askIds, 'step deleted', now);
-  db.prepare(`UPDATE desk_items SET state = 'done', done_at = ?, outcome = 'step deleted' WHERE state <> 'done' AND kind = 'stopped' AND node_id IN (${nodeIds.map(() => '?').join(', ')})`).run(now, ...nodeIds);
+  db.prepare(`UPDATE desk_items SET state = 'done', done_at = ?, outcome = 'step deleted' WHERE project_id = (SELECT project_id FROM nodes WHERE id = ?) AND state <> 'done' AND kind = 'stopped' AND node_id IN (${nodeIds.map(() => '?').join(', ')})`).run(now, nodeIds[0], ...nodeIds);
 }
