@@ -2,7 +2,7 @@ import type { AskOwner } from '../../core/lead';
 import { ASK_KINDS, ASK_TRAIL_MS, STALE_SESSION_MS, type Ask, type AskKind } from '../../core/types';
 import { msAgo, write, type Ctx, type RecordEvent } from '../db/tx';
 import { badRequest, notFound } from '../errors';
-import { deskOnAskCleared, deskOnAskRaised } from './deskProducers';
+import { deskOnAskCleared, deskOnAskRaised, withBringDeferred, type UndoneAsk } from './deskProducers';
 import { patchNode, requireNode } from './nodes';
 import { inLiveProject } from './projects';
 import { parkedAncestor } from './shelved';
@@ -91,9 +91,10 @@ export function raiseAskDetailed(ctx: Ctx, actor: string, input: RaiseAskInput):
 /**
  * raiseAskDetailed's work, inside a write() already open (write() never nests): a lead command raises its promise and logs
  * it in one write. An ask of Aiden's on the project root is refused; the lead's own ask (a promise about the whole
- * project) may sit there. `actor` is the write's own: the events are recorded under it.
+ * project) may sit there. `actor` is the write's own: the events are recorded under it. `undone`: an undo raises the
+ * ask again, so its desk item is Aiden's at once (deskOnAskRaised), never the lead's to decide again.
  */
-export function raiseAskInWrite(ctx: Ctx, record: RecordEvent, actor: string, input: RaiseAskInput): RaisedAsk {
+export function raiseAskInWrite(ctx: Ctx, record: RecordEvent, actor: string, input: RaiseAskInput, undone?: UndoneAsk): RaisedAsk {
   void actor; // The signature names the actor for the caller's sake; record() already carries the write's own.
   if (!(ASK_KINDS as readonly string[]).includes(input.kind)) {
     throw badRequest(`Unknown ask kind ${JSON.stringify(input.kind)}. Use one of: ${ASK_KINDS.join(', ')}.`);
@@ -134,14 +135,17 @@ export function raiseAskInWrite(ctx: Ctx, record: RecordEvent, actor: string, in
   const ask = toAsk(row);
   // A session's question or permission on a project whose round is on goes on the lead's desk, in this same write: when
   // it is new, or asked anew (bumped), as ask.raised is recorded. A plain join never queues an ask whose item is done.
-  if (info.changes || bumped) deskOnAskRaised(ctx.db, ask, ctx.now());
+  if (info.changes || bumped) deskOnAskRaised(ctx, ask, undone);
   if (info.changes || bumped) record({ projectId: node.projectId, type: 'ask.raised', entity: 'ask', entityId: ask.id, data: { ask } });
   return { ask, joined: !info.changes, untracked: owner !== 'lead' && !!input.sessionId && !tracked };
 }
 
 /**
  * Inside an open write: the idempotent clear of spec 1.2. `via` is how the answer came (`lead`: the lead carried Aiden's
- * words), written to answered_via on the first clear only.
+ * words; `lead_decided`: the lead decided; `lead_card`: the lead answered with the landing check's rule), written to
+ * answered_via on the first clear only. The first clear also writes the desk's side (deskOnAskCleared): every desk item
+ * about the ask not yet done moves to done, and when one of them was brought to Aiden, the next waiting item of its
+ * project is brought (a lead_events `bring` line, its decisions row, and the item's outcome), in this same write.
  */
 export function clearInWrite(ctx: Ctx, record: RecordEvent, actor: string, before: Ask, answer: string, completeQuestion = true, via: string | null = null): Ask {
   const first = before.clearedAt === null;
@@ -154,7 +158,7 @@ export function clearInWrite(ctx: Ctx, record: RecordEvent, actor: string, befor
   const ask = requireAsk(ctx, before.id);
   if (first) {
     // Its desk items close in the same write, whichever path cleared it.
-    deskOnAskCleared(ctx.db, ask.id, actor, ctx.now());
+    deskOnAskCleared(ctx, ask.id, actor);
     record({ projectId: ask.projectId, type: 'ask.cleared', entity: 'ask', entityId: ask.id, data: { ask } });
     const node = requireNode(ctx, ask.nodeId);
     if (completeQuestion && node.kind === 'question' && node.status !== 'done' && node.status !== 'dropped' && node.status !== 'parked') {
@@ -171,11 +175,14 @@ export function clearAsk(ctx: Ctx, actor: string, askId: number, answer = ''): A
 
 /**
  * clearAsk's work for every open ask on a node, inside an open write (a drop, or a question node being finished).
- * The caller is changing the node itself, so the question-node completion is left out.
+ * The caller is changing the node itself, so the question-node completion is left out. The desk's bring waits until every
+ * ask is cleared (withBringDeferred), so it never brings one of them.
  */
 export function clearNodeAsks(ctx: Ctx, record: RecordEvent, actor: string, nodeId: number, answer = ''): void {
   const open = ctx.db.prepare('SELECT * FROM asks WHERE node_id = ? AND cleared_at IS NULL').all(nodeId) as AskRow[];
-  for (const row of open) clearInWrite(ctx, record, actor, toAsk(row), answer, false);
+  withBringDeferred(ctx, () => {
+    for (const row of open) clearInWrite(ctx, record, actor, toAsk(row), answer, false);
+  });
 }
 
 /** Open asks of the project and those cleared within ASK_TRAIL_MS, oldest raised first. */

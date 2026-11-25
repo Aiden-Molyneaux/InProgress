@@ -62,6 +62,8 @@ export interface AddDeskItemInput {
   ref: string;
   nodeId?: number | null;
   dueAt?: string | null;
+  /** Open unless named: an ask raised again by an undo goes straight to waiting_aiden (it is Aiden's, not the lead's). */
+  state?: 'open' | 'waiting_aiden';
 }
 
 /**
@@ -70,10 +72,16 @@ export interface AddDeskItemInput {
  */
 export function addDeskItem(db: DB, input: AddDeskItemInput, now: string): { item: DeskItem; created: boolean } {
   const info = db
-    .prepare('INSERT INTO desk_items (project_id, kind, ref, node_id, created_at, due_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING')
-    .run(input.projectId, input.kind, input.ref, input.nodeId ?? null, now, input.dueAt ?? null);
+    .prepare('INSERT INTO desk_items (project_id, kind, ref, node_id, created_at, due_at, state) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING')
+    .run(input.projectId, input.kind, input.ref, input.nodeId ?? null, now, input.dueAt ?? null, input.state ?? 'open');
   const row = db.prepare("SELECT * FROM desk_items WHERE kind = ? AND ref = ? AND state <> 'done'").get(input.kind, input.ref) as DeskItemRow;
   return { item: toDeskItem(row), created: info.changes > 0 };
+}
+
+/** The lead of the item's project, or null when it has none (or the item is gone). */
+export function leadOfItem(db: DB, itemId: number): string | null {
+  const lead = db.prepare('SELECT p.lead FROM desk_items d JOIN projects p ON p.id = d.project_id WHERE d.id = ?').pluck().get(itemId) as string | null | undefined;
+  return lead ?? null;
 }
 
 export function getDeskItem(db: DB, id: number): DeskItem | undefined {

@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import { SESSION_APPS } from '../core/session-app';
 import { LEAD_NAME_MAX, LEAD_SWITCHES } from '../core/lead';
-import { HELD_ACTIONS } from '../core/hold';
 import { LANDING_ACTIONS } from '../core/landing';
 import { ID_MAX } from '../core/notices';
 import { ASK_KINDS, ASSIGNEES, BRIEFING_MODES, COMMAND_KINDS, COMMAND_OUTCOMES, HOOK_EVENTS, NODE_KINDS, NODE_LABELS, NODE_STATUSES, ORIGINS, PROJECT_NAME_MAX, RANK_BANDS, RESOURCE_KINDS, RESOURCE_PURPOSES, TITLE_CHANNELS, WHAT_WHY_MAX, WORK_STATUSES, unknownLabel, type NodeInput } from '../core/types';
@@ -251,9 +250,16 @@ const leadWho = { as: z.string().min(1).max(200), instructions: z.number().int()
 const leadId = z.number().int().positive();
 /** `lead answer`: Aiden's words, carried as the answer to a question of his. */
 export const leadAnswerBody = z.object({ ...leadWho, askId: leadId, aidenWords: z.string().trim().min(1).max(2_000), says: z.string().trim().min(1).max(2_000).optional() }).strict();
-/** `lead decide`: the question, the lead's answer and why, and Aiden's words when he told the lead to decide. */
+/** `lead decide`: the question, the lead's answer and why, Aiden's words when he told the lead to decide, and the decision's kind (technical unless named). */
 export const leadDecideBody = z
-  .object({ ...leadWho, askId: leadId, answer: z.string().trim().min(1).max(2_000), reason: z.string().trim().min(1).max(2_000), aidenWords: z.string().trim().min(1).max(2_000).optional() })
+  .object({
+    ...leadWho,
+    askId: leadId,
+    answer: z.string().trim().min(1).max(2_000),
+    reason: z.string().trim().min(1).max(2_000),
+    aidenWords: z.string().trim().min(1).max(2_000).optional(),
+    kind: z.enum(['product', 'technical']).optional(),
+  })
   .strict();
 /** `lead undo`: the decision (a lead_events id) and Aiden's words. */
 export const leadUndoBody = z.object({ ...leadWho, eventId: leadId, aidenWords: z.string().trim().min(1).max(2_000) }).strict();
@@ -280,10 +286,6 @@ export const leadDisallowBody = z.object({ ...leadWho, switch: z.enum(LEAD_SWITC
 /** The landing check: the step asked about, the action, the session's folder (a git checkout) and, for a branch other than the one checked out, its name. */
 export const leadLandingBody = z
   .object({ stepId: leadId, action: z.enum(LANDING_ACTIONS, { errorMap: (_issue, ctx) => ({ message: `${String(ctx.data)} is not an action: give merge, deploy, push, publish or push-public` }) }), folder: z.string().min(1).max(1_000), branch: z.string().min(1).max(200).optional() })
-  .strict();
-/** The hold hook's call: the session (when the hook knew it), its folder, the whole command, and the action the hook named. */
-export const leadHoldBody = z
-  .object({ sessionId: z.string().max(ID_MAX).nullable().optional(), cwd: z.string().max(1_000), command: z.string().min(1).max(100_000), action: z.enum(HELD_ACTIONS) })
   .strict();
 /** The permission hook's call: the session, its folder, and the tool and input it asks permission for. */
 export const leadStuckBody = z

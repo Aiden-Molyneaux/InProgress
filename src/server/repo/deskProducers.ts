@@ -1,7 +1,9 @@
 import type { Ask } from '../../core/types';
 import type { DB } from '../db/connection';
-import { addDeskItem, type AddDeskItemInput, type DeskItem, type DeskItemKind } from './desk';
-import { bringNext, broughtProjectsOfAsk } from './deskBring';
+import type { Ctx } from '../db/tx';
+import { addDeskItem, moveDeskItem, type AddDeskItemInput, type DeskItem, type DeskItemKind } from './desk';
+import { bringItem, bringNext, broughtProjectsOfAsk } from './deskBring';
+import type { DecisionKind } from './leadDecisions';
 import { roundBound } from './switches';
 
 /** How long after it is raised a session's question or permission ask is due on the desk. */
@@ -51,18 +53,59 @@ export const ITEM_EVER_MADE_SQL = 'SELECT 1 FROM desk_items WHERE kind = ? AND r
 /** Whether a desk item of this kind and ref exists in any state, done included. */
 export const itemEverMade = (db: DB, kind: DeskItemKind, ref: string): boolean => db.prepare(ITEM_EVER_MADE_SQL).get(kind, ref) !== undefined;
 
+/** How long after a `stuck` item is made a permission ask of the same session makes no desk item of its own. */
+export const STUCK_COVERS_ASK_MS = 10 * 60 * 1000;
+
+/**
+ * Whether the session has a `stuck` desk item made since `since` (ISO), in any state: the lead already had its permission
+ * prompt through the permission hook (src/server/lead/hold.ts). The item's session is in its `stuck` line in the lead's
+ * log, whose text starts with the item's ref.
+ */
+function stuckSince(db: DB, projectId: number, sessionId: string, since: string): boolean {
+  return (
+    db
+      .prepare(
+        `SELECT 1 FROM desk_items d JOIN lead_events e ON e.project_id = d.project_id AND e.kind = 'stuck' AND substr(e.text, 1, length(d.ref)) = d.ref
+          WHERE d.project_id = ? AND d.kind = 'stuck' AND d.created_at >= ? AND e.session_id = ? LIMIT 1`,
+      )
+      .get(projectId, since, sessionId) !== undefined
+  );
+}
+
+/** An ask raised again by an undo: it is Aiden's at once, brought with the undone decision's kind and the lead's withdrawn answer. */
+export interface UndoneAsk {
+  /** The lead's answer the undo withdrew: the bring's would-have. */
+  wouldHave: string;
+  kind: DecisionKind;
+  productRuling: boolean;
+}
+
 /**
  * Inside the write that raised `ask`, or raised it again after its session's prompt (bumped): a session's question or
  * permission ask of Aiden's, raised since the round was first switched on and while it is on, is queued on the desk, due
- * DESK_ASK_DUE_MS after it was raised. A project that is not active makes none, as the minute watch skips it. The caller does not call it for a plain join, so a join never queues an ask
- * whose item is done.
+ * DESK_ASK_DUE_MS after it was raised. A project that is not active makes none, as the minute watch skips it. The caller
+ * does not call it for a plain join, so a join never queues an ask whose item is done. A permission ask makes none while
+ * its session has a `stuck` item made in the last STUCK_COVERS_ASK_MS: the notification hook raised it for the prompt
+ * the lead already had. With `undone` (an undo raised it again), the item goes straight to waiting_aiden and is brought,
+ * whatever the limit, with nothing sent: it is Aiden's now, not the lead's to decide again.
  */
-export function deskOnAskRaised(db: DB, ask: Ask, now: string): void {
+export function deskOnAskRaised(ctx: Ctx, ask: Ask, undone?: UndoneAsk): void {
+  const db = ctx.db;
+  const now = ctx.now();
   if (ask.owner !== 'aiden' || (ask.kind !== 'question' && ask.kind !== 'permission') || ask.sessionId === null) return;
   if (db.prepare('SELECT status FROM projects WHERE id = ?').pluck().get(ask.projectId) !== 'active') return;
   const bound = roundBound(db, ask.projectId);
   if (bound === null || ask.raisedAt < bound) return;
-  produceDeskItem(db, { projectId: ask.projectId, kind: ask.kind, ref: String(ask.id), nodeId: ask.nodeId, dueAt: plusMs(ask.raisedAt, DESK_ASK_DUE_MS) }, now);
+  const input: AddDeskItemInput = { projectId: ask.projectId, kind: ask.kind, ref: String(ask.id), nodeId: ask.nodeId, dueAt: plusMs(ask.raisedAt, DESK_ASK_DUE_MS) };
+  if (undone !== undefined) {
+    const { item, created } = addDeskItem(db, { ...input, state: 'waiting_aiden' }, now);
+    if (!created) return;
+    const eventId = bringItem(ctx, item, { id: null, kind: null, answer: undone.wouldHave }, { tell: false, decision: { kind: undone.kind, productRuling: undone.productRuling } });
+    if (eventId !== undefined) moveDeskItem(db, item.id, ['waiting_aiden'], 'waiting_aiden', { outcome: `AIDEN d${eventId}`, now });
+    return;
+  }
+  if (ask.kind === 'permission' && stuckSince(db, ask.projectId, ask.sessionId, plusMs(now, -STUCK_COVERS_ASK_MS))) return;
+  produceDeskItem(db, input, now);
 }
 
 /** Moves every not-done desk item about one of these asks to done, with `outcome`. */
@@ -74,16 +117,42 @@ function closeAskItems(db: DB, askIds: readonly number[], outcome: string, now: 
   ).run(now, outcome, ...ASK_ITEM_KINDS, ...askIds.map(String));
 }
 
+/** While a write clears several asks (withBringDeferred), the projects whose brought items it freed: brought once, after. */
+let deferred: { db: DB; projects: Set<number> } | null = null;
+
+/**
+ * Runs `fn`, a part of a write that may clear several asks (a drop or a park clears every ask on its step), with the
+ * bring that each clear of a brought ask runs held back: bringNext runs once per freed project after `fn`, so it never
+ * brings an ask that `fn` clears later. Nested calls run inside the outer one's deferral.
+ */
+export function withBringDeferred<T>(ctx: Ctx, fn: () => T): T {
+  if (deferred !== null) return fn();
+  const mine = { db: ctx.db, projects: new Set<number>() };
+  deferred = mine;
+  let result: T;
+  try {
+    result = fn();
+  } finally {
+    deferred = null;
+  }
+  for (const projectId of mine.projects) bringNext(ctx, projectId);
+  return result;
+}
+
 /**
  * Inside the write that first clears ask `askId`: every desk item about it that is not done moves to done, with the
  * outcome `cleared by <by>`. A leased item too: the runner treats an apply on an item no longer leased as abandoned. When
- * one of them was brought to Aiden, the next waiting item of its project is brought (bringNext).
+ * one of them was brought to Aiden, the next waiting item of its project is brought (bringNext), at once, or after the
+ * other clears under withBringDeferred.
  */
-export function deskOnAskCleared(db: DB, askId: number, by: string, now: string): void {
+export function deskOnAskCleared(ctx: Ctx, askId: number, by: string): void {
   // An item the lead brought to Aiden frees its place when its ask clears: the next waiting one is brought in this write.
-  const freed = broughtProjectsOfAsk(db, askId);
-  closeAskItems(db, [askId], `cleared by ${by}`, now);
-  for (const projectId of freed) bringNext(db, projectId, now);
+  const freed = broughtProjectsOfAsk(ctx.db, askId);
+  closeAskItems(ctx.db, [askId], `cleared by ${by}`, ctx.now());
+  for (const projectId of freed) {
+    if (deferred !== null && deferred.db === ctx.db) deferred.projects.add(projectId);
+    else bringNext(ctx, projectId);
+  }
 }
 
 /**

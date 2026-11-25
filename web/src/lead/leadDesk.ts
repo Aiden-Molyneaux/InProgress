@@ -73,7 +73,7 @@ export function deskHead(b: LeadBrief, now: number): DeskHead {
 
 export function deskGroups(b: LeadBrief, now: number): DeskGroup[] {
   const span = b.links.lastSeenAt === null ? `in the last ${LEAD_LOOK_BACK_DAYS} days` : "since the lead's last look";
-  const over = b.aidenOpenAcrossProjects - AIDEN_OPEN_LIMIT;
+  const over = b.aidenOpenInProject - AIDEN_OPEN_LIMIT;
   const needsRows: DeskRow[] = [
     ...b.aidensOwn.map((s) => ({
       key: `own-${s.stepId}`,
@@ -94,7 +94,7 @@ export function deskGroups(b: LeadBrief, now: number): DeskGroup[] {
       id: 'needs',
       title: 'Needs you',
       count: needsRows.length,
-      note: `Open asks across all projects: ${b.aidenOpenAcrossProjects} of ${AIDEN_OPEN_LIMIT}${over > 0 ? `, ${over} over the limit` : ''}`,
+      note: `Open asks in this project: ${b.aidenOpenInProject} of ${AIDEN_OPEN_LIMIT}${over > 0 ? `, ${over} over the limit` : ''} · across all projects: ${b.aidenOpenAcrossProjects}`,
       rows: needsRows,
     },
     {

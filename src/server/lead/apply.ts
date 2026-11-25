@@ -1,37 +1,28 @@
-import { LEAD_INSTRUCTIONS_VERSION } from '../../core/lead';
-import { clipLine } from '../../core/step-ref';
-import { askTag, type Ask } from '../../core/types';
+import { AIDEN_BROUGHT_LIMIT, LEAD_INSTRUCTIONS_VERSION } from '../../core/lead';
+import { leadLine } from '../../core/relay';
+import { askTag } from '../../core/types';
 import type { Ctx, RecordEvent } from '../db/tx';
 import { decideInWrite } from '../lead-commands';
 import { logLeadEvent } from '../lead';
-import { clearInWrite, requireAsk } from '../repo/asks';
+import { clearInWrite } from '../repo/asks';
 import type { DeskItem } from '../repo/desk';
-import { AIDEN_BROUGHT_LIMIT, bringItem, bringNext as bringNextIn, broughtOpen, DECISION_LINE_CUT, t3ThreadOf } from '../repo/deskBring';
-import { addDecision, type DecisionKind } from '../repo/leadDecisions';
+import { askOf, bringItem, bringNext, broughtOpen, t3ThreadOf, tellAidens } from '../repo/deskBring';
+import { addDecision } from '../repo/leadDecisions';
 import type { LeadTurn, TurnEffect } from '../repo/leadTurns';
 import { insertLeadEvent } from '../repo/leadEvents';
 import { intendSend } from '../repo/leadSends';
 import { getProjectById } from '../repo/projects';
 import { permissionLine, stuckRequestOf } from './hold';
 
-export { AIDEN_BROUGHT_LIMIT } from '../repo/deskBring';
-
 /** What a CARD tells the session until the landing check (task 6) answers in its place. */
 export const cardAnswer = (stepId: number): string =>
   `A landing is decided by the landing check, not by the lead. Run: inprogress landing ${stepId} --action <merge|deploy|push|publish|push-public>, and follow its answer.`;
 
-/** The ask a question or permission item is about, read in this write; undefined when it is gone (its project deleted, or the row). */
-function askOf(ctx: Ctx, item: DeskItem): Ask | undefined {
-  if (!/^\d+$/.test(item.ref)) return undefined;
-  const id = Number(item.ref);
-  if (ctx.db.prepare('SELECT 1 FROM asks WHERE id = ?').get(id) === undefined) return undefined;
-  try {
-    return requireAsk(ctx, id);
-  } catch {
-    // requireAsk refuses an ask of a deleted project: for the desk that is an ask gone, an ordinary outcome.
-    return undefined;
-  }
-}
+/** The turn's WHY as a sentence: a period added when it ends in none of . ! or ?. */
+export const sentence = (text: string): string => {
+  const t = text.trim();
+  return t === '' || /[.!?]$/.test(t) ? t : `${t}.`;
+};
 
 /**
  * What a verdict does, as the runner's `apply`: run inside the runner's write (immediate, under the lead's actor) and
@@ -59,33 +50,41 @@ export function applyVerdict(ctx: Ctx, turn: LeadTurn, item: DeskItem, record: R
     if (thread !== null) intendSend(ctx.db, { projectId: project.id, itemId: item.id, kind: 'relay', target: thread, retryKey, body }, now);
   };
   if (verdict === 'DECIDE') {
-    const id = decideInWrite(ctx, record, { project, name, actor, instructions: LEAD_INSTRUCTIONS_VERSION, ask, answer, reason: why });
-    const kind: DecisionKind = item.kind === 'permission' ? 'permission' : turn.kind === 'PRODUCT' ? 'product' : 'technical';
-    addDecision(ctx.db, {
-      eventId: id,
-      itemId: item.id,
-      turnId: turn.id,
-      kind,
-      productRuling: turn.kind === 'PRODUCT',
-      line: `${clipLine(ask.text, DECISION_LINE_CUT)} -> ${clipLine(answer, DECISION_LINE_CUT)}`,
-      saidWhere: 'desk',
-      saidAt: now,
+    const id = decideInWrite(ctx, record, {
+      project,
+      name,
+      actor,
+      instructions: LEAD_INSTRUCTIONS_VERSION,
+      ask,
+      answer,
+      reason: why,
+      decision: {
+        kind: item.kind === 'permission' ? 'permission' : turn.kind === 'PRODUCT' ? 'product' : 'technical',
+        productRuling: turn.kind === 'PRODUCT',
+        saidWhere: 'desk',
+        itemId: item.id,
+        turnId: turn.id,
+      },
     });
-    tell(`relay:d${id}`, `[From ${name}, the lead] d${id}: ${answer}\nWhy: ${why} Aiden can undo this with "undo d${id}".`);
+    tell(`relay:d${id}`, leadLine(name, `d${id}: ${answer}\nWhy: ${sentence(why)} Aiden can undo this with "undo d${id}".`));
     return { itemState: 'done', outcome: `DECIDE d${id}` };
   }
   if (verdict === 'AIDEN') {
     // Waiting items come first, in their order, while there is room; this one is brought only if room is left.
-    bringNextIn(ctx.db, project.id, now);
-    if (broughtOpen(ctx.db, project.id) >= AIDEN_BROUGHT_LIMIT) return { itemState: 'waiting_aiden', outcome: 'AIDEN waiting (limit)' };
-    const id = bringItem(ctx.db, item, { id: turn.id, kind: turn.kind, answer: turn.answer }, now);
-    return { itemState: 'waiting_aiden', outcome: id === undefined ? 'AIDEN waiting (limit)' : `AIDEN d${id}` };
+    bringNext(ctx, project.id);
+    const room = broughtOpen(ctx, project.id) < AIDEN_BROUGHT_LIMIT;
+    const id = room ? bringItem(ctx, item, { id: turn.id, kind: turn.kind, answer: turn.answer }, { tell: true }) : undefined;
+    if (id !== undefined) return { itemState: 'waiting_aiden', outcome: `AIDEN d${id}` };
+    // Past the limit it waits to be brought, but its session hears at once that the ask is Aiden's: the bring later sends nothing.
+    tellAidens(ctx.db, { projectId: project.id, itemId: item.id, lead: name, ask, kind: turn.kind }, now);
+    return { itemState: 'waiting_aiden', outcome: 'AIDEN waiting (limit)' };
   }
   if (verdict === 'CARD' && item.kind === 'question') {
     const said = cardAnswer(ask.nodeId);
-    clearInWrite(ctx, record, actor, ask, said, true, 'lead_decided');
+    // Not a decision: its session reads the landing check's rule, with no undo word (session-flow's answers line).
+    clearInWrite(ctx, record, actor, ask, said, true, 'lead_card');
     logLeadEvent(ctx, { projectId: project.id, lead: name, instructions: LEAD_INSTRUCTIONS_VERSION, kind: 'card', askId: ask.id, nodeId: ask.nodeId, text: answer });
-    tell(`card:${askTag(ask.id)}`, `[From ${name}, the lead] ${askTag(ask.id)}: ${said}`);
+    tell(`card:${askTag(ask.id)}`, leadLine(name, `${askTag(ask.id)}: ${said}`));
     return { itemState: 'done', outcome: 'CARD' };
   }
   return { itemState: 'done', outcome: `${verdict} (no action in this task)` };
@@ -131,9 +130,4 @@ function applyStuck(ctx: Ctx, turn: LeadTurn, item: DeskItem, name: string): Tur
     saidAt: now,
   });
   return { itemState: 'done', outcome: `${behavior === 'allow' ? 'ALLOW' : 'DENY'} ${reason}`.trim() };
-}
-
-/** Brings the project's next waiting items to Aiden while it has room (src/server/repo/deskBring.ts), in one write of its own. */
-export function bringNext(ctx: Ctx, projectId: number): number[] {
-  return ctx.db.transaction(() => bringNextIn(ctx.db, projectId, ctx.now())).immediate();
 }

@@ -226,6 +226,10 @@ export function applyTurn(db: DB, turnId: number, now: string, effect: (turn: Le
     if (!moveTurn(db, turnId, ['answered'], 'applied')) throw new Error(`Turn ${turnId} left answered inside its own apply`);
     // From done too: the effect's own clear of the item's ask closes the item (deskOnAskCleared) in this transaction, and
     // the effect's outcome is the one to keep. Nothing else can have moved it: the item was leased when the effect began.
+    // An item its effect closed stays done: an effect that cleared the ask and still says waiting_aiden is a bug.
+    if (getDeskItem(db, item.id)?.state === 'done' && result.itemState !== 'done') {
+      throw new Error(`Desk item ${item.id} was closed by its own apply, which still says ${result.itemState}`);
+    }
     if (!moveDeskItem(db, item.id, ['leased', 'done'], result.itemState, { outcome: result.outcome, now })) {
       throw new Error(`Desk item ${item.id} left leased inside its own apply`);
     }
@@ -235,12 +239,17 @@ export function applyTurn(db: DB, turnId: number, now: string, effect: (turn: Le
 
 /** How many failed or abandoned turns move an item to behind: the runner gives up on it. */
 export const TURN_FAILURES_BEHIND = 2;
+/** How many runner faults in a row on one item move it to behind, so one bad item (a prompt too long) cannot hold its lane. */
+export const TURN_FAULTS_BEHIND = 3;
+/** How an interrupted turn's `why` opens when the fault was the runner's: the runner writes it, releaseItem counts it. */
+export const RUNNER_FAULT_WHY = 'the runner could not run the turn';
 
 /**
  * In one immediate transaction: the turn leased to `state` with `why` (and any further fields, such as a failed turn's
  * cost), and its item leased back to open, or to behind when it now has TURN_FAILURES_BEHIND turns failed or abandoned
- * (an interrupted turn is not counted). An item no longer leased (cleared meanwhile) is left as it is. False when the turn
- * was no longer leased.
+ * (an interrupted turn is not counted), or when its last TURN_FAULTS_BEHIND turns were all runner faults (interrupted, the
+ * why opening RUNNER_FAULT_WHY). An item no longer leased (cleared meanwhile) is left as it is. False when the turn was no
+ * longer leased.
  */
 export function failTurn(db: DB, turnId: number, state: 'failed' | 'abandoned' | 'interrupted', why: string, now: string, fields: TurnFields = {}): boolean {
   return db.transaction((): boolean => {
@@ -262,11 +271,16 @@ export function failAnsweredTurn(db: DB, turnId: number, why: string, now: strin
   }).immediate();
 }
 
-/** The failed turn's item, leased back to open, or to behind at TURN_FAILURES_BEHIND failed or abandoned turns. */
+/**
+ * The failed turn's item, leased back to open, or to behind at TURN_FAILURES_BEHIND failed or abandoned turns, or at
+ * TURN_FAULTS_BEHIND runner faults in a row.
+ */
 function releaseItem(db: DB, turnId: number, now: string): void {
   const itemId = getTurn(db, turnId)!.itemId;
   const failures = db.prepare("SELECT COUNT(*) FROM lead_turns WHERE item_id = ? AND state IN ('failed', 'abandoned')").pluck().get(itemId) as number;
-  moveDeskItem(db, itemId, ['leased'], failures >= TURN_FAILURES_BEHIND ? 'behind' : 'open', { now });
+  const last = db.prepare('SELECT state, why FROM lead_turns WHERE item_id = ? ORDER BY id DESC LIMIT ?').all(itemId, TURN_FAULTS_BEHIND) as { state: string; why: string | null }[];
+  const faults = last.length === TURN_FAULTS_BEHIND && last.every((t) => t.state === 'interrupted' && (t.why ?? '').startsWith(RUNNER_FAULT_WHY));
+  moveDeskItem(db, itemId, ['leased'], failures >= TURN_FAILURES_BEHIND || faults ? 'behind' : 'open', { now });
 }
 
 /** Turns with an answer saved and not applied, oldest first: recovery applies them without running again. */

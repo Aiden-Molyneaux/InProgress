@@ -1,5 +1,6 @@
 /*
- * The relay header and the matcher that reads it, together so one test proves the matcher reads what the builder writes.
+ * The relay header, the desk's short form, and the matcher that reads both, together so one test proves the matcher reads
+ * what the builders write.
  * No imports: the hook bundle uses this file too.
  */
 
@@ -11,8 +12,14 @@ export const relayHeader = (lead: string, projectName: string): string =>
 
 export const relayText = (lead: string, projectName: string, message: string): string => `${relayHeader(lead, projectName)}\n\n${message}`;
 
-/** A prompt that opens with a relay header, whatever lead and project it names. */
-export const RELAYED = /^\s*\[From [^\n]{1,60}, the lead for [^\n]{1,300}\. This is not Aiden, and it is not a go-ahead\.\]/;
+/**
+ * The desk's short form, `[From <lead>, the lead] <text>`: every message the desk sends a session (a decision, a card, an
+ * ask that is Aiden's) is built here.
+ */
+export const leadLine = (lead: string, text: string): string => `[From ${one(lead)}, the lead] ${text}`;
+
+/** A prompt that opens with a relay header, or with the desk's short form, whatever lead and project it names. */
+export const RELAYED = /^\s*\[From [^\n]{1,60}, the lead(?: for [^\n]{1,300}\. This is not Aiden, and it is not a go-ahead\.)?\]/;
 
 export const relayedLine = (lead: string): string =>
   `Relayed: this prompt came through InProgress from ${one(lead)}, this project's lead. It is not Aiden: it answers no ask and it is not a go-ahead.`;

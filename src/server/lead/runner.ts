@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'node:child_process';
+import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { delimiter, extname, join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -6,10 +6,10 @@ import { fileURLToPath } from 'node:url';
 import type { Project } from '../../core/types';
 import { write, type Ctx, type RecordEvent } from '../db/tx';
 import { leadFolders } from '../lead';
-import { getDeskItem, openItemsInLane, type DeskItem, type DeskLane } from '../repo/desk';
+import { getDeskItem, leadOfItem, openItemsInLane, type DeskItem, type DeskLane } from '../repo/desk';
 import { bringNext } from '../repo/deskBring';
 import { onDeskItem } from '../repo/deskProducers';
-import { answeredTurns, applyTurn, expiredLeases, failAnsweredTurn, failTurn, leaseItem, saveAnswer, type LeadTurn, type TurnEffect, type TurnFields } from '../repo/leadTurns';
+import { answeredTurns, applyTurn, expiredLeases, failAnsweredTurn, failTurn, leaseItem, RUNNER_FAULT_WHY, saveAnswer, type LeadTurn, type TurnEffect, type TurnFields } from '../repo/leadTurns';
 import { getProjectById } from '../repo/projects';
 import { isLiveWithRound, liveProjectsWithRound } from '../repo/switches';
 import { addReading, type AddReadingInput } from '../repo/usageReadings';
@@ -34,6 +34,8 @@ export const FAULT_BACKOFF_MS = 5 * 60 * 1000;
 export const STOP_WAIT_MS = 2000;
 /** How long a run may go on after its result line before it is killed. */
 export const AFTER_RESULT_KILL_MS = 5000;
+/** After an abort or a kill, how long a run has to end before it is settled anyway: the kill itself may have failed. */
+export const KILL_GRACE_MS = 10_000;
 /** The most a turn's stream may run to in tool calls and replies. */
 const MAX_TURNS = 14;
 /** How much of a failed run's stderr its failure keeps. */
@@ -168,18 +170,25 @@ export function resolveProgram(claudePath: string, env: NodeJS.ProcessEnv, platf
 }
 
 /**
- * One argument quoted for `cmd.exe /d /s /c "..."` and the program's own parser. cmd.exe still reads % and ! inside
- * quotes, and a quote or a line break cannot be carried safely, so an argument with one is refused, not mangled.
+ * One argument quoted for `cmd.exe /d /s /c "..."` and the program's own parser. cmd.exe still reads % inside quotes, and
+ * a quote or a line break cannot be carried safely, so an argument with one is refused, not mangled. A `!` passes: delayed
+ * expansion is off under `cmd /d /s /c`, so cmd.exe reads it as itself.
  */
 export function cmdQuote(arg: string): string {
-  if (/["%!\r\n]/.test(arg)) throw new Error(`cannot pass ${JSON.stringify(arg)} through cmd.exe: it holds a quote, %, ! or a line break`);
+  if (/["%\r\n]/.test(arg)) throw new Error(`cannot pass ${JSON.stringify(arg)} through cmd.exe: it holds a quote, % or a line break`);
   return `"${arg.replace(/(\\+)$/, '$1$1')}"`;
 }
 
+/** taskkill by its full system path, `%SystemRoot%\System32\taskkill.exe`, so no other taskkill on PATH runs; 'taskkill' when SystemRoot is unset. */
+export function taskkillPath(env: NodeJS.ProcessEnv): string {
+  const root = envValue(env, 'SYSTEMROOT');
+  return root ? join(root, 'System32', 'taskkill.exe') : 'taskkill';
+}
+
 /** Ends the child and, on Windows, every process under it; a taskkill that fails falls back to killing the child itself. */
-function killTree(pid: number | undefined, kill: () => void): void {
-  if (process.platform === 'win32' && pid !== undefined) {
-    execFile('taskkill', ['/T', '/F', '/PID', String(pid)], { windowsHide: true }, (err) => {
+export function killTree(pid: number | undefined, kill: () => void, opts: { platform?: NodeJS.Platform; taskkill?: string } = {}): void {
+  if ((opts.platform ?? process.platform) === 'win32' && pid !== undefined) {
+    execFile(opts.taskkill ?? taskkillPath(process.env), ['/T', '/F', '/PID', String(pid)], { windowsHide: true }, (err) => {
       if (err) kill();
     });
     return;
@@ -189,22 +198,35 @@ function killTree(pid: number | undefined, kill: () => void): void {
 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
+/** What the headless way needs: the program, the lead's folder, the tool server's entry, and for tests the kill and its grace. */
+export interface HeadlessOptions {
+  claudePath: string;
+  leadDir: (slug: string) => string;
+  toolsEntry: string;
+  env?: NodeJS.ProcessEnv;
+  /** How a run and what it started are ended; killTree by default, with the environment's taskkill. */
+  killTree?: (pid: number | undefined, kill: () => void) => void;
+  /** KILL_GRACE_MS unless given. */
+  killGraceMs?: number;
+}
+
 /**
  * The headless way: `claude -p` (or INPROGRESS_LEAD_CLAUDE's program, see resolveProgram) in the lead's own folder, with
  * the turn's own system prompt and tool server config (desk-turn-<turnId>.md, tools-<turnId>.json, removed when the run
  * ends) and an empty project settings file written once, only the lead's MCP tools allowed, and the session variables
- * removed from its environment. The stream is read line by line; the signal kills the run and everything it started. A run
- * that does not answer rejects with a TurnRunError carrying what it read.
+ * removed from its environment. The stream is read line by line; the signal kills the run and everything it started, and
+ * a run that has not ended KILL_GRACE_MS after an abort or a kill is settled anyway. A run that does not answer rejects
+ * with a TurnRunError carrying what it read; a fault writing its files or starting it is a runner fault, its files removed.
  */
-export function headlessWay(opts: { claudePath: string; leadDir: (slug: string) => string; toolsEntry: string; env?: NodeJS.ProcessEnv }): TurnWay {
+export function headlessWay(opts: HeadlessOptions): TurnWay {
   return {
     name: 'headless',
     run(input, signal) {
       return new Promise<TurnOutput>((resolve, reject) => {
         if (signal.aborted) return reject(abortError(signal, { rateLimits: [] }));
         const env = opts.env ?? process.env;
+        const endTree = opts.killTree ?? ((pid: number | undefined, kill: () => void) => killTree(pid, kill, { taskkill: taskkillPath(env) }));
         const dir = opts.leadDir(input.slug);
-        mkdirSync(join(dir, '.claude'), { recursive: true });
         const promptFile = join(dir, `desk-turn-${input.turnId}.md`);
         const toolsFile = join(dir, `tools-${input.turnId}.json`);
         const settingsFile = join(dir, '.claude', 'settings.json');
@@ -217,27 +239,28 @@ export function headlessWay(opts: { claudePath: string; leadDir: (slug: string) 
             }
           }
         };
-        writeFileSync(promptFile, input.systemPrompt);
-        writeFileSync(toolsFile, JSON.stringify({ mcpServers: { 'inprogress-lead': { command: process.execPath, args: [opts.toolsEntry, input.slug], env: input.toolsEnv } } }, null, 2));
-        if (!existsSync(settingsFile)) writeFileSync(settingsFile, '{}\n');
-        const args = headlessArgs(input.model, promptFile, toolsFile);
-        const program = resolveProgram(opts.claudePath, env);
-        let command: string;
-        let argv: string[];
+        let child: ChildProcessWithoutNullStreams;
         try {
-          command = program.viaCmd ? (envValue(env, 'COMSPEC') ?? 'cmd.exe') : program.command;
-          argv = program.viaCmd ? ['/d', '/s', '/c', `"${[program.command, ...program.prefix, ...args].map(cmdQuote).join(' ')}"`] : [...program.prefix, ...args];
+          mkdirSync(join(dir, '.claude'), { recursive: true });
+          writeFileSync(promptFile, input.systemPrompt);
+          writeFileSync(toolsFile, JSON.stringify({ mcpServers: { 'inprogress-lead': { command: process.execPath, args: [opts.toolsEntry, input.slug], env: input.toolsEnv } } }, null, 2));
+          if (!existsSync(settingsFile)) writeFileSync(settingsFile, '{}\n');
+          const args = headlessArgs(input.model, promptFile, toolsFile);
+          const program = resolveProgram(opts.claudePath, env);
+          const command = program.viaCmd ? (envValue(env, 'COMSPEC') ?? 'cmd.exe') : program.command;
+          const argv = program.viaCmd ? ['/d', '/s', '/c', `"${[program.command, ...program.prefix, ...args].map(cmdQuote).join(' ')}"`] : [...program.prefix, ...args];
+          child = spawn(command, argv, {
+            cwd: dir,
+            env: turnEnv(env),
+            windowsHide: true,
+            windowsVerbatimArguments: program.viaCmd,
+            stdio: ['pipe', 'pipe', 'pipe'],
+          });
         } catch (err) {
+          // A disk fault or a spawn that throws is the runner's, not the item's.
           removeFiles();
           return reject(new TurnRunError(`could not start ${opts.claudePath}: ${(err as Error).message}`, { rateLimits: [] }, true));
         }
-        const child = spawn(command, argv, {
-          cwd: dir,
-          env: turnEnv(env),
-          windowsHide: true,
-          windowsVerbatimArguments: program.viaCmd,
-          stdio: ['pipe', 'pipe', 'pipe'],
-        });
         const rateLimits: unknown[] = [];
         let result: Record<string, unknown> | undefined;
         let model = input.model;
@@ -246,15 +269,24 @@ export function headlessWay(opts: { claudePath: string; leadDir: (slug: string) 
         let finished = false;
         let closed = false;
         let afterResult: NodeJS.Timeout | undefined;
+        let grace: NodeJS.Timeout | undefined;
         // The run ends once both the child has closed and its stdout's last line is read, whichever comes last.
         let pending = 2;
-        const kill = () => killTree(child.pid, () => child.kill('SIGKILL'));
+        const kill = () => {
+          endTree(child.pid, () => child.kill('SIGKILL'));
+          // If neither taskkill nor the fallback ends it, the run is settled anyway, so its lane is never lost.
+          if (grace === undefined) {
+            grace = setTimeout(() => finish(conclude), opts.killGraceMs ?? KILL_GRACE_MS);
+            grace.unref();
+          }
+        };
         signal.addEventListener('abort', kill, { once: true });
         const finish = (fn: () => void) => {
           if (finished) return;
           finished = true;
           signal.removeEventListener('abort', kill);
           clearTimeout(afterResult);
+          clearTimeout(grace);
           removeFiles();
           fn();
         };
@@ -433,7 +465,7 @@ export function createRunner(ctx: Ctx, opts: RunnerOptions): Runner {
 
   /** The actor the apply writes as: the item's project's lead. */
   function actorOf(itemId: number): string {
-    const lead = db.prepare('SELECT p.lead FROM desk_items d JOIN projects p ON p.id = d.project_id WHERE d.id = ?').pluck().get(itemId) as string | null | undefined;
+    const lead = leadOfItem(db, itemId);
     return lead ? `lead:${lead}` : 'lead';
   }
 
@@ -489,7 +521,7 @@ export function createRunner(ctx: Ctx, opts: RunnerOptions): Runner {
       stopStrays();
       for (const projectId of liveProjectsWithRound(db)) {
         try {
-          const brought = db.transaction(() => bringNext(db, projectId, ctx.now())).immediate();
+          const brought = db.transaction(() => bringNext(ctx, projectId)).immediate();
           if (brought.length > 0) log.info(`Lead runner: brought ${brought.map((id) => `d${id}`).join(', ')} to Aiden in project ${projectId}`);
         } catch (err) {
           log.error(`Lead runner: could not bring waiting items to Aiden in project ${projectId}: ${message(err)}`);
@@ -548,7 +580,10 @@ export function createRunner(ctx: Ctx, opts: RunnerOptions): Runner {
       })
       .then((end) => {
         running.delete(turn.id);
-        if (end === 'ok') backoff.delete(project.id);
+        // A run that ended without a fault proves claude runs again, but only a back-off that has run out is dropped: one a
+        // sibling run's fault just set stays. 'failed' counts too: claude ran and answered, the item was at fault.
+        const until = backoff.get(project.id);
+        if (end !== 'fault' && until !== undefined && nowMs() >= until) backoff.delete(project.id);
         // Its lane is free: the next waiting item may run. After a failure the next tick looks again, so an item that just
         // failed is not leased again at once.
         if (end === 'ok' && !stopped) kick(project.id);
@@ -607,7 +642,7 @@ export function createRunner(ctx: Ctx, opts: RunnerOptions): Runner {
       const interrupted = reason === STOPPING || reason === ITEM_LEFT;
       const fault = !interrupted && err instanceof TurnRunError && err.runnerFault;
       const state = interrupted || fault ? 'interrupted' : 'failed';
-      const why = interrupted ? (reason as Error).message : fault ? `the runner could not run the turn: ${message(err)}` : `the ${opts.way.name} run failed: ${message(err)}`;
+      const why = interrupted ? (reason as Error).message : fault ? `${RUNNER_FAULT_WHY}: ${message(err)}` : `the ${opts.way.name} run failed: ${message(err)}`;
       logFail(turn.id, item.id, state, why, failTurn(db, turn.id, state, why, ctx.now(), costsOf(startedAt, partial)));
       if (fault) {
         const already = (backoff.get(project.id) ?? 0) > nowMs();

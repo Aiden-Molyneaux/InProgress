@@ -1,15 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
 import { openDb } from '../../src/server/db/connection';
 import { createCtx, write } from '../../src/server/db/tx';
 import { aidenOpenAsks, readLeadBrief } from '../../src/server/lead';
 import { leadAllow, leadDecide, leadUndo } from '../../src/server/lead-commands';
 import { renderLeadBrief } from '../../src/server/lead-text';
-import { AIDEN_BROUGHT_LIMIT, applyVerdict, cardAnswer } from '../../src/server/lead/apply';
+import { AIDEN_BROUGHT_LIMIT, LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
+import { RELAYED } from '../../src/core/relay';
+import { applyVerdict, cardAnswer, sentence } from '../../src/server/lead/apply';
 import { clearAsk, raiseAskDetailed, requireAsk } from '../../src/server/repo/asks';
-import { getDeskItem } from '../../src/server/repo/desk';
+import { addDeskItem, getDeskItem, moveDeskItem } from '../../src/server/repo/desk';
+import { bringNext, broughtOpen } from '../../src/server/repo/deskBring';
+import { STUCK_COVERS_ASK_MS } from '../../src/server/repo/deskProducers';
+import { insertLeadEvent } from '../../src/server/repo/leadEvents';
 import { applyTurn, getTurn, leaseItem, saveAnswer } from '../../src/server/repo/leadTurns';
-import { addNodes } from '../../src/server/repo/nodes';
+import { addNodes, parkNode, updateNode } from '../../src/server/repo/nodes';
 import { addBinding, createProject, setProjectLead } from '../../src/server/repo/projects';
 import { handleHookEvent } from '../../src/server/session-flow';
 
@@ -128,7 +132,7 @@ describe('AIDEN', () => {
       kind: 'product', product_ruling: 1, line: 'The button says "Find" or "Search"?', would_have: 'Search: the window says it everywhere else.', said_where: null, item_id: itemId, turn_id: turnId,
     });
     expect(w.sends()).toEqual([{
-      kind: 'relay', target: 'thread-s1', retryKey: `aiden:d${d}`, state: 'intended', itemId,
+      kind: 'relay', target: 'thread-s1', retryKey: `aiden:a${ask.id}`, state: 'intended', itemId,
       body: `[From Progresser, the lead] a${ask.id} is Aiden's to answer (taste). Carry on with what does not depend on it, or stop.`,
     }]);
     expect(requireAsk(w.ctx, ask.id).clearedAt).toBeNull();
@@ -193,7 +197,7 @@ describe('CARD', () => {
     expect(w.apply(w.answered(itemId!, 'CARD', 'NONE', 'Checks green, reviewed by Murr, touches web/ only.'))).toBe(true);
     const said = cardAnswer(w.step.id);
     expect(said).toBe(`A landing is decided by the landing check, not by the lead. Run: inprogress landing ${w.step.id} --action <merge|deploy|push|publish|push-public>, and follow its answer.`);
-    expect(requireAsk(w.ctx, ask.id)).toMatchObject({ answer: said, answeredVia: 'lead_decided' });
+    expect(requireAsk(w.ctx, ask.id)).toMatchObject({ answer: said, answeredVia: 'lead_card' });
     expect(w.ctx.db.prepare("SELECT ask_id, text FROM lead_events WHERE kind = 'card'").all()).toEqual([{ ask_id: ask.id, text: 'Checks green, reviewed by Murr, touches web/ only.' }]);
     expect(w.sends()).toEqual([{ kind: 'relay', target: 'thread-s1', retryKey: `card:a${ask.id}`, state: 'intended', itemId, body: `[From Progresser, the lead] a${ask.id}: ${said}` }]);
     expect(getDeskItem(w.ctx.db, itemId!)).toMatchObject({ state: 'done', outcome: 'CARD' });
@@ -237,3 +241,137 @@ describe('refusals', () => {
   });
 });
 
+
+describe('the fix round after Murr', () => {
+  it('F1: an undone desk decision is raised again straight to Aiden and brought: no open item, one brought, no second relay; a permission stays one', () => {
+    const w = world();
+    w.session('s1', true);
+    for (const kind of ['question', 'permission'] as const) {
+      const { ask, itemId } = w.ask('s1', `Undo me, ${kind}?`, kind);
+      expect(w.apply(w.answered(itemId!, 'DECIDE', 'PRODUCT', 'Yes.', 'It reads well'))).toBe(true);
+      const d = w.ctx.db.prepare("SELECT id FROM lead_events WHERE kind = 'decide' AND ask_id = ?").pluck().get(ask.id) as number;
+      const sendsBefore = w.sends().length;
+      const text = leadUndo(w.ctx, w.project.slug, 'Progresser', V, { eventId: d, aidenWords: 'undo it' }).text;
+      const again = Number(/as a(\d+)/.exec(text)![1]);
+      expect(requireAsk(w.ctx, again)).toMatchObject({ kind, clearedAt: null });
+      const items = w.ctx.db.prepare('SELECT id, state, outcome FROM desk_items WHERE ref = ?').all(String(again)) as { id: number; state: string; outcome: string }[];
+      expect(items).toHaveLength(1);
+      expect(items[0]!.state).toBe('waiting_aiden');
+      expect(items[0]!.outcome).toMatch(/^AIDEN d\d+$/);
+      const bring = w.ctx.db
+        .prepare("SELECT ld.kind, ld.product_ruling, ld.would_have, ld.turn_id FROM lead_decisions ld JOIN lead_events e ON e.id = ld.event_id WHERE e.kind = 'bring' AND ld.item_id = ?")
+        .all(items[0]!.id);
+      expect(bring).toEqual([{ kind: kind === 'permission' ? 'permission' : 'product', product_ruling: 1, would_have: 'Yes.', turn_id: null }]);
+      expect(w.sends()).toHaveLength(sendsBefore);
+    }
+    expect(w.count("desk_items WHERE state = 'open'")).toBe(0);
+  });
+
+  it('F2: a drop that clears five brought asks and a waiting sixth brings none of them', () => {
+    const w = world();
+    w.session('s1', false);
+    const six = [1, 2, 3, 4, 5, 6].map((i) => w.ask('s1', `Dropped question ${i}?`));
+    for (const x of six) expect(w.apply(w.answered(x.itemId!, 'AIDEN', 'DIRECTION', 'This.'))).toBe(true);
+    expect(getDeskItem(w.ctx.db, six[5]!.itemId!)!.outcome).toBe('AIDEN waiting (limit)');
+    updateNode(w.ctx, 'window', w.step.id, { status: 'dropped' });
+    expect(w.count("lead_events WHERE kind = 'bring'")).toBe(AIDEN_BROUGHT_LIMIT);
+    expect(getDeskItem(w.ctx.db, six[5]!.itemId!)).toMatchObject({ state: 'done', outcome: 'cleared by window' });
+  });
+
+  it('F3: brought items on a shelved step do not count, and a waiting one there is not brought', () => {
+    const w = world();
+    w.session('s1', false);
+    const [parent, other] = addNodes(w.ctx, 'test', { parentId: w.project.rootNodeId, nodes: [{ title: 'Parent' }, { title: 'Other' }] });
+    const [child] = addNodes(w.ctx, 'test', { parentId: parent!.id, nodes: [{ title: 'Child' }] });
+    const itemOf = (askId: number) => w.ctx.db.prepare("SELECT id FROM desk_items WHERE kind = 'question' AND ref = ?").pluck().get(String(askId)) as number;
+    const onChild = [1, 2, 3, 4, 5, 6].map((i) => {
+      w.tick();
+      return itemOf(raiseAskDetailed(w.ctx, 'scribe:s1', { nodeId: child!.id, kind: 'question', text: `Child question ${i}?`, sessionId: 's1' }).ask.id);
+    });
+    for (const itemId of onChild) expect(w.apply(w.answered(itemId, 'AIDEN', 'TASTE', 'This.'))).toBe(true);
+    expect(broughtOpen(w.ctx, w.project.id)).toBe(AIDEN_BROUGHT_LIMIT);
+    parkNode(w.ctx, 'window', parent!.id, { reason: 'later' }, () => undefined);
+    expect(broughtOpen(w.ctx, w.project.id)).toBe(0);
+    expect(w.ctx.db.transaction(() => bringNext(w.ctx, w.project.id)).immediate()).toEqual([]);
+    expect(getDeskItem(w.ctx.db, onChild[5]!)!.outcome).toBe('AIDEN waiting (limit)');
+    w.tick();
+    const itemId = itemOf(raiseAskDetailed(w.ctx, 'scribe:s1', { nodeId: other!.id, kind: 'question', text: 'Elsewhere?', sessionId: 's1' }).ask.id);
+    expect(w.apply(w.answered(itemId, 'AIDEN', 'TASTE', 'This.'))).toBe(true);
+    expect(getDeskItem(w.ctx.db, itemId)!.outcome).toMatch(/^AIDEN d\d+$/);
+  });
+
+  it("F4 and F7: a WHY with no closing mark gets its period, and the message reads as the lead's relay", () => {
+    expect(sentence('the board shows ids')).toBe('the board shows ids.');
+    expect(sentence('Is it? ')).toBe('Is it?');
+    expect(sentence('Done!')).toBe('Done!');
+    const w = world();
+    w.session('s1', true);
+    const { itemId } = w.ask('s1', 'Should search match ids?');
+    expect(w.apply(w.answered(itemId!, 'DECIDE', 'PRODUCT', 'yes', 'the board already shows ids beside titles'))).toBe(true);
+    const body = w.sends()[0]!.body as string;
+    expect(body).toMatch(/^\[From Progresser, the lead\] d\d+: yes\nWhy: the board already shows ids beside titles\. Aiden can undo this with "undo d\d+"\.$/);
+    expect(RELAYED.test(body)).toBe(true);
+  });
+
+  it('F6: CARD clears with answered_via lead_card, and its session reads it as the rule, with no undo words', () => {
+    const w = world();
+    w.session('s1', false);
+    const { ask, itemId } = w.ask('s1', 'May I merge?');
+    expect(w.apply(w.answered(itemId!, 'CARD', 'NONE', 'A landing.'))).toBe(true);
+    expect(requireAsk(w.ctx, ask.id).answeredVia).toBe('lead_card');
+    const context = handleHookEvent(w.ctx, 's1', { event: 'prompt' }).context ?? '';
+    expect(context).toContain(`The lead answered a${ask.id} with the landing check's rule, not a decision: "${cardAnswer(w.step.id)}"`);
+    expect(context).not.toContain('undo');
+  });
+
+  it('F9: an AIDEN past the limit tells its session at once, keyed by its ask; the bring later sends nothing more', () => {
+    const w = world();
+    w.session('s1', true);
+    const five = [1, 2, 3, 4, 5].map((i) => w.ask('s1', `Brought ${i}?`));
+    for (const x of five) expect(w.apply(w.answered(x.itemId!, 'AIDEN', 'TASTE', 'This.'))).toBe(true);
+    const sixth = w.ask('s1', 'Sixth?');
+    expect(w.apply(w.answered(sixth.itemId!, 'AIDEN', 'DIRECTION', 'That.'))).toBe(true);
+    expect(getDeskItem(w.ctx.db, sixth.itemId!)!.outcome).toBe('AIDEN waiting (limit)');
+    const mine = () => w.sends().filter((x) => x.itemId === sixth.itemId);
+    expect(mine()).toEqual([
+      {
+        kind: 'relay', target: 'thread-s1', retryKey: `aiden:a${sixth.ask.id}`, state: 'intended', itemId: sixth.itemId,
+        body: `[From Progresser, the lead] a${sixth.ask.id} is Aiden's to answer (direction). Carry on with what does not depend on it, or stop.`,
+      },
+    ]);
+    clearAsk(w.ctx, 'window', five[0]!.ask.id, 'B');
+    expect(getDeskItem(w.ctx.db, sixth.itemId!)!.outcome).toMatch(/^AIDEN d\d+$/);
+    expect(mine()).toHaveLength(1);
+  });
+
+  it('F10: applyTurn refuses an effect that closed its item and still says waiting_aiden', () => {
+    const w = world();
+    w.session('s1', false);
+    const { itemId } = w.ask('s1', 'Which port?');
+    const turnId = w.answered(itemId!, 'AIDEN', 'TASTE', 'x');
+    expect(() =>
+      applyTurn(w.ctx.db, turnId, w.ctx.now(), (_t, item) => {
+        moveDeskItem(w.ctx.db, item.id, ['leased'], 'done', { outcome: 'closed', now: w.ctx.now() });
+        return { itemState: 'waiting_aiden', outcome: 'AIDEN' };
+      }),
+    ).toThrow(/closed by its own apply/);
+    expect(getTurn(w.ctx.db, turnId)!.state).toBe('answered');
+  });
+
+  it("item 3: a session's permission ask makes no desk item while it has a stuck item from the last ten minutes", () => {
+    const w = world();
+    w.session('s1', false);
+    w.session('s2', false);
+    const stuck = addDeskItem(w.ctx.db, { projectId: w.project.id, kind: 'stuck', ref: 'abc123' }, w.ctx.now()).item;
+    insertLeadEvent(w.ctx.db, { projectId: w.project.id, lead: 'Progresser', instructions: V, kind: 'stuck', sessionId: 's1', text: 'abc123 Bash {"command":"rm x"}' }, w.ctx.now());
+    expect(w.ask('s1', 'Allow rm x?', 'permission').itemId).toBeUndefined();
+    // Another session's permission, and the same session's question, still go on the desk.
+    expect(w.ask('s2', 'Allow rm y?', 'permission').itemId).toBeDefined();
+    expect(w.ask('s1', 'Which file?').itemId).toBeDefined();
+    // Done or not, the stuck item covers ten minutes from when it was made; then a permission ask is the desk's again.
+    moveDeskItem(w.ctx.db, stuck.id, ['open'], 'done', { outcome: 'ALLOW ok', now: w.ctx.now() });
+    expect(w.ask('s1', 'Allow rm z?', 'permission').itemId).toBeUndefined();
+    w.tick(STUCK_COVERS_ASK_MS);
+    expect(w.ask('s1', 'Allow rm w?', 'permission').itemId).toBeDefined();
+  });
+});

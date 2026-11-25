@@ -1,5 +1,5 @@
 import { isAidens, type LeadSwitch } from '../core/lead';
-import { stepRef } from '../core/step-ref';
+import { clipLine, stepRef } from '../core/step-ref';
 import { askTag, type Ask, type Project, type TreeNode } from '../core/types';
 import { write, type Ctx, type RecordEvent } from './db/tx';
 import { clip, stamp } from './digest';
@@ -7,6 +7,8 @@ import { badRequest, conflict, notFound } from './errors';
 import { leadSwitches, logLeadEvent, requireLead } from './lead';
 import { intentHeadlines } from './lead-text';
 import { aidensAskSql, clearInWrite, markAnswersDelivered, raiseAskInWrite, requireAsk } from './repo/asks';
+import { DECISION_LINE_CUT } from './repo/deskBring';
+import { addDecision, decisionByEvent, type DecisionKind, type SaidWhere } from './repo/leadDecisions';
 import { parkNodeInWrite, requireNode, unparkNodeInWrite, updateNodeInWrite } from './repo/nodes';
 import { setProjectIntentInWrite } from './repo/projects';
 import { liveDriver, liveSessionUnder } from './repo/sessions';
@@ -105,29 +107,50 @@ export function leadDecide(
   ref: string,
   as: string,
   instructions: number,
-  input: { askId: number; answer: string; reason: string; aidenWords?: string },
+  input: { askId: number; answer: string; reason: string; aidenWords?: string; kind?: 'product' | 'technical' },
 ): { text: string; ask: Ask; decision: number } {
   const { project, name, actor } = leadOf(ctx, ref, as, instructions);
   return write(ctx, actor, (record) => {
     const before = askIn(ctx, project, input.askId);
     if (isAidens(before) && before.kind !== 'question') throw conflict(DECIDE_QUESTION_ONLY);
-    const decision = decideInWrite(ctx, record, { project, name, actor, instructions, ask: before, answer: input.answer, reason: input.reason, aidenWords: input.aidenWords });
+    const kind = input.kind ?? 'technical';
+    const decision = decideInWrite(ctx, record, {
+      project,
+      name,
+      actor,
+      instructions,
+      ask: before,
+      answer: input.answer,
+      reason: input.reason,
+      aidenWords: input.aidenWords,
+      decision: { kind, productRuling: kind === 'product', saidWhere: 'thread' },
+    });
     const ask = requireAsk(ctx, before.id);
     const heard = ask.sessionId === null ? 'No session is waiting on it.' : 'Its session reads your answer on its next prompt.';
     return { text: `Decided ${askTag(ask.id)}: decision ${decisionTag(decision)}. ${heard}`, ask, decision };
   });
 }
 
+/** A decision's row beside its event: its kind and ruling, where it was said, and the desk item and turn it came from. */
+export interface DecisionMeta {
+  kind: DecisionKind;
+  productRuling: boolean;
+  saidWhere: SaidWhere;
+  itemId?: number;
+  turnId?: number;
+}
+
 /**
  * A decision on an open ask of Aiden's, inside an open write: the ask cleared with the lead's answer (`answered_via`
- * `lead_decided`) and its `decide` line in the lead's log, whose id it answers (the `d12` undo takes). `lead decide` and the
- * desk (src/server/lead/apply.ts) both decide through here; only `lead decide` refuses a permission. Refuses the lead's
- * own promise, and an ask already cleared.
+ * `lead_decided`), its `decide` line in the lead's log, whose id it answers (the `d12` undo takes), and its decisions row
+ * beside that line (`decision`, with the line `<ask> -> <answer>`). `lead decide` and the desk (src/server/lead/apply.ts)
+ * both decide through here; only `lead decide` refuses a permission. Refuses the lead's own promise, and an ask already
+ * cleared.
  */
 export function decideInWrite(
   ctx: Ctx,
   record: RecordEvent,
-  input: { project: Project; name: string; actor: string; instructions: number; ask: Ask; answer: string; reason: string; aidenWords?: string },
+  input: { project: Project; name: string; actor: string; instructions: number; ask: Ask; answer: string; reason: string; aidenWords?: string | undefined; decision: DecisionMeta },
 ): number {
   const before = input.ask;
   const tag = askTag(before.id);
@@ -136,7 +159,20 @@ export function decideInWrite(
     throw conflict(before.answer !== '' ? `Already answered: "${clip(before.answer, ANSWER_CUT)}".` : `${tag} is already cleared, with no answer.`);
   }
   const ask = clearInWrite(ctx, record, input.actor, before, input.answer, true, 'lead_decided');
-  return logLeadEvent(ctx, { projectId: input.project.id, lead: input.name, instructions: input.instructions, kind: 'decide', askId: ask.id, nodeId: ask.nodeId, text: input.reason, aidenWords: input.aidenWords });
+  const eventId = logLeadEvent(ctx, { projectId: input.project.id, lead: input.name, instructions: input.instructions, kind: 'decide', askId: ask.id, nodeId: ask.nodeId, text: input.reason, aidenWords: input.aidenWords });
+  const d = input.decision;
+  addDecision(ctx.db, {
+    eventId,
+    ...(d.itemId === undefined ? {} : { itemId: d.itemId }),
+    ...(d.turnId === undefined ? {} : { turnId: d.turnId }),
+    kind: d.kind,
+    productRuling: d.productRuling,
+    line: `${clipLine(before.text, DECISION_LINE_CUT)} -> ${clipLine(input.answer, DECISION_LINE_CUT)}`,
+    ...(input.aidenWords === undefined ? {} : { aidenWords: input.aidenWords }),
+    saidWhere: d.saidWhere,
+    saidAt: ctx.now(),
+  });
+  return eventId;
 }
 
 /** Parks a step: the reason given, else Aiden's words, else that the lead parked it. A step of Aiden's needs his words. */
@@ -239,7 +275,11 @@ export function leadUndo(ctx: Ctx, ref: string, as: string, instructions: number
       }
       // A withdrawn answer its session has not read yet is never read.
       if (old.answerDeliveredAt === null) markAnswersDelivered(ctx, [old.id]);
-      const raised = raiseAskInWrite(ctx, record, actor, { nodeId: old.nodeId, kind: 'question', text: old.text, ...(old.sessionId === null ? {} : { sessionId: old.sessionId }) });
+      // Raised again with its own kind (a permission stays a permission). With the round on, its desk item is Aiden's at
+      // once and brought, never back on the lead's desk to be decided again.
+      const was = decisionByEvent(ctx.db, event.id);
+      const undone = { wouldHave: old.answer, kind: was?.kind ?? (old.kind === 'permission' ? 'permission' : 'technical'), productRuling: was?.productRuling ?? false };
+      const raised = raiseAskInWrite(ctx, record, actor, { nodeId: old.nodeId, kind: old.kind, text: old.text, ...(old.sessionId === null ? {} : { sessionId: old.sessionId }) }, undone);
       text = `Undid ${tag}: the question is Aiden's again as ${askTag(raised.ask.id)}. Your answer was: "${clip(old.answer, ANSWER_CUT)}".`;
     } else {
       const node = requireNode(ctx, event.node_id as number);

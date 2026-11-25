@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -7,7 +7,7 @@ import { openDb } from '../../src/server/db/connection';
 import { createCtx, type Ctx } from '../../src/server/db/tx';
 import { leadAllow, leadDisallow } from '../../src/server/lead-commands';
 import {
-  ABORT_BEFORE_LEASE_END_MS, createRunner, FAULT_BACKOFF_MS, headlessWay, resolveProgram, standInApply, TurnRunError, type Runner, type TurnInput, type TurnOutput, type TurnWay,
+  ABORT_BEFORE_LEASE_END_MS, cmdQuote, createRunner, FAULT_BACKOFF_MS, headlessWay, killTree, resolveProgram, standInApply, taskkillPath, TurnRunError, type HeadlessOptions, type Runner, type TurnInput, type TurnOutput, type TurnWay,
 } from '../../src/server/lead/runner';
 import { clearAsk, raiseAskDetailed } from '../../src/server/repo/asks';
 import { addDeskItem, getDeskItem, type DeskItem, type DeskItemKind } from '../../src/server/repo/desk';
@@ -349,7 +349,7 @@ describe('the turn runner', () => {
     expect(getDeskItem(w.ctx.db, item.id)!.state).toBe('open');
   });
 
-  it('a runner fault interrupts the turn with its cost and readings, never puts items behind, and backs the project off', async () => {
+  it('a runner fault interrupts the turn with its cost and readings, does not count as a failure, and backs the project off', async () => {
     const w = world();
     const [a, b] = [w.add(), w.add()];
     const way = quickWay(() => {
@@ -376,12 +376,7 @@ describe('the turn runner', () => {
     expect(way.calls).toHaveLength(3);
     await vi.waitFor(() => expect(turnsOf(w.ctx, a.id).length + turnsOf(w.ctx, b.id).length).toBe(3));
     await new Promise((r) => setImmediate(r));
-    // However often it faults, no item goes behind.
-    for (let i = 0; i < 3; i++) {
-      w.tick(FAULT_BACKOFF_MS + 1000);
-      runner.tick();
-      await new Promise((r) => setTimeout(r, 20));
-    }
+    // A fault is not a failure: neither item has three in a row yet, so both stay open.
     expect([a, b].map((i) => getDeskItem(w.ctx.db, i.id)!.state)).toEqual(['open', 'open']);
   });
 
@@ -411,6 +406,91 @@ describe('the turn runner', () => {
     runner.tick();
     await vi.waitFor(() => expect(turnsOf(w.ctx, item.id)[0]!.state).toBe('interrupted'));
     expect(getDeskItem(w.ctx.db, item.id)!.state).toBe('open');
+  });
+  it('counts an error_max_turns run against the item: the turn fails', async () => {
+    const w = world();
+    const item = w.add();
+    const way = quickWay(() => {
+      throw new TurnRunError('the turn ended with error_max_turns: (no result text)', { rateLimits: [] }, false);
+    });
+    const { runner } = runnerOn(w.ctx, way);
+    runner.kick(w.project.id);
+    await vi.waitFor(() => expect(turnsOf(w.ctx, item.id)[0]?.state).toBe('failed'));
+    expect(getDeskItem(w.ctx.db, item.id)!.state).toBe('open');
+  });
+
+  it('puts an item behind after three runner faults in a row, so it cannot hold its lane', async () => {
+    const w = world();
+    const item = w.add();
+    const way = quickWay(() => {
+      throw new TurnRunError('the turn ended with error_during_execution: Prompt is too long', { rateLimits: [] }, true);
+    });
+    const { runner } = runnerOn(w.ctx, way);
+    runner.kick(w.project.id);
+    for (let i = 0; i < 2; i++) {
+      await vi.waitFor(() => expect(turnsOf(w.ctx, item.id)[i]?.state).toBe('interrupted'));
+      expect(getDeskItem(w.ctx.db, item.id)!.state).toBe('open');
+      await new Promise((r) => setImmediate(r));
+      w.tick(FAULT_BACKOFF_MS + 1000);
+      runner.tick();
+    }
+    await vi.waitFor(() => expect(getDeskItem(w.ctx.db, item.id)!.state).toBe('behind'));
+    expect(turnsOf(w.ctx, item.id).map((t) => t.state)).toEqual(['interrupted', 'interrupted', 'interrupted']);
+    expect(turnsOf(w.ctx, item.id)[2]!.why).toMatch(/^the runner could not run the turn: /);
+  });
+
+  it("keeps a back-off a sibling's fault set when another run then ends ok (R1)", async () => {
+    const w = world();
+    const [a, b] = [w.add(), w.add()];
+    const calls: TurnInput[] = [];
+    let release: ((o: TurnOutput) => void) | undefined;
+    const way: TurnWay = {
+      name: 'headless',
+      run: (input) => {
+        calls.push(input);
+        if (calls.length === 1) return new Promise<TurnOutput>((r) => (release = r));
+        return Promise.reject(new TurnRunError('the turn ended with error_during_execution: Not logged in', { rateLimits: [] }, true));
+      },
+    };
+    const { runner } = runnerOn(w.ctx, way);
+    runner.kick(w.project.id);
+    expect(calls.map((c) => c.item.id)).toEqual([a.id, b.id]);
+    await vi.waitFor(() => expect(turnsOf(w.ctx, b.id)[0]?.state).toBe('interrupted'));
+    release!(output());
+    await vi.waitFor(() => expect(turnsOf(w.ctx, a.id)[0]?.state).toBe('applied'));
+    await new Promise((r) => setTimeout(r, 20));
+    // Still backed off: b is not leased again until the back-off runs out.
+    expect(calls).toHaveLength(2);
+    w.tick(FAULT_BACKOFF_MS + 1000);
+    runner.tick();
+    expect(calls).toHaveLength(3);
+  });
+
+  it('drops an expired back-off when the one try ends failed, so the lanes fill again (R2)', async () => {
+    const w = world();
+    const a = w.add();
+    const calls: TurnInput[] = [];
+    const way: TurnWay = {
+      name: 'headless',
+      run: (input, signal) => {
+        calls.push(input);
+        if (calls.length === 1) return Promise.reject(new TurnRunError('the turn ended with error_during_execution: Not logged in', { rateLimits: [] }, true));
+        if (calls.length === 2) return Promise.resolve(output({ text: 'nonsense' }));
+        return new Promise<TurnOutput>((_r, reject) => signal.addEventListener('abort', () => reject(signal.reason as Error), { once: true }));
+      },
+    };
+    const { runner } = runnerOn(w.ctx, way);
+    runner.kick(w.project.id);
+    await vi.waitFor(() => expect(turnsOf(w.ctx, a.id)[0]?.state).toBe('interrupted'));
+    w.tick(FAULT_BACKOFF_MS + 1000);
+    runner.tick();
+    await vi.waitFor(() => expect(turnsOf(w.ctx, a.id)[1]?.state).toBe('failed'));
+    await new Promise((r) => setTimeout(r, 20));
+    w.add();
+    w.add();
+    runner.tick();
+    // Two reflex turns at once, not one at a time.
+    expect(calls).toHaveLength(4);
   });
 });
 
@@ -444,6 +524,10 @@ process.stdin.on('end', () => {
     setInterval(() => undefined, 1000);
     return;
   }
+  if (mode === 'maxturns') {
+    process.stdout.write(JSON.stringify({ type: 'result', subtype: 'error_max_turns', is_error: true, total_cost_usd: 0.02, duration_ms: 50, usage: { input_tokens: 5, output_tokens: 1 } }) + '\\n');
+    return;
+  }
   if (mode === 'iserror') {
     process.stdout.write(JSON.stringify({ type: 'rate_limit_event', rate_limit_info: ${JSON.stringify(RATE)} }) + '\\n');
     process.stdout.write(JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'Not logged in', total_cost_usd: 0.01, duration_ms: 90, usage: { input_tokens: 5, output_tokens: 1 } }) + '\\n');
@@ -465,9 +549,15 @@ process.stdin.on('end', () => {
 `;
 
 describe('the headless way', () => {
-  function stubSetup(mode: string, claude?: (dir: string, stub: string) => string) {
+  function stubSetup(mode: string, claude?: (dir: string, stub: string) => string, extra: Partial<HeadlessOptions> = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'lead-headless-'));
-    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+    cleanups.push(() => {
+      try {
+        rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      } catch {
+        // Windows can hold a killed stub's working folder for seconds after it ends: the scratch folder stays in the temp folder.
+      }
+    });
     const stub = join(dir, 'claude-stub.mjs');
     writeFileSync(stub, STUB);
     const record = join(dir, 'record.json');
@@ -489,7 +579,7 @@ describe('the headless way', () => {
       CLAUDE_EFFORT: 'high',
     };
     const leadDir = (slug: string) => join(dir, 'home', 'lead', slug);
-    const way = headlessWay({ claudePath: claude ? claude(dir, stub) : stub, leadDir, toolsEntry: 'C:/dist/lead/tools.js', env });
+    const way = headlessWay({ claudePath: claude ? claude(dir, stub) : stub, leadDir, toolsEntry: 'C:/dist/lead/tools.js', env, ...extra });
     const input: TurnInput = {
       turnId: 7,
       slug: 'ingame',
@@ -589,6 +679,77 @@ describe('the headless way', () => {
       '--max-turns', '14', '--no-session-persistence',
     ]);
     expect(resolveProgram('claude', { PATH: s.dir }, 'win32')).toEqual({ command: join(s.dir, 'claude.cmd'), prefix: [], viaCmd: true });
+  });
+
+  it('fails an error_max_turns result as the item\'s failure, not a runner fault', async () => {
+    const s = stubSetup('maxturns');
+    const err = (await s.way.run(s.input, new AbortController().signal).catch((e: unknown) => e)) as TurnRunError;
+    expect(err).toBeInstanceOf(TurnRunError);
+    expect(err.message).toContain('error_max_turns');
+    expect(err.runnerFault).toBe(false);
+  });
+
+  it('answers from a result line read before an abort, even when the run then hangs', async () => {
+    const s = stubSetup('linger');
+    const controller = new AbortController();
+    const run = s.way.run(s.input, controller.signal);
+    await vi.waitFor(() => expect(existsSync(s.record)).toBe(true), { timeout: 10_000 });
+    await new Promise((r) => setTimeout(r, 500));
+    controller.abort(new Error('the server stopped during the turn'));
+    expect((await run).text).toBe(ANSWER);
+  }, 20_000);
+
+  it('a disk fault writing the turn files is a runner fault, and removes what was written (R3)', async () => {
+    const s = stubSetup('ok');
+    mkdirSync(join(s.lead, 'tools-7.json'), { recursive: true });
+    const err = (await s.way.run(s.input, new AbortController().signal).catch((e: unknown) => e)) as TurnRunError;
+    expect(err).toBeInstanceOf(TurnRunError);
+    expect(err.message).toContain('could not start');
+    expect(err.runnerFault).toBe(true);
+    expect(existsSync(join(s.lead, 'desk-turn-7.md'))).toBe(false);
+  });
+
+  it('a spawn that throws is a runner fault, and removes the turn files (R3)', async () => {
+    const s = stubSetup('ok', (dir) => join(dir, 'bad\0name.js'));
+    const err = (await s.way.run(s.input, new AbortController().signal).catch((e: unknown) => e)) as TurnRunError;
+    expect(err).toBeInstanceOf(TurnRunError);
+    expect(err.runnerFault).toBe(true);
+    expect(existsSync(join(s.lead, 'desk-turn-7.md'))).toBe(false);
+    expect(existsSync(join(s.lead, 'tools-7.json'))).toBe(false);
+  });
+
+  it('settles an aborted run whose kill did nothing, after the grace (R4)', async () => {
+    const kills: (() => void)[] = [];
+    const s = stubSetup('hang', undefined, { killTree: (_pid, kill) => void kills.push(kill), killGraceMs: 300 });
+    const controller = new AbortController();
+    const run = s.way.run(s.input, controller.signal);
+    await vi.waitFor(() => expect(existsSync(s.record)).toBe(true), { timeout: 10_000 });
+    const { pid } = s.read();
+    // Ended before its folder is removed (cleanups run last first): Windows will not remove a folder a process runs in.
+    cleanups.push(async () => {
+      // The run's own fallback kill, through its ChildProcess, so the process and its handles are closed.
+      kills[0]?.();
+      await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 10_000 });
+    });
+    controller.abort(new Error('the lease is ending'));
+    await expect(run).rejects.toThrow('the lease is ending');
+    expect(kills).toHaveLength(1);
+    // The run was settled while its process still lived.
+    expect(() => process.kill(pid, 0)).not.toThrow();
+  });
+
+  it('quotes for cmd.exe: a quote and % are refused, ! passes (R6)', () => {
+    expect(cmdQuote('wow!')).toBe('"wow!"');
+    expect(() => cmdQuote('say "hi"')).toThrow(/quote, % or a line break/);
+    expect(() => cmdQuote('100%')).toThrow(/quote, % or a line break/);
+  });
+
+  it('runs taskkill by its system path, and falls back to the kill when taskkill fails (R6)', async () => {
+    expect(taskkillPath({ SystemRoot: 'C:\\Windows' })).toBe(join('C:\\Windows', 'System32', 'taskkill.exe'));
+    expect(taskkillPath({})).toBe('taskkill');
+    const kill = vi.fn();
+    killTree(999_999, kill, { platform: 'win32', taskkill: join(tmpdir(), 'no-such-dir-xyz', 'taskkill.exe') });
+    await vi.waitFor(() => expect(kill).toHaveBeenCalledTimes(1));
   });
 
   it('kills the run on abort', async () => {

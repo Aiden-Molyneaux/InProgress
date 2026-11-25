@@ -378,7 +378,7 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
     // record of Aiden's words, not the lead's claim.
     const lines: string[] = relayedBy === null ? [] : [relayedLine(relayedBy)];
     if (answers.length) {
-      lines.push(...answers.map((a) => (a.answeredVia === 'lead_decided' ? `Decided by this project's lead, not Aiden: ${askTag(a.id)} "${oneLine(a.answer)}" (yours: act on it; Aiden may still undo it)` : a.answer ? `Answered: ${askTag(a.id)} "${oneLine(a.answer)}" (yours: act on it, or add it to your tasks)` : `Cleared: ${askTag(a.id)}, no answer`)));
+      lines.push(...answers.map((a) => (a.answeredVia === 'lead_decided' ? `Decided by this project's lead, not Aiden: ${askTag(a.id)} "${oneLine(a.answer)}" (yours: act on it; Aiden may still undo it)` : a.answeredVia === 'lead_card' ? `The lead answered ${askTag(a.id)} with the landing check's rule, not a decision: "${oneLine(a.answer)}"` : a.answer ?`Answered: ${askTag(a.id)} "${oneLine(a.answer)}" (yours: act on it, or add it to your tasks)` : `Cleared: ${askTag(a.id)}, no answer`)));
       markAnswersDelivered(ctx, answers.map((a) => a.id));
     }
     // Landing went off after this session started: its briefing may hold the Landing line, so every prompt says it no longer stands.

@@ -43,8 +43,8 @@ const full = (): LeadBrief => ({
   ],
   waitingOnAiden: [{ askId: 7, kind: 'question', stepId: 9, stepTitle: 'Pick a port', text: longText, raisedAt: ago(3 * DAY) }],
   aidensOwn: [{ stepId: 3, title: 'Sign it', updatedAt: ago(HOUR) }],
-  aidenOpenInProject: 7,
-  aidenOpenAcrossProjects: 7,
+  aidenOpenInProject: 6,
+  aidenOpenAcrossProjects: 9,
   forTheLead: [
     { askId: 11, stepId: 5, stepTitle: 'Late', text: 'Do it', dueAt: ago(DAY), overdue: true },
     { askId: 12, stepId: 6, stepTitle: 'Open', text: 'Later', dueAt: null, overdue: false },
@@ -74,7 +74,7 @@ describe('deskGroups', () => {
       "Said in your name since the lead's last look",
     ]);
     expect(g.map((x) => x.count)).toEqual([2, 2, 1, 1, 2, 2, 1]);
-    expect(g[0].note).toBe('Open asks across all projects: 7 of 5, 2 over the limit');
+    expect(g[0].note).toBe('Open asks in this project: 6 of 5, 1 over the limit · across all projects: 9');
     expect(g[1].note).toBe('2 of 3 in flight');
     expect(g[3].note).toBe('Backlog: 21 steps not started and not in the queue');
     expect(g[2].note).toBeUndefined();
@@ -124,7 +124,7 @@ describe('deskGroups', () => {
     const g = deskGroups(empty(), NOW);
     expect(g).toHaveLength(7);
     expect(g.every((x) => x.rows.length === 0 && x.count === 0)).toBe(true);
-    expect(g[0].note).toBe('Open asks across all projects: 0 of 5');
+    expect(g[0].note).toBe('Open asks in this project: 0 of 5 · across all projects: 0');
   });
 });
 

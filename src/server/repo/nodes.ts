@@ -4,7 +4,7 @@ import { write, type Ctx, type RecordEvent } from '../db/tx';
 import { badRequest, conflict, notFound } from '../errors';
 import { definedOnly } from '../util';
 import { clearNodeAsks } from './asks';
-import { deskOnStepsDeleted } from './deskProducers';
+import { deskOnStepsDeleted, withBringDeferred } from './deskProducers';
 import { appendUnowned, dropFromQueue, getProjectById, inLiveProject, isQueued, moveInQueue } from './projects';
 import { placeInBand } from './rank';
 import { parkedAncestor, shelvedAmong, subtreeIds } from './shelved';
@@ -219,15 +219,18 @@ export function updateNodeInWrite(ctx: Ctx, record: RecordEvent, actor: string, 
 
 /** The body of updateNode, inside a write() already open: the drop, park and question-node ask clearing, then patchNode. */
 function patchWithAsks(ctx: Ctx, record: RecordEvent, actor: string, before: TreeNode, patch: NodePatch): TreeNode {
-  // Before patchNode, so node.updated stays the project's newest event (the activity strip shows it).
-  if ((patch.status === 'dropped' || patch.status === 'parked') && before.status !== patch.status) {
-    // A dropped or parked step's asks are moot (spec 1.2); a finished one's stay, a review ask most of all.
-    clearNodeAsks(ctx, record, actor, before.id);
-  } else if ((patch.kind ?? before.kind) === 'question' && patch.status === 'done' && before.status !== 'done') {
-    // A question node and its migrated ask are one question: finishing the node answers the ask.
-    clearNodeAsks(ctx, record, actor, before.id, (patch.outcome ?? before.outcome).trim());
-  }
-  return patchNode(ctx, record, before, patch);
+  // The desk's bring for the asks cleared here runs after the patch too, so a park has landed before it picks what to bring.
+  return withBringDeferred(ctx, () => {
+    // Before patchNode, so node.updated stays the project's newest event (the activity strip shows it).
+    if ((patch.status === 'dropped' || patch.status === 'parked') && before.status !== patch.status) {
+      // A dropped or parked step's asks are moot (spec 1.2); a finished one's stay, a review ask most of all.
+      clearNodeAsks(ctx, record, actor, before.id);
+    } else if ((patch.kind ?? before.kind) === 'question' && patch.status === 'done' && before.status !== 'done') {
+      // A question node and its migrated ask are one question: finishing the node answers the ask.
+      clearNodeAsks(ctx, record, actor, before.id, (patch.outcome ?? before.outcome).trim());
+    }
+    return patchNode(ctx, record, before, patch);
+  });
 }
 
 /**

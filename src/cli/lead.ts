@@ -11,7 +11,7 @@ export const LEAD_USAGE = [
   `  inprogress lead step <project> <step id> ${WHO}`,
   `  inprogress lead resource <project> <document id> ${WHO}`,
   `  inprogress lead answer <project> <ask id> --aiden <words> [--says <text>] ${WHO}`,
-  `  inprogress lead decide <project> <ask id> --answer <text> --reason <text> [--aiden <words>] ${WHO}`,
+  `  inprogress lead decide <project> <ask id> --answer <text> --reason <text> [--kind product|technical] [--aiden <words>] ${WHO}`,
   `  inprogress lead undo <project> <decision> --aiden <words> ${WHO}`,
   `  inprogress lead park <project> <step id> [--reason <text>] [--aiden <words>] ${WHO}`,
   `  inprogress lead drop <project> <step id> --reason <text> [--aiden <words>] ${WHO}`,
@@ -75,7 +75,7 @@ const COMMANDS: Record<string, CommandSpec> = {
   step: { positionals: 1, flags: [] },
   resource: { positionals: 1, flags: [] },
   answer: { positionals: 1, flags: ['--aiden', '--says'] },
-  decide: { positionals: 1, flags: ['--answer', '--reason', '--aiden'] },
+  decide: { positionals: 1, flags: ['--answer', '--reason', '--kind', '--aiden'] },
   undo: { positionals: 1, flags: ['--aiden'] },
   park: { positionals: 1, flags: ['--reason', '--aiden'] },
   drop: { positionals: 1, flags: ['--reason', '--aiden'] },
@@ -187,9 +187,13 @@ function draft(command: string, p: Parsed): Draft {
       if ('error' in answer) return answer;
       const reason = needed('--reason');
       if ('error' in reason) return reason;
+      // Technical unless named: sent only when given, so the body stays what an older server accepts.
+      const kind = p.flags.get('--kind');
+      if (kind !== undefined && kind !== 'product' && kind !== 'technical') return { error: `--kind is product or technical, not ${JSON.stringify(kind)}` };
       fields.askId = id;
       fields.answer = answer;
       fields.reason = reason;
+      if (kind !== undefined) fields.kind = { text: kind };
       put('aidenWords', flag('--aiden'));
       return { fields };
     }

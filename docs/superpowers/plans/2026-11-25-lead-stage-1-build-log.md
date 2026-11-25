@@ -296,3 +296,11 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   every rule's examples to the installed `if` rules. Accepted: `"$(git push)"` inside quotes, `bash -c "git push"` and
   `pwsh -Command "..."` are not watched ("forget security for now"); the hold schema moved into
   `src/server/lead/hold.ts`.
+
+## The fix round for tasks 4 and 5
+
+- By a fresh Sev on Opus (resumed once at its turn limit): F1 to F10, R1 to R7 and the stuck check done; 2668 unit
+  tests green. Calls of Sev's, accepted: an undone decision's ask goes straight to Aiden, brought with the withdrawn
+  answer as the would-have and no turn, even past the five (it is his own undo), and the session's withdrawal message
+  is task 10's; three runner faults in a row are the item's last three turns all interrupted by a fault.
+- Sigmund removed the hold schema task 7 left unused in `src/server/schemas.ts`.

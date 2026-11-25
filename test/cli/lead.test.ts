@@ -309,6 +309,16 @@ describe("inprogress lead's commands", () => {
     expect(undone.code).toBe(0);
     expect(undone.lines[0]).toMatch(/^Undid d\d+: the question is Aiden's again as a\d+\. Your answer was: "Inter"\.$/);
     expect(await run(['undo', 'ingame', m![2], '--aiden', 'again', ...WHO])).toEqual({ code: 1, lines: [`d${m![2]} is already undone.`] });
+    // Every decision has its row: technical unless --kind product, said in the lead's thread.
+    expect(row('SELECT kind, product_ruling, said_where, line FROM lead_decisions WHERE event_id = ?', Number(m![2]))).toEqual({ kind: 'technical', product_ruling: 0, said_where: 'thread', line: 'Which font? -> Inter' });
+    const other = raiseAsk(createCtx(db), 'test', { nodeId: steps.fourth, kind: 'question', text: 'Which colour?' });
+    const product = await run(['decide', 'ingame', `a${other.id}`, '--answer', 'Blue', '--reason', 'The brand', '--kind', 'product', ...WHO]);
+    const d = Number(/decision d(\d+)/.exec(product.lines[0])![1]);
+    expect(row('SELECT kind, product_ruling, said_where FROM lead_decisions WHERE event_id = ?', d)).toEqual({ kind: 'product', product_ruling: 1, said_where: 'thread' });
+    const third = raiseAsk(createCtx(db), 'test', { nodeId: steps.fourth, kind: 'question', text: 'Which size?' });
+    const bad = await run(['decide', 'ingame', `a${third.id}`, '--answer', 'Big', '--reason', 'Room', '--kind', 'taste', ...WHO]);
+    expect(bad.code).toBe(1);
+    expect(bad.lines[0]).toBe('--kind is product or technical, not "taste"');
   });
 
   it('promise and kept: 7 and a7 name the same ask', async () => {
@@ -433,7 +443,7 @@ describe("inprogress lead's commands", () => {
     expect(lines[3]).toBe('  inprogress lead step <project> <step id> --as <name> --instructions <n>');
     expect(lines[4]).toBe('  inprogress lead resource <project> <document id> --as <name> --instructions <n>');
     expect(lines[5]).toBe('  inprogress lead answer <project> <ask id> --aiden <words> [--says <text>] --as <name> --instructions <n>');
-    expect(lines[6]).toBe('  inprogress lead decide <project> <ask id> --answer <text> --reason <text> [--aiden <words>] --as <name> --instructions <n>');
+    expect(lines[6]).toBe('  inprogress lead decide <project> <ask id> --answer <text> --reason <text> [--kind product|technical] [--aiden <words>] --as <name> --instructions <n>');
     expect(lines[7]).toBe('  inprogress lead undo <project> <decision> --aiden <words> --as <name> --instructions <n>');
     expect(lines[12]).toBe('  inprogress lead intent <project> --as <name> --instructions <n>');
     expect(lines[13]).toBe('  inprogress lead intent <project> <file | -> --as <name> --instructions <n>');
