@@ -47,6 +47,8 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   live-home guard expands 8.3 short names. Debt fixed with them: project_id derived from the parent row on a turn and a
   decision, `sendByRetryKey`, the readings' units written down, a reopened item drops its outcome, the migration test
   pinned at v21.
+- Murr's proportional re-check of 809be9f: sound, no findings. Migration 21 was edited in place before it shipped;
+  only scratch copies ran its first text (`mig21`, `home21`, both discarded), so no home holds the old schema.
 - Task 2, from Murr's owner-calls: the minute watch also sweeps for a session's open question or permission ask on a
   project whose round is on, raised after the round was switched on, with no desk item (an ask raised while a rolled-back
   build ran). Asks older than the switch are the old asks of task 17, not desk items.
