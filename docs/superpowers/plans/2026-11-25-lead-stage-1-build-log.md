@@ -354,3 +354,10 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   T3 Code learns the lead's folder as a project once, at landing (`t3 project add`), on Aiden's word; the lead's
   folder is the lead's: no session registered, no briefing, the hold hooks silent there; Aiden's late answer in the
   window after the lead decided becomes an undo plus his answer.
+- Murr on task 8 (Opus): needs fixes, 0 blocker, 3 major: a waiting unknown_send item could bring an unrelated ask
+  (its ref read as an ask id); the lead's `threads` read could not finish inside the tool's 5-second client timeout,
+  so case C could never be cleared at the desk; an unknown start held its step only ten minutes, so a later start and
+  then FIRST could make two sessions on one step. Queued with his minors after task 9 (shared files). Calls on his
+  owner-calls: a send records that it was tried just before the action, so a send never tried simply goes after a
+  restart; a lost message is found by its text and time, keeping scene 1's text frozen; NOT FOUND on a message sends it
+  again once; the start guards read the starts made before this build; the thread read is scoped to the project.
