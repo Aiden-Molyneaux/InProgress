@@ -141,3 +141,12 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   a reviewer, both one line): a deleted step's stopped items are looked up within its project (the index serves it), and
   a repeated comment in `switches.ts` removed. Accepted: the raise path's archived check relies on a deleted project
   being archived first, which `deleteProject` does; an ask raised while archived is swept as overdue on unarchive.
+- Task 4 built by Sev (Opus). typecheck and 2410 unit tests green. Deviations, each Sev's and accepted:
+  - Brief said a failed compare-and-set in the apply abandons the turn. Did: only an answered turn is abandoned; a
+    leased one is left for its lease to run out. Because abandoning a leased turn would strand its item in leased.
+  - Brief named no model. Did `claude-opus-5-5` (`LEAD_MODEL`).
+  - A `.js` stub named by `INPROGRESS_LEAD_CLAUDE` runs under node, since there is no shell to run a script.
+  - Stopping the server aborts running turns as abandoned (the items reopen; they count toward behind).
+  - The repo for the git tools is the project's first bound folder; a project with no lead is skipped before a lease.
+- Open from task 4, for task 5: an apply that throws leaves the turn answered and recovery retries it every tick. Task 5
+  bounds it: a second throw fails the turn.

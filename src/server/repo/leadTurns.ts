@@ -1,4 +1,5 @@
 import type { DB } from '../db/connection';
+import { getDeskItem, moveDeskItem, type DeskItem } from './desk';
 
 /** How a turn runs (migration 21): a headless run, or a message in the lead's thread. */
 export type TurnWay = 'headless' | 'thread';
@@ -154,4 +155,92 @@ export function moveTurn(db: DB, id: number, from: TurnState[], to: TurnState, f
     .prepare(`UPDATE lead_turns SET ${sets.join(', ')} WHERE id = ? AND state IN (${from.map(() => '?').join(', ')})`)
     .run(...values, id, ...from);
   return info.changes > 0;
+}
+
+/** Whether `err` is lead_turns_live_once refusing a second live turn: the only unique index a leased insert can meet. */
+function isLiveOnce(err: unknown): boolean {
+  const e = err as { code?: unknown; message?: unknown };
+  return e?.code === 'SQLITE_CONSTRAINT_UNIQUE' && typeof e.message === 'string' && e.message.includes('lead_turns.item_id');
+}
+
+export interface LeaseInput {
+  way: TurnWay;
+  model?: string | null;
+  /** How long the lease runs from `now`. */
+  leaseMs: number;
+}
+
+/**
+ * The only way into a turn, in one immediate transaction: the item moves open or behind to leased (compare-and-set) and
+ * its turn is inserted, leased until now + leaseMs. Undefined, with nothing written, when the item is in no such state
+ * or already has a live turn. Any other error is thrown.
+ */
+export function leaseItem(db: DB, itemId: number, input: LeaseInput, now: string): LeadTurn | undefined {
+  try {
+    return db.transaction((): LeadTurn | undefined => {
+      if (!moveDeskItem(db, itemId, ['open', 'behind'], 'leased', { now })) return undefined;
+      // A throw here rolls back the item's move with it.
+      return insertTurn(db, { itemId, ...input }, now);
+    }).immediate();
+  } catch (err) {
+    if (isLiveOnce(err)) return undefined;
+    throw err;
+  }
+}
+
+/** What a turn's answer saves. finishedAt defaults to `now`. */
+export type AnswerFields = Omit<TurnFields, 'verdict' | 'answer' | 'why' | 'kind'> & { verdict: string; answer: string; why: string; kind: string };
+
+/** In one immediate transaction, the turn leased to answered with its answer and costs. False when it was no longer leased. */
+export function saveAnswer(db: DB, turnId: number, fields: AnswerFields, now: string): boolean {
+  return db.transaction(() => moveTurn(db, turnId, ['leased'], 'answered', { finishedAt: now, ...fields })).immediate();
+}
+
+/** What applying an answer does to its item, and the outcome written on it. */
+export interface TurnEffect {
+  itemState: 'done' | 'waiting_aiden';
+  outcome: string;
+}
+
+/**
+ * In one immediate transaction: the turn answered to applied and its item leased to the effect's state, both
+ * compare-and-set, with `effect` run between them so its own writes commit or roll back with the two moves. False, with
+ * the effect not run, when the turn is not answered (it is left as it is: a leased turn is the lease's to end, an applied
+ * one is done) or its item is no longer leased (cleared while the turn ran): then an answered turn moves to abandoned. A
+ * throw from the effect rolls everything back and is rethrown: the turn stays answered for the next recovery.
+ */
+export function applyTurn(db: DB, turnId: number, now: string, effect: (turn: LeadTurn, item: DeskItem) => TurnEffect): boolean {
+  return db.transaction((): boolean => {
+    const turn = getTurn(db, turnId);
+    if (turn === undefined || turn.state !== 'answered') return false;
+    const item = getDeskItem(db, turn.itemId);
+    if (item === undefined || item.state !== 'leased') {
+      moveTurn(db, turnId, ['answered'], 'abandoned', { finishedAt: turn.finishedAt ?? now });
+      return false;
+    }
+    const result = effect(turn, item);
+    if (!moveTurn(db, turnId, ['answered'], 'applied')) throw new Error(`Turn ${turnId} left answered inside its own apply`);
+    if (!moveDeskItem(db, item.id, ['leased'], result.itemState, { outcome: result.outcome, now })) {
+      throw new Error(`Desk item ${item.id} left leased inside its own apply`);
+    }
+    return true;
+  }).immediate();
+}
+
+/** How many failed or abandoned turns move an item to behind: the runner gives up on it. */
+export const TURN_FAILURES_BEHIND = 2;
+
+/**
+ * In one immediate transaction: the turn leased to `state` with `why` (and any further fields, such as a failed turn's
+ * cost), and its item leased back to open, or to behind when it now has TURN_FAILURES_BEHIND turns failed or abandoned.
+ * An item no longer leased (cleared meanwhile) is left as it is. False when the turn was no longer leased.
+ */
+export function failTurn(db: DB, turnId: number, state: 'failed' | 'abandoned', why: string, now: string, fields: TurnFields = {}): boolean {
+  return db.transaction((): boolean => {
+    if (!moveTurn(db, turnId, ['leased'], state, { finishedAt: now, ...fields, why })) return false;
+    const itemId = getTurn(db, turnId)!.itemId;
+    const failures = db.prepare("SELECT COUNT(*) FROM lead_turns WHERE item_id = ? AND state IN ('failed', 'abandoned')").pluck().get(itemId) as number;
+    moveDeskItem(db, itemId, ['leased'], failures >= TURN_FAILURES_BEHIND ? 'behind' : 'open', { now });
+    return true;
+  }).immediate();
 }

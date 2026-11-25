@@ -10,6 +10,7 @@ import { truncateIfLarge } from './backup';
 import { openDb } from './db/connection';
 import { createCtx } from './db/tx';
 import { watchDesk } from './lead/desk';
+import { createRunner, headlessWay, LEAD_MODEL, leadToolsEntry, standInApply, type Runner } from './lead/runner';
 import { createBackupRunner } from './backup-runner';
 import { runMaintenance } from './project-lifecycle';
 import { reconcileProjects } from './repo/taskState';
@@ -44,6 +45,7 @@ async function main(): Promise<void> {
   let closing = false;
   let maintenance: NodeJS.Timeout | undefined;
   let watchTimer: NodeJS.Timeout | undefined;
+  let leadRunner: Runner | undefined;
   const app = buildApp({
     ctx,
     home,
@@ -61,6 +63,8 @@ async function main(): Promise<void> {
     closing = true;
     clearInterval(maintenance);
     clearInterval(watchTimer);
+    // Its running turns are stopped and abandoned before the database closes under them.
+    await leadRunner?.stop().catch((err: unknown) => app.log.error(`Could not stop the lead's turn runner: ${(err as Error).message}`));
     await app.close().catch(() => undefined);
     db.close();
     rmSync(join(home, 'server.pid'), { force: true });
@@ -120,6 +124,23 @@ async function main(): Promise<void> {
   watch();
   watchTimer = setInterval(watch, watchInterval(process.env));
   watchTimer.unref();
+  // The lead's turn runner (src/server/lead/runner.ts): it runs turns only on a project whose round is on.
+  // INPROGRESS_LEAD_RUNNER=off keeps it from starting; INPROGRESS_LEAD_CLAUDE names the program a turn runs.
+  if (process.env.INPROGRESS_LEAD_RUNNER !== 'off') {
+    try {
+      leadRunner = createRunner(ctx, {
+        way: headlessWay({ claudePath: process.env.INPROGRESS_LEAD_CLAUDE || 'claude', leadDir: (slug) => join(home, 'lead', slug), toolsEntry: leadToolsEntry() }),
+        model: LEAD_MODEL,
+        home,
+        port,
+        apply: standInApply,
+        log: { info: (message) => app.log.info(message), error: (message) => app.log.error(message) },
+      });
+      leadRunner.start();
+    } catch (err) {
+      app.log.error(`Could not start the lead's turn runner: ${(err as Error).message}`);
+    }
+  }
   // A hidden, detached server on Windows never receives these signals; POST /api/admin/shutdown is the clean way to stop it.
   process.on('SIGINT', () => void shutdown());
   process.on('SIGTERM', () => void shutdown());
