@@ -275,3 +275,19 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
 - A permission prompt the lead did not answer in time still raises the notification hook's permission ask, which
   would make a second desk item for the same prompt: fixed in the next round (no desk item for that ask while the
   session has a stuck item from the last ten minutes).
+
+## Murr on task 7 (Opus, risk list)
+
+- Needs fixes: 2 blocker, 3 major. The `if` rules started the hook for fewer forms than the hold list holds
+  (`git -C ... push`, pnpm and yarn publish, a full-path deploy script, PowerShell's other delete words); a `cd` before
+  a merge was ignored, so a merge into main from a worktree read the worktree's branch; a second push in one command was
+  never judged; the playbook's Held lines were shadowed; text inside quotes and heredocs (a PR body) was read as
+  commands. All sent back with the minors.
+- Calls on his owner-calls: with the server down a matched command is held only inside a folder whose round is on,
+  so other projects are never touched; `gh pr merge` is held; ExitPlanMode and AskUserQuestion never go to the desk;
+  updating main from origin is not a landing; each hold family gets its own argument so Claude Code cannot merge them
+  as one hook. Accepted: if the hook bundle itself is missing or fails to load, Claude Code runs the command (a broken
+  build is caught by the deploy's own checks); an older build's install after a rollback leaves the new entries
+  inert.
+- To prove on a real `claude -p` with a scratch Claude config before landing: each family starts its handler, the
+  deny shapes, a mid-pattern `*` in an `if` rule (`node *deploy*`), a hook's timeout.
