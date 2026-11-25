@@ -304,3 +304,8 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   answer as the would-have and no turn, even past the five (it is his own undo), and the session's withdrawal message
   is task 10's; three runner faults in a row are the item's last three turns all interrupted by a fault.
 - Sigmund removed the hold schema task 7 left unused in `src/server/schemas.ts`.
+- Murr's re-check of task 7's fixes (Sonnet, proportional, round 1): 1 major: a shell redirection (`2>&1`, `> out.txt`)
+  read as a branch or remote, so an ordinary landing was held for Aiden instead of checked. Sent to a fresh Sev with
+  the minors (git spellings the `if` families missed: `-P`, `-p`, `git.exe`, a full path; `npm run deploy-check` held
+  as a deploy; one retry of a held.json read during its rename). Accepted: `cd /tmp` reads as a folder under the
+  current one (it holds, never leaks); a `cd` in a subshell carries over (held or checked either way).
