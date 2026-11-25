@@ -5,6 +5,7 @@ import { leadBootstrap, leadRules } from '../core/lead-rules';
 import { buildIndex, dfsOrder, shelvedIds } from '../core/tree';
 import { ASK_TRAIL_MS, askTag, type Ask, type Project } from '../core/types';
 import { spanAgo } from './briefing';
+import type { DB } from './db/connection';
 import { write, type Ctx } from './db/tx';
 import { conflict } from './errors';
 import { intentHeadlines, intentParagraphs } from './lead-text';
@@ -329,7 +330,18 @@ export function leadSwitches(ctx: Ctx, projectId: number): Record<LeadSwitch, Le
     if (row === undefined || row.kind !== 'allow') return { on: false, at: null, words: null };
     return { on: true, at: row.at, words: row.aiden_words };
   };
-  return { starts: read('starts'), landing: read('landing') };
+  return { starts: read('starts'), landing: read('landing'), round: read('round') };
+}
+
+/**
+ * When the lead's round was switched on: the `at` of the newest allow or disallow line for `round`, when it is an allow;
+ * null when the round is off or never was. Non-null means on. Read as leadSwitches reads a switch.
+ */
+export function roundSince(db: DB, projectId: number): string | null {
+  const row = db
+    .prepare("SELECT kind, at FROM lead_events WHERE project_id = ? AND kind IN ('allow', 'disallow') AND text = 'round' ORDER BY at DESC, id DESC LIMIT 1")
+    .get(projectId) as { kind: string; at: string } | undefined;
+  return row !== undefined && row.kind === 'allow' ? row.at : null;
 }
 
 /** When Landing was turned off, if the newest allow or disallow line for it is a disallow; null when it is on or never was. */

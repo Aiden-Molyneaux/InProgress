@@ -20,7 +20,7 @@ function setup(lead: string | null = 'Progresser') {
   addBinding(ctx, 'test', project.slug, BOUND);
   const [step] = addNodes(ctx, 'test', { parentId: project.rootNodeId, nodes: [{ title: 'Build tabs' }] });
   if (lead !== null) setProjectLead(ctx, 'window', project.slug, lead);
-  const on = (sw: 'starts' | 'landing') => leadAllow(ctx, project.slug, 'Progresser', V, { switch: sw, aidenWords: 'yes' });
+  const on = (sw: 'starts' | 'landing' | 'round') => leadAllow(ctx, project.slug, 'Progresser', V, { switch: sw, aidenWords: 'yes' });
   const off = (sw: 'starts' | 'landing') => leadDisallow(ctx, project.slug, 'Progresser', V, { switch: sw });
   const start = (id: string) => handleHookEvent(ctx, id, { event: 'start', source: 'startup', cwd: BOUND });
   const prompt = (id: string) => String(handleHookEvent(ctx, id, { event: 'prompt' }).context ?? '');
@@ -73,14 +73,16 @@ describe('switches do not survive a change of lead', () => {
       const t = setup();
       t.on('starts');
       t.on('landing');
+      t.on('round');
       t.start('s1');
       const before = (t.events() as unknown[]).length;
       setProjectLead(t.ctx, 'window', t.project.slug, next);
       expect((t.events() as unknown[]).slice(before)).toEqual([
         { lead: 'Progresser', instructions: V, kind: 'disallow', text: 'starts', aiden_words: null },
         { lead: 'Progresser', instructions: V, kind: 'disallow', text: 'landing', aiden_words: null },
+        { lead: 'Progresser', instructions: V, kind: 'disallow', text: 'round', aiden_words: null },
       ]);
-      expect(leadSwitches(t.ctx, t.project.id)).toEqual({ starts: { on: false, at: null, words: null }, landing: { on: false, at: null, words: null } });
+      expect(leadSwitches(t.ctx, t.project.id)).toEqual({ starts: { on: false, at: null, words: null }, landing: { on: false, at: null, words: null }, round: { on: false, at: null, words: null } });
       // The session that held the Landing line is told on its next prompt.
       expect(t.prompt('s1')).toContain(landingOffLine(t.newest('landing')));
     }

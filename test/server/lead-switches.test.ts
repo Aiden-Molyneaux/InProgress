@@ -39,9 +39,9 @@ function setup() {
 }
 
 describe('leadSwitches', () => {
-  it('reads both off with no events, on after an allow, off after a disallow, on again after another allow', () => {
+  it('reads all off with no events, on after an allow, off after a disallow, on again after another allow', () => {
     const s = setup();
-    expect(leadSwitches(s.ctx, s.project.id)).toEqual({ starts: { on: false, at: null, words: null }, landing: { on: false, at: null, words: null } });
+    expect(leadSwitches(s.ctx, s.project.id)).toEqual({ starts: { on: false, at: null, words: null }, landing: { on: false, at: null, words: null }, round: { on: false, at: null, words: null } });
     leadAllow(s.ctx, s.project.slug, 'progresser', V, { switch: 'starts', aidenWords: 'yes, start them' });
     const on = leadSwitches(s.ctx, s.project.id);
     expect(on.starts).toMatchObject({ on: true, words: 'yes, start them' });

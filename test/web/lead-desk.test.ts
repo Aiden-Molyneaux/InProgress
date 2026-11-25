@@ -25,7 +25,7 @@ const empty = (): LeadBrief => ({
   landedSince: [],
   saidInAidensName: [],
   decided: [],
-  switches: { starts: { on: false, at: null, words: null }, landing: { on: false, at: null, words: null } },
+  switches: { starts: { on: false, at: null, words: null }, landing: { on: false, at: null, words: null }, round: { on: false, at: null, words: null } },
   started: [],
   links: { t3: 'not checked', t3At: null, lastSeenAt: null },
 });
@@ -208,11 +208,11 @@ describe('deskSwitches', () => {
     ]);
   });
   it('says on with its age and the words that turned it on', () => {
-    const b = { ...empty(), switches: { starts: { on: true, at: ago(2 * HOUR), words: 'turn starts on' }, landing: { on: false, at: null, words: null } } };
+    const b = { ...empty(), switches: { starts: { on: true, at: ago(2 * HOUR), words: 'turn starts on' }, landing: { on: false, at: null, words: null }, round: { on: false, at: null, words: null } } };
     expect(deskSwitches(b, NOW).map((s) => s.line)).toEqual(['Starts: on, since 2h ago, on Aiden\'s words "turn starts on"', 'Landing: off']);
   });
   it('leaves the words out when there are none', () => {
-    const b = { ...empty(), switches: { starts: { on: false, at: null, words: null }, landing: { on: true, at: ago(3 * DAY), words: null } } };
+    const b = { ...empty(), switches: { starts: { on: false, at: null, words: null }, landing: { on: true, at: ago(3 * DAY), words: null }, round: { on: false, at: null, words: null } } };
     expect(deskSwitches(b, NOW).map((s) => s.line)).toEqual(['Starts: off', 'Landing: on, since 3d ago']);
   });
 });

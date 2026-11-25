@@ -21,8 +21,9 @@ export const LEAD_USAGE = [
   `  inprogress lead intent <project> <file | -> ${WHO}`,
   `  inprogress lead relay <project> <step id> <message | -> ${WHO}`,
   `  inprogress lead start <project> <step id> [--aiden <words>] ${WHO}`,
-  `  inprogress lead allow <project> starts|landing --aiden <words> ${WHO}`,
-  `  inprogress lead disallow <project> starts|landing [--aiden <words>] ${WHO}`,
+  `  inprogress lead allow <project> starts|landing|round --aiden <words> ${WHO}`,
+  `  inprogress lead disallow <project> starts|landing|round [--aiden <words>] ${WHO}`,
+  '  inprogress lead desk <project> [--json]',
 ].join('\n');
 
 /** What a write command prints when the server did not answer in time: it may have been applied all the same. */
@@ -64,6 +65,8 @@ interface CommandSpec {
   bools?: readonly string[];
   /** The command can be run without --instructions (the lead does not know the version until it has read the rules). */
   noInstructions?: boolean;
+  /** The command needs neither --as nor --instructions: a read with no lead check. */
+  noWho?: boolean;
 }
 
 const COMMANDS: Record<string, CommandSpec> = {
@@ -83,6 +86,7 @@ const COMMANDS: Record<string, CommandSpec> = {
   start: { positionals: 1, flags: ['--aiden'] },
   allow: { positionals: 1, flags: ['--aiden'] },
   disallow: { positionals: 1, flags: ['--aiden'] },
+  desk: { positionals: 0, flags: [], bools: ['--json'], noWho: true },
 };
 
 interface Parsed {
@@ -120,9 +124,9 @@ function parseArgs(args: string[], spec: CommandSpec): Parsed | { error: string 
   if (project === undefined) return { error: 'Missing <project>' };
   if (rest.length < (spec.minPositionals ?? spec.positionals)) return { error: 'Missing a value after <project>' };
   if (rest.length > spec.positionals) return { error: `Unexpected ${rest[spec.positionals]}` };
-  if (as === undefined) return { error: 'Missing --as <name>' };
-  if (instructions === undefined && !spec.noInstructions) return { error: 'Missing --instructions <n>' };
-  return { project, positionals: rest, flags, bools, as, instructions: instructions ?? 0 };
+  if (as === undefined && !spec.noWho) return { error: 'Missing --as <name>' };
+  if (instructions === undefined && !spec.noInstructions && !spec.noWho) return { error: 'Missing --instructions <n>' };
+  return { project, positionals: rest, flags, bools, as: as ?? '', instructions: instructions ?? 0 };
 }
 
 /** An ask as the brief names it, `a7`, or as a bare number, `7`. */
@@ -243,7 +247,7 @@ function draft(command: string, p: Parsed): Draft {
     }
     case 'allow':
     case 'disallow': {
-      if (!(LEAD_SWITCHES as readonly string[]).includes(first)) return { error: `${first} is not a switch: give starts or landing` };
+      if (!(LEAD_SWITCHES as readonly string[]).includes(first)) return { error: `${first} is not a switch: give starts, landing or round` };
       fields.switch = { text: first };
       if (command === 'allow') {
         const words = needed('--aiden');
@@ -259,7 +263,8 @@ function draft(command: string, p: Parsed): Draft {
 
 /**
  * `inprogress lead <command>`. `rules` prints the lead's rules (or with --bootstrap the three lines to paste) and needs no
- * --instructions. `brief` prints the server's text, or with --json the brief. `rules`, `brief`, `step`, `resource` and `intent`
+ * --instructions. `brief` prints the server's text, or with --json the brief. `desk` prints the open desk items, or with
+ * --json the items, and needs neither --as nor --instructions. `rules`, `brief`, `step`, `resource`, `desk` and `intent`
  * with no file are the reads: GETs that print the route's text. The nine commands (answer, decide, undo, park, drop, promise, kept, intent with a file or
  * `-`, relay) each post to their route and print its sentence. No command, an unknown one, or
  * arguments it cannot use print the usage and exit 1, before anything is read from stdin; a refusal from the server prints
@@ -278,9 +283,9 @@ export async function runLead(args: string[], out: (line: string) => void, o: Co
   if (command === undefined || !Object.hasOwn(COMMANDS, command)) return usage();
   const p = parseArgs(rest, COMMANDS[command]);
   if ('error' in p) return usage(p.error);
-  // The reads: brief, rules, step, resource, and intent with no file. They are GETs and send nothing.
+  // The reads: brief, rules, step, resource, desk, and intent with no file. They are GETs and send nothing.
   const [first] = p.positionals;
-  const reads = command === 'brief' || command === 'rules' || command === 'step' || command === 'resource' || (command === 'intent' && first === undefined);
+  const reads = command === 'brief' || command === 'rules' || command === 'step' || command === 'resource' || command === 'desk' || (command === 'intent' && first === undefined);
   const readId = command === 'step' ? stepId(first) : command === 'resource' ? resourceId(first) : undefined;
   if ((command === 'step' || command === 'resource') && readId === undefined) {
     return usage(command === 'step' ? `${first} is not a step: give it as #42 or 42` : `${first} is not a document: give it as r42 or 42`);
@@ -326,6 +331,11 @@ export async function runLead(args: string[], out: (line: string) => void, o: Co
     }
     if (command === 'intent') {
       out((await client.get<{ text: string }>(`${path}/intent?${asked}`)).text);
+      return 0;
+    }
+    if (command === 'desk') {
+      const desk = await client.get<{ items: unknown[]; text: string }>(`${path}/desk`);
+      out(p.bools.has('--json') ? JSON.stringify(desk.items, null, 2) : desk.text);
       return 0;
     }
     if (command === 'rules') {

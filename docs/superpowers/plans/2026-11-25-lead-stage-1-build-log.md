@@ -55,6 +55,14 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
 - Task 4, from Murr's debt: the lease and the apply are each one repo function in one immediate transaction
   (`leaseItem`, `applyTurn`), not pairs of calls the runner must hold together.
 
+- Usage units, read from stage 0's readings file: `rate_limit_info.unifiedWindows.five_hour.utilization` and
+  `.seven_day.utilization` are fractions (0.47 is 47 percent); `resetsAt` is epoch seconds. `usage_readings` stores the
+  fraction as reported and the reset as ISO; text multiplies by 100. (809be9f's doc comment said percent 0 to 100:
+  corrected with task 2.)
+- Task 3. Plan said `inprogress lead-tools <slug>`. Do a build entry of its own, `dist/lead/tools.js <slug>`
+  (source `src/server/lead/tools.ts`). Because the CLI then need not carry the MCP library on every call, and the
+  scribe's MCP server (`src/mcp/`, risk list) stays untouched.
+
 ## Where task 2 hooks in (Moh, 2026-11-25, spot-checked before use)
 
 - Writes: `write` in `src/server/db/tx.ts:48-93` (one transaction, no nesting, events after commit; `ctx.now()`).
@@ -72,3 +80,17 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   `test/cli/lead.test.ts`, `test/server/lead-brief.test.ts`.
 - Live work: `sessionActivity` `src/core/activity.ts:31-35`; session loaded with subagents and commands by
   `findSession` `src/server/repo/sessions.ts:74-81`.
+
+## Task 2: the desk and its items
+
+- Built by Sev (Opus: the producers write inside the ask-raising transaction). The round's switch, the producers in
+  `src/server/lead/desk.ts` (raise, clear, the minute watch's stopped, promise_due and sweep passes), the wake, and
+  `lead desk <slug>` with `GET /api/lead/:ref/desk`. typecheck and 2352 unit tests green.
+- Plan said `lead desk inprogress`. The CLI asked every lead command for `--as`; `desk` takes none (a `noWho` spec
+  field). Because the desk is a read anyone may make, as `/events` is.
+- A task step marked done keeps its asks (`src/server/repo/nodes.ts:220-229`); only a drop, a park or a finished
+  question step clears them. So a desk item about an ask on a finished step stays until the ask clears. Left as it is:
+  the lead's turn reads the step and finds it done.
+- "No open ask on the step" for a stopped session means no open ask of Aiden's, as the board's stall check reads it; a
+  lead's promise on the step does not block a stopped item.
+- The wake is a hint to read the desk, not proof an item exists: a write that rolls back may still wake the runner once.

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { runCli } from '../../src/cli/commands';
 import { LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
+import { stamp } from '../../src/core/span';
 import { LEAD_TIMEOUT, LEAD_USAGE, RELAY_NO_ANSWER, RELAY_TIMEOUT_MS, START_NO_ANSWER, runLead } from '../../src/cli/lead';
 import { TASKS_NOT_RUNNING_HINT } from '../../src/cli/tasks';
 import { ApiClientError } from '../../src/lib/client';
@@ -14,6 +15,7 @@ import { openDb, type DB } from '../../src/server/db/connection';
 import { createCtx } from '../../src/server/db/tx';
 import { noLeadNamed } from '../../src/server/lead';
 import { raiseAsk } from '../../src/server/repo/asks';
+import { addDeskItem, moveDeskItem } from '../../src/server/repo/desk';
 import { addNodes } from '../../src/server/repo/nodes';
 import { createProject, setProjectLead } from '../../src/server/repo/projects';
 
@@ -166,6 +168,32 @@ describe('inprogress lead brief', () => {
     const usage = capture();
     await runCli(['nonsense'], usage.out);
     expect(usage.lines[0]).toContain('lead brief <project> --as <name> --instructions <n> [--mark] [--json]');
+  });
+});
+
+describe('inprogress lead desk', () => {
+  it('lists the open items oldest first with their limits, needs no --as, and says when the desk is empty', async () => {
+    const project = createProject(createCtx(db), 'test', { name: 'Desk check' });
+    const empty = capture();
+    expect(await runLead(['desk', project.slug], empty.out, conn)).toBe(0);
+    expect(empty.lines).toEqual(['The desk is empty.']);
+    const now = Date.now();
+    const iso = (ms: number) => new Date(now + ms).toISOString();
+    const late = addDeskItem(db, { projectId: project.id, kind: 'question', ref: '41', nodeId: 7, dueAt: iso(30 * 60_000) }, iso(-60_000)).item;
+    const early = addDeskItem(db, { projectId: project.id, kind: 'stopped', ref: 's1@x', nodeId: 8, dueAt: iso(-20 * 60_000) }, iso(-25 * 60_000)).item;
+    const done = addDeskItem(db, { projectId: project.id, kind: 'permission', ref: '42', nodeId: 9, dueAt: iso(60_000) }, iso(-30 * 60_000)).item;
+    moveDeskItem(db, done.id, ['open'], 'done', { outcome: 'cleared by window', now: iso(0) });
+    const listed = capture();
+    expect(await runLead(['desk', project.slug], listed.out, conn)).toBe(0);
+    expect(listed.lines).toEqual([
+      [
+        `#${early.id} stopped s1@x step #8 due ${stamp(iso(-20 * 60_000)).slice(11)} (20 min over) open`,
+        `#${late.id} question 41 step #7 due ${stamp(iso(30 * 60_000)).slice(11)} (30 min left) open`,
+      ].join('\n'),
+    ]);
+    const json = capture();
+    expect(await runLead(['desk', project.slug, '--json'], json.out, conn)).toBe(0);
+    expect((JSON.parse(json.lines[0]) as { id: number }[]).map((i) => i.id)).toEqual([early.id, late.id]);
   });
 });
 
@@ -396,11 +424,12 @@ describe("inprogress lead's commands", () => {
 
   it('lists the reads and the commands in the usage, one line each (intent has a read and a write form)', () => {
     const lines = LEAD_USAGE.split('\n');
-    expect(lines).toHaveLength(18);
-    expect(lines.slice(1).map((l) => l.trim().split(' ')[2])).toEqual(['rules', 'brief', 'step', 'resource', 'answer', 'decide', 'undo', 'park', 'drop', 'promise', 'kept', 'intent', 'intent', 'relay', 'start', 'allow', 'disallow']);
+    expect(lines).toHaveLength(19);
+    expect(lines.slice(1).map((l) => l.trim().split(' ')[2])).toEqual(['rules', 'brief', 'step', 'resource', 'answer', 'decide', 'undo', 'park', 'drop', 'promise', 'kept', 'intent', 'intent', 'relay', 'start', 'allow', 'disallow', 'desk']);
     expect(lines[15]).toBe('  inprogress lead start <project> <step id> [--aiden <words>] --as <name> --instructions <n>');
-    expect(lines[16]).toBe('  inprogress lead allow <project> starts|landing --aiden <words> --as <name> --instructions <n>');
-    expect(lines[17]).toBe('  inprogress lead disallow <project> starts|landing [--aiden <words>] --as <name> --instructions <n>');
+    expect(lines[16]).toBe('  inprogress lead allow <project> starts|landing|round --aiden <words> --as <name> --instructions <n>');
+    expect(lines[17]).toBe('  inprogress lead disallow <project> starts|landing|round [--aiden <words>] --as <name> --instructions <n>');
+    expect(lines[18]).toBe('  inprogress lead desk <project> [--json]');
     expect(lines[3]).toBe('  inprogress lead step <project> <step id> --as <name> --instructions <n>');
     expect(lines[4]).toBe('  inprogress lead resource <project> <document id> --as <name> --instructions <n>');
     expect(lines[5]).toBe('  inprogress lead answer <project> <ask id> --aiden <words> [--says <text>] --as <name> --instructions <n>');
@@ -513,8 +542,9 @@ describe('inprogress lead relay', () => {
       expect(await run(['allow', 'inprogress', 'starts', '--aiden', 'yes, go', ...WHO])).toEqual({ code: 0, lines: ['Starts is on for InGame.'], reads: 0 });
       expect(await run(['disallow', 'inprogress', 'landing', ...WHO])).toMatchObject({ code: 0 });
       expect(await run(['disallow', 'inprogress', 'landing', '--aiden', 'stop it', ...WHO])).toMatchObject({ code: 0 });
+      expect(await run(['allow', 'inprogress', 'round', '--aiden', 'run the round', ...WHO])).toMatchObject({ code: 0 });
       const bad = await run(['allow', 'inprogress', 'deploys', '--aiden', 'go', ...WHO]);
-      expect(bad).toEqual({ code: 1, lines: ['deploys is not a switch: give starts or landing', LEAD_USAGE], reads: 0 });
+      expect(bad).toEqual({ code: 1, lines: ['deploys is not a switch: give starts, landing or round', LEAD_USAGE], reads: 0 });
       const noWords = await run(['allow', 'inprogress', 'starts', ...WHO]);
       expect(noWords).toEqual({ code: 1, lines: ['Missing --aiden', LEAD_USAGE], reads: 0 });
     } finally {
@@ -526,6 +556,7 @@ describe('inprogress lead relay', () => {
       ['/api/lead/inprogress/allow', { ...who, switch: 'starts', aidenWords: 'yes, go' }],
       ['/api/lead/inprogress/disallow', { ...who, switch: 'landing' }],
       ['/api/lead/inprogress/disallow', { ...who, switch: 'landing', aidenWords: 'stop it' }],
+      ['/api/lead/inprogress/allow', { ...who, switch: 'round', aidenWords: 'run the round' }],
     ]);
   });
 

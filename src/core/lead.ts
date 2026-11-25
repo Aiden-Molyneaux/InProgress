@@ -4,8 +4,11 @@ import type { AskKind } from './types';
 
 /** The version of the lead's written instructions. A write command from a lower version is refused. */
 export const LEAD_INSTRUCTIONS_VERSION = 6;
-/** The two per-project switches only Aiden turns on: whether the lead may start a thread on its own judgment, and whether a session may land routine work. */
-export const LEAD_SWITCHES = ['starts', 'landing'] as const;
+/**
+ * The per-project switches only Aiden turns on: whether the lead may start a thread on its own judgment, whether a session
+ * may land routine work, and whether the lead's round runs (desk items are made only while it is on).
+ */
+export const LEAD_SWITCHES = ['starts', 'landing', 'round'] as const;
 export type LeadSwitch = (typeof LEAD_SWITCHES)[number];
 /** The most threads the lead starts on its own judgment (no words of Aiden's) in one project in 24 hours. */
 export const LEAD_STARTS_PER_DAY = 3;

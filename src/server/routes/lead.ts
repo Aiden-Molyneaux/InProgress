@@ -5,6 +5,7 @@ import { badRequest } from '../errors';
 import { cliBesideServer, nodeCli } from '../../lib/task-command';
 import { listLeadEvents, markLeadSeen, readLeadBrief, readLeadIntent, readLeadRules, requireLead } from '../lead';
 import { leadAllow, leadDisallow, leadAnswer, leadDecide, leadUndo, leadDrop, leadIntent, leadKept, leadPark, leadPromise } from '../lead-commands';
+import { readDesk } from '../lead/desk';
 import { leadRelay, type RelaySend } from '../lead-relay';
 import { leadStart, type StartThread } from '../lead-start';
 import { readLeadResource, readLeadStep } from '../lead-step';
@@ -59,6 +60,8 @@ export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken:
     return readLeadIntent(ctx, (req.params as { ref: string }).ref, query.as, query.instructions);
   });
   app.get('/api/lead/:ref/events', async (req) => ({ events: listLeadEvents(ctx, (req.params as { ref: string }).ref) }));
+  // The lead's desk: its open items, oldest first, and their text. No lead check, like the log.
+  app.get('/api/lead/:ref/desk', async (req) => readDesk(ctx, (req.params as { ref: string }).ref));
   // The lead has read the brief: the next one counts what landed and what was said from here.
   app.post('/api/lead/:ref/seen', { onRequest: requireToken }, async (req) => {
     const body = leadSeenBody.parse(req.body);

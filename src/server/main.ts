@@ -9,6 +9,7 @@ import { buildApp } from './app';
 import { truncateIfLarge } from './backup';
 import { openDb } from './db/connection';
 import { createCtx } from './db/tx';
+import { watchDesk } from './lead/desk';
 import { createBackupRunner } from './backup-runner';
 import { runMaintenance } from './project-lifecycle';
 import { reconcileProjects } from './repo/taskState';
@@ -90,8 +91,9 @@ async function main(): Promise<void> {
   runner.startup();
   maintenance = setInterval(() => void runner.tick(), MAINTENANCE_MS);
   maintenance.unref();
-  // The transcript watcher: once now, so subagents that died while the server was down end at once, then on a timer that
-  // never keeps the process alive. A failed tick is logged and the next one tries again.
+  // The transcript watcher, and the lead's desk (src/server/lead/desk.ts): once now, so subagents that died while the
+  // server was down end at once, then on a timer that never keeps the process alive. A failed tick is logged and the next
+  // one tries again.
   const watchState = createWatchState();
   const watch = () => {
     try {
@@ -107,6 +109,12 @@ async function main(): Promise<void> {
       for (const u of unreadable) app.log.warn(`Could not read the transcript of session ${u.sessionId} for command ends (${u.code}): ${u.path}`);
     } catch (err) {
       app.log.error(`Could not watch command ends: ${(err as Error).message}`);
+    }
+    try {
+      const { stopped, promiseDue, swept } = watchDesk(ctx);
+      if (stopped + promiseDue + swept > 0) app.log.info(`Desk: ${stopped} stopped, ${promiseDue} promise due, ${swept} swept`);
+    } catch (err) {
+      app.log.error(`Could not watch the lead's desk: ${(err as Error).message}`);
     }
   };
   watch();

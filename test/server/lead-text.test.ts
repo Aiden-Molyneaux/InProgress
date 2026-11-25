@@ -26,7 +26,7 @@ const empty: LeadBrief = {
   landedSince: [],
   saidInAidensName: [],
   decided: [],
-  switches: { starts: { on: false, at: null, words: null }, landing: { on: false, at: null, words: null } },
+  switches: { starts: { on: false, at: null, words: null }, landing: { on: false, at: null, words: null }, round: { on: false, at: null, words: null } },
   started: [],
   links: { t3: 'not checked', t3At: null, lastSeenAt: null },
 };
@@ -55,7 +55,7 @@ const full: LeadBrief = {
     { tag: 'd9', at: ago(3 * DAY), by: 'Progresser', stepId: 16, stepTitle: 'Old spike', what: 'parked', why: '', isNew: false },
     { tag: '', at: ago(HOUR), by: 'a session', stepId: 12, stepTitle: 'Play app signing', what: 'rename the helper · clearer', why: '', isNew: true },
   ],
-  switches: { starts: { on: true, at: ago(DAY), words: 'start them' }, landing: { on: false, at: null, words: null } },
+  switches: { starts: { on: true, at: ago(DAY), words: 'start them' }, landing: { on: false, at: null, words: null }, round: { on: false, at: null, words: null } },
   started: [
     { at: ago(HOUR), stepId: 15, stepTitle: 'Add the privacy page', threadId: 'mcp:t1', onAidensWord: true, claimed: true },
     { at: ago(5 * MIN), stepId: 16, stepTitle: 'Old spike', threadId: 'mcp:t2', onAidensWord: false, claimed: false },
@@ -124,7 +124,7 @@ describe('renderLeadBrief', () => {
 
   it('prints a switch that is on with since when and the words, and leaves the parenthesis out with no words', () => {
     const sw = (starts: LeadBrief['switches']['starts'], landing: LeadBrief['switches']['landing']) =>
-      renderLeadBrief({ ...empty, switches: { starts, landing } }).split('\n').find((l) => l.startsWith('Switches:'));
+      renderLeadBrief({ ...empty, switches: { starts, landing, round: { on: false, at: null, words: null } } }).split('\n').find((l) => l.startsWith('Switches:'));
     const off = { on: false, at: null, words: null };
     expect(sw(off, { on: true, at: ago(HOUR), words: 'land it' })).toBe(`Switches: starts off · landing on since ${stamp(ago(HOUR))} ("land it")`);
     expect(sw({ on: true, at: ago(HOUR), words: null }, off)).toBe(`Switches: starts on since ${stamp(ago(HOUR))} · landing off`);
