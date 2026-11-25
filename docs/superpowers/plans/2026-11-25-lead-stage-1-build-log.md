@@ -245,3 +245,16 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   read `t3 thread start --help` (flags --base-dir, --title, --provider, --model, --worktree, --branch, --wait, --json:
   no retry key). Because the CLI's own help answers it without starting a real thread. So the send id goes in the
   thread's title (` [s<id>]`) and recovery finds it with `t3 thread list`.
+
+## Murr on task 5 (Opus, risk list)
+
+- Needs fixes: 0 blocker, 1 major: undoing a desk decision put the question back on the desk, where the lead could
+  decide it again. Minors: a multi-ask drop could bring an ask it was clearing; asks on parked steps counted against
+  the five; scene 1's "Why:" needs its period; the Lead view still counted the limit across projects; CARD's ask read
+  as an undoable decision. Queued for one fix round with task 4's re-check minors, after task 7 (same files).
+- Calls on his owner-calls: the hook learns the short form `[From <lead>, the lead]` as the lead's relay (scene 1's
+  text stays as frozen; a desk message never reads as Aiden typing); `lead decide` from the CLI writes its decisions
+  row too, with `--kind`; a sixth AIDEN item tells its session at once. Kept, for Aiden's look: the desk may DECIDE a
+  session's permission ask (the plan's decision kinds include it; the rule judges it by what it will do). Left for
+  task 10: an answer Aiden gives in the window after the lead decided is dropped today (the clear is first-wins); task
+  10's undo makes his late answer an undo plus his answer. Product rulings first in the list: task 10.
