@@ -218,14 +218,14 @@ describe('refusals', () => {
     expect(getDeskItem(w.ctx.db, itemId!)).toMatchObject({ state: 'done', outcome: 'ask cleared' });
   });
 
-  it('a stopped item: no action in this task, item done', () => {
+  it('a stopped item answered with none of RESTART, PARK or DONE: nothing written, it waits for Aiden as unclear (task 9)', () => {
     const w = world();
     const item = w.ctx.db.prepare("INSERT INTO desk_items (project_id, kind, ref, created_at) VALUES (?, 'stopped', 's9@x', ?)").run(w.project.id, w.ctx.now());
     const itemId = Number(item.lastInsertRowid);
     const before = footprint(w);
     expect(w.apply(w.answered(itemId, 'DECIDE', 'TECHNICAL', 'Carry on.'))).toBe(true);
     expect(footprint(w)).toEqual(before);
-    expect(getDeskItem(w.ctx.db, itemId)).toMatchObject({ state: 'done', outcome: 'DECIDE (no action in this task)' });
+    expect(getDeskItem(w.ctx.db, itemId)).toMatchObject({ state: 'waiting_aiden', outcome: 'unclear' });
   });
 
   it('a project with no lead: outcome no lead', () => {

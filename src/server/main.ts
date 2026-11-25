@@ -11,6 +11,7 @@ import { openDb } from './db/connection';
 import { createCtx } from './db/tx';
 import { watchDesk } from './lead/desk';
 import { applyVerdict } from './lead/apply';
+import { stoppedBeforeLease } from './lead/stopped';
 import { watchHeldLines } from './lead/hold';
 import { createRunner, headlessWay, LEAD_MODEL, leadToolsEntry, type Runner } from './lead/runner';
 import { createSender, type Sender } from './lead/sends';
@@ -156,6 +157,12 @@ async function main(): Promise<void> {
           const effect = applyVerdict(c, turn, item, record, sender);
           if (sender !== undefined) setImmediate(() => void sender.wake());
           return effect;
+        },
+        // A stopped session is asked in plain code before any turn; the ask is a send, carried out after its write commits.
+        holdBack: (item) => {
+          const r = stoppedBeforeLease(ctx, item);
+          if (r === 'asked' && sender !== undefined) setImmediate(() => void sender.wake());
+          return r !== 'lease';
         },
         log: { info: (message) => app.log.info(message), error: (message) => app.log.error(message) },
       });

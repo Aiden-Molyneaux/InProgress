@@ -9,11 +9,12 @@ import { leadFolders } from '../lead';
 import { getDeskItem, leadOfItem, openItemsInLane, type DeskItem, type DeskLane } from '../repo/desk';
 import { bringNext } from '../repo/deskBring';
 import { onDeskItem } from '../repo/deskProducers';
-import { answeredTurns, applyTurn, expiredLeases, failAnsweredTurn, failTurn, leaseItem, RUNNER_FAULT_WHY, saveAnswer, type LeadTurn, type TurnEffect, type TurnFields } from '../repo/leadTurns';
+import { answeredTurns, applyTurn, expiredLeases, failAnsweredTurn, failTurn, leaseItem, reopenFaultedItems, RUNNER_FAULT_WHY, saveAnswer, type LeadTurn, type TurnEffect, type TurnFields } from '../repo/leadTurns';
 import { getProjectById } from '../repo/projects';
 import { isLiveWithRound, liveProjectsWithRound } from '../repo/switches';
 import { addReading, type AddReadingInput } from '../repo/usageReadings';
 import { deskSystemPrompt, deskUserMessage } from './prompt';
+import { stoppedBeforeLease } from './stopped';
 import { parseVerdict } from './verdict';
 
 /** The model a desk turn runs on: Opus 5.5. */
@@ -77,13 +78,17 @@ export interface TurnOutput {
   model: string;
 }
 
-/** What a run that did not answer still read: its rate limits always, its costs when a result line came. */
-export type PartialOutput = Partial<Omit<TurnOutput, 'text' | 'rateLimits'>> & { rateLimits: unknown[] };
+/**
+ * What a run that did not answer still read: its rate limits always, its costs when a result line came. `resultRead`: a
+ * result line was read, so claude ran the turn to its end (an error result such as error_max_turns).
+ */
+export type PartialOutput = Partial<Omit<TurnOutput, 'text' | 'rateLimits'>> & { rateLimits: unknown[]; resultRead?: boolean };
 
 /**
  * A run that did not answer, with what it read. `runnerFault`: the fault is the runner's, not the item's (claude would not
- * start, ended with no result line, or ended in error such as not logged in or a usage limit): the item is not counted
- * toward behind, and the runner backs off.
+ * start, ended with no result line, or ended in error such as not logged in or a usage limit): the turn is interrupted, not
+ * failed, and the runner backs off. Three faults in a row put the item behind, so one bad item cannot hold its lane; the
+ * next turn of the project that ends ok reopens it, since claude runs again.
  */
 export class TurnRunError extends Error {
   constructor(
@@ -172,7 +177,8 @@ export function resolveProgram(claudePath: string, env: NodeJS.ProcessEnv, platf
 /**
  * One argument quoted for `cmd.exe /d /s /c "..."` and the program's own parser. cmd.exe still reads % inside quotes, and
  * a quote or a line break cannot be carried safely, so an argument with one is refused, not mangled. A `!` passes: delayed
- * expansion is off under `cmd /d /s /c`, so cmd.exe reads it as itself.
+ * expansion is off by default under `cmd /d /s /c` (no /v:on is passed), so cmd.exe reads it as itself; a machine that
+ * turns delayed expansion on in the registry would not.
  */
 export function cmdQuote(arg: string): string {
   if (/["%\r\n]/.test(arg)) throw new Error(`cannot pass ${JSON.stringify(arg)} through cmd.exe: it holds a quote, % or a line break`);
@@ -306,6 +312,7 @@ export function headlessWay(opts: HeadlessOptions): TurnWay {
             refusedTools: denials.map((d) => String(d.tool_name ?? 'unknown')),
             rateLimits,
             model,
+            resultRead: true,
           };
         };
         const conclude = () => {
@@ -421,6 +428,11 @@ export interface RunnerOptions {
   apply: (ctx: Ctx, turn: LeadTurn, item: DeskItem, record: RecordEvent) => TurnEffect;
   /** Where each step is logged in one line: the server log. */
   log?: RunnerLog;
+  /**
+   * Whether an open item is held back from a lease, read before each lease: by default stopped.ts's, which asks a stopped
+   * session in plain code (no turn) and holds its item until its due_at. The server's also wakes the sender after an ask.
+   */
+  holdBack?: (item: DeskItem) => boolean;
 }
 
 export interface Runner {
@@ -436,8 +448,12 @@ const STOPPING = new Error('the server stopped during the turn');
 /** Aborts a run whose item left the desk mid-run (cleared, its step deleted, the round off): interrupted, not counted. */
 const ITEM_LEFT = new Error('the item left the desk during the turn');
 
-/** How a run ended, for what the runner does next. */
-type RunEnd = 'ok' | 'failed' | 'fault';
+/**
+ * How a run ended, for what the runner does next. 'failed': claude ran the turn to its end and the item was at fault (an
+ * answer that did not parse, an error result such as error_max_turns). 'unrun': it did not run to its end and the fault
+ * was not the runner's (the item left, the runner stopped, a run killed at its lease's end with no result line, a throw).
+ */
+type RunEnd = 'ok' | 'failed' | 'unrun' | 'fault';
 
 /**
  * The lead's turn runner. A lease is the only way into a turn, so two runners on one database never both run an item.
@@ -462,6 +478,7 @@ export function createRunner(ctx: Ctx, opts: RunnerOptions): Runner {
   const applyThrows = new Map<number, number>();
   const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
   const nowMs = (): number => Date.parse(ctx.now());
+  const holdBack = opts.holdBack ?? ((item: DeskItem) => stoppedBeforeLease(ctx, item) !== 'lease');
 
   /** The actor the apply writes as: the item's project's lead. */
   function actorOf(itemId: number): string {
@@ -557,10 +574,23 @@ export function createRunner(ctx: Ctx, opts: RunnerOptions): Runner {
     }
   }
 
+  /** Whether the item is held back from a lease now. A throw holds it back for this look, logged: never a turn it should not have. */
+  function heldBack(itemId: number): boolean {
+    const item = getDeskItem(db, itemId);
+    if (item === undefined) return true;
+    try {
+      return holdBack(item);
+    } catch (err) {
+      log.error(`Lead runner: could not look at desk item #${itemId} before its lease, so it waits for the next look: ${message(err)}`);
+      return true;
+    }
+  }
+
   function fill(project: Project, lane: DeskLane, max: number): void {
     while (!stopped && inLane(project.id, lane) < max && !backedOff(project.id)) {
       let turn: LeadTurn | undefined;
       for (const itemId of openItemsInLane(db, project.id, lane)) {
+        if (heldBack(itemId)) continue;
         turn = leaseItem(db, itemId, { way: opts.way.name, model: opts.model, leaseMs }, ctx.now());
         if (turn !== undefined) break;
       }
@@ -576,18 +606,29 @@ export function createRunner(ctx: Ctx, opts: RunnerOptions): Runner {
     entry.done = runTurn(turn, project, lane, controller)
       .catch((err: unknown): RunEnd => {
         log.error(`Lead turn ${turn.id}: ${message(err)}`);
-        return 'failed';
+        return 'unrun';
       })
       .then((end) => {
         running.delete(turn.id);
-        // A run that ended without a fault proves claude runs again, but only a back-off that has run out is dropped: one a
-        // sibling run's fault just set stays. 'failed' counts too: claude ran and answered, the item was at fault.
+        // Only a run claude ran to its end proves claude runs again ('ok', or 'failed' with a result line read), and only a
+        // back-off that has run out is dropped: one a sibling run's fault just set stays. An interruption proves nothing.
         const until = backoff.get(project.id);
-        if (end !== 'fault' && until !== undefined && nowMs() >= until) backoff.delete(project.id);
+        if ((end === 'ok' || end === 'failed') && until !== undefined && nowMs() >= until) backoff.delete(project.id);
+        // Claude runs again: the items that went behind on runner faults alone are open again.
+        if (end === 'ok') reopenFaulted(project.id);
         // Its lane is free: the next waiting item may run. After a failure the next tick looks again, so an item that just
         // failed is not leased again at once.
         if (end === 'ok' && !stopped) kick(project.id);
       });
+  }
+
+  function reopenFaulted(projectId: number): void {
+    try {
+      const reopened = reopenFaultedItems(db, projectId, ctx.now());
+      if (reopened.length > 0) log.info(`Lead runner: a turn ended ok, so ${reopened.map((id) => `#${id}`).join(', ')}, behind on runner faults, are open again`);
+    } catch (err) {
+      log.error(`Lead runner: could not reopen the desk items behind on runner faults in project ${projectId}: ${message(err)}`);
+    }
   }
 
   function logFail(turnId: number, itemId: number, state: 'failed' | 'abandoned' | 'interrupted', why: string, moved: boolean): void {
@@ -636,7 +677,7 @@ export function createRunner(ctx: Ctx, opts: RunnerOptions): Runner {
       const input: TurnInput = { turnId: turn.id, slug: project.slug, item, systemPrompt: deskSystemPrompt(ctx, project), userMessage: deskUserMessage(ctx, item), model: opts.model, toolsEnv };
       output = await opts.way.run(input, controller.signal);
     } catch (err) {
-      const partial = err instanceof TurnRunError ? err.partial : { rateLimits: [] };
+      const partial: PartialOutput = err instanceof TurnRunError ? err.partial : { rateLimits: [] };
       writeReadings(turn.id, partial.rateLimits, partial.model ?? opts.model);
       const reason = controller.signal.reason;
       const interrupted = reason === STOPPING || reason === ITEM_LEFT;
@@ -650,7 +691,7 @@ export function createRunner(ctx: Ctx, opts: RunnerOptions): Runner {
         if (!already) log.error(`Lead runner: ${project.slug} backs off for ${FAULT_BACKOFF_MS / 60_000} minutes, then tries one turn: ${message(err)}`);
         return 'fault';
       }
-      return 'failed';
+      return !interrupted && partial.resultRead === true ? 'failed' : 'unrun';
     } finally {
       clearTimeout(timeout);
     }

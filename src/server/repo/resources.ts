@@ -137,31 +137,34 @@ export function listNodeResources(ctx: Ctx, nodeId: number): ResourceMeta[] {
 }
 
 export function addResource(ctx: Ctx, actor: string, input: ResourceInput): Resource {
-  return write(ctx, actor, (record) => {
-    checkPurpose(input.purpose);
-    const node = requireNode(ctx, input.nodeId);
-    const content = input.content ?? null;
-    const path = clean(input.path);
-    const url = clean(input.url);
-    if (content === null && !path && !url) throw badRequest('A resource needs content, a path, or a url');
-    const title = input.title.trim();
-    if (!title) throw badRequest('Resource title is empty');
-    const purpose = input.purpose ?? null;
-    if (purpose === 'state') claimStateNote(ctx, record, node.projectId, node.id, node.parentId, null);
-    const page = isPage({ purpose });
-    if (page) {
-      checkPageRules(ctx, node.projectId, { kind: input.kind, content, path });
-      if (!input.confirmedSha) throw badRequest('A page is registered with its repo HEAD', 'POST /api/resources inspects the file first.');
-    }
-    const ts = ctx.now();
-    const confirmedSha = page ? input.confirmedSha! : null;
-    const info = ctx.db
-      .prepare('INSERT INTO resources (project_id, node_id, kind, title, content, path, url, session_id, created_at, updated_at, purpose, confirmed_sha, confirmed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
-      .run(node.projectId, node.id, input.kind, title, content, path, url, input.sessionId ?? null, ts, ts, purpose, confirmedSha, page ? ts : null);
-    const resource = requireResource(ctx, Number(info.lastInsertRowid));
-    record({ projectId: node.projectId, type: 'resource.created', entity: 'resource', entityId: resource.id, data: { nodeId: node.id, title, kind: input.kind } });
-    return resource;
-  });
+  return write(ctx, actor, (record) => addResourceInWrite(ctx, record, input));
+}
+
+/** addResource inside a write the caller holds (the lead's apply), recording resource.created with that write's `record`. */
+export function addResourceInWrite(ctx: Ctx, record: RecordEvent, input: ResourceInput): Resource {
+  checkPurpose(input.purpose);
+  const node = requireNode(ctx, input.nodeId);
+  const content = input.content ?? null;
+  const path = clean(input.path);
+  const url = clean(input.url);
+  if (content === null && !path && !url) throw badRequest('A resource needs content, a path, or a url');
+  const title = input.title.trim();
+  if (!title) throw badRequest('Resource title is empty');
+  const purpose = input.purpose ?? null;
+  if (purpose === 'state') claimStateNote(ctx, record, node.projectId, node.id, node.parentId, null);
+  const page = isPage({ purpose });
+  if (page) {
+    checkPageRules(ctx, node.projectId, { kind: input.kind, content, path });
+    if (!input.confirmedSha) throw badRequest('A page is registered with its repo HEAD', 'POST /api/resources inspects the file first.');
+  }
+  const ts = ctx.now();
+  const confirmedSha = page ? input.confirmedSha! : null;
+  const info = ctx.db
+    .prepare('INSERT INTO resources (project_id, node_id, kind, title, content, path, url, session_id, created_at, updated_at, purpose, confirmed_sha, confirmed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
+    .run(node.projectId, node.id, input.kind, title, content, path, url, input.sessionId ?? null, ts, ts, purpose, confirmedSha, page ? ts : null);
+  const resource = requireResource(ctx, Number(info.lastInsertRowid));
+  record({ projectId: node.projectId, type: 'resource.created', entity: 'resource', entityId: resource.id, data: { nodeId: node.id, title, kind: input.kind } });
+  return resource;
 }
 
 export function updateResource(ctx: Ctx, actor: string, id: number, patch: ResourcePatch): Resource {

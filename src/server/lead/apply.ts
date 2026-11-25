@@ -14,9 +14,13 @@ import { getSend, intendSend, moveSend, setSendBody } from '../repo/leadSends';
 import { getProjectById } from '../repo/projects';
 import { permissionLine, stuckRequestOf } from './hold';
 import { parseStartBody, recordStartInWrite, sendMarker } from './sends';
+import { applyStopped, type StoppedDeps } from './stopped';
 
-/** What the apply reads outside the database: whether the lead's `threads` read listed a thread (the sender remembers it). */
-export interface ApplyDeps {
+/**
+ * What the apply reads outside the database: whether the lead's `threads` read listed a thread (the sender remembers it),
+ * and for a restart the reserve (stopped.ts's default unless given).
+ */
+export interface ApplyDeps extends StoppedDeps {
   listed(project: string, threadId: string): boolean;
 }
 
@@ -45,6 +49,25 @@ export function applyVerdict(ctx: Ctx, turn: LeadTurn, item: DeskItem, record: R
   const verdict = turn.verdict ?? '';
   if (item.kind === 'stuck') return applyStuck(ctx, turn, item, name);
   if (item.kind === 'unknown_send') return applyUnknownSend(ctx, turn, item, record, deps);
+  if (item.kind === 'stopped') return applyStopped(ctx, turn, item, record, name, deps);
+  if (item.kind === 'promise_due') {
+    // A promise of the lead's past its time: his answer is noted for the morning list, and the item is done.
+    const askId = /^\d+$/.test(item.ref) ? Number(item.ref) : undefined;
+    const id = insertLeadEvent(
+      ctx.db,
+      {
+        projectId: project.id,
+        lead: name,
+        instructions: LEAD_INSTRUCTIONS_VERSION,
+        kind: 'promise_due',
+        ...(item.nodeId === null ? {} : { nodeId: item.nodeId }),
+        ...(askId === undefined ? {} : { askId }),
+        text: `${verdict}: ${turn.answer ?? ''}`.trim(),
+      },
+      ctx.now(),
+    );
+    return { itemState: 'done', outcome: `${verdict} noted (e${id})` };
+  }
   if (item.kind !== 'question' && item.kind !== 'permission') return { itemState: 'done', outcome: `${verdict} (no action in this task)` };
   const ask = askOf(ctx, item);
   if (ask === undefined || ask.clearedAt !== null) return { itemState: 'done', outcome: 'ask cleared' };

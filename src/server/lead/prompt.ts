@@ -5,6 +5,7 @@ import type { DeskItem } from '../repo/desk';
 import { getSend } from '../repo/leadSends';
 import { stuckRequestOf } from './hold';
 import { markedTitle, parseStartBody, sendMarker } from './sends';
+import { stoppedTurnLines } from './stopped';
 
 /**
  * The project's standing rulings, as the desk turn's last section reads them. '' until task 10 of lead stage 1 (#743)
@@ -116,6 +117,7 @@ export function deskUserMessage(ctx: Ctx, item: DeskItem): string {
     const at = item.ref.indexOf('@');
     sessionId = at > 0 ? item.ref.slice(0, at) : item.ref;
     if (at > 0) raisedAt = item.ref.slice(at + 1);
+    lines.push(...stoppedTurnLines(ctx, item));
   } else if (stuck !== undefined) {
     lines.push('It waits on a permission prompt to use a tool, and runs it or not by your verdict.', `The tool: ${stuck.toolName}`, `Its input: ${stuck.input}`);
     lines.push('Answer DECIDE with ANSWER starting ALLOW: or DENY: and your reason, or AIDEN.');

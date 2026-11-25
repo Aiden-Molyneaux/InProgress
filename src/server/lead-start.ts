@@ -42,6 +42,19 @@ export function defaultStart(o: T3Options = {}, env: Record<string, string | und
     t3Start(project, message, { ...opts, provider: named(env.INPROGRESS_LEAD_PROVIDER, LEAD_START_PROVIDER), model: named(env.INPROGRESS_LEAD_MODEL, LEAD_START_MODEL) }, o);
 }
 
+/** The provider and model a start names: INPROGRESS_LEAD_PROVIDER and INPROGRESS_LEAD_MODEL when set and not blank, else the defaults. */
+export function startProviderModel(env: Record<string, string | undefined> = process.env): { provider: string; model: string } {
+  return { provider: named(env.INPROGRESS_LEAD_PROVIDER, LEAD_START_PROVIDER), model: named(env.INPROGRESS_LEAD_MODEL, LEAD_START_MODEL) };
+}
+
+/** The project's starts on the lead's own judgment (no words of Aiden's, not cleared) in the 24 hours before `nowMs`: what LEAD_STARTS_PER_DAY limits. */
+export function ownStartsToday(ctx: Ctx, projectId: number, nowMs: number): number {
+  return ctx.db
+    .prepare("SELECT COUNT(*) FROM lead_sends WHERE project_id = ? AND kind = 'start' AND state <> 'cleared' AND json_extract(body, '$.aidenWords') IS NULL AND created_at >= ?")
+    .pluck()
+    .get(projectId, new Date(nowMs - DAY_MS).toISOString()) as number;
+}
+
 const MINUTE_MS = 60 * 1000;
 /** How long a started thread is given to claim its step: a second start of the step, and the in-flight count, wait that long. */
 const CLAIM_WINDOW_MS = 10 * MINUTE_MS;
@@ -121,10 +134,7 @@ export async function leadStart(
     if (!leadSwitches(ctx, project.id).starts.on) throw conflict("Starts is off for this project: starting a thread needs Aiden's words. Pass them with --aiden.");
     const open = aidenOpenAsks(ctx, project.id).project;
     if (open >= AIDEN_OPEN_LIMIT) throw conflict(`Aiden has ${open} open asks in this project, and the limit is ${AIDEN_OPEN_LIMIT}. Bring those to him first.`);
-    const own = ctx.db
-      .prepare("SELECT COUNT(*) FROM lead_sends WHERE project_id = ? AND kind = 'start' AND state <> 'cleared' AND json_extract(body, '$.aidenWords') IS NULL AND created_at >= ?")
-      .pluck()
-      .get(project.id, new Date(nowMs - DAY_MS).toISOString()) as number;
+    const own = ownStartsToday(ctx, project.id, nowMs);
     if (own >= LEAD_STARTS_PER_DAY) {
       throw conflict(`You have started ${own} threads on your own judgment in the last 24 hours, and the limit is ${LEAD_STARTS_PER_DAY}. Ask Aiden.`);
     }
@@ -152,8 +162,7 @@ export async function leadStart(
     const body: StartBody = {
       message,
       title: startTitle(node.id, node.title),
-      provider: named(process.env.INPROGRESS_LEAD_PROVIDER, LEAD_START_PROVIDER),
-      model: named(process.env.INPROGRESS_LEAD_MODEL, LEAD_START_MODEL),
+      ...startProviderModel(),
       nodeId: node.id,
       ...(input.aidenWords === undefined ? {} : { aidenWords: input.aidenWords }),
     };

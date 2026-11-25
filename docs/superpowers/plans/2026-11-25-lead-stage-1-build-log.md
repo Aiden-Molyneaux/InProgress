@@ -361,3 +361,15 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   owner-calls: a send records that it was tried just before the action, so a send never tried simply goes after a
   restart; a lost message is found by its text and time, keeping scene 1's text frozen; NOT FOUND on a message sends it
   again once; the start guards read the starts made before this build; the thread read is scoped to the project.
+
+## Task 9 and the last runner fixes
+
+- By a fresh Sev (Opus). G1 to G3 done (the first good turn after a fault stretch reopens what the faults put behind;
+  a back-off is dropped only after a run that really ran). Task 9: asking a stopped session is plain code (one message,
+  then held 30 minutes); past that a turn answers RESTART, PARK or DONE; a session that moved on closes its item. 2753
+  unit tests green. Sev's calls, accepted: an asked item is known by its `ask-stopped:` send; a restart starts in the
+  project's folder on the session's worktree and branch.
+- Calls on his open questions: a restart is the lead's own start, so it needs the Starts switch on and passes every
+  refusal `lead start` has (in flight, a parked or done step, a live session on the step) besides the two restarts,
+  the day's limit and the reserve; refused, it becomes PARK with the reason. Queued with task 8's fixes. The thread way
+  (task 12) must mark a run that read an answer.

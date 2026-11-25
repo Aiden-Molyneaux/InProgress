@@ -492,6 +492,104 @@ describe('the turn runner', () => {
     // Two reflex turns at once, not one at a time.
     expect(calls).toHaveLength(4);
   });
+
+  it('keeps an expired back-off when the one try is interrupted because its item left, so still one try at a time (G2)', async () => {
+    const w = world();
+    const a = w.add();
+    const calls: TurnInput[] = [];
+    const way: TurnWay = {
+      name: 'headless',
+      run: (input, signal) => {
+        calls.push(input);
+        if (calls.length === 1) return Promise.reject(new TurnRunError('the turn ended with error_during_execution: Not logged in', { rateLimits: [] }, true));
+        return new Promise<TurnOutput>((_r, reject) => signal.addEventListener('abort', () => reject(signal.reason as Error), { once: true }));
+      },
+    };
+    const { runner } = runnerOn(w.ctx, way);
+    runner.kick(w.project.id);
+    await vi.waitFor(() => expect(turnsOf(w.ctx, a.id)[0]?.state).toBe('interrupted'));
+    w.tick(FAULT_BACKOFF_MS + 1000);
+    runner.tick();
+    expect(calls).toHaveLength(2);
+    // The one try's item leaves the desk: its run is interrupted, which proves nothing about claude.
+    w.ctx.db.prepare("UPDATE desk_items SET state = 'done', outcome = 'cleared by window' WHERE id = ?").run(a.id);
+    runner.tick();
+    await vi.waitFor(() => expect(turnsOf(w.ctx, a.id)[1]?.state).toBe('interrupted'));
+    await new Promise((r) => setTimeout(r, 20));
+    w.add();
+    w.add();
+    runner.tick();
+    // Still one try at a time: one lease, not two.
+    expect(calls).toHaveLength(3);
+  });
+
+  it('a run that fails with an error result (a result line read) drops an expired back-off; one killed with none does not (G2)', async () => {
+    for (const resultRead of [true, false]) {
+      const w = world();
+      const a = w.add();
+      const calls: TurnInput[] = [];
+      const way: TurnWay = {
+        name: 'headless',
+        run: (input, signal) => {
+          calls.push(input);
+          if (calls.length === 1) return Promise.reject(new TurnRunError('the turn ended with error_during_execution: Not logged in', { rateLimits: [] }, true));
+          if (calls.length === 2) return Promise.reject(new TurnRunError('the turn ended with error_max_turns: (no result text)', { rateLimits: [], ...(resultRead ? { resultRead } : {}) }, false));
+          return new Promise<TurnOutput>((_r, reject) => signal.addEventListener('abort', () => reject(signal.reason as Error), { once: true }));
+        },
+      };
+      const { runner } = runnerOn(w.ctx, way);
+      runner.kick(w.project.id);
+      await vi.waitFor(() => expect(turnsOf(w.ctx, a.id)[0]?.state).toBe('interrupted'));
+      w.tick(FAULT_BACKOFF_MS + 1000);
+      runner.tick();
+      await vi.waitFor(() => expect(turnsOf(w.ctx, a.id)[1]?.state).toBe('failed'));
+      await new Promise((r) => setTimeout(r, 20));
+      w.add();
+      w.add();
+      runner.tick();
+      expect(calls).toHaveLength(resultRead ? 4 : 3);
+      await runner.stop();
+    }
+  });
+
+  it('reopens the items a usage-limit stretch put behind at the first ok turn after it; an item behind on two real failures stays behind (G1)', async () => {
+    const w = world();
+    let mode: 'fail' | 'fault' | 'ok' = 'fail';
+    const way = quickWay(() => {
+      if (mode === 'fault') throw new TurnRunError('the turn ended with error_during_execution: Usage limit reached', { rateLimits: [] }, true);
+      return output(mode === 'fail' ? { text: 'nonsense' } : {});
+    });
+    const { runner, lines } = runnerOn(w.ctx, way);
+    // Two real failures: behind for good.
+    const failing = w.add();
+    runner.kick(w.project.id);
+    await vi.waitFor(() => expect(turnsOf(w.ctx, failing.id)[0]?.state).toBe('failed'));
+    await new Promise((r) => setImmediate(r));
+    runner.tick();
+    await vi.waitFor(() => expect(getDeskItem(w.ctx.db, failing.id)!.state).toBe('behind'));
+    // The usage-limit stretch: three faults in a row put the next item behind.
+    mode = 'fault';
+    const limited = w.add();
+    runner.kick(w.project.id);
+    for (let i = 0; i < 2; i++) {
+      await vi.waitFor(() => expect(turnsOf(w.ctx, limited.id)[i]?.state).toBe('interrupted'));
+      await new Promise((r) => setImmediate(r));
+      w.tick(FAULT_BACKOFF_MS + 1000);
+      runner.tick();
+    }
+    await vi.waitFor(() => expect(getDeskItem(w.ctx.db, limited.id)!.state).toBe('behind'));
+    // The limit lifts: the next turn ends ok, and the item behind on faults alone is open again and runs.
+    mode = 'ok';
+    await new Promise((r) => setImmediate(r));
+    const fresh = w.add();
+    w.tick(FAULT_BACKOFF_MS + 1000);
+    runner.tick();
+    await vi.waitFor(() => expect(getDeskItem(w.ctx.db, fresh.id)!.state).toBe('done'));
+    await vi.waitFor(() => expect(getDeskItem(w.ctx.db, limited.id)!.state).toBe('done'));
+    expect(turnsOf(w.ctx, limited.id).map((t) => t.state)).toEqual(['interrupted', 'interrupted', 'interrupted', 'applied']);
+    expect(lines.some((l) => l.includes(`#${limited.id}, behind on runner faults, are open again`))).toBe(true);
+    expect(getDeskItem(w.ctx.db, failing.id)!.state).toBe('behind');
+  });
 });
 
 describe('leaseItem', () => {

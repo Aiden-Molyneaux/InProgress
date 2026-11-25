@@ -283,6 +283,28 @@ function releaseItem(db: DB, turnId: number, now: string): void {
   moveDeskItem(db, itemId, ['leased'], failures >= TURN_FAILURES_BEHIND || faults ? 'behind' : 'open', { now });
 }
 
+/**
+ * In one immediate transaction: the project's behind items whose latest turn is a runner fault (interrupted, the why
+ * opening RUNNER_FAULT_WHY) go back to open, answering their ids. The runner calls it when a turn of the project ends ok:
+ * claude runs again, so a stretch it could not run (a usage limit, a sign-out) does not keep those items behind for good.
+ * An item behind on its own failed or abandoned turns has a latest turn that is not a fault, and stays behind.
+ */
+export function reopenFaultedItems(db: DB, projectId: number, now: string): number[] {
+  return db.transaction((): number[] => {
+    const ids = db
+      .prepare(
+        `SELECT d.id FROM desk_items d
+          WHERE d.project_id = ? AND d.state = 'behind'
+            AND EXISTS (SELECT 1 FROM lead_turns t WHERE t.id = (SELECT MAX(id) FROM lead_turns WHERE item_id = d.id)
+                          AND t.state = 'interrupted' AND substr(COALESCE(t.why, ''), 1, length(?)) = ?)
+          ORDER BY d.id`,
+      )
+      .pluck()
+      .all(projectId, RUNNER_FAULT_WHY, RUNNER_FAULT_WHY) as number[];
+    return ids.filter((id) => moveDeskItem(db, id, ['behind'], 'open', { now }));
+  }).immediate();
+}
+
 /** Turns with an answer saved and not applied, oldest first: recovery applies them without running again. */
 export function answeredTurns(db: DB): { id: number; itemId: number }[] {
   return db.prepare("SELECT id, item_id AS itemId FROM lead_turns WHERE state = 'answered' ORDER BY id").all() as { id: number; itemId: number }[];
