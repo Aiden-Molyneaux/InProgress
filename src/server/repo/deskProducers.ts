@@ -44,18 +44,21 @@ export function produceDeskItem(db: DB, input: AddDeskItemInput, now: string): {
   return result;
 }
 
-/** Whether a desk item of this kind and ref exists in any state, done included. Served by desk_items_kind_ref. */
-export const itemEverMade = (db: DB, kind: DeskItemKind, ref: string): boolean =>
-  db.prepare('SELECT 1 FROM desk_items WHERE kind = ? AND ref = ?').get(kind, ref) !== undefined;
+/** The read itemEverMade runs: served by desk_items_kind_ref (a test plans this very text). */
+export const ITEM_EVER_MADE_SQL = 'SELECT 1 FROM desk_items WHERE kind = ? AND ref = ?';
+
+/** Whether a desk item of this kind and ref exists in any state, done included. */
+export const itemEverMade = (db: DB, kind: DeskItemKind, ref: string): boolean => db.prepare(ITEM_EVER_MADE_SQL).get(kind, ref) !== undefined;
 
 /**
  * Inside the write that raised `ask`, or raised it again after its session's prompt (bumped): a session's question or
  * permission ask of Aiden's, raised since the round was first switched on and while it is on, is queued on the desk, due
- * DESK_ASK_DUE_MS after it was raised. The caller does not call it for a plain join, so a join never queues an ask
+ * DESK_ASK_DUE_MS after it was raised. A project that is not active makes none, as the minute watch skips it. The caller does not call it for a plain join, so a join never queues an ask
  * whose item is done.
  */
 export function deskOnAskRaised(db: DB, ask: Ask, now: string): void {
   if (ask.owner !== 'aiden' || (ask.kind !== 'question' && ask.kind !== 'permission') || ask.sessionId === null) return;
+  if (db.prepare('SELECT status FROM projects WHERE id = ?').pluck().get(ask.projectId) !== 'active') return;
   const bound = roundBound(db, ask.projectId);
   if (bound === null || ask.raisedAt < bound) return;
   produceDeskItem(db, { projectId: ask.projectId, kind: ask.kind, ref: String(ask.id), nodeId: ask.nodeId, dueAt: plusMs(ask.raisedAt, DESK_ASK_DUE_MS) }, now);
@@ -80,10 +83,12 @@ export function deskOnAskCleared(db: DB, askId: number, by: string, now: string)
 
 /**
  * Inside the write that deletes these steps, before the delete: their asks go by cascade, with no clear, so every desk
- * item about one of them that is not done moves to done, outcome `step deleted`.
+ * item about one of them that is not done moves to done, outcome `step deleted`. So do the stopped items on the steps
+ * themselves.
  */
 export function deskOnStepsDeleted(db: DB, nodeIds: readonly number[], now: string): void {
   if (nodeIds.length === 0) return;
   const askIds = db.prepare(`SELECT id FROM asks WHERE node_id IN (${nodeIds.map(() => '?').join(', ')})`).pluck().all(...nodeIds) as number[];
   closeAskItems(db, askIds, 'step deleted', now);
+  db.prepare(`UPDATE desk_items SET state = 'done', done_at = ?, outcome = 'step deleted' WHERE state <> 'done' AND kind = 'stopped' AND node_id IN (${nodeIds.map(() => '?').join(', ')})`).run(now, ...nodeIds);
 }

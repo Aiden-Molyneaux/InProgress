@@ -9,7 +9,8 @@ import { clearAsk, raiseAskDetailed } from '../../src/server/repo/asks';
 import { getDeskItem, moveDeskItem, type DeskItem } from '../../src/server/repo/desk';
 import { addNodes, deleteNode, updateNode } from '../../src/server/repo/nodes';
 import { addBinding, createProject, setProjectLead, updateProject } from '../../src/server/repo/projects';
-import { roundFirstOn, roundSince, switchLine } from '../../src/server/repo/switches';
+import { ITEM_EVER_MADE_SQL } from '../../src/server/repo/deskProducers';
+import { ROUND_FIRST_ON_SQL, SWITCH_LINE_SQL, roundFirstOn, roundSince, switchLine } from '../../src/server/repo/switches';
 import { claimStep, handleHookEvent } from '../../src/server/session-flow';
 
 const V = LEAD_INSTRUCTIONS_VERSION;
@@ -84,10 +85,10 @@ describe('the round switch', () => {
   it('reads a switch through lead_events_switch, and an item ever made through desk_items_kind_ref', () => {
     const s = setup();
     const plan = (sql: string, ...args: unknown[]) => String(s.ctx.db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...args).map((r) => (r as { detail: string }).detail));
-    expect(plan("SELECT kind, at, aiden_words FROM lead_events WHERE project_id = ? AND kind IN ('allow', 'disallow') AND text = ? ORDER BY at DESC, id DESC LIMIT 1", 1, 'round')).toContain('lead_events_switch');
-    expect(plan("SELECT at FROM lead_events WHERE project_id = ? AND kind IN ('allow', 'disallow') AND text = 'round' AND kind = 'allow' ORDER BY at, id LIMIT 1", 1)).toContain('lead_events_switch');
-    expect(plan('SELECT 1 FROM desk_items WHERE kind = ? AND ref = ?', 'stopped', 's1@x')).toContain('desk_items_kind_ref');
-    // The plans above are of the queries switchLine and roundFirstOn run: they still answer.
+    expect(plan(SWITCH_LINE_SQL, 1, 'round')).toContain('lead_events_switch');
+    expect(plan(ROUND_FIRST_ON_SQL, 1)).toContain('lead_events_switch');
+    expect(plan(ITEM_EVER_MADE_SQL, 'stopped', 's1@x')).toContain('desk_items_kind_ref');
+    // The plans above are of the very strings switchLine, roundFirstOn and itemEverMade run: they still answer.
     s.roundOn();
     expect(switchLine(s.ctx.db, s.project.id, 'round')).toEqual({ kind: 'allow', at: s.now(), aidenWords: 'run the round' });
   });
@@ -240,6 +241,17 @@ describe('clearing the ask closes its item in the same write', () => {
   });
 });
 
+describe('an ask on a project that is not active', () => {
+  it('makes no item', () => {
+    const s = setup();
+    s.roundOn();
+    s.hook('s1', { event: 'start', source: 'startup', cwd: BOUND });
+    updateProject(s.ctx, 'window', s.project.slug, { status: 'archived' });
+    s.ask('s1');
+    expect(s.items()).toEqual([]);
+  });
+});
+
 describe('deleting a step closes the items of its asks, which go by cascade', () => {
   it('for the step and the steps under it, outcome step deleted, and leaves other steps alone', () => {
     const s = setup();
@@ -257,6 +269,27 @@ describe('deleting a step closes the items of its asks, which go by cascade', ()
       [String(onStep.id), 'done', 'step deleted', s.now()],
       [String(onChild.id), 'done', 'step deleted', s.now()],
       [String(elsewhere.id), 'open', null, null],
+    ]);
+  });
+});
+
+describe('deleting a step closes the stopped items on it', () => {
+  it('on the step and the steps under it, outcome step deleted, and leaves other steps alone', () => {
+    const s = setup();
+    s.roundOn();
+    s.tick(MIN);
+    const [child] = addNodes(s.ctx, 'test', { parentId: s.step.id, nodes: [{ title: 'Tab bar' }] });
+    s.stopOn('s1', s.step.id);
+    s.stopOn('s2', child.id);
+    s.stopOn('s3', s.other.id);
+    s.tick(DESK_STOPPED_MS);
+    expect(watchDesk(s.ctx).stopped).toBe(3);
+    s.tick(MIN);
+    deleteNode(s.ctx, 'window', s.step.id, true);
+    expect(s.items().map((i) => [i.nodeId, i.state, i.outcome])).toEqual([
+      [s.step.id, 'done', 'step deleted'],
+      [child.id, 'done', 'step deleted'],
+      [s.other.id, 'open', null],
     ]);
   });
 });

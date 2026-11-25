@@ -79,10 +79,15 @@ function git(repo: string, args: string[]): Promise<{ code: number; stdout: stri
  * Whether this exact branch name is a local branch. Loose refs are files, and on NTFS `Feature/X` finds `feature/x`, so
  * git's own lookup is not enough: the ref git lists must be spelled exactly as asked.
  */
-export async function exactBranch(repo: string, name: string): Promise<boolean> {
+export async function exactBranch(repo: string, name: string): Promise<boolean | string> {
   const r = await git(repo, ['for-each-ref', '--format=%(refname)', `refs/heads/${name}`]);
-  return r.code === 0 && r.stdout.split('\n').some((l) => l.trim() === `refs/heads/${name}`);
+  // for-each-ref with no match exits 0 and prints nothing, so a non-zero exit is a real failure (a repo that is gone, an unsafe owner).
+  if (r.code !== 0) return couldNotTell(r);
+  return r.stdout.split('\n').some((l) => l.trim() === `refs/heads/${name}`);
 }
+
+/** What a tool answers when git failed in a way that says nothing about the branch. */
+const couldNotTell = (r: { code: number; stderr: string }): string => `Could not tell: git said ${r.stderr.trim() || `exit ${r.code}`}`;
 
 /** The lead's read-only tools: eight reads, no write of any kind, nothing that starts InProgress. */
 export function createLeadToolsServer(o: LeadToolsOptions): McpServer {
@@ -121,19 +126,21 @@ export function createLeadToolsServer(o: LeadToolsOptions): McpServer {
   const branchArg = { branch: z.string().describe('A local branch name, e.g. feature/tabs') };
   tool('branch_merged', 'Whether a branch is merged into main.', branchArg, (a: { branch: string }) =>
     onBranch(a.branch, async (repo) => {
-      if (!(await exactBranch(repo, a.branch))) return `No branch named ${a.branch}`;
+      const there = await exactBranch(repo, a.branch);
+      if (there !== true) return there === false ? `No branch named ${a.branch}` : there;
       const r = await git(repo, ['merge-base', '--is-ancestor', `refs/heads/${a.branch}`, 'refs/heads/main']);
       if (r.code === 0) return `${a.branch} is merged into main`;
       if (r.code === 1) return `${a.branch} is not merged into main`;
-      return `Could not tell: git said ${r.stderr.trim() || `exit ${r.code}`}`;
+      return couldNotTell(r);
     }));
   tool('change_size', "How big a branch's change against main is: the shortstat and the files it touches (at most 200 listed).", branchArg, (a: { branch: string }) =>
     onBranch(a.branch, async (repo) => {
-      if (!(await exactBranch(repo, a.branch))) return `No branch named ${a.branch}`;
+      const there = await exactBranch(repo, a.branch);
+      if (there !== true) return there === false ? `No branch named ${a.branch}` : there;
       const range = `refs/heads/main...refs/heads/${a.branch}`;
       const [stat, names] = await Promise.all([git(repo, ['diff', '--shortstat', range]), git(repo, ['diff', '--name-only', '-z', range])]);
       const bad = [stat, names].find((r) => r.code !== 0);
-      if (bad) return `Could not tell: git said ${bad.stderr.trim() || `exit ${bad.code}`}`;
+      if (bad) return couldNotTell(bad);
       const files = names.stdout.split('\0').filter(Boolean);
       const lines = [stat.stdout.trim() || `${a.branch} changes nothing against main`, ...files.slice(0, FILES_MAX)];
       if (files.length > FILES_MAX) lines.push(`... and ${files.length - FILES_MAX} more files`);
@@ -141,7 +148,8 @@ export function createLeadToolsServer(o: LeadToolsOptions): McpServer {
     }));
   tool('branch_exists', 'Whether a local branch of that name exists.', branchArg, (a: { branch: string }) =>
     onBranch(a.branch, async (repo) => {
-      return `${a.branch} ${(await exactBranch(repo, a.branch)) ? 'exists' : 'does not exist'}`;
+      const there = await exactBranch(repo, a.branch);
+      return typeof there === 'string' ? there : `${a.branch} ${there ? 'exists' : 'does not exist'}`;
     }));
 
   return server;

@@ -223,6 +223,25 @@ describe('the git tools', () => {
     expect((await call(withRepo, 'change_size', { branch: 'Feature/Open' })).text).toBe('No branch named Feature/Open');
   });
 
+  it('say "Could not tell" when git itself fails, never that the branch is missing', async () => {
+    const empty = mkdtempSync(join(tmpdir(), 'ip-lead-tools-empty-'));
+    temps.push(empty);
+    const bare = await connect({ baseUrl: base, repo: empty });
+    for (const tool of ['branch_exists', 'branch_merged', 'change_size']) {
+      expect((await call(bare, tool, { branch: 'feature/open' })).text).toMatch(/^Could not tell: git said /);
+    }
+  });
+
+  it('treat a case change in the folder part of a name as another name, where the file system folds case', async () => {
+    const probe = join(repo, 'CaseProbe2');
+    writeFileSync(probe, 'x');
+    const folds = existsSync(join(repo, 'caseprobe2'));
+    rmSync(probe);
+    if (!folds) return; // A case-sensitive file system: nothing to show.
+    expect((await call(withRepo, 'branch_exists', { branch: 'FEATURE/open' })).text).toBe('FEATURE/open does not exist');
+    expect((await call(withRepo, 'branch_merged', { branch: 'FEATURE/open' })).text).toBe('No branch named FEATURE/open');
+  });
+
   it('say whether a branch exists', async () => {
     expect((await call(withRepo, 'branch_exists', { branch: 'feature/open' })).text).toBe('feature/open exists');
     expect((await call(withRepo, 'branch_exists', { branch: 'feature/nope' })).text).toBe('feature/nope does not exist');
