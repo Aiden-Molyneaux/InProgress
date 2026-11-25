@@ -68,7 +68,7 @@ describe('requireLead', () => {
     setLead('Progresser');
     expect(requireLead(ctx, project.slug, 'Progresser', LEAD_INSTRUCTIONS_VERSION - 1, false).lead).toBe('Progresser');
     expect(() => requireLead(ctx, project.slug, 'Progresser', LEAD_INSTRUCTIONS_VERSION - 1, true)).toThrow(outOfDate(LEAD_INSTRUCTIONS_VERSION - 1, project.slug, 'Progresser'));
-    expect(outOfDate(1, 'ingame', 'Progresser')).toBe('Your rules are version 1; version 5 is current. Run "lead rules ingame --as Progresser" again and follow what it prints.');
+    expect(outOfDate(1, 'ingame', 'Progresser')).toBe('Your rules are version 1; version 6 is current. Run "lead rules ingame --as Progresser" again and follow what it prints.');
   });
 });
 
@@ -366,7 +366,7 @@ describe('the brief route', () => {
     const ok = await app.inject({ url: `/api/lead/${project.slug}/brief?as=progresser&instructions=${LEAD_INSTRUCTIONS_VERSION}` });
     expect(ok.statusCode).toBe(200);
     expect(ok.json().brief.project).toEqual({ slug: 'ingame', name: 'InGame', lead: 'Progresser' });
-    expect(ok.json().text.split('\n')[0]).toMatch(/^Lead brief · InGame · .* · instructions v5 \(yours: v5\)$/);
+    expect(ok.json().text.split('\n')[0]).toMatch(/^Lead brief · InGame · .* · instructions v6 \(yours: v6\)$/);
   });
 
   it('answers the window without `as`: no lead check, yours null, and never marks, whatever the query says', async () => {
@@ -538,16 +538,16 @@ describe('the window route that sets a lead', () => {
 describe('the rules route', () => {
   const CLI = 'node C:/x/dist/cli/main.js';
 
-  it('answers version 5 and the text for the stored lead name, whatever case `as` is given in', async () => {
+  it('answers version 6 and the text for the stored lead name, whatever case `as` is given in', async () => {
     const { app, project, setLead } = setup();
     setLead('Progresser');
     for (const as of ['Progresser', 'progresser', 'PROGRESSER']) {
       const res = await app.inject({ url: `/api/lead/${project.slug}/rules?as=${as}` });
       expect(res.statusCode).toBe(200);
       const body = res.json() as { version: number; text: string; bootstrap: string };
-      expect(body.version).toBe(5);
-      expect(body.text.split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 5.');
-      expect(body.text).toContain('lead brief ingame --as Progresser --instructions 5');
+      expect(body.version).toBe(6);
+      expect(body.text.split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 6.');
+      expect(body.text).toContain('lead brief ingame --as Progresser --instructions 6');
       expect(body.bootstrap.split('\n')).toHaveLength(3);
       expect(body.bootstrap).toContain('lead rules ingame --as Progresser');
     }
@@ -593,11 +593,24 @@ describe('a lead on older rules', () => {
       payload: { as: 'Progresser', instructions: 1, askId: 1 },
     });
     expect(res.statusCode).toBe(409);
-    expect(res.json().error).toBe('Your rules are version 1; version 5 is current. Run "lead rules ingame --as Progresser" again and follow what it prints.');
+    expect(res.json().error).toBe('Your rules are version 1; version 6 is current. Run "lead rules ingame --as Progresser" again and follow what it prints.');
     const read = await app.inject({ url: `/api/lead/${project.slug}/brief?as=Progresser&instructions=1` });
     expect(read.statusCode).toBe(200);
     expect(read.json().text.split('\n')[1]).toBe('Your rules are out of date: you can read, you cannot change anything. Run the rules command again.');
     expect(brief().instructions.yours).toBe(1);
+  });
+
+  it('still marks its look at the brief: brief --mark is not refused', async () => {
+    const { app, project, setLead } = setup();
+    setLead('Progresser');
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/lead/${project.slug}/seen`,
+      headers: { authorization: 'Bearer t' },
+      payload: { as: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION - 1 },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(typeof res.json().seenAt).toBe('string');
   });
 });
 
