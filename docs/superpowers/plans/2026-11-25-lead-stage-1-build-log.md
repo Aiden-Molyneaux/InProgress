@@ -339,3 +339,18 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   state (T3 lists no creation time); a Voice line cannot be looked up, so it goes unknown after two looks.
 - Calls on his open questions: a sender-owned send that T3 refuses as an argument (a bad stored target) is cleared
   with one log line, not retried every minute; the ten newest threads are enough for the minute of a lost start.
+
+## Tasks 10 to 15: three briefs
+
+- Written in Sigmund's scratchpad as taskA-brief.md (tasks 10 and 13: the morning list, undo, usage and the reserve),
+  taskB-brief.md (tasks 11 and 15: the Voice, rules version 7, the guard on Aiden's go-ahead, pictures) and
+  taskC-brief.md (tasks 12 and 14: the lead's thread, the round in the window, "The lead is behind"). They run after
+  task 9, one builder at a time where files are shared (apply.ts, sends.ts, runner.ts).
+- Calls in them: quiet hours, the Voice's daily cap, the lead thread and the turn way are 'setting' rows written by
+  `lead set`; the Voice's webhook address and key live in `<home>/lead/voice.json`, read only by the server, given by
+  secret card at landing; voice lines are gathered three minutes and sent as one POST, each line with its send id; a
+  review's "ship it" records a yes for merge, deploy and push by the change's patch id read when it is carried; a
+  picture is copied into the project's documents folder where the server stores a resource (all paths get it);
+  T3 Code learns the lead's folder as a project once, at landing (`t3 project add`), on Aiden's word; the lead's
+  folder is the lead's: no session registered, no briefing, the hold hooks silent there; Aiden's late answer in the
+  window after the lead decided becomes an undo plus his answer.
