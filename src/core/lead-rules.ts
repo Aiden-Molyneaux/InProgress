@@ -27,7 +27,7 @@ export function leadRules(v: LeadRulesFor): string {
   // InProgress keeps a step's documents; the project's own folders are outside it.
   const documents = [
     'You may also read the file of a document of this project: the path lead step prints after "file". Never one under C:\\work.',
-    'When Aiden asks to see a picture or a document, find it with lead step, copy that file to your computer, and send it to him in the chat (a picture as an image). Your file tools copy only from inside his user folder on the laptop: if a copy is refused, rule 7 applies.',
+    'When Aiden asks to see a picture, find its document with lead step, copy that file from his laptop to your own computer, and send it to him in the chat as an image. That copy changes nothing on his laptop. Your file tools copy only from inside his user folder: a picture kept anywhere else cannot be shown yet, so say where it is.',
   ];
   const reading = folders.length
     ? [

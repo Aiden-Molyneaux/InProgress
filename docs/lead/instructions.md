@@ -48,7 +48,8 @@ The rules and the three lines are code: `src/core/lead-rules.ts`. The built serv
 
 Run in Grok after the gate, in a new conversation:
 
-1. Paste the three lines. Progresser runs the rules command and says he has version 5.
+1. Paste the three lines. Progresser runs the rules command and says he has version 6.
+1b. Version 6: say "show me the picture r<n> on step <n>" for a picture attached to a step. He finds the document with lead step, copies its file from the laptop to his own computer, and the picture appears in the chat. Grok's file tools copy only from inside the user folder (`C:\Users\<user>`), which is where a step's documents are kept; a picture inside the project's folders cannot be shown.
 1a. Say "start #n" for a step that is next. A thread opens in T3 Code, claims the step within a minute, and the brief lists it under Started. Say "turn starts on" and later "where are we": he says what he started himself, and why.
 2. Say "where are we". He first decides the open questions his mandate lets him decide. The answer is twelve lines or fewer: the first line has Aiden's open asks across all projects, then what was decided for him with the words that undo each, then what needs him, each with a recommendation one word answers.
 2a. Say "undo d<n>" for one of them. It is put back, and he says what InProgress answered.

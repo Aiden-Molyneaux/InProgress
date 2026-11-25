@@ -599,6 +599,19 @@ describe('a lead on older rules', () => {
     expect(read.json().text.split('\n')[1]).toBe('Your rules are out of date: you can read, you cannot change anything. Run the rules command again.');
     expect(brief().instructions.yours).toBe(1);
   });
+
+  it('still marks its look at the brief: brief --mark is not refused', async () => {
+    const { app, project, setLead } = setup();
+    setLead('Progresser');
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/lead/${project.slug}/seen`,
+      headers: { authorization: 'Bearer t' },
+      payload: { as: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION - 1 },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(typeof res.json().seenAt).toBe('string');
+  });
 });
 
 describe('the intent record on the brief', () => {
