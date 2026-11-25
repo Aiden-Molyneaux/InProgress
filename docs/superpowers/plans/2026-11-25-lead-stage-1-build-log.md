@@ -119,3 +119,16 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   The runner (task 4) passes both from the server's own settings, so they come from one place. "No repository" and
   "Not a branch name" are plain answers, not errors: the turn reads the words. The trunk is `main`, as on every
   project with a lead in this stage.
+- Task 2 and 3 fixes committed (3947eca, 2817e1f): typecheck, 2377 unit tests and 35 smoke tests green. Murr's
+  proportional re-check of both is running.
+- Found on the way: `test/smoke/built.test.ts` passed `--instructions 5` to `lead decide`, so smoke was red on main
+  since rules v6 (50f559c). Fixed here: the test reads `LEAD_INSTRUCTIONS_VERSION`.
+
+## Task 4: the turn runner
+
+- Brief to a fresh Sev on Opus (hard-ordering list: leases, recovery, two runners). The calls in the brief: the lease,
+  the answer, the apply and a failure are each one repo function in one immediate transaction; `behind` means the
+  runner gave up after two failed turns (past due is shown late, not moved); the headless way runs `claude -p` with
+  `--tools ""` and only the lead's MCP tools allowed, in `<home>/lead/<slug>/` with its own empty project settings, the
+  session variables removed; `INPROGRESS_LEAD_CLAUDE` names another executable (a stub for the scenes on a copy);
+  `INPROGRESS_LEAD_RUNNER=off` keeps it from starting; a stand-in apply until task 5.
