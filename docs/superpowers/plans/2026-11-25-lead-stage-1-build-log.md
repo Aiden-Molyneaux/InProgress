@@ -150,3 +150,19 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   - The repo for the git tools is the project's first bound folder; a project with no lead is skipped before a lease.
 - Open from task 4, for task 5: an apply that throws leaves the turn answered and recovery retries it every tick. Task 5
   bounds it: a second throw fails the turn.
+
+## Task 7: facts read before the brief (Claude Code hooks docs, code.claude.com/docs/en/hooks and hooks-guide)
+
+- A hook handler takes an `if` field in permission-rule syntax (`"if": "Bash(git push *)"`, `"PowerShell(Remove-Item *)"`),
+  one rule per handler, evaluated before the process is spawned, on PreToolUse and PermissionRequest among others.
+  Each subcommand of a compound command is checked; input it cannot split runs the hook regardless.
+- PreToolUse deny: `hookSpecificOutput { hookEventName: "PreToolUse", permissionDecision: "deny",
+  permissionDecisionReason }`, honoured in every mode, bypassPermissions included.
+- PermissionRequest: input has tool_name and tool_input; output `hookSpecificOutput { hookEventName:
+  "PermissionRequest", decision: { behavior: "allow" | "deny", message? } }`; exit 0 with no output leaves the normal
+  prompt. It fires only when Claude Code would ask, so not in bypassPermissions. The deny shape and a timeout's effect
+  are not shown verbatim in the docs: the task proves them on a real `claude -p` run against a scratch home.
+- Plan said every shell command goes through the hold hook, under 50 ms when it matches nothing. Do: one handler per
+  watched family with an `if` rule (push, merge, publish, deploy, gh, delete), so an ordinary command starts no hook at
+  all. Because about 2,700 shell commands a day would otherwise each wait on a Node start. A playbook's `Held:` lines
+  refine within those families; a line outside them is reported by the installer, not watched.
