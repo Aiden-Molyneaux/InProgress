@@ -309,3 +309,8 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   the minors (git spellings the `if` families missed: `-P`, `-p`, `git.exe`, a full path; `npm run deploy-check` held
   as a deploy; one retry of a held.json read during its rename). Accepted: `cd /tmp` reads as a folder under the
   current one (it holds, never leaks); a `cd` in a subshell carries over (held or checked either way).
+- Murr's re-check of the 4-5 fix round (Sonnet, proportional, round 1 of its two): 1 major: three runner faults put
+  an item behind for good, so a usage-limit stretch would quietly send the oldest items behind one by one. Fix queued
+  after task 8 (same file): the first good turn after a fault stretch reopens the items the faults put behind. Accepted
+  owner-calls: an unparked ancestor's brought items count again at once; the stuck cover matches the session, not the
+  exact tool.
