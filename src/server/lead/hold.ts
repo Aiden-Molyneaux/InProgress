@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname, isAbsolute, resolve } from 'node:path';
-import { CHECKED_ACTIONS, gitFolderOption, heldActions, mergeTarget, playbookHeldLines, pushTarget, type HeldActionName, type HeldMatch } from '../../core/hold';
+import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { z } from 'zod';
+import { CHECKED_ACTIONS, HELD_ACTIONS, heldActions, isUpstreamOfMain, mergeTargets, playbookHeldLines, pushTarget, type HeldMatch } from '../../core/hold';
+import { ID_MAX } from '../../core/notices';
 import { LEAD_INSTRUCTIONS_VERSION } from '../../core/lead';
 import { clipLine } from '../../core/step-ref';
 import { heldFile } from '../../hooks/hold';
@@ -11,7 +13,7 @@ import { DESK_ASK_DUE_MS, plusMs, produceDeskItem } from '../repo/deskProducers'
 import { insertLeadEvent } from '../repo/leadEvents';
 import { findNode } from '../repo/nodes';
 import type { Project } from '../../core/types';
-import { getProjectById, resolveBinding } from '../repo/projects';
+import { getProjectById, listBindings, resolveBinding } from '../repo/projects';
 import { findSession } from '../repo/sessions';
 import { isLiveWithRound } from '../repo/switches';
 import { checkLanding, ghVisibility, realGit, type LandingDeps } from './landing';
@@ -60,12 +62,23 @@ export const heldRef = (sessionId: string | null, command: string): string => cr
 export const stuckRef = (sessionId: string | null, toolName: string, toolInput: unknown): string =>
   createHash('sha1').update(`${sessionId ?? ''}\n${toolName}\n${JSON.stringify(toolInput ?? null)}`).digest('hex');
 
-export interface HoldAsk {
-  sessionId?: string | null;
-  cwd: string;
-  command: string;
-  action: HeldActionName;
-}
+/**
+ * The hold hook's call: the session (when the hook knew it), its folder, the whole command, and the command of it the hook
+ * asks about: its place in the line, its text, the folder it runs in, and the action the hook named. The server reads the
+ * line again itself and judges the command at that place.
+ */
+export const holdBody = z
+  .object({
+    sessionId: z.string().max(ID_MAX).nullable().optional(),
+    cwd: z.string().max(1_000),
+    command: z.string().min(1).max(100_000),
+    action: z.enum(HELD_ACTIONS),
+    index: z.number().int().min(0).max(10_000),
+    segment: z.string().max(100_000).optional(),
+    folder: z.string().max(1_000).nullable().optional(),
+  })
+  .strict();
+export type HoldAsk = z.infer<typeof holdBody>;
 
 export type HoldAnswer = SayNothing | { held: true; text: string };
 
@@ -83,23 +96,24 @@ async function currentBranch(deps: LandingDeps, folder: string): Promise<string 
 /** A held answer, as the route works it out: what the command does, and why it is held (for the log). */
 type Judged = { clear: true } | { clear: false; what: string; why: string };
 
-/** Runs the landing check for a held command, read from its words; any refusal of the check holds it. */
-async function judge(ctx: Ctx, scope: LeadScope, ask: HoldAsk, match: HeldMatch, deps: LandingDeps): Promise<Judged> {
+/** Runs the landing check for a held command, read from its words, in the folder it runs in; any refusal of the check holds it. */
+async function judge(ctx: Ctx, scope: LeadScope, match: HeldMatch, deps: LandingDeps): Promise<Judged> {
   if (!CHECKED_ACTIONS.includes(match.action)) return { clear: false, what: `${match.what} (${clipLine(match.segment, 120)})`, why: "this is Aiden's without a check" };
+  const folder = match.folder;
+  if (folder === null) return { clear: false, what: match.what, why: 'could not tell which folder it runs in' };
   let branch: string | undefined;
   let what = match.what;
-  // `git -C <dir>` runs in that folder, not the session's: the check reads git there.
-  const named = match.action === 'merge' || match.action === 'push' ? gitFolderOption(match.segment) : undefined;
-  const folder = named === undefined ? ask.cwd : isAbsolute(named) ? named : resolve(ask.cwd, named);
   if (match.action === 'merge') {
     // Only a merge into main is on the list: a merge in a checkout on another branch goes into that branch.
     const on = await currentBranch(deps, folder);
     if (on !== null && on !== 'main') return { clear: true };
     if (on === null) return { clear: false, what: 'a merge', why: 'could not tell which branch this checkout is on' };
-    const target = mergeTarget(match.segment);
-    if (target === undefined) return { clear: false, what: 'a merge into main', why: 'could not tell what is being merged' };
-    branch = target;
-    what = `a merge of ${target} into main`;
+    const targets = mergeTargets(match.segment);
+    // Updating main from its remote is not a landing.
+    if (targets.length === 1 && isUpstreamOfMain(targets[0])) return { clear: true };
+    if (targets.length !== 1) return { clear: false, what: 'a merge into main', why: targets.length === 0 ? 'could not tell what is being merged' : 'a merge of several branches at once' };
+    branch = targets[0];
+    what = `a merge of ${branch} into main`;
   } else if (match.action === 'push') {
     const target = pushTarget(match.segment);
     if (!target.ok) return { clear: false, what: match.what, why: target.why };
@@ -129,17 +143,22 @@ async function judge(ctx: Ctx, scope: LeadScope, ask: HoldAsk, match: HeldMatch,
 
 /**
  * POST /api/lead/hold: a command on the hold list, from the hold or permission hook. Says nothing when the session's
- * project has no lead or its round is off, or the command is not on this project's list; else names the action and runs
- * the landing check for a merge, deploy, push or publish (the rest are Aiden's without one). Clear: nothing. Held: a `held`
+ * project has no lead or its round is off, or the command at the place the hook names is not on this project's list (its
+ * Held lines first); else names the action and runs the landing check for a merge, deploy, push or publish in the folder
+ * that command runs in (the rest are Aiden's without one). A command that reads differently here than the hook sent it is
+ * held. Clear: nothing. Held: a `held`
  * desk item waiting on Aiden (one per session and command while it is not done) and a `held` line in the lead's log, and
  * what the command does, in plain words.
  */
 export async function holdCheck(ctx: Ctx, ask: HoldAsk, deps: LandingDeps = REAL_DEPS): Promise<HoldAnswer> {
   const scope = leadScopeOf(ctx, ask.sessionId, ask.cwd);
   if (scope === undefined) return SAY_NOTHING;
-  const match = heldActions(ask.command, playbookHeldLines(scope.project.playbook)).find((m) => m.action === ask.action);
+  const match = heldActions(ask.command, playbookHeldLines(scope.project.playbook), ask.cwd || null).find((m) => m.index === ask.index);
   if (match === undefined) return SAY_NOTHING;
-  const judged = await judge(ctx, scope, ask, match, deps);
+  const judged: Judged =
+    ask.segment !== undefined && ask.segment !== match.segment
+      ? { clear: false, what: match.what, why: 'the hook and InProgress read the command differently' }
+      : await judge(ctx, scope, match, deps);
   if (judged.clear) return SAY_NOTHING;
   const now = ctx.now();
   ctx.db
@@ -207,6 +226,8 @@ export interface StuckWaitOptions {
   pollMs?: number;
   /** Resolves after `ms`; a timer unless a test gives another. */
   sleep?: (ms: number) => Promise<void>;
+  /** Whether the hook has gone (its connection closed): the wait stops, and the item stays. */
+  gone?: () => boolean;
 }
 
 const sleepFor = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -247,12 +268,14 @@ export async function stuckWait(ctx: Ctx, ask: StuckAsk, opts: StuckWaitOptions 
   const waitMs = opts.waitMs ?? STUCK_WAIT_MS;
   const pollMs = opts.pollMs ?? STUCK_POLL_MS;
   const sleep = opts.sleep ?? sleepFor;
-  for (let waited = 0; ; waited += pollMs) {
+  // Measured on the clock, not by counting sleeps: a slow event loop must not stretch the wait past the hook's timeout.
+  const deadline = Date.now() + waitMs;
+  for (;;) {
     const item = getDeskItem(ctx.db, itemId);
     if (item === undefined || item.state === 'waiting_aiden') return SAY_NOTHING;
     if (item.state === 'done') return stuckVerdict(item.outcome) ?? SAY_NOTHING;
-    if (waited >= waitMs) return SAY_NOTHING;
-    await sleep(pollMs);
+    if (Date.now() >= deadline || opts.gone?.()) return SAY_NOTHING;
+    await sleep(Math.min(pollMs, Math.max(0, deadline - Date.now())));
   }
 }
 
@@ -262,35 +285,75 @@ export function allHeldLines(ctx: Ctx): string[] {
   return [...new Set(rows.flatMap((p) => playbookHeldLines(p)))];
 }
 
-/** Writes `<home>/lead/held.json` from the playbooks' Held lines: a temporary file renamed over it, so the hook never reads half of one. */
-export function writeHeldLines(ctx: Ctx, home: string): string[] {
-  const lines = allHeldLines(ctx);
-  const file = heldFile(home);
-  mkdirSync(dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(lines, null, 2)}\n`);
-  renameSync(tmp, file);
-  return lines;
+/** The bound folders of every project with a lead and its round on: where the hook holds a command InProgress does not answer about. */
+export function watchedFolders(ctx: Ctx): string[] {
+  const live = new Map<number, boolean>();
+  const watched = (projectId: number): boolean => {
+    if (!live.has(projectId)) {
+      const lead = ctx.db.prepare('SELECT lead FROM projects WHERE id = ?').pluck().get(projectId) as string | null | undefined;
+      live.set(projectId, typeof lead === 'string' && lead.trim() !== '' && isLiveWithRound(ctx.db, projectId));
+    }
+    return live.get(projectId)!;
+  };
+  return [...new Set(listBindings(ctx).filter((b) => watched(b.projectId)).map((b) => b.path.replace(/\\/g, '/')))];
+}
+
+/** How often a rename over held.json is tried when Windows has the file open (EPERM, EBUSY), and how long apart. */
+const RENAME_TRIES = 3;
+const RENAME_WAIT_MS = 100;
+
+function renameWithRetry(from: string, to: string, rename: (from: string, to: string) => void): void {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      rename(from, to);
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if ((code !== 'EPERM' && code !== 'EBUSY') || attempt >= RENAME_TRIES) throw err;
+      // A hook reading the file holds it open for a moment. A synchronous wait: this runs inside an event listener.
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, RENAME_WAIT_MS);
+    }
+  }
 }
 
 /**
- * Writes the Held lines now and again after each change to a project's playbook or lead. A failed write is logged and the
- * next change tries again. Answers the unsubscribe.
+ * Writes `<home>/lead/held.json`: `{ lines, folders }`, the playbooks' Held lines and the folders where a command on the
+ * list is held while InProgress does not answer. A temporary file is renamed over it, so the hook never reads half of one;
+ * a failed write removes the temporary file and throws.
+ */
+export function writeHeldLines(ctx: Ctx, home: string, rename: (from: string, to: string) => void = renameSync): { lines: string[]; folders: string[] } {
+  const content = { lines: allHeldLines(ctx), folders: watchedFolders(ctx) };
+  const file = heldFile(home);
+  mkdirSync(dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  try {
+    writeFileSync(tmp, `${JSON.stringify(content, null, 2)}\n`);
+    renameWithRetry(tmp, file, rename);
+  } catch (err) {
+    rmSync(tmp, { force: true });
+    throw err;
+  }
+  return content;
+}
+
+/** The events after which held.json may say something else: a playbook, a lead, a switch, a project's state, a binding. */
+const HELD_EVENTS = new Set(['project.updated', 'project.deleted', 'project.restored', 'project.purged', 'binding.created', 'binding.deleted']);
+
+/**
+ * Writes held.json now and again after each event that can change it. A failed write is logged and the next event tries
+ * again. Answers the unsubscribe.
  */
 export function watchHeldLines(ctx: Ctx, home: string, log: { error: (message: string) => void }): () => void {
   const rewrite = () => {
     try {
       writeHeldLines(ctx, home);
     } catch (err) {
-      log.error(`Could not write the playbooks' Held lines to ${heldFile(home)}: ${(err as Error).message}`);
+      log.error(`Could not write the Held lines and watched folders to ${heldFile(home)}: ${(err as Error).message}`);
     }
   };
   rewrite();
-  const listener = (e: { type: string; data?: unknown }) => {
-    if (e.type !== 'project.updated' && e.type !== 'project.deleted' && e.type !== 'project.restored') return;
-    const changes = (e.data as { changes?: Record<string, unknown> } | undefined)?.changes;
-    if (e.type === 'project.updated' && (changes === undefined || (!('playbook' in changes) && !('lead' in changes)))) return;
-    rewrite();
+  const listener = (e: { type: string }) => {
+    if (HELD_EVENTS.has(e.type)) rewrite();
   };
   ctx.bus.on('event', listener);
   return () => {

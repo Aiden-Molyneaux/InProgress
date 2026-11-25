@@ -1,34 +1,47 @@
 import { describe, expect, it } from 'vitest';
-import { commandSegments, gitFolderOption, heldAction, heldActions, heldLineWatched, mergeTarget, playbookHeldLines, pushTarget } from '../../src/core/hold';
+import {
+  HOLD_RULES,
+  commandSegments,
+  familyRe,
+  folderInside,
+  gitFolderOption,
+  heldAction,
+  heldActions,
+  heldLineWatched,
+  holdFamilies,
+  isUpstreamOfMain,
+  mergeTarget,
+  mergeTargets,
+  playbookHeldLines,
+  pushTarget,
+  splitCommand,
+  type HoldTool,
+} from '../../src/core/hold';
 
 const action = (command: string, extra: string[] = []) => heldAction(command, extra)?.action;
 
-describe('heldAction: P3 (spikes/lead-stage0/p3/hold-hook.cjs)', () => {
-  // Each rule of the stage 0 hook, with the commands it held there.
-  it.each([
-    ['npm publish', 'publish'],
-    ['pnpm publish --access public', 'publish'],
-    ['yarn publish', 'publish'],
-    ['cargo publish', 'publish'],
-    ['twine upload dist/*', 'publish'],
-    ['git push', 'push'],
-    ['git push origin feature', 'push'],
-    ['git push --force-with-lease', 'push'],
-    ['git -C C:/repo push', 'push'],
-    ['npm run deploy', 'deploy'],
-    ['pnpm run release', 'deploy'],
-    ['node scripts/deploy.mjs', 'deploy'],
-    ['node scripts\\deploy-web.mjs', 'deploy'],
-    ['gh repo create acme/widgets --public', 'repo'],
-    ['gh repo delete acme/widgets --yes', 'repo'],
-    ['gh repo edit --visibility public', 'repo'],
-    ['gh release create v1.0.0', 'repo'],
-    ['rm -rf ~/.inprogress', 'delete'],
-    ['rm ~/.inprogress/inprogress.db', 'delete'],
-  ])('%s is held as %s', (command, expected) => {
-    expect(action(command)).toBe(expected);
-  });
+describe('the if rules start the hook for every form the list holds', () => {
+  /**
+   * A model of the installed `if` rules: Claude Code tests each command of a compound one against `<Tool>(<pattern>)`, with
+   * `*` any text. Every example of every rule must start a hook in its shell, and be held by that rule once it does.
+   */
+  const starts = (tool: HoldTool, command: string) => splitCommand(command).some((seg) => holdFamilies(tool).some((f) => familyRe(f).test(seg.raw)));
+  for (const rule of HOLD_RULES) {
+    for (const tool of ['Bash', 'PowerShell'] as const) {
+      it.each(rule.examples[tool].map((e) => [e]))(`${tool}: %s starts the hook and is held as ${rule.action}`, (example) => {
+        expect(starts(tool, example)).toBe(true);
+        expect(heldAction(example)?.action).toBe(rule.action);
+      });
+    }
+  }
 
+  it('the families include the forms the review found missing', () => {
+    expect(holdFamilies('Bash')).toEqual(expect.arrayContaining(['git -C *', 'git -c *', 'git --*', 'pnpm publish*', 'yarn publish*', 'cargo publish*', 'twine upload*', 'npm run release*', 'pnpm run deploy*', 'yarn deploy*', 'node *deploy*', 'rm *']));
+    expect(holdFamilies('PowerShell')).toEqual(expect.arrayContaining(['rm *', 'del *', 'ri *', 'rmdir *', 'rd *', 'Remove-Item *']));
+  });
+});
+
+describe('heldAction: P3 (spikes/lead-stage0/p3/hold-hook.cjs) and the rest of the list', () => {
   it.each(['npm test', 'npm run build', 'git status', 'git log --oneline', 'git merge-base main HEAD', 'git pushx', 'gh pr view 12', 'gh release list', 'rm -rf dist', 'node scripts/build-to.mjs .build', 'npm run dev'])(
     'an ordinary command is not held: %s',
     (command) => {
@@ -37,8 +50,11 @@ describe('heldAction: P3 (spikes/lead-stage0/p3/hold-hook.cjs)', () => {
   );
 
   it('a merge is named merge for the server to decide whether it goes into main', () => {
-    expect(heldAction('git merge feature')).toEqual({ action: 'merge', segment: 'git merge feature', what: 'a merge into main' });
-    expect(action('git merge --no-ff -m "land it" feature')).toBe('merge');
+    expect(heldAction('git merge feature', [], 'C:/repo')).toEqual({ action: 'merge', index: 0, segment: 'git merge feature', folder: 'C:/repo', what: 'a merge into main' });
+  });
+
+  it('gh pr merge is held as a merge of a pull request', () => {
+    expect(action('gh pr merge 12 --squash')).toBe('pr-merge');
   });
 
   it('says what it does without the server, for the refusal when InProgress is not answering', () => {
@@ -48,17 +64,21 @@ describe('heldAction: P3 (spikes/lead-stage0/p3/hold-hook.cjs)', () => {
   });
 });
 
-describe('heldAction: compound commands and PowerShell', () => {
-  it('finds a held command anywhere in a compound one', () => {
+describe('heldAction: compound commands, quotes and heredocs', () => {
+  it('finds a held command anywhere in a compound one, with its place in the line', () => {
     expect(action('npm test && git push')).toBe('push');
     expect(action('git status; npm publish')).toBe('publish');
     expect(action('npm run build || npm run deploy')).toBe('deploy');
     expect(action('cat x | gh repo create a/b')).toBe('repo');
-    expect(heldAction('git add -A && git commit -m x && git push origin feature')?.segment).toBe('git push origin feature');
+    expect(heldAction('git add -A && git commit -m x && git push origin feature')).toMatchObject({ index: 2, segment: 'git push origin feature' });
   });
 
-  it('lists every held command of a compound one, in order', () => {
-    expect(heldActions('git merge feature && git push && npm test').map((m) => m.action)).toEqual(['merge', 'push']);
+  it('lists every held command of a compound one, in order, each with its place', () => {
+    expect(heldActions('git merge feature && git push && npm test && git push origin other').map((m) => [m.action, m.index])).toEqual([
+      ['merge', 0],
+      ['push', 1],
+      ['push', 3],
+    ]);
   });
 
   it('holds the PowerShell forms', () => {
@@ -75,27 +95,80 @@ describe('heldAction: compound commands and PowerShell', () => {
     expect(action('rm -rf dist && ls ~/.inprogress')).toBeUndefined();
   });
 
-  it('git push-ish text inside an echo string is still matched: the hook does not parse quotes', () => {
-    expect(action('echo "git push"')).toBe('push');
-    expect(action("echo 'npm publish'")).toBe('publish');
+  it('text inside a quoted string is not a command', () => {
+    expect(action('echo "git push"')).toBeUndefined();
+    expect(action('git commit -m "ready: npm run deploy after this; git push"')).toBeUndefined();
+    expect(action("echo 'npm publish'")).toBeUndefined();
+  });
+
+  it('a heredoc body inside a quoted $(...) is not a command, and the gh command itself is read on its own words', () => {
+    const command = `gh pr create --title "x" --body "$(cat <<'EOF'
+Land it with git push, then npm run deploy.
+(Merge with git merge main.)
+EOF
+)"`;
+    expect(heldActions(command)).toEqual([]);
+    expect(heldActions(`cat <<EOF > notes.md\ngit push\nEOF\nnpm test`)).toEqual([]);
+    expect(action(`cat <<EOF > notes.md\ngit push\nEOF\ngit push`)).toBe('push');
+  });
+
+  it('a command that does not close is read as plain text, so nothing in it escapes the list', () => {
+    expect(action('echo "unclosed && git push')).toBe('push');
+    expect(action("cat <<EOF\nno end && git push")).toBe('push');
+  });
+
+  it('a bare $(...) or backticks run their command', () => {
+    expect(action('echo $(git push)')).toBe('push');
+    expect(action('echo `npm publish`')).toBe('publish');
+  });
+
+  it('splits on &&, ||, ;, |, & and line breaks', () => {
+    expect(commandSegments('a && b || c; d | e\nf & g')).toEqual(['a', 'b', 'c', 'd', 'e', 'f', 'g']);
+  });
+});
+
+describe('the folder each command runs in', () => {
+  const folders = (command: string, cwd = 'C:/wt') => heldActions(command, [], cwd).map((m) => m.folder);
+
+  it('follows cd, Set-Location, sl, pushd and git -C, resolved against the session folder', () => {
+    expect(folders('cd C:/personal/InProgress && git merge --ff-only topic')).toEqual(['C:/personal/InProgress']);
+    expect(folders('cd ../main; git push')).toEqual(['C:/main']);
+    expect(folders('Set-Location -Path C:\\repo; git push')).toEqual(['C:/repo']);
+    expect(folders('sl C:/a; pushd b && git push')).toEqual(['C:/a/b']);
+    expect(folders('git -C ../main merge x')).toEqual(['C:/main']);
+    expect(folders('cd /c/personal/x && git push')).toEqual(['C:/personal/x']);
+    expect(folders('git push')).toEqual(['C:/wt']);
+  });
+
+  it('a folder change it cannot read leaves the folder unknown', () => {
+    expect(folders('cd $REPO && git push')).toEqual([null]);
+    expect(folders('cd - && git push')).toEqual([null]);
+    expect(folders('cd && git push')).toEqual([null]);
+    expect(folders('pushd C:/a; popd; git push')).toEqual([null]);
+    expect(folders('cd ~/x && git push')).toEqual([null]);
+  });
+
+  it('a folder is inside a root, case and slashes ignored', () => {
+    expect(folderInside('C:\\Personal\\InProgress\\.claude\\worktrees\\x', 'c:/personal/InProgress')).toBe(true);
+    expect(folderInside('C:/personal/InProgressX', 'C:/personal/InProgress')).toBe(false);
   });
 });
 
 describe('Held lines', () => {
-  it('reads the playbook\'s Held lines', () => {
+  it("reads the playbook's Held lines", () => {
     expect(playbookHeldLines('Risk: billing/**\nHeld: gh pr merge\n  Held:   npm run seed-prod  \nHeld:\nnot Held: x')).toEqual(['gh pr merge', 'npm run seed-prod']);
   });
 
   it('holds a command that starts with a Held line, case ignored', () => {
-    expect(heldAction('gh pr merge 12 --squash', ['gh pr merge'])).toMatchObject({ action: 'playbook', segment: 'gh pr merge 12 --squash', what: 'a command the playbook holds for Aiden (gh pr merge)' });
-    expect(action('GH PR MERGE 12', ['gh pr merge'])).toBe('playbook');
-    expect(action('npm test && gh pr merge 3', ['gh pr merge'])).toBe('playbook');
-    expect(action('gh pr view 12', ['gh pr merge'])).toBeUndefined();
-    expect(action('echo gh pr merge', ['gh pr merge'])).toBeUndefined();
+    expect(heldAction('npm run seed-prod --force', ['npm run seed-prod'])).toMatchObject({ action: 'playbook', segment: 'npm run seed-prod --force', what: 'a command the playbook holds for Aiden (npm run seed-prod)' });
+    expect(action('NPM RUN SEED-PROD', ['npm run seed-prod'])).toBe('playbook');
+    expect(action('npm test && npm run seed-prod', ['npm run seed-prod'])).toBe('playbook');
+    expect(action('npm run seed-dev', ['npm run seed-prod'])).toBeUndefined();
   });
 
-  it("P3's list comes before a Held line", () => {
-    expect(action('git push', ['git push'])).toBe('push');
+  it('a Held line comes before the list: a match is always held, without a check', () => {
+    expect(action('git push --force', ['git push --force'])).toBe('playbook');
+    expect(action('git push', ['git push --force'])).toBe('push');
   });
 
   it('a Held line inside a watched family is watched; one outside is not', () => {
@@ -108,16 +181,19 @@ describe('Held lines', () => {
 });
 
 describe('reading a merge and a push', () => {
-  it('splits a compound command on &&, ||, ; and |', () => {
-    expect(commandSegments('a && b || c; d | e\nf')).toEqual(['a', 'b', 'c', 'd', 'e', 'f']);
-  });
-
-  it('names the branch a merge merges, past its options', () => {
+  it('names what a merge merges, past its options', () => {
     expect(mergeTarget('git merge feature')).toBe('feature');
     expect(mergeTarget('git merge --no-ff -m "land it" feature')).toBe('feature');
     expect(mergeTarget('git -C ../main merge -s ort --no-edit lead-x')).toBe('lead-x');
     expect(mergeTarget('git merge')).toBeUndefined();
     expect(mergeTarget('git merge --abort')).toBeUndefined();
+    expect(mergeTargets('git merge a b')).toEqual(['a', 'b']);
+    expect(mergeTarget('git merge a b')).toBeUndefined();
+  });
+
+  it("knows main's upstream", () => {
+    expect(['origin/main', '@{u}', '@{upstream}'].map(isUpstreamOfMain)).toEqual([true, true, true]);
+    expect(['origin/feature', 'main', 'feature'].map(isUpstreamOfMain)).toEqual([false, false, false]);
   });
 
   it('reads what a push sends, and refuses what it cannot read as one branch', () => {
@@ -126,6 +202,8 @@ describe('reading a merge and a push', () => {
     expect(pushTarget('git push origin HEAD')).toEqual({ ok: true, remote: 'origin' });
     expect(pushTarget('git push origin +refs/heads/x:refs/heads/x')).toEqual({ ok: true, remote: 'origin', branch: 'x' });
     expect(pushTarget('git push upstream x')).toEqual({ ok: true, remote: 'upstream', branch: 'x' });
+    expect(pushTarget('git push --repo https://example.com/x.git')).toEqual({ ok: true, remote: 'https://example.com/x.git' });
+    expect(pushTarget('git push --repo=other feature')).toEqual({ ok: true, remote: 'other', branch: 'feature' });
     expect(pushTarget('git push origin x:main')).toMatchObject({ ok: false });
     expect(pushTarget('git push origin :x')).toMatchObject({ ok: false });
     expect(pushTarget('git push origin a b')).toMatchObject({ ok: false });

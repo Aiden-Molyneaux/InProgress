@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { runHandler, type HookDeps } from '../../src/hooks/handlers';
-import { heldFile, readHeldLines } from '../../src/hooks/hold';
+import { heldFile, readHeld, readHeldLines, type HeldFile } from '../../src/hooks/hold';
 import { createClient } from '../../src/lib/client';
 
 /** A stub InProgress: records each request and answers what the test sets. */
@@ -35,10 +35,12 @@ afterEach(() => {
   reply = () => ({ status: 200, body: { say: 'nothing' } });
 });
 
-const deps = (url = base, heldLines: string[] = []): HookDeps => ({
+/** held.json as the server writes it: the Held lines, and the watched folders (C:/repo, where the tests run). */
+const file = (lines: string[] = [], folders: string[] | null = ['C:/repo']): HeldFile => ({ present: true, lines, folders });
+const deps = (url = base, held: HeldFile = file(), fallback?: (json: object | undefined) => void): HookDeps => ({
   post: async () => ({ tracked: false }),
   ensureServer: async () => true,
-  lead: { post: (path, body, timeoutMs) => createClient({ baseUrl: url, token: 'tok', timeoutMs }).post(path, body), heldLines: () => heldLines },
+  lead: { post: (path, body, timeoutMs) => createClient({ baseUrl: url, token: 'tok', timeoutMs }).post(path, body), held: () => held, fallback },
 });
 const bash = (command: string) => ({ session_id: 's1', cwd: 'C:/repo', hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command } });
 const deny = (reason: string) => ({ json: { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } } });
@@ -52,7 +54,9 @@ describe('the hold hook', () => {
 
   it('asks the server about a command on the list, and prints nothing when it says nothing', async () => {
     expect(await runHandler('hold', bash('npm test && git push origin feature'), deps())).toBeUndefined();
-    expect(requests).toEqual([{ path: '/api/lead/hold', body: { sessionId: 's1', cwd: 'C:/repo', command: 'npm test && git push origin feature', action: 'push' } }]);
+    expect(requests).toEqual([
+      { path: '/api/lead/hold', body: { sessionId: 's1', cwd: 'C:/repo', command: 'npm test && git push origin feature', action: 'push', index: 1, segment: 'git push origin feature', folder: 'C:/repo' } },
+    ]);
   });
 
   it('prints the exact PreToolUse deny when the server holds it', async () => {
@@ -65,8 +69,35 @@ describe('the hold hook', () => {
   it('asks about each held command of a compound one, and the first held answers', async () => {
     reply = (_path, body) => (body.action === 'push' ? { status: 200, body: { held: true, text: 'a push of x to origin' } } : { status: 200, body: { say: 'nothing' } });
     const out = await runHandler('hold', bash('git merge x && git push'), deps());
-    expect(requests.map((r) => r.body.action)).toEqual(['merge', 'push']);
+    expect(requests.map((r) => [r.body.action, r.body.index])).toEqual([
+      ['merge', 0],
+      ['push', 1],
+    ]);
     expect(out).toStrictEqual(deny('Held for Aiden before it runs: a push of x to origin. It waits for his word. Do not retry it and do not try another way.'));
+  });
+
+  it('with the server down, holds only in a watched folder (or one it cannot read), and says nothing with no held.json', async () => {
+    const down = 'http://127.0.0.1:9';
+    const at = (cwd: string, command = 'git push') => ({ ...bash(command), cwd });
+    expect((await runHandler('hold', at('C:/repo/sub'), deps(down)))?.json).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } });
+    expect(await runHandler('hold', at('C:/elsewhere'), deps(down))).toBeUndefined();
+    expect((await runHandler('hold', at('C:/elsewhere', 'cd C:/repo && git push'), deps(down)))?.json).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } });
+    expect((await runHandler('hold', at('C:/elsewhere', 'cd $X && git push'), deps(down)))?.json).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } });
+    expect(await runHandler('hold', at('C:/repo'), deps(down, { present: false, lines: [], folders: null }))).toBeUndefined();
+    // The old array form names no folders: held anywhere.
+    expect((await runHandler('hold', at('C:/elsewhere'), deps(down, file([], null))))?.json).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } });
+  });
+
+  it('hands main the refusal to print if it is cut off, before it asks the server; nothing for a command off the list', async () => {
+    const seen: (object | undefined)[] = [];
+    await runHandler('hold', bash('git push'), deps(base, file(), (json) => seen.push(json)));
+    expect(seen).toEqual([{ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: expect.stringContaining('InProgress is not answering') } }]);
+    seen.length = 0;
+    await runHandler('hold', { ...bash('git push'), cwd: 'C:/elsewhere' }, deps(base, file(), (json) => seen.push(json)));
+    expect(seen).toEqual([undefined]);
+    seen.length = 0;
+    await runHandler('hold', bash('npm test'), deps(base, file(), (json) => seen.push(json)));
+    expect(seen).toEqual([]);
   });
 
   it('fails closed when the server is down, for a command on the list only', async () => {
@@ -95,9 +126,9 @@ describe('the hold hook', () => {
   });
 
   it("asks about a playbook's Held line", async () => {
-    expect(await runHandler('hold', bash('gh pr merge 12'), deps(base))).toBeUndefined();
+    expect(await runHandler('hold', bash('gh pr list'), deps(base))).toBeUndefined();
     expect(requests).toEqual([]);
-    await runHandler('hold', bash('gh pr merge 12'), deps(base, ['gh pr merge']));
+    await runHandler('hold', bash('gh pr list'), deps(base, file(['gh pr list'])));
     expect(requests.map((r) => r.body.action)).toEqual(['playbook']);
   });
 });
@@ -106,12 +137,24 @@ describe('held.json', () => {
   const home = mkdtempSync(join(tmpdir(), 'ip-held-'));
   afterAll(() => rmSync(home, { recursive: true, force: true }));
 
-  it('reads an array of strings; a missing or bad file is an empty list', () => {
+  it('reads { lines, folders }, and the old array of lines; a missing file is not present', () => {
+    expect(readHeld(home)).toEqual({ present: false, lines: [], folders: null });
+    mkdirSync(join(home, 'lead'), { recursive: true });
+    writeFileSync(heldFile(home), JSON.stringify({ lines: ['gh pr list', 4], folders: ['C:/repo'] }));
+    expect(readHeld(home)).toEqual({ present: true, lines: ['gh pr list'], folders: ['C:/repo'] });
+    writeFileSync(heldFile(home), JSON.stringify(['npm run seed']));
+    expect(readHeld(home)).toEqual({ present: true, lines: ['npm run seed'], folders: null });
+    writeFileSync(heldFile(home), '{not json');
+    expect(readHeld(home)).toEqual({ present: true, lines: [], folders: null });
+  });
+
+  it('the lines alone: a bad file is an empty list', () => {
+    rmSync(join(home, 'lead'), { recursive: true, force: true });
     expect(readHeldLines(home)).toEqual([]);
     mkdirSync(join(home, 'lead'), { recursive: true });
     writeFileSync(heldFile(home), '{not json');
     expect(readHeldLines(home)).toEqual([]);
-    writeFileSync(heldFile(home), JSON.stringify({ lines: ['x'] }));
+    writeFileSync(heldFile(home), JSON.stringify({ other: ['x'] }));
     expect(readHeldLines(home)).toEqual([]);
     writeFileSync(heldFile(home), JSON.stringify(['gh pr merge', 3, 'npm run seed']));
     expect(readHeldLines(home)).toEqual(['gh pr merge', 'npm run seed']);

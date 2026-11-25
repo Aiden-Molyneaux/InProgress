@@ -2,7 +2,8 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, 
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { allowRules, claudeDir, HOOK_DEFS, hookEntry, install, isInProgressHook, kitStatus, nodeBinary, renderTemplate, STATIC_ALLOW_RULES, uninstall } from '../../src/cli/claude-config';
+import { holdFamilies } from '../../src/core/hold';
+import { allowRules, claudeDir, defEntry, HOOK_DEFS, hookEntry, install, isInProgressHook, kitStatus, nodeBinary, renderTemplate, STATIC_ALLOW_RULES, uninstall } from '../../src/cli/claude-config';
 import { homeDir } from '../../src/lib/home';
 import { CLI_SUBCOMMANDS, cliAllowRules, cliPrefix, isCliAllowRule, repoCli, taskPrefix } from '../../src/lib/task-command';
 
@@ -125,10 +126,8 @@ describe('HOOK_DEFS', () => {
 });
 
 describe('the hold and permission hooks', () => {
-  const holdRules = [
-    ...['git push*', 'git merge*', 'npm publish*', 'npm run deploy*', 'node scripts/deploy*', 'gh *', 'rm *'].map((r) => `Bash(${r})`),
-    ...['git push*', 'git merge*', 'npm publish*', 'npm run deploy*', 'node scripts/deploy*', 'gh *', 'Remove-Item *'].map((r) => `PowerShell(${r})`),
-  ];
+  // Derived from the list's own data (src/core/hold.ts HOLD_RULES); test/core/hold.test.ts runs every example through them.
+  const holdRules = [...holdFamilies('Bash').map((r) => `Bash(${r})`), ...holdFamilies('PowerShell').map((r) => `PowerShell(${r})`)];
 
   it('hold: one PreToolUse handler per watched family with its if rule, 30 s, never async; permission: PermissionRequest, 180 s', () => {
     const hold = HOOK_DEFS.filter((d) => d.name === 'hold');
@@ -139,7 +138,13 @@ describe('the hold and permission hooks', () => {
       // Beside pre-tool, never on the same call.
       expect(new RegExp(d.matcher!).test('Agent') || new RegExp(d.matcher!).test('Task')).toBe(false);
     }
-    expect(HOOK_DEFS.filter((d) => d.name === 'permission')).toEqual([{ event: 'PermissionRequest', name: 'permission', timeout: 180 }]);
+    // Plan mode's exit and a question to the user are Aiden's own prompts: the permission hook is never started for them.
+    expect(HOOK_DEFS.filter((d) => d.name === 'permission')).toEqual([{ event: 'PermissionRequest', name: 'permission', matcher: '^(?!(ExitPlanMode|AskUserQuestion)$).*', timeout: 180 }]);
+    const permission = new RegExp(HOOK_DEFS.find((d) => d.name === 'permission')!.matcher!);
+    expect(['ExitPlanMode', 'AskUserQuestion', 'Bash', 'Edit', 'ExitPlanModeX', 'mcp__x__AskUserQuestion'].map((t) => permission.test(t))).toEqual([false, false, true, true, true, true]);
+    // Each hold handler carries its rule as a third argument, so no two are the same command.
+    const commands = hold.map((d) => JSON.stringify(defEntry(repo, d).args));
+    expect(new Set(commands).size).toBe(hold.length);
   });
 
   it('are written once with their if fields, kept on a second install, removed on uninstall; a user hook is untouched', () => {
@@ -147,7 +152,7 @@ describe('the hold and permission hooks', () => {
     const dir = claudeDirWithSettings({ ...existing, hooks: { ...existing.hooks, PreToolUse: [{ matcher: '^Bash$', hooks: [userHook] }] } });
     const written = (s: { hooks: Record<string, { matcher?: string; hooks: { if?: string; args?: string[] }[] }[]> }) =>
       Object.entries(s.hooks).flatMap(([event, groups]) => groups.flatMap((g) => g.hooks.filter((h) => isInProgressHook(h) && ['hold', 'permission'].includes(h.args![1])).map((h) => `${event} ${g.matcher ?? ''} ${h.args![1]} ${h.if ?? ''}`)));
-    const expected = [...holdRules.map((r) => `PreToolUse ^${r.slice(0, r.indexOf('('))}$ hold ${r}`), 'PermissionRequest  permission '];
+    const expected = [...holdRules.map((r) => `PreToolUse ^${r.slice(0, r.indexOf('('))}$ hold ${r}`), 'PermissionRequest ^(?!(ExitPlanMode|AskUserQuestion)$).* permission '];
     install({ repo, claudeDir: dir, stamp: 'h1' });
     const once = readSettings(dir);
     expect(written(once)).toEqual(expected);
@@ -231,7 +236,7 @@ describe('install', () => {
     expect(s.hooks.Stop[0].hooks[0].command).toBe('other-tool --stop');
     for (const def of HOOK_DEFS) {
       const group = s.hooks[def.event].find((g: { matcher?: string; hooks: { if?: string }[] }) => g.matcher === def.matcher && g.hooks.some((h) => isInProgressHook(h) && h.if === def.if));
-      const entry = { type: 'command', command: nodeBinary(), args: [`${repo}/dist/hooks/hook.js`, def.name], timeout: def.timeout, ...(def.if ? { if: def.if } : {}) };
+      const entry = { type: 'command', command: nodeBinary(), args: [`${repo}/dist/hooks/hook.js`, def.name, ...(def.if ? [def.if] : [])], timeout: def.timeout, ...(def.if ? { if: def.if } : {}) };
       expect(group.hooks).toEqual([def.async ? { ...entry, async: true } : entry]);
     }
     // The command tools' group is the one async entry, written as Claude Code reads it.

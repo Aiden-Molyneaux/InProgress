@@ -36,7 +36,7 @@ afterEach(() => {
 const deps = (url = base): HookDeps => ({
   post: async () => ({ tracked: false }),
   ensureServer: async () => true,
-  lead: { post: (path, body, timeoutMs) => createClient({ baseUrl: url, token: 'tok', timeoutMs }).post(path, body), heldLines: () => [] },
+  lead: { post: (path, body, timeoutMs) => createClient({ baseUrl: url, token: 'tok', timeoutMs }).post(path, body), held: () => ({ present: true, lines: [], folders: null }) },
 });
 const request = (tool_name: string, tool_input: unknown) => ({ session_id: 's1', cwd: 'C:/repo', hook_event_name: 'PermissionRequest', tool_name, tool_input });
 const decision = (d: object) => ({ json: { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: d } } });

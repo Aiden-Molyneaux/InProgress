@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { HOOK_NAMES, type HookName } from '../hooks/handlers';
 import { homeDir } from '../lib/home';
 import { normalizePath } from '../lib/paths';
-import { HOLD_RULE_PREFIXES, heldLineWatched } from '../core/hold';
+import { heldLineWatched, holdFamilies } from '../core/hold';
 import { readHeldLines } from '../hooks/hold';
 import { CLI_SUBCOMMANDS, cliAllowRules, cliPrefix, isCliAllowRule, repoCli, taskPrefix } from '../lib/task-command';
 
@@ -32,10 +32,16 @@ export interface HookDef {
   if?: string;
 }
 
-/** The hold hook's handlers: one per watched family of each shell, with its `if` rule. Never async: the command waits on it. */
+/**
+ * The hold hook's handlers: one per watched family of each shell (src/core/hold.ts HOLD_RULES), with its `if` rule. Each
+ * carries its rule as a third argument, so no two are the same command for Claude Code to merge. Never async: the
+ * command waits on it.
+ */
 const HOLD_DEFS: HookDef[] = (['Bash', 'PowerShell'] as const).flatMap((tool) =>
-  HOLD_RULE_PREFIXES[tool].map((prefix): HookDef => ({ event: 'PreToolUse', name: 'hold', matcher: `^${tool}$`, timeout: 30, if: `${tool}(${prefix}*)` })),
+  holdFamilies(tool).map((family): HookDef => ({ event: 'PreToolUse', name: 'hold', matcher: `^${tool}$`, timeout: 30, if: `${tool}(${family})` })),
 );
+/** Prompts that are Aiden's own interaction with the session, never the desk's: the permission hook is not started for them. */
+export const PERMISSION_MATCHER = '^(?!(ExitPlanMode|AskUserQuestion)$).*';
 
 export const HOOK_DEFS: HookDef[] = [
   { event: 'SessionStart', name: 'session-start', timeout: 10 },
@@ -55,10 +61,10 @@ export const HOOK_DEFS: HookDef[] = [
   // What is Aiden's is held before it runs (lead stage 1, task 7): beside pre-tool, whose matcher never meets these.
   ...HOLD_DEFS,
   // A permission prompt goes to the lead's desk first; the hook waits up to 175 s for his verdict.
-  { event: 'PermissionRequest', name: 'permission', timeout: 180 },
+  { event: 'PermissionRequest', name: 'permission', matcher: PERMISSION_MATCHER, timeout: 180 },
 ];
 
-type HookEntry = { type?: string; command?: string; args?: string[]; timeout?: number; async?: boolean; if?: string };
+export type HookEntry = { type?: string; command?: string; args?: string[]; timeout?: number; async?: boolean; if?: string };
 type HookGroup = { matcher?: string; hooks?: HookEntry[] };
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Settings = Record<string, any>;
@@ -84,9 +90,23 @@ export function nodeBinary(execPath: string = process.execPath): string {
   return realpathSync(execPath).replace(/\\/g, '/');
 }
 
+/**
+ * A handler as install writes it. One with an `if` rule carries the rule as a third argument (the hook ignores it), so no
+ * two handlers are the same command for Claude Code to run once for both.
+ */
 export function hookEntry(repo: string, name: HookName, timeout: number, async = false, ifRule?: string): HookEntry {
-  return { type: 'command', command: nodeBinary(), args: [`${repo}${HOOK_SCRIPT_SUFFIX}`, name], timeout, ...(async ? { async: true } : {}), ...(ifRule ? { if: ifRule } : {}) };
+  return {
+    type: 'command',
+    command: nodeBinary(),
+    args: [`${repo}${HOOK_SCRIPT_SUFFIX}`, name, ...(ifRule === undefined ? [] : [ifRule])],
+    timeout,
+    ...(async ? { async: true } : {}),
+    ...(ifRule ? { if: ifRule } : {}),
+  };
 }
+
+/** The settings entry for one HOOK_DEFS definition. */
+export const defEntry = (repo: string, d: HookDef): HookEntry => hookEntry(repo, d.name, d.timeout, d.async, d.if);
 
 /**
  * Only an exec-form entry running `<...>/dist/hooks/hook.js <InProgress hook name>` is ours. Shell-form
@@ -116,7 +136,7 @@ export function addInProgressHooks(settings: Settings, repo: string): Settings {
   stripInProgressHooks(settings);
   settings.hooks ??= {};
   for (const d of HOOK_DEFS) {
-    const group: HookGroup = { ...(d.matcher ? { matcher: d.matcher } : {}), hooks: [hookEntry(repo, d.name, d.timeout, d.async, d.if)] };
+    const group: HookGroup = { ...(d.matcher ? { matcher: d.matcher } : {}), hooks: [defEntry(repo, d)] };
     (settings.hooks[d.event] ??= []).push(group);
   }
   return settings;

@@ -291,3 +291,8 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   inert.
 - To prove on a real `claude -p` with a scratch Claude config before landing: each family starts its handler, the
   deny shapes, a mid-pattern `*` in an `if` rule (`node *deploy*`), a hook's timeout.
+- Task 7's fixes after Murr, by the same Sev: all 2 blockers, 3 majors, 4 minors and 5 calls done; 2668 unit and 35
+  smoke tests green. The hold hook now has 24 handlers per shell, each family with its own argument, and a test ties
+  every rule's examples to the installed `if` rules. Accepted: `"$(git push)"` inside quotes, `bash -c "git push"` and
+  `pwsh -Command "..."` are not watched ("forget security for now"); the hold schema moved into
+  `src/server/lead/hold.ts`.

@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -6,7 +6,8 @@ import { LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
 import { buildApp } from '../../src/server/app';
 import { openDb } from '../../src/server/db/connection';
 import { createCtx, write } from '../../src/server/db/tx';
-import { leadAllow } from '../../src/server/lead-commands';
+import { heldActions, playbookHeldLines } from '../../src/core/hold';
+import { leadAllow, leadDisallow } from '../../src/server/lead-commands';
 import { applyVerdict } from '../../src/server/lead/apply';
 import { STUCK_POLL_MS, STUCK_WAIT_MS, stuckWait, watchHeldLines, writeHeldLines } from '../../src/server/lead/hold';
 import { realGit, type LandingDeps } from '../../src/server/lead/landing';
@@ -43,8 +44,16 @@ function world(opts: { roundOn?: boolean } = {}) {
   ctx.db.prepare("UPDATE sessions SET focus_node_id = ? WHERE id = 's1'").run(step!.id);
   const landing: LandingDeps = { git: realGit, visibility: async () => false };
   const app = buildApp({ ctx, token: 'tok', uiToken: 'u', version: 'test', landing });
-  const hold = async (command: string, action: string, sessionId: string | null = 's1', cwd = repo.wt) => {
-    const res = await app.inject({ method: 'POST', url: '/api/lead/hold', headers: { authorization: 'Bearer tok' }, payload: { sessionId, cwd, command, action } });
+  /**
+   * The hook's call about one command of the line: the `nth` command the list holds (as the hook reads it, with this
+   * project's Held lines), sent with its place, text and folder.
+   */
+  const hold = async (command: string, o: { nth?: number; sessionId?: string | null; cwd?: string; segment?: string } = {}) => {
+    const cwd = o.cwd ?? repo.wt;
+    const playbook = ctx.db.prepare('SELECT playbook FROM projects WHERE id = ?').pluck().get(project.id) as string;
+    const match = heldActions(command, playbookHeldLines(playbook), cwd)[o.nth ?? 0];
+    const payload = { sessionId: o.sessionId === undefined ? 's1' : o.sessionId, cwd, command, action: match?.action ?? 'push', index: match?.index ?? 0, segment: o.segment ?? match?.segment, folder: match?.folder ?? null };
+    const res = await app.inject({ method: 'POST', url: '/api/lead/hold', headers: { authorization: 'Bearer tok' }, payload });
     expect(res.statusCode).toBe(200);
     return res.json() as Record<string, unknown>;
   };
@@ -64,7 +73,7 @@ describe('POST /api/lead/hold', () => {
     const w = world({ roundOn: false });
     writeFile(repo.wt, 'src/hooks/x.ts', lines(9, 'feature'));
     commit(repo.wt, 'hooks');
-    expect(await w.hold('git push', 'push')).toEqual({ say: 'nothing' });
+    expect(await w.hold('git push')).toEqual({ say: 'nothing' });
     expect(w.items('held')).toEqual([]);
   });
 
@@ -72,7 +81,7 @@ describe('POST /api/lead/hold', () => {
     const w = world();
     writeFile(repo.wt, 'web/app.ts', lines(9, 'feature'));
     commit(repo.wt, 'web');
-    expect(await w.hold('git push origin feature', 'push')).toEqual({ say: 'nothing' });
+    expect(await w.hold('git push origin feature')).toEqual({ say: 'nothing' });
     expect(w.items('held')).toEqual([]);
   });
 
@@ -80,10 +89,10 @@ describe('POST /api/lead/hold', () => {
     const w = world();
     writeFile(repo.wt, 'src/hooks/x.ts', lines(9, 'feature'));
     commit(repo.wt, 'hooks');
-    expect(await w.hold('npm test && git push', 'push')).toEqual({ held: true, text: 'a push of feature to origin' });
+    expect(await w.hold('npm test && git push')).toEqual({ held: true, text: 'a push of feature to origin' });
     expect(w.items('held')).toEqual([expect.objectContaining({ state: 'waiting_aiden', node_id: w.step.id, outcome: "held: hold: this is Aiden's (it touches src/hooks/x.ts)" })]);
     expect(w.events('held')).toEqual([{ text: "npm test && git push -> hold: this is Aiden's (it touches src/hooks/x.ts)", node_id: w.step.id, session_id: 's1' }]);
-    expect(await w.hold('npm test && git push', 'push')).toEqual({ held: true, text: 'a push of feature to origin' });
+    expect(await w.hold('npm test && git push')).toEqual({ held: true, text: 'a push of feature to origin' });
     expect(w.items('held')).toHaveLength(1);
     expect(w.events('held')).toHaveLength(1);
   });
@@ -92,23 +101,23 @@ describe('POST /api/lead/hold', () => {
     const w = world();
     writeFile(repo.wt, 'web/app.ts', lines(9, 'feature'));
     commit(repo.wt, 'web');
-    expect(await w.hold('git merge main', 'merge')).toEqual({ say: 'nothing' });
-    expect(await w.hold('git merge feature', 'merge', 's1', repo.main)).toEqual({ say: 'nothing' });
-    expect(await w.hold('git merge --abort', 'merge', 's1', repo.main)).toEqual({ held: true, text: 'a merge into main' });
-    expect(await w.hold('git merge nosuch', 'merge', 's1', repo.main)).toEqual({ held: true, text: 'a merge of nosuch into main' });
+    expect(await w.hold('git merge main')).toEqual({ say: 'nothing' });
+    expect(await w.hold('git merge feature', { cwd: repo.main })).toEqual({ say: 'nothing' });
+    expect(await w.hold('git merge --abort', { cwd: repo.main })).toEqual({ held: true, text: 'a merge into main' });
+    expect(await w.hold('git merge nosuch', { cwd: repo.main })).toEqual({ held: true, text: 'a merge of nosuch into main' });
   });
 
   it("a change to a repository on Aiden's account and a delete under the live home are held without a check", async () => {
     const w = world();
-    expect(await w.hold('gh repo create acme/x --public', 'repo')).toEqual({ held: true, text: "a change to a repository on Aiden's account (gh repo create acme/x --public)" });
-    expect(await w.hold('rm -rf ~/.inprogress', 'delete')).toEqual({ held: true, text: 'a delete under the live home (rm -rf ~/.inprogress)' });
+    expect(await w.hold('gh repo create acme/x --public')).toEqual({ held: true, text: "a change to a repository on Aiden's account (gh repo create acme/x --public)" });
+    expect(await w.hold('rm -rf ~/.inprogress')).toEqual({ held: true, text: 'a delete under the live home (rm -rf ~/.inprogress)' });
   });
 
   it("a Held line of this project's playbook holds; another project's does not", async () => {
     const w = world();
-    expect(await w.hold('gh pr merge 3', 'playbook')).toEqual({ say: 'nothing' });
-    updateProject(w.ctx, 'test', w.project.slug, { playbook: 'Held: gh pr merge' });
-    expect(await w.hold('gh pr merge 3', 'playbook')).toEqual({ held: true, text: 'a command the playbook holds for Aiden (gh pr merge) (gh pr merge 3)' });
+    expect(await w.hold('npm run seed-prod')).toEqual({ say: 'nothing' });
+    updateProject(w.ctx, 'test', w.project.slug, { playbook: 'Held: npm run seed-prod' });
+    expect(await w.hold('npm run seed-prod')).toEqual({ held: true, text: 'a command the playbook holds for Aiden (npm run seed-prod) (npm run seed-prod)' });
   });
 
   it('a session with no focus step is held: the check needs one', async () => {
@@ -116,8 +125,39 @@ describe('POST /api/lead/hold', () => {
     w.ctx.db.prepare("UPDATE sessions SET focus_node_id = NULL WHERE id = 's1'").run();
     writeFile(repo.wt, 'web/app.ts', lines(9, 'feature'));
     commit(repo.wt, 'web');
-    expect(await w.hold('git push', 'push')).toEqual({ held: true, text: 'a push of feature to origin' });
+    expect(await w.hold('git push')).toEqual({ held: true, text: 'a push of feature to origin' });
     expect(w.items('held')[0]!.outcome).toBe('held: could not tell which step this is for');
+  });
+
+  it('judges the merge in the folder a cd moved to, not the session\'s: from a worktree, a merge in the main checkout is held', async () => {
+    const w = world();
+    writeFile(repo.wt, 'src/hooks/x.ts', lines(9, 'feature'));
+    commit(repo.wt, 'hooks');
+    expect(await w.hold('git merge --ff-only feature')).toEqual({ say: 'nothing' });
+    expect(await w.hold(`cd ${repo.main.replace(/\\/g, '/')} && git merge --ff-only feature`)).toEqual({ held: true, text: 'a merge of feature into main' });
+    expect(await w.hold('cd $MAIN && git merge --ff-only feature')).toEqual({ held: true, text: 'a merge into main' });
+    expect(w.items('held').map((i) => i.outcome)).toEqual(["held: hold: this is Aiden's (it touches src/hooks/x.ts)", 'held: could not tell which folder it runs in']);
+  });
+
+  it('judges the command at the place the hook names: a second push of the line is judged on its own', async () => {
+    const w = world();
+    writeFile(repo.wt, 'src/hooks/x.ts', lines(9, 'feature'));
+    commit(repo.wt, 'hooks');
+    // main has nothing to push; feature touches the hooks.
+    const line = 'git push origin main && git push origin feature';
+    expect(await w.hold(line)).toEqual({ say: 'nothing' });
+    expect(await w.hold(line, { nth: 1 })).toEqual({ held: true, text: 'a push of feature to origin' });
+    // A command that reads differently here than the hook sent it is held.
+    expect(await w.hold(line, { segment: 'git push origin elsewhere' })).toMatchObject({ held: true });
+  });
+
+  it("on main, an octopus merge is held, and updating main from origin is not a landing; gh pr merge is held without a check", async () => {
+    const w = world();
+    expect(await w.hold('git merge a b', { cwd: repo.main })).toEqual({ held: true, text: 'a merge into main' });
+    expect(w.items('held')[0]!.outcome).toBe('held: a merge of several branches at once');
+    expect(await w.hold('git merge origin/main', { cwd: repo.main })).toEqual({ say: 'nothing' });
+    expect(await w.hold('git merge --ff-only @{u}', { cwd: repo.main })).toEqual({ say: 'nothing' });
+    expect(await w.hold('gh pr merge 12 --squash')).toEqual({ held: true, text: 'a merge of a pull request into main (gh pr merge 12 --squash)' });
   });
 
   it('wants the token', async () => {
@@ -178,8 +218,20 @@ describe('POST /api/lead/stuck', () => {
     expect(w.items('stuck')[0]!.state).toBe('waiting_aiden');
   });
 
-  it('no verdict in 170 s resolves to nothing, and the item stays', async () => {
+  it('stops waiting when the hook has gone, and the item stays', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const w = world();
+    let gone = false;
+    const waiting = stuckWait(w.ctx, { ...ask, cwd: repo.wt }, { gone: () => gone });
+    await vi.advanceTimersByTimeAsync(2 * STUCK_POLL_MS);
+    gone = true;
+    await vi.advanceTimersByTimeAsync(STUCK_POLL_MS);
+    expect(await waiting).toEqual({ say: 'nothing' });
+    expect(w.items('stuck')[0]!.state).toBe('open');
+  });
+
+  it('no verdict in 170 s by the clock resolves to nothing, and the item stays', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     const w = world();
     let done = false;
     const waiting = stuckWait(w.ctx, { ...ask, cwd: repo.wt }).finally(() => (done = true));
@@ -192,6 +244,29 @@ describe('POST /api/lead/stuck', () => {
 });
 
 describe('held.json', () => {
+  it('a rename Windows refuses while the file is open is tried again, and a failed write leaves no temporary file', () => {
+    const home = mkdtempSync(join(tmpdir(), 'ip-held-'));
+    try {
+      const w = world();
+      let calls = 0;
+      const busy = (from: string, to: string) => {
+        calls++;
+        if (calls < 3) throw Object.assign(new Error('busy'), { code: 'EBUSY' });
+        renameSync(from, to);
+      };
+      writeHeldLines(w.ctx, home, busy);
+      expect(calls).toBe(3);
+      expect(existsSync(join(home, 'lead', 'held.json'))).toBe(true);
+      const never = () => {
+        throw Object.assign(new Error('denied'), { code: 'EPERM' });
+      };
+      expect(() => writeHeldLines(w.ctx, home, never)).toThrow('denied');
+      expect(readdirSync(join(home, 'lead'))).toEqual(['held.json']);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it('holds the Held lines of every project with a lead, rewritten when a playbook changes', () => {
     const home = mkdtempSync(join(tmpdir(), 'ip-held-'));
     try {
@@ -199,14 +274,22 @@ describe('held.json', () => {
       const other = createProject(w.ctx, 'test', { name: 'NoLead', playbook: 'Held: npm run nope' });
       expect(other.lead).toBeNull();
       const stop = watchHeldLines(w.ctx, home, { error: () => undefined });
-      const read = () => JSON.parse(readFileSync(join(home, 'lead', 'held.json'), 'utf8')) as string[];
-      expect(read()).toEqual([]);
+      const read = () => JSON.parse(readFileSync(join(home, 'lead', 'held.json'), 'utf8')) as { lines: string[]; folders: string[] };
+      const wt = repo.wt.replace(/\\/g, '/');
+      expect(read()).toEqual({ lines: [], folders: [wt] });
       updateProject(w.ctx, 'test', w.project.slug, { playbook: 'Risk: billing/**\nHeld: gh pr merge\nHeld: npm run seed-prod' });
-      expect(read()).toEqual(['gh pr merge', 'npm run seed-prod']);
+      expect(read().lines).toEqual(['gh pr merge', 'npm run seed-prod']);
       setProjectLead(w.ctx, 'window', other.slug, 'Nora');
-      expect(read()).toEqual(['gh pr merge', 'npm run seed-prod', 'npm run nope']);
+      expect(read().lines).toEqual(['gh pr merge', 'npm run seed-prod', 'npm run nope']);
+      // The other project's folder is watched once its round is on, and a new binding is too.
+      addBinding(w.ctx, 'test', other.slug, 'C:/personal/NoLead');
+      expect(read().folders).toEqual([wt]);
+      leadAllow(w.ctx, other.slug, 'Nora', V, { switch: 'round', aidenWords: 'go' });
+      expect(read().folders).toEqual([wt, 'C:/personal/NoLead']);
+      leadDisallow(w.ctx, w.project.slug, 'Progresser', V, { switch: 'round' });
+      expect(read().folders).toEqual(['C:/personal/NoLead']);
       stop();
-      expect(writeHeldLines(w.ctx, home)).toEqual(['gh pr merge', 'npm run seed-prod', 'npm run nope']);
+      expect(writeHeldLines(w.ctx, home)).toEqual({ lines: ['gh pr merge', 'npm run seed-prod', 'npm run nope'], folders: ['C:/personal/NoLead'] });
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

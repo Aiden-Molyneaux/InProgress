@@ -6,8 +6,7 @@ import { appendLog } from '../lib/log';
 import { hookBudget } from './budget';
 import { captureHookInput } from './capture';
 import { CONTEXT_EVENT_NAME, HOOK_NAMES, hookErrorLine, parseHookInput, runHandler, type HookName } from './handlers';
-import { heldAction } from '../core/hold';
-import { commandOf, preToolDeny, readHeldLines, unansweredReason } from './hold';
+import { readHeld } from './hold';
 
 // Claude may stop reading before the briefing is written (say after a timeout): an EPIPE must not reach stderr.
 process.stdout.on('error', () => undefined);
@@ -46,11 +45,6 @@ async function main(): Promise<void> {
   let fallback: object | undefined;
   const work = (async () => {
     const input = parseHookInput(await readStdin(1000));
-    if (name === 'hold') {
-      const command = commandOf(input);
-      const match = command === undefined ? undefined : heldAction(command, readHeldLines(homeDir()));
-      if (match) fallback = preToolDeny(unansweredReason(match.what));
-    }
     // Task 0 capture (src/hooks/capture.ts): a redacted copy of this input, for the hooks the activity design reads.
     // Synchronous and silent; it never throws. Off with INPROGRESS_HOOK_CAPTURE=0 or a file ~/.inprogress/capture/off.
     captureHookInput(name, input);
@@ -58,10 +52,14 @@ async function main(): Promise<void> {
     const output = await runHandler(name, input, {
       ensureServer: () => ensureServer({ baseUrl: url, waitMs: budget.serverWaitMs }),
       // Read the token lazily: the first server start creates it.
-      post: (path, body) => createClient({ baseUrl: url, token: readToken(), timeoutMs: budget.postTimeoutMs }).post(path, body),
+      post: (path, body) => createClient({ baseUrl: url, token: readToken(), timeoutMs: budget.postTimeoutMs ?? 500 }).post(path, body),
       lead: {
         post: (path, body, timeoutMs) => createClient({ baseUrl: url, token: readToken(), timeoutMs }).post(path, body),
-        heldLines: () => readHeldLines(homeDir()),
+        held: () => readHeld(homeDir()),
+        // Set before the first POST: what to print if the limit passes first.
+        fallback: (json) => {
+          fallback = json;
+        },
       },
     });
     if (output?.json) {
