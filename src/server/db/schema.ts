@@ -421,6 +421,8 @@ export const MIGRATIONS: string[] = [
     state TEXT NOT NULL DEFAULT 'open', done_at TEXT, outcome TEXT);
   CREATE UNIQUE INDEX desk_items_open_once ON desk_items (kind, ref) WHERE state <> 'done';
   CREATE INDEX desk_items_project_state ON desk_items (project_id, state, created_at);
+  -- Whether an item of a kind and ref was ever made, done ones included.
+  CREATE INDEX desk_items_kind_ref ON desk_items (kind, ref);
   CREATE TABLE lead_turns (id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL REFERENCES desk_items(id) ON DELETE CASCADE,
     project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, way TEXT NOT NULL, model TEXT,
     leased_at TEXT NOT NULL, lease_until TEXT NOT NULL, started_at TEXT, finished_at TEXT,
@@ -455,6 +457,8 @@ export const MIGRATIONS: string[] = [
   CREATE INDEX usage_readings_turn ON usage_readings (turn_id);
   -- Importing the same file twice adds nothing.
   CREATE UNIQUE INDEX usage_readings_import_once ON usage_readings (at, source) WHERE source = 'import';
+  -- A switch's newest allow or disallow line, read on every raise and every minute.
+  CREATE INDEX lead_events_switch ON lead_events (project_id, text, at) WHERE kind IN ('allow', 'disallow');
   -- New tables and indexes only: v1 to v20 builds can still read and write this schema, so a rollback across it works.
   INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
   `,

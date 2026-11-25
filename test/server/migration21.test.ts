@@ -9,6 +9,8 @@ const NEW_TABLES = ['desk_items', 'lead_turns', 'lead_decisions', 'lead_sends', 
 const NEW_INDEXES = [
   'desk_items_open_once',
   'desk_items_project_state',
+  'desk_items_kind_ref',
+  'lead_events_switch',
   'lead_turns_applied_once',
   'lead_turns_live_once',
   'lead_turns_project_leased',

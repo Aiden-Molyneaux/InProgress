@@ -1,82 +1,20 @@
 import { sessionActivity } from '../../core/activity';
-import { STALE_SESSION_MS, type Ask } from '../../core/types';
+import { STALE_SESSION_MS } from '../../core/types';
 import { stamp } from '../../core/span';
-import type { DB } from '../db/connection';
 import { write, type Ctx } from '../db/tx';
-import { roundSince } from '../lead';
-import { addDeskItem, openDeskItems, type DeskItem, type DeskItemKind } from '../repo/desk';
 import { aidensAskSql } from '../repo/asks';
+import { openDeskItems, type DeskItem } from '../repo/desk';
+import { DESK_ASK_DUE_MS, itemEverMade, plusMs, produceDeskItem } from '../repo/deskProducers';
 import { resolveProject } from '../repo/projects';
 import { findSession } from '../repo/sessions';
+import { roundBound } from '../repo/switches';
 
-/** How long after it is raised a session's question or permission ask is due on the desk. */
-export const DESK_ASK_DUE_MS = 3 * 60 * 1000;
+export { DESK_ASK_DUE_MS, onDeskItem } from '../repo/deskProducers';
+
 /** How long a worker session must have been stopped before the minute watch makes a `stopped` item. */
 export const DESK_STOPPED_MS = 10 * 60 * 1000;
 /** How long after the minute watch makes an item (stopped, promise_due, or a swept ask's) it is due. */
 export const DESK_WATCH_DUE_MS = 5 * 60 * 1000;
-
-/** The kinds of desk item that are about an ask, and close when it clears. */
-const ASK_ITEM_KINDS: readonly DeskItemKind[] = ['question', 'permission', 'old_ask', 'promise_due'];
-
-const listeners = new Set<(projectId: number) => void>();
-
-/** Calls `listener` with the project's id each time a producer makes a desk item. Returns the unsubscribe. */
-export function onDeskItem(listener: (projectId: number) => void): () => void {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
-}
-
-/**
- * Wakes every listener for the project, each on its own setImmediate: the producer runs inside a synchronous write, so the
- * listener fires after that write commits. A listener's throw is logged here and never reaches the write.
- */
-function wake(projectId: number): void {
-  for (const listener of listeners) {
-    setImmediate(() => {
-      try {
-        listener(projectId);
-      } catch (err) {
-        console.error('[desk] a desk listener failed:', err);
-      }
-    });
-  }
-}
-
-const plus = (iso: string, ms: number): string => new Date(Date.parse(iso) + ms).toISOString();
-
-/** Adds the item and wakes the listeners when it is new. */
-function produce(db: DB, input: Parameters<typeof addDeskItem>[1], now: string): { item: DeskItem; created: boolean } {
-  const result = addDeskItem(db, input, now);
-  if (result.created) wake(input.projectId);
-  return result;
-}
-
-/** Whether a desk item of this kind and ref exists in any state, done included. */
-const itemEverMade = (db: DB, kind: DeskItemKind, ref: string): boolean =>
-  db.prepare('SELECT 1 FROM desk_items WHERE kind = ? AND ref = ?').get(kind, ref) !== undefined;
-
-/**
- * Inside the write that raised or joined `ask`: a session's question or permission ask of Aiden's, on a project whose
- * round is on, is queued on the desk, due DESK_ASK_DUE_MS after it was raised. A joined ask finds its existing item.
- */
-export function deskOnAskRaised(db: DB, ask: Ask, now: string): void {
-  if (ask.owner !== 'aiden' || (ask.kind !== 'question' && ask.kind !== 'permission') || ask.sessionId === null) return;
-  if (roundSince(db, ask.projectId) === null) return;
-  produce(db, { projectId: ask.projectId, kind: ask.kind, ref: String(ask.id), nodeId: ask.nodeId, dueAt: plus(ask.raisedAt, DESK_ASK_DUE_MS) }, now);
-}
-
-/**
- * Inside the write that first clears ask `askId`: every desk item about it that is not done moves to done, with the
- * outcome `cleared by <by>`. A leased item too: the runner treats an apply on an item no longer leased as abandoned.
- */
-export function deskOnAskCleared(db: DB, askId: number, by: string, now: string): void {
-  db.prepare(
-    `UPDATE desk_items SET state = 'done', done_at = ?, outcome = ? WHERE ref = ? AND state IN ('open', 'leased', 'behind', 'waiting_aiden') AND kind IN (${ASK_ITEM_KINDS.map(() => '?').join(', ')})`,
-  ).run(now, `cleared by ${by}`, String(askId), ...ASK_ITEM_KINDS);
-}
 
 /** What one minute's desk watch made, per pass. */
 export interface DeskWatchResult {
@@ -86,17 +24,18 @@ export interface DeskWatchResult {
 }
 
 /**
- * The minute watch's desk part. For each live project whose round is on, three passes, each in its own write:
+ * The minute watch's desk part. For each active, live project whose round is on, three passes, each in its own write:
  * stopped (a worker session idle on an active step with no open ask of Aiden's, stopped DESK_STOPPED_MS to
- * STALE_SESSION_MS ago and not before the round was switched on), promise_due (a lead's promise past its time), and the
- * sweep (a session's question or permission ask raised since the round was switched on that has no desk item, as one
- * raised while a rolled-back build ran). Each cause makes one item, however often the watch runs.
+ * STALE_SESSION_MS ago and not before the round was first switched on; an open stopped item whose session has moved on
+ * since is closed first), promise_due (a lead's promise past its time), and the sweep (a session's question or permission
+ * ask raised since the round was first switched on that has no desk item: one raised while the round was off, or while a
+ * rolled-back build ran). Each cause makes one item, however often the watch runs.
  */
 export function watchDesk(ctx: Ctx): DeskWatchResult {
   const result: DeskWatchResult = { stopped: 0, promiseDue: 0, swept: 0 };
-  const projects = ctx.db.prepare('SELECT id FROM projects WHERE deleted_at IS NULL ORDER BY id').pluck().all() as number[];
+  const projects = ctx.db.prepare("SELECT id FROM projects WHERE status = 'active' AND deleted_at IS NULL ORDER BY id").pluck().all() as number[];
   for (const projectId of projects) {
-    if (roundSince(ctx.db, projectId) === null) continue;
+    if (roundBound(ctx.db, projectId) === null) continue;
     result.stopped += write(ctx, 'system', () => stoppedPass(ctx, projectId));
     result.promiseDue += write(ctx, 'system', () => promiseDuePass(ctx, projectId));
     result.swept += write(ctx, 'system', () => sweepPass(ctx, projectId));
@@ -105,9 +44,18 @@ export function watchDesk(ctx: Ctx): DeskWatchResult {
 }
 
 function stoppedPass(ctx: Ctx, projectId: number): number {
-  const since = roundSince(ctx.db, projectId);
-  if (since === null) return 0;
+  const bound = roundBound(ctx.db, projectId);
+  if (bound === null) return 0;
   const now = ctx.now();
+  // A stop the session has moved on from (a prompt, a hook since) is no longer a stop: its open item closes.
+  ctx.db
+    .prepare(
+      `UPDATE desk_items SET state = 'done', done_at = ?, outcome = 'session moved on'
+       WHERE project_id = ? AND kind = 'stopped' AND state = 'open' AND instr(ref, '@') > 0
+         AND EXISTS (SELECT 1 FROM sessions s WHERE s.id = substr(desk_items.ref, 1, instr(desk_items.ref, '@') - 1)
+                     AND s.last_seen_at > substr(desk_items.ref, instr(desk_items.ref, '@') + 1))`,
+    )
+    .run(now, projectId);
   const nowMs = Date.parse(now);
   const latest = new Date(nowMs - DESK_STOPPED_MS).toISOString();
   const earliest = new Date(nowMs - STALE_SESSION_MS).toISOString();
@@ -119,7 +67,7 @@ function stoppedPass(ctx: Ctx, projectId: number): number {
          AND NOT EXISTS (SELECT 1 FROM asks a WHERE a.node_id = n.id AND a.cleared_at IS NULL AND ${aidensAskSql('a.')})
        ORDER BY s.last_seen_at, s.id`,
     )
-    .all(projectId, latest, earliest, since) as { id: string; focus_node_id: number; last_seen_at: string }[];
+    .all(projectId, latest, earliest, bound) as { id: string; focus_node_id: number; last_seen_at: string }[];
   let made = 0;
   for (const c of candidates) {
     const ref = `${c.id}@${c.last_seen_at}`;
@@ -127,7 +75,7 @@ function stoppedPass(ctx: Ctx, projectId: number): number {
     const session = findSession(ctx, c.id);
     // Live background work (a subagent that is not a reader, a command that counts as work) is not a stop.
     if (session === undefined || sessionActivity(session, nowMs) !== 'idle') continue;
-    if (produce(ctx.db, { projectId, kind: 'stopped', ref, nodeId: c.focus_node_id, dueAt: plus(now, DESK_WATCH_DUE_MS) }, now).created) made++;
+    if (produceDeskItem(ctx.db, { projectId, kind: 'stopped', ref, nodeId: c.focus_node_id, dueAt: plusMs(now, DESK_WATCH_DUE_MS) }, now).created) made++;
   }
   return made;
 }
@@ -141,27 +89,27 @@ function promiseDuePass(ctx: Ctx, projectId: number): number {
   for (const a of due) {
     const ref = String(a.id);
     if (itemEverMade(ctx.db, 'promise_due', ref)) continue;
-    if (produce(ctx.db, { projectId, kind: 'promise_due', ref, nodeId: a.node_id, dueAt: plus(now, DESK_WATCH_DUE_MS) }, now).created) made++;
+    if (produceDeskItem(ctx.db, { projectId, kind: 'promise_due', ref, nodeId: a.node_id, dueAt: plusMs(now, DESK_WATCH_DUE_MS) }, now).created) made++;
   }
   return made;
 }
 
 function sweepPass(ctx: Ctx, projectId: number): number {
-  const since = roundSince(ctx.db, projectId);
-  if (since === null) return 0;
+  const bound = roundBound(ctx.db, projectId);
+  if (bound === null) return 0;
   const now = ctx.now();
   const missing = ctx.db
     .prepare(
       `SELECT a.id, a.kind, a.node_id, a.raised_at FROM asks a
-       WHERE a.project_id = ? AND a.owner = 'aiden' AND a.kind IN ('question', 'permission') AND a.cleared_at IS NULL
+       WHERE a.project_id = ? AND ${aidensAskSql('a.')} AND a.kind IN ('question', 'permission') AND a.cleared_at IS NULL
          AND a.session_id IS NOT NULL AND a.raised_at >= ?
          AND NOT EXISTS (SELECT 1 FROM desk_items d WHERE d.kind = a.kind AND d.ref = CAST(a.id AS TEXT))
        ORDER BY a.raised_at, a.id`,
     )
-    .all(projectId, since) as { id: number; kind: 'question' | 'permission'; node_id: number; raised_at: string }[];
+    .all(projectId, bound) as { id: number; kind: 'question' | 'permission'; node_id: number; raised_at: string }[];
   let made = 0;
   for (const a of missing) {
-    if (produce(ctx.db, { projectId, kind: a.kind, ref: String(a.id), nodeId: a.node_id, dueAt: plus(a.raised_at, DESK_ASK_DUE_MS) }, now).created) made++;
+    if (produceDeskItem(ctx.db, { projectId, kind: a.kind, ref: String(a.id), nodeId: a.node_id, dueAt: plusMs(a.raised_at, DESK_ASK_DUE_MS) }, now).created) made++;
   }
   return made;
 }

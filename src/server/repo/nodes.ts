@@ -4,6 +4,7 @@ import { write, type Ctx, type RecordEvent } from '../db/tx';
 import { badRequest, conflict, notFound } from '../errors';
 import { definedOnly } from '../util';
 import { clearNodeAsks } from './asks';
+import { deskOnStepsDeleted } from './deskProducers';
 import { appendUnowned, dropFromQueue, getProjectById, inLiveProject, isQueued, moveInQueue } from './projects';
 import { placeInBand } from './rank';
 import { parkedAncestor, shelvedAmong, subtreeIds } from './shelved';
@@ -468,6 +469,8 @@ export function deleteNode(ctx: Ctx, actor: string, id: number, cascade = false,
     if (ids.length > 1 && !cascade) {
       throw badRequest(`#${id} has ${ids.length - 1} descendant(s)`, 'Pass cascade: true to delete them too, or move them first.');
     }
+    // The steps' asks go by cascade, with no clear: their desk items close here, before the rows go.
+    deskOnStepsDeleted(ctx.db, ids, ctx.now());
     ctx.db.prepare('DELETE FROM nodes WHERE id = ?').run(id);
     record({ projectId: node.projectId, type: 'node.deleted', entity: 'node', entityId: id, data: { ids, parentId: node.parentId } });
     return { ids };

@@ -2,7 +2,7 @@ import type { AskOwner } from '../../core/lead';
 import { ASK_KINDS, ASK_TRAIL_MS, STALE_SESSION_MS, type Ask, type AskKind } from '../../core/types';
 import { msAgo, write, type Ctx, type RecordEvent } from '../db/tx';
 import { badRequest, notFound } from '../errors';
-import { deskOnAskCleared, deskOnAskRaised } from '../lead/desk';
+import { deskOnAskCleared, deskOnAskRaised } from './deskProducers';
 import { patchNode, requireNode } from './nodes';
 import { inLiveProject } from './projects';
 import { parkedAncestor } from './shelved';
@@ -132,8 +132,9 @@ export function raiseAskInWrite(ctx: Ctx, record: RecordEvent, actor: string, in
     }
   }
   const ask = toAsk(row);
-  // A session's question or permission on a project whose round is on goes on the lead's desk, in this same write.
-  deskOnAskRaised(ctx.db, ask, ctx.now());
+  // A session's question or permission on a project whose round is on goes on the lead's desk, in this same write: when
+  // it is new, or asked anew (bumped), as ask.raised is recorded. A plain join never queues an ask whose item is done.
+  if (info.changes || bumped) deskOnAskRaised(ctx.db, ask, ctx.now());
   if (info.changes || bumped) record({ projectId: node.projectId, type: 'ask.raised', entity: 'ask', entityId: ask.id, data: { ask } });
   return { ask, joined: !info.changes, untracked: owner !== 'lead' && !!input.sessionId && !tracked };
 }
