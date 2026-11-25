@@ -234,3 +234,14 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   full github.com URL so gh's default host cannot answer for it. Accepted as known: a private read is kept 10 minutes;
   a deploy is judged on main's commits, not the main checkout's working tree; a hostile branch's odd paths (short names,
   trailing dots) are not caught. "forget security for now" covers the last.
+- Murr's re-check of task 4's fixes (Sonnet, proportional): sound, five minors (back-off bookkeeping, a disk or spawn
+  fault counted against the item, no settle bound after a failed kill, one raw query, test gaps), queued with task 5's
+  findings for one fix round. Calls on his owner-calls: three runner faults in a row on one item put it behind (so one
+  bad item cannot hold its lane); taskkill by its full system path; `!` allowed in a cmd.exe argument.
+
+## Task 8: the retry key
+
+- Plan said prove on one scratch T3 Code thread, deleted afterwards, whether `t3 thread start` takes a retry key. Did:
+  read `t3 thread start --help` (flags --base-dir, --title, --provider, --model, --worktree, --branch, --wait, --json:
+  no retry key). Because the CLI's own help answers it without starting a real thread. So the send id goes in the
+  thread's title (` [s<id>]`) and recovery finds it with `t3 thread list`.
