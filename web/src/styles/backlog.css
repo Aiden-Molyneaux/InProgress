@@ -91,7 +91,8 @@
 .ip-insp-facts { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); font-family: var(--font-mono); font-size: var(--t-detail-sm); color: var(--text-dim); }
 .ip-insp-why, .ip-insp-where { margin: 0; overflow-wrap: anywhere; white-space: pre-line; font-size: var(--t-detail-sm); color: var(--text-muted); }
 .ip-insp-selects { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
-.ip-insp-sel { gap: var(--sp-1); min-width: 140px; }
+/* A picker is as wide as its longest option (parts.css). The cap keeps one long name from taking the row. */
+.ip-insp-sel { gap: var(--sp-1); min-width: 140px; max-width: min(260px, 100%); }
 .ip-insp-acts { display: flex; flex-direction: column; gap: var(--sp-2); }
 .ip-insp-acts .p-btn { width: 100%; }
 .ip-insp-acts [data-delete] { margin-top: auto; }

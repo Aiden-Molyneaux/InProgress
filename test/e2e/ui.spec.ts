@@ -4864,13 +4864,57 @@ test.describe('#542 ranked Backlog', () => {
     await page.keyboard.press('Enter');
     await expect(inspector.getByRole('listbox')).toHaveCount(0);
     await expect(label).toBeFocused();
-    await expect(label).toHaveText(/ui/);
+    await expect(label.locator('.p-pick-face[data-shown] .p-pick-text')).toHaveText('ui');
+    await expect(label.locator('.p-pick-face[data-shown] .p-pick-mark')).toHaveCount(1);
     await expect.poll(async () => ((await (await api.get(`/api/nodes/${fresh.ids['4 Build to GitHub']}`)).json()) as { node: { label: string | null } }).node.label).toBe('ui');
     // A press outside closes an open list without a change.
     await inspector.getByRole('combobox', { name: 'Band' }).click();
     await inspector.locator('.ip-insp-facts').click({ position: { x: 2, y: 2 } });
     await expect(inspector.getByRole('listbox')).toHaveCount(0);
     await expect(inspector.getByRole('combobox', { name: 'Band' })).toHaveAttribute('data-value', 'soon');
+  });
+
+  test('a pick does not resize or move the Phase, Label and Band pickers', async ({ page, api, fresh }) => {
+    // A phase whose name is wider than a picker's smallest width: before the boxes were sized ahead, choosing it widened
+    // the Phase box and pushed Label and Band along (Aiden, 2026-11-25, #740).
+    await write(api, fresh.session, 'post', '/api/nodes', { parentId: fresh.root, nodes: [{ title: 'The long-named phase to pick', kind: 'phase' }] });
+    const { view } = await openRankedWith(page, api, fresh, ['4 Build to GitHub']);
+    const row = blRow(page, view, '4 Build to GitHub');
+    const inspector = await openInspector(row);
+    const names = ['Phase', 'Label', 'Band'];
+    const half = (n: number) => Math.round(n * 2) / 2;
+    // Each box's place inside the row of pickers, and its size: the row itself moves when the step changes band.
+    // Null while the inspector is re-mounting (a band change moves the row), so the poll below tries again.
+    const layout = async () => {
+      const selects = await inspector.locator('.ip-insp-selects').boundingBox();
+      if (!selects) return null;
+      const out: Record<string, number[]> = { row: [half(selects.width), half(selects.height)] };
+      for (const name of names) {
+        const b = await inspector.getByRole('combobox', { name }).boundingBox();
+        if (!b) return null;
+        out[name] = [half(b.x - selects.x), half(b.y - selects.y), half(b.width), half(b.height)];
+      }
+      return out;
+    };
+    const shown = (name: string) => inspector.getByRole('combobox', { name }).locator('.p-pick-face[data-shown]');
+    await expect(inspector.getByRole('combobox', { name: 'Phase' }).locator('.p-pick-face', { hasText: 'The long-named phase to pick' })).toHaveCount(1);
+    const before = (await layout())!;
+    const picks: [string, string][] = [['Phase', 'The long-named phase to pick'], ['Phase', 'Milestones'], ['Label', 'integration'], ['Label', 'ui'], ['Band', 'Next up'], ['Band', 'Soon']];
+    for (const [name, option] of picks) {
+      await pickIn(inspector, name, option);
+      await expect(shown(name)).toHaveText(new RegExp(option + '$'));
+      await expect.poll(layout, { message: 'after ' + name + ': ' + option }).toEqual(before);
+    }
+    // The long phase really is wider than the smallest box, so the test would have caught the shift.
+    expect(before.Phase[2]).toBeGreaterThan(141);
+    // Each button shows one choice at a time, and none of its choices is cut short.
+    for (const name of names) {
+      const button = inspector.getByRole('combobox', { name });
+      await expect(button.locator('.p-pick-face[data-shown]')).toHaveCount(1);
+      type Sized = { scrollWidth: number; clientWidth: number };
+      const cut = await button.locator('.p-pick-text').evaluateAll((els: unknown[]) => (els as Sized[]).filter((el) => el.scrollWidth > el.clientWidth).length);
+      expect(cut, name + ': no choice is cut short').toBe(0);
+    }
   });
 
   test('Park then Unpark from the inspector lands the step in Needs Triage', async ({ page, api, fresh }) => {
