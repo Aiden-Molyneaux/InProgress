@@ -409,6 +409,49 @@ export const MIGRATIONS: string[] = [
   -- it as it would one of his.
   INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
   `,
+  // 21: the lead's desk (#743, plan 2026-11-25-lead-stage-1-the-desk-answers.md). No CHECK on a kind or state column: a
+  // value added in a later stage needs no table rebuild; the allowed values are the union types in src/server/repo/.
+  // desk_items: a thing the lead must deal with (an ask, a session or a send, named by ref), never queued twice while
+  // not done. lead_turns: a turn of the lead on one item, at most one live and one applied per item. lead_decisions: a
+  // decision, beside its lead_events row. lead_sends: an action that leaves InProgress, written before it happens.
+  // usage_readings: a reading of the account's usage gauges, so it has no project.
+  `
+  CREATE TABLE desk_items (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL, ref TEXT NOT NULL, node_id INTEGER, created_at TEXT NOT NULL, due_at TEXT,
+    state TEXT NOT NULL DEFAULT 'open', done_at TEXT, outcome TEXT);
+  CREATE UNIQUE INDEX desk_items_open_once ON desk_items (kind, ref) WHERE state <> 'done';
+  CREATE INDEX desk_items_project_state ON desk_items (project_id, state, created_at);
+  CREATE TABLE lead_turns (id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL REFERENCES desk_items(id) ON DELETE CASCADE,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, way TEXT NOT NULL, model TEXT,
+    leased_at TEXT NOT NULL, lease_until TEXT NOT NULL, started_at TEXT, finished_at TEXT,
+    state TEXT NOT NULL DEFAULT 'leased', verdict TEXT, answer TEXT, why TEXT, kind TEXT, cost_usd REAL,
+    duration_ms INTEGER, tokens_in INTEGER, tokens_out INTEGER, refused_tools TEXT);
+  CREATE UNIQUE INDEX lead_turns_applied_once ON lead_turns (item_id) WHERE state = 'applied';
+  CREATE UNIQUE INDEX lead_turns_live_once ON lead_turns (item_id) WHERE state IN ('leased', 'answered');
+  CREATE INDEX lead_turns_project_leased ON lead_turns (project_id, leased_at);
+  CREATE TABLE lead_decisions (id INTEGER PRIMARY KEY,
+    event_id INTEGER NOT NULL UNIQUE REFERENCES lead_events(id) ON DELETE CASCADE,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    item_id INTEGER REFERENCES desk_items(id) ON DELETE SET NULL,
+    turn_id INTEGER REFERENCES lead_turns(id) ON DELETE SET NULL,
+    kind TEXT NOT NULL, product_ruling INTEGER NOT NULL DEFAULT 0, line TEXT NOT NULL, would_have TEXT,
+    aiden_answer TEXT, aiden_words TEXT, said_where TEXT, said_at TEXT, shown_at TEXT);
+  CREATE INDEX lead_decisions_project ON lead_decisions (project_id, said_at);
+  CREATE TABLE lead_sends (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    item_id INTEGER REFERENCES desk_items(id) ON DELETE SET NULL, kind TEXT NOT NULL, target TEXT NOT NULL,
+    retry_key TEXT, state TEXT NOT NULL DEFAULT 'intended', result TEXT, created_at TEXT NOT NULL, done_at TEXT,
+    seen_at TEXT, body TEXT NOT NULL DEFAULT '');
+  CREATE UNIQUE INDEX lead_sends_retry_once ON lead_sends (retry_key) WHERE retry_key IS NOT NULL;
+  CREATE INDEX lead_sends_project_state ON lead_sends (project_id, state, created_at);
+  CREATE TABLE usage_readings (id INTEGER PRIMARY KEY, at TEXT NOT NULL, source TEXT NOT NULL,
+    turn_id INTEGER REFERENCES lead_turns(id) ON DELETE SET NULL, model TEXT, window_used REAL, window_resets TEXT,
+    week_used REAL, week_resets TEXT, other TEXT);
+  CREATE INDEX usage_readings_at ON usage_readings (at);
+  -- Importing the same file twice adds nothing.
+  CREATE UNIQUE INDEX usage_readings_import_once ON usage_readings (at, source) WHERE source = 'import';
+  -- New tables and indexes only: v1 to v20 builds can still read and write this schema, so a rollback across it works.
+  INSERT INTO meta (key, value) VALUES ('min_reader_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+  `,
 ];
 
 /**
