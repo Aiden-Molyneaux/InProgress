@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -43,6 +43,13 @@ function makeRepo(): string {
   writeFileSync(join(dir, 'src', 'c.txt'), 'three\nfour\n');
   git(dir, 'add', '.');
   git(dir, 'commit', '-q', '-m', 'third');
+  git(dir, 'checkout', '-q', 'main');
+  git(dir, 'branch', 'feature/same');
+  git(dir, 'checkout', '-q', '-b', 'feature/many');
+  for (let i = 0; i < 250; i++) writeFileSync(join(dir, `f${String(i).padStart(3, '0')}.txt`), `${i}\n`);
+  writeFileSync(join(dir, 'caf\u00e9.txt'), 'x\n');
+  git(dir, 'add', '.');
+  git(dir, 'commit', '-q', '-m', 'many');
   git(dir, 'checkout', '-q', 'main');
   return dir;
 }
@@ -140,6 +147,25 @@ describe('the cap', () => {
     expect(cut.split('\n').at(-1)).toMatch(/^\[Cut: /);
     expect(Buffer.byteLength(cut)).toBeLessThan(TOOL_ANSWER_MAX_BYTES + 200);
   });
+
+  it('cuts inside a multibyte character without leaving a broken one', () => {
+    // 40 KB is an even number: after one "a" the two-byte "\u00e9" runs straddle the limit.
+    const cut = capAnswer(`a${'\u00e9'.repeat(TOOL_ANSWER_MAX_BYTES)}`);
+    expect(cut).not.toContain('\uFFFD');
+    expect(cut.split('\n').at(-1)).toMatch(/^\[Cut: /);
+    expect(Buffer.byteLength(cut.split('\n').slice(0, -1).join('\n'))).toBeLessThanOrEqual(TOOL_ANSWER_MAX_BYTES);
+  });
+});
+
+describe('a wrong lead name', () => {
+  it('passes the 409 of the server on with its own words', async () => {
+    const wrong = await connect({ baseUrl: base, as: 'Somebody' });
+    const direct = await (await fetch(`${base}/api/lead/ingame/brief?as=Somebody&instructions=${V}`)).json() as { error: string };
+    const res = await call(wrong, 'brief');
+    expect(res.isError).toBe(true);
+    expect(res.text.startsWith(direct.error)).toBe(true);
+    expect(res.text).not.toBe('InProgress is not answering');
+  });
 });
 
 describe('the start check', () => {
@@ -162,7 +188,7 @@ describe('the git tools', () => {
   it('say whether a branch is merged into main', async () => {
     expect((await call(withRepo, 'branch_merged', { branch: 'feature/done' })).text).toBe('feature/done is merged into main');
     expect((await call(withRepo, 'branch_merged', { branch: 'feature/open' })).text).toBe('feature/open is not merged into main');
-    expect((await call(withRepo, 'branch_merged', { branch: 'feature/nope' })).text).toMatch(/^Could not tell/);
+    expect((await call(withRepo, 'branch_merged', { branch: 'feature/nope' })).text).toBe('No branch named feature/nope');
   });
 
   it('give the size of a change and its files', async () => {
@@ -170,6 +196,31 @@ describe('the git tools', () => {
     expect(res.isError).toBe(false);
     expect(res.text).toMatch(/1 file changed, 2 insertions/);
     expect(res.text.split('\n')).toContain('src/c.txt');
+  });
+
+  it('answer for an unknown branch, an unchanged one and one with many files', async () => {
+    expect((await call(withRepo, 'change_size', { branch: 'feature/nope' })).text).toBe('No branch named feature/nope');
+    expect((await call(withRepo, 'change_size', { branch: 'feature/same' })).text).toBe('feature/same changes nothing against main');
+    const many = (await call(withRepo, 'change_size', { branch: 'feature/many' })).text.split('\n');
+    // The stat line, 200 names, and a line for the rest: 251 files in all, names as they are.
+    expect(many).toHaveLength(1 + 200 + 1);
+    expect(many[0]).toMatch(/251 files changed/);
+    expect(many.at(-1)).toBe('... and 51 more files');
+    // A non-ASCII name is listed as it is, not in git's quoted octal form.
+    expect(many).toContain('café.txt');
+    const small = await call(withRepo, 'change_size', { branch: 'feature/open' });
+    expect(small.text).not.toContain('more files');
+  });
+
+  it('treat a branch whose name differs only in case as another name, where the file system folds case', async () => {
+    const probe = join(repo, 'CaseProbe');
+    writeFileSync(probe, 'x');
+    const folds = existsSync(join(repo, 'caseprobe'));
+    rmSync(probe);
+    if (!folds) return; // A case-sensitive file system: git cannot confuse the two, so there is nothing to show.
+    expect((await call(withRepo, 'branch_exists', { branch: 'Feature/Open' })).text).toBe('Feature/Open does not exist');
+    expect((await call(withRepo, 'branch_merged', { branch: 'Feature/Open' })).text).toBe('No branch named Feature/Open');
+    expect((await call(withRepo, 'change_size', { branch: 'Feature/Open' })).text).toBe('No branch named Feature/Open');
   });
 
   it('say whether a branch exists', async () => {

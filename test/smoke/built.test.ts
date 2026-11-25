@@ -7,6 +7,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import Database from 'better-sqlite3';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
 import type { ProjectSnapshot, TreeNode } from '../../src/core/types';
 import { nodeBinary } from '../../src/cli/claude-config';
 import { createClient } from '../../src/lib/client';
@@ -399,7 +400,7 @@ describe('built artifacts', () => {
     const id = Number(/^a(\d+) raised on #/.exec(lines(asked.stdout)[0])![1]);
     setLead('Progresser');
     try {
-      const WHO = ['--as', 'Progresser', '--instructions', '5'];
+      const WHO = ['--as', 'Progresser', '--instructions', String(LEAD_INSTRUCTIONS_VERSION)];
       const decided = cli('lead', 'decide', 'smoke', `a${id}`, '--answer', 'Inter', '--reason', 'Already in the repo', ...WHO);
       expect(decided).toMatchObject({ status: 0, stderr: '' });
       const decision = /^Decided a\d+: decision (d\d+)\./.exec(lines(decided.stdout)[0]);
@@ -492,5 +493,13 @@ describe('built artifacts', () => {
     expect(doc.stdout).toContain(`Started InProgress at ${base}`);
     expect(doc.stdout).not.toContain('✗');
     expect(doc.status).toBe(0);
+  });
+
+  it('the lead tool server refuses to start without its home, and says why', () => {
+    const { INPROGRESS_HOME: _home, ...bare } = env;
+    const r = spawnSync(process.execPath, [bin('lead/tools.js'), 'smoke'], { env: { ...bare, INPROGRESS_PORT: '4411', INPROGRESS_LEAD_AS: 'Progresser' }, encoding: 'utf8' });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('INPROGRESS_HOME is not set');
+    expect(r.stdout).toBe('');
   });
 });

@@ -35,7 +35,7 @@ type ToolResult = { content: { type: 'text'; text: string }[]; isError?: boolean
 export function capAnswer(text: string): string {
   const bytes = Buffer.from(text, 'utf8');
   if (bytes.length <= TOOL_ANSWER_MAX_BYTES) return text;
-  const kept = bytes.subarray(0, TOOL_ANSWER_MAX_BYTES).toString('utf8').replace(/�+$/, '');
+  const kept = bytes.subarray(0, TOOL_ANSWER_MAX_BYTES).toString('utf8').replace(/\uFFFD+$/, '');
   return `${kept}\n[Cut: the answer was ${bytes.length} bytes and the limit is ${TOOL_ANSWER_MAX_BYTES}.]`;
 }
 
@@ -60,16 +60,28 @@ const ok = (text: string): ToolResult => ({ content: [{ type: 'text', text: capA
 const fail = (text: string): ToolResult => ({ isError: true, content: [{ type: 'text', text }] });
 const enc = encodeURIComponent;
 
-/** Runs git without a shell. Resolves with the exit code and output: a non-zero exit is an answer, not a throw. */
+/**
+ * Runs git without a shell, as `git -C <repo>` and with no cwd option: Windows looks in the working directory for git.exe
+ * before PATH, so a git.exe inside the repository's tree must never be found. Resolves with the exit code and output: a non-zero exit is an answer, not a throw.
+ */
 function git(repo: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    execFile('git', args, { cwd: repo, timeout: GIT_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024, windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }, (err, stdout, stderr) => {
+    execFile('git', ['-C', repo, ...args], { timeout: GIT_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024, windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }, (err, stdout, stderr) => {
       if (!err) return resolve({ code: 0, stdout, stderr });
       const code = (err as { code?: unknown }).code;
       if (typeof code === 'number') return resolve({ code, stdout, stderr });
       reject(new Error(`git ${args[0]} did not finish: ${err.message}`));
     });
   });
+}
+
+/**
+ * Whether this exact branch name is a local branch. Loose refs are files, and on NTFS `Feature/X` finds `feature/x`, so
+ * git's own lookup is not enough: the ref git lists must be spelled exactly as asked.
+ */
+export async function exactBranch(repo: string, name: string): Promise<boolean> {
+  const r = await git(repo, ['for-each-ref', '--format=%(refname)', `refs/heads/${name}`]);
+  return r.code === 0 && r.stdout.split('\n').some((l) => l.trim() === `refs/heads/${name}`);
 }
 
 /** The lead's read-only tools: eight reads, no write of any kind, nothing that starts InProgress. */
@@ -103,12 +115,13 @@ export function createLeadToolsServer(o: LeadToolsOptions): McpServer {
     async (a: { id: number }) => (await o.client.get<{ text: string }>(`/api/lead/${project}/step/${a.id}?${asked}`)).text);
   tool('resource', 'One document stored in InProgress, as `lead resource` prints it.', { id: z.number().int().positive().describe('The resource number: the number after "r"') },
     async (a: { id: number }) => (await o.client.get<{ text: string }>(`/api/lead/${project}/resource/${a.id}?${asked}`)).text);
-  tool('search', 'Find steps and resources in this project by text.', { query: z.string().min(1) },
+  tool('search', 'Find steps and resources in this project by text.', { query: z.string().min(1).max(200) },
     async (a: { query: string }) => formatSearch(await o.client.get<SearchResult>(`/api/search?project=${project}&q=${enc(a.query)}`)));
 
   const branchArg = { branch: z.string().describe('A local branch name, e.g. feature/tabs') };
   tool('branch_merged', 'Whether a branch is merged into main.', branchArg, (a: { branch: string }) =>
     onBranch(a.branch, async (repo) => {
+      if (!(await exactBranch(repo, a.branch))) return `No branch named ${a.branch}`;
       const r = await git(repo, ['merge-base', '--is-ancestor', `refs/heads/${a.branch}`, 'refs/heads/main']);
       if (r.code === 0) return `${a.branch} is merged into main`;
       if (r.code === 1) return `${a.branch} is not merged into main`;
@@ -116,21 +129,19 @@ export function createLeadToolsServer(o: LeadToolsOptions): McpServer {
     }));
   tool('change_size', "How big a branch's change against main is: the shortstat and the files it touches (at most 200 listed).", branchArg, (a: { branch: string }) =>
     onBranch(a.branch, async (repo) => {
+      if (!(await exactBranch(repo, a.branch))) return `No branch named ${a.branch}`;
       const range = `refs/heads/main...refs/heads/${a.branch}`;
-      const [stat, names] = await Promise.all([git(repo, ['diff', '--shortstat', range]), git(repo, ['diff', '--name-only', range])]);
+      const [stat, names] = await Promise.all([git(repo, ['diff', '--shortstat', range]), git(repo, ['diff', '--name-only', '-z', range])]);
       const bad = [stat, names].find((r) => r.code !== 0);
       if (bad) return `Could not tell: git said ${bad.stderr.trim() || `exit ${bad.code}`}`;
-      const files = names.stdout.split('\n').filter(Boolean);
+      const files = names.stdout.split('\0').filter(Boolean);
       const lines = [stat.stdout.trim() || `${a.branch} changes nothing against main`, ...files.slice(0, FILES_MAX)];
       if (files.length > FILES_MAX) lines.push(`... and ${files.length - FILES_MAX} more files`);
       return lines.join('\n');
     }));
   tool('branch_exists', 'Whether a local branch of that name exists.', branchArg, (a: { branch: string }) =>
     onBranch(a.branch, async (repo) => {
-      const r = await git(repo, ['rev-parse', '--verify', '--quiet', `refs/heads/${a.branch}`]);
-      if (r.code === 0) return `${a.branch} exists`;
-      if (r.code === 1) return `${a.branch} does not exist`;
-      return `Could not tell: git said ${r.stderr.trim() || `exit ${r.code}`}`;
+      return `${a.branch} ${(await exactBranch(repo, a.branch)) ? 'exists' : 'does not exist'}`;
     }));
 
   return server;

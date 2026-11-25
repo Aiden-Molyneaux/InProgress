@@ -12,7 +12,8 @@ async function main(): Promise<void> {
   const start = checkLeadToolsStart(process.env, process.argv.slice(2));
   if (!start.ok) {
     process.stderr.write(`${start.error}\n`);
-    process.exit(2);
+    process.exitCode = 2;
+    return;
   }
   const client = createClient({ baseUrl: baseUrl(start.port) });
   const server = createLeadToolsServer({ slug: start.slug, client, repo: start.repo, as: start.as, instructions: start.instructions });
