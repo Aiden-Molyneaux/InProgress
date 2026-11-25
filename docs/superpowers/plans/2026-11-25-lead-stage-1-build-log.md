@@ -103,3 +103,13 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   typecheck and 2364 unit tests green.
 - The start check also asks for `INPROGRESS_LEAD_AS` (the lead's name for the reads' lead check). The runner sets it.
 - The entry's exit 2 is tested through its check function, not by spawning the built entry; the scenes' build runs it.
+- Murr on task 2 (Opus, risk list): sound, 0 blocker, 0 major, 3 minor. He hit his 40-turn limit before reporting and
+  was resumed once to write it. Fixes sent to the same Sev: the raise path held to the sweep's rule; a deleted step
+  closes its asks' items; archived projects skipped; the producers moved into `src/server/repo/` (no import cycle
+  through `repo/asks`); one switch reader; a plain join never makes a second item; two indexes added to migration 21
+  (it has not shipped); a stopped item closes when its session moves again.
+- Plan (scene 5) says turning the round back on takes what waited, oldest first. Did: the bound for asks and stops is
+  the first time the round was ever switched on, not the newest. Because an ask raised while the round was off after
+  that is the desk's, and only asks older than the first switch-on are task 17's old asks.
+- Left for task 14: the window's switch list and the brief's switch line are written by hand (`web/src/lead/leadDesk.ts`,
+  `src/server/lead-text.ts:137`) and show no round yet; the rules text gains the round with version 7 (task 11).
