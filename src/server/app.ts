@@ -7,6 +7,7 @@ import type { BackupRunner } from './backup-runner';
 import { ApiError } from './errors';
 import type { RelaySend } from './lead-relay';
 import type { StartThread } from './lead-start';
+import type { Sender } from './lead/sends';
 import type { LandingDeps } from './lead/landing';
 import type { DesktopSession, OpenDesktopResult } from './open-desktop';
 import { registerAskRoutes } from './routes/asks';
@@ -42,6 +43,8 @@ export interface AppOptions {
   t3Send?: RelaySend;
   /** Starts a T3 Code thread. Replaceable so tests never run the t3 CLI. */
   t3Start?: StartThread;
+  /** The server's sender (src/server/lead/sends.ts), shared with its minute check. Without it the app makes its own. */
+  sender?: Sender;
   /** How the hold route's landing check reads git and a remote's visibility. Replaceable so tests never run gh. */
   landing?: LandingDeps;
 }
@@ -126,7 +129,7 @@ export function buildApp(opts: AppOptions): FastifyInstance {
   registerWriteRoutes(app, opts.ctx, requireToken);
   registerSessionRoutes(app, opts.ctx, requireToken);
   registerAskRoutes(app, opts.ctx, requireToken);
-  registerLeadRoutes(app, opts.ctx, requireToken, opts.t3Send, opts.t3Start, opts.landing);
+  registerLeadRoutes(app, opts.ctx, requireToken, opts.t3Send, opts.t3Start, opts.landing, opts.sender);
   registerSse(app, opts.ctx);
   registerWindowRoutes(app, opts.ctx, requireUi, opts.openDesktop);
   registerUi(app, opts, requireToken, requireUi);

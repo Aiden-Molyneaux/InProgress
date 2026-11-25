@@ -2,7 +2,9 @@ import { stamp } from '../../core/span';
 import type { Project } from '../../core/types';
 import type { Ctx } from '../db/tx';
 import type { DeskItem } from '../repo/desk';
+import { getSend } from '../repo/leadSends';
 import { stuckRequestOf } from './hold';
+import { markedTitle, parseStartBody, sendMarker } from './sends';
 
 /**
  * The project's standing rulings, as the desk turn's last section reads them. '' until task 10 of lead stage 1 (#743)
@@ -43,6 +45,8 @@ Your tools (read-only, from the inprogress-lead server):
   branch_merged <branch>: whether a branch is merged into main
   change_size <branch>: how big a branch's change against main is, and the files it touches
   branch_exists <branch>: whether a local branch of that name exists
+  threads: this project's T3 Code threads, newest first, and whether each holds a first message
+  thread <id>: one T3 Code thread and its messages
 Use at most eight tool calls.
 
 Answer in exactly four lines, nothing else:
@@ -77,6 +81,27 @@ const KIND_WORDS: Record<DeskItem['kind'], string> = {
   promise_due: 'A promise of yours is past its time.',
 };
 
+/** An unknown send in plain words, and how to answer it: what was sent, where, its marker, its text and its time. */
+function unknownSendLines(ctx: Ctx, item: DeskItem): string[] {
+  const send = getSend(ctx.db, Number(item.ref));
+  if (send === undefined) return [`Its send s${item.ref} is no longer in the record.`];
+  const start = send.kind === 'start' ? parseStartBody(send.body) : undefined;
+  const lines = [
+    `The send s${send.id}: a ${send.kind}, to ${send.kind === 'start' ? `the folder ${send.target}` : `thread ${send.target}`}, written at ${stamp(send.createdAt)}.`,
+    'It may have reached T3 Code: its answer was lost, and two looks did not find it.',
+  ];
+  if (send.kind === 'start') lines.push(`Its thread's title ends with the marker ${sendMarker(send.id)}${start ? `: "${markedTitle(start.title, send.id)}"` : ''}.`);
+  lines.push(send.kind === 'start' ? 'Its first message:' : 'Its text:', start?.message ?? send.body);
+  lines.push(
+    'Read threads, and the thread that may be it, then answer DECIDE with KIND: TECHNICAL and ANSWER one of:',
+    'FOUND <thread id>: the send happened (for a start, the thread holds its first message).',
+    'FIRST <thread id>: the thread was started but holds no first message; it is sent once.',
+    'NOT FOUND: it never happened; the step can be started again.',
+    'Or answer AIDEN when you cannot tell. Nothing is retried.',
+  );
+  return lines;
+}
+
 /**
  * The desk item in plain words, as the turn's user message: what it is, the ask's text (or, for a stop, the session and
  * its step), the step's number and title, the session, when it was raised and its limit, in local time. A read.
@@ -95,6 +120,8 @@ export function deskUserMessage(ctx: Ctx, item: DeskItem): string {
     lines.push('It waits on a permission prompt to use a tool, and runs it or not by your verdict.', `The tool: ${stuck.toolName}`, `Its input: ${stuck.input}`);
     lines.push('Answer DECIDE with ANSWER starting ALLOW: or DENY: and your reason, or AIDEN.');
     sessionId = stuck.sessionId;
+  } else if (item.kind === 'unknown_send') {
+    lines.push(...unknownSendLines(ctx, item));
   } else if (/^\d+$/.test(item.ref)) {
     const ask = ctx.db.prepare('SELECT id, kind, text, session_id, raised_at, owner FROM asks WHERE id = ?').get(Number(item.ref)) as AskLine | undefined;
     if (ask === undefined) {

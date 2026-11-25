@@ -149,8 +149,8 @@ describe('leadRelay', () => {
     const cases: [unknown, string][] = [
       [new T3Unavailable('t3 thread send failed: exit 1: no such thread.'), 'Not delivered: t3 thread send failed: exit 1: no such thread.'],
       [new TypeError('threadId is empty'), 'Not delivered: threadId is empty.'],
-      [new Error(`line one\n\n  line two ${'y'.repeat(400)}`), `Not delivered: line one line two ${'y'.repeat(300 - 'line one line two '.length)}.`],
-      [new Error('ends in dots ...  '), 'Not delivered: ends in dots.'],
+      [new T3Unavailable(`line one\n\n  line two ${'y'.repeat(400)}`), `Not delivered: line one line two ${'y'.repeat(300 - 'line one line two '.length)}.`],
+      [new T3Unavailable('ends in dots ...  '), 'Not delivered: ends in dots.'],
     ];
     for (const [error, sentence] of cases) {
       const send = vi.fn<RelaySend>(async () => {

@@ -8,10 +8,18 @@ import { badGateway, conflict } from './errors';
 import { logLeadEvent, requireLead } from './lead';
 import { requireNode } from './repo/nodes';
 import { readProjectSessions } from './repo/sessions';
+import { createSender, type Sender } from './lead/sends';
+import { intendSend } from './repo/leadSends';
 import { T3Unavailable, t3Send } from './t3';
 
 /** Sends a message to a T3 Code thread. Injected, so no test runs the t3 CLI. */
 export type RelaySend = (threadId: string, message: string) => Promise<void>;
+
+/** A sender of its own for a caller that passes a bare send: it carries out only the sends it is asked to perform. */
+export function senderForRelay(ctx: Ctx, send: RelaySend): Sender {
+  const none = () => Promise.reject(new T3Unavailable('this sender does not read T3 Code'));
+  return createSender(ctx, { t3: { list: none, show: none, start: none, send } });
+}
 
 /** The answer to a send that timed out: the message may be in the thread, so it is not sent again. */
 export const RELAY_UNKNOWN = 'It may have been delivered. Not retried.';
@@ -37,8 +45,9 @@ export async function leadRelay(
   as: string,
   instructions: number,
   input: { stepId: number; message: string },
-  send: RelaySend = t3Send,
+  via: RelaySend | Sender = t3Send,
 ): Promise<{ text: string; sessionId: string }> {
+  const sender = typeof via === 'function' ? senderForRelay(ctx, via) : via;
   const project = requireLead(ctx, ref, as, instructions, true);
   // requireLead has matched `as` against the stored name, so it is set.
   const name = project.lead as string;
@@ -54,17 +63,18 @@ export async function leadRelay(
 
   let kind: LeadEventKind;
   let reason = '';
-  try {
-    await send(session.t3ThreadId, relayText(name, project.name, input.message));
-    kind = 'relay';
-  } catch (err) {
-    if (err instanceof T3Unavailable && err.outcomeUnknown) kind = 'relay_unknown';
-    else {
-      kind = 'relay_failed';
-      reason = reasonOf(err);
-      console.error(`InProgress: a relay to session ${session.id} was not delivered: ${reason}`);
-    }
-  }
+  // Written as intended before the send, and carried out by the sender: a relay that may have reached the thread is only
+  // ever looked up by its text there, never sent again.
+  const intended = write(ctx, actor, () =>
+    intendSend(ctx.db, { projectId: project.id, kind: 'relay', target: session.t3ThreadId as string, body: relayText(name, project.name, input.message) }, ctx.now()),
+  );
+  const outcome = await sender.perform(intended.id, { clearIfNotSent: true });
+  if (outcome.state === 'done') kind = 'relay';
+  else if (outcome.state === 'cleared' || outcome.state === 'waiting') {
+    kind = 'relay_failed';
+    reason = reasonOf(outcome.reason);
+    console.error(`InProgress: a relay to session ${session.id} was not delivered: ${reason}`);
+  } else kind = 'relay_unknown';
   try {
     write(ctx, actor, () => logLeadEvent(ctx, { projectId: project.id, lead: name, instructions, kind, nodeId: node.id, sessionId: session.id, text: input.message }));
   } catch (err) {

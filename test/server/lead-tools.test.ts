@@ -99,9 +99,9 @@ const asked = `as=Progresser&instructions=${V}`;
 const get = async (path: string) => ((await (await fetch(`${base}${path}`)).json()) as { text: string }).text;
 
 describe('the lead tools', () => {
-  it('offer these eight tools and no others', async () => {
+  it('offer these ten tools and no others', async () => {
     const names = (await live.listTools()).tools.map((t) => t.name).sort();
-    expect(names).toEqual(['branch_exists', 'branch_merged', 'brief', 'change_size', 'desk', 'resource', 'search', 'step'].sort());
+    expect(names).toEqual(['branch_exists', 'branch_merged', 'brief', 'change_size', 'desk', 'resource', 'search', 'step', 'thread', 'threads'].sort());
   });
 
   it('read what the matching lead reads return', async () => {

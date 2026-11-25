@@ -328,3 +328,14 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   but a letter or digit, so `deploy-check` is held too and goes to the landing check; any error but "no such file"
   fails closed). Left as owner-calls for the receipt: while held.json is busy the playbook's Held lines are not seen
   (a window of under a tenth of a second, server up); `npm run "deploy"` and `npm run -s deploy` start no hook.
+
+## Task 8: a start happens once
+
+- Built by Sev (Opus). typecheck and 2740 unit tests green; P2's six cases pass against an in-process stand-in T3.
+  Deviations, Sev's, accepted: `lead start` and `lead relay` write the intended row in a write of its own before the
+  call and their events after, as before (the events carry the outcome); a start or relay that never reached T3 is
+  cleared, not retried, so "Not started" stays true and the step can be started again; a TypeError from t3.ts (an
+  argument it refuses) counts as never sent; the lead's `threads` read shows the ten newest threads' first-message
+  state (T3 lists no creation time); a Voice line cannot be looked up, so it goes unknown after two looks.
+- Calls on his open questions: a sender-owned send that T3 refuses as an argument (a bad stored target) is cleared
+  with one log line, not retried every minute; the ten newest threads are enough for the minute of a lost start.

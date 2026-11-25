@@ -10,10 +10,18 @@ import { intentHeadlines } from './lead-text';
 import { requireNode } from './repo/nodes';
 import { liveSessionUnder, readProjectSessions } from './repo/sessions';
 import { parkedAncestor } from './repo/shelved';
-import { T3Unavailable, t3Start, type T3Options } from './t3';
+import { createSender, type Sender, type StartBody, type StartOptions } from './lead/sends';
+import { intendSend } from './repo/leadSends';
+import { T3Unavailable, t3Send, t3Start, type T3Options } from './t3';
 
 /** Starts a T3 Code thread in a folder with a first message. Injected, so no test runs the t3 CLI. */
-export type StartThread = (project: string, message: string, opts: { title?: string }) => Promise<{ threadId: string }>;
+export type StartThread = (project: string, message: string, opts: StartOptions) => Promise<{ threadId: string }>;
+
+/** A sender of its own for a caller that passes a bare start: it carries out only the sends it is asked to perform. */
+export function senderForStart(ctx: Ctx, start: StartThread): Sender {
+  const none = () => Promise.reject(new T3Unavailable('this sender does not read T3 Code'));
+  return createSender(ctx, { t3: { list: none, show: none, start, send: t3Send } });
+}
 
 /** The answer to a start that timed out: a thread may exist, so it is not started again. */
 export const START_UNKNOWN = 'A thread may have been started. Do not run it again: read the brief and tell Aiden.';
@@ -51,8 +59,9 @@ export async function leadStart(
   as: string,
   instructions: number,
   input: { stepId: number; aidenWords?: string },
-  start: StartThread = defaultStart(),
+  via: StartThread | Sender = defaultStart(),
 ): Promise<{ text: string; threadId: string }> {
+  const sender = typeof via === 'function' ? senderForStart(ctx, via) : via;
   const project = requireLead(ctx, ref, as, instructions, true);
   if (underWay.has(project.id)) throw conflict(START_UNDER_WAY);
   // requireLead has matched `as` against the stored name, so it is set.
@@ -70,14 +79,17 @@ export async function leadStart(
 
   const nowMs = Date.parse(ctx.now());
   // A live session may carry a thread this step was started with and not yet have claimed the step (its focus is elsewhere).
+  // The starts are lead_sends rows (src/server/lead/sends.ts): a cleared one never reached T3 Code and holds nothing.
   const carried = ctx.db
-    .prepare("SELECT e.text FROM lead_events e WHERE e.project_id = ? AND e.node_id = ? AND e.kind = 'start' ORDER BY e.at DESC, e.id DESC")
+    .prepare("SELECT result FROM lead_sends WHERE project_id = ? AND kind = 'start' AND state = 'done' AND json_extract(body, '$.nodeId') = ? ORDER BY created_at DESC, id DESC")
     .pluck()
     .all(project.id, node.id) as string[];
   const holder = readProjectSessions(ctx, project.id).find((s) => isLive(s, nowMs) && s.t3ThreadId !== null && carried.includes(s.t3ThreadId));
   if (holder !== undefined) throw conflict(`${ref_} already has a thread open (${holder.t3ThreadId}) that has not claimed it. Tell Aiden.`);
   const recent = ctx.db
-    .prepare("SELECT at FROM lead_events WHERE project_id = ? AND node_id = ? AND kind IN ('start', 'start_unknown') AND at >= ? ORDER BY at DESC, id DESC LIMIT 1")
+    .prepare(
+      "SELECT created_at AS at FROM lead_sends WHERE project_id = ? AND kind = 'start' AND state <> 'cleared' AND json_extract(body, '$.nodeId') = ? AND created_at >= ? ORDER BY created_at DESC, id DESC LIMIT 1",
+    )
     .get(project.id, node.id, new Date(nowMs - CLAIM_WINDOW_MS).toISOString()) as { at: string } | undefined;
   if (recent !== undefined) {
     const minutes = Math.max(1, Math.round((nowMs - Date.parse(recent.at)) / MINUTE_MS));
@@ -94,9 +106,9 @@ export async function leadStart(
   const live = readProjectSessions(ctx, project.id).filter((s) => isLive(s, nowMs)).length;
   const unclaimed = ctx.db
     .prepare(
-      `SELECT COUNT(*) FROM lead_events e
-        WHERE e.project_id = ? AND e.kind IN ('start', 'start_unknown') AND e.at >= ?
-          AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.t3_thread_id = e.text)`,
+      `SELECT COUNT(*) FROM lead_sends e
+        WHERE e.project_id = ? AND e.kind = 'start' AND e.state <> 'cleared' AND e.created_at >= ?
+          AND (e.result IS NULL OR NOT EXISTS (SELECT 1 FROM sessions s WHERE s.t3_thread_id = e.result))`,
     )
     .pluck()
     .get(project.id, new Date(nowMs - CLAIM_WINDOW_MS).toISOString()) as number;
@@ -110,7 +122,7 @@ export async function leadStart(
     const open = aidenOpenAsks(ctx, project.id).project;
     if (open >= AIDEN_OPEN_LIMIT) throw conflict(`Aiden has ${open} open asks in this project, and the limit is ${AIDEN_OPEN_LIMIT}. Bring those to him first.`);
     const own = ctx.db
-      .prepare("SELECT COUNT(*) FROM lead_events WHERE project_id = ? AND kind IN ('start', 'start_unknown') AND aiden_words IS NULL AND at >= ?")
+      .prepare("SELECT COUNT(*) FROM lead_sends WHERE project_id = ? AND kind = 'start' AND state <> 'cleared' AND json_extract(body, '$.aidenWords') IS NULL AND created_at >= ?")
       .pluck()
       .get(project.id, new Date(nowMs - DAY_MS).toISOString()) as number;
     if (own >= LEAD_STARTS_PER_DAY) {
@@ -135,16 +147,28 @@ export async function leadStart(
   // Set before the first await, so a second start of the project that comes in while this one waits is refused.
   underWay.add(project.id);
   try {
-    try {
-      threadId = (await start(folder, message, { title: startTitle(node.id, node.title) })).threadId;
+    // Written as intended before the start, and carried out by the sender: a start that may have reached T3 Code is only
+    // ever looked up by the marker in its title, never started again.
+    const body: StartBody = {
+      message,
+      title: startTitle(node.id, node.title),
+      provider: named(process.env.INPROGRESS_LEAD_PROVIDER, LEAD_START_PROVIDER),
+      model: named(process.env.INPROGRESS_LEAD_MODEL, LEAD_START_MODEL),
+      nodeId: node.id,
+      ...(input.aidenWords === undefined ? {} : { aidenWords: input.aidenWords }),
+    };
+    const send = write(ctx, actor, () => intendSend(ctx.db, { projectId: project.id, kind: 'start', target: folder, body: JSON.stringify(body) }, ctx.now()));
+    const outcome = await sender.perform(send.id, { clearIfNotSent: true });
+    if (outcome.state === 'done') {
+      threadId = outcome.result;
       kind = 'start';
-    } catch (err) {
-      reason = reasonOf(err);
-      if (err instanceof T3Unavailable && err.outcomeUnknown) kind = 'start_unknown';
-      else {
-        kind = 'start_failed';
-        console.error(`InProgress: a thread for #${node.id} was not started: ${reason}`);
-      }
+    } else if (outcome.state === 'cleared' || outcome.state === 'waiting') {
+      reason = reasonOf(outcome.reason);
+      kind = 'start_failed';
+      console.error(`InProgress: a thread for #${node.id} was not started: ${reason}`);
+    } else {
+      reason = outcome.state === 'lookup' ? reasonOf(outcome.reason) : 'the start was no longer intended';
+      kind = 'start_unknown';
     }
     try {
       write(ctx, actor, (record) => {

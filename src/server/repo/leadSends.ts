@@ -119,3 +119,13 @@ export function sendsInState(db: DB, projectId: number, state: SendState): LeadS
     .prepare('SELECT * FROM lead_sends WHERE project_id = ? AND state = ? ORDER BY created_at, id')
     .all(projectId, state) as LeadSendRow[]).map(toLeadSend);
 }
+
+/** Every project's intended sends, oldest first: what the sender has still to carry out or look up. */
+export function intendedSends(db: DB): LeadSend[] {
+  return (db.prepare("SELECT * FROM lead_sends WHERE state = 'intended' ORDER BY created_at, id").all() as LeadSendRow[]).map(toLeadSend);
+}
+
+/** Rewrites an intended send's text, inside the write that made it: a body that names its own id is written after the insert. */
+export function setSendBody(db: DB, id: number, body: string): void {
+  db.prepare("UPDATE lead_sends SET body = ? WHERE id = ? AND state = 'intended'").run(body, id);
+}

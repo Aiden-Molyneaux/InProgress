@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
+import { LEAD_INSTRUCTIONS_VERSION, LEAD_START_MODEL, LEAD_START_PROVIDER } from '../../src/core/lead';
+import { markedTitle } from '../../src/server/lead/sends';
 import { startHandoff, startTitle } from '../../src/core/lead-start';
 import { buildApp } from '../../src/server/app';
 import { listLeadEvents, noLeadNamed, outOfDate } from '../../src/server/lead';
@@ -90,7 +91,8 @@ describe('leadStart: the start', () => {
       phase: 'Store release.',
       onAidensWord: true,
     });
-    expect(s.start).toHaveBeenCalledWith(BOUND, handoff, { title: startTitle(s.signing.id, 'Play app signing') });
+    // The title ends with the send's marker (the first send: s1), and the provider and model are the send's own.
+    expect(s.start).toHaveBeenCalledWith(BOUND, handoff, { title: markedTitle(startTitle(s.signing.id, 'Play app signing'), 1), provider: LEAD_START_PROVIDER, model: LEAD_START_MODEL });
     expect(res.text).toBe(`Started a thread for #${s.signing.id} Play app signing: ${res.threadId}. It claims the step on its first turn.`);
     const events = listLeadEvents(s.ctx, s.project.slug).filter((e) => e.kind === 'start');
     expect(events).toHaveLength(1);
@@ -192,7 +194,7 @@ describe('leadStart: the refusals, each with its sentence and nothing started or
 
   it('is free again after a start that failed', async () => {
     const boom = vi.fn<StartThread>(async () => {
-      throw new Error('nope');
+      throw new T3Unavailable('nope');
     });
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const s = setup(boom);
@@ -209,11 +211,11 @@ describe('leadStart: the refusals, each with its sentence and nothing started or
       message: `A thread was started for #${s.signing.id} Play app signing 1 minute ago. Give it time to claim the step.`,
     });
     const old = new Date(Date.parse(s.ctx.now()) - 11 * 60 * 1000).toISOString();
-    s.ctx.db.prepare("UPDATE lead_events SET at = ? WHERE kind = 'start'").run(old);
+    s.ctx.db.prepare("UPDATE lead_sends SET created_at = ? WHERE kind = 'start'").run(old);
     await expect(s.run(s.signing.id, WORDS)).resolves.toMatchObject({ threadId: expect.any(String) });
     // Five minutes: the sentence counts them.
     const five = new Date(Date.parse(s.ctx.now()) - 5 * 60 * 1000).toISOString();
-    s.ctx.db.prepare("UPDATE lead_events SET at = ? WHERE kind = 'start' AND id = (SELECT MAX(id) FROM lead_events)").run(five);
+    s.ctx.db.prepare("UPDATE lead_sends SET created_at = ? WHERE kind = 'start' AND id = (SELECT MAX(id) FROM lead_sends)").run(five);
     expect((await s.refused(() => s.run(s.signing.id, WORDS))).message).toBe(`A thread was started for #${s.signing.id} Play app signing 5 minutes ago. Give it time to claim the step.`);
   });
 
@@ -264,7 +266,7 @@ describe('leadStart: the refusals, each with its sentence and nothing started or
       status: 409,
       message: '3 sessions are in flight (3 started and not claimed yet), and the limit is 3. Wait for one to end.',
     });
-    s.ctx.db.prepare("UPDATE lead_events SET at = ? WHERE kind = 'start_unknown'").run(new Date(Date.parse(s.ctx.now()) - 11 * 60 * 1000).toISOString());
+    s.ctx.db.prepare("UPDATE lead_sends SET created_at = ? WHERE kind = 'start'").run(new Date(Date.parse(s.ctx.now()) - 11 * 60 * 1000).toISOString());
     expect(await s.refused(() => s.run(s.sound.id))).toMatchObject({
       status: 409,
       message: 'You have started 3 threads on your own judgment in the last 24 hours, and the limit is 3. Ask Aiden.',
@@ -274,7 +276,7 @@ describe('leadStart: the refusals, each with its sentence and nothing started or
   it('refuses a step while a live session carries the thread it was started with, whatever that session has claimed', async () => {
     const s = setup();
     const started = await s.run(s.signing.id, WORDS);
-    s.ctx.db.prepare("UPDATE lead_events SET at = ? WHERE kind = 'start'").run(new Date(Date.parse(s.ctx.now()) - 11 * 60 * 1000).toISOString());
+    s.ctx.db.prepare("UPDATE lead_sends SET created_at = ? WHERE kind = 'start'").run(new Date(Date.parse(s.ctx.now()) - 11 * 60 * 1000).toISOString());
     s.session('s1', s.dark.id, started.threadId);
     expect(await s.refused(() => s.run(s.signing.id, WORDS))).toMatchObject({
       status: 409,
@@ -322,7 +324,7 @@ describe('leadStart: on the lead own judgment (no words of Aiden)', () => {
     const steps = [s.signing, s.privacy, s.dark];
     for (const step of steps) await s.run(step.id);
     // A start on his word does not count against the cap; it needs a free slot in flight, so end the sessions' room first.
-    s.ctx.db.prepare("UPDATE lead_events SET at = ? WHERE kind = 'start'").run(new Date(Date.parse(s.ctx.now()) - 11 * 60 * 1000).toISOString());
+    s.ctx.db.prepare("UPDATE lead_sends SET created_at = ? WHERE kind = 'start'").run(new Date(Date.parse(s.ctx.now()) - 11 * 60 * 1000).toISOString());
     expect(await s.refused(() => s.run(s.sound.id))).toMatchObject({
       status: 409,
       message: 'You have started 3 threads on your own judgment in the last 24 hours, and the limit is 3. Ask Aiden.',
@@ -331,8 +333,8 @@ describe('leadStart: on the lead own judgment (no words of Aiden)', () => {
     await expect(s.run(s.sound.id, WORDS)).resolves.toBeDefined();
     // A start 25 hours old no longer counts: with the oldest of the three that old, a fourth on his own judgment is allowed.
     const [extra] = addNodes(s.ctx, 'test', { parentId: s.project.rootNodeId, nodes: [{ title: 'Extra', what: 'w', why: 'y' }] });
-    s.ctx.db.prepare("UPDATE lead_events SET at = ? WHERE kind = 'start'").run(new Date(Date.parse(s.ctx.now()) - 11 * 60 * 1000).toISOString());
-    s.ctx.db.prepare("UPDATE lead_events SET at = ? WHERE kind = 'start' AND id = (SELECT MIN(id) FROM lead_events WHERE kind = 'start')").run(new Date(Date.parse(s.ctx.now()) - 25 * 60 * 60 * 1000).toISOString());
+    s.ctx.db.prepare("UPDATE lead_sends SET created_at = ? WHERE kind = 'start'").run(new Date(Date.parse(s.ctx.now()) - 11 * 60 * 1000).toISOString());
+    s.ctx.db.prepare("UPDATE lead_sends SET created_at = ? WHERE kind = 'start' AND id = (SELECT MIN(id) FROM lead_sends WHERE kind = 'start')").run(new Date(Date.parse(s.ctx.now()) - 25 * 60 * 60 * 1000).toISOString());
     await expect(s.run(extra.id)).resolves.toBeDefined();
   });
 });

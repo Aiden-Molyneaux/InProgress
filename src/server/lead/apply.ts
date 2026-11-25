@@ -3,16 +3,22 @@ import { leadLine } from '../../core/relay';
 import { askTag } from '../../core/types';
 import type { Ctx, RecordEvent } from '../db/tx';
 import { decideInWrite } from '../lead-commands';
-import { logLeadEvent } from '../lead';
+import { leadFolders, logLeadEvent } from '../lead';
 import { clearInWrite } from '../repo/asks';
 import type { DeskItem } from '../repo/desk';
 import { askOf, bringItem, bringNext, broughtOpen, t3ThreadOf, tellAidens } from '../repo/deskBring';
 import { addDecision } from '../repo/leadDecisions';
 import type { LeadTurn, TurnEffect } from '../repo/leadTurns';
 import { insertLeadEvent } from '../repo/leadEvents';
-import { intendSend } from '../repo/leadSends';
+import { getSend, intendSend, moveSend, setSendBody } from '../repo/leadSends';
 import { getProjectById } from '../repo/projects';
 import { permissionLine, stuckRequestOf } from './hold';
+import { parseStartBody, recordStartInWrite, sendMarker } from './sends';
+
+/** What the apply reads outside the database: whether the lead's `threads` read listed a thread (the sender remembers it). */
+export interface ApplyDeps {
+  listed(project: string, threadId: string): boolean;
+}
 
 /** What a CARD tells the session until the landing check (task 6) answers in its place. */
 export const cardAnswer = (stepId: number): string =>
@@ -31,13 +37,14 @@ export const sentence = (text: string): string => {
  * sender (task 8). An ordinary refusal (no lead, an ask already cleared or gone) is an outcome with the item done, never a
  * throw. Writes as `lead:<the project's lead>` under the current rules version.
  */
-export function applyVerdict(ctx: Ctx, turn: LeadTurn, item: DeskItem, record: RecordEvent): TurnEffect {
+export function applyVerdict(ctx: Ctx, turn: LeadTurn, item: DeskItem, record: RecordEvent, deps?: ApplyDeps): TurnEffect {
   const project = getProjectById(ctx, item.projectId);
   if (project === undefined || project.lead === null || project.lead.trim() === '') return { itemState: 'done', outcome: 'no lead' };
   const name = project.lead;
   const actor = `lead:${name}`;
   const verdict = turn.verdict ?? '';
   if (item.kind === 'stuck') return applyStuck(ctx, turn, item, name);
+  if (item.kind === 'unknown_send') return applyUnknownSend(ctx, turn, item, record, deps);
   if (item.kind !== 'question' && item.kind !== 'permission') return { itemState: 'done', outcome: `${verdict} (no action in this task)` };
   const ask = askOf(ctx, item);
   if (ask === undefined || ask.clearedAt !== null) return { itemState: 'done', outcome: 'ask cleared' };
@@ -130,4 +137,42 @@ function applyStuck(ctx: Ctx, turn: LeadTurn, item: DeskItem, name: string): Tur
     saidAt: now,
   });
   return { itemState: 'done', outcome: `${behavior === 'allow' ? 'ALLOW' : 'DENY'} ${reason}`.trim() };
+}
+
+/**
+ * A verdict on an `unknown_send` item (P2's case C): the lead read `threads` and `thread` and says what became of the send.
+ * DECIDE with ANSWER `FOUND <thread id>`: it happened, done with that thread (a start recorded as leadStart records one).
+ * `FIRST <thread id>`: a start whose thread holds no first message: done, and the first message is a send of its own whose
+ * text ends with its own marker line, so it is never sent twice. `NOT FOUND`: cleared, which releases the step for a new
+ * start. A thread id the lead's `threads` read did not list, or any other ANSWER, is `unclear` and Aiden's; so is AIDEN.
+ */
+function applyUnknownSend(ctx: Ctx, turn: LeadTurn, item: DeskItem, record: RecordEvent, deps: ApplyDeps | undefined): TurnEffect {
+  const verdict = turn.verdict ?? '';
+  const send = getSend(ctx.db, Number(item.ref));
+  if (send === undefined || send.state !== 'unknown') return { itemState: 'done', outcome: 'send no longer unknown' };
+  const known = `s${send.id}: a ${send.kind} to ${send.target}, written ${send.createdAt}`;
+  if (verdict === 'AIDEN') return { itemState: 'waiting_aiden', outcome: `AIDEN (${known})` };
+  if (verdict !== 'DECIDE') return { itemState: 'done', outcome: `${verdict} (no action in this task)` };
+  const now = ctx.now();
+  const answer = (turn.answer ?? '').trim();
+  if (/^NOT FOUND\.?$/i.test(answer)) {
+    moveSend(ctx.db, send.id, ['unknown'], 'cleared', { now });
+    return { itemState: 'done', outcome: 'NOT FOUND' };
+  }
+  const unclear: TurnEffect = { itemState: 'waiting_aiden', outcome: `unclear (${known})` };
+  const m = /^(FOUND|FIRST)\s+(\S+?)\.?$/.exec(answer);
+  if (!m) return unclear;
+  const word = m[1] as 'FOUND' | 'FIRST';
+  const threadId = m[2] as string;
+  const folder = send.kind === 'start' ? send.target : leadFolders(ctx, send.projectId)[0];
+  if (folder === undefined || deps === undefined || !deps.listed(folder, threadId)) return unclear;
+  const start = send.kind === 'start' ? parseStartBody(send.body) : undefined;
+  if (word === 'FIRST' && start === undefined) return unclear;
+  if (!moveSend(ctx.db, send.id, ['unknown'], 'done', { result: threadId, now })) return { itemState: 'done', outcome: 'send no longer unknown' };
+  if (send.kind === 'start') recordStartInWrite(ctx, record, send, threadId);
+  if (word === 'FIRST' && start !== undefined) {
+    const first = intendSend(ctx.db, { projectId: send.projectId, itemId: item.id, kind: 'relay', target: threadId, body: start.message }, now);
+    setSendBody(ctx.db, first.id, `${start.message}\n${sendMarker(first.id)}`);
+  }
+  return { itemState: 'done', outcome: `${word} ${threadId}` };
 }

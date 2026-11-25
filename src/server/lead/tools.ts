@@ -76,7 +76,7 @@ export async function exactBranch(repo: string, name: string): Promise<boolean |
 /** What a tool answers when git failed in a way that says nothing about the branch. */
 const couldNotTell = (r: { code: number; stderr: string }): string => `Could not tell: git said ${r.stderr.trim() || `exit ${r.code}`}`;
 
-/** The lead's read-only tools: eight reads, no write of any kind, nothing that starts InProgress. */
+/** The lead's read-only tools: ten reads, no write of any kind, nothing that starts InProgress. */
 export function createLeadToolsServer(o: LeadToolsOptions): McpServer {
   const server = new McpServer({ name: 'inprogress-lead', version: VERSION });
   const project = enc(o.slug);
@@ -109,6 +109,11 @@ export function createLeadToolsServer(o: LeadToolsOptions): McpServer {
     async (a: { id: number }) => (await o.client.get<{ text: string }>(`/api/lead/${project}/resource/${a.id}?${asked}`)).text);
   tool('search', 'Find steps and resources in this project by text.', { query: z.string().min(1).max(200) },
     async (a: { query: string }) => formatSearch(await o.client.get<SearchResult>(`/api/search?project=${project}&q=${enc(a.query)}`)));
+
+  tool('threads', "This project's T3 Code threads, newest first: each thread's id, title, when it last changed, and whether it holds a first message.", {}, async () =>
+    (await o.client.get<{ text: string }>(`/api/lead/${project}/threads?${asked}`)).text);
+  tool('thread', 'One T3 Code thread: its title and its messages.', { id: z.string().min(1).max(200).describe('The thread id, as threads lists it') },
+    async (a: { id: string }) => (await o.client.get<{ text: string }>(`/api/lead/${project}/thread/${enc(a.id)}?${asked}`)).text);
 
   const branchArg = { branch: z.string().describe('A local branch name, e.g. feature/tabs') };
   tool('branch_merged', 'Whether a branch is merged into main.', branchArg, (a: { branch: string }) =>

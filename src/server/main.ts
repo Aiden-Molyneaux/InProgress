@@ -13,6 +13,9 @@ import { watchDesk } from './lead/desk';
 import { applyVerdict } from './lead/apply';
 import { watchHeldLines } from './lead/hold';
 import { createRunner, headlessWay, LEAD_MODEL, leadToolsEntry, type Runner } from './lead/runner';
+import { createSender, type Sender } from './lead/sends';
+import { defaultStart } from './lead-start';
+import { t3List, t3Send, t3Show } from './t3';
 import { createBackupRunner } from './backup-runner';
 import { runMaintenance } from './project-lifecycle';
 import { reconcileProjects } from './repo/taskState';
@@ -48,7 +51,15 @@ async function main(): Promise<void> {
   let maintenance: NodeJS.Timeout | undefined;
   let watchTimer: NodeJS.Timeout | undefined;
   let leadRunner: Runner | undefined;
+  // The lead's sender (src/server/lead/sends.ts), beside the runner: every start, relay and desk message happens once. With
+  // the runner off the app makes its own, which carries out lead start and relay and has no minute check.
+  const senderLog = { info: (message: string) => app.log.info(message), error: (message: string) => app.log.error(message) };
+  const sender: Sender | undefined =
+    process.env.INPROGRESS_LEAD_RUNNER === 'off'
+      ? undefined
+      : createSender(ctx, { t3: { list: (p) => t3List(p), show: (id) => t3Show(id), start: defaultStart(), send: (id, text) => t3Send(id, text) } }, { log: senderLog });
   const app = buildApp({
+    ...(sender === undefined ? {} : { sender }),
     ctx,
     home,
     backups: runner,
@@ -66,6 +77,7 @@ async function main(): Promise<void> {
     clearInterval(maintenance);
     clearInterval(watchTimer);
     // Its running turns are stopped and abandoned before the database closes under them.
+    sender?.stop();
     await leadRunner?.stop().catch((err: unknown) => app.log.error(`Could not stop the lead's turn runner: ${(err as Error).message}`));
     await app.close().catch(() => undefined);
     db.close();
@@ -124,6 +136,8 @@ async function main(): Promise<void> {
     } catch (err) {
       app.log.error(`Could not watch the lead's desk: ${(err as Error).message}`);
     }
+    // Recovery of sends that may have happened, then the rest carried out. tick() logs its own failures.
+    if (sender !== undefined) void sender.tick().catch((err: unknown) => app.log.error(`Could not check the lead's sends: ${(err as Error).message}`));
   };
   watch();
   watchTimer = setInterval(watch, watchInterval(process.env));
@@ -137,7 +151,12 @@ async function main(): Promise<void> {
         model: LEAD_MODEL,
         home,
         port,
-        apply: applyVerdict,
+        // The sends a verdict intends are carried out after its write commits.
+        apply: (c, turn, item, record) => {
+          const effect = applyVerdict(c, turn, item, record, sender);
+          if (sender !== undefined) setImmediate(() => void sender.wake());
+          return effect;
+        },
         log: { info: (message) => app.log.info(message), error: (message) => app.log.error(message) },
       });
       leadRunner.start();
