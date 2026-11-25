@@ -90,7 +90,8 @@ export const HOLD_RULES: readonly HoldRule[] = [
     action: 'deploy',
     what: 'a deploy',
     test: (s) =>
-      /\b(?:npm|pnpm)\s+run\s+(?:deploy|release|rollback)(?=[\s&;|<>]|$)|\byarn\s+(?:run\s+)?(?:deploy|release|rollback)(?=[\s&;|<>]|$)/i.test(s.masked) ||
+      // The name ends at anything but a letter or digit, so deploy:prod and deploy-web are held too: over-holding is the safe side.
+      /\b(?:npm|pnpm)\s+run\s+(?:deploy|release|rollback)(?![a-z0-9])|\byarn\s+(?:run\s+)?(?:deploy|release|rollback)(?![a-z0-9])/i.test(s.masked) ||
       (program(s.argv) === 'node' && s.argv.slice(1).some((a) => /(?:^|[\\/])scripts[\\/]deploy[^\\/]*$/i.test(a))),
     families: both(['npm run deploy*', 'npm run release*', 'npm run rollback*', 'pnpm run deploy*', 'pnpm run release*', 'pnpm run rollback*', 'yarn run deploy*', 'yarn run release*', 'yarn run rollback*', 'yarn deploy*', 'yarn release*', 'yarn rollback*', 'node *deploy*']),
     examples: both(['npm run deploy', 'npm run release', 'npm run rollback', 'npm run deploy>deploy.log', 'yarn deploy<in', 'pnpm run deploy', 'yarn deploy', 'yarn run release', 'node scripts/deploy.mjs', 'node scripts\\deploy-web.mjs', 'node C:/personal/InProgress/scripts/deploy.mjs']),

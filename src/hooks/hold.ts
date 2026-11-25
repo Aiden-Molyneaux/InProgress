@@ -52,7 +52,8 @@ export function readHeld(home: string): HeldFile {
     } catch (e) {
       const code = (e as NodeJS.ErrnoException).code;
       // The server may be replacing the file at this moment (Windows says EPERM or EBUSY): look once more.
-      busy = code === 'EPERM' || code === 'EBUSY';
+      // Anything but "no such file" means the file may be there: EPERM and EBUSY get a second look, the rest fail closed.
+      busy = code !== 'ENOENT';
       if (attempt === 0 && busy) pause(50);
       else break;
     }

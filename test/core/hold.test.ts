@@ -248,11 +248,11 @@ describe('a redirection is not an argument', () => {
   });
 });
 
-describe('the deploy rule holds the script itself', () => {
-  it.each(['npm run deploy', 'npm run release', 'npm run deploy && echo', 'pnpm run deploy;ls', 'yarn deploy | tee x', 'yarn run release'])('holds %s', (c) => {
+describe('the deploy rule holds the script and its variants (over-holding is the safe side)', () => {
+  it.each(['npm run deploy', 'npm run release', 'npm run deploy && echo', 'pnpm run deploy;ls', 'yarn deploy | tee x', 'yarn run release', 'npm run deploy:prod', 'npm run deploy-prod', 'npm run deploy.sh', 'npm run deploy-check', 'npm run release:notes', 'yarn run release:notes'])('holds %s', (c) => {
     expect(action(c)).toBe('deploy');
   });
-  it.each(['npm run deploy-check', 'npm run release:notes', 'npm run deploy:web', 'pnpm run release-notes', 'yarn deploy-check', 'yarn run release:notes'])('does not hold %s', (c) => {
+  it.each(['npm run deployer', 'npm run releases', 'npm run rollbacks', 'npm run deploymentnotes'])('does not hold %s, a longer word', (c) => {
     expect(action(c)).toBeUndefined();
   });
 });

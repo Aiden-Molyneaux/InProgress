@@ -323,3 +323,8 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   rollback` (and pnpm and yarn) is held like a deploy, since it swaps the live build; a held.json still busy after
   the second look counts as there and unread, so a held command fails closed when the server is down. One last
   proportional Murr runs on these lines; whatever he finds goes to the receipt as an owner-call.
+- The last look (Haiku, proportional) found two more: a deploy name followed by `:`, `-` or `.` (`deploy:prod`) went
+  unheld, and a read error other than EPERM or EBUSY read as no file. Both fixed inline (the name now ends at anything
+  but a letter or digit, so `deploy-check` is held too and goes to the landing check; any error but "no such file"
+  fails closed). Left as owner-calls for the receipt: while held.json is busy the playbook's Held lines are not seen
+  (a window of under a tenth of a second, server up); `npm run "deploy"` and `npm run -s deploy` start no hook.
