@@ -3,10 +3,25 @@ import type { AddressInfo } from 'node:net';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { runHandler, type HookDeps } from '../../src/hooks/handlers';
 import { heldFile, readHeld, readHeldLines, type HeldFile } from '../../src/hooks/hold';
 import { createClient } from '../../src/lib/client';
+
+/** Reads of held.json fail with these errors first, when a test sets some. */
+const readFaults = vi.hoisted(() => ({ next: [] as Error[], calls: 0 }));
+vi.mock('node:fs', async (importOriginal) => {
+  const real = await importOriginal<typeof import('node:fs')>();
+  return {
+    ...real,
+    readFileSync: ((...a: Parameters<typeof real.readFileSync>) => {
+      readFaults.calls++;
+      const fault = readFaults.next.shift();
+      if (fault) throw fault;
+      return real.readFileSync(...a);
+    }) as typeof real.readFileSync,
+  };
+});
 
 /** A stub InProgress: records each request and answers what the test sets. */
 const requests: { path: string; body: Record<string, unknown> }[] = [];
@@ -158,5 +173,35 @@ describe('held.json', () => {
     expect(readHeldLines(home)).toEqual([]);
     writeFileSync(heldFile(home), JSON.stringify(['gh pr merge', 3, 'npm run seed']));
     expect(readHeldLines(home)).toEqual(['gh pr merge', 'npm run seed']);
+  });
+});
+
+describe('held.json read while the server replaces it', () => {
+  const eperm = (code: string) => Object.assign(new Error(code + ': the file is being replaced'), { code });
+  afterEach(() => {
+    readFaults.next = [];
+  });
+
+  it.each(['EPERM', 'EBUSY'])('looks once more after %s, and gives up after a second one', (code) => {
+    const home = mkdtempSync(join(tmpdir(), 'ip-held-retry-'));
+    try {
+      mkdirSync(join(home, 'lead'), { recursive: true });
+      writeFileSync(heldFile(home), JSON.stringify({ lines: ['gh pr list'], folders: null }));
+      readFaults.calls = 0;
+      readFaults.next = [eperm(code)];
+      expect(readHeld(home)).toEqual({ present: true, lines: ['gh pr list'], folders: null });
+      expect(readFaults.calls).toBe(2);
+      readFaults.calls = 0;
+      readFaults.next = [eperm(code), eperm(code), eperm(code)];
+      expect(readHeld(home)).toEqual({ present: false, lines: [], folders: null });
+      expect(readFaults.calls).toBe(2);
+      readFaults.next = [];
+      readFaults.calls = 0;
+      readFaults.next = [Object.assign(new Error('ENOENT'), { code: 'ENOENT' })];
+      expect(readHeld(home).present).toBe(false);
+      expect(readFaults.calls).toBe(1);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });

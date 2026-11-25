@@ -61,7 +61,9 @@ const GIT = String.raw`\bgit(?:\.exe)?(?:\s+(?:-[Cc]\s+(?:"[^"]*"|'[^']*'|\S+)|-
 const GIT_PUSH = new RegExp(`${GIT}push(?![\\w-])`, 'i');
 const GIT_MERGE = new RegExp(`${GIT}merge(?![\\w-])`, 'i');
 /** git's global options as `if` rules: a push or merge behind them starts the hook too. */
-const GIT_FAMILIES = ['git -C *', 'git -c *', 'git --*'];
+const GIT_FAMILIES = ['git -C *', 'git -c *', 'git --*', 'git -P *', 'git -p *', 'git.exe *', '*git.exe *', '*/git *', '*\\git *'];
+/** Spellings of git that a push or merge example is also run through. */
+const GIT_SPELLINGS = ['git -P push', 'git -p push', 'git.exe push', 'C:/Program Files/Git/cmd/git.exe push', '/usr/bin/git push', 'C:\\tools\\git push'];
 const both = (list: readonly string[]): Record<HoldTool, readonly string[]> => ({ Bash: list, PowerShell: list });
 const DELETERS = new Set(['rm', 'rmdir', 'remove-item', 'del', 'ri', 'rd', 'erase']);
 
@@ -82,13 +84,13 @@ export const HOLD_RULES: readonly HoldRule[] = [
     what: 'a push to a remote',
     test: (s) => GIT_PUSH.test(s.masked),
     families: both(['git push*', ...GIT_FAMILIES]),
-    examples: both(['git push', 'git push origin feature', 'git -C C:/repo push', 'git -C "C:/a b" push', 'git -c core.x=1 push', 'git --no-pager push']),
+    examples: both(['git push', 'git push origin feature', 'git -C C:/repo push', 'git -C "C:/a b" push', 'git -c core.x=1 push', 'git --no-pager push', ...GIT_SPELLINGS]),
   },
   {
     action: 'deploy',
     what: 'a deploy',
     test: (s) =>
-      /\b(?:npm|pnpm)\s+run\s+(?:deploy|release)\b|\byarn\s+(?:run\s+)?(?:deploy|release)\b/i.test(s.masked) ||
+      /\b(?:npm|pnpm)\s+run\s+(?:deploy|release)(?=[\s&;|]|$)|\byarn\s+(?:run\s+)?(?:deploy|release)(?=[\s&;|]|$)/i.test(s.masked) ||
       (program(s.argv) === 'node' && s.argv.slice(1).some((a) => /(?:^|[\\/])scripts[\\/]deploy[^\\/]*$/i.test(a))),
     families: both(['npm run deploy*', 'npm run release*', 'pnpm run deploy*', 'pnpm run release*', 'yarn run deploy*', 'yarn run release*', 'yarn deploy*', 'yarn release*', 'node *deploy*']),
     examples: both(['npm run deploy', 'npm run release', 'pnpm run deploy', 'yarn deploy', 'yarn run release', 'node scripts/deploy.mjs', 'node scripts\\deploy-web.mjs', 'node C:/personal/InProgress/scripts/deploy.mjs']),
@@ -122,7 +124,7 @@ export const HOLD_RULES: readonly HoldRule[] = [
     what: 'a merge into main',
     test: (s) => GIT_MERGE.test(s.masked),
     families: both(['git merge*', ...GIT_FAMILIES]),
-    examples: both(['git merge feature', 'git merge --no-ff -m "land it" feature', 'git -C ../main merge x', 'git --no-pager merge x']),
+    examples: both(['git merge feature', 'git merge --no-ff -m "land it" feature', 'git -C ../main merge x', 'git --no-pager merge x', ...GIT_SPELLINGS.map((x) => x.replace(/push$/, 'merge x'))]),
   },
 ];
 
@@ -297,6 +299,13 @@ export function splitCommand(command: string): CommandSegment[] {
       i += 2;
       continue;
     }
+    if (c === '&' && (s[i - 1] === '>' || s[i - 1] === '<' || s[i + 1] === '>')) {
+      // `2>&1`, `>&2`, `&>log`: the & belongs to a redirection, it does not end the command.
+      raw += c;
+      masked += c;
+      i++;
+      continue;
+    }
     if (';|&()`'.includes(c)) {
       push();
       i++;
@@ -314,11 +323,25 @@ export function splitCommand(command: string): CommandSegment[] {
 /** The raw text of each command of a compound command (see splitCommand). */
 export const commandSegments = (command: string): string[] => splitCommand(command).map((x) => x.raw);
 
-/** A command's words, with simple single and double quotes taken off (no escapes, no expansion). */
+/** A command's words, with simple single and double quotes taken off (no escapes, no expansion), and its redirections (`2>&1`, `> out`, `&>log`, `*>`) and their targets left out. */
 export function words(segment: string): string[] {
   const out: string[] = [];
   const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
-  for (let m = re.exec(segment); m; m = re.exec(segment)) out.push(m[1] ?? m[2] ?? m[3] ?? '');
+  let skipNext = false;
+  for (let m = re.exec(segment); m; m = re.exec(segment)) {
+    const word = m[1] ?? m[2] ?? m[3] ?? '';
+    if (skipNext) {
+      skipNext = false;
+      continue;
+    }
+    const redirect = m[3] === undefined ? null : /^(?:\d*|&|\*)(?:>>?|<{1,3})(&?)(.*)$/.exec(word);
+    if (redirect) {
+      // A bare operator (`>`, `2>`, `<<`) takes the next word as its target; a joined one (`>out`, `2>&1`) carries it.
+      skipNext = redirect[2] === '';
+      continue;
+    }
+    out.push(word);
+  }
   return out;
 }
 

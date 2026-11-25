@@ -217,3 +217,42 @@ describe('reading a merge and a push', () => {
     expect(gitFolderOption('git push')).toBeUndefined();
   });
 });
+
+describe('a redirection is not an argument', () => {
+  it.each(['git merge feat 2>&1', 'git merge feat >/dev/null', 'git merge feat > out.txt', 'git merge feat &>log', 'git merge feat 2>$null', 'git merge feat *> all.log'])('%s merges the one branch', (command) => {
+    expect(splitCommand(command)).toHaveLength(1);
+    expect(mergeTargets(command)).toEqual(['feat']);
+    expect(mergeTarget(command)).toBe('feat');
+    expect(heldAction(command)?.action).toBe('merge');
+  });
+
+  it('a push keeps its one remote and branch', () => {
+    expect(pushTarget('git push origin feat 2>&1')).toEqual({ ok: true, remote: 'origin', branch: 'feat' });
+    expect(pushTarget('git push 2>&1')).toEqual({ ok: true, remote: 'origin' });
+    expect(pushTarget('git push > out.txt')).toEqual({ ok: true, remote: 'origin' });
+    expect(pushTarget('git push &>log')).toEqual({ ok: true, remote: 'origin' });
+    expect(pushTarget('git push origin feat 2>&1 >out.log')).toEqual({ ok: true, remote: 'origin', branch: 'feat' });
+    expect(pushTarget('git push origin feat < in.txt')).toEqual({ ok: true, remote: 'origin', branch: 'feat' });
+  });
+
+  it('a & beside a redirection does not cut the command, a lone & still does', () => {
+    expect(commandSegments('git push 2>&1 && git status')).toEqual(['git push 2>&1', 'git status']);
+    expect(commandSegments('git push >&2; echo x')).toEqual(['git push >&2', 'echo x']);
+    expect(commandSegments('sleep 1 & git push')).toEqual(['sleep 1', 'git push']);
+  });
+
+  it('a git -C folder is still read behind a redirection, and a quoted > stays a word', () => {
+    expect(gitFolderOption('git -C ../x push 2>&1')).toBe('../x');
+    expect(mergeTargets('git merge -m ">" feat')).toEqual(['feat']);
+    expect(mergeTargets('git merge ">x"')).toEqual(['>x']);
+  });
+});
+
+describe('the deploy rule holds the script itself', () => {
+  it.each(['npm run deploy', 'npm run release', 'npm run deploy && echo', 'pnpm run deploy;ls', 'yarn deploy | tee x', 'yarn run release'])('holds %s', (c) => {
+    expect(action(c)).toBe('deploy');
+  });
+  it.each(['npm run deploy-check', 'npm run release:notes', 'npm run deploy:web', 'pnpm run release-notes', 'yarn deploy-check', 'yarn run release:notes'])('does not hold %s', (c) => {
+    expect(action(c)).toBeUndefined();
+  });
+});

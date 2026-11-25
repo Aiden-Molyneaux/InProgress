@@ -314,3 +314,7 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   after task 8 (same file): the first good turn after a fault stretch reopens the items the faults put behind. Accepted
   owner-calls: an unparked ancestor's brought items count again at once; the stuck cover matches the session, not the
   exact tool.
+- Task 7's re-check fixes, by a fresh Sev (Sonnet): redirections are dropped before a branch or remote is read; the
+  `if` families cover `git -P`, `git -p`, `git.exe` and a path to git; only `deploy` and `release` themselves are
+  deploys; a held.json read is retried once. 2715 unit and 35 smoke tests green. Task 7 has had its two re-check
+  rounds; what is left goes in the receipt.

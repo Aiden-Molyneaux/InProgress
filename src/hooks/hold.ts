@@ -34,15 +34,28 @@ export const heldFile = (home: string): string => join(home, 'lead', 'held.json'
 
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 
+/** A blocking wait, for a hook that has nothing else to do while it waits. */
+const pause = (ms: number): void => {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+};
+
 /**
  * `<home>/lead/held.json`: `{ lines, folders }`, or the older array of lines. A missing file is `present: false`; a broken
  * one, or the old form, says nothing of folders, so any folder counts.
  */
 export function readHeld(home: string): HeldFile {
-  let text: string;
-  try {
-    text = readFileSync(heldFile(home), 'utf8');
-  } catch {
+  let text: string | undefined;
+  for (let attempt = 0; attempt < 2 && text === undefined; attempt++) {
+    try {
+      text = readFileSync(heldFile(home), 'utf8');
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      // The server may be replacing the file at this moment (Windows says EPERM or EBUSY): look once more.
+      if (attempt === 0 && (code === 'EPERM' || code === 'EBUSY')) pause(50);
+      else break;
+    }
+  }
+  if (text === undefined) {
     // No file: the server never wrote one, so no project here has the round on.
     return { present: false, lines: [], folders: null };
   }
