@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { SESSION_APPS } from '../core/session-app';
 import { LEAD_NAME_MAX, LEAD_SWITCHES } from '../core/lead';
+import { LANDING_ACTIONS } from '../core/landing';
 import { ID_MAX } from '../core/notices';
 import { ASK_KINDS, ASSIGNEES, BRIEFING_MODES, COMMAND_KINDS, COMMAND_OUTCOMES, HOOK_EVENTS, NODE_KINDS, NODE_LABELS, NODE_STATUSES, ORIGINS, PROJECT_NAME_MAX, RANK_BANDS, RESOURCE_KINDS, RESOURCE_PURPOSES, TITLE_CHANNELS, WHAT_WHY_MAX, WORK_STATUSES, unknownLabel, type NodeInput } from '../core/types';
 
@@ -275,6 +276,10 @@ export const leadRelayBody = z.object({ ...leadWho, stepId: leadId, message: z.s
 export const leadAllowBody = z.object({ ...leadWho, switch: z.enum(LEAD_SWITCHES), aidenWords: z.string().trim().min(1).max(2_000) }).strict();
 /** `lead disallow`: the switch, and Aiden's words when he gave them. */
 export const leadDisallowBody = z.object({ ...leadWho, switch: z.enum(LEAD_SWITCHES), aidenWords: z.string().trim().min(1).max(2_000).optional() }).strict();
+/** The landing check: the step asked about, the action, the session's folder (a git checkout) and, for a branch other than the one checked out, its name. */
+export const leadLandingBody = z
+  .object({ stepId: leadId, action: z.enum(LANDING_ACTIONS, { errorMap: (_issue, ctx) => ({ message: `${String(ctx.data)} is not an action: give merge, deploy, push, publish or push-public` }) }), folder: z.string().min(1).max(1_000), branch: z.string().min(1).max(200).optional() })
+  .strict();
 /** `lead start`: the step to start a thread for, and Aiden's words when he told the lead to. */
 export const leadStartBody = z.object({ ...leadWho, stepId: leadId, aidenWords: z.string().trim().min(1).max(2_000).optional() }).strict();
 /** The window's change of a project's lead: the slug it shows, and a name (trimmed, 1 to 40 characters) or null for none. */

@@ -6,11 +6,12 @@ import { cliBesideServer, nodeCli } from '../../lib/task-command';
 import { listLeadEvents, markLeadSeen, readLeadBrief, readLeadIntent, readLeadRules, requireLead } from '../lead';
 import { leadAllow, leadDisallow, leadAnswer, leadDecide, leadUndo, leadDrop, leadIntent, leadKept, leadPark, leadPromise } from '../lead-commands';
 import { readDesk } from '../lead/desk';
+import { checkLanding } from '../lead/landing';
 import { leadRelay, type RelaySend } from '../lead-relay';
 import { leadStart, type StartThread } from '../lead-start';
 import { readLeadResource, readLeadStep } from '../lead-step';
 import { renderLeadBrief } from '../lead-text';
-import { leadAllowBody, leadDisallowBody, leadAnswerBody,leadBriefQuery, leadDecideBody, leadUndoBody, leadDropBody, leadIntentBody, leadKeptBody, leadParkBody, leadPromiseBody, leadReadQuery, leadRelayBody, leadStartBody, leadRulesQuery, leadSeenBody } from '../schemas';
+import { leadAllowBody, leadDisallowBody, leadAnswerBody,leadBriefQuery, leadDecideBody, leadUndoBody, leadDropBody, leadIntentBody, leadKeptBody, leadLandingBody, leadParkBody, leadPromiseBody, leadReadQuery, leadRelayBody, leadStartBody, leadRulesQuery, leadSeenBody } from '../schemas';
 
 /** A route's `:id`: a whole number above 0, or a 400. */
 function positiveId(text: string): number {
@@ -106,6 +107,11 @@ export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken:
   app.post('/api/lead/:ref/intent', { onRequest: requireToken }, async (req) => {
     const { as, instructions, ...input } = leadIntentBody.parse(req.body);
     return leadIntent(ctx, ref(req), as, instructions, input);
+  });
+  // The landing check: git read in the session's folder, judged in plain code with no model. Held or clear, it answers 200.
+  app.post('/api/lead/:ref/landing', { onRequest: requireToken }, async (req) => {
+    const body = leadLandingBody.parse(req.body);
+    return checkLanding(ctx, { ref: ref(req), ...body });
   });
   // The two switches: only ever on Aiden's words, turned on by the lead on his word and logged with it.
   app.post('/api/lead/:ref/allow', { onRequest: requireToken }, async (req) => {

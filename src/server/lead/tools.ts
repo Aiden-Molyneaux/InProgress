@@ -1,4 +1,3 @@
-import { execFile } from 'node:child_process';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { LEAD_INSTRUCTIONS_VERSION } from '../../core/lead';
@@ -6,12 +5,12 @@ import type { SearchResult } from '../../core/types';
 import { ApiClientError, type Client } from '../../lib/client';
 import { VERSION } from '../../lib/version';
 import { formatSearch } from '../../mcp/format';
+import { runGit, type GitResult } from './git';
 
 /** The most one answer may carry: a turn's context is not the place for a whole log. */
 export const TOOL_ANSWER_MAX_BYTES = 40 * 1024;
 /** The most file names change_size lists. */
 const FILES_MAX = 200;
-const GIT_TIMEOUT_MS = 10_000;
 /** What every tool answers when nothing listens: said the same way each time, and nothing is started. */
 export const NOT_ANSWERING = 'InProgress is not answering';
 const BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
@@ -60,20 +59,8 @@ const ok = (text: string): ToolResult => ({ content: [{ type: 'text', text: capA
 const fail = (text: string): ToolResult => ({ isError: true, content: [{ type: 'text', text }] });
 const enc = encodeURIComponent;
 
-/**
- * Runs git without a shell, as `git -C <repo>` and with no cwd option: Windows looks in the working directory for git.exe
- * before PATH, so a git.exe inside the repository's tree must never be found. Resolves with the exit code and output: a non-zero exit is an answer, not a throw.
- */
-function git(repo: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    execFile('git', ['-C', repo, ...args], { timeout: GIT_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024, windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }, (err, stdout, stderr) => {
-      if (!err) return resolve({ code: 0, stdout, stderr });
-      const code = (err as { code?: unknown }).code;
-      if (typeof code === 'number') return resolve({ code, stdout, stderr });
-      reject(new Error(`git ${args[0]} did not finish: ${err.message}`));
-    });
-  });
-}
+/** Runs git as `git -C <repo>` (see runGit): a non-zero exit is an answer, not a throw. */
+const git = (repo: string, args: string[]): Promise<GitResult> => runGit(repo, args);
 
 /**
  * Whether this exact branch name is a local branch. Loose refs are files, and on NTFS `Feature/X` finds `feature/x`, so
