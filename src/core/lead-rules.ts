@@ -23,6 +23,12 @@ export function leadRules(v: LeadRulesFor): string {
   const cli = clean(v.cli);
   const folders = v.folders.map(clean).filter((f) => f !== '');
   const W = `--as ${Lead} --instructions ${LEAD_INSTRUCTIONS_VERSION}`;
+  // What lets the lead show Aiden a picture. Grok's file tools copy only from inside his user folder, which is where
+  // InProgress keeps a step's documents; the project's own folders are outside it.
+  const documents = [
+    'You may also read the file of a document of this project: the path lead step prints after "file". Never one under C:\\work.',
+    'When Aiden asks to see a picture or a document, find it with lead step, copy that file to your computer, and send it to him in the chat (a picture as an image). Your file tools copy only from inside his user folder on the laptop: if a copy is refused, rule 7 applies.',
+  ];
   const reading = folders.length
     ? [
         'Reading the project',
@@ -33,8 +39,9 @@ export function leadRules(v: LeadRulesFor): string {
         'If a file will not open, read its committed copy through git: show HEAD:./<its path inside the folder>.',
         'Nothing else from git, and nothing that writes, moves or deletes.',
         'You may also read this project\'s T3 Code threads.',
+        ...documents,
       ]
-    : ['Reading the project', 'This project has no folder on record. Read it through the commands above and its T3 Code threads.'];
+    : ['Reading the project', 'This project has no folder on record. Read it through the commands above and its T3 Code threads.', ...documents];
   return [
     `Rules for ${Lead}, the lead for ${Project}. Version ${LEAD_INSTRUCTIONS_VERSION}.`,
     '',

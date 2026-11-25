@@ -4,10 +4,10 @@ import { LEAD_MANDATE } from '../../src/core/lead-mandate';
 import { leadBootstrap, leadRules } from '../../src/core/lead-rules';
 
 const V = { lead: 'Progresser', projectName: 'InProgress', slug: 'inprogress', cli: 'node C:/x/dist/cli/main.js', folders: ['C:/personal/InProgress', 'D:/other/InProgress'] };
-const W = '--as Progresser --instructions 5';
+const W = '--as Progresser --instructions 6';
 
 const EXPECTED = [
-  'Rules for Progresser, the lead for InProgress. Version 5.',
+  'Rules for Progresser, the lead for InProgress. Version 6.',
   '',
   'You are Progresser, the lead for one project: InProgress. Your job is to know where the project stands, tell Aiden, and record what he decides. You hold no state of your own: the record is InProgress. Before you answer anything about the project, read the record again. Never answer from memory.',
   '',
@@ -79,6 +79,8 @@ const EXPECTED = [
   'If a file will not open, read its committed copy through git: show HEAD:./<its path inside the folder>.',
   'Nothing else from git, and nothing that writes, moves or deletes.',
   "You may also read this project's T3 Code threads.",
+  'You may also read the file of a document of this project: the path lead step prints after "file". Never one under C:\\work.',
+  'When Aiden asks to see a picture or a document, find it with lead step, copy that file to your computer, and send it to him in the chat (a picture as an image). Your file tools copy only from inside his user folder on the laptop: if a copy is refused, rule 7 applies.',
   '',
   ...LEAD_MANDATE,
   '',
@@ -139,15 +141,15 @@ describe('leadRules', () => {
     EXPECTED.forEach((line, i) => expect(lines[i], `line ${i + 1}`).toBe(line));
   });
 
-  it('is version 5, and the constant says so', () => {
-    expect(LEAD_INSTRUCTIONS_VERSION).toBe(5);
-    expect(leadRules(V).split('\n')[0]).toBe('Rules for Progresser, the lead for InProgress. Version 5.');
+  it('is version 6, and the constant says so', () => {
+    expect(LEAD_INSTRUCTIONS_VERSION).toBe(6);
+    expect(leadRules(V).split('\n')[0]).toBe('Rules for Progresser, the lead for InProgress. Version 6.');
   });
 
   it('has the relay line, eleven numbered rules, no placeholder left, plain ASCII and no trailing newline', () => {
     const text = leadRules(V);
     const lines = text.split('\n');
-    expect(lines).toContain('  lead relay inprogress <step number> "<message>" --as Progresser --instructions 5');
+    expect(lines).toContain('  lead relay inprogress <step number> "<message>" --as Progresser --instructions 6');
     expect(lines.filter((l) => /^\d+\. /.test(l)).map((l) => l.split('.')[0])).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11']);
     for (const mark of ['<Lead>', '<Project>', '<slug>', '<cli>', '<n>', '<W>']) expect(text).not.toContain(mark);
     expect(text.endsWith('\n')).toBe(false);
@@ -186,7 +188,7 @@ describe('leadRules', () => {
 
   it('keeps a project whose name holds a line break on one line', () => {
     const text = leadRules({ ...V, projectName: ' In\nProgress ' });
-    expect(text.split('\n')[0]).toBe('Rules for Progresser, the lead for In Progress. Version 5.');
+    expect(text.split('\n')[0]).toBe('Rules for Progresser, the lead for In Progress. Version 6.');
     expect(text).not.toContain('In\nProgress');
   });
 
@@ -194,7 +196,9 @@ describe('leadRules', () => {
     const lines = leadRules({ ...V, folders: [] }).split('\n');
     const at = lines.indexOf('Reading the project');
     expect(lines[at + 1]).toBe('This project has no folder on record. Read it through the commands above and its T3 Code threads.');
-    expect(lines[at + 2]).toBe('');
+    expect(lines[at + 2]).toContain('the path lead step prints after "file"');
+    expect(lines[at + 3]).toContain('copy that file to your computer');
+    expect(lines[at + 4]).toBe('');
     expect(lines).not.toContain('You may read, and never change, anything inside:');
     expect(lines.some((l) => l.includes('git -C'))).toBe(false);
   });

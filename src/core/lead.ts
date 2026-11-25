@@ -3,7 +3,7 @@ import { spanAgo } from './span';
 import type { AskKind } from './types';
 
 /** The version of the lead's written instructions. A write command from a lower version is refused. */
-export const LEAD_INSTRUCTIONS_VERSION = 5;
+export const LEAD_INSTRUCTIONS_VERSION = 6;
 /** The two per-project switches only Aiden turns on: whether the lead may start a thread on its own judgment, and whether a session may land routine work. */
 export const LEAD_SWITCHES = ['starts', 'landing'] as const;
 export type LeadSwitch = (typeof LEAD_SWITCHES)[number];

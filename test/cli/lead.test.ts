@@ -75,7 +75,7 @@ describe('inprogress lead brief', () => {
     const text = capture();
     expect(await runLead(['brief', 'ingame', '--as', 'Progresser', '--instructions', String(LEAD_INSTRUCTIONS_VERSION)], text.out, conn)).toBe(0);
     expect(text.lines).toHaveLength(1);
-    expect(text.lines[0].split('\n')[0]).toMatch(/^Lead brief · InGame · .* · instructions v5 \(yours: v5\)$/);
+    expect(text.lines[0].split('\n')[0]).toMatch(/^Lead brief · InGame · .* · instructions v6 \(yours: v6\)$/);
     expect(text.lines[0]).toContain('In flight (0 of 3):');
 
     const json = capture();
@@ -174,12 +174,12 @@ describe('inprogress lead rules', () => {
     const c = capture();
     expect(await runLead(['rules', 'ingame', '--as', 'Progresser'], c.out, conn)).toBe(0);
     expect(c.lines).toHaveLength(1);
-    expect(c.lines[0].split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 5.');
+    expect(c.lines[0].split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 6.');
     expect(c.lines[0]).toContain(`lead brief ingame --as Progresser --instructions ${LEAD_INSTRUCTIONS_VERSION}`);
     // --instructions, when given, is ignored.
     const given = capture();
     expect(await runLead(['rules', 'ingame', '--as', 'progresser', '--instructions', '1'], given.out, conn)).toBe(0);
-    expect(given.lines[0].split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 5.');
+    expect(given.lines[0].split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 6.');
   });
 
   it('prints the three lines to paste with --bootstrap', async () => {
