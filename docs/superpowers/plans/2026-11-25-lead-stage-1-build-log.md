@@ -132,3 +132,8 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   `--tools ""` and only the lead's MCP tools allowed, in `<home>/lead/<slug>/` with its own empty project settings, the
   session variables removed; `INPROGRESS_LEAD_CLAUDE` names another executable (a stub for the scenes on a copy);
   `INPROGRESS_LEAD_RUNNER=off` keeps it from starting; a stand-in apply until task 5.
+- Murr's re-check of the task 2 and 3 fixes: 1 major in the fix (any git failure read as "no such branch"), sent back
+  with three small follow-ups (a deleted step closes its stopped items; no item on an archived project's raise; the
+  index test plans the real SQL). Accepted as is: the round's first switch-on is the first ever, across lead changes;
+  migration 21's added indexes exist only where 21 runs fresh, which is every home, since no home but scratch copies
+  has run 21.
