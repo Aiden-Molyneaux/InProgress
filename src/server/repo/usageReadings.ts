@@ -10,11 +10,11 @@ export interface UsageReading {
   source: ReadingSource;
   turnId: number | null;
   model: string | null;
-  /** Percent of the window used, 0 to 100. */
+  /** Fraction of the window used, as the stream reports it: 0.47 is 47 percent. */
   windowUsed: number | null;
   /** When the window resets, an ISO time. */
   windowResets: string | null;
-  /** Percent of the week used, 0 to 100. */
+  /** Fraction of the week used, as the stream reports it: 0.47 is 47 percent. */
   weekUsed: number | null;
   /** When the week resets, an ISO time. */
   weekResets: string | null;
@@ -53,11 +53,11 @@ export interface AddReadingInput {
   source: ReadingSource;
   turnId?: number | null;
   model?: string | null;
-  /** Percent of the window used, 0 to 100. */
+  /** Fraction of the window used, as the stream reports it: 0.47 is 47 percent. */
   windowUsed?: number | null;
   /** When the window resets, an ISO time. */
   windowResets?: string | null;
-  /** Percent of the week used, 0 to 100. */
+  /** Fraction of the week used, as the stream reports it: 0.47 is 47 percent. */
   weekUsed?: number | null;
   /** When the week resets, an ISO time. */
   weekResets?: string | null;

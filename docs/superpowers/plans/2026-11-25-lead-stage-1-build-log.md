@@ -94,3 +94,12 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
 - "No open ask on the step" for a stopped session means no open ask of Aiden's, as the board's stall check reads it; a
   lead's promise on the step does not block a stopped item.
 - The wake is a hint to read the desk, not proof an item exists: a write that rolls back may still wake the runner once.
+
+## Task 3: the lead's tools
+
+- Built by Sev (Sonnet). `src/server/lead/tools.ts` and the entry `dist/lead/tools.js <slug>`: eight read tools
+  (desk, brief, step, resource, search, branch_merged, change_size, branch_exists), each answer capped at 40 KB, git on
+  full refs through execFile with no shell, "InProgress is not answering" when nothing listens, no server started.
+  typecheck and 2364 unit tests green.
+- The start check also asks for `INPROGRESS_LEAD_AS` (the lead's name for the reads' lead check). The runner sets it.
+- The entry's exit 2 is tested through its check function, not by spawning the built entry; the scenes' build runs it.
