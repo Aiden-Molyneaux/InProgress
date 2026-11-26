@@ -14,7 +14,7 @@ import { addLogInWrite } from '../repo/logs';
 import { shelvedAmong } from '../repo/shelved';
 import { checkLanding, landingKey, PUBLISH_NO_YES, realGit, recordYes, type LandingDeps } from './landing';
 import { aidenSaidWords } from './aidenSaid';
-import { heldKeysOf, heldLandingAsk, heldLines, heldWhatOf, publishesFolderPackage, type HeldKeys, type HeldLine } from './hold';
+import { heldKeysOf, heldLandingAsk, heldLines, heldWhatOf, publishesFolderPackage, SETS_NPM_CONFIG, type HeldKeys, type HeldLine } from './hold';
 
 /*
  * Carrying Aiden's answer (lead stage 1, #743, task 11 and its fixes): what his yes covers, read from git, and his reply to
@@ -113,13 +113,28 @@ function yesCanRelease(m: HeldMatch): boolean {
  * push held as public is never released by a yes. Read without git: a yes that cannot be recorded when he clicks (it changed
  * after the hold, a folder with changes not committed) is the route's 409.
  */
+/**
+ * Whether the hold kept a key a yes can match for `action`: a string, or null for a push (nothing to send, so no yes is
+ * needed). A publish or merge with a null key (its folder had changes not committed), or an action whose read failed at
+ * the hold (no key kept), can never be released by a yes.
+ */
+function keyedForYes(stored: HeldKeys, action: string): boolean {
+  const keys = stored.keys as Record<string, string | null | undefined>;
+  return typeof keys[action] === 'string' || (action === 'push' && action in keys && keys[action] === null);
+}
+
 export function heldGoAhead(ctx: Ctx, project: Project, item: Pick<DeskItem, 'nodeId' | 'outcome'>, line: HeldLine | undefined): boolean {
   if (item.nodeId === null || line === undefined) return false;
   if (line.why.includes(goesOutWhy('push-public'))) return false;
   const stored = heldKeysOf(item.outcome);
   if (stored === undefined) return false;
+  // npm's settings changed by the environment can send a publish elsewhere: the hold took no key for it.
+  if (SETS_NPM_CONFIG.test(line.command)) return false;
   const matches = heldMatches(ctx, project, line);
-  return matches.length > 0 && matches.every((m) => yesCanRelease(m) && m.action in stored.keys);
+  // Each action once, with a key the hold computed: two pushes in one command, or a hold whose read failed (a null key),
+  // could never be released by one yes, so they offer Not yet alone.
+  const once = new Set(matches.map((m) => m.action)).size === matches.length;
+  return matches.length > 0 && once && matches.every((m) => yesCanRelease(m) && keyedForYes(stored, m.action));
 }
 
 /**

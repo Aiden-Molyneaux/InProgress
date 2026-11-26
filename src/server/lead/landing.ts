@@ -194,7 +194,8 @@ export function publishDestination(segment: string | undefined): string[] {
     const w = words[i]!;
     const eq = w.indexOf('=');
     const name = (eq < 0 ? w : w.slice(0, eq)).toLowerCase();
-    if (name === '--dry-run' && eq < 0) out.push(name);
+    // --ignore-scripts changes what the package's own scripts do on the way out (prepack, prepublishOnly).
+    if ((name === '--dry-run' || name === '--ignore-scripts') && eq < 0) out.push(name);
     else if (PUBLISH_VALUE_FLAGS.has(name)) {
       const value = eq < 0 ? (words[++i] ?? '') : w.slice(eq + 1);
       if (name !== '--otp') out.push(`${name}=${unquote(value)}`);

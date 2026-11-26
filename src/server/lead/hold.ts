@@ -71,6 +71,9 @@ export interface HeldLine {
   why: string;
 }
 
+/** A command that sets one of npm's settings by the environment (npm_config_*, in any case and any shell's form). */
+export const SETS_NPM_CONFIG = /npm_config_/i;
+
 /**
  * The project's held lines by the ref of the held item each made, read once (the window's cards, the morning list and an
  * answer to one item all find an item's line here). The line is `<command> -> <why>`, and either part may hold an arrow,
@@ -135,7 +138,9 @@ const SAFE_FLAGS = new Set(['--dry-run', '--provenance', '--no-git-checks', '--i
  * (yarn's --minor, --new-version) or any flag not known: false, and the publish is named as before, by its branch.
  */
 export function publishesFolderPackage(segment: string): boolean {
-  const m = /\b(?:npm|pnpm|yarn)\s+publish\b(.*)$/i.exec(segment);
+  // Nothing may come before the tool: an environment setting in front (NPM_CONFIG_REGISTRY=... npm publish) can change
+  // where it goes without a word after it, so such a publish takes no yes.
+  const m = /^\s*(?:npm|pnpm|yarn)\s+publish\b(.*)$/i.exec(segment);
   if (m === null) return false;
   const words = m[1]!.trim().split(/\s+/).filter((w) => w !== '');
   for (let i = 0; i < words.length; i++) {
@@ -310,7 +315,7 @@ async function judge(ctx: Ctx, scope: LeadScope, match: HeldMatch, deps: Landing
     return answer.clear ? { clear: true } : { clear: false, what, why: answer.text, keys: keys(answer.patchId) };
   } catch (err) {
     // A check that refuses (a 4xx: no such branch, a range it cannot read) or fails holds the command, with no key.
-    return { clear: false, what, why: `the landing check could not answer: ${(err as Error).message}`, keys: keys(null) };
+    return { clear: false, what, why: `the landing check could not answer: ${(err as Error).message}`, keys: { folder, branch: asked.read, keys: {} } };
   }
 }
 
@@ -331,7 +336,10 @@ export async function holdCheck(ctx: Ctx, ask: HoldAsk, deps: LandingDeps = REAL
   const judged: Judged =
     ask.segment !== undefined && ask.segment !== match.segment
       ? { clear: false, what: match.what, why: 'the hook and InProgress read the command differently' }
-      : await judge(ctx, scope, match, deps);
+      : match.action === 'publish' && SETS_NPM_CONFIG.test(ask.command)
+        ? // npm's settings changed anywhere in the command (export, set, $env:) can send the publish elsewhere: no yes clears it.
+          { clear: false, what: match.what, why: PUBLISH_NO_YES }
+        : await judge(ctx, scope, match, deps);
   if (judged.clear) return SAY_NOTHING;
   const now = ctx.now();
   ctx.db

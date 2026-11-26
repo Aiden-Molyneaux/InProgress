@@ -5,7 +5,7 @@ import { ONLY_YOU } from '../../src/core/landing';
 import { buildApp } from '../../src/server/app';
 import { write as dbWrite } from '../../src/server/db/tx';
 import { CHANGED_SINCE_HELD, heldCards } from '../../src/server/lead/carry';
-import { heldOutcome, heldRef } from '../../src/server/lead/hold';
+import { heldKeysOf, heldOutcome, heldRef } from '../../src/server/lead/hold';
 import { checkLanding, publishDestination, PUBLISH_NO_YES, realGit, type LandingDeps } from '../../src/server/lead/landing';
 import { createSender, type SenderT3 } from '../../src/server/lead/sends';
 import { intendHeldLine } from '../../src/server/lead/voice';
@@ -144,7 +144,7 @@ describe('M1: a publish yes is keyed on what goes out', () => {
     expect(t.yesCount()).toBe(0);
   });
 
-  it('a folder with changes not committed takes no yes: the click changes nothing and says why', async () => {
+  it('a folder with changes not committed takes no yes: its card offers Not yet alone, and a click changes nothing', async () => {
     const calls: string[][] = [];
     const t = setup({ calls });
     pkg(repo.wt, 'x', '1.2.0');
@@ -152,7 +152,7 @@ describe('M1: a publish yes is keyed on what goes out', () => {
     const h = await held(t, 'npm publish');
     const res = await t.click(h.item.id, 'go');
     expect(res.statusCode).toBe(409);
-    expect(res.json().error).toContain(PUBLISH_NO_YES);
+    expect(res.json().error).toBe(ONLY_YOU);
     expect({ state: state(t, h.item.id), yes: t.yesCount(), answers: t.answers() }).toEqual({ state: 'waiting_aiden', yes: 0, answers: 0 });
     expect(t.ctx.db.prepare("SELECT COUNT(*) FROM lead_sends WHERE kind = 'carry'").pluck().get()).toBe(0);
   });
@@ -424,5 +424,34 @@ describe('the newest held line for a ref decides Go ahead', () => {
     const again = await held(t, 'git push');
     expect(again.item.id).not.toBe(first.item.id);
     expect(heldCards(t.ctx, t.project.id).cards).toEqual([expect.objectContaining({ id: again.item.id, goAhead: true })]);
+  });
+});
+
+describe('the last look: Go ahead only where one yes can release the command', () => {
+  const goAhead = (t: T, id: number) => heldCards(t.ctx, t.project.id).cards.find((c) => c.id === id)?.goAhead;
+
+  it('a hold that kept a null key offers Not yet alone', async () => {
+    const t = setup();
+    pkg(repo.wt, 'x', '1.2.0');
+    const h = await held(t, 'npm publish');
+    const stored = heldKeysOf(getDeskItem(t.ctx.db, h.item.id)!.outcome)!;
+    expect(goAhead(t, h.item.id)).toBe(true);
+    t.ctx.db.prepare('UPDATE desk_items SET outcome = ? WHERE id = ?').run(heldOutcome('by the check', 'a held command', { ...stored, keys: { publish: null } }), h.item.id);
+    expect(goAhead(t, h.item.id)).toBe(false);
+  });
+
+  it('a command with the same action twice offers Not yet alone', async () => {
+    const t = setup();
+    const h = await held(t, 'git push origin feature && git push origin release');
+    expect(goAhead(t, h.item.id)).toBe(false);
+  });
+
+  it("a command that sets npm's settings by the environment offers Not yet alone", async () => {
+    const t = setup();
+    pkg(repo.wt, 'x', '1.2.0');
+    for (const command of ['export npm_config_registry=https://x.invalid && npm publish', 'NPM_CONFIG_TAG=next npm publish']) {
+      const h = await held(t, command);
+      expect(goAhead(t, h.item.id), command).toBe(false);
+    }
   });
 });

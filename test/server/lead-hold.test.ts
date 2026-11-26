@@ -163,6 +163,16 @@ describe('POST /api/lead/hold', () => {
     expect(why).toEqual([PUBLISH_NO_YES, PUBLISH_NO_YES, PUBLISH_NO_YES]);
   });
 
+  it("a publish with npm's settings changed by the environment is held before the landing check, so no yes can clear it", async () => {
+    const w = world();
+    writeFile(repo.wt, 'package.json', JSON.stringify({ name: 'x', version: '1.2.0' }));
+    for (const command of ['NPM_CONFIG_REGISTRY=https://x.invalid npm publish', 'export npm_config_tag=next && npm publish']) {
+      expect((await w.hold(command)).held, command).toBe(true);
+    }
+    const why = (w.events('held') as { text: string }[]).map((e) => e.text.slice(e.text.lastIndexOf(' -> ') + 4));
+    expect(why).toEqual([PUBLISH_NO_YES, PUBLISH_NO_YES]);
+  });
+
   it('heldWhatOf reads the what back from the outcome, and nothing from an item held before it was stored', () => {
     expect(heldWhatOf(heldOutcome('why\nwhat: not this', 'a deploy of main to the live build'))).toBe('a deploy of main to the live build');
     expect(heldWhatOf("held: hold: this is Aiden's")).toBeUndefined();
