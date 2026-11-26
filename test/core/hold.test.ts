@@ -39,6 +39,86 @@ describe('the if rules start the hook for every form the list holds', () => {
     expect(holdFamilies('Bash')).toEqual(expect.arrayContaining(['git -C *', 'git -c *', 'git --*', 'pnpm publish*', 'yarn publish*', 'cargo publish*', 'twine upload*', 'npm run release*', 'pnpm run deploy*', 'yarn deploy*', 'node *deploy*', 'rm *']));
     expect(holdFamilies('PowerShell')).toEqual(expect.arrayContaining(['rm *', 'del *', 'ri *', 'rmdir *', 'rd *', 'Remove-Item *']));
   });
+
+  it('the families include every spelling of a publish or deploy, and an assignment in front of a held program (#743 B2)', () => {
+    for (const tool of ['Bash', 'PowerShell'] as const) {
+      expect(holdFamilies(tool)).toEqual(
+        expect.arrayContaining(['npm -*', 'pnpm -*', 'yarn -*', '*npm.cmd *', '*npm.ps1 *', '*/npm *', '*\\npm *', 'npx *npm*', 'pnpm dlx *', 'yarn dlx *', '*=* npm *', '*=* npx *', '*=* git *', '*=* gh *', '*=* node *']),
+      );
+    }
+    expect(holdFamilies('Bash')).toEqual(expect.arrayContaining(['*=* rm *', '*=* rmdir *']));
+  });
+
+  it("the brief's eight commands start the hook in both shells and are held (#743 B3)", () => {
+    const eight = [
+      ['npm.cmd publish', 'publish'],
+      ['npm --registry https://x.invalid publish', 'publish'],
+      ['npx -y npm@10 publish', 'publish'],
+      ['NPM_CONFIG_REGISTRY=https://x.invalid npm publish', 'publish'],
+      ['GIT_DIR=.git git push', 'push'],
+      ['git -c remote.origin.pushurl=x push origin main', 'push'],
+      ['git push -f', 'push'],
+      ['npm.cmd run deploy', 'deploy'],
+    ] as const;
+    for (const [command, held] of eight) {
+      for (const tool of ['Bash', 'PowerShell'] as const) expect(starts(tool, command), `${tool}: ${command}`).toBe(true);
+      expect(action(command), command).toBe(held);
+    }
+  });
+
+  it('ordinary npm, npx and git commands start no hook', () => {
+    for (const command of ['npm test', 'npm run build', 'npm run typecheck', 'npx vitest run test/core', 'npx tsc --noEmit', 'git status', 'git commit -m "x=y"', 'node scripts/build-to.mjs .build']) {
+      for (const tool of ['Bash', 'PowerShell'] as const) expect(starts(tool, command), `${tool}: ${command}`).toBe(false);
+    }
+  });
+});
+
+describe('heldAction: a publish or deploy by any spelling (#743 B1)', () => {
+  it.each([
+    'npm --version',
+    'npm -w web test',
+    'npm --silent run build',
+    'npm.cmd install',
+    'npm.cmd run deployment',
+    'npx vitest run',
+    'npx -y prettier --write src',
+    'npx tsc --project publish',
+    'npx npm test',
+    'pnpm dlx create-vite app',
+    'yarn dlx npm@10 install',
+    'NODE_ENV=test npm test',
+    'GIT_DIR=.git git status',
+    'X=1 node scripts/build-to.mjs .build',
+  ])('is not held: %s', (command) => {
+    expect(heldAction(command)).toBeUndefined();
+  });
+
+  it('reads options before the subcommand, a value after a bare option included', () => {
+    expect(action('npm --registry https://x.invalid publish')).toBe('publish');
+    expect(action('npm --tag next publish --access public')).toBe('publish');
+    expect(action('npm --registry=https://x.invalid publish')).toBe('publish');
+    expect(action('npm --silent run deploy')).toBe('deploy');
+    expect(action('npm run --silent rollback')).toBe('deploy');
+  });
+
+  it('reads npm, pnpm and yarn through npx and dlx, a version and a folder taken off', () => {
+    expect(action('npx -y npm@10 publish')).toBe('publish');
+    expect(action('npx --yes npm@latest --tag next publish')).toBe('publish');
+    expect(action('pnpm dlx npm publish')).toBe('publish');
+    expect(action('yarn --silent dlx pnpm@9 publish')).toBe('publish');
+    expect(action('npx.cmd npm run deploy')).toBe('deploy');
+    expect(action('C:\\nodejs\\npm.ps1 publish')).toBe('publish');
+  });
+
+  it('an assignment in front is not the program, also when its value is quoted', () => {
+    expect(action('NPM_CONFIG_REGISTRY=https://x.invalid npm publish')).toBe('publish');
+    expect(action('X="a b" npm.cmd publish')).toBe('publish');
+    expect(action("X='a b' npm.cmd run deploy")).toBe('deploy');
+    expect(action('GH_TOKEN=x gh pr merge 12')).toBe('pr-merge');
+    expect(action('GH_TOKEN=x gh repo delete a/b --yes')).toBe('repo');
+    expect(action('X=1 rm -rf ~/.inprogress')).toBe('delete');
+    expect(action('X=1 node scripts/deploy.mjs')).toBe('deploy');
+  });
 });
 
 describe('heldAction: P3 (spikes/lead-stage0/p3/hold-hook.cjs) and the rest of the list', () => {

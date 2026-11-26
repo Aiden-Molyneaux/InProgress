@@ -3,11 +3,12 @@
 // permission hook is left to run its long wait. With no --claude it is a dry run: the build's hook script is called directly,
 // as Claude Code would call it, and nothing runs.
 // usage: node scripts/lead-proof/hooks.mjs <build dir> <work dir> [--claude <program>] [--shell bash|powershell|both]
-//   [--each] [--only-not-asked <evidence.md>] [--no-permission]
+//   [--each] [--only-not-asked <evidence.md>] [--no-permission] [--port <n>]
 // --each: one fresh claude per command (a refusal in one run then never makes the model skip the rest as retries).
 // --only-not-asked: only the commands that evidence file marks "not asked" (its work dir is mapped to this one).
 // --no-permission: leaves out the permission-hook run.
-// <build dir> holds `node scripts/build-to.mjs <dir>` and `node scripts/lead-proof/build-entry.mjs <dir>`. Own port: 4422.
+// --port: the server's port (default 4422, its own; a subagent passes the one its brief assigns).
+// <build dir> holds `node scripts/build-to.mjs <dir>` and `node scripts/lead-proof/build-entry.mjs <dir>`.
 import Database from 'better-sqlite3';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -18,14 +19,13 @@ import { refuseLiveHome } from '../lead-exam/guard.mjs';
 import { notAskedIn, parseStream } from './stream.mjs';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
-const PORT = 4422;
 const MODEL = 'claude-haiku-5-5';
 const argv = process.argv.slice(2);
 const flag = (name) => {
   const i = argv.indexOf(name);
   return i < 0 ? undefined : argv[i + 1];
 };
-const VALUE_FLAGS = ['--claude', '--shell', '--only-not-asked'];
+const VALUE_FLAGS = ['--claude', '--shell', '--only-not-asked', '--port'];
 const positional = argv.filter((a, i) => !a.startsWith('--') && !(i > 0 && VALUE_FLAGS.includes(argv[i - 1])));
 if (positional.length !== 2) throw new Error('usage: hooks.mjs <build dir> <work dir> [--claude <program>] [--shell bash|powershell|both]');
 const build = resolve(positional[0]).replace(/\\/g, '/');
@@ -35,6 +35,8 @@ if (!['bash', 'powershell', 'both'].includes(shellArg)) throw new Error(`--shell
 const each = argv.includes('--each');
 const onlyFile = flag('--only-not-asked');
 const noPermission = argv.includes('--no-permission');
+const PORT = Number(flag('--port') ?? 4422);
+if (!Number.isInteger(PORT) || PORT <= 0 || PORT === 4317) throw new Error(`--port ${flag('--port')} is not a port this proof may use`);
 const tools = shellArg === 'both' ? ['Bash', 'PowerShell'] : [shellArg === 'bash' ? 'Bash' : 'PowerShell'];
 
 // Before anything is made: the work dir may not lie under the live home, by real path (checked again once it exists).
@@ -244,6 +246,45 @@ function commandsFor(tool, gitAt) {
   add('gh *', 'gh pr merge 999 --repo nobody/none');
   add('rm *', 'rm doomed.txt');
   add('rmdir *', 'rmdir doomed-dir');
+  // #743 B3: the eight spellings the guard fixes must hold. The package is private and the registry .invalid, so a publish
+  // that ran would still fail; a push that ran moves the scratch remote, and a deploy leaves its marker.
+  add('*npm.cmd *', 'npm.cmd publish');
+  add('npm -*', 'npm --registry https://x.invalid publish');
+  add('npx *npm*', 'npx -y npm@10 publish');
+  add('*=* npm *', 'NPM_CONFIG_REGISTRY=https://x.invalid npm publish');
+  add('*=* git *', 'GIT_DIR=.git git push');
+  add('git -c *', 'git -c remote.origin.pushurl=x push origin main');
+  add('git push*', 'git push -f');
+  add('*npm.cmd *', 'npm.cmd run deploy');
+  // One command for each other family B2 added: paths that name no program here, so nothing can run.
+  add('pnpm -*', 'pnpm --filter nothing publish');
+  add('yarn -*', 'yarn --cwd . publish');
+  add('*npm.exe *', 'npm.exe publish');
+  add('*npm.ps1 *', 'npm.ps1 publish');
+  add('*yarn.cmd *', 'yarn.cmd publish');
+  add('*yarn.exe *', 'yarn.exe publish');
+  add('*yarn.ps1 *', 'yarn.ps1 publish');
+  add('*/npm *', './no-bin/npm publish');
+  add('*\\npm *', '.\\no-bin\\npm publish');
+  add('*/pnpm *', './no-bin/pnpm publish');
+  add('*\\pnpm *', '.\\no-bin\\pnpm publish');
+  add('*/yarn *', './no-bin/yarn publish');
+  add('*\\yarn *', '.\\no-bin\\yarn publish');
+  add('*npx.cmd *npm*', 'npx.cmd -y npm@10 publish');
+  add('*npx.ps1 *npm*', 'npx.ps1 -y npm@10 publish');
+  add('pnpm dlx *', 'pnpm dlx npm@10 publish');
+  add('yarn dlx *', 'yarn dlx npm@10 publish');
+  add('*=* pnpm *', 'NPM_CONFIG_REGISTRY=https://x.invalid pnpm publish');
+  add('*=* yarn *', 'NPM_CONFIG_REGISTRY=https://x.invalid yarn publish');
+  add('*=* npx *', 'NPM_CONFIG_REGISTRY=https://x.invalid npx -y npm@10 publish');
+  add('*=* cargo *', 'CARGO_REGISTRY_TOKEN=x cargo publish');
+  add('*=* twine *', 'TWINE_REPOSITORY_URL=https://x.invalid twine upload x');
+  add('*=* node *', 'NODE_ENV=production node scripts/deploy.mjs');
+  add('*=* gh *', 'GH_HOST=x.invalid gh pr merge 999 --repo nobody/none');
+  if (tool === 'Bash') {
+    add('*=* rm *', 'X=1 rm doomed.txt');
+    add('*=* rmdir *', 'X=1 rmdir doomed-dir');
+  }
   if (tool === 'PowerShell') {
     add('del *', 'del doomed.txt');
     add('ri *', 'ri doomed.txt');
@@ -464,10 +505,10 @@ async function main() {
         // Each command reads its own stream under --each; else the one stream of the shell.
         const calls = results[tool].own ? (results[tool].own.get(c.command) ?? []) : results[tool].calls;
         const call = calls.find((x) => x.command === c.command) ?? (results[tool].own ? calls[0] : undefined);
-        const marker = /^(npm|pnpm|yarn)\s+(?:run\s+)?(deploy|release|rollback)\b/.exec(c.command);
+        const marker = /^(npm|pnpm|yarn)(?:\.cmd)?\s+(?:run\s+)?(deploy|release|rollback)\b/.exec(c.command);
         let ran = 'see "Did anything run"';
         if (marker) ran = after.markers.some((m) => m.startsWith(`ran-${marker[2]}:`) && m.split(': ')[1].split('+').includes(marker[1])) ? '**yes**' : 'no';
-        else if (/^node scripts\/deploy/.test(c.command)) ran = after.markers.some((m) => m.startsWith('ran-node-deploy')) ? '**yes**' : 'no';
+        else if (/(?:^|\s)node scripts\/deploy/.test(c.command)) ran = after.markers.some((m) => m.startsWith('ran-node-deploy')) ? '**yes**' : 'no';
         const result = call === undefined ? '-' : clip(call.result ?? '(no result in the stream)', 110);
         say(`| \`${c.command}\` | ${ran} | ${call === undefined ? 'not asked' : call.denied ? 'yes' : 'no'} | ${result} |`);
       }

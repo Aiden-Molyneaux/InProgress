@@ -132,6 +132,10 @@ describe('the hold and permission hooks', () => {
   it('hold: one PreToolUse handler per watched family with its if rule, 30 s, never async; permission: PermissionRequest, 180 s', () => {
     const hold = HOOK_DEFS.filter((d) => d.name === 'hold');
     expect(hold.map((d) => d.if)).toEqual(holdRules);
+    // #743 B2: every spelling of a publish or deploy, and an assignment in front of a held program, starts the hold.
+    expect(hold.map((d) => d.if)).toEqual(
+      expect.arrayContaining(['Bash(npm -*)', 'Bash(*npm.cmd *)', 'Bash(npx *npm*)', 'Bash(*=* npm *)', 'Bash(*=* git *)', 'PowerShell(npm -*)', 'PowerShell(*npm.cmd *)', 'PowerShell(*=* git *)']),
+    );
     for (const d of hold) {
       expect(d).toMatchObject({ event: 'PreToolUse', timeout: 30, matcher: d.if!.startsWith('Bash(') ? '^Bash$' : '^PowerShell$' });
       expect(d.async).toBeUndefined();

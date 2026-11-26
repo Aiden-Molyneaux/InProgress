@@ -37,8 +37,10 @@ export interface CommandSegment {
 interface SegmentView {
   /** The command with quoted strings emptied (`""`), so text inside a string never matches. */
   masked: string;
-  /** Its words, quotes taken off. */
+  /** Its words, quotes taken off, without the environment assignments in front of it. */
   argv: string[];
+  /** The words of `masked`, without the assignments in front of them: `X="a b" npm publish` reads as one assignment here. */
+  maskedArgv: string[];
 }
 
 /**
@@ -53,8 +55,85 @@ interface HoldRule {
   examples: Record<HoldTool, readonly string[]>;
 }
 
-/** The program a command runs, lower case, without a folder or `.exe`/`.cmd`. */
-const program = (argv: string[]): string => (argv[0] ?? '').replace(/^.*[\\/]/, '').replace(/\.(?:exe|cmd|bat)$/i, '').toLowerCase();
+/** The program a command runs, lower case, without a folder or `.exe`/`.cmd`/`.bat`/`.ps1`. */
+const program = (argv: string[]): string => (argv[0] ?? '').replace(/^.*[\\/]/, '').replace(/\.(?:exe|cmd|bat|ps1)$/i, '').toLowerCase();
+
+/** A word that sets an environment variable for the command after it (`NPM_CONFIG_X=y`, `GIT_DIR=x`). */
+const isAssignment = (word: string): boolean => /^[A-Za-z_][A-Za-z0-9_]*=/.test(word);
+
+/** A command's words without the environment assignments in front of it: the program they run comes first. */
+export function withoutAssignments(argv: string[]): string[] {
+  let i = 0;
+  while (i < argv.length && isAssignment(argv[i])) i++;
+  return argv.slice(i);
+}
+
+/**
+ * Where the first word that `is` accepts stands among a tool's words past its options (`npm --registry x publish`), or -1
+ * when the subcommand is another. A word after a bare option (`--tag next`) may be that option's value, so the word after
+ * it is read as well: holding too much is the safe side. `is` is given the word in lower case.
+ */
+function subcommandIndex(words: readonly string[], is: (word: string) => boolean): number {
+  let afterOption = false;
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    if (w.startsWith('-')) {
+      afterOption = !w.includes('=');
+      continue;
+    }
+    if (is(w.toLowerCase())) return i;
+    if (!afterOption) return -1;
+    afterOption = false;
+  }
+  return -1;
+}
+
+const PACKAGE_MANAGERS = new Set(['npm', 'pnpm', 'yarn']);
+/** A package as npx or dlx names it, without its version (`npm@10` is npm), lower case. */
+const packageName = (word: string): string => program([word.replace(/(.)@.*$/, '$1')]);
+
+/**
+ * The package manager a command runs (npm, pnpm or yarn, by any spelling program() reads) and its words after it, also when
+ * it is run through `npx [options] npm[@<v>]`, or `pnpm dlx` or `yarn dlx` the same way; undefined when it runs none.
+ */
+function packageRun(argv: string[]): { tool: string; rest: string[] } | undefined {
+  let tool = program(argv);
+  let rest = argv.slice(1);
+  for (let hop = 0; hop < 3; hop++) {
+    let runner: string[] | undefined = tool === 'npx' ? rest : undefined;
+    if (tool === 'pnpm' || tool === 'yarn') {
+      const dlx = subcommandIndex(rest, (w) => w === 'dlx');
+      if (dlx >= 0) runner = rest.slice(dlx + 1);
+    }
+    if (runner === undefined) return PACKAGE_MANAGERS.has(tool) ? { tool, rest } : undefined;
+    const at = subcommandIndex(runner, (w) => PACKAGE_MANAGERS.has(packageName(w)));
+    if (at < 0) return undefined;
+    tool = packageName(runner[at]);
+    rest = runner.slice(at + 1);
+  }
+  return undefined;
+}
+
+/** Whether a command's words publish through npm, pnpm or yarn, by any spelling packageRun reads. */
+function publishesPackage(argv: string[]): boolean {
+  const run = packageRun(argv);
+  return run !== undefined && subcommandIndex(run.rest, (w) => w === 'publish') >= 0;
+}
+
+/** A script name the deploy rule holds: it ends at anything but a letter or digit, so deploy:prod and deploy-web are held too. */
+const DEPLOY_SCRIPT = /^(?:deploy|release|rollback)(?![a-z0-9])/;
+/** npm's names for `run` (pnpm and yarn take `run`). */
+const RUN_WORDS = new Set(['run', 'run-script', 'rum', 'urn']);
+
+/** Whether a command's words run a deploy, release or rollback script through npm, pnpm or yarn (`yarn deploy` too). */
+function runsDeployScript(argv: string[]): boolean {
+  const run = packageRun(argv);
+  if (run === undefined) return false;
+  const at = subcommandIndex(run.rest, (w) => RUN_WORDS.has(w) || (run.tool === 'yarn' && DEPLOY_SCRIPT.test(w)));
+  if (at < 0) return false;
+  if (!RUN_WORDS.has(run.rest[at].toLowerCase())) return true;
+  return subcommandIndex(run.rest.slice(at + 1), (w) => DEPLOY_SCRIPT.test(w)) >= 0;
+}
 
 /** git with any global options before its subcommand (`git -C <dir> push`, `git -C "a b" push`, `git -c k=v push`, `git --no-pager push`). */
 const GIT = String.raw`\bgit(?:\.exe)?(?:\s+(?:-[Cc]\s+(?:"[^"]*"|'[^']*'|\S+)|--?[\w-]+(?:=\S+)?))*\s+`;
@@ -65,6 +144,37 @@ const GIT_FAMILIES = ['git -C *', 'git -c *', 'git --*', 'git -P *', 'git -p *',
 /** Spellings of git that a push or merge example is also run through. */
 const GIT_SPELLINGS = ['git -P push', 'git -p push', 'git.exe push', 'C:/Program Files/Git/cmd/git.exe push', '/usr/bin/git push', 'C:\\tools\\git push'];
 const both = (list: readonly string[]): Record<HoldTool, readonly string[]> => ({ Bash: list, PowerShell: list });
+/**
+ * A command with environment assignments in front of it (`NPM_CONFIG_X=y npm publish`, `GIT_DIR=x git push`), as `if`
+ * rules: one per program a rule reads, the program a word of its own after an `=`. The server decides what it does.
+ */
+const assigned = (programs: readonly string[]): string[] => programs.map((p) => `*=* ${p} *`);
+/**
+ * npm, pnpm and yarn as a path or with `.cmd`, `.exe` or `.ps1`, with options before the subcommand, and run through npx
+ * or dlx, as `if` rules: a publish or a deploy behind them starts the hook too.
+ */
+const PACKAGE_FAMILIES = [
+  'npm -*',
+  'pnpm -*',
+  'yarn -*',
+  '*npm.cmd *',
+  '*npm.exe *',
+  '*npm.ps1 *',
+  '*yarn.cmd *',
+  '*yarn.exe *',
+  '*yarn.ps1 *',
+  '*/npm *',
+  '*\\npm *',
+  '*/pnpm *',
+  '*\\pnpm *',
+  '*/yarn *',
+  '*\\yarn *',
+  'npx *npm*',
+  '*npx.cmd *npm*',
+  '*npx.ps1 *npm*',
+  'pnpm dlx *',
+  'yarn dlx *',
+];
 const DELETERS = new Set(['rm', 'rmdir', 'remove-item', 'del', 'ri', 'rd', 'erase']);
 
 /**
@@ -75,16 +185,61 @@ export const HOLD_RULES: readonly HoldRule[] = [
   {
     action: 'publish',
     what: 'a publish of a package for anyone to install',
-    test: (s) => /\b(?:npm|pnpm|yarn)\s+publish\b|\bcargo\s+publish\b|\btwine\s+upload\b/i.test(s.masked),
-    families: both(['npm publish*', 'pnpm publish*', 'yarn publish*', 'cargo publish*', 'twine upload*']),
-    examples: both(['npm publish', 'pnpm publish --access public', 'yarn publish', 'cargo publish', 'twine upload dist/*']),
+    test: (s) => /\b(?:npm|pnpm|yarn)\s+publish\b|\bcargo\s+publish\b|\btwine\s+upload\b/i.test(s.masked) || publishesPackage(s.argv) || publishesPackage(s.maskedArgv),
+    families: both(['npm publish*', 'pnpm publish*', 'yarn publish*', 'cargo publish*', 'twine upload*', ...PACKAGE_FAMILIES, ...assigned(['npm', 'pnpm', 'yarn', 'npx', 'cargo', 'twine'])]),
+    examples: both([
+      'npm publish',
+      'pnpm publish --access public',
+      'yarn publish',
+      'cargo publish',
+      'twine upload dist/*',
+      'npm.cmd publish',
+      'npm.exe publish',
+      'npm.ps1 publish',
+      'pnpm.cmd publish',
+      'yarn.cmd publish',
+      'yarn.ps1 publish',
+      'C:/nodejs/npm.cmd publish',
+      '/usr/local/bin/npm publish',
+      'C:\\nodejs\\pnpm publish',
+      '/usr/bin/yarn publish',
+      'npm --registry https://x.invalid publish',
+      'npm -w a publish',
+      'npm --tag next publish',
+      'pnpm --filter web publish',
+      'yarn --cwd x publish',
+      'npx npm publish',
+      'npx -y npm@10 publish',
+      'npx.cmd -y npm@10 publish',
+      'pnpm dlx npm publish',
+      'yarn dlx npm@10 publish',
+      'NPM_CONFIG_REGISTRY=https://x.invalid npm publish',
+      'npm_config_registry=x npm --tag next publish',
+      'A=1 B=2 pnpm publish',
+      'X="a b" npm.cmd publish',
+      'X=1 npx -y npm publish',
+      'X=1 cargo publish',
+      'X=1 twine upload dist/*',
+    ]),
   },
   {
     action: 'push',
     what: 'a push to a remote',
     test: (s) => GIT_PUSH.test(s.masked),
-    families: both(['git push*', ...GIT_FAMILIES]),
-    examples: both(['git push', 'git push origin feature', 'git -C C:/repo push', 'git -C "C:/a b" push', 'git -c core.x=1 push', 'git --no-pager push', ...GIT_SPELLINGS]),
+    families: both(['git push*', ...GIT_FAMILIES, ...assigned(['git'])]),
+    examples: both([
+      'git push',
+      'git push origin feature',
+      'git -C C:/repo push',
+      'git -C "C:/a b" push',
+      'git -c core.x=1 push',
+      'git --no-pager push',
+      'git -c remote.origin.pushurl=x push origin main',
+      'git push -f',
+      'GIT_DIR=.git git push',
+      'GIT_SSH_COMMAND=x git -C C:/repo push origin main',
+      ...GIT_SPELLINGS,
+    ]),
   },
   {
     action: 'deploy',
@@ -92,31 +247,76 @@ export const HOLD_RULES: readonly HoldRule[] = [
     test: (s) =>
       // The name ends at anything but a letter or digit, so deploy:prod and deploy-web are held too: over-holding is the safe side.
       /\b(?:npm|pnpm)\s+run\s+(?:deploy|release|rollback)(?![a-z0-9])|\byarn\s+(?:run\s+)?(?:deploy|release|rollback)(?![a-z0-9])/i.test(s.masked) ||
+      runsDeployScript(s.argv) ||
+      runsDeployScript(s.maskedArgv) ||
       (program(s.argv) === 'node' && s.argv.slice(1).some((a) => /(?:^|[\\/])scripts[\\/]deploy[^\\/]*$/i.test(a))),
-    families: both(['npm run deploy*', 'npm run release*', 'npm run rollback*', 'pnpm run deploy*', 'pnpm run release*', 'pnpm run rollback*', 'yarn run deploy*', 'yarn run release*', 'yarn run rollback*', 'yarn deploy*', 'yarn release*', 'yarn rollback*', 'node *deploy*']),
-    examples: both(['npm run deploy', 'npm run release', 'npm run rollback', 'npm run deploy>deploy.log', 'yarn deploy<in', 'pnpm run deploy', 'yarn deploy', 'yarn run release', 'node scripts/deploy.mjs', 'node scripts\\deploy-web.mjs', 'node C:/personal/InProgress/scripts/deploy.mjs']),
+    families: both([
+      'npm run deploy*',
+      'npm run release*',
+      'npm run rollback*',
+      'pnpm run deploy*',
+      'pnpm run release*',
+      'pnpm run rollback*',
+      'yarn run deploy*',
+      'yarn run release*',
+      'yarn run rollback*',
+      'yarn deploy*',
+      'yarn release*',
+      'yarn rollback*',
+      'node *deploy*',
+      ...PACKAGE_FAMILIES,
+      ...assigned(['npm', 'pnpm', 'yarn', 'npx', 'node']),
+    ]),
+    examples: both([
+      'npm run deploy',
+      'npm run release',
+      'npm run rollback',
+      'npm run deploy>deploy.log',
+      'yarn deploy<in',
+      'pnpm run deploy',
+      'yarn deploy',
+      'yarn run release',
+      'node scripts/deploy.mjs',
+      'node scripts\\deploy-web.mjs',
+      'node C:/personal/InProgress/scripts/deploy.mjs',
+      'npm.cmd run deploy',
+      'npm.cmd run rollback',
+      'npm --silent run deploy',
+      'npm.cmd --silent run rollback',
+      'npm --prefix C:/repo run deploy',
+      'npm -s run-script deploy:prod',
+      'pnpm.cmd run release',
+      'yarn.cmd deploy',
+      'yarn --cwd x rollback',
+      'C:/nodejs/npm.cmd run deploy',
+      'npx npm run deploy',
+      'pnpm dlx npm@10 run rollback',
+      'NODE_ENV=production npm run deploy',
+      'X=1 npm --silent run rollback',
+      'X=1 node scripts/deploy.mjs',
+    ]),
   },
   {
     action: 'repo',
     what: "a change to a repository on Aiden's account",
     test: (s) => program(s.argv) === 'gh' && ((s.argv[1] === 'repo' && ['create', 'delete', 'edit'].includes(s.argv[2] ?? '')) || (s.argv[1] === 'release' && s.argv[2] === 'create')),
-    families: both(['gh *']),
-    examples: both(['gh repo create acme/widgets --public', 'gh repo delete acme/widgets --yes', 'gh repo edit --visibility public', 'gh release create v1.0.0']),
+    families: both(['gh *', ...assigned(['gh'])]),
+    examples: both(['gh repo create acme/widgets --public', 'gh repo delete acme/widgets --yes', 'gh repo edit --visibility public', 'gh release create v1.0.0', 'GH_TOKEN=x gh repo delete acme/widgets --yes']),
   },
   {
     action: 'pr-merge',
     what: 'a merge of a pull request into main',
     test: (s) => program(s.argv) === 'gh' && s.argv[1] === 'pr' && s.argv[2] === 'merge',
-    families: both(['gh *']),
-    examples: both(['gh pr merge 12 --squash']),
+    families: both(['gh *', ...assigned(['gh'])]),
+    examples: both(['gh pr merge 12 --squash', 'GH_TOKEN=x gh pr merge 12 --squash']),
   },
   {
     action: 'delete',
     what: 'a delete under the live home',
     test: (s) => DELETERS.has(program(s.argv)) && s.argv.slice(1).some((a) => /\.inprogress(?![\w-])/i.test(a)),
-    families: { Bash: ['rm *', 'rmdir *'], PowerShell: ['rm *', 'del *', 'ri *', 'rmdir *', 'rd *', 'Remove-Item *'] },
+    families: { Bash: ['rm *', 'rmdir *', ...assigned(['rm', 'rmdir'])], PowerShell: ['rm *', 'del *', 'ri *', 'rmdir *', 'rd *', 'Remove-Item *'] },
     examples: {
-      Bash: ['rm -rf ~/.inprogress', 'rm ~/.inprogress/inprogress.db', 'rmdir ~/.inprogress/x'],
+      Bash: ['rm -rf ~/.inprogress', 'rm ~/.inprogress/inprogress.db', 'rmdir ~/.inprogress/x', 'X=1 rm -rf ~/.inprogress'],
       PowerShell: ['Remove-Item -Recurse -Force $HOME\\.inprogress\\resources', 'rm C:/Users/a/.inprogress', 'del "C:\\Users\\a\\.inprogress\\token"', 'ri ~/.inprogress', 'rd ~/.inprogress', 'rmdir ~/.inprogress'],
     },
   },
@@ -124,8 +324,8 @@ export const HOLD_RULES: readonly HoldRule[] = [
     action: 'merge',
     what: 'a merge into main',
     test: (s) => GIT_MERGE.test(s.masked),
-    families: both(['git merge*', ...GIT_FAMILIES]),
-    examples: both(['git merge feature', 'git merge --no-ff -m "land it" feature', 'git -C ../main merge x', 'git --no-pager merge x', ...GIT_SPELLINGS.map((x) => x.replace(/push$/, 'merge x'))]),
+    families: both(['git merge*', ...GIT_FAMILIES, ...assigned(['git'])]),
+    examples: both(['git merge feature', 'git merge --no-ff -m "land it" feature', 'git -C ../main merge x', 'git --no-pager merge x', 'GIT_DIR=x git merge feature',...GIT_SPELLINGS.map((x) => x.replace(/push$/, 'merge x'))]),
   },
 ];
 
@@ -427,9 +627,9 @@ export function heldActions(command: string, extra: readonly string[] = [], cwd:
       matches.push({ action: 'playbook', index, segment: seg.raw, folder: here, what: `a command the playbook holds for Aiden (${line})` });
       return;
     }
-    // A gh command is read on its own words, against the gh rules alone.
-    const view: SegmentView = { masked: seg.masked, argv };
-    const rule = HOLD_RULES.find((r) => (program(argv) === 'gh' ? r.action === 'repo' || r.action === 'pr-merge' : true) && r.test(view));
+    // A gh command is read on its own words, against the gh rules alone; assignments in front of a command are not its program.
+    const view: SegmentView = { masked: seg.masked, argv: withoutAssignments(argv), maskedArgv: withoutAssignments(words(seg.masked)) };
+    const rule = HOLD_RULES.find((r) => (program(view.argv) === 'gh' ?r.action === 'repo' || r.action === 'pr-merge' : true) && r.test(view));
     if (rule) matches.push({ action: rule.action, index, segment: seg.raw, folder: here, what: rule.what });
   });
   return matches;
