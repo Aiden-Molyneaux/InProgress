@@ -641,3 +641,10 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   under a fresh key; a name that leads no project is refused. Calls: the old lane runs beside the new ones, as built.
   Deviations accepted: only untried lines are cleared (a line in a POST may still go out); the try number is the key's
   suffix from the second; a decided old question is recorded as a question's kind. 2929 unit tests green.
+- Murr's re-check of f08ee1b (Opus): 1 major: a decision on an old question was relayed to its session's T3 thread even
+  when that session had ended, reviving it on a stale step. Fixed as P1 to P6: an old ask's decision and its undo go
+  only to a live session, else to the step's log; a line put back after a failed POST is cleared if its ask was
+  answered meanwhile; an undone old question comes back as an old ask for the Voice; a line heard 24 hours ago with no
+  answer frees its place (the plan's "left open": the ask stays his, in the window); an ask gets at most two lines;
+  the round's AIDEN or CARD answer becomes the ask's reading when none is stored. 2935 unit tests green. Kept as
+  built: "The old asks are done" means none remain for the Voice; any left open are in the window.

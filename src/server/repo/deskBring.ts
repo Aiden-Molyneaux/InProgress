@@ -49,6 +49,16 @@ export function t3ThreadOf(db: DB, sessionId: string | null): string | null {
   return row !== undefined && row.app === 't3' && row.t3_thread_id ? row.t3_thread_id : null;
 }
 
+/**
+ * The T3 Code thread of the session while it has not ended; else null. An old ask's session may have ended long ago: a
+ * relay to its thread would wake it on a stale step, so the old ask's decision and its undo go to the step's log instead.
+ */
+export function liveT3ThreadOf(db: DB, sessionId: string | null): string | null {
+  if (sessionId === null) return null;
+  const state = db.prepare('SELECT state FROM sessions WHERE id = ?').pluck().get(sessionId) as string | undefined;
+  return state === undefined || state === 'ended' ? null : t3ThreadOf(db, sessionId);
+}
+
 /** The T3 Code thread of the newest session, not ended, focused on the step; null when there is none. */
 export function t3ThreadOnStep(ctx: Ctx, nodeId: number): string | null {
   const thread = ctx.db

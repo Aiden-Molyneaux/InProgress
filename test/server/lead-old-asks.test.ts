@@ -3,16 +3,17 @@ import { LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
 import { buildApp } from '../../src/server/app';
 import { openDb } from '../../src/server/db/connection';
 import { createCtx, type Ctx } from '../../src/server/db/tx';
-import { DECIDE_QUESTION_ONLY, leadAllow, WORK_PROJECT } from '../../src/server/lead-commands';
+import { DECIDE_QUESTION_ONLY, leadAllow, leadUndo, WORK_PROJECT } from '../../src/server/lead-commands';
 import { applyVerdict } from '../../src/server/lead/apply';
 import { write as dbWrite } from '../../src/server/db/tx';
 import { bringItem } from '../../src/server/repo/deskBring';
 import { produceDeskItem } from '../../src/server/repo/deskProducers';
 import { getSend, markTrying } from '../../src/server/repo/leadSends';
-import { leadOldAskReading, leadOldAsks, leadOldAsksAll, leadOldAsksNext, leadsNoProject, NO_OLD_ASKS, OLD_ASKS_WITH_AIDEN } from '../../src/server/lead/oldAsks';
+import { leadOldAskReading, leadOldAsks, leadOldAsksAll, leadOldAsksNext, leadsNoProject, NO_OLD_ASKS, oldReading, OLD_ASKS_WITH_AIDEN } from '../../src/server/lead/oldAsks';
 import { createRunner, type TurnInput, type TurnOutput, type TurnWay } from '../../src/server/lead/runner';
 import { createSender, type SenderT3 } from '../../src/server/lead/sends';
-import { OLD_ASKS_DONE_LINE } from '../../src/server/lead/voice';
+import { OLD_ASKS_DONE_LINE, voiceReadiness } from '../../src/server/lead/voice';
+import { handleHookEvent } from '../../src/server/session-flow';
 import { clearAsk, raiseAsk, requireAsk } from '../../src/server/repo/asks';
 import { addDeskItem, getDeskItem, type DeskItem } from '../../src/server/repo/desk';
 import { addNodes } from '../../src/server/repo/nodes';
@@ -323,11 +324,109 @@ describe('the runner and an open old ask, with the real apply', () => {
     expect(getDeskItem(w.ctx.db, items[0]!)!.outcome).toMatch(/^DECIDE d\d+$/);
     for (const a of [perm, q2, review]) expect(requireAsk(w.ctx, a.id).clearedAt).toBeNull();
     expect(items.slice(1).map((id) => getDeskItem(w.ctx.db, id)!.outcome)).toEqual([`AIDEN for the Voice: ${DECIDE_QUESTION_ONLY}`, 'AIDEN for the Voice', 'CARD for the Voice']);
+    // P6: with no reading stored, an AIDEN or CARD answer becomes the reading; a DECIDE refused for a permission writes none.
+    expect([perm, q2, review].map((a) => oldReading(w.ctx, a.id))).toEqual([null, 'Blue.', 'The landing check decides.']);
     // No bring: nothing went to the Voice until next carries them.
     expect(w.lines()).toEqual([]);
     expect(leadOldAsksNext(w.ctx, 'Progresser', V).text).toBe('Queued 3 old asks for the Voice; 0 remain.');
     // Oldest ask first: the colour question was raised two days back, the permission and the review now.
     expect(w.lines().map((l) => l.itemId)).toEqual([items[2], items[1], items[3]]);
+    expect(w.lines()[0]!.body).toMatch(/\nBlue\. Say your answer\.$/);
+  });
+});
+
+describe('an old question decided by the round, and undone (P1, P3, P6)', () => {
+  const out = (text: string): TurnOutput => ({ text, costUsd: 0, durationMs: 1, tokensIn: 1, tokensOut: 1, refusedTools: [], rateLimits: [], model: 'claude-opus-5-5' });
+  const DECIDE = 'DECIDE\nKIND: TECHNICAL\nANSWER: Use port 4410.\nWHY: It is free.';
+  function decideOld(state: 'ended' | 'idle', withSession = true) {
+    const w = world();
+    handleHookEvent(w.ctx, 's1', { event: 'start', source: 'startup', cwd: 'C:/personal/InProgress' });
+    w.ctx.db.prepare("UPDATE sessions SET app = 't3', t3_thread_id = 'th_1', state = ? WHERE id = 's1'").run(state);
+    const a = withSession ? raiseAsk(w.ctx, 'test', { nodeId: w.ip.step.id, kind: 'question', text: 'Which port?', sessionId: 's1' }) : w.ask(w.ip, 'Which port?', 3);
+    leadAllow(w.ctx, w.ip.project.slug, 'Progresser', V, { switch: 'round', aidenWords: 'run the round' });
+    leadOldAsks(w.ctx, w.ip.project.slug, 'Progresser', V);
+    const itemId = w.item(a.id)[0]!.id;
+    const way: TurnWay = { name: 'headless', run: async () => out(DECIDE) };
+    const r = createRunner(w.ctx, { way, model: 'claude-opus-5-5', home: 'C:/home', port: 4410, tickMs: 60 * 60 * 1000, apply: (c, turn, it, record) => applyVerdict(c, turn, it, record), log: { info: () => undefined, error: () => undefined } });
+    cleanups.push(() => r.stop());
+    return { ...w, a, itemId, r };
+  }
+  const relays = (ctx: Ctx) => ctx.db.prepare("SELECT target, retry_key AS retryKey FROM lead_sends WHERE kind = 'relay' ORDER BY id").all() as { target: string; retryKey: string }[];
+  const logs = (ctx: Ctx, nodeId: number) => ctx.db.prepare('SELECT text FROM log_entries WHERE node_id = ? ORDER BY id').pluck().all(nodeId) as string[];
+  const decision = (ctx: Ctx, item: number) => Number(/^DECIDE d(\d+)$/.exec(getDeskItem(ctx.db, item)!.outcome ?? '')![1]);
+
+  it("with its session ended: no relay to the old thread, the decision and its undo go in the step's log", async () => {
+    const w = decideOld('ended');
+    w.r.kick(w.ip.project.id);
+    await vi.waitFor(() => expect(getDeskItem(w.ctx.db, w.itemId)!.state).toBe('done'));
+    const d = decision(w.ctx, w.itemId);
+    expect(relays(w.ctx)).toEqual([]);
+    expect(logs(w.ctx, w.ip.step.id)).toEqual([`Progresser decided d${d}: Use port 4410. Why: It is free. Aiden can undo this with "undo d${d}".`]);
+    leadUndo(w.ctx, w.ip.project.slug, 'Progresser', V, { eventId: d, aidenWords: 'undo that' });
+    expect(relays(w.ctx)).toEqual([]);
+    expect(logs(w.ctx, w.ip.step.id).at(-1)).toBe(`Progresser: d${d} is withdrawn: a${w.a.id} is Aiden's again.`);
+  });
+
+  it('with its session live: the decision and its undo are relayed to its thread', async () => {
+    const w = decideOld('idle');
+    w.r.kick(w.ip.project.id);
+    await vi.waitFor(() => expect(getDeskItem(w.ctx.db, w.itemId)!.state).toBe('done'));
+    const d = decision(w.ctx, w.itemId);
+    expect(relays(w.ctx)).toEqual([{ target: 'th_1', retryKey: `relay:d${d}` }]);
+    leadUndo(w.ctx, w.ip.project.slug, 'Progresser', V, { eventId: d, aidenWords: 'undo that' });
+    expect(relays(w.ctx)).toEqual([{ target: 'th_1', retryKey: `relay:d${d}` }, { target: 'th_1', retryKey: `undo:d${d}` }]);
+  });
+
+  it('undone, the question raised again is an old ask waiting on Aiden, for next', async () => {
+    const w = decideOld('ended', false);
+    w.r.kick(w.ip.project.id);
+    await vi.waitFor(() => expect(getDeskItem(w.ctx.db, w.itemId)!.state).toBe('done'));
+    leadUndo(w.ctx, w.ip.project.slug, 'Progresser', V, { eventId: decision(w.ctx, w.itemId), aidenWords: 'undo that' });
+    const again = w.ctx.db.prepare("SELECT id FROM asks WHERE cleared_at IS NULL AND text = 'Which port?'").pluck().get() as number;
+    expect(again).not.toBe(w.a.id);
+    expect(w.item(again).map((i) => i.state)).toEqual(['waiting_aiden']);
+    expect(leadOldAsksNext(w.ctx, 'Progresser', V).text).toBe('Queued 1 old asks for the Voice; 0 remain.');
+  });
+});
+
+describe('the Voice and the cap after the re-check (P2, P4, P5)', () => {
+  it('a line put back to intended whose ask was answered meanwhile is cleared before the project gathers; one still open stays', () => {
+    const w = world();
+    const [a, b] = [w.ask(w.glimpse, 'one', 5), w.ask(w.glimpse, 'two', 4)];
+    leadOldAsks(w.ctx, w.glimpse.project.slug, 'Progresser', V);
+    leadOldAsksNext(w.ctx, 'Progresser', V);
+    const [la, lb] = w.lines();
+    // Answered while its line was being tried: closeAskItems left it, and the failed POST put it back (result cleared).
+    w.ctx.db.prepare("UPDATE desk_items SET state = 'done' WHERE id = ?").run(w.item(a.id)[0]!.id);
+    voiceReadiness(w.ctx, 'C:/no-such-home-for-this-test', getSend(w.ctx.db, lb!.id)!);
+    expect([getSend(w.ctx.db, la!.id)!.state, getSend(w.ctx.db, lb!.id)!.state]).toEqual(['cleared', 'intended']);
+    expect(w.item(b.id)[0]!.state).toBe('waiting_aiden');
+  });
+
+  it('a line he heard 24 hours ago with no answer stops counting against the cap; one heard 23 hours ago still counts', () => {
+    const w = world();
+    for (let i = 0; i < 7; i++) w.ask(w.glimpse, `ask ${i}`, 9 - i);
+    leadOldAsks(w.ctx, w.glimpse.project.slug, 'Progresser', V);
+    leadOldAsksNext(w.ctx, 'Progresser', V);
+    const ids = w.lines().map((l) => l.id);
+    const heard = (id: number, at: string) => w.ctx.db.prepare("UPDATE lead_sends SET state = 'done', done_at = ? WHERE id = ?").run(at, id);
+    ids.slice(0, 4).forEach((id) => heard(id, '2026-11-24T08:00:00.000Z'));
+    heard(ids[4]!, '2026-11-24T10:00:00.000Z');
+    expect(leadOldAsksNext(w.ctx, 'Progresser', V).text).toBe('Queued 2 old asks for the Voice; 0 remain.');
+  });
+
+  it('after its second line ends unknown or cleared an old ask gets no third line: it stays for the window', () => {
+    const w = world();
+    const a = w.ask(w.glimpse, 'one', 5);
+    leadOldAsks(w.ctx, w.glimpse.project.slug, 'Progresser', V);
+    leadOldAsksNext(w.ctx, 'Progresser', V);
+    const end = (state: string) => w.ctx.db.prepare("UPDATE lead_sends SET state = ? WHERE id = (SELECT MAX(id) FROM lead_sends WHERE kind = 'voice_line')").run(state);
+    end('unknown');
+    expect(leadOldAsksNext(w.ctx, 'Progresser', V).text).toBe('Queued 1 old asks for the Voice; 0 remain.');
+    end('cleared');
+    expect(leadOldAsksNext(w.ctx, 'Progresser', V).text).toBe(NO_OLD_ASKS);
+    expect(w.lines().filter((l) => l.itemId === w.item(a.id)[0]!.id)).toHaveLength(2);
+    expect(w.item(a.id)[0]!.state).toBe('waiting_aiden');
   });
 });
 

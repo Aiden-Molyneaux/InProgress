@@ -6,7 +6,9 @@ import { decideInWrite, DECIDE_QUESTION_ONLY } from '../lead-commands';
 import { logLeadEvent } from '../lead';
 import { clearInWrite, requireAsk } from '../repo/asks';
 import type { DeskItem } from '../repo/desk';
-import { askOf, bringItem, bringNext, broughtOpen, t3ThreadOf, tellAidens } from '../repo/deskBring';
+import { askOf, bringItem, bringNext, broughtOpen, liveT3ThreadOf, t3ThreadOf, tellAidens } from '../repo/deskBring';
+import { addLogInWrite } from '../repo/logs';
+import { oldReading, storeOldReadingInWrite } from './oldAsks';
 import { addDecision } from '../repo/leadDecisions';
 import type { LeadTurn, TurnEffect } from '../repo/leadTurns';
 import { insertLeadEvent } from '../repo/leadEvents';
@@ -60,6 +62,11 @@ export function applyVerdict(ctx: Ctx, turn: LeadTurn, item: DeskItem, record: R
   // An old ask (task 17) the lead may decide only when it is a question, as lead decide does. Any other is Aiden's: it
   // waits on him with no bring, and lead old-asks next carries it to the Voice.
   if (item.kind === 'old_ask' && !(verdict === 'DECIDE' && ask.kind === 'question')) {
+    // With no reading of the lead's stored, the round's answer is its reading: its line says what the lead would do.
+    const would = (turn.answer ?? '').trim();
+    if ((verdict === 'AIDEN' || verdict === 'CARD') && would !== '' && oldReading(ctx, ask.id) === null) {
+      storeOldReadingInWrite(ctx, { projectId: project.id, lead: name, askId: ask.id, nodeId: ask.nodeId, reading: would });
+    }
     return { itemState: 'waiting_aiden', outcome: verdict === 'DECIDE' ? `AIDEN for the Voice: ${DECIDE_QUESTION_ONLY}` : `${verdict} for the Voice` };
   }
   const answer = turn.answer ?? '';
@@ -87,7 +94,14 @@ export function applyVerdict(ctx: Ctx, turn: LeadTurn, item: DeskItem, record: R
         turnId: turn.id,
       },
     });
-    tell(`relay:d${id}`, leadLine(name, `d${id}: ${answer}\nWhy: ${sentence(why)} Aiden can undo this with "undo d${id}".`));
+    const said = `d${id}: ${answer}\nWhy: ${sentence(why)} Aiden can undo this with "undo d${id}".`;
+    if (item.kind !== 'old_ask') tell(`relay:d${id}`, leadLine(name, said));
+    else {
+      // An old ask's session may have ended long ago: only a live one is told; else the step's log says it.
+      const thread = liveT3ThreadOf(ctx.db, ask.sessionId);
+      if (thread !== null) intendSend(ctx.db, { projectId: project.id, itemId: item.id, kind: 'relay', target: thread, retryKey: `relay:d${id}`, body: leadLine(name, said) }, now);
+      else addLogInWrite(ctx, record, ask.nodeId, `${name} decided ${said.replace('\n', ' ')}`);
+    }
     return { itemState: 'done', outcome: `DECIDE d${id}` };
   }
   if (verdict === 'AIDEN') {

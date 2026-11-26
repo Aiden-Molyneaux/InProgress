@@ -10,7 +10,8 @@ import { LEAD_NAME, LEAD_NAME_RULE } from '../core/lead';
 import { resolveProject } from './repo/projects';
 import { intentHeadlines } from './lead-text';
 import { aidensAskSql, clearInWrite, markAnswersDelivered, raiseAskInWrite, requireAsk } from './repo/asks';
-import { DECISION_LINE_CUT, t3ThreadOf, t3ThreadOnStep } from './repo/deskBring';
+import { DECISION_LINE_CUT, liveT3ThreadOf, t3ThreadOf, t3ThreadOnStep } from './repo/deskBring';
+import { addDeskItem, getDeskItem } from './repo/desk';
 import { intendSend, sendByRetryKey } from './repo/leadSends';
 import { SETTING_KEYS } from './lead/settings';
 import { addDecision, decisionByEvent, type DecisionKind, type SaidWhere } from './repo/leadDecisions';
@@ -492,13 +493,20 @@ export function leadUndo(ctx: Ctx, ref: string, as: string, instructions: number
       const was = decisionByEvent(ctx.db, event.id);
       const undone = { wouldHave: old.answer, kind: was?.kind ?? (old.kind === 'permission' ? 'permission' : 'technical'), productRuling: was?.productRuling ?? false };
       const raised = raiseAskInWrite(ctx, record, actor, { nodeId: old.nodeId, kind: old.kind, text: old.text, ...(old.sessionId === null ? {} : { sessionId: old.sessionId }) }, undone);
+      const oldAsk = was?.itemId != null && getDeskItem(ctx.db, was.itemId)?.kind === 'old_ask';
+      // An old ask's question raised again is his, carried by lead old-asks next, unless the desk already brings it.
+      if (oldAsk && ctx.db.prepare("SELECT 1 FROM desk_items WHERE kind IN ('question', 'permission', 'old_ask') AND ref = ?").get(String(raised.ask.id)) === undefined) {
+        addDeskItem(ctx.db, { projectId: project.id, kind: 'old_ask', ref: String(raised.ask.id), nodeId: raised.ask.nodeId, state: 'waiting_aiden' }, ctx.now());
+      }
       // A decision made at the desk or in the thread was told to its session: the session is told once that it is withdrawn.
+      // An old ask's session is told only while it has not ended (as its decision was); else the step's log says it.
       if (was?.saidWhere === 'desk' || was?.saidWhere === 'thread') {
-        const thread = t3ThreadOf(ctx.db, old.sessionId);
+        const thread = oldAsk ? liveT3ThreadOf(ctx.db, old.sessionId) : t3ThreadOf(ctx.db, old.sessionId);
         const retryKey = `undo:${tag}`;
+        const line = `${tag} is withdrawn: ${askTag(old.id)} is Aiden's again.`;
         if (thread !== null && sendByRetryKey(ctx.db, retryKey) === undefined) {
-          intendSend(ctx.db, { projectId: project.id, kind: 'relay', target: thread, retryKey, body: leadLine(name, `${tag} is withdrawn: ${askTag(old.id)} is Aiden's again.`) }, ctx.now());
-        }
+          intendSend(ctx.db, { projectId: project.id, kind: 'relay', target: thread, retryKey, body: leadLine(name, line) }, ctx.now());
+        } else if (thread === null && oldAsk) addLogInWrite(ctx, record, old.nodeId, `${name}: ${line}`);
       }
       text = `Undid ${tag}: the question is Aiden's again as ${askTag(raised.ask.id)}. Your answer was: "${clip(old.answer, ANSWER_CUT)}".`;
     } else {

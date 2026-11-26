@@ -1,3 +1,4 @@
+import { LEAD_INSTRUCTIONS_VERSION } from '../../core/lead';
 import { askTag } from '../../core/types';
 import { write, type Ctx } from '../db/tx';
 import { badRequest, conflict } from '../errors';
@@ -129,6 +130,10 @@ export function leadOldAsksAll(ctx: Ctx, as: string, instructions: number): { te
 const OLD_LINE_SQL = `s.kind = 'voice_line' AND s.retry_key LIKE '${OLD_KEY_LIKE}' AND s.retry_key NOT LIKE '${OLD_DONE_KEY_LIKE}'`;
 /** SQL: a line still with Aiden or on its way: intended (or being tried), or done. One that ended unknown or cleared is not. */
 const LIVE_LINE_SQL = `s.state IN ('intended', 'done')`;
+/** How long a line he heard waits for his answer before it stops counting against the cap: its ask stays his, in the window. */
+export const OLD_LINE_HEARD_MS = 24 * 60 * 60 * 1000;
+/** How many lines an old ask gets: its first, and one more after a line that ended unknown or cleared. */
+export const OLD_LINES_PER_ASK = 2;
 
 /**
  * `lead old-asks next [count]`: queues one Voice line for each of the next `count` old_ask items (at most OLD_ASKS_AT_ONCE
@@ -149,9 +154,12 @@ export function leadOldAsksNext(ctx: Ctx, as: string, instructions: number, coun
     const byId = new Map(projects.map((p) => [p.id, p]));
     const served = (projectId: number): boolean => byId.has(projectId);
     const pending = (db
-      .prepare(`SELECT d.project_id FROM lead_sends s JOIN desk_items d ON d.id = s.item_id WHERE ${OLD_LINE_SQL} AND ${LIVE_LINE_SQL} AND d.state <> 'done'`)
+      .prepare(
+        `SELECT d.project_id FROM lead_sends s JOIN desk_items d ON d.id = s.item_id
+          WHERE ${OLD_LINE_SQL} AND ${LIVE_LINE_SQL} AND d.state <> 'done' AND NOT (s.state = 'done' AND s.done_at <= ?)`,
+      )
       .pluck()
-      .all() as number[]).filter(served).length;
+      .all(new Date(Date.parse(now) - OLD_LINE_HEARD_MS).toISOString()) as number[]).filter(served).length;
     if (pending >= OLD_ASKS_AT_ONCE) throw conflict(OLD_ASKS_WITH_AIDEN);
     const waiting = (db
       .prepare(
@@ -162,7 +170,9 @@ export function leadOldAsksNext(ctx: Ctx, as: string, instructions: number, coun
             AND NOT EXISTS (SELECT 1 FROM lead_sends s WHERE s.item_id = d.id AND ${OLD_LINE_SQL} AND ${LIVE_LINE_SQL})
           ORDER BY a.raised_at, a.id, d.id`,
       )
-      .all() as { id: number; projectId: number; askId: number; nodeId: number; raisedAt: string; lines: number }[]).filter((r) => served(r.projectId));
+      .all() as { id: number; projectId: number; askId: number; nodeId: number; raisedAt: string; lines: number }[])
+      // After its second line ends unknown or cleared, an old ask stays his in the window: no third line.
+      .filter((r) => served(r.projectId) && r.lines < OLD_LINES_PER_ASK);
     if (waiting.length === 0) {
       if (pending === 0) {
         const last = (db.prepare(`SELECT s.project_id FROM lead_sends s WHERE ${OLD_LINE_SQL} ORDER BY s.id DESC`).pluck().all() as number[]).find(served);
@@ -204,6 +214,15 @@ export function leadOldAsksNext(ctx: Ctx, as: string, instructions: number, coun
   });
 }
 
+/** Writes an `old_reading` line for the ask, inside the caller's write: the latest one is its reading. Answers its id. */
+export function storeOldReadingInWrite(ctx: Ctx, input: { projectId: number; lead: string; askId: number; nodeId: number; reading: string }): number {
+  return insertLeadEvent(
+    ctx.db,
+    { projectId: input.projectId, lead: input.lead, instructions: LEAD_INSTRUCTIONS_VERSION, kind: OLD_READING, askId: input.askId, nodeId: input.nodeId, text: readingText(input.askId, input.reading.trim()) },
+    ctx.now(),
+  );
+}
+
 /** The text an `old_reading` line holds: the ask, then the reading. */
 const readingText = (askId: number, reading: string): string => `${askTag(askId)}: ${reading}`;
 
@@ -226,8 +245,7 @@ export function leadOldAskReading(ctx: Ctx, ref: string, as: string, instruction
   return write(ctx, actor, () => {
     const ask = requireAsk(ctx, input.askId);
     if (ask.projectId !== project.id) throw conflict(`${askTag(ask.id)} is not in this project.`);
-    const reading = input.text.trim();
-    const eventId = insertLeadEvent(ctx.db, { projectId: project.id, lead: name, instructions, kind: OLD_READING, askId: ask.id, nodeId: ask.nodeId, text: readingText(ask.id, reading) }, ctx.now());
+    const eventId = storeOldReadingInWrite(ctx, { projectId: project.id, lead: name, askId: ask.id, nodeId: ask.nodeId, reading: input.text });
     return { text: `Stored your reading of ${askTag(ask.id)}.`, eventId };
   });
 }

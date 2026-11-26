@@ -4,6 +4,7 @@ import { clipLine, stepRef } from '../../core/step-ref';
 import type { DB } from '../db/connection';
 import { write, type Ctx } from '../db/tx';
 import { getSend, intendSend, markTrying, moveSend, sendByRetryKey, type LeadSend } from '../repo/leadSends';
+import { ASK_ITEM_KINDS } from '../repo/deskProducers';
 import { quietEndToday } from './morning';
 import { SendWaits } from './sends';
 import { quietHours, voiceCap } from './settings';
@@ -124,6 +125,7 @@ export interface VoiceOptions {
  * quiet hours, still gathering, past the day's cap). A read. A webhook file that does not read throws SendWaits.
  */
 export function voiceReadiness(ctx: Ctx, home: string, send: LeadSend): { wait: string } | { config: VoiceConfig; lines: LeadSend[] } {
+  clearAnsweredLines(ctx.db, send.projectId);
   const config = readVoiceConfig(home);
   if (config === undefined) return { wait: 'the Voice is not set up' };
   const now = ctx.now();
@@ -142,6 +144,18 @@ export function voiceReadiness(ctx: Ctx, home: string, send: LeadSend): { wait: 
     return { wait: "past the day's cap: the lines wait for the morning" };
   }
   return { config, lines };
+}
+
+/**
+ * The project's intended lines not being tried whose item is an ask's and done (its ask answered or gone) move to cleared,
+ * so a line put back after a failed POST is never spoken once its ask is answered. closeAskItems (deskProducers.ts) clears
+ * them as the item closes; this catches the ones put back to intended after it.
+ */
+function clearAnsweredLines(db: DB, projectId: number): void {
+  db.prepare(
+    `UPDATE lead_sends SET state = 'cleared' WHERE project_id = ? AND kind = 'voice_line' AND state = 'intended' AND result IS NULL
+       AND item_id IN (SELECT id FROM desk_items WHERE state = 'done' AND kind IN (${ASK_ITEM_KINDS.map(() => '?').join(', ')}))`,
+  ).run(projectId, ...ASK_ITEM_KINDS);
 }
 
 /** The sender's two Voice deps: whether a project's lines are ready (asked before anything is written), and the webhook. */
