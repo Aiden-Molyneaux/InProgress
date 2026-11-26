@@ -81,6 +81,18 @@ describe('the hold hook', () => {
     );
   });
 
+  it("prints a split answer's text as it is, in the hold and the permission hook alike", async () => {
+    const text = 'Run the push as a command of its own: InProgress reads it before the commands in front of it have run.';
+    reply = () => ({ status: 200, body: { split: true, text } });
+    expect(await runHandler('hold', bash('git commit -am x && git push'), deps())).toStrictEqual(deny(text));
+    expect(await runHandler('permission', { ...bash('git commit -am x && git push'), hook_event_name: 'PermissionRequest' }, deps())).toStrictEqual({
+      json: { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'deny', message: text } } },
+    });
+    // A split answer with no text is one the hook cannot read: held, as InProgress not answering.
+    reply = () => ({ status: 200, body: { split: true } });
+    expect((await runHandler('hold', bash('git commit -am x && git push'), deps()))?.json).toMatchObject({ hookSpecificOutput: { permissionDecisionReason: expect.stringContaining('InProgress is not answering') } });
+  });
+
   it('asks about each held command of a compound one, and the first held answers', async () => {
     reply = (_path, body) => (body.action === 'push' ? { status: 200, body: { held: true, text: 'a push of x to origin' } } : { status: 200, body: { say: 'nothing' } });
     const out = await runHandler('hold', bash('git merge x && git push'), deps());

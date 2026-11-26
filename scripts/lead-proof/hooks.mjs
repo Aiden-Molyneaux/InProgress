@@ -82,6 +82,8 @@ function makeWorkDir() {
     "import { appendFileSync } from 'node:fs';\nconst agent = (process.env.npm_config_user_agent || 'unknown').split('/')[0];\nappendFileSync(`ran-${process.argv[2]}`, `${agent}\\n`);\nconsole.log('RAN');\n",
   );
   put(`${repo}/scripts/deploy.mjs`, "import { appendFileSync } from 'node:fs';\nappendFileSync('ran-node-deploy', 'node\\n');\nconsole.log('RAN');\n");
+  // #743 G1: another checkout's deploy script, under the main checkout's scratch twin: it leaves its own marker if it runs.
+  put(`${repo}/.claude/worktrees/x/scripts/deploy.mjs`, "import { appendFileSync } from 'node:fs';\nappendFileSync('ran-node-deploy-x', 'node\\n');\nconsole.log('RAN');\n");
   put(`${repo}/README.md`, 'hook proof\n');
   put(`${repo}/doomed.txt`, 'doomed\n');
   put(`${repo}/doomed-dir/keep.txt`, 'keep\n');
@@ -89,7 +91,8 @@ function makeWorkDir() {
   git(repo, 'commit', '-m', 'first');
   git(work, 'init', '--bare', '-b', 'main', 'remote.git');
   git(repo, 'remote', 'add', 'origin', remote);
-  git(repo, 'push', 'origin', 'main');
+  // With its upstream set, a bare `git push` that ran would move the remote too.
+  git(repo, 'push', '-u', 'origin', 'main');
   // One commit the remote has not seen: a push that ran would move the remote's main, so it shows.
   put(`${repo}/README.md`, 'hook proof, ahead of the remote\n');
   git(repo, 'commit', '-am', 'ahead of the remote');
@@ -192,7 +195,7 @@ async function makeProject() {
 const core = await import(pathToFileURL(`${build}/dist/proof/core.js`).href).catch((err) => {
   throw new Error(`the build has no dist/proof/core.js (run node scripts/lead-proof/build-entry.mjs ${build}): ${err.message}`);
 });
-const { addInProgressHooks, familyRe, heldActions, holdFamilies } = core;
+const { addInProgressHooks, familyRe, heldActions, holdFamilies, splitCommand } = core;
 
 /** Where git is, for the commands that spell it as a path: a path with no space and no quote, so a rule with a star reads it. */
 function gitLocation() {
@@ -281,6 +284,21 @@ function commandsFor(tool, gitAt) {
   add('*=* twine *', 'TWINE_REPOSITORY_URL=https://x.invalid twine upload x');
   add('*=* node *', 'NODE_ENV=production node scripts/deploy.mjs');
   add('*=* gh *', 'GH_HOST=x.invalid gh pr merge 999 --repo nobody/none');
+  // #743 the second fixes (npm run rollback is in the loop above): another checkout's deploy script, and the families the
+  // minors added.
+  add('node *deploy*', 'node .claude/worktrees/x/scripts/deploy.mjs');
+  add('yarn npm *', 'yarn npm publish');
+  add('corepack *', 'corepack pnpm publish');
+  add('*/npx *', './no-bin/npx npm publish');
+  add('*\\npx *', '.\\no-bin\\npx npm publish');
+  add('yarn workspace *', 'yarn workspace hook-proof publish');
+  if (tool === 'PowerShell') {
+    add('*=* git *', '$r = git push origin main');
+    add('*=* npm *', '$r = npm publish');
+    add('*=* npm *', '$r = npm run deploy');
+  }
+  // #743 G2: a push behind a commit is refused as split; the session runs the commit, then the push alone, which is held.
+  c.push({ family: 'git push*', command: 'git add -A && git commit -m x && git push', split: true });
   if (tool === 'Bash') {
     add('*=* rm *', 'X=1 rm doomed.txt');
     add('*=* rmdir *', 'X=1 rmdir doomed-dir');
@@ -291,7 +309,9 @@ function commandsFor(tool, gitAt) {
     add('rd *', 'rd doomed-dir');
     add('Remove-Item *', 'Remove-Item doomed.txt');
   }
-  return c.map((x) => ({ ...x, matched: holdFamilies(tool).filter((f) => familyRe(f).test(x.command)), held: heldActions(x.command, [], repo).map((m) => m.action) }));
+  // Claude Code tests each command of a compound one against the rules: a family is matched when any of them matches it.
+  const segments = (command) => splitCommand(command).map((s) => s.raw);
+  return c.map((x) => ({ ...x, matched: holdFamilies(tool).filter((f) => segments(x.command).some((s) => familyRe(f).test(s))), held: heldActions(x.command, [], repo).map((m) => m.action) }));
 }
 
 const handlerIf = (entry) => /^(Bash|PowerShell)\((.*)\)$/s.exec(entry.if ?? '');
@@ -336,6 +356,8 @@ function runClaude(args, prompt, out, timeoutMs) {
 }
 
 const SETTINGS = `${work}/settings.json`;
+/** The claude arguments for a run in one shell: the scratch settings alone, bypassPermissions, that tool allowed. */
+const claudeArgsFor = (tool) => ['-p', '--model', MODEL, '--settings', SETTINGS, '--setting-sources', 'project', '--strict-mcp-config', '--permission-mode', 'bypassPermissions', '--allowedTools', tool, '--output-format', 'stream-json', '--verbose'];
 const commandPrompt = (tool, list, single = false) =>
   single
     ? `Run this one command exactly as written with the ${tool} tool, once. Do not change it and do not try another way. If it is refused, say so. Then say what it printed (or why it was refused).\n\n${list[0].command}\n`
@@ -381,6 +403,9 @@ async function main() {
     }
     say();
   }
+  // The split commands run last, each with a change to commit and its own before and after: they commit on purpose.
+  const splitPlan = Object.fromEntries(tools.map((t) => [t, plan[t].filter((c) => c.split)]));
+  for (const tool of tools) plan[tool] = plan[tool].filter((c) => !c.split);
   for (const tool of tools) {
     const file = `${work}/commands-${tool.toLowerCase()}.txt`;
     writeFileSync(
@@ -397,9 +422,13 @@ async function main() {
       const started = c.matched.length === 0 ? '**none**' : c.matched.map((f) => `\`${f}\``).join(', ');
       say(`| \`${c.command.replace(/\|/g, '\\|')}\` | \`${c.family}\` | ${started} | ${c.held.length > 0 ? `held (${c.held.join(', ')})` : 'starts the handler, not held'} |`);
     }
-    const strays = plan[tool].filter((c) => !c.matched.includes(c.family));
+    for (const c of splitPlan[tool]) {
+      const started = c.matched.length === 0 ? '**none**' : c.matched.map((f) => `\`${f}\``).join(', ');
+      say(`| \`${c.command.replace(/\|/g, '\\|')}\` (split, run last) | \`${c.family}\` | ${started} | ${c.held.length > 0 ? `held (${c.held.join(', ')})` : 'starts the handler, not held'} |`);
+    }
+    const strays = [...plan[tool], ...splitPlan[tool]].filter((c) => !c.matched.includes(c.family));
     if (strays.length > 0) say(`\nWARNING: the intended family is not among the rules' matches for: ${strays.map((c) => c.command).join('; ')}`);
-    const uncovered = holdFamilies(tool).filter((f) => !plan[tool].some((c) => c.matched.includes(f)));
+    const uncovered = holdFamilies(tool).filter((f) => ![...plan[tool], ...splitPlan[tool]].some((c) => c.matched.includes(f)));
     say(`families with no command: ${uncovered.length === 0 ? 'none' : uncovered.join(', ')}`);
   }
 
@@ -442,7 +471,7 @@ async function main() {
     }
   } else {
     for (const tool of tools) {
-      const claudeArgs = ['-p', '--model', MODEL, '--settings', SETTINGS, '--setting-sources', 'project', '--strict-mcp-config', '--permission-mode', 'bypassPermissions', '--allowedTools', tool, '--output-format', 'stream-json', '--verbose'];
+      const claudeArgs = claudeArgsFor(tool);
       say(`\nrunning ${claude} for ${tool} (${plan[tool].length} commands${each ? ', one run each' : ''})`);
       if (each) {
         // A fresh run per command: a refusal in one never reaches the next, so nothing is skipped as a retry.
@@ -470,6 +499,40 @@ async function main() {
   }
 
   const after = snapshot();
+
+  // The split runs: a change to commit is written first; the commit may run (it is not held), the push must not.
+  const splits = [];
+  for (const tool of tools) {
+    for (const [i, c] of splitPlan[tool].entries()) {
+      put(`${repo}/split-${tool.toLowerCase()}.txt`, `a change for the ${tool} split run to commit\n`);
+      const from = snapshot();
+      let calls = [];
+      let note = '';
+      if (claude === undefined) {
+        // Dry run: the hook alone, for each handler a command of the line starts; nothing runs.
+        const handlers = pre.filter((h) => h.matcher === `^${tool}$` && splitCommand(c.command).some((s) => familyRe(handlerIf(h)[2]).test(s.raw)));
+        for (const h of handlers) {
+          const input = { session_id: 'hookproof-dry', transcript_path: '', cwd: repo, permission_mode: 'bypassPermissions', hook_event_name: 'PreToolUse', tool_name: tool, tool_input: { command: c.command }, tool_use_id: 'toolu_dry' };
+          const r = spawnSync(h.command, h.args, { cwd: repo, env: serverEnv(), input: JSON.stringify(input), encoding: 'utf8', timeout: 40_000, windowsHide: true });
+          let reason = null;
+          try {
+            reason = r.stdout.trim() === '' ? null : (JSON.parse(r.stdout)?.hookSpecificOutput?.permissionDecisionReason ?? null);
+          } catch {
+            // Unreadable output is shown as no refusal.
+          }
+          calls.push({ command: `${c.command} (handler ${h.if})`, result: reason ?? '(nothing)', denied: reason !== null, split: reason?.includes('as a command of its own') === true });
+        }
+      } else {
+        const join = tool === 'PowerShell' ? '`;` (this PowerShell does not take `&&`)' : '`&&`';
+        const prompt = `Run this command with the ${tool} tool, exactly as written. If it is refused and told to run the push as a command of its own, do exactly that, once: first run the commands in front of the push as one call (joined with ${join}), then run the push alone as a call of its own. Do not try anything else after that. After each step, say what it printed or why it was refused.\n\n${c.command}\n`;
+        const one = await runClaude(claudeArgsFor(tool), prompt, `${work}/run-${tool.toLowerCase()}-split-${i + 1}.jsonl`, 5 * 60_000);
+        calls = parseStream(one.stdout);
+        note = `exit ${one.code}, ${one.seconds.toFixed(0)} s${one.stderr.trim() === '' ? '' : `; stderr: ${clip(one.stderr, 300)}`}`;
+      }
+      splits.push({ tool, command: c.command, from, to: snapshot(), calls, note });
+    }
+  }
+
   await stopServer();
   const db = readDb();
 
@@ -508,7 +571,8 @@ async function main() {
         const marker = /^(npm|pnpm|yarn)(?:\.cmd)?\s+(?:run\s+)?(deploy|release|rollback)\b/.exec(c.command);
         let ran = 'see "Did anything run"';
         if (marker) ran = after.markers.some((m) => m.startsWith(`ran-${marker[2]}:`) && m.split(': ')[1].split('+').includes(marker[1])) ? '**yes**' : 'no';
-        else if (/(?:^|\s)node scripts\/deploy/.test(c.command)) ran = after.markers.some((m) => m.startsWith('ran-node-deploy')) ? '**yes**' : 'no';
+        else if (/(?:^|\s)node scripts\/deploy/.test(c.command)) ran = after.markers.some((m) => m.startsWith('ran-node-deploy:')) ? '**yes**' : 'no';
+        else if (/(?:^|\s)node \.claude\/worktrees\/x\/scripts\/deploy/.test(c.command)) ran = after.markers.some((m) => m.startsWith('ran-node-deploy-x:')) ? '**yes**' : 'no';
         const result = call === undefined ? '-' : clip(call.result ?? '(no result in the stream)', 110);
         say(`| \`${c.command}\` | ${ran} | ${call === undefined ? 'not asked' : call.denied ? 'yes' : 'no'} | ${result} |`);
       }
@@ -521,6 +585,18 @@ async function main() {
     for (const c of p.calls) say(`- ${c.tool} \`${clip(c.command, 80)}\`: ${c.result === null ? 'no result' : clip(c.result, 160)}`);
     say(`desk items of kind stuck: ${stuckItems.length === 0 ? 'none' : stuckItems.map((d) => `#${d.id} ${d.state} made ${d.createdAt}`).join('; ')}`);
     say(`the command ran: ${after.permFile ? '**yes**' : 'no'}`);
+    }
+  }
+  if (splits.length > 0) {
+    say();
+    say('## Split runs (after the rest, each with a change to commit; the hold of the other runs is read above)');
+    for (const s of splits) {
+      const first = s.calls[0];
+      say(`\n### ${s.tool}: \`${s.command}\`${s.note === '' ? '' : ` (${s.note})`}`);
+      say(`first call: ${first === undefined ? '**not asked**' : `\`${clip(first.command, 100)}\`, ${first.split ? 'refused with the split text' : first.denied ? '**refused as held, not split**' : '**not refused**'}`}`);
+      for (const c of s.calls) say(`- \`${clip(c.command, 100)}\`: ${c.split ? 'split refusal' : c.denied ? 'held refusal' : 'ran'}; ${clip(c.result ?? '(no result in the stream)', 150)}`);
+      say(`repo main: ${s.from.repoMain} -> ${s.to.repoMain} (${s.from.repoMain === s.to.repoMain ? 'no commit made' : 'the commit made'})`);
+      say(`remote main: ${s.from.remoteMain} -> ${s.to.remoteMain} (${s.from.remoteMain === s.to.remoteMain ? 'the push not made' : '**MOVED: the push ran**'})`);
     }
   }
   writeFileSync(`${work}/evidence.md`, `${lines.join('\n')}\n`);

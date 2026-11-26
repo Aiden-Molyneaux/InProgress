@@ -6,10 +6,13 @@ const textOf = (content) =>
 
 /** What the hold hook's refusal says (src/hooks/hold.ts heldReason and unansweredReason). */
 export const HELD_TEXT = 'Held for Aiden before it runs';
+/** What the hold hook's split refusal says (src/server/lead/hold.ts ownCommandText). */
+export const SPLIT_TEXT = 'as a command of its own: InProgress reads it before the commands in front of it have run';
 
 /**
- * The tool calls of a stream, in order: `{ id, tool, command, result, isError, denied }`. `result` is null when the stream
- * shows none; `denied` is whether the result carries the hold hook's reason. Lines that are not JSON are skipped.
+ * The tool calls of a stream, in order: `{ id, tool, command, result, isError, denied, split }`. `result` is null when the
+ * stream shows none; `denied` is whether the result carries the hold hook's reason, held or split, and `split` whether it is
+ * the split one. Lines that are not JSON are skipped.
  */
 export function parseStream(text) {
   const calls = [];
@@ -28,7 +31,7 @@ export function parseStream(text) {
     for (const block of content) {
       if (block?.type === 'tool_use') {
         const input = block.input ?? {};
-        const call = { id: block.id, tool: block.name, command: typeof input.command === 'string' ? input.command : null, result: null, isError: false, denied: false };
+        const call = { id: block.id, tool: block.name, command: typeof input.command === 'string' ? input.command : null, result: null, isError: false, denied: false, split: false };
         calls.push(call);
         byId.set(block.id, call);
       } else if (block?.type === 'tool_result') {
@@ -36,7 +39,8 @@ export function parseStream(text) {
         if (call === undefined) continue;
         call.result = textOf(block.content);
         call.isError = block.is_error === true;
-        call.denied = call.result.includes(HELD_TEXT);
+        call.split = call.result.includes(SPLIT_TEXT);
+        call.denied = call.result.includes(HELD_TEXT) || call.split;
       }
     }
   }

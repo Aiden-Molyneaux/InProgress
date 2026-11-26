@@ -3,9 +3,9 @@ import { heldActions } from '../../src/core/hold';
 import { LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
 import { buildApp } from '../../src/server/app';
 import { leadAllow, leadDisallow } from '../../src/server/lead-commands';
-import { heldCards } from '../../src/server/lead/carry';
-import { GIT_CHANGED_WHY, heldKeysOf, heldOutcome, heldWhatOf, PUBLISH_MORE_WHY } from '../../src/server/lead/hold';
-import { checkLanding, DEPLOY_WHERE_WHY, deployScript, FORCE_WHY, forcePush, realGit, recordYes, ROLLBACK_WHY, TAG_TOO_WHY, type LandingDeps } from '../../src/server/lead/landing';
+import { CHANGED_SINCE_HELD, heldCards } from '../../src/server/lead/carry';
+import { GIT_CHANGED_WHY, heldKeysOf, heldOutcome, heldRef, heldWhatOf } from '../../src/server/lead/hold';
+import { checkLanding, DEPLOY_SCRIPT_WHY, DEPLOY_WHERE_WHY, deployScript, FORCE_WHY, forcePush, realGit, recordYes, ROLLBACK_WHY, TAG_TOO_WHY, type LandingDeps } from '../../src/server/lead/landing';
 import { addNodes } from '../../src/server/repo/nodes';
 import { addBinding, createProject, setProjectLead } from '../../src/server/repo/projects';
 import { handleHookEvent } from '../../src/server/session-flow';
@@ -70,27 +70,90 @@ function webChange(): void {
   commit(repo.wt, 'web');
 }
 
-describe('A1: a publish is keyed only when the rest of its command is folder changes', () => {
-  it('a publish after another command is held with no key and no Go ahead; after cd or pushd it keeps its key', async () => {
+describe('G2: a held action runs as a command of its own', () => {
+  /** How many held items, held lines and Voice lines there are: a split answer makes none. */
+  const made = (w: ReturnType<typeof world>) => ({
+    items: w.ctx.db.prepare("SELECT COUNT(*) FROM desk_items WHERE kind = 'held'").pluck().get(),
+    lines: w.ctx.db.prepare("SELECT COUNT(*) FROM lead_events WHERE kind = 'held'").pluck().get(),
+    voice: w.ctx.db.prepare('SELECT COUNT(*) FROM lead_sends').pluck().get(),
+  });
+
+  it('a push, merge, deploy or publish behind a command that may change it is answered split, and nothing is made', async () => {
+    const w = world();
+    webChange();
+    write(repo.wt, 'package.json', JSON.stringify({ name: 'x', version: '1.2.0' }));
+    commit(repo.wt, 'package');
+    for (const [command, cwd, action] of [
+      ['git add -A && git commit -m x && git push', repo.wt, 'push'],
+      ['git checkout feature; git push origin feature', repo.wt, 'push'],
+      ['echo x > notes.txt && git push', repo.wt, 'push'],
+      ['git config user.name x && git merge feature', repo.main, 'merge'],
+      ['npm version patch && npm publish', repo.wt, 'publish'],
+      ['npm install && npm run deploy', repo.main, 'deploy'],
+      ['git -C . status && git push', repo.wt, 'push'],
+    ] as const) {
+      expect(await w.hold(command, cwd), command).toEqual({ split: true, text: `Run the ${action} as a command of its own: InProgress reads it before the commands in front of it have run.` });
+    }
+    expect(made(w)).toEqual({ items: 0, lines: 0, voice: 0 });
+  });
+
+  it('folder changes and the read-only commands in front, and anything after, leave it read as before', async () => {
+    const w = world();
+    webChange();
+    // Landing is on and the change is off the risk list: each push reads clear, as alone.
+    for (const command of [
+      'git status && git push',
+      'git log --oneline -3 && git diff main && git push',
+      'git fetch origin; git rev-parse HEAD; git show --stat; git push',
+      'git branch --show-current && git push',
+      'npm test && npm run typecheck && git push',
+      `cd ${repo.wt.replace(/\\/g, '/')} && pushd . && git push`,
+      'git push && git commit --allow-empty -m after',
+      'git push; echo done',
+    ]) {
+      expect(await w.hold(command), command).toEqual({ say: 'nothing' });
+    }
+  });
+
+  it('a publish behind a read-only command or a folder change, or with commands after it, keeps its key', async () => {
     const w = world();
     write(repo.wt, 'package.json', JSON.stringify({ name: 'x', version: '1.2.0' }));
     commit(repo.wt, 'package');
-    for (const command of ['npm test && npm publish', 'npm publish; echo done', 'npm version patch && npm publish']) {
-      expect((await w.hold(command)).held, command).toBe(true);
-      expect(w.last(), command).toMatchObject({ why: PUBLISH_MORE_WHY, keys: undefined, goAhead: false });
-    }
-    for (const command of ['cd . && npm publish', 'pushd . && npm publish']) {
+    for (const command of ['npm test && npm publish', 'npm publish; echo done', 'cd . && npm publish', 'pushd . && npm publish']) {
       expect((await w.hold(command)).held, command).toBe(true);
       expect(w.last().keys?.keys.publish, command).toMatch(/:x@1\.2\.0$/);
       expect(w.last().goAhead, command).toBe(true);
     }
   });
 
+  it("what InProgress cannot read exactly stays held, also behind other commands: git's environment changed", async () => {
+    const w = world();
+    webChange();
+    expect((await w.hold('export GIT_SSH_COMMAND=x && git push')).held).toBe(true);
+    expect(w.last()).toMatchObject({ why: GIT_CHANGED_WHY, goAhead: false });
+  });
+
+  it('a held line from before, with a commit in front of its push, offers no Go ahead and takes no yes', async () => {
+    const w = world();
+    write(repo.wt, 'src/hooks/x.ts', lines(9, 'feature'));
+    commit(repo.wt, 'hooks');
+    expect((await w.hold('git push')).held).toBe(true);
+    const held = w.last();
+    expect(held.goAhead).toBe(true);
+    // The same item's held line rewritten as the old hold made it: a commit in front of the push.
+    w.ctx.db.prepare("UPDATE lead_events SET text = 'git commit -am x && git push -> by the check' WHERE kind = 'held'").run();
+    w.ctx.db.prepare("UPDATE desk_items SET ref = ? WHERE id = ?").run(heldRef('s1', 'git commit -am x && git push'), held.id);
+    expect(w.last().goAhead).toBe(false);
+    const res = await w.click(held.id);
+    expect(res.statusCode).toBe(409);
+    expect(w.ctx.db.prepare("SELECT COUNT(*) FROM lead_events WHERE kind = 'yes'").pluck().get()).toBe(0);
+  });
+
   it("the card's npm_config_ test applies only when a publish is among the commands", async () => {
     const w = world();
     write(repo.wt, 'src/hooks/x.ts', lines(9, 'feature'));
     commit(repo.wt, 'hooks');
-    expect((await w.hold('export npm_config_color=false && git push')).held).toBe(true);
+    expect((await w.hold('git push && export npm_config_color=false')).held).toBe(true);
     expect(w.last()).toMatchObject({ goAhead: true, keys: { keys: { push: expect.stringMatching(/^[0-9a-f]{40}$/) } } });
   });
 });
@@ -208,23 +271,83 @@ describe('A5: a deploy is keyed, or cleared, only from the main checkout on main
     expect((await w.check('deploy', repo.main, 'npm run deploy')).patchId).toBeNull();
   });
 
-  it("a rollback is always held, and only his yes on that rollback releases it; a yes on the deploy does not", async () => {
+  it('G3: a rollback is never released by a yes: no key, Not yet alone, the Voice records no yes, and Landing never clears it', async () => {
     const w = world();
     mainAhead();
     expect(await w.hold('npm run rollback', repo.main)).toEqual({ held: true, text: 'a rollback of the live build (the rollback script)' });
     const rollback = w.last();
-    expect(rollback).toMatchObject({ why: `hold: this is Aiden's (${ROLLBACK_WHY})`, keys: { keys: { deploy: expect.stringMatching(/^rollback:[0-9a-f]{40}$/) } }, goAhead: true });
+    expect(rollback).toMatchObject({ why: `hold: this is Aiden's (${ROLLBACK_WHY})`, keys: { keys: { deploy: null } }, goAhead: false });
+    expect((await w.click(rollback.id)).statusCode).toBe(409);
+    // Even a hand-made key a yes could match is no yes: yesCanRelease refuses a rollback by its words.
+    w.ctx.db.prepare('UPDATE desk_items SET outcome = ? WHERE id = ?').run(heldOutcome(ROLLBACK_WHY, 'a rollback', { ...rollback.keys!, keys: { deploy: 'rollback:abc' } }), rollback.id);
+    expect(w.last().goAhead).toBe(false);
+    // Held with Landing on and nothing risky, by either spelling.
+    for (const s of ['npm run rollback', 'node scripts/deploy.mjs --rollback']) {
+      expect(await w.check('deploy', repo.main, s), s).toMatchObject({ clear: false, patchId: null, text: expect.stringContaining(ROLLBACK_WHY) });
+    }
+    // A yes on the deploy, or one recorded on a rollback key, never clears a rollback: its check computes no key.
     const deploy = (await w.check('deploy', repo.main, 'npm run deploy')).patchId!;
     recordYes(w.ctx, w.project.id, { action: 'deploy', patchId: deploy, stepId: w.step.id, aidenWords: 'deploy it' });
-    expect(await w.check('deploy', repo.main, 'node scripts/deploy.mjs --rollback')).toMatchObject({ clear: false, patchId: deploy.replace(/^deploy:/, 'rollback:') });
-    expect((await w.click(rollback.id)).statusCode).toBe(200);
-    expect(await w.check('deploy', repo.main, 'npm run rollback')).toMatchObject({ clear: true, why: 'his yes' });
+    recordYes(w.ctx, w.project.id, { action: 'deploy', patchId: deploy.replace(/^deploy:/, 'rollback:'), stepId: w.step.id, aidenWords: 'roll it back' });
+    for (const s of ['npm run rollback', 'node scripts/deploy.mjs --rollback']) {
+      expect(await w.check('deploy', repo.main, s), s).toMatchObject({ clear: false, patchId: null });
+    }
   });
 
-  it('reads the script exactly: deploy or rollback, nothing else', () => {
-    expect([deployScript('npm run deploy'), deployScript('pnpm run-script deploy'), deployScript('yarn deploy'), deployScript('node scripts/deploy.mjs'), deployScript(undefined)]).toEqual(['deploy', 'deploy', 'deploy', 'deploy', 'deploy']);
-    expect([deployScript('npm run rollback'), deployScript('yarn run rollback'), deployScript('node C:/x/scripts/deploy.mjs --rollback')]).toEqual(['rollback', 'rollback', 'rollback']);
-    for (const s of ['npm run release', 'npm run deploy -- --rollback', 'node scripts/deploy-web.mjs', 'X=1 npm run deploy', 'npm run deploy:prod']) expect(deployScript(s), s).toBeNull();
+  it('G1: node <path>/deploy.mjs is the deploy only when the path is the checkout\'s own scripts/deploy.mjs', async () => {
+    const w = world();
+    mainAhead();
+    leadDisallow(w.ctx, w.project.slug, 'Progresser', V, { switch: 'landing' });
+    // The checkout as git names it (a temporary folder may be given by its short Windows name).
+    const main = git(repo.main, 'rev-parse', '--show-toplevel');
+    // Another checkout's deploy script, run from the main checkout: held with no key.
+    const other = `cd ${main} && node ${main}/.claude/worktrees/x/scripts/deploy.mjs`;
+    expect(await w.hold(other, repo.main)).toMatchObject({ held: true, text: expect.stringContaining('a deploy by a script InProgress cannot read (node ') });
+    expect(w.last()).toMatchObject({ why: `hold: this is Aiden's (${DEPLOY_SCRIPT_WHY})`, keys: { keys: { deploy: null } }, goAhead: false });
+    for (const s of ['node .claude/worktrees/x/scripts/deploy.mjs', 'node ../elsewhere/scripts/deploy.mjs', 'node deploy.mjs', 'node scripts/deploy.js']) {
+      expect((await w.check('deploy', repo.main, s)).patchId, s).toBeNull();
+    }
+    // The checkout's own, relative, absolute or with its slashes the other way and its case changed: keyed.
+    for (const s of ['node scripts/deploy.mjs', `node ${main}/scripts/deploy.mjs`, `node ${main.replace(/\//g, '\\').toUpperCase()}\\SCRIPTS\\DEPLOY.MJS`, 'node ./scripts/../scripts/deploy.mjs']) {
+      expect((await w.check('deploy', repo.main, s)).patchId, s).toMatch(/^deploy:[0-9a-f]{40}$/);
+    }
+    expect((await w.hold('node scripts/deploy.mjs', repo.main)).held).toBe(true);
+    expect(w.last()).toMatchObject({ keys: { keys: { deploy: expect.stringMatching(/^deploy:[0-9a-f]{40}$/) } }, goAhead: true });
+  });
+
+  it('a file not tracked counts as uncommitted, also where git is set to hide them', async () => {
+    const w = world();
+    mainAhead();
+    leadDisallow(w.ctx, w.project.slug, 'Progresser', V, { switch: 'landing' });
+    git(repo.main, 'config', 'status.showUntrackedFiles', 'no');
+    write(repo.main, 'stray/new.txt', 'not committed\n');
+    expect((await w.check('deploy', repo.main, 'npm run deploy')).text).toContain(DEPLOY_WHERE_WHY);
+  });
+
+  it('a key the hold kept that reads as none now is changed since held', async () => {
+    const w = world();
+    mainAhead();
+    leadDisallow(w.ctx, w.project.slug, 'Progresser', V, { switch: 'landing' });
+    expect((await w.hold('npm run deploy', repo.main)).held).toBe(true);
+    const held = w.last();
+    expect(held.goAhead).toBe(true);
+    // The main checkout now has a change not committed: the deploy's key reads as none.
+    write(repo.main, 'notes.txt', 'not committed\n');
+    const res = await w.click(held.id);
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toContain(`deploy: ${CHANGED_SINCE_HELD}`);
+  });
+
+  it('reads the script exactly: deploy or rollback, nothing else; a node script only against its checkout', () => {
+    const at = { folder: 'C:/repo', top: 'C:/repo' };
+    expect([deployScript('npm run deploy'), deployScript('pnpm run-script deploy'), deployScript('yarn deploy'), deployScript('node scripts/deploy.mjs', at), deployScript(undefined)]).toEqual(['deploy', 'deploy', 'deploy', 'deploy', 'deploy']);
+    expect([deployScript('npm run rollback'), deployScript('yarn run rollback'), deployScript('node C:/repo/scripts/deploy.mjs --rollback', at)]).toEqual(['rollback', 'rollback', 'rollback']);
+    for (const s of ['npm run release', 'npm run deploy -- --rollback', 'node scripts/deploy-web.mjs', 'X=1 npm run deploy', 'npm run deploy:prod']) expect(deployScript(s, at), s).toBeNull();
+    // A node script with no checkout to read it against, or another checkout's, is null.
+    expect(deployScript('node scripts/deploy.mjs')).toBeNull();
+    expect(deployScript('node C:/x/scripts/deploy.mjs --rollback', at)).toBeNull();
+    expect(deployScript('node C:/repo/.claude/worktrees/x/scripts/deploy.mjs', at)).toBeNull();
+    expect(deployScript('node ../scripts/deploy.mjs', { folder: 'C:/repo/web', top: 'C:/repo' })).toBe('deploy');
   });
 });
 

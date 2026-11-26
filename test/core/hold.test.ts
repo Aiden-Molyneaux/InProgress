@@ -49,6 +49,23 @@ describe('the if rules start the hook for every form the list holds', () => {
     expect(holdFamilies('Bash')).toEqual(expect.arrayContaining(['*=* rm *', '*=* rmdir *']));
   });
 
+  it('the families include yarn npm, yarn workspace, corepack and npx by a path, in both shells (#743 second fixes)', () => {
+    for (const tool of ['Bash', 'PowerShell'] as const) {
+      expect(holdFamilies(tool)).toEqual(expect.arrayContaining(['yarn npm *', 'yarn workspace *', 'corepack *', '*/npx *', '*\\npx *']));
+      for (const command of ['yarn npm publish', 'corepack pnpm publish', 'C:/nodejs/npx npm publish', 'C:\\nodejs\\npx npm publish', 'yarn workspace web publish', 'yarn workspace web deploy']) {
+        expect(starts(tool, command), `${tool}: ${command}`).toBe(true);
+      }
+    }
+  });
+
+  it('PowerShell output to a variable is still held', () => {
+    expect(['$r = git push origin main', '$r = npm publish', '$r = npm run deploy'].map((c) => [starts('PowerShell', c), action(c)])).toEqual([
+      [true, 'push'],
+      [true, 'publish'],
+      [true, 'deploy'],
+    ]);
+  });
+
   it("the brief's eight commands start the hook in both shells and are held (#743 B3)", () => {
     const eight = [
       ['npm.cmd publish', 'publish'],
@@ -108,6 +125,16 @@ describe('heldAction: a publish or deploy by any spelling (#743 B1)', () => {
     expect(action('yarn --silent dlx pnpm@9 publish')).toBe('publish');
     expect(action('npx.cmd npm run deploy')).toBe('deploy');
     expect(action('C:\\nodejs\\npm.ps1 publish')).toBe('publish');
+  });
+
+  it('reads yarn workspace <name> as the script or publish after the name', () => {
+    expect(action('yarn workspace web publish')).toBe('publish');
+    expect(action('yarn workspace web publish --access public')).toBe('publish');
+    expect(action('yarn workspace web deploy')).toBe('deploy');
+    expect(action('yarn workspace web run rollback')).toBe('deploy');
+    expect(action('yarn workspace web release:prod')).toBe('deploy');
+    expect(action('npx yarn workspace web publish')).toBe('publish');
+    for (const command of ['yarn workspace web test', 'yarn workspace web build', 'yarn workspace publish', 'yarn workspaces list']) expect(heldAction(command), command).toBeUndefined();
   });
 
   it('an assignment in front is not the program, also when its value is quoted', () => {

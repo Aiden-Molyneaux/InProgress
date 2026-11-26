@@ -20,6 +20,14 @@ describe('the hook proof stream reader', () => {
       ['ls', false, false, null],
     ]);
   });
+
+  it('marks the split refusal as a refusal of its own kind', () => {
+    const text = [
+      line({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'a', name: 'Bash', input: { command: 'git commit -am x && git push' } }] } }),
+      line({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'a', is_error: true, content: 'Run the push as a command of its own: InProgress reads it before the commands in front of it have run.' }] } }),
+    ].join('\n');
+    expect(parseStream(text).map((c) => [c.denied, c.split])).toEqual([[true, true]]);
+  });
 });
 
 describe('the commands a previous evidence file marks not asked', () => {

@@ -106,7 +106,8 @@ function heldUnanswered(held: HeldFile, match: HeldMatch): boolean {
 
 /**
  * Whether the command is held: undefined when nothing in it is on the list (the server is not asked); else each command of
- * it on the list is asked about in turn, by its place in the line, and the first one held is the answer. A command the
+ * it on the list is asked about in turn, by its place in the line, and the first one held is the answer (a split answer,
+ * the action to be run on its own, refuses with the server's text as it is). A command the
  * server does not answer about (no answer, an error, an answer it cannot read) is held where heldUnanswered says.
  */
 export async function holdCommand(
@@ -138,8 +139,10 @@ export async function holdCommand(
       if (heldUnanswered(held, match)) return { held: true, reason: unansweredReason(match.what) };
       continue;
     }
-    const a = answer as { say?: unknown; held?: unknown; text?: unknown } | undefined;
+    const a = answer as { say?: unknown; held?: unknown; split?: unknown; text?: unknown } | undefined;
     if (a?.held === true && typeof a.text === 'string' && a.text.trim() !== '') return { held: true, reason: heldReason(a.text) };
+    // Split: the action must run as a command of its own. The server's words are the refusal, as they are.
+    if (a?.split === true && typeof a.text === 'string' && a.text.trim() !== '') return { held: true, reason: a.text };
     if (a?.say !== 'nothing' && heldUnanswered(held, match)) return { held: true, reason: unansweredReason(match.what) };
   }
   return { held: false };

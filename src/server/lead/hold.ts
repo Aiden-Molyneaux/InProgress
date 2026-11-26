@@ -19,7 +19,7 @@ import { getProjectById, listBindings, resolveBinding } from '../repo/projects';
 import { findSession } from '../repo/sessions';
 import { isLiveWithRound } from '../repo/switches';
 import { isLeadFolder } from './folder';
-import { checkLanding, deployScript, ghVisibility, isGitWord, programOf, PUBLISH_NO_YES, realGit, type LandingDeps } from './landing';
+import { checkLanding, ghVisibility, isGitWord, programOf, PUBLISH_NO_YES, readDeployScript, realGit, type LandingDeps } from './landing';
 import { intendHeldLine } from './voice';
 
 /** What the hold and stuck routes answer when the lead has nothing to say: the hook prints nothing. */
@@ -81,13 +81,13 @@ export const SETS_GIT_ENV = /\bGIT_\w*\s*=|\b(?:export|set|declare|typeset|reado
 
 /** Why a publish takes no key when npm's settings are changed in its command. */
 export const NPM_CONFIG_WHY = "npm's settings are changed in this command: run it yourself";
-/** Why a publish takes no key when its command does more than the publish and folder changes. */
-export const PUBLISH_MORE_WHY = 'this command does more than the publish: run it yourself';
 /** Why a push or merge takes no key when its command changes how git runs. */
 export const GIT_CHANGED_WHY = 'this command changes how git runs: run it yourself';
 
-/** The folder changes a publish's command may hold besides the publish (as their program, lower case). */
+/** The folder changes that may stand before a held action in its line (as their program, lower case). */
 const FOLDER_CHANGES = new Set(['cd', 'set-location', 'pushd', 'push-location', 'popd']);
+/** The git subcommands that may stand before a held action in its line, with any words after them: they change nothing it reads. */
+const GIT_READS = new Set(['status', 'log', 'diff', 'show', 'fetch', 'rev-parse']);
 /** git's global options a push or merge may carry and still be read exactly (`-C <dir>` is read for its folder). */
 const GIT_GLOBALS_READ = new Set(['--no-pager', '-P', '-p']);
 
@@ -110,19 +110,43 @@ export function gitAsRead(segment: string): boolean {
 
 /**
  * Why one command of a held line takes no key, so no yes can match it and Landing cannot clear it, read from the words
- * alone; undefined when nothing stops a key. A publish whose command changes npm's settings (NPM_CONFIG_WHY), or holds
- * anything but folder changes besides it (PUBLISH_MORE_WHY); a push or merge with git's options or environment changed
- * (GIT_CHANGED_WHY), whatever it touches.
+ * alone; undefined when nothing stops a key. A publish whose command changes npm's settings (NPM_CONFIG_WHY); a push or
+ * merge with git's options or environment changed (GIT_CHANGED_WHY), whatever it touches.
  */
 export function keylessWhy(command: string, match: Pick<HeldMatch, 'action' | 'index' | 'segment'>): string | undefined {
-  if (match.action === 'publish') {
-    if (SETS_NPM_CONFIG.test(command)) return NPM_CONFIG_WHY;
-    const rest = splitCommand(command).filter((_, i) => i !== match.index);
-    if (rest.some((seg) => !FOLDER_CHANGES.has(programOf(words(seg.raw)[0])))) return PUBLISH_MORE_WHY;
-  }
+  if (match.action === 'publish' && SETS_NPM_CONFIG.test(command)) return NPM_CONFIG_WHY;
   if ((match.action === 'push' || match.action === 'merge') && (!gitAsRead(match.segment) || SETS_GIT_ENV.test(command))) return GIT_CHANGED_WHY;
   return undefined;
 }
+
+/**
+ * Whether a command of a line changes nothing a held action after it reads: a folder change (FOLDER_CHANGES), `git` with one
+ * of GIT_READS, `git branch --show-current`, `npm test` or `npm run typecheck`.
+ */
+function changesNothing(segment: string): boolean {
+  const w = words(segment);
+  const prog = programOf(w[0]);
+  if (FOLDER_CHANGES.has(prog)) return true;
+  if (w.length > 0 && isGitWord(w[0]!)) return GIT_READS.has(w[1] ?? '') || (w.length === 3 && w[1] === 'branch' && w[2] === '--show-current');
+  return prog === 'npm' && ((w.length === 2 && w[1] === 'test') || (w.length === 3 && w[1] === 'run' && w[2] === 'typecheck'));
+}
+
+/**
+ * Whether a held push, merge, deploy or publish runs as a command of its own: every command before it in its line changes
+ * nothing it reads (changesNothing). The hook and the server read a line before any of it has run, so a key or a clear read
+ * now is of the action as it stands, not as it will be after a commit, a checkout or a write in front of it. Commands after
+ * it run after it, and every other action is not keyed or cleared at all: both always run alone.
+ */
+export function runsAlone(command: string, match: Pick<HeldMatch, 'action' | 'index'>): boolean {
+  if (!CHECKED_ACTIONS.includes(match.action)) return true;
+  return splitCommand(command)
+    .slice(0, match.index)
+    .every((seg) => changesNothing(seg.raw));
+}
+
+/** What the hook prints for a held action that does not run alone (runsAlone): the session runs it again on its own. */
+export const ownCommandText = (action: HeldMatch['action']): string =>
+  `Run the ${action} as a command of its own: InProgress reads it before the commands in front of it have run.`;
 
 /**
  * The project's held lines by the ref of the held item each made, read once (the window's cards, the morning list and an
@@ -164,7 +188,11 @@ export const holdBody = z
   .strict();
 export type HoldAsk = z.infer<typeof holdBody>;
 
-export type HoldAnswer = SayNothing | { held: true; text: string };
+/**
+ * The hold route's answer: nothing; held (a desk item waiting on Aiden, `text` what it does); or split (no item, `text` the
+ * refusal the hook prints as it is: ownCommandText).
+ */
+export type HoldAnswer = SayNothing | { held: true; text: string } | { split: true; text: string };
 
 /** The checkout's branch, or null when it is on none or git could not tell. */
 async function currentBranch(deps: LandingDeps, folder: string): Promise<string | null> {
@@ -337,8 +365,9 @@ export async function heldLandingAsk(match: HeldMatch, deps: LandingDeps = REAL_
     read = pushed;
     what = pushed === null ? 'a push to origin' : `a push of ${pushed} to origin`;
   } else if (match.action === 'deploy') {
-    // The card names the script it runs.
-    const script = deployScript(match.segment);
+    // The card names the script it runs: a node script only when it is the repo's own (readDeployScript). A git that
+    // cannot tell is a script it cannot read: the check that follows holds it.
+    const script = await readDeployScript(deps, folder, match.segment).catch(() => null);
     what =
       script === 'deploy'
         ? 'a deploy of main to the live build (the deploy script)'
@@ -385,7 +414,9 @@ async function judge(ctx: Ctx, scope: LeadScope, match: HeldMatch, deps: Landing
  * project has no lead or its round is off, or the command at the place the hook names is not on this project's list (its
  * Held lines first); else names the action and runs the landing check for a merge, deploy, push or publish in the folder
  * that command runs in (the rest are Aiden's without one). A command that reads differently here than the hook sent it is
- * held, and so is one InProgress cannot read exactly (keylessWhy), before any check and with no key. Clear: nothing. Held: a `held` desk item waiting on Aiden (one per session and command while it is not done), with
+ * held, and so is one InProgress cannot read exactly (keylessWhy), before any check and with no key. A push, merge, deploy
+ * or publish that does not run alone (runsAlone) is answered split: the session runs it on its own, and nothing is made.
+ * Clear: nothing. Held: a `held` desk item waiting on Aiden (one per session and command while it is not done), with
  * what the check resolved when it ran (HeldKeys, in its outcome), a `held` line in the lead's log, and what the command
  * does, in plain words.
  */
@@ -395,13 +426,16 @@ export async function holdCheck(ctx: Ctx, ask: HoldAsk, deps: LandingDeps = REAL
   const match = heldActions(ask.command, playbookHeldLines(scope.project.playbook), ask.cwd || null).find((m) => m.index === ask.index);
   if (match === undefined) return SAY_NOTHING;
   // A command InProgress cannot read exactly (keylessWhy) is held before any check, with no key: no yes or Landing clears it.
-  const keyless = keylessWhy(ask.command, match);
-  const judged: Judged =
-    ask.segment !== undefined && ask.segment !== match.segment
-      ? { clear: false, what: match.what, why: 'the hook and InProgress read the command differently' }
-      : keyless !== undefined
-        ? { clear: false, what: match.what, why: keyless }
-        : await judge(ctx, scope, match, deps);
+  const differs = ask.segment !== undefined && ask.segment !== match.segment;
+  const keyless = differs ? undefined : keylessWhy(ask.command, match);
+  // A push, merge, deploy or publish behind commands that may change what it reads is neither held nor cleared: the
+  // session is told to run it on its own, and nothing is made (no item, no held line, no Voice line).
+  if (!differs && keyless === undefined && !runsAlone(ask.command, match)) return { split: true, text: ownCommandText(match.action) };
+  const judged: Judged = differs
+    ? { clear: false, what: match.what, why: 'the hook and InProgress read the command differently' }
+    : keyless !== undefined
+      ? { clear: false, what: match.what, why: keyless }
+      : await judge(ctx, scope, match, deps);
   if (judged.clear) return SAY_NOTHING;
   const now = ctx.now();
   ctx.db

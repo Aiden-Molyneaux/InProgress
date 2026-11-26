@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { LEAD_INSTRUCTIONS_VERSION } from '../../core/lead';
-import { words } from '../../core/hold';
+import { resolveFolder, words } from '../../core/hold';
 import { landingVerdict, riskGlobsOf, type LandingAction, type LandingVerdict } from '../../core/landing';
 import type { Ctx } from '../db/tx';
 import { badRequest, conflict, notFound } from '../errors';
@@ -285,24 +285,61 @@ export function forcePush(segment: string): boolean {
 }
 
 /**
- * The script a deploy runs, read exactly: `deploy` or `rollback`, from `npm run <name>` or `pnpm run <name>` (or
- * `run-script`), `yarn [run] <name>`, or `node <path>/deploy.mjs` (with `--rollback` alone after it, a rollback). Null for
- * anything else (another script, words after the name, anything before the tool): what it does cannot be read. A check
- * asked with no command (the lead's own landing check) is of the deploy script.
+ * The script a deploy's words name, before any path is checked: `deploy` or `rollback`, from `npm run <name>` or `pnpm run
+ * <name>` (or `run-script`), `yarn [run] <name>`, or `node <path>/deploy.mjs` (with `--rollback` alone after it, a
+ * rollback), whose path is given back to be checked (deployScript). Null for anything else (another script, words after the
+ * name, anything before the tool).
  */
-export function deployScript(segment: string | undefined): 'deploy' | 'rollback' | null {
-  if (segment === undefined) return 'deploy';
+function deployWords(segment: string): { name: 'deploy' | 'rollback'; path?: string } | null {
   const w = words(segment);
   const prog = programOf(w[0]);
   let name: string | undefined;
+  let path: string | undefined;
   if ((prog === 'npm' || prog === 'pnpm') && (w[1] === 'run' || w[1] === 'run-script') && w.length === 3) name = w[2];
   else if (prog === 'yarn' && w[1] === 'run' && w.length === 3) name = w[2];
   else if (prog === 'yarn' && w.length === 2) name = w[1];
   else if (prog === 'node' && /(?:^|[\\/])deploy\.m?js$/i.test(w[1] ?? '')) {
+    path = w[1];
     if (w.length === 2) name = 'deploy';
     else if (w.length === 3 && w[2] === '--rollback') name = 'rollback';
   }
-  return name === 'deploy' || name === 'rollback' ? name : null;
+  return name === 'deploy' || name === 'rollback' ? { name, ...(path === undefined ? {} : { path }) } : null;
+}
+
+/** Whether a deploy's words name a rollback, whatever its path (deployWords): a rollback is never released by a yes. */
+export const namesRollback = (segment: string): boolean => deployWords(segment)?.name === 'rollback';
+
+/** Two paths are the same file: forward slashes, no trailing slash, case ignored. */
+const samePath = (a: string, b: string): boolean => a.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() === b.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+
+/**
+ * The script a deploy runs, read exactly: `deploy` or `rollback` (deployWords). A `node <path>/deploy.mjs` counts only when
+ * the path, resolved against the folder the command runs in (`checkout.folder`), is `<checkout.top>/scripts/deploy.mjs`,
+ * the repo's own deploy script; another path, or no checkout to read it against, is null. A check asked with no command
+ * (the lead's own landing check) is of the deploy script.
+ */
+export function deployScript(segment: string | undefined, checkout?: { folder: string; top: string }): 'deploy' | 'rollback' | null {
+  if (segment === undefined) return 'deploy';
+  const read = deployWords(segment);
+  if (read === null) return null;
+  if (read.path === undefined) return read.name;
+  if (checkout === undefined) return null;
+  const at = resolveFolder(checkout.folder, read.path);
+  return at !== null && samePath(at, `${checkout.top}/scripts/deploy.mjs`) ? read.name : null;
+}
+
+/**
+ * The script a deploy in `folder` runs (deployScript), reading the folder's checkout only for a `node <path>` deploy: its
+ * top level, and the folder as git names it (the top level and `--show-prefix`), so a folder spelled another way (a short
+ * Windows name) still resolves to the same path git gives. A git that fails is a 409.
+ */
+export async function readDeployScript(deps: LandingDeps, folder: string, segment: string | undefined): Promise<'deploy' | 'rollback' | null> {
+  if (segment === undefined || deployWords(segment)?.path === undefined) return deployScript(segment);
+  const r = await deps.git(folder, ['rev-parse', '--show-toplevel', '--show-prefix']);
+  if (r.code !== 0) throw conflict(couldNotTell('where this checkout is', r));
+  const [top = '', prefix = ''] = r.stdout.split(/\r?\n/).map((l) => l.trim());
+  if (top === '') throw conflict(`Could not tell where this checkout is: git named no top level for ${folder}.`);
+  return deployScript(segment, { folder: prefix === '' ? top : `${top}/${prefix}`, top });
 }
 
 /**
@@ -313,14 +350,14 @@ async function deploysFromMain(deps: LandingDeps, folder: string): Promise<boole
   const dirs = await deps.git(folder, ['rev-parse', '--path-format=absolute', '--show-toplevel', '--git-common-dir']);
   if (dirs.code !== 0) throw conflict(couldNotTell('where the main checkout is', dirs));
   const [top = '', common = ''] = dirs.stdout.split(/\r?\n/).map((l) => l.trim());
-  const same = (a: string, b: string) => a.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() === b.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
-  if (top === '' || common === '' || !same(top, dirname(common))) return false;
+  if (top === '' || common === '' || !samePath(top, dirname(common))) return false;
   const head = await deps.git(folder, ['symbolic-ref', '-q', 'HEAD']);
   // Exit 1 with no output is a detached HEAD: not on main.
   if (head.code !== 0 && !(head.code === 1 && head.stderr.trim() === '')) throw conflict(couldNotTell('which branch this is', head));
   if (head.code !== 0 || head.stdout.trim() !== 'refs/heads/main') return false;
   // No optional locks: a read must not take the index lock a session's own git may be waiting on.
-  const status = await deps.git(folder, ['--no-optional-locks', 'status', '--porcelain']);
+  // Every file not tracked counts, also inside a folder git would show as one line.
+  const status = await deps.git(folder, ['--no-optional-locks', 'status', '--porcelain', '--untracked-files=all']);
   if (status.code !== 0) throw conflict(couldNotTell(`whether ${folder} has changes not committed`, status));
   return status.stdout.trim() === '';
 }
@@ -342,7 +379,7 @@ interface ChangeRead {
  * live..main, each as the patch id of that range's diff; a publish on what goes out and where (publishKey, with the held
  * command `segment`). A force push (forcePush) is held always and keyed `force:<patch id>`, so a yes on a plain push never
  * covers it. A deploy is keyed `<script>:<patch id>` (deployScript), and only from the main checkout, on main, with nothing
- * uncommitted; a rollback is held always. A merge of a name that is a tag at another commit too takes no key. The carried
+ * uncommitted; a rollback is held always and takes no key (Aiden's own act). A merge of a name that is a tag at another commit too takes no key. The carried
  * yes for a held command reads it here too (landingKey), so his yes is keyed as the check keys it.
  */
 async function readChange(deps: LandingDeps, folder: string, action: LandingAction, askBranch: string | undefined, segment?: string): Promise<ChangeRead> {
@@ -383,11 +420,14 @@ async function readChange(deps: LandingDeps, folder: string, action: LandingActi
     if (behind.code === 1) holdBecause = 'the live build is not behind main';
     else if (behind.code !== 0) throw conflict(couldNotTell('whether the live build is behind main', behind));
     else if (live.dirty) holdBecause = 'the live build was made from uncommitted work';
-    const script = deployScript(segment);
-    if (script === 'rollback') holdBecause = ROLLBACK_WHY;
+    const script = await readDeployScript(deps, folder, segment);
     keyPrefix = script === null ? null : `${script}:`;
     if (script === null) holdBecause = DEPLOY_SCRIPT_WHY;
-    else if (!(await deploysFromMain(deps, folder))) {
+    else if (script === 'rollback') {
+      // A rollback is Aiden's own act: held always, and never keyed, so no yes of his or Landing releases it.
+      holdBecause = ROLLBACK_WHY;
+      keyPrefix = null;
+    } else if (!(await deploysFromMain(deps, folder))) {
       holdBecause = DEPLOY_WHERE_WHY;
       keyPrefix = null;
     }

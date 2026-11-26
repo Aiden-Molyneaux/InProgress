@@ -88,18 +88,27 @@ function subcommandIndex(words: readonly string[], is: (word: string) => boolean
   return -1;
 }
 
+/** The package managers the publish and deploy rules read. A known gap, named and not built: `bun publish` is not held. */
 const PACKAGE_MANAGERS = new Set(['npm', 'pnpm', 'yarn']);
 /** A package as npx or dlx names it, without its version (`npm@10` is npm), lower case. */
 const packageName = (word: string): string => program([word.replace(/(.)@.*$/, '$1')]);
 
 /**
  * The package manager a command runs (npm, pnpm or yarn, by any spelling program() reads) and its words after it, also when
- * it is run through `npx [options] npm[@<v>]`, or `pnpm dlx` or `yarn dlx` the same way; undefined when it runs none.
+ * it is run through `npx [options] npm[@<v>]`, or `pnpm dlx` or `yarn dlx` the same way; for `yarn workspace <name> ...`,
+ * the words after the name (its script, or publish); undefined when it runs none.
  */
 function packageRun(argv: string[]): { tool: string; rest: string[] } | undefined {
   let tool = program(argv);
   let rest = argv.slice(1);
-  for (let hop = 0; hop < 3; hop++) {
+  for (let hop = 0; hop < 4; hop++) {
+    if (tool === 'yarn') {
+      const ws = subcommandIndex(rest, (w) => w === 'workspace');
+      if (ws >= 0 && ws + 2 < rest.length) {
+        rest = rest.slice(ws + 2);
+        continue;
+      }
+    }
     let runner: string[] | undefined = tool === 'npx' ? rest : undefined;
     if (tool === 'pnpm' || tool === 'yarn') {
       const dlx = subcommandIndex(rest, (w) => w === 'dlx');
@@ -144,6 +153,8 @@ const GIT_FAMILIES = ['git -C *', 'git -c *', 'git --*', 'git -P *', 'git -p *',
 /** Spellings of git that a push or merge example is also run through. */
 const GIT_SPELLINGS = ['git -P push', 'git -p push', 'git.exe push', 'C:/Program Files/Git/cmd/git.exe push', '/usr/bin/git push', 'C:\\tools\\git push'];
 const both = (list: readonly string[]): Record<HoldTool, readonly string[]> => ({ Bash: list, PowerShell: list });
+/** Examples for both shells, and some for PowerShell alone (its own forms, such as `$r = <command>`). */
+const withPowerShell = (list: readonly string[], powerShell: readonly string[]): Record<HoldTool, readonly string[]> => ({ Bash: list, PowerShell: [...list, ...powerShell] });
 /**
  * A command with environment assignments in front of it (`NPM_CONFIG_X=y npm publish`, `GIT_DIR=x git push`), as `if`
  * rules: one per program a rule reads, the program a word of its own after an `=`. The server decides what it does.
@@ -172,8 +183,13 @@ const PACKAGE_FAMILIES = [
   'npx *npm*',
   '*npx.cmd *npm*',
   '*npx.ps1 *npm*',
+  '*/npx *',
+  '*\\npx *',
   'pnpm dlx *',
   'yarn dlx *',
+  'yarn npm *',
+  'yarn workspace *',
+  'corepack *',
 ];
 const DELETERS = new Set(['rm', 'rmdir', 'remove-item', 'del', 'ri', 'rd', 'erase']);
 
@@ -187,7 +203,7 @@ export const HOLD_RULES: readonly HoldRule[] = [
     what: 'a publish of a package for anyone to install',
     test: (s) => /\b(?:npm|pnpm|yarn)\s+publish\b|\bcargo\s+publish\b|\btwine\s+upload\b/i.test(s.masked) || publishesPackage(s.argv) || publishesPackage(s.maskedArgv),
     families: both(['npm publish*', 'pnpm publish*', 'yarn publish*', 'cargo publish*', 'twine upload*', ...PACKAGE_FAMILIES, ...assigned(['npm', 'pnpm', 'yarn', 'npx', 'cargo', 'twine'])]),
-    examples: both([
+    examples: withPowerShell([
       'npm publish',
       'pnpm publish --access public',
       'yarn publish',
@@ -220,14 +236,26 @@ export const HOLD_RULES: readonly HoldRule[] = [
       'X=1 npx -y npm publish',
       'X=1 cargo publish',
       'X=1 twine upload dist/*',
-    ]),
+      'yarn npm publish',
+      'yarn npm publish --access public',
+      'corepack pnpm publish',
+      'corepack npm publish',
+      'corepack yarn npm publish',
+      'C:/nodejs/npx -y npm publish',
+      '/usr/local/bin/npx npm@10 publish',
+      'C:\\nodejs\\npx npm publish',
+      'yarn workspace web publish',
+      'yarn workspace web npm publish',
+    ],
+    // PowerShell hands a command's output to a variable: the command still runs.
+    ['$r = npm publish']),
   },
   {
     action: 'push',
     what: 'a push to a remote',
     test: (s) => GIT_PUSH.test(s.masked),
     families: both(['git push*', ...GIT_FAMILIES, ...assigned(['git'])]),
-    examples: both([
+    examples: withPowerShell([
       'git push',
       'git push origin feature',
       'git -C C:/repo push',
@@ -239,7 +267,7 @@ export const HOLD_RULES: readonly HoldRule[] = [
       'GIT_DIR=.git git push',
       'GIT_SSH_COMMAND=x git -C C:/repo push origin main',
       ...GIT_SPELLINGS,
-    ]),
+    ], ['$r = git push origin main']),
   },
   {
     action: 'deploy',
@@ -267,7 +295,7 @@ export const HOLD_RULES: readonly HoldRule[] = [
       ...PACKAGE_FAMILIES,
       ...assigned(['npm', 'pnpm', 'yarn', 'npx', 'node']),
     ]),
-    examples: both([
+    examples: withPowerShell([
       'npm run deploy',
       'npm run release',
       'npm run rollback',
@@ -294,7 +322,11 @@ export const HOLD_RULES: readonly HoldRule[] = [
       'NODE_ENV=production npm run deploy',
       'X=1 npm --silent run rollback',
       'X=1 node scripts/deploy.mjs',
-    ]),
+      'node .claude/worktrees/x/scripts/deploy.mjs',
+      'corepack pnpm run deploy',
+      'yarn workspace web deploy',
+      'yarn workspace web run rollback',
+    ], ['$r = npm run deploy']),
   },
   {
     action: 'repo',
