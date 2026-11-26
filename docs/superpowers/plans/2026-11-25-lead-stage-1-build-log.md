@@ -763,3 +763,12 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   back when cleared unsent. Deviation accepted: a late answer is marked undelivered until its carry is tried (as any
   carry), so a refused carry can never leave the session without his words. `landing --action publish` is accepted
   (LANDING_ACTIONS). 2958 unit tests green.
+- The scenes on 9572cdd (the last run, 0.60 dollars): all six shown, 33 PASS, 10 DIFFERS on wording, 0 FAIL; done when
+  3 holds on every count. The recorder's repeats: the day's thread started once per faked morning, and one carry was
+  tried five times at a thread the stand-in did not know (one send row, nothing delivered). Follow-up, not built: a
+  carry to a thread T3 no longer has is retried every tick and never cleared.
+- Task 18. Plan said a reviewer who did not build it gets the scenes and the running build. Did: a fresh Opus agent of
+  the general kind, given only the plan's scenes section, the branch at 9572cdd and the harness to drive it, told to
+  judge from the raw records (Voice POSTs, T3 calls, turns, the copy's database) and to treat the harness's own
+  PASS lines as claims. Because: Murr is read-only and serves nothing, Parvati reviews screens, and the scenes are
+  mostly lines and records. It does not see this log, the results page or the earlier runs.
