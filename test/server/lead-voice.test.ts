@@ -9,7 +9,8 @@ import { openDb } from '../../src/server/db/connection';
 import { createCtx, write, type Ctx } from '../../src/server/db/tx';
 import { leadSeen } from '../../src/server/lead-commands';
 import { createSender, type SenderT3 } from '../../src/server/lead/sends';
-import { createVoiceWebhook, heldVoiceLine, inQuiet, intendHeldLine, VOICE_GATHER_MS, voiceFile, voiceSetUp } from '../../src/server/lead/voice';
+import { bringVoiceLine, createVoiceWebhook, heldVoiceLine, inQuiet, intendHeldLine, oldAskVoiceLine, VOICE_ASK_CUT, VOICE_GATHER_MS, voiceFile, voiceSetUp } from '../../src/server/lead/voice';
+import { clipLine } from '../../src/core/step-ref';
 import { raiseAsk } from '../../src/server/repo/asks';
 import { bringItem } from '../../src/server/repo/deskBring';
 import { produceDeskItem } from '../../src/server/repo/deskProducers';
@@ -120,6 +121,31 @@ describe('the Voice: what makes a line', () => {
     expect(line.body).toBe(
       `Yours, InGame: #${s.step.id} Search button. Which name should the button carry, 1?\nI would pick: Search Say "yes" to that, or give your own answer.`,
     );
+  });
+
+  it('a pick that opens with its own "I would pick" or "I\'d recommend" is not doubled, and is capitalised (C4)', () => {
+    const base = { projectName: 'InGame', stepId: 7, stepTitle: 'Tabs', askText: 'Which tab first?' };
+    const tail = (wouldHave: string) => bringVoiceLine({ ...base, wouldHave }).split('\n')[1];
+    for (const own of ["I'd recommend: the board tab.", 'I would pick the board tab.', "i'd pick: the board tab.", 'I recommend the board tab.', 'I WOULD RECOMMEND: the board tab.']) {
+      expect(tail(own)).toBe('I would pick: The board tab. Say "yes" to that, or give your own answer.');
+    }
+    // A pick that only mentions recommending further in is kept whole.
+    expect(tail('The board tab, as I recommend.')).toBe('I would pick: The board tab, as I recommend. Say "yes" to that, or give your own answer.');  });
+
+  it('an ask raised again by an undo carries no pick: it says what he undid, with his words when he gave them (C1)', () => {
+    const base = { projectName: 'InGame', stepId: 7, stepTitle: 'Tabs', askText: 'Which tab first?', wouldHave: 'The board.' };
+    expect(bringVoiceLine({ ...base, undid: { tag: 'd18', words: 'ids are noise' } })).toBe('Yours, InGame: #7 Tabs. Which tab first?\nYou undid d18: "ids are noise". Give your answer.');
+    expect(bringVoiceLine({ ...base, undid: { tag: 'd18', words: '  ' } })).toBe('Yours, InGame: #7 Tabs. Which tab first?\nYou undid d18. Give your answer.');
+  });
+
+  it('an old ask names what was asked, and says "Say" once (C3)', () => {
+    const base = { projectName: 'Glimpse', index: 1, total: 3, stepId: 9, stepTitle: 'Login', days: 4, askText: `Should  the\nlogin ${'wait '.repeat(40)}` };
+    const [head, tail] = oldAskVoiceLine({ ...base, reading: null }).split('\n');
+    expect(head).toBe(`Glimpse, 1 of 3: #9 Login, 4 days old. Asked: "${clipLine(base.askText, VOICE_ASK_CUT)}".`);
+    expect(head).toContain('Asked: "Should the login wait');
+    expect(tail).toBe('Say your answer.');
+    expect(oldAskVoiceLine({ ...base, reading: 'Close it' }).split('\n')[1]).toBe('Close it. Say your answer.');
+    expect(oldAskVoiceLine({ ...base, reading: 'Close it: say "close it". Say "close it" to agree.' }).split('\n')[1]).toBe('Close it: say "close it". Say "close it" to agree.');
   });
 
   it('a held item makes one line, once per item', () => {

@@ -143,6 +143,8 @@ export interface BringOptions {
   tell: boolean;
   /** The decision's kind and ruling when no turn's kind gives them (an undone decision keeps its own). */
   decision?: { kind: DecisionKind; productRuling: boolean };
+  /** An undo raised the ask again: its line says what he undid (the undo's tag and his words) and carries no pick. */
+  undid?: { tag: string; words: string };
 }
 
 /**
@@ -191,7 +193,7 @@ export function bringItem(ctx: Ctx, item: DeskItem, turn: BringTurn, opts: Bring
   }
   intendBringLine(
     ctx.db,
-    { projectId: item.projectId, itemId: item.id, eventId, projectName: project!.name, stepId: ask.nodeId, stepTitle: stepTitle ?? null, askText: ask.text, wouldHave },
+    { projectId: item.projectId, itemId: item.id, eventId, projectName: project!.name, stepId: ask.nodeId, stepTitle: stepTitle ?? null, askText: ask.text, wouldHave, ...(opts.undid === undefined ? {} : { undid: opts.undid }) },
     now,
   );
   return eventId;

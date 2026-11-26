@@ -14,6 +14,8 @@ import { quietHours } from '../../src/server/lead/settings';
 import { raiseAskDetailed, undeliveredAnswers } from '../../src/server/repo/asks';
 import { addDeskItem, moveDeskItem } from '../../src/server/repo/desk';
 import { insertLeadEvent } from '../../src/server/repo/leadEvents';
+import { addDecision } from '../../src/server/repo/leadDecisions';
+import { clipLine } from '../../src/core/step-ref';
 import { intendSend } from '../../src/server/repo/leadSends';
 import { applyTurn, leaseItem, moveTurn, saveAnswer } from '../../src/server/repo/leadTurns';
 import { addNodes } from '../../src/server/repo/nodes';
@@ -72,8 +74,13 @@ describe('the morning list', () => {
     const stopped = addDeskItem(w.ctx.db, { projectId: w.project.id, kind: 'stopped', ref: `s1@${w.ctx.now()}`, nodeId: w.step.id }, w.ctx.now()).item;
     w.at(local(1, 2, 51));
     moveDeskItem(w.ctx.db, stopped.id, ['open'], 'done', { outcome: 'RESTART d9', now: w.ctx.now() });
-    // Not delivered: a voice line never sent.
+    // Its restart's decision is not listed again under Decided for you: Went wrong names it (C6).
+    const restart = insertLeadEvent(w.ctx.db, { projectId: w.project.id, lead: 'Progresser', instructions: V, kind: 'decide', nodeId: w.step.id, text: 'restart' }, w.ctx.now());
+    addDecision(w.ctx.db, { eventId: restart, itemId: stopped.id, kind: 'technical', line: 'Restarted the step', saidWhere: 'desk', saidAt: w.ctx.now() });
+    // Not delivered: a voice line never sent, a carried answer and a message under the lead's header (C5).
     intendSend(w.ctx.db, { projectId: w.project.id, kind: 'voice_line', target: 'webhook', body: 'x' }, local(1, 3));
+    intendSend(w.ctx.db, { projectId: w.project.id, kind: 'carry', target: 'thread-s1', body: `Aiden's answer to a1, carried by Progresser:   "Search"\nsecond line` }, local(1, 3, 1));
+    intendSend(w.ctx.db, { projectId: w.project.id, kind: 'relay', target: 'thread-s1', body: `[From Progresser, the lead] d1 is withdrawn: ${'a very long line '.repeat(8)}` }, local(1, 3, 2));
     // The lead: three applied calls, one late.
     const calls = [[70_000, null], [170_000, local(1, 4)], [30_000, local(1, 5, 30)]] as const;
     calls.forEach(([ms, due], i) => {
@@ -100,8 +107,10 @@ describe('the morning list', () => {
       col('', `d${product} ${step}: Which fixture file? -> ids are matched too. "undo d${product}"`, false),
       col('', `d${technical} ${step}: Which port? -> use 4410. "undo d${technical}"`, false),
       col('Held for you (1)', `#${w.step.id} wants to npm publish. Say "go ahead" or "not yet".`),
-      col('Went wrong (1)', `#${w.step.id} stopped at 02:10; restarted at 02:51.`),
-      col('Not delivered (1)', `voice_line to webhook (s1), not sent since 03:00.`),
+      col('Went wrong (1)', `#${w.step.id} stopped at 02:10; restarted at 02:51, 41 minutes lost.`),
+      col('Not delivered (3)', `A Voice line "x" (s1), not sent since 03:00.`),
+      col('', `A carried answer "Aiden's answer to a1, carried by Progresser: "Search"" (s2), not sent since 03:01.`, false),
+      col('', `A message to a session "${clipLine(`d1 is withdrawn: ${'a very long line '.repeat(8)}`, 80)}" (s3), not sent since 03:02.`, false),
       col('The lead', '3 calls, median 70 s, slowest 2 min 50, 1 late.'),
       col('The week', '41 percent used, the line says 44. Window 12 percent.'),
     ]);
@@ -183,7 +192,10 @@ describe('the morning list', () => {
     w.at(local(1, 8, 31));
     w.ask('s1', 'Which fixture file?');
     const list = morningList(w.ctx, w.project.id, local(0, 9), local(1, 9, 30));
-    expect(list.text.split('\n').at(-1)).toBe(`The laptop slept from ${hm(local(0, 22, 1))} to 08:30; 3 items waited.`);
+    expect(list.text.split('\n').at(-1)).toBe(`The laptop slept from ${hm(local(0, 22, 1))} to 08:30. 3 items waited; none was lost.`);
+    // One that waited and fell behind is said (C7).
+    w.ctx.db.prepare("UPDATE desk_items SET state = 'behind' WHERE ref = 'h1'").run();
+    expect(morningList(w.ctx, w.project.id, local(0, 9), local(1, 9, 30)).text.split('\n').at(-1)).toBe(`The laptop slept from ${hm(local(0, 22, 1))} to 08:30. 3 items waited; 1 fell behind.`);
   });
 
   it('a gap outside the quiet hours is not noted as the night', () => {
@@ -327,7 +339,7 @@ describe('undo of a desk decision, and Aiden late answer', () => {
     expect(standingRulings(w.ctx, w.project.id)).toBe('');
     leadUndo(w.ctx, w.project.slug, 'Progresser', V, { eventId: d, aidenWords: 'undo d' + d + ', ids are noise', reason: 'ids are noise' });
     const told = w.sends().filter((s) => s.retryKey === `undo:d${d}`);
-    expect(told).toEqual([{ kind: 'relay', target: 'thread-s1', retryKey: `undo:d${d}`, body: `[From Progresser, the lead] d${d} is withdrawn: a${a.id} is Aiden's again.` }]);
+    expect(told).toEqual([{ kind: 'relay', target: 'thread-s1', retryKey: `undo:d${d}`, body: `[From Progresser, the lead] d${d} is withdrawn: a${a.id} is Aiden's again. His words: "undo d${d}, ids are noise".` }]);
     expect(standingRulings(w.ctx, w.project.id)).toBe(`- ids are noise (from undo d${d}, ${dateKey(w.ctx.now())})`);
     // The tag is stored on the ruling itself, not found by a join.
     expect(w.ctx.db.prepare("SELECT text FROM lead_events WHERE kind = 'ruling'").pluck().get()).toBe(`d${d}: ids are noise`);

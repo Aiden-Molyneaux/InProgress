@@ -132,7 +132,7 @@ export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken:
   app.get('/api/lead/:ref/resource/:id', async (req) => {
     const { ref, id } = req.params as { ref: string; id: string };
     const query = leadReadQuery.parse(req.query);
-    return readLeadResource(ctx, ref, query.as, query.instructions, positiveId(id));
+    return readLeadResource(ctx, ref, query.as, query.instructions, positiveId(id), home ?? ctx.home);
   });
   app.get('/api/lead/:ref/intent', async (req) => {
     const query = leadReadQuery.parse(req.query);

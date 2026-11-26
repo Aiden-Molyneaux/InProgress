@@ -163,14 +163,14 @@ export function leadOldAsksNext(ctx: Ctx, as: string, instructions: number, coun
     if (pending >= OLD_ASKS_AT_ONCE) throw conflict(OLD_ASKS_WITH_AIDEN);
     const waiting = (db
       .prepare(
-        `SELECT d.id, d.project_id AS projectId, a.id AS askId, a.node_id AS nodeId, a.raised_at AS raisedAt,
+        `SELECT d.id, d.project_id AS projectId, a.id AS askId, a.node_id AS nodeId, a.raised_at AS raisedAt, a.text AS askText,
                 (SELECT COUNT(*) FROM lead_sends s WHERE s.item_id = d.id AND ${OLD_LINE_SQL}) AS lines
            FROM desk_items d JOIN asks a ON a.id = CAST(d.ref AS INTEGER)
           WHERE d.kind = 'old_ask' AND d.state = 'waiting_aiden'
             AND NOT EXISTS (SELECT 1 FROM lead_sends s WHERE s.item_id = d.id AND ${OLD_LINE_SQL} AND ${LIVE_LINE_SQL})
           ORDER BY a.raised_at, a.id, d.id`,
       )
-      .all() as { id: number; projectId: number; askId: number; nodeId: number; raisedAt: string; lines: number }[])
+      .all() as { id: number; projectId: number; askId: number; nodeId: number; raisedAt: string; askText: string; lines: number }[])
       // After its second line ends unknown or cleared, an old ask stays his in the window: no third line.
       .filter((r) => served(r.projectId) && r.lines < OLD_LINES_PER_ASK);
     if (waiting.length === 0) {
@@ -205,6 +205,7 @@ export function leadOldAsksNext(ctx: Ctx, as: string, instructions: number, coun
         stepId: row.nodeId,
         stepTitle: title ?? null,
         days: Math.max(0, Math.floor((Date.parse(now) - Date.parse(row.raisedAt)) / DAY_MS)),
+        askText: row.askText,
         reading: oldReading(ctx, row.askId),
       });
       intendOldAskLine(db, { projectId: row.projectId, itemId: row.id, body, n: row.lines + 1 }, now);

@@ -262,7 +262,12 @@ describe('the fix round after Murr', () => {
       const bring = w.ctx.db
         .prepare("SELECT ld.kind, ld.product_ruling, ld.would_have, ld.turn_id FROM lead_decisions ld JOIN lead_events e ON e.id = ld.event_id WHERE e.kind = 'bring' AND ld.item_id = ?")
         .all(items[0]!.id);
-      expect(bring).toEqual([{ kind: kind === 'permission' ? 'permission' : 'product', product_ruling: 1, would_have: 'Yes.', turn_id: null }]);
+      // The re-raised ask carries no pick: the answer he just withdrew is not offered back to him (C1).
+      expect(bring).toEqual([{ kind: kind === 'permission' ? 'permission' : 'product', product_ruling: 1, would_have: '', turn_id: null }]);
+      const line = w.ctx.db.prepare("SELECT body FROM lead_sends WHERE kind = 'voice_line' AND item_id = ?").pluck().get(items[0]!.id) as string;
+      expect(line).not.toContain('I would pick');
+      expect(line).not.toContain('Yes.');
+      expect(line).toContain(`You undid d${d}: "undo it". Give your answer.`);
       // One more send: the undo tells the session once that the decision is withdrawn (task 10); the bring adds none.
       expect(w.sends()).toHaveLength(sendsBefore + 1);
     }

@@ -245,6 +245,18 @@ describe('readLeadResource', () => {
     expect(rd(s, r.id).split('\n').slice(2)).toEqual(['Not stored in InProgress. Read the file: C:/personal/InGame/spec.md']);
   });
 
+  it("says a file under the home's resources folder is in InProgress (C10)", () => {
+    const s = setup();
+    const home = 'C:/test-home/inprogress';
+    const inside = addResource(s.ctx, 'test', { nodeId: s.step.id, kind: 'doc', title: 'Mock', path: 'C:/test-home/inprogress/resources/ingame/mock.png' });
+    const beside = addResource(s.ctx, 'test', { nodeId: s.step.id, kind: 'doc', title: 'Other', path: 'C:/test-home/inprogress/resources-old/mock.png' });
+    const at = (id: number) => readLeadResource(s.ctx, s.project.slug, 'Progresser', LEAD_INSTRUCTIONS_VERSION, id, home).text.split('\n').slice(2);
+    expect(at(inside.id)).toEqual(["The file is in InProgress's resources folder: C:/test-home/inprogress/resources/ingame/mock.png"]);
+    expect(at(beside.id)).toEqual(['Not stored in InProgress. Read the file: C:/test-home/inprogress/resources-old/mock.png']);
+    // With no home known, nothing can be said to be in it.
+    expect(rd(s, inside.id).split('\n').slice(2)).toEqual(['Not stored in InProgress. Read the file: C:/test-home/inprogress/resources/ingame/mock.png']);
+  });
+
   it('says a link', () => {
     const s = setup();
     const r = addResource(s.ctx, 'test', { nodeId: s.step.id, kind: 'link', title: 'Page', url: 'https://example.com/x' });

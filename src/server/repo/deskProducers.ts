@@ -78,6 +78,8 @@ export interface UndoneAsk {
   wouldHave: string;
   kind: DecisionKind;
   productRuling: boolean;
+  /** The undo's tag and his words: the line says what he undid instead of a pick. */
+  undid?: { tag: string; words: string };
 }
 
 /**
@@ -107,7 +109,7 @@ export function deskOnAskRaised(ctx: Ctx, ask: Ask, undone?: UndoneAsk): void {
   if (undone !== undefined) {
     const { item, created } = addDeskItem(db, { ...input, state: 'waiting_aiden' }, now);
     if (!created) return;
-    const eventId = bringItem(ctx, item, { id: null, kind: null, answer: undone.wouldHave }, { tell: false, decision: { kind: undone.kind, productRuling: undone.productRuling } });
+    const eventId = bringItem(ctx, item, { id: null, kind: null, answer: undone.wouldHave }, { tell: false, decision: { kind: undone.kind, productRuling: undone.productRuling }, ...(undone.undid === undefined ? {} : { undid: undone.undid }) });
     if (eventId !== undefined) moveDeskItem(db, item.id, ['waiting_aiden'], 'waiting_aiden', { outcome: `AIDEN d${eventId}`, now });
     return;
   }

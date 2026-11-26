@@ -220,10 +220,28 @@ function intendLine(db: DB, input: { projectId: number; itemId?: number | null; 
   intendSend(db, { projectId: input.projectId, itemId: input.itemId ?? null, kind: 'voice_line', target: 'webhook', retryKey: input.retryKey, body: input.body }, now);
 }
 
-/** A bring's line (scene 2): the project, the step, the ask, and what the lead would pick. Retry key `voice:bring:d<id>`. */
-export function bringVoiceLine(input: { projectName: string; stepId: number | null; stepTitle: string | null; askText: string; wouldHave: string }): string {
+/** A pick's own leading "I would pick", "I'd pick", "I'd recommend", "I recommend" or "I would recommend", with its colon or space. */
+const OWN_PICK = /^(?:i would pick|i'd pick|i'd recommend|i recommend|i would recommend)(?::\s*|\s+)/i;
+
+/** The pick as the line says it after `I would pick: `: its own leading "I would pick" (OWN_PICK) dropped, the rest capitalised. */
+export function pickText(wouldHave: string): string {
+  const rest = wouldHave.trim().replace(OWN_PICK, '').trim();
+  return rest.charAt(0).toUpperCase() + rest.slice(1);
+}
+
+/**
+ * A bring's line (scene 2): the project, the step, the ask, and what the lead would pick. Retry key `voice:bring:d<id>`.
+ * An ask raised again by an undo (`undid`: the undo's tag and his words) carries no pick: it says what he undid.
+ */
+export function bringVoiceLine(input: { projectName: string; stepId: number | null; stepTitle: string | null; askText: string; wouldHave: string; undid?: { tag: string; words: string } }): string {
   const step = input.stepId === null ? '' : `${stepRef(input.stepId, input.stepTitle ?? undefined)}. `;
-  const pick = input.wouldHave.trim() === '' ? 'Give your answer.' : `I would pick: ${input.wouldHave.trim()} Say "yes" to that, or give your own answer.`;
+  const words = input.undid?.words.trim() ?? '';
+  const pick =
+    input.undid !== undefined
+      ? `You undid ${input.undid.tag}${words === '' ? '' : `: "${words}"`}. Give your answer.`
+      : pickText(input.wouldHave) === ''
+        ? 'Give your answer.'
+        : `I would pick: ${pickText(input.wouldHave)} Say "yes" to that, or give your own answer.`;
   return `Yours, ${clipLine(input.projectName, 80)}: ${step}${clipLine(input.askText, VOICE_ASK_CUT)}\n${pick}`;
 }
 
@@ -253,7 +271,11 @@ export function heldVoiceLine(input: { projectName: string; stepId: number | nul
 }
 
 /** Intends a bring's voice line, inside the caller's write. */
-export function intendBringLine(db: DB, input: { projectId: number; itemId: number; eventId: number; projectName: string; stepId: number | null; stepTitle: string | null; askText: string; wouldHave: string }, now: string): void {
+export function intendBringLine(
+  db: DB,
+  input: { projectId: number; itemId: number; eventId: number; projectName: string; stepId: number | null; stepTitle: string | null; askText: string; wouldHave: string; undid?: { tag: string; words: string } },
+  now: string,
+): void {
   intendLine(db, { projectId: input.projectId, itemId: input.itemId, retryKey: `voice:bring:d${input.eventId}`, body: bringVoiceLine(input) }, now);
 }
 
@@ -265,12 +287,16 @@ export function intendHeldLine(db: DB, input: { projectId: number; itemId: numbe
 
 /**
  * An old ask's line (task 17, scene 6): the project, where the ask is in that project's old asks, its step, its age in
- * whole days, then the lead's reading when one is stored, and the words that ask for his answer. Retry key
- * `voice:old:<item id>`.
+ * whole days and what was asked (its text clipped to VOICE_ASK_CUT), then the lead's reading when one is stored, and the
+ * words that ask for his answer (left out when the reading has its own `Say "`). Retry key `voice:old:<item id>`.
  */
-export function oldAskVoiceLine(input: { projectName: string; index: number; total: number; stepId: number; stepTitle: string | null; days: number; reading: string | null }): string {
-  const reading = input.reading === null || input.reading.trim() === '' ? '' : `${sentenceOf(input.reading)} `;
-  return `${clipLine(input.projectName, 80)}, ${input.index} of ${input.total}: ${stepRef(input.stepId, input.stepTitle ?? undefined)}, ${input.days} day${input.days === 1 ? '' : 's'} old.\n${reading}Say your answer.`;
+export function oldAskVoiceLine(input: { projectName: string; index: number; total: number; stepId: number; stepTitle: string | null; days: number; askText: string; reading: string | null }): string {
+  const reading = input.reading === null || input.reading.trim() === '' ? '' : sentenceOf(input.reading);
+  // "Say" once: a reading with its own `Say "..."` needs no second one.
+  const say = reading.includes('Say "') ? '' : 'Say your answer.';
+  const asked = `Asked: "${clipLine(input.askText, VOICE_ASK_CUT)}".`;
+  const head = `${clipLine(input.projectName, 80)}, ${input.index} of ${input.total}: ${stepRef(input.stepId, input.stepTitle ?? undefined)}, ${input.days} day${input.days === 1 ? '' : 's'} old. ${asked}`;
+  return `${head}\n${[reading, say].filter((t) => t !== '').join(' ')}`;
 }
 
 /** The reading as a sentence: a period added when it ends in none of . ! or ?. */

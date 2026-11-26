@@ -59,7 +59,8 @@ describe('a picture has one home', () => {
     expect(existsSync(join(s.repo, 'docs', 'mock.png'))).toBe(true);
     const step = readLeadStep(s.ctx, s.project.slug, 'Progresser', LEAD_INSTRUCTIONS_VERSION, s.step.id, new Date(s.ctx.now())).text;
     expect(step).toContain(`file ${second.path}`);
-    expect(readLeadResource(s.ctx, s.project.slug, 'Progresser', LEAD_INSTRUCTIONS_VERSION, first.id).text).toContain(`Read the file: ${first.path}`);
+    // The copy is in the home's resources folder, so lead resource says it is in InProgress (C10).
+    expect(readLeadResource(s.ctx, s.project.slug, 'Progresser', LEAD_INSTRUCTIONS_VERSION, first.id, s.home).text).toContain(`The file is in InProgress's resources folder: ${first.path}`);
   });
 
   it('a picture already in the documents folder stays there; a text file is not copied; rows already stored are not rewritten', async () => {

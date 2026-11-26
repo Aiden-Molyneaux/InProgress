@@ -3,7 +3,7 @@ import { LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
 import { buildApp } from '../../src/server/app';
 import { openDb } from '../../src/server/db/connection';
 import { createCtx, type Ctx } from '../../src/server/db/tx';
-import { DECIDE_QUESTION_ONLY, leadAllow, leadUndo, WORK_PROJECT } from '../../src/server/lead-commands';
+import { DECIDE_QUESTION_ONLY, leadAllow, leadAnswer, leadUndo, WORK_PROJECT } from '../../src/server/lead-commands';
 import { applyVerdict } from '../../src/server/lead/apply';
 import { write as dbWrite } from '../../src/server/db/tx';
 import { bringItem } from '../../src/server/repo/deskBring';
@@ -173,11 +173,11 @@ describe('lead old-asks next: the old asks waiting on Aiden, to the Voice', () =
     const lines = w.lines();
     const stepG = `#${w.glimpse.step.id} Login screen review`;
     expect(lines.map((l) => l.body)).toEqual([
-      `Glimpse, 1 of 7: ${stepG}, 19 days old.\nThe lead would close it: the step was done and merged on 3 November. Say your answer.`,
-      `Glimpse, 2 of 7: ${stepG}, 17 days old.\nSay your answer.`,
-      `Glimpse, 3 of 7: ${stepG}, 15 days old.\nSay your answer.`,
-      `Notes, 1 of 1: #${w.notes.step.id} Sync, 14 days old.\nSay your answer.`,
-      `Glimpse, 4 of 7: ${stepG}, 13 days old.\nSay your answer.`,
+      `Glimpse, 1 of 7: ${stepG}, 19 days old. Asked: "Glimpse ask 1".\nThe lead would close it: the step was done and merged on 3 November. Say your answer.`,
+      `Glimpse, 2 of 7: ${stepG}, 17 days old. Asked: "Glimpse ask 2".\nSay your answer.`,
+      `Glimpse, 3 of 7: ${stepG}, 15 days old. Asked: "Glimpse ask 3".\nSay your answer.`,
+      `Notes, 1 of 1: #${w.notes.step.id} Sync, 14 days old. Asked: "Notes ask".\nSay your answer.`,
+      `Glimpse, 4 of 7: ${stepG}, 13 days old. Asked: "Glimpse ask 4".\nSay your answer.`,
     ]);
     const items = [w.g[0], w.g[1], w.g[2], w.n, w.g[3]].map((a) => w.item(a!.id)[0]!.id);
     expect(lines.map((l) => [l.itemId, l.retryKey])).toEqual(items.map((id) => [id, `voice:old:${id}`]));
@@ -324,8 +324,9 @@ describe('the runner and an open old ask, with the real apply', () => {
     expect(getDeskItem(w.ctx.db, items[0]!)!.outcome).toMatch(/^DECIDE d\d+$/);
     for (const a of [perm, q2, review]) expect(requireAsk(w.ctx, a.id).clearedAt).toBeNull();
     expect(items.slice(1).map((id) => getDeskItem(w.ctx.db, id)!.outcome)).toEqual([`AIDEN for the Voice: ${DECIDE_QUESTION_ONLY}`, 'AIDEN for the Voice', 'CARD for the Voice']);
-    // P6: with no reading stored, an AIDEN or CARD answer becomes the reading; a DECIDE refused for a permission writes none.
-    expect([perm, q2, review].map((a) => oldReading(w.ctx, a.id))).toEqual([null, 'Blue.', 'The landing check decides.']);
+    // P6 and C2: with no reading stored, the answer becomes the reading whatever the verdict, a DECIDE refused for a
+    // permission too.
+    expect([perm, q2, review].map((a) => oldReading(w.ctx, a.id))).toEqual(['Allow it.', 'Blue.', 'The landing check decides.']);
     // No bring: nothing went to the Voice until next carries them.
     expect(w.lines()).toEqual([]);
     expect(leadOldAsksNext(w.ctx, 'Progresser', V).text).toBe('Queued 3 old asks for the Voice; 0 remain.');
@@ -366,7 +367,7 @@ describe('an old question decided by the round, and undone (P1, P3, P6)', () => 
     expect(logs(w.ctx, w.ip.step.id)).toEqual([`Progresser decided d${d}: Use port 4410. Why: It is free. Aiden can undo this with "undo d${d}".`]);
     leadUndo(w.ctx, w.ip.project.slug, 'Progresser', V, { eventId: d, aidenWords: 'undo that' });
     expect(relays(w.ctx)).toEqual([]);
-    expect(logs(w.ctx, w.ip.step.id).at(-1)).toBe(`Progresser: d${d} is withdrawn: a${w.a.id} is Aiden's again.`);
+    expect(logs(w.ctx, w.ip.step.id).at(-1)).toBe(`Progresser: d${d} is withdrawn: a${w.a.id} is Aiden's again. His words: "undo that".`);
   });
 
   it('with its session live: the decision and its undo are relayed to its thread', async () => {
@@ -506,5 +507,29 @@ describe("next's lines after Murr's review", () => {
     const old = await post('/api/lead/old-asks/next', { instructions: V - 1 });
     expect(old.statusCode).toBe(409);
     expect(old.json().error).toContain(`Run "lead rules ${w.ip.project.slug} --as Progresser"`);
+  });
+});
+
+describe("an old ask's answer is recorded, never carried (C9)", () => {
+  it('with its session live in T3 Code: no carry, a line in the step log, and the session reads it on its next prompt', () => {
+    const w = world();
+    handleHookEvent(w.ctx, 's1', { event: 'start', source: 'startup', cwd: 'C:/personal/Glimpse' });
+    w.ctx.db.prepare("UPDATE sessions SET app = 't3', t3_thread_id = 'th_1', state = 'idle' WHERE id = 's1'").run();
+    const a = raiseAsk(w.ctx, 'test', { nodeId: w.glimpse.step.id, kind: 'question', text: 'Keep the old login?', sessionId: 's1' });
+    const fresh = raiseAsk(w.ctx, 'test', { nodeId: w.glimpse.step.id, kind: 'question', text: 'Which font?', sessionId: 's1' });
+    leadOldAsks(w.ctx, w.glimpse.project.slug, 'Progresser', V);
+    // Only the first is an old ask: the second is made one only to answer it after; drop its item so it is not.
+    w.ctx.db.prepare("DELETE FROM desk_items WHERE kind = 'old_ask' AND ref = ?").run(String(fresh.id));
+    const res = leadAnswer(w.ctx, w.glimpse.project.slug, 'Progresser', V, { askId: a.id, aidenWords: 'drop it', where: 'voice' });
+    expect(res.carried).toBe(false);
+    expect(res.text).toContain("An old ask: his words are in the step's log");
+    const sends = () => w.ctx.db.prepare("SELECT retry_key FROM lead_sends WHERE kind = 'carry'").pluck().all() as string[];
+    expect(sends()).toEqual([]);
+    const logs = w.ctx.db.prepare('SELECT text FROM log_entries WHERE node_id = ? ORDER BY id').pluck().all(w.glimpse.step.id) as string[];
+    expect(logs).toContain(`Aiden's answer to a${a.id} (an old ask), in his words: "drop it"`);
+    expect(requireAsk(w.ctx, a.id)).toMatchObject({ answer: 'drop it', answerDeliveredAt: null });
+    // An ask that is not an old ask is carried as before.
+    expect(leadAnswer(w.ctx, w.glimpse.project.slug, 'Progresser', V, { askId: fresh.id, aidenWords: 'serif', where: 'voice' }).carried).toBe(true);
+    expect(sends()).toEqual([`carry:a${fresh.id}`]);
   });
 });

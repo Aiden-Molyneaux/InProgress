@@ -1,3 +1,4 @@
+import { join, resolve, sep } from 'node:path';
 import { LEAD_INSTRUCTIONS_VERSION } from '../core/lead';
 import { spanAgo, stamp } from '../core/span';
 import type { Ask } from '../core/types';
@@ -126,8 +127,23 @@ export function readLeadStep(ctx: Ctx, ref: string, as: string, instructions: nu
   return { text: out.join('\n') };
 }
 
-/** One document of the lead's project: its stored content, or where to read it. A read: it changes nothing. */
-export function readLeadResource(ctx: Ctx, ref: string, as: string, instructions: number, resourceId: number): { text: string } {
+/** Whether `path` is under the home's `resources` folder (case and slashes aside on Windows). */
+export function inHomeResources(home: string | undefined, path: string): boolean {
+  if (home === undefined || home.trim() === '') return false;
+  const norm = (p: string): string => {
+    const r = resolve(p);
+    return process.platform === 'win32' ? r.toLowerCase() : r;
+  };
+  const root = norm(join(home, 'resources'));
+  const file = norm(path);
+  return file.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
+}
+
+/**
+ * One document of the lead's project: its stored content, or where to read it. A read: it changes nothing. A file under the
+ * home's resources folder (`home`, else the ctx's) is said to be in InProgress.
+ */
+export function readLeadResource(ctx: Ctx, ref: string, as: string, instructions: number, resourceId: number, home: string | undefined = ctx.home): { text: string } {
   const project = requireLead(ctx, ref, as, instructions, false);
   let r;
   try {
@@ -143,7 +159,7 @@ export function readLeadResource(ctx: Ctx, ref: string, as: string, instructions
   const content = r.content ?? '';
   let body: string;
   if (content.length > 0) body = content.length > LEAD_RESOURCE_CUT ? `${content.slice(0, LEAD_RESOURCE_CUT)}\n(cut: ${content.length - LEAD_RESOURCE_CUT} more characters)` : content;
-  else if (r.path) body = `Not stored in InProgress. Read the file: ${clean(r.path)}`;
+  else if (r.path) body = inHomeResources(home, r.path) ? `The file is in InProgress's resources folder: ${clean(r.path)}` : `Not stored in InProgress. Read the file: ${clean(r.path)}`;
   else if (r.url) body = `A link: ${clean(r.url)}`;
   else body = `r${r.id} has nothing stored.`;
   return { text: `${head}\n\n${body}` };

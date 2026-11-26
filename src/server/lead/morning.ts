@@ -10,6 +10,7 @@ import { liveProjectsWithRound, roundFirstOn } from '../repo/switches';
 import { heldRef } from './hold';
 import { startProviderModel } from '../lead-start';
 import { leadFolderOf } from './folder';
+import { parseStartBody } from './sends';
 import { leadThreadOn, quietHours } from './settings';
 import { weekSentence } from './usage';
 
@@ -60,6 +61,18 @@ export interface MorningList {
 interface Titled {
   node_id: number | null;
   title: string | null;
+}
+
+/** What a send not delivered was, as the morning list names it; any other kind is named by its kind. */
+const SEND_WHAT: Record<string, string> = { voice_line: 'A Voice line', carry: 'A carried answer', relay: 'A message to a session', start: 'A session start' };
+/** How much of a send's first line the Not delivered line keeps. */
+const SEND_GIST_CUT = 80;
+
+/** A send's gist: its body's first line (a start's first message), after any `[From ...]` prefix, on one line and clipped. */
+export function sendGist(kind: string, body: string): string {
+  const text = kind === 'start' ? (parseStartBody(body)?.message ?? body) : body;
+  const first = (text.trim().split(/\r?\n/)[0] ?? '').replace(/^\[From [^\]]*\]\s*/, '');
+  return clipLine(first, SEND_GIST_CUT);
 }
 
 const stepWords = (nodeId: number | null, title: string | null): string => (nodeId === null ? '' : title === null ? `#${nodeId}` : `#${nodeId} ${title}`);
@@ -113,13 +126,15 @@ export function morningList(ctx: Ctx, projectId: number, since: string, now: str
   );
   if (yours.length) parts.push({ name: 'Yours', count: yours.length, lines: yours });
 
-  // Decided for you: the lead's own, not undone; product rulings first, then by time.
+  // Decided for you: the lead's own, not undone; product rulings first, then by time. A decision on a stopped item is left
+  // out: its restart, park or done note is under Went wrong.
   const decidedRows = db
     .prepare(
       `SELECT e.id AS event_id, e.kind AS event_kind, e.node_id, n.title, d.line, d.product_ruling FROM lead_decisions d
        JOIN lead_events e ON e.id = d.event_id LEFT JOIN nodes n ON n.id = e.node_id
        WHERE d.project_id = ? AND d.said_at > ? AND e.kind NOT IN ('bring', 'answer')
          AND NOT EXISTS (SELECT 1 FROM lead_events u WHERE u.project_id = e.project_id AND u.kind = 'undo' AND u.text = 'd' || e.id)
+         AND NOT EXISTS (SELECT 1 FROM desk_items si WHERE si.id = d.item_id AND si.kind = 'stopped')
        ORDER BY d.product_ruling DESC, d.said_at, d.id`,
     )
     .all(projectId, since) as (Titled & { event_id: number; event_kind: string; line: string; product_ruling: number })[];
@@ -167,8 +182,11 @@ export function morningList(ctx: Ctx, projectId: number, since: string, now: str
     if (i.kind === 'unknown_send') wrong.push(`A send could not be confirmed (s${i.ref})${i.state === 'done' ? `; settled at ${hhmm(i.done_at ?? i.created_at)}` : ''}.`);
     else if (i.state === 'behind') wrong.push(`${step}: the lead is behind on a ${i.kind} item (${i.ref}).`);
     else {
-      const stopped = i.kind === 'stopped' && i.ref.includes('@') ? hhmm(i.ref.slice(i.ref.indexOf('@') + 1)) : hhmm(i.created_at);
+      const stoppedAt = i.kind === 'stopped' && i.ref.includes('@') ? i.ref.slice(i.ref.indexOf('@') + 1) : i.created_at;
+      const stopped = hhmm(stoppedAt);
       const at = hhmm(i.done_at ?? i.created_at);
+      // A restart says how long was lost: from the stop to the restart, in whole minutes.
+      const lost = Math.max(0, Math.round((Date.parse(i.done_at ?? i.created_at) - Date.parse(stoppedAt)) / 60_000));
       const o = i.outcome ?? '';
       // A restart that waits, and a park skipped, have words of their own: neither restarted nor parked anything.
       const skipped = /^PARK skipped: #\d+ is already (\w+)/.exec(o);
@@ -177,7 +195,7 @@ export function morningList(ctx: Ctx, projectId: number, since: string, now: str
         : skipped
           ? `not parked at ${at}: the step was already ${skipped[1]}`
           : o.startsWith('RESTART')
-            ? `restarted at ${at}`
+            ? `restarted at ${at}, ${Number.isNaN(lost) ? 'time lost unknown' : `${lost} minute${lost === 1 ? '' : 's'} lost`}`
             : o.startsWith('PARK')
               ? `parked at ${at}`
               : o.startsWith('DONE')
@@ -196,12 +214,12 @@ export function morningList(ctx: Ctx, projectId: number, since: string, now: str
   // Not delivered.
   const undelivered = (db
     .prepare(
-      `SELECT id, kind, target, state, created_at FROM lead_sends
+      `SELECT id, kind, body, state, created_at FROM lead_sends
        WHERE project_id = ? AND created_at > ? AND NOT (kind = 'voice_line' AND COALESCE(retry_key, '') LIKE 'morning:%')
          AND (state = 'unknown' OR (state = 'intended' AND created_at <= ?)) ORDER BY created_at, id`,
     )
-    .all(projectId, since, new Date(Date.parse(now) - NOT_DELIVERED_AFTER_MS).toISOString()) as { id: number; kind: string; target: string; state: string; created_at: string }[]).map(
-    (s) => `${s.kind} to ${s.target} (s${s.id}), ${s.state === 'unknown' ? 'not confirmed' : `not sent since ${hhmm(s.created_at)}`}.`,
+    .all(projectId, since, new Date(Date.parse(now) - NOT_DELIVERED_AFTER_MS).toISOString()) as { id: number; kind: string; body: string; state: string; created_at: string }[]).map(
+    (s) => `${SEND_WHAT[s.kind] ?? s.kind} "${sendGist(s.kind, s.body)}" (s${s.id}), ${s.state === 'unknown' ? 'not confirmed' : `not sent since ${hhmm(s.created_at)}`}.`,
   );
   if (undelivered.length) parts.push({ name: 'Not delivered', count: undelivered.length, lines: undelivered });
 
@@ -237,9 +255,11 @@ export function morningList(ctx: Ctx, projectId: number, since: string, now: str
   for (const s of slept) {
     try {
       const gap = JSON.parse(s.text) as { from: string; to: string };
-      const waited = (db
-        .prepare('SELECT COUNT(*) FROM desk_items WHERE project_id = ? AND created_at <= ? AND (done_at IS NULL OR done_at > ?)').pluck().get(projectId, gap.to, gap.from) as number);
-      tail.push(`The laptop slept from ${hhmm(gap.from)} to ${hhmm(gap.to)}; ${waited} item${waited === 1 ? '' : 's'} waited.`);
+      const waited = db
+        .prepare("SELECT COUNT(*) AS n, COALESCE(SUM(state = 'behind'), 0) AS behind FROM desk_items WHERE project_id = ? AND created_at <= ? AND (done_at IS NULL OR done_at > ?)")
+        .get(projectId, gap.to, gap.from) as { n: number; behind: number };
+      const fate = waited.behind === 0 ? 'none was lost' : `${waited.behind} fell behind`;
+      tail.push(`The laptop slept from ${hhmm(gap.from)} to ${hhmm(gap.to)}. ${waited.n} item${waited.n === 1 ? '' : 's'} waited; ${fate}.`);
     } catch {
       // A slept row that is not JSON was written by hand: the lid line is left out.
     }

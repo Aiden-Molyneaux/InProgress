@@ -24,7 +24,7 @@ import type { LeadTurn } from '../../src/server/repo/leadTurns';
 import { addNodes } from '../../src/server/repo/nodes';
 import { addBinding, createProject, setProjectLead } from '../../src/server/repo/projects';
 import { claimStep, handleHookEvent } from '../../src/server/session-flow';
-import { T3ArgumentRefused, t3Start } from '../../src/server/t3';
+import { T3ArgumentRefused, T3Unavailable, t3Start } from '../../src/server/t3';
 import { StandInT3 } from '../t3-stub';
 
 const BOUND = 'C:/personal/InGame';
@@ -641,5 +641,55 @@ describe('the day thread start (Y8)', () => {
     expect(ownStartsToday(s.ctx, s.project.id, Date.parse(s.ctx.now()))).toBe(0);
     s.intendStart();
     expect(ownStartsToday(s.ctx, s.project.id, Date.parse(s.ctx.now()))).toBe(1);
+  });
+});
+
+describe('a carry or relay to a thread T3 Code no longer has (C8)', () => {
+  /** A T3 Code whose send fails not-sent; its show and list as the case gives them. A read, never a second send. */
+  const t3Of = (o: { show: 'fails' | 'finds'; list: 'answers' | 'down' | 'lists it' }): SenderT3 & { sends: number } => {
+    const t = {
+      sends: 0,
+      list: async () => {
+        if (o.list === 'down') throw new T3Unavailable('t3 did not answer');
+        return o.list === 'lists it' ? [{ threadId: 'th_gone' } as never] : [];
+      },
+      show: async () => {
+        if (o.show === 'fails') throw new T3Unavailable('no such thread');
+        return { thread: {} as never, messages: [] };
+      },
+      start: async () => ({ threadId: 'x' }),
+      send: async () => {
+        t.sends++;
+        throw new T3Unavailable('thread not found');
+      },
+    };
+    return t;
+  };
+  const intend = (s: ReturnType<typeof setup>, kind: 'carry' | 'relay') =>
+    write(s.ctx, 'test', () => intendSend(s.ctx.db, { projectId: s.project.id, kind, target: 'th_gone', retryKey: `${kind}:x`, body: 'his answer' }, s.ctx.now())).id;
+  const refusedLines = (s: ReturnType<typeof setup>) => s.ctx.db.prepare("SELECT text FROM lead_events WHERE kind = 'send_refused'").pluck().all() as string[];
+
+  it('T3 Code answers and the thread is not there: cleared, and one send_refused line names it', async () => {
+    for (const kind of ['carry', 'relay'] as const) {
+      const s = setup();
+      const t3 = t3Of({ show: 'fails', list: 'answers' });
+      const id = intend(s, kind);
+      const out = await createSender(s.ctx, { t3 }, { log: { info: () => undefined, error: () => undefined } }).perform(id);
+      expect(out).toEqual({ state: 'cleared', reason: 'its thread th_gone is not in T3 Code' });
+      expect(getSend(s.ctx.db, id)!.state).toBe('cleared');
+      expect(refusedLines(s)).toEqual([`s${id} (${kind}): its thread th_gone is not in T3 Code`]);
+      expect(t3.sends).toBe(1);
+    }
+  });
+
+  it('T3 Code does not answer, or still has the thread: it waits as before', async () => {
+    for (const o of [{ show: 'fails', list: 'down' }, { show: 'finds', list: 'answers' }, { show: 'fails', list: 'lists it' }] as const) {
+      const s = setup();
+      const id = intend(s, 'carry');
+      const out = await createSender(s.ctx, { t3: t3Of(o) }, { log: { info: () => undefined, error: () => undefined } }).perform(id);
+      expect(out.state).toBe('waiting');
+      expect(getSend(s.ctx.db, id)).toMatchObject({ state: 'intended', result: null });
+      expect(refusedLines(s)).toEqual([]);
+    }
   });
 });

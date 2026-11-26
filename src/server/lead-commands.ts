@@ -245,14 +245,18 @@ export function leadAnswer(ctx: Ctx, ref: string, as: string, instructions: numb
     const lines = [`Answered ${tag} with Aiden's words: decision ${decisionTag(eventId)}.`, ...yesLines];
     // Only a reachable session is told in its thread (seen in the last two days): a relay would wake a long-gone one on a
     // stale step. Any other reads the answer on its next prompt, if it ever resumes.
-    const thread = reachableThread(ctx.db, { sessionId: ask.sessionId }, ctx.now());
+    // An old ask's answer is recorded, never carried: its session may have ended long ago. The step's log says it, and the
+    // session reads it on its next prompt, as any answer not delivered.
+    const oldAsk = ctx.db.prepare("SELECT 1 FROM desk_items WHERE kind = 'old_ask' AND ref = ?").get(String(ask.id)) !== undefined;
+    if (oldAsk) addLogInWrite(ctx, record, ask.nodeId, `Aiden's answer to ${tag} (an old ask), in his words: "${input.aidenWords.trim()}"`);
+    const thread = oldAsk ? null : reachableThread(ctx.db, { sessionId: ask.sessionId }, ctx.now());
     const retryKey = `carry:${askTag(ask.id)}`;
     let carried = false;
     if (thread !== null && sendByRetryKey(ctx.db, retryKey) === undefined) {
       intendSend(ctx.db, { projectId: project.id, kind: 'carry', target: thread, retryKey, body: carriedLine(name, where, saidAt, input.aidenWords, ask.id) }, ctx.now());
       carried = true;
       lines.push('Its session is told in its thread.');
-    }
+    } else if (oldAsk) lines.push("An old ask: his words are in the step's log, for its session's next prompt.");
     return { text: lines.join(' '), ask, carried };
   });
 }
@@ -511,7 +515,8 @@ export function leadUndo(ctx: Ctx, ref: string, as: string, instructions: number
       // Raised again with its own kind (a permission stays a permission). With the round on, its desk item is Aiden's at
       // once and brought, never back on the lead's desk to be decided again.
       const was = decisionByEvent(ctx.db, event.id);
-      const undone = { wouldHave: old.answer, kind: was?.kind ?? (old.kind === 'permission' ? 'permission' : 'technical'), productRuling: was?.productRuling ?? false };
+      // It carries no pick: the answer he just withdrew is not offered back to him.
+      const undone = { wouldHave: '', kind: was?.kind ?? (old.kind === 'permission' ? 'permission' : 'technical'), productRuling: was?.productRuling ?? false, undid: { tag, words: input.aidenWords } };
       const raised = raiseAskInWrite(ctx, record, actor, { nodeId: old.nodeId, kind: old.kind, text: old.text, ...(old.sessionId === null ? {} : { sessionId: old.sessionId }) }, undone);
       const oldAsk = was?.itemId != null && getDeskItem(ctx.db, was.itemId)?.kind === 'old_ask';
       // An old ask's question raised again is his, carried by lead old-asks next, unless the desk already brings it.
@@ -523,7 +528,8 @@ export function leadUndo(ctx: Ctx, ref: string, as: string, instructions: number
       if (was?.saidWhere === 'desk' || was?.saidWhere === 'thread') {
         const thread = reachableThread(ctx.db, { sessionId: old.sessionId }, ctx.now());
         const retryKey = `undo:${tag}`;
-        const line = `${tag} is withdrawn: ${askTag(old.id)} is Aiden's again.`;
+        const words = input.aidenWords.trim();
+        const line = `${tag} is withdrawn: ${askTag(old.id)} is Aiden's again.${words === '' ? '' : ` His words: "${words}".`}`;
         if (thread !== null && sendByRetryKey(ctx.db, retryKey) === undefined) {
           intendSend(ctx.db, { projectId: project.id, kind: 'relay', target: thread, retryKey, body: leadLine(name, line) }, ctx.now());
         } else if (thread === null && oldAsk) addLogInWrite(ctx, record, old.nodeId, `${name}: ${line}`);

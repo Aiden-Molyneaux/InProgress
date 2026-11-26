@@ -62,9 +62,10 @@ export function applyVerdict(ctx: Ctx, turn: LeadTurn, item: DeskItem, record: R
   // An old ask (task 17) the lead may decide only when it is a question, as lead decide does. Any other is Aiden's: it
   // waits on him with no bring, and lead old-asks next carries it to the Voice.
   if (item.kind === 'old_ask' && !(verdict === 'DECIDE' && ask.kind === 'question')) {
-    // With no reading of the lead's stored, the round's answer is its reading: its line says what the lead would do.
+    // With no reading of the lead's stored, the round's answer is its reading, a DECIDE it may not make too: its line says
+    // what the lead would do.
     const would = (turn.answer ?? '').trim();
-    if ((verdict === 'AIDEN' || verdict === 'CARD') && would !== '' && oldReading(ctx, ask.id) === null) {
+    if ((verdict === 'AIDEN' || verdict === 'CARD' || verdict === 'DECIDE') && would !== '' && oldReading(ctx, ask.id) === null) {
       storeOldReadingInWrite(ctx, { projectId: project.id, lead: name, askId: ask.id, nodeId: ask.nodeId, reading: would });
     }
     return { itemState: 'waiting_aiden', outcome: verdict === 'DECIDE' ? `AIDEN for the Voice: ${DECIDE_QUESTION_ONLY}` : `${verdict} for the Voice` };

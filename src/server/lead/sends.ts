@@ -192,14 +192,17 @@ export function recordStartInWrite(ctx: Ctx, record: RecordEvent, send: LeadSend
   record({ projectId: project.id, type: 'project.updated', entity: 'project', entityId: project.id, data: { changes: { started: 'start' } } });
 }
 
-/** A `send_refused` line in the lead's log for a send T3 Code refused or that could not be read: its item, step and reason. */
+/**
+ * A `send_refused` line in the lead's log for a send T3 Code refused, that could not be read, or whose thread T3 Code no
+ * longer has: its item (when it has one), step and reason.
+ */
 function noteRefusedInWrite(ctx: Ctx, send: LeadSend, reason: string): void {
   const project = getProjectById(ctx, send.projectId);
   if (project === undefined || project.lead === null || project.lead.trim() === '') return;
   const nodeId = stepOf(ctx, send);
   insertLeadEvent(
     ctx.db,
-    { projectId: project.id, lead: project.lead, instructions: LEAD_INSTRUCTIONS_VERSION, kind: 'send_refused', ...(nodeId === null ? {} : { nodeId }), text: `s${send.id} for item #${send.itemId}: ${reason}` },
+    { projectId: project.id, lead: project.lead, instructions: LEAD_INSTRUCTIONS_VERSION, kind: 'send_refused', ...(nodeId === null ? {} : { nodeId }), text: `s${send.id}${send.itemId === null ? ` (${send.kind})` : ` for item #${send.itemId}`}: ${reason}` },
     ctx.now(),
   );
 }
@@ -318,6 +321,18 @@ export function createSender(ctx: Ctx, deps: SenderDeps, opts: SenderOptions = {
           clear(id);
           return { state: 'cleared', reason };
         }
+        // A carry or relay to a thread T3 Code no longer has can never go: cleared as a refused one is (a carried answer is
+        // read on the session's next prompt), and named once. When T3 Code does not answer the read, it waits as any.
+        if ((send.kind === 'relay' || send.kind === 'carry') && (await threadGone(send))) {
+          const gone = `its thread ${send.target} is not in T3 Code`;
+          write(ctx, ACTOR, () => {
+            if (!moveSend(ctx.db, id, ['intended'], 'cleared', { now: ctx.now() })) return;
+            uncarriedInWrite(ctx, send);
+            noteRefusedInWrite(ctx, send, gone);
+          });
+          log.error(`send s${id} (${send.kind}) was cleared, ${gone}: ${reason}`);
+          return { state: 'cleared', reason: gone };
+        }
         // Nothing reached T3 Code: never tried, so the next try simply sends it.
         write(ctx, ACTOR, () => markTrying(ctx.db, id, false));
         if (!(err instanceof SendWaits && err.quiet)) log.error(`send s${id} (${send.kind}) was not sent and waits for the next try: ${reason}`);
@@ -345,6 +360,28 @@ export function createSender(ctx: Ctx, deps: SenderDeps, opts: SenderOptions = {
     const p = run(id, o).finally(() => inFlight.delete(id));
     inFlight.set(id, p);
     return p;
+  };
+
+  /**
+   * Whether T3 Code answers and the send's thread is not there: a show of it fails and the lists of the project's folders,
+   * which answer, do not name it. A read, never a send. False when the show finds it, or when T3 Code answers neither (it waits).
+   */
+  const threadGone = async (send: LeadSend): Promise<boolean> => {
+    try {
+      await deps.t3.show(send.target);
+      return false;
+    } catch {
+      // The show failing says nothing alone: the project's list tells a thread that is gone from T3 Code not answering.
+    }
+    const folders = leadFolders(ctx, send.projectId);
+    if (folders.length === 0) return false;
+    try {
+      for (const folder of folders) if ((await threads(folder)).some((t) => t.threadId === send.target)) return false;
+      return true;
+    } catch {
+      // T3 Code answers neither: the send waits for the next try, as any not sent.
+      return false;
+    }
   };
 
   /**

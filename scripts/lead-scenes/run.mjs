@@ -469,6 +469,22 @@ async function scene2() {
   s.check("The session's thread shows his answer carried by the lead from Grok", `Aiden's answer, carried by Progresser from Grok at 14:02: "search"`, carried, new RegExp(`^\\[From Progresser, the lead\\] Aiden's answer, carried by Progresser from Grok at ${hm(at.getTime())}: "search"$`), /Aiden's answer( to a\d+)?, carried by Progresser from Grok at \d\d:\d\d: "search"/);
   s.note('A DIFFERS on the carried answer means: the line names the ask ("Aiden\'s answer to a<id>, carried by ...").');
 
+  // Typed in the lead's thread: Progresser carries his answer with --where thread.
+  const q2 = 'Should the search box keep its text when the board reloads?';
+  const ask2 = await raise('b', 'question', q2);
+  s.act(`session on ${idRef('button')} asked: ${q2} (ask a${ask2.id})`);
+  const typed = lead('answer', SLUG, `a${ask2.id}`, '--aiden', 'keep it', '--where', 'thread');
+  const typedAt = new Date();
+  s.act(`lead answer ${SLUG} a${ask2.id} --aiden "keep it" --where thread (typed in the lead's thread) -> ${aiden(typed)}`);
+  const carriedThread = await waitFor('his typed answer in the thread', () => sentTo(sess.threadId, s.callsFrom).find((m) => /"keep it"/.test(m)), 90_000);
+  s.check(
+    "An answer typed in the lead's thread is carried as from the lead's thread",
+    `Aiden's answer to a<id>, carried by Progresser from the lead's thread at HH:MM: "keep it"`,
+    carriedThread,
+    new RegExp(`Aiden's answer to a${ask2.id}, carried by Progresser from the lead's thread at ${hm(typedAt.getTime())}: "keep it"$`),
+    /from the lead's thread/,
+  );
+
   // The review, with a picture.
   mkdirSync(`${scratch}/session-b`, { recursive: true });
   const png = `${scratch}/session-b/board-search.png`;
@@ -505,7 +521,7 @@ async function scene2() {
   const landed = cli(['landing', String(steps.button.id), '--action', 'merge', '--branch', 'step-button-name'], repo);
   s.act(`inprogress landing ${steps.button.id} --action merge --branch step-button-name (in the scratch repo) AFTER his yes -> exit ${landed.code}: ${clip(landed.text, 300)}`);
   s.check('The landing check answers clear by his yes', 'Clear to land', landed.text, (t) => landed.code === 0 && /Clear to land/.test(t), (t) => landed.code === 0);
-  const carry2 = await waitFor('the second answer in the thread', () => sentTo(sess.threadId, s.callsFrom).filter((m) => /Aiden's answer/.test(m)).length >= 2, 60_000);
+  const carry2 = await waitFor('the review answer in the thread', () => sentTo(sess.threadId, s.callsFrom).some((m) => /Aiden's answer[^\n]*"ship it"/.test(m)), 60_000);
   s.check('He said it once, to the Voice: the session was told in its thread', 'nobody sends him to a thread to say it again', sentTo(sess.threadId, s.callsFrom).filter((m) => /Aiden's answer/.test(m)).join('\n---\n'), () => carry2 === true);
   s.note('Whether the work is in the working app the next time he sits down needs the live install (done-when 1, after landing): not shown here.');
   finishScene(s);
@@ -555,20 +571,29 @@ async function scene3() {
 
   // A second session's publish is held.
   const d = await startSession('d', 'publish', 'step-publish', `${idRef('publish')} Release`, 'releasing');
+  // A bare origin beside the scratch repo, main pushed, so the check knows origin/main and holds the publish by its own rule.
+  const origin = `${scratch}/origin.git`;
+  rmSync(origin, { recursive: true, force: true });
+  git(scratch, 'init', '--bare', '-b', 'main', origin);
+  if (!git(repo, 'remote').split(/\r?\n/).includes('origin')) git(repo, 'remote', 'add', 'origin', origin);
+  git(repo, 'push', '-q', 'origin', 'main');
+  s.act(`the scratch repo got a bare origin (${origin}) and main was pushed to it`);
   const held = holdHook(d.id, repo, 'npm publish', 'npm publish*');
   s.act(`hold hook for session ${d.id.slice(0, 8)} on \`npm publish\` -> exit ${held.code}, stdout ${clip(held.stdout, 400)}`);
   s.check('The publish is held before it runs and the session is told it waits for Aiden', 'it is held before it runs, and told it waits for Aiden', held.stdout, /"permissionDecision"\s*:\s*"deny".*waits/s, /"permissionDecision"\s*:\s*"deny"/);
   const heldItem = await waitFor('the held item', () => readDb("SELECT id, state FROM desk_items WHERE project_id = ? AND kind = 'held' ORDER BY id DESC LIMIT 1", project.id)[0], 60_000);
   s.act(`held desk item #${heldItem?.id} (${heldItem?.state})`);
+  const heldWhy = readDb("SELECT text FROM lead_events WHERE project_id = ? AND kind = 'held' AND at >= ? ORDER BY id DESC LIMIT 1", project.id, s.startAt)[0]?.text;
+  s.check('The hold records the publish rule as its reason', 'npm publish -> ... a publish goes out in his name', heldWhy, /a publish goes out in his name/, (t) => !/origin\/main is not known/.test(t) && t !== '');
   // The lid: a slept note across the quiet hours.
   writeDb((db) => db.prepare("INSERT INTO lead_events (project_id, at, lead, instructions, kind, text) VALUES (?, ?, ?, ?, 'slept', ?)").run(project.id, iso(), LEAD, INSTRUCTIONS, JSON.stringify({ from: iso(Date.now() - 8 * 60 * MIN), to: iso(Date.now() - 30 * MIN) })));
   s.back(`a slept note written by hand with from ${hm(Date.now() - 8 * 60 * MIN)} to ${hm(Date.now() - 30 * MIN)} (the minute watch writes one when a tick finds a gap over 3 minutes; waiting for a real sleep is not possible)`);
   const morning = await nextMorning(10);
   s.act('the next morning list written (quiet hours ended a minute after being set; older morning rows backdated a day)');
   const text = morning?.text ?? '';
-  s.check('The morning list has the "Went wrong" line for the stopped session', `Went wrong (1)   #746 stopped at 02:10. Restarted from its record at 02:51; 41 minutes lost.`, text, new RegExp(`Went wrong \\(1\\)\\s+#${steps.stopped.id} stopped at ${hm(Date.now() - 40 * MIN)}\\. [Rr]estarted from its record at \\d\\d:\\d\\d; \\d+ minutes lost\\.`), /Went wrong \(\d+\)[^\n]*stopped at[^\n]*restarted/i);
+  s.check('The morning list has the "Went wrong" line for the stopped session', `Went wrong (1)   #746 stopped at 02:10; restarted at 02:51, 41 minutes lost.`, text, new RegExp(`Went wrong \\(1\\)\\s+#${steps.stopped.id} stopped at \\d\\d:\\d\\d; restarted at \\d\\d:\\d\\d, \\d+ minutes? lost\\.`), /Went wrong \(\d+\)[^\n]*stopped at[^\n]*restarted/i);
   s.check('The morning list has the "Held for you" line for the publish', `Held for you (1) #747 wants to publish package x 1.2.0 to npm. Say "publish it" or "not yet".`, text, /Held for you \(1\)\s+#\d+ wants to publish package x 1\.2\.0 to npm\. Say "publish it" or "not yet"\./, /Held for you \(\d+\)[^\n]*wants to/);
-  s.check('A lid gap is shown', `The lid was shut 22:06 to 10:23. 3 items waited; none was lost.`, text, /The lid was shut \d\d:\d\d to \d\d:\d\d\. \d+ items? waited; none was lost\./, /slept from \d\d:\d\d to \d\d:\d\d/);
+  s.check('A lid gap is shown', `The laptop slept from 22:06 to 10:23. 3 items waited; none was lost.`, text, /The laptop slept from \d\d:\d\d to \d\d:\d\d\. \d+ items? waited; (none was lost|\d+ fell behind)\./, /slept from \d\d:\d\d to \d\d:\d\d/);
   writeDb((db) => setAside.forEach((id) => db.prepare('UPDATE asks SET cleared_at = NULL WHERE id = ?').run(id)));
   finishScene(s, ['', '### The morning list', '```', text, '```']);
 }
@@ -591,6 +616,16 @@ async function scene4(scene1d) {
   const undo = lead('undo', SLUG, `d${scene1d}`, '--aiden', `undo d${scene1d}, ids are noise`, '--reason', 'ids are noise');
   s.act(`lead undo ${SLUG} d${scene1d} --aiden "undo d${scene1d}, ids are noise" --reason "ids are noise" -> ${aiden(undo)}`);
   s.check('The answer is withdrawn', 'the answer is withdrawn', undo.text, /withdr|undone|Undid|Undone/i);
+  // The question raised again is his: its line says what he undid, and offers no pick (the answer he withdrew).
+  const again = /as a(\d+)/.exec(undo.text)?.[1];
+  const reask = again === undefined ? undefined : await waitFor('the re-raised ask line', () => readDb("SELECT s.body FROM lead_sends s JOIN desk_items d ON d.id = s.item_id WHERE s.kind = 'voice_line' AND d.ref = ? ORDER BY s.id DESC LIMIT 1", again)[0]?.body, 30_000);
+  s.check(
+    'The re-raised ask says what he undid and offers no pick',
+    `Yours, InProgress: #<step> <title>. <question>\nYou undid d${scene1d}: "undo d${scene1d}, ids are noise". Give your answer.`,
+    reask,
+    (t) => new RegExp(`You undid d${scene1d}: "undo d${scene1d}, ids are noise"\\. Give your answer\\.`).test(t) && !/I would pick/.test(t),
+    (t) => t !== '' && !/I would pick/.test(t),
+  );
   const told = await waitFor('the session told', () => sentTo(sessions.a.threadId, s.callsFrom).filter((m) => /undo|withdraw|withdrawn/i.test(m)), 60_000);
   await sleep(11_000);
   const toldAll = sentTo(sessions.a.threadId, s.callsFrom).filter((m) => /undo|withdraw|withdrawn/i.test(m));
@@ -679,6 +714,41 @@ async function scene5() {
 }
 
 // ---- scene 6 ----
+/** The stage 0 list of old asks (lead stage 0), read only: the one file under the live home the scenes read. */
+const STAGE0_FILE = join(liveHome, 'resources', 'inprogress', '2026-11-23-lead-stage-0-old-asks.md');
+/**
+ * The readings of the other projects' asks in the stage 0 list: under each `## <slug>` heading a table
+ * `| Ask | Step | Open for | Outcome | What the lead says |`; a reading is `<Outcome>: <what the lead says to its first full stop,
+ * clipped to 200>.` InProgress's own rows are left out (the round reads those).
+ */
+function stage0Readings() {
+  let text;
+  try {
+    text = readFileSync(STAGE0_FILE, 'utf8');
+  } catch (err) {
+    return { file: STAGE0_FILE, readings: [], error: `not read: ${err.code ?? err.message}` };
+  }
+  const readings = [];
+  let slug;
+  for (const raw of text.split(/\r?\n/)) {
+    const heading = /^##\s+(\S+)\s*$/.exec(raw);
+    if (heading !== null) {
+      slug = heading[1];
+      continue;
+    }
+    if (slug === undefined || slug === SLUG) continue;
+    const cells = raw.trim().startsWith('|') ? raw.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim()) : [];
+    const ask = /^a(\d+)$/.exec(cells[0] ?? '');
+    if (ask === null || cells.length < 5) continue;
+    const says = cells.slice(4).join('|').trim();
+    // The first full stop: a period that ends a sentence (followed by a space or the end), not one inside 127.0.0.1 or a path.
+    const stop = /\.(\s|$)/.exec(says);
+    const sentence = (stop === null ? says : says.slice(0, stop.index)).slice(0, 200).trim();
+    readings.push({ slug, ask: Number(ask[1]), text: `${cells[3]}: ${sentence}.` });
+  }
+  return { file: STAGE0_FILE, readings };
+}
+
 async function scene6() {
   const s = newScene(6, 'The old asks, cleared with the Voice');
   const has = existsSync(`${build}/dist/cli/main.js`) && readFileSync(`${build}/dist/cli/main.js`, 'utf8').includes('old-asks');
@@ -704,16 +774,18 @@ async function scene6() {
   const put = lead('old-asks', SLUG);
   s.act(`lead old-asks ${SLUG} -> ${aiden(put)}`);
   s.check('The old asks of InProgress are put on the desk', 'On InProgress the lead has already decided what his rule allows, and brings the rest', put.text, /Put \d+ old asks on the desk/);
-  // A reading for the first five old asks of one project (oldest first), so their lines read "the lead would ...".
-  const first = readDb("SELECT p.id AS pid, p.slug FROM desk_items d JOIN projects p ON p.id = d.project_id JOIN asks a ON a.id = CAST(d.ref AS INTEGER) WHERE d.kind = 'old_ask' AND d.state = 'waiting_aiden' ORDER BY a.raised_at, a.id LIMIT 1")[0];
-  if (first !== undefined) {
-    const five = readDb("SELECT a.id FROM desk_items d JOIN asks a ON a.id = CAST(d.ref AS INTEGER) WHERE d.kind = 'old_ask' AND d.state = 'waiting_aiden' AND d.project_id = ? ORDER BY a.raised_at, a.id LIMIT 5", first.pid);
-    for (const a of five) {
-      const r = lead('old-asks', 'reading', first.slug, String(a.id), 'The lead would close it: the step was done and merged. Say "close" or "keep".');
-      s.act(`lead old-asks reading ${first.slug} ${a.id} <reading> -> ${clip(aiden(r), 160)}`);
-    }
+  // The readings of the other projects' old asks come from the stage 0 list (read only, never written): an ask not in it gets none.
+  const stage0 = stage0Readings();
+  s.act(`read ${stage0.file}: ${stage0.readings.length} reading(s) of other projects' asks${stage0.error ? ` (${stage0.error})` : ''}`);
+  let loaded = 0;
+  for (const r of stage0.readings) {
+    const res = lead('old-asks', 'reading', r.slug, String(r.ask), r.text);
+    if (res.code === 0) loaded++;
+    s.act(`lead old-asks reading ${r.slug} ${r.ask} "${clip(r.text, 120)}" -> ${clip(aiden(res), 160)}`);
   }
+  s.note(`The readings of the other projects' old asks came from the stage 0 list (${stage0.file}), ${loaded} loaded: "<Outcome>: <what the lead says, to its first full stop>." An ask not in the list has none.`);
   let rounds = 0;
+  let firstBatch;
   let answeredCount = 0;
   let finished = false;
   while (rounds < 16 && !finished) {
@@ -722,6 +794,8 @@ async function scene6() {
     s.act(`lead old-asks next 5 -> ${aiden(next)}`);
     if (/No old asks remain/.test(next.text)) finished = true;
     const queued = readDb("SELECT id, body FROM lead_sends WHERE project_id IS NOT NULL AND kind = 'voice_line' AND retry_key LIKE 'voice:old:%' AND state = 'intended' ORDER BY id");
+    const oldLines = queued.filter((q) => /\d+ of \d+: #/.test(q.body));
+    if (firstBatch === undefined && oldLines.length) firstBatch = oldLines.map((q) => q.body);
     if (queued.length) {
       backdate('lead_sends', 'created_at', "kind = 'voice_line' AND retry_key LIKE 'voice:old:%' AND state = 'intended'", [], 4 * MIN);
       s.back(`${queued.length} old-ask voice line(s) created_at moved 4 minutes back (the gather)`);
@@ -742,7 +816,16 @@ async function scene6() {
     }
   }
   const lines = voice.posts.slice(s.postsFrom).flatMap((p) => String(p.body?.text ?? '').split(/\n\n/)).filter((l) => /\d+ of \d+: #/.test(l));
-  s.check('Old asks come as voice lines in the plan\'s shape', `Glimpse, 1 of 7: #612 Login screen review, 19 days old.\nThe lead would close it: the step was done and merged on 3 November. Say "close" or "keep".`, lines[0], /^[^\n]+, 1 of \d+: #\d+ .+, \d+ days old\.\n.*Say "close" or "keep"\./, /\d+ of \d+: #\d+/);
+  s.check('Old asks come as voice lines in the plan\'s shape, naming what was asked', `Glimpse, 1 of 7: #612 Login screen review, 19 days old. Asked: "<the ask>".\n<the reading>. Say your answer.`, lines[0], /^[^\n]+, 1 of \d+: #\d+ .+, \d+ days old\. Asked: ".*"\.\n.+/, /\d+ of \d+: #\d+/);
+  // Every line of the first batch names its ask and carries a reading (from the stage 0 list, or the round's own answer).
+  const batch = firstBatch ?? [];
+  s.check(
+    'Every line of the first batch carries what was asked and a reading',
+    'each line: Asked: "<the ask>", then the lead\'s reading',
+    batch.join('\n---\n') || '(no batch)',
+    () => batch.length > 0 && batch.every((b) => b.includes('Asked: "') && (b.split('\n')[1] ?? '').trim() !== 'Say your answer.' && (b.split('\n')[1] ?? '').trim() !== ''),
+    () => batch.length > 0 && batch.every((b) => b.includes('Asked: "')),
+  );
   s.check('Each answer is recorded in his words', 'each answer is recorded in his words', `${answeredCount} answered with "close"`, () => answeredCount > 0);
   s.check('When the list is empty the Voice says so', 'When the list is empty the Voice says so.', voice.posts.slice(s.postsFrom).map((p) => p.body?.text).filter((t) => /old asks are done/i.test(String(t))).join(' | '), /The old asks are done/);
   s.note(`Stopped after ${rounds} round(s) of 5${finished ? '' : ' without reaching the done line (a cap of 16 rounds)'}.`);
