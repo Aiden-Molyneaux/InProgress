@@ -792,3 +792,14 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   landing); lead-thread is off by default and starts a new thread each morning; the sleep detection is not exercised
   (a real sleep cannot be waited for, and the laptop's power settings are not touched); "show me" through Grok rests
   on the live run.
+- Murr on the check-1 round (Opus, main pass): one major (a stop decided after a morning list was named nowhere:
+  Decided now leaves out only what Went wrong lists), five minors (an old ask's answer still carried by lateAnswer and
+  for an undone old question; a relayed body's gist empty; a thread judged gone on one read; a test that could not
+  fail; an undo's words unclipped), a debt (UndoneAsk's dead would-have). All fixed by the same Sev in 2238e57, with
+  two owner-calls taken: a parked stop's Went wrong line carries its undo word, and a gone thread's send reads "could
+  not go". Taken as built: `isOldAsk` also counts a fresh ask with the same text on the same step as an old one (that
+  ask is not carried; it reaches the session on its next prompt). An old ask decided as CARD is logged on its step as
+  `<lead>: a<id>: <answer>` when no thread is reachable.
+- The real scenes on 7271d2d (between the two rounds): 38 PASS, 9 DIFFERS, 0 FAIL. The run showed one more doubled pick
+  ("I would pick: I'd suggest"), folded into 2238e57. One full unit run of three had one failure that two reruns and
+  three runs of the changed files did not repeat; it was not captured.
