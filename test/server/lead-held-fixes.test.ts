@@ -4,9 +4,9 @@ import { LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
 import { ONLY_YOU } from '../../src/core/landing';
 import { buildApp } from '../../src/server/app';
 import { write as dbWrite } from '../../src/server/db/tx';
-import { CHANGED_AFTER, heldCards } from '../../src/server/lead/carry';
+import { CHANGED_SINCE_HELD, heldCards } from '../../src/server/lead/carry';
 import { heldOutcome, heldRef } from '../../src/server/lead/hold';
-import { checkLanding, PUBLISH_NO_YES, realGit, type LandingDeps } from '../../src/server/lead/landing';
+import { checkLanding, publishDestination, PUBLISH_NO_YES, realGit, type LandingDeps } from '../../src/server/lead/landing';
 import { createSender, type SenderT3 } from '../../src/server/lead/sends';
 import { intendHeldLine } from '../../src/server/lead/voice';
 import { WORK_PROJECT } from '../../src/server/lead-commands';
@@ -19,6 +19,7 @@ import { addBinding, createProject, setProjectLead } from '../../src/server/repo
 import { getProjectSnapshot } from '../../src/server/repo/snapshot';
 import { handleHookEvent } from '../../src/server/session-flow';
 import { commit, git, lines, makeRepo, write, type TestRepo } from '../git-repo';
+import { keysAtHold } from '../held-keys';
 import { makeCtx } from '../helpers';
 
 /*
@@ -63,25 +64,29 @@ function setup(opts: { calls?: string[][]; cwd?: string; branch?: string; thread
   const sender = createSender(ctx, { t3: fakeT3 }, { log: { info: () => undefined, error: () => undefined } });
   const app = buildApp({ ctx, token: 't', uiToken: 'ui', version: 'test', landing: deps, sender });
   const click = (itemId: number, answer: string) => app.inject({ method: 'POST', url: `/api/ui/held/${itemId}`, headers: UI, payload: { answer } });
-  const check = (action: 'merge' | 'push' | 'publish' | 'deploy', folder = repo.wt, branch: string | undefined = 'feature') =>
-    checkLanding(ctx, { ref: project.slug, stepId: step.id, action, folder, ...(branch === undefined ? {} : { branch }) }, deps, { record: false });
+  const check = (action: 'merge' | 'push' | 'publish' | 'deploy', folder = repo.wt, branch: string | undefined = 'feature', segment?: string) =>
+    checkLanding(ctx, { ref: project.slug, stepId: step.id, action, folder, ...(branch === undefined ? {} : { branch }), ...(segment === undefined ? {} : { segment }) }, deps, { record: false });
   const yesCount = () => ctx.db.prepare("SELECT COUNT(*) FROM lead_events WHERE kind = 'yes'").pluck().get() as number;
   const answers = () => ctx.db.prepare("SELECT COUNT(*) FROM lead_events WHERE kind = 'answer'").pluck().get() as number;
   const answer = (payload: Record<string, unknown>) =>
     app.inject({ method: 'POST', url: `/api/lead/${project.slug}/answer`, headers: { authorization: 'Bearer t' }, payload: { as: 'Progresser', instructions: V, ...payload } });
   write(repo.wt, 'web/app.ts', lines(20, 'tabs'));
   commit(repo.wt, 'tabs');
-  return { ctx, project, step, app, click, check, yesCount, answers, answer, calls };
+  return { ctx, project, step, app, click, check, yesCount, answers, answer, calls, cwd: opts.cwd ?? repo.wt };
 }
 
 type T = ReturnType<typeof setup>;
 
-/** A held item for `command` by session s1, waiting on Aiden as holdCheck leaves it, with its line to the Voice. */
-function held(t: T, command: string, why = 'by the check', nodeId: number | null = t.step.id, projectId = t.project.id) {
+/**
+ * A held item for `command` by session s1, waiting on Aiden as holdCheck leaves it (with the keys its check computes now,
+ * when it is on a step, unless `keyed` is false), with its line to the Voice.
+ */
+async function held(t: T, command: string, why = 'by the check', nodeId: number | null = t.step.id, projectId = t.project.id, keyed = true) {
+  const keys = nodeId === null || !keyed ? undefined : await keysAtHold(t.ctx, t.project.slug, nodeId, command, t.cwd);
   return dbWrite(t.ctx, 'test', () => {
     const now = t.ctx.now();
     const { item } = produceDeskItem(t.ctx.db, { projectId, kind: 'held', ref: heldRef('s1', command), nodeId }, now);
-    moveDeskItem(t.ctx.db, item.id, ['open'], 'waiting_aiden', { outcome: heldOutcome(why, 'a held command'), now });
+    moveDeskItem(t.ctx.db, item.id, ['open'], 'waiting_aiden', { outcome: heldOutcome(why, 'a held command', keys), now });
     insertLeadEvent(t.ctx.db, { projectId, lead: 'Progresser', instructions: V, kind: 'held', ...(nodeId === null ? {} : { nodeId }), sessionId: 's1', text: `${command} -> ${why}` }, now);
     intendHeldLine(t.ctx.db, { projectId, itemId: item.id, projectName: 'InGame', stepId: nodeId, what: 'a held command' }, now);
     const send = t.ctx.db.prepare("SELECT id FROM lead_sends WHERE kind = 'voice_line' AND item_id = ?").pluck().get(item.id) as number;
@@ -109,7 +114,7 @@ describe('M1: a publish yes is keyed on what goes out', () => {
     const t = setup();
     pkg(repo.wt, 'a', '1.0.0', 'packages/a');
     pkg(repo.wt, 'b', '1.0.0', 'packages/b');
-    const h = held(t, 'cd packages/a && npm publish');
+    const h = await held(t, 'cd packages/a && npm publish');
     expect(getProjectSnapshot(t.ctx, t.project.id).held?.[0]?.goAhead).toBe(true);
     const res = await t.click(h.item.id, 'go');
     expect(res.statusCode, res.body).toBe(200);
@@ -125,7 +130,7 @@ describe('M1: a publish yes is keyed on what goes out', () => {
     const t = setup();
     pkg(repo.wt, 'x', '1.2.0');
     for (const command of ['npm publish ./x-1.2.0.tgz', 'npm publish --workspace a']) {
-      const h = held(t, command);
+      const h = await held(t, command);
       const card = heldCards(t.ctx, t.project.id).cards.find((c) => c.id === h.item.id)!;
       expect(card.goAhead).toBe(false);
       const res = await t.click(h.item.id, 'go');
@@ -144,7 +149,7 @@ describe('M1: a publish yes is keyed on what goes out', () => {
     const t = setup({ calls });
     pkg(repo.wt, 'x', '1.2.0');
     write(repo.wt, 'notes.txt', 'not committed\n');
-    const h = held(t, 'npm publish');
+    const h = await held(t, 'npm publish');
     const res = await t.click(h.item.id, 'go');
     expect(res.statusCode).toBe(409);
     expect(res.json().error).toContain(PUBLISH_NO_YES);
@@ -158,7 +163,7 @@ describe('M1: a publish yes is keyed on what goes out', () => {
     const other = makeRepo();
     others.push(other);
     pkg(other.wt, 'x', '1.2.0');
-    const h = held(t, `cd ${fwd(other.wt)} && npm publish`);
+    const h = await held(t, `cd ${fwd(other.wt)} && npm publish`);
     expect((await t.click(h.item.id, 'go')).statusCode).toBe(200);
     expect(await t.check('publish', other.wt)).toMatchObject({ clear: true, why: 'his yes' });
     expect((await t.check('publish')).clear).toBe(false);
@@ -167,7 +172,7 @@ describe('M1: a publish yes is keyed on what goes out', () => {
   it('a yes already given does not cover the folder once it has changes not committed', async () => {
     const t = setup();
     pkg(repo.wt, 'x', '1.2.0');
-    const h = held(t, 'npm publish');
+    const h = await held(t, 'npm publish');
     expect((await t.click(h.item.id, 'go')).statusCode).toBe(200);
     expect((await t.check('publish')).clear).toBe(true);
     write(repo.wt, 'package.json', JSON.stringify({ name: 'x', version: '9.9.9' }));
@@ -186,17 +191,15 @@ describe('M1: a publish yes is keyed on what goes out', () => {
   });
 });
 
-describe('M2: a window click is anchored at the hold', () => {
+describe('M2: a window click covers what was held', () => {
   it('a commit between the hold and the click gets no yes, and nothing is answered', async () => {
     const t = setup();
-    const h = held(t, 'git push');
-    // The hold came 10 s from now; a commit 30 s from now is after it, and before the click (the ctx clock, a minute on).
-    t.ctx.db.prepare('UPDATE desk_items SET created_at = ? WHERE id = ?').run(new Date(Date.now() + 10_000).toISOString(), h.item.id);
+    const h = await held(t, 'git push');
     write(repo.wt, 'web/later.ts', lines(3, 'later'));
-    commitAt(repo.wt, 'later', new Date(Date.now() + 30_000));
+    commit(repo.wt, 'later');
     const res = await t.click(h.item.id, 'go');
     expect(res.statusCode).toBe(409);
-    expect(res.json().error).toContain(CHANGED_AFTER);
+    expect(res.json().error).toContain(`push: ${CHANGED_SINCE_HELD}`);
     expect({ state: state(t, h.item.id), yes: t.yesCount(), answers: t.answers() }).toEqual({ state: 'waiting_aiden', yes: 0, answers: 0 });
     // Not yet still answers it.
     expect((await t.click(h.item.id, 'not-yet')).statusCode).toBe(200);
@@ -209,7 +212,7 @@ describe('M3: push and deploy yeses are keyed as the landing check keys them', (
     git(repo.wt, 'update-ref', 'refs/remotes/origin/feature', git(repo.wt, 'rev-parse', 'HEAD'));
     write(repo.wt, 'web/next.ts', lines(4, 'next'));
     commit(repo.wt, 'next');
-    const h = held(t, 'git push');
+    const h = await held(t, 'git push');
     expect((await t.check('push')).clear).toBe(false);
     const res = await t.click(h.item.id, 'go');
     expect(res.statusCode, res.body).toBe(200);
@@ -219,7 +222,7 @@ describe('M3: push and deploy yeses are keyed as the landing check keys them', (
   it('a push with nothing to send needs no yes', async () => {
     const t = setup();
     git(repo.wt, 'update-ref', 'refs/remotes/origin/feature', git(repo.wt, 'rev-parse', 'HEAD'));
-    const h = held(t, 'git push');
+    const h = await held(t, 'git push');
     const res = await t.click(h.item.id, 'go');
     expect(res.statusCode, res.body).toBe(200);
     expect(res.json().text).toContain('No yes needed for push: nothing to push.');
@@ -230,7 +233,7 @@ describe('M3: push and deploy yeses are keyed as the landing check keys them', (
     const t = setup({ cwd: repo.main, branch: 'main' });
     write(repo.main, 'web/deployed.ts', lines(4, 'deployed'));
     commit(repo.main, 'to deploy');
-    const h = held(t, 'npm run deploy');
+    const h = await held(t, 'npm run deploy');
     expect((await t.check('deploy', repo.main, undefined)).clear).toBe(false);
     const res = await t.click(h.item.id, 'go');
     expect(res.statusCode, res.body).toBe(200);
@@ -243,7 +246,7 @@ describe('owner-calls: Go ahead only where a yes can release the command', () =>
     const calls: string[][] = [];
     const t = setup({ calls });
     t.ctx.db.prepare('UPDATE projects SET playbook = ? WHERE id = ?').run('Held: make release', t.project.id);
-    const h = held(t, 'make release', "this is Aiden's without a check");
+    const h = await held(t, 'make release', "this is Aiden's without a check");
     expect(heldCards(t.ctx, t.project.id).cards[0]).toMatchObject({ id: h.item.id, goAhead: false });
     const before = calls.length;
     const res = await t.click(h.item.id, 'go');
@@ -254,17 +257,17 @@ describe('owner-calls: Go ahead only where a yes can release the command', () =>
     expect((await t.click(h.item.id, 'not-yet')).statusCode).toBe(200);
   });
 
-  it('a push held as public, a command on no step, and a pull request merge show only Not yet', () => {
+  it('a push held as public, a command on no step, and a pull request merge show only Not yet', async () => {
     const t = setup();
-    held(t, 'git push origin feature', "hold: this is Aiden's (a push-public goes out in his name)");
-    held(t, 'git push', 'by the check', null);
-    held(t, 'gh pr merge 12 --squash');
+    await held(t, 'git push origin feature', "hold: this is Aiden's (a push-public goes out in his name)");
+    await held(t, 'git push', 'by the check', null);
+    await held(t, 'gh pr merge 12 --squash');
     expect(heldCards(t.ctx, t.project.id).cards.map((c) => c.goAhead)).toEqual([false, false, false]);
   });
 
   it("the window's answer is recorded as the window", async () => {
     const t = setup({ thread: false });
-    const h = held(t, 'git push');
+    const h = await held(t, 'git push');
     const mark = t.ctx.db.prepare('SELECT COALESCE(MAX(id), 0) FROM events').pluck().get() as number;
     expect((await t.click(h.item.id, 'not-yet')).statusCode).toBe(200);
     expect(t.ctx.db.prepare('SELECT DISTINCT actor FROM events WHERE id > ?').pluck().all(mark)).toEqual(['window']);
@@ -277,7 +280,7 @@ describe('owner-calls: Go ahead only where a yes can release the command', () =>
     const work = createProject(t.ctx, 'test', { name: 'Client' });
     addBinding(t.ctx, 'test', work.slug, 'C:/work/client');
     setProjectLead(t.ctx, 'window', work.slug, 'Progresser');
-    const h = held(t, 'git push', 'by the check', null, work.id);
+    const h = await held(t, 'git push', 'by the check', null, work.id);
     const before = calls.length;
     const res = await t.click(h.item.id, 'go');
     expect(res.statusCode).toBe(409);
@@ -287,12 +290,13 @@ describe('owner-calls: Go ahead only where a yes can release the command', () =>
 });
 
 describe('minors: the held cards the snapshot carries', () => {
-  it('clips the command, counts every one waiting past the cap, and leaves out a parked step and a C:\\work project', () => {
+  it('clips the command, counts every one waiting past the cap, and leaves out a parked step and a C:\\work project', async () => {
     const t = setup();
     const long = `git push ${'x'.repeat(3000)}`;
-    held(t, long);
+    await held(t, long, 'by the check', t.step.id, t.project.id, false);
     expect(heldCards(t.ctx, t.project.id).cards[0]!.command).toHaveLength(2000);
-    for (let i = 0; i < 100; i++) held(t, `git push origin b${i}`);
+    // Cards alone are counted here: no keys are read for them.
+    for (let i = 0; i < 100; i++) await held(t, `git push origin b${i}`, 'by the check', t.step.id, t.project.id, false);
     const snap = getProjectSnapshot(t.ctx, t.project.id);
     expect([snap.held?.length, snap.heldTotal]).toEqual([100, 101]);
     parkNode(t.ctx, 'window', t.step.id, { reason: 'later' }, () => undefined);
@@ -300,7 +304,125 @@ describe('minors: the held cards the snapshot carries', () => {
 
     const work = createProject(t.ctx, 'test', { name: 'Client' });
     addBinding(t.ctx, 'test', work.slug, 'C:/work/client');
-    held(t, 'git push origin w', 'by the check', null, work.id);
+    await held(t, 'git push origin w', 'by the check', null, work.id);
     expect(heldCards(t.ctx, work.id)).toEqual({ cards: [], total: 0 });
+  });
+});
+
+/*
+ * The second fixes after Murr's re-check: a held command remembers what it would do (K1), a yes is recorded only for exactly
+ * that (K2), and a publish's key names where it goes (K3).
+ */
+
+describe('K1, K2: a yes covers the folder the hold read, not where the session is now', () => {
+  it("a monorepo session's publish held in packages/a: the session moving to packages/b does not move the yes", async () => {
+    const t = setup({ cwd: `${repo.wt}/packages/a` });
+    pkg(repo.wt, 'a', '1.0.0', 'packages/a');
+    pkg(repo.wt, 'b', '1.0.0', 'packages/b');
+    const h = await held(t, 'npm publish');
+    t.ctx.db.prepare("UPDATE sessions SET cwd = ? WHERE id = 's1'").run(`${repo.wt}/packages/b`);
+    const res = await t.click(h.item.id, 'go');
+    expect(res.statusCode, res.body).toBe(200);
+    const tree = (await realGit(repo.wt, ['rev-parse', 'HEAD^{tree}'])).stdout.trim();
+    expect(t.ctx.db.prepare("SELECT text FROM lead_events WHERE kind = 'yes'").pluck().all()).toEqual([`publish ${tree}:packages/a/:a@1.0.0`]);
+    expect(await t.check('publish', `${repo.wt}/packages/a`, 'feature', 'npm publish')).toMatchObject({ clear: true, why: 'his yes' });
+    // A later publish in b is held.
+    expect((await t.check('publish', `${repo.wt}/packages/b`, 'feature', 'npm publish')).clear).toBe(false);
+  });
+
+  it('two folders with the same name and version: a yes for one does not clear the other', async () => {
+    const t = setup({ cwd: `${repo.wt}/packages/a` });
+    pkg(repo.wt, 'x', '1.0.0', 'packages/a');
+    pkg(repo.wt, 'x', '1.0.0', 'packages/c');
+    const h = await held(t, 'npm publish');
+    expect((await t.click(h.item.id, 'go')).statusCode).toBe(200);
+    expect((await t.check('publish', `${repo.wt}/packages/a`, 'feature', 'npm publish')).clear).toBe(true);
+    expect((await t.check('publish', `${repo.wt}/packages/c`, 'feature', 'npm publish')).clear).toBe(false);
+  });
+});
+
+describe('K2: a yes only for exactly what was held', () => {
+  it('a deploy held, then main fast-forwarded to commits dated before the hold: Go ahead is refused, and by the Voice no yes', async () => {
+    const t = setup({ cwd: repo.main, branch: 'main' });
+    write(repo.main, 'web/deployed.ts', lines(4, 'deployed'));
+    commit(repo.main, 'to deploy');
+    const h = await held(t, 'npm run deploy');
+    // A commit dated an hour back: no commit date says it came after the hold.
+    write(repo.main, 'web/sneaked.ts', lines(4, 'sneaked'));
+    commitAt(repo.main, 'sneaked in', new Date(Date.now() - 3_600_000));
+    const res = await t.click(h.item.id, 'go');
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toContain(`deploy: ${CHANGED_SINCE_HELD}`);
+    expect({ state: state(t, h.item.id), yes: t.yesCount(), answers: t.answers() }).toEqual({ state: 'waiting_aiden', yes: 0, answers: 0 });
+    const voice = await t.answer({ sendId: h.send, aidenWords: 'go ahead', saidAt: new Date(Date.now() + 1000).toISOString(), yes: ['deploy'] });
+    expect(voice.statusCode).toBe(200);
+    expect(voice.json().text).toContain(`No yes recorded for deploy: ${CHANGED_SINCE_HELD}.`);
+    expect(t.yesCount()).toBe(0);
+  });
+
+  it('a push held on one branch, the folder switched to another: Go ahead is refused', async () => {
+    const t = setup();
+    const h = await held(t, 'git push');
+    git(repo.wt, 'checkout', '-q', '-b', 'other');
+    const res = await t.click(h.item.id, 'go');
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toContain(`push: ${CHANGED_SINCE_HELD}`);
+    expect({ state: state(t, h.item.id), yes: t.yesCount(), answers: t.answers() }).toEqual({ state: 'waiting_aiden', yes: 0, answers: 0 });
+  });
+
+  it('an item the hold stored no keys for offers no Go ahead', async () => {
+    const t = setup();
+    const h = await held(t, 'git push', 'by the check', t.step.id, t.project.id, false);
+    expect(heldCards(t.ctx, t.project.id).cards.find((c) => c.id === h.item.id)!.goAhead).toBe(false);
+    expect((await t.click(h.item.id, 'go')).statusCode).toBe(409);
+    expect(t.yesCount()).toBe(0);
+  });
+});
+
+describe('K3: a publish key names where it goes', () => {
+  it('reads --dry-run, --registry, --tag, --access and --publish-branch either way they are written, sorted, without --otp', () => {
+    expect(publishDestination('npm publish')).toEqual([]);
+    expect(publishDestination('NPM publish --TAG=beta --otp 123456 --Access public --dry-run')).toEqual(['--access=public', '--dry-run', '--tag=beta']);
+    expect(publishDestination('pnpm publish --publish-branch "release" --registry=https://r.example/')).toEqual(['--publish-branch=release', '--registry=https://r.example/']);
+    expect(publishDestination(undefined)).toEqual([]);
+  });
+
+  it('a yes on --dry-run does not clear --access public', async () => {
+    const t = setup();
+    pkg(repo.wt, 'x', '1.2.0');
+    const h = await held(t, 'npm publish --dry-run');
+    expect((await t.click(h.item.id, 'go')).statusCode).toBe(200);
+    expect((await t.check('publish', repo.wt, 'feature', 'npm publish --dry-run')).clear).toBe(true);
+    expect((await t.check('publish', repo.wt, 'feature', 'npm publish --access public')).clear).toBe(false);
+    expect((await t.check('publish', repo.wt, 'feature', 'npm publish')).clear).toBe(false);
+  });
+
+  it('a yes for one registry does not clear a plain publish', async () => {
+    const t = setup();
+    pkg(repo.wt, 'x', '1.2.0');
+    const h = await held(t, 'npm publish --registry https://r.example/');
+    expect((await t.click(h.item.id, 'go')).statusCode).toBe(200);
+    expect((await t.check('publish', repo.wt, 'feature', 'npm publish --registry=https://r.example/')).clear).toBe(true);
+    expect((await t.check('publish', repo.wt, 'feature', 'npm publish')).clear).toBe(false);
+  });
+
+  it('a yes for --tag beta clears --tag=beta', async () => {
+    const t = setup();
+    pkg(repo.wt, 'x', '1.2.0');
+    const h = await held(t, 'npm publish --tag beta');
+    expect((await t.click(h.item.id, 'go')).statusCode).toBe(200);
+    expect(await t.check('publish', repo.wt, 'feature', 'npm publish --tag=beta')).toMatchObject({ clear: true, why: 'his yes' });
+  });
+});
+
+describe('the newest held line for a ref decides Go ahead', () => {
+  it('a command held as a public push, answered, then held again by the check: its card offers Go ahead', async () => {
+    const t = setup();
+    const first = await held(t, 'git push', "hold: this is Aiden's (a push-public goes out in his name)");
+    expect(heldCards(t.ctx, t.project.id).cards[0]!.goAhead).toBe(false);
+    expect((await t.click(first.item.id, 'not-yet')).statusCode).toBe(200);
+    const again = await held(t, 'git push');
+    expect(again.item.id).not.toBe(first.item.id);
+    expect(heldCards(t.ctx, t.project.id).cards).toEqual([expect.objectContaining({ id: again.item.id, goAhead: true })]);
   });
 });

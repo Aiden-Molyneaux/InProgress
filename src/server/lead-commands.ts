@@ -166,10 +166,10 @@ export const carriedLine = (lead: string, where: AnswerWhere, saidAt: string, wo
  * (main...branch, as the landing check reads a merge, nothing logged). A merge, deploy or push the yes covers is keyed on
  * that one change: after the merge, a deploy reads main against the live build and a push the branch against origin, which
  * is the same change when nothing else came between, and is held when something did. A publish is keyed on what goes out
- * (the tree, the folder and the package's name and version: publishKey), which only a held publish names: a review takes
- * no yes for it (the answer route refuses --yes publish on one). A change that cannot be read carries the reason for every
- * action, and so does a change with a commit after his words (`saidAt`). A read, outside any write; undefined for an ask
- * that is not a review of this project.
+ * and where (the tree, the folder, the package's name and version and the publish's flags: publishKey), which only a held
+ * publish names: a review takes no yes for it (the answer route refuses --yes publish on one). A change that cannot be read
+ * carries the reason for every action, and so does a change with a commit after his words (`saidAt`). A read, outside any
+ * write; undefined for an ask that is not a review of this project.
  */
 export async function readYeses(
   ctx: Ctx,

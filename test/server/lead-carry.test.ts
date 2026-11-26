@@ -8,14 +8,14 @@ import { buildApp } from '../../src/server/app';
 import { write as dbWrite } from '../../src/server/db/tx';
 import { leadAllow, leadAnswer, leadDeskAdd, leadUndo, readYeses } from '../../src/server/lead-commands';
 import { applyVerdict } from '../../src/server/lead/apply';
-import { CHANGED_AFTER, heldScope, SAID_AT_NEEDED } from '../../src/server/lead/carry';
+import { CHANGED_AFTER, CHANGED_SINCE_HELD, heldScope, SAID_AT_NEEDED } from '../../src/server/lead/carry';
 import { fullPath } from '../../src/server/repo/resources';
 import { markAnswersDelivered } from '../../src/server/repo/asks';
 import { checkLanding, realGit, type LandingDeps } from '../../src/server/lead/landing';
 import { morningList } from '../../src/server/lead/morning';
 import { createSender, type SenderT3 } from '../../src/server/lead/sends';
 import { createVoice, intendHeldLine, voiceDayStart, voiceFile } from '../../src/server/lead/voice';
-import { heldRef } from '../../src/server/lead/hold';
+import { heldOutcome, heldRef } from '../../src/server/lead/hold';
 import { raiseAsk, requireAsk, undeliveredAnswers } from '../../src/server/repo/asks';
 import { getDeskItem, moveDeskItem } from '../../src/server/repo/desk';
 import { bringItem } from '../../src/server/repo/deskBring';
@@ -28,6 +28,7 @@ import { addBinding, createProject, setProjectLead } from '../../src/server/repo
 import { handleHookEvent } from '../../src/server/session-flow';
 import { T3ArgumentRefused } from '../../src/server/t3';
 import { commit, lines, makeRepo, write, type TestRepo } from '../git-repo';
+import { keysAtHold } from '../held-keys';
 import { makeCtx } from '../helpers';
 
 const V = LEAD_INSTRUCTIONS_VERSION;
@@ -118,23 +119,26 @@ describe('W2: his reply to a line from the Voice, by its send', () => {
 
   it("a held line: with --yes a yes for that action on the session's change and the item closes; without, his words go to the session and the item closes", async () => {
     const t = setup();
-    const held = (command: string) =>
-      dbWrite(t.ctx, 'test', () => {
+    const held = async (command: string) => {
+      const keys = await keysAtHold(t.ctx, t.project.slug, t.step.id, command, repo.wt);
+      return dbWrite(t.ctx, 'test', () => {
         const now = t.ctx.now();
         const { item } = produceDeskItem(t.ctx.db, { projectId: t.project.id, kind: 'held', ref: heldRef('s1', command), nodeId: t.step.id }, now);
+        moveDeskItem(t.ctx.db, item.id, ['open'], 'waiting_aiden', { outcome: heldOutcome('it touches src/hooks', 'a push to a remote', keys), now });
         insertLeadEvent(t.ctx.db, { projectId: t.project.id, lead: 'Progresser', instructions: V, kind: 'held', nodeId: t.step.id, sessionId: 's1', text: `${command} -> it touches src/hooks` }, now);
         intendHeldLine(t.ctx.db, { projectId: t.project.id, itemId: item.id, projectName: 'InGame', stepId: t.step.id, what: 'a push to a remote' }, now);
         const send = t.ctx.db.prepare("SELECT id FROM lead_sends WHERE kind = 'voice_line' AND item_id = ?").pluck().get(item.id) as number;
         return { item, send };
       });
-    const a = held('git push');
+    };
+    const a = await held('git push');
     const yes = await t.answer({ sendId: a.send, aidenWords: 'go ahead', where: 'voice', saidAt: saidNow(), yes: ['push'] });
     expect(yes.statusCode).toBe(200);
     expect(t.ctx.db.prepare("SELECT text, node_id FROM lead_events WHERE kind = 'yes'").all()).toEqual([{ text: expect.stringMatching(/^push [0-9a-f]{40}$/), node_id: t.step.id }]);
     expect(getDeskItem(t.ctx.db, a.item.id)).toMatchObject({ state: 'done', outcome: expect.stringMatching(/^ANSWERED d[0-9]+$/) });
     expect(await t.check('push')).toMatchObject({ clear: true, why: 'his yes' });
 
-    const b = held('git push origin feature');
+    const b = await held('git push origin feature');
     expect((await t.answer({ sendId: b.send, aidenWords: 'not yet', where: 'voice' })).statusCode).toBe(200);
     expect(t.yesCount()).toBe(1);
     expect(getDeskItem(t.ctx.db, b.item.id)!.state).toBe('done');
@@ -326,11 +330,16 @@ describe('W5: a picture path must be whole', () => {
   });
 });
 
-/** A held item for `command` by session s1 on the step (or on none), with its held line and its line to the Voice. */
-function heldItem(t: ReturnType<typeof setup>, command: string, nodeId: number | null = t.step.id) {
+/**
+ * A held item for `command` by session s1 on the step (or on none), waiting on Aiden with the keys its check computes now (on
+ * a step), with its held line and its line to the Voice.
+ */
+async function heldItem(t: ReturnType<typeof setup>, command: string, nodeId: number | null = t.step.id) {
+  const keys = nodeId === null ? undefined : await keysAtHold(t.ctx, t.project.slug, nodeId, command, repo.wt);
   return dbWrite(t.ctx, 'test', () => {
     const now = t.ctx.now();
     const { item } = produceDeskItem(t.ctx.db, { projectId: t.project.id, kind: 'held', ref: heldRef('s1', command), nodeId }, now);
+    moveDeskItem(t.ctx.db, item.id, ['open'], 'waiting_aiden', { outcome: heldOutcome('held', 'a push', keys), now });
     insertLeadEvent(t.ctx.db, { projectId: t.project.id, lead: 'Progresser', instructions: V, kind: 'held', ...(nodeId === null ? {} : { nodeId }), sessionId: 's1', text: `${command} -> held` }, now);
     intendHeldLine(t.ctx.db, { projectId: t.project.id, itemId: item.id, projectName: 'InGame', stepId: nodeId, what: 'a push' }, now);
     const send = t.ctx.db.prepare("SELECT id FROM lead_sends WHERE kind = 'voice_line' AND item_id = ?").pluck().get(item.id) as number;
@@ -341,19 +350,21 @@ function heldItem(t: ReturnType<typeof setup>, command: string, nodeId: number |
 const reached = (t: ReturnType<typeof setup>, send: number, at: string) => t.ctx.db.prepare("UPDATE lead_sends SET state = 'done', done_at = ? WHERE id = ?").run(at, send);
 
 describe('W8a: a yes is checked against when he could have said it', () => {
-  it('with no --said-at, a reply by --send is checked against the time the line reached him; by ask id, a yes needs --said-at', async () => {
+  it('a reply by --send to a held line is keyed on what was held, with no time of his; by ask id, a yes needs --said-at', async () => {
     const t = setup();
-    // The line reached him a minute before the work last changed: his yes cannot cover that change.
-    const early = heldItem(t, 'git push');
+    // K2: a held line's yes needs no time: what he okayed is what was held, so a line that reached him early still counts.
+    const early = await heldItem(t, 'git push');
     reached(t, early.send, new Date(Date.now() - 60_000).toISOString());
-    const res = await t.answer({ sendId: early.send, aidenWords: 'go ahead', yes: ['push'] });
-    expect(res.statusCode).toBe(200);
-    expect(res.json().text).toContain(`No yes recorded for push: ${CHANGED_AFTER}.`);
-    expect(t.yesCount()).toBe(0);
-    // A line that reached him after the last commit: the yes holds.
-    const late = heldItem(t, 'git push origin feature');
+    expect((await t.answer({ sendId: early.send, aidenWords: 'go ahead', yes: ['push'] })).json().text).toContain('His yes covers push');
+    expect(t.yesCount()).toBe(1);
+    // A commit after the hold: what would go out is not what was held, so no yes.
+    const late = await heldItem(t, 'git push origin feature');
+    write(repo.wt, 'web/later.ts', lines(3, 'later'));
+    commit(repo.wt, 'later');
     reached(t, late.send, new Date(Date.now() + 2000).toISOString());
-    expect((await t.answer({ sendId: late.send, aidenWords: 'go ahead', yes: ['push'] })).json().text).toContain('His yes covers push');
+    const res = await t.answer({ sendId: late.send, aidenWords: 'go ahead', yes: ['push'] });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().text).toContain(`No yes recorded for push: ${CHANGED_SINCE_HELD}.`);
     expect(t.yesCount()).toBe(1);
     // By ask id with no time of his: no yes, and it says what is missing.
     const byAsk = await t.answer({ askId: t.review.id, aidenWords: 'ship it', yes: ['merge'] });
@@ -403,9 +414,9 @@ describe('R1: a review raised with the round on reaches the Voice, and "ship it"
 });
 
 describe('W13: a held item is matched to its own held line', () => {
-  it('by its ref, not by its time', () => {
+  it('by its ref, not by its time', async () => {
     const t = setup();
-    const { item } = heldItem(t, 'git push origin other');
+    const { item } = await heldItem(t, 'git push origin other');
     // Another held line at the very same time, written first.
     t.ctx.db.prepare("UPDATE lead_events SET at = (SELECT created_at FROM desk_items WHERE id = ?) WHERE kind = 'held'").run(item.id);
     insertLeadEvent(t.ctx.db, { projectId: t.project.id, lead: 'Progresser', instructions: V, kind: 'held', sessionId: 's2', text: 'npm run deploy -> held' }, item.createdAt);
@@ -429,7 +440,7 @@ describe('W14: undoing one answer takes back only its own yes', () => {
 describe('W15, W17, W18: a reply to a held line', () => {
   it("records a yes only for the held command's own action, says what was ignored, and is heard on the Voice", async () => {
     const t = setup();
-    const h = heldItem(t, 'git push');
+    const h = await heldItem(t, 'git push');
     const res = await t.answer({ sendId: h.send, aidenWords: 'go', saidAt: saidNow(), says: 'push it', yes: ['merge', 'push'] });
     const text = res.json().text as string;
     expect(text).toContain('--yes merge was ignored: the held command is not a merge.');
@@ -441,11 +452,11 @@ describe('W15, W17, W18: a reply to a held line', () => {
   it('a held command on no step says so and runs no git; a closed item is refused before any git', async () => {
     const calls: string[][] = [];
     const t = setup(calls);
-    const loose = heldItem(t, 'git push', null);
+    const loose = await heldItem(t, 'git push', null);
     const res = await t.answer({ sendId: loose.send, aidenWords: 'go', saidAt: saidNow(), yes: ['push'] });
     expect(res.json().text).toContain('No yes recorded: the held command is on no step.');
     expect(calls).toEqual([]);
-    const done = heldItem(t, 'git push origin feature');
+    const done = await heldItem(t, 'git push origin feature');
     t.ctx.db.prepare("UPDATE desk_items SET state = 'done' WHERE id = ?").run(done.item.id);
     expect((await t.answer({ sendId: done.send, aidenWords: 'go', saidAt: saidNow(), yes: ['push'] })).statusCode).toBe(409);
     expect(calls).toEqual([]);

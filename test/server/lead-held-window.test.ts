@@ -15,6 +15,7 @@ import { addBinding, createProject, setProjectLead } from '../../src/server/repo
 import { getProjectSnapshot } from '../../src/server/repo/snapshot';
 import { handleHookEvent } from '../../src/server/session-flow';
 import { commit, lines, makeRepo, write, type TestRepo } from '../git-repo';
+import { keysAtHold } from '../held-keys';
 import { makeCtx } from '../helpers';
 
 /*
@@ -61,12 +62,16 @@ function setup(gitCalls: string[][] = []) {
   return { ctx, project, step, app, click, check, answer, yesCount };
 }
 
-/** A held item for `command` by session s1, waiting on Aiden as holdCheck leaves it (`what` stored unless null), with its line to the Voice. */
-function held(t: ReturnType<typeof setup>, command: string, what: string | null = 'a push of feature to origin') {
+/**
+ * A held item for `command` by session s1, waiting on Aiden as holdCheck leaves it (`what` and the keys its check computes
+ * now stored, unless `what` is null: an item held before either was stored), with its line to the Voice.
+ */
+async function held(t: ReturnType<typeof setup>, command: string, what: string | null = 'a push of feature to origin') {
+  const keys = what === null ? undefined : await keysAtHold(t.ctx, t.project.slug, t.step.id, command, repo.wt);
   return dbWrite(t.ctx, 'test', () => {
     const now = t.ctx.now();
     const { item } = produceDeskItem(t.ctx.db, { projectId: t.project.id, kind: 'held', ref: heldRef('s1', command), nodeId: t.step.id }, now);
-    moveDeskItem(t.ctx.db, item.id, ['open'], 'waiting_aiden', { outcome: what === null ? 'held: by the check' : heldOutcome('by the check', what), now });
+    moveDeskItem(t.ctx.db, item.id, ['open'], 'waiting_aiden', { outcome: what === null ? 'held: by the check' : heldOutcome('by the check', what, keys), now });
     insertLeadEvent(t.ctx.db, { projectId: t.project.id, lead: 'Progresser', instructions: V, kind: 'held', nodeId: t.step.id, sessionId: 's1', text: `${command} -> by the check` }, now);
     intendHeldLine(t.ctx.db, { projectId: t.project.id, itemId: item.id, projectName: 'InGame', stepId: t.step.id, what: what ?? command }, now);
     const send = t.ctx.db.prepare("SELECT id FROM lead_sends WHERE kind = 'voice_line' AND item_id = ?").pluck().get(item.id) as number;
@@ -85,13 +90,14 @@ const sendState = (t: ReturnType<typeof setup>, id: number) => t.ctx.db.prepare(
 describe('D1: the snapshot carries the held items waiting on Aiden', () => {
   it('oldest first, with what each does (or its command when none was stored) and its command; an answered one is gone', async () => {
     const t = setup();
-    const a = held(t, 'git push');
-    const b = held(t, 'git push origin feature', null);
-    const c = held(t, 'npm run deploy', 'a deploy of main to the live build');
+    const a = await held(t, 'git push');
+    const b = await held(t, 'git push origin feature', null);
+    const c = await held(t, 'npm run deploy', 'a deploy of main to the live build');
     t.ctx.db.prepare("UPDATE desk_items SET state = 'done' WHERE id = ?").run(c.item.id);
     expect(getProjectSnapshot(t.ctx, t.project.id).held).toEqual([
       { id: a.item.id, stepId: t.step.id, createdAt: a.item.createdAt, what: 'a push of feature to origin', command: 'git push', goAhead: true },
-      { id: b.item.id, stepId: t.step.id, createdAt: b.item.createdAt, what: 'git push origin feature', command: 'git push origin feature', goAhead: true },
+      // K1: an item held before its keys were stored offers no Go ahead.
+      { id: b.item.id, stepId: t.step.id, createdAt: b.item.createdAt, what: 'git push origin feature', command: 'git push origin feature', goAhead: false },
     ]);
     expect(getProjectSnapshot(t.ctx, t.project.id).heldTotal).toBe(2);
     // A held item not yet waiting on Aiden (still open) is not a card.
@@ -103,7 +109,7 @@ describe('D1: the snapshot carries the held items waiting on Aiden', () => {
 describe('D3: POST /api/ui/held/:id', () => {
   it("Go ahead records his yes for exactly the held command's actions, closes the item, clears its unsent Voice line, and the landing check is clear", async () => {
     const t = setup();
-    const h = held(t, 'git push');
+    const h = await held(t, 'git push');
     expect((await t.check('push')).clear).toBe(false);
     const res = await t.click(h.item.id, 'go');
     expect(res.statusCode).toBe(200);
@@ -121,7 +127,7 @@ describe('D3: POST /api/ui/held/:id', () => {
   it('a second click is a 409 and changes nothing, before any git', async () => {
     const calls: string[][] = [];
     const t = setup(calls);
-    const h = held(t, 'git push');
+    const h = await held(t, 'git push');
     expect((await t.click(h.item.id, 'go')).statusCode).toBe(200);
     const after = { yes: t.yesCount(), answers: t.ctx.db.prepare("SELECT COUNT(*) FROM lead_events WHERE kind = 'answer'").pluck().get(), git: calls.length };
     for (const answer of ['go', 'not-yet']) {
@@ -134,7 +140,7 @@ describe('D3: POST /api/ui/held/:id', () => {
 
   it('two clicks at once answer once', async () => {
     const t = setup();
-    const h = held(t, 'git push');
+    const h = await held(t, 'git push');
     const [one, two] = await Promise.all([t.click(h.item.id, 'go'), t.click(h.item.id, 'go')]);
     expect([one.statusCode, two.statusCode].sort()).toEqual([200, 409]);
     expect(t.yesCount()).toBe(1);
@@ -144,7 +150,7 @@ describe('D3: POST /api/ui/held/:id', () => {
   it('Not yet records his words and no yes, tells the session in its thread, closes the item and clears its line; the landing still holds', async () => {
     const calls: string[][] = [];
     const t = setup(calls);
-    const h = held(t, 'git push');
+    const h = await held(t, 'git push');
     const res = await t.click(h.item.id, 'not-yet');
     expect(res.statusCode).toBe(200);
     expect(res.json().text).toContain('Its session is told in its thread.');
@@ -159,7 +165,7 @@ describe('D3: POST /api/ui/held/:id', () => {
 
   it('a Voice line already being tried is left to the sender', async () => {
     const t = setup();
-    const h = held(t, 'git push');
+    const h = await held(t, 'git push');
     t.ctx.db.prepare("UPDATE lead_sends SET result = 'trying' WHERE id = ?").run(h.send);
     expect((await t.click(h.item.id, 'not-yet')).statusCode).toBe(200);
     expect(sendState(t, h.send)).toBe('intended');
@@ -175,7 +181,7 @@ describe('D3: POST /api/ui/held/:id', () => {
     expect(getDeskItem(t.ctx.db, open.id)!.state).toBe('open');
     expect(getDeskItem(t.ctx.db, stopped.id)!.state).toBe('waiting_aiden');
     expect((await t.click(99_999, 'go')).statusCode).toBe(404);
-    const h = held(t, 'git push origin feature');
+    const h = await held(t, 'git push origin feature');
     expect((await t.click(h.item.id, 'yes')).statusCode).toBe(400);
     expect(getDeskItem(t.ctx.db, h.item.id)!.state).toBe('waiting_aiden');
     expect(t.ctx.db.prepare("SELECT COUNT(*) FROM lead_events WHERE kind = 'answer'").pluck().get()).toBe(0);
@@ -183,7 +189,7 @@ describe('D3: POST /api/ui/held/:id', () => {
 
   it('needs the window: no UI token, no answer', async () => {
     const t = setup();
-    const h = held(t, 'git push');
+    const h = await held(t, 'git push');
     const res = await t.app.inject({ method: 'POST', url: `/api/ui/held/${h.item.id}`, headers: { origin: 'http://localhost:80' }, payload: { answer: 'go' } });
     expect(res.statusCode).toBe(401);
     expect(getDeskItem(t.ctx.db, h.item.id)!.state).toBe('waiting_aiden');
@@ -194,7 +200,7 @@ describe('D3: a yes for a publish', () => {
   it('Go ahead on a held npm publish clears the landing check for publish on what goes out, and a later commit holds it again', async () => {
     const t = setup();
     pkg(repo.wt, 'x', '1.2.0');
-    const h = held(t, 'npm publish', 'a publish of x 1.2.0 to npm');
+    const h = await held(t, 'npm publish', 'a publish of x 1.2.0 to npm');
     expect((await t.check('publish')).clear).toBe(false);
     const res = await t.click(h.item.id, 'go');
     expect(res.statusCode).toBe(200);
@@ -212,7 +218,7 @@ describe('D3: a yes for a publish', () => {
   it('a reply to the held line by --send with --yes publish records the same yes', async () => {
     const t = setup();
     pkg(repo.wt, 'x', '1.2.0');
-    const h = held(t, 'npm publish', 'a publish of x 1.2.0 to npm');
+    const h = await held(t, 'npm publish', 'a publish of x 1.2.0 to npm');
     const res = await t.answer({ sendId: h.send, aidenWords: 'go ahead', saidAt: new Date(Date.now() + 1000).toISOString(), yes: ['publish'] });
     expect(res.statusCode).toBe(200);
     expect(res.json().text).toContain('His yes covers publish');
@@ -221,7 +227,7 @@ describe('D3: a yes for a publish', () => {
 
   it('a yes for a public push is refused by the route', async () => {
     const t = setup();
-    const h = held(t, 'git push');
+    const h = await held(t, 'git push');
     expect((await t.answer({ sendId: h.send, aidenWords: 'go ahead', yes: ['push-public'] })).statusCode).toBe(400);
     expect(t.yesCount()).toBe(0);
   });

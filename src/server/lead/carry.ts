@@ -14,7 +14,7 @@ import { addLogInWrite } from '../repo/logs';
 import { shelvedAmong } from '../repo/shelved';
 import { checkLanding, landingKey, PUBLISH_NO_YES, realGit, recordYes, type LandingDeps } from './landing';
 import { aidenSaidWords } from './aidenSaid';
-import { heldLandingAsk, heldLines, heldWhatOf, publishesFolderPackage, type HeldLine } from './hold';
+import { heldKeysOf, heldLandingAsk, heldLines, heldWhatOf, publishesFolderPackage, type HeldKeys, type HeldLine } from './hold';
 
 /*
  * Carrying Aiden's answer (lead stage 1, #743, task 11 and its fixes): what his yes covers, read from git, and his reply to
@@ -23,6 +23,10 @@ import { heldLandingAsk, heldLines, heldWhatOf, publishesFolderPackage, type Hel
 
 /** The line an answer prints when the work moved after his word (W8). */
 export const CHANGED_AFTER = 'the work changed after his word';
+/** Why a held command's yes is not recorded: what it would do now is not what was held (another folder, branch or change). */
+export const CHANGED_SINCE_HELD = 'it changed after it was held';
+/** Why a held command's yes is not recorded when the hold kept no key for it. */
+export const NOT_KEYED = 'it was not checked when it was held: run it yourself';
 /** The line an answer prints for a review's yes given with no time of his (W8a). */
 export const SAID_AT_NEEDED = 'give --said-at with a yes';
 
@@ -104,30 +108,34 @@ function yesCanRelease(m: HeldMatch): boolean {
 }
 
 /**
- * Whether Go ahead is offered on a held item: it is on a step, its held line is found, and a yes can release every command
- * of it on the list (yesCanRelease); a push held as public is never released by a yes. Read without git: a yes that cannot
- * be read when he clicks (the work changed after the hold, a folder with changes not committed) is the route's 409.
+ * Whether Go ahead is offered on a held item: it is on a step, its held line is found, the hold stored what it checked
+ * (heldKeysOf) with a key for every action of it, and a yes can release every command of it on the list (yesCanRelease); a
+ * push held as public is never released by a yes. Read without git: a yes that cannot be recorded when he clicks (it changed
+ * after the hold, a folder with changes not committed) is the route's 409.
  */
-export function heldGoAhead(ctx: Ctx, project: Project, item: Pick<DeskItem, 'nodeId'>, line: HeldLine | undefined): boolean {
+export function heldGoAhead(ctx: Ctx, project: Project, item: Pick<DeskItem, 'nodeId' | 'outcome'>, line: HeldLine | undefined): boolean {
   if (item.nodeId === null || line === undefined) return false;
   if (line.why.includes(goesOutWhy('push-public'))) return false;
+  const stored = heldKeysOf(item.outcome);
+  if (stored === undefined) return false;
   const matches = heldMatches(ctx, project, line);
-  return matches.length > 0 && matches.every(yesCanRelease);
+  return matches.length > 0 && matches.every((m) => yesCanRelease(m) && m.action in stored.keys);
 }
 
 /**
- * The yes for each command of a held line his go-ahead covers (`actions`, every one when absent), keyed as the landing check
- * keys that command (heldLandingAsk, then landingKey): in the folder the command runs in, never the session's own, a merge on
- * main...branch, a push on what it would push, a deploy on live..main, a publish on what goes out. No yes when the command's
- * target cannot be read, a publish that does not send its folder's package as committed (PUBLISH_NO_YES), or when the work
- * changed after `asOf` (the time he could first see it). A push with nothing to send needs none. Nothing logged.
+ * The yes for each command of a held line his go-ahead covers (`actions`, every one when absent): exactly what the hold
+ * checked (`stored`, heldKeysOf). Each command's key is read now as the landing check reads it (heldLandingAsk, then
+ * landingKey) in the folder the hold stored, never the session's own, and a yes is recorded only when the checkout still
+ * reads the branch the hold read and the key is the one the hold computed. Else no yes: CHANGED_SINCE_HELD, NOT_KEYED for an
+ * action the hold kept no key for (or an item with none), PUBLISH_NO_YES for a publish that does not send its folder's
+ * package as committed, or why its target cannot be read. A push with nothing to send needs none. Nothing logged.
  */
 export async function readHeldYeses(
   ctx: Ctx,
   project: Project,
   line: HeldLine | undefined,
+  stored: HeldKeys | undefined,
   actions: readonly YesAction[] | undefined,
-  asOf: string,
   deps?: LandingDeps,
 ): Promise<CarriedYes[]> {
   const wanted = (a: string): a is YesAction => (YES_ACTIONS as readonly string[]).includes(a) && (actions === undefined || actions.includes(a as YesAction));
@@ -140,13 +148,23 @@ export async function readHeldYeses(
       out.push({ action, patchId: null, why: PUBLISH_NO_YES });
       continue;
     }
+    const kept = stored?.keys[action];
+    if (stored === undefined || kept === undefined) {
+      out.push({ action, patchId: null, why: NOT_KEYED });
+      continue;
+    }
     try {
-      const asked = await heldLandingAsk(m, deps);
+      // The command as it reads now in the folder the hold read it in.
+      const asked = await heldLandingAsk({ ...m, folder: stored.folder }, deps);
       if (!('check' in asked)) {
-        out.push(asked.clear ? { action, patchId: null, why: 'the landing check clears it as it is', needless: true } : { action, patchId: null, why: asked.why });
+        out.push({ action, patchId: null, why: asked.clear ? CHANGED_SINCE_HELD : asked.why });
         continue;
       }
-      const key = await landingKey(asked.folder, asked.action, asked.branch, deps);
+      if (asked.read !== stored.branch) {
+        out.push({ action, patchId: null, why: CHANGED_SINCE_HELD });
+        continue;
+      }
+      const key = await landingKey(stored.folder, asked.action, asked.branch, action === 'publish' ? m.segment : undefined, deps);
       if (key.nothingToPush) {
         out.push({ action, patchId: null, why: 'nothing to push', needless: true });
         continue;
@@ -155,10 +173,7 @@ export async function readHeldYeses(
         out.push({ action, patchId: null, why: action === 'publish' ? PUBLISH_NO_YES : 'there is no change to read' });
         continue;
       }
-      // A publish sends HEAD; any other range ends at the branch it reads.
-      const tip = action === 'publish' ? 'HEAD' : (key.range.split(/\.{2,3}/)[1] ?? 'HEAD');
-      const after = await changedAfter(asked.folder, tip, asOf, deps);
-      if (after !== false) out.push({ action, patchId: null, why: after === true ? CHANGED_AFTER : after.why });
+      if (kept === null || key.patchId !== kept) out.push({ action, patchId: null, why: CHANGED_SINCE_HELD });
       else if (!out.some((y) => y.action === action && y.patchId === key.patchId)) out.push({ action, patchId: key.patchId });
     } catch (err) {
       out.push({ action, patchId: null, why: (err as Error).message.replace(/\.+$/, '') });

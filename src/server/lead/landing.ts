@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { LEAD_INSTRUCTIONS_VERSION } from '../../core/lead';
 import { landingVerdict, riskGlobsOf, type LandingAction, type LandingVerdict } from '../../core/landing';
@@ -41,6 +42,8 @@ export interface LandingAsk {
   folder: string;
   /** The branch the change is on; the folder's current one when absent. */
   branch?: string;
+  /** For a publish, the held command itself: where it goes (publishDestination) is part of its key. */
+  segment?: string;
 }
 
 export interface LandingAnswer extends LandingVerdict {
@@ -171,14 +174,45 @@ export function recordYes(ctx: Ctx, projectId: number, y: { action: LandingActio
 /** Why a publish takes no yes: it does not send its folder's package as committed (the route and the card say it). */
 export const PUBLISH_NO_YES = 'this publish names another package, or the folder has changes not committed: run it yourself';
 
+/** Flags of a publish that take a value (the next word, or the part after "="), as publishesFolderPackage reads them. */
+const PUBLISH_VALUE_FLAGS = new Set(['--tag', '--access', '--otp', '--registry', '--publish-branch']);
+
+/** A flag's value as the shell gives it: one pair of quotes around it taken off. */
+const unquote = (v: string): string => (v.length >= 2 && (v[0] === '"' || v[0] === "'") && v[v.length - 1] === v[0] ? v.slice(1, -1) : v);
+
 /**
- * What a yes for a publish in `folder` is keyed on, what goes out: the tree of HEAD, the folder's path inside the repository
- * (`git rev-parse --show-prefix`) and the name and version in its package.json, as `<tree>:<prefix>:<name>@<version>`. No
- * key (`why`) when the folder has changes not committed or files not tracked (not ignored), or its package.json names no
- * package: what would go out is not what is committed. A git that fails is a 409.
+ * Where a publish goes, read from its flags: `--dry-run` when given, and `--registry`, `--tag`, `--access` and
+ * `--publish-branch` as `<flag>=<value>` whichever way they are written (`=` or a space, the flag in any case), sorted.
+ * `--otp` is left out: it changes nothing of where the package goes. Empty for a plain publish, or no publish at all.
  */
-export async function publishKey(deps: LandingDeps, folder: string): Promise<{ key: string } | { why: string }> {
-  const status = await deps.git(folder, ['status', '--porcelain', '--', '.']);
+export function publishDestination(segment: string | undefined): string[] {
+  const m = segment === undefined ? null : /\b(?:npm|pnpm|yarn)\s+publish\b(.*)$/i.exec(segment);
+  if (m === null) return [];
+  const words = m[1]!.trim().split(/\s+/).filter((w) => w !== '');
+  const out: string[] = [];
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i]!;
+    const eq = w.indexOf('=');
+    const name = (eq < 0 ? w : w.slice(0, eq)).toLowerCase();
+    if (name === '--dry-run' && eq < 0) out.push(name);
+    else if (PUBLISH_VALUE_FLAGS.has(name)) {
+      const value = eq < 0 ? (words[++i] ?? '') : w.slice(eq + 1);
+      if (name !== '--otp') out.push(`${name}=${unquote(value)}`);
+    }
+  }
+  return out.sort();
+}
+
+/**
+ * What a yes for a publish in `folder` is keyed on, what goes out and where: the tree of HEAD, the folder's path inside the
+ * repository (`git rev-parse --show-prefix`) and the name and version in its package.json, as
+ * `<tree>:<prefix>:<name>@<version>`, then where the held command `segment` sends it (publishDestination), space-separated,
+ * when it names anywhere. No key (`why`) when the folder has changes not committed or files not tracked (not ignored), or its
+ * package.json names no package: what would go out is not what is committed. A git that fails is a 409.
+ */
+export async function publishKey(deps: LandingDeps, folder: string, segment?: string): Promise<{ key: string } | { why: string }> {
+  // No optional locks: a read must not take the index lock a session's own git may be waiting on.
+  const status = await deps.git(folder, ['--no-optional-locks', 'status', '--porcelain', '--untracked-files=all', '--', '.']);
   if (status.code !== 0) throw conflict(couldNotTell(`whether ${folder} has changes not committed`, status));
   if (status.stdout.trim() !== '') return { why: PUBLISH_NO_YES };
   const tree = await deps.git(folder, ['rev-parse', '--verify', 'HEAD^{tree}']);
@@ -187,13 +221,15 @@ export async function publishKey(deps: LandingDeps, folder: string): Promise<{ k
   if (prefix.code !== 0) throw conflict(couldNotTell(`where ${folder} is in its repository`, prefix));
   let pkg: { name?: unknown; version?: unknown };
   try {
-    pkg = (JSON.parse(readFileSync(join(folder, 'package.json'), 'utf8')) ?? {}) as { name?: unknown; version?: unknown };
+    // Read without blocking the server: the folder may be on a slow share.
+    pkg = (JSON.parse(await readFile(join(folder, 'package.json'), 'utf8')) ?? {}) as { name?: unknown; version?: unknown };
   } catch {
     // No package.json, or one that is not JSON: there is no package of this folder for a yes to cover.
     return { why: PUBLISH_NO_YES };
   }
   if (typeof pkg.name !== 'string' || typeof pkg.version !== 'string' || pkg.name.trim() === '' || pkg.version.trim() === '') return { why: PUBLISH_NO_YES };
-  return { key: `${tree.stdout.trim()}:${prefix.stdout.trim()}:${pkg.name}@${pkg.version}` };
+  const to = publishDestination(segment);
+  return { key: `${tree.stdout.trim()}:${prefix.stdout.trim()}:${pkg.name}@${pkg.version}${to.length === 0 ? '' : ` ${to.join(' ')}`}` };
 }
 
 /** What a landing check reads of the change for one action: the range, the files, and the key a yes is recorded on. */
@@ -210,10 +246,11 @@ interface ChangeRead {
 /**
  * The landing check's key for one action, read from git in `folder` (the check's own read, without judging it): a merge on
  * main...branch, a push on what it would push (origin/branch..branch once pushed, else main...branch), a deploy on
- * live..main, each as the patch id of that range's diff; a publish on what goes out (publishKey). The carried yes for a held
- * command reads it here too (landingKey), so his yes is keyed as the check keys it.
+ * live..main, each as the patch id of that range's diff; a publish on what goes out and where (publishKey, with the held
+ * command `segment`). The carried yes for a held command reads it here too (landingKey), so his yes is keyed as the check
+ * keys it.
  */
-async function readChange(deps: LandingDeps, folder: string, action: LandingAction, askBranch: string | undefined): Promise<ChangeRead> {
+async function readChange(deps: LandingDeps, folder: string, action: LandingAction, askBranch: string | undefined, segment?: string): Promise<ChangeRead> {
   const git = (args: string[], input?: string) => deps.git(folder, args, input);
   const inside = await git(['rev-parse', '--is-inside-work-tree']);
   if (inside.code !== 0 || inside.stdout.trim() !== 'true') throw badRequest(`${folder} is not a git checkout.`);
@@ -266,7 +303,7 @@ async function readChange(deps: LandingDeps, folder: string, action: LandingActi
   let patchId: string | null = null;
   if (action === 'publish') {
     // A publish is keyed on what goes out, so a yes on a head that is already pushed (an empty range) still counts.
-    const key = await publishKey(deps, folder);
+    const key = await publishKey(deps, folder, segment);
     patchId = 'key' in key ? key.key : null;
   } else if (diff.stdout !== '') {
     // --verbatim: whitespace counts, so a yes does not survive an indentation-only change.
@@ -285,11 +322,12 @@ export async function landingKey(
   folder: string,
   action: 'merge' | 'deploy' | 'push' | 'publish',
   branch: string | undefined,
+  segment: string | undefined,
   deps: LandingDeps = REAL_DEPS,
 ): Promise<{ range: string; patchId: string | null; nothingToPush: boolean }> {
   if (!isAbsolute(folder)) throw badRequest(`${folder} is not a full path to a folder.`);
   if (branch !== undefined && !BRANCH.test(branch)) throw badRequest(`${branch} is not a branch name.`);
-  const read = await readChange(deps, folder, action, branch);
+  const read = await readChange(deps, folder, action, branch, segment);
   return { range: read.range, patchId: read.patchId, nothingToPush: read.nothingToPush };
 }
 
@@ -308,7 +346,7 @@ export async function checkLanding(ctx: Ctx, ask: LandingAsk, deps: LandingDeps 
 
   const folder = ask.folder;
   const git = (args: string[], input?: string) => deps.git(folder, args, input);
-  const { range, files, patchId, nothingToPush, holdBecause } = await readChange(deps, folder, ask.action, ask.branch);
+  const { range, files, patchId, nothingToPush, holdBecause } = await readChange(deps, folder, ask.action, ask.branch, ask.segment);
   if (nothingToPush) return { clear: true, text: 'Clear to land', why: 'nothing to push', action: ask.action, range, files: 0, patchId: null };
 
   // Only a push is judged by where it goes: a publish is Aiden's whatever the remote. Where it goes is the push URL.

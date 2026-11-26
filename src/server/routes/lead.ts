@@ -10,7 +10,7 @@ import { reserveAllowsStart } from '../lead/reserve';
 import { importUsage, leadCounts, weekText } from '../lead/usage';
 import { resolveProject } from '../repo/projects';
 import { readDesk } from '../lead/desk';
-import { holdBody, holdCheck, stuckWait } from '../lead/hold';
+import { heldKeysOf, holdBody, holdCheck, stuckWait } from '../lead/hold';
 import { checkLanding, PUBLISH_NO_YES, type LandingDeps } from '../lead/landing';
 import { leadRelay, reasonOf, type RelaySend } from '../lead-relay';
 import { defaultStart, leadStart, type StartThread } from '../lead-start';
@@ -175,8 +175,9 @@ export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken:
     const given = body.saidAt === undefined ? undefined : new Date(Math.min(Date.parse(body.saidAt), Date.parse(now))).toISOString();
     const saidAt = given ?? now;
     let askId = givenAsk;
-    // The time a yes is checked against: the work must have no commit after it (W8a). With no time of his, the line to
-    // the Voice he replied to gives one: he cannot have said yes before it reached him.
+    // The time a review's yes is checked against: the work must have no commit after it (W8a). With no time of his, the
+    // line to the Voice he replied to gives one: he cannot have said yes before it reached him. A held command's yes needs
+    // none: it is keyed on what was held.
     let anchor: string | undefined = given;
     // His reply to a line to the Voice is heard on the Voice unless the lead says otherwise.
     const input = sendId !== undefined && body.where === undefined ? { ...body, where: 'voice' as const } : body;
@@ -201,9 +202,8 @@ export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken:
           if (target.item.nodeId === null) {
             if (kept.length) notes.push('No yes recorded: the held command is on no step.');
           } else if (kept.length) {
-            yeses = anchor === undefined
-              ? kept.map((action) => ({ action, patchId: null, why: SAID_AT_NEEDED }))
-              : await readHeldYeses(ctx, project, heldLineOf(ctx, target.item), kept, anchor, landing);
+            // Keyed on what was held, not on when he said it: no time of his is needed (readHeldYeses).
+            yeses = await readHeldYeses(ctx, project, heldLineOf(ctx, target.item), heldKeysOf(target.item.outcome), kept, landing);
           }
         } else if (yes !== undefined) notes.push('--yes was ignored: what he left to the lead takes no go-ahead.');
         const { says: _says, ...rest } = input;

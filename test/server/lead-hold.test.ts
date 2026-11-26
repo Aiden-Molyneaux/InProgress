@@ -9,7 +9,7 @@ import { createCtx, deskOnly, write } from '../../src/server/db/tx';
 import { heldActions, playbookHeldLines } from '../../src/core/hold';
 import { leadAllow, leadDisallow } from '../../src/server/lead-commands';
 import { applyVerdict } from '../../src/server/lead/apply';
-import { heldOutcome, heldWhatOf, STUCK_POLL_MS, STUCK_WAIT_MS, stuckWait, watchHeldLines, writeHeldLines } from '../../src/server/lead/hold';
+import { heldKeysOf, heldOutcome, heldWhatOf, STUCK_POLL_MS, STUCK_WAIT_MS, stuckWait, watchHeldLines, writeHeldLines } from '../../src/server/lead/hold';
 import { PUBLISH_NO_YES } from '../../src/server/lead/landing';
 import { realGit, type LandingDeps } from '../../src/server/lead/landing';
 import { deskUserMessage } from '../../src/server/lead/prompt';
@@ -95,7 +95,10 @@ describe('POST /api/lead/hold', () => {
     expect(await w.hold('npm test && git push')).toEqual({ held: true, text: 'a push of feature to origin' });
     // Y13: the held item is made in a transaction of its own, and the window hears of it at once.
     expect(desk).toHaveLength(1);
-    expect(w.items('held')).toEqual([expect.objectContaining({ state: 'waiting_aiden', node_id: w.step.id, outcome: "held: hold: this is Aiden's (it touches src/hooks/x.ts)\nwhat: a push of feature to origin" })]);
+    expect(w.items('held')).toEqual([expect.objectContaining({ state: 'waiting_aiden', node_id: w.step.id })]);
+    expect(w.items('held')[0]!.outcome).toMatch(/^held: hold: this is Aiden's \(it touches src\/hooks\/x\.ts\)\nwhat: a push of feature to origin\nkeys: \{/);
+    // K1: the hold keeps the folder, the branch it read and the key its check computed.
+    expect(heldKeysOf(w.items('held')[0]!.outcome)).toEqual({ folder: repo.wt.replace(/\\/g, '/'), branch: 'feature', keys: { push: expect.stringMatching(/^[0-9a-f]{40}$/) } });
     expect(w.events('held')).toEqual([{ text: "npm test && git push -> hold: this is Aiden's (it touches src/hooks/x.ts)", node_id: w.step.id, session_id: 's1' }]);
     expect(await w.hold('npm test && git push')).toEqual({ held: true, text: 'a push of feature to origin' });
     expect(w.items('held')).toHaveLength(1);
@@ -165,6 +168,13 @@ describe('POST /api/lead/hold', () => {
     expect(heldWhatOf("held: hold: this is Aiden's")).toBeUndefined();
     expect(heldWhatOf(null)).toBeUndefined();
     expect(heldWhatOf('ANSWERED d4\nwhat: x')).toBeUndefined();
+    // K1: the keys line after the what is read apart from it, and round-trips.
+    const keys = { folder: 'C:/r/packages/a', branch: 'main', keys: { publish: 'k', push: null } };
+    const withKeys = heldOutcome('why\nkeys: {"folder":"x"}', 'a publish of a 1.0.0 to npm', keys);
+    expect(heldWhatOf(withKeys)).toBe('a publish of a 1.0.0 to npm');
+    expect(heldKeysOf(withKeys)).toEqual(keys);
+    expect(heldKeysOf(heldOutcome('why\nkeys: {"folder":"x","branch":null,"keys":{}}', 'a push'))).toBeUndefined();
+    expect(heldKeysOf('held: x\nwhat: y\nkeys: not json')).toBeUndefined();
   });
 
   it('judges the merge in the folder a cd moved to, not the session\'s: from a worktree, a merge in the main checkout is held', async () => {
@@ -174,7 +184,9 @@ describe('POST /api/lead/hold', () => {
     expect(await w.hold('git merge --ff-only feature')).toEqual({ say: 'nothing' });
     expect(await w.hold(`cd ${repo.main.replace(/\\/g, '/')} && git merge --ff-only feature`)).toEqual({ held: true, text: 'a merge of feature into main' });
     expect(await w.hold('cd $MAIN && git merge --ff-only feature')).toEqual({ held: true, text: 'a merge into main' });
-    expect(w.items('held').map((i) => i.outcome)).toEqual(["held: hold: this is Aiden's (it touches src/hooks/x.ts)\nwhat: a merge of feature into main", 'held: could not tell which folder it runs in\nwhat: a merge into main']);
+    expect(w.items('held').map((i) => heldWhatOf(i.outcome))).toEqual(['a merge of feature into main', 'a merge into main']);
+    expect(w.items('held')[1]!.outcome).toBe('held: could not tell which folder it runs in\nwhat: a merge into main');
+    expect(heldKeysOf(w.items('held')[0]!.outcome)).toMatchObject({ branch: 'feature', keys: { merge: expect.stringMatching(/^[0-9a-f]{40}$/) } });
   });
 
   it('judges the command at the place the hook names: a second push of the line is judged on its own', async () => {

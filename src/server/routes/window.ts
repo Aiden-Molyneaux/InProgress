@@ -12,6 +12,7 @@ import { clearAsk } from '../repo/asks';
 import { lateAnswer, requireAnswerLead, workProject, WORK_PROJECT, type CarriedYes } from '../lead-commands';
 import { ONLY_YOU } from '../../core/landing';
 import { heldGoAhead, heldLineOf, leadAnswerItem, readHeldYeses } from '../lead/carry';
+import { heldKeysOf } from '../lead/hold';
 import type { LandingDeps } from '../lead/landing';
 import type { Sender } from '../lead/sends';
 import { getDeskItem } from '../repo/desk';
@@ -260,9 +261,9 @@ export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: 
   });
   // A held card's Go ahead or Not yet (lead stage 1, task D): answered as `lead answer --send` answers a held line, in the
   // project lead's name but recorded as the window's, with his words said now in the window. Go ahead records a yes for
-  // exactly the commands of that held command, keyed as the landing check keys each and read against the hold's own time
-  // (the earliest he could see the card): it is refused (409, nothing changed) where no yes can release the command
-  // (heldGoAhead), and where any yes cannot be recorded (the work changed after the hold, a target that cannot be read). Not
+  // exactly what was held: each command's key read now in the folder the hold stored, on the branch it read, equal to the
+  // key the hold computed (readHeldYeses). It is refused (409, nothing changed) where no yes can release the command
+  // (heldGoAhead), and where any yes cannot be recorded (it changed after it was held, a target that cannot be read). Not
   // yet records none. Only a held item still waiting on him is answered: anything else, a second click too, is a 409.
   app.post('/api/ui/held/:id', guarded, async (req) => {
     const { id } = idParam.parse(req.params);
@@ -282,7 +283,7 @@ export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: 
     if (answer === 'go') {
       const line = heldLineOf(ctx, item);
       if (!heldGoAhead(ctx, project, item, line)) throw conflict(ONLY_YOU);
-      yeses = await readHeldYeses(ctx, project, line, undefined, item.createdAt, lead.landing);
+      yeses = await readHeldYeses(ctx, project, line, heldKeysOf(item.outcome), undefined, lead.landing);
       const missing = yeses.filter((y) => y.patchId === null && !y.needless);
       if (missing.length) throw conflict(`No yes recorded, nothing answered: ${missing.map((y) => `${y.action}: ${y.why ?? 'the change could not be read'}`).join('; ')}.`);
     }

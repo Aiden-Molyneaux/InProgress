@@ -74,7 +74,7 @@ export interface HeldLine {
 /**
  * The project's held lines by the ref of the held item each made, read once (the window's cards, the morning list and an
  * answer to one item all find an item's line here). The line is `<command> -> <why>`, and either part may hold an arrow,
- * so each cut is tried; the oldest line for a ref wins.
+ * so each cut is tried; the newest line for a ref wins (a command held again after its item was answered is the new item's).
  */
 export function heldLines(db: DB, projectId: number): Map<string, HeldLine> {
   const rows = db.prepare("SELECT session_id, text FROM lead_events WHERE project_id = ? AND kind = 'held' ORDER BY id").all(projectId) as { session_id: string | null; text: string }[];
@@ -82,8 +82,8 @@ export function heldLines(db: DB, projectId: number): Map<string, HeldLine> {
   for (const r of rows) {
     for (let at = r.text.indexOf(' -> '); at >= 0; at = r.text.indexOf(' -> ', at + 1)) {
       const command = r.text.slice(0, at);
-      const ref = heldRef(r.session_id, command);
-      if (!out.has(ref)) out.set(ref, { sessionId: r.session_id, command, why: r.text.slice(at + 4) });
+      // Read oldest first: a later line for the same ref replaces an earlier one.
+      out.set(heldRef(r.session_id, command), { sessionId: r.session_id, command, why: r.text.slice(at + 4) });
     }
   }
   return out;
@@ -168,31 +168,77 @@ async function packageOf(folder: string): Promise<{ name: string; version: strin
 }
 
 /**
- * A held item's outcome: why it is held, then what the command does on a line of its own (`what` is one line, so the last
- * `\nwhat: ` is always its own). heldWhatOf reads it back.
+ * What the hold resolved for a held command, kept so a yes covers exactly that: the folder it runs in, the branch it read
+ * (null for a deploy, or a checkout on none), and per action the key its landing check computed (null when there was none).
+ */
+export interface HeldKeys {
+  folder: string;
+  branch: string | null;
+  keys: Partial<Record<HeldLandingAsk['action'], string | null>>;
+}
+
+const heldKeysShape = z
+  .object({
+    folder: z.string().min(1),
+    branch: z.string().nullable(),
+    keys: z.record(z.string(), z.string().nullable()),
+  })
+  .strict();
+
+/**
+ * A held item's outcome: why it is held, then what the command does on a line of its own, then (when the hold resolved them)
+ * its keys as one line of JSON. `what` and the JSON are one line each, so the last `\nwhat: ` is always the what's, and a
+ * `\nkeys: ` after it is always the keys'. heldWhatOf and heldKeysOf read them back.
  */
 const HELD_WHAT = '\nwhat: ';
-export const heldOutcome = (why: string, what: string): string => `held: ${why}${HELD_WHAT}${clipLine(what, 1_000)}`;
+const HELD_KEYS = '\nkeys: ';
+export const heldOutcome = (why: string, what: string, keys?: HeldKeys): string =>
+  `held: ${why}${HELD_WHAT}${clipLine(what, 1_000)}${keys === undefined ? '' : `${HELD_KEYS}${JSON.stringify(keys)}`}`;
 
 /** What a held item's command does, from its outcome (heldOutcome); undefined for an item held before it was stored. */
 export function heldWhatOf(outcome: string | null): string | undefined {
   if (outcome === null || !outcome.startsWith('held: ')) return undefined;
   const at = outcome.lastIndexOf(HELD_WHAT);
   if (at < 0) return undefined;
-  const what = outcome.slice(at + HELD_WHAT.length).trim();
+  const rest = outcome.slice(at + HELD_WHAT.length);
+  const end = rest.indexOf('\n');
+  const what = (end < 0 ? rest : rest.slice(0, end)).trim();
   return what === '' ? undefined : what;
 }
 
-/** A held answer, as the route works it out: what the command does, and why it is held (for the log). */
-type Judged = { clear: true } | { clear: false; what: string; why: string };
+/** The folder, branch and keys the hold stored with a held item (heldOutcome); undefined when it stored none, or they cannot be read. */
+export function heldKeysOf(outcome: string | null): HeldKeys | undefined {
+  if (outcome === null || !outcome.startsWith('held: ')) return undefined;
+  const whatAt = outcome.lastIndexOf(HELD_WHAT);
+  const at = outcome.lastIndexOf(HELD_KEYS);
+  if (whatAt < 0 || at < whatAt) return undefined;
+  try {
+    const parsed = heldKeysShape.safeParse(JSON.parse(outcome.slice(at + HELD_KEYS.length)));
+    return parsed.success ? (parsed.data as HeldKeys) : undefined;
+  } catch {
+    // Not JSON: as an item with no keys stored, it takes no yes.
+    return undefined;
+  }
+}
 
-/** What the landing check is asked for a held command: its action, the folder it runs in and the branch it names (the folder's own when absent). */
+/**
+ * A held answer, as the route works it out: what the command does, why it is held (for the log), and, when its landing check
+ * ran, what that check resolved (HeldKeys), stored with the item so a yes covers exactly that.
+ */
+type Judged = { clear: true } | { clear: false; what: string; why: string; keys?: HeldKeys };
+
+/**
+ * What the landing check is asked for a held command: its action, the folder it runs in and the branch it names (the folder's
+ * own when absent), and the branch it reads (`read`): the one named, else the checkout's own for a push or publish; null for a
+ * deploy, or when the checkout is on none.
+ */
 export interface HeldLandingAsk {
   check: true;
   action: 'merge' | 'deploy' | 'push' | 'publish';
   what: string;
   folder: string;
   branch?: string;
+  read: string | null;
 }
 
 /**
@@ -209,6 +255,7 @@ export async function heldLandingAsk(match: HeldMatch, deps: LandingDeps = REAL_
   const folder = match.folder;
   if (folder === null) return { clear: false, what: match.what, why: 'could not tell which folder it runs in' };
   let branch: string | undefined;
+  let read: string | null = null;
   let what = match.what;
   if (match.action === 'merge') {
     // Only a merge into main is on the list: a merge in a checkout on another branch goes into that branch.
@@ -220,6 +267,7 @@ export async function heldLandingAsk(match: HeldMatch, deps: LandingDeps = REAL_
     if (targets.length === 1 && isUpstreamOfMain(targets[0])) return { clear: true };
     if (targets.length !== 1) return { clear: false, what: 'a merge into main', why: targets.length === 0 ? 'could not tell what is being merged' : 'a merge of several branches at once' };
     branch = targets[0];
+    read = branch ?? null;
     what = `a merge of ${branch} into main`;
   } else if (match.action === 'push') {
     const target = pushTarget(match.segment);
@@ -227,22 +275,23 @@ export async function heldLandingAsk(match: HeldMatch, deps: LandingDeps = REAL_
     if (target.remote !== 'origin') return { clear: false, what: `a push to ${target.remote}`, why: `could not tell where ${target.remote} is: the check reads origin` };
     branch = target.branch;
     const pushed = branch ?? (await currentBranch(deps, folder));
+    read = pushed;
     what = pushed === null ? 'a push to origin' : `a push of ${pushed} to origin`;
   } else if (match.action === 'deploy') {
     what = 'a deploy of main to the live build';
   } else if (match.action === 'publish') {
     const pkg = publishesFolderPackage(match.segment) ? await packageOf(folder) : undefined;
-    if (pkg !== undefined) {
-      what = `a publish of ${pkg.name} ${pkg.version} to npm`;
-    } else {
-      const on = await currentBranch(deps, folder);
-      what = on === null ? match.what : `a publish of ${on}`;
-    }
+    read = await currentBranch(deps, folder);
+    what = pkg !== undefined ? `a publish of ${pkg.name} ${pkg.version} to npm` : read === null ? match.what : `a publish of ${read}`;
   }
-  return { check: true, action: match.action as HeldLandingAsk['action'], what, folder, ...(branch === undefined ? {} : { branch }) };
+  return { check: true, action: match.action as HeldLandingAsk['action'], what, folder, ...(branch === undefined ? {} : { branch }), read };
 }
 
-/** Runs the landing check for a held command, read from its words (heldLandingAsk), in the folder it runs in; any refusal of the check holds it. */
+/**
+ * Runs the landing check for a held command, read from its words (heldLandingAsk), in the folder it runs in, a publish with
+ * its own flags; any refusal of the check holds it. Held after the check ran (or tried to), it keeps the folder and branch
+ * the check read and the key it computed for the action (null when there was none).
+ */
 async function judge(ctx: Ctx, scope: LeadScope, match: HeldMatch, deps: LandingDeps): Promise<Judged> {
   const asked = await heldLandingAsk(match, deps);
   if (!('check' in asked)) return asked;
@@ -251,16 +300,17 @@ async function judge(ctx: Ctx, scope: LeadScope, match: HeldMatch, deps: Landing
   // A publish of anything but the folder's own package (a tarball, a path, a workspace) takes no yes, so no yes may
   // clear it: a yes given for the folder's package would otherwise release it at the same commit.
   if (asked.action === 'publish' && !publishesFolderPackage(match.segment)) return { clear: false, what, why: PUBLISH_NO_YES };
+  const keys = (key: string | null): HeldKeys => ({ folder, branch: asked.read, keys: { [asked.action]: key } });
   try {
     const answer = await checkLanding(
       ctx,
-      { ref: scope.project.slug, stepId: scope.stepId, action: asked.action, folder, ...(branch === undefined ? {} : { branch }) },
+      { ref: scope.project.slug, stepId: scope.stepId, action: asked.action, folder, ...(branch === undefined ? {} : { branch }), ...(asked.action === 'publish' ? { segment: match.segment } : {}) },
       deps,
     );
-    return answer.clear ? { clear: true } : { clear: false, what, why: answer.text };
+    return answer.clear ? { clear: true } : { clear: false, what, why: answer.text, keys: keys(answer.patchId) };
   } catch (err) {
-    // A check that refuses (a 4xx: no such branch, a range it cannot read) or fails holds the command.
-    return { clear: false, what, why: `the landing check could not answer: ${(err as Error).message}` };
+    // A check that refuses (a 4xx: no such branch, a range it cannot read) or fails holds the command, with no key.
+    return { clear: false, what, why: `the landing check could not answer: ${(err as Error).message}`, keys: keys(null) };
   }
 }
 
@@ -269,9 +319,9 @@ async function judge(ctx: Ctx, scope: LeadScope, match: HeldMatch, deps: Landing
  * project has no lead or its round is off, or the command at the place the hook names is not on this project's list (its
  * Held lines first); else names the action and runs the landing check for a merge, deploy, push or publish in the folder
  * that command runs in (the rest are Aiden's without one). A command that reads differently here than the hook sent it is
- * held. Clear: nothing. Held: a `held`
- * desk item waiting on Aiden (one per session and command while it is not done) and a `held` line in the lead's log, and
- * what the command does, in plain words.
+ * held. Clear: nothing. Held: a `held` desk item waiting on Aiden (one per session and command while it is not done), with
+ * what the check resolved when it ran (HeldKeys, in its outcome), a `held` line in the lead's log, and what the command
+ * does, in plain words.
  */
 export async function holdCheck(ctx: Ctx, ask: HoldAsk, deps: LandingDeps = REAL_DEPS): Promise<HoldAnswer> {
   const scope = leadScopeOf(ctx, ask.sessionId, ask.cwd);
@@ -289,7 +339,7 @@ export async function holdCheck(ctx: Ctx, ask: HoldAsk, deps: LandingDeps = REAL
       const { item, created } = produceDeskItem(ctx.db, { projectId: scope.project.id, kind: 'held', ref: heldRef(scope.sessionId, ask.command), nodeId: scope.stepId }, now);
       if (!created) return;
       // Aiden's by the check: the runner never leases it; the Voice and the morning list bring it.
-      moveDeskItem(ctx.db, item.id, ['open'], 'waiting_aiden', { outcome: heldOutcome(judged.why, judged.what), now });
+      moveDeskItem(ctx.db, item.id, ['open'], 'waiting_aiden', { outcome: heldOutcome(judged.why, judged.what, judged.keys), now });
       insertLeadEvent(
         ctx.db,
         {
