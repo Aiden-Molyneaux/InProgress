@@ -85,7 +85,7 @@ export const NPM_CONFIG_WHY = "npm's settings are changed in this command: run i
 export const GIT_CHANGED_WHY = 'this command changes how git runs: run it yourself';
 
 /** The folder changes that may stand before a held action in its line (as their program, lower case). */
-const FOLDER_CHANGES = new Set(['cd', 'set-location', 'pushd', 'push-location', 'popd']);
+const FOLDER_CHANGES = new Set(['cd', 'chdir', 'set-location', 'sl', 'pushd', 'push-location', 'popd', 'pop-location']);
 /** The git subcommands that may stand before a held action in its line, with any words after them: they change nothing it reads. */
 const GIT_READS = new Set(['status', 'log', 'diff', 'show', 'fetch', 'rev-parse']);
 /** git's global options a push or merge may carry and still be read exactly (`-C <dir>` is read for its folder). */
@@ -97,7 +97,9 @@ const GIT_GLOBALS_READ = new Set(['--no-pager', '-P', '-p']);
  * or another global option (`-c`, `--git-dir`, `--work-tree`, `--exec-path`) can change where it goes or what it reads.
  */
 export function gitAsRead(segment: string): boolean {
-  const w = words(segment);
+  const all = words(segment);
+  // PowerShell's `$r = git push ...` runs git as written: the assignment only keeps its output.
+  const w = all.length >= 3 && /^\$\w+$/.test(all[0]!) && all[1] === '=' ? all.slice(2) : all;
   if (w.length === 0 || !isGitWord(w[0]!)) return false;
   for (let i = 1; i < w.length; i++) {
     const x = w[i]!;
@@ -127,7 +129,11 @@ function changesNothing(segment: string): boolean {
   const w = words(segment);
   const prog = programOf(w[0]);
   if (FOLDER_CHANGES.has(prog)) return true;
-  if (w.length > 0 && isGitWord(w[0]!)) return GIT_READS.has(w[1] ?? '') || (w.length === 3 && w[1] === 'branch' && w[2] === '--show-current');
+  if (w.length > 0 && isGitWord(w[0]!)) {
+    // A fetch into a branch (`git fetch origin a:b`) moves that branch: it is no read.
+    if (w[1] === 'fetch' && w.slice(2).some((x) => x.includes(':'))) return false;
+    return GIT_READS.has(w[1] ?? '') || (w.length === 3 && w[1] === 'branch' && w[2] === '--show-current');
+  }
   return prog === 'npm' && ((w.length === 2 && w[1] === 'test') || (w.length === 3 && w[1] === 'run' && w[2] === 'typecheck'));
 }
 
@@ -146,7 +152,7 @@ export function runsAlone(command: string, match: Pick<HeldMatch, 'action' | 'in
 
 /** What the hook prints for a held action that does not run alone (runsAlone): the session runs it again on its own. */
 export const ownCommandText = (action: HeldMatch['action']): string =>
-  `Run the ${action} as a command of its own: InProgress reads it before the commands in front of it have run.`;
+  `Run the commands in front of it first, then the ${action} as a command of its own: InProgress reads it before the commands in front of it have run.`;
 
 /**
  * The project's held lines by the ref of the held item each made, read once (the window's cards, the morning list and an
@@ -423,10 +429,15 @@ async function judge(ctx: Ctx, scope: LeadScope, match: HeldMatch, deps: Landing
 export async function holdCheck(ctx: Ctx, ask: HoldAsk, deps: LandingDeps = REAL_DEPS): Promise<HoldAnswer> {
   const scope = leadScopeOf(ctx, ask.sessionId, ask.cwd);
   if (scope === undefined) return SAY_NOTHING;
-  const match = heldActions(ask.command, playbookHeldLines(scope.project.playbook), ask.cwd || null).find((m) => m.index === ask.index);
+  const matches = heldActions(ask.command, playbookHeldLines(scope.project.playbook), ask.cwd || null);
+  const match = matches.find((m) => m.index === ask.index);
   if (match === undefined) return SAY_NOTHING;
+  // The hook stops at the first held answer, so a later action of the line that does not run alone is answered split
+  // now (`git merge feature && npm run deploy`): the session runs each on its own, and nothing is made.
   // A command InProgress cannot read exactly (keylessWhy) is held before any check, with no key: no yes or Landing clears it.
   const differs = ask.segment !== undefined && ask.segment !== match.segment;
+  const laterSplit = differs ? undefined : matches.find((m) => m.index > match.index && keylessWhy(ask.command, m) === undefined && !runsAlone(ask.command, m));
+  if (laterSplit !== undefined) return { split: true, text: ownCommandText(laterSplit.action) };
   const keyless = differs ? undefined : keylessWhy(ask.command, match);
   // A push, merge, deploy or publish behind commands that may change what it reads is neither held nor cleared: the
   // session is told to run it on its own, and nothing is made (no item, no held line, no Voice line).

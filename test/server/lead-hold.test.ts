@@ -205,9 +205,12 @@ describe('POST /api/lead/hold', () => {
     commit(repo.wt, 'hooks');
     // main has nothing to push; feature touches the hooks.
     const line = 'git push origin main && git push origin feature';
-    expect(await w.hold(line)).toEqual({ say: 'nothing' });
-    // The second push has a push in front of it: it is to be run as a command of its own (#743 G2), and then is held.
-    expect(await w.hold(line, { nth: 1 })).toEqual({ split: true, text: 'Run the push as a command of its own: InProgress reads it before the commands in front of it have run.' });
+    // The second push has a push in front of it, so the line is answered split at either push (#743 G2): the hook stops at
+    // the first answer, and the session runs each push on its own.
+    const split = { split: true, text: 'Run the commands in front of it first, then the push as a command of its own: InProgress reads it before the commands in front of it have run.' };
+    expect(await w.hold(line)).toEqual(split);
+    expect(await w.hold(line, { nth: 1 })).toEqual(split);
+    expect(await w.hold('git push origin main')).toEqual({ say: 'nothing' });
     expect(await w.hold('git push origin feature')).toEqual({ held: true, text: 'a push of feature to origin' });
     // A command that reads differently here than the hook sent it is held.
     expect(await w.hold(line, { segment: 'git push origin elsewhere' })).toMatchObject({ held: true });

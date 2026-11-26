@@ -4,7 +4,7 @@ import { LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
 import { buildApp } from '../../src/server/app';
 import { leadAllow, leadDisallow } from '../../src/server/lead-commands';
 import { CHANGED_SINCE_HELD, heldCards } from '../../src/server/lead/carry';
-import { GIT_CHANGED_WHY, heldKeysOf, heldOutcome, heldRef, heldWhatOf } from '../../src/server/lead/hold';
+import { GIT_CHANGED_WHY, heldKeysOf, heldOutcome, heldRef, heldWhatOf, keylessWhy } from '../../src/server/lead/hold';
 import { checkLanding, DEPLOY_SCRIPT_WHY, DEPLOY_WHERE_WHY, deployScript, FORCE_WHY, forcePush, realGit, recordYes, ROLLBACK_WHY, TAG_TOO_WHY, type LandingDeps } from '../../src/server/lead/landing';
 import { addNodes } from '../../src/server/repo/nodes';
 import { addBinding, createProject, setProjectLead } from '../../src/server/repo/projects';
@@ -71,6 +71,11 @@ function webChange(): void {
 }
 
 describe('G2: a held action runs as a command of its own', () => {
+  it("PowerShell's `$r = git push` runs git as written: it is read, not held as git changed", () => {
+    expect(keylessWhy('$r = git push origin feature', { action: 'push', index: 0, segment: '$r = git push origin feature' })).toBeUndefined();
+    expect(keylessWhy('$r = git -c x=y push', { action: 'push', index: 0, segment: '$r = git -c x=y push' })).toBe(GIT_CHANGED_WHY);
+  });
+
   /** How many held items, held lines and Voice lines there are: a split answer makes none. */
   const made = (w: ReturnType<typeof world>) => ({
     items: w.ctx.db.prepare("SELECT COUNT(*) FROM desk_items WHERE kind = 'held'").pluck().get(),
@@ -91,8 +96,12 @@ describe('G2: a held action runs as a command of its own', () => {
       ['npm version patch && npm publish', repo.wt, 'publish'],
       ['npm install && npm run deploy', repo.main, 'deploy'],
       ['git -C . status && git push', repo.wt, 'push'],
+      // A fetch into a branch moves it: no read.
+      ['git fetch origin feature:feature && git merge feature', repo.main, 'merge'],
+      // The merge comes first, but the deploy after it would not run alone: the line is split for the deploy.
+      ['git merge feature && npm run deploy', repo.main, 'deploy'],
     ] as const) {
-      expect(await w.hold(command, cwd), command).toEqual({ split: true, text: `Run the ${action} as a command of its own: InProgress reads it before the commands in front of it have run.` });
+      expect(await w.hold(command, cwd), command).toEqual({ split: true, text: `Run the commands in front of it first, then the ${action} as a command of its own: InProgress reads it before the commands in front of it have run.` });
     }
     expect(made(w)).toEqual({ items: 0, lines: 0, voice: 0 });
   });
