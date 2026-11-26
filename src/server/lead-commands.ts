@@ -169,9 +169,18 @@ export function requireAnswerLead(ctx: Ctx, ref: string, as: string, instruction
   const name = named ?? as.trim();
   if (project.status === 'archived') throw conflict(ARCHIVED);
   if (named !== null && named.toLowerCase() !== as.trim().toLowerCase()) throw conflict(noLeadNamed(as.trim()));
-  if (named === null && !LEAD_NAME.test(name)) throw badRequest(LEAD_NAME_RULE);
-  if (instructions < LEAD_INSTRUCTIONS_VERSION) throw conflict(outOfDate(instructions, project.slug, name));
+  requireLeadWho(name, instructions, project.slug, named === null);
   return { project, name, actor: `lead:${name}` };
+}
+
+/**
+ * The name and rules checks of a lead command: with `checkName`, a name that is not a lead's is a 400; with `checkRules`,
+ * rules older than LEAD_INSTRUCTIONS_VERSION are a 409 naming `slug` in the rules command to run. requireAnswerLead and the old-asks
+ * commands that name no project (src/server/lead/oldAsks.ts) check through here.
+ */
+export function requireLeadWho(name: string, instructions: number, slug: string, checkName = true, checkRules = true): void {
+  if (checkName && !LEAD_NAME.test(name)) throw badRequest(LEAD_NAME_RULE);
+  if (checkRules && instructions < LEAD_INSTRUCTIONS_VERSION) throw conflict(outOfDate(instructions, slug, name));
 }
 
 /** Actions as a sentence names them: `merge, deploy and push`. */

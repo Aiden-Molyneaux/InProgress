@@ -2,7 +2,7 @@ import { AIDEN_BROUGHT_LIMIT, LEAD_INSTRUCTIONS_VERSION } from '../../core/lead'
 import { leadLine } from '../../core/relay';
 import { askTag } from '../../core/types';
 import type { Ctx, RecordEvent } from '../db/tx';
-import { decideInWrite } from '../lead-commands';
+import { decideInWrite, DECIDE_QUESTION_ONLY } from '../lead-commands';
 import { logLeadEvent } from '../lead';
 import { clearInWrite, requireAsk } from '../repo/asks';
 import type { DeskItem } from '../repo/desk';
@@ -54,9 +54,14 @@ export function applyVerdict(ctx: Ctx, turn: LeadTurn, item: DeskItem, record: R
   if (item.kind === 'stopped') return applyStopped(ctx, turn, item, record, name, deps);
   if (item.kind === 'promise_due') return applyPromiseDue(ctx, turn, item, record, name);
   if (item.kind === 'aiden_said') return applyAidenSaid(ctx, turn, item, record, name);
-  if (item.kind !== 'question' && item.kind !== 'permission') return { itemState: 'done', outcome: `${verdict} (no action in this task)` };
+  if (item.kind !== 'question' && item.kind !== 'permission' && item.kind !== 'old_ask') return { itemState: 'done', outcome: `${verdict} (no action in this task)` };
   const ask = askOf(ctx, item);
   if (ask === undefined || ask.clearedAt !== null) return { itemState: 'done', outcome: 'ask cleared' };
+  // An old ask (task 17) the lead may decide only when it is a question, as lead decide does. Any other is Aiden's: it
+  // waits on him with no bring, and lead old-asks next carries it to the Voice.
+  if (item.kind === 'old_ask' && !(verdict === 'DECIDE' && ask.kind === 'question')) {
+    return { itemState: 'waiting_aiden', outcome: verdict === 'DECIDE' ? `AIDEN for the Voice: ${DECIDE_QUESTION_ONLY}` : `${verdict} for the Voice` };
+  }
   const answer = turn.answer ?? '';
   const why = turn.why ?? '';
   const now = ctx.now();

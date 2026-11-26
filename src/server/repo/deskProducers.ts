@@ -108,9 +108,19 @@ export function deskOnAskRaised(ctx: Ctx, ask: Ask, undone?: UndoneAsk): void {
   produceDeskItem(db, input, now);
 }
 
-/** Moves every not-done desk item about one of these asks to done, with `outcome`. */
+/**
+ * Moves every not-done desk item about one of these asks to done, with `outcome`. Their lines to the Voice not yet tried
+ * move to cleared: an ask answered elsewhere (the window, its thread) is never spoken after. A line being tried is left to
+ * the sender, which may have sent it already.
+ */
 function closeAskItems(db: DB, askIds: readonly number[], outcome: string, now: string): void {
   if (askIds.length === 0) return;
+  const kinds = ASK_ITEM_KINDS.map(() => '?').join(', ');
+  const refs = askIds.map(() => '?').join(', ');
+  db.prepare(
+    `UPDATE lead_sends SET state = 'cleared' WHERE kind = 'voice_line' AND state = 'intended' AND result IS NULL` +
+      ` AND item_id IN (SELECT id FROM desk_items WHERE state <> 'done' AND kind IN (${kinds}) AND ref IN (${refs}))`,
+  ).run(...ASK_ITEM_KINDS, ...askIds.map(String));
   db.prepare(
     `UPDATE desk_items SET state = 'done', done_at = ?, outcome = ? WHERE state <> 'done'` +
       ` AND kind IN (${ASK_ITEM_KINDS.map(() => '?').join(', ')}) AND ref IN (${askIds.map(() => '?').join(', ')})`,

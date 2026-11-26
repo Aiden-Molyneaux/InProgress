@@ -633,3 +633,11 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   ask id column; a count outside 1 to 5 is refused; `next` covers only projects where `lead answer --send` can carry
   his reply (not archived, not C:\work, no lead or this lead); the done line goes only when no old-ask line still
   waits. Calls: a batch is at most five less those waiting; rules version 7 tells the lead how to run the old asks.
+- Murr on task 17 (Opus): needs fixes, 2 major: an old ask the round took was closed with no action while its ask
+  stayed open (the apply had no old_ask branch; its test used the stand-in apply); a line in a project later archived
+  or re-led blocked `next` for good. Fixed as O1 to O7: DECIDE on an old question is a numbered decision; anything
+  else waits for the Voice; the waiting count covers only the projects `next` serves; an ask answered in the window
+  is never spoken after (its untried lines cleared, bring lines too); a line refused by the webhook is queued again
+  under a fresh key; a name that leads no project is refused. Calls: the old lane runs beside the new ones, as built.
+  Deviations accepted: only untried lines are cleared (a line in a POST may still go out); the try number is the key's
+  suffix from the second; a decided old question is recorded as a question's kind. 2929 unit tests green.

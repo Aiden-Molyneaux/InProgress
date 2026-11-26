@@ -1,16 +1,15 @@
-import { LEAD_INSTRUCTIONS_VERSION, LEAD_NAME, LEAD_NAME_RULE } from '../../core/lead';
 import { askTag } from '../../core/types';
 import { write, type Ctx } from '../db/tx';
 import { badRequest, conflict } from '../errors';
 import { outOfDate } from '../lead';
-import { requireAnswerLead, workProject, WORK_PROJECT } from '../lead-commands';
+import { requireAnswerLead, requireLeadWho, workProject, WORK_PROJECT } from '../lead-commands';
 import { aidensAskSql, requireAsk } from '../repo/asks';
 import { addDeskItem } from '../repo/desk';
 import { itemEverMade, produceDeskItem } from '../repo/deskProducers';
 import { insertLeadEvent } from '../repo/leadEvents';
 import { roundFirstOn, roundSince } from '../repo/switches';
 import { dateKey } from './morning';
-import { intendOldAskLine, intendOldAsksDoneLine, oldAskVoiceLine } from './voice';
+import { intendOldAskLine, intendOldAsksDoneLine, OLD_DONE_KEY_LIKE, OLD_KEY_LIKE, oldAskVoiceLine } from './voice';
 
 /*
  * The old asks (lead stage 1, #743, task 17): Aiden's asks raised before the round was first switched on in their project.
@@ -74,13 +73,24 @@ function putOldAsks(ctx: Ctx, project: { id: number; lead: string | null }): { f
   return { forRound: forRound ? made : 0, forVoice: forRound ? 0 : made };
 }
 
-/** A lead name and rules version for the commands that name no project: a bad name is a 400, older rules a 409. */
-function requireLeadName(as: string, instructions: number): string {
+/**
+ * The lead of the commands that name no project (`next`, `--all`): a name that is not a lead's is a 400, one that leads no
+ * project (active or paused, not deleted) a 409, and older rules a 409 naming the first project it leads.
+ */
+function requireLeadName(ctx: Ctx, as: string, instructions: number): string {
   const name = as.trim();
-  if (!LEAD_NAME.test(name)) throw badRequest(LEAD_NAME_RULE);
-  if (instructions < LEAD_INSTRUCTIONS_VERSION) throw conflict(outOfDate(instructions, '<project>', name));
+  requireLeadWho(name, instructions, '', true, false);
+  const slug = ctx.db
+    .prepare("SELECT slug FROM projects WHERE status <> 'archived' AND deleted_at IS NULL AND lead IS NOT NULL AND lower(trim(lead)) = lower(?) ORDER BY id LIMIT 1")
+    .pluck()
+    .get(name) as string | undefined;
+  if (slug === undefined) throw conflict(leadsNoProject(name));
+  requireLeadWho(name, instructions, slug, false);
   return name;
 }
+
+/** The refusal of `next` or `--all` for a name that leads no project. */
+export const leadsNoProject = (name: string): string => `${name} leads no project.`;
 
 /**
  * Aiden's personal projects this lead may carry his answers in, by id: not archived or deleted, not under C:\work, and
@@ -99,7 +109,7 @@ function personalProjects(ctx: Ctx, name: string): { id: number; name: string; l
  * write. Answers one line for each project that had an old ask put on the desk, then the total.
  */
 export function leadOldAsksAll(ctx: Ctx, as: string, instructions: number): { text: string; forRound: number; forVoice: number } {
-  const name = requireLeadName(as, instructions);
+  const name = requireLeadName(ctx, as, instructions);
   return write(ctx, `lead:${name}`, () => {
     const lines: string[] = [];
     let k = 0;
@@ -115,56 +125,62 @@ export function leadOldAsksAll(ctx: Ctx, as: string, instructions: number): { te
   });
 }
 
-/** SQL: the old-ask lines (not the done line) whose item is not done: they wait on his answer. */
-const PENDING_SQL = `SELECT COUNT(*) FROM lead_sends s JOIN desk_items d ON d.id = s.item_id
-  WHERE s.kind = 'voice_line' AND s.retry_key LIKE 'voice:old:%' AND s.retry_key NOT LIKE 'voice:old:done:%' AND d.state <> 'done'`;
+/** SQL: an old ask's line (not the done line), as `s`. */
+const OLD_LINE_SQL = `s.kind = 'voice_line' AND s.retry_key LIKE '${OLD_KEY_LIKE}' AND s.retry_key NOT LIKE '${OLD_DONE_KEY_LIKE}'`;
+/** SQL: a line still with Aiden or on its way: intended (or being tried), or done. One that ended unknown or cleared is not. */
+const LIVE_LINE_SQL = `s.state IN ('intended', 'done')`;
 
 /**
  * `lead old-asks next [count]`: queues one Voice line for each of the next `count` old_ask items (at most OLD_ASKS_AT_ONCE
- * less the old-ask lines already waiting on his answer) that wait on Aiden with no line yet, oldest ask first, across his personal projects: those this lead leads or that have
- * no lead, not archived, not under C:\work (the projects `lead answer` can carry his reply in). Refused while
- * OLD_ASKS_AT_ONCE old-ask lines wait on his answer. With none to queue it answers NO_OLD_ASKS, and once no line waits
- * either, queues the line that says they are done, once a day, in the project of the newest old-ask line.
+ * less the old-ask lines already waiting on his answer) that wait on Aiden with no live line, oldest ask first, across his
+ * personal projects (personalProjects: the projects `lead answer` can carry his reply in). A line waits on his answer while
+ * it is intended or done and its item is not done; one that ended unknown (a refused webhook) or cleared does not, and its
+ * item is queued again under the next key (oldLineKey). Only items of those projects count. Refused while OLD_ASKS_AT_ONCE
+ * lines wait. With none to queue it answers NO_OLD_ASKS, and once no line waits either, queues the line that says they
+ * are done, once a day, in the project of the newest old-ask line.
  */
 export function leadOldAsksNext(ctx: Ctx, as: string, instructions: number, count = OLD_ASKS_AT_ONCE): { text: string; queued: number; remain: number } {
-  const name = requireLeadName(as, instructions);
+  const name = requireLeadName(ctx, as, instructions);
   if (!Number.isInteger(count) || count < 1 || count > OLD_ASKS_AT_ONCE) throw badRequest(`The count is a whole number from 1 to ${OLD_ASKS_AT_ONCE}, not ${count}.`);
   return write(ctx, `lead:${name}`, () => {
     const db = ctx.db;
     const now = ctx.now();
     const projects = personalProjects(ctx, name);
     const byId = new Map(projects.map((p) => [p.id, p]));
-    const pending = db.prepare(PENDING_SQL).pluck().get() as number;
+    const served = (projectId: number): boolean => byId.has(projectId);
+    const pending = (db
+      .prepare(`SELECT d.project_id FROM lead_sends s JOIN desk_items d ON d.id = s.item_id WHERE ${OLD_LINE_SQL} AND ${LIVE_LINE_SQL} AND d.state <> 'done'`)
+      .pluck()
+      .all() as number[]).filter(served).length;
     if (pending >= OLD_ASKS_AT_ONCE) throw conflict(OLD_ASKS_WITH_AIDEN);
     const waiting = (db
       .prepare(
-        `SELECT d.id, d.project_id AS projectId, a.id AS askId, a.node_id AS nodeId, a.raised_at AS raisedAt FROM desk_items d JOIN asks a ON a.id = CAST(d.ref AS INTEGER)
+        `SELECT d.id, d.project_id AS projectId, a.id AS askId, a.node_id AS nodeId, a.raised_at AS raisedAt,
+                (SELECT COUNT(*) FROM lead_sends s WHERE s.item_id = d.id AND ${OLD_LINE_SQL}) AS lines
+           FROM desk_items d JOIN asks a ON a.id = CAST(d.ref AS INTEGER)
           WHERE d.kind = 'old_ask' AND d.state = 'waiting_aiden'
-            AND NOT EXISTS (SELECT 1 FROM lead_sends s WHERE s.kind = 'voice_line' AND s.retry_key = 'voice:old:' || d.id)
+            AND NOT EXISTS (SELECT 1 FROM lead_sends s WHERE s.item_id = d.id AND ${OLD_LINE_SQL} AND ${LIVE_LINE_SQL})
           ORDER BY a.raised_at, a.id, d.id`,
       )
-      .all() as { id: number; projectId: number; askId: number; nodeId: number; raisedAt: string }[]).filter((r) => byId.has(r.projectId));
+      .all() as { id: number; projectId: number; askId: number; nodeId: number; raisedAt: string; lines: number }[]).filter((r) => served(r.projectId));
     if (waiting.length === 0) {
       if (pending === 0) {
-        const last = db
-          .prepare("SELECT project_id FROM lead_sends WHERE kind = 'voice_line' AND retry_key LIKE 'voice:old:%' AND retry_key NOT LIKE 'voice:old:done:%' ORDER BY id DESC LIMIT 1")
-          .pluck()
-          .get() as number | undefined;
+        const last = (db.prepare(`SELECT s.project_id FROM lead_sends s WHERE ${OLD_LINE_SQL} ORDER BY s.id DESC`).pluck().all() as number[]).find(served);
         if (last !== undefined) intendOldAsksDoneLine(db, { projectId: last, date: dateKey(now) }, now);
       }
       return { text: NO_OLD_ASKS, queued: 0, remain: 0 };
     }
     // With the lines already waiting on him, never more than OLD_ASKS_AT_ONCE with him at once.
     const take = waiting.slice(0, Math.min(count, OLD_ASKS_AT_ONCE - pending));
-    /** Each project's old asks in ask order, done ones too, so "i of total" holds from one batch to the next. */
+    /**
+     * Each project's old asks, done ones too, so "i of total" holds from one batch to the next: counted by the item, in the
+     * order they were put on the desk (each put takes them oldest ask first), whether or not its ask is still there.
+     */
     const order = new Map<number, number[]>();
     const orderOf = (projectId: number): number[] => {
       let ids = order.get(projectId);
       if (ids === undefined) {
-        ids = db
-          .prepare("SELECT d.id FROM desk_items d JOIN asks a ON a.id = CAST(d.ref AS INTEGER) WHERE d.kind = 'old_ask' AND d.project_id = ? ORDER BY a.raised_at, a.id, d.id")
-          .pluck()
-          .all(projectId) as number[];
+        ids = db.prepare("SELECT id FROM desk_items WHERE kind = 'old_ask' AND project_id = ? ORDER BY created_at, id").pluck().all(projectId) as number[];
         order.set(projectId, ids);
       }
       return ids;
@@ -181,7 +197,7 @@ export function leadOldAsksNext(ctx: Ctx, as: string, instructions: number, coun
         days: Math.max(0, Math.floor((Date.parse(now) - Date.parse(row.raisedAt)) / DAY_MS)),
         reading: oldReading(ctx, row.askId),
       });
-      intendOldAskLine(db, { projectId: row.projectId, itemId: row.id, body }, now);
+      intendOldAskLine(db, { projectId: row.projectId, itemId: row.id, body, n: row.lines + 1 }, now);
     }
     const remain = waiting.length - take.length;
     return { text: `Queued ${take.length} old asks for the Voice; ${remain} remain.`, queued: take.length, remain };

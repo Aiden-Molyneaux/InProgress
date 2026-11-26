@@ -250,12 +250,24 @@ const sentenceOf = (text: string): string => {
 /** The line that says the old asks are all answered. Retry key `voice:old:done:<date>`. */
 export const OLD_ASKS_DONE_LINE = 'The old asks are done.';
 
-/** Intends an old ask's voice line, inside the caller's write. */
-export function intendOldAskLine(db: DB, input: { projectId: number; itemId: number; body: string }, now: string): void {
-  intendLine(db, { projectId: input.projectId, itemId: input.itemId, retryKey: `voice:old:${input.itemId}`, body: input.body }, now);
+/** Where every old-ask retry key starts; the done line's keys start with OLD_DONE_KEY_PREFIX inside it. */
+export const OLD_KEY_PREFIX = 'voice:old:';
+export const OLD_DONE_KEY_PREFIX = `${OLD_KEY_PREFIX}done:`;
+/** SQL LIKE patterns for the two: an old ask's line is `LIKE OLD_KEY_LIKE AND NOT LIKE OLD_DONE_KEY_LIKE`. */
+export const OLD_KEY_LIKE = `${OLD_KEY_PREFIX}%`;
+export const OLD_DONE_KEY_LIKE = `${OLD_DONE_KEY_PREFIX}%`;
+
+/** An old ask's line's retry key: `voice:old:<item id>` for its first line, `voice:old:<item id>:<n>` for its n-th. */
+export const oldLineKey = (itemId: number, n = 1): string => (n <= 1 ? `${OLD_KEY_PREFIX}${itemId}` : `${OLD_KEY_PREFIX}${itemId}:${n}`);
+/** The done line's retry key for a day. */
+export const oldDoneKey = (date: string): string => `${OLD_DONE_KEY_PREFIX}${date}`;
+
+/** Intends an old ask's n-th voice line (oldLineKey), inside the caller's write. */
+export function intendOldAskLine(db: DB, input: { projectId: number; itemId: number; body: string; n?: number }, now: string): void {
+  intendLine(db, { projectId: input.projectId, itemId: input.itemId, retryKey: oldLineKey(input.itemId, input.n), body: input.body }, now);
 }
 
-/** Intends the line that the old asks are done, once a day (retry key `voice:old:done:<date>`), inside the caller's write. */
+/** Intends the line that the old asks are done, once a day (oldDoneKey), inside the caller's write. */
 export function intendOldAsksDoneLine(db: DB, input: { projectId: number; date: string }, now: string): void {
-  intendLine(db, { projectId: input.projectId, retryKey: `voice:old:done:${input.date}`, body: OLD_ASKS_DONE_LINE }, now);
+  intendLine(db, { projectId: input.projectId, retryKey: oldDoneKey(input.date), body: OLD_ASKS_DONE_LINE }, now);
 }
