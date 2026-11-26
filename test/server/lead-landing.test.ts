@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
 import { SESSION_LANDING_LINE, landingOffLine, sessionMandateLines } from '../../src/core/lead-mandate';
 import { leadBriefingLine } from '../../src/core/relay';
+import { landingCheckLine } from '../../src/server/briefing-scoped';
 import { stamp } from '../../src/server/digest';
 import { leadSwitches } from '../../src/server/lead';
 import { leadAllow, leadDisallow } from '../../src/server/lead-commands';
@@ -122,12 +123,13 @@ describe('the claim carries the lead lines', () => {
   it('adds the Lead line and the two mandate lines after the step block in a led project, and the Landing line only when Landing is on', () => {
     const t = setup();
     const block = claim(t);
-    expect(block.slice(-3)).toEqual([leadBriefingLine('Progresser'), ...sessionMandateLines('Progresser')]);
+    // The landing check's line closes the lead lines in every led project, Landing on or off.
+    expect(block.slice(-4)).toEqual([leadBriefingLine('Progresser'), ...sessionMandateLines('Progresser'), landingCheckLine()]);
     expect(block.findIndex((l) => l.startsWith('Your step:'))).toBe(0);
     expect(block).not.toContain(SESSION_LANDING_LINE);
     t.on('landing');
     const landing = claim(t, 's2');
-    expect(landing.slice(-4)).toEqual([leadBriefingLine('Progresser'), ...sessionMandateLines('Progresser'), SESSION_LANDING_LINE]);
+    expect(landing.slice(-5)).toEqual([leadBriefingLine('Progresser'), ...sessionMandateLines('Progresser'), SESSION_LANDING_LINE, landingCheckLine()]);
   });
 
   it('adds none with no lead, even with Landing on in the log', () => {

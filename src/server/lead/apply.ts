@@ -6,7 +6,7 @@ import { decideInWrite, DECIDE_QUESTION_ONLY } from '../lead-commands';
 import { logLeadEvent } from '../lead';
 import { clearInWrite, requireAsk } from '../repo/asks';
 import type { DeskItem } from '../repo/desk';
-import { askOf, bringItem, bringNext, broughtOpen, liveT3ThreadOf, t3ThreadOf, tellAidens } from '../repo/deskBring';
+import { askOf, bringItem, bringNext, broughtOpen, reachableThread, tellAidens } from '../repo/deskBring';
 import { addLogInWrite } from '../repo/logs';
 import { oldReading, storeOldReadingInWrite } from './oldAsks';
 import { addDecision } from '../repo/leadDecisions';
@@ -74,7 +74,7 @@ export function applyVerdict(ctx: Ctx, turn: LeadTurn, item: DeskItem, record: R
   const now = ctx.now();
   /** The session's message, when it runs in T3 Code: a send intended now, made after the commit. */
   const tell = (retryKey: string, body: string): void => {
-    const thread = t3ThreadOf(ctx.db, ask.sessionId);
+    const thread = reachableThread(ctx.db, { sessionId: ask.sessionId }, now);
     if (thread !== null) intendSend(ctx.db, { projectId: project.id, itemId: item.id, kind: 'relay', target: thread, retryKey, body }, now);
   };
   if (verdict === 'DECIDE') {
@@ -97,8 +97,8 @@ export function applyVerdict(ctx: Ctx, turn: LeadTurn, item: DeskItem, record: R
     const said = `d${id}: ${answer}\nWhy: ${sentence(why)} Aiden can undo this with "undo d${id}".`;
     if (item.kind !== 'old_ask') tell(`relay:d${id}`, leadLine(name, said));
     else {
-      // An old ask's session may have ended long ago: only a live one is told; else the step's log says it.
-      const thread = liveT3ThreadOf(ctx.db, ask.sessionId);
+      // An old ask's session may be weeks old: only a reachable one is told; else the step's log says it.
+      const thread = reachableThread(ctx.db, { sessionId: ask.sessionId }, now);
       if (thread !== null) intendSend(ctx.db, { projectId: project.id, itemId: item.id, kind: 'relay', target: thread, retryKey: `relay:d${id}`, body: leadLine(name, said) }, now);
       else addLogInWrite(ctx, record, ask.nodeId, `${name} decided ${said.replace('\n', ' ')}`);
     }

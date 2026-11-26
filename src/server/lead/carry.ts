@@ -5,7 +5,7 @@ import { conflict, notFound } from '../errors';
 import { carriedLine, requireAnswerLead, workProject, WORK_PROJECT, type CarriedYes, type YesAction } from '../lead-commands';
 import { logLeadEvent } from '../lead';
 import { getDeskItem, moveDeskItem, type DeskItem } from '../repo/desk';
-import { askOf, DECISION_LINE_CUT, liveT3ThreadOf, t3ThreadOnStep } from '../repo/deskBring';
+import { askOf, DECISION_LINE_CUT, reachableThread, t3ThreadOnStep } from '../repo/deskBring';
 import { addDecision } from '../repo/leadDecisions';
 import { getSend, intendSend, sendByRetryKey, type LeadSend } from '../repo/leadSends';
 import { addLogInWrite } from '../repo/logs';
@@ -148,8 +148,13 @@ export function leadAnswerItem(ctx: Ctx, ref: string, as: string, instructions: 
       saidAt,
     });
     moveDeskItem(ctx.db, item.id, ['open', 'leased', 'behind', 'waiting_aiden'], 'done', { outcome: `ANSWERED d${eventId}`, now: ctx.now() });
-    // A held command's session is told only while it has not ended (t3ThreadOnStep takes a live one already).
-    const thread = held !== undefined ? liveT3ThreadOf(ctx.db, held.sessionId) : item.nodeId === null ? null : t3ThreadOnStep(ctx, item.nodeId);
+    // His words reach only a reachable thread (reachableThread): the held command's session, or the step's session now.
+    const thread =
+      held !== undefined
+        ? reachableThread(ctx.db, { sessionId: held.sessionId }, ctx.now())
+        : item.nodeId === null
+          ? null
+          : reachableThread(ctx.db, { threadId: t3ThreadOnStep(ctx, item.nodeId) }, ctx.now());
     const retryKey = `carry:i${item.id}`;
     const said = carriedLine(name, where, saidAt, input.aidenWords);
     let carried = false;
@@ -174,16 +179,14 @@ export function liveTarget(ctx: Ctx, retryKey: string): string | undefined {
 }
 
 /**
- * The relay target a carried answer went to, for its undo: the carry send of the ask or of the item, while a session on
- * that thread has not ended. An ended one gets no withdrawal relay: the undo's log line and the ask's answer say it.
+ * The relay target a carried answer went to, for its undo: the carry send of the ask or of the item, while its thread is
+ * reachable (reachableThread). Else no withdrawal relay: the undo's log line and the ask's answer say it.
  */
 export function carryTarget(ctx: Ctx, answer: { askId: number | null; text: string }): string | undefined {
   const item = /; item (\d+)/.exec(answer.text);
   const key = answer.askId !== null ? `carry:a${answer.askId}` : item !== null ? `carry:i${item[1]}` : undefined;
   const target = key === undefined ? undefined : liveTarget(ctx, key);
-  if (target === undefined) return undefined;
-  const live = ctx.db.prepare("SELECT 1 FROM sessions WHERE app = 't3' AND t3_thread_id = ? AND state <> 'ended'").get(target) !== undefined;
-  return live ? target : undefined;
+  return reachableThread(ctx.db, { threadId: target }, ctx.now()) ?? undefined;
 }
 
 /** The yes rows an answer recorded, from its line's `yes e12,e13`. */

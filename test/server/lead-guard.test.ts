@@ -7,10 +7,12 @@ import { deskUserMessage } from '../../src/server/lead/prompt';
 import { createSender, type SenderT3 } from '../../src/server/lead/sends';
 import { raiseAsk, requireAsk, undeliveredAnswers } from '../../src/server/repo/asks';
 import { applyVerdict } from '../../src/server/lead/apply';
+import { leadAnswerItem } from '../../src/server/lead/carry';
 import type { LeadTurn } from '../../src/server/repo/leadTurns';
-import { leadUndo } from '../../src/server/lead-commands';
+import { lateAnswer, leadDecide, leadUndo } from '../../src/server/lead-commands';
 import { morningList } from '../../src/server/lead/morning';
-import { getDeskItem } from '../../src/server/repo/desk';
+import { addDeskItem, getDeskItem } from '../../src/server/repo/desk';
+import { tellAidens } from '../../src/server/repo/deskBring';
 import { addNodes } from '../../src/server/repo/nodes';
 import { addBinding, createProject, setProjectLead } from '../../src/server/repo/projects';
 import { handleHookEvent } from '../../src/server/session-flow';
@@ -40,6 +42,9 @@ function setup() {
   const check = (action: 'merge' | 'deploy' | 'push') => checkLanding(ctx, { ref: project.slug, stepId: step.id, action, folder: repo.wt, ...(action === 'deploy' ? {} : { branch: 'feature' }) }, deps);
   return { ctx, project, step, review, permission, check };
 }
+
+/** A time `hours` before the test clock's now. */
+const hoursAgo = (t: { ctx: { now(): string } }, hours: number): string => new Date(Date.parse(t.ctx.now()) - hours * 60 * 60 * 1000).toISOString();
 
 describe("the guard on Aiden's go-ahead", () => {
   // Many git reads: under a full parallel run it can pass the default 20 s.
@@ -121,9 +126,51 @@ describe("the guard on Aiden's go-ahead", () => {
     expect(carriedLine('Progresser', 'thread', saidAt, 'yes')).toMatch(/^Aiden's answer, carried by/);
   });
 
-  it('C1: carries nothing to an ended session: the ask is answered and waits for its next prompt; its undo relays nothing', () => {
+  it('G1: a session marked ended after a quiet night (last seen 13 hours ago) still gets the carry', () => {
     const t = setup();
-    t.ctx.db.prepare("UPDATE sessions SET state = 'ended' WHERE id = 's1'").run();
+    t.ctx.db.prepare("UPDATE sessions SET state = 'ended', last_seen_at = ? WHERE id = 's1'").run(hoursAgo(t, 13));
+    const res = leadAnswer(t.ctx, t.project.slug, 'Progresser', V, { askId: t.permission.id, aidenWords: 'go ahead', where: 'voice' });
+    expect(res.carried).toBe(true);
+    expect(t.ctx.db.prepare("SELECT target, retry_key AS retryKey FROM lead_sends WHERE kind = 'carry'").all()).toEqual([{ target: 'th_1', retryKey: `carry:a${t.permission.id}` }]);
+  });
+
+  it('G2: a late answer in the window reaches a session last seen 13 hours ago in its thread; one last seen 3 days ago reads it on its next prompt', () => {
+    for (const [hours, relayed] of [[13, true], [72, false]] as const) {
+      const t = setup();
+      const q = raiseAsk(t.ctx, 'session:s1', { nodeId: t.step.id, kind: 'question', text: 'Which port?', sessionId: 's1' });
+      leadDecide(t.ctx, t.project.slug, 'Progresser', V, { askId: q.id, answer: '4410', reason: 'free' });
+      // The session read the lead's answer; then it went quiet and was marked ended.
+      t.ctx.db.prepare('UPDATE asks SET answer_delivered_at = ? WHERE id = ?').run(t.ctx.now(), q.id);
+      t.ctx.db.prepare("UPDATE sessions SET state = 'ended', last_seen_at = ? WHERE id = 's1'").run(hoursAgo(t, hours));
+      expect(lateAnswer(t.ctx, q.id, '4411', 'window')).toBe(true);
+      const late = t.ctx.db.prepare("SELECT target FROM lead_sends WHERE retry_key = ?").pluck().all(`late:a${q.id}`);
+      expect(late).toEqual(relayed ? ['th_1'] : []);
+      // Not relayed, his answer waits for the next prompt: it is marked not yet delivered.
+      expect(t.ctx.db.prepare('SELECT answer_delivered_at FROM asks WHERE id = ?').pluck().get(q.id) === null).toBe(!relayed);
+    }
+  });
+
+  it('G3: undoing a carried review answer on a done or parked step withdraws it and its yeses, and asks nothing again', async () => {
+    for (const status of ['done', 'parked'] as const) {
+      const t = setup();
+      write(repo.wt, 'web/app.ts', lines(20, `tabs ${status}`));
+      commit(repo.wt, `tabs ${status}`);
+      const saidAt = new Date(Date.now() + 1000).toISOString();
+      const yeses = await readYeses(t.ctx, t.project.slug, t.project.id, t.review.id, ['merge'], saidAt, deps);
+      const res = leadAnswer(t.ctx, t.project.slug, 'Progresser', V, { askId: t.review.id, aidenWords: 'ship it', where: 'voice', saidAt, yeses: yeses! });
+      t.ctx.db.prepare('UPDATE nodes SET status = ? WHERE id = ?').run(status, t.step.id);
+      const d = Number(/decision d(\d+)/.exec(res.text)![1]);
+      const undo = leadUndo(t.ctx, t.project.slug, 'Progresser', V, { eventId: d, aidenWords: 'take that back' });
+      expect(undo.text).toContain(`#${t.step.id} is ${status}, so its review is not asked again.`);
+      expect(undo.text).toContain('with his yes for merge');
+      expect(t.ctx.db.prepare("SELECT COUNT(*) FROM asks WHERE kind = 'review' AND cleared_at IS NULL").pluck().get()).toBe(0);
+      expect(t.ctx.db.prepare("SELECT COUNT(*) FROM lead_events WHERE kind = 'yes_withdrawn'").pluck().get()).toBe(1);
+    }
+  });
+
+  it('C1, G1: carries nothing to a session last seen 3 days ago: the ask is answered and waits for its next prompt; its undo relays nothing', () => {
+    const t = setup();
+    t.ctx.db.prepare("UPDATE sessions SET state = 'ended', last_seen_at = ? WHERE id = 's1'").run(hoursAgo(t, 72));
     const res = leadAnswer(t.ctx, t.project.slug, 'Progresser', V, { askId: t.permission.id, aidenWords: 'go ahead', where: 'voice' });
     expect(res.carried).toBe(false);
     expect(res.text).not.toContain('Its session is told in its thread.');
@@ -135,11 +182,11 @@ describe("the guard on Aiden's go-ahead", () => {
     expect(t.ctx.db.prepare("SELECT COUNT(*) FROM lead_sends WHERE kind IN ('carry', 'relay')").pluck().get()).toBe(0);
   });
 
-  it("C1: a carry made while the session was live, undone after it ended, relays no withdrawal: the ask's answer says it", () => {
+  it("C1, G1: a carry made while the session was live, undone once it is out of reach, relays no withdrawal: the ask's answer says it", () => {
     const t = setup();
     const res = leadAnswer(t.ctx, t.project.slug, 'Progresser', V, { askId: t.permission.id, aidenWords: 'go ahead', where: 'voice' });
     expect(res.carried).toBe(true);
-    t.ctx.db.prepare("UPDATE sessions SET state = 'ended' WHERE id = 's1'").run();
+    t.ctx.db.prepare("UPDATE sessions SET state = 'ended', last_seen_at = ? WHERE id = 's1'").run(hoursAgo(t, 72));
     const d = Number(/decision d(\d+)/.exec(res.text)![1]);
     leadUndo(t.ctx, t.project.slug, 'Progresser', V, { eventId: d, aidenWords: 'take that back' });
     expect(t.ctx.db.prepare("SELECT retry_key FROM lead_sends WHERE kind IN ('carry', 'relay') ORDER BY id").pluck().all()).toEqual([`carry:a${t.permission.id}`]);
@@ -185,6 +232,18 @@ describe("the guard on Aiden's go-ahead", () => {
   });
 });
 
+describe("tellAidens: a session is told an ask is Aiden's only in a reachable thread", () => {
+  it('tells a session last seen 13 hours ago and marked ended; not one last seen 3 days ago', () => {
+    for (const [hours, told] of [[13, true], [72, false]] as const) {
+      const t = setup();
+      t.ctx.db.prepare("UPDATE sessions SET state = 'ended', last_seen_at = ? WHERE id = 's1'").run(hoursAgo(t, hours));
+      const { item } = addDeskItem(t.ctx.db, { projectId: t.project.id, kind: 'permission', ref: String(t.permission.id), nodeId: t.step.id }, t.ctx.now());
+      dbWrite(t.ctx, 'test', () => tellAidens(t.ctx.db, { projectId: t.project.id, itemId: item.id, lead: 'Progresser', ask: { id: t.permission.id, sessionId: 's1' }, kind: 'TASTE' }, t.ctx.now()));
+      expect(t.ctx.db.prepare('SELECT target FROM lead_sends WHERE retry_key = ?').pluck().all(`aiden:a${t.permission.id}`)).toEqual(told ? ['th_1'] : []);
+    }
+  });
+});
+
 describe('the round on what Aiden left to the lead', () => {
   /** An aiden_said item on the step and a turn on it with this verdict, applied as the runner applies one. */
   function decided(t: ReturnType<typeof setup>, verdict: string, answer: string) {
@@ -212,6 +271,27 @@ describe('the round on what Aiden left to the lead', () => {
     expect(morningList(t.ctx, t.project.id, '2000-01-01T00:00:00.000Z', t.ctx.now()).text).toContain(`d${id}`);
     expect(leadUndo(t.ctx, t.project.slug, 'Progresser', V, { eventId: id, aidenWords: 'undo it' }).text).toBe(`Undid d${id}: the decision is withdrawn.`);
     expect(relays(t).map((r) => r.retryKey)).toEqual([`aiden-said:d${id}`, `undo:d${id}`]);
+  });
+
+  it('DECIDE with the T3 Code session on the step marked ended but last seen 13 hours ago relays to its thread, and so does a carry', () => {
+    const t = setup();
+    t.ctx.db.prepare("UPDATE sessions SET focus_node_id = ?, state = 'ended', last_seen_at = ? WHERE id = 's1'").run(t.step.id, hoursAgo(t, 13));
+    const effect = decided(t, 'DECIDE', 'Alphabetical');
+    const id = Number(/^DECIDE d([0-9]+)$/.exec(effect.outcome)![1]);
+    expect(relays(t).map((r) => [r.target, r.retryKey])).toEqual([['th_1', `aiden-said:d${id}`]]);
+    expect(t.ctx.db.prepare('SELECT COUNT(*) FROM log_entries WHERE node_id = ?').pluck().get(t.step.id)).toBe(0);
+    // His reply to what he left to the lead, carried: the same thread.
+    const { itemId } = leadDeskAdd(t.ctx, t.project.slug, 'Progresser', V, { stepId: t.step.id, aidenWords: 'you decide the colours' });
+    expect(leadAnswerItem(t.ctx, t.project.slug, 'Progresser', V, itemId, { aidenWords: 'blue' }).carried).toBe(true);
+    expect(t.ctx.db.prepare("SELECT target FROM lead_sends WHERE retry_key = ?").pluck().all(`carry:i${itemId}`)).toEqual(['th_1']);
+  });
+
+  it('DECIDE with the T3 Code session on the step last seen 3 days ago relays nothing: a line on the step', () => {
+    const t = setup();
+    t.ctx.db.prepare("UPDATE sessions SET focus_node_id = ?, last_seen_at = ? WHERE id = 's1'").run(t.step.id, hoursAgo(t, 72));
+    const effect = decided(t, 'DECIDE', 'Alphabetical');
+    expect(relays(t)).toEqual([]);
+    expect(t.ctx.db.prepare('SELECT text FROM log_entries WHERE node_id = ?').pluck().all(t.step.id)).toEqual([expect.stringContaining(`Progresser decided ${effect.outcome.slice(7)}: Alphabetical`)]);
   });
 
   it('DECIDE with no T3 Code session on the step is a line on the step; AIDEN brings it with a Voice line; CARD is noted', () => {

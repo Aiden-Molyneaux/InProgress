@@ -22,7 +22,7 @@ export function repoCli(repo: string): string {
 const hasSpace = (path: string): boolean => /\s/.test(path);
 
 /** The subcommands a session runs itself, so install allows each (usage is Aiden's and is left out). */
-export const CLI_SUBCOMMANDS = ['tasks', 'claim', 'ask', 'orchestrate', 'digest', 'outline'] as const;
+export const CLI_SUBCOMMANDS = ['tasks', 'claim', 'ask', 'orchestrate', 'digest', 'outline', 'landing'] as const;
 export type CliSubcommand = (typeof CLI_SUBCOMMANDS)[number];
 
 /** `node <path>`, the path with forward slashes and quoted when it holds a space: what every printed command starts with. */
@@ -52,6 +52,11 @@ export function taskCommand(sessionId: string, o: { cli?: string } = {}): string
 /** `node <cli> claim <id> --session <sid>`: the claim command written out for a session; the step id is left for it to fill. */
 export function claimCommand(sessionId: string, o: { cli?: string } = {}): string {
   return `${cliPrefix(o.cli ?? cliBesideServer(), 'claim')} <id> --session ${sessionId}`;
+}
+
+/** `node <cli> landing <step id> --action merge|deploy|push`: the landing check a session asks before it lands (lead stage 1). */
+export function landingCommand(o: { cli?: string } = {}): string {
+  return `${cliPrefix(o.cli ?? cliBesideServer(), 'landing')} <step id> --action merge|deploy|push`;
 }
 
 /**

@@ -10,7 +10,7 @@ import { LEAD_NAME, LEAD_NAME_RULE } from '../core/lead';
 import { resolveProject } from './repo/projects';
 import { intentHeadlines } from './lead-text';
 import { aidensAskSql, clearInWrite, markAnswersDelivered, raiseAskInWrite, requireAsk } from './repo/asks';
-import { DECISION_LINE_CUT, liveT3ThreadOf, t3ThreadOf, t3ThreadOnStep } from './repo/deskBring';
+import { DECISION_LINE_CUT, reachableThread, t3ThreadOf } from './repo/deskBring';
 import { addDeskItem, getDeskItem } from './repo/desk';
 import { intendSend, sendByRetryKey } from './repo/leadSends';
 import { SETTING_KEYS } from './lead/settings';
@@ -243,9 +243,9 @@ export function leadAnswer(ctx: Ctx, ref: string, as: string, instructions: numb
       saidAt,
     });
     const lines = [`Answered ${tag} with Aiden's words: decision ${decisionTag(eventId)}.`, ...yesLines];
-    // Only a session that has not ended is told in its thread: a relay would wake a long-ended one on a stale step. An
-    // ended one reads the answer on its next prompt, if it ever resumes.
-    const thread = liveT3ThreadOf(ctx.db, ask.sessionId);
+    // Only a reachable session is told in its thread (seen in the last two days): a relay would wake a long-gone one on a
+    // stale step. Any other reads the answer on its next prompt, if it ever resumes.
+    const thread = reachableThread(ctx.db, { sessionId: ask.sessionId }, ctx.now());
     const retryKey = `carry:${askTag(ask.id)}`;
     let carried = false;
     if (thread !== null && sendByRetryKey(ctx.db, retryKey) === undefined) {
@@ -476,14 +476,24 @@ export function leadUndo(ctx: Ctx, ref: string, as: string, instructions: number
       // to answer (with the round on it is brought through the Voice).
       const answered = event.ask_id === null ? undefined : ctx.db.prepare('SELECT id FROM asks WHERE id = ?').pluck().get(event.ask_id) === undefined ? undefined : requireAsk(ctx, event.ask_id);
       if (answered !== undefined && answered.kind === 'review') {
-        const again = raiseAskInWrite(ctx, record, actor, { nodeId: answered.nodeId, kind: 'review', text: answered.text, ...(answered.sessionId === null ? {} : { sessionId: answered.sessionId }) });
-        text += ` The review is Aiden's again as ${askTag(again.ask.id)}.`;
+        // A review of work that landed, or of a step set aside, is not asked again: the answer and its yeses are withdrawn all
+        // the same. Checked first, so the raise never refuses and rolls the whole undo back.
+        const step = requireNode(ctx, answered.nodeId);
+        const above = parkedAncestor(ctx, step.id);
+        if (step.status === 'done' || step.status === 'parked' || step.status === 'dropped') {
+          text += ` #${step.id} is ${step.status}, so its review is not asked again.`;
+        } else if (above !== null) {
+          text += ` #${step.id} is under parked #${above}, so its review is not asked again.`;
+        } else {
+          const again = raiseAskInWrite(ctx, record, actor, { nodeId: answered.nodeId, kind: 'review', text: answered.text, ...(answered.sessionId === null ? {} : { sessionId: answered.sessionId }) });
+          text += ` The review is Aiden's again as ${askTag(again.ask.id)}.`;
+        }
       }
     } else if (event.kind === 'decide' && event.ask_id === null) {
       // A decision on what Aiden left to the lead (an aiden_said item): there is no question to raise again. The session its
       // relay went to is told once that it is withdrawn; with no relay, the step's log says so.
       // A relay cleared unsent went to a dead thread: the withdrawal goes to the step's log instead.
-      withdraw(liveTarget(ctx, `aiden-said:${tag}`), `${tag} is withdrawn: Aiden takes it back.`);
+      withdraw(reachableThread(ctx.db, { threadId: liveTarget(ctx, `aiden-said:${tag}`) }, ctx.now()) ?? undefined, `${tag} is withdrawn: Aiden takes it back.`);
       text = `Undid ${tag}: the decision is withdrawn.`;
     } else if (event.kind === 'decide') {
       const old = requireAsk(ctx, event.ask_id as number);
@@ -511,7 +521,7 @@ export function leadUndo(ctx: Ctx, ref: string, as: string, instructions: number
       // A decision made at the desk or in the thread was told to its session: the session is told once that it is withdrawn.
       // An old ask's session is told only while it has not ended (as its decision was); else the step's log says it.
       if (was?.saidWhere === 'desk' || was?.saidWhere === 'thread') {
-        const thread = oldAsk ? liveT3ThreadOf(ctx.db, old.sessionId) : t3ThreadOf(ctx.db, old.sessionId);
+        const thread = reachableThread(ctx.db, { sessionId: old.sessionId }, ctx.now());
         const retryKey = `undo:${tag}`;
         const line = `${tag} is withdrawn: ${askTag(old.id)} is Aiden's again.`;
         if (thread !== null && sendByRetryKey(ctx.db, retryKey) === undefined) {
@@ -569,7 +579,8 @@ export function lateAnswer(ctx: Ctx, askId: number, words: string, actor: string
     const base = { projectId: project.id, lead: project.lead, instructions: LEAD_INSTRUCTIONS_VERSION, nodeId: ask.nodeId, askId: ask.id, aidenWords: words };
     logLeadEvent(ctx, { ...base, kind: 'undo', text: tag });
     logLeadEvent(ctx, { ...base, kind: 'answer' });
-    const thread = t3ThreadOf(ctx.db, ask.sessionId);
+    // His words reach only a reachable session; any other reads them on its next prompt (the thread === null branch below).
+    const thread = reachableThread(ctx.db, { sessionId: ask.sessionId }, ctx.now());
     const retryKey = `late:${askTag(ask.id)}`;
     if (thread !== null && sendByRetryKey(ctx.db, retryKey) === undefined) {
       intendSend(ctx.db, { projectId: project.id, kind: 'relay', target: thread, retryKey, body: leadLine(project.lead, `Aiden's answer, which replaces ${tag}: "${words.trim()}"`) }, ctx.now());

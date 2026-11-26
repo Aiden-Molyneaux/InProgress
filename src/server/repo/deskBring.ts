@@ -50,20 +50,37 @@ export function t3ThreadOf(db: DB, sessionId: string | null): string | null {
   return row !== undefined && row.app === 't3' && row.t3_thread_id ? row.t3_thread_id : null;
 }
 
+/** How recently a T3 Code session must have been seen for a relay of Aiden's words to reach its thread. */
+export const REACHABLE_MS = 48 * 60 * 60 * 1000;
+
 /**
- * The T3 Code thread of the session while it has not ended; else null. An old ask's session may have ended long ago: a
- * relay to its thread would wake it on a stale step, so the old ask's decision and its undo go to the step's log instead.
+ * The T3 Code thread a relay of Aiden's words, or of a withdrawal, may go to; else null. A thread is reachable when its
+ * session (for a thread id, any session on that thread) was last seen within REACHABLE_MS of `now`, whatever its state:
+ * one marked ended after a quiet night still gets his morning answer, and an old ask's weeks-old session is never woken
+ * on a stale step. Not reachable, the caller does what it does with no thread: the answer waits for the next prompt, or
+ * the step's log says it.
  */
-export function liveT3ThreadOf(db: DB, sessionId: string | null): string | null {
-  if (sessionId === null) return null;
-  const state = db.prepare('SELECT state FROM sessions WHERE id = ?').pluck().get(sessionId) as string | undefined;
-  return state === undefined || state === 'ended' ? null : t3ThreadOf(db, sessionId);
+export function reachableThread(db: DB, ref: { sessionId: string | null } | { threadId: string | null | undefined }, now: string): string | null {
+  const since = new Date(Date.parse(now) - REACHABLE_MS).toISOString();
+  if ('sessionId' in ref) {
+    const thread = t3ThreadOf(db, ref.sessionId);
+    if (thread === null) return null;
+    const seen = db.prepare('SELECT last_seen_at FROM sessions WHERE id = ?').pluck().get(ref.sessionId) as string | null | undefined;
+    return seen !== null && seen !== undefined && seen >= since ? thread : null;
+  }
+  if (ref.threadId === null || ref.threadId === undefined || ref.threadId === '') return null;
+  const seen = db.prepare("SELECT 1 FROM sessions WHERE app = 't3' AND t3_thread_id = ? AND last_seen_at >= ? LIMIT 1").get(ref.threadId, since) !== undefined;
+  return seen ? ref.threadId : null;
 }
 
-/** The T3 Code thread of the newest session, not ended, focused on the step; null when there is none. */
+/**
+ * The T3 Code thread of the newest session focused on the step, whatever its state; null when there is none. Its callers
+ * (the aiden_said relay and carry) relay only when reachableThread accepts it: a session marked ended after a quiet night
+ * still gets his words, a weeks-old one does not. It does not mean "a live session works on the step".
+ */
 export function t3ThreadOnStep(ctx: Ctx, nodeId: number): string | null {
   const thread = ctx.db
-    .prepare("SELECT t3_thread_id FROM sessions WHERE focus_node_id = ? AND app = 't3' AND t3_thread_id IS NOT NULL AND t3_thread_id <> '' AND state <> 'ended' ORDER BY last_seen_at DESC LIMIT 1")
+    .prepare("SELECT t3_thread_id FROM sessions WHERE focus_node_id = ? AND app = 't3' AND t3_thread_id IS NOT NULL AND t3_thread_id <> '' ORDER BY last_seen_at DESC LIMIT 1")
     .pluck()
     .get(nodeId) as string | undefined;
   return thread ?? null;
@@ -95,7 +112,8 @@ const AIDEN_KIND_WORDS: Record<string, string> = { TASTE: 'taste', DIRECTION: 'd
  * made when the lead says AIDEN, whether the item is brought at once or waits past the limit. Inside the caller's write.
  */
 export function tellAidens(db: DB, input: { projectId: number; itemId: number; lead: string; ask: Pick<Ask, 'id' | 'sessionId'>; kind: string | null }, now: string): void {
-  const thread = t3ThreadOf(db, input.ask.sessionId);
+  // Only a reachable thread is told (reachableThread); any other session has nothing sent.
+  const thread = reachableThread(db, { sessionId: input.ask.sessionId }, now);
   const retryKey = `aiden:${askTag(input.ask.id)}`;
   // Told once per ask: a later item about the same ask (raised anew after its session's prompt) sends nothing more.
   if (thread === null || sendByRetryKey(db, retryKey) !== undefined) return;

@@ -6,7 +6,7 @@ import { SESSION_LANDING_LINE, sessionMandateLines } from '../core/lead-mandate'
 import { leadBriefingLine, one } from '../core/relay';
 import { clipLine } from '../core/step-ref';
 import { ASK_GLYPHS, askTag, glyphTitle, sessionDisplayTitle, type ProjectSnapshot, type Session, type TreeNode } from '../core/types';
-import { claimCommand } from '../lib/task-command';
+import { claimCommand, landingCommand } from '../lib/task-command';
 import { PLAN_EDIT_LINE, bodyLines, headerLine, leftUnfinishedOn, lineFor, openTasks, othersLine, parkedFocusLine, playbookLines, spanAgo, updateRules, type BriefingOptions } from './briefing';
 
 /*
@@ -89,9 +89,15 @@ export function unclaimedLines(snapshot: ProjectSnapshot, session: Session, now:
  * What a session in a project with a lead is told about it: the Lead line, the two mandate lines, and the Landing line when
  * Aiden has turned Landing on. None with no lead. The worker briefing and the claim's answer both print it.
  */
-export function leadLines(lead: string | null, landing: boolean): string[] {
-  return lead?.trim() ? [leadBriefingLine(lead), ...sessionMandateLines(one(lead)), ...(landing ? [SESSION_LANDING_LINE] : [])] : [];
+export function leadLines(lead: string | null, landing: boolean, cli?: string): string[] {
+  return lead?.trim()
+    ? [leadBriefingLine(lead), ...sessionMandateLines(one(lead)), ...(landing ? [SESSION_LANDING_LINE] : []), landingCheckLine(cli)]
+    : [];
 }
+
+/** Every session in a project with a lead asks the landing check before it lands (lead stage 1): a hold is Aiden's. */
+export const landingCheckLine = (cli?: string): string =>
+  `Before a merge, a deploy or a push, ask the landing check: ${landingCommand(cli === undefined ? {} : { cli })}. "Clear to land" lets it go; a hold is Aiden's: wait for his word.`;
 
 /** A worker's briefing in a scoped project, once it has claimed a step. */
 export function renderWorkerBriefing(snapshot: ProjectSnapshot, session: Session, now: number, cli?: string, landing = false): string {
@@ -101,7 +107,7 @@ export function renderWorkerBriefing(snapshot: ProjectSnapshot, session: Session
   const lines = [
     headerLine(snapshot, session.id),
     `Role: worker on #${session.focusNodeId}.`,
-    ...leadLines(lead, landing),
+    ...leadLines(lead, landing, cli),
     PLAN_EDIT_LINE,
     ...playbookLines(snapshot),
     ...updateRules({ sessionId: session.id, cli, mode: { scoped: true, orchestrator: false } }),

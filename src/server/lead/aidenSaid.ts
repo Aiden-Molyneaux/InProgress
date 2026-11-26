@@ -4,7 +4,7 @@ import { clipLine } from '../../core/step-ref';
 import type { Ctx, RecordEvent } from '../db/tx';
 import { logLeadEvent } from '../lead';
 import type { DeskItem } from '../repo/desk';
-import { DECISION_LINE_CUT, t3ThreadOnStep } from '../repo/deskBring';
+import { DECISION_LINE_CUT, reachableThread, t3ThreadOnStep } from '../repo/deskBring';
 import { addDecision } from '../repo/leadDecisions';
 import { intendSend } from '../repo/leadSends';
 import type { LeadTurn, TurnEffect } from '../repo/leadTurns';
@@ -55,7 +55,8 @@ export function applyAidenSaid(ctx: Ctx, turn: LeadTurn, item: DeskItem, record:
       saidWhere: 'desk',
       saidAt: now,
     });
-    const thread = item.nodeId === null ? null : t3ThreadOnStep(ctx, item.nodeId);
+    // Only a reachable thread is told (reachableThread); else the step's log says it.
+    const thread = item.nodeId === null ? null : reachableThread(ctx.db, { threadId: t3ThreadOnStep(ctx, item.nodeId) }, now);
     const left = words === undefined ? 'Aiden left this to the lead.' : `Aiden left this to the lead: "${words}".`;
     if (thread !== null) {
       intendSend(

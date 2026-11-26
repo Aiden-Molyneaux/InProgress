@@ -341,7 +341,9 @@ describe('an old question decided by the round, and undone (P1, P3, P6)', () => 
   function decideOld(state: 'ended' | 'idle', withSession = true) {
     const w = world();
     handleHookEvent(w.ctx, 's1', { event: 'start', source: 'startup', cwd: 'C:/personal/InProgress' });
+    // An ended old ask's session was last seen three days before: past reachableThread's two days.
     w.ctx.db.prepare("UPDATE sessions SET app = 't3', t3_thread_id = 'th_1', state = ? WHERE id = 's1'").run(state);
+    if (state === 'ended') w.ctx.db.prepare("UPDATE sessions SET last_seen_at = '2026-11-22T09:00:00.000Z' WHERE id = 's1'").run();
     const a = withSession ? raiseAsk(w.ctx, 'test', { nodeId: w.ip.step.id, kind: 'question', text: 'Which port?', sessionId: 's1' }) : w.ask(w.ip, 'Which port?', 3);
     leadAllow(w.ctx, w.ip.project.slug, 'Progresser', V, { switch: 'round', aidenWords: 'run the round' });
     leadOldAsks(w.ctx, w.ip.project.slug, 'Progresser', V);
@@ -355,7 +357,7 @@ describe('an old question decided by the round, and undone (P1, P3, P6)', () => 
   const logs = (ctx: Ctx, nodeId: number) => ctx.db.prepare('SELECT text FROM log_entries WHERE node_id = ? ORDER BY id').pluck().all(nodeId) as string[];
   const decision = (ctx: Ctx, item: number) => Number(/^DECIDE d(\d+)$/.exec(getDeskItem(ctx.db, item)!.outcome ?? '')![1]);
 
-  it("with its session ended: no relay to the old thread, the decision and its undo go in the step's log", async () => {
+  it("with its session last seen three days ago: no relay to the old thread, the decision and its undo go in the step's log", async () => {
     const w = decideOld('ended');
     w.r.kick(w.ip.project.id);
     await vi.waitFor(() => expect(getDeskItem(w.ctx.db, w.itemId)!.state).toBe('done'));

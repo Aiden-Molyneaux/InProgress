@@ -386,7 +386,7 @@ describe('install', () => {
     // Nothing could allow it, and another checkout's rules still go.
     expect(readSettings(dir).permissions.allow).toEqual(['Bash(git status)', ...STATIC_ALLOW_RULES]);
     expect(log).toContain(`Allow rules: ${STATIC_ALLOW_RULES.join(', ')}`);
-    expect(log.join('\n')).toMatch(/Left out the allow rules for the tasks, claim, ask, orchestrate, digest and outline commands: the repo path .*ip repo-.* holds a space/);
+    expect(log.join('\n')).toMatch(/Left out the allow rules for the tasks, claim, ask, orchestrate, digest, outline and landing commands: the repo path .*ip repo-.* holds a space/);
     expect(kitStatus({ repo: spaced, claudeDir: dir }).differs).not.toContain('settings');
     // The skill quotes the path, as the briefing does, so its command still runs (with a prompt).
     const skill = readFileSync(join(dir, 'skills', 'inprogress', 'SKILL.md'), 'utf8');
@@ -706,9 +706,9 @@ describe('kitStatus', () => {
 });
 
 describe('allow rules for every session command', () => {
-  it('are twelve: two tools for each of tasks, claim, ask, orchestrate, digest and outline', () => {
+  it('are fourteen: two tools for each of tasks, claim, ask, orchestrate, digest, outline and landing', () => {
     expect(cliAllowRules(repoCli(repo))).toEqual(taskRules);
-    expect(taskRules).toHaveLength(12);
+    expect(taskRules).toHaveLength(14);
     expect(cliAllowRules(repoCli('C:/My Repos/InProgress'))).toEqual([]);
   });
 

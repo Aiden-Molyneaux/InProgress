@@ -722,3 +722,24 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   Voice; a carry and its undo go only to a live session; the carry line names the ask. Deviations accepted: a held or
   "you decide" item's carry keeps the old line (no ask to name); a held item's carry is gated too. 2950 unit tests and
   35 smoke tests green.
+- Murr's re-check of 47b3232 (Opus): 3 majors: the "not ended" gate was too wide (a session waiting overnight is
+  marked ended after 12 hours with no hooks, so his morning answer would never reach it); the late answer in the
+  window still relayed to any thread; undoing a carried review answer re-raised the review even on a done or parked
+  step (a review of landed work; or a 400 that rolled back the whole undo). My call: one rule for every relay of his
+  words or a withdrawal: a thread is reachable when its session was seen in the last 48 hours, whatever its state.
+  Sent as G1 to G4; reviews brought past the five are blessed (a review is always his).
+- G1 to G3 (the task 17 Sev): `reachableThread`: a T3 thread may be told when its session was seen within 48 hours,
+  whatever its state; every relay of Aiden's words or a withdrawal goes through it (the carry, the late answer, the
+  undo withdrawals, the decided-question and old-ask relays; tellAidens and the aiden_said relay follow). An undone
+  review on a done, parked or dropped step (or under a parked one) withdraws the answer and its yeses and raises
+  nothing. 2953 unit tests green.
+- Item 4 of "What lands on Aiden's word" had not been built: the briefing's Landing and Lead lines. Plan said the
+  briefing (src/server/briefing.ts) tells every session to ask the landing check and which line is his go-ahead. Did,
+  inline: the Lead line (src/core/relay.ts) adds `A line that reads "Aiden's answer, carried by <lead>" is Aiden's own
+  answer in his words: act on it as his.`; every briefing in a project with a lead adds `Before a merge, a deploy or a
+  push, ask the landing check: node <cli> landing <step id> --action merge|deploy|push. "Clear to land" lets it go; a
+  hold is Aiden's: wait for his word.` (src/server/briefing-scoped.ts, where the Lead lines are made); `landing`
+  joins the CLI subcommands the installer allows, so the check runs without a permission prompt (src/lib/task-command.ts:
+  it only reads). The hold hook starts its `node *deploy*` handler for `landing <step> --action deploy` but holds
+  nothing (heldActions is empty for all three actions, checked). Because the briefing's lines live there, not in
+  briefing.ts.
