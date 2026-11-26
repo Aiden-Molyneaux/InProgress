@@ -852,3 +852,24 @@ Code at 9e3f13a, branch `lead-stage-1-desk`, nothing landed. Next, in order: rew
 scribe (r811 snapshot, a356's text); then Aiden's word: "ship it" on the six, "add web" or "leave it". Evidence for the
 last runs is in the results folder (scenes-after-four-fixes, check-3-evidence); the scratchpad may not survive the
 restart.
+
+## The guard, after Aiden's "one more look" (2026-11-26)
+
+- Aiden: "one more look. leave it." (no `Risk: web/**` line). Murr's look on 9232719..9e3f13a: four majors (a publish
+  changed by anything else in its command; git options or environment in front of a push; publishes and deploys never
+  held by their spelling; a deploy from a worktree read as a deploy of main). None a regression against today.
+- Plan: `2026-11-26-lead-stage-1-guard-fixes.md`. Part A (52e01b4): a key only for what can be read exactly; force push
+  held and keyed apart; a deploy only from the main checkout on main, clean; rollback held. Part B (2ff2634): every
+  spelling starts the hold; proved under the real Claude Code (hooks/evidence-run3-guard.md).
+- Murr on both: one blocker (`node <worktree>/scripts/deploy.mjs` from the main checkout read as the deploy), two
+  majors (a push behind a commit read before the commit; a rollback could take a yes). Plan:
+  `2026-11-26-lead-stage-1-guard-fixes-2.md`, built in b48cb71: a held action behind anything but folder changes and a
+  few reads gets a split answer (run it on its own, no card); the deploy script must be the checkout's own; a rollback
+  never takes a yes. Proved again (hooks/evidence-run4-guard2.md, evidence-run4-split.md).
+- Scope rule from here (decided): the guard covers what a session does by accident or in the ordinary way; deliberate
+  workarounds (an alias, PATH, HOME, a settings file, `git fetch . a:main`) are out of scope under Aiden's "forget
+  security for now". Known spellings that start no hook: `env X=y npm publish`, `npm run --silent deploy`, `npm exec
+  npm publish`, a quoted program path with a space, `bun publish`.
+- Murr's last look on b48cb71: sound; four minors fixed inline in the commit after it (a later action that would not
+  run alone splits the line at its first; a fetch into a branch is no read; the split text says to run the commands in
+  front first; `$r = git push` read as git), no reviewer has read those lines. 3203 unit and 35 smoke pass.
