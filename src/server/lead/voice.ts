@@ -230,3 +230,32 @@ export function intendHeldLine(db: DB, input: { projectId: number; itemId: numbe
   intendLine(db, { projectId: input.projectId, itemId: input.itemId, retryKey: `voice:held:${input.itemId}`, body: heldVoiceLine(input) }, now);
 }
 
+
+/**
+ * An old ask's line (task 17, scene 6): the project, where the ask is in that project's old asks, its step, its age in
+ * whole days, then the lead's reading when one is stored, and the words that ask for his answer. Retry key
+ * `voice:old:<item id>`.
+ */
+export function oldAskVoiceLine(input: { projectName: string; index: number; total: number; stepId: number; stepTitle: string | null; days: number; reading: string | null }): string {
+  const reading = input.reading === null || input.reading.trim() === '' ? '' : `${sentenceOf(input.reading)} `;
+  return `${clipLine(input.projectName, 80)}, ${input.index} of ${input.total}: ${stepRef(input.stepId, input.stepTitle ?? undefined)}, ${input.days} day${input.days === 1 ? '' : 's'} old.\n${reading}Say your answer.`;
+}
+
+/** The reading as a sentence: a period added when it ends in none of . ! or ?. */
+const sentenceOf = (text: string): string => {
+  const t = text.trim();
+  return /[.!?]$/.test(t) ? t : `${t}.`;
+};
+
+/** The line that says the old asks are all answered. Retry key `voice:old:done:<date>`. */
+export const OLD_ASKS_DONE_LINE = 'The old asks are done.';
+
+/** Intends an old ask's voice line, inside the caller's write. */
+export function intendOldAskLine(db: DB, input: { projectId: number; itemId: number; body: string }, now: string): void {
+  intendLine(db, { projectId: input.projectId, itemId: input.itemId, retryKey: `voice:old:${input.itemId}`, body: input.body }, now);
+}
+
+/** Intends the line that the old asks are done, once a day (retry key `voice:old:done:<date>`), inside the caller's write. */
+export function intendOldAsksDoneLine(db: DB, input: { projectId: number; date: string }, now: string): void {
+  intendLine(db, { projectId: input.projectId, retryKey: `voice:old:done:${input.date}`, body: OLD_ASKS_DONE_LINE }, now);
+}

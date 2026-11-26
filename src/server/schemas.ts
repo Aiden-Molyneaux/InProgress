@@ -274,6 +274,12 @@ export const leadAnswerBody = z
 export const leadStampBody = z.object({ ...leadWho, sendId: leadId }).strict();
 /** `lead desk-add`: Aiden's "you decide" on a step, for the round. */
 export const leadDeskAddBody = z.object({ ...leadWho, stepId: leadId, aidenWords: z.string().trim().min(1).max(2_000) }).strict();
+/** `lead old-asks <project>`: the project's old asks onto the desk. */
+export const leadOldAsksBody = z.object({ ...leadWho }).strict();
+/** `lead old-asks next [count]`: the next old asks waiting on Aiden, to the Voice; five unless fewer are named. */
+export const leadOldAsksNextBody = z.object({ ...leadWho, count: z.number().int().min(1).max(5).optional() }).strict();
+/** `lead old-asks reading <project> <ask> <text>`: the lead's reading of an old ask, shown in its Voice line. */
+export const leadOldAsksReadingBody = z.object({ ...leadWho, askId: leadId, text: z.string().trim().min(1).max(2_000) }).strict();
 /** `lead decide`: the question, the lead's answer and why, Aiden's words when he told the lead to decide, and the decision's kind (technical unless named). */
 export const leadDecideBody = z
   .object({

@@ -434,12 +434,12 @@ describe("inprogress lead's commands", () => {
 
   it('lists the reads and the commands in the usage, one line each (intent has a read and a write form)', () => {
     const lines = LEAD_USAGE.split('\n');
-    expect(lines).toHaveLength(26);
-    expect(lines.slice(1).map((l) => l.trim().split(' ')[2])).toEqual(['rules', 'brief', 'step', 'resource', 'answer', 'seen', 'desk-add', 'decide', 'undo', 'set', 'park', 'drop', 'promise', 'kept', 'intent', 'intent', 'relay', 'start', 'allow', 'disallow', 'desk', 'morning', 'week', 'counts', 'import-usage']);
-    expect(lines[18]).toBe('  inprogress lead start <project> <step id> [--aiden <words>] --as <name> --instructions <n>');
-    expect(lines[19]).toBe('  inprogress lead allow <project> starts|landing|round --aiden <words> --as <name> --instructions <n>');
-    expect(lines[20]).toBe('  inprogress lead disallow <project> starts|landing|round [--aiden <words>] --as <name> --instructions <n>');
-    expect(lines[21]).toBe('  inprogress lead desk <project> [--json]');
+    expect(lines).toHaveLength(29);
+    expect(lines.slice(1).map((l) => l.trim().split(' ')[2])).toEqual(['rules', 'brief', 'step', 'resource', 'answer', 'seen', 'desk-add', 'old-asks', 'old-asks', 'old-asks', 'decide', 'undo', 'set', 'park', 'drop', 'promise', 'kept', 'intent', 'intent', 'relay', 'start', 'allow', 'disallow', 'desk', 'morning', 'week', 'counts', 'import-usage']);
+    expect(lines[21]).toBe('  inprogress lead start <project> <step id> [--aiden <words>] --as <name> --instructions <n>');
+    expect(lines[22]).toBe('  inprogress lead allow <project> starts|landing|round --aiden <words> --as <name> --instructions <n>');
+    expect(lines[23]).toBe('  inprogress lead disallow <project> starts|landing|round [--aiden <words>] --as <name> --instructions <n>');
+    expect(lines[24]).toBe('  inprogress lead desk <project> [--json]');
     expect(lines[3]).toBe('  inprogress lead step <project> <step id> --as <name> --instructions <n>');
     expect(lines[4]).toBe('  inprogress lead resource <project> <document id> --as <name> --instructions <n>');
     expect(lines[5]).toBe(
@@ -447,11 +447,14 @@ describe("inprogress lead's commands", () => {
     );
     expect(lines[6]).toBe('  inprogress lead seen <project> <send id> --as <name> --instructions <n>');
     expect(lines[7]).toBe('  inprogress lead desk-add <project> --step <step id> --words <his words> --as <name> --instructions <n>');
-    expect(lines[8]).toBe('  inprogress lead decide <project> <ask id> --answer <text> --reason <text> [--kind product|technical] [--aiden <words>] --as <name> --instructions <n>');
-    expect(lines[9]).toBe('  inprogress lead undo <project> <decision> --aiden <words> [--reason <text>] --as <name> --instructions <n>');
-    expect(lines[15]).toBe('  inprogress lead intent <project> --as <name> --instructions <n>');
-    expect(lines[16]).toBe('  inprogress lead intent <project> <file | -> --as <name> --instructions <n>');
-    expect(lines[17]).toBe('  inprogress lead relay <project> <step id> <message | -> --as <name> --instructions <n>');
+    expect(lines[8]).toBe('  inprogress lead old-asks <project> | --all --as <name> --instructions <n>');
+    expect(lines[9]).toBe('  inprogress lead old-asks next [count, 1 to 5] --as <name> --instructions <n>');
+    expect(lines[10]).toBe('  inprogress lead old-asks reading <project> <ask id> <text | -> --as <name> --instructions <n>');
+    expect(lines[11]).toBe('  inprogress lead decide <project> <ask id> --answer <text> --reason <text> [--kind product|technical] [--aiden <words>] --as <name> --instructions <n>');
+    expect(lines[12]).toBe('  inprogress lead undo <project> <decision> --aiden <words> [--reason <text>] --as <name> --instructions <n>');
+    expect(lines[18]).toBe('  inprogress lead intent <project> --as <name> --instructions <n>');
+    expect(lines[19]).toBe('  inprogress lead intent <project> <file | -> --as <name> --instructions <n>');
+    expect(lines[20]).toBe('  inprogress lead relay <project> <step id> <message | -> --as <name> --instructions <n>');
   });
 });
 
@@ -604,6 +607,33 @@ describe('inprogress lead relay', () => {
     ]);
     // An answer reads git on the server: it waits as long as a relay.
     expect(sent.filter((s) => s.url.endsWith('/answer')).map((s) => s.timeoutMs)).toEqual([RELAY_TIMEOUT_MS, RELAY_TIMEOUT_MS]);
+  });
+
+  it('posts old-asks to its project, next with no project and an optional count, and reading with the ask and its text', async () => {
+    const sent = stubbed(async () => new Response(JSON.stringify({ text: 'Queued 5 old asks for the Voice; 2 remain.' }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    try {
+      expect(await run(['old-asks', 'glimpse', ...WHO])).toMatchObject({ code: 0 });
+      expect(await run(['old-asks', '--all', ...WHO])).toMatchObject({ code: 0 });
+      expect(await run(['old-asks', 'glimpse', '--all', ...WHO])).toEqual({ code: 1, lines: ['--all takes no project: glimpse', LEAD_USAGE], reads: 0 });
+      expect(await run(['old-asks', ...WHO])).toEqual({ code: 1, lines: ['Missing <project>', LEAD_USAGE], reads: 0 });
+      expect(await run(['old-asks', 'next', ...WHO])).toEqual({ code: 0, lines: ['Queued 5 old asks for the Voice; 2 remain.'], reads: 0 });
+      expect(await run(['old-asks', 'next', '3', ...WHO])).toMatchObject({ code: 0 });
+      expect(await run(['old-asks', 'reading', 'glimpse', 'a12', '-', ...WHO], 'The lead would close it.')).toMatchObject({ code: 0, reads: 1 });
+      expect(await run(['old-asks', 'next', '6', ...WHO])).toEqual({ code: 1, lines: ['The count is a whole number from 1 to 5, not "6"', LEAD_USAGE], reads: 0 });
+      expect(await run(['old-asks', 'glimpse', 'extra', ...WHO])).toEqual({ code: 1, lines: ['Unexpected extra', LEAD_USAGE], reads: 0 });
+      expect(await run(['old-asks', 'reading', 'glimpse', 'a12', ...WHO])).toEqual({ code: 1, lines: ['old-asks reading needs <project> <ask id> <text>', LEAD_USAGE], reads: 0 });
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+    const who = { as: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION };
+    expect(sent.map((s) => [s.url.replace(conn.baseUrl, ''), s.body])).toEqual([
+      ['/api/lead/glimpse/old-asks', who],
+      ['/api/lead/old-asks/all', who],
+      ['/api/lead/old-asks/next', who],
+      ['/api/lead/old-asks/next', { ...who, count: 3 }],
+      ['/api/lead/glimpse/old-asks/reading', { ...who, askId: 12, text: 'The lead would close it.' }],
+    ]);
   });
 
   it('posts start with its step and optional words, waiting RELAY_TIMEOUT_MS, and says a thread may have been started when no answer comes back', async () => {

@@ -614,3 +614,22 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   until the run ended, past Claude Code's default 60, and the command did not run. After the first push was refused
   ("do not retry"), the model treated the other push forms as retries and skipped them, and the PowerShell run stopped
   after five: the harness gained `--each` (one session per command), now running on the 35 not asked.
+- The hook proof's second run (`--each`, one claude session per command, on the 35 the first run did not reach): every
+  one denied before it ran, in both shells: the nine push forms (`git -C`, `-c`, `--no-pager`, `-P`, `-p`, `git.exe`,
+  the full `git.exe` path through the mid-pattern `*git.exe *`, the slash and backslash paths), and in PowerShell the
+  three publishes, the thirteen deploy, release and rollback forms (`node *deploy*` among them) and `gh pr merge`.
+  Nothing ran (the remote's and the repo's sha unchanged, no marker file). The one exception: in Bash the backslash
+  path is mangled by bash itself into a program that does not exist, so it can never run there. With both runs, every
+  hold family of both shells has started its handler under the real Claude Code and denied its command. Evidence:
+  scratchpad hookproof-real/evidence.md and hookproof-each/evidence.md, to be copied beside the results page.
+
+## Task 17's mechanism, built before landing
+
+- Plan said task 17 is after landing, the first real use. Did: its mechanism now (`lead old-asks <slug>`, `lead
+  old-asks next <n>`, `lead old-asks reading`), so scene 6 is shown on the copy with the others. Because the done-when
+  asks for every scene on a check surface before landing, and scene 6 needs it. The real use (the 41 old asks) stays
+  after landing.
+- By an Opus Sev: 13 tests, 2917 unit tests green. Deviations accepted: "1 day old"; the reading is also keyed by the
+  ask id column; a count outside 1 to 5 is refused; `next` covers only projects where `lead answer --send` can carry
+  his reply (not archived, not C:\work, no lead or this lead); the done line goes only when no old-ask line still
+  waits. Calls: a batch is at most five less those waiting; rules version 7 tells the lead how to run the old asks.

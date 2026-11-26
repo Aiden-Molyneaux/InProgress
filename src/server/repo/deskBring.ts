@@ -58,12 +58,12 @@ export function t3ThreadOnStep(ctx: Ctx, nodeId: number): string | null {
   return thread ?? null;
 }
 
-/** The desk item kinds whose ref is an ask id (old_ask joins them with task 17). */
-const ASK_KINDS: ReadonlySet<string> = new Set(['question', 'permission']);
+/** The desk item kinds whose ref is an ask id: an old ask's too (task 17), so a reply to its Voice line finds its ask. */
+const ASK_KINDS: ReadonlySet<string> = new Set(['question', 'permission', 'old_ask']);
 
-/** The ask a question or permission item is about, read in this write; undefined when it is gone (its project deleted, or the row). */
+/** The ask a question, permission or old_ask item is about, read in this write; undefined when it is gone (its project deleted, or the row). */
 export function askOf(ctx: Ctx, item: DeskItem): Ask | undefined {
-  // Only a question or permission item's ref is an ask id: an unknown_send's is a send id, a stopped item's a session.
+  // Only a question, permission or old_ask item's ref is an ask id: an unknown_send's is a send id, a stopped item's a session.
   if (!ASK_KINDS.has(item.kind)) return undefined;
   if (!/^\d+$/.test(item.ref)) return undefined;
   const id = Number(item.ref);

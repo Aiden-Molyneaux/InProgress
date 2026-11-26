@@ -14,6 +14,9 @@ export const LEAD_USAGE = [
   `  inprogress lead answer <project> <ask id> | --send <send id> --aiden <words> [--says <text>] [--where voice|thread] [--said-at <iso time>] [--shown r12,r13] [--yes merge|deploy|push ...] ${WHO}`,
   `  inprogress lead seen <project> <send id> ${WHO}`,
   `  inprogress lead desk-add <project> --step <step id> --words <his words> ${WHO}`,
+  `  inprogress lead old-asks <project> | --all ${WHO}`,
+  `  inprogress lead old-asks next [count, 1 to 5] ${WHO}`,
+  `  inprogress lead old-asks reading <project> <ask id> <text | -> ${WHO}`,
   `  inprogress lead decide <project> <ask id> --answer <text> --reason <text> [--kind product|technical] [--aiden <words>] ${WHO}`,
   `  inprogress lead undo <project> <decision> --aiden <words> [--reason <text>] ${WHO}`,
   `  inprogress lead set <project> quiet|voice-cap <value> [--aiden <words>] ${WHO}`,
@@ -75,6 +78,8 @@ interface CommandSpec {
   noInstructions?: boolean;
   /** The command needs neither --as nor --instructions: a read with no lead check. */
   noWho?: boolean;
+  /** A bare flag that makes the project optional: with it the command names none. */
+  noProjectWith?: string;
 }
 
 const COMMANDS: Record<string, CommandSpec> = {
@@ -85,6 +90,8 @@ const COMMANDS: Record<string, CommandSpec> = {
   answer: { positionals: 1, minPositionals: 0, flags: ['--aiden', '--says', '--where', '--said-at', '--shown', '--yes', '--send'] },
   seen: { positionals: 1, flags: [] },
   'desk-add': { positionals: 0, flags: ['--step', '--words'] },
+  // `old-asks <project>`, `old-asks next [count]` (no project), `old-asks reading <project> <ask> <text>`: the first word decides.
+  'old-asks': { positionals: 3, minPositionals: 0, flags: [], bools: ['--all'], noProjectWith: '--all' },
   decide: { positionals: 1, flags: ['--answer', '--reason', '--kind', '--aiden'] },
   undo: { positionals: 1, flags: ['--aiden', '--reason'] },
   set: { positionals: 2, flags: ['--aiden'] },
@@ -137,12 +144,13 @@ function parseArgs(args: string[], spec: CommandSpec): Parsed | { error: string 
     else positionals.push(arg);
   }
   const [project, ...rest] = positionals;
-  if (project === undefined) return { error: 'Missing <project>' };
+  const projectless = spec.noProjectWith !== undefined && bools.has(spec.noProjectWith);
+  if (project === undefined && !projectless) return { error: 'Missing <project>' };
   if (rest.length < (spec.minPositionals ?? spec.positionals)) return { error: 'Missing a value after <project>' };
   if (rest.length > spec.positionals) return { error: `Unexpected ${rest[spec.positionals]}` };
   if (as === undefined && !spec.noWho) return { error: 'Missing --as <name>' };
   if (instructions === undefined && !spec.noInstructions && !spec.noWho) return { error: 'Missing --instructions <n>' };
-  return { project, positionals: rest, flags, bools, as: as ?? '', instructions: instructions ?? 0 };
+  return { project: project ?? '', positionals: rest, flags, bools, as: as ?? '', instructions: instructions ?? 0 };
 }
 
 /** An ask as the brief names it, `a7`, or as a bare number, `7`. */
@@ -175,7 +183,7 @@ const valueOf = (text: string | undefined): Value | undefined => (text === undef
  * A command's body, with `-` values still to read: the fields as the route takes them, each a Value or a plain number; or
  * what is wrong with the arguments. `file` is the intent file to read, when it is not `-`.
  */
-type Draft = { fields: Record<string, Value | number | (string | number)[]>; file?: string } | { error: string };
+type Draft = { fields: Record<string, Value | number | (string | number)[]>; file?: string; route?: string } | { error: string };
 
 function draft(command: string, p: Parsed): Draft {
   const [first] = p.positionals;
@@ -298,6 +306,29 @@ function draft(command: string, p: Parsed): Draft {
       if (m === null || Number(m[1]) === 0) return { error: `${first} is not a send: give it as s42 or 42` };
       return { fields: { sendId: Number(m[1]) } };
     }
+    case 'old-asks': {
+      // `--all` names no project: every personal project the lead may carry his answers in.
+      if (p.bools.has('--all')) {
+        if (p.project !== '') return { error: `--all takes no project: ${p.project}` };
+        return { fields: {}, route: '/api/lead/old-asks/all' };
+      }
+      // `next` takes no project: it reads the old asks of all of Aiden's personal projects.
+      if (p.project === 'next') {
+        if (p.positionals.length > 1) return { error: `Unexpected ${p.positionals[1]}` };
+        if (first === undefined) return { fields: {}, route: '/api/lead/old-asks/next' };
+        if (!/^[1-5]$/.test(first.trim())) return { error: `The count is a whole number from 1 to 5, not ${JSON.stringify(first)}` };
+        return { fields: { count: Number(first.trim()) }, route: '/api/lead/old-asks/next' };
+      }
+      if (p.project === 'reading') {
+        const [slug, ask, text] = p.positionals;
+        if (slug === undefined || ask === undefined || text === undefined) return { error: 'old-asks reading needs <project> <ask id> <text>' };
+        const id = askId(ask);
+        if (id === undefined) return { error: `${ask} is not an ask: give it as a7 or 7` };
+        return { fields: { askId: id, text: valueOf(text)! }, route: `/api/lead/${encodeURIComponent(slug)}/old-asks/reading` };
+      }
+      if (first !== undefined) return { error: `Unexpected ${first}` };
+      return { fields: {} };
+    }
     case 'desk-add': {
       const step = p.flags.get('--step');
       const id = step === undefined ? undefined : stepId(step);
@@ -407,7 +438,8 @@ export async function runLead(args: string[], out: (line: string) => void, o: Co
   const path = `/api/lead/${encodeURIComponent(p.project)}`;
   try {
     if (payload !== undefined) {
-      const res = await client.post<{ text: string }>(`${path}/${command === 'seen' ? 'stamp' : command}`, payload, command === 'relay' || command === 'start' || command === 'answer' ? { timeoutMs: RELAY_TIMEOUT_MS } : {});
+      const route = body !== undefined && !('error' in body) && body.route !== undefined ? body.route : `${path}/${command === 'seen' ? 'stamp' : command}`;
+      const res = await client.post<{ text: string }>(route, payload, command === 'relay' || command === 'start' || command === 'answer' ? { timeoutMs: RELAY_TIMEOUT_MS } : {});
       out(res.text);
       return 0;
     }

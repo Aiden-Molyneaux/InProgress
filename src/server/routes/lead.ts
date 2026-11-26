@@ -18,7 +18,8 @@ import { createSender, type Sender } from '../lead/sends';
 import { T3ArgumentRefused, T3Unavailable, t3List, t3Send, t3Show } from '../t3';
 import { readLeadResource, readLeadStep } from '../lead-step';
 import { renderLeadBrief } from '../lead-text';
-import { leadAllowBody, leadDisallowBody, leadAnswerBody, leadBriefQuery, leadStuckBody, leadDecideBody, leadUndoBody, leadSetBody, leadImportUsageBody, leadCountsQuery, leadDropBody, leadIntentBody, leadKeptBody, leadLandingBody, leadParkBody, leadPromiseBody, leadReadQuery, leadRelayBody, leadStartBody, leadRulesQuery, leadSeenBody, leadStampBody, leadDeskAddBody } from '../schemas';
+import { leadAllowBody, leadDisallowBody, leadAnswerBody, leadBriefQuery, leadStuckBody, leadDecideBody, leadUndoBody, leadSetBody, leadImportUsageBody, leadCountsQuery, leadDropBody, leadIntentBody, leadKeptBody, leadLandingBody, leadParkBody, leadPromiseBody, leadReadQuery, leadRelayBody, leadStartBody, leadRulesQuery, leadSeenBody, leadStampBody, leadDeskAddBody, leadOldAsksBody, leadOldAsksNextBody, leadOldAsksReadingBody } from '../schemas';
+import { leadOldAskReading, leadOldAsks, leadOldAsksAll, leadOldAsksNext } from '../lead/oldAsks';
 import { VOICE_NOT_SET_UP, voiceSetUp } from '../lead/voice';
 import { heldScope, leadAnswerItem, readSessionYeses, SAID_AT_NEEDED, voiceTarget } from '../lead/carry';
 import { heldActions, playbookHeldLines } from '../../core/hold';
@@ -237,6 +238,23 @@ export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken:
   app.post('/api/lead/:ref/desk-add', { onRequest: requireToken }, async (req) => {
     const { as, instructions, ...input } = leadDeskAddBody.parse(req.body);
     return leadDeskAdd(ctx, ref(req), as, instructions, input);
+  });
+  // The old asks (task 17): onto the desk, the lead's reading of one, and the next few to the Voice (across his projects).
+  app.post('/api/lead/:ref/old-asks', { onRequest: requireToken }, async (req) => {
+    const { as, instructions } = leadOldAsksBody.parse(req.body);
+    return leadOldAsks(ctx, ref(req), as, instructions);
+  });
+  app.post('/api/lead/:ref/old-asks/reading', { onRequest: requireToken }, async (req) => {
+    const { as, instructions, ...input } = leadOldAsksReadingBody.parse(req.body);
+    return leadOldAskReading(ctx, ref(req), as, instructions, input);
+  });
+  app.post('/api/lead/old-asks/all', { onRequest: requireToken }, async (req) => {
+    const { as, instructions } = leadOldAsksBody.parse(req.body);
+    return leadOldAsksAll(ctx, as, instructions);
+  });
+  app.post('/api/lead/old-asks/next', { onRequest: requireToken }, async (req) => {
+    const { as, instructions, count } = leadOldAsksNextBody.parse(req.body);
+    return leadOldAsksNext(ctx, as, instructions, count);
   });
   app.post('/api/lead/:ref/decide', { onRequest: requireToken }, async (req) => {
     const { as, instructions, ...input } = leadDecideBody.parse(req.body);

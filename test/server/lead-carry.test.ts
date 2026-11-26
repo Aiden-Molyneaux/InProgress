@@ -96,7 +96,7 @@ describe('W1: a yes only for the actions his words okayed', () => {
     expect(text).toContain('lead answer ingame --send <send number>');
     expect(text).toContain('pass his word with lead answer --send s42');
     // W11: rule 4 says plainly where he acts.
-    expect(text).toContain("you act only in it, and you read nothing under C:\\work or in any other project. The one exception: you may carry Aiden's answer, in his words, on an ask of any of his personal projects, never on one under C:\\work.");
+    expect(text).toContain("you act only in it, and you read nothing under C:\\work or in any other project. The one exception: you may carry Aiden's answer, in his words, on an ask of any of his personal projects, and put their old asks on the desk with lead old-asks --all, which decides nothing; never on one under C:\\work.");
   });
 });
 
