@@ -82,7 +82,11 @@ export function inQuiet(minute: number, q: { from: number; to: number }): boolea
 /** Where the Voice's day starts: the latest end of quiet hours at or before now. */
 export function voiceDayStart(now: string, quietTo: number): string {
   const end = quietEndToday(now, quietTo);
-  return end <= now ? end : new Date(Date.parse(end) - 24 * 60 * 60 * 1000).toISOString();
+  if (end <= now) return end;
+  // One calendar day back, at the same local time: a day with a clock change is not 24 hours long.
+  const d = new Date(end);
+  d.setDate(d.getDate() - 1);
+  return d.toISOString();
 }
 
 /** How many POSTs the project's lines made since `since`: lines that went together share their done time. */
@@ -115,28 +119,54 @@ export interface VoiceOptions {
  * 5xx or a network failure. A 2xx moves them all to done with the status. Any other status throws a plain error, so the
  * sender looks the line up, and, as a line to the Voice cannot be found, it becomes unknown with an unknown_send item.
  */
+/**
+ * Whether the project of `send` has lines ready to go: the webhook's config and the lines, or why they wait (not set up,
+ * quiet hours, still gathering, past the day's cap). A read. A webhook file that does not read throws SendWaits.
+ */
+export function voiceReadiness(ctx: Ctx, home: string, send: LeadSend): { wait: string } | { config: VoiceConfig; lines: LeadSend[] } {
+  const config = readVoiceConfig(home);
+  if (config === undefined) return { wait: 'the Voice is not set up' };
+  const now = ctx.now();
+  const quiet = quietHours(ctx.db, send.projectId);
+  const local = new Date(now);
+  if (inQuiet(local.getHours() * 60 + local.getMinutes(), quiet)) return { wait: 'quiet hours' };
+  const lines = (ctx.db
+    .prepare("SELECT id FROM lead_sends WHERE project_id = ? AND kind = 'voice_line' AND state = 'intended' AND (result IS NULL OR id = ?) ORDER BY created_at, id")
+    .pluck()
+    .all(send.projectId, send.id) as number[]).flatMap((id) => getSend(ctx.db, id) ?? []);
+  if (lines.length === 0) return { wait: 'no line to send' };
+  const morning = lines.some(isMorningLine);
+  const oldest = Math.min(...lines.map((l) => Date.parse(l.createdAt)));
+  if (!morning && Date.parse(now) - oldest < VOICE_GATHER_MS) return { wait: 'gathering' };
+  if (!morning && voicePostsSince(ctx.db, send.projectId, voiceDayStart(now, quiet.to)) >= voiceCap(ctx.db, send.projectId)) {
+    return { wait: "past the day's cap: the lines wait for the morning" };
+  }
+  return { config, lines };
+}
+
+/** The sender's two Voice deps: whether a project's lines are ready (asked before anything is written), and the webhook. */
+export function createVoice(ctx: Ctx, opts: VoiceOptions): { ready: (send: LeadSend) => boolean; webhook: (send: LeadSend) => Promise<string> } {
+  return {
+    ready: (send) => {
+      try {
+        return !('wait' in voiceReadiness(ctx, opts.home, send));
+      } catch {
+        // A webhook file that does not read: the webhook runs, and the sender logs why the line waits.
+        return true;
+      }
+    },
+    webhook: createVoiceWebhook(ctx, opts),
+  };
+}
+
 export function createVoiceWebhook(ctx: Ctx, opts: VoiceOptions): (send: LeadSend) => Promise<string> {
   const doFetch = opts.fetch ?? fetch;
   return async (send) => {
-    const config = readVoiceConfig(opts.home);
-    if (config === undefined) throw new SendWaits('the Voice is not set up', true);
+    const ready = voiceReadiness(ctx, opts.home, send);
+    if ('wait' in ready) throw new SendWaits(ready.wait, true);
+    const { config, lines } = ready;
     // Never let the address or the key reach a log line or an error.
     const scrub = (text: string): string => text.split(config.url).join("the Voice's webhook").split(config.key).join('[key]');
-    const now = ctx.now();
-    const quiet = quietHours(ctx.db, send.projectId);
-    const local = new Date(now);
-    if (inQuiet(local.getHours() * 60 + local.getMinutes(), quiet)) throw new SendWaits('quiet hours', true);
-    const lines = (ctx.db
-      .prepare("SELECT id FROM lead_sends WHERE project_id = ? AND kind = 'voice_line' AND state = 'intended' AND (result IS NULL OR id = ?) ORDER BY created_at, id")
-      .pluck()
-      .all(send.projectId, send.id) as number[]).flatMap((id) => getSend(ctx.db, id) ?? []);
-    if (lines.length === 0) throw new SendWaits('no line to send', true);
-    const morning = lines.some(isMorningLine);
-    const oldest = Math.min(...lines.map((l) => Date.parse(l.createdAt)));
-    if (!morning && Date.parse(now) - oldest < VOICE_GATHER_MS) throw new SendWaits('gathering', true);
-    if (!morning && voicePostsSince(ctx.db, send.projectId, voiceDayStart(now, quiet.to)) >= voiceCap(ctx.db, send.projectId)) {
-      throw new SendWaits("past the day's cap: the lines wait for the morning", true);
-    }
     const others = lines.filter((l) => l.id !== send.id).map((l) => l.id);
     // The rest are tried with this one: written before the POST, so a restart looks them up rather than sending them again.
     write(ctx, ACTOR, () => others.forEach((id) => markTrying(ctx.db, id, true)));

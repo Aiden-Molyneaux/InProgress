@@ -26,7 +26,58 @@ export interface Ctx {
 }
 
 export function createCtx(db: DB, now: () => string = () => new Date().toISOString()): Ctx {
-  return { db, bus: new EventBus(), now };
+  const ctx: Ctx = { db, bus: new EventBus(), now };
+  watchDeskWrites(db);
+  ctxByDb.set(db, ctx);
+  return ctx;
+}
+
+/** The context made for each database: flushDesk writes through it. */
+const ctxByDb = new WeakMap<DB, Ctx>();
+/** The databases whose desk writes are watched (the temp table and triggers exist on the connection). */
+const deskWatched = new WeakSet<DB>();
+
+/**
+ * Watches the desk on this connection: temp triggers note the project of every desk item inserted, or whose state or
+ * due_at changes, whoever writes it (a repo function, a bulk UPDATE, the runner's own transactions). write() turns the
+ * notes into one `project.updated` (changes: { desk: true }) per project, so an open window reloads its desk.
+ */
+function watchDeskWrites(db: DB): void {
+  if (deskWatched.has(db)) return;
+  try {
+    db.exec(`
+      CREATE TEMP TABLE IF NOT EXISTS desk_touched (project_id INTEGER NOT NULL);
+      CREATE TEMP TRIGGER IF NOT EXISTS desk_touched_insert AFTER INSERT ON main.desk_items
+        BEGIN INSERT INTO desk_touched (project_id) VALUES (NEW.project_id); END;
+      CREATE TEMP TRIGGER IF NOT EXISTS desk_touched_update AFTER UPDATE OF state, due_at ON main.desk_items
+        WHEN OLD.state IS NOT NEW.state OR OLD.due_at IS NOT NEW.due_at
+        BEGIN INSERT INTO desk_touched (project_id) VALUES (NEW.project_id); END;
+    `);
+    deskWatched.add(db);
+  } catch (err) {
+    // A database with no desk yet (one opened before its migrations): there is nothing to watch, and no event to miss.
+    if (!(err instanceof Error) || !/no such table/i.test(err.message)) throw err;
+  }
+}
+
+/** The projects whose desk changed since the last drain, emptied. Read inside a transaction. */
+function drainDesk(db: DB): number[] {
+  if (!deskWatched.has(db)) return [];
+  const ids = db.prepare('SELECT DISTINCT project_id FROM temp.desk_touched ORDER BY project_id').pluck().all() as number[];
+  if (ids.length) db.prepare('DELETE FROM temp.desk_touched').run();
+  return ids;
+}
+
+/**
+ * For a desk change made in a transaction of its own, not in write() (the runner's lease, apply, fail and reopen): records
+ * and delivers its `project.updated` events now, in a write of their own. Inside a transaction it does nothing: the
+ * enclosing write() records them.
+ */
+export function flushDesk(db: DB): void {
+  const ctx = ctxByDb.get(db);
+  if (ctx === undefined || db.inTransaction || !deskWatched.has(db)) return;
+  if (db.prepare('SELECT 1 FROM temp.desk_touched LIMIT 1').get() === undefined) return;
+  write(ctx, 'system', () => undefined);
 }
 
 /** The ISO time `ms` before the context's clock: the cutoff for "stopped less than this long ago". */
@@ -59,12 +110,15 @@ export function write<T>(ctx: Ctx, actor: string, fn: (record: RecordEvent) => T
     'INSERT INTO events (ts, project_id, actor, type, entity, entity_id, data) VALUES (?, ?, ?, ?, ?, ?, ?)',
   );
   const run = ctx.db.transaction((): T => {
-    const result = fn((e) => {
+    const record: RecordEvent = (e) => {
       const ts = ctx.now();
       const data = e.data ?? {};
       const info = insert.run(ts, e.projectId, actor, e.type, e.entity, String(e.entityId), JSON.stringify(data));
       pending.push({ id: Number(info.lastInsertRowid), ts, projectId: e.projectId, actor, type: e.type, entity: e.entity, entityId: String(e.entityId), data });
-    });
+    };
+    const result = fn(record);
+    // Every project whose desk this write changed (an item made, moved, or given a new due time): one event each.
+    for (const projectId of drainDesk(ctx.db)) record({ projectId, type: 'project.updated', entity: 'project', entityId: projectId, data: { changes: { desk: true } } });
     const projectIds = [...new Set(pending.map((e) => e.projectId).filter((id): id is number => id !== null))];
     if (projectIds.length && ctx.reconcile) {
       const reconcile = ctx.reconcile;

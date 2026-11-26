@@ -52,6 +52,9 @@ export function AskActions({ ask, area }: { ask: Pick<Ask, 'id' | 'text'>; area:
     setBusy(false);
     // A sent or cleared ask strikes through until the snapshot drops it; the panel is the element holding the ask's id.
     if (result === 'ok') {
+      // The same ask can show in two places (its Needs me card and a "The lead is behind" row): every copy is struck, so a focus
+      // walk passes over the other copy whichever one was answered.
+      document.querySelectorAll(`[data-ask="${ask.id}"]`).forEach((el) => el.setAttribute('data-sent', ''));
       own?.setAttribute('data-sent', '');
       setSent(true);
     }

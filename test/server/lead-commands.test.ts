@@ -12,6 +12,7 @@ import { addBinding, changeProject, createProject, listProjectSummaries, resolve
 import { getProjectSnapshot } from '../../src/server/repo/snapshot';
 import { claimStep, handleHookEvent } from '../../src/server/session-flow';
 import { makeCtx } from '../helpers';
+import { insertLeadEvent } from '../../src/server/repo/leadEvents';
 
 const BEARER = { authorization: 'Bearer t' };
 const DUE = '2026-10-01T09:00:00.000Z';
@@ -76,7 +77,7 @@ describe('leadAnswer', () => {
   it("clears the question with Aiden's words, logs one line, hands it to the asker and cites it in the brief", () => {
     const { ctx, project, question, events, askRow } = setup();
     const res = leadAnswer(ctx, project.slug, 'progresser', LEAD_INSTRUCTIONS_VERSION, { askId: question.id, aidenWords: 'Use the release keystore.' });
-    expect(res.text).toBe(`Answered a${question.id} with Aiden's words.`);
+    expect(res.text).toBe(`Answered a${question.id} with Aiden's words: decision d1.`);
     expect(askRow(question.id)).toMatchObject({ answer: 'Use the release keystore.', cleared_by: 'lead:Progresser', answered_via: 'lead' });
     expect(events()).toEqual([
       { kind: 'answer', node_id: question.nodeId, ask_id: question.id, instructions: LEAD_INSTRUCTIONS_VERSION, lead: 'Progresser', text: expect.stringMatching(/^where thread; said [0-9]{4}-/), aiden_words: 'Use the release keystore.' },
@@ -458,7 +459,7 @@ describe('the routes', () => {
       s.app.inject({ method: 'POST', url: `/api/lead/${s.project.slug}/${command}`, headers: BEARER, payload: { as: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION, ...payload } });
     const answered = await post('answer', { askId: s.question.id, aidenWords: 'Use the release keystore.' });
     expect(answered.statusCode).toBe(200);
-    expect(answered.json().text).toBe(`Answered a${s.question.id} with Aiden's words.`);
+    expect(answered.json().text).toMatch(new RegExp(`^Answered a${s.question.id} with Aiden's words: decision d[0-9]+[.]$`));
     clearAsk(s.ctx, 'window', s.review.id);
     const parked = await post('park', { stepId: s.proposed.id });
     expect(parked.statusCode).toBe(200);
@@ -617,8 +618,9 @@ describe('leadUndo', () => {
   it("refuses an unknown number, an answer's line, and another project's decision, with 404", () => {
     const { ctx, project, question, refused } = setup();
     expect(refused(() => leadUndo(ctx, project.slug, 'Progresser', V, { eventId: 99, aidenWords: 'x' }))).toMatchObject({ status: 404, message: 'd99 not found.' });
-    leadAnswer(ctx, project.slug, 'Progresser', V, { askId: question.id, aidenWords: 'Yes.' });
-    expect(refused(() => leadUndo(ctx, project.slug, 'Progresser', V, { eventId: 1, aidenWords: 'x' })).status).toBe(404);
+    // An answer line carried before task 11 has no decisions row: it is no decision to undo.
+    const bare = insertLeadEvent(ctx.db, { projectId: project.id, lead: 'Progresser', instructions: V, kind: 'answer', askId: question.id, aidenWords: 'Yes.' }, ctx.now());
+    expect(refused(() => leadUndo(ctx, project.slug, 'Progresser', V, { eventId: bare, aidenWords: 'x' })).status).toBe(404);
     const elsewhere = createProject(ctx, 'test', { name: 'Elsewhere' });
     addBinding(ctx, 'test', elsewhere.slug, 'C:/personal/Elsewhere');
     setProjectLead(ctx, 'window', elsewhere.slug, 'Rich');

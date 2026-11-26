@@ -1,10 +1,11 @@
 // The exam's unseen cases (plan task 16). usage: node scripts/lead-exam/cases.mjs <copy> <out dir> [manifest of the 121]
 // Answered asks (cleared, answer not empty) on personal projects, not among stage 0's 121: every review, and every
-// question and permission cleared on or after 2026-11-21. Split by seed 743, each kind on its own, into half-a.txt (the exam now, gets the odd
+// question and permission cleared on or after 2026-11-21. Split by a hash of seed 743 and the ask id, each kind on its own, into half-a.txt (the exam now, gets the odd
 // one) and half-b.txt (kept back for a rerun after a narrowing). Per case: <k>-<id>.md (what the lead sees) and
 // <k>-<id>.key.md (with Aiden's answer, for the labellers), written as stage 0's gen-cases.cjs wrote them.
 import Database from 'better-sqlite3';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 
 const [dbPath, out, manifest121 = process.env.EXAM_121] = process.argv.slice(2);
@@ -16,6 +17,8 @@ const seen = new Set(
   readFileSync(manifest121, 'utf8').split('\n').filter((l) => l.trim() !== '').map((l) => Number(l.split(' ')[1])),
 );
 const db = new Database(dbPath, { readonly: true });
+// Half files once written are never regenerated: a half is the exam, and the other is kept back.
+if (existsSync(join(out, 'half-a.txt')) || existsSync(join(out, 'half-b.txt'))) throw new Error(`${out} already has half files: use a new out dir`);
 mkdirSync(out, { recursive: true });
 const rows = db
   .prepare(
@@ -26,11 +29,12 @@ const rows = db
   .all()
   .filter((r) => !WORK.test(r.slug) && !seen.has(r.id))
   .filter((r) => r.kind === 'review' || ((r.kind === 'question' || r.kind === 'permission') && r.cleared_at >= SINCE));
-let seed = 743;
-const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
-// One draw per case, in id order. Each kind is split on its own: sorted by the draw, its first half is A (an odd one goes
+const SEED = 743;
+// The draw is a hash of the seed and the ask's id, so a case falls in the same half from any copy of the data.
+const draw = (id) => createHash('sha256').update(`${SEED}:${id}`).digest().readUIntBE(0, 6);
+// Each kind is split on its own: sorted by the draw, its first half is A (an odd one goes
 // to A), the rest B; so each half holds its share of the questions and permissions.
-const drawn = rows.map((r) => [rnd(), r]);
+const drawn = rows.map((r) => [draw(r.id), r]);
 const inA = [];
 const inB = [];
 for (const kindName of ['question', 'review', 'permission']) {

@@ -62,6 +62,8 @@ export interface TurnInput {
   userMessage: string;
   model: string;
   toolsEnv: ToolsEnv;
+  /** The project's id: the thread way finds the project's day thread by it. */
+  projectId?: number;
   /** The usage probe: no tool server is configured, the run only reads its usage. */
   noTools?: boolean;
 }
@@ -106,6 +108,8 @@ export class TurnRunError extends Error {
 /** A way to run a desk turn: headless (`claude -p`), or a message in the lead's thread (task 12). */
 export interface TurnWay {
   name: 'headless' | 'thread';
+  /** Whether the way can run a turn of the project now; absent means always (the thread way needs a day thread). */
+  available?(projectId: number): boolean;
   run(input: TurnInput, signal: AbortSignal): Promise<TurnOutput>;
 }
 
@@ -387,11 +391,9 @@ export function headlessWay(opts: HeadlessOptions): TurnWay {
 /** What the thread way needs: T3 Code's send and show, the project's day's thread, and for tests the poll's pace. */
 export interface ThreadOptions {
   send: (threadId: string, message: string) => Promise<void>;
-  show: (threadId: string) => Promise<{ messages: { role: string; text: string }[] }>;
+  show: (threadId: string) => Promise<{ thread?: { status: string }; messages: { role: string; text: string }[] }>;
   /** The id of the project's day's thread (the morning start send's result), undefined when it has none. */
-  dayThread: (projectId: number, slug: string) => string | undefined;
-  /** The project's id by slug, for dayThread. */
-  projectIdOf: (slug: string) => number | undefined;
+  dayThread: (projectId: number) => string | undefined;
   /** THREAD_POLL_MS unless given. */
   pollMs?: number;
 }
@@ -399,8 +401,12 @@ export interface ThreadOptions {
 /** How often the thread way reads the thread for the reply. */
 export const THREAD_POLL_MS = 5000;
 
+/** Thread statuses that mean the agent is still writing: a reply seen then may be cut, so it is not taken yet. */
+const THREAD_RUNNING = new Set(['running', 'starting']);
+
 const sleepOrAbort = (ms: number, signal: AbortSignal): Promise<void> =>
   new Promise((resolve) => {
+    if (signal.aborted) return resolve();
     const timer = setTimeout(done, ms);
     signal.addEventListener('abort', done, { once: true });
     function done(): void {
@@ -424,16 +430,16 @@ export function threadWay(opts: ThreadOptions): TurnWay {
   const unanswered = (): TurnRunError => new TurnRunError("the lead's thread did not answer in time", { rateLimits: [] }, true);
   return {
     name: 'thread',
+    available: (projectId) => opts.dayThread(projectId) !== undefined,
     async run(input, signal) {
       if (signal.aborted) throw unanswered();
-      const projectId = opts.projectIdOf(input.slug);
-      const threadId = projectId === undefined ? undefined : opts.dayThread(projectId, input.slug);
+      const threadId = input.projectId === undefined ? undefined : opts.dayThread(input.projectId);
       if (threadId === undefined) throw new TurnRunError(`${input.slug} has no thread for today: the morning list has not started one`, { rateLimits: [] }, true);
-      const head = `Desk item ${input.item.id}, turn ${input.turnId}. Answer in the four lines, starting your reply with "Desk item ${input.item.id}:".`;
+      const head = `Desk item ${input.item.id}, turn ${input.turnId}. Answer in the four lines, starting your reply with "Desk item ${input.item.id}, turn ${input.turnId}:".`;
       const sent = `${head}
 
 ${input.userMessage}`;
-      const reply = `Desk item ${input.item.id}:`;
+      const reply = `Desk item ${input.item.id}, turn ${input.turnId}:`;
       try {
         await opts.send(threadId, sent);
       } catch (err) {
@@ -444,7 +450,10 @@ ${input.userMessage}`;
         if (signal.aborted) throw unanswered();
         let messages: { role: string; text: string }[];
         try {
-          messages = (await opts.show(threadId)).messages;
+          const shown = await opts.show(threadId);
+          // The agent is still writing: what is there may be cut short, so it waits for the next look.
+          if (shown.thread !== undefined && THREAD_RUNNING.has(shown.thread.status)) continue;
+          messages = shown.messages;
         } catch (err) {
           throw new TurnRunError(`T3 Code did not show the thread: ${err instanceof Error ? err.message : String(err)}`, { rateLimits: [] }, true);
         }
@@ -561,7 +570,19 @@ export function createRunner(ctx: Ctx, opts: RunnerOptions): Runner {
   const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
   const nowMs = (): number => Date.parse(ctx.now());
   /** The way a project's turns run: the lead's thread when its `turn-way` is thread (and the runner has one), else headless. */
-  const wayOf = (projectId: number): TurnWay => (opts.threadWay !== undefined && turnWayOf(db, projectId) === 'thread' ? opts.threadWay : opts.way);
+  /**
+   * The way a project's next turn runs, read once at its lease: the lead's thread when its `turn-way` is thread, the runner has
+   * one and the project has a day thread; with no day thread yet (before the morning list) it is headless for that turn, said
+   * in the log, with no fault.
+   */
+  function wayFor(projectId: number): TurnWay {
+    if (opts.threadWay === undefined || turnWayOf(db, projectId) !== 'thread') return opts.way;
+    if (opts.threadWay.available?.(projectId) === false) {
+      log.info(`Lead runner: project ${projectId} runs its turns in the lead's thread, which has no thread for today yet, so this turn runs headless`);
+      return opts.way;
+    }
+    return opts.threadWay;
+  }
   const holdBack = opts.holdBack ?? ((item: DeskItem) => stoppedHoldBack(ctx, item));
 
   /** The actor the apply writes as: the item's project's lead. */
@@ -672,22 +693,27 @@ export function createRunner(ctx: Ctx, opts: RunnerOptions): Runner {
 
   function fill(project: Project, lane: DeskLane, max: number): void {
     while (!stopped && inLane(project.id, lane) < max && !backedOff(project.id)) {
+      // A project on the thread way runs one turn at a time: the thread is one conversation, and two answers at once would cross.
+      const busy = [...running.values()].some((r) => r.projectId === project.id);
       let turn: LeadTurn | undefined;
+      let way: TurnWay | undefined;
       for (const itemId of openItemsInLane(db, project.id, lane)) {
         if (heldBack(itemId)) continue;
-        turn = leaseItem(db, itemId, { way: wayOf(project.id).name, model: opts.model, leaseMs }, ctx.now());
+        way ??= wayFor(project.id);
+        if (way.name === 'thread' && busy) return;
+        turn = leaseItem(db, itemId, { way: way.name, model: opts.model, leaseMs }, ctx.now());
         if (turn !== undefined) break;
       }
-      if (turn === undefined) return;
-      begin(turn, project, lane);
+      if (turn === undefined || way === undefined) return;
+      begin(turn, project, lane, way);
     }
   }
 
-  function begin(turn: LeadTurn, project: Project, lane: DeskLane): void {
+  function begin(turn: LeadTurn, project: Project, lane: DeskLane, way: TurnWay): void {
     const controller = new AbortController();
     const entry = { projectId: project.id, itemId: turn.itemId, lane, controller, done: Promise.resolve() };
     running.set(turn.id, entry);
-    entry.done = runTurn(turn, project, lane, controller)
+    entry.done = runTurn(turn, project, lane, controller, way)
       .catch((err: unknown): RunEnd => {
         log.error(`Lead turn ${turn.id}: ${message(err)}`);
         return 'unrun';
@@ -743,9 +769,9 @@ export function createRunner(ctx: Ctx, opts: RunnerOptions): Runner {
     ...(o.refusedTools === undefined ? {} : { refusedTools: o.refusedTools }),
   });
 
-  async function runTurn(turn: LeadTurn, project: Project, lane: DeskLane, controller: AbortController): Promise<RunEnd> {
+  async function runTurn(turn: LeadTurn, project: Project, lane: DeskLane, controller: AbortController, way: TurnWay): Promise<RunEnd> {
     const item = getDeskItem(db, turn.itemId)!;
-    log.info(`Lead turn ${turn.id}: leased desk item #${item.id} (${item.kind} ${item.ref}) of ${project.slug} in the ${lane} lane, ${wayOf(project.id).name}, until ${turn.leaseUntil}`);
+    log.info(`Lead turn ${turn.id}: leased desk item #${item.id} (${item.kind} ${item.ref}) of ${project.slug} in the ${lane} lane, ${way.name}, until ${turn.leaseUntil}`);
     const startedAt = ctx.now();
     const abortAt = Date.parse(turn.leaseUntil) - ABORT_BEFORE_LEASE_END_MS - Date.parse(startedAt);
     const timeout = setTimeout(() => controller.abort(new Error(`the run was stopped ${ABORT_BEFORE_LEASE_END_MS / 1000} seconds before its lease ends`)), Math.max(0, abortAt));
@@ -758,8 +784,8 @@ export function createRunner(ctx: Ctx, opts: RunnerOptions): Runner {
         INPROGRESS_LEAD_AS: project.lead!.trim(),
         ...(repo === undefined ? {} : { INPROGRESS_LEAD_REPO: repo }),
       };
-      const input: TurnInput = { turnId: turn.id, slug: project.slug, item, systemPrompt: deskSystemPrompt(ctx, project), userMessage: deskUserMessage(ctx, item), model: opts.model, toolsEnv };
-      output = await wayOf(project.id).run(input, controller.signal);
+      const input: TurnInput = { turnId: turn.id, projectId: project.id, slug: project.slug, item, systemPrompt: deskSystemPrompt(ctx, project), userMessage: deskUserMessage(ctx, item), model: opts.model, toolsEnv };
+      output = await way.run(input, controller.signal);
     } catch (err) {
       const partial: PartialOutput = err instanceof TurnRunError ? err.partial : { rateLimits: [] };
       writeReadings(turn.id, partial.rateLimits, partial.model ?? opts.model);
@@ -767,7 +793,7 @@ export function createRunner(ctx: Ctx, opts: RunnerOptions): Runner {
       const interrupted = reason === STOPPING || reason === ITEM_LEFT;
       const fault = !interrupted && err instanceof TurnRunError && err.runnerFault;
       const state = interrupted || fault ? 'interrupted' : 'failed';
-      const why = interrupted ? (reason as Error).message : fault ? `${RUNNER_FAULT_WHY}: ${message(err)}` : `the ${wayOf(project.id).name} run failed: ${message(err)}`;
+      const why = interrupted ? (reason as Error).message : fault ? `${RUNNER_FAULT_WHY}: ${message(err)}` : `the ${way.name} run failed: ${message(err)}`;
       logFail(turn.id, item.id, state, why, failTurn(db, turn.id, state, why, ctx.now(), costsOf(startedAt, partial)));
       if (fault) {
         const already = (backoff.get(project.id) ?? 0) > nowMs();

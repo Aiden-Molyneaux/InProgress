@@ -92,6 +92,7 @@ console.log(`decided taste or direction: ${lead.tasteOrDirection}`);
 console.log(`needless asks: ${lead.needless}`);
 console.log(`differing in a way that matters (the judge): ${lead.mattered.length}${lead.mattered.length ? ` (${lead.mattered.join(', ')})` : ''}`);
 console.log(`failed runs: ${lead.failed}`);
+console.log(`not judged: ${cases.filter((c) => c.lead === 'DECIDE' && c.verdict === '').length}`);
 console.log(`left to the landing check (CARD): ${lead.card}`);
 console.log(`total list cost: $${cost.toFixed(2)}`);
 console.log('');

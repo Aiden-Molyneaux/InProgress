@@ -254,7 +254,9 @@ const leadId = z.number().int().positive();
 export const leadAnswerBody = z
   .object({
     ...leadWho,
-    askId: leadId,
+    /** The ask he answered; or `sendId`, the line to the Voice he replied to. Exactly one of the two. */
+    askId: leadId.optional(),
+    sendId: leadId.optional(),
     aidenWords: z.string().trim().min(1).max(2_000),
     says: z.string().trim().min(1).max(2_000).optional(),
     /** Where he said it: to the Voice or in the lead's thread. */
@@ -263,10 +265,11 @@ export const leadAnswerBody = z
     saidAt: z.string().datetime({ offset: true }).optional(),
     /** The documents he was shown. */
     shown: z.array(leadId).max(50).optional(),
-    /** For a review, what his yes covers; merge, deploy and push when absent. */
+    /** The actions his words okayed, for a review or a held action; absent, no yes is recorded. */
     yes: z.array(z.enum(['merge', 'deploy', 'push'])).min(1).max(3).optional(),
   })
-  .strict();
+  .strict()
+  .refine((b) => (b.askId === undefined) !== (b.sendId === undefined), { message: 'give the ask (askId) or the line to the Voice (sendId), not both', path: ['askId'] });
 /** `lead seen`: the send of a line to the Voice that Aiden answered. */
 export const leadStampBody = z.object({ ...leadWho, sendId: leadId }).strict();
 /** `lead desk-add`: Aiden's "you decide" on a step, for the round. */

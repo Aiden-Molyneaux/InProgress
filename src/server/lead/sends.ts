@@ -91,6 +91,11 @@ export interface SenderDeps {
   t3: SenderT3;
   /** Sends a line to the Voice and answers its id (task 11). Without it a voice_line waits. */
   webhook?: (send: LeadSend) => Promise<string>;
+  /**
+   * Whether a project's lines to the Voice are ready to go (set up, out of quiet hours, gathered, under the cap): asked
+   * before anything is written, so a project whose lines wait costs no write per tick (voice.ts).
+   */
+  voiceReady?: (send: LeadSend) => boolean;
 }
 
 export interface SenderLog {
@@ -201,12 +206,18 @@ function noteRefusedInWrite(ctx: Ctx, send: LeadSend, reason: string): void {
 }
 
 /**
- * A carried answer that reached its T3 Code session (a `carry` send, retry key `carry:a<ask id>`): the ask's answer is
- * stamped delivered, so the session's next prompt does not repeat it.
+ * A carried answer about to go to its T3 Code session (a `carry` send, retry key `carry:a<ask id>`): the ask's answer is
+ * stamped delivered when the send is marked trying, so the prompt hook never repeats a carry in flight.
  */
 function carriedInWrite(ctx: Ctx, send: LeadSend): void {
   const m = send.kind === 'carry' ? /^carry:a(\d+)$/.exec(send.retryKey ?? '') : null;
   if (m !== null) markAnswersDelivered(ctx, [Number(m[1])]);
+}
+
+/** A carry cleared unsent: the ask's answer is not delivered after all, so the next prompt gives it. */
+function uncarriedInWrite(ctx: Ctx, send: LeadSend): void {
+  const m = send.kind === 'carry' ? /^carry:a(\d+)$/.exec(send.retryKey ?? '') : null;
+  if (m !== null) ctx.db.prepare('UPDATE asks SET answer_delivered_at = NULL WHERE id = ?').run(Number(m[1]));
 }
 
 const key = (project: string): string => project.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
@@ -245,7 +256,10 @@ export function createSender(ctx: Ctx, deps: SenderDeps, opts: SenderOptions = {
 
   /** Moves an intended send to cleared, in the sender's own write. */
   const clear = (id: number): void => {
-    write(ctx, ACTOR, () => moveSend(ctx.db, id, ['intended'], 'cleared', { now: ctx.now() }));
+    write(ctx, ACTOR, () => {
+      const send = getSend(ctx.db, id);
+      if (moveSend(ctx.db, id, ['intended'], 'cleared', { now: ctx.now() }) && send !== undefined) uncarriedInWrite(ctx, send);
+    });
   };
 
   const run = async (id: number, o: { clearIfNotSent?: boolean }): Promise<PerformOutcome> => {
@@ -258,8 +272,14 @@ export function createSender(ctx: Ctx, deps: SenderDeps, opts: SenderOptions = {
       clear(id);
       return { state: 'cleared', reason };
     }
-    // Written before the action, in its own write: from here on a restart looks it up rather than sending it again.
-    write(ctx, ACTOR, () => markTrying(ctx.db, id, true));
+    // A line to the Voice that is not ready waits with nothing written.
+    if (send.kind === 'voice_line' && (deps.webhook === undefined || deps.voiceReady?.(send) === false)) return { state: 'waiting', reason: 'the Voice waits' };
+    // Written before the action, in its own write: from here on a restart looks it up rather than sending it again. A
+    // carry stamps its ask delivered here.
+    write(ctx, ACTOR, () => {
+      markTrying(ctx.db, id, true);
+      carriedInWrite(ctx, send);
+    });
     let result: string;
     try {
       result = await act(send);
@@ -269,7 +289,9 @@ export function createSender(ctx: Ctx, deps: SenderDeps, opts: SenderOptions = {
         // It can never go as it stands: cleared, said once, and it holds nothing behind it. A start an apply intended (a
         // restart) leaves a `send_refused` line too, so the morning list's Went wrong names it.
         write(ctx, ACTOR, () => {
-          if (moveSend(ctx.db, id, ['intended'], 'cleared', { now: ctx.now() }) && send.kind === 'start' && send.itemId !== null) noteRefusedInWrite(ctx, send, reason);
+          if (!moveSend(ctx.db, id, ['intended'], 'cleared', { now: ctx.now() })) return;
+          uncarriedInWrite(ctx, send);
+          if (send.kind === 'start' && send.itemId !== null) noteRefusedInWrite(ctx, send, reason);
         });
         log.error(`send s${id} (${send.kind}) was cleared, it cannot be sent: ${reason}`);
         return { state: 'cleared', reason };
@@ -292,7 +314,6 @@ export function createSender(ctx: Ctx, deps: SenderDeps, opts: SenderOptions = {
         // A start an apply intended (a restart) is recorded as leadStart records its own: a `start` line with the thread.
         if (!moveSend(ctx.db, id, ['intended'], 'done', { result, now: ctx.now() })) return;
         if (send.kind === 'start' && send.itemId !== null) recordStartInWrite(ctx, record, send, result);
-        carriedInWrite(ctx, send);
       });
     } catch (err) {
       // Sent, but not recorded: it still holds 'trying', so it is looked up, never sent again.
@@ -370,7 +391,6 @@ export function createSender(ctx: Ctx, deps: SenderDeps, opts: SenderOptions = {
       write(ctx, ACTOR, (record) => {
         if (!moveSend(ctx.db, send.id, ['intended'], 'done', { result: threadId, now: ctx.now() })) return;
         if (send.kind === 'start') recordStartInWrite(ctx, record, send, threadId);
-        carriedInWrite(ctx, send);
       });
       misses.delete(send.id);
       log.info(`send s${send.id} (${send.kind}) was found and is done: ${threadId}`);

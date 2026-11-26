@@ -289,12 +289,12 @@ describe('logLines', () => {
 });
 
 describe('deskBehind', () => {
-  const item = (o: Partial<LeadBehindItem>): LeadBehindItem => ({ id: 1, kind: 'question', state: 'open', createdAt: ago(HOUR), dueAt: null, stepId: 4, stepTitle: 'Signing', what: 'Which port?', askId: 9, sessionId: null, ...o });
+  const item = (o: Partial<LeadBehindItem>): LeadBehindItem => ({ id: 1, kind: 'question', state: 'open', createdAt: ago(HOUR), dueAt: null, stepId: 4, stepTitle: 'Signing', what: 'Which port?', askId: 9, sessionId: null, behindWhy: null, ...o });
   it('lists items past their limit and items given up on, oldest first, with how late and what Aiden can do', () => {
     const rows = deskBehind(
       [
         item({ id: 2, createdAt: ago(30 * 60_000), dueAt: ago(12 * 60_000) }),
-        item({ id: 3, createdAt: ago(2 * HOUR), kind: 'stopped', state: 'behind', what: 'a stopped session', askId: null, sessionId: 's-1', stepId: null }),
+        item({ id: 3, createdAt: ago(2 * HOUR), kind: 'stopped', state: 'behind', behindWhy: 'failures', what: 'a stopped session', askId: null, sessionId: 's-1', stepId: null }),
         item({ id: 4, dueAt: new Date(NOW + 60_000).toISOString() }),
       ],
       NOW,

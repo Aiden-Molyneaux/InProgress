@@ -1962,14 +1962,22 @@ test('The lead is behind appears with a late desk item and leaves when it is han
   await switches.locator('[data-switch="round"]').getByRole('button', { name: 'Turn on' }).click();
   await expect(switches).toContainText('Round: on');
   await expect(switches).toContainText('switched in the window');
-  // A question, and the desk item the round makes of it, due 12 minutes ago (written straight in: the item's limit is minutes away
-  // and the window's own clock is what is under test).
-  const ask = await write<{ id: number }>(api, session, 'post', `/api/nodes/${step.id}/asks`, { kind: 'question', text: 'Which port do the tests use?', sessionId: session });
+  // The three Turn buttons stand in one column at 1440.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const lefts = await Promise.all([0, 1, 2].map(async (i) => Math.round((await switches.getByRole('button').nth(i).boundingBox())!.x)));
+  expect(lefts).toHaveLength(3);
+  expect(new Set(lefts).size).toBe(1);
+  // Two questions, and the desk items the round makes of them, due 12 and 11 minutes ago (written straight in: the limit is
+  // minutes away and the window's own clock is what is under test).
+  const [step2] = await write<{ id: number }[]>(api, session, 'post', '/api/nodes', { parentId: made.rootNodeId, nodes: [{ title: 'Pick a store' }] });
+  const first = await write<{ id: number }>(api, session, 'post', `/api/nodes/${step.id}/asks`, { kind: 'question', text: 'Which port do the tests use?', sessionId: session });
+  const second = await write<{ id: number }>(api, session, 'post', `/api/nodes/${step2.id}/asks`, { kind: 'question', text: 'Which store account?', sessionId: session });
   const db = new Database('.e2e-home/inprogress.db');
   try {
     db.pragma('busy_timeout = 5000');
-    const at = new Date(Date.now() - 15 * 60_000).toISOString();
-    db.prepare("INSERT INTO desk_items (project_id, kind, ref, node_id, created_at, due_at, state) VALUES (?, 'question', ?, ?, ?, ?, 'open')").run(made.id, String(ask.id), step.id, at, new Date(Date.now() - 12 * 60_000).toISOString());
+    const insert = db.prepare("INSERT INTO desk_items (project_id, kind, ref, node_id, created_at, due_at, state) VALUES (?, 'question', ?, ?, ?, ?, 'open')");
+    insert.run(made.id, String(first.id), step.id, new Date(Date.now() - 15 * 60_000).toISOString(), new Date(Date.now() - 12 * 60_000).toISOString());
+    insert.run(made.id, String(second.id), step2.id, new Date(Date.now() - 14 * 60_000).toISOString(), new Date(Date.now() - 11 * 60_000).toISOString());
   } finally {
     db.close();
   }
@@ -1977,8 +1985,17 @@ test('The lead is behind appears with a late desk item and leaves when it is han
   await viewButton(page, 'Board').click();
   const group = page.getByRole('region', { name: 'The lead is behind', exact: true });
   await expect(group).toBeVisible();
-  await expect(group).toContainText(`#${step.id} Pick a port: Which port do the tests use?`);
-  await expect(group).toContainText('min late');
+  const rows = group.locator('[data-behind]');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.first()).toContainText(`#${step.id} Pick a port: Which port do the tests use?`);
+  await expect(rows.first()).toContainText('min late');
+  // Answering the last behind row: its Needs me card goes too, and focus lands on the other behind row, not the page.
+  await rows.last().getByRole('button', { name: 'Answer…' }).click();
+  await rows.last().getByRole('textbox').fill('main account');
+  await page.keyboard.press('Enter');
+  await expect(rows).toHaveCount(1);
+  await expect(group.getByRole('button', { name: 'Answer…' })).toBeFocused();
+  await expect(rows.first()).toContainText('Which port do the tests use?');
   await group.getByRole('button', { name: 'Answer…' }).click();
   await group.getByRole('textbox').fill('4410');
   await page.keyboard.press('Enter');

@@ -36,6 +36,8 @@ export function reserveAllowsStart(ctx: Ctx, now: string): ReserveAnswer {
     const old = nowMs - Date.parse(from);
     if (old > READING_STALE_MS) return { ok: false, why: `the ${name} figure comes from a usage reading ${Math.round(old / 60_000)} min old`, wait: true };
   }
+  // No week figure in the readings looked at is no basis either: the start waits for one, it is never allowed blind.
+  if (g.week === null || g.weekAt === null) return { ok: false, why: 'no usage reading has a week figure', wait: true };
   if (g.week !== null && g.week >= WEEK_LIMIT) return { ok: false, why: `the week is ${percent(g.week)} percent used` };
   if (g.window !== null && g.window >= WINDOW_LIMIT) return { ok: false, why: `the window is ${percent(g.window)} percent used` };
   if (g.window !== null && g.window > WINDOW_LIMIT_AT_WORK) {

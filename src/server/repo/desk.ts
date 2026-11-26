@@ -99,16 +99,16 @@ export function openDeskItems(db: DB, projectId: number): DeskItem[] {
 /**
  * Compare-and-set: moves the item to `to` only while its state is one of `from`. A move to done sets done_at to `now`
  * and the outcome; a move to waiting_aiden sets the outcome (what the lead did: brought it, or holds it at the limit) and
- * clears done_at; a move to any other state clears both, so an item reopened carries no stale outcome. Returns whether
- * the row changed.
+ * clears done_at; a move to any other state clears done_at and writes the outcome given, or clears it, so an item
+ * reopened carries no stale outcome. Returns whether the row changed.
  */
 export function moveDeskItem(db: DB, id: number, from: DeskItemState[], to: DeskItemState, opts: { outcome?: string; now: string }): boolean {
   if (from.length === 0) return false;
   const done = to === 'done';
-  const keepsOutcome = done || to === 'waiting_aiden';
+  // Any move writes the outcome it is given (an item put back open says why: a restart that waits); one given none clears it.
   const info = db
     .prepare(`UPDATE desk_items SET state = ?, done_at = ?, outcome = ? WHERE id = ? AND state IN (${from.map(() => '?').join(', ')})`)
-    .run(to, done ? opts.now : null, keepsOutcome ? (opts.outcome ?? null) : null, id, ...from);
+    .run(to, done ? opts.now : null, opts.outcome ?? null, id, ...from);
   return info.changes > 0;
 }
 

@@ -7,12 +7,13 @@ import { DESK_STOPPED_MS, watchDesk } from '../../src/server/lead/desk';
 import { deskUserMessage } from '../../src/server/lead/prompt';
 import type { ReserveAnswer } from '../../src/server/lead/reserve';
 import { createRunner, type TurnInput, type TurnWay } from '../../src/server/lead/runner';
+import { failTurn, leaseItem, reopenFaultedItems, RUNNER_FAULT_WHY, TURN_FAILURES_BEHIND } from '../../src/server/repo/leadTurns';
 import { createSender, parseStartBody, type Sender } from '../../src/server/lead/sends';
-import { ASK_STOPPED_WAIT_MS, askStoppedKey, CAUSE_LIMIT, CAUSE_RESTARTS, parseStoppedRef, RESTARTS_PER_STEP, stoppedRef } from '../../src/server/lead/stopped';
+import { ASK_STOPPED_WAIT_MS, askStoppedKey, CAUSE_LIMIT, CAUSE_RESTARTS, parseStoppedRef, RESTARTS_PER_STEP, stoppedHoldBack, stoppedRef } from '../../src/server/lead/stopped';
 import { morningList } from '../../src/server/lead/morning';
 import { T3ArgumentRefused } from '../../src/server/t3';
 import { leadAllow, leadIntent, leadPromise } from '../../src/server/lead-commands';
-import { getDeskItem, type DeskItem } from '../../src/server/repo/desk';
+import { getDeskItem, moveDeskItem, type DeskItem } from '../../src/server/repo/desk';
 import { insertLeadEvent } from '../../src/server/repo/leadEvents';
 import { intendSend, markTrying, sendByRetryKey } from '../../src/server/repo/leadSends';
 import { addNodes, requireNode } from '../../src/server/repo/nodes';
@@ -422,15 +423,106 @@ describe('a restart and the usage reading (task 13, U10)', () => {
     await w.round();
     await vi.waitFor(() => expect(w.calls).toHaveLength(1));
     await vi.waitFor(() => expect(w.state().state).toBe('open'));
+    // Y4: the apply's outcome is kept on its move back to open (the applied turn's item move says so).
+    expect(w.state().outcome).toMatch(/^waits: a restart waits for a fresh usage reading \(/);
     expect(requireNode(w.ctx, w.step.id).status).not.toBe('parked');
     expect(w.sends('start')).toHaveLength(0);
     // The next tick holds it back (the real reserve: this server has read nothing), with the why on the item, and spends no second turn while there is still no reading.
     await w.round();
     expect(w.calls).toHaveLength(1);
-    expect(w.state()).toMatchObject({ state: 'open', outcome: 'RESTART waits for a fresh usage reading: there is no usage reading yet' });
+    expect(w.state()).toMatchObject({ state: 'open', outcome: 'waits: a restart waits for a fresh usage reading (there is no usage reading yet)' });
+    // Y4: the hold writes its why only when it changes: a second look writes nothing.
+    const changes = () => w.ctx.db.prepare('SELECT total_changes()').pluck().get() as number;
+    const before = changes();
+    expect(stoppedHoldBack(w.ctx, w.state())).toBe(true);
+    expect(changes()).toBe(before);
     // A reserve that is really low parks, with its why.
     const low = world({ reserve: { ok: false, why: 'the week is 96 percent used' } });
     await low.unanswered(verdictText('RESTART: Goal: tabs.'));
     expect(requireNode(low.ctx, low.step.id)).toMatchObject({ status: 'parked', parkedReason: `${CAUSE_LIMIT}: the week is 96 percent used` });
+  });
+});
+
+describe('the second fix round after Murr (Y3 to Y7)', () => {
+  const deskEvents = (w: ReturnType<typeof world>) => {
+    const seen: number[] = [];
+    w.ctx.bus.on('event', (e: { type: string; projectId: number | null; data: { changes?: { desk?: boolean } } }) => {
+      if (e.type === 'project.updated' && e.data.changes?.desk === true && e.projectId !== null) seen.push(e.projectId);
+    });
+    return seen;
+  };
+
+  it('Y3: a watch close records a desk event for the project', () => {
+    const w = world();
+    const seen = deskEvents(w);
+    handleHookEvent(w.ctx, 's1', { event: 'prompt' });
+    w.tick(MIN);
+    watchDesk(w.ctx);
+    expect(w.state().state).toBe('done');
+    expect(seen).toContain(w.project.id);
+  });
+
+  it('Y3: a move to behind, made in the runner own transaction, records a desk event', () => {
+    const w = world();
+    const seen = deskEvents(w);
+    for (let i = 0; i < TURN_FAILURES_BEHIND; i++) {
+      const turn = leaseItem(w.ctx.db, w.item.id, { way: 'headless', leaseMs: MIN }, w.ctx.now())!;
+      seen.length = 0;
+      failTurn(w.ctx.db, turn.id, 'failed', 'no verdict', w.ctx.now());
+    }
+    expect(w.state().state).toBe('behind');
+    expect(seen).toEqual([w.project.id]);
+  });
+
+  it('Y4: a move to open keeps the outcome it is given; one given none clears it', () => {
+    const w = world();
+    w.ctx.db.prepare("UPDATE desk_items SET state = 'leased' WHERE id = ?").run(w.item.id);
+    expect(moveDeskItem(w.ctx.db, w.item.id, ['leased'], 'open', { outcome: 'waits: why', now: w.ctx.now() })).toBe(true);
+    expect(w.state().outcome).toBe('waits: why');
+    w.ctx.db.prepare("UPDATE desk_items SET state = 'leased' WHERE id = ?").run(w.item.id);
+    moveDeskItem(w.ctx.db, w.item.id, ['leased'], 'open', { now: w.ctx.now() });
+    expect(w.state().outcome).toBeNull();
+  });
+
+  it('Y5: a stopped item turn prints no limit', () => {
+    const w = world();
+    const message = deskUserMessage(w.ctx, w.state());
+    expect(message).toContain('Stopped at ');
+    expect(message).not.toContain('Its limit is');
+  });
+
+  it('Y6: an ask cleared undelivered does not keep a later stop on the step from its item', () => {
+    const w = world();
+    w.t3.down = true;
+    handleHookEvent(w.ctx, 's1', { event: 'prompt' });
+    w.tick(MIN);
+    watchDesk(w.ctx);
+    expect(sendByRetryKey(w.ctx.db, askStoppedKey(w.item.id))!.state).toBe('cleared');
+    handleHookEvent(w.ctx, 's1', { event: 'stop', background: [] });
+    w.tick(DESK_STOPPED_MS);
+    expect(watchDesk(w.ctx).stopped).toBe(1);
+  });
+});
+
+describe('reopenFaultedItems once per fault stretch (Y7)', () => {
+  it('blocks a second reopen in one stretch, and allows one again after a good turn', () => {
+    const w = world();
+    const id = w.item.id;
+    const fault = () => {
+      const turn = leaseItem(w.ctx.db, id, { way: 'headless', leaseMs: MIN }, w.ctx.now())!;
+      w.ctx.db.prepare("UPDATE lead_turns SET state = 'interrupted', why = ? WHERE id = ?").run(`${RUNNER_FAULT_WHY}: Prompt is too long`, turn.id);
+      w.ctx.db.prepare("UPDATE desk_items SET state = 'behind' WHERE id = ?").run(id);
+    };
+    fault();
+    expect(reopenFaultedItems(w.ctx.db, w.project.id, w.ctx.now())).toEqual([id]);
+    fault();
+    expect(reopenFaultedItems(w.ctx.db, w.project.id, w.ctx.now())).toEqual([]);
+    // A good turn ends the stretch.
+    w.ctx.db.prepare("UPDATE desk_items SET state = 'open' WHERE id = ?").run(id);
+    const good = leaseItem(w.ctx.db, id, { way: 'headless', leaseMs: MIN }, w.ctx.now())!;
+    w.ctx.db.prepare("UPDATE lead_turns SET state = 'applied' WHERE id = ?").run(good.id);
+    w.ctx.db.prepare("UPDATE desk_items SET state = 'open' WHERE id = ?").run(id);
+    fault();
+    expect(reopenFaultedItems(w.ctx.db, w.project.id, w.ctx.now())).toEqual([id]);
   });
 });

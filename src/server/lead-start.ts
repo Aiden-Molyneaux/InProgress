@@ -93,22 +93,27 @@ export function buildStartBody(i: {
 /**
  * The project's starts on the lead's own judgment (no words of Aiden's, not cleared) in the 24 hours before `nowMs`: what
  * LEAD_STARTS_PER_DAY limits. The start lines written before the sends (#743 task 8) count too, so a deploy resets nothing.
+ * The day's thread start (retry key `morning-thread:...`) starts no step and does not count.
  */
 export function ownStartsToday(ctx: Ctx, projectId: number, nowMs: number): number {
   const since = new Date(nowMs - DAY_MS).toISOString();
   const sends = ctx.db
     .prepare(
       `SELECT COUNT(*) FROM lead_sends WHERE project_id = ? AND kind = 'start' AND state <> 'cleared' AND created_at >= ?
-          AND (NOT json_valid(body) OR json_extract(body, '$.aidenWords') IS NULL)`,
+          AND (NOT json_valid(body) OR json_extract(body, '$.aidenWords') IS NULL)
+          AND (retry_key IS NULL OR substr(retry_key, 1, length(?)) <> ?)`,
     )
     .pluck()
-    .get(projectId, since) as number;
+    .get(projectId, since, MORNING_THREAD_KEY, MORNING_THREAD_KEY) as number;
   const before = ctx.db
     .prepare(`SELECT COUNT(*) FROM lead_events e WHERE e.project_id = ? AND e.aiden_words IS NULL AND e.at >= ? AND ${LEGACY_START}`)
     .pluck()
     .get(projectId, since) as number;
   return sends + before;
 }
+
+/** The retry key prefix of the day's thread start (morning.ts): it starts no step, so it is no start of the lead's own. */
+const MORNING_THREAD_KEY = 'morning-thread:';
 
 const MINUTE_MS = 60 * 1000;
 /** How long a started thread is given to claim its step: a second start of the step, and the in-flight count, wait that long. */

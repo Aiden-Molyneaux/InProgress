@@ -15,9 +15,10 @@ import { stoppedHoldBack } from './lead/stopped';
 import { watchHeldLines } from './lead/hold';
 import { createRunner, headlessWay, threadWay, LEAD_MODEL, leadToolsEntry, type Runner } from './lead/runner';
 import { createSender, type Sender } from './lead/sends';
-import { createVoiceWebhook } from './lead/voice';
+import { createVoice } from './lead/voice';
+/** The Voice as the sender takes it: the webhook, and the readiness asked before anything is written. */
+const voiceDeps = (v: ReturnType<typeof createVoice>) => ({ webhook: v.webhook, voiceReady: v.ready });
 import { dayThreadOf, noteWake, watchMorning } from './lead/morning';
-import { resolveProject } from './repo/projects';
 import { probeUsage } from './lead/usage';
 import { defaultStart } from './lead-start';
 import { t3List, t3Send, t3Show } from './t3';
@@ -66,7 +67,7 @@ async function main(): Promise<void> {
       : createSender(
           ctx,
           // The Voice's lines go by its webhook, read from <home>/lead/voice.json (task 11); without the file they wait.
-          { t3: { list: (p) => t3List(p), show: (id) => t3Show(id), start: defaultStart(), send: (id, text) => t3Send(id, text) }, webhook: createVoiceWebhook(ctx, { home }) },
+          { t3: { list: (p) => t3List(p), show: (id) => t3Show(id), start: defaultStart(), send: (id, text) => t3Send(id, text) }, ...voiceDeps(createVoice(ctx, { home })) },
           { log: senderLog },
         );
   const app = buildApp({
@@ -184,7 +185,6 @@ async function main(): Promise<void> {
           send: (threadId, message) => t3Send(threadId, message),
           show: (threadId) => t3Show(threadId),
           dayThread: (projectId) => dayThreadOf(ctx, projectId, ctx.now()),
-          projectIdOf: (slug) => resolveProject(ctx, slug).id,
         }),
         model: LEAD_MODEL,
         home,

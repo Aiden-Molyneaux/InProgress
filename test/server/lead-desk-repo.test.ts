@@ -49,11 +49,14 @@ describe('desk items', () => {
     expect(getDeskItem(db, it1.id)).toMatchObject({ state: 'leased', doneAt: null });
   });
 
-  it('clears done_at and the outcome when a done item is moved back', () => {
+  it('clears done_at and the outcome when a done item is moved back, and keeps an outcome given with the move (Y4)', () => {
     const it1 = item();
     expect(moveDeskItem(db, it1.id, ['open'], 'done', { outcome: 'answered', now: T1 })).toBe(true);
-    expect(moveDeskItem(db, it1.id, ['done'], 'open', { outcome: 'ignored', now: T2 })).toBe(true);
+    expect(moveDeskItem(db, it1.id, ['done'], 'open', { now: T2 })).toBe(true);
     expect(getDeskItem(db, it1.id)).toMatchObject({ state: 'open', doneAt: null, outcome: null });
+    expect(moveDeskItem(db, it1.id, ['open'], 'done', { outcome: 'answered', now: T1 })).toBe(true);
+    expect(moveDeskItem(db, it1.id, ['done'], 'open', { outcome: 'waits: why', now: T2 })).toBe(true);
+    expect(getDeskItem(db, it1.id)).toMatchObject({ state: 'open', doneAt: null, outcome: 'waits: why' });
   });
 
   it('lists the open items oldest first', () => {

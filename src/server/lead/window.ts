@@ -15,8 +15,10 @@ const nameOf = (s: LeadSwitch): string => s.charAt(0).toUpperCase() + s.slice(1)
  * names. A switch already in the state asked for is refused, as the commands refuse it.
  */
 export function windowLeadSwitch(ctx: Ctx, projectId: number, name: LeadSwitch, on: boolean): { text: string } {
-  const project = resolveProject(ctx, projectId);
   return write(ctx, 'window', (record) => {
+    // Read inside the write, so the project cannot change between the check and the log line.
+    const project = resolveProject(ctx, projectId);
+    if (project.status === 'archived') throw conflict('This project is archived.', 'Unarchive it first.');
     if (project.lead === null || project.lead.trim() === '') throw conflict('This project has no lead.', 'Give it one from its actions first.');
     if (leadSwitches(ctx, project.id)[name].on === on) throw conflict(`${nameOf(name)} is already ${on ? 'on' : 'off'}.`, 'Reload the window.');
     logLeadEvent(ctx, { projectId: project.id, lead: project.lead, instructions: LEAD_INSTRUCTIONS_VERSION, kind: on ? 'allow' : 'disallow', text: name, aidenWords: SWITCHED_IN_WINDOW });

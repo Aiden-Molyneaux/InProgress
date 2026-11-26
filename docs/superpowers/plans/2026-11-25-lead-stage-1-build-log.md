@@ -496,3 +496,37 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   of them. Did a Turn on / Turn off button on each line of the Lead view and `POST /api/ui/projects/:id/lead-switch`.
 - "The lead is behind" rides on the snapshot (`leadBehind`: items with a limit, or behind); the window's clock decides
   which are late, so no server event is needed to make one appear. It sits in the Board's Needs me band under the asks.
+
+## The reviews of 6aba786 and a1fa449
+
+- Murr on tasks 11 and 15 (Opus): needs fixes, 1 blocker, 2 major. The blocker: a review answer the lead carried
+  recorded a yes for merge, deploy and push whatever Aiden's words were (the route defaulted to all three), so "not
+  yet" would have cleared the landing. Majors: a Voice line gave the lead no fixed way to carry Aiden's reply to the
+  right ask or held item; an aiden_said undo told the wrong thread, or nothing. Sent back as W1 to W12. Calls: a yes is
+  written only for the actions `--yes` names; `lead answer --send s<id>` resolves a voice line on the server; a yes is
+  refused when the change has a commit newer than his words; an undo takes back a carried answer's yeses; the carry
+  stamps the ask delivered when it is tried.
+- Murr on tasks 12 and 14 (Opus): needs fixes, 3 major: "The lead is behind" went stale because desk writes sent no
+  project event; focus after an answer there could drop to the page; the lead-folder test could not fail. Sent back as
+  X1 to X13 and Y3. Calls: the thread way reads a reply only when the thread is not running, runs one turn at a time,
+  and falls back to the headless way before the day's thread exists; the window's switch refuses an archived project.
+- Murr's re-check of T1 to T9 and U1 to U12 (Opus): 1 major each: the late answer reached the session marked as the
+  lead's; a restart waiting for a reading read as "restarted" in the morning list. Sent back as Y1 to Y9. Calls: an
+  ask counts as asked only once delivered; a reopen is once per fault stretch; the day's thread start is not one of
+  the lead's three starts; no week figure means the reserve waits.
+- Murr on the exam harness (Sonnet): needs fixes, 2 major: a dropped step was not reopened by the cut; a stand-in
+  result would have been skipped as done by the real run. No path to the live home or the live ports. Sent back as Z1
+  to Z10. Calls: the exam's tools get no repo, so a review case cannot read what happened after the ask; the split
+  draws from a hash of seed and id, and half files are never regenerated.
+- Parvati on the Lead view's switches and "The lead is behind" (port 4401, scratch data): C1 to C4 PASS, 0 flags,
+  3 polish (the buttons' column at 1440 taken; a late ask shown twice, as the request asks; the Needs me count leaves
+  the behind rows out).
+- Fix rounds back: Z1 to Z10 (the exam: a stable hash split, no repo for the exam's tools, the guard before any
+  write), Y1 to Y9 (desk writes now raise one project event through temporary triggers on the connection, read by
+  write() and by the runner's own transactions; Aiden's late answer is his own, not the lead's), X1 to X13 (the
+  thread way matches the turn, waits out a running thread, runs one turn at a time and falls back to headless before
+  the day's thread exists). X9's busy status checked against T3's own list, read only: a thread at work reads
+  `running` (`starting` is the Sev's guess, kept, harmless).
+- Y3: plan said each write that touches a desk item records its event. Did it once, with temporary triggers on the
+  connection. Because the desk is written from about fifteen places, some bulk, some in the runner's raw
+  transactions. My call on the traffic: one event per desk write is fine at a few a minute.

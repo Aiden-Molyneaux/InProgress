@@ -98,6 +98,18 @@ export function morningList(ctx: Ctx, projectId: number, since: string, now: str
     .all(projectId) as (Titled & { ask_text: string; would_have: string })[]).map(
     (r) => `${stepWords(r.node_id, r.title)}: ${noStop(clipLine(r.ask_text, ASK_CUT))}. I would: ${noStop(r.would_have)}.`,
   );
+  // What he left to the lead and the round brought back to him (an aiden_said item, task 11), while it waits on him.
+  yours.push(
+    ...(db
+      .prepare(
+        `SELECT e.node_id, n.title, ld.aiden_words, e.text AS would_have FROM lead_events e
+         JOIN lead_decisions ld ON ld.event_id = e.id JOIN desk_items d ON d.id = ld.item_id LEFT JOIN nodes n ON n.id = e.node_id
+         WHERE e.project_id = ? AND e.kind = 'bring' AND d.kind = 'aiden_said' AND d.state = 'waiting_aiden' ORDER BY e.at, e.id`,
+      )
+      .all(projectId) as (Titled & { aiden_words: string | null; would_have: string })[]).map(
+      (r) => `${stepWords(r.node_id, r.title)}: you left it to me ("${noStop(clipLine(r.aiden_words ?? '', ASK_CUT))}"). I would: ${noStop(r.would_have)}.`,
+    ),
+  );
   if (yours.length) parts.push({ name: 'Yours', count: yours.length, lines: yours });
 
   // Decided for you: the lead's own, not undone; product rulings first, then by time.
@@ -145,7 +157,7 @@ export function morningList(ctx: Ctx, projectId: number, since: string, now: str
     .prepare(
       `SELECT kind, ref, node_id, state, outcome, created_at, done_at FROM desk_items
        WHERE project_id = ? AND created_at > ? AND (kind IN ('unknown_send') OR state = 'behind'
-         OR (kind = 'stopped' AND (outcome LIKE 'RESTART%' OR outcome LIKE 'PARK%' OR outcome LIKE 'DONE%' OR outcome = 'asked')))
+         OR (kind = 'stopped' AND (outcome LIKE 'RESTART%' OR outcome LIKE 'PARK%' OR outcome LIKE 'DONE%' OR outcome LIKE 'waits%' OR outcome = 'asked')))
        ORDER BY created_at, id`,
     )
     .all(projectId, since) as { kind: string; ref: string; node_id: number | null; state: string; outcome: string | null; created_at: string; done_at: string | null }[];
@@ -156,7 +168,20 @@ export function morningList(ctx: Ctx, projectId: number, since: string, now: str
     else {
       const stopped = i.kind === 'stopped' && i.ref.includes('@') ? hhmm(i.ref.slice(i.ref.indexOf('@') + 1)) : hhmm(i.created_at);
       const at = hhmm(i.done_at ?? i.created_at);
-      const what = (i.outcome ?? '').startsWith('RESTART') ? `restarted at ${at}` : (i.outcome ?? '').startsWith('PARK') ? `parked at ${at}` : (i.outcome ?? '').startsWith('DONE') ? `noted done at ${at}` : 'asked, no answer yet';
+      const o = i.outcome ?? '';
+      // A restart that waits, and a park skipped, have words of their own: neither restarted nor parked anything.
+      const skipped = /^PARK skipped: #\d+ is already (\w+)/.exec(o);
+      const what = o.startsWith('waits')
+        ? 'a restart waits for a usage reading'
+        : skipped
+          ? `not parked at ${at}: the step was already ${skipped[1]}`
+          : o.startsWith('RESTART')
+            ? `restarted at ${at}`
+            : o.startsWith('PARK')
+              ? `parked at ${at}`
+              : o.startsWith('DONE')
+                ? `noted done at ${at}`
+                : 'asked, no answer yet';
       wrong.push(`${step} stopped at ${stopped}; ${what}.`);
     }
   }

@@ -19,12 +19,16 @@ export const AFTER = {
  */
 export const REOPENED_STATUS = 'active';
 
+/** The steps finished, parked or dropped after BEFORE (three ? for it). */
+const CLOSED_AFTER = "completed_at > ? OR parked_at > ? OR (status = 'dropped' AND updated_at > ?)";
+
 /** Rows written after BEFORE, per table, plus the asks and steps the cut reopens and the sessions that exist. */
 export function countAfter(db, before) {
   const out = {};
   for (const [table, where] of Object.entries(AFTER)) out[table] = db.prepare(`SELECT COUNT(*) FROM ${table} WHERE ${where}`).pluck().get(before);
   out.asks_cleared_after = db.prepare('SELECT COUNT(*) FROM asks WHERE cleared_at > ?').pluck().get(before);
-  out.steps_closed_after = db.prepare('SELECT COUNT(*) FROM nodes WHERE completed_at > ? OR parked_at > ?').pluck().get(before, before);
+  // A drop sets neither completed_at nor parked_at: a dropped step counts by when it was last updated.
+  out.steps_closed_after = db.prepare(`SELECT COUNT(*) FROM nodes WHERE ${CLOSED_AFTER}`).pluck().get(before, before, before);
   out.sessions = db.prepare('SELECT COUNT(*) FROM sessions').pluck().get();
   return out;
 }
@@ -36,13 +40,8 @@ export function countAfter(db, before) {
  */
 export function cutAt(db, before, askId) {
   const run = db.transaction(() => {
-    // Reopen first, so a step made after BEFORE that was also closed is simply deleted below.
-    db.prepare(
-      "UPDATE OR IGNORE asks SET cleared_at = NULL, cleared_by = NULL, answer = '', answer_delivered_at = NULL, answered_via = NULL WHERE cleared_at > ? OR id = ?",
-    ).run(before, askId);
-    db.prepare(
-      `UPDATE nodes SET status = '${REOPENED_STATUS}', completed_at = NULL, outcome = '', parked_reason = '', parked_where = '', parked_at = NULL WHERE completed_at > ? OR parked_at > ?`,
-    ).run(before, before);
+    // The later rows go first, so a reopened ask never meets a later twin in the unique index; a conflict that remains
+    // is real, and throws (the whole cut is rolled back).
     db.prepare('DELETE FROM lead_events WHERE at > ?').run(before);
     db.prepare('DELETE FROM lead_decisions WHERE said_at > ?').run(before);
     db.prepare('DELETE FROM log_entries WHERE created_at > ?').run(before);
@@ -50,6 +49,12 @@ export function cutAt(db, before, askId) {
     db.prepare('DELETE FROM asks WHERE raised_at > ? AND id <> ?').run(before, askId);
     db.prepare('DELETE FROM nodes WHERE created_at > ?').run(before);
     db.prepare('DELETE FROM events WHERE ts > ?').run(before);
+    db.prepare(
+      "UPDATE asks SET cleared_at = NULL, cleared_by = NULL, answer = '', answer_delivered_at = NULL, answered_via = NULL WHERE cleared_at > ? OR id = ?",
+    ).run(before, askId);
+    db.prepare(
+      `UPDATE nodes SET status = '${REOPENED_STATUS}', completed_at = NULL, outcome = '', parked_reason = '', parked_where = '', parked_at = NULL WHERE ${CLOSED_AFTER}`,
+    ).run(before, before, before);
     // Every session row: no stopped item, no live session. Rows that name one are cleared by their own foreign keys.
     db.prepare('UPDATE nodes SET driver_session_id = NULL').run();
     db.prepare('DELETE FROM sessions').run();
@@ -58,4 +63,21 @@ export function cutAt(db, before, askId) {
   const ask = db.prepare('SELECT cleared_at, answer FROM asks WHERE id = ?').get(askId);
   if (ask === undefined) throw new Error(`the cut at ${before} removed ask ${askId} itself`);
   if (ask.cleared_at !== null || ask.answer !== '') throw new Error(`ask ${askId} is still answered after the cut at ${before}`);
+}
+
+/**
+ * The exam's tools get no repo: the lead's git reads (its folders are the project's bindings) would show what happened after
+ * the ask. Every binding of the project, and every session's folder, is pointed at a folder under `dir` that does not exist,
+ * so a git read answers that the change cannot be read. Distinct paths, for the bindings' unique index. Returns the paths.
+ */
+export function pointFoldersAway(db, projectId, dir) {
+  const root = `${dir.split('\\').join('/').replace(/\/+$/, '')}/no-repo`;
+  const ids = db.prepare('SELECT id FROM bindings WHERE project_id = ? ORDER BY id').pluck().all(projectId);
+  const paths = ids.map((id) => `${root}/${id}`);
+  const set = db.prepare('UPDATE bindings SET path = ? WHERE id = ?');
+  db.transaction(() => {
+    ids.forEach((id, i) => set.run(paths[i], id));
+    db.prepare('UPDATE sessions SET cwd = ?').run(`${root}/sessions`);
+  })();
+  return paths;
 }

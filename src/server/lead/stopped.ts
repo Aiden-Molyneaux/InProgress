@@ -33,7 +33,7 @@ export const CAUSE_RESTARTS = 'two restarts tried';
 /** The park cause when the starts per day or the reserve refuse a restart (the reserve's why follows it). */
 export const CAUSE_LIMIT = 'the start limit or the reserve';
 /** What a restart that waits for a fresh usage reading is called, in the item's outcome while it is held. */
-export const RESTART_WAITS = 'RESTART waits for a fresh usage reading';
+export const RESTART_WAITS = 'waits: a restart waits for a fresh usage reading';
 
 /** A stopped item's ref: `<session id>@<last_seen_at>`, the session and the moment it stopped. desk.ts's SQL reads it too. */
 export const stoppedRef = (sessionId: string, lastSeenAt: string): string => `${sessionId}@${lastSeenAt}`;
@@ -137,7 +137,9 @@ export function stoppedHoldBack(ctx: Ctx, item: DeskItem, reserveNow: (ctx: Ctx,
   if (lastAnswer !== undefined && lastAnswer !== null && /^RESTART:/.test(lastAnswer.trim())) {
     const reserve = reserveNow(ctx, ctx.now());
     if (!reserve.ok && reserve.wait === true) {
-      ctx.db.prepare("UPDATE desk_items SET outcome = ? WHERE id = ? AND state = 'open'").run(`${RESTART_WAITS}: ${reserve.why}`, item.id);
+      // The why is written in a write, and only when it changed: a fill looks often, and the why rarely moves.
+      const why = `${RESTART_WAITS} (${reserve.why})`;
+      if (item.outcome !== why) write(ctx, 'system', () => ctx.db.prepare("UPDATE desk_items SET outcome = ? WHERE id = ? AND state = 'open'").run(why, item.id), { immediate: true });
       return true;
     }
   }
@@ -237,7 +239,7 @@ function verdictOnStopped(ctx: Ctx, turn: LeadTurn, item: DeskItem, record: Reco
   const reserve = (deps.reserveAllowsStart ?? reserveAllowsStart)(ctx, now);
   // No fresh reading is no low reserve: the restart waits for one (the item goes back on the desk, held with the why until
   // the reading is fresh), and only a reserve that is really low parks the step.
-  if (!reserve.ok && reserve.wait === true) return { itemState: 'open', outcome: `${RESTART_WAITS}: ${reserve.why}` };
+  if (!reserve.ok && reserve.wait === true) return { itemState: 'open', outcome: `${RESTART_WAITS} (${reserve.why})` };
   if (!reserve.ok) return park(`${CAUSE_LIMIT}: ${reserve.why}`);
   // A restart is the lead's own start: every refusal `lead start` has (Starts off, the in-flight limit, a parked or done
   // step, a live session on it) refuses it too, leaving out only the stopped session itself.

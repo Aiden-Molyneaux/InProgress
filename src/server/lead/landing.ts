@@ -141,7 +141,13 @@ async function liveBuild(deps: LandingDeps, folder: string): Promise<{ sha: stri
 
 /** Aiden's yeses on the project: `<action> <patch id>` on each kind 'yes' line of its log, with the step it was given on. */
 function yesesOf(ctx: Ctx, projectId: number): { action: string; patchId: string; stepId: number | null }[] {
-  const rows = ctx.db.prepare("SELECT text, node_id FROM lead_events WHERE project_id = ? AND kind = 'yes'").all(projectId) as { text: string; node_id: number | null }[];
+  // A yes withdrawn by the undo of the answer that carried it (a later `yes_withdrawn` line with its text and step) is not one.
+  const rows = ctx.db
+    .prepare(
+      `SELECT y.text, y.node_id FROM lead_events y WHERE y.project_id = ? AND y.kind = 'yes'
+         AND NOT EXISTS (SELECT 1 FROM lead_events w WHERE w.project_id = y.project_id AND w.kind = 'yes_withdrawn' AND w.text = y.text AND w.node_id IS y.node_id AND w.id > y.id)`,
+    )
+    .all(projectId) as { text: string; node_id: number | null }[];
   return rows.flatMap((r) => {
     const i = r.text.indexOf(' ');
     return i > 0 ? [{ action: r.text.slice(0, i), patchId: r.text.slice(i + 1), stepId: r.node_id }] : [];

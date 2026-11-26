@@ -47,7 +47,9 @@ describe("the guard on Aiden's go-ahead", () => {
     write(repo.wt, 'web/app.ts', lines(20, 'tabs'));
     commit(repo.wt, 'tabs');
     expect(await t.check('merge')).toMatchObject({ clear: false });
-    const yeses = await readYeses(t.ctx, t.project.slug, t.review.id, ['merge', 'deploy', 'push'], deps);
+    // His word, after the last commit (git's clock is the real one, the test's ctx clock is not).
+    const said = new Date(Date.now() + 1000).toISOString();
+    const yeses = await readYeses(t.ctx, t.project.slug, t.project.id, t.review.id, ['merge', 'deploy', 'push'], said, deps);
     const merge = (await checkLanding(t.ctx, { ref: t.project.slug, stepId: t.step.id, action: 'merge', folder: repo.wt, branch: 'feature' }, deps)).patchId;
     expect(merge).toMatch(/^[0-9a-f]{40}$/);
     expect(yeses).toEqual([
@@ -57,14 +59,14 @@ describe("the guard on Aiden's go-ahead", () => {
     ]);
     // The two checks above held and logged; the read logs nothing.
     expect(t.ctx.db.prepare("SELECT COUNT(*) FROM lead_events WHERE kind = 'landing_check'").pluck().get()).toBe(2);
-    const res = leadAnswer(t.ctx, t.project.slug, 'Progresser', V, { askId: t.review.id, aidenWords: 'ship it', where: 'voice', shown: [3], yeses: yeses! });
-    expect(res.text).toBe(`Answered a${t.review.id} with Aiden's words. His yes covers merge, deploy and push of the change as it is now. Its session is told in its thread.`);
+    const res = leadAnswer(t.ctx, t.project.slug, 'Progresser', V, { askId: t.review.id, aidenWords: 'ship it', where: 'voice', saidAt: said, shown: [3], yeses: yeses! });
+    expect(res.text).toMatch(new RegExp(`^Answered a${t.review.id} with Aiden's words: decision d[0-9]+\\. His yes covers merge, deploy and push of the change as it is now\\. Its session is told in its thread\\.$`));
     expect(requireAsk(t.ctx, t.review.id)).toMatchObject({ answer: 'ship it', answeredVia: 'lead' });
     const yesLines = t.ctx.db.prepare("SELECT text, node_id, aiden_words FROM lead_events WHERE kind = 'yes' ORDER BY id").all() as { text: string; node_id: number; aiden_words: string }[];
     expect(yesLines.map((y) => y.text)).toEqual(yeses!.map((y) => `${y.action} ${y.patchId}`));
     expect(yesLines.every((y) => y.node_id === t.step.id && y.aiden_words === 'ship it')).toBe(true);
     expect(t.ctx.db.prepare("SELECT kind, aiden_words, aiden_answer, said_where FROM lead_decisions").get()).toEqual({ kind: 'technical', aiden_words: 'ship it', aiden_answer: 'ship it', said_where: 'voice' });
-    expect(t.ctx.db.prepare("SELECT text FROM lead_events WHERE kind = 'answer'").pluck().get()).toMatch(/^where voice; said .*; shown r3$/);
+    expect(t.ctx.db.prepare("SELECT text FROM lead_events WHERE kind = 'answer'").pluck().get()).toMatch(/^where voice; said .*; shown r3; yes e[0-9]+,e[0-9]+,e[0-9]+$/);
 
     expect(await t.check('merge')).toMatchObject({ clear: true, why: 'his yes' });
     expect(await t.check('push')).toMatchObject({ clear: true, why: 'his yes' });
@@ -83,7 +85,7 @@ describe("the guard on Aiden's go-ahead", () => {
   it('records the answer without a yes when the change cannot be read, and says so', async () => {
     const t = setup();
     t.ctx.db.prepare("UPDATE sessions SET cwd = NULL WHERE id = 's1'").run();
-    const yeses = await readYeses(t.ctx, t.project.slug, t.review.id, ['merge'], deps);
+    const yeses = await readYeses(t.ctx, t.project.slug, t.project.id, t.review.id, ['merge'], new Date().toISOString(), deps);
     const res = leadAnswer(t.ctx, t.project.slug, 'Progresser', V, { askId: t.review.id, aidenWords: 'ship it', yeses: yeses! });
     expect(res.text).toContain('No yes recorded for merge: its session has no folder on record.');
     expect(t.ctx.db.prepare("SELECT COUNT(*) FROM lead_events WHERE kind = 'yes'").pluck().get()).toBe(0);
@@ -144,7 +146,7 @@ describe("the guard on Aiden's go-ahead", () => {
     addBinding(t.ctx, 'test', free.slug, 'C:/personal/Garden');
     const [step] = addNodes(t.ctx, 'test', { parentId: free.rootNodeId, nodes: [{ title: 'Beds' }] });
     const old = raiseAsk(t.ctx, 'test', { nodeId: step.id, kind: 'question', text: 'Raised beds?' });
-    expect(leadAnswer(t.ctx, free.slug, 'Progresser', V, { askId: old.id, aidenWords: 'yes, raised' }).text).toBe(`Answered a${old.id} with Aiden's words.`);
+    expect(leadAnswer(t.ctx, free.slug, 'Progresser', V, { askId: old.id, aidenWords: 'yes, raised' }).text).toMatch(new RegExp(`^Answered a${old.id} with Aiden's words: decision d[0-9]+[.]$`));
     expect(requireAsk(t.ctx, old.id)).toMatchObject({ answer: 'yes, raised', clearedBy: 'lead:Progresser' });
     const other = createProject(t.ctx, 'test', { name: 'Theirs' });
     setProjectLead(t.ctx, 'window', other.slug, 'Keeper');

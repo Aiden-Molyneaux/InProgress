@@ -48,7 +48,7 @@ export function watchDesk(ctx: Ctx): DeskWatchResult {
 
 /**
  * The stopped pass: closes the items whose session moved on, makes the new ones, and asks each open one that can be asked
- * and was not (stopped.ts's askStoppedInWrite). A session asked on a step is never given another item on that step.
+ * and was not (stopped.ts's askStoppedInWrite). A session whose ask on a step was delivered is never given another item on that step; an ask cleared undelivered does not count.
  */
 function stoppedPass(ctx: Ctx, projectId: number): { made: number; asked: number } {
   const bound = roundBound(ctx.db, projectId);
@@ -75,7 +75,9 @@ function stoppedPass(ctx: Ctx, projectId: number): { made: number; asked: number
        WHERE s.project_id = ? AND s.role = 'worker' AND s.state = 'idle' AND s.ended_at IS NULL AND n.status = 'active'
          AND s.last_seen_at <= ? AND s.last_seen_at >= ? AND s.last_seen_at >= ?
          AND NOT EXISTS (SELECT 1 FROM asks a WHERE a.node_id = n.id AND a.cleared_at IS NULL AND ${aidensAskSql('a.')})
-         AND NOT EXISTS (SELECT 1 FROM lead_events e WHERE e.project_id = s.project_id AND e.kind = 'asked' AND e.session_id = s.id AND e.node_id = s.focus_node_id)
+         AND NOT EXISTS (SELECT 1 FROM desk_items d JOIN lead_sends ls ON ls.retry_key = 'ask-stopped:' || d.id
+                          WHERE d.project_id = s.project_id AND d.kind = 'stopped' AND d.node_id = s.focus_node_id
+                            AND substr(d.ref, 1, length(s.id) + 1) = s.id || '@' AND ls.state = 'done')
        ORDER BY s.last_seen_at, s.id`,
     )
     .all(projectId, latest, earliest, bound) as { id: string; focus_node_id: number; last_seen_at: string }[];

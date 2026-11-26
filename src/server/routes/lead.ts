@@ -1,10 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import type { Guard } from '../app';
 import type { Ctx } from '../db/tx';
-import { badGateway, badRequest, notFound } from '../errors';
+import { badGateway, badRequest, conflict, notFound } from '../errors';
 import { cliBesideServer, nodeCli } from '../../lib/task-command';
 import { leadFolders, listLeadEvents, markLeadSeen, readLeadBrief, readLeadIntent, readLeadRules, requireLead } from '../lead';
-import { leadAllow, leadDisallow, leadAnswer, leadDeskAdd, leadSeen, readYeses, requireAnswerLead, YES_ACTIONS, leadDecide, leadUndo, leadDrop, leadIntent, leadKept, leadPark, leadPromise, leadSet } from '../lead-commands';
+import { leadAllow, leadDisallow, leadAnswer, leadDeskAdd, leadSeen, readYeses, requireAnswerLead, workProject, WORK_PROJECT, leadDecide, leadUndo, leadDrop, leadIntent, leadKept, leadPark, leadPromise, leadSet } from '../lead-commands';
 import { readMorning } from '../lead/morning';
 import { reserveAllowsStart } from '../lead/reserve';
 import { importUsage, leadCounts, weekText } from '../lead/usage';
@@ -20,6 +20,7 @@ import { readLeadResource, readLeadStep } from '../lead-step';
 import { renderLeadBrief } from '../lead-text';
 import { leadAllowBody, leadDisallowBody, leadAnswerBody, leadBriefQuery, leadStuckBody, leadDecideBody, leadUndoBody, leadSetBody, leadImportUsageBody, leadCountsQuery, leadDropBody, leadIntentBody, leadKeptBody, leadLandingBody, leadParkBody, leadPromiseBody, leadReadQuery, leadRelayBody, leadStartBody, leadRulesQuery, leadSeenBody, leadStampBody, leadDeskAddBody } from '../schemas';
 import { VOICE_NOT_SET_UP, voiceSetUp } from '../lead/voice';
+import { heldScope, leadAnswerItem, readSessionYeses, voiceTarget } from '../lead/carry';
 
 /** How many of a project's threads, newest first, the threads read lists. */
 const THREADS_LISTED = 20;
@@ -164,12 +165,29 @@ export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken:
   // what its command returns, `text` being the sentence the CLI prints.
   const ref = (req: { params: unknown }): string => (req.params as { ref: string }).ref;
   app.post('/api/lead/:ref/answer', { onRequest: requireToken }, async (req) => {
-    const { as, instructions, yes, ...input } = leadAnswerBody.parse(req.body);
-    // A review's yes is keyed on the change's patch id, read now in its session's folder, before the write. The lead is
-    // checked first, so a refused lead starts no git.
-    requireAnswerLead(ctx, ref(req), as, instructions);
-    const yeses = await readYeses(ctx, ref(req), input.askId, yes ?? YES_ACTIONS, landing);
-    const res = leadAnswer(ctx, ref(req), as, instructions, { ...input, ...(yeses === undefined ? {} : { yeses }) });
+    const { as, instructions, yes, sendId, askId: givenAsk, ...input } = leadAnswerBody.parse(req.body);
+    // The lead and the C:\work refusal are checked first, so a refused answer starts no git.
+    const { project } = requireAnswerLead(ctx, ref(req), as, instructions);
+    if (workProject(ctx, project.id)) throw conflict(WORK_PROJECT);
+    const saidAt = input.saidAt ?? ctx.now();
+    let askId = givenAsk;
+    if (sendId !== undefined) {
+      // His reply to a line to the Voice: the line's send says what it was about.
+      const target = voiceTarget(ctx, project, sendId);
+      if (target.kind === 'ask') askId = target.askId;
+      else {
+        const held = target.kind === 'held' ? heldScope(ctx, target.item) : undefined;
+        const yeses =
+          held !== undefined && yes !== undefined && target.item.nodeId !== null ? await readSessionYeses(ctx, ref(req), target.item.nodeId, held.sessionId, yes, saidAt, landing) : undefined;
+        const res = leadAnswerItem(ctx, ref(req), as, instructions, target.item.id, { ...input, saidAt, ...(yeses === undefined ? {} : { yeses }) });
+        if (res.carried) setImmediate(() => void sender.wake());
+        return res;
+      }
+    }
+    // A review's yes, only for the actions his words okayed (`yes`): keyed on the change's patch id, read now in its
+    // session's folder, before the write. No `yes`, no yes.
+    const yeses = yes === undefined ? undefined : await readYeses(ctx, ref(req), project.id, askId as number, yes, saidAt, landing);
+    const res = leadAnswer(ctx, ref(req), as, instructions, { ...input, askId: askId as number, saidAt, ...(yeses === undefined ? {} : { yeses }) });
     // The carried line is a send: carried out after the write commits (wake never throws).
     if (res.carried) setImmediate(() => void sender.wake());
     return res;

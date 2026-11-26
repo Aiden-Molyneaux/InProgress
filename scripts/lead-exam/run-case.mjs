@@ -8,7 +8,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } 
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
-import { countAfter, cutAt } from './cut.mjs';
+import { countAfter, cutAt, pointFoldersAway } from './cut.mjs';
+import { refuseLiveHome } from './guard.mjs';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const [buildArg, copyArg, outArg, kind, idArg, portArg] = process.argv.slice(2);
@@ -21,10 +22,15 @@ const port = Number(portArg);
 if (!Number.isInteger(port) || port < 4410 || port > 4419) throw new Error(`port ${portArg} is not in the exam's lane, 4410 to 4419`);
 if (!['q', 'r', 'm'].includes(kind) || !Number.isInteger(askId)) throw new Error(`case ${kind} ${idArg} is not <q|r|m> <ask id>`);
 
+// Before anything is made or written: neither the out dir nor the copy may lie under the live home, by real path.
+refuseLiveHome([out, copy], join(homedir(), '.inprogress'));
+const program = process.env.INPROGRESS_LEAD_CLAUDE || 'claude';
 const resultFile = join(out, `lead-${kind}-${askId}.json`);
 if (existsSync(resultFile)) {
   try {
-    if (JSON.parse(readFileSync(resultFile, 'utf8')).error === null) {
+    const done = JSON.parse(readFileSync(resultFile, 'utf8'));
+    // Skipped only when the same program and build wrote it: a stand-in's result is never a real run's.
+    if (done.error === null && done.program === program && done.build === build) {
       console.log(`case ${kind}-${askId} is already written: skipped`);
       process.exit(0);
     }
@@ -37,8 +43,7 @@ if (existsSync(resultFile)) {
 const caseDir = join(out, 'cases', `${kind}-${askId}`);
 mkdirSync(caseDir, { recursive: true });
 process.env.INPROGRESS_HOME = caseDir;
-const live = resolve(homedir(), '.inprogress').toLowerCase();
-if (process.env.INPROGRESS_HOME !== caseDir || resolve(caseDir).toLowerCase().startsWith(live)) throw new Error(`INPROGRESS_HOME is ${process.env.INPROGRESS_HOME}: not a case folder`);
+if (process.env.INPROGRESS_HOME !== caseDir) throw new Error(`INPROGRESS_HOME is ${process.env.INPROGRESS_HOME}: not a case folder`);
 process.env.INPROGRESS_PORT = String(port);
 process.env.T3CODE_CLI_PATH = join(here, process.platform === 'win32' ? 't3-standin.cmd' : 't3-standin.sh');
 rmSync(join(caseDir, 'lead', 'voice.json'), { force: true });
@@ -46,7 +51,7 @@ rmSync(join(caseDir, 'voice.json'), { force: true });
 
 const TIMEOUT_MS = 8 * 60 * 1000;
 const log = (m) => console.log(`[${kind}-${askId}] ${m}`);
-const write = (o) => writeFileSync(resultFile, JSON.stringify({ verdict: null, answer: null, reason: null, outcome: null, state: null, text: null, cost: null, error: null, ...o }, null, 1));
+const write = (o) => writeFileSync(resultFile, JSON.stringify({ program, build, verdict: null, answer: null, reason: null, outcome: null, state: null, text: null, cost: null, error: null, ...o }, null, 1));
 
 let db;
 let app;
@@ -72,6 +77,8 @@ try {
   const beforeCut = countAfter(db, BEFORE);
   cutAt(db, BEFORE, askId);
   log(`cut at ${BEFORE}: rows after before ${JSON.stringify(beforeCut)}, after ${JSON.stringify(countAfter(db, BEFORE))}`);
+  // The exam's tools get no repo: the project's folders point at ones that do not exist.
+  pointFoldersAway(db, ask.project_id, caseDir);
   // c. The clock: fixed at BEFORE plus one minute when the run starts, then moving with real time, as the live server's
   // does, so a lease (6 minutes) and the abort before its end behave as they do live.
   const t0 = Date.now();
@@ -110,7 +117,7 @@ try {
   await app.listen({ port, host: '127.0.0.1' });
   // g. The runner, with the real apply on the case copy.
   runner = harness.createRunner(ctx, {
-    way: harness.headlessWay({ claudePath: process.env.INPROGRESS_LEAD_CLAUDE || 'claude', leadDir: (slug) => join(home, 'lead', slug), toolsEntry: harness.leadToolsEntry() }),
+    way: harness.headlessWay({ claudePath: program, leadDir: (slug) => join(home, 'lead', slug), toolsEntry: harness.leadToolsEntry() }),
     model: harness.LEAD_MODEL,
     home,
     port,
@@ -131,6 +138,8 @@ try {
     if (turn !== undefined && ENDED.includes(turn.state)) break;
     await new Promise((r) => setTimeout(r, 500));
   }
+  // The stop sequence below may hang on a run that will not end: the watchdog ends the process, non-zero, with no result file, so the case is run again.
+  setTimeout(() => process.exit(1), 60_000).unref();
   const ended = turn !== undefined && ENDED.includes(turn.state);
   await runner.stop();
   sender.stop();

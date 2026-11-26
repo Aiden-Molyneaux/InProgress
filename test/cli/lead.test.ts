@@ -266,13 +266,13 @@ describe("inprogress lead's commands", () => {
   it("answer: reads Aiden's words from stdin with --aiden -, prints the sentence and exits 0", async () => {
     const stdin = io('Use the release keystore.\n');
     const res = await run(['answer', 'ingame', `a${asks.stdin}`, '--aiden', '-', ...WHO], stdin.io);
-    expect(res).toEqual({ code: 0, lines: [`Answered a${asks.stdin} with Aiden's words.`] });
+    expect(res).toEqual({ code: 0, lines: [expect.stringMatching(new RegExp(`^Answered a${asks.stdin} with Aiden's words: decision d[0-9]+[.]$`))] });
     expect(stdin.reads.stdin).toBe(1);
     expect(row('SELECT answer, answered_via FROM asks WHERE id = ?', asks.stdin)).toEqual({ answer: 'Use the release keystore.', answered_via: 'lead' });
   });
 
   it('answer: 7 and a7 name the same ask, and a refusal prints its sentence and exits 1', async () => {
-    expect(await run(['answer', 'ingame', String(asks.plain), '--aiden', 'Netlify.', ...WHO])).toEqual({ code: 0, lines: [`Answered a${asks.plain} with Aiden's words.`] });
+    expect(await run(['answer', 'ingame', String(asks.plain), '--aiden', 'Netlify.', ...WHO])).toEqual({ code: 0, lines: [expect.stringMatching(new RegExp(`^Answered a${asks.plain} with Aiden's words: decision d[0-9]+[.]$`))] });
     expect(await run(['answer', 'ingame', `a${asks.plain}`, '--aiden', 'Vercel.', ...WHO])).toEqual({ code: 1, lines: ['Already answered: "Netlify.".'] });
   });
 
@@ -293,7 +293,7 @@ describe("inprogress lead's commands", () => {
 
   it('answer --says: stores the answer his words accepted beside his words', async () => {
     const ask = raiseAsk(createCtx(db), 'test', { nodeId: steps.fourth, kind: 'question', text: 'Which region?' });
-    expect(await run(['answer', 'ingame', String(ask.id), '--aiden', 'yes', '--says', 'eu-west', ...WHO])).toEqual({ code: 0, lines: [`Answered a${ask.id} with Aiden's words.`] });
+    expect(await run(['answer', 'ingame', String(ask.id), '--aiden', 'yes', '--says', 'eu-west', ...WHO])).toEqual({ code: 0, lines: [expect.stringMatching(new RegExp(`^Answered a${ask.id} with Aiden's words: decision d[0-9]+[.]$`))] });
     expect(row('SELECT answer FROM asks WHERE id = ?', ask.id)).toEqual({ answer: 'eu-west (Aiden said: "yes")' });
   });
 
@@ -443,7 +443,7 @@ describe("inprogress lead's commands", () => {
     expect(lines[3]).toBe('  inprogress lead step <project> <step id> --as <name> --instructions <n>');
     expect(lines[4]).toBe('  inprogress lead resource <project> <document id> --as <name> --instructions <n>');
     expect(lines[5]).toBe(
-      '  inprogress lead answer <project> <ask id> --aiden <words> [--says <text>] [--where voice|thread] [--said-at <iso time>] [--shown r12,r13] [--yes merge,deploy,push] --as <name> --instructions <n>',
+      '  inprogress lead answer <project> <ask id> | --send <send id> --aiden <words> [--says <text>] [--where voice|thread] [--said-at <iso time>] [--shown r12,r13] [--yes merge|deploy|push ...] --as <name> --instructions <n>',
     );
     expect(lines[6]).toBe('  inprogress lead seen <project> <send id> --as <name> --instructions <n>');
     expect(lines[7]).toBe('  inprogress lead desk-add <project> --step <step id> --words <his words> --as <name> --instructions <n>');
@@ -586,6 +586,10 @@ describe('inprogress lead relay', () => {
       expect(await run(answer)).toMatchObject({ code: 0 });
       expect((await run(['answer', 'inprogress', 'a5', '--aiden', 'x', '--where', 'phone', ...WHO])).code).toBe(1);
       expect((await run(['answer', 'inprogress', 'a5', '--aiden', 'x', '--yes', 'publish', ...WHO])).code).toBe(1);
+      // His reply to a line from the Voice, by its send; --yes once per action.
+      expect(await run(['answer', 'inprogress', '--send', 's9', '--aiden', 'go ahead', '--yes', 'push', '--yes', 'merge', ...WHO])).toMatchObject({ code: 0 });
+      expect((await run(['answer', 'inprogress', 'a5', '--send', 's9', '--aiden', 'x', ...WHO])).code).toBe(1);
+      expect((await run(['answer', 'inprogress', '--aiden', 'x', ...WHO])).code).toBe(1);
     } finally {
       vi.unstubAllGlobals();
       vi.restoreAllMocks();
@@ -596,7 +600,10 @@ describe('inprogress lead relay', () => {
       ['/api/lead/inprogress/stamp', { ...who, sendId: 7 }],
       ['/api/lead/inprogress/desk-add', { ...who, stepId: 12, aidenWords: 'you decide' }],
       ['/api/lead/inprogress/answer', { ...who, askId: 5, aidenWords: 'ship it', where: 'voice', saidAt: '2026-11-25T14:02:00.000Z', shown: [12, 13], yes: ['merge', 'push'] }],
+      ['/api/lead/inprogress/answer', { ...who, sendId: 9, aidenWords: 'go ahead', yes: ['push', 'merge'] }],
     ]);
+    // An answer reads git on the server: it waits as long as a relay.
+    expect(sent.filter((s) => s.url.endsWith('/answer')).map((s) => s.timeoutMs)).toEqual([RELAY_TIMEOUT_MS, RELAY_TIMEOUT_MS]);
   });
 
   it('posts start with its step and optional words, waiting RELAY_TIMEOUT_MS, and says a thread may have been started when no answer comes back', async () => {

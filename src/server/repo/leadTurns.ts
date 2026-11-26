@@ -1,5 +1,12 @@
 import type { DB } from '../db/connection';
+import { flushDesk } from '../db/tx';
 import { getDeskItem, moveDeskItem, type DeskItem } from './desk';
+
+/** The result of a transaction that may have moved desk items, after their window events went out (flushDesk). */
+function andFlush<T>(db: DB, result: T): T {
+  flushDesk(db);
+  return result;
+}
 
 /** How a turn runs (migration 21): a headless run, or a message in the lead's thread. */
 export type TurnWay = 'headless' | 'thread';
@@ -181,11 +188,11 @@ export interface LeaseInput {
  */
 export function leaseItem(db: DB, itemId: number, input: LeaseInput, now: string): LeadTurn | undefined {
   try {
-    return db.transaction((): LeadTurn | undefined => {
+    return andFlush(db, db.transaction((): LeadTurn | undefined => {
       if (!moveDeskItem(db, itemId, ['open', 'behind'], 'leased', { now })) return undefined;
       // A throw here rolls back the item's move with it.
       return insertTurn(db, { itemId, ...input }, now);
-    }).immediate();
+    }).immediate());
   } catch (err) {
     if (isLiveOnce(err)) return undefined;
     throw err;
@@ -215,7 +222,7 @@ export interface TurnEffect {
  * throw from the effect rolls everything back and is rethrown: the turn stays answered for the next recovery.
  */
 export function applyTurn(db: DB, turnId: number, now: string, effect: (turn: LeadTurn, item: DeskItem) => TurnEffect): boolean {
-  return db.transaction((): boolean => {
+  return andFlush(db, db.transaction((): boolean => {
     const turn = getTurn(db, turnId);
     if (turn === undefined || turn.state !== 'answered') return false;
     const item = getDeskItem(db, turn.itemId);
@@ -235,7 +242,7 @@ export function applyTurn(db: DB, turnId: number, now: string, effect: (turn: Le
       throw new Error(`Desk item ${item.id} left leased inside its own apply`);
     }
     return true;
-  }).immediate();
+  }).immediate());
 }
 
 /** How many failed or abandoned turns move an item to behind: the runner gives up on it. */
@@ -255,11 +262,11 @@ export const REOPENED_MARK = ' [reopened once]';
  * longer leased.
  */
 export function failTurn(db: DB, turnId: number, state: 'failed' | 'abandoned' | 'interrupted', why: string, now: string, fields: TurnFields = {}): boolean {
-  return db.transaction((): boolean => {
+  return andFlush(db, db.transaction((): boolean => {
     if (!moveTurn(db, turnId, ['leased'], state, { finishedAt: now, ...fields, why })) return false;
     releaseItem(db, turnId, now);
     return true;
-  }).immediate();
+  }).immediate());
 }
 
 /**
@@ -267,11 +274,11 @@ export function failTurn(db: DB, turnId: number, state: 'failed' | 'abandoned' |
  * answer stay on the row), and its item leased back to open or behind, as failTurn does. False when it was no longer answered.
  */
 export function failAnsweredTurn(db: DB, turnId: number, why: string, now: string): boolean {
-  return db.transaction((): boolean => {
+  return andFlush(db, db.transaction((): boolean => {
     if (!moveTurn(db, turnId, ['answered'], 'failed', { why })) return false;
     releaseItem(db, turnId, now);
     return true;
-  }).immediate();
+  }).immediate());
 }
 
 /**
@@ -291,18 +298,20 @@ function releaseItem(db: DB, turnId: number, now: string): void {
  * opening RUNNER_FAULT_WHY) go back to open, answering their ids. The runner calls it when a turn of the project ends ok:
  * claude runs again, so a stretch it could not run (a usage limit, a sign-out) does not keep those items behind for good.
  * An item behind on its own failed or abandoned turns has a latest turn that is not a fault, and stays behind. An item is
- * reopened once: its latest turn's why is marked REOPENED_MARK, and one that faults again after it (its own fault, such as a
- * prompt too long, that reads as the runner's) stays behind.
+ * reopened once per fault stretch: its latest turn's why is marked REOPENED_MARK, and one that faults again after it (its
+ * own fault, such as a prompt too long, that reads as the runner's) stays behind. A good turn of the item (applied) ends
+ * the stretch: a mark before it blocks nothing.
  */
 export function reopenFaultedItems(db: DB, projectId: number, now: string): number[] {
-  return db.transaction((): number[] => {
+  return andFlush(db, db.transaction((): number[] => {
     const ids = db
       .prepare(
         `SELECT d.id FROM desk_items d
           WHERE d.project_id = ? AND d.state = 'behind'
             AND EXISTS (SELECT 1 FROM lead_turns t WHERE t.id = (SELECT MAX(id) FROM lead_turns WHERE item_id = d.id)
                           AND t.state = 'interrupted' AND substr(COALESCE(t.why, ''), 1, length(?)) = ?)
-            AND NOT EXISTS (SELECT 1 FROM lead_turns r WHERE r.item_id = d.id AND instr(COALESCE(r.why, ''), ?) > 0)
+            AND NOT EXISTS (SELECT 1 FROM lead_turns r WHERE r.item_id = d.id AND instr(COALESCE(r.why, ''), ?) > 0
+                              AND r.id > COALESCE((SELECT MAX(g.id) FROM lead_turns g WHERE g.item_id = d.id AND g.state = 'applied'), 0))
           ORDER BY d.id`,
       )
       .pluck()
@@ -312,7 +321,7 @@ export function reopenFaultedItems(db: DB, projectId: number, now: string): numb
       db.prepare("UPDATE lead_turns SET why = COALESCE(why, '') || ? WHERE id = (SELECT MAX(id) FROM lead_turns WHERE item_id = ?)").run(REOPENED_MARK, id);
       return true;
     });
-  }).immediate();
+  }).immediate());
 }
 
 /** Turns with an answer saved and not applied, oldest first: recovery applies them without running again. */

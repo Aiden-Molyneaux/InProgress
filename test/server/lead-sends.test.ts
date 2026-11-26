@@ -633,3 +633,13 @@ describe('the fix round after Murr on task 8', () => {
     await vi.waitFor(() => expect(getSend(s.ctx.db, waiting)?.state).toBe('done'));
   });
 });
+
+describe('the day thread start (Y8)', () => {
+  it('is not counted in ownStartsToday: it starts no step', () => {
+    const s = setup();
+    write(s.ctx, 'test', () => intendSend(s.ctx.db, { projectId: s.project.id, kind: 'start', target: BOUND, retryKey: `morning-thread:${s.project.id}:2026-11-25`, body: JSON.stringify({ message: 'm', title: 't' }) }, s.ctx.now()));
+    expect(ownStartsToday(s.ctx, s.project.id, Date.parse(s.ctx.now()))).toBe(0);
+    s.intendStart();
+    expect(ownStartsToday(s.ctx, s.project.id, Date.parse(s.ctx.now()))).toBe(1);
+  });
+});

@@ -21,7 +21,9 @@ import { parkedAncestor, subtreeIds } from './repo/shelved';
 import { listBindings } from './repo/projects';
 import { produceDeskItem } from './repo/deskProducers';
 import { getSend, stampSeen } from './repo/leadSends';
-import { checkLanding, recordYes, type LandingDeps } from './lead/landing';
+import { recordYes, type LandingDeps } from './lead/landing';
+import { answerYesIds, carryTarget, readSessionYeses } from './lead/carry';
+import { addLogInWrite } from './repo/logs';
 
 /**
  * The lead's six commands. Each one is checked, performed and logged in a single write: requireLead first (outside it, a
@@ -136,23 +138,24 @@ export const carriedLine = (lead: string, where: 'voice' | 'thread', saidAt: str
  * (main...branch, as the landing check reads a merge, nothing logged). Every action the yes covers is keyed on that one
  * change: after the merge, a deploy reads main against the live build and a push the branch against origin, which is the
  * same change when nothing else came between, and is held when something did. A change that cannot be read carries the
- * reason for every action. A read, outside any write; undefined for an ask that is not a review.
+ * reason for every action, and so does a change with a commit after his words (`saidAt`). A read, outside any write;
+ * undefined for an ask that is not a review of this project.
  */
-export async function readYeses(ctx: Ctx, ref: string, askId: number, actions: readonly YesAction[], deps?: LandingDeps): Promise<CarriedYes[] | undefined> {
-  const ask = ctx.db.prepare('SELECT kind, node_id, session_id FROM asks WHERE id = ?').get(askId) as { kind: string; node_id: number; session_id: string | null } | undefined;
-  if (ask === undefined || ask.kind !== 'review') return undefined;
-  const session = ask.session_id === null ? undefined : (ctx.db.prepare('SELECT cwd, branch FROM sessions WHERE id = ?').get(ask.session_id) as { cwd: string | null; branch: string | null } | undefined);
-  const folder = session?.cwd ?? null;
-  const none = (why: string): CarriedYes[] => actions.map((action) => ({ action, patchId: null, why }));
-  if (folder === null || folder.trim() === '') return none('its session has no folder on record');
-  const branch = session?.branch ? session.branch : undefined;
-  try {
-    const read = await checkLanding(ctx, { ref, stepId: ask.node_id, action: 'merge', folder, ...(branch === undefined ? {} : { branch }) }, deps, { record: false });
-    if (read.patchId === null) return none('there is no change to read');
-    return actions.map((action) => ({ action, patchId: read.patchId }));
-  } catch (err) {
-    return none((err as Error).message.replace(/\.+$/, ''));
-  }
+export async function readYeses(
+  ctx: Ctx,
+  ref: string,
+  projectId: number,
+  askId: number,
+  actions: readonly YesAction[],
+  saidAt: string,
+  deps?: LandingDeps,
+): Promise<CarriedYes[] | undefined> {
+  const ask = ctx.db.prepare('SELECT kind, node_id, session_id, project_id FROM asks WHERE id = ?').get(askId) as
+    | { kind: string; node_id: number; session_id: string | null; project_id: number }
+    | undefined;
+  // Another project's ask runs no git: leadAnswer refuses it.
+  if (ask === undefined || ask.kind !== 'review' || ask.project_id !== projectId) return undefined;
+  return readSessionYeses(ctx, ref, ask.node_id, ask.session_id, actions, saidAt, deps);
 }
 
 /**
@@ -198,6 +201,17 @@ export function leadAnswer(ctx: Ctx, ref: string, as: string, instructions: numb
     const stored = input.says === undefined ? input.aidenWords : `${input.says} (Aiden said: "${input.aidenWords}")`;
     const ask = clearInWrite(ctx, record, actor, before, stored, true, 'lead');
     const shown = (input.shown ?? []).map((id) => `r${id}`).join(',');
+    // A review's yes, only for the actions his words okayed (`yeses`, read before the write): written first, so the
+    // answer's line names them (`yes e12,e13`) and its undo withdraws them.
+    const yesLines: string[] = [];
+    const yesIds: number[] = [];
+    if (before.kind === 'review') {
+      const yeses = input.yeses ?? [];
+      const got = yeses.filter((y) => y.patchId !== null);
+      for (const y of got) yesIds.push(recordYes(ctx, project.id, { action: y.action, patchId: y.patchId as string, stepId: ask.nodeId, aidenWords: input.aidenWords, said: saidAt }));
+      if (got.length) yesLines.push(`His yes covers ${andList(got.map((y) => y.action))} of the change as it is now.`);
+      for (const y of yeses.filter((y) => y.patchId === null)) yesLines.push(`No yes recorded for ${y.action}: ${y.why ?? 'the change could not be read'}.`);
+    }
     const eventId = logLeadEvent(ctx, {
       projectId: project.id,
       lead: name,
@@ -206,7 +220,7 @@ export function leadAnswer(ctx: Ctx, ref: string, as: string, instructions: numb
       askId: ask.id,
       nodeId: ask.nodeId,
       aidenWords: input.aidenWords,
-      text: `where ${where}; said ${saidAt}${shown === '' ? '' : `; shown ${shown}`}`,
+      text: `where ${where}; said ${saidAt}${shown === '' ? '' : `; shown ${shown}`}${yesIds.length ? `; yes ${yesIds.map((id) => `e${id}`).join(',')}` : ''}`,
     });
     addDecision(ctx.db, {
       eventId,
@@ -217,14 +231,7 @@ export function leadAnswer(ctx: Ctx, ref: string, as: string, instructions: numb
       saidWhere: where,
       saidAt,
     });
-    const lines = [`Answered ${tag} with Aiden's words.`];
-    if (before.kind === 'review') {
-      const yeses = input.yeses ?? [];
-      const got = yeses.filter((y) => y.patchId !== null);
-      for (const y of got) recordYes(ctx, project.id, { action: y.action, patchId: y.patchId as string, stepId: ask.nodeId, aidenWords: input.aidenWords, said: saidAt });
-      if (got.length) lines.push(`His yes covers ${andList(got.map((y) => y.action))} of the change as it is now.`);
-      for (const y of yeses.filter((y) => y.patchId === null)) lines.push(`No yes recorded for ${y.action}: ${y.why ?? 'the change could not be read'}.`);
-    }
+    const lines = [`Answered ${tag} with Aiden's words: decision ${decisionTag(eventId)}.`, ...yesLines];
     const thread = t3ThreadOf(ctx.db, ask.sessionId);
     const retryKey = `carry:${askTag(ask.id)}`;
     let carried = false;
@@ -422,20 +429,32 @@ export function leadUndo(ctx: Ctx, ref: string, as: string, instructions: number
   return write(ctx, actor, (record) => {
     const tag = decisionTag(input.eventId);
     const event = ctx.db
-      .prepare("SELECT id, kind, node_id, ask_id, text FROM lead_events WHERE id = ? AND project_id = ? AND kind IN ('decide', 'park', 'drop')")
+      .prepare("SELECT id, kind, node_id, ask_id, text FROM lead_events WHERE id = ? AND project_id = ? AND kind IN ('decide', 'park', 'drop', 'answer')")
       .get(input.eventId, project.id) as DecisionRow | undefined;
-    if (event === undefined) throw notFound(`${tag} not found.`, 'The brief lists decisions as d<number>.');
+    // A carried answer is undone only when it has its decisions row (an answer carried before task 11 has none).
+    if (event === undefined || (event.kind === 'answer' && decisionByEvent(ctx.db, event.id) === undefined)) throw notFound(`${tag} not found.`, 'The brief lists decisions as d<number>.');
     // An undo line's text is the decision's tag: decisionTag names the other site.
     if (ctx.db.prepare("SELECT 1 FROM lead_events WHERE project_id = ? AND kind = 'undo' AND text = ?").get(project.id, tag) !== undefined) throw conflict(`${tag} is already undone.`);
-    let text: string;
-    if (event.kind === 'decide' && event.ask_id === null) {
-      // A decision on what Aiden left to the lead (an aiden_said item): there is no question to raise again. The step's T3
-      // Code session, told the decision, is told once that it is withdrawn.
-      const thread = event.node_id === null ? null : t3ThreadOnStep(ctx, event.node_id);
+    /** Tells the session the relay of the decision went to, once; with no relay, a line in the step's log. */
+    const withdraw = (target: string | undefined, line: string): void => {
       const retryKey = `undo:${tag}`;
-      if (thread !== null && sendByRetryKey(ctx.db, retryKey) === undefined) {
-        intendSend(ctx.db, { projectId: project.id, kind: 'relay', target: thread, retryKey, body: leadLine(name, `${tag} is withdrawn: Aiden takes it back.`) }, ctx.now());
-      }
+      if (target !== undefined) {
+        if (sendByRetryKey(ctx.db, retryKey) === undefined) intendSend(ctx.db, { projectId: project.id, kind: 'relay', target, retryKey, body: leadLine(name, line) }, ctx.now());
+      } else if (event.node_id !== null) addLogInWrite(ctx, record, event.node_id, `${name}: ${line}`);
+    };
+    let text: string;
+    if (event.kind === 'answer') {
+      // His carried answer withdrawn: each yes it recorded is withdrawn too (a `yes_withdrawn` line the landing check reads).
+      const yeses = answerYesIds(event.text)
+        .map((id) => ctx.db.prepare("SELECT id, node_id, text FROM lead_events WHERE id = ? AND project_id = ? AND kind = 'yes'").get(id, project.id) as { id: number; node_id: number | null; text: string } | undefined)
+        .filter((y) => y !== undefined);
+      for (const y of yeses) logLeadEvent(ctx, { projectId: project.id, lead: name, instructions, kind: 'yes_withdrawn', ...(y.node_id === null ? {} : { nodeId: y.node_id }), text: y.text, aidenWords: input.aidenWords });
+      withdraw(carryTarget(ctx, { askId: event.ask_id, text: event.text }), `${tag} is withdrawn: Aiden's answer no longer stands${yeses.length ? ', and neither does his go-ahead' : ''}.`);
+      text = `Undid ${tag}: Aiden's answer is withdrawn${yeses.length ? `, with his yes for ${andList(yeses.map((y) => y.text.split(' ')[0]!))}` : ''}.`;
+    } else if (event.kind === 'decide' && event.ask_id === null) {
+      // A decision on what Aiden left to the lead (an aiden_said item): there is no question to raise again. The session its
+      // relay went to is told once that it is withdrawn; with no relay, the step's log says so.
+      withdraw(sendByRetryKey(ctx.db, `aiden-said:${tag}`)?.target, `${tag} is withdrawn: Aiden takes it back.`);
       text = `Undid ${tag}: the decision is withdrawn.`;
     } else if (event.kind === 'decide') {
       const old = requireAsk(ctx, event.ask_id as number);
@@ -496,12 +515,13 @@ export function leadUndo(ctx: Ctx, ref: string, as: string, instructions: number
 /**
  * Aiden answers, in the window, an ask the lead already decided (`answered_via` `lead_decided`): his answer is not dropped.
  * It is recorded as `lead undo` of that decision plus his answer: an `undo` line, an `answer` line with his words, and a
- * relay to the session (a T3 Code one) that his answer replaces the decision, once (retry key `late:a<ask id>`); a session
- * not in T3 Code gets his words as the ask's answer, read on its next prompt. False,
+ * relay to the session (a T3 Code one) that his answer replaces the decision, once (retry key `late:a<ask id>`). The ask's
+ * answer becomes his words, as his own (answered_via NULL), with an event for the window; a session not in T3 Code reads
+ * it on its next prompt. False,
  * with nothing written, when the ask is not one the lead decided, has no lead, or was already undone.
  */
 export function lateAnswer(ctx: Ctx, askId: number, words: string, actor: string): boolean {
-  return write(ctx, actor, () => {
+  return write(ctx, actor, (record) => {
     const ask = requireAsk(ctx, askId);
     if (ask.clearedAt === null || ask.answeredVia !== 'lead_decided' || words.trim() === '') return false;
     const project = ctx.db.prepare('SELECT id, lead FROM projects WHERE id = ?').get(ask.projectId) as { id: number; lead: string | null } | undefined;
@@ -517,11 +537,14 @@ export function lateAnswer(ctx: Ctx, askId: number, words: string, actor: string
     const retryKey = `late:${askTag(ask.id)}`;
     if (thread !== null && sendByRetryKey(ctx.db, retryKey) === undefined) {
       intendSend(ctx.db, { projectId: project.id, kind: 'relay', target: thread, retryKey, body: leadLine(project.lead, `Aiden's answer, which replaces ${tag}: "${words.trim()}"`) }, ctx.now());
-    } else if (thread === null) {
-      // A session not in T3 Code cannot be sent a relay: the ask's answer becomes his words, not yet delivered, so the
-      // session reads it on its next prompt as it reads any answered ask.
-      ctx.db.prepare('UPDATE asks SET answer = ?, answer_delivered_at = NULL WHERE id = ?').run(words.trim(), ask.id);
     }
+    // The ask's answer is his now, Aiden's own (answered_via NULL), so the window shows it and no line calls it the lead's.
+    // A session not in T3 Code gets no relay: the answer is marked not yet delivered, and its next prompt reads it as it
+    // reads any answered ask. A T3 session has the relay, so its delivery mark stays.
+    ctx.db
+      .prepare(`UPDATE asks SET answer = ?, answered_via = NULL${thread === null ? ', answer_delivered_at = NULL' : ''} WHERE id = ?`)
+      .run(words.trim(), ask.id);
+    record({ projectId: project.id, type: 'ask.cleared', entity: 'ask', entityId: ask.id, data: { ask: requireAsk(ctx, ask.id) } });
     return true;
   });
 }

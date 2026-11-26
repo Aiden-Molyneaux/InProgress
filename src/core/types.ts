@@ -617,6 +617,8 @@ export interface LeadBehindItem {
   askId: number | null;
   /** The session Aiden can open, for a stopped item. */
   sessionId: string | null;
+  /** For a `behind` item: whether the lead gave up after failed turns or after runner faults; null otherwise. */
+  behindWhy: 'failures' | 'faults' | null;
 }
 
 export interface ProjectSnapshot {

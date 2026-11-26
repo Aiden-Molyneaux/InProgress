@@ -11,7 +11,7 @@ export const LEAD_USAGE = [
   `  inprogress lead brief <project> ${WHO} [--mark] [--json]`,
   `  inprogress lead step <project> <step id> ${WHO}`,
   `  inprogress lead resource <project> <document id> ${WHO}`,
-  `  inprogress lead answer <project> <ask id> --aiden <words> [--says <text>] [--where voice|thread] [--said-at <iso time>] [--shown r12,r13] [--yes merge,deploy,push] ${WHO}`,
+  `  inprogress lead answer <project> <ask id> | --send <send id> --aiden <words> [--says <text>] [--where voice|thread] [--said-at <iso time>] [--shown r12,r13] [--yes merge|deploy|push ...] ${WHO}`,
   `  inprogress lead seen <project> <send id> ${WHO}`,
   `  inprogress lead desk-add <project> --step <step id> --words <his words> ${WHO}`,
   `  inprogress lead decide <project> <ask id> --answer <text> --reason <text> [--kind product|technical] [--aiden <words>] ${WHO}`,
@@ -82,7 +82,7 @@ const COMMANDS: Record<string, CommandSpec> = {
   brief: { positionals: 0, flags: [], bools: ['--mark', '--json'] },
   step: { positionals: 1, flags: [] },
   resource: { positionals: 1, flags: [] },
-  answer: { positionals: 1, flags: ['--aiden', '--says', '--where', '--said-at', '--shown', '--yes'] },
+  answer: { positionals: 1, minPositionals: 0, flags: ['--aiden', '--says', '--where', '--said-at', '--shown', '--yes', '--send'] },
   seen: { positionals: 1, flags: [] },
   'desk-add': { positionals: 0, flags: ['--step', '--words'] },
   decide: { positionals: 1, flags: ['--answer', '--reason', '--kind', '--aiden'] },
@@ -130,7 +130,9 @@ function parseArgs(args: string[], spec: CommandSpec): Parsed | { error: string 
       else if (arg === '--instructions') {
         if (!/^\d+$/.test(next.trim())) return { error: `--instructions needs a whole number, not ${next}` };
         instructions = Number(next.trim());
-      } else flags.set(arg, next);
+      } else if (arg === '--yes' && flags.has(arg)) flags.set(arg, `${flags.get(arg)},${next}`);
+      // --yes may be given once per action; every other flag keeps its last value.
+      else flags.set(arg, next);
     } else if (arg.startsWith('--')) return { error: `Unknown flag ${arg}` };
     else positionals.push(arg);
   }
@@ -185,11 +187,20 @@ function draft(command: string, p: Parsed): Draft {
   };
   switch (command) {
     case 'answer': {
-      const id = askId(first);
-      if (id === undefined) return { error: `${first} is not an ask: give it as a7 or 7` };
+      // The ask, or with --send the line to the Voice he replied to: one of the two.
+      const send = p.flags.get('--send');
+      if ((first === undefined) === (send === undefined)) return { error: 'Give the ask (a7) or --send s<id>, one of the two' };
+      if (send !== undefined) {
+        const m = /^s?(\d+)$/i.exec(send.trim());
+        if (m === null || Number(m[1]) === 0) return { error: `${send} is not a send: give it as s42 or 42` };
+        fields.sendId = Number(m[1]);
+      } else {
+        const id = askId(first as string);
+        if (id === undefined) return { error: `${first} is not an ask: give it as a7 or 7` };
+        fields.askId = id;
+      }
       const words = needed('--aiden');
       if ('error' in words) return words;
-      fields.askId = id;
       fields.aidenWords = words;
       put('says', flag('--says'));
       const where = p.flags.get('--where');
@@ -396,7 +407,7 @@ export async function runLead(args: string[], out: (line: string) => void, o: Co
   const path = `/api/lead/${encodeURIComponent(p.project)}`;
   try {
     if (payload !== undefined) {
-      const res = await client.post<{ text: string }>(`${path}/${command === 'seen' ? 'stamp' : command}`, payload, command === 'relay' || command === 'start' ? { timeoutMs: RELAY_TIMEOUT_MS } : {});
+      const res = await client.post<{ text: string }>(`${path}/${command === 'seen' ? 'stamp' : command}`, payload, command === 'relay' || command === 'start' || command === 'answer' ? { timeoutMs: RELAY_TIMEOUT_MS } : {});
       out(res.text);
       return 0;
     }

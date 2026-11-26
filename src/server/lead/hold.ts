@@ -48,9 +48,9 @@ export interface LeadScope {
  * nothing) when there is none, it has no lead, or its round is off or it is not active.
  */
 export function leadScopeOf(ctx: Ctx, sessionId: string | null | undefined, cwd: string): LeadScope | undefined {
-  // The lead's own folder is the lead's: the hooks say nothing there (task 12).
-  if (isLeadFolder(ctx, cwd)) return undefined;
   const session = sessionId ? findSession(ctx, sessionId) : undefined;
+  // The lead's own folder is the lead's: the hooks say nothing there (task 12), unless a tracked session is asking.
+  if (session === undefined && isLeadFolder(ctx, cwd)) return undefined;
   const project = session?.projectId != null ? getProjectById(ctx, session.projectId) : cwd ? resolveBinding(ctx, cwd, session?.branch ?? null) : undefined;
   if (project === undefined || project.lead === null || project.lead.trim() === '') return undefined;
   if (!isLiveWithRound(ctx.db, project.id)) return undefined;

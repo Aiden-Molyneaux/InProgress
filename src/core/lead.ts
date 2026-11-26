@@ -58,7 +58,7 @@ export type AskOwner = 'aiden' | 'lead';
  * title, no count and no Board row.
  */
 export const isAidens = (a: { owner: AskOwner }): boolean => a.owner !== 'lead';
-export type LeadEventKind = 'answer' | 'decide' | 'undo' | 'park' | 'drop' | 'promise' | 'kept' | 'intent' | 'relay' | 'relay_unknown' | 'relay_failed' | 'allow' | 'disallow' | 'start' | 'start_unknown' | 'start_failed' | 'yes' | 'landing_check' | 'bring' | 'card' | 'held' | 'stuck' | 'permission' | 'asked' | 'restart' | 'done_noted' | 'promise_due' | 'setting' | 'morning' | 'slept' | 'ruling' | 'send_cleared' | 'send_refused' | 'aiden_said';
+export type LeadEventKind = 'answer' | 'decide' | 'undo' | 'park' | 'drop' | 'promise' | 'kept' | 'intent' | 'relay' | 'relay_unknown' | 'relay_failed' | 'allow' | 'disallow' | 'start' | 'start_unknown' | 'start_failed' | 'yes' | 'landing_check' | 'bring' | 'card' | 'held' | 'stuck' | 'permission' | 'asked' | 'restart' | 'done_noted' | 'promise_due' | 'setting' | 'morning' | 'slept' | 'ruling' | 'send_cleared' | 'send_refused' | 'aiden_said' | 'yes_withdrawn';
 
 /** One line of the lead's log, as the log's read answers it. */
 export interface LeadEventOut {

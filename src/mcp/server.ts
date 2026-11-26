@@ -1,6 +1,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { PICTURE_FILE } from '../core/pictures';
 import {
   ASK_KINDS, ASSIGNEES, BRIEFING_MODES, NODE_KINDS, NODE_LABELS, NODE_STATUSES, ORIGINS, RESOURCE_KINDS, RESOURCE_PURPOSES, TITLE_CHANNELS, WHAT_WHY_MAX, askTag, glyphTitle, unknownLabel,
   type Ask, type Binding, type LogEntry, type NodeDetail, type NodeInput, type Project, type ProjectSnapshot, type ProjectSummary, type Resource, type SearchResult, type TreeNode,
@@ -181,7 +182,7 @@ export function createMcpServer(client: Client, o: McpOptions = {}): McpServer {
     async (a: { node: number; kind: string; title: string; content?: string; path?: string; url?: string; snapshot_file?: boolean; purpose?: string; session?: string }) => {
       let content = a.content;
       // A picture's bytes are never read as text: the server copies the file into the project's documents folder.
-      if (a.snapshot_file && !(a.path !== undefined && /\.(png|jpe?g|gif|webp)$/i.test(a.path))) {
+      if (a.snapshot_file && !(a.path !== undefined && PICTURE_FILE.test(a.path))) {
         if (!a.path) throw new Error('snapshot_file needs a path');
         const size = statSync(a.path).size;
         if (size > SNAPSHOT_LIMIT) throw new Error(`${a.path} is ${Math.round(size / 1024)} KB; the snapshot limit is 200 KB. Attach it by path only.`);

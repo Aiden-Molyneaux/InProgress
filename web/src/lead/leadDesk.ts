@@ -203,7 +203,7 @@ export function deskBehind(items: readonly LeadBehindItem[], now: number): Behin
       return {
         key: i.id,
         text: `${step}${flat(i.what)}`,
-        late: i.state === 'behind' ? 'given up after two tries' : `${mins} min late`,
+        late: i.state === 'behind' ? (i.behindWhy === 'faults' ? 'given up after three runner faults' : 'given up after two tries') : `${mins} min late`,
         askId: i.askId,
         askText: i.what,
         sessionId: i.sessionId,

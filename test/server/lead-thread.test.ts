@@ -13,9 +13,10 @@ import { createRunner, standInApply, THREAD_POLL_MS, threadWay, TurnRunError, ty
 import { turnWayOf } from '../../src/server/lead/settings';
 import { windowLeadSwitch } from '../../src/server/lead/window';
 import { addDeskItem, moveDeskItem } from '../../src/server/repo/desk';
+import { insertTurn } from '../../src/server/repo/leadTurns';
 import { intendSend, moveSend } from '../../src/server/repo/leadSends';
 import { addNodes } from '../../src/server/repo/nodes';
-import { addBinding, createProject, setProjectLead } from '../../src/server/repo/projects';
+import { addBinding, changeProject, createProject, setProjectLead } from '../../src/server/repo/projects';
 import { getProjectSnapshot } from '../../src/server/repo/snapshot';
 import { handleHookEvent } from '../../src/server/session-flow';
 import { StandInT3 } from '../t3-stub';
@@ -40,6 +41,7 @@ function world() {
 
 const input = (w: ReturnType<typeof world>, id: number, turnId = 7): TurnInput => ({
   turnId,
+  projectId: w.project.id,
   slug: w.project.slug,
   item: { id, projectId: w.project.id, kind: 'question', ref: '1', nodeId: null, createdAt: '', dueAt: null, state: 'leased', doneAt: null, outcome: null },
   systemPrompt: 'rules',
@@ -53,8 +55,15 @@ function agent(w: ReturnType<typeof world>, threadId: string, text: string): voi
   w.t3.threads.find((x) => x.threadId === threadId)!.messages.push({ role: 'assistant', text });
 }
 
-const wayOver = (w: ReturnType<typeof world>, threadId: string | undefined) =>
-  threadWay({ send: (id, m) => w.t3.send(id, m), show: (id) => w.t3.show(id), dayThread: () => threadId, projectIdOf: () => w.project.id, pollMs: 5 });
+/** The thread's status as T3 Code shows it: a test sets it to 'running' while the agent is still writing. */
+const status = { value: 'idle' };
+const wayOver = (w: ReturnType<typeof world>, threadId: string | undefined, pollMs = 5, send?: (id: string, m: string) => Promise<void>) =>
+  threadWay({
+    send: send ?? ((id, m) => w.t3.send(id, m)),
+    show: async (id) => ({ ...(await w.t3.show(id)), thread: { status: status.value } }),
+    dayThread: () => threadId,
+    pollMs,
+  });
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 describe('the thread way', () => {
@@ -64,8 +73,8 @@ describe('the thread way', () => {
     const way = wayOver(w, threadId);
     const run = way.run(input(w, 12), new AbortController().signal);
     await pause(20);
-    expect(w.t3.threads[0]!.messages.at(-1)!.text.split('\n')[0]).toBe('Desk item 12, turn 7. Answer in the four lines, starting your reply with "Desk item 12:".');
-    agent(w, threadId, 'Desk item 12: I read step #1.\nDECIDE\nKIND: TECHNICAL\nANSWER: Port 4410.\nWHY: free.');
+    expect(w.t3.threads[0]!.messages.at(-1)!.text.split('\n')[0]).toBe('Desk item 12, turn 7. Answer in the four lines, starting your reply with "Desk item 12, turn 7:".');
+    agent(w, threadId, 'Desk item 12, turn 7: I read step #1.\nDECIDE\nKIND: TECHNICAL\nANSWER: Port 4410.\nWHY: free.');
     const out = await run;
     expect(out.text).toBe('I read step #1.\nDECIDE\nKIND: TECHNICAL\nANSWER: Port 4410.\nWHY: free.');
     expect([out.costUsd, out.durationMs, out.tokensIn, out.tokensOut, out.rateLimits]).toEqual([null, null, null, null, []]);
@@ -77,12 +86,14 @@ describe('the thread way', () => {
     const { threadId } = await w.t3.start(HOME, 'the list', {});
     const run = wayOver(w, threadId).run(input(w, 12), new AbortController().signal);
     await pause(20);
-    agent(w, threadId, 'Desk item 13: I read step #2.\nDECIDE\nKIND: TECHNICAL\nANSWER: no\nWHY: no');
+    agent(w, threadId, 'Desk item 13, turn 7: I read step #2.\nDECIDE\nKIND: TECHNICAL\nANSWER: no\nWHY: no');
+    // The same item under another turn's number is not this turn's reply either.
+    agent(w, threadId, 'Desk item 12, turn 6: an old turn');
     let settled = false;
     void run.then(() => (settled = true), () => (settled = true));
     await pause(40);
     expect(settled).toBe(false);
-    agent(w, threadId, 'Desk item 12: mine');
+    agent(w, threadId, 'Desk item 12, turn 7: mine');
     expect((await run).text).toBe('mine');
   });
 
@@ -106,9 +117,41 @@ describe('the thread way', () => {
     await expect(run).rejects.toMatchObject({ runnerFault: true, message: "the lead's thread did not answer in time" });
     const again = wayOver(w, threadId).run(input(w, 14, 8), new AbortController().signal);
     await pause(20);
-    agent(w, threadId, 'Desk item 14:');
+    agent(w, threadId, 'Desk item 14, turn 8:');
     await expect(again).rejects.toMatchObject({ runnerFault: false, partial: { resultRead: true } });
     expect(THREAD_POLL_MS).toBe(5000);
+  });
+
+  it('returns at once when the abort came while the message was being sent (no poll wait)', async () => {
+    const w = world();
+    const { threadId } = await w.t3.start(HOME, 'the list', {});
+    const controller = new AbortController();
+    const started = Date.now();
+    const run = wayOver(w, threadId, 60_000, async (id, m) => {
+      await w.t3.send(id, m);
+      controller.abort(new Error('round off'));
+    }).run(input(w, 12), controller.signal);
+    await expect(run).rejects.toBeInstanceOf(TurnRunError);
+    expect(Date.now() - started).toBeLessThan(5000);
+  });
+
+  it('takes a reply only when the thread is not running, so a reply still streaming is not cut', async () => {
+    const w = world();
+    const { threadId } = await w.t3.start(HOME, 'the list', {});
+    status.value = 'running';
+    try {
+      const run = wayOver(w, threadId).run(input(w, 12), new AbortController().signal);
+      await pause(20);
+      agent(w, threadId, 'Desk item 12, turn 7: half of it');
+      let settled = false;
+      void run.then(() => (settled = true), () => (settled = true));
+      await pause(40);
+      expect(settled).toBe(false);
+      status.value = 'idle';
+      expect((await run).text).toBe('half of it');
+    } finally {
+      status.value = 'idle';
+    }
   });
 
   it("the runner uses it only for a project whose turn-way is thread, and the day's thread is the morning send's result", async () => {
@@ -175,6 +218,40 @@ describe('a thread turn with no reply by the lease abort', () => {
     await runner.stop();
   });
 
+  it('runs one turn at a time for a project on the thread way', async () => {
+    const { w, runner } = await silent();
+    addDeskItem(w.ctx.db, { projectId: w.project.id, kind: 'question', ref: '100', nodeId: w.step.id }, w.ctx.now());
+    runner.kick(w.project.id);
+    runner.kick(w.project.id);
+    await pause(50);
+    expect(w.ctx.db.prepare("SELECT COUNT(*) FROM lead_turns WHERE state = 'leased'").pluck().get()).toBe(1);
+    expect(w.t3.sends).toBe(1);
+    await runner.stop();
+  });
+
+  it('runs a turn headless, with a line in the log and no fault, while the project has no day thread yet', async () => {
+    const w = world();
+    leadSet(w.ctx, w.project.slug, 'Progresser', V, { key: 'turn-way', value: 'thread' });
+    leadAllow(w.ctx, w.project.slug, 'Progresser', V, { switch: 'round', aidenWords: 'go' });
+    const lines: string[] = [];
+    const errors: string[] = [];
+    let headlessRan = 0;
+    const runner = createRunner(w.ctx, {
+      way: { name: 'headless', run: () => { headlessRan++; return Promise.reject(new Error('stand-in')); } },
+      threadWay: wayOver(w, undefined),
+      model: 'm', home: HOME, port: 1, apply: standInApply, holdBack: () => false,
+      log: { info: (m) => lines.push(m), error: (m) => errors.push(m) },
+    });
+    addDeskItem(w.ctx.db, { projectId: w.project.id, kind: 'question', ref: '99', nodeId: w.step.id }, w.ctx.now());
+    runner.kick(w.project.id);
+    await pause(50);
+    expect(headlessRan).toBe(1);
+    expect(lines.some((m) => m.includes('has no thread for today yet'))).toBe(true);
+    expect(lines.some((m) => m.includes(', headless, until'))).toBe(true);
+    expect(errors.some((m) => m.includes('backs off'))).toBe(false);
+    await runner.stop();
+  });
+
   it('stays an interruption, with no back-off, when the round switches off during the turn', async () => {
     const { w, runner, lines, errors } = await silent();
     runner.kick(w.project.id);
@@ -199,23 +276,38 @@ describe('a thread turn with no reply by the lease abort', () => {
 });
 
 describe("the lead's folder", () => {
-  it('registers no session and gives no briefing, as for an untracked folder', () => {
+  /** A folder that holds HOME is bound to the project, so without the guard the lead's folder would resolve to it. */
+  const bindAbove = (w: ReturnType<typeof world>) => addBinding(w.ctx, 'test', w.project.slug, 'C:/test-home');
+
+  it('registers no session and gives no briefing, as for an untracked folder, though a bound folder holds it', () => {
     const w = world();
+    bindAbove(w);
     const cwd = join(HOME, 'lead', w.project.slug);
+    // The binding resolves a folder beside the lead's: it does track, so the guard is what keeps the lead's out.
+    expect(handleHookEvent(w.ctx, 's0', { event: 'start', source: 'startup', cwd: join('C:/test-home', 'elsewhere'), app: 't3' as const }).tracked).toBe(true);
     expect(handleHookEvent(w.ctx, 's1', { event: 'start', source: 'startup', cwd, app: 't3' as const })).toEqual({ tracked: false });
     expect(handleHookEvent(w.ctx, 's1', { event: 'prompt', cwd: join(cwd, 'sub') })).toEqual({ tracked: false });
-    expect(w.ctx.db.prepare('SELECT COUNT(*) FROM sessions').pluck().get()).toBe(0);
-    // A bound folder still tracks.
-    expect(handleHookEvent(w.ctx, 's2', { event: 'start', source: 'startup', cwd: BOUND, app: 't3' as const }).tracked).toBe(true);
+    expect(w.ctx.db.prepare("SELECT COUNT(*) FROM sessions WHERE id = 's1'").pluck().get()).toBe(0);
   });
 
-  it('the hold and permission hooks say nothing there, even for a session of the project with its round on', () => {
+  it('the hold and permission hooks say nothing there, even with a bound folder above and the round on', () => {
+    const w = world();
+    bindAbove(w);
+    leadAllow(w.ctx, w.project.slug, 'Progresser', V, { switch: 'round', aidenWords: 'go' });
+    expect(leadScopeOf(w.ctx, null, join('C:/test-home', 'elsewhere'))).toBeDefined();
+    expect(leadScopeOf(w.ctx, null, join(HOME, 'lead', w.project.slug))).toBeUndefined();
+    expect(leadScopeOf(w.ctx, null, join(HOME, 'lead', 'other'))).toBeUndefined();
+  });
+
+  it('a tracked session whose folder strays under the lead folder still gets its events, so it ends', () => {
     const w = world();
     leadAllow(w.ctx, w.project.slug, 'Progresser', V, { switch: 'round', aidenWords: 'go' });
-    handleHookEvent(w.ctx, 's2', { event: 'start', source: 'startup', cwd: BOUND, app: 't3' as const });
-    expect(leadScopeOf(w.ctx, 's2', BOUND)).toBeDefined();
-    expect(leadScopeOf(w.ctx, 's2', join(HOME, 'lead', w.project.slug))).toBeUndefined();
-    expect(leadScopeOf(w.ctx, null, join(HOME, 'lead', 'other'))).toBeUndefined();
+    handleHookEvent(w.ctx, 's3', { event: 'start', source: 'startup', cwd: BOUND, app: 't3' as const });
+    const lead = join(HOME, 'lead', w.project.slug);
+    expect(handleHookEvent(w.ctx, 's3', { event: 'end', cwd: lead }).tracked).toBe(true);
+    expect(w.ctx.db.prepare("SELECT state FROM sessions WHERE id = 's3'").pluck().get()).toBe('ended');
+    handleHookEvent(w.ctx, 's4', { event: 'start', source: 'startup', cwd: BOUND, app: 't3' as const });
+    expect(leadScopeOf(w.ctx, 's4', lead)).toBeDefined();
   });
 });
 
@@ -229,6 +321,9 @@ describe('the round in the window and the brief', () => {
     expect(() => windowLeadSwitch(w.ctx, w.project.id, 'round', true)).toThrow('already on');
     expect(brief()).toContain('Switches: starts off · landing off · round on since');
     windowLeadSwitch(w.ctx, w.project.id, 'round', false);
+    changeProject(w.ctx, 'test', w.project.id, { status: 'archived' });
+    expect(() => windowLeadSwitch(w.ctx, w.project.id, 'round', true)).toThrow('archived');
+    changeProject(w.ctx, 'test', w.project.id, { status: 'active' });
     expect(leadSwitches(w.ctx, w.project.id).round.on).toBe(false);
     expect(brief()).toContain('landing off · round off');
   });
@@ -250,6 +345,16 @@ describe('the behind watch', () => {
       [given.id, 'behind', 'a permission prompt', null, null],
     ]);
     expect(rows.find((r) => r.id === waiting.id)).toBeUndefined();
-    expect(getProjectSnapshot(w.ctx, w.project.id).leadBehind).toHaveLength(2);
+    expect(rows.map((r) => r.behindWhy)).toEqual([null, 'failures']);
+    // An ask that is gone (404) leaves its row with the kind's words and no answer; nothing throws.
+    addDeskItem(w.ctx.db, { projectId: w.project.id, kind: 'question', ref: '9999', dueAt: '2026-11-25T08:10:00.000Z' }, now);
+    expect(leadBehindWatch(w.ctx, w.project.id).find((r) => r.what === 'a question')).toMatchObject({ askId: null });
+    // Three runner faults in a row read as faults.
+    for (let n = 1; n <= 3; n++) {
+      const t = insertTurn(w.ctx.db, { itemId: given.id, way: 'headless', model: 'm', leaseMs: 1000 }, now);
+      w.ctx.db.prepare("UPDATE lead_turns SET state = 'interrupted', why = ? WHERE id = ?").run(`the runner could not run the turn: x${n}`, t.id);
+    }
+    expect(leadBehindWatch(w.ctx, w.project.id).find((r) => r.id === given.id)!.behindWhy).toBe('faults');
+    expect(getProjectSnapshot(w.ctx, w.project.id).leadBehind).toHaveLength(3);
   });
 });

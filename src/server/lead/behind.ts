@@ -1,7 +1,9 @@
+import { ApiError } from '../errors';
 import type { Ask, LeadBehindItem } from '../../core/types';
 import type { Ctx } from '../db/tx';
 import { requireAsk } from '../repo/asks';
 import { findNode } from '../repo/nodes';
+import { RUNNER_FAULT_WHY, TURN_FAULTS_BEHIND } from '../repo/leadTurns';
 import { parseStoppedRef } from './stopped';
 
 interface Row {
@@ -27,6 +29,12 @@ const WHAT: Record<string, string> = {
   permission: 'a permission ask',
 };
 
+/** Why the lead gave up on an item: its last turns were all runner faults, or it failed twice. */
+function behindWhy(ctx: Ctx, itemId: number): 'faults' | 'failures' {
+  const last = ctx.db.prepare('SELECT state, why FROM lead_turns WHERE item_id = ? ORDER BY id DESC LIMIT ?').all(itemId, TURN_FAULTS_BEHIND) as { state: string; why: string | null }[];
+  return last.length === TURN_FAULTS_BEHIND && last.every((t) => t.state === 'interrupted' && (t.why ?? '').startsWith(RUNNER_FAULT_WHY)) ? 'faults' : 'failures';
+}
+
 /**
  * The project's desk items that could be "The lead is behind": every one not done and not waiting on Aiden that has a limit or
  * has been given up on (state behind). The window decides which are past their limit by its own clock, so the group appears
@@ -43,8 +51,10 @@ export function leadBehindWatch(ctx: Ctx, projectId: number): LeadBehindItem[] {
     if (askKind && /^\d+$/.test(r.ref)) {
       try {
         ask = requireAsk(ctx, Number(r.ref));
-      } catch {
-        // The ask is gone (its project was deleted or archived): the row then names the kind and offers no answer.
+      } catch (err) {
+        // The ask is gone (its project was deleted or archived): the row then names the kind and offers no answer. Anything
+        // else is a real fault and is not hidden.
+        if (!(err instanceof ApiError) || err.status !== 404) throw err;
         ask = undefined;
       }
     }
@@ -60,6 +70,7 @@ export function leadBehindWatch(ctx: Ctx, projectId: number): LeadBehindItem[] {
       what: ask !== undefined ? ask.text : (WHAT[r.kind] ?? r.kind),
       askId: ask !== undefined && open ? ask.id : null,
       sessionId: r.kind === 'stopped' ? parseStoppedRef(r.ref).sessionId : null,
+      behindWhy: r.state === 'behind' ? behindWhy(ctx, r.id) : null,
     };
   });
 }

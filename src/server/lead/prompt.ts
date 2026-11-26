@@ -169,7 +169,9 @@ export function deskUserMessage(ctx: Ctx, item: DeskItem): string {
   }
   lines.push(sessionId === null ? 'No session.' : `Session: ${sessionId}`);
   if (item.kind === 'promise_due') lines.push('When it is done, answer DECIDE with ANSWER starting KEPT: and a note: the promise is cleared as lead kept clears it. Any other answer is noted for the morning list as it stands.');
-  lines.push(`${item.kind === 'stopped' ? 'Stopped' : 'Raised'} at ${stamp(raisedAt)}. ${item.dueAt === null ? 'It has no limit.' : `Its limit is ${stamp(item.dueAt)}.`}`);
+  // A stopped item's due time is its wait, always past by its turn: it is no limit, so none is printed.
+  if (item.kind === 'stopped') lines.push(`Stopped at ${stamp(raisedAt)}.`);
+  else lines.push(`Raised at ${stamp(raisedAt)}. ${item.dueAt === null ? 'It has no limit.' : `Its limit is ${stamp(item.dueAt)}.`}`);
   lines.push('Look before you answer.');
   return lines.join('\n');
 }

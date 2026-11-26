@@ -10,7 +10,7 @@ import { heldRef } from '../../src/server/lead/hold';
 import { dateKey, dayWords, morningList, noteWake, readMorning, watchMorning, WAKE_GAP_MS } from '../../src/server/lead/morning';
 import { standingRulings } from '../../src/server/lead/prompt';
 import { quietHours } from '../../src/server/lead/settings';
-import { raiseAskDetailed } from '../../src/server/repo/asks';
+import { raiseAskDetailed, undeliveredAnswers } from '../../src/server/repo/asks';
 import { addDeskItem, moveDeskItem } from '../../src/server/repo/desk';
 import { insertLeadEvent } from '../../src/server/repo/leadEvents';
 import { intendSend } from '../../src/server/repo/leadSends';
@@ -357,11 +357,36 @@ describe('undo of a desk decision, and Aiden late answer', () => {
     expect(lateAnswer(plain.w.ctx, plain.a.id, 'No, ids are noise.', 'window')).toBe(true);
     expect(plain.w.ctx.db.prepare('SELECT answer, answer_delivered_at AS delivered FROM asks WHERE id = ?').get(plain.a.id)).toEqual({ answer: 'No, ids are noise.', delivered: null });
     expect(plain.w.sends().filter((s) => s.retryKey === `late:a${plain.a.id}`)).toHaveLength(0);
+    // Y1: the answer is Aiden's own: the session's prompt reads it as his, never as the lead's.
+    expect(undeliveredAnswers(plain.w.ctx, 's1').map((x) => [x.id, x.answer, x.answeredVia])).toEqual([[plain.a.id, 'No, ids are noise.', null]]);
+    const context = handleHookEvent(plain.w.ctx, 's1', { event: 'prompt' }).context ?? '';
+    expect(context).toContain(`Answered: a${plain.a.id} "No, ids are noise."`);
+    expect(context).not.toContain('not Aiden');
     const t3 = decided();
-    const before = t3.w.ctx.db.prepare('SELECT answer FROM asks WHERE id = ?').pluck().get(t3.a.id);
+    const events: string[] = [];
+    t3.w.ctx.bus.on('event', (e: { type: string }) => void events.push(e.type));
+    t3.w.ctx.db.prepare('UPDATE asks SET answer_delivered_at = ? WHERE id = ?').run(t3.w.ctx.now(), t3.a.id);
     expect(lateAnswer(t3.w.ctx, t3.a.id, 'No, ids are noise.', 'window')).toBe(true);
-    expect(t3.w.ctx.db.prepare('SELECT answer FROM asks WHERE id = ?').pluck().get(t3.a.id)).toBe(before);
+    // The window shows his answer (an event, and the row), and the T3 session has its relay, not a second delivery.
+    expect(t3.w.ctx.db.prepare('SELECT answer, answered_via AS via FROM asks WHERE id = ?').get(t3.a.id)).toEqual({ answer: 'No, ids are noise.', via: null });
+    expect(undeliveredAnswers(t3.w.ctx, 's1')).toHaveLength(0);
+    expect(events).toContain('ask.cleared');
     expect(t3.w.sends().filter((s) => s.retryKey === `late:a${t3.a.id}`)).toHaveLength(1);
+  });
+
+  it('Y2: Went wrong gives a restart that waits and a park skipped words of their own, never restarted or parked', () => {
+    const w = world();
+    const made = (ref: string, outcome: string, state: 'open' | 'done') => {
+      const { item } = addDeskItem(w.ctx.db, { projectId: w.project.id, kind: 'stopped', ref, nodeId: w.step.id }, w.ctx.now());
+      moveDeskItem(w.ctx.db, item.id, ['open'], state, { outcome, now: w.ctx.now() });
+    };
+    made(`s1@${w.ctx.now()}`, 'waits: a restart waits for a fresh usage reading (there is no usage reading yet)', 'open');
+    made(`s2@${w.ctx.now()}`, `PARK skipped: #${w.step.id} is already done (the cause)`, 'done');
+    const list = morningList(w.ctx, w.project.id, '2026-01-01T00:00:00.000Z', w.ctx.now());
+    const wrong = list.parts.find((p) => p.name === 'Went wrong')!.lines;
+    expect(wrong.some((l) => l.includes('a restart waits for a usage reading'))).toBe(true);
+    expect(wrong.some((l) => l.includes('not parked at') && l.includes('the step was already done'))).toBe(true);
+    expect(wrong.some((l) => / restarted at |; parked at /.test(l))).toBe(false);
   });
 
   it('Aiden late answer in the window becomes an undo plus his answer, and reaches the session once', () => {

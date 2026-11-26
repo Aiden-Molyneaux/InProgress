@@ -1,3 +1,4 @@
+import { PICTURE_FILE } from '../../core/pictures';
 import { copyFileSync, existsSync, mkdirSync, rmSync, statSync } from 'node:fs';
 import { basename, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { RESOURCE_PURPOSES, type Resource, type ResourceKind, type ResourceMeta, type ResourcePurpose, type StateNote } from '../../core/types';
@@ -138,9 +139,6 @@ export function listNodeResources(ctx: Ctx, nodeId: number): ResourceMeta[] {
   return (ctx.db.prepare(`SELECT ${META} FROM resources WHERE node_id = ? ORDER BY id`).all(nodeId) as ResourceRow[]).map(toMeta);
 }
 
-/** A picture, by its file's extension: what is copied into the project's documents folder. */
-export const PICTURE_FILE = /\.(png|jpe?g|gif|webp)$/i;
-
 /** The project's documents folder: `<home>/resources/<slug>`. */
 export const documentsFolder = (home: string, slug: string): string => join(home, 'resources', slug);
 
@@ -163,6 +161,8 @@ function freeName(dir: string, name: string): string {
 export function homePicture(ctx: Ctx, home: string, input: ResourceInput): { input: ResourceInput; copied?: string } {
   const path = clean(input.path);
   if (!path || !PICTURE_FILE.test(path) || isPage({ purpose: input.purpose ?? null })) return { input };
+  // Never resolved against the server's own folder: a relative path names nothing the caller meant.
+  if (!isAbsolute(path)) throw badRequest(`${path} is not a full path: give the full path of the picture.`);
   const node = requireNode(ctx, input.nodeId);
   const slug = ctx.db.prepare('SELECT slug FROM projects WHERE id = ?').pluck().get(node.projectId) as string;
   const dir = resolve(documentsFolder(home, slug));

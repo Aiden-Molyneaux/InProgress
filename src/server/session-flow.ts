@@ -125,7 +125,8 @@ const landingOn = (ctx: Ctx, projectId: number): boolean => leadSwitches(ctx, pr
 
 export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInput): HookEventResult {
   // The lead's own folder (and its thread in T3 Code) is the lead's: no session, no briefing, no nudge, as for an untracked folder.
-  if (isLeadFolder(ctx, input.cwd)) return input.event === 'prompt' && input.mentionsInProgress ? { tracked: false, context: untrackedHint(sessionId) } : { tracked: false };
+  // Only for a session not yet known: one already tracked whose cwd strays under the lead's folder still gets its events, so it ends.
+  if (isLeadFolder(ctx, input.cwd) && !findSession(ctx, sessionId)) return input.event === 'prompt' && input.mentionsInProgress ? { tracked: false, context: untrackedHint(sessionId) } : { tracked: false };
   let created = false;
   /**
    * The session owed the full briefing (its "briefing due" marker was set) and this response carries it: a start, a

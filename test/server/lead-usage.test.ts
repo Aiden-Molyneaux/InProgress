@@ -201,3 +201,11 @@ describe('lead counts, as stage 0 measured 1.55', () => {
     expect(leadCounts(w.ctx, w.project.id, w.ctx.now())).toMatchObject({ reached: 0 });
   });
 });
+
+describe('the reserve with no week figure (Y9)', () => {
+  it('waits when no reading looked at has a week figure, never allows', () => {
+    const w = world();
+    w.reading(5, null, 0.2);
+    expect(reserveAllowsStart(w.ctx, w.ctx.now())).toEqual({ ok: false, why: 'no usage reading has a week figure', wait: true });
+  });
+});
