@@ -8,3 +8,4 @@ export interface StreamCall {
   denied: boolean;
 }
 export function parseStream(text: string): StreamCall[];
+export function notAskedIn(evidence: string): { work: string | null; commands: { Bash: string[]; PowerShell: string[] } };

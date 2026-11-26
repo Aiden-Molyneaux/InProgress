@@ -184,8 +184,8 @@ export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken:
       // His reply to a line to the Voice: the line's send says what it was about.
       const target = voiceTarget(ctx, project, sendId);
       const reached = target.send.doneAt ?? undefined;
+      // A line with no delivery time and no time of his gives no anchor: a yes then records none, as on an ask.
       if (reached !== undefined && (anchor === undefined || reached < anchor)) anchor = reached;
-      anchor ??= now;
       if (target.kind === 'ask') askId = target.askId;
       else {
         // A closed item runs no git.
@@ -202,7 +202,11 @@ export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken:
           for (const a of yes.filter((a) => !own.has(a))) notes.push(`--yes ${a} was ignored: the held command is not a ${a}.`);
           if (target.item.nodeId === null) {
             if (kept.length) notes.push('No yes recorded: the held command is on no step.');
-          } else if (kept.length) yeses = await readSessionYeses(ctx, ref(req), target.item.nodeId, held.sessionId, kept, anchor, landing);
+          } else if (kept.length) {
+            yeses = anchor === undefined
+              ? kept.map((action) => ({ action, patchId: null, why: SAID_AT_NEEDED }))
+              : await readSessionYeses(ctx, ref(req), target.item.nodeId, held.sessionId, kept, anchor, landing);
+          }
         } else if (yes !== undefined) notes.push('--yes was ignored: what he left to the lead takes no go-ahead.');
         const { says: _says, ...rest } = input;
         const res = leadAnswerItem(ctx, ref(req), as, instructions, target.item.id, { ...rest, saidAt, notes, ...(yeses === undefined ? {} : { yeses }) });

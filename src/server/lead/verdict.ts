@@ -18,6 +18,17 @@ export interface ParsedVerdict {
 export type VerdictResult = { ok: true; value: ParsedVerdict } | { ok: false; reason: string };
 
 /**
+ * The verdict word of the verdict line. The exam's turns (task 16) wrote it twice in other shapes: numbered ("1. CARD")
+ * and after the question it answers ("DECIDE or AIDEN or CARD: AIDEN"). A leading list mark is dropped, and the text
+ * after the last colon is taken; what is left must still be exactly one verdict word, so nothing ambiguous passes.
+ */
+function verdictWord(line: string): string {
+  const unmarked = line.replace(/^(?:\d+[.)]|[-*])\s+/, '');
+  const colon = unmarked.lastIndexOf(':');
+  return (colon === -1 ? unmarked : unmarked.slice(colon + 1)).trim();
+}
+
+/**
  * Reads a turn's four-line answer: the last four non-empty lines must be the verdict (DECIDE, AIDEN or CARD, in
  * capitals), `KIND: ...` with a kind its verdict allows, `ANSWER: ...` and `WHY: ...`, each with text. Anything before
  * them is ignored. Anything else is a failure with the reason.
@@ -25,8 +36,9 @@ export type VerdictResult = { ok: true; value: ParsedVerdict } | { ok: false; re
 export function parseVerdict(text: string): VerdictResult {
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l !== '');
   if (lines.length < 4) return { ok: false, reason: `the answer has ${lines.length} non-empty lines, not four` };
-  const [head, kindLine, answerLine, whyLine] = lines.slice(-4) as [string, string, string, string];
-  if (!Object.hasOwn(VERDICT_KINDS, head)) return { ok: false, reason: `the verdict line is "${head}", not DECIDE, AIDEN or CARD` };
+  const [raw, kindLine, answerLine, whyLine] = lines.slice(-4) as [string, string, string, string];
+  const head = verdictWord(raw);
+  if (!Object.hasOwn(VERDICT_KINDS, head)) return { ok: false, reason: `the verdict line is "${raw}", not DECIDE, AIDEN or CARD` };
   const verdict = head as Verdict;
   const field = (line: string, name: string): string | undefined => (line.startsWith(`${name}:`) ? line.slice(name.length + 1).trim() : undefined);
   const kind = field(kindLine, 'KIND');

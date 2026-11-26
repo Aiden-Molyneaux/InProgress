@@ -49,4 +49,13 @@ describe('parseVerdict', () => {
     expect(parseVerdict(answer('toString', 'NONE')).ok).toBe(false);
     expect(parseVerdict(answer('DECIDE', 'technical')).ok).toBe(false);
   });
+  it('reads a numbered verdict line, or the verdict after a colon, as the exam turns wrote them; still one word or nothing', () => {
+    const numbered = parseVerdict(answer('1. CARD', 'NONE'));
+    expect(numbered.ok && numbered.value.verdict).toBe('CARD');
+    const restated = parseVerdict(answer('DECIDE or AIDEN or CARD: AIDEN', 'TASTE'));
+    expect(restated.ok && restated.value.verdict).toBe('AIDEN');
+    expect(parseVerdict(answer('DECIDE or AIDEN', 'TASTE')).ok).toBe(false);
+    expect(parseVerdict(answer('VERDICT: DECIDE or AIDEN', 'TASTE')).ok).toBe(false);
+    expect(parseVerdict(answer('1. aiden', 'TASTE')).ok).toBe(false);
+  });
 });

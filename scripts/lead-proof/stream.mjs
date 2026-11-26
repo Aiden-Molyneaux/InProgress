@@ -42,3 +42,25 @@ export function parseStream(text) {
   }
   return calls;
 }
+
+/**
+ * The commands an evidence.md of this harness marks "not asked", per shell (`Bash`, `PowerShell`), as written in its
+ * "<Shell> run: what the stream showed" tables, plus the work dir the file names on its `work ` line (null if none).
+ */
+export function notAskedIn(evidence) {
+  const out = { Bash: [], PowerShell: [] };
+  let tool = null;
+  for (const line of evidence.split(/\r?\n/)) {
+    const head = /^## (Bash|PowerShell) run: what the stream showed/.exec(line);
+    if (head) {
+      tool = head[1];
+      continue;
+    }
+    if (line.startsWith('## ')) tool = null;
+    if (tool === null) continue;
+    const row = /^\| `(.*)` \| .*? \| not asked \| .* \|$/.exec(line);
+    if (row) out[tool].push(row[1].split('\\|').join('|'));
+  }
+  const work = /^work\s+(\S.*)$/m.exec(evidence)?.[1].trim() ?? null;
+  return { work, commands: out };
+}

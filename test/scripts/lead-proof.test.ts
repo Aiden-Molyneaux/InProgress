@@ -21,3 +21,27 @@ describe('the hook proof stream reader', () => {
     ]);
   });
 });
+
+describe('the commands a previous evidence file marks not asked', () => {
+  it('reads each shell\'s table and the work dir', async () => {
+    const { notAskedIn } = await import('../../scripts/lead-proof/stream.mjs');
+    const evidence = [
+      '# Hook proof',
+      'work  C:/old/work',
+      '',
+      '## Bash run: what the stream showed',
+      '| command | ran | deny shown | result |',
+      '|---|---|---|---|',
+      '| `git push origin main` | no | yes | Held |',
+      '| `git -C C:/old/work/repo push origin main` | no | not asked | - |',
+      '',
+      '## PowerShell run: what the stream showed',
+      '| `npm run deploy` | no | not asked | - |',
+      '| `rm doomed.txt` | no | no | ok |',
+      '',
+      '## Permission run',
+      '| `x` | no | not asked | - |',
+    ].join('\n');
+    expect(notAskedIn(evidence)).toEqual({ work: 'C:/old/work', commands: { Bash: ['git -C C:/old/work/repo push origin main'], PowerShell: ['npm run deploy'] } });
+  });
+});

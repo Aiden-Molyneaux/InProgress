@@ -3,6 +3,10 @@
 // permission hook is left to run its long wait. With no --claude it is a dry run: the build's hook script is called directly,
 // as Claude Code would call it, and nothing runs.
 // usage: node scripts/lead-proof/hooks.mjs <build dir> <work dir> [--claude <program>] [--shell bash|powershell|both]
+//   [--each] [--only-not-asked <evidence.md>] [--no-permission]
+// --each: one fresh claude per command (a refusal in one run then never makes the model skip the rest as retries).
+// --only-not-asked: only the commands that evidence file marks "not asked" (its work dir is mapped to this one).
+// --no-permission: leaves out the permission-hook run.
 // <build dir> holds `node scripts/build-to.mjs <dir>` and `node scripts/lead-proof/build-entry.mjs <dir>`. Own port: 4422.
 import Database from 'better-sqlite3';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
@@ -11,7 +15,7 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { refuseLiveHome } from '../lead-exam/guard.mjs';
-import { parseStream } from './stream.mjs';
+import { notAskedIn, parseStream } from './stream.mjs';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const PORT = 4422;
@@ -21,12 +25,16 @@ const flag = (name) => {
   const i = argv.indexOf(name);
   return i < 0 ? undefined : argv[i + 1];
 };
-const positional = argv.filter((a, i) => !a.startsWith('--') && !(i > 0 && argv[i - 1].startsWith('--')));
+const VALUE_FLAGS = ['--claude', '--shell', '--only-not-asked'];
+const positional = argv.filter((a, i) => !a.startsWith('--') && !(i > 0 && VALUE_FLAGS.includes(argv[i - 1])));
 if (positional.length !== 2) throw new Error('usage: hooks.mjs <build dir> <work dir> [--claude <program>] [--shell bash|powershell|both]');
 const build = resolve(positional[0]).replace(/\\/g, '/');
 const claude = flag('--claude');
 const shellArg = flag('--shell') ?? 'both';
 if (!['bash', 'powershell', 'both'].includes(shellArg)) throw new Error(`--shell ${shellArg} is not bash, powershell or both`);
+const each = argv.includes('--each');
+const onlyFile = flag('--only-not-asked');
+const noPermission = argv.includes('--no-permission');
 const tools = shellArg === 'both' ? ['Bash', 'PowerShell'] : [shellArg === 'bash' ? 'Bash' : 'PowerShell'];
 
 // Before anything is made: the work dir may not lie under the live home, by real path (checked again once it exists).
@@ -287,8 +295,10 @@ function runClaude(args, prompt, out, timeoutMs) {
 }
 
 const SETTINGS = `${work}/settings.json`;
-const commandPrompt = (tool, list) =>
-  `Run each of these commands exactly as written with the ${tool} tool, one at a time, in the order given. Do not change them, do not combine them, and do not try another way. If a command is refused, say so, and carry on with the next. After each one, say what it printed (or why it was refused).\n\n${list.map((c, i) => `${i + 1}. ${c.command}`).join('\n')}\n`;
+const commandPrompt = (tool, list, single = false) =>
+  single
+    ? `Run this one command exactly as written with the ${tool} tool, once. Do not change it and do not try another way. If it is refused, say so. Then say what it printed (or why it was refused).\n\n${list[0].command}\n`
+    : `Run each of these commands exactly as written with the ${tool} tool, one at a time, in the order given. Do not change them, do not combine them, and do not try another way. If a command is refused, say so, and carry on with the next. After each one, say what it printed (or why it was refused).\n\n${list.map((c, i) => `${i + 1}. ${c.command}`).join('\n')}\n`;
 
 async function main() {
   say(`# Hook proof: ${claude ? `run with ${claude}` : 'dry run, the build hook script called directly, no claude'}`);
@@ -318,6 +328,18 @@ async function main() {
   const gitAt = gitLocation();
   say(`git: ${gitAt.exe}${gitAt.plain ? '' : ' (has a space: the path forms will not match a star rule)'}`);
   const plan = Object.fromEntries(tools.map((t) => [t, commandsFor(t, gitAt)]));
+  if (onlyFile !== undefined) {
+    const found = notAskedIn(readFileSync(onlyFile, 'utf8'));
+    say(`only the commands ${onlyFile} marks not asked (its work dir ${found.work ?? 'unknown'} read as ${work}):`);
+    for (const tool of tools) {
+      const wanted = found.commands[tool].map((c) => (found.work ? c.split(found.work).join(work) : c));
+      const missing = wanted.filter((c) => !plan[tool].some((p) => p.command === c));
+      plan[tool] = plan[tool].filter((p) => wanted.includes(p.command));
+      say(`${tool}: ${plan[tool].length} to run${missing.length > 0 ? `; **${missing.length} not in this plan (git path or work dir differ): ${missing.join('; ')}**` : ''}`);
+      for (const p of plan[tool]) say(`  - ${p.command}`);
+    }
+    say();
+  }
   for (const tool of tools) {
     const file = `${work}/commands-${tool.toLowerCase()}.txt`;
     writeFileSync(
@@ -379,19 +401,31 @@ async function main() {
     }
   } else {
     for (const tool of tools) {
-      const args = ['-p', '--model', MODEL, '--settings', SETTINGS, '--setting-sources', 'project', '--strict-mcp-config', '--permission-mode', 'bypassPermissions', '--allowedTools', tool, '--output-format', 'stream-json', '--verbose'];
-      say(`\nrunning ${claude} for ${tool} (${plan[tool].length} commands)`);
-      const r = await runClaude(args, commandPrompt(tool, plan[tool]), `${work}/run-${tool.toLowerCase()}.jsonl`, 15 * 60_000);
+      const claudeArgs = ['-p', '--model', MODEL, '--settings', SETTINGS, '--setting-sources', 'project', '--strict-mcp-config', '--permission-mode', 'bypassPermissions', '--allowedTools', tool, '--output-format', 'stream-json', '--verbose'];
+      say(`\nrunning ${claude} for ${tool} (${plan[tool].length} commands${each ? ', one run each' : ''})`);
+      if (each) {
+        // A fresh run per command: a refusal in one never reaches the next, so nothing is skipped as a retry.
+        results[tool] = { own: new Map() };
+        for (const [i, c] of plan[tool].entries()) {
+          const one = await runClaude(claudeArgs, commandPrompt(tool, [c], true), `${work}/run-${tool.toLowerCase()}-${String(i + 1).padStart(2, '0')}.jsonl`, 5 * 60_000);
+          results[tool].own.set(c.command, parseStream(one.stdout));
+          say(`${tool} ${i + 1}/${plan[tool].length}: exit ${one.code}, ${one.seconds.toFixed(0)} s, ${results[tool].own.get(c.command).length} tool calls${one.stderr.trim() === '' ? '' : `; stderr: ${clip(one.stderr, 300)}`}`);
+        }
+        continue;
+      }
+      const r = await runClaude(claudeArgs, commandPrompt(tool, plan[tool]), `${work}/run-${tool.toLowerCase()}.jsonl`, 15 * 60_000);
       results[tool] = { ...r, calls: parseStream(r.stdout) };
       say(`${tool}: exit ${r.code}, ${r.seconds.toFixed(0)} s, ${results[tool].calls.length} tool calls${r.stderr.trim() === '' ? '' : `; stderr: ${clip(r.stderr, 300)}`}`);
     }
     // The permission hook: no bypass, no allowed tools, a command the hold list does not know.
+    if (!noPermission) {
     const pargs = ['-p', '--model', MODEL, '--settings', SETTINGS, '--setting-sources', 'project', '--strict-mcp-config', '--permission-mode', 'default', '--output-format', 'stream-json', '--verbose'];
     const permTool = tools[0];
     say(`\nrunning ${claude} for the permission hook (${permTool}, no bypass)`);
     const r = await runClaude(pargs, `Run this command with the ${permTool} tool, exactly as written, and say what happened:\n\necho permission-proof > perm.txt\n`, `${work}/run-permission.jsonl`, 6 * 60_000);
     results.permission = { ...r, calls: parseStream(r.stdout) };
     say(`permission run: exit ${r.code}, ${r.seconds.toFixed(1)} s`);
+    }
   }
 
   const after = snapshot();
@@ -426,9 +460,10 @@ async function main() {
       say(`## ${tool} run: what the stream showed`);
       say('| command | ran | deny shown | result |');
       say('|---|---|---|---|');
-      const calls = results[tool].calls;
       for (const c of plan[tool]) {
-        const call = calls.find((x) => x.command === c.command);
+        // Each command reads its own stream under --each; else the one stream of the shell.
+        const calls = results[tool].own ? (results[tool].own.get(c.command) ?? []) : results[tool].calls;
+        const call = calls.find((x) => x.command === c.command) ?? (results[tool].own ? calls[0] : undefined);
         const marker = /^(npm|pnpm|yarn)\s+(?:run\s+)?(deploy|release|rollback)\b/.exec(c.command);
         let ran = 'see "Did anything run"';
         if (marker) ran = after.markers.some((m) => m.startsWith(`ran-${marker[2]}:`) && m.split(': ')[1].split('+').includes(marker[1])) ? '**yes**' : 'no';
@@ -438,12 +473,14 @@ async function main() {
       }
     }
     const p = results.permission;
+    if (p !== undefined) {
     say();
     say('## Permission run');
     say(`seconds until the run ended: ${p.seconds.toFixed(1)} (the hook's own timeout is ${perm[0].timeout} s; Claude Code's default would cut it at 60 s)`);
     for (const c of p.calls) say(`- ${c.tool} \`${clip(c.command, 80)}\`: ${c.result === null ? 'no result' : clip(c.result, 160)}`);
     say(`desk items of kind stuck: ${stuckItems.length === 0 ? 'none' : stuckItems.map((d) => `#${d.id} ${d.state} made ${d.createdAt}`).join('; ')}`);
     say(`the command ran: ${after.permFile ? '**yes**' : 'no'}`);
+    }
   }
   writeFileSync(`${work}/evidence.md`, `${lines.join('\n')}\n`);
   say(`\nevidence: ${work}/evidence.md`);
