@@ -803,3 +803,10 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
 - The real scenes on 7271d2d (between the two rounds): 38 PASS, 9 DIFFERS, 0 FAIL. The run showed one more doubled pick
   ("I would pick: I'd suggest"), folded into 2238e57. One full unit run of three had one failure that two reruns and
   three runs of the changed files did not repeat; it was not captured.
+- Murr's re-check of 2238e57 (Opus, proportional): sound, three minors fixed inline in dcbf5c0 (a thread's miss record
+  cleared when it takes a send, and a first miss older than five minutes stale; the same-text old-ask rule only within
+  one session; an undone park's line without its undo word). No reviewer has seen dcbf5c0's lines; none is a blocker or
+  major fix, so no last look was sent.
+- The real scenes on 2238e57: 38 PASS, 9 DIFFERS, 0 FAIL, and done when 3 clean on all four counts (the five retries
+  to an unknown thread are gone with C9). Kept as scenes-after-check-1 beside the page; the 9572cdd run is
+  scenes-before-check-1. Check 2, a fresh agent with check 1's brief and no sight of check 1, runs on dcbf5c0.
