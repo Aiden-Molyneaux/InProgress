@@ -379,3 +379,23 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   his owner-calls: a session is asked once per step, then left alone; a non-T3 session gets the same 30-minute grace
   before its turn; the ask moves into the minute watch so a back-off never delays it; a promise turn that says KEPT
   clears the promise. To check live after landing: what T3's --worktree does with an existing worktree path.
+
+## Tasks 10 and 13, and task 8's fix round (a737463)
+
+- Tasks 10 and 13 by a Sev (Sonnet): the morning list and the week, the counts, `lead set` for a project's settings,
+  undo with a reason, usage imported and read, the reserve. Task 8's S1 to S16 by the task 9 Sev (Opus) in the same
+  worktree at the same time.
+- Plan said two commits, one per round. Did one. Because the shared files (prompt.ts, runner.ts, routes/lead.ts,
+  core/lead.ts, schemas.ts) carry hunks of both, and each commit must build on its own.
+- Plan said S11 reads the thread's created time. Did: `createdAt` added to t3.ts's thread (the CLI's `thread list
+  --json` gives it; '' from an older CLI), and the marker check reads it before `updatedAt`. Because `updatedAt` moves
+  with every message, so a reused id on an old thread could pass on `updatedAt` alone.
+- Plan said S7 matches a message by its text and a time at or after the send. Did text only. Because `thread show
+  --json` gives a message no time (role, runId and text), as the Sev found. Said here, as S7 asked.
+- The S round's calls by the Sev, accepted: the in-flight count keeps its ten-minute window for done starts; a done
+  step is not parked by a refused restart; a thread's own session is left out of the live-session check; a voice line
+  answered NOT FOUND is cleared, not sent again.
+- An open point from task 10, my call: Aiden's late answer for a session not in T3 Code also updates the ask's answer,
+  so the session gets it on its next prompt. Queued with task 9's fixes.
+- Two tests followed the usage: `lead set` sits after `undo`, and `lead undo` takes `[--reason <text>]`.
+- Typecheck clean; 2788 unit tests green.
