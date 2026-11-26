@@ -13,8 +13,9 @@ import { answeredTurns, applyTurn, expiredLeases, failAnsweredTurn, failTurn, le
 import { getProjectById } from '../repo/projects';
 import { isLiveWithRound, liveProjectsWithRound } from '../repo/switches';
 import { addReading, type AddReadingInput } from '../repo/usageReadings';
+import { turnWayOf } from './settings';
 import { deskSystemPrompt, deskUserMessage } from './prompt';
-import { stoppedBeforeLease } from './stopped';
+import { stoppedHoldBack } from './stopped';
 import { parseVerdict } from './verdict';
 
 /** The model a desk turn runs on: Opus 5.5. */
@@ -383,6 +384,83 @@ export function headlessWay(opts: HeadlessOptions): TurnWay {
   };
 }
 
+/** What the thread way needs: T3 Code's send and show, the project's day's thread, and for tests the poll's pace. */
+export interface ThreadOptions {
+  send: (threadId: string, message: string) => Promise<void>;
+  show: (threadId: string) => Promise<{ messages: { role: string; text: string }[] }>;
+  /** The id of the project's day's thread (the morning start send's result), undefined when it has none. */
+  dayThread: (projectId: number, slug: string) => string | undefined;
+  /** The project's id by slug, for dayThread. */
+  projectIdOf: (slug: string) => number | undefined;
+  /** THREAD_POLL_MS unless given. */
+  pollMs?: number;
+}
+
+/** How often the thread way reads the thread for the reply. */
+export const THREAD_POLL_MS = 5000;
+
+const sleepOrAbort = (ms: number, signal: AbortSignal): Promise<void> =>
+  new Promise((resolve) => {
+    const timer = setTimeout(done, ms);
+    signal.addEventListener('abort', done, { once: true });
+    function done(): void {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', done);
+      resolve();
+    }
+  });
+
+/**
+ * The thread way: the item's user message goes to the day's thread in T3 Code, after a first line naming the item and the
+ * turn, and the thread is read every THREAD_POLL_MS until the thread's agent answers after it with a message that starts
+ * `Desk item <id>:` (another item's reply is not this item's). What follows that is the turn's text. No day's thread, T3
+ * Code not answering, or no reply before the lease's abort, is a runner fault. The abort stops the poll. It reports no cost or usage: the output's fields are null.
+ */
+export function threadWay(opts: ThreadOptions): TurnWay {
+  const pollMs = opts.pollMs ?? THREAD_POLL_MS;
+  // An abort before the reply came is the thread not answering in time: a runner fault, so the item backs off and is not sent to
+  // the thread again at every lease. The runner itself reads an abort for the round switching off or the server stopping as an
+  // interruption whatever this says, so those never count as a fault.
+  const unanswered = (): TurnRunError => new TurnRunError("the lead's thread did not answer in time", { rateLimits: [] }, true);
+  return {
+    name: 'thread',
+    async run(input, signal) {
+      if (signal.aborted) throw unanswered();
+      const projectId = opts.projectIdOf(input.slug);
+      const threadId = projectId === undefined ? undefined : opts.dayThread(projectId, input.slug);
+      if (threadId === undefined) throw new TurnRunError(`${input.slug} has no thread for today: the morning list has not started one`, { rateLimits: [] }, true);
+      const head = `Desk item ${input.item.id}, turn ${input.turnId}. Answer in the four lines, starting your reply with "Desk item ${input.item.id}:".`;
+      const sent = `${head}
+
+${input.userMessage}`;
+      const reply = `Desk item ${input.item.id}:`;
+      try {
+        await opts.send(threadId, sent);
+      } catch (err) {
+        throw new TurnRunError(`T3 Code did not take the message: ${err instanceof Error ? err.message : String(err)}`, { rateLimits: [] }, true);
+      }
+      for (;;) {
+        await sleepOrAbort(pollMs, signal);
+        if (signal.aborted) throw unanswered();
+        let messages: { role: string; text: string }[];
+        try {
+          messages = (await opts.show(threadId)).messages;
+        } catch (err) {
+          throw new TurnRunError(`T3 Code did not show the thread: ${err instanceof Error ? err.message : String(err)}`, { rateLimits: [] }, true);
+        }
+        const at = messages.map((m) => m.role === 'user' && m.text.includes(head)).lastIndexOf(true);
+        if (at < 0) continue;
+        const found = messages.slice(at + 1).find((m) => m.role !== 'user' && m.text.trimStart().startsWith(reply));
+        if (found === undefined) continue;
+        const text = found.text.trimStart().slice(reply.length).trim();
+        // The agent answered but said nothing under its heading: the turn ran to its end and the item was at fault.
+        if (text === '') throw new TurnRunError(`the thread's reply to desk item ${input.item.id} had no lines after its heading`, { rateLimits: [], resultRead: true }, false);
+        return { text, costUsd: null, durationMs: null, tokensIn: null, tokensOut: null, refusedTools: [], rateLimits: [], model: input.model };
+      }
+    },
+  };
+}
+
 /** The abort's reason as a TurnRunError with what the run read: the runner reads the reason itself to tell whose fault it was. */
 const abortError = (signal: AbortSignal, partial: PartialOutput): TurnRunError =>
   new TurnRunError(signal.reason instanceof Error ? signal.reason.message : 'the turn was stopped', partial, false);
@@ -419,6 +497,8 @@ export interface RunnerLog {
 
 export interface RunnerOptions {
   way: TurnWay;
+  /** The thread way, for a project whose `turn-way` setting is thread; unset, every project runs the way above. */
+  threadWay?: TurnWay;
   model: string;
   /** The server's own home and port, which the turn's tool server reads. */
   home: string;
@@ -480,7 +560,9 @@ export function createRunner(ctx: Ctx, opts: RunnerOptions): Runner {
   const applyThrows = new Map<number, number>();
   const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
   const nowMs = (): number => Date.parse(ctx.now());
-  const holdBack = opts.holdBack ?? ((item: DeskItem) => stoppedBeforeLease(ctx, item) !== 'lease');
+  /** The way a project's turns run: the lead's thread when its `turn-way` is thread (and the runner has one), else headless. */
+  const wayOf = (projectId: number): TurnWay => (opts.threadWay !== undefined && turnWayOf(db, projectId) === 'thread' ? opts.threadWay : opts.way);
+  const holdBack = opts.holdBack ?? ((item: DeskItem) => stoppedHoldBack(ctx, item));
 
   /** The actor the apply writes as: the item's project's lead. */
   function actorOf(itemId: number): string {
@@ -593,7 +675,7 @@ export function createRunner(ctx: Ctx, opts: RunnerOptions): Runner {
       let turn: LeadTurn | undefined;
       for (const itemId of openItemsInLane(db, project.id, lane)) {
         if (heldBack(itemId)) continue;
-        turn = leaseItem(db, itemId, { way: opts.way.name, model: opts.model, leaseMs }, ctx.now());
+        turn = leaseItem(db, itemId, { way: wayOf(project.id).name, model: opts.model, leaseMs }, ctx.now());
         if (turn !== undefined) break;
       }
       if (turn === undefined) return;
@@ -663,7 +745,7 @@ export function createRunner(ctx: Ctx, opts: RunnerOptions): Runner {
 
   async function runTurn(turn: LeadTurn, project: Project, lane: DeskLane, controller: AbortController): Promise<RunEnd> {
     const item = getDeskItem(db, turn.itemId)!;
-    log.info(`Lead turn ${turn.id}: leased desk item #${item.id} (${item.kind} ${item.ref}) of ${project.slug} in the ${lane} lane, ${opts.way.name}, until ${turn.leaseUntil}`);
+    log.info(`Lead turn ${turn.id}: leased desk item #${item.id} (${item.kind} ${item.ref}) of ${project.slug} in the ${lane} lane, ${wayOf(project.id).name}, until ${turn.leaseUntil}`);
     const startedAt = ctx.now();
     const abortAt = Date.parse(turn.leaseUntil) - ABORT_BEFORE_LEASE_END_MS - Date.parse(startedAt);
     const timeout = setTimeout(() => controller.abort(new Error(`the run was stopped ${ABORT_BEFORE_LEASE_END_MS / 1000} seconds before its lease ends`)), Math.max(0, abortAt));
@@ -677,7 +759,7 @@ export function createRunner(ctx: Ctx, opts: RunnerOptions): Runner {
         ...(repo === undefined ? {} : { INPROGRESS_LEAD_REPO: repo }),
       };
       const input: TurnInput = { turnId: turn.id, slug: project.slug, item, systemPrompt: deskSystemPrompt(ctx, project), userMessage: deskUserMessage(ctx, item), model: opts.model, toolsEnv };
-      output = await opts.way.run(input, controller.signal);
+      output = await wayOf(project.id).run(input, controller.signal);
     } catch (err) {
       const partial: PartialOutput = err instanceof TurnRunError ? err.partial : { rateLimits: [] };
       writeReadings(turn.id, partial.rateLimits, partial.model ?? opts.model);
@@ -685,7 +767,7 @@ export function createRunner(ctx: Ctx, opts: RunnerOptions): Runner {
       const interrupted = reason === STOPPING || reason === ITEM_LEFT;
       const fault = !interrupted && err instanceof TurnRunError && err.runnerFault;
       const state = interrupted || fault ? 'interrupted' : 'failed';
-      const why = interrupted ? (reason as Error).message : fault ? `${RUNNER_FAULT_WHY}: ${message(err)}` : `the ${opts.way.name} run failed: ${message(err)}`;
+      const why = interrupted ? (reason as Error).message : fault ? `${RUNNER_FAULT_WHY}: ${message(err)}` : `the ${wayOf(project.id).name} run failed: ${message(err)}`;
       logFail(turn.id, item.id, state, why, failTurn(db, turn.id, state, why, ctx.now(), costsOf(startedAt, partial)));
       if (fault) {
         const already = (backoff.get(project.id) ?? 0) > nowMs();

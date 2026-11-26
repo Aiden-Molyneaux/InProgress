@@ -11,7 +11,7 @@ import {
 } from '../../src/server/lead/runner';
 import { clearAsk, raiseAskDetailed } from '../../src/server/repo/asks';
 import { addDeskItem, getDeskItem, type DeskItem, type DeskItemKind } from '../../src/server/repo/desk';
-import { applyTurn, getTurn, insertTurn, leaseItem, saveAnswer, type LeadTurn } from '../../src/server/repo/leadTurns';
+import { applyTurn, getTurn, insertTurn, leaseItem, REOPENED_MARK, saveAnswer, type LeadTurn } from '../../src/server/repo/leadTurns';
 import { addNodes } from '../../src/server/repo/nodes';
 import { addBinding, createProject, setProjectLead } from '../../src/server/repo/projects';
 import { handleHookEvent } from '../../src/server/session-flow';
@@ -589,6 +589,41 @@ describe('the turn runner', () => {
     expect(turnsOf(w.ctx, limited.id).map((t) => t.state)).toEqual(['interrupted', 'interrupted', 'interrupted', 'applied']);
     expect(lines.some((l) => l.includes(`#${limited.id}, behind on runner faults, are open again`))).toBe(true);
     expect(getDeskItem(w.ctx.db, failing.id)!.state).toBe('behind');
+  });
+  it("T2: an item whose own fault reads as the runner's is reopened once; faulting again, it stays behind and backs the project off no more", async () => {
+    const w = world();
+    const tooLong = w.add();
+    const way = quickWay((input) => {
+      if (input.userMessage.includes(`#${tooLong.id},`)) throw new TurnRunError('the turn ended with error_during_execution: Prompt is too long', { rateLimits: [] }, true);
+      return output({});
+    });
+    const { runner } = runnerOn(w.ctx, way);
+    runner.kick(w.project.id);
+    for (let i = 0; i < 2; i++) {
+      await vi.waitFor(() => expect(turnsOf(w.ctx, tooLong.id)[i]?.state).toBe('interrupted'));
+      await new Promise((r) => setImmediate(r));
+      w.tick(FAULT_BACKOFF_MS + 1000);
+      runner.tick();
+    }
+    await vi.waitFor(() => expect(getDeskItem(w.ctx.db, tooLong.id)!.state).toBe('behind'));
+    // An ok turn: the item is reopened, once, and faults again.
+    const ok = w.add();
+    w.tick(FAULT_BACKOFF_MS + 1000);
+    runner.tick();
+    await vi.waitFor(() => expect(getDeskItem(w.ctx.db, ok.id)!.state).toBe('done'));
+    await vi.waitFor(() => expect(turnsOf(w.ctx, tooLong.id)).toHaveLength(4));
+    await vi.waitFor(() => expect(getDeskItem(w.ctx.db, tooLong.id)!.state).toBe('behind'));
+    expect(turnsOf(w.ctx, tooLong.id)[2]!.why).toContain(REOPENED_MARK);
+    // More ok turns: it stays behind, and is never run again.
+    for (let i = 0; i < 2; i++) {
+      const more = w.add();
+      w.tick(FAULT_BACKOFF_MS + 1000);
+      runner.tick();
+      await vi.waitFor(() => expect(getDeskItem(w.ctx.db, more.id)!.state).toBe('done'));
+    }
+    await new Promise((r) => setImmediate(r));
+    expect(getDeskItem(w.ctx.db, tooLong.id)!.state).toBe('behind');
+    expect(turnsOf(w.ctx, tooLong.id)).toHaveLength(4);
   });
 });
 

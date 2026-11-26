@@ -5,10 +5,12 @@ import { askTag, type Ask, type Project, type TreeNode } from '../core/types';
 import { write, type Ctx, type RecordEvent } from './db/tx';
 import { clip, stamp } from './digest';
 import { badRequest, conflict, notFound } from './errors';
-import { leadSwitches, logLeadEvent, requireLead } from './lead';
+import { ARCHIVED, leadSwitches, logLeadEvent, noLeadNamed, outOfDate, requireLead } from './lead';
+import { LEAD_NAME, LEAD_NAME_RULE } from '../core/lead';
+import { resolveProject } from './repo/projects';
 import { intentHeadlines } from './lead-text';
 import { aidensAskSql, clearInWrite, markAnswersDelivered, raiseAskInWrite, requireAsk } from './repo/asks';
-import { DECISION_LINE_CUT, t3ThreadOf } from './repo/deskBring';
+import { DECISION_LINE_CUT, t3ThreadOf, t3ThreadOnStep } from './repo/deskBring';
 import { intendSend, sendByRetryKey } from './repo/leadSends';
 import { SETTING_KEYS } from './lead/settings';
 import { addDecision, decisionByEvent, type DecisionKind, type SaidWhere } from './repo/leadDecisions';
@@ -16,6 +18,10 @@ import { parkNodeInWrite, requireNode, unparkNodeInWrite, updateNodeInWrite } fr
 import { setProjectIntentInWrite } from './repo/projects';
 import { liveDriver, liveSessionUnder } from './repo/sessions';
 import { parkedAncestor, subtreeIds } from './repo/shelved';
+import { listBindings } from './repo/projects';
+import { produceDeskItem } from './repo/deskProducers';
+import { getSend, stampSeen } from './repo/leadSends';
+import { checkLanding, recordYes, type LandingDeps } from './lead/landing';
 
 /**
  * The lead's six commands. Each one is checked, performed and logged in a single write: requireLead first (outside it, a
@@ -25,8 +31,8 @@ import { parkedAncestor, subtreeIds } from './repo/shelved';
 
 /** How much of a stored answer the refusal of a second answer quotes. */
 const ANSWER_CUT = 120;
-/** The refusal of `answer` for a permission or a review: in stage 1 the lead carries his answer to a question only. */
-export const QUESTION_ONLY = "The lead can carry Aiden's answer to a question only. A permission or a review needs Aiden in the thread or the window.";
+/** The refusal of `answer` in a project whose folders are all under C:\work: the lead carries nothing there. */
+export const WORK_PROJECT = "This project's folders are under C:\\work: the lead carries no answer there.";
 /** The refusal of a decide on a permission or a review: only a question is the lead's to answer for Aiden. */
 export const DECIDE_QUESTION_ONLY = "The lead decides a question only. A permission or a review is Aiden's: it needs him in the thread or the window.";
 /** The refusal of a drop of a step of Aiden's without his words. */
@@ -82,22 +88,179 @@ function requireQuiet(ctx: Ctx, node: TreeNode, session: string): void {
   }
 }
 
-/** Clears an open question of Aiden's with his words, carried by the lead: `answered_via` is `lead`. */
-export function leadAnswer(ctx: Ctx, ref: string, as: string, instructions: number, input: { askId: number; aidenWords: string; says?: string }): { text: string; ask: Ask } {
-  const { project, name, actor } = leadOf(ctx, ref, as, instructions);
+/** The actions a review's go-ahead covers when the caller names none: "ship it". */
+export const YES_ACTIONS = ['merge', 'deploy', 'push'] as const;
+export type YesAction = (typeof YES_ACTIONS)[number];
+
+/** One action of a review's go-ahead, read before the write: the change's patch id, or why it could not be read. */
+export interface CarriedYes {
+  action: YesAction;
+  patchId: string | null;
+  why?: string;
+}
+
+/** What `lead answer` carries: Aiden's words, where and when he said them, what he was shown, and for a review what his yes covers. */
+export interface LeadAnswerInput {
+  askId: number;
+  aidenWords: string;
+  says?: string;
+  where?: 'voice' | 'thread';
+  /** When he said it (ISO); now when absent. */
+  saidAt?: string;
+  /** The documents he was shown, by id. */
+  shown?: number[];
+  /** A review's yes, each action with the patch id read just before (readYeses). */
+  yeses?: CarriedYes[];
+}
+
+/** Whether every folder bound to the project is at or under C:/work (a project with none is not). */
+export function workProject(ctx: Ctx, projectId: number): boolean {
+  const paths = listBindings(ctx)
+    .filter((b) => b.projectId === projectId)
+    .map((b) => b.path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase());
+  return paths.length > 0 && paths.every((p) => p === 'c:/work' || p.startsWith('c:/work/'));
+}
+
+/** A time as HH:MM, local. */
+const hhmmOf = (iso: string): string => {
+  const d = new Date(iso);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+
+/** The line a T3 Code session reads in its thread when the lead carries Aiden's answer. */
+export const carriedLine = (lead: string, where: 'voice' | 'thread', saidAt: string, words: string): string =>
+  `Aiden's answer, carried by ${lead} from ${where === 'voice' ? 'Grok' : "the lead's thread"} at ${hhmmOf(saidAt)}: "${words.trim()}"`;
+
+/**
+ * For a review: the patch id of the change of the ask's step, read now in its session's folder on the branch it is on
+ * (main...branch, as the landing check reads a merge, nothing logged). Every action the yes covers is keyed on that one
+ * change: after the merge, a deploy reads main against the live build and a push the branch against origin, which is the
+ * same change when nothing else came between, and is held when something did. A change that cannot be read carries the
+ * reason for every action. A read, outside any write; undefined for an ask that is not a review.
+ */
+export async function readYeses(ctx: Ctx, ref: string, askId: number, actions: readonly YesAction[], deps?: LandingDeps): Promise<CarriedYes[] | undefined> {
+  const ask = ctx.db.prepare('SELECT kind, node_id, session_id FROM asks WHERE id = ?').get(askId) as { kind: string; node_id: number; session_id: string | null } | undefined;
+  if (ask === undefined || ask.kind !== 'review') return undefined;
+  const session = ask.session_id === null ? undefined : (ctx.db.prepare('SELECT cwd, branch FROM sessions WHERE id = ?').get(ask.session_id) as { cwd: string | null; branch: string | null } | undefined);
+  const folder = session?.cwd ?? null;
+  const none = (why: string): CarriedYes[] => actions.map((action) => ({ action, patchId: null, why }));
+  if (folder === null || folder.trim() === '') return none('its session has no folder on record');
+  const branch = session?.branch ? session.branch : undefined;
+  try {
+    const read = await checkLanding(ctx, { ref, stepId: ask.node_id, action: 'merge', folder, ...(branch === undefined ? {} : { branch }) }, deps, { record: false });
+    if (read.patchId === null) return none('there is no change to read');
+    return actions.map((action) => ({ action, patchId: read.patchId }));
+  } catch (err) {
+    return none((err as Error).message.replace(/\.+$/, ''));
+  }
+}
+
+/**
+ * The project `lead answer` may write to: one whose lead is `as`, or one with no lead at all (Aiden's other personal
+ * projects: the lead carries his answer on their old asks under its own name). A project naming another lead, an archived
+ * one, a name that is not a lead's, and older rules are refused. A read; leadAnswer also refuses a project under C:\work.
+ */
+export function requireAnswerLead(ctx: Ctx, ref: string, as: string, instructions: number): { project: Project; name: string; actor: string } {
+  const project = resolveProject(ctx, ref);
+  const named = project.lead === null || project.lead.trim() === '' ? null : project.lead.trim();
+  const name = named ?? as.trim();
+  if (project.status === 'archived') throw conflict(ARCHIVED);
+  if (named !== null && named.toLowerCase() !== as.trim().toLowerCase()) throw conflict(noLeadNamed(as.trim()));
+  if (named === null && !LEAD_NAME.test(name)) throw badRequest(LEAD_NAME_RULE);
+  if (instructions < LEAD_INSTRUCTIONS_VERSION) throw conflict(outOfDate(instructions, project.slug, name));
+  return { project, name, actor: `lead:${name}` };
+}
+
+/** Actions as a sentence names them: `merge, deploy and push`. */
+const andList = (items: readonly string[]): string => (items.length <= 1 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`);
+
+/**
+ * Clears an open ask of Aiden's (a question, a permission or a review) with his words, carried by the lead: `answered_via`
+ * is `lead`. It records his sentence, when, where and what he was shown (an `answer` line and a decisions row), and for a
+ * review each yes whose patch id was read (`yeses`), so the landing check clears that change and not a later one. A T3
+ * Code session is told in its thread once (retry key `carry:a<ask id>`), and once that is done its next prompt does not
+ * repeat it (sends.ts stamps the answer delivered); any other session reads the answer on its next prompt. The project is
+ * one this lead leads or one with no lead (requireAnswerLead); one whose folders are all under C:\work is refused.
+ */
+export function leadAnswer(ctx: Ctx, ref: string, as: string, instructions: number, input: LeadAnswerInput): { text: string; ask: Ask; carried: boolean } {
+  const { project, name, actor } = requireAnswerLead(ctx, ref, as, instructions);
+  if (workProject(ctx, project.id)) throw conflict(WORK_PROJECT);
+  const where = input.where ?? 'thread';
+  const saidAt = input.saidAt ?? ctx.now();
   return write(ctx, actor, (record) => {
     const before = askIn(ctx, project, input.askId);
     const tag = askTag(before.id);
     if (!isAidens(before)) throw conflict(`${tag} is the lead's own promise. Clear it with kept.`);
-    if (before.kind !== 'question') throw conflict(QUESTION_ONLY);
     if (before.clearedAt !== null) {
       throw conflict(before.answer !== '' ? `Already answered: "${clip(before.answer, ANSWER_CUT)}".` : `${tag} is already cleared, with no answer.`);
     }
     // With `says`, the session reads the answer his words accepted, and his words beside it; the log keeps his words alone.
     const stored = input.says === undefined ? input.aidenWords : `${input.says} (Aiden said: "${input.aidenWords}")`;
     const ask = clearInWrite(ctx, record, actor, before, stored, true, 'lead');
-    logLeadEvent(ctx, { projectId: project.id, lead: name, instructions, kind: 'answer', askId: ask.id, nodeId: ask.nodeId, aidenWords: input.aidenWords });
-    return { text: `Answered ${tag} with Aiden's words.`, ask };
+    const shown = (input.shown ?? []).map((id) => `r${id}`).join(',');
+    const eventId = logLeadEvent(ctx, {
+      projectId: project.id,
+      lead: name,
+      instructions,
+      kind: 'answer',
+      askId: ask.id,
+      nodeId: ask.nodeId,
+      aidenWords: input.aidenWords,
+      text: `where ${where}; said ${saidAt}${shown === '' ? '' : `; shown ${shown}`}`,
+    });
+    addDecision(ctx.db, {
+      eventId,
+      kind: before.kind === 'permission' ? 'permission' : 'technical',
+      line: clipLine(before.text, DECISION_LINE_CUT),
+      aidenAnswer: stored,
+      aidenWords: input.aidenWords,
+      saidWhere: where,
+      saidAt,
+    });
+    const lines = [`Answered ${tag} with Aiden's words.`];
+    if (before.kind === 'review') {
+      const yeses = input.yeses ?? [];
+      const got = yeses.filter((y) => y.patchId !== null);
+      for (const y of got) recordYes(ctx, project.id, { action: y.action, patchId: y.patchId as string, stepId: ask.nodeId, aidenWords: input.aidenWords, said: saidAt });
+      if (got.length) lines.push(`His yes covers ${andList(got.map((y) => y.action))} of the change as it is now.`);
+      for (const y of yeses.filter((y) => y.patchId === null)) lines.push(`No yes recorded for ${y.action}: ${y.why ?? 'the change could not be read'}.`);
+    }
+    const thread = t3ThreadOf(ctx.db, ask.sessionId);
+    const retryKey = `carry:${askTag(ask.id)}`;
+    let carried = false;
+    if (thread !== null && sendByRetryKey(ctx.db, retryKey) === undefined) {
+      intendSend(ctx.db, { projectId: project.id, kind: 'carry', target: thread, retryKey, body: carriedLine(name, where, saidAt, input.aidenWords) }, ctx.now());
+      carried = true;
+      lines.push('Its session is told in its thread.');
+    }
+    return { text: lines.join(' '), ask, carried };
+  });
+}
+
+/** `lead seen`: the Voice passed Aiden's word on a line; its send is stamped seen, once. A send of another project, or not a voice line, is refused. */
+export function leadSeen(ctx: Ctx, ref: string, as: string, instructions: number, input: { sendId: number }): { text: string; stamped: boolean } {
+  const { project, actor } = leadOf(ctx, ref, as, instructions);
+  return write(ctx, actor, () => {
+    const send = getSend(ctx.db, input.sendId);
+    if (send === undefined) throw notFound(`s${input.sendId} not found.`);
+    if (send.projectId !== project.id) throw conflict(`s${send.id} is not in this project.`);
+    if (send.kind !== 'voice_line') throw conflict(`s${send.id} is not a line to the Voice.`);
+    const stamped = stampSeen(ctx.db, send.id, ctx.now());
+    return { text: `Seen s${send.id}.`, stamped };
+  });
+}
+
+/**
+ * `lead desk-add`: Aiden said "you decide" on a step. His words go on the desk as an `aiden_said` item on the step, for the
+ * round to answer like a question; the words are an `aiden_said` line in the lead's log, which the item's ref names.
+ */
+export function leadDeskAdd(ctx: Ctx, ref: string, as: string, instructions: number, input: { stepId: number; aidenWords: string }): { text: string; itemId: number } {
+  const { project, name, actor } = leadOf(ctx, ref, as, instructions);
+  return write(ctx, actor, () => {
+    const node = requireInProject(requireNode(ctx, input.stepId), project);
+    const eventId = logLeadEvent(ctx, { projectId: project.id, lead: name, instructions, kind: 'aiden_said', nodeId: node.id, aidenWords: input.aidenWords });
+    const { item } = produceDeskItem(ctx.db, { projectId: project.id, kind: 'aiden_said', ref: `said:${eventId}`, nodeId: node.id }, ctx.now());
+    return { text: `On the desk: item #${item.id} for ${stepRef(node.id, node.title)}. The round answers it.`, itemId: item.id };
   });
 }
 
@@ -265,7 +428,16 @@ export function leadUndo(ctx: Ctx, ref: string, as: string, instructions: number
     // An undo line's text is the decision's tag: decisionTag names the other site.
     if (ctx.db.prepare("SELECT 1 FROM lead_events WHERE project_id = ? AND kind = 'undo' AND text = ?").get(project.id, tag) !== undefined) throw conflict(`${tag} is already undone.`);
     let text: string;
-    if (event.kind === 'decide') {
+    if (event.kind === 'decide' && event.ask_id === null) {
+      // A decision on what Aiden left to the lead (an aiden_said item): there is no question to raise again. The step's T3
+      // Code session, told the decision, is told once that it is withdrawn.
+      const thread = event.node_id === null ? null : t3ThreadOnStep(ctx, event.node_id);
+      const retryKey = `undo:${tag}`;
+      if (thread !== null && sendByRetryKey(ctx.db, retryKey) === undefined) {
+        intendSend(ctx.db, { projectId: project.id, kind: 'relay', target: thread, retryKey, body: leadLine(name, `${tag} is withdrawn: Aiden takes it back.`) }, ctx.now());
+      }
+      text = `Undid ${tag}: the decision is withdrawn.`;
+    } else if (event.kind === 'decide') {
       const old = requireAsk(ctx, event.ask_id as number);
       const step = requireNode(ctx, old.nodeId);
       const above = parkedAncestor(ctx, step.id);
@@ -314,7 +486,8 @@ export function leadUndo(ctx: Ctx, ref: string, as: string, instructions: number
     });
     // His reason, when he gave one, becomes a standing ruling the lead reads before the next call of that kind.
     if (input.reason !== undefined && input.reason.trim() !== '') {
-      logLeadEvent(ctx, { projectId: project.id, lead: name, instructions, kind: 'ruling', text: input.reason.trim(), aidenWords: input.aidenWords });
+      // The undo's tag leads the text (`d12: <reason>`), so standingRulings names the undo it came from without a join.
+      logLeadEvent(ctx, { projectId: project.id, lead: name, instructions, kind: 'ruling', text: `${tag}: ${input.reason.trim()}`, aidenWords: input.aidenWords });
     }
     return { text };
   });
@@ -323,7 +496,8 @@ export function leadUndo(ctx: Ctx, ref: string, as: string, instructions: number
 /**
  * Aiden answers, in the window, an ask the lead already decided (`answered_via` `lead_decided`): his answer is not dropped.
  * It is recorded as `lead undo` of that decision plus his answer: an `undo` line, an `answer` line with his words, and a
- * relay to the session (a T3 Code one) that his answer replaces the decision, once (retry key `late:a<ask id>`). False,
+ * relay to the session (a T3 Code one) that his answer replaces the decision, once (retry key `late:a<ask id>`); a session
+ * not in T3 Code gets his words as the ask's answer, read on its next prompt. False,
  * with nothing written, when the ask is not one the lead decided, has no lead, or was already undone.
  */
 export function lateAnswer(ctx: Ctx, askId: number, words: string, actor: string): boolean {
@@ -343,6 +517,10 @@ export function lateAnswer(ctx: Ctx, askId: number, words: string, actor: string
     const retryKey = `late:${askTag(ask.id)}`;
     if (thread !== null && sendByRetryKey(ctx.db, retryKey) === undefined) {
       intendSend(ctx.db, { projectId: project.id, kind: 'relay', target: thread, retryKey, body: leadLine(project.lead, `Aiden's answer, which replaces ${tag}: "${words.trim()}"`) }, ctx.now());
+    } else if (thread === null) {
+      // A session not in T3 Code cannot be sent a relay: the ask's answer becomes his words, not yet delivered, so the
+      // session reads it on its next prompt as it reads any answered ask.
+      ctx.db.prepare('UPDATE asks SET answer = ?, answer_delivered_at = NULL WHERE id = ?').run(words.trim(), ask.id);
     }
     return true;
   });

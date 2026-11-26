@@ -180,7 +180,8 @@ export function createMcpServer(client: Client, o: McpOptions = {}): McpServer {
     { node: id, kind: z.enum(RESOURCE_KINDS), title: z.string().min(1), content: z.string().optional(), path: z.string().optional().describe('Absolute path of the file; with snapshot_file its text is read and saved'), url: z.string().optional(), snapshot_file: z.boolean().optional(), purpose: z.enum(RESOURCE_PURPOSES).optional().describe('handoff: the handoff a session leaves on its step. state: the project state note, on the root; it replaces the previous one. library or page: a page (kind doc) read live from its path under a folder bound to the project, listed in the Library or in the Docs view of its project; it takes no content and no snapshot_file'), session },
     async (a: { node: number; kind: string; title: string; content?: string; path?: string; url?: string; snapshot_file?: boolean; purpose?: string; session?: string }) => {
       let content = a.content;
-      if (a.snapshot_file) {
+      // A picture's bytes are never read as text: the server copies the file into the project's documents folder.
+      if (a.snapshot_file && !(a.path !== undefined && /\.(png|jpe?g|gif|webp)$/i.test(a.path))) {
         if (!a.path) throw new Error('snapshot_file needs a path');
         const size = statSync(a.path).size;
         if (size > SNAPSHOT_LIMIT) throw new Error(`${a.path} is ${Math.round(size / 1024)} KB; the snapshot limit is 200 KB. Attach it by path only.`);

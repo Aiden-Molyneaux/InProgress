@@ -320,7 +320,7 @@ describe('the minute watch: stopped', () => {
     leadPromise(s.ctx, s.project.slug, 'Progresser', V, { text: 'Check the tabs', dueAt: new Date(Date.parse(s.now()) + MIN).toISOString(), stepId: s.step.id });
     updateProject(s.ctx, 'window', s.project.slug, { status: 'archived' });
     s.tick(2 * MIN);
-    expect(watchDesk(s.ctx)).toEqual({ stopped: 0, promiseDue: 0, swept: 0 });
+    expect(watchDesk(s.ctx)).toEqual({ stopped: 0, asked: 0, promiseDue: 0, swept: 0 });
     expect(s.items()).toEqual([]);
   });
 
@@ -339,7 +339,7 @@ describe('the minute watch: stopped', () => {
       expect.objectContaining({ kind: 'stopped', ref: `s1@${stoppedAt}`, nodeId: s.step.id, dueAt: new Date(Date.parse(s.now()) + DESK_WATCH_DUE_MS).toISOString() }),
     ]);
     s.tick(MIN);
-    expect(watchDesk(s.ctx)).toEqual({ stopped: 0, promiseDue: 0, swept: 0 });
+    expect(watchDesk(s.ctx)).toEqual({ stopped: 0, asked: 0, promiseDue: 0, swept: 0 });
     moveDeskItem(s.ctx.db, s.items()[0].id, ['open'], 'done', { outcome: 'relayed', now: s.now() });
     s.tick(MIN);
     expect(watchDesk(s.ctx).stopped).toBe(0);
@@ -388,7 +388,7 @@ describe('the minute watch: stopped', () => {
     const s = setup();
     s.stopOn('s1', s.step.id);
     s.tick(DESK_STOPPED_MS + MIN);
-    expect(watchDesk(s.ctx)).toEqual({ stopped: 0, promiseDue: 0, swept: 0 });
+    expect(watchDesk(s.ctx)).toEqual({ stopped: 0, asked: 0, promiseDue: 0, swept: 0 });
     expect(s.items()).toEqual([]);
   });
 });

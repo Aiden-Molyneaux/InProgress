@@ -16,7 +16,9 @@ import type { Project } from '../../core/types';
 import { getProjectById, listBindings, resolveBinding } from '../repo/projects';
 import { findSession } from '../repo/sessions';
 import { isLiveWithRound } from '../repo/switches';
+import { isLeadFolder } from './folder';
 import { checkLanding, ghVisibility, realGit, type LandingDeps } from './landing';
+import { intendHeldLine } from './voice';
 
 /** What the hold and stuck routes answer when the lead has nothing to say: the hook prints nothing. */
 export const SAY_NOTHING = { say: 'nothing' } as const;
@@ -46,6 +48,8 @@ export interface LeadScope {
  * nothing) when there is none, it has no lead, or its round is off or it is not active.
  */
 export function leadScopeOf(ctx: Ctx, sessionId: string | null | undefined, cwd: string): LeadScope | undefined {
+  // The lead's own folder is the lead's: the hooks say nothing there (task 12).
+  if (isLeadFolder(ctx, cwd)) return undefined;
   const session = sessionId ? findSession(ctx, sessionId) : undefined;
   const project = session?.projectId != null ? getProjectById(ctx, session.projectId) : cwd ? resolveBinding(ctx, cwd, session?.branch ?? null) : undefined;
   if (project === undefined || project.lead === null || project.lead.trim() === '') return undefined;
@@ -180,6 +184,8 @@ export async function holdCheck(ctx: Ctx, ask: HoldAsk, deps: LandingDeps = REAL
         },
         now,
       );
+      // A new held item reaches the Voice as one line (task 11).
+      intendHeldLine(ctx.db, { projectId: scope.project.id, itemId: item.id, projectName: scope.project.name, stepId: scope.stepId, what: judged.what }, now);
     })
     .immediate();
   return { held: true, text: judged.what };

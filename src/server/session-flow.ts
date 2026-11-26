@@ -1,4 +1,5 @@
 import { commandLabel, sessionActivity } from '../core/activity';
+import { isLeadFolder } from './lead/folder';
 import type { SessionApp } from '../core/session-app';
 import { relayedLine } from '../core/relay';
 import { clipLine, stepRef } from '../core/step-ref';
@@ -123,6 +124,8 @@ const clean = (text: string | undefined): string | null => text?.trim() || null;
 const landingOn = (ctx: Ctx, projectId: number): boolean => leadSwitches(ctx, projectId).landing.on;
 
 export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInput): HookEventResult {
+  // The lead's own folder (and its thread in T3 Code) is the lead's: no session, no briefing, no nudge, as for an untracked folder.
+  if (isLeadFolder(ctx, input.cwd)) return input.event === 'prompt' && input.mentionsInProgress ? { tracked: false, context: untrackedHint(sessionId) } : { tracked: false };
   let created = false;
   /**
    * The session owed the full briefing (its "briefing due" marker was set) and this response carries it: a start, a

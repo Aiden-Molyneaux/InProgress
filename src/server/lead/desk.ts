@@ -3,11 +3,12 @@ import { STALE_SESSION_MS } from '../../core/types';
 import { stamp } from '../../core/span';
 import { write, type Ctx } from '../db/tx';
 import { aidensAskSql } from '../repo/asks';
-import { openDeskItems, type DeskItem } from '../repo/desk';
+import { getDeskItem, openDeskItems, type DeskItem } from '../repo/desk';
 import { DESK_ASK_DUE_MS, itemEverMade, plusMs, produceDeskItem } from '../repo/deskProducers';
 import { resolveProject } from '../repo/projects';
 import { findSession } from '../repo/sessions';
 import { liveProjectsWithRound, roundBound } from '../repo/switches';
+import { askStoppedInWrite, closeStoppedInWrite, stoppedRef } from './stopped';
 
 export { DESK_ASK_DUE_MS, onDeskItem } from '../repo/deskProducers';
 
@@ -19,6 +20,8 @@ export const DESK_WATCH_DUE_MS = 5 * 60 * 1000;
 /** What one minute's desk watch made, per pass. */
 export interface DeskWatchResult {
   stopped: number;
+  /** Stopped sessions asked where their work stands (relay sends the sender carries out after the commit). */
+  asked: number;
   promiseDue: number;
   swept: number;
 }
@@ -32,28 +35,37 @@ export interface DeskWatchResult {
  * rolled-back build ran). Each cause makes one item, however often the watch runs.
  */
 export function watchDesk(ctx: Ctx): DeskWatchResult {
-  const result: DeskWatchResult = { stopped: 0, promiseDue: 0, swept: 0 };
+  const result: DeskWatchResult = { stopped: 0, asked: 0, promiseDue: 0, swept: 0 };
   for (const projectId of liveProjectsWithRound(ctx.db)) {
-    result.stopped += write(ctx, 'system', () => stoppedPass(ctx, projectId));
+    const stopped = write(ctx, 'system', () => stoppedPass(ctx, projectId));
+    result.stopped += stopped.made;
+    result.asked += stopped.asked;
     result.promiseDue += write(ctx, 'system', () => promiseDuePass(ctx, projectId));
     result.swept += write(ctx, 'system', () => sweepPass(ctx, projectId));
   }
   return result;
 }
 
-function stoppedPass(ctx: Ctx, projectId: number): number {
+/**
+ * The stopped pass: closes the items whose session moved on, makes the new ones, and asks each open one that can be asked
+ * and was not (stopped.ts's askStoppedInWrite). A session asked on a step is never given another item on that step.
+ */
+function stoppedPass(ctx: Ctx, projectId: number): { made: number; asked: number } {
   const bound = roundBound(ctx.db, projectId);
-  if (bound === null) return 0;
+  if (bound === null) return { made: 0, asked: 0 };
   const now = ctx.now();
-  // A stop the session has moved on from (a prompt, a hook since) is no longer a stop: its open item closes.
-  ctx.db
+  // A stop the session has moved on from (a prompt, a hook since) is no longer a stop: its open item closes, and an ask not
+  // yet sent is cleared. The SQL reads stoppedRef's `<session id>@<last_seen_at>` with instr and substr.
+  const movedOn = ctx.db
     .prepare(
-      `UPDATE desk_items SET state = 'done', done_at = ?, outcome = 'session moved on'
-       WHERE project_id = ? AND kind = 'stopped' AND state = 'open' AND instr(ref, '@') > 0
-         AND EXISTS (SELECT 1 FROM sessions s WHERE s.id = substr(desk_items.ref, 1, instr(desk_items.ref, '@') - 1)
-                     AND s.last_seen_at > substr(desk_items.ref, instr(desk_items.ref, '@') + 1))`,
+      `SELECT d.id FROM desk_items d
+       WHERE d.project_id = ? AND d.kind = 'stopped' AND d.state = 'open' AND instr(d.ref, '@') > 0
+         AND EXISTS (SELECT 1 FROM sessions s WHERE s.id = substr(d.ref, 1, instr(d.ref, '@') - 1)
+                     AND s.last_seen_at > substr(d.ref, instr(d.ref, '@') + 1))`,
     )
-    .run(now, projectId);
+    .pluck()
+    .all(projectId) as number[];
+  for (const id of movedOn) closeStoppedInWrite(ctx, id, 'session moved on');
   const nowMs = Date.parse(now);
   const latest = new Date(nowMs - DESK_STOPPED_MS).toISOString();
   const earliest = new Date(nowMs - STALE_SESSION_MS).toISOString();
@@ -63,19 +75,27 @@ function stoppedPass(ctx: Ctx, projectId: number): number {
        WHERE s.project_id = ? AND s.role = 'worker' AND s.state = 'idle' AND s.ended_at IS NULL AND n.status = 'active'
          AND s.last_seen_at <= ? AND s.last_seen_at >= ? AND s.last_seen_at >= ?
          AND NOT EXISTS (SELECT 1 FROM asks a WHERE a.node_id = n.id AND a.cleared_at IS NULL AND ${aidensAskSql('a.')})
+         AND NOT EXISTS (SELECT 1 FROM lead_events e WHERE e.project_id = s.project_id AND e.kind = 'asked' AND e.session_id = s.id AND e.node_id = s.focus_node_id)
        ORDER BY s.last_seen_at, s.id`,
     )
     .all(projectId, latest, earliest, bound) as { id: string; focus_node_id: number; last_seen_at: string }[];
   let made = 0;
   for (const c of candidates) {
-    const ref = `${c.id}@${c.last_seen_at}`;
+    const ref = stoppedRef(c.id, c.last_seen_at);
     if (itemEverMade(ctx.db, 'stopped', ref)) continue;
     const session = findSession(ctx, c.id);
     // Live background work (a subagent that is not a reader, a command that counts as work) is not a stop.
     if (session === undefined || sessionActivity(session, nowMs) !== 'idle') continue;
     if (produceDeskItem(ctx.db, { projectId, kind: 'stopped', ref, nodeId: c.focus_node_id, dueAt: plusMs(now, DESK_WATCH_DUE_MS) }, now).created) made++;
   }
-  return made;
+  // The ask is plain code here, not in the runner's fill: a back-off or full lanes never delay it.
+  let asked = 0;
+  const open = ctx.db.prepare("SELECT id FROM desk_items WHERE project_id = ? AND kind = 'stopped' AND state = 'open' ORDER BY id").pluck().all(projectId) as number[];
+  for (const id of open) {
+    const item = getDeskItem(ctx.db, id);
+    if (item !== undefined && askStoppedInWrite(ctx, item)) asked++;
+  }
+  return { made, asked };
 }
 
 function promiseDuePass(ctx: Ctx, projectId: number): number {

@@ -42,6 +42,54 @@ export function startProviderModel(env: Record<string, string | undefined> = pro
   return { provider: named(env.INPROGRESS_LEAD_PROVIDER, LEAD_START_PROVIDER), model: named(env.INPROGRESS_LEAD_MODEL, LEAD_START_MODEL) };
 }
 
+/** A restart's handoff: the lead's text for the fresh session, and the stopped session's branch and worktree. */
+export interface RestartHandoff {
+  text: string;
+  branch: string | null;
+  worktree: string | null;
+}
+
+/**
+ * A start send's body, for `lead start` and for a restart alike: the first message startHandoff builds (the claim line, who
+ * started it, not Aiden, not a go-ahead), with a restart's handoff, branch and worktree after it; the title startTitle
+ * builds; the provider and model; a restart's worktree and branch; the step; and Aiden's words when the start was his.
+ */
+export function buildStartBody(i: {
+  lead: string;
+  projectName: string;
+  node: TreeNode;
+  goal: string;
+  phase: string;
+  aidenWords?: string;
+  restart?: RestartHandoff;
+}): StartBody {
+  const first = startHandoff({
+    lead: i.lead,
+    projectName: i.projectName,
+    stepId: i.node.id,
+    stepTitle: i.node.title,
+    what: i.node.what,
+    why: i.node.why,
+    goal: i.goal,
+    phase: i.phase,
+    onAidensWord: i.aidenWords !== undefined,
+  });
+  const r = i.restart;
+  const message =
+    r === undefined
+      ? first
+      : [first, '', 'This is a restart: a session before you stopped on this step. Its handoff:', '', r.text, '', `Branch: ${r.branch ?? '(not on record)'}`, `Worktree: ${r.worktree ?? '(not on record)'}`].join('\n');
+  return {
+    message,
+    title: startTitle(i.node.id, i.node.title),
+    ...startProviderModel(),
+    ...(r?.worktree == null ? {} : { worktree: r.worktree }),
+    ...(r?.branch == null ? {} : { branch: r.branch }),
+    nodeId: i.node.id,
+    ...(i.aidenWords === undefined ? {} : { aidenWords: i.aidenWords }),
+  };
+}
+
 /**
  * The project's starts on the lead's own judgment (no words of Aiden's, not cleared) in the 24 hours before `nowMs`: what
  * LEAD_STARTS_PER_DAY limits. The start lines written before the sends (#743 task 8) count too, so a deploy resets nothing.
@@ -195,17 +243,7 @@ export async function leadStart(
   const ref_ = stepRef(node.id, node.title);
   const { folder, goal, phase } = startGuard(ctx, project, node, input.aidenWords === undefined ? {} : { aidenWords: input.aidenWords });
 
-  const message = startHandoff({
-    lead: name,
-    projectName: project.name,
-    stepId: node.id,
-    stepTitle: node.title,
-    what: node.what,
-    why: node.why,
-    goal,
-    phase,
-    onAidensWord: input.aidenWords !== undefined,
-  });
+  const body = buildStartBody({ lead: name, projectName: project.name, node, goal, phase, ...(input.aidenWords === undefined ? {} : { aidenWords: input.aidenWords }) });
   let kind: LeadEventKind;
   let threadId = '';
   let reason = '';
@@ -214,13 +252,6 @@ export async function leadStart(
   try {
     // Written as intended before the start, and carried out by the sender: a start that may have reached T3 Code is only
     // ever looked up by the marker in its title, never started again.
-    const body: StartBody = {
-      message,
-      title: startTitle(node.id, node.title),
-      ...startProviderModel(),
-      nodeId: node.id,
-      ...(input.aidenWords === undefined ? {} : { aidenWords: input.aidenWords }),
-    };
     const send = write(ctx, actor, () => intendSend(ctx.db, { projectId: project.id, kind: 'start', target: folder, body: JSON.stringify(body) }, ctx.now()));
     const outcome = await sender.perform(send.id, { clearIfNotSent: true });
     if (outcome.state === 'done') {

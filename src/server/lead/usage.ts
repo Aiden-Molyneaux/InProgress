@@ -5,6 +5,7 @@ import type { DeskItem } from '../repo/desk';
 import { liveProjectsWithRound } from '../repo/switches';
 import { addReading, latestReading, type UsageReading } from '../repo/usageReadings';
 import { readingOf, TurnRunError, type TurnWay } from './runner';
+import { dayTime, hhmm } from './when';
 
 /*
  * The week's usage (lead stage 1, #743, task 13): the readings every turn writes (runner.ts), a probe on the smallest model
@@ -27,13 +28,18 @@ export interface Gauges {
   at: string;
   week: number | null;
   weekResets: string | null;
+  /** The time of the reading the week value came from. */
+  weekAt: string | null;
   window: number | null;
   windowResets: string | null;
+  /** The time of the reading the window value came from. */
+  windowAt: string | null;
   /** The further gauges of the newest reading that has any, by name. */
   other: Record<string, number | null>;
 }
 
 interface RecentRow {
+  at: string;
   window_used: number | null;
   window_resets: string | null;
   week_used: number | null;
@@ -59,8 +65,10 @@ export function gauges(db: Ctx['db']): Gauges | undefined {
     at: newest.at,
     week: week?.week_used ?? null,
     weekResets: week?.week_resets ?? null,
+    weekAt: week?.at ?? null,
     window: window?.window_used ?? null,
     windowResets: window?.window_resets ?? null,
+    windowAt: window?.at ?? null,
     other: parsed,
   };
 }
@@ -73,9 +81,6 @@ export function weekLine(weekResets: string | null, now: string): number | null 
 }
 
 const pct = (f: number): number => Math.round(f * 100);
-const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const hhmm = (iso: string): string => stamp(iso).slice(11);
-const dayTime = (iso: string): string => `${WEEKDAYS[new Date(iso).getDay()]} ${hhmm(iso)}`;
 
 /** The morning list's last line: `<week> percent used, the line says <line>. Window <window> percent.`; null with no reading. */
 export function weekSentence(db: Ctx['db'], now: string): string | null {
@@ -215,18 +220,24 @@ export function importUsage(ctx: Ctx, file: string): { added: number; skipped: n
 export const STAGE_0_RATIO = 1.55;
 
 /**
- * What reached Aiden since `since` (ISO) beside the steps closed: his asks (the ones brought to him, plus the ones raised to
- * him and answered by him, not by the lead; each counted once), the steps closed, and their ratio. Read from landing.
+ * What reached Aiden since `since` (ISO, exclusive) beside the steps closed, as stage 0's 1.55 was measured
+ * (spikes/lead-stage0/p5-baseline.cjs on lead-plans): `reached` is every ask of kind review, question or permission raised
+ * after `since`, counted by its raised time, and `closed` the steps of kind task with status done and completed_at after
+ * `since`; the ratio is reached per close. Now that the lead answers some asks, an ask counts only when it reached Aiden:
+ * not the lead's own promises, and not one the lead decided or answered with the landing rule, unless it was brought to him
+ * or he undid the decision (so the question came back to him).
  */
 export function leadCounts(ctx: Ctx, projectId: number, since: string): { reached: number; closed: number; ratio: number | null; text: string } {
   const db = ctx.db;
-  const brought = db.prepare("SELECT DISTINCT ask_id FROM lead_events WHERE project_id = ? AND kind = 'bring' AND at >= ? AND ask_id IS NOT NULL").pluck().all(projectId, since) as number[];
-  const answered = db
-    .prepare("SELECT id FROM asks WHERE project_id = ? AND raised_at >= ? AND owner <> 'lead' AND cleared_at IS NOT NULL AND (answered_via IS NULL OR answered_via = 'lead')")
+  const reached = db
+    .prepare(
+      `SELECT COUNT(*) FROM asks a WHERE a.project_id = ? AND a.raised_at > ? AND a.owner <> 'lead' AND a.kind IN ('review', 'question', 'permission')
+         AND (a.answered_via IS NULL OR a.answered_via NOT IN ('lead_decided', 'lead_card')
+              OR EXISTS (SELECT 1 FROM lead_events e WHERE e.project_id = a.project_id AND e.ask_id = a.id AND e.kind IN ('bring', 'undo')))`,
+    )
     .pluck()
-    .all(projectId, since) as number[];
-  const reached = new Set([...brought, ...answered]).size;
-  const closed = db.prepare("SELECT COUNT(*) FROM nodes WHERE project_id = ? AND status = 'done' AND kind NOT IN ('goal', 'phase') AND completed_at >= ?").pluck().get(projectId, since) as number;
+    .get(projectId, since) as number;
+  const closed = db.prepare("SELECT COUNT(*) FROM nodes WHERE project_id = ? AND kind = 'task' AND status = 'done' AND completed_at > ?").pluck().get(projectId, since) as number;
   const ratio = closed === 0 ? null : Math.round((reached / closed) * 100) / 100;
   const text = `Since ${stamp(since)}: ${reached} ask${reached === 1 ? '' : 's'} reached Aiden, ${closed} step${closed === 1 ? '' : 's'} closed${ratio === null ? '' : `, ${ratio} per step`}. Stage 0 was ${STAGE_0_RATIO}.`;
   return { reached, closed, ratio, text };

@@ -102,7 +102,7 @@ describe('renderLeadBrief', () => {
       'Started in the last 7 days (2):',
       `  ${stamp(ago(HOUR))} · #15 Add the privacy page · thread mcp:t1 · on Aiden's word · claimed`,
       `  ${stamp(ago(5 * MIN))} · #16 Old spike · thread mcp:t2 · on your own judgment · not claimed yet`,
-      `Switches: starts on since ${stamp(ago(DAY))} ("start them") · landing off`,
+      `Switches: starts on since ${stamp(ago(DAY))} ("start them") · landing off · round off`,
       'Links: T3 Code ok, last relay 1m ago · your last look 2d ago',
     ]);
   });
@@ -132,9 +132,9 @@ describe('renderLeadBrief', () => {
     const sw = (starts: LeadBrief['switches']['starts'], landing: LeadBrief['switches']['landing']) =>
       renderLeadBrief({ ...empty, switches: { starts, landing, round: { on: false, at: null, words: null } } }).split('\n').find((l) => l.startsWith('Switches:'));
     const off = { on: false, at: null, words: null };
-    expect(sw(off, { on: true, at: ago(HOUR), words: 'land it' })).toBe(`Switches: starts off · landing on since ${stamp(ago(HOUR))} ("land it")`);
-    expect(sw({ on: true, at: ago(HOUR), words: null }, off)).toBe(`Switches: starts on since ${stamp(ago(HOUR))} · landing off`);
-    expect(sw({ on: true, at: ago(HOUR), words: 'a\nb' }, off)).toBe(`Switches: starts on since ${stamp(ago(HOUR))} ("a b") · landing off`);
+    expect(sw(off, { on: true, at: ago(HOUR), words: 'land it' })).toBe(`Switches: starts off · landing on since ${stamp(ago(HOUR))} ("land it") · round off`);
+    expect(sw({ on: true, at: ago(HOUR), words: null }, off)).toBe(`Switches: starts on since ${stamp(ago(HOUR))} · landing off · round off`);
+    expect(sw({ on: true, at: ago(HOUR), words: 'a\nb' }, off)).toBe(`Switches: starts on since ${stamp(ago(HOUR))} ("a b") · landing off · round off`);
   });
 
   it('renders the same text twice for the same brief, whatever the clock says', () => {
@@ -171,7 +171,7 @@ describe('renderLeadBrief', () => {
       '  none',
       'Started in the last 7 days (0):',
       '  none',
-      'Switches: starts off · landing off',
+      'Switches: starts off · landing off · round off',
       'Links: T3 Code not checked · your last look never',
     ]);
   });

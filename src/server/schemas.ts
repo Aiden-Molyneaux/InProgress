@@ -173,6 +173,8 @@ export const openUrlBody = z.object({ url: z.string().min(1).max(2048) }).strict
  * id). Not max 60: a slug made from a 120-character name is longer.
  */
 export const windowProjectBody = z.object({ slug: z.string().min(1).max(200) }).strict();
+/** The window's switch of the lead's round, starts or landing: the slug it shows, the switch, and on or off. */
+export const windowLeadSwitchBody = z.object({ slug: windowProjectBody.shape.slug, switch: z.enum(LEAD_SWITCHES), on: z.boolean() }).strict();
 /** The window's rename: the slug it shows, as windowProjectBody, and the new name under the project name rule. */
 export const windowRenameBody = z.object({ slug: windowProjectBody.shape.slug, name: projectName }).strict();
 /** The window's queue change (spec 2.5): one operation, applied to the queue as stored. */
@@ -249,7 +251,26 @@ export const leadSeenBody = z.object({ as: z.string().min(1).max(200), instructi
 const leadWho = { as: z.string().min(1).max(200), instructions: z.number().int().min(0) };
 const leadId = z.number().int().positive();
 /** `lead answer`: Aiden's words, carried as the answer to a question of his. */
-export const leadAnswerBody = z.object({ ...leadWho, askId: leadId, aidenWords: z.string().trim().min(1).max(2_000), says: z.string().trim().min(1).max(2_000).optional() }).strict();
+export const leadAnswerBody = z
+  .object({
+    ...leadWho,
+    askId: leadId,
+    aidenWords: z.string().trim().min(1).max(2_000),
+    says: z.string().trim().min(1).max(2_000).optional(),
+    /** Where he said it: to the Voice or in the lead's thread. */
+    where: z.enum(['voice', 'thread']).optional(),
+    /** When he said it; now when absent. */
+    saidAt: z.string().datetime({ offset: true }).optional(),
+    /** The documents he was shown. */
+    shown: z.array(leadId).max(50).optional(),
+    /** For a review, what his yes covers; merge, deploy and push when absent. */
+    yes: z.array(z.enum(['merge', 'deploy', 'push'])).min(1).max(3).optional(),
+  })
+  .strict();
+/** `lead seen`: the send of a line to the Voice that Aiden answered. */
+export const leadStampBody = z.object({ ...leadWho, sendId: leadId }).strict();
+/** `lead desk-add`: Aiden's "you decide" on a step, for the round. */
+export const leadDeskAddBody = z.object({ ...leadWho, stepId: leadId, aidenWords: z.string().trim().min(1).max(2_000) }).strict();
 /** `lead decide`: the question, the lead's answer and why, Aiden's words when he told the lead to decide, and the decision's kind (technical unless named). */
 export const leadDecideBody = z
   .object({

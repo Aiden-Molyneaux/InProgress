@@ -18,6 +18,11 @@ export interface Ctx {
    * (repo/taskState.ts). The server sets it in main.ts; unset, writes skip it.
    */
   reconcile?: (ctx: Ctx, projectIds: number[]) => void;
+  /**
+   * The server's home folder, set by main.ts. The lead's folders are under it (`<home>/lead/<slug>`): the hooks treat them as
+   * the lead's own and the morning list starts its thread there. Unset, there is no lead folder.
+   */
+  home?: string;
 }
 
 export function createCtx(db: DB, now: () => string = () => new Date().toISOString()): Ctx {

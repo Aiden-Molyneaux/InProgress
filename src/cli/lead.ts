@@ -11,7 +11,9 @@ export const LEAD_USAGE = [
   `  inprogress lead brief <project> ${WHO} [--mark] [--json]`,
   `  inprogress lead step <project> <step id> ${WHO}`,
   `  inprogress lead resource <project> <document id> ${WHO}`,
-  `  inprogress lead answer <project> <ask id> --aiden <words> [--says <text>] ${WHO}`,
+  `  inprogress lead answer <project> <ask id> --aiden <words> [--says <text>] [--where voice|thread] [--said-at <iso time>] [--shown r12,r13] [--yes merge,deploy,push] ${WHO}`,
+  `  inprogress lead seen <project> <send id> ${WHO}`,
+  `  inprogress lead desk-add <project> --step <step id> --words <his words> ${WHO}`,
   `  inprogress lead decide <project> <ask id> --answer <text> --reason <text> [--kind product|technical] [--aiden <words>] ${WHO}`,
   `  inprogress lead undo <project> <decision> --aiden <words> [--reason <text>] ${WHO}`,
   `  inprogress lead set <project> quiet|voice-cap <value> [--aiden <words>] ${WHO}`,
@@ -80,7 +82,9 @@ const COMMANDS: Record<string, CommandSpec> = {
   brief: { positionals: 0, flags: [], bools: ['--mark', '--json'] },
   step: { positionals: 1, flags: [] },
   resource: { positionals: 1, flags: [] },
-  answer: { positionals: 1, flags: ['--aiden', '--says'] },
+  answer: { positionals: 1, flags: ['--aiden', '--says', '--where', '--said-at', '--shown', '--yes'] },
+  seen: { positionals: 1, flags: [] },
+  'desk-add': { positionals: 0, flags: ['--step', '--words'] },
   decide: { positionals: 1, flags: ['--answer', '--reason', '--kind', '--aiden'] },
   undo: { positionals: 1, flags: ['--aiden', '--reason'] },
   set: { positionals: 2, flags: ['--aiden'] },
@@ -169,13 +173,13 @@ const valueOf = (text: string | undefined): Value | undefined => (text === undef
  * A command's body, with `-` values still to read: the fields as the route takes them, each a Value or a plain number; or
  * what is wrong with the arguments. `file` is the intent file to read, when it is not `-`.
  */
-type Draft = { fields: Record<string, Value | number>; file?: string } | { error: string };
+type Draft = { fields: Record<string, Value | number | (string | number)[]>; file?: string } | { error: string };
 
 function draft(command: string, p: Parsed): Draft {
   const [first] = p.positionals;
   const flag = (name: string) => valueOf(p.flags.get(name));
   const needed = (name: string): Value | { error: string } => flag(name) ?? { error: `Missing ${name}` };
-  const fields: Record<string, Value | number> = {};
+  const fields: Record<string, Value | number | (string | number)[]> = {};
   const put = (key: string, value: Value | undefined) => {
     if (value !== undefined) fields[key] = value;
   };
@@ -188,6 +192,24 @@ function draft(command: string, p: Parsed): Draft {
       fields.askId = id;
       fields.aidenWords = words;
       put('says', flag('--says'));
+      const where = p.flags.get('--where');
+      if (where !== undefined && where !== 'voice' && where !== 'thread') return { error: `--where is voice or thread, not ${JSON.stringify(where)}` };
+      if (where !== undefined) fields.where = { text: where };
+      const saidAt = p.flags.get('--said-at');
+      if (saidAt !== undefined && Number.isNaN(Date.parse(saidAt))) return { error: `--said-at needs an iso time, not ${JSON.stringify(saidAt)}` };
+      if (saidAt !== undefined) fields.saidAt = { text: new Date(saidAt).toISOString() };
+      const shown = p.flags.get('--shown');
+      if (shown !== undefined) {
+        const ids = shown.split(',').map((t) => resourceId(t));
+        if (ids.some((n) => n === undefined)) return { error: `--shown takes documents as r12,r13, not ${JSON.stringify(shown)}` };
+        fields.shown = ids as number[];
+      }
+      const yes = p.flags.get('--yes');
+      if (yes !== undefined) {
+        const actions = yes.split(',').map((t) => t.trim());
+        if (actions.some((a) => a !== 'merge' && a !== 'deploy' && a !== 'push')) return { error: `--yes takes merge, deploy and push, not ${JSON.stringify(yes)}` };
+        fields.yes = [...new Set(actions)];
+      }
       return { fields };
     }
     case 'decide': {
@@ -259,6 +281,19 @@ function draft(command: string, p: Parsed): Draft {
       fields.stepId = id;
       put('aidenWords', flag('--aiden'));
       return { fields };
+    }
+    case 'seen': {
+      const m = /^s?(\d+)$/i.exec(first.trim());
+      if (m === null || Number(m[1]) === 0) return { error: `${first} is not a send: give it as s42 or 42` };
+      return { fields: { sendId: Number(m[1]) } };
+    }
+    case 'desk-add': {
+      const step = p.flags.get('--step');
+      const id = step === undefined ? undefined : stepId(step);
+      if (id === undefined) return { error: step === undefined ? 'Missing --step' : `${step} is not a step: give it as #42 or 42` };
+      const words = needed('--words');
+      if ('error' in words) return words;
+      return { fields: { stepId: id, aidenWords: words } };
     }
     case 'set': {
       fields.key = { text: first };
@@ -333,7 +368,7 @@ export async function runLead(args: string[], out: (line: string) => void, o: Co
   }
   const body = reads ? undefined : draft(command, p);
   if (body !== undefined && 'error' in body) return usage(body.error);
-  if (body !== undefined && Object.values(body.fields).filter((v) => typeof v === 'object' && 'stdin' in v).length > 1) {
+  if (body !== undefined && Object.values(body.fields).filter((v) => typeof v === 'object' && !Array.isArray(v) && 'stdin' in v).length > 1) {
     return usage('Only one value can be read from stdin (-)');
   }
 
@@ -341,7 +376,7 @@ export async function runLead(args: string[], out: (line: string) => void, o: Co
   let payload: Record<string, unknown> | undefined;
   if (body !== undefined) {
     payload = { as: p.as, instructions: p.instructions };
-    for (const [key, value] of Object.entries(body.fields)) payload[key] = typeof value === 'number' ? value : 'stdin' in value ? await io.stdin() : value.text;
+    for (const [key, value] of Object.entries(body.fields)) payload[key] = typeof value === 'number' || Array.isArray(value) ? value : 'stdin' in value ? await io.stdin() : value.text;
     if (body.file !== undefined) {
       try {
         payload.intent = io.readFile(body.file);
@@ -361,7 +396,7 @@ export async function runLead(args: string[], out: (line: string) => void, o: Co
   const path = `/api/lead/${encodeURIComponent(p.project)}`;
   try {
     if (payload !== undefined) {
-      const res = await client.post<{ text: string }>(`${path}/${command}`, payload, command === 'relay' || command === 'start' ? { timeoutMs: RELAY_TIMEOUT_MS } : {});
+      const res = await client.post<{ text: string }>(`${path}/${command === 'seen' ? 'stamp' : command}`, payload, command === 'relay' || command === 'start' ? { timeoutMs: RELAY_TIMEOUT_MS } : {});
       out(res.text);
       return 0;
     }

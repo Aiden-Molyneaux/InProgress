@@ -4,7 +4,7 @@ import { askTag } from '../../core/types';
 import type { Ctx, RecordEvent } from '../db/tx';
 import { decideInWrite } from '../lead-commands';
 import { logLeadEvent } from '../lead';
-import { clearInWrite } from '../repo/asks';
+import { clearInWrite, requireAsk } from '../repo/asks';
 import type { DeskItem } from '../repo/desk';
 import { askOf, bringItem, bringNext, broughtOpen, t3ThreadOf, tellAidens } from '../repo/deskBring';
 import { addDecision } from '../repo/leadDecisions';
@@ -16,6 +16,7 @@ import { getProjectById } from '../repo/projects';
 import { permissionLine, stuckRequestOf } from './hold';
 import { parseStartBody, recordStartInWrite, sendMarker } from './sends';
 import { applyStopped, type StoppedDeps } from './stopped';
+import { applyAidenSaid } from './aidenSaid';
 
 /**
  * What the apply reads outside the database: whether the lead's `threads` read listed a thread (the sender remembers it),
@@ -51,24 +52,8 @@ export function applyVerdict(ctx: Ctx, turn: LeadTurn, item: DeskItem, record: R
   if (item.kind === 'stuck') return applyStuck(ctx, turn, item, name);
   if (item.kind === 'unknown_send') return applyUnknownSend(ctx, turn, item, record, name, deps);
   if (item.kind === 'stopped') return applyStopped(ctx, turn, item, record, name, deps);
-  if (item.kind === 'promise_due') {
-    // A promise of the lead's past its time: his answer is noted for the morning list, and the item is done.
-    const askId = /^\d+$/.test(item.ref) ? Number(item.ref) : undefined;
-    const id = insertLeadEvent(
-      ctx.db,
-      {
-        projectId: project.id,
-        lead: name,
-        instructions: LEAD_INSTRUCTIONS_VERSION,
-        kind: 'promise_due',
-        ...(item.nodeId === null ? {} : { nodeId: item.nodeId }),
-        ...(askId === undefined ? {} : { askId }),
-        text: `${verdict}: ${turn.answer ?? ''}`.trim(),
-      },
-      ctx.now(),
-    );
-    return { itemState: 'done', outcome: `${verdict} noted (e${id})` };
-  }
+  if (item.kind === 'promise_due') return applyPromiseDue(ctx, turn, item, record, name);
+  if (item.kind === 'aiden_said') return applyAidenSaid(ctx, turn, item, record, name);
   if (item.kind !== 'question' && item.kind !== 'permission') return { itemState: 'done', outcome: `${verdict} (no action in this task)` };
   const ask = askOf(ctx, item);
   if (ask === undefined || ask.clearedAt !== null) return { itemState: 'done', outcome: 'ask cleared' };
@@ -119,6 +104,26 @@ export function applyVerdict(ctx: Ctx, turn: LeadTurn, item: DeskItem, record: R
     return { itemState: 'done', outcome: 'CARD' };
   }
   return { itemState: 'done', outcome: `${verdict} (no action in this task)` };
+}
+
+/**
+ * A verdict on a `promise_due` item: a promise of the lead's past its time. DECIDE with ANSWER starting `KEPT:` clears the
+ * promise as `lead kept` does (cleared with no answer, a `kept` line with the note after the colon). Any other answer, or
+ * a promise already cleared or not the lead's, is noted as it stands for the morning list. The item is done either way.
+ */
+function applyPromiseDue(ctx: Ctx, turn: LeadTurn, item: DeskItem, record: RecordEvent, name: string): TurnEffect {
+  const verdict = turn.verdict ?? '';
+  const askId = /^\d+$/.test(item.ref) ? Number(item.ref) : undefined;
+  const base = { projectId: item.projectId, lead: name, instructions: LEAD_INSTRUCTIONS_VERSION, ...(item.nodeId === null ? {} : { nodeId: item.nodeId }) };
+  const kept = verdict === 'DECIDE' ? /^KEPT:\s*(.*)$/s.exec((turn.answer ?? '').trim()) : null;
+  const before = askId === undefined ? undefined : ctx.db.prepare('SELECT 1 FROM asks WHERE id = ?').get(askId) === undefined ? undefined : requireAsk(ctx, askId);
+  if (kept && before !== undefined && before.owner === 'lead' && before.clearedAt === null) {
+    const ask = clearInWrite(ctx, record, `lead:${name}`, before, '', false);
+    const id = logLeadEvent(ctx, { ...base, kind: 'kept', askId: ask.id, nodeId: ask.nodeId, text: (kept[1] as string).trim() });
+    return { itemState: 'done', outcome: `KEPT (e${id})` };
+  }
+  const id = insertLeadEvent(ctx.db, { ...base, kind: 'promise_due', ...(askId === undefined ? {} : { askId }), text: `${verdict}: ${turn.answer ?? ''}`.trim() }, ctx.now());
+  return { itemState: 'done', outcome: `${verdict} noted (e${id})` };
 }
 
 /**

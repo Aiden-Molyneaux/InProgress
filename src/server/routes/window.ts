@@ -8,11 +8,12 @@ import { findSession, liveDriver } from '../repo/sessions';
 import { deleteProject, listDeletedProjects, restoreProject } from '../project-lifecycle';
 import { clearAsk } from '../repo/asks';
 import { lateAnswer } from '../lead-commands';
+import { windowLeadSwitch } from '../lead/window';
 import { recordQuiet } from '../repo/events';
 import { addNodes, applyRankOp, deleteNode, finishNode, labelNode, moveNode, parkNode, unparkNode } from '../repo/nodes';
 import { applyQueueOp, changeProject, getProjectById, isQueued, resolveProject, setProjectLead } from '../repo/projects';
 import { shelvedAmong } from '../repo/shelved';
-import { idParam, sessionIdParam, windowClearBody, windowDoneBody, windowEventBody, windowLabelBody, windowLeadBody, windowMoveBody, windowNodeBody, windowParkBody, windowProjectBody, windowQueueBody, windowNodeParams, windowRankBody, windowRenameBody, windowUnparkBody, WINDOW_EVENT_KEYS } from '../schemas';
+import { idParam, sessionIdParam, windowClearBody, windowDoneBody, windowEventBody, windowLabelBody, windowLeadBody, windowLeadSwitchBody, windowMoveBody, windowNodeBody, windowParkBody, windowProjectBody, windowQueueBody, windowNodeParams, windowRankBody, windowRenameBody, windowUnparkBody, WINDOW_EVENT_KEYS } from '../schemas';
 
 /** Who the window's writes are recorded as: fixed here, never taken from a header. */
 const ACTOR = 'window';
@@ -92,6 +93,11 @@ export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: 
   app.post('/api/ui/projects/:id/lead', guarded, async (req) => {
     const { slug, name } = windowLeadBody.parse(req.body);
     return { project: setProjectLead(ctx, ACTOR, targetBySlug(req.params, slug), name) };
+  });
+  // A lead's switch on or off from the window: an allow or disallow line with the window as the actor and its words as Aiden's.
+  app.post('/api/ui/projects/:id/lead-switch', guarded, async (req) => {
+    const { slug, switch: name, on } = windowLeadSwitchBody.parse(req.body);
+    return windowLeadSwitch(ctx, targetBySlug(req.params, slug), name, on);
   });
   // One queue operation applied to the stored queue (spec 2.5), never the list the window last saw.
   app.post('/api/ui/projects/:id/queue', guarded, async (req) => {

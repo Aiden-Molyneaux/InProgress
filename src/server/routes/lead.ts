@@ -4,7 +4,7 @@ import type { Ctx } from '../db/tx';
 import { badGateway, badRequest, notFound } from '../errors';
 import { cliBesideServer, nodeCli } from '../../lib/task-command';
 import { leadFolders, listLeadEvents, markLeadSeen, readLeadBrief, readLeadIntent, readLeadRules, requireLead } from '../lead';
-import { leadAllow, leadDisallow, leadAnswer, leadDecide, leadUndo, leadDrop, leadIntent, leadKept, leadPark, leadPromise, leadSet } from '../lead-commands';
+import { leadAllow, leadDisallow, leadAnswer, leadDeskAdd, leadSeen, readYeses, requireAnswerLead, YES_ACTIONS, leadDecide, leadUndo, leadDrop, leadIntent, leadKept, leadPark, leadPromise, leadSet } from '../lead-commands';
 import { readMorning } from '../lead/morning';
 import { reserveAllowsStart } from '../lead/reserve';
 import { importUsage, leadCounts, weekText } from '../lead/usage';
@@ -18,7 +18,8 @@ import { createSender, type Sender } from '../lead/sends';
 import { T3ArgumentRefused, T3Unavailable, t3List, t3Send, t3Show } from '../t3';
 import { readLeadResource, readLeadStep } from '../lead-step';
 import { renderLeadBrief } from '../lead-text';
-import { leadAllowBody, leadDisallowBody, leadAnswerBody, leadBriefQuery, leadStuckBody, leadDecideBody, leadUndoBody, leadSetBody, leadImportUsageBody, leadCountsQuery, leadDropBody, leadIntentBody, leadKeptBody, leadLandingBody, leadParkBody, leadPromiseBody, leadReadQuery, leadRelayBody, leadStartBody, leadRulesQuery, leadSeenBody } from '../schemas';
+import { leadAllowBody, leadDisallowBody, leadAnswerBody, leadBriefQuery, leadStuckBody, leadDecideBody, leadUndoBody, leadSetBody, leadImportUsageBody, leadCountsQuery, leadDropBody, leadIntentBody, leadKeptBody, leadLandingBody, leadParkBody, leadPromiseBody, leadReadQuery, leadRelayBody, leadStartBody, leadRulesQuery, leadSeenBody, leadStampBody, leadDeskAddBody } from '../schemas';
+import { VOICE_NOT_SET_UP, voiceSetUp } from '../lead/voice';
 
 /** How many of a project's threads, newest first, the threads read lists. */
 const THREADS_LISTED = 20;
@@ -47,7 +48,7 @@ function positiveId(text: string): number {
  * lead's seven commands are writes, so they are POSTs behind the bearer token guard. `send` is how a relay reaches a T3
  * Code thread: the t3 CLI unless the app was given another.
  */
-export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken: Guard, send?: RelaySend, start?: StartThread, landing?: LandingDeps, given?: Sender): void {
+export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken: Guard, send?: RelaySend, start?: StartThread, landing?: LandingDeps, given?: Sender, home?: string): void {
   // One sender for the app's starts, relays and thread reads: the server's own when it runs one (main.ts), else the app's.
   const sender = given ?? createSender(ctx, { t3: { list: (p) => t3List(p), show: (id) => t3Show(id), start: start ?? defaultStart(), send: send ?? t3Send } });
   /** A T3 Code read for the lead's tools: a refused argument is a 400, T3 Code not answering a 502 with its reason. */
@@ -141,7 +142,9 @@ export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken:
   app.get('/api/lead/:ref/morning', async (req) => ({ text: readMorning(ctx, resolveProject(ctx, (req.params as { ref: string }).ref).id) }));
   app.get('/api/lead/:ref/week', async (req) => {
     resolveProject(ctx, (req.params as { ref: string }).ref);
-    return { text: weekText(ctx.db, ctx.now(), reserveAllowsStart(ctx, ctx.now())) };
+    const text = weekText(ctx.db, ctx.now(), reserveAllowsStart(ctx, ctx.now()));
+    // The Voice's set-up is the webhook file in the home; an app with no home (a test) says nothing of it.
+    return { text: home === undefined || voiceSetUp(home) ? text : `${text}\n${VOICE_NOT_SET_UP}` };
   });
   app.get('/api/lead/:ref/counts', async (req) => {
     const project = resolveProject(ctx, (req.params as { ref: string }).ref);
@@ -161,8 +164,25 @@ export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken:
   // what its command returns, `text` being the sentence the CLI prints.
   const ref = (req: { params: unknown }): string => (req.params as { ref: string }).ref;
   app.post('/api/lead/:ref/answer', { onRequest: requireToken }, async (req) => {
-    const { as, instructions, ...input } = leadAnswerBody.parse(req.body);
-    return leadAnswer(ctx, ref(req), as, instructions, input);
+    const { as, instructions, yes, ...input } = leadAnswerBody.parse(req.body);
+    // A review's yes is keyed on the change's patch id, read now in its session's folder, before the write. The lead is
+    // checked first, so a refused lead starts no git.
+    requireAnswerLead(ctx, ref(req), as, instructions);
+    const yeses = await readYeses(ctx, ref(req), input.askId, yes ?? YES_ACTIONS, landing);
+    const res = leadAnswer(ctx, ref(req), as, instructions, { ...input, ...(yeses === undefined ? {} : { yeses }) });
+    // The carried line is a send: carried out after the write commits (wake never throws).
+    if (res.carried) setImmediate(() => void sender.wake());
+    return res;
+  });
+  // The Voice passed Aiden's word on a line: its send is stamped seen. The round never waits on it.
+  app.post('/api/lead/:ref/stamp', { onRequest: requireToken }, async (req) => {
+    const { as, instructions, ...input } = leadStampBody.parse(req.body);
+    return leadSeen(ctx, ref(req), as, instructions, input);
+  });
+  // "You decide": Aiden's words on a step, put on the desk for the round.
+  app.post('/api/lead/:ref/desk-add', { onRequest: requireToken }, async (req) => {
+    const { as, instructions, ...input } = leadDeskAddBody.parse(req.body);
+    return leadDeskAdd(ctx, ref(req), as, instructions, input);
   });
   app.post('/api/lead/:ref/decide', { onRequest: requireToken }, async (req) => {
     const { as, instructions, ...input } = leadDecideBody.parse(req.body);

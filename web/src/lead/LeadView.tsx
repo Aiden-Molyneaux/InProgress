@@ -1,4 +1,7 @@
+import { useState } from 'react';
 import type { Project } from '../../../src/core/types';
+import { leadSwitch } from '../api';
+import { Button } from '../parts/Button';
 import { PageHead } from '../page/PageHead';
 import { EmptyState } from '../parts/EmptyState';
 import { ErrorLine } from '../parts/ErrorLine';
@@ -48,6 +51,18 @@ function Row({ row, onOpenNode }: { row: DeskRow; onOpenNode: (id: number) => vo
  */
 export function LeadView({ project, code, desk, now, onOpenNode }: Props) {
   const { brief, events, error } = desk;
+  /** The switch whose request is out, and a refusal to show. The brief reloads on the project's stream event, so the line changes by itself. */
+  const [busy, setBusy] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const turn = async (key: 'starts' | 'landing' | 'round', on: boolean) => {
+    if (busy !== null) return;
+    setBusy(key);
+    setProblem(null);
+    const result = await leadSwitch(project.id, project.slug, key, on);
+    setBusy(null);
+    if (result === 'reload') return window.location.reload();
+    if (result !== 'ok') setProblem(result);
+  };
   const head = brief ? deskHead(brief, now) : null;
   const groups = brief ? deskGroups(brief, now) : [];
   const decided = brief ? deskDecided(brief, now) : [];
@@ -82,9 +97,13 @@ export function LeadView({ project, code, desk, now, onOpenNode }: Props) {
           <div className="ip-lead-switches" aria-label="Switches">
             {switches.map((s) => (
               <p key={s.key} className="ip-lead-note" data-switch={s.key}>
-                {s.line}
+                {s.line}{' '}
+                <Button variant="ghost" size="sm" data-act aria-disabled={busy === s.key} onClick={() => void turn(s.key, !s.on)}>
+                  {s.on ? 'Turn off' : 'Turn on'}
+                </Button>
               </p>
             ))}
+            {problem && <ErrorLine message={problem} role="alert" />}
           </div>
           <div className="ip-lead-cols">
             <div className="ip-lead-desk">

@@ -8,11 +8,13 @@ import { deskUserMessage } from '../../src/server/lead/prompt';
 import type { ReserveAnswer } from '../../src/server/lead/reserve';
 import { createRunner, type TurnInput, type TurnWay } from '../../src/server/lead/runner';
 import { createSender, parseStartBody, type Sender } from '../../src/server/lead/sends';
-import { ASK_STOPPED_WAIT_MS, askStoppedKey, CAUSE_LIMIT, CAUSE_RESTARTS } from '../../src/server/lead/stopped';
-import { leadAllow, leadIntent } from '../../src/server/lead-commands';
+import { ASK_STOPPED_WAIT_MS, askStoppedKey, CAUSE_LIMIT, CAUSE_RESTARTS, parseStoppedRef, RESTARTS_PER_STEP, stoppedRef } from '../../src/server/lead/stopped';
+import { morningList } from '../../src/server/lead/morning';
+import { T3ArgumentRefused } from '../../src/server/t3';
+import { leadAllow, leadIntent, leadPromise } from '../../src/server/lead-commands';
 import { getDeskItem, type DeskItem } from '../../src/server/repo/desk';
 import { insertLeadEvent } from '../../src/server/repo/leadEvents';
-import { intendSend, sendByRetryKey } from '../../src/server/repo/leadSends';
+import { intendSend, markTrying, sendByRetryKey } from '../../src/server/repo/leadSends';
 import { addNodes, requireNode } from '../../src/server/repo/nodes';
 import { addBinding, createProject, setProjectLead } from '../../src/server/repo/projects';
 import { claimStep, handleHookEvent } from '../../src/server/session-flow';
@@ -150,7 +152,16 @@ describe('a stopped session', () => {
     const start = w.ctx.db.prepare("SELECT target, body, state FROM lead_sends WHERE kind = 'start'").get() as { target: string; body: string; state: string };
     expect(start.state).toBe('done');
     expect(start.target).toBe(BOUND);
-    expect(parseStartBody(start.body)).toMatchObject({ message: resource.content, title: `#${w.step.id} Build tabs (restart)`, worktree: WORKTREE, branch: BRANCH, nodeId: w.step.id });
+    // T3: lead start's own first message (the claim line, who started it, not Aiden), then the handoff, branch and worktree.
+    const body = parseStartBody(start.body)!;
+    expect(body).toMatchObject({ title: `#${w.step.id} Build tabs`, worktree: WORKTREE, branch: BRANCH, nodeId: w.step.id });
+    expect(body.message.startsWith(`Claim #${w.step.id} Build tabs.`)).toBe(true);
+    expect(body.message).toContain('This is not Aiden, and it is not a go-ahead');
+    expect(body.message).toContain('Next: wire the panels.');
+    expect(body.message).toContain(`Branch: ${BRANCH}`);
+    expect(body.message).toContain(`Worktree: ${WORKTREE}`);
+    // T5: a restart that reached T3 Code is recorded as leadStart records a start.
+    expect(w.events('start')).toEqual([{ nodeId: w.step.id, sessionId: null, text: 'th_1' }]);
     expect(parseStartBody(start.body)!.aidenWords).toBeUndefined();
     expect(w.events('restart')).toHaveLength(1);
     const eventId = Number(outcome.slice('RESTART d'.length));
@@ -189,7 +200,8 @@ describe('a stopped session', () => {
   it('the reserve refusing is a PARK: the start limit or the reserve', async () => {
     const w = world({ reserve: { ok: false, why: 'past 95 percent of the week' } });
     await w.unanswered(verdictText('RESTART: Goal: tabs.'));
-    expect(requireNode(w.ctx, w.step.id)).toMatchObject({ status: 'parked', parkedReason: CAUSE_LIMIT });
+    // T8: the reserve's why is kept in the cause.
+    expect(requireNode(w.ctx, w.step.id)).toMatchObject({ status: 'parked', parkedReason: `${CAUSE_LIMIT}: past 95 percent of the week` });
     expect(w.sends('start')).toHaveLength(0);
   });
 
@@ -217,9 +229,15 @@ describe('a stopped session', () => {
     expect(requireNode(w.ctx, w.step.id).status).toBe('active');
   });
 
-  it('not in T3 Code, cannot be asked: it goes straight to the turn', async () => {
+  it('not in T3 Code, cannot be asked: it waits 30 minutes from its stop as an asked one would (T7), then gets its turn', async () => {
     const w = world({ inT3: false });
     w.setAnswer(verdictText('DONE: merged as #12.'));
+    // The item is made 10 minutes after the stop: 19 more minutes and it still waits.
+    await w.round();
+    w.tick(ASK_STOPPED_WAIT_MS - DESK_STOPPED_MS - MIN);
+    await w.round();
+    expect(w.calls).toHaveLength(0);
+    w.tick(2 * MIN);
     await w.round();
     await vi.waitFor(() => expect(w.state().state).toBe('done'));
     expect(w.calls).toHaveLength(1);
@@ -272,19 +290,147 @@ describe("a restart passes every refusal lead start has (S16)", () => {
     parkedWith(w, 'sessions are in flight');
   });
 
-  it('a step that is done: a PARK line, and the step stays done', async () => {
+  it('T6: a step done meanwhile: the PARK is skipped, with no park line or decision, and the outcome says so', async () => {
     const w = world();
     w.ctx.db.prepare("UPDATE nodes SET status = 'done' WHERE id = ?").run(w.step.id);
     await w.unanswered(restart);
-    parkedWith(w, 'is done');
+    expect(w.state()).toMatchObject({ state: 'done', outcome: expect.stringMatching(new RegExp(`^PARK skipped: #${w.step.id} is already done`)) });
+    expect(w.events('park')).toHaveLength(0);
+    expect(w.ctx.db.prepare('SELECT COUNT(*) FROM lead_decisions').pluck().get()).toBe(0);
     expect(requireNode(w.ctx, w.step.id).status).toBe('done');
   });
 
   it('a start of the step still unanswered: a PARK', async () => {
     const w = world();
-    write(w.ctx, 'test', () => intendSend(w.ctx.db, { projectId: w.project.id, kind: 'start', target: 'C:/elsewhere', body: JSON.stringify({ message: 'm', title: 't', nodeId: w.step.id }) }, w.ctx.now()));
-    w.t3.down = true;
+    const earlier = write(w.ctx, 'test', () => intendSend(w.ctx.db, { projectId: w.project.id, kind: 'start', target: 'C:/elsewhere', body: JSON.stringify({ message: 'm', title: 't', nodeId: w.step.id }) }, w.ctx.now()));
+    // It may have been sent: only ever looked up, never sent again.
+    write(w.ctx, 'test', () => markTrying(w.ctx.db, earlier.id, true));
     await w.unanswered(restart);
-    parkedWith(w, 'has not answered yet', 1);
+    parkedWith(w, 'A start for #', 1);
+  });
+});
+
+describe('task 9 fixes after Murr', () => {
+  const stoppedItems = (w: ReturnType<typeof world>) => w.ctx.db.prepare("SELECT COUNT(*) FROM desk_items WHERE kind = 'stopped'").pluck().get() as number;
+
+  it('T7: the minute watch asks, in plain code, before any runner tick', () => {
+    const w = world();
+    expect(sendByRetryKey(w.ctx.db, askStoppedKey(w.item.id))).toMatchObject({ state: 'intended', target: 'th_s1' });
+    expect(w.calls).toHaveLength(0);
+  });
+
+  it('T1: a session asked on a step is left alone there: it answers, stops again, and gets no second item or ask', async () => {
+    const w = world();
+    await w.round();
+    handleHookEvent(w.ctx, 's1', { event: 'prompt' });
+    w.tick(MIN);
+    watchDesk(w.ctx);
+    expect(w.state()).toMatchObject({ state: 'done', outcome: 'session moved on' });
+    handleHookEvent(w.ctx, 's1', { event: 'stop', background: [] });
+    for (let i = 0; i < 3; i++) {
+      w.tick(DESK_STOPPED_MS);
+      watchDesk(w.ctx);
+      await w.round();
+    }
+    expect(stoppedItems(w)).toBe(1);
+    expect(w.sends('relay')).toHaveLength(1);
+    expect(w.events('asked')).toHaveLength(1);
+  });
+
+  it('T4: held while the ask is not delivered, then 30 minutes from its delivery; the turn says it was delivered', async () => {
+    const w = world();
+    w.t3.down = true;
+    await w.round();
+    w.tick(ASK_STOPPED_WAIT_MS + 10 * MIN);
+    await w.round();
+    expect(w.calls).toHaveLength(0);
+    w.t3.down = false;
+    await w.round();
+    const ask = sendByRetryKey(w.ctx.db, askStoppedKey(w.item.id))!;
+    expect(ask).toMatchObject({ state: 'done', doneAt: w.ctx.now() });
+    w.tick(ASK_STOPPED_WAIT_MS - MIN);
+    await w.round();
+    expect(w.calls).toHaveLength(0);
+    w.setAnswer(verdictText('DONE: merged as #12.'));
+    w.tick(2 * MIN);
+    await w.round();
+    await vi.waitFor(() => expect(w.state().state).toBe('done'));
+    expect(w.calls[0]!.userMessage).toContain('the ask was delivered at');
+  });
+
+  it('T4: an item that closes clears an ask still intended', () => {
+    const w = world();
+    expect(sendByRetryKey(w.ctx.db, askStoppedKey(w.item.id))!.state).toBe('intended');
+    handleHookEvent(w.ctx, 's1', { event: 'prompt' });
+    w.tick(MIN);
+    watchDesk(w.ctx);
+    expect(w.state().state).toBe('done');
+    expect(sendByRetryKey(w.ctx.db, askStoppedKey(w.item.id))!.state).toBe('cleared');
+  });
+
+  it('T5: a restart T3 Code refuses is cleared with a send_refused line, named in the morning list', async () => {
+    const w = world();
+    w.t3.start = async () => {
+      throw new T3ArgumentRefused('worktree holds a character that cannot go on the t3 command line');
+    };
+    await w.unanswered(verdictText('RESTART: Goal: tabs. Next: the panels.'));
+    await w.sender.wake();
+    const start = w.ctx.db.prepare("SELECT id, state FROM lead_sends WHERE kind = 'start'").get() as { id: number; state: string };
+    expect(start.state).toBe('cleared');
+    const refused = w.events('send_refused');
+    expect(refused).toHaveLength(1);
+    expect(refused[0]!.text).toContain(`s${start.id} for item #${w.item.id}: worktree holds a character`);
+    expect(w.events('start')).toHaveLength(0);
+    const list = morningList(w.ctx, w.project.id, '2026-11-24T00:00:00.000Z', w.ctx.now());
+    const wrong = list.parts.find((p) => p.name === 'Went wrong')!;
+    expect(wrong.lines.some((l) => l.includes('a send was refused'))).toBe(true);
+  });
+
+  it('T8: the turn does not print a limit already past', async () => {
+    const w = world();
+    write(w.ctx, 'test', () => {
+      for (let i = 0; i < RESTARTS_PER_STEP; i++) insertLeadEvent(w.ctx.db, { projectId: w.project.id, lead: 'Progresser', instructions: V, kind: 'restart', nodeId: w.step.id, text: 'earlier' }, w.ctx.now());
+    });
+    const message = deskUserMessage(w.ctx, w.item);
+    expect(message).toContain(`This step has had its ${RESTARTS_PER_STEP} restarts: a RESTART now is a PARK.`);
+    expect(message).not.toContain('is restarted at most');
+    expect(stoppedRef('s9', '2026-11-25T02:00:00.000Z')).toBe('s9@2026-11-25T02:00:00.000Z');
+    expect(parseStoppedRef('s9@2026-11-25T02:00:00.000Z')).toEqual({ sessionId: 's9', stoppedAt: '2026-11-25T02:00:00.000Z' });
+    expect(parseStoppedRef('s9')).toEqual({ sessionId: 's9', stoppedAt: undefined });
+  });
+
+  it('T7: a promise_due DECIDE with KEPT: clears the promise as lead kept does; another answer is noted', () => {
+    const w = world();
+    const { ask } = leadPromise(w.ctx, w.project.slug, 'Progresser', V, { text: 'Review the tabs', dueAt: new Date(Date.parse(w.ctx.now()) + MIN).toISOString(), stepId: w.step.id });
+    const item = { ...w.item, kind: 'promise_due', ref: String(ask.id) } as DeskItem;
+    const effect = write(w.ctx, 'lead:Progresser', (record) =>
+      applyVerdict(w.ctx, { id: 0, verdict: 'DECIDE', kind: 'TECHNICAL', answer: 'KEPT: reviewed, two nits', why: 'done' } as never, item, record, { listed: () => false }),
+    );
+    expect(effect).toMatchObject({ itemState: 'done', outcome: expect.stringMatching(/^KEPT \(e\d+\)$/) });
+    expect(w.ctx.db.prepare('SELECT cleared_at FROM asks WHERE id = ?').pluck().get(ask.id)).not.toBeNull();
+    expect(w.ctx.db.prepare("SELECT text FROM lead_events WHERE kind = 'kept' AND ask_id = ?").pluck().all(ask.id)).toEqual(['reviewed, two nits']);
+    expect(w.events('promise_due')).toHaveLength(0);
+  });
+});
+
+describe('a restart and the usage reading (task 13, U10)', () => {
+  it('with no fresh reading a restart waits and says why: no park, no start, the item held with the reason; a low reserve still parks', async () => {
+    const w = world({ reserve: { ok: false, why: 'the newest usage reading is 75 min old', wait: true } });
+    w.setAnswer(verdictText('RESTART: Goal: tabs.'));
+    await w.round();
+    w.tick(ASK_STOPPED_WAIT_MS + MIN);
+    await w.round();
+    await vi.waitFor(() => expect(w.calls).toHaveLength(1));
+    await vi.waitFor(() => expect(w.state().state).toBe('open'));
+    expect(requireNode(w.ctx, w.step.id).status).not.toBe('parked');
+    expect(w.sends('start')).toHaveLength(0);
+    // The next tick holds it back (the real reserve: this server has read nothing), with the why on the item, and spends no second turn while there is still no reading.
+    await w.round();
+    expect(w.calls).toHaveLength(1);
+    expect(w.state()).toMatchObject({ state: 'open', outcome: 'RESTART waits for a fresh usage reading: there is no usage reading yet' });
+    // A reserve that is really low parks, with its why.
+    const low = world({ reserve: { ok: false, why: 'the week is 96 percent used' } });
+    await low.unanswered(verdictText('RESTART: Goal: tabs.'));
+    expect(requireNode(low.ctx, low.step.id)).toMatchObject({ status: 'parked', parkedReason: `${CAUSE_LIMIT}: the week is 96 percent used` });
   });
 });

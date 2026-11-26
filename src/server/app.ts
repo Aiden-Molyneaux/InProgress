@@ -126,10 +126,10 @@ export function buildApp(opts: AppOptions): FastifyInstance {
   };
 
   registerReadRoutes(app, opts.ctx, opts.version, opts.build ?? null);
-  registerWriteRoutes(app, opts.ctx, requireToken);
+  registerWriteRoutes(app, opts.ctx, requireToken, opts.home);
   registerSessionRoutes(app, opts.ctx, requireToken);
   registerAskRoutes(app, opts.ctx, requireToken);
-  registerLeadRoutes(app, opts.ctx, requireToken, opts.t3Send, opts.t3Start, opts.landing, opts.sender);
+  registerLeadRoutes(app, opts.ctx, requireToken, opts.t3Send, opts.t3Start, opts.landing, opts.sender, opts.home);
   registerSse(app, opts.ctx);
   registerWindowRoutes(app, opts.ctx, requireUi, opts.openDesktop);
   registerUi(app, opts, requireToken, requireUi);

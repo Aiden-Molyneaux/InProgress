@@ -11,11 +11,13 @@ import { openDb } from './db/connection';
 import { createCtx } from './db/tx';
 import { watchDesk } from './lead/desk';
 import { applyVerdict } from './lead/apply';
-import { stoppedBeforeLease } from './lead/stopped';
+import { stoppedHoldBack } from './lead/stopped';
 import { watchHeldLines } from './lead/hold';
-import { createRunner, headlessWay, LEAD_MODEL, leadToolsEntry, type Runner } from './lead/runner';
+import { createRunner, headlessWay, threadWay, LEAD_MODEL, leadToolsEntry, type Runner } from './lead/runner';
 import { createSender, type Sender } from './lead/sends';
-import { noteWake, watchMorning } from './lead/morning';
+import { createVoiceWebhook } from './lead/voice';
+import { dayThreadOf, noteWake, watchMorning } from './lead/morning';
+import { resolveProject } from './repo/projects';
 import { probeUsage } from './lead/usage';
 import { defaultStart } from './lead-start';
 import { t3List, t3Send, t3Show } from './t3';
@@ -44,6 +46,7 @@ async function main(): Promise<void> {
   const token = ensureToken(home);
   const db = openDb(join(home, 'inprogress.db'));
   const ctx = createCtx(db);
+  ctx.home = home;
   // The Board reconcile runs inside every write; set here, not in createCtx, so tests opt in.
   ctx.reconcile = reconcileProjects;
   // The runner serializes the timer's tick, the startup run and the window's Back up now. It logs through the app's logger,
@@ -60,7 +63,12 @@ async function main(): Promise<void> {
   const sender: Sender | undefined =
     process.env.INPROGRESS_LEAD_RUNNER === 'off'
       ? undefined
-      : createSender(ctx, { t3: { list: (p) => t3List(p), show: (id) => t3Show(id), start: defaultStart(), send: (id, text) => t3Send(id, text) } }, { log: senderLog });
+      : createSender(
+          ctx,
+          // The Voice's lines go by its webhook, read from <home>/lead/voice.json (task 11); without the file they wait.
+          { t3: { list: (p) => t3List(p), show: (id) => t3Show(id), start: defaultStart(), send: (id, text) => t3Send(id, text) }, webhook: createVoiceWebhook(ctx, { home }) },
+          { log: senderLog },
+        );
   const app = buildApp({
     ...(sender === undefined ? {} : { sender }),
     ctx,
@@ -134,15 +142,17 @@ async function main(): Promise<void> {
       app.log.error(`Could not watch command ends: ${(err as Error).message}`);
     }
     try {
-      const { stopped, promiseDue, swept } = watchDesk(ctx);
-      if (stopped + promiseDue + swept > 0) app.log.info(`Desk: ${stopped} stopped, ${promiseDue} promise due, ${swept} swept`);
+      const { stopped, asked, promiseDue, swept } = watchDesk(ctx);
+      if (stopped + asked + promiseDue + swept > 0) app.log.info(`Desk: ${stopped} stopped, ${asked} asked, ${promiseDue} promise due, ${swept} swept`);
+      // The asks are sends, carried out after the watch's write commits.
+      if (asked > 0 && sender !== undefined) setImmediate(() => void sender.wake());
     } catch (err) {
       app.log.error(`Could not watch the lead's desk: ${(err as Error).message}`);
     }
     // The morning list (src/server/lead/morning.ts): a laptop that slept is noted first, so the list can say so.
     try {
       noteWake(ctx);
-      const made = watchMorning(ctx);
+      const made = watchMorning(ctx, { error: (message) => app.log.error(message) });
       if (made > 0) {
         app.log.info(`Morning: ${made} list${made === 1 ? '' : 's'} written`);
         if (sender !== undefined) setImmediate(() => void sender.wake());
@@ -170,6 +180,12 @@ async function main(): Promise<void> {
     try {
       leadRunner = createRunner(ctx, {
         way: headlessWay({ claudePath: process.env.INPROGRESS_LEAD_CLAUDE || 'claude', leadDir: (slug) => join(home, 'lead', slug), toolsEntry: leadToolsEntry() }),
+        threadWay: threadWay({
+          send: (threadId, message) => t3Send(threadId, message),
+          show: (threadId) => t3Show(threadId),
+          dayThread: (projectId) => dayThreadOf(ctx, projectId, ctx.now()),
+          projectIdOf: (slug) => resolveProject(ctx, slug).id,
+        }),
         model: LEAD_MODEL,
         home,
         port,
@@ -179,12 +195,8 @@ async function main(): Promise<void> {
           if (sender !== undefined) setImmediate(() => void sender.wake());
           return effect;
         },
-        // A stopped session is asked in plain code before any turn; the ask is a send, carried out after its write commits.
-        holdBack: (item) => {
-          const r = stoppedBeforeLease(ctx, item);
-          if (r === 'asked' && sender !== undefined) setImmediate(() => void sender.wake());
-          return r !== 'lease';
-        },
+        // A stopped session is asked by the minute watch; until its wait is over its item is held back from a lease.
+        holdBack: (item) => stoppedHoldBack(ctx, item),
         log: { info: (message) => app.log.info(message), error: (message) => app.log.error(message) },
       });
       leadRunner.start();

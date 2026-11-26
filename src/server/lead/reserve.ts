@@ -2,7 +2,7 @@ import type { Ctx } from '../db/tx';
 import { gauges } from './usage';
 
 /** Whether the usage reserve allows one of the lead's own starts now, and when not, why. */
-export type ReserveAnswer = { ok: true } | { ok: false; why: string };
+export type ReserveAnswer = { ok: true } | { ok: false; why: string; wait?: true };
 
 /** A reading older than this is no basis for a start. */
 export const READING_STALE_MS = 60 * 60 * 1000;
@@ -26,9 +26,16 @@ const percent = (f: number): number => Math.round(f * 100);
 export function reserveAllowsStart(ctx: Ctx, now: string): ReserveAnswer {
   const g = gauges(ctx.db);
   const nowMs = Date.parse(now);
-  if (g === undefined) return { ok: false, why: 'there is no usage reading yet' };
+  if (g === undefined) return { ok: false, why: 'there is no usage reading yet', wait: true };
   const age = nowMs - Date.parse(g.at);
-  if (age > READING_STALE_MS) return { ok: false, why: `the newest usage reading is ${Math.round(age / 60_000)} min old` };
+  // No reading, or one too old, is not a low reserve: the start waits for a fresh reading (`wait`), it is not parked.
+  if (age > READING_STALE_MS) return { ok: false, why: `the newest usage reading is ${Math.round(age / 60_000)} min old`, wait: true };
+  // A value is judged by the reading it came from: a week value carried from an old reading is no basis either.
+  for (const [name, from, v] of [['week', g.weekAt, g.week], ['window', g.windowAt, g.window]] as const) {
+    if (v === null || from === null) continue;
+    const old = nowMs - Date.parse(from);
+    if (old > READING_STALE_MS) return { ok: false, why: `the ${name} figure comes from a usage reading ${Math.round(old / 60_000)} min old`, wait: true };
+  }
   if (g.week !== null && g.week >= WEEK_LIMIT) return { ok: false, why: `the week is ${percent(g.week)} percent used` };
   if (g.window !== null && g.window >= WINDOW_LIMIT) return { ok: false, why: `the window is ${percent(g.window)} percent used` };
   if (g.window !== null && g.window > WINDOW_LIMIT_AT_WORK) {

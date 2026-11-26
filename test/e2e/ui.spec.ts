@@ -1,3 +1,4 @@
+import Database from 'better-sqlite3';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -1937,6 +1938,51 @@ test('The Lead view shows the switches and what was started', async ({ page, api
   await expect(switches).toContainText('Starts: on');
   await expect(switches).toContainText('turn starts on');
   await expect(switches).toContainText('Landing: off');
+});
+
+test('The lead is behind appears with a late desk item and leaves when it is handled; the round switches in the window', async ({ page, api }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const name = unique('Lead behind');
+  const made = await bare(api, name);
+  const session = `e2e-${randomUUID()}`;
+  const [step] = await write<{ id: number }[]>(api, session, 'post', '/api/nodes', { parentId: made.rootNodeId, nodes: [{ title: 'Pick a port' }] });
+  await page.goto(`/#/p/${made.slug}`);
+  const tab = railRow(page, name);
+  await expect(tab).toHaveAttribute('aria-current', 'page');
+  await tab.click({ button: 'right' });
+  await tabMenu(page, name).getByRole('menuitem', { name: 'Lead…', exact: true }).click();
+  const field = page.getByRole('textbox', { name: `Lead of ${name}`, exact: true });
+  await field.fill('Progresser');
+  await page.keyboard.press('Enter');
+  await expect(field).toBeHidden();
+  // The round is switched in the window, beside Starts and Landing.
+  await viewButton(page, 'Lead').click();
+  const switches = page.getByLabel('Switches', { exact: true });
+  await expect(switches).toContainText('Round: off');
+  await switches.locator('[data-switch="round"]').getByRole('button', { name: 'Turn on' }).click();
+  await expect(switches).toContainText('Round: on');
+  await expect(switches).toContainText('switched in the window');
+  // A question, and the desk item the round makes of it, due 12 minutes ago (written straight in: the item's limit is minutes away
+  // and the window's own clock is what is under test).
+  const ask = await write<{ id: number }>(api, session, 'post', `/api/nodes/${step.id}/asks`, { kind: 'question', text: 'Which port do the tests use?', sessionId: session });
+  const db = new Database('.e2e-home/inprogress.db');
+  try {
+    db.pragma('busy_timeout = 5000');
+    const at = new Date(Date.now() - 15 * 60_000).toISOString();
+    db.prepare("INSERT INTO desk_items (project_id, kind, ref, node_id, created_at, due_at, state) VALUES (?, 'question', ?, ?, ?, ?, 'open')").run(made.id, String(ask.id), step.id, at, new Date(Date.now() - 12 * 60_000).toISOString());
+  } finally {
+    db.close();
+  }
+  await page.reload();
+  await viewButton(page, 'Board').click();
+  const group = page.getByRole('region', { name: 'The lead is behind', exact: true });
+  await expect(group).toBeVisible();
+  await expect(group).toContainText(`#${step.id} Pick a port: Which port do the tests use?`);
+  await expect(group).toContainText('min late');
+  await group.getByRole('button', { name: 'Answer…' }).click();
+  await group.getByRole('textbox').fill('4410');
+  await page.keyboard.press('Enter');
+  await expect(group).toHaveCount(0);
 });
 
 test('the open archived project can be renamed from its tab, and ⋯ shows the new name', async ({ page, api }) => {

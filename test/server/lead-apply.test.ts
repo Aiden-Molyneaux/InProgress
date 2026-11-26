@@ -51,7 +51,8 @@ function world(opts: { roundOn?: boolean } = {}) {
   const apply = (turnId: number) =>
     write(ctx, 'lead:Progresser', (record) => applyTurn(ctx.db, turnId, ctx.now(), (turn, item) => applyVerdict(ctx, turn, item, record)), { immediate: true });
   const count = (sql: string, ...args: unknown[]) => ctx.db.prepare(`SELECT COUNT(*) FROM ${sql}`).pluck().get(...args) as number;
-  const sends = () => ctx.db.prepare('SELECT kind, target, retry_key AS retryKey, state, body, item_id AS itemId FROM lead_sends ORDER BY id').all() as Record<string, unknown>[];
+  /** Every send but the Voice's lines (task 11 gives each bring one; lead-voice.test.ts covers them). */
+  const sends = () => ctx.db.prepare("SELECT kind, target, retry_key AS retryKey, state, body, item_id AS itemId FROM lead_sends WHERE kind <> 'voice_line' ORDER BY id").all() as Record<string, unknown>[];
   return { ctx, project, step: step!, tick, roundOn, session, ask, answered, apply, count, sends };
 }
 

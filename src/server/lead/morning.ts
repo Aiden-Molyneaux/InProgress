@@ -1,12 +1,16 @@
 import { LEAD_INSTRUCTIONS_VERSION } from '../../core/lead';
 import { clipLine } from '../../core/step-ref';
 import { stamp } from '../../core/span';
+import { hhmm, WEEKDAYS, dayTime } from './when';
 import { write, type Ctx } from '../db/tx';
 import { insertLeadEvent } from '../repo/leadEvents';
 import { intendSend } from '../repo/leadSends';
 import { getProjectById } from '../repo/projects';
 import { liveProjectsWithRound, roundFirstOn } from '../repo/switches';
-import { leadThreadProject, quietHours } from './settings';
+import { heldRef } from './hold';
+import { startProviderModel } from '../lead-start';
+import { leadFolderOf } from './folder';
+import { leadThreadOn, quietHours } from './settings';
 import { weekSentence } from './usage';
 
 /*
@@ -17,17 +21,14 @@ import { weekSentence } from './usage';
 /** An intended send older than this is counted as not delivered. */
 export const NOT_DELIVERED_AFTER_MS = 10 * 60 * 1000;
 const ASK_CUT = 100;
-const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-const hhmm = (iso: string): string => stamp(iso).slice(11);
 
 /** `Thursday 26 November`, local. */
 export function dayWords(iso: string): string {
   const d = new Date(iso);
   return `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`;
 }
-/** `Wednesday 09:00`, local. */
-export const dayTime = (iso: string): string => `${WEEKDAYS[new Date(iso).getDay()]} ${hhmm(iso)}`;
+export { dayTime };
 /** A local date, `2026-11-26`: the day's key in a retry key. */
 export const dateKey = (iso: string): string => stamp(iso).slice(0, 10);
 
@@ -104,7 +105,7 @@ export function morningList(ctx: Ctx, projectId: number, since: string, now: str
     .prepare(
       `SELECT e.id AS event_id, e.kind AS event_kind, e.node_id, n.title, d.line, d.product_ruling FROM lead_decisions d
        JOIN lead_events e ON e.id = d.event_id LEFT JOIN nodes n ON n.id = e.node_id
-       WHERE d.project_id = ? AND d.said_at >= ? AND e.kind <> 'bring'
+       WHERE d.project_id = ? AND d.said_at > ? AND e.kind NOT IN ('bring', 'answer')
          AND NOT EXISTS (SELECT 1 FROM lead_events u WHERE u.project_id = e.project_id AND u.kind = 'undo' AND u.text = 'd' || e.id)
        ORDER BY d.product_ruling DESC, d.said_at, d.id`,
     )
@@ -118,17 +119,24 @@ export function morningList(ctx: Ctx, projectId: number, since: string, now: str
     parts.push({ name: 'Decided for you', count: decidedRows.length, lines });
   }
 
-  // Held for you: held desk items not done.
+  // Held for you: held desk items not done, each joined to its `held` line by the session and command its ref hashes.
   const heldRows = db
-    .prepare(
-      `SELECT d.node_id, d.created_at, (SELECT e.text FROM lead_events e WHERE e.project_id = d.project_id AND e.kind = 'held' AND e.at = d.created_at ORDER BY e.id LIMIT 1) AS what
-       FROM desk_items d WHERE d.project_id = ? AND d.kind = 'held' AND d.state <> 'done' ORDER BY d.created_at, d.id`,
-    )
-    .all(projectId) as { node_id: number | null; what: string | null }[];
-  const held = heldRows.map((r) => {
-    const command = noStop((r.what ?? 'run a held command').split(' -> ')[0]!);
-    return `${r.node_id === null ? 'A session' : `#${r.node_id}`} wants to ${command}. Say "go ahead" or "not yet".`;
-  });
+    .prepare("SELECT node_id, ref FROM desk_items WHERE project_id = ? AND kind = 'held' AND state <> 'done' ORDER BY created_at, id")
+    .all(projectId) as { node_id: number | null; ref: string }[];
+  const heldEvents = db
+    .prepare("SELECT session_id, text FROM lead_events WHERE project_id = ? AND kind = 'held'")
+    .all(projectId) as { session_id: string | null; text: string }[];
+  /** The command a held item's ref was made from: the line is `<command> -> <why>`, and either part may hold an arrow. */
+  const commandOf = (ref: string): string | undefined => {
+    for (const e of heldEvents) {
+      for (let at = e.text.indexOf(' -> '); at >= 0; at = e.text.indexOf(' -> ', at + 1)) {
+        const command = e.text.slice(0, at);
+        if (heldRef(e.session_id, command) === ref) return command;
+      }
+    }
+    return undefined;
+  };
+  const held = heldRows.map((r) => `${r.node_id === null ? 'A session' : `#${r.node_id}`} wants to ${noStop(commandOf(r.ref) ?? 'run a held command')}. Say "go ahead" or "not yet".`);
   if (held.length) parts.push({ name: 'Held for you', count: held.length, lines: held });
 
   // Went wrong.
@@ -136,7 +144,7 @@ export function morningList(ctx: Ctx, projectId: number, since: string, now: str
   const items = db
     .prepare(
       `SELECT kind, ref, node_id, state, outcome, created_at, done_at FROM desk_items
-       WHERE project_id = ? AND created_at >= ? AND (kind IN ('unknown_send') OR state = 'behind'
+       WHERE project_id = ? AND created_at > ? AND (kind IN ('unknown_send') OR state = 'behind'
          OR (kind = 'stopped' AND (outcome LIKE 'RESTART%' OR outcome LIKE 'PARK%' OR outcome LIKE 'DONE%' OR outcome = 'asked')))
        ORDER BY created_at, id`,
     )
@@ -152,13 +160,19 @@ export function morningList(ctx: Ctx, projectId: number, since: string, now: str
       wrong.push(`${step} stopped at ${stopped}; ${what}.`);
     }
   }
+  // A send T3 Code refused, or one that could not be read: cleared, and named here (sends.ts's `send_refused` line).
+  const refusedSends = db
+    .prepare("SELECT node_id, text, at FROM lead_events WHERE project_id = ? AND kind = 'send_refused' AND at > ? ORDER BY at, id")
+    .all(projectId, since) as { node_id: number | null; text: string; at: string }[];
+  for (const r of refusedSends) wrong.push(`${r.node_id === null ? 'A send' : `#${r.node_id}`}: a send was refused at ${hhmm(r.at)} and cleared (${r.text}).`);
   if (wrong.length) parts.push({ name: 'Went wrong', count: wrong.length, lines: wrong });
 
   // Not delivered.
   const undelivered = (db
     .prepare(
       `SELECT id, kind, target, state, created_at FROM lead_sends
-       WHERE project_id = ? AND created_at >= ? AND (state = 'unknown' OR (state = 'intended' AND created_at <= ?)) ORDER BY created_at, id`,
+       WHERE project_id = ? AND created_at > ? AND NOT (kind = 'voice_line' AND COALESCE(retry_key, '') LIKE 'morning:%')
+         AND (state = 'unknown' OR (state = 'intended' AND created_at <= ?)) ORDER BY created_at, id`,
     )
     .all(projectId, since, new Date(Date.parse(now) - NOT_DELIVERED_AFTER_MS).toISOString()) as { id: number; kind: string; target: string; state: string; created_at: string }[]).map(
     (s) => `${s.kind} to ${s.target} (s${s.id}), ${s.state === 'unknown' ? 'not confirmed' : `not sent since ${hhmm(s.created_at)}`}.`,
@@ -174,7 +188,7 @@ export function morningList(ctx: Ctx, projectId: number, since: string, now: str
   const turns = db
     .prepare(
       `SELECT t.duration_ms, t.started_at, t.finished_at, i.due_at FROM lead_turns t JOIN desk_items i ON i.id = t.item_id
-       WHERE t.project_id = ? AND t.state = 'applied' AND t.finished_at >= ?`,
+       WHERE t.project_id = ? AND t.state = 'applied' AND t.finished_at > ?`,
     )
     .all(projectId, since) as { duration_ms: number | null; started_at: string | null; finished_at: string; due_at: string | null }[];
   if (turns.length) {
@@ -193,12 +207,12 @@ export function morningList(ctx: Ctx, projectId: number, since: string, now: str
 
   // The lid.
   const tail: string[] = [];
-  const slept = db.prepare("SELECT text FROM lead_events WHERE project_id = ? AND kind = 'slept' AND at >= ? ORDER BY at, id").all(projectId, since) as { text: string }[];
+  const slept = db.prepare("SELECT text FROM lead_events WHERE project_id = ? AND kind = 'slept' AND at > ? ORDER BY at, id").all(projectId, since) as { text: string }[];
   for (const s of slept) {
     try {
       const gap = JSON.parse(s.text) as { from: string; to: string };
       const waited = (db
-        .prepare('SELECT COUNT(*) FROM desk_items WHERE project_id = ? AND created_at >= ? AND created_at <= ? ').pluck().get(projectId, gap.from, gap.to) as number);
+        .prepare('SELECT COUNT(*) FROM desk_items WHERE project_id = ? AND created_at <= ? AND (done_at IS NULL OR done_at > ?)').pluck().get(projectId, gap.to, gap.from) as number);
       tail.push(`The laptop slept from ${hhmm(gap.from)} to ${hhmm(gap.to)}; ${waited} item${waited === 1 ? '' : 's'} waited.`);
     } catch {
       // A slept row that is not JSON was written by hand: the lid line is left out.
@@ -214,12 +228,18 @@ export function lastMorning(ctx: Ctx, projectId: number): { at: string; text: st
   return ctx.db.prepare("SELECT at, text FROM lead_events WHERE project_id = ? AND kind = 'morning' ORDER BY at DESC, id DESC LIMIT 1").get(projectId) as { at: string; text: string } | undefined;
 }
 
-/** What `lead morning` prints: the list since the last morning row (or the round's start), or "Nothing since <time>.". */
+/**
+ * What `lead morning` prints: today's written list (the last morning row's text) when one exists, then `Since then:` with
+ * anything new since it; before today's list exists, the list built now from the last morning row (or the round's start),
+ * or "Nothing since <time>.".
+ */
 export function readMorning(ctx: Ctx, projectId: number): string {
   const now = ctx.now();
-  const since = lastMorning(ctx, projectId)?.at ?? roundFirstOn(ctx.db, projectId) ?? now;
-  const list = morningList(ctx, projectId, since, now);
-  return list.text === '' ? `Nothing since ${dayTime(since)}.` : list.text;
+  const last = lastMorning(ctx, projectId);
+  const since = last?.at ?? roundFirstOn(ctx.db, projectId) ?? now;
+  const fresh = morningList(ctx, projectId, since, now).text;
+  if (last !== undefined && last.text !== '' && dateKey(last.at) === dateKey(now)) return fresh === '' ? last.text : `${last.text}\n\nSince then:\n${fresh}`;
+  return fresh === '' ? `Nothing since ${dayTime(since)}.` : fresh;
 }
 
 /** The end of today's quiet hours as an ISO time: `now`'s local date at the `to` minute. */
@@ -231,69 +251,112 @@ export function quietEndToday(now: string, toMinutes: number): string {
 
 /**
  * The minute watch's morning part. For each project with the round on, once now is past today's quiet-hours end and no
- * 'morning' row has been written at or after that end, the list since the last morning row (or the round's first
- * switch-on) is built: one list for a missed night, not two. A list with something in it is, in one write, a 'morning'
- * row, a Voice line, and a start send for the day's lead thread when the project has one set up; an empty day writes the
- * 'morning' row with no text and sends nothing. Returns how many projects got a list.
+ * 'morning' row has been written at or after that end or on today's date (quiet hours changed after the morning ran: still
+ * one a day), the list since the last morning row (or the round's first switch-on) is built: one list for a missed night,
+ * not two. A list with something in it is, in one write, a 'morning' row, a Voice line, and a start send for the day's lead
+ * thread when the project has one set up; an empty day writes the 'morning' row with no text and sends nothing. One
+ * project's failure is logged and never stops the others. Returns how many projects got a list.
  */
-export function watchMorning(ctx: Ctx): number {
+export function watchMorning(ctx: Ctx, log?: { error: (message: string) => void }): number {
   let made = 0;
   for (const projectId of liveProjectsWithRound(ctx.db)) {
-    const now = ctx.now();
-    const end = quietEndToday(now, quietHours(ctx.db, projectId).to);
-    if (now < end) continue;
-    const last = lastMorning(ctx, projectId);
-    if (last !== undefined && last.at >= end) continue;
-    const project = getProjectById(ctx, projectId);
-    const since = last?.at ?? roundFirstOn(ctx.db, projectId);
-    if (project === undefined || project.lead === null || since === null) continue;
-    const lead = project.lead;
-    // Built and written in one write, so two ticks at once never write two lists.
-    const wrote = write(
-      ctx,
-      'system',
-      () => {
-        const again = lastMorning(ctx, projectId);
-        if (again !== undefined && again.at >= end) return false;
-        const list = morningList(ctx, projectId, since, now);
-        insertLeadEvent(ctx.db, { projectId, lead, instructions: LEAD_INSTRUCTIONS_VERSION, kind: 'morning', text: list.text }, now);
-        if (list.text === '') return false;
-        const date = dateKey(now);
-        intendSend(
-          ctx.db,
-          {
-            projectId,
-            kind: 'voice_line',
-            target: 'webhook',
-            retryKey: `morning:${projectId}:${date}`,
-            body: `${project.name} morning list: ${list.yours} yours, ${list.decided} decided, ${list.held} held. Say "the list" for all of it.`,
-          },
-          now,
-        );
-        const t3Project = leadThreadProject(ctx.db, projectId);
-        if (t3Project !== undefined) {
-          intendSend(
-            ctx.db,
-            { projectId, kind: 'start', target: t3Project, retryKey: `morning-thread:${projectId}:${date}`, body: JSON.stringify({ message: list.text, title: `${project.name} lead ${date}` }) },
-            now,
-          );
-        }
-        return true;
-      },
-      { immediate: true },
-    );
-    if (wrote) made++;
+    try {
+      if (morningFor(ctx, projectId)) made++;
+    } catch (err) {
+      log?.error(`Could not write the morning list of project ${projectId}: ${(err as Error).message}`);
+    }
   }
   return made;
+}
+
+/**
+ * The id of the project's thread for the day of `now`: the result of the day's morning start send, once it is done. Read
+ * from the send itself (its retry key names the day), so no second record of it can fall out of step.
+ */
+export function dayThreadOf(ctx: Ctx, projectId: number, now: string): string | undefined {
+  const row = ctx.db.prepare("SELECT result FROM lead_sends WHERE retry_key = ? AND kind = 'start' AND state = 'done'").pluck().get(`morning-thread:${projectId}:${dateKey(now)}`) as string | null | undefined;
+  return row === null || row === undefined || row === '' ? undefined : row;
+}
+
+/** The day's thread's title: `<Project> lead <Weekday d Month>`, local time. */
+export const threadTitle = (projectName: string, now: string): string => `${projectName} lead ${dayWords(now)}`;
+
+/** The day's thread's first message: the lead's opening, its rules by command, then this morning's list. */
+export const threadOpening = (projectName: string, slug: string, lead: string, list: string): string =>
+  `You are ${lead}, the lead for ${projectName}. Run: inprogress lead rules ${slug} --as ${lead} and follow them. Then read this morning's list:
+
+${list}`;
+
+/** Whether a morning row is written at or after `end`, or on the date of `now`. */
+const writtenToday = (ctx: Ctx, projectId: number, end: string, now: string): boolean => {
+  const last = lastMorning(ctx, projectId);
+  return last !== undefined && (last.at >= end || dateKey(last.at) === dateKey(now));
+};
+
+function morningFor(ctx: Ctx, projectId: number): boolean {
+  const now = ctx.now();
+  const end = quietEndToday(now, quietHours(ctx.db, projectId).to);
+  if (now < end || writtenToday(ctx, projectId, end, now)) return false;
+  const project = getProjectById(ctx, projectId);
+  const since = lastMorning(ctx, projectId)?.at ?? roundFirstOn(ctx.db, projectId);
+  if (project === undefined || project.lead === null || since === null) return false;
+  const lead = project.lead;
+  // Built and written in one write, so two ticks at once never write two lists.
+  return write(
+    ctx,
+    'system',
+    () => {
+      if (writtenToday(ctx, projectId, end, now)) return false;
+      const list = morningList(ctx, projectId, since, now);
+      insertLeadEvent(ctx.db, { projectId, lead, instructions: LEAD_INSTRUCTIONS_VERSION, kind: 'morning', text: list.text }, now);
+      if (list.text === '') return false;
+      const date = dateKey(now);
+      intendSend(
+        ctx.db,
+        {
+          projectId,
+          kind: 'voice_line',
+          target: 'webhook',
+          retryKey: `morning:${projectId}:${date}`,
+          body: `${project.name} morning list: ${list.yours} yours, ${list.decided} decided, ${list.held} held. Say "the list" for all of it.`,
+        },
+        now,
+      );
+      const folder = ctx.home === undefined ? undefined : leadFolderOf(ctx.home, project.slug);
+      if (folder !== undefined && leadThreadOn(ctx.db, projectId)) {
+        const { provider, model } = startProviderModel();
+        intendSend(
+          ctx.db,
+          { projectId, kind: 'start', target: folder, retryKey: `morning-thread:${projectId}:${date}`, body: JSON.stringify({ message: threadOpening(project.name, project.slug, lead, list.text), title: threadTitle(project.name, now), provider, model }) },
+          now,
+        );
+      }
+      return true;
+    },
+    { immediate: true },
+  );
 }
 
 /** The longest the minute watch may go between ticks before the gap counts as the laptop sleeping. */
 export const WAKE_GAP_MS = 3 * 60 * 1000;
 const lastTick = new WeakMap<object, string>();
 
+/** Whether the gap from `from` to `to` overlaps the quiet hours `q` (minutes of the local day) on any day it touches. */
+export function overlapsQuiet(from: string, to: string, q: { from: number; to: number }): boolean {
+  const day = new Date(from);
+  day.setHours(0, 0, 0, 0);
+  const last = new Date(to);
+  for (let d = new Date(day.getTime() - 24 * 3600 * 1000); d <= last; d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)) {
+    const start = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, q.from).getTime();
+    const end = new Date(d.getFullYear(), d.getMonth(), d.getDate() + (q.to > q.from ? 0 : 1), 0, q.to).getTime();
+    if (start < Date.parse(to) && end > Date.parse(from)) return true;
+  }
+  return false;
+}
+
 /**
  * The minute watch's sleep part: when this tick finds the last one more than WAKE_GAP_MS ago, the laptop slept; a 'slept'
- * row (text JSON `{from, to}`) is written for each project with the round on, for the morning list's lid line. Returns
+ * row (text JSON `{from, to}`) is written for each project with the round on whose quiet hours the gap overlaps (inside the night), for the morning list's lid line. Returns
  * whether a gap was seen.
  */
 export function noteWake(ctx: Ctx): boolean {
@@ -303,7 +366,7 @@ export function noteWake(ctx: Ctx): boolean {
   if (before === undefined || Date.parse(now) - Date.parse(before) <= WAKE_GAP_MS) return false;
   for (const projectId of liveProjectsWithRound(ctx.db)) {
     const lead = getProjectById(ctx, projectId)?.lead;
-    if (lead === null || lead === undefined) continue;
+    if (lead === null || lead === undefined || !overlapsQuiet(before, now, quietHours(ctx.db, projectId))) continue;
     write(ctx, 'system', () => insertLeadEvent(ctx.db, { projectId, lead, instructions: LEAD_INSTRUCTIONS_VERSION, kind: 'slept', text: JSON.stringify({ from: before, to: now }) }, now));
   }
   return true;

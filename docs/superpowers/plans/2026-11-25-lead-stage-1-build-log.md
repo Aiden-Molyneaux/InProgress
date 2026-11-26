@@ -399,3 +399,100 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   so the session gets it on its next prompt. Queued with task 9's fixes.
 - Two tests followed the usage: `lead set` sits after `undo`, and `lead undo` takes `[--reason <text>]`.
 - Typecheck clean; 2788 unit tests green.
+
+## Task 9's fix round (T1 to T9)
+
+- By the task 9 Sev (Opus), beside the tasks 11 and 15 Sev in the same worktree. T1 to T9 built, each with a test;
+  its own suites green while the other builder's were still red.
+- T2: plan said mark a reopen with a lead_events row or a turn why. Did the turn why (`REOPENED_MARK` on the latest
+  turn). Because a new event kind meant editing core/lead.ts, which the other builder held.
+- T4: plan said hold the item while its ask is not delivered. Did that for an intended ask; an ask that ended cleared
+  or unknown lets its item wait 30 minutes from when the ask was written, then take its turn. Because a refused ask
+  would otherwise hold its item forever. My call on the Sev's question (wait 30 minutes or wait for Aiden): 30
+  minutes, the same grace a session not in T3 Code gets (T7).
+- T5: plan said a start that cannot be sent is cleared with `send_refused`. Did it for a refused argument or an
+  unreadable body only (S5's rule). Because a start T3 Code did not answer still waits for the next try.
+- T6: plan said skip the park when the step is parked or done. Also skipped when it is dropped. Because parking a
+  dropped step would change its state the same way.
+- T3: a restart's title is `#<id> <title>`, with no "(restart)" suffix. Because that is what `startTitle` builds.
+- T9: a late answer for a session not in T3 Code sets the ask's answer to Aiden's words and clears its delivery stamp,
+  so the session reads it on its next prompt; a T3 session keeps its relay.
+- Murr on a737463 (Opus): S1 to S16 sound, each fixed with no new defect. Tasks 10 and 13: needs fixes, 0 blocker, 2
+  major: a second morning list on the same date (quiet hours changed after the morning ran) threw every minute and
+  stopped the other projects' lists; the lid line counted items made during the sleep, so it said 0 where scene 3
+  wants 3. Sent back with his minors and debt (U1 to U8). Calls on his owner-calls: `lead morning` prints today's list
+  when it is written, then what came since, so "the list" on the Voice maps to it; a restart with no fresh reading
+  waits and says why, and only a really low reserve parks; "reached Aiden" in the counts is stage 0's own definition
+  (p5-baseline.cjs); a sleep is noted only when it overlaps the quiet hours; stage 0's `other` gauges stay out of the
+  import.
+
+## Tasks 10 and 13: the fix round (U1 to U12)
+
+- By the task 10 Sev. U1 to U12 each with a test; typecheck clean, 2816 of 2817 unit tests green with the one red in
+  the Voice's suite, then under construction, passing on rerun.
+- "Reached Aiden" in the counts, matched to stage 0's p5-baseline.cjs: asks of kind review, question or permission
+  raised after the since time; closes are done task steps; the lead's own promises and the asks the lead decided or
+  carried by the landing rule are left out unless they were brought to Aiden or he undid the decision.
+- U10: plan said a restart with no fresh reading is held back with the reason and retried at the next tick. Did: the
+  item goes back to open and is held until a fresh reading arrives, then gets one new turn. Because a restart that
+  must wait is only known once the turn has answered, so that turn is spent.
+- U2: plan said count items open across the gap. Did that, an item with no done time included. Because that is what
+  open means.
+- U5: plan said the week figure is judged by its own reading's age. Did both the week and the window figures. Because
+  a stale window figure is the same hole.
+- U6: the undo's tag is stored on the ruling as `d<id>: <reason>`, and the prompt's standing rulings read it there.
+
+## Task 16: the exam harness
+
+- By a Sev (Sonnet), dry-run on stand-ins only: scripts/lead-exam/ (cases, the cut, one case through the runner, the
+  pipeline, the score). 170 unseen cases: 166 reviews and 4 questions (no permission was answered since 2026-11-21
+  outside the 121). The exam copy was unchanged by the dry run (size and time checked before and after).
+- Plan said each case runs through task 4's runner. Did: the build's own runner, apply and routes, bundled for the
+  exam from scripts/lead-exam/harness-entry.ts, on a copy per case cut at the ask, with T3 a stand-in that refuses
+  every start and send. Because main.js starts a server when imported and exports nothing.
+- A review makes no desk item in stage 1 (only questions and permissions do). The exam queues a review as a
+  `question` item whose ref is the review ask; the prompt shows the ask's own kind ("The review (a<id>)").
+- Plan said split by a fixed seed into two halves. Did: each kind split on its own by the seed. Because a plain split
+  put all four questions in the kept half, so the exam would have tested reviews only.
+- Other calls by the Sev, accepted: the round is switched on at the ask's time by a lead_events row with the words
+  "the exam"; a project with no lead gets Progresser on the copy; a reopened step is 'active'; the turn's text is
+  rebuilt from lead_turns (the raw four lines are not stored); the stream's events after the ask are cut too.
+
+## Tasks 11 and 15: the Voice, rules version 7, the guard, pictures
+
+- By an Opus Sev. Typecheck clean, smoke green (its first run lost a race on .build with another builder), unit
+  tests green but for three in the brief's switch line, which is task 14's change in flight.
+- Plan said a held line reads `#<step> wants to <what it does>`. Did `wants to do <what>`, and "a session" with no
+  step. Because hold.ts names the action as a noun ("a merge into main").
+- Plan said every bring line ends `I would pick: ... Say "yes" to that`. Did `Give your answer.` when there is no
+  would-have. Because "yes to that" means nothing then.
+- Plan said a 4xx from the webhook is unknown, as task 8 does. Did it through the sender's own two-look lookup, so
+  each line of the POST becomes its own unknown_send item about two minutes later.
+- Plan said the guard writes a decisions row. Did, and took Aiden's own answers out of the morning list's "Decided
+  for you". Because they would otherwise be listed as decided for him.
+- Plan said refuse an old ask of a C:\work project. Did: refuse any `lead answer` in a project whose bound folders
+  are all under C:\work. Because the lead may not act there at all.
+- Rules version 7: the own-judgment commands left his rules as planned; the "where are we" and triage paragraphs
+  and rule 2 were rewritten because they told him to decide and park on his own judgement. Rule 6 is word for word.
+- `lead seen` posts to `/api/lead/:ref/stamp`, because `/seen` is `brief --mark`'s route. `checkLanding` gained a
+  `record` option so the guard reads a patch id without writing a held line.
+- Calls on the Sev's questions, queued as V1 to V5: the deploy and push yeses are keyed on the step's change, as the
+  merge yes is; `lead answer` works in a project naming this lead or no lead; DECIDE on an aiden_said item is a
+  numbered decision relayed to the step's T3 session, or a log line without one; a carried answer stamps the ask
+  delivered, so the session does not get it twice; version 7 drops the own-judgment `lead start`.
+
+## Tasks 12 and 14: the lead's thread, the round's switch, "The lead is behind"
+
+- Plan said the day's thread is a `lead-thread-today <id> <date>` setting row, written when the start send is done. Did
+  no row: `dayThreadOf` reads the result of the day's `morning-thread:<project>:<date>` send. Because the send's done
+  path is in sends.ts, which another builder holds, and the send already holds the id and the day.
+- Plan said the morning start send's project is the lead's folder. Did: its target is `<home>/lead/<slug>`, which needs
+  `ctx.home` (new optional field, set in main.ts); with no home, or `lead-thread` not `on`, no start is sent. Provider
+  and model come from `startProviderModel()` (claudeAgent, claude-opus-5-5). Task 10's `lead-project` setting is gone.
+- `lead set` takes `lead-thread on|off` and `turn-way thread|headless`.
+- The thread way reports no cost or usage: its output fields are null. A reply with nothing under its heading rejects
+  with `resultRead` true (the item's fault); no day thread or T3 Code down is a runner fault.
+- Plan said the window switches the round "the same way" as Starts and Landing. The window had no switch control for any
+  of them. Did a Turn on / Turn off button on each line of the Lead view and `POST /api/ui/projects/:id/lead-switch`.
+- "The lead is behind" rides on the snapshot (`leadBehind`: items with a limit, or behind); the window's clock decides
+  which are late, so no server event is needed to make one appear. It sits in the Board's Needs me band under the asks.

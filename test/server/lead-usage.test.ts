@@ -11,6 +11,7 @@ import { TurnRunError, type TurnInput, type TurnWay } from '../../src/server/lea
 import { importUsage, leadCounts, PROBE_MODEL, probeUsage, weekText } from '../../src/server/lead/usage';
 import { insertLeadEvent } from '../../src/server/repo/leadEvents';
 import { addNodes } from '../../src/server/repo/nodes';
+import { raiseAskDetailed } from '../../src/server/repo/asks';
 import { addBinding, createProject, setProjectLead } from '../../src/server/repo/projects';
 import { addReading, latestReading } from '../../src/server/repo/usageReadings';
 import { handleHookEvent } from '../../src/server/session-flow';
@@ -65,7 +66,7 @@ describe('the reserve', () => {
     const w = world();
     expect(reserveAllowsStart(w.ctx, w.ctx.now())).toMatchObject({ ok: false });
     w.reading(75, 0.1, 0.1);
-    expect(reserveAllowsStart(w.ctx, w.ctx.now())).toEqual({ ok: false, why: 'the newest usage reading is 75 min old' });
+    expect(reserveAllowsStart(w.ctx, w.ctx.now())).toEqual({ ok: false, why: 'the newest usage reading is 75 min old', wait: true });
     w.reading(2, 0.95, 0.1);
     expect(reserveAllowsStart(w.ctx, w.ctx.now())).toEqual({ ok: false, why: 'the week is 95 percent used' });
     w.reading(1, 0.5, 0.85);
@@ -79,6 +80,27 @@ describe('the reserve', () => {
     expect(reserveAllowsStart(w.ctx, w.ctx.now())).toEqual({ ok: false, why: 'the window is 75 percent used and Aiden is at work' });
     w.ctx.db.prepare('UPDATE sessions SET last_prompt_at = ? WHERE id = ?').run(iso(NOW - 40 * MIN), 's1');
     expect(reserveAllowsStart(w.ctx, w.ctx.now())).toEqual({ ok: true });
+  });
+});
+
+describe('the reserve and a week value from an old reading (U5)', () => {
+  it('a reading with no week figure does not make an old week figure fresh', () => {
+    const w = world();
+    w.reading(90, 0.4, 0.1);
+    // The newest reading is fresh but holds only the window: the week figure comes from 90 minutes ago.
+    w.reading(1, null, 0.2);
+    expect(reserveAllowsStart(w.ctx, w.ctx.now())).toEqual({ ok: false, why: 'the week figure comes from a usage reading 90 min old', wait: true });
+    w.reading(0, 0.4, 0.2);
+    expect(reserveAllowsStart(w.ctx, w.ctx.now())).toEqual({ ok: true });
+  });
+
+  it('no reading, and an old one, wait for a fresh one: they are not a low reserve', () => {
+    const w = world();
+    expect(reserveAllowsStart(w.ctx, w.ctx.now())).toMatchObject({ ok: false, wait: true });
+    w.reading(75, 0.1, 0.1);
+    expect(reserveAllowsStart(w.ctx, w.ctx.now())).toMatchObject({ ok: false, wait: true });
+    w.reading(0, 0.96, 0.1);
+    expect(reserveAllowsStart(w.ctx, w.ctx.now())).not.toHaveProperty('wait');
   });
 });
 
@@ -151,14 +173,31 @@ describe('import-usage', () => {
   });
 });
 
-describe('lead counts', () => {
-  it('counts what reached Aiden beside the steps closed', () => {
+describe('lead counts, as stage 0 measured 1.55', () => {
+  it('counts review, question and permission asks raised since that reached Aiden, per task closed', () => {
     const w = world();
-    const [a, b] = addNodes(w.ctx, 'test', { parentId: w.project.rootNodeId, nodes: [{ title: 'One' }, { title: 'Two' }] });
-    insertLeadEvent(w.ctx.db, { projectId: w.project.id, lead: 'Progresser', instructions: V, kind: 'bring', askId: 1, nodeId: a!.id, text: 'x' }, iso(NOW + MIN));
-    w.ctx.db.prepare("UPDATE nodes SET status = 'done', completed_at = ? WHERE id IN (?, ?)").run(iso(NOW + 2 * MIN), a!.id, b!.id);
+    const [t1, t2, g] = addNodes(w.ctx, 'test', { parentId: w.project.rootNodeId, nodes: [{ title: 'One' }, { title: 'Two' }, { title: 'Three' }] });
+    const ask = (kind: 'review' | 'question' | 'permission', text: string, id = t1!.id) => raiseAskDetailed(w.ctx, 'scribe:x', { nodeId: id, kind, text }).ask;
+    w.move(MIN);
+    const a1 = ask('review', 'Look at this');
+    const a2 = ask('question', 'Which port?');
+    const a3 = ask('question', 'Which file?');
+    const a4 = ask('permission', 'Run npm?');
+    ask('question', 'Still open?');
+    // The lead decided a3 and carded a4: they never reached Aiden. a2 was decided and then undone, so it did.
+    w.ctx.db.prepare("UPDATE asks SET cleared_at = ?, answered_via = 'lead_decided' WHERE id IN (?, ?)").run(w.ctx.now(), a2.id, a3.id);
+    w.ctx.db.prepare("UPDATE asks SET cleared_at = ?, answered_via = 'lead_card' WHERE id = ?").run(w.ctx.now(), a4.id);
+    insertLeadEvent(w.ctx.db, { projectId: w.project.id, lead: 'Progresser', instructions: V, kind: 'undo', askId: a2.id, text: 'd1' }, w.ctx.now());
+    void a1;
+    // A promise of the lead's is not Aiden's, and an ask raised before `since` is another period's.
+    w.ctx.db.prepare("INSERT INTO asks (project_id, node_id, kind, text, raised_at, owner) SELECT project_id, node_id, 'review', 'promise', raised_at, 'lead' FROM asks WHERE id = ?").run(a1.id);
+    w.ctx.db.prepare("UPDATE nodes SET status = 'done', completed_at = ? WHERE id IN (?, ?)").run(iso(NOW + 5 * MIN), t1!.id, t2!.id);
+    w.ctx.db.prepare("UPDATE nodes SET status = 'done', completed_at = ? WHERE id = ?").run(iso(NOW + 5 * MIN), g!.id);
     const c = leadCounts(w.ctx, w.project.id, iso(NOW));
-    expect(c).toMatchObject({ reached: 1, closed: 2, ratio: 0.5 });
+    // Reached: a1, a2 (undone), the open one = 3. Closed: 3 tasks.
+    expect(c).toMatchObject({ reached: 3, closed: 3, ratio: 1 });
     expect(c.text).toContain('Stage 0 was 1.55.');
+    // The since bound is exclusive, as stage 0's was: asks raised at it are the period before.
+    expect(leadCounts(w.ctx, w.project.id, w.ctx.now())).toMatchObject({ reached: 0 });
   });
 });

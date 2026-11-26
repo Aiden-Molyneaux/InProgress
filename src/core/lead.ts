@@ -3,7 +3,7 @@ import { spanAgo } from './span';
 import type { AskKind } from './types';
 
 /** The version of the lead's written instructions. A write command from a lower version is refused. */
-export const LEAD_INSTRUCTIONS_VERSION = 6;
+export const LEAD_INSTRUCTIONS_VERSION = 7;
 /**
  * The per-project switches only Aiden turns on: whether the lead may start a thread on its own judgment, whether a session
  * may land routine work, and whether the lead's round runs (desk items are made only while it is on).
@@ -58,7 +58,7 @@ export type AskOwner = 'aiden' | 'lead';
  * title, no count and no Board row.
  */
 export const isAidens = (a: { owner: AskOwner }): boolean => a.owner !== 'lead';
-export type LeadEventKind = 'answer' | 'decide' | 'undo' | 'park' | 'drop' | 'promise' | 'kept' | 'intent' | 'relay' | 'relay_unknown' | 'relay_failed' | 'allow' | 'disallow' | 'start' | 'start_unknown' | 'start_failed' | 'yes' | 'landing_check' | 'bring' | 'card' | 'held' | 'stuck' | 'permission' | 'asked' | 'restart' | 'done_noted' | 'promise_due' | 'setting' | 'morning' | 'slept' | 'ruling' | 'send_cleared';
+export type LeadEventKind = 'answer' | 'decide' | 'undo' | 'park' | 'drop' | 'promise' | 'kept' | 'intent' | 'relay' | 'relay_unknown' | 'relay_failed' | 'allow' | 'disallow' | 'start' | 'start_unknown' | 'start_failed' | 'yes' | 'landing_check' | 'bring' | 'card' | 'held' | 'stuck' | 'permission' | 'asked' | 'restart' | 'done_noted' | 'promise_due' | 'setting' | 'morning' | 'slept' | 'ruling' | 'send_cleared' | 'send_refused' | 'aiden_said';
 
 /** One line of the lead's log, as the log's read answers it. */
 export interface LeadEventOut {

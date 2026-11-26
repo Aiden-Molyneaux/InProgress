@@ -6,6 +6,7 @@ import { insertLeadEvent } from '../repo/leadEvents';
 import { leadFolders } from '../lead';
 import { getSend, intendedSends, markTrying, moveSend, SEND_TRYING, type LeadSend } from '../repo/leadSends';
 import { getProjectById } from '../repo/projects';
+import { markAnswersDelivered } from '../repo/asks';
 import { T3ArgumentRefused, T3Unavailable, type T3Message, type T3Thread } from '../t3';
 
 /*
@@ -132,8 +133,21 @@ export interface Sender {
   listed(project: string, threadId: string): boolean;
 }
 
+/**
+ * Thrown by a webhook when nothing was sent and the line waits for a later try (src/server/lead/voice.ts): not set up, quiet
+ * hours, the day's cap, still gathering, or a failure that reached nothing. `quiet` keeps the sender from logging it.
+ */
+export class SendWaits extends Error {
+  constructor(
+    message: string,
+    readonly quiet = false,
+  ) {
+    super(message);
+  }
+}
+
 /** A voice_line with no webhook yet: nothing was sent, it waits. */
-class NoWebhook extends Error {}
+class NoWebhook extends SendWaits {}
 
 /** A start send whose stored body cannot be read: nothing was sent, and no later try can send it. */
 class UnreadableBody extends Error {}
@@ -142,7 +156,7 @@ class UnreadableBody extends Error {}
 const refused = (err: unknown): boolean => err instanceof T3ArgumentRefused || err instanceof UnreadableBody;
 
 /** Whether a failure says nothing reached T3 Code: refused, no webhook yet, or a t3 failure whose outcome is known. */
-const notSent = (err: unknown): boolean => err instanceof NoWebhook || refused(err) || (err instanceof T3Unavailable && !err.outcomeUnknown);
+const notSent = (err: unknown): boolean => err instanceof SendWaits || refused(err) || (err instanceof T3Unavailable && !err.outcomeUnknown);
 
 /** A time T3 Code gave, in ms, or undefined when it gave none or one that does not read as a time. */
 const timeOf = (at: string | undefined): number | undefined => {
@@ -174,6 +188,27 @@ export function recordStartInWrite(ctx: Ctx, record: RecordEvent, send: LeadSend
   record({ projectId: project.id, type: 'project.updated', entity: 'project', entityId: project.id, data: { changes: { started: 'start' } } });
 }
 
+/** A `send_refused` line in the lead's log for a send T3 Code refused or that could not be read: its item, step and reason. */
+function noteRefusedInWrite(ctx: Ctx, send: LeadSend, reason: string): void {
+  const project = getProjectById(ctx, send.projectId);
+  if (project === undefined || project.lead === null || project.lead.trim() === '') return;
+  const nodeId = stepOf(ctx, send);
+  insertLeadEvent(
+    ctx.db,
+    { projectId: project.id, lead: project.lead, instructions: LEAD_INSTRUCTIONS_VERSION, kind: 'send_refused', ...(nodeId === null ? {} : { nodeId }), text: `s${send.id} for item #${send.itemId}: ${reason}` },
+    ctx.now(),
+  );
+}
+
+/**
+ * A carried answer that reached its T3 Code session (a `carry` send, retry key `carry:a<ask id>`): the ask's answer is
+ * stamped delivered, so the session's next prompt does not repeat it.
+ */
+function carriedInWrite(ctx: Ctx, send: LeadSend): void {
+  const m = send.kind === 'carry' ? /^carry:a(\d+)$/.exec(send.retryKey ?? '') : null;
+  if (m !== null) markAnswersDelivered(ctx, [Number(m[1])]);
+}
+
 const key = (project: string): string => project.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 
 export function createSender(ctx: Ctx, deps: SenderDeps, opts: SenderOptions = {}): Sender {
@@ -201,7 +236,7 @@ export function createSender(ctx: Ctx, deps: SenderDeps, opts: SenderOptions = {
       return (await deps.t3.start(send.target, body.message, o)).threadId;
     }
     if (send.kind === 'voice_line') {
-      if (deps.webhook === undefined) throw new NoWebhook('no Voice webhook yet');
+      if (deps.webhook === undefined) throw new NoWebhook('no Voice webhook yet', true);
       return deps.webhook(send);
     }
     await deps.t3.send(send.target, send.body);
@@ -231,8 +266,11 @@ export function createSender(ctx: Ctx, deps: SenderDeps, opts: SenderOptions = {
     } catch (err) {
       const reason = reasonOf(err);
       if (refused(err)) {
-        // It can never go as it stands: cleared, said once, and it holds nothing behind it.
-        clear(id);
+        // It can never go as it stands: cleared, said once, and it holds nothing behind it. A start an apply intended (a
+        // restart) leaves a `send_refused` line too, so the morning list's Went wrong names it.
+        write(ctx, ACTOR, () => {
+          if (moveSend(ctx.db, id, ['intended'], 'cleared', { now: ctx.now() }) && send.kind === 'start' && send.itemId !== null) noteRefusedInWrite(ctx, send, reason);
+        });
         log.error(`send s${id} (${send.kind}) was cleared, it cannot be sent: ${reason}`);
         return { state: 'cleared', reason };
       }
@@ -243,14 +281,19 @@ export function createSender(ctx: Ctx, deps: SenderDeps, opts: SenderOptions = {
         }
         // Nothing reached T3 Code: never tried, so the next try simply sends it.
         write(ctx, ACTOR, () => markTrying(ctx.db, id, false));
-        if (!(err instanceof NoWebhook)) log.error(`send s${id} (${send.kind}) was not sent and waits for the next try: ${reason}`);
+        if (!(err instanceof SendWaits && err.quiet)) log.error(`send s${id} (${send.kind}) was not sent and waits for the next try: ${reason}`);
         return { state: 'waiting', reason };
       }
       log.error(`send s${id} (${send.kind}) may have been sent and will be looked up: ${reason}`);
       return { state: 'lookup', reason };
     }
     try {
-      write(ctx, ACTOR, () => moveSend(ctx.db, id, ['intended'], 'done', { result, now: ctx.now() }));
+      write(ctx, ACTOR, (record) => {
+        // A start an apply intended (a restart) is recorded as leadStart records its own: a `start` line with the thread.
+        if (!moveSend(ctx.db, id, ['intended'], 'done', { result, now: ctx.now() })) return;
+        if (send.kind === 'start' && send.itemId !== null) recordStartInWrite(ctx, record, send, result);
+        carriedInWrite(ctx, send);
+      });
     } catch (err) {
       // Sent, but not recorded: it still holds 'trying', so it is looked up, never sent again.
       log.error(`send s${id} (${send.kind}) was sent but could not be marked done, and will be looked up: ${reasonOf(err)}`);
@@ -325,7 +368,9 @@ export function createSender(ctx: Ctx, deps: SenderDeps, opts: SenderOptions = {
     if (found !== undefined) {
       const threadId = found;
       write(ctx, ACTOR, (record) => {
-        if (moveSend(ctx.db, send.id, ['intended'], 'done', { result: threadId, now: ctx.now() }) && send.kind === 'start') recordStartInWrite(ctx, record, send, threadId);
+        if (!moveSend(ctx.db, send.id, ['intended'], 'done', { result: threadId, now: ctx.now() })) return;
+        if (send.kind === 'start') recordStartInWrite(ctx, record, send, threadId);
+        carriedInWrite(ctx, send);
       });
       misses.delete(send.id);
       log.info(`send s${send.id} (${send.kind}) was found and is done: ${threadId}`);
@@ -350,9 +395,11 @@ export function createSender(ctx: Ctx, deps: SenderDeps, opts: SenderOptions = {
     const byTarget = new Map<string, LeadSend[]>();
     for (const s of intendedSends(ctx.db)) {
       if (s.result === SEND_TRYING) continue;
-      const list = byTarget.get(s.target) ?? [];
+      // The Voice's lines go one project at a time: a project whose lines wait (quiet hours, its cap) holds no other's.
+      const k = s.kind === 'voice_line' ? `${s.target}:${s.projectId}` : s.target;
+      const list = byTarget.get(k) ?? [];
       list.push(s);
-      byTarget.set(s.target, list);
+      byTarget.set(k, list);
     }
     await Promise.all(
       [...byTarget.values()].map(async (list) => {

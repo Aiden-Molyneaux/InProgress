@@ -12,6 +12,7 @@ import { intendSend, sendByRetryKey } from './leadSends';
 import { getProjectById } from './projects';
 import { shelvedAmong } from './shelved';
 import { roundSince } from './switches';
+import { intendBringLine } from '../lead/voice';
 
 /** How much of an ask's text, and of an answer, a decision's line keeps. */
 export const DECISION_LINE_CUT = 80;
@@ -46,6 +47,15 @@ export function t3ThreadOf(db: DB, sessionId: string | null): string | null {
   if (sessionId === null) return null;
   const row = db.prepare('SELECT app, t3_thread_id FROM sessions WHERE id = ?').get(sessionId) as { app: string; t3_thread_id: string | null } | undefined;
   return row !== undefined && row.app === 't3' && row.t3_thread_id ? row.t3_thread_id : null;
+}
+
+/** The T3 Code thread of the newest session, not ended, focused on the step; null when there is none. */
+export function t3ThreadOnStep(ctx: Ctx, nodeId: number): string | null {
+  const thread = ctx.db
+    .prepare("SELECT t3_thread_id FROM sessions WHERE focus_node_id = ? AND app = 't3' AND t3_thread_id IS NOT NULL AND t3_thread_id <> '' AND state <> 'ended' ORDER BY last_seen_at DESC LIMIT 1")
+    .pluck()
+    .get(nodeId) as string | undefined;
+  return thread ?? null;
 }
 
 /** The desk item kinds whose ref is an ask id (old_ask joins them with task 17). */
@@ -113,12 +123,13 @@ export interface BringOptions {
 /**
  * Brings the item to Aiden, inside the caller's write: the would-have first, as a `bring` line in the lead's log (text: the
  * turn's answer) and its decisions row (kind product for TASTE or DIRECTION, permission for a permission item, else
- * technical, unless `opts.decision` names them); then, with `opts.tell`, the session told. The item's state is the
+ * technical, unless `opts.decision` names them); then, with `opts.tell`, the session told; then its line to the Voice. The item's state is the
  * caller's. Answers the bring's id, or undefined (nothing written) when the item's ask is gone or cleared, or the project
  * has no lead.
  */
 export function bringItem(ctx: Ctx, item: DeskItem, turn: BringTurn, opts: BringOptions): number | undefined {
-  const lead = getProjectById(ctx, item.projectId)?.lead;
+  const project = getProjectById(ctx, item.projectId);
+  const lead = project?.lead;
   if (lead === null || lead === undefined || lead.trim() === '') return undefined;
   const ask = askOf(ctx, item);
   if (ask === undefined || ask.clearedAt !== null) return undefined;
@@ -139,6 +150,13 @@ export function bringItem(ctx: Ctx, item: DeskItem, turn: BringTurn, opts: Bring
     saidAt: now,
   });
   if (opts.tell) tellAidens(ctx.db, { projectId: item.projectId, itemId: item.id, lead, ask, kind: turn.kind }, now);
+  // Every bring reaches the Voice as one line (task 11), gathered with the project's others by the sender.
+  const stepTitle = ctx.db.prepare('SELECT title FROM nodes WHERE id = ?').pluck().get(ask.nodeId) as string | undefined;
+  intendBringLine(
+    ctx.db,
+    { projectId: item.projectId, itemId: item.id, eventId, projectName: project!.name, stepId: ask.nodeId, stepTitle: stepTitle ?? null, askText: ask.text, wouldHave },
+    now,
+  );
   return eventId;
 }
 

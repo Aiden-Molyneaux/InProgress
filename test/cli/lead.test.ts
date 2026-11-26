@@ -77,7 +77,7 @@ describe('inprogress lead brief', () => {
     const text = capture();
     expect(await runLead(['brief', 'ingame', '--as', 'Progresser', '--instructions', String(LEAD_INSTRUCTIONS_VERSION)], text.out, conn)).toBe(0);
     expect(text.lines).toHaveLength(1);
-    expect(text.lines[0].split('\n')[0]).toMatch(/^Lead brief · InGame · .* · instructions v6 \(yours: v6\)$/);
+    expect(text.lines[0].split('\n')[0]).toMatch(/^Lead brief · InGame · .* · instructions v7 \(yours: v7\)$/);
     expect(text.lines[0]).toContain('In flight (0 of 3):');
 
     const json = capture();
@@ -202,12 +202,12 @@ describe('inprogress lead rules', () => {
     const c = capture();
     expect(await runLead(['rules', 'ingame', '--as', 'Progresser'], c.out, conn)).toBe(0);
     expect(c.lines).toHaveLength(1);
-    expect(c.lines[0].split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 6.');
+    expect(c.lines[0].split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 7.');
     expect(c.lines[0]).toContain(`lead brief ingame --as Progresser --instructions ${LEAD_INSTRUCTIONS_VERSION}`);
     // --instructions, when given, is ignored.
     const given = capture();
     expect(await runLead(['rules', 'ingame', '--as', 'progresser', '--instructions', '1'], given.out, conn)).toBe(0);
-    expect(given.lines[0].split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 6.');
+    expect(given.lines[0].split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 7.');
   });
 
   it('prints the three lines to paste with --bootstrap', async () => {
@@ -434,20 +434,24 @@ describe("inprogress lead's commands", () => {
 
   it('lists the reads and the commands in the usage, one line each (intent has a read and a write form)', () => {
     const lines = LEAD_USAGE.split('\n');
-    expect(lines).toHaveLength(24);
-    expect(lines.slice(1).map((l) => l.trim().split(' ')[2])).toEqual(['rules', 'brief', 'step', 'resource', 'answer', 'decide', 'undo', 'set', 'park', 'drop', 'promise', 'kept', 'intent', 'intent', 'relay', 'start', 'allow', 'disallow', 'desk', 'morning', 'week', 'counts', 'import-usage']);
-    expect(lines[16]).toBe('  inprogress lead start <project> <step id> [--aiden <words>] --as <name> --instructions <n>');
-    expect(lines[17]).toBe('  inprogress lead allow <project> starts|landing|round --aiden <words> --as <name> --instructions <n>');
-    expect(lines[18]).toBe('  inprogress lead disallow <project> starts|landing|round [--aiden <words>] --as <name> --instructions <n>');
-    expect(lines[19]).toBe('  inprogress lead desk <project> [--json]');
+    expect(lines).toHaveLength(26);
+    expect(lines.slice(1).map((l) => l.trim().split(' ')[2])).toEqual(['rules', 'brief', 'step', 'resource', 'answer', 'seen', 'desk-add', 'decide', 'undo', 'set', 'park', 'drop', 'promise', 'kept', 'intent', 'intent', 'relay', 'start', 'allow', 'disallow', 'desk', 'morning', 'week', 'counts', 'import-usage']);
+    expect(lines[18]).toBe('  inprogress lead start <project> <step id> [--aiden <words>] --as <name> --instructions <n>');
+    expect(lines[19]).toBe('  inprogress lead allow <project> starts|landing|round --aiden <words> --as <name> --instructions <n>');
+    expect(lines[20]).toBe('  inprogress lead disallow <project> starts|landing|round [--aiden <words>] --as <name> --instructions <n>');
+    expect(lines[21]).toBe('  inprogress lead desk <project> [--json]');
     expect(lines[3]).toBe('  inprogress lead step <project> <step id> --as <name> --instructions <n>');
     expect(lines[4]).toBe('  inprogress lead resource <project> <document id> --as <name> --instructions <n>');
-    expect(lines[5]).toBe('  inprogress lead answer <project> <ask id> --aiden <words> [--says <text>] --as <name> --instructions <n>');
-    expect(lines[6]).toBe('  inprogress lead decide <project> <ask id> --answer <text> --reason <text> [--kind product|technical] [--aiden <words>] --as <name> --instructions <n>');
-    expect(lines[7]).toBe('  inprogress lead undo <project> <decision> --aiden <words> [--reason <text>] --as <name> --instructions <n>');
-    expect(lines[13]).toBe('  inprogress lead intent <project> --as <name> --instructions <n>');
-    expect(lines[14]).toBe('  inprogress lead intent <project> <file | -> --as <name> --instructions <n>');
-    expect(lines[15]).toBe('  inprogress lead relay <project> <step id> <message | -> --as <name> --instructions <n>');
+    expect(lines[5]).toBe(
+      '  inprogress lead answer <project> <ask id> --aiden <words> [--says <text>] [--where voice|thread] [--said-at <iso time>] [--shown r12,r13] [--yes merge,deploy,push] --as <name> --instructions <n>',
+    );
+    expect(lines[6]).toBe('  inprogress lead seen <project> <send id> --as <name> --instructions <n>');
+    expect(lines[7]).toBe('  inprogress lead desk-add <project> --step <step id> --words <his words> --as <name> --instructions <n>');
+    expect(lines[8]).toBe('  inprogress lead decide <project> <ask id> --answer <text> --reason <text> [--kind product|technical] [--aiden <words>] --as <name> --instructions <n>');
+    expect(lines[9]).toBe('  inprogress lead undo <project> <decision> --aiden <words> [--reason <text>] --as <name> --instructions <n>');
+    expect(lines[15]).toBe('  inprogress lead intent <project> --as <name> --instructions <n>');
+    expect(lines[16]).toBe('  inprogress lead intent <project> <file | -> --as <name> --instructions <n>');
+    expect(lines[17]).toBe('  inprogress lead relay <project> <step id> <message | -> --as <name> --instructions <n>');
   });
 });
 
@@ -567,6 +571,31 @@ describe('inprogress lead relay', () => {
       ['/api/lead/inprogress/disallow', { ...who, switch: 'landing' }],
       ['/api/lead/inprogress/disallow', { ...who, switch: 'landing', aidenWords: 'stop it' }],
       ['/api/lead/inprogress/allow', { ...who, switch: 'round', aidenWords: 'run the round' }],
+    ]);
+  });
+
+  it("posts seen to the stamp route, desk-add with his words, and answer with where, when, what he was shown and what his yes covers", async () => {
+    const sent = stubbed(async () => new Response(JSON.stringify({ text: 'Seen s42.' }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    try {
+      expect(await run(['seen', 'inprogress', 's42', ...WHO])).toEqual({ code: 0, lines: ['Seen s42.'], reads: 0 });
+      expect(await run(['seen', 'inprogress', '7', ...WHO])).toMatchObject({ code: 0 });
+      expect(await run(['seen', 'inprogress', 'sx', ...WHO])).toEqual({ code: 1, lines: ['sx is not a send: give it as s42 or 42', LEAD_USAGE], reads: 0 });
+      expect(await run(['desk-add', 'inprogress', '--step', '#12', '--words', 'you decide', ...WHO])).toMatchObject({ code: 0 });
+      expect(await run(['desk-add', 'inprogress', '--words', 'you decide', ...WHO])).toEqual({ code: 1, lines: ['Missing --step', LEAD_USAGE], reads: 0 });
+      const answer = ['answer', 'inprogress', 'a5', '--aiden', 'ship it', '--where', 'voice', '--said-at', '2026-11-25T14:02:00Z', '--shown', 'r12,13', '--yes', 'merge,push', ...WHO];
+      expect(await run(answer)).toMatchObject({ code: 0 });
+      expect((await run(['answer', 'inprogress', 'a5', '--aiden', 'x', '--where', 'phone', ...WHO])).code).toBe(1);
+      expect((await run(['answer', 'inprogress', 'a5', '--aiden', 'x', '--yes', 'publish', ...WHO])).code).toBe(1);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+    const who = { as: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION };
+    expect(sent.map((s) => [s.url.replace(conn.baseUrl, ''), s.body])).toEqual([
+      ['/api/lead/inprogress/stamp', { ...who, sendId: 42 }],
+      ['/api/lead/inprogress/stamp', { ...who, sendId: 7 }],
+      ['/api/lead/inprogress/desk-add', { ...who, stepId: 12, aidenWords: 'you decide' }],
+      ['/api/lead/inprogress/answer', { ...who, askId: 5, aidenWords: 'ship it', where: 'voice', saidAt: '2026-11-25T14:02:00.000Z', shown: [12, 13], yes: ['merge', 'push'] }],
     ]);
   });
 

@@ -10,6 +10,8 @@ import type { DB } from '../db/connection';
 export const SETTING_KEYS: Record<string, (value: string) => string | null> = {
   quiet: (v) => (parseQuiet(v) === undefined ? 'quiet hours are written HH:MM-HH:MM, for example 23:00-08:00.' : null),
   'voice-cap': (v) => (/^\d{1,3}$/.test(v) && Number(v) >= 1 ? null : 'voice-cap is a whole number of lines a day, 1 or more.'),
+  'lead-thread': (v) => (v === 'on' || v === 'off' ? null : 'lead-thread is on or off.'),
+  'turn-way': (v) => (v === 'thread' || v === 'headless' ? null : 'turn-way is thread or headless.'),
 };
 
 /** Quiet hours when none are set: midnight to nine in the morning, local time. */
@@ -46,8 +48,8 @@ export function voiceCap(db: DB, projectId: number): number {
   return v !== undefined && /^\d+$/.test(v) && Number(v) >= 1 ? Number(v) : DEFAULT_VOICE_CAP;
 }
 
-/** The T3 Code project the lead's own thread lives in (task 12), or undefined when it is not set up. */
-export const leadThreadProject = (db: DB, projectId: number): string | undefined => {
-  const v = settingOf(db, projectId, 'lead-project');
-  return v === undefined || v === '' ? undefined : v;
-};
+/** Whether the lead's own thread in T3 Code is on for the project (task 12): `lead set <slug> lead-thread on`. */
+export const leadThreadOn = (db: DB, projectId: number): boolean => settingOf(db, projectId, 'lead-thread') === 'on';
+
+/** The way the project's desk turns run (task 12): the lead's thread when `turn-way thread` is set, else headless. */
+export const turnWayOf = (db: DB, projectId: number): 'headless' | 'thread' => (settingOf(db, projectId, 'turn-way') === 'thread' ? 'thread' : 'headless');

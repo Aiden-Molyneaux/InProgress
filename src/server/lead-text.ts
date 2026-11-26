@@ -1,4 +1,4 @@
-import { IN_FLIGHT_LIMIT, AIDEN_BROUGHT_LIMIT, AIDEN_OPEN_LIMIT, LEAD_LIST_CAP, LEAD_LOOK_BACK_DAYS, intentLine, type LeadBrief } from '../core/lead';
+import { IN_FLIGHT_LIMIT, AIDEN_BROUGHT_LIMIT, AIDEN_OPEN_LIMIT, LEAD_LIST_CAP, LEAD_SWITCHES, LEAD_LOOK_BACK_DAYS, intentLine, type LeadBrief } from '../core/lead';
 import { clipLine, stepRef } from '../core/step-ref';
 import { PROJECT_NAME_MAX, askTag } from '../core/types';
 import { spanAgo } from './briefing';
@@ -139,7 +139,7 @@ export function renderLeadBrief(b: LeadBrief): string {
       `Started in the last ${LEAD_LOOK_BACK_DAYS} days (${b.started.length}):`,
       b.started.map((s) => `${stamp(s.at)} · ${step(s.stepId, s.stepTitle)} · thread ${line(s.threadId, TEXT_CUT)} · ${s.onAidensWord ? "on Aiden's word" : 'on your own judgment'} · ${s.claimed ? 'claimed' : 'not claimed yet'}`),
     ),
-    `Switches: starts ${switchText(b.switches.starts)} · landing ${switchText(b.switches.landing)}`,
+    `Switches: ${LEAD_SWITCHES.map((k) => `${k} ${switchText(b.switches[k])}`).join(' · ')}`,
     `Links: T3 Code ${t3}${t3At === null ? '' : `, last relay ${spanAgo(t3At, now)} ago`} · your last look ${b.links.lastSeenAt === null ? 'never' : `${spanAgo(b.links.lastSeenAt, now)} ago`}`,
   );
   return lines.join('\n');

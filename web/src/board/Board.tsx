@@ -11,6 +11,7 @@ import { BAND_LABEL, ColumnHead, type Band } from './ColumnHead';
 import { DoneColumn, doneKeys, doneView } from './DoneColumn';
 import { layoutFor, type BoardLayout } from './layout';
 import { BoardSlab } from './BoardSlab';
+import { LeadBehind } from './LeadBehind';
 import { NeedsMe, needsKeys } from './NeedsMe';
 import { NextColumn } from './NextColumn';
 import { NowColumn, nowKeys } from './NowColumn';
@@ -72,7 +73,12 @@ export function Board(props: ViewProps) {
   };
   const rise = useRise(order.flatMap((b) => keys[b].map((k) => `${b}:${k}`)));
   const body: Record<Band, ReactNode> = {
-    needs: <NeedsMe {...band} cursor={cursorOf('needs')} rise={rise} />,
+    needs: (
+      <>
+        <NeedsMe {...band} cursor={cursorOf('needs')} rise={rise} />
+        <LeadBehind snapshot={snapshot} now={now} />
+      </>
+    ),
     now: <NowColumn {...band} cursor={cursorOf('now')} rise={rise} />,
     next: <NextColumn {...band} queue={queue} cursor={cursorOf('next')} rise={rise} />,
     done: <DoneColumn {...band} view={done} lastLook={lastLook} cursor={cursorOf('done')} rise={rise} />,

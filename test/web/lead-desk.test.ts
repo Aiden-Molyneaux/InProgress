@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { LEAD_INSTRUCTIONS_VERSION, type LeadBrief, type LeadEventOut } from '../../src/core/lead';
 import { stamp } from '../../src/core/span';
-import { deskDecided, deskGroups, deskHead, deskStarted, deskSwitches, logLines } from '../../web/src/lead/leadDesk';
+import type { LeadBehindItem } from '../../src/core/types';
+import { deskBehind, deskDecided, deskGroups, deskHead, deskStarted, deskSwitches, logLines } from '../../web/src/lead/leadDesk';
 
 const NOW = Date.parse('2026-11-15T12:00:00.000Z');
 const ago = (ms: number): string => new Date(NOW - ms).toISOString();
@@ -213,17 +214,18 @@ describe('deskDecided', () => {
 describe('deskSwitches', () => {
   it('says off for both, Starts first', () => {
     expect(deskSwitches(empty(), NOW)).toEqual([
-      { key: 'starts', line: 'Starts: off' },
-      { key: 'landing', line: 'Landing: off' },
+      { key: 'starts', line: 'Starts: off', on: false },
+      { key: 'landing', line: 'Landing: off', on: false },
+      { key: 'round', line: 'Round: off', on: false },
     ]);
   });
   it('says on with its age and the words that turned it on', () => {
     const b = { ...empty(), switches: { starts: { on: true, at: ago(2 * HOUR), words: 'turn starts on' }, landing: { on: false, at: null, words: null }, round: { on: false, at: null, words: null } } };
-    expect(deskSwitches(b, NOW).map((s) => s.line)).toEqual(['Starts: on, since 2h ago, on Aiden\'s words "turn starts on"', 'Landing: off']);
+    expect(deskSwitches(b, NOW).map((s) => s.line)).toEqual(['Starts: on, since 2h ago, on Aiden\'s words "turn starts on"', 'Landing: off', 'Round: off']);
   });
   it('leaves the words out when there are none', () => {
     const b = { ...empty(), switches: { starts: { on: false, at: null, words: null }, landing: { on: true, at: ago(3 * DAY), words: null }, round: { on: false, at: null, words: null } } };
-    expect(deskSwitches(b, NOW).map((s) => s.line)).toEqual(['Starts: off', 'Landing: on, since 3d ago']);
+    expect(deskSwitches(b, NOW).map((s) => s.line)).toEqual(['Starts: off', 'Landing: on, since 3d ago', 'Round: off']);
   });
 });
 
@@ -283,5 +285,26 @@ describe('logLines', () => {
     ]);
     expect(lines[0].text).toBe('the intent record, 14 characters');
     expect(lines[1]).toMatchObject({ text: '', words: 'Park it, for now.' });
+  });
+});
+
+describe('deskBehind', () => {
+  const item = (o: Partial<LeadBehindItem>): LeadBehindItem => ({ id: 1, kind: 'question', state: 'open', createdAt: ago(HOUR), dueAt: null, stepId: 4, stepTitle: 'Signing', what: 'Which port?', askId: 9, sessionId: null, ...o });
+  it('lists items past their limit and items given up on, oldest first, with how late and what Aiden can do', () => {
+    const rows = deskBehind(
+      [
+        item({ id: 2, createdAt: ago(30 * 60_000), dueAt: ago(12 * 60_000) }),
+        item({ id: 3, createdAt: ago(2 * HOUR), kind: 'stopped', state: 'behind', what: 'a stopped session', askId: null, sessionId: 's-1', stepId: null }),
+        item({ id: 4, dueAt: new Date(NOW + 60_000).toISOString() }),
+      ],
+      NOW,
+    );
+    expect(rows).toEqual([
+      { key: 3, text: 'a stopped session', late: 'given up after two tries', askId: null, askText: 'a stopped session', sessionId: 's-1' },
+      { key: 2, text: '#4 Signing: Which port?', late: '12 min late', askId: 9, askText: 'Which port?', sessionId: null },
+    ]);
+  });
+  it('is empty when nothing is late', () => {
+    expect(deskBehind([item({ dueAt: new Date(NOW + 1000).toISOString() })], NOW)).toEqual([]);
   });
 });

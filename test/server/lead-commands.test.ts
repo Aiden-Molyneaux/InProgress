@@ -15,7 +15,6 @@ import { makeCtx } from '../helpers';
 
 const BEARER = { authorization: 'Bearer t' };
 const DUE = '2026-10-01T09:00:00.000Z';
-const QUESTION_ONLY = "The lead can carry Aiden's answer to a question only. A permission or a review needs Aiden in the thread or the window.";
 const aidens = (origin: string) => `This step is Aiden's (origin ${origin}). Pass his words with --aiden.`;
 const parkNeeds = (origin: string) => `This step is Aiden's (origin ${origin}). Pass his words with --aiden, or your reason with --reason when nobody is working on it.`;
 
@@ -80,7 +79,7 @@ describe('leadAnswer', () => {
     expect(res.text).toBe(`Answered a${question.id} with Aiden's words.`);
     expect(askRow(question.id)).toMatchObject({ answer: 'Use the release keystore.', cleared_by: 'lead:Progresser', answered_via: 'lead' });
     expect(events()).toEqual([
-      { kind: 'answer', node_id: question.nodeId, ask_id: question.id, instructions: LEAD_INSTRUCTIONS_VERSION, lead: 'Progresser', text: '', aiden_words: 'Use the release keystore.' },
+      { kind: 'answer', node_id: question.nodeId, ask_id: question.id, instructions: LEAD_INSTRUCTIONS_VERSION, lead: 'Progresser', text: expect.stringMatching(/^where thread; said [0-9]{4}-/), aiden_words: 'Use the release keystore.' },
     ]);
     expect(undeliveredAnswers(ctx, 's1').map((a) => a.id)).toEqual([question.id]);
     const said = readLeadBrief(ctx, project.slug, 1, new Date(ctx.now())).saidInAidensName;
@@ -103,11 +102,9 @@ describe('leadAnswer', () => {
     );
   });
 
-  it("refuses a review, a permission, the lead's own promise and an ask of another project, writing nothing", () => {
-    const { ctx, project, review, permission, asked, refused } = setup();
+  it("refuses the lead's own promise and an ask of another project, writing nothing", () => {
+    const { ctx, project, asked, refused } = setup();
     const answer = (askId: number) => () => leadAnswer(ctx, project.slug, 'Progresser', LEAD_INSTRUCTIONS_VERSION, { askId, aidenWords: 'Yes.' });
-    expect(refused(answer(review.id))).toMatchObject({ status: 409, message: QUESTION_ONLY });
-    expect(refused(answer(permission.id))).toMatchObject({ status: 409, message: QUESTION_ONLY });
     const promise = raiseAsk(ctx, 'lead', { nodeId: asked.id, kind: 'review', text: 'Send the draft', owner: 'lead', dueAt: DUE });
     expect(refused(answer(promise.id))).toMatchObject({ status: 409, message: `a${promise.id} is the lead's own promise. Clear it with kept.` });
     const elsewhere = createProject(ctx, 'test', { name: 'Elsewhere' });
@@ -405,8 +402,9 @@ describe('every command (Review Focus 1)', () => {
     s.app.inject({ method: 'POST', url: `/api/lead/${s.project.slug}/${command}`, headers, payload });
 
   /** Each command answers `status` with `error` (when given), and writes nothing. */
-  async function expectRefused(s: S, extra: Record<string, unknown>, status: number, error?: string, headers?: Record<string, string>) {
+  async function expectRefused(s: S, extra: Record<string, unknown>, status: number, error?: string, headers?: Record<string, string>, except?: string) {
     for (const [command, body] of bodies(s)) {
+      if (command === except) continue;
       const mark = maxEventId(s.ctx);
       const count = s.leadEvents();
       const res = await post(s, command, { as: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION, ...body, ...extra }, headers);
@@ -421,7 +419,10 @@ describe('every command (Review Focus 1)', () => {
     const s = setup();
     await expectRefused(s, { as: 'Rich' }, 409, noLeadNamed('Rich'));
     setProjectLead(s.ctx, 'window', s.project.slug, null);
-    await expectRefused(s, {}, 409, noLeadNamed('Progresser'));
+    // Every command but answer: a lead carries Aiden's answer on a project with no lead (an old ask of a personal project).
+    await expectRefused(s, {}, 409, noLeadNamed('Progresser'), undefined, 'answer');
+    const answer = bodies(s).find(([command]) => command === 'answer')!;
+    expect((await post(s, 'answer', { as: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION, ...answer[1] })).statusCode).toBe(200);
   });
 
   it('is refused with instructions below the current version', async () => {
@@ -495,7 +496,7 @@ describe('leadAnswer with says', () => {
     const { ctx, project, question, events, askRow } = setup();
     leadAnswer(ctx, project.slug, 'Progresser', V, { askId: question.id, aidenWords: 'yes', says: 'Use the release keystore' });
     expect(askRow(question.id)).toMatchObject({ answer: 'Use the release keystore (Aiden said: "yes")', answered_via: 'lead' });
-    expect(events()[0]).toMatchObject({ kind: 'answer', aiden_words: 'yes', text: '' });
+    expect(events()[0]).toMatchObject({ kind: 'answer', aiden_words: 'yes', text: expect.stringMatching(/^where thread; said [0-9]{4}-/) });
   });
 });
 

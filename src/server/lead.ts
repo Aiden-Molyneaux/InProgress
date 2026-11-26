@@ -113,15 +113,16 @@ function decidedSince(ctx: Ctx, projectId: number, cutoff: string, lastSeen: str
   const isNew = (at: string): boolean => lastSeen === null || at >= lastSeen;
   const events = ctx.db
     .prepare(
-      `SELECT e.id, e.at, e.lead, e.kind, e.node_id, e.text, a.answer AS answer, e.ask_id
+      `SELECT e.id, e.at, e.lead, e.kind, e.node_id, e.text, a.answer AS answer, e.ask_id, ld.aiden_answer AS left_answer
          FROM lead_events e LEFT JOIN asks a ON a.id = e.ask_id LEFT JOIN nodes n ON n.id = e.node_id
+         LEFT JOIN lead_decisions ld ON ld.event_id = e.id
         WHERE e.project_id = ? AND e.at >= ?
           AND (e.kind = 'decide' OR (e.aiden_words IS NULL AND ((e.kind = 'park' AND n.status = 'parked') OR (e.kind = 'drop' AND n.status = 'dropped'))))
           -- An undo line's text is the decision's tag: decisionTag (lead-commands.ts) names the other site.
           AND NOT EXISTS (SELECT 1 FROM lead_events u WHERE u.project_id = e.project_id AND u.kind = 'undo' AND u.text = 'd' || e.id)
         ORDER BY e.at DESC, e.id DESC`,
     )
-    .all(projectId, cutoff) as { id: number; at: string; lead: string; kind: string; node_id: number | null; text: string; answer: string | null; ask_id: number | null }[];
+    .all(projectId, cutoff) as { id: number; at: string; lead: string; kind: string; node_id: number | null; text: string; answer: string | null; ask_id: number | null; left_answer: string | null }[];
   const logs = ctx.db
     .prepare(
       `SELECT l.id, l.created_at AS at, l.node_id, l.text
@@ -136,7 +137,8 @@ function decidedSince(ctx: Ctx, projectId: number, cutoff: string, lastSeen: str
     by: e.lead,
     stepId: e.node_id,
     stepTitle: e.node_id === null ? '' : titleOf(e.node_id),
-    what: e.kind === 'decide' ? `answered ${askTag(e.ask_id as number)}: "${e.answer ?? ''}"` : e.kind === 'park' ? 'parked' : 'dropped',
+    // A decision with no ask is on what Aiden left to the lead (an aiden_said item).
+    what: e.kind === 'decide' ? (e.ask_id === null ? `decided what Aiden left to the lead: "${e.left_answer ?? ''}"` : `answered ${askTag(e.ask_id)}: "${e.answer ?? ''}"`) : e.kind === 'park' ? 'parked' : 'dropped',
     why: e.text,
     isNew: isNew(e.at),
   }));

@@ -202,7 +202,8 @@ export function saveAnswer(db: DB, turnId: number, fields: AnswerFields, now: st
 
 /** What applying an answer does to its item, and the outcome written on it. */
 export interface TurnEffect {
-  itemState: 'done' | 'waiting_aiden';
+  /** `open`: the item goes back on the desk (a restart waiting for a fresh usage reading). */
+  itemState: 'done' | 'waiting_aiden' | 'open';
   outcome: string;
 }
 
@@ -243,6 +244,8 @@ export const TURN_FAILURES_BEHIND = 2;
 export const TURN_FAULTS_BEHIND = 3;
 /** How an interrupted turn's `why` opens when the fault was the runner's: the runner writes it, releaseItem counts it. */
 export const RUNNER_FAULT_WHY = 'the runner could not run the turn';
+/** What the latest turn's why ends with once reopenFaultedItems has reopened its item: it is never reopened again. */
+export const REOPENED_MARK = ' [reopened once]';
 
 /**
  * In one immediate transaction: the turn leased to `state` with `why` (and any further fields, such as a failed turn's
@@ -287,7 +290,9 @@ function releaseItem(db: DB, turnId: number, now: string): void {
  * In one immediate transaction: the project's behind items whose latest turn is a runner fault (interrupted, the why
  * opening RUNNER_FAULT_WHY) go back to open, answering their ids. The runner calls it when a turn of the project ends ok:
  * claude runs again, so a stretch it could not run (a usage limit, a sign-out) does not keep those items behind for good.
- * An item behind on its own failed or abandoned turns has a latest turn that is not a fault, and stays behind.
+ * An item behind on its own failed or abandoned turns has a latest turn that is not a fault, and stays behind. An item is
+ * reopened once: its latest turn's why is marked REOPENED_MARK, and one that faults again after it (its own fault, such as a
+ * prompt too long, that reads as the runner's) stays behind.
  */
 export function reopenFaultedItems(db: DB, projectId: number, now: string): number[] {
   return db.transaction((): number[] => {
@@ -297,11 +302,16 @@ export function reopenFaultedItems(db: DB, projectId: number, now: string): numb
           WHERE d.project_id = ? AND d.state = 'behind'
             AND EXISTS (SELECT 1 FROM lead_turns t WHERE t.id = (SELECT MAX(id) FROM lead_turns WHERE item_id = d.id)
                           AND t.state = 'interrupted' AND substr(COALESCE(t.why, ''), 1, length(?)) = ?)
+            AND NOT EXISTS (SELECT 1 FROM lead_turns r WHERE r.item_id = d.id AND instr(COALESCE(r.why, ''), ?) > 0)
           ORDER BY d.id`,
       )
       .pluck()
-      .all(projectId, RUNNER_FAULT_WHY, RUNNER_FAULT_WHY) as number[];
-    return ids.filter((id) => moveDeskItem(db, id, ['behind'], 'open', { now }));
+      .all(projectId, RUNNER_FAULT_WHY, RUNNER_FAULT_WHY, REOPENED_MARK) as number[];
+    return ids.filter((id) => {
+      if (!moveDeskItem(db, id, ['behind'], 'open', { now })) return false;
+      db.prepare("UPDATE lead_turns SET why = COALESCE(why, '') || ? WHERE id = (SELECT MAX(id) FROM lead_turns WHERE item_id = ?)").run(REOPENED_MARK, id);
+      return true;
+    });
   }).immediate();
 }
 

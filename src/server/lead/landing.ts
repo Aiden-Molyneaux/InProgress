@@ -163,9 +163,10 @@ export function recordYes(ctx: Ctx, projectId: number, y: { action: LandingActio
 
 /**
  * Whether the change may land without Aiden, read from git itself in the session's folder and judged in plain code with no
- * model. A held answer is written as a `landing_check` line in the project's log, so the morning list can show what was held.
+ * model. A held answer is written as a `landing_check` line in the project's log, so the morning list can show what was held;
+ * with `opts.record` false nothing is written (the carried "ship it" reads the change's patch id this way).
  */
-export async function checkLanding(ctx: Ctx, ask: LandingAsk, deps: LandingDeps = REAL_DEPS): Promise<LandingAnswer> {
+export async function checkLanding(ctx: Ctx, ask: LandingAsk, deps: LandingDeps = REAL_DEPS, opts: { record?: boolean } = {}): Promise<LandingAnswer> {
   const project = resolveProject(ctx, ask.ref);
   const node = findNode(ctx, ask.stepId);
   if (!node) throw notFound(`#${ask.stepId} not found.`, `Run "outline ${project.slug}" to see this project's steps.`);
@@ -263,7 +264,7 @@ export async function checkLanding(ctx: Ctx, ask: LandingAsk, deps: LandingDeps 
     yeses: yesesOf(ctx, project.id),
     holdBecause,
   });
-  if (!verdict.clear) {
+  if (!verdict.clear && opts.record !== false) {
     ctx.db
       .prepare("INSERT INTO lead_events (project_id, at, lead, instructions, kind, node_id, text) VALUES (?, ?, ?, ?, 'landing_check', ?, ?)")
       .run(project.id, ctx.now(), project.lead ?? '', LEAD_INSTRUCTIONS_VERSION, ask.stepId, `${ask.action}: ${verdict.text}`);

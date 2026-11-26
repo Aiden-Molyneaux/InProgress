@@ -5,7 +5,8 @@ import type { DeskItem } from '../repo/desk';
 import { getSend } from '../repo/leadSends';
 import { stuckRequestOf } from './hold';
 import { markedTitle, parseStartBody, sendMarker } from './sends';
-import { stoppedTurnLines } from './stopped';
+import { aidenSaidWords } from './aidenSaid';
+import { parseStoppedRef, stoppedTurnLines } from './stopped';
 
 /** How many rulings the desk turn reads: the newest. */
 export const RULINGS_READ = 20;
@@ -16,14 +17,15 @@ export const RULINGS_READ = 20;
  */
 export function standingRulings(ctx: Ctx, projectId: number): string {
   const rows = ctx.db
-    .prepare(
-      `SELECT r.text, r.at, (SELECT u.text FROM lead_events u WHERE u.project_id = r.project_id AND u.kind = 'undo' AND u.aiden_words = r.aiden_words AND u.id < r.id ORDER BY u.id DESC LIMIT 1) AS undo
-       FROM lead_events r WHERE r.project_id = ? AND r.kind = 'ruling' ORDER BY r.at DESC, r.id DESC LIMIT ?`,
-    )
-    .all(projectId, RULINGS_READ) as { text: string; at: string; undo: string | null }[];
+    .prepare("SELECT text, at FROM lead_events WHERE project_id = ? AND kind = 'ruling' ORDER BY at DESC, id DESC LIMIT ?")
+    .all(projectId, RULINGS_READ) as { text: string; at: string }[];
   return rows
     .reverse()
-    .map((r) => `- ${r.text} (from undo ${r.undo ?? 'd?'}, ${stamp(r.at).slice(0, 10)})`)
+    .map((r) => {
+      // The text is `d<id>: <reason>`, written with the undo it came from.
+      const m = /^(d\d+): ([\s\S]*)$/.exec(r.text);
+      return `- ${m === null ? r.text : m[2]} (from undo ${m === null ? 'd?' : m[1]}, ${stamp(r.at).slice(0, 10)})`;
+    })
     .join('\n');
 }
 
@@ -133,9 +135,9 @@ export function deskUserMessage(ctx: Ctx, item: DeskItem): string {
   // A permission request the permission hook waits on (task 7): its tool and input are in the lead's log.
   const stuck = item.kind === 'stuck' ? stuckRequestOf(ctx, item) : undefined;
   if (item.kind === 'stopped') {
-    const at = item.ref.indexOf('@');
-    sessionId = at > 0 ? item.ref.slice(0, at) : item.ref;
-    if (at > 0) raisedAt = item.ref.slice(at + 1);
+    const ref = parseStoppedRef(item.ref);
+    sessionId = ref.sessionId;
+    if (ref.stoppedAt !== undefined) raisedAt = ref.stoppedAt;
     lines.push(...stoppedTurnLines(ctx, item));
   } else if (stuck !== undefined) {
     lines.push('It waits on a permission prompt to use a tool, and runs it or not by your verdict.', `The tool: ${stuck.toolName}`, `Its input: ${stuck.input}`);
@@ -143,6 +145,10 @@ export function deskUserMessage(ctx: Ctx, item: DeskItem): string {
     sessionId = stuck.sessionId;
   } else if (item.kind === 'unknown_send') {
     lines.push(...unknownSendLines(ctx, item));
+  } else if (item.kind === 'aiden_said') {
+    // "You decide", passed by the lead with `lead desk-add` (task 11): his words, on the item's `aiden_said` line.
+    const words = aidenSaidWords(ctx, item);
+    lines.push(words === undefined ? 'His words are no longer in the record.' : `Aiden said: "${words}"`, 'He leaves it to you. Answer it as you would a question on this step: DECIDE with your answer, or AIDEN.');
   } else if (/^\d+$/.test(item.ref)) {
     const ask = ctx.db.prepare('SELECT id, kind, text, session_id, raised_at, owner FROM asks WHERE id = ?').get(Number(item.ref)) as AskLine | undefined;
     if (ask === undefined) {
@@ -162,6 +168,7 @@ export function deskUserMessage(ctx: Ctx, item: DeskItem): string {
     lines.push('No step.');
   }
   lines.push(sessionId === null ? 'No session.' : `Session: ${sessionId}`);
+  if (item.kind === 'promise_due') lines.push('When it is done, answer DECIDE with ANSWER starting KEPT: and a note: the promise is cleared as lead kept clears it. Any other answer is noted for the morning list as it stands.');
   lines.push(`${item.kind === 'stopped' ? 'Stopped' : 'Raised'} at ${stamp(raisedAt)}. ${item.dueAt === null ? 'It has no limit.' : `Its limit is ${stamp(item.dueAt)}.`}`);
   lines.push('Look before you answer.');
   return lines.join('\n');
