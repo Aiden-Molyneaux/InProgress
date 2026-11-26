@@ -352,6 +352,11 @@ export function createSender(ctx: Ctx, deps: SenderDeps, opts: SenderOptions = {
       write(ctx, ACTOR, (record) => {
         // A start an apply intended (a restart) is recorded as leadStart records its own: a `start` line with the thread.
         if (!moveSend(ctx.db, id, ['intended'], 'done', { result, now: ctx.now() })) return;
+        // A thread that took a send is there: its miss record goes, and it counts as found.
+        if (send.kind === 'relay' || send.kind === 'carry') {
+          threadMissedAt.delete(send.target);
+          threadFound.set(send.target, Date.parse(ctx.now()));
+        }
         if (send.kind === 'start' && send.itemId !== null) recordStartInWrite(ctx, record, send, result);
       });
     } catch (err) {
@@ -407,7 +412,8 @@ export function createSender(ctx: Ctx, deps: SenderDeps, opts: SenderOptions = {
       return false;
     }
     const first = threadMissedAt.get(send.target);
-    if (first === undefined) {
+    // A first miss older than THREAD_FOUND_MS is stale: the two reads must be close, as a lookup's two looks are.
+    if (first === undefined || nowMs - first > THREAD_FOUND_MS) {
       threadMissedAt.set(send.target, nowMs);
       return false;
     }

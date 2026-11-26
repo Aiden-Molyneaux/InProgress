@@ -701,6 +701,19 @@ describe('a carry or relay to a thread T3 Code no longer has (C8)', () => {
     }
   });
 
+  it('a first miss older than five minutes is stale: two reads close together are needed again', async () => {
+    const s = setup();
+    const t3 = t3Of({ show: 'fails', list: 'answers' });
+    const sender = createSender(s.ctx, { t3 }, quiet);
+    const { id } = intend(s, 'carry');
+    expect((await sender.perform(id)).state).toBe('waiting');
+    s.advance(THREAD_FOUND_MS + 60 * 1000);
+    // The old miss is stale: this read only notes a new first miss.
+    expect((await sender.perform(id)).state).toBe('waiting');
+    s.advance(61 * 1000);
+    expect((await sender.perform(id)).state).toBe('cleared');
+  });
+
   it('T3 Code does not answer, or still has the thread: it waits as before, and a thread found is not read again for five minutes', async () => {
     for (const o of [{ show: 'fails', list: 'down' }, { show: 'finds', list: 'answers' }, { show: 'fails', list: 'lists it' }] as const) {
       const s = setup();

@@ -207,7 +207,9 @@ export function morningList(ctx: Ctx, projectId: number, since: string, now: str
                 : 'asked, no answer yet';
       // A park carries the word that undoes it: its decision's event id is in the outcome (`PARK d<n>`).
       const parkedBy = skipped ? null : /^PARK d(\d+)/.exec(o);
-      wrong.push(`${step} stopped at ${stopped}; ${what}.${parkedBy === null ? '' : ` "undo d${parkedBy[1]}"`}`);
+      // A park undone since carries no undo word: saying it again would find nothing to undo.
+      const parkUndone = parkedBy !== null && db.prepare("SELECT 1 FROM lead_events WHERE project_id = ? AND kind = 'undo' AND text = ?").get(projectId, `d${parkedBy[1]}`) !== undefined;
+      wrong.push(`${step} stopped at ${stopped}; ${what}.${parkedBy === null || parkUndone ? '' : ` "undo d${parkedBy[1]}"`}`);
     }
   }
   // A send T3 Code refused, or one that could not be read: cleared, and named here (sends.ts's `send_refused` line).

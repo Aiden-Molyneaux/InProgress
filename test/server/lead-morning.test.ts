@@ -148,6 +148,10 @@ describe('the morning list', () => {
       `#${w.step.id}: a send was refused at 03:00 and cleared (s8 for item #3: a bad title).`,
     ]);
     expect(part('Not delivered')).toEqual([`A message to a session "Where does the work stand?" (s${relayed.id}), not sent since 03:05.`]);
+    // The park undone since: its line keeps the park and drops the undo word (Murr's re-check).
+    insertLeadEvent(w.ctx.db, { projectId: w.project.id, lead: 'Progresser', instructions: V, kind: 'undo', nodeId: w.step.id, text: `d${park}` }, local(1, 7));
+    const after = morningList(w.ctx, w.project.id, local(0, 9), local(1, 9, 30)).parts.find((p) => p.name === 'Went wrong')!.lines;
+    expect(after[0]).toBe(`#${w.step.id} stopped at 02:10; parked at 02:51.`);
   });
 
   it('leaves out a part with nothing, and a day with nothing has no list', () => {

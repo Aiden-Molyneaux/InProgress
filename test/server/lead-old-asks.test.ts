@@ -555,6 +555,8 @@ describe('isOldAsk, and the C9 rule in every answer path (m2, m3)', () => {
     const other = raiseAsk(w.ctx, 'test', { nodeId: w.glimpse.step.id, kind: 'question', text: 'Which font?', sessionId: 's1' });
     expect(w.item(again.id)).toEqual([]);
     expect([old, again, other].map((a) => isOldAsk(w.ctx.db, a))).toEqual([true, true, false]);
+    // The same words from another session (here none) are a fresh ask, not one an undo raised again.
+    expect(isOldAsk(w.ctx.db, { ...again, id: again.id + 1000, sessionId: null })).toBe(false);
     // leadAnswer on the one raised again: recorded, never carried.
     const res = leadAnswer(w.ctx, w.glimpse.project.slug, 'Progresser', V, { askId: again.id, aidenWords: 'drop it' });
     expect(res.carried).toBe(false);

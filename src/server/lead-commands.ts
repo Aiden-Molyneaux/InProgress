@@ -133,16 +133,17 @@ const hhmmOf = (iso: string): string => {
 
 /**
  * Whether an ask is an old ask (task 17): a desk item of kind old_ask names it, or names another ask on the same step with
- * the same text (an undo raises an old question again, with its old text on its old step, under a new id). An old ask's
+ * the same text from the same session (an undo raises an old question again, with its old text, step and session, under a
+ * new id). An old ask's
  * answer is recorded, never carried: its session may have ended long ago.
  */
-export function isOldAsk(db: DB, ask: { id: number; nodeId: number; text: string }): boolean {
+export function isOldAsk(db: DB, ask: { id: number; nodeId: number; text: string; sessionId: string | null }): boolean {
   return (
     db
       .prepare(
-        `SELECT 1 FROM desk_items d WHERE d.kind = 'old_ask' AND (d.ref = ? OR d.ref IN (SELECT CAST(a.id AS TEXT) FROM asks a WHERE a.node_id = ? AND a.text = ? AND a.id <> ?)) LIMIT 1`,
+        `SELECT 1 FROM desk_items d WHERE d.kind = 'old_ask' AND (d.ref = ? OR d.ref IN (SELECT CAST(a.id AS TEXT) FROM asks a WHERE a.node_id = ? AND a.text = ? AND a.session_id IS ? AND a.id <> ?)) LIMIT 1`,
       )
-      .get(String(ask.id), ask.nodeId, ask.text, ask.id) !== undefined
+      .get(String(ask.id), ask.nodeId, ask.text, ask.sessionId, ask.id) !== undefined
   );
 }
 
