@@ -1,5 +1,5 @@
 import { Fragment, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import type { AskKind, Ask, Session } from '../../../src/core/types';
+import type { AskKind, Ask, HeldCard, Session } from '../../../src/core/types';
 import type { TaskBox as BoxData } from '../../../src/core/taskState';
 import { sessionActivity } from '../../../src/core/activity';
 import { commandLabel, WORDS } from '../live';
@@ -8,9 +8,13 @@ import { Chip } from '../parts/Chip';
 import { EmptyState } from '../parts/EmptyState';
 import { Eyebrow } from '../parts/Eyebrow';
 import type { CursorItemProps } from '../parts/ListCursor';
+import { Tile } from '../parts/Tile';
+import { rowClick } from './Marks';
 import { AskActions } from './AskActions';
 import type { BandProps } from './bandProps';
 import { BoardTile } from './BoardTile';
+import { HeldActions } from './HeldActions';
+import { heldText, type NeedsTile } from './needsTiles';
 import { SessionLine } from './SessionLine';
 import { OpenButton, OpenScope, type SessionRef } from './TaskBox';
 import { ageShort } from './text';
@@ -19,12 +23,25 @@ export const KIND_MARK: Record<AskKind, string> = { question: '?', permission: '
 /** The kind a needs Chip and an ask panel's Eyebrow name. */
 const KIND_WORD: Record<AskKind, string> = { question: 'QUESTION', permission: 'PERMISSION', review: 'REVIEW' };
 
-/** The key of a Needs me tile: its step, or its session when the wait is on no step. The grid's cursor and the rise follow it. */
-const keyOf = (box: BoxData): string => (box.row ? `n${box.row.node.id}` : `s${box.session!.id}`);
+/** The keys of the Needs me tiles, in draw order: the grid's cursor and the rise follow them. */
+export function needsKeys(tiles: readonly NeedsTile[]): string[] {
+  return tiles.map((t) => t.key);
+}
 
-/** The keys of the Needs me tiles, in draw order. */
-export function needsKeys(boxes: BandProps['boxes']): string[] {
-  return boxes.needs.map(keyOf);
+/** A held command's card (lead stage 1, task D): what it does, the command itself, and Go ahead and Not yet. */
+function HeldPanel({ held, now }: { held: HeldCard; now: number }) {
+  return (
+    <div className="ip-ask-panel ip-held-panel" data-held={held.id}>
+      <div className="ip-ask-head">
+        <Eyebrow>HELD</Eyebrow>
+        <span className="ip-tile-age">{ageShort(held.createdAt, now)}</span>
+      </div>
+      <p className="ip-ask-text">{heldText(held)}</p>
+      {/* data-act: selecting the command by hand must not open Details. */}
+      {held.command !== '' && <code className="ip-term" data-act>{held.command}</code>}
+      <HeldActions itemId={held.id} area="needs_me" />
+    </div>
+  );
 }
 
 /** The newest running command of a session, as "npm run build" (a monitor reads "Monitor ..."): what a permission wait is probably about. */
@@ -72,13 +89,15 @@ function AskText({ text }: { text: string }) {
 }
 
 /** Needs me: one tile per task that waits on Aiden, oldest need first (spec 2.2); each ask in its own panel. */
-export function NeedsMe({ snapshot, boxes, now, selectedNode, onOpenNode, onOpenResource, cursor, rise }: BandProps & {
+export function NeedsMe({ snapshot, tiles, now, selectedNode, onOpenNode, onOpenResource, cursor, rise }: BandProps & {
+  /** The tiles to draw, in order (needsTiles): the tasks that wait on Aiden and the commands held for him. */
+  tiles: readonly NeedsTile[];
   /** The grid cursor's props for the tile at this row. */
   cursor: (row: number) => CursorItemProps;
   /** The stagger place a tile key (`needs:<key>`) rises with. */
   rise: (key: string) => number | undefined;
 }) {
-  if (boxes.needs.length === 0) return <EmptyState>Nothing needs you</EmptyState>;
+  if (tiles.length === 0) return <EmptyState>Nothing needs you</EmptyState>;
   /** The session an ask was raised from, live or past; one that is gone still names its id. */
   const raiser = (ask: Ask): SessionRef | null => {
     if (ask.sessionId === null) return null;
@@ -89,7 +108,7 @@ export function NeedsMe({ snapshot, boxes, now, selectedNode, onOpenNode, onOpen
     const live = ref ? snapshot.sessions.find((s) => s.id === ref.id) : undefined;
     return live ? WORDS[sessionActivity(live, now)] : undefined;
   };
-  const body = (box: BoxData) => {
+  const body = (box: BoxData, held: readonly HeldCard[]) => {
     // Every session of the step that waits on permission has its own panel (a focusless box holds just its session).
     const waiting = box.row ? box.row.sessions.filter((x) => x.state === 'permission') : box.session ? [box.session] : [];
     const asks = box.row?.waiting ?? [];
@@ -124,13 +143,63 @@ export function NeedsMe({ snapshot, boxes, now, selectedNode, onOpenNode, onOpen
         </>
       ) });
     });
+    // The commands held on the step come after its asks, oldest first.
+    for (const h of held) parts.push({ key: `held${h.id}`, node: <HeldPanel held={h} now={now} /> });
     // One OpenScope for the tile, holding one Open session state per session id.
     return <OpenScope area="needs_me">{parts.map((p) => <Fragment key={p.key}>{p.node}</Fragment>)}</OpenScope>;
   };
   return (
     <ul className="ip-list">
-      {boxes.needs.map((box, i) => {
-        const key = keyOf(box);
+      {tiles.map((tile, i) => {
+        const key = tile.key;
+        if (tile.kind === 'held') {
+          const cards = tile.held.map((h) => <HeldPanel key={h.id} held={h} now={now} />);
+          const chip = <Chip tone="needs">HELD</Chip>;
+          const age = ageShort(tile.held[0].createdAt, now);
+          // A step drawn elsewhere on the Board keeps its tile's look (id, title, hue, foot); the age is the oldest hold's.
+          if (tile.step) {
+            return (
+              <BoardTile
+                key={key}
+                box={tile.step}
+                now={now}
+                area="needs_me"
+                band="needs"
+                docs={snapshot.resources.filter((r) => r.nodeId === tile.stepId).length}
+                cursor={cursor(i)}
+                rise={rise(`needs:${key}`)}
+                selected={selectedNode === tile.stepId}
+                chips={chip}
+                age={age}
+                onOpenNode={onOpenNode}
+                onOpenResource={onOpenResource}
+              >
+                {cards}
+              </BoardTile>
+            );
+          }
+          const stepId = tile.stepId;
+          const step = stepId === null ? undefined : snapshot.nodes.find((n) => n.id === stepId);
+          return (
+            <li key={key}>
+              <Tile
+                {...cursor(i)}
+                className="ip-tile ip-needs-tile"
+                tone="ask"
+                data-node={step?.id}
+                id={step ? `#${step.id}` : undefined}
+                chips={<>{chip}<span className="ip-tile-age">{age}</span></>}
+                title={step ? step.title : 'A held command'}
+                titleClassName={step ? 'ip-row-title' : undefined}
+                body={cards}
+                selected={step ? selectedNode === step.id : false}
+                rise={rise(`needs:${key}`)}
+                onClick={step ? rowClick('needs_me', () => onOpenNode(step.id)) : undefined}
+              />
+            </li>
+          );
+        }
+        const { box } = tile;
         const kind = box.state === 'question' || box.state === 'permission' || box.state === 'review' ? KIND_WORD[box.state] : box.state.toUpperCase();
         return (
           <BoardTile
@@ -147,7 +216,7 @@ export function NeedsMe({ snapshot, boxes, now, selectedNode, onOpenNode, onOpen
             onOpenNode={onOpenNode}
             onOpenResource={onOpenResource}
           >
-            {body(box)}
+            {body(box, tile.held)}
           </BoardTile>
         );
       })}

@@ -1,8 +1,9 @@
+import { heldActions, playbookHeldLines } from '../../core/hold';
 import { clipLine } from '../../core/step-ref';
-import type { Project } from '../../core/types';
+import type { HeldCard, Project } from '../../core/types';
 import { write, type Ctx } from '../db/tx';
 import { conflict, notFound } from '../errors';
-import { carriedLine, isOldAsk, oldAskAnswerLine, requireAnswerLead, workProject, WORK_PROJECT, type CarriedYes, type YesAction } from '../lead-commands';
+import { carriedLine, isOldAsk, oldAskAnswerLine, requireAnswerLead, workProject, WORK_PROJECT, YES_ACTIONS, type AnswerWhere, type CarriedYes, type YesAction } from '../lead-commands';
 import { logLeadEvent } from '../lead';
 import { getDeskItem, moveDeskItem, type DeskItem } from '../repo/desk';
 import { askOf, DECISION_LINE_CUT, reachableThread, t3SessionOnStep } from '../repo/deskBring';
@@ -11,7 +12,7 @@ import { getSend, intendSend, sendByRetryKey, type LeadSend } from '../repo/lead
 import { addLogInWrite } from '../repo/logs';
 import { checkLanding, realGit, recordYes, type LandingDeps } from './landing';
 import { aidenSaidWords } from './aidenSaid';
-import { heldRef } from './hold';
+import { heldRef, heldWhatOf } from './hold';
 
 /*
  * Carrying Aiden's answer (lead stage 1, #743, task 11 and its fixes): what his yes covers, read from git, and his reply to
@@ -24,9 +25,10 @@ export const CHANGED_AFTER = 'the work changed after his word';
 export const SAID_AT_NEEDED = 'give --said-at with a yes';
 
 /**
- * The yes for each action, keyed on the change of the session's branch (main...branch, as the landing check reads a merge,
- * nothing logged), read now in its folder. No yes when the change cannot be read, or when its newest commit is after his
- * words (`saidAt`): what he said yes to is not what is there now.
+ * The yes for each action, read now in the session's folder on its branch, as the landing check keys it (nothing logged):
+ * a merge, deploy or push on the change of the branch (main...branch, as a merge reads it), a publish on the tree of the
+ * branch's head (what a publish sends). No yes when the change cannot be read, or when the branch's newest commit is after
+ * his words (`saidAt`): what he said yes to is not what is there now.
  */
 export async function readSessionYeses(
   ctx: Ctx,
@@ -42,19 +44,29 @@ export async function readSessionYeses(
   const folder = session?.cwd ?? null;
   if (folder === null || folder.trim() === '') return none('its session has no folder on record');
   const branch = session?.branch ? session.branch : undefined;
-  try {
-    const read = await checkLanding(ctx, { ref, stepId, action: 'merge', folder, ...(branch === undefined ? {} : { branch }) }, deps, { record: false });
-    if (read.patchId === null) return none('there is no change to read');
-    const tip = read.range.split('...')[1] ?? 'HEAD';
-    const log = await (deps?.git ?? realGit)(folder, ['log', '-1', '--format=%cI', tip, '--']);
-    const newest = log.code === 0 ? Date.parse(log.stdout.trim()) : NaN;
-    if (Number.isNaN(newest)) return none(`could not tell when ${tip.replace('refs/heads/', '')} last changed`);
-    // git gives whole seconds: a commit in the same second as his word counts as before it.
-    if (newest > Math.floor(Date.parse(saidAt) / 1000) * 1000) return none(CHANGED_AFTER);
-    return actions.map((action) => ({ action, patchId: read.patchId }));
-  } catch (err) {
-    return none((err as Error).message.replace(/\.+$/, ''));
-  }
+  /** One read of the landing check: the key a yes is recorded on for `action`, or why there is none. */
+  const keyOf = async (action: 'merge' | 'publish'): Promise<{ patchId: string } | { why: string }> => {
+    try {
+      const read = await checkLanding(ctx, { ref, stepId, action, folder, ...(branch === undefined ? {} : { branch }) }, deps, { record: false });
+      if (read.patchId === null) return { why: 'there is no change to read' };
+      // The range ends at the branch read: main...branch, or origin/branch..branch for a publish of a pushed branch.
+      const tip = read.range.split(/\.{2,3}/)[1] ?? 'HEAD';
+      const log = await (deps?.git ?? realGit)(folder, ['log', '-1', '--format=%cI', tip, '--']);
+      const newest = log.code === 0 ? Date.parse(log.stdout.trim()) : NaN;
+      if (Number.isNaN(newest)) return { why: `could not tell when ${tip.replace('refs/heads/', '')} last changed` };
+      // git gives whole seconds: a commit in the same second as his word counts as before it.
+      if (newest > Math.floor(Date.parse(saidAt) / 1000) * 1000) return { why: CHANGED_AFTER };
+      return { patchId: read.patchId };
+    } catch (err) {
+      return { why: (err as Error).message.replace(/\.+$/, '') };
+    }
+  };
+  const change = actions.some((a) => a !== 'publish') ? await keyOf('merge') : undefined;
+  const tree = actions.includes('publish') ? await keyOf('publish') : undefined;
+  return actions.map((action) => {
+    const key = (action === 'publish' ? tree : change)!;
+    return 'patchId' in key ? { action, patchId: key.patchId } : { action, patchId: null, why: key.why };
+  });
 }
 
 /** What a line to the Voice is about, for his reply: an ask (a bring line), a held action, or what he left to the lead. */
@@ -89,15 +101,47 @@ export function heldScope(ctx: Ctx, item: DeskItem): { sessionId: string | null;
   return { sessionId: null, command: '' };
 }
 
+/**
+ * The actions of a held item's command that a yes can be recorded for (YES_ACTIONS), read from its command as the hold read
+ * it, in its session's folder: a yes for a held command covers only what that command does.
+ */
+export function heldYesActions(ctx: Ctx, project: Project, held: { sessionId: string | null; command: string }): YesAction[] {
+  const cwd = held.sessionId === null ? null : ((ctx.db.prepare('SELECT cwd FROM sessions WHERE id = ?').pluck().get(held.sessionId) as string | null | undefined) ?? null);
+  const own = new Set(heldActions(held.command, playbookHeldLines(project.playbook), cwd).map((m) => m.action as string));
+  return YES_ACTIONS.filter((a) => own.has(a));
+}
+
+/** How many held cards the window is sent for one project at most. */
+const HELD_CARDS_MAX = 100;
+
+/**
+ * The project's held items waiting on Aiden, oldest first, for the window's Needs me (lead stage 1, task D): what each
+ * command does (heldWhatOf, or the command for an item held before that was stored) and the command itself.
+ */
+export function heldCards(ctx: Ctx, projectId: number): HeldCard[] {
+  const rows = ctx.db
+    .prepare("SELECT id FROM desk_items WHERE project_id = ? AND kind = 'held' AND state = 'waiting_aiden' ORDER BY created_at, id LIMIT ?")
+    .pluck()
+    .all(projectId, HELD_CARDS_MAX) as number[];
+  return rows.flatMap((id) => {
+    const item = getDeskItem(ctx.db, id);
+    if (item === undefined) return [];
+    const { command } = heldScope(ctx, item);
+    return [{ id: item.id, stepId: item.nodeId, createdAt: item.createdAt, what: heldWhatOf(item.outcome) ?? command, command }];
+  });
+}
+
 export interface ItemAnswerInput {
   aidenWords: string;
-  where?: 'voice' | 'thread';
+  where?: AnswerWhere;
   saidAt?: string;
   shown?: number[];
   /** For a held action, the yes for each action he okayed, read before the write (readSessionYeses). */
   yeses?: CarriedYes[];
   /** Lines the route adds to the answer: what of --yes or --says was not used, and why. */
   notes?: string[];
+  /** The window's answer to a held card: the item must be a held one still waiting on Aiden, else a 409 and nothing changes. */
+  heldWaiting?: boolean;
 }
 
 /**
@@ -114,6 +158,7 @@ export function leadAnswerItem(ctx: Ctx, ref: string, as: string, instructions: 
     const item = getDeskItem(ctx.db, itemId);
     if (item === undefined || item.projectId !== project.id) throw notFound(`Desk item #${itemId} not found.`);
     if (item.state === 'done') throw conflict(`Desk item #${item.id} is already closed.`);
+    if (input.heldWaiting && (item.kind !== 'held' || item.state !== 'waiting_aiden')) throw conflict(`Desk item #${item.id} is not a held command waiting on Aiden.`);
     const held = item.kind === 'held' ? heldScope(ctx, item) : undefined;
     const lines: string[] = [];
     const yesIds: number[] = [];
@@ -148,6 +193,10 @@ export function leadAnswerItem(ctx: Ctx, ref: string, as: string, instructions: 
       saidAt,
     });
     moveDeskItem(ctx.db, item.id, ['open', 'leased', 'behind', 'waiting_aiden'], 'done', { outcome: `ANSWERED d${eventId}`, now: ctx.now() });
+    // A held item's line to the Voice not yet tried is never spoken once he has answered it (the window answers before it goes).
+    if (held !== undefined) {
+      ctx.db.prepare("UPDATE lead_sends SET state = 'cleared' WHERE item_id = ? AND kind = 'voice_line' AND state = 'intended' AND result IS NULL").run(item.id);
+    }
     // His words reach only a reachable thread (reachableThread): the held command's session, or the step's session now. An
     // item about an old ask (isOldAsk) is never carried: the step's log records his words.
     const asked = item.kind === 'held' || item.kind === 'aiden_said' ? undefined : askOf(ctx, item);

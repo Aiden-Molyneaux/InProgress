@@ -92,8 +92,8 @@ function requireQuiet(ctx: Ctx, node: TreeNode, session: string): void {
   }
 }
 
-/** The actions a review's go-ahead covers when the caller names none: "ship it". */
-export const YES_ACTIONS = ['merge', 'deploy', 'push'] as const;
+/** The actions a yes of Aiden's can be recorded for: a review's go-ahead, or his go-ahead to a held command. A public push is never one. */
+export const YES_ACTIONS = ['merge', 'deploy', 'push', 'publish'] as const;
 export type YesAction = (typeof YES_ACTIONS)[number];
 
 /** One action of a review's go-ahead, read before the write: the change's patch id, or why it could not be read. */
@@ -108,7 +108,7 @@ export interface LeadAnswerInput {
   askId: number;
   aidenWords: string;
   says?: string;
-  where?: 'voice' | 'thread';
+  where?: AnswerWhere;
   /** When he said it (ISO); now when absent. */
   saidAt?: string;
   /** The documents he was shown, by id. */
@@ -150,10 +150,14 @@ export function isOldAsk(db: DB, ask: { id: number; nodeId: number; text: string
 /** The step-log line that records Aiden's answer to an old ask, in place of a carry. */
 export const oldAskAnswerLine = (askId: number, words: string): string => `Aiden's answer to ${askTag(askId)} (an old ask), in his words: "${words.trim()}"`;
 
+/** Where Aiden gave an answer the lead carries: to the Voice, in the lead's thread, or in the window (a held card). */
+export type AnswerWhere = 'voice' | 'thread' | 'window';
+const WHERE_SAID: Record<AnswerWhere, string> = { voice: 'Grok', thread: "the lead's thread", window: 'the window' };
+
 /** The line a T3 Code session reads in its thread when the lead carries Aiden's answer. */
-export const carriedLine = (lead: string, where: 'voice' | 'thread', saidAt: string, words: string, askId?: number): string =>
+export const carriedLine = (lead: string, where: AnswerWhere, saidAt: string, words: string, askId?: number): string =>
   // The ask is named, so a session with several asks knows which one he answered (a held or "you decide" item has none).
-  `Aiden's answer${askId === undefined ? '' : ` to ${askTag(askId)}`}, carried by ${lead} from ${where === 'voice' ? 'Grok' : "the lead's thread"} at ${hhmmOf(saidAt)}: "${words.trim()}"`;
+  `Aiden's answer${askId === undefined ? '' : ` to ${askTag(askId)}`}, carried by ${lead} from ${WHERE_SAID[where]} at ${hhmmOf(saidAt)}: "${words.trim()}"`;
 
 /**
  * For a review: the patch id of the change of the ask's step, read now in its session's folder on the branch it is on

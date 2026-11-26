@@ -266,7 +266,7 @@ export const leadAnswerBody = z
     /** The documents he was shown. */
     shown: z.array(leadId).max(50).optional(),
     /** The actions his words okayed, for a review or a held action; absent, no yes is recorded. */
-    yes: z.array(z.enum(['merge', 'deploy', 'push'])).min(1).max(3).optional(),
+    yes: z.array(z.enum(['merge', 'deploy', 'push', 'publish'])).min(1).max(4).optional(),
   })
   .strict()
   .refine((b) => (b.askId === undefined) !== (b.sendId === undefined), { message: 'give the ask (askId) or the line to the Voice (sendId), not both', path: ['askId'] });

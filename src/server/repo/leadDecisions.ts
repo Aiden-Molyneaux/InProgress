@@ -4,7 +4,7 @@ import type { DB } from '../db/connection';
 export type DecisionKind = 'product' | 'technical' | 'order' | 'permission' | 'restart' | 'old_ask';
 
 /** Where Aiden said his answer. */
-export type SaidWhere = 'desk' | 'voice' | 'thread';
+export type SaidWhere = 'desk' | 'voice' | 'thread' | 'window';
 
 /** A decision of the lead, beside its lead_events row. */
 export interface LeadDecision {

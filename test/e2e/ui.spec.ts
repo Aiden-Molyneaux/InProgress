@@ -2002,6 +2002,75 @@ test('The lead is behind appears with a late desk item and leaves when it is han
   await expect(group).toHaveCount(0);
 });
 
+test('a held command shows as a card in Needs me, and Go ahead clears the landing check for it, once', async ({ page, api }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const name = unique('Held card');
+  const made = await bare(api, name);
+  const session = `e2e-${randomUUID()}`;
+  const [step] = await write<{ id: number }[]>(api, session, 'post', '/api/nodes', { parentId: made.rootNodeId, nodes: [{ title: 'Ship the package' }] });
+  const ui = await uiHeaders(api);
+  for (const [path, data] of [
+    [`/api/ui/projects/${made.id}/lead`, { slug: made.slug, name: 'Progresser' }],
+    [`/api/ui/projects/${made.id}/lead-switch`, { slug: made.slug, switch: 'round', on: true }],
+  ] as const) {
+    const res = await api.post(path, { headers: ui, data });
+    expect(res.ok(), `${path} answered ${res.status()}: ${await res.text()}`).toBe(true);
+  }
+  // A package on a feature branch, in a repository of its own (no hooks: the user's global ones would slow every commit).
+  const dir = mkdtempSync(join(tmpdir(), 'ip-e2e-held-'));
+  pageDirs.push(dir);
+  const git = (...args: string[]) => execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', '-c', `core.hooksPath=${join(dir, '.git', 'no-hooks')}`, ...args], { stdio: 'ignore' });
+  git('init', '-q', '-b', 'main');
+  writeFileSync(join(dir, 'README.md'), 'x\n');
+  git('add', '.');
+  git('commit', '-q', '-m', 'start');
+  git('checkout', '-q', '-b', 'feature');
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x', version: '1.2.0' }));
+  git('add', '.');
+  git('commit', '-q', '-m', 'package');
+  // The session that runs the publish: on the step, in that folder, on that branch (written straight in, as the hooks would).
+  await write(api, session, 'post', `/api/sessions/${session}/enroll`, { project: made.slug, title: 'Held session' });
+  await write(api, session, 'post', `/api/sessions/${session}/focus`, { nodeId: step.id });
+  const db = new Database('.e2e-home/inprogress.db');
+  try {
+    db.pragma('busy_timeout = 5000');
+    db.prepare("UPDATE sessions SET cwd = ?, branch = 'feature' WHERE id = ?").run(dir, session);
+  } finally {
+    db.close();
+  }
+  await page.goto(`/#/p/${made.slug}`);
+  await viewButton(page, 'Board').click();
+  const needs = page.locator('.ip-band-needs');
+  await expect(needs).toContainText('Nothing needs you');
+  const auth = { authorization: `Bearer ${readFileSync('.e2e-home/token', 'utf8').trim()}` };
+  const landing = async () => {
+    const res = await api.post(`/api/lead/${made.slug}/landing`, { headers: auth, data: { stepId: step.id, action: 'publish', folder: dir, branch: 'feature' } });
+    expect(res.ok(), `landing answered ${res.status()}: ${await res.text()}`).toBe(true);
+    return (await res.json()) as { clear: boolean; why?: string };
+  };
+  // The hold hook's call.
+  const held = await api.post('/api/lead/hold', { headers: auth, data: { sessionId: session, cwd: dir, command: 'npm publish', action: 'publish', index: 0, folder: dir } });
+  expect(await held.json()).toEqual({ held: true, text: 'a publish of x 1.2.0 to npm' });
+  expect((await landing()).clear).toBe(false);
+  // Within two seconds, by the stream: no reload.
+  const card = needs.locator('[data-held]');
+  await expect(card).toHaveCount(1, { timeout: 2_000 });
+  await expect(card).toContainText('HELD');
+  await expect(card.locator('.ip-ask-text')).toHaveText(`#${step.id} wants a publish of x 1.2.0 to npm.`);
+  await expect(card.locator('code')).toHaveText('npm publish');
+  // The band counts the held tile.
+  await expect(needs.locator('.p-count-figure').first()).toHaveText('1');
+  const itemId = Number(await card.getAttribute('data-held'));
+  await card.getByRole('button', { name: 'Go ahead', exact: true }).click();
+  await expect(needs.locator('[data-held]')).toHaveCount(0);
+  await expect(needs).toContainText('Nothing needs you');
+  expect(await landing()).toMatchObject({ clear: true, why: 'his yes' });
+  // A second answer to the same card is refused and changes nothing.
+  const again = await api.post(`/api/ui/held/${itemId}`, { headers: ui, data: { answer: 'not-yet' } });
+  expect(again.status()).toBe(409);
+  expect(await landing()).toMatchObject({ clear: true, why: 'his yes' });
+});
+
 test('the open archived project can be renamed from its tab, and ⋯ shows the new name', async ({ page, api }) => {
   const keptName = unique('Rename kept');
   const oldName = unique('Rename shelved');

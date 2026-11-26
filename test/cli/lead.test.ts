@@ -443,7 +443,7 @@ describe("inprogress lead's commands", () => {
     expect(lines[3]).toBe('  inprogress lead step <project> <step id> --as <name> --instructions <n>');
     expect(lines[4]).toBe('  inprogress lead resource <project> <document id> --as <name> --instructions <n>');
     expect(lines[5]).toBe(
-      '  inprogress lead answer <project> <ask id> | --send <send id> --aiden <words> [--says <text>] [--where voice|thread] [--said-at <iso time>] [--shown r12,r13] [--yes merge|deploy|push ...] --as <name> --instructions <n>',
+      '  inprogress lead answer <project> <ask id> | --send <send id> --aiden <words> [--says <text>] [--where voice|thread] [--said-at <iso time>] [--shown r12,r13] [--yes merge|deploy|push|publish ...] --as <name> --instructions <n>',
     );
     expect(lines[6]).toBe('  inprogress lead seen <project> <send id> --as <name> --instructions <n>');
     expect(lines[7]).toBe('  inprogress lead desk-add <project> --step <step id> --words <his words> --as <name> --instructions <n>');
@@ -588,7 +588,9 @@ describe('inprogress lead relay', () => {
       const answer = ['answer', 'inprogress', 'a5', '--aiden', 'ship it', '--where', 'voice', '--said-at', '2026-11-25T14:02:00Z', '--shown', 'r12,13', '--yes', 'merge,push', ...WHO];
       expect(await run(answer)).toMatchObject({ code: 0 });
       expect((await run(['answer', 'inprogress', 'a5', '--aiden', 'x', '--where', 'phone', ...WHO])).code).toBe(1);
-      expect((await run(['answer', 'inprogress', 'a5', '--aiden', 'x', '--yes', 'publish', ...WHO])).code).toBe(1);
+      // A public push is never a yes; a publish is.
+      expect((await run(['answer', 'inprogress', 'a5', '--aiden', 'x', '--yes', 'push-public', ...WHO])).code).toBe(1);
+      expect(await run(['answer', 'inprogress', '--send', 's9', '--aiden', 'go ahead', '--yes', 'publish', ...WHO])).toMatchObject({ code: 0 });
       // His reply to a line from the Voice, by its send; --yes once per action.
       expect(await run(['answer', 'inprogress', '--send', 's9', '--aiden', 'go ahead', '--yes', 'push', '--yes', 'merge', ...WHO])).toMatchObject({ code: 0 });
       expect((await run(['answer', 'inprogress', 'a5', '--send', 's9', '--aiden', 'x', ...WHO])).code).toBe(1);
@@ -603,10 +605,11 @@ describe('inprogress lead relay', () => {
       ['/api/lead/inprogress/stamp', { ...who, sendId: 7 }],
       ['/api/lead/inprogress/desk-add', { ...who, stepId: 12, aidenWords: 'you decide' }],
       ['/api/lead/inprogress/answer', { ...who, askId: 5, aidenWords: 'ship it', where: 'voice', saidAt: '2026-11-25T14:02:00.000Z', shown: [12, 13], yes: ['merge', 'push'] }],
+      ['/api/lead/inprogress/answer', { ...who, sendId: 9, aidenWords: 'go ahead', yes: ['publish'] }],
       ['/api/lead/inprogress/answer', { ...who, sendId: 9, aidenWords: 'go ahead', yes: ['push', 'merge'] }],
     ]);
     // An answer reads git on the server: it waits as long as a relay.
-    expect(sent.filter((s) => s.url.endsWith('/answer')).map((s) => s.timeoutMs)).toEqual([RELAY_TIMEOUT_MS, RELAY_TIMEOUT_MS]);
+    expect(sent.filter((s) => s.url.endsWith('/answer')).map((s) => s.timeoutMs)).toEqual([RELAY_TIMEOUT_MS, RELAY_TIMEOUT_MS, RELAY_TIMEOUT_MS]);
   });
 
   it('posts old-asks to its project, next with no project and an optional count, and reading with the ask and its text', async () => {

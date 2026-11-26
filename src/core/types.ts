@@ -621,6 +621,18 @@ export interface LeadBehindItem {
   behindWhy: 'failures' | 'faults' | null;
 }
 
+/** A command the hold check held for Aiden (lead stage 1, task D): a held desk item still waiting on him. */
+export interface HeldCard {
+  /** The desk item's id, which the window's Go ahead and Not yet post to. */
+  id: number;
+  stepId: number | null;
+  createdAt: string;
+  /** What the command does, in plain words (`a push of feature to origin`), or the command for an item held before that was stored. */
+  what: string;
+  /** The command as the session ran it; empty when its held line cannot be found. */
+  command: string;
+}
+
 export interface ProjectSnapshot {
   project: Project;
   nodes: TreeNode[];
@@ -639,6 +651,8 @@ export interface ProjectSnapshot {
   stateNote: StateNote | null;
   /** The desk items that may be behind, by the lead's round (see LeadBehindItem); absent in older fixtures. */
   leadBehind?: LeadBehindItem[];
+  /** The commands held for Aiden, oldest first (see HeldCard); absent in older fixtures. */
+  held?: HeldCard[];
   lastEventId: number;
   lastEvent: EventRow | null;
 }

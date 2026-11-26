@@ -11,7 +11,7 @@ export const LEAD_USAGE = [
   `  inprogress lead brief <project> ${WHO} [--mark] [--json]`,
   `  inprogress lead step <project> <step id> ${WHO}`,
   `  inprogress lead resource <project> <document id> ${WHO}`,
-  `  inprogress lead answer <project> <ask id> | --send <send id> --aiden <words> [--says <text>] [--where voice|thread] [--said-at <iso time>] [--shown r12,r13] [--yes merge|deploy|push ...] ${WHO}`,
+  `  inprogress lead answer <project> <ask id> | --send <send id> --aiden <words> [--says <text>] [--where voice|thread] [--said-at <iso time>] [--shown r12,r13] [--yes merge|deploy|push|publish ...] ${WHO}`,
   `  inprogress lead seen <project> <send id> ${WHO}`,
   `  inprogress lead desk-add <project> --step <step id> --words <his words> ${WHO}`,
   `  inprogress lead old-asks <project> | --all ${WHO}`,
@@ -226,7 +226,7 @@ function draft(command: string, p: Parsed): Draft {
       const yes = p.flags.get('--yes');
       if (yes !== undefined) {
         const actions = yes.split(',').map((t) => t.trim());
-        if (actions.some((a) => a !== 'merge' && a !== 'deploy' && a !== 'push')) return { error: `--yes takes merge, deploy and push, not ${JSON.stringify(yes)}` };
+        if (actions.some((a) => a !== 'merge' && a !== 'deploy' && a !== 'push' && a !== 'publish')) return { error: `--yes takes merge, deploy, push and publish, not ${JSON.stringify(yes)}` };
         fields.yes = [...new Set(actions)];
       }
       return { fields };

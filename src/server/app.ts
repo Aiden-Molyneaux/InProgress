@@ -131,7 +131,7 @@ export function buildApp(opts: AppOptions): FastifyInstance {
   registerAskRoutes(app, opts.ctx, requireToken);
   registerLeadRoutes(app, opts.ctx, requireToken, opts.t3Send, opts.t3Start, opts.landing, opts.sender, opts.home);
   registerSse(app, opts.ctx);
-  registerWindowRoutes(app, opts.ctx, requireUi, opts.openDesktop);
+  registerWindowRoutes(app, opts.ctx, requireUi, opts.openDesktop, { ...(opts.landing === undefined ? {} : { landing: opts.landing }), ...(opts.sender === undefined ? {} : { sender: opts.sender }) });
   registerUi(app, opts, requireToken, requireUi);
   if (opts.home && opts.backups) registerBackupRoutes(app, { ...opts, home: opts.home, backups: opts.backups }, requireUi);
   return app;

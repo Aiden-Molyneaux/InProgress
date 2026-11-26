@@ -73,7 +73,7 @@
 .ip-ask-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .ip-answer-row { display: flex; align-items: center; gap: var(--sp-2); }
 .ip-answer-row .p-field { flex: 1; min-width: 0; }
-[data-ask][data-sent] { opacity: 0.5; text-decoration: line-through; text-decoration-color: var(--text-dim); }
+[data-ask][data-sent], [data-held][data-sent] { opacity: 0.5; text-decoration: line-through; text-decoration-color: var(--text-dim); }
 /* A terminal readout: a command or a session's progress on the darkest ground. */
 .ip-term:has(.ip-term-task, .ip-cmd, .ip-kin-count) { display: grid; gap: var(--sp-2); }
 .ip-term-task { color: var(--text-hi); overflow-wrap: anywhere; }

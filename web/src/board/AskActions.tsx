@@ -40,7 +40,7 @@ export function AskActions({ ask, area }: { ask: Pick<Ask, 'id' | 'text'>; area:
     const handoff = (): HTMLElement | null => {
       // Details' row is itself the ask (li.ip-dask): its siblings are under its parent.
       const scope = row && row === own ? row.parentElement : row;
-      const sibling = scope?.isConnected ? [...scope.querySelectorAll<HTMLElement>('[data-ask]')].find((b) => b !== own && !b.classList.contains('cleared') && !b.hasAttribute('data-sent')) : undefined;
+      const sibling = scope?.isConnected ? [...scope.querySelectorAll<HTMLElement>('[data-ask], [data-held]')].find((b) => b !== own && !b.classList.contains('cleared') && !b.hasAttribute('data-sent')) : undefined;
       const answer = sibling?.querySelector<HTMLElement>('[data-answer]') ?? sibling?.querySelector<HTMLElement>('input');
       if (answer) return answer;
       if (row?.isConnected) return focusTargetAfter(row);

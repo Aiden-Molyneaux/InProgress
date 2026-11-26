@@ -1,13 +1,19 @@
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import type { Guard } from '../app';
 import type { Ctx } from '../db/tx';
+import { LEAD_INSTRUCTIONS_VERSION } from '../../core/lead';
 import { STALE_SESSION_MS, type TreeNode } from '../../core/types';
 import { badRequest, conflict, notFound } from '../errors';
 import { openInDesktop, resumeCommand, usableCwd, type DesktopSession, type OpenDesktopResult } from '../open-desktop';
 import { findSession, liveDriver } from '../repo/sessions';
 import { deleteProject, listDeletedProjects, restoreProject } from '../project-lifecycle';
 import { clearAsk } from '../repo/asks';
-import { lateAnswer } from '../lead-commands';
+import { lateAnswer, type CarriedYes } from '../lead-commands';
+import { heldScope, heldYesActions, leadAnswerItem, readSessionYeses } from '../lead/carry';
+import type { LandingDeps } from '../lead/landing';
+import type { Sender } from '../lead/sends';
+import { getDeskItem } from '../repo/desk';
 import { windowLeadSwitch } from '../lead/window';
 import { recordQuiet } from '../repo/events';
 import { addNodes, applyRankOp, deleteNode, finishNode, labelNode, moveNode, parkNode, unparkNode } from '../repo/nodes';
@@ -17,6 +23,16 @@ import { idParam, sessionIdParam, windowClearBody, windowDoneBody, windowEventBo
 
 /** Who the window's writes are recorded as: fixed here, never taken from a header. */
 const ACTOR = 'window';
+
+/** Go ahead or Not yet on a held card, and the words each is recorded as: Aiden's own, said in the window. */
+const windowHeldBody = z.object({ answer: z.enum(['go', 'not-yet']) }).strict();
+const HELD_WORDS = { go: 'go ahead (window)', 'not-yet': 'not yet (window)' } as const;
+
+/** What the held route reads git with and wakes to carry his words: the app's landing deps and sender, when it has them. */
+export interface WindowLeadDeps {
+  landing?: LandingDeps;
+  sender?: Sender;
+}
 
 /**
  * Why a step is not one the Backlog shows, or null when it is: done or dropped, worked on (a live session's focus, or
@@ -40,7 +56,7 @@ function notInBacklog(ctx: Ctx, projectId: number, n: TreeNode): string | null {
  * active project or an archived one (an active one is archived in the same write); delete and restore answer 409 on the
  * wrong state: already deleted, or not deleted.
  */
-export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: Guard, openDesktop: (session: DesktopSession) => Promise<OpenDesktopResult> = openInDesktop): void {
+export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: Guard, openDesktop: (session: DesktopSession) => Promise<OpenDesktopResult> = openInDesktop, lead: WindowLeadDeps = {}): void {
   const guarded = { onRequest: requireUi };
 
   // "Open session" on the Board: the Claude desktop app opens the session. When it cannot, the answer carries the command
@@ -240,6 +256,45 @@ export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: 
     // An answer to an ask the lead already decided is not dropped: it undoes that decision and carries his words.
     if (answer !== undefined && answer.trim() !== '') lateAnswer(ctx, id, answer.trim(), ACTOR);
     return { ask: clearAsk(ctx, ACTOR, id, answer) };
+  });
+  // A held card's Go ahead or Not yet (lead stage 1, task D): answered as `lead answer --send` answers a held line, in the
+  // project lead's name, with his words said now in the window. Go ahead records a yes for exactly the actions of that held command; Not
+  // yet records none. Only a held item still waiting on him is answered: anything else, a second click too, is a 409.
+  app.post('/api/ui/held/:id', guarded, async (req) => {
+    const { id } = idParam.parse(req.params);
+    const { answer } = windowHeldBody.parse(req.body);
+    const item = getDeskItem(ctx.db, id);
+    if (item === undefined) throw notFound(`Desk item #${id} not found.`, 'Reload the window.');
+    // Checked before any git: a refused answer reads nothing.
+    if (item.kind !== 'held' || item.state !== 'waiting_aiden') throw conflict(`Desk item #${id} is not a held command waiting on you.`, 'Reload the window.');
+    const project = getProjectById(ctx, item.projectId);
+    if (project === undefined) throw notFound(`Desk item #${id} has no project.`, 'Reload the window.');
+    const leadName = project.lead?.trim() ?? '';
+    if (leadName === '') throw conflict(`${project.name} has no lead to answer this held command.`, 'Answer it in the session.');
+    const saidAt = ctx.now();
+    let yeses: CarriedYes[] | undefined;
+    const notes: string[] = [];
+    if (answer === 'go') {
+      const held = heldScope(ctx, item);
+      const actions = heldYesActions(ctx, project, held);
+      if (item.nodeId === null) {
+        if (actions.length) notes.push('No yes recorded: the held command is on no step.');
+      } else if (actions.length) {
+        yeses = await readSessionYeses(ctx, project.slug, item.nodeId, held.sessionId, actions, saidAt, lead.landing);
+      }
+    }
+    const res = leadAnswerItem(ctx, project.slug, leadName, LEAD_INSTRUCTIONS_VERSION, item.id, {
+      aidenWords: HELD_WORDS[answer],
+      where: 'window',
+      saidAt,
+      notes,
+      heldWaiting: true,
+      ...(yeses === undefined ? {} : { yeses }),
+    });
+    // The carried line is a send: carried out after the write commits (wake never throws). Without the server's sender, its
+    // minute check carries it.
+    if (res.carried && lead.sender !== undefined) setImmediate(() => void lead.sender!.wake());
+    return res;
   });
   // The window's measurements (spec 2.6): stored quietly, only the named keys, and strings cut short: never content.
   app.post('/api/ui/events', guarded, async (req, reply) => {
