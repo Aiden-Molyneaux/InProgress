@@ -10,18 +10,13 @@ import { intentHeadlines } from './lead-text';
 import { requireNode } from './repo/nodes';
 import { liveSessionUnder, readProjectSessions } from './repo/sessions';
 import { parkedAncestor } from './repo/shelved';
-import { createSender, type Sender, type StartBody, type StartOptions } from './lead/sends';
+import type { Sender, StartBody, StartOptions } from './lead/sends';
 import { intendSend } from './repo/leadSends';
-import { T3Unavailable, t3Send, t3Start, type T3Options } from './t3';
+import { t3Start, type T3Options } from './t3';
+import type { Project, TreeNode } from '../core/types';
 
 /** Starts a T3 Code thread in a folder with a first message. Injected, so no test runs the t3 CLI. */
 export type StartThread = (project: string, message: string, opts: StartOptions) => Promise<{ threadId: string }>;
-
-/** A sender of its own for a caller that passes a bare start: it carries out only the sends it is asked to perform. */
-export function senderForStart(ctx: Ctx, start: StartThread): Sender {
-  const none = () => Promise.reject(new T3Unavailable('this sender does not read T3 Code'));
-  return createSender(ctx, { t3: { list: none, show: none, start, send: t3Send } });
-}
 
 /** The answer to a start that timed out: a thread may exist, so it is not started again. */
 export const START_UNKNOWN = 'A thread may have been started. Do not run it again: read the brief and tell Aiden.';
@@ -47,12 +42,24 @@ export function startProviderModel(env: Record<string, string | undefined> = pro
   return { provider: named(env.INPROGRESS_LEAD_PROVIDER, LEAD_START_PROVIDER), model: named(env.INPROGRESS_LEAD_MODEL, LEAD_START_MODEL) };
 }
 
-/** The project's starts on the lead's own judgment (no words of Aiden's, not cleared) in the 24 hours before `nowMs`: what LEAD_STARTS_PER_DAY limits. */
+/**
+ * The project's starts on the lead's own judgment (no words of Aiden's, not cleared) in the 24 hours before `nowMs`: what
+ * LEAD_STARTS_PER_DAY limits. The start lines written before the sends (#743 task 8) count too, so a deploy resets nothing.
+ */
 export function ownStartsToday(ctx: Ctx, projectId: number, nowMs: number): number {
-  return ctx.db
-    .prepare("SELECT COUNT(*) FROM lead_sends WHERE project_id = ? AND kind = 'start' AND state <> 'cleared' AND json_extract(body, '$.aidenWords') IS NULL AND created_at >= ?")
+  const since = new Date(nowMs - DAY_MS).toISOString();
+  const sends = ctx.db
+    .prepare(
+      `SELECT COUNT(*) FROM lead_sends WHERE project_id = ? AND kind = 'start' AND state <> 'cleared' AND created_at >= ?
+          AND (NOT json_valid(body) OR json_extract(body, '$.aidenWords') IS NULL)`,
+    )
     .pluck()
-    .get(projectId, new Date(nowMs - DAY_MS).toISOString()) as number;
+    .get(projectId, since) as number;
+  const before = ctx.db
+    .prepare(`SELECT COUNT(*) FROM lead_events e WHERE e.project_id = ? AND e.aiden_words IS NULL AND e.at >= ? AND ${LEGACY_START}`)
+    .pluck()
+    .get(projectId, since) as number;
+  return sends + before;
 }
 
 const MINUTE_MS = 60 * 1000;
@@ -60,27 +67,31 @@ const MINUTE_MS = 60 * 1000;
 const CLAIM_WINDOW_MS = 10 * MINUTE_MS;
 const DAY_MS = 24 * 60 * MINUTE_MS;
 
+/** A start send of the step `?`: its body is checked as JSON before it is read. */
+const START_OF_STEP = "kind = 'start' AND json_valid(body) AND json_extract(body, '$.nodeId') = ?";
 /**
- * The lead starts a T3 Code thread for a step: checked (every refusal is a 409 thrown before anything is started or written),
- * started outside any write (write() cannot hold an await) and never repeated, then logged in one write whatever it did. A start
- * that timed out after it may have made a thread answers START_UNKNOWN, any other failure `Not started: <reason>`, both as a 502.
- * Without Aiden's words the start is the lead's own judgment: it needs Starts on, and stays inside the daily and open-ask limits.
+ * A `start` or `start_unknown` line (alias e) written before the sends (#743 task 8): no start send has its thread id, or
+ * none of its step was written at or before it. Every start since writes its send first, so these are the old ones.
  */
-export async function leadStart(
-  ctx: Ctx,
-  ref: string,
-  as: string,
-  instructions: number,
-  input: { stepId: number; aidenWords?: string },
-  via: StartThread | Sender = defaultStart(),
-): Promise<{ text: string; threadId: string }> {
-  const sender = typeof via === 'function' ? senderForStart(ctx, via) : via;
-  const project = requireLead(ctx, ref, as, instructions, true);
-  if (underWay.has(project.id)) throw conflict(START_UNDER_WAY);
-  // requireLead has matched `as` against the stored name, so it is set.
-  const name = project.lead as string;
-  const actor = `lead:${name}`;
-  const node = requireNode(ctx, input.stepId);
+const LEGACY_START = `(
+  (e.kind = 'start' AND NOT EXISTS (SELECT 1 FROM lead_sends x WHERE x.project_id = e.project_id AND x.kind = 'start' AND x.result = e.text))
+  OR (e.kind = 'start_unknown' AND NOT EXISTS (SELECT 1 FROM lead_sends x WHERE x.project_id = e.project_id AND x.kind = 'start' AND x.created_at <= e.at
+        AND json_valid(x.body) AND json_extract(x.body, '$.nodeId') = e.node_id)))`;
+
+export interface StartGuardInput {
+  /** Aiden's words: without them the start is the lead's own judgment, under Starts and the limits. */
+  aidenWords?: string;
+  /** A session the live checks leave out: a restart's own stopped session. */
+  exceptSession?: string;
+}
+
+/**
+ * Every refusal of a start, as a 409 thrown before anything is written: the step's state, a session or thread already on it,
+ * a start of it not yet settled, the project's intent, the step's What and Why, a folder, the in-flight limit, and for the
+ * lead's own judgment the Starts switch, the open asks and the starts per day. Answers what the start needs. A restart
+ * (stopped.ts) calls it too, so both refuse alike.
+ */
+export function startGuard(ctx: Ctx, project: Project, node: TreeNode, input: StartGuardInput): { folder: string; goal: string; phase: string } {
   if (node.projectId !== project.id) throw conflict(`#${node.id} is not in this project.`);
   if (node.parentId === null) throw conflict('The project itself cannot be started.');
   const ref_ = stepRef(node.id, node.title);
@@ -88,24 +99,38 @@ export async function leadStart(
   if (node.status === 'parked') throw conflict(`#${node.id} is parked. Aiden unparks it first.`);
   const above = parkedAncestor(ctx, node.id);
   if (above !== null) throw conflict(`#${node.id} is under parked #${above}.`);
-  if (liveSessionUnder(ctx, node.id)) throw conflict(`${ref_} already has a session working on it.`);
+  if (liveSessionUnder(ctx, node.id, input.exceptSession)) throw conflict(`${ref_} already has a session working on it.`);
 
   const nowMs = Date.parse(ctx.now());
+  const since = new Date(nowMs - CLAIM_WINDOW_MS).toISOString();
+  const others = readProjectSessions(ctx, project.id).filter((s) => s.id !== input.exceptSession && isLive(s, nowMs));
   // A live session may carry a thread this step was started with and not yet have claimed the step (its focus is elsewhere).
-  // The starts are lead_sends rows (src/server/lead/sends.ts): a cleared one never reached T3 Code and holds nothing.
-  const carried = ctx.db
-    .prepare("SELECT result FROM lead_sends WHERE project_id = ? AND kind = 'start' AND state = 'done' AND json_extract(body, '$.nodeId') = ? ORDER BY created_at DESC, id DESC")
-    .pluck()
-    .all(project.id, node.id) as string[];
-  const holder = readProjectSessions(ctx, project.id).find((s) => isLive(s, nowMs) && s.t3ThreadId !== null && carried.includes(s.t3ThreadId));
+  // The starts are lead_sends rows (src/server/lead/sends.ts), and before them `start` lines: a cleared send holds nothing.
+  const carried = [
+    ...(ctx.db.prepare(`SELECT result FROM lead_sends WHERE project_id = ? AND state = 'done' AND ${START_OF_STEP}`).pluck().all(project.id, node.id) as string[]),
+    ...(ctx.db.prepare(`SELECT e.text FROM lead_events e WHERE e.project_id = ? AND e.node_id = ? AND e.kind = 'start' AND ${LEGACY_START}`).pluck().all(project.id, node.id) as string[]),
+  ];
+  const holder = others.find((s) => s.t3ThreadId !== null && carried.includes(s.t3ThreadId));
   if (holder !== undefined) throw conflict(`${ref_} already has a thread open (${holder.t3ThreadId}) that has not claimed it. Tell Aiden.`);
+  // An intended or unknown start holds the step with no time limit: it may yet be a thread, and FIRST may yet give it its
+  // first message. A done one holds it for the claim window, as the old start lines do.
+  const unsettled = ctx.db
+    .prepare(`SELECT state FROM lead_sends WHERE project_id = ? AND state IN ('intended', 'unknown') AND ${START_OF_STEP} ORDER BY created_at DESC, id DESC LIMIT 1`)
+    .pluck()
+    .get(project.id, node.id) as string | undefined;
+  if (unsettled === 'unknown') throw conflict(`A start for ${ref_} may have made a thread, and is on the desk to be cleared. Clear it first.`);
+  if (unsettled === 'intended') throw conflict(`A start for ${ref_} has not answered yet. Wait for it.`);
   const recent = ctx.db
     .prepare(
-      "SELECT created_at AS at FROM lead_sends WHERE project_id = ? AND kind = 'start' AND state <> 'cleared' AND json_extract(body, '$.nodeId') = ? AND created_at >= ? ORDER BY created_at DESC, id DESC LIMIT 1",
+      `SELECT at FROM (
+         SELECT created_at AS at FROM lead_sends WHERE project_id = ? AND state = 'done' AND created_at >= ? AND ${START_OF_STEP}
+         UNION ALL SELECT e.at AS at FROM lead_events e WHERE e.project_id = ? AND e.node_id = ? AND e.at >= ? AND ${LEGACY_START}
+       ) ORDER BY at DESC LIMIT 1`,
     )
-    .get(project.id, node.id, new Date(nowMs - CLAIM_WINDOW_MS).toISOString()) as { at: string } | undefined;
+    .pluck()
+    .get(project.id, since, node.id, project.id, node.id, since) as string | undefined;
   if (recent !== undefined) {
-    const minutes = Math.max(1, Math.round((nowMs - Date.parse(recent.at)) / MINUTE_MS));
+    const minutes = Math.max(1, Math.round((nowMs - Date.parse(recent)) / MINUTE_MS));
     throw conflict(`A thread was started for ${ref_} ${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago. Give it time to claim the step.`);
   }
 
@@ -116,15 +141,20 @@ export async function leadStart(
   if (folder === undefined) throw conflict('This project has no folder on record, so no thread can be started.');
 
   // In flight: the project's live sessions, and the threads started in the claim window that no session carries yet.
-  const live = readProjectSessions(ctx, project.id).filter((s) => isLive(s, nowMs)).length;
-  const unclaimed = ctx.db
-    .prepare(
-      `SELECT COUNT(*) FROM lead_sends e
-        WHERE e.project_id = ? AND e.kind = 'start' AND e.state <> 'cleared' AND e.created_at >= ?
-          AND (e.result IS NULL OR NOT EXISTS (SELECT 1 FROM sessions s WHERE s.t3_thread_id = e.result))`,
-    )
-    .pluck()
-    .get(project.id, new Date(nowMs - CLAIM_WINDOW_MS).toISOString()) as number;
+  const unclaimed =
+    (ctx.db
+      .prepare(
+        `SELECT COUNT(*) FROM lead_sends e
+          WHERE e.project_id = ? AND e.kind = 'start' AND e.state <> 'cleared' AND e.created_at >= ?
+            AND (e.result IS NULL OR NOT EXISTS (SELECT 1 FROM sessions s WHERE s.t3_thread_id = e.result))`,
+      )
+      .pluck()
+      .get(project.id, since) as number) +
+    (ctx.db
+      .prepare(`SELECT COUNT(*) FROM lead_events e WHERE e.project_id = ? AND e.at >= ? AND ${LEGACY_START} AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.t3_thread_id = e.text)`)
+      .pluck()
+      .get(project.id, since) as number);
+  const live = others.length;
   if (live + unclaimed >= IN_FLIGHT_LIMIT) {
     const notClaimed = unclaimed === 0 ? '' : ` (${unclaimed} started and not claimed yet)`;
     throw conflict(`${live + unclaimed} sessions are in flight${notClaimed}, and the limit is ${IN_FLIGHT_LIMIT}. Wait for one to end.`);
@@ -139,6 +169,31 @@ export async function leadStart(
       throw conflict(`You have started ${own} threads on your own judgment in the last 24 hours, and the limit is ${LEAD_STARTS_PER_DAY}. Ask Aiden.`);
     }
   }
+  return { folder, goal, phase };
+}
+
+/**
+ * The lead starts a T3 Code thread for a step: checked by startGuard (every refusal is a 409 thrown before anything is
+ * started or written), written as an intended send and carried out by the sender outside any write, never repeated, then
+ * logged in one write whatever it did. A start that may have made a thread answers START_UNKNOWN, any other failure
+ * `Not started: <reason>`, both as a 502. Without Aiden's words the start is the lead's own judgment.
+ */
+export async function leadStart(
+  ctx: Ctx,
+  ref: string,
+  as: string,
+  instructions: number,
+  input: { stepId: number; aidenWords?: string },
+  sender: Sender,
+): Promise<{ text: string; threadId: string }> {
+  const project = requireLead(ctx, ref, as, instructions, true);
+  if (underWay.has(project.id)) throw conflict(START_UNDER_WAY);
+  // requireLead has matched `as` against the stored name, so it is set.
+  const name = project.lead as string;
+  const actor = `lead:${name}`;
+  const node = requireNode(ctx, input.stepId);
+  const ref_ = stepRef(node.id, node.title);
+  const { folder, goal, phase } = startGuard(ctx, project, node, input.aidenWords === undefined ? {} : { aidenWords: input.aidenWords });
 
   const message = startHandoff({
     lead: name,
@@ -200,6 +255,8 @@ export async function leadStart(
   } finally {
     underWay.delete(project.id);
   }
+  // After the commit: the sender carries out what waits behind this start (its wake never throws).
+  void sender.wake();
   if (kind === 'start_unknown') throw badGateway(START_UNKNOWN);
   if (kind === 'start_failed') throw badGateway(`Not started: ${reason}`);
   return { text: `Started a thread for ${ref_}: ${threadId}. It claims the step on its first turn.`, threadId };

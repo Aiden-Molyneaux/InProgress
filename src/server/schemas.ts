@@ -262,7 +262,15 @@ export const leadDecideBody = z
   })
   .strict();
 /** `lead undo`: the decision (a lead_events id) and Aiden's words. */
-export const leadUndoBody = z.object({ ...leadWho, eventId: leadId, aidenWords: z.string().trim().min(1).max(2_000) }).strict();
+export const leadUndoBody = z
+  .object({ ...leadWho, eventId: leadId, aidenWords: z.string().trim().min(1).max(2_000), reason: z.string().trim().min(1).max(2_000).optional() })
+  .strict();
+/** `lead set`: a setting of the project (quiet, voice-cap), its value, and Aiden's words when he gave them. */
+export const leadSetBody = z.object({ ...leadWho, key: z.string().trim().min(1).max(40), value: z.string().trim().min(1).max(200), aidenWords: z.string().trim().min(1).max(2_000).optional() }).strict();
+/** `lead import-usage`: the file of stage 0's readings, on this machine. */
+export const leadImportUsageBody = z.object({ file: z.string().min(1).max(1_000) }).strict();
+/** `lead counts`: the time to count from. */
+export const leadCountsQuery = z.object({ since: z.string().datetime({ offset: true }) }).strict();
 /** `lead park`: the step, why (optional), and Aiden's words (needed for a step of his). */
 export const leadParkBody = z
   .object({ ...leadWho, stepId: leadId, reason: z.string().trim().min(1).max(500).optional(), aidenWords: z.string().trim().min(1).max(2_000).optional() })

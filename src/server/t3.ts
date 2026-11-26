@@ -5,7 +5,7 @@ import { z } from 'zod';
 
 /**
  * The only code that runs the `t3` CLI (T3 Code's command line). Every failure to run it or to read what it printed is a
- * T3Unavailable; a TypeError means the caller passed an argument that is never run.
+ * T3Unavailable; a T3ArgumentRefused means the caller passed an argument that is never run.
  */
 
 export interface T3Thread {
@@ -19,13 +19,22 @@ export interface T3Thread {
   archived: boolean;
   pendingRequestCount: number;
   updatedAt: string;
+  /** When the thread was made; '' when the CLI does not say. */
+  createdAt: string;
   createdBy: string;
   creationSource: string;
 }
 export interface T3Message {
   role: string;
   text: string;
+  /** When the message was written, when T3 Code says so. */
+  createdAt?: string;
 }
+/**
+ * An argument refused before anything runs (cmd.exe would read it as syntax): nothing reached T3 Code. A TypeError, as it
+ * always was, but its own class, so a caller can tell it from any other TypeError.
+ */
+export class T3ArgumentRefused extends TypeError {}
 /** A command the runner killed at its time limit. */
 export class T3Timeout extends Error {}
 export class T3Unavailable extends Error {
@@ -71,10 +80,12 @@ const threadSchema = z.object({
   archived: z.boolean().default(false),
   pendingRequestCount: z.number().default(0),
   updatedAt: z.string().default(''),
+  /** When the thread was made (`t3 thread list --json` gives it); '' when an older CLI does not. */
+  createdAt: z.string().default(''),
   createdBy: z.string().default(''),
   creationSource: z.string().default(''),
 });
-const showSchema = z.object({ thread: threadSchema, messages: z.array(z.object({ role: z.string(), text: z.string() })) });
+const showSchema = z.object({ thread: threadSchema, messages: z.array(z.object({ role: z.string(), text: z.string(), createdAt: z.string().optional() })) });
 const startSchema = z.object({ threadId: z.string().min(1) });
 
 export function t3CliPath(env: Record<string, string | undefined> = process.env): string {
@@ -137,7 +148,7 @@ export const execRun: T3Run = (file, args, { timeoutMs, input, verbatim }) =>
 function safe(name: string, value: string): string {
   // A closing backslash would escape the quote that follows it when the CLI reads its own arguments.
   // A leading dash would be read as an option.
-  if (!value || UNSAFE.test(value) || value.endsWith('\\') || value.startsWith('-')) throw new TypeError(`${name} is empty, starts with a dash, ends with a backslash, or holds a character that cannot go on the t3 command line`);
+  if (!value || UNSAFE.test(value) || value.endsWith('\\') || value.startsWith('-')) throw new T3ArgumentRefused(`${name} is empty, starts with a dash, ends with a backslash, or holds a character that cannot go on the t3 command line`);
   return value;
 }
 

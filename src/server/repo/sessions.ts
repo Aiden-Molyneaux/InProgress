@@ -21,11 +21,14 @@ export function liveDriver(ctx: Ctx, n: TreeNode): string | null {
  * True when a session that has not ended, seen within STALE_SESSION_MS, has `nodeId`, or any step under it, as its focus:
  * a driver or a helper, on the step or below it.
  */
-export function liveSessionUnder(ctx: Ctx, nodeId: number): boolean {
+export function liveSessionUnder(ctx: Ctx, nodeId: number, except?: string): boolean {
   const cutoff = new Date(Date.parse(ctx.now()) - STALE_SESSION_MS).toISOString();
   const ids = subtreeIds(ctx, nodeId);
+  // `except` leaves one session out: a restart's own stopped session is not a session working on the step.
   return (
-    ctx.db.prepare(`SELECT 1 FROM sessions WHERE focus_node_id IN (${ids.map(() => '?').join(', ')}) AND state != 'ended' AND last_seen_at >= ?`).get(...ids, cutoff) !== undefined
+    ctx.db
+      .prepare(`SELECT 1 FROM sessions WHERE focus_node_id IN (${ids.map(() => '?').join(', ')}) AND state != 'ended' AND last_seen_at >= ? AND id IS NOT ?`)
+      .get(...ids, cutoff, except ?? null) !== undefined
   );
 }
 

@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { LEAD_SWITCHES, type LeadBrief } from '../core/lead';
 import { ApiClientError, createClient } from '../lib/client';
 import { TASKS_NOT_RUNNING_HINT } from './tasks';
@@ -12,7 +13,8 @@ export const LEAD_USAGE = [
   `  inprogress lead resource <project> <document id> ${WHO}`,
   `  inprogress lead answer <project> <ask id> --aiden <words> [--says <text>] ${WHO}`,
   `  inprogress lead decide <project> <ask id> --answer <text> --reason <text> [--kind product|technical] [--aiden <words>] ${WHO}`,
-  `  inprogress lead undo <project> <decision> --aiden <words> ${WHO}`,
+  `  inprogress lead undo <project> <decision> --aiden <words> [--reason <text>] ${WHO}`,
+  `  inprogress lead set <project> quiet|voice-cap <value> [--aiden <words>] ${WHO}`,
   `  inprogress lead park <project> <step id> [--reason <text>] [--aiden <words>] ${WHO}`,
   `  inprogress lead drop <project> <step id> --reason <text> [--aiden <words>] ${WHO}`,
   `  inprogress lead promise <project> <text> --due <iso time> [--step <step id>] ${WHO}`,
@@ -24,6 +26,10 @@ export const LEAD_USAGE = [
   `  inprogress lead allow <project> starts|landing|round --aiden <words> ${WHO}`,
   `  inprogress lead disallow <project> starts|landing|round [--aiden <words>] ${WHO}`,
   '  inprogress lead desk <project> [--json]',
+  '  inprogress lead morning <project>',
+  '  inprogress lead week <project>',
+  '  inprogress lead counts <project> --since <iso time>',
+  '  inprogress lead import-usage <file>',
 ].join('\n');
 
 /** What a write command prints when the server did not answer in time: it may have been applied all the same. */
@@ -76,7 +82,8 @@ const COMMANDS: Record<string, CommandSpec> = {
   resource: { positionals: 1, flags: [] },
   answer: { positionals: 1, flags: ['--aiden', '--says'] },
   decide: { positionals: 1, flags: ['--answer', '--reason', '--kind', '--aiden'] },
-  undo: { positionals: 1, flags: ['--aiden'] },
+  undo: { positionals: 1, flags: ['--aiden', '--reason'] },
+  set: { positionals: 2, flags: ['--aiden'] },
   park: { positionals: 1, flags: ['--reason', '--aiden'] },
   drop: { positionals: 1, flags: ['--reason', '--aiden'] },
   promise: { positionals: 1, flags: ['--due', '--step'] },
@@ -87,6 +94,9 @@ const COMMANDS: Record<string, CommandSpec> = {
   allow: { positionals: 1, flags: ['--aiden'] },
   disallow: { positionals: 1, flags: ['--aiden'] },
   desk: { positionals: 0, flags: [], bools: ['--json'], noWho: true },
+  morning: { positionals: 0, flags: [], noWho: true },
+  week: { positionals: 0, flags: [], noWho: true },
+  counts: { positionals: 0, flags: ['--since'], noWho: true },
 };
 
 interface Parsed {
@@ -204,6 +214,7 @@ function draft(command: string, p: Parsed): Draft {
       if ('error' in words) return words;
       fields.eventId = id;
       fields.aidenWords = words;
+      put('reason', flag('--reason'));
       return { fields };
     }
     case 'park':
@@ -249,6 +260,12 @@ function draft(command: string, p: Parsed): Draft {
       put('aidenWords', flag('--aiden'));
       return { fields };
     }
+    case 'set': {
+      fields.key = { text: first };
+      fields.value = { text: p.positionals[1]! };
+      put('aidenWords', flag('--aiden'));
+      return { fields };
+    }
     case 'allow':
     case 'disallow': {
       if (!(LEAD_SWITCHES as readonly string[]).includes(first)) return { error: `${first} is not a switch: give starts, landing or round` };
@@ -284,12 +301,32 @@ export async function runLead(args: string[], out: (line: string) => void, o: Co
     return 1;
   };
   const [command, ...rest] = args;
+  // `import-usage` names a file, not a project: it asks the server to read stage 0's readings from it.
+  if (command === 'import-usage') {
+    if (rest.length !== 1) return usage('import-usage takes one file');
+    const down = o.bringUp ? await o.bringUp() : null;
+    if (down !== null) {
+      out(down);
+      return 1;
+    }
+    try {
+      out((await createClient(o).post<{ text: string }>('/api/lead/usage/import', { file: resolve(rest[0]!) })).text);
+      return 0;
+    } catch (err) {
+      if (err instanceof ApiClientError && err.status === 0) throw new ApiClientError(0, err.message, TASKS_NOT_RUNNING_HINT, err.code);
+      if (err instanceof ApiClientError) {
+        out(err.message);
+        return 1;
+      }
+      throw err;
+    }
+  }
   if (command === undefined || !Object.hasOwn(COMMANDS, command)) return usage();
   const p = parseArgs(rest, COMMANDS[command]);
   if ('error' in p) return usage(p.error);
   // The reads: brief, rules, step, resource, desk, and intent with no file. They are GETs and send nothing.
   const [first] = p.positionals;
-  const reads = command === 'brief' || command === 'rules' || command === 'step' || command === 'resource' || command === 'desk' || (command === 'intent' && first === undefined);
+  const reads = command === 'brief' || command === 'rules' || command === 'step' || command === 'resource' || command === 'desk' || command === 'morning' || command === 'week' || command === 'counts' || (command === 'intent' && first === undefined);
   const readId = command === 'step' ? stepId(first) : command === 'resource' ? resourceId(first) : undefined;
   if ((command === 'step' || command === 'resource') && readId === undefined) {
     return usage(command === 'step' ? `${first} is not a step: give it as #42 or 42` : `${first} is not a document: give it as r42 or 42`);
@@ -340,6 +377,16 @@ export async function runLead(args: string[], out: (line: string) => void, o: Co
     if (command === 'desk') {
       const desk = await client.get<{ items: unknown[]; text: string }>(`${path}/desk`);
       out(p.bools.has('--json') ? JSON.stringify(desk.items, null, 2) : desk.text);
+      return 0;
+    }
+    if (command === 'morning' || command === 'week') {
+      out((await client.get<{ text: string }>(`${path}/${command}`)).text);
+      return 0;
+    }
+    if (command === 'counts') {
+      const since = p.flags.get('--since');
+      if (since === undefined || Number.isNaN(Date.parse(since))) return usage('counts needs --since <iso time>');
+      out((await client.get<{ text: string }>(`${path}/counts?since=${encodeURIComponent(new Date(since).toISOString())}`)).text);
       return 0;
     }
     if (command === 'rules') {

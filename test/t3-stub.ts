@@ -1,5 +1,18 @@
-import type { SenderT3, StartOptions } from '../src/server/lead/sends';
+import type { Ctx } from '../src/server/db/tx';
+import { createSender, type Sender, type SenderT3, type StartOptions } from '../src/server/lead/sends';
 import { T3Unavailable, type T3Message, type T3Thread } from '../src/server/t3';
+
+/**
+ * A sender over a bare start and send (a test's fakes), as leadStart and leadRelay take one: its list and show answer as T3
+ * Code not running. Quiet: its log lines go nowhere.
+ */
+export function senderOver(
+  ctx: Ctx,
+  calls: { start?: SenderT3['start']; send?: SenderT3['send'] },
+): Sender {
+  const none = () => Promise.reject(new T3Unavailable('this stand-in does not read T3 Code'));
+  return createSender(ctx, { t3: { list: none, show: none, start: calls.start ?? none, send: calls.send ?? none } }, { log: { info: () => undefined, error: () => undefined } });
+}
 
 /**
  * A stand-in for T3 Code, in process: stage 0's stub-t3.mjs (lead-plans:spikes/lead-stage0/p2) as the sender's four calls.
@@ -35,6 +48,9 @@ export class StandInT3 implements SenderT3 {
   sends = 0;
   private n = 0;
 
+  /** `clock` stamps each thread's updatedAt and each message's time: the test's own clock, so lookups compare like times. */
+  constructor(private readonly clock: () => string = () => new Date().toISOString()) {}
+
   private refuseIfDown(what: string): void {
     if (this.down) throw new T3Unavailable(`t3 thread ${what} failed: exit 1: T3 Code is not running`);
   }
@@ -47,6 +63,8 @@ export class StandInT3 implements SenderT3 {
       link: `t3://thread/${t.threadId}`,
       status: 'idle',
       runtimeMode: 'full-access',
+      // No creation time, like an older CLI: lookups then read updatedAt, which this stand-in stamps.
+      createdAt: '',
       settled: true,
       archived: false,
       pendingRequestCount: 0,
@@ -73,8 +91,8 @@ export class StandInT3 implements SenderT3 {
     this.starts++;
     const fault = this.nextStart;
     this.nextStart = 'ok';
-    const t: StubThread = { threadId: `th_${++this.n}`, project, title: fault === 'lost-bare' ? '' : (opts.title ?? ''), messages: [], updatedAt: new Date(this.n * 1000).toISOString() };
-    if (fault !== 'lost-bare') t.messages.push({ role: 'user', text: message });
+    const t: StubThread = { threadId: `th_${++this.n}`, project, title: fault === 'lost-bare' ? '' : (opts.title ?? ''), messages: [], updatedAt: this.clock() };
+    if (fault !== 'lost-bare') t.messages.push({ role: 'user', text: message, createdAt: this.clock() });
     this.threads.push(t);
     if (fault === 'hang') return new Promise(() => undefined);
     if (fault !== 'ok') throw new T3Unavailable('t3 thread start failed: timed out after 60 s', true);
@@ -88,7 +106,8 @@ export class StandInT3 implements SenderT3 {
     this.sends++;
     const fault = this.nextSend;
     this.nextSend = 'ok';
-    t.messages.push({ role: 'user', text: message });
+    t.messages.push({ role: 'user', text: message, createdAt: this.clock() });
+    t.updatedAt = this.clock();
     if (fault === 'hang') return new Promise(() => undefined);
     if (fault === 'lost') throw new T3Unavailable('t3 thread send failed: timed out after 60 s', true);
   }

@@ -8,18 +8,11 @@ import { badGateway, conflict } from './errors';
 import { logLeadEvent, requireLead } from './lead';
 import { requireNode } from './repo/nodes';
 import { readProjectSessions } from './repo/sessions';
-import { createSender, type Sender } from './lead/sends';
+import type { Sender } from './lead/sends';
 import { intendSend } from './repo/leadSends';
-import { T3Unavailable, t3Send } from './t3';
 
 /** Sends a message to a T3 Code thread. Injected, so no test runs the t3 CLI. */
 export type RelaySend = (threadId: string, message: string) => Promise<void>;
-
-/** A sender of its own for a caller that passes a bare send: it carries out only the sends it is asked to perform. */
-export function senderForRelay(ctx: Ctx, send: RelaySend): Sender {
-  const none = () => Promise.reject(new T3Unavailable('this sender does not read T3 Code'));
-  return createSender(ctx, { t3: { list: none, show: none, start: none, send } });
-}
 
 /** The answer to a send that timed out: the message may be in the thread, so it is not sent again. */
 export const RELAY_UNKNOWN = 'It may have been delivered. Not retried.';
@@ -45,9 +38,8 @@ export async function leadRelay(
   as: string,
   instructions: number,
   input: { stepId: number; message: string },
-  via: RelaySend | Sender = t3Send,
+  sender: Sender,
 ): Promise<{ text: string; sessionId: string }> {
-  const sender = typeof via === 'function' ? senderForRelay(ctx, via) : via;
   const project = requireLead(ctx, ref, as, instructions, true);
   // requireLead has matched `as` against the stored name, so it is set.
   const name = project.lead as string;
@@ -81,6 +73,8 @@ export async function leadRelay(
     // The send has happened (or not) whatever the log says: the lead is still told which.
     console.error(`InProgress: a relay to session ${session.id} (${kind}) could not be logged: ${reasonOf(err)}`);
   }
+  // After the commit: the sender carries out what waits behind this relay (its wake never throws).
+  void sender.wake();
   if (kind === 'relay_unknown') throw badGateway(RELAY_UNKNOWN);
   if (kind === 'relay_failed') throw badGateway(`Not delivered: ${reason}.`);
   return { text: `Delivered to "${clipLine(sessionDisplayTitle(session), 60)}".`, sessionId: session.id };

@@ -3,8 +3,9 @@ import { leadLine } from '../../core/relay';
 import { stamp } from '../../core/span';
 import { stepRef } from '../../core/step-ref';
 import { write, type Ctx, type RecordEvent } from '../db/tx';
-import { leadFolders, logLeadEvent } from '../lead';
-import { ownStartsToday, startProviderModel } from '../lead-start';
+import { ApiError } from '../errors';
+import { logLeadEvent } from '../lead';
+import { ownStartsToday, startGuard, startProviderModel } from '../lead-start';
 import { getDeskItem, moveDeskItem, type DeskItem } from '../repo/desk';
 import { addDecision } from '../repo/leadDecisions';
 import { insertLeadEvent } from '../repo/leadEvents';
@@ -149,7 +150,8 @@ export function applyStopped(ctx: Ctx, turn: LeadTurn, item: DeskItem, record: R
   const base = { projectId: item.projectId, lead: name, instructions: LEAD_INSTRUCTIONS_VERSION, nodeId: node.id, sessionId: s.sessionId };
 
   const park = (cause: string): TurnEffect => {
-    parkNodeInWrite(ctx, record, `lead:${name}`, node.id, { reason: cause });
+    // A step already done or dropped keeps its state: the PARK is its line and decision only.
+    if (node.status !== 'done' && node.status !== 'dropped') parkNodeInWrite(ctx, record, `lead:${name}`, node.id, { reason: cause });
     const eventId = logLeadEvent(ctx, { ...base, kind: 'park', text: cause });
     addDecision(ctx.db, { eventId, itemId: item.id, turnId: turn.id, kind: 'technical', line: `Parked ${stepRef(node.id, node.title)}: ${cause}`, saidWhere: 'desk', saidAt: now });
     return { itemState: 'done', outcome: `PARK d${eventId}` };
@@ -165,8 +167,17 @@ export function applyStopped(ctx: Ctx, turn: LeadTurn, item: DeskItem, record: R
   if (restarts >= RESTARTS_PER_STEP) return park(CAUSE_RESTARTS);
   const reserve = (deps.reserveAllowsStart ?? reserveAllowsStart)(ctx, now);
   if (ownStartsToday(ctx, item.projectId, Date.parse(now)) >= LEAD_STARTS_PER_DAY || !reserve.ok) return park(CAUSE_LIMIT);
-  const folder = leadFolders(ctx, item.projectId)[0] ?? s.row?.cwd ?? undefined;
-  if (folder === undefined) return { itemState: 'waiting_aiden', outcome: 'unclear (no folder on record to start in)' };
+  // A restart is the lead's own start: every refusal `lead start` has (Starts off, the in-flight limit, a parked or done
+  // step, a live session on it) refuses it too, leaving out only the stopped session itself.
+  const project = getProjectById(ctx, item.projectId);
+  if (project === undefined) return { itemState: 'done', outcome: 'no lead' };
+  let folder: string;
+  try {
+    folder = startGuard(ctx, project, node, { exceptSession: s.sessionId }).folder;
+  } catch (err) {
+    if (err instanceof ApiError) return park(err.message);
+    throw err;
+  }
   const branch = s.row?.branch ?? null;
   const worktree = s.row?.cwd ?? null;
   const handoff = [

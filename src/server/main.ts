@@ -15,6 +15,8 @@ import { stoppedBeforeLease } from './lead/stopped';
 import { watchHeldLines } from './lead/hold';
 import { createRunner, headlessWay, LEAD_MODEL, leadToolsEntry, type Runner } from './lead/runner';
 import { createSender, type Sender } from './lead/sends';
+import { noteWake, watchMorning } from './lead/morning';
+import { probeUsage } from './lead/usage';
 import { defaultStart } from './lead-start';
 import { t3List, t3Send, t3Show } from './t3';
 import { createBackupRunner } from './backup-runner';
@@ -136,6 +138,25 @@ async function main(): Promise<void> {
       if (stopped + promiseDue + swept > 0) app.log.info(`Desk: ${stopped} stopped, ${promiseDue} promise due, ${swept} swept`);
     } catch (err) {
       app.log.error(`Could not watch the lead's desk: ${(err as Error).message}`);
+    }
+    // The morning list (src/server/lead/morning.ts): a laptop that slept is noted first, so the list can say so.
+    try {
+      noteWake(ctx);
+      const made = watchMorning(ctx);
+      if (made > 0) {
+        app.log.info(`Morning: ${made} list${made === 1 ? '' : 's'} written`);
+        if (sender !== undefined) setImmediate(() => void sender.wake());
+      }
+    } catch (err) {
+      app.log.error(`Could not write the morning list: ${(err as Error).message}`);
+    }
+    // The usage probe: when nothing has been read for an hour and a round is on, one small run reads the gauges.
+    if (process.env.INPROGRESS_LEAD_RUNNER !== 'off') {
+      void probeUsage(ctx, {
+        way: headlessWay({ claudePath: process.env.INPROGRESS_LEAD_CLAUDE || 'claude', leadDir: (slug) => join(home, 'lead', slug), toolsEntry: leadToolsEntry() }),
+        home,
+        log: { error: (message) => app.log.error(message) },
+      }).catch((err: unknown) => app.log.error(`Could not run the usage probe: ${(err as Error).message}`));
     }
     // Recovery of sends that may have happened, then the rest carried out. tick() logs its own failures.
     if (sender !== undefined) void sender.tick().catch((err: unknown) => app.log.error(`Could not check the lead's sends: ${(err as Error).message}`));

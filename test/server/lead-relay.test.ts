@@ -8,8 +8,9 @@ import { maxEventId } from '../../src/server/repo/events';
 import { addNodes } from '../../src/server/repo/nodes';
 import { addBinding, createProject, setProjectLead } from '../../src/server/repo/projects';
 import { claimStep, handleHookEvent } from '../../src/server/session-flow';
-import { T3Unavailable } from '../../src/server/t3';
+import { T3ArgumentRefused, T3Unavailable } from '../../src/server/t3';
 import { makeCtx } from '../helpers';
+import { senderOver } from '../t3-stub';
 
 const BEARER = { authorization: 'Bearer t' };
 const BOUND = 'C:/personal/InGame';
@@ -35,7 +36,8 @@ function setup(send: RelaySend = vi.fn<RelaySend>(async () => undefined)) {
   };
   const leadEvents = () => ctx.db.prepare('SELECT COUNT(*) FROM lead_events').pluck().get() as number;
   const app = buildApp({ ctx, token: 't', uiToken: 'ui-token', version: 'test', t3Send: send });
-  const relay = (stepId: number, message = 'carry on', as = 'Progresser', instructions = LEAD_INSTRUCTIONS_VERSION) => leadRelay(ctx, project.slug, as, instructions, { stepId, message }, send);
+  const sender = senderOver(ctx, { send });
+  const relay = (stepId: number, message = 'carry on', as = 'Progresser', instructions = LEAD_INSTRUCTIONS_VERSION) => leadRelay(ctx, project.slug, as, instructions, { stepId, message }, sender);
   /** Runs `fn`, which must reject; answers what it threw, having checked that nothing was sent or written. */
   const refused = async (fn: () => Promise<unknown>): Promise<{ status: number; message: string }> => {
     const mark = maxEventId(ctx);
@@ -148,7 +150,7 @@ describe('leadRelay', () => {
   it('answers any other failure with Not delivered and the reason, logs relay_failed and names the session in the server log', async () => {
     const cases: [unknown, string][] = [
       [new T3Unavailable('t3 thread send failed: exit 1: no such thread.'), 'Not delivered: t3 thread send failed: exit 1: no such thread.'],
-      [new TypeError('threadId is empty'), 'Not delivered: threadId is empty.'],
+      [new T3ArgumentRefused('threadId is empty'), 'Not delivered: threadId is empty.'],
       [new T3Unavailable(`line one\n\n  line two ${'y'.repeat(400)}`), `Not delivered: line one line two ${'y'.repeat(300 - 'line one line two '.length)}.`],
       [new T3Unavailable('ends in dots ...  '), 'Not delivered: ends in dots.'],
     ];

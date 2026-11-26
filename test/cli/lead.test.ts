@@ -434,20 +434,20 @@ describe("inprogress lead's commands", () => {
 
   it('lists the reads and the commands in the usage, one line each (intent has a read and a write form)', () => {
     const lines = LEAD_USAGE.split('\n');
-    expect(lines).toHaveLength(19);
-    expect(lines.slice(1).map((l) => l.trim().split(' ')[2])).toEqual(['rules', 'brief', 'step', 'resource', 'answer', 'decide', 'undo', 'park', 'drop', 'promise', 'kept', 'intent', 'intent', 'relay', 'start', 'allow', 'disallow', 'desk']);
-    expect(lines[15]).toBe('  inprogress lead start <project> <step id> [--aiden <words>] --as <name> --instructions <n>');
-    expect(lines[16]).toBe('  inprogress lead allow <project> starts|landing|round --aiden <words> --as <name> --instructions <n>');
-    expect(lines[17]).toBe('  inprogress lead disallow <project> starts|landing|round [--aiden <words>] --as <name> --instructions <n>');
-    expect(lines[18]).toBe('  inprogress lead desk <project> [--json]');
+    expect(lines).toHaveLength(24);
+    expect(lines.slice(1).map((l) => l.trim().split(' ')[2])).toEqual(['rules', 'brief', 'step', 'resource', 'answer', 'decide', 'undo', 'set', 'park', 'drop', 'promise', 'kept', 'intent', 'intent', 'relay', 'start', 'allow', 'disallow', 'desk', 'morning', 'week', 'counts', 'import-usage']);
+    expect(lines[16]).toBe('  inprogress lead start <project> <step id> [--aiden <words>] --as <name> --instructions <n>');
+    expect(lines[17]).toBe('  inprogress lead allow <project> starts|landing|round --aiden <words> --as <name> --instructions <n>');
+    expect(lines[18]).toBe('  inprogress lead disallow <project> starts|landing|round [--aiden <words>] --as <name> --instructions <n>');
+    expect(lines[19]).toBe('  inprogress lead desk <project> [--json]');
     expect(lines[3]).toBe('  inprogress lead step <project> <step id> --as <name> --instructions <n>');
     expect(lines[4]).toBe('  inprogress lead resource <project> <document id> --as <name> --instructions <n>');
     expect(lines[5]).toBe('  inprogress lead answer <project> <ask id> --aiden <words> [--says <text>] --as <name> --instructions <n>');
     expect(lines[6]).toBe('  inprogress lead decide <project> <ask id> --answer <text> --reason <text> [--kind product|technical] [--aiden <words>] --as <name> --instructions <n>');
-    expect(lines[7]).toBe('  inprogress lead undo <project> <decision> --aiden <words> --as <name> --instructions <n>');
-    expect(lines[12]).toBe('  inprogress lead intent <project> --as <name> --instructions <n>');
-    expect(lines[13]).toBe('  inprogress lead intent <project> <file | -> --as <name> --instructions <n>');
-    expect(lines[14]).toBe('  inprogress lead relay <project> <step id> <message | -> --as <name> --instructions <n>');
+    expect(lines[7]).toBe('  inprogress lead undo <project> <decision> --aiden <words> [--reason <text>] --as <name> --instructions <n>');
+    expect(lines[13]).toBe('  inprogress lead intent <project> --as <name> --instructions <n>');
+    expect(lines[14]).toBe('  inprogress lead intent <project> <file | -> --as <name> --instructions <n>');
+    expect(lines[15]).toBe('  inprogress lead relay <project> <step id> <message | -> --as <name> --instructions <n>');
   });
 });
 

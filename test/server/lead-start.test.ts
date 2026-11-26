@@ -11,8 +11,9 @@ import { maxEventId } from '../../src/server/repo/events';
 import { addNodes, updateNode } from '../../src/server/repo/nodes';
 import { addBinding, createProject, setProjectLead } from '../../src/server/repo/projects';
 import { claimStep, handleHookEvent } from '../../src/server/session-flow';
-import { T3Unavailable } from '../../src/server/t3';
+import { T3ArgumentRefused, T3Unavailable } from '../../src/server/t3';
 import { makeCtx } from '../helpers';
+import { senderOver } from '../t3-stub';
 
 const BEARER = { authorization: 'Bearer t' };
 const BOUND = 'C:/personal/InGame';
@@ -44,8 +45,9 @@ function setup(start: StartThread = fake()) {
   const app = buildApp({ ctx, token: 't', uiToken: 'ui-token', version: 'test', t3Start: start });
   const leadEvents = () => ctx.db.prepare('SELECT COUNT(*) FROM lead_events').pluck().get() as number;
   const on = () => leadAllow(ctx, project.slug, 'Progresser', V, { switch: 'starts', aidenWords: 'start things' });
+  const sender = senderOver(ctx, { start });
   const run = (stepId: number, aidenWords?: string, as = 'Progresser', instructions = V) =>
-    leadStart(ctx, project.slug, as, instructions, { stepId, ...(aidenWords === undefined ? {} : { aidenWords }) }, start);
+    leadStart(ctx, project.slug, as, instructions, { stepId, ...(aidenWords === undefined ? {} : { aidenWords }) }, sender);
   /** A session in the project focused on `nodeId`, carrying `thread` when given. */
   const session = (id: string, nodeId: number, thread?: string) => {
     handleHookEvent(ctx, id, { event: 'start', source: 'startup', cwd: BOUND, app: 't3', t3ThreadId: thread ?? `mcp:s-${id}` });
@@ -116,15 +118,15 @@ describe('leadStart: the start', () => {
     expect(START_UNKNOWN).toBe('A thread may have been started. Do not run it again: read the brief and tell Aiden.');
     expect(start).toHaveBeenCalledTimes(1);
     expect(listLeadEvents(s.ctx, s.project.slug).filter((e) => e.kind.startsWith('start')).map((e) => [e.kind, e.nodeId, e.aidenWords])).toEqual([['start_unknown', s.signing.id, WORDS]]);
-    // The unknown start holds the step for ten minutes, as a start does.
-    expect(await s.refused(() => s.run(s.signing.id, WORDS))).toMatchObject({ status: 409, message: expect.stringContaining('A thread was started for #') });
+    // The unknown start holds the step with no time limit: it may yet be a thread.
+    expect(await s.refused(() => s.run(s.signing.id, WORDS))).toMatchObject({ status: 409, message: expect.stringContaining('A start for #') });
   });
 
   it('answers any other failure with Not started and the reason, and logs start_failed', async () => {
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     for (const [error, sentence] of [
       [new T3Unavailable('t3 thread start failed: exit 1: no such project.'), 'Not started: t3 thread start failed: exit 1: no such project'],
-      [new TypeError('project is empty'), 'Not started: project is empty'],
+      [new T3ArgumentRefused('project is empty'), 'Not started: project is empty'],
     ] as [unknown, string][]) {
       const start = vi.fn<StartThread>(async () => {
         throw error;

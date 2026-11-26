@@ -262,7 +262,8 @@ describe('the fix round after Murr', () => {
         .prepare("SELECT ld.kind, ld.product_ruling, ld.would_have, ld.turn_id FROM lead_decisions ld JOIN lead_events e ON e.id = ld.event_id WHERE e.kind = 'bring' AND ld.item_id = ?")
         .all(items[0]!.id);
       expect(bring).toEqual([{ kind: kind === 'permission' ? 'permission' : 'product', product_ruling: 1, would_have: 'Yes.', turn_id: null }]);
-      expect(w.sends()).toHaveLength(sendsBefore);
+      // One more send: the undo tells the session once that the decision is withdrawn (task 10); the bring adds none.
+      expect(w.sends()).toHaveLength(sendsBefore + 1);
     }
     expect(w.count("desk_items WHERE state = 'open'")).toBe(0);
   });

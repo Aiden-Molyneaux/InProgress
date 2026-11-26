@@ -61,6 +61,8 @@ export interface TurnInput {
   userMessage: string;
   model: string;
   toolsEnv: ToolsEnv;
+  /** The usage probe: no tool server is configured, the run only reads its usage. */
+  noTools?: boolean;
 }
 
 /** What a turn ran to. */
@@ -249,7 +251,7 @@ export function headlessWay(opts: HeadlessOptions): TurnWay {
         try {
           mkdirSync(join(dir, '.claude'), { recursive: true });
           writeFileSync(promptFile, input.systemPrompt);
-          writeFileSync(toolsFile, JSON.stringify({ mcpServers: { 'inprogress-lead': { command: process.execPath, args: [opts.toolsEntry, input.slug], env: input.toolsEnv } } }, null, 2));
+          writeFileSync(toolsFile, JSON.stringify({ mcpServers: input.noTools === true ? {} : { 'inprogress-lead': { command: process.execPath, args: [opts.toolsEntry, input.slug], env: input.toolsEnv } } }, null, 2));
           if (!existsSync(settingsFile)) writeFileSync(settingsFile, '{}\n');
           const args = headlessArgs(input.model, promptFile, toolsFile);
           const program = resolveProgram(opts.claudePath, env);

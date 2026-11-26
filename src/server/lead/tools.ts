@@ -11,6 +11,8 @@ import { runGit, type GitResult } from './git';
 export const TOOL_ANSWER_MAX_BYTES = 40 * 1024;
 /** The most file names change_size lists. */
 const FILES_MAX = 200;
+/** How long the lead's T3 Code reads may take: a list and several shows, each a CLI run. */
+const T3_READ_MS = 120_000;
 /** What every tool answers when nothing listens: said the same way each time, and nothing is started. */
 export const NOT_ANSWERING = 'InProgress is not answering';
 const BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
@@ -110,10 +112,11 @@ export function createLeadToolsServer(o: LeadToolsOptions): McpServer {
   tool('search', 'Find steps and resources in this project by text.', { query: z.string().min(1).max(200) },
     async (a: { query: string }) => formatSearch(await o.client.get<SearchResult>(`/api/search?project=${project}&q=${enc(a.query)}`)));
 
-  tool('threads', "This project's T3 Code threads, newest first: each thread's id, title, when it last changed, and whether it holds a first message.", {}, async () =>
-    (await o.client.get<{ text: string }>(`/api/lead/${project}/threads?${asked}`)).text);
+  // Each is a T3 Code CLI run or several, which takes far longer than the client's 5 s default.
+  tool('threads', "This project's 20 newest T3 Code threads: each thread's id, title and when it last changed, and for the 5 newest whether it holds a first message; it says how many were not opened.", {}, async () =>
+    (await o.client.get<{ text: string }>(`/api/lead/${project}/threads?${asked}`, { timeoutMs: T3_READ_MS })).text);
   tool('thread', 'One T3 Code thread: its title and its messages.', { id: z.string().min(1).max(200).describe('The thread id, as threads lists it') },
-    async (a: { id: string }) => (await o.client.get<{ text: string }>(`/api/lead/${project}/thread/${enc(a.id)}?${asked}`)).text);
+    async (a: { id: string }) => (await o.client.get<{ text: string }>(`/api/lead/${project}/thread/${enc(a.id)}?${asked}`, { timeoutMs: T3_READ_MS })).text);
 
   const branchArg = { branch: z.string().describe('A local branch name, e.g. feature/tabs') };
   tool('branch_merged', 'Whether a branch is merged into main.', branchArg, (a: { branch: string }) =>

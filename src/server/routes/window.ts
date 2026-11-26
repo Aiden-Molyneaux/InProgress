@@ -7,6 +7,7 @@ import { openInDesktop, resumeCommand, usableCwd, type DesktopSession, type Open
 import { findSession, liveDriver } from '../repo/sessions';
 import { deleteProject, listDeletedProjects, restoreProject } from '../project-lifecycle';
 import { clearAsk } from '../repo/asks';
+import { lateAnswer } from '../lead-commands';
 import { recordQuiet } from '../repo/events';
 import { addNodes, applyRankOp, deleteNode, finishNode, labelNode, moveNode, parkNode, unparkNode } from '../repo/nodes';
 import { applyQueueOp, changeProject, getProjectById, isQueued, resolveProject, setProjectLead } from '../repo/projects';
@@ -230,6 +231,8 @@ export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: 
   app.post('/api/ui/asks/:id/clear', guarded, async (req) => {
     const { id } = idParam.parse(req.params);
     const { answer } = windowClearBody.parse(req.body ?? {});
+    // An answer to an ask the lead already decided is not dropped: it undoes that decision and carries his words.
+    if (answer !== undefined && answer.trim() !== '') lateAnswer(ctx, id, answer.trim(), ACTOR);
     return { ask: clearAsk(ctx, ACTOR, id, answer) };
   });
   // The window's measurements (spec 2.6): stored quietly, only the named keys, and strings cut short: never content.

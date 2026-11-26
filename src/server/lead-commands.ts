@@ -1,4 +1,5 @@
-import { isAidens, type LeadSwitch } from '../core/lead';
+import { isAidens, LEAD_INSTRUCTIONS_VERSION, type LeadSwitch } from '../core/lead';
+import { leadLine } from '../core/relay';
 import { clipLine, stepRef } from '../core/step-ref';
 import { askTag, type Ask, type Project, type TreeNode } from '../core/types';
 import { write, type Ctx, type RecordEvent } from './db/tx';
@@ -7,7 +8,9 @@ import { badRequest, conflict, notFound } from './errors';
 import { leadSwitches, logLeadEvent, requireLead } from './lead';
 import { intentHeadlines } from './lead-text';
 import { aidensAskSql, clearInWrite, markAnswersDelivered, raiseAskInWrite, requireAsk } from './repo/asks';
-import { DECISION_LINE_CUT } from './repo/deskBring';
+import { DECISION_LINE_CUT, t3ThreadOf } from './repo/deskBring';
+import { intendSend, sendByRetryKey } from './repo/leadSends';
+import { SETTING_KEYS } from './lead/settings';
 import { addDecision, decisionByEvent, type DecisionKind, type SaidWhere } from './repo/leadDecisions';
 import { parkNodeInWrite, requireNode, unparkNodeInWrite, updateNodeInWrite } from './repo/nodes';
 import { setProjectIntentInWrite } from './repo/projects';
@@ -251,7 +254,7 @@ interface DecisionRow {
  * Puts a decision back, on Aiden's words: a parked or dropped step returns to the backlog, a decided question is raised
  * again as a new ask of his. A decision is undone once; a step that has moved on since (unparked, finished) is refused.
  */
-export function leadUndo(ctx: Ctx, ref: string, as: string, instructions: number, input: { eventId: number; aidenWords: string }): { text: string } {
+export function leadUndo(ctx: Ctx, ref: string, as: string, instructions: number, input: { eventId: number; aidenWords: string; reason?: string }): { text: string } {
   const { project, name, actor } = leadOf(ctx, ref, as, instructions);
   return write(ctx, actor, (record) => {
     const tag = decisionTag(input.eventId);
@@ -280,6 +283,14 @@ export function leadUndo(ctx: Ctx, ref: string, as: string, instructions: number
       const was = decisionByEvent(ctx.db, event.id);
       const undone = { wouldHave: old.answer, kind: was?.kind ?? (old.kind === 'permission' ? 'permission' : 'technical'), productRuling: was?.productRuling ?? false };
       const raised = raiseAskInWrite(ctx, record, actor, { nodeId: old.nodeId, kind: old.kind, text: old.text, ...(old.sessionId === null ? {} : { sessionId: old.sessionId }) }, undone);
+      // A decision made at the desk or in the thread was told to its session: the session is told once that it is withdrawn.
+      if (was?.saidWhere === 'desk' || was?.saidWhere === 'thread') {
+        const thread = t3ThreadOf(ctx.db, old.sessionId);
+        const retryKey = `undo:${tag}`;
+        if (thread !== null && sendByRetryKey(ctx.db, retryKey) === undefined) {
+          intendSend(ctx.db, { projectId: project.id, kind: 'relay', target: thread, retryKey, body: leadLine(name, `${tag} is withdrawn: ${askTag(old.id)} is Aiden's again.`) }, ctx.now());
+        }
+      }
       text = `Undid ${tag}: the question is Aiden's again as ${askTag(raised.ask.id)}. Your answer was: "${clip(old.answer, ANSWER_CUT)}".`;
     } else {
       const node = requireNode(ctx, event.node_id as number);
@@ -301,7 +312,53 @@ export function leadUndo(ctx: Ctx, ref: string, as: string, instructions: number
       text: tag,
       aidenWords: input.aidenWords,
     });
+    // His reason, when he gave one, becomes a standing ruling the lead reads before the next call of that kind.
+    if (input.reason !== undefined && input.reason.trim() !== '') {
+      logLeadEvent(ctx, { projectId: project.id, lead: name, instructions, kind: 'ruling', text: input.reason.trim(), aidenWords: input.aidenWords });
+    }
     return { text };
+  });
+}
+
+/**
+ * Aiden answers, in the window, an ask the lead already decided (`answered_via` `lead_decided`): his answer is not dropped.
+ * It is recorded as `lead undo` of that decision plus his answer: an `undo` line, an `answer` line with his words, and a
+ * relay to the session (a T3 Code one) that his answer replaces the decision, once (retry key `late:a<ask id>`). False,
+ * with nothing written, when the ask is not one the lead decided, has no lead, or was already undone.
+ */
+export function lateAnswer(ctx: Ctx, askId: number, words: string, actor: string): boolean {
+  return write(ctx, actor, () => {
+    const ask = requireAsk(ctx, askId);
+    if (ask.clearedAt === null || ask.answeredVia !== 'lead_decided' || words.trim() === '') return false;
+    const project = ctx.db.prepare('SELECT id, lead FROM projects WHERE id = ?').get(ask.projectId) as { id: number; lead: string | null } | undefined;
+    if (project === undefined || project.lead === null || project.lead.trim() === '') return false;
+    const event = ctx.db.prepare("SELECT id FROM lead_events WHERE project_id = ? AND kind = 'decide' AND ask_id = ? ORDER BY id DESC LIMIT 1").pluck().get(project.id, ask.id) as number | undefined;
+    if (event === undefined) return false;
+    const tag = decisionTag(event);
+    if (ctx.db.prepare("SELECT 1 FROM lead_events WHERE project_id = ? AND kind = 'undo' AND text = ?").get(project.id, tag) !== undefined) return false;
+    const base = { projectId: project.id, lead: project.lead, instructions: LEAD_INSTRUCTIONS_VERSION, nodeId: ask.nodeId, askId: ask.id, aidenWords: words };
+    logLeadEvent(ctx, { ...base, kind: 'undo', text: tag });
+    logLeadEvent(ctx, { ...base, kind: 'answer' });
+    const thread = t3ThreadOf(ctx.db, ask.sessionId);
+    const retryKey = `late:${askTag(ask.id)}`;
+    if (thread !== null && sendByRetryKey(ctx.db, retryKey) === undefined) {
+      intendSend(ctx.db, { projectId: project.id, kind: 'relay', target: thread, retryKey, body: leadLine(project.lead, `Aiden's answer, which replaces ${tag}: "${words.trim()}"`) }, ctx.now());
+    }
+    return true;
+  });
+}
+
+/** `lead set`: one setting of the project, as a `setting` line `<key> <value>`; the newest of a key wins. Refuses a key or value it does not know. */
+export function leadSet(ctx: Ctx, ref: string, as: string, instructions: number, input: { key: string; value: string; aidenWords?: string }): { text: string } {
+  const { project, name, actor } = leadOf(ctx, ref, as, instructions);
+  const check = Object.hasOwn(SETTING_KEYS, input.key) ? SETTING_KEYS[input.key]! : undefined;
+  if (check === undefined) throw badRequest(`${input.key} is not a setting.`, `The settings are: ${Object.keys(SETTING_KEYS).join(', ')}.`);
+  const value = input.value.trim();
+  const bad = check(value);
+  if (bad !== null) throw badRequest(bad);
+  return write(ctx, actor, () => {
+    logLeadEvent(ctx, { projectId: project.id, lead: name, instructions, kind: 'setting', text: `${input.key} ${value}`, ...(input.aidenWords === undefined ? {} : { aidenWords: input.aidenWords }) });
+    return { text: `Set ${input.key} to ${value}.` };
   });
 }
 

@@ -1,0 +1,310 @@
+import { LEAD_INSTRUCTIONS_VERSION } from '../../core/lead';
+import { clipLine } from '../../core/step-ref';
+import { stamp } from '../../core/span';
+import { write, type Ctx } from '../db/tx';
+import { insertLeadEvent } from '../repo/leadEvents';
+import { intendSend } from '../repo/leadSends';
+import { getProjectById } from '../repo/projects';
+import { liveProjectsWithRound, roundFirstOn } from '../repo/switches';
+import { leadThreadProject, quietHours } from './settings';
+import { weekSentence } from './usage';
+
+/*
+ * The morning list (lead stage 1, #743, task 10): plain code, no model. At the end of quiet hours, or at the first wake
+ * after it, one list per project with a lead and the round on. Lines the Voice held in the night go out with it.
+ */
+
+/** An intended send older than this is counted as not delivered. */
+export const NOT_DELIVERED_AFTER_MS = 10 * 60 * 1000;
+const ASK_CUT = 100;
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const hhmm = (iso: string): string => stamp(iso).slice(11);
+
+/** `Thursday 26 November`, local. */
+export function dayWords(iso: string): string {
+  const d = new Date(iso);
+  return `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`;
+}
+/** `Wednesday 09:00`, local. */
+export const dayTime = (iso: string): string => `${WEEKDAYS[new Date(iso).getDay()]} ${hhmm(iso)}`;
+/** A local date, `2026-11-26`: the day's key in a retry key. */
+export const dateKey = (iso: string): string => stamp(iso).slice(0, 10);
+
+/** A duration as the list reads it: `70 s`, `2 min 50`, `3 min`. */
+export function duration(ms: number): string {
+  const s = Math.round(ms / 1000);
+  if (s < 120) return `${s} s`;
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return r === 0 ? `${m} min` : `${m} min ${r}`;
+}
+
+/** One part of the list: its name, the count in brackets when it has one, and its lines. */
+export interface MorningPart {
+  name: string;
+  count?: number;
+  lines: string[];
+}
+
+/** The list as text, and by part. `text` is '' when the day had nothing. */
+export interface MorningList {
+  text: string;
+  parts: MorningPart[];
+  yours: number;
+  decided: number;
+  held: number;
+}
+
+interface Titled {
+  node_id: number | null;
+  title: string | null;
+}
+
+const stepWords = (nodeId: number | null, title: string | null): string => (nodeId === null ? '' : title === null ? `#${nodeId}` : `#${nodeId} ${title}`);
+const noStop = (text: string): string => text.trim().replace(/\.+$/, '');
+
+/** The list's text: each part's label padded to one column, two spaces, then its lines under each other. */
+function layout(header: string, parts: MorningPart[], tail: string[]): string {
+  const labels = parts.map((p) => (p.count === undefined ? p.name : `${p.name} (${p.count})`));
+  const width = Math.max(0, ...labels.map((l) => l.length)) + 2;
+  const out = [header];
+  parts.forEach((p, i) => {
+    p.lines.forEach((line, j) => out.push(`${j === 0 ? labels[i]!.padEnd(width) : ' '.repeat(width)}${line}`));
+  });
+  out.push(...tail);
+  return out.join('\n');
+}
+
+/**
+ * The project's list since `since` as of `now`. A part with nothing in it is left out; a day with nothing yours, decided,
+ * held, gone wrong or undelivered has no list (text ''). The week and the lead's own count never make a list alone.
+ */
+export function morningList(ctx: Ctx, projectId: number, since: string, now: string): MorningList {
+  const db = ctx.db;
+  const project = getProjectById(ctx, projectId);
+  const empty: MorningList = { text: '', parts: [], yours: 0, decided: 0, held: 0 };
+  if (project === undefined) return empty;
+  const parts: MorningPart[] = [];
+
+  // Yours: brought and still waiting.
+  const yours = (db
+    .prepare(
+      `SELECT e.node_id, n.title, a.text AS ask_text, e.text AS would_have FROM lead_events e
+       JOIN asks a ON a.id = e.ask_id LEFT JOIN nodes n ON n.id = e.node_id
+       WHERE e.project_id = ? AND e.kind = 'bring' AND a.cleared_at IS NULL ORDER BY e.at, e.id`,
+    )
+    .all(projectId) as (Titled & { ask_text: string; would_have: string })[]).map(
+    (r) => `${stepWords(r.node_id, r.title)}: ${noStop(clipLine(r.ask_text, ASK_CUT))}. I would: ${noStop(r.would_have)}.`,
+  );
+  if (yours.length) parts.push({ name: 'Yours', count: yours.length, lines: yours });
+
+  // Decided for you: the lead's own, not undone; product rulings first, then by time.
+  const decidedRows = db
+    .prepare(
+      `SELECT e.id AS event_id, e.kind AS event_kind, e.node_id, n.title, d.line, d.product_ruling FROM lead_decisions d
+       JOIN lead_events e ON e.id = d.event_id LEFT JOIN nodes n ON n.id = e.node_id
+       WHERE d.project_id = ? AND d.said_at >= ? AND e.kind <> 'bring'
+         AND NOT EXISTS (SELECT 1 FROM lead_events u WHERE u.project_id = e.project_id AND u.kind = 'undo' AND u.text = 'd' || e.id)
+       ORDER BY d.product_ruling DESC, d.said_at, d.id`,
+    )
+    .all(projectId, since) as (Titled & { event_id: number; event_kind: string; line: string; product_ruling: number })[];
+  if (decidedRows.length) {
+    const lines = decidedRows.map((r) => {
+      const undoable = r.event_kind === 'decide' || r.event_kind === 'park' || r.event_kind === 'drop';
+      return `d${r.event_id} ${stepWords(r.node_id, r.title)}${r.node_id === null ? '' : ': '}${noStop(r.line)}.${undoable ? ` "undo d${r.event_id}"` : ''}`;
+    });
+    if (decidedRows.some((r) => r.product_ruling !== 0)) lines.unshift('Product rulings first:');
+    parts.push({ name: 'Decided for you', count: decidedRows.length, lines });
+  }
+
+  // Held for you: held desk items not done.
+  const heldRows = db
+    .prepare(
+      `SELECT d.node_id, d.created_at, (SELECT e.text FROM lead_events e WHERE e.project_id = d.project_id AND e.kind = 'held' AND e.at = d.created_at ORDER BY e.id LIMIT 1) AS what
+       FROM desk_items d WHERE d.project_id = ? AND d.kind = 'held' AND d.state <> 'done' ORDER BY d.created_at, d.id`,
+    )
+    .all(projectId) as { node_id: number | null; what: string | null }[];
+  const held = heldRows.map((r) => {
+    const command = noStop((r.what ?? 'run a held command').split(' -> ')[0]!);
+    return `${r.node_id === null ? 'A session' : `#${r.node_id}`} wants to ${command}. Say "go ahead" or "not yet".`;
+  });
+  if (held.length) parts.push({ name: 'Held for you', count: held.length, lines: held });
+
+  // Went wrong.
+  const wrong: string[] = [];
+  const items = db
+    .prepare(
+      `SELECT kind, ref, node_id, state, outcome, created_at, done_at FROM desk_items
+       WHERE project_id = ? AND created_at >= ? AND (kind IN ('unknown_send') OR state = 'behind'
+         OR (kind = 'stopped' AND (outcome LIKE 'RESTART%' OR outcome LIKE 'PARK%' OR outcome LIKE 'DONE%' OR outcome = 'asked')))
+       ORDER BY created_at, id`,
+    )
+    .all(projectId, since) as { kind: string; ref: string; node_id: number | null; state: string; outcome: string | null; created_at: string; done_at: string | null }[];
+  for (const i of items) {
+    const step = i.node_id === null ? 'A session' : `#${i.node_id}`;
+    if (i.kind === 'unknown_send') wrong.push(`A send could not be confirmed (s${i.ref})${i.state === 'done' ? `; settled at ${hhmm(i.done_at ?? i.created_at)}` : ''}.`);
+    else if (i.state === 'behind') wrong.push(`${step}: the lead is behind on a ${i.kind} item (${i.ref}).`);
+    else {
+      const stopped = i.kind === 'stopped' && i.ref.includes('@') ? hhmm(i.ref.slice(i.ref.indexOf('@') + 1)) : hhmm(i.created_at);
+      const at = hhmm(i.done_at ?? i.created_at);
+      const what = (i.outcome ?? '').startsWith('RESTART') ? `restarted at ${at}` : (i.outcome ?? '').startsWith('PARK') ? `parked at ${at}` : (i.outcome ?? '').startsWith('DONE') ? `noted done at ${at}` : 'asked, no answer yet';
+      wrong.push(`${step} stopped at ${stopped}; ${what}.`);
+    }
+  }
+  if (wrong.length) parts.push({ name: 'Went wrong', count: wrong.length, lines: wrong });
+
+  // Not delivered.
+  const undelivered = (db
+    .prepare(
+      `SELECT id, kind, target, state, created_at FROM lead_sends
+       WHERE project_id = ? AND created_at >= ? AND (state = 'unknown' OR (state = 'intended' AND created_at <= ?)) ORDER BY created_at, id`,
+    )
+    .all(projectId, since, new Date(Date.parse(now) - NOT_DELIVERED_AFTER_MS).toISOString()) as { id: number; kind: string; target: string; state: string; created_at: string }[]).map(
+    (s) => `${s.kind} to ${s.target} (s${s.id}), ${s.state === 'unknown' ? 'not confirmed' : `not sent since ${hhmm(s.created_at)}`}.`,
+  );
+  if (undelivered.length) parts.push({ name: 'Not delivered', count: undelivered.length, lines: undelivered });
+
+  if (parts.length === 0) return empty;
+  const yoursN = yours.length;
+  const decidedN = decidedRows.length;
+  const heldN = held.length;
+
+  // The lead's own calls.
+  const turns = db
+    .prepare(
+      `SELECT t.duration_ms, t.started_at, t.finished_at, i.due_at FROM lead_turns t JOIN desk_items i ON i.id = t.item_id
+       WHERE t.project_id = ? AND t.state = 'applied' AND t.finished_at >= ?`,
+    )
+    .all(projectId, since) as { duration_ms: number | null; started_at: string | null; finished_at: string; due_at: string | null }[];
+  if (turns.length) {
+    const ms = turns.map((t) => t.duration_ms ?? (t.started_at === null ? 0 : Date.parse(t.finished_at) - Date.parse(t.started_at))).sort((a, b) => a - b);
+    const median = ms.length % 2 === 1 ? ms[(ms.length - 1) / 2]! : (ms[ms.length / 2 - 1]! + ms[ms.length / 2]!) / 2;
+    const late = turns.filter((t) => t.due_at !== null && t.finished_at > t.due_at).length;
+    parts.push({
+      name: 'The lead',
+      lines: [`${turns.length} call${turns.length === 1 ? '' : 's'}, median ${duration(median)}, slowest ${duration(ms[ms.length - 1]!)}, ${late === 0 ? 'none late' : `${late} late`}.`],
+    });
+  }
+
+  // The week.
+  const week = weekSentence(db, now);
+  if (week !== null) parts.push({ name: 'The week', lines: [week] });
+
+  // The lid.
+  const tail: string[] = [];
+  const slept = db.prepare("SELECT text FROM lead_events WHERE project_id = ? AND kind = 'slept' AND at >= ? ORDER BY at, id").all(projectId, since) as { text: string }[];
+  for (const s of slept) {
+    try {
+      const gap = JSON.parse(s.text) as { from: string; to: string };
+      const waited = (db
+        .prepare('SELECT COUNT(*) FROM desk_items WHERE project_id = ? AND created_at >= ? AND created_at <= ? ').pluck().get(projectId, gap.from, gap.to) as number);
+      tail.push(`The laptop slept from ${hhmm(gap.from)} to ${hhmm(gap.to)}; ${waited} item${waited === 1 ? '' : 's'} waited.`);
+    } catch {
+      // A slept row that is not JSON was written by hand: the lid line is left out.
+    }
+  }
+
+  const header = `${project.name} · ${dayWords(now)} · since ${dayTime(since)}`;
+  return { text: layout(header, parts, tail), parts, yours: yoursN, decided: decidedN, held: heldN };
+}
+
+/** The newest 'morning' row of the project: its time, and its list text ('' for a day with nothing). */
+export function lastMorning(ctx: Ctx, projectId: number): { at: string; text: string } | undefined {
+  return ctx.db.prepare("SELECT at, text FROM lead_events WHERE project_id = ? AND kind = 'morning' ORDER BY at DESC, id DESC LIMIT 1").get(projectId) as { at: string; text: string } | undefined;
+}
+
+/** What `lead morning` prints: the list since the last morning row (or the round's start), or "Nothing since <time>.". */
+export function readMorning(ctx: Ctx, projectId: number): string {
+  const now = ctx.now();
+  const since = lastMorning(ctx, projectId)?.at ?? roundFirstOn(ctx.db, projectId) ?? now;
+  const list = morningList(ctx, projectId, since, now);
+  return list.text === '' ? `Nothing since ${dayTime(since)}.` : list.text;
+}
+
+/** The end of today's quiet hours as an ISO time: `now`'s local date at the `to` minute. */
+export function quietEndToday(now: string, toMinutes: number): string {
+  const d = new Date(now);
+  d.setHours(Math.floor(toMinutes / 60), toMinutes % 60, 0, 0);
+  return d.toISOString();
+}
+
+/**
+ * The minute watch's morning part. For each project with the round on, once now is past today's quiet-hours end and no
+ * 'morning' row has been written at or after that end, the list since the last morning row (or the round's first
+ * switch-on) is built: one list for a missed night, not two. A list with something in it is, in one write, a 'morning'
+ * row, a Voice line, and a start send for the day's lead thread when the project has one set up; an empty day writes the
+ * 'morning' row with no text and sends nothing. Returns how many projects got a list.
+ */
+export function watchMorning(ctx: Ctx): number {
+  let made = 0;
+  for (const projectId of liveProjectsWithRound(ctx.db)) {
+    const now = ctx.now();
+    const end = quietEndToday(now, quietHours(ctx.db, projectId).to);
+    if (now < end) continue;
+    const last = lastMorning(ctx, projectId);
+    if (last !== undefined && last.at >= end) continue;
+    const project = getProjectById(ctx, projectId);
+    const since = last?.at ?? roundFirstOn(ctx.db, projectId);
+    if (project === undefined || project.lead === null || since === null) continue;
+    const lead = project.lead;
+    // Built and written in one write, so two ticks at once never write two lists.
+    const wrote = write(
+      ctx,
+      'system',
+      () => {
+        const again = lastMorning(ctx, projectId);
+        if (again !== undefined && again.at >= end) return false;
+        const list = morningList(ctx, projectId, since, now);
+        insertLeadEvent(ctx.db, { projectId, lead, instructions: LEAD_INSTRUCTIONS_VERSION, kind: 'morning', text: list.text }, now);
+        if (list.text === '') return false;
+        const date = dateKey(now);
+        intendSend(
+          ctx.db,
+          {
+            projectId,
+            kind: 'voice_line',
+            target: 'webhook',
+            retryKey: `morning:${projectId}:${date}`,
+            body: `${project.name} morning list: ${list.yours} yours, ${list.decided} decided, ${list.held} held. Say "the list" for all of it.`,
+          },
+          now,
+        );
+        const t3Project = leadThreadProject(ctx.db, projectId);
+        if (t3Project !== undefined) {
+          intendSend(
+            ctx.db,
+            { projectId, kind: 'start', target: t3Project, retryKey: `morning-thread:${projectId}:${date}`, body: JSON.stringify({ message: list.text, title: `${project.name} lead ${date}` }) },
+            now,
+          );
+        }
+        return true;
+      },
+      { immediate: true },
+    );
+    if (wrote) made++;
+  }
+  return made;
+}
+
+/** The longest the minute watch may go between ticks before the gap counts as the laptop sleeping. */
+export const WAKE_GAP_MS = 3 * 60 * 1000;
+const lastTick = new WeakMap<object, string>();
+
+/**
+ * The minute watch's sleep part: when this tick finds the last one more than WAKE_GAP_MS ago, the laptop slept; a 'slept'
+ * row (text JSON `{from, to}`) is written for each project with the round on, for the morning list's lid line. Returns
+ * whether a gap was seen.
+ */
+export function noteWake(ctx: Ctx): boolean {
+  const now = ctx.now();
+  const before = lastTick.get(ctx.db);
+  lastTick.set(ctx.db, now);
+  if (before === undefined || Date.parse(now) - Date.parse(before) <= WAKE_GAP_MS) return false;
+  for (const projectId of liveProjectsWithRound(ctx.db)) {
+    const lead = getProjectById(ctx, projectId)?.lead;
+    if (lead === null || lead === undefined) continue;
+    write(ctx, 'system', () => insertLeadEvent(ctx.db, { projectId, lead, instructions: LEAD_INSTRUCTIONS_VERSION, kind: 'slept', text: JSON.stringify({ from: before, to: now }) }, now));
+  }
+  return true;
+}

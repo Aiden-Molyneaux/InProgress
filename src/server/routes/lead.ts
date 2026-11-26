@@ -1,23 +1,30 @@
 import type { FastifyInstance } from 'fastify';
 import type { Guard } from '../app';
 import type { Ctx } from '../db/tx';
-import { badGateway, badRequest } from '../errors';
+import { badGateway, badRequest, notFound } from '../errors';
 import { cliBesideServer, nodeCli } from '../../lib/task-command';
 import { leadFolders, listLeadEvents, markLeadSeen, readLeadBrief, readLeadIntent, readLeadRules, requireLead } from '../lead';
-import { leadAllow, leadDisallow, leadAnswer, leadDecide, leadUndo, leadDrop, leadIntent, leadKept, leadPark, leadPromise } from '../lead-commands';
+import { leadAllow, leadDisallow, leadAnswer, leadDecide, leadUndo, leadDrop, leadIntent, leadKept, leadPark, leadPromise, leadSet } from '../lead-commands';
+import { readMorning } from '../lead/morning';
+import { reserveAllowsStart } from '../lead/reserve';
+import { importUsage, leadCounts, weekText } from '../lead/usage';
+import { resolveProject } from '../repo/projects';
 import { readDesk } from '../lead/desk';
 import { holdBody, holdCheck, stuckWait } from '../lead/hold';
 import { checkLanding, type LandingDeps } from '../lead/landing';
 import { leadRelay, reasonOf, type RelaySend } from '../lead-relay';
 import { defaultStart, leadStart, type StartThread } from '../lead-start';
 import { createSender, type Sender } from '../lead/sends';
-import { T3Unavailable, t3List, t3Send, t3Show } from '../t3';
+import { T3ArgumentRefused, T3Unavailable, t3List, t3Send, t3Show } from '../t3';
 import { readLeadResource, readLeadStep } from '../lead-step';
 import { renderLeadBrief } from '../lead-text';
-import { leadAllowBody, leadDisallowBody, leadAnswerBody, leadBriefQuery, leadStuckBody, leadDecideBody, leadUndoBody, leadDropBody, leadIntentBody, leadKeptBody, leadLandingBody, leadParkBody, leadPromiseBody, leadReadQuery, leadRelayBody, leadStartBody, leadRulesQuery, leadSeenBody } from '../schemas';
+import { leadAllowBody, leadDisallowBody, leadAnswerBody, leadBriefQuery, leadStuckBody, leadDecideBody, leadUndoBody, leadSetBody, leadImportUsageBody, leadCountsQuery, leadDropBody, leadIntentBody, leadKeptBody, leadLandingBody, leadParkBody, leadPromiseBody, leadReadQuery, leadRelayBody, leadStartBody, leadRulesQuery, leadSeenBody } from '../schemas';
 
-/** How many of a project's threads, newest first, the threads read opens to see whether they hold a message. */
-const THREADS_READ = 10;
+/** How many of a project's threads, newest first, the threads read lists. */
+const THREADS_LISTED = 20;
+/** How many of those, newest first, it opens to see whether they hold a message, and how many at a time. */
+const THREADS_READ = 5;
+const THREADS_AT_ONCE = 3;
 /** The most a thread read answers. */
 const THREAD_MAX_BYTES = 40 * 1024;
 /** The text cut to THREAD_MAX_BYTES, with a last line saying so. */
@@ -48,7 +55,7 @@ export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken:
     try {
       return await read();
     } catch (err) {
-      if (err instanceof TypeError) throw badRequest(err.message);
+      if (err instanceof T3ArgumentRefused) throw badRequest(err.message);
       if (err instanceof T3Unavailable) throw badGateway(`T3 Code is not answering: ${reasonOf(err)}`);
       throw err;
     }
@@ -60,25 +67,36 @@ export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken:
     const project = requireLead(ctx, ref, query.as, query.instructions, false);
     const [folder] = leadFolders(ctx, project.id);
     if (folder === undefined) return { text: 'This project has no folder on record.' };
-    const threads = [...(await t3Read(() => sender.threads(folder)))].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-    const lines: string[] = [];
-    for (const [i, t] of threads.entries()) {
-      let said = 'messages not read (only the newest ' + THREADS_READ + ' are)';
-      if (i < THREADS_READ) {
-        try {
-          said = (await sender.show(t.threadId)).messages.some((m) => m.role === 'user') ? 'has a first message' : 'has no message';
-        } catch (err) {
-          said = `could not read its messages: ${reasonOf(err)}`;
-        }
-      }
-      lines.push(`${t.threadId}  "${t.title}"  updated ${t.updatedAt || '(unknown)'}  ${said}`);
+    const all = [...(await t3Read(() => sender.threads(folder)))].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    const threads = all.slice(0, THREADS_LISTED);
+    // Each show is a CLI run: the newest few only, a few at a time, so the read ends inside the tool's wait.
+    const said = threads.map(() => 'messages not opened');
+    const opened = threads.slice(0, THREADS_READ);
+    for (let i = 0; i < opened.length; i += THREADS_AT_ONCE) {
+      await Promise.all(
+        opened.slice(i, i + THREADS_AT_ONCE).map(async (t, j) => {
+          try {
+            said[i + j] = (await sender.show(t.threadId)).messages.some((m) => m.role === 'user') ? 'has a first message' : 'has no message';
+          } catch (err) {
+            said[i + j] = `could not read its messages: ${reasonOf(err)}`;
+          }
+        }),
+      );
     }
-    return { text: lines.length === 0 ? 'No threads.' : lines.join('\n') };
+    const lines = threads.map((t, i) => `${t.threadId}  "${t.title}"  updated ${t.updatedAt || '(unknown)'}  ${said[i]}`);
+    if (lines.length === 0) return { text: 'No threads.' };
+    const notOpened = threads.length - opened.length;
+    if (notOpened > 0) lines.push(`${notOpened} of these were not opened: read one with thread.`);
+    if (all.length > threads.length) lines.push(`${all.length - threads.length} older threads are not listed.`);
+    return { text: lines.join('\n') };
   });
   app.get('/api/lead/:ref/thread/:id', async (req) => {
     const { ref, id } = req.params as { ref: string; id: string };
     const query = leadReadQuery.parse(req.query);
-    requireLead(ctx, ref, query.as, query.instructions, false);
+    const project = requireLead(ctx, ref, query.as, query.instructions, false);
+    // Only a thread of this project: one its last threads read listed.
+    const folder = leadFolders(ctx, project.id)[0];
+    if (folder === undefined || !sender.listed(folder, id)) throw notFound(`Thread ${id} was not in this project's last threads read. Read threads first.`);
     const { thread, messages } = await t3Read(() => sender.show(id));
     const text = [`${thread.threadId}  "${thread.title}"  updated ${thread.updatedAt || '(unknown)'}`, ...messages.map((m) => `${m.role}: ${m.text}`)].join('\n\n');
     return { text: capText(text) };
@@ -119,6 +137,16 @@ export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken:
   app.get('/api/lead/:ref/events', async (req) => ({ events: listLeadEvents(ctx, (req.params as { ref: string }).ref) }));
   // The lead's desk: its open items, oldest first, and their text. No lead check, like the log.
   app.get('/api/lead/:ref/desk', async (req) => readDesk(ctx, (req.params as { ref: string }).ref));
+  // The morning list since the last one, the week's usage, and what reached Aiden per step closed: reads, no lead check.
+  app.get('/api/lead/:ref/morning', async (req) => ({ text: readMorning(ctx, resolveProject(ctx, (req.params as { ref: string }).ref).id) }));
+  app.get('/api/lead/:ref/week', async (req) => {
+    resolveProject(ctx, (req.params as { ref: string }).ref);
+    return { text: weekText(ctx.db, ctx.now(), reserveAllowsStart(ctx, ctx.now())) };
+  });
+  app.get('/api/lead/:ref/counts', async (req) => {
+    const project = resolveProject(ctx, (req.params as { ref: string }).ref);
+    return leadCounts(ctx, project.id, leadCountsQuery.parse(req.query).since);
+  });
   // The lead has read the brief: the next one counts what landed and what was said from here.
   app.post('/api/lead/:ref/seen', { onRequest: requireToken }, async (req) => {
     const body = leadSeenBody.parse(req.body);
@@ -143,6 +171,20 @@ export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken:
   app.post('/api/lead/:ref/undo', { onRequest: requireToken }, async (req) => {
     const { as, instructions, ...input } = leadUndoBody.parse(req.body);
     return leadUndo(ctx, ref(req), as, instructions, input);
+  });
+  app.post('/api/lead/:ref/set', { onRequest: requireToken }, async (req) => {
+    const { as, instructions, ...input } = leadSetBody.parse(req.body);
+    return leadSet(ctx, ref(req), as, instructions, input);
+  });
+  // Stage 0's hourly usage readings, imported once from a file on this machine.
+  app.post('/api/lead/usage/import', { onRequest: requireToken }, async (req) => {
+    const { file } = leadImportUsageBody.parse(req.body);
+    try {
+      const r = importUsage(ctx, file);
+      return { ...r, text: `Imported ${r.added} reading${r.added === 1 ? '' : 's'}; ${r.skipped} skipped.` };
+    } catch (err) {
+      throw badRequest(`Could not import ${file}: ${(err as Error).message}`);
+    }
   });
   app.post('/api/lead/:ref/park', { onRequest: requireToken }, async (req) => {
     const { as, instructions, ...input } = leadParkBody.parse(req.body);

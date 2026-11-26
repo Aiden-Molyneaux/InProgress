@@ -48,8 +48,13 @@ export function t3ThreadOf(db: DB, sessionId: string | null): string | null {
   return row !== undefined && row.app === 't3' && row.t3_thread_id ? row.t3_thread_id : null;
 }
 
+/** The desk item kinds whose ref is an ask id (old_ask joins them with task 17). */
+const ASK_KINDS: ReadonlySet<string> = new Set(['question', 'permission']);
+
 /** The ask a question or permission item is about, read in this write; undefined when it is gone (its project deleted, or the row). */
 export function askOf(ctx: Ctx, item: DeskItem): Ask | undefined {
+  // Only a question or permission item's ref is an ask id: an unknown_send's is a send id, a stopped item's a session.
+  if (!ASK_KINDS.has(item.kind)) return undefined;
   if (!/^\d+$/.test(item.ref)) return undefined;
   const id = Number(item.ref);
   if (ctx.db.prepare('SELECT 1 FROM asks WHERE id = ?').get(id) === undefined) return undefined;
@@ -154,7 +159,7 @@ export function bringNext(ctx: Ctx, projectId: number): number[] {
       `SELECT d.id, d.node_id AS nodeId FROM desk_items d
          LEFT JOIN asks a ON a.id = CAST(d.ref AS INTEGER) AND d.kind IN ('question', 'permission')
          LEFT JOIN sessions s ON s.id = a.session_id
-        WHERE d.project_id = ? AND d.state = 'waiting_aiden' AND d.kind <> 'old_ask' AND NOT ${BROUGHT_SQL}
+        WHERE d.project_id = ? AND d.state = 'waiting_aiden' AND d.kind IN ('question', 'permission') AND NOT ${BROUGHT_SQL}
         ORDER BY CASE WHEN d.kind = 'permission' THEN 0 WHEN d.kind = 'question' AND s.state = 'idle' THEN 1 ELSE 2 END, d.created_at, d.id`,
     )
     .all(projectId) as { id: number; nodeId: number | null }[];

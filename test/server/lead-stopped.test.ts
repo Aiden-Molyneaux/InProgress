@@ -36,7 +36,7 @@ const verdictText = (answer: string, head = 'DECIDE') => `I read the thread.\n${
  * (in T3 Code unless `inT3` is false), its stopped item on the desk, a stand-in T3 and a sender over it, and a runner whose
  * turns answer `answer` and whose apply is the server's.
  */
-function world(opts: { inT3?: boolean; reserve?: ReserveAnswer } = {}) {
+function world(opts: { inT3?: boolean; reserve?: ReserveAnswer; starts?: boolean } = {}) {
   let t = Date.parse('2026-11-25T02:00:00.000Z');
   const ctx: Ctx = createCtx(openDb(':memory:'), () => new Date(t).toISOString());
   cleanups.push(() => void ctx.db.close());
@@ -47,6 +47,8 @@ function world(opts: { inT3?: boolean; reserve?: ReserveAnswer } = {}) {
   leadIntent(ctx, project.slug, 'Progresser', V, { intent: '## Goal\nShip the game.\n\n## Phase\nStore release.\n' });
   const [step] = addNodes(ctx, 'test', { parentId: project.rootNodeId, nodes: [{ title: 'Build tabs', what: 'Tabs.', why: 'Players asked.' }] });
   leadAllow(ctx, project.slug, 'Progresser', V, { switch: 'round', aidenWords: 'run the round' });
+  // A restart is the lead's own start: it needs Starts on.
+  if (opts.starts !== false) leadAllow(ctx, project.slug, 'Progresser', V, { switch: 'starts', aidenWords: 'start things' });
   tick(MIN);
   const t3 = new StandInT3();
   handleHookEvent(ctx, 's1', { event: 'start', source: 'startup', cwd: BOUND });
@@ -237,5 +239,52 @@ describe('a promise past its time', () => {
     expect(effect.itemState).toBe('done');
     expect(effect.outcome).toMatch(/^DECIDE noted \(e\d+\)$/);
     expect(w.ctx.db.prepare("SELECT ask_id AS askId, text FROM lead_events WHERE kind = 'promise_due'").get()).toEqual({ askId: 7, text: 'DECIDE: Done it: the tabs ship tonight.' });
+  });
+});
+
+describe("a restart passes every refusal lead start has (S16)", () => {
+  const restart = verdictText('RESTART: carry on from the tabs.');
+  const parkedWith = (w: ReturnType<typeof world>, words: string, starts = 0) => {
+    expect(w.state().outcome).toMatch(/^PARK d\d+$/);
+    expect(w.sends('start')).toHaveLength(starts);
+    expect(w.events('park').map((e) => e.text).join('\n')).toContain(words);
+  };
+
+  it('Starts off: a PARK with the reason', async () => {
+    const w = world({ starts: false });
+    await w.unanswered(restart);
+    parkedWith(w, 'Starts is off');
+  });
+
+  it('another live session on the step: a PARK, while its own stopped session does not count', async () => {
+    const w = world();
+    const [child] = addNodes(w.ctx, 'test', { parentId: w.step.id, nodes: [{ title: 'Tab icons', what: 'Icons.', why: 'Looks.' }] });
+    handleHookEvent(w.ctx, 's2', { event: 'start', source: 'startup', cwd: BOUND });
+    claimStep(w.ctx, 'session:s2', 's2', child!.id);
+    await w.unanswered(restart);
+    parkedWith(w, 'already has a session working on it');
+  });
+
+  it('the in-flight limit: a PARK', async () => {
+    const w = world();
+    for (const id of ['x1', 'x2', 'x3']) handleHookEvent(w.ctx, id, { event: 'start', source: 'startup', cwd: BOUND });
+    await w.unanswered(restart);
+    parkedWith(w, 'sessions are in flight');
+  });
+
+  it('a step that is done: a PARK line, and the step stays done', async () => {
+    const w = world();
+    w.ctx.db.prepare("UPDATE nodes SET status = 'done' WHERE id = ?").run(w.step.id);
+    await w.unanswered(restart);
+    parkedWith(w, 'is done');
+    expect(requireNode(w.ctx, w.step.id).status).toBe('done');
+  });
+
+  it('a start of the step still unanswered: a PARK', async () => {
+    const w = world();
+    write(w.ctx, 'test', () => intendSend(w.ctx.db, { projectId: w.project.id, kind: 'start', target: 'C:/elsewhere', body: JSON.stringify({ message: 'm', title: 't', nodeId: w.step.id }) }, w.ctx.now()));
+    w.t3.down = true;
+    await w.unanswered(restart);
+    parkedWith(w, 'has not answered yet', 1);
   });
 });

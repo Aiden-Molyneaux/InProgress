@@ -7,12 +7,24 @@ import { stuckRequestOf } from './hold';
 import { markedTitle, parseStartBody, sendMarker } from './sends';
 import { stoppedTurnLines } from './stopped';
 
+/** How many rulings the desk turn reads: the newest. */
+export const RULINGS_READ = 20;
+
 /**
- * The project's standing rulings, as the desk turn's last section reads them. '' until task 10 of lead stage 1 (#743)
- * fills it.
+ * The project's standing rulings, as the desk turn's last section reads them: Aiden's reasons given with an undo (a
+ * `ruling` line in the lead's log), the newest 20, one line each `- <text> (from undo d<id>, <date>)`; '' when none.
  */
-export function standingRulings(_ctx: Ctx, _projectId: number): string {
-  return '';
+export function standingRulings(ctx: Ctx, projectId: number): string {
+  const rows = ctx.db
+    .prepare(
+      `SELECT r.text, r.at, (SELECT u.text FROM lead_events u WHERE u.project_id = r.project_id AND u.kind = 'undo' AND u.aiden_words = r.aiden_words AND u.id < r.id ORDER BY u.id DESC LIMIT 1) AS undo
+       FROM lead_events r WHERE r.project_id = ? AND r.kind = 'ruling' ORDER BY r.at DESC, r.id DESC LIMIT ?`,
+    )
+    .all(projectId, RULINGS_READ) as { text: string; at: string; undo: string | null }[];
+  return rows
+    .reverse()
+    .map((r) => `- ${r.text} (from undo ${r.undo ?? 'd?'}, ${stamp(r.at).slice(0, 10)})`)
+    .join('\n');
 }
 
 /**
@@ -93,13 +105,20 @@ function unknownSendLines(ctx: Ctx, item: DeskItem): string[] {
   ];
   if (send.kind === 'start') lines.push(`Its thread's title ends with the marker ${sendMarker(send.id)}${start ? `: "${markedTitle(start.title, send.id)}"` : ''}.`);
   lines.push(send.kind === 'start' ? 'Its first message:' : 'Its text:', start?.message ?? send.body);
-  lines.push(
-    'Read threads, and the thread that may be it, then answer DECIDE with KIND: TECHNICAL and ANSWER one of:',
-    'FOUND <thread id>: the send happened (for a start, the thread holds its first message).',
-    'FIRST <thread id>: the thread was started but holds no first message; it is sent once.',
-    'NOT FOUND: it never happened; the step can be started again.',
-    'Or answer AIDEN when you cannot tell. Nothing is retried.',
-  );
+  lines.push('Read threads, and the thread that may be it, then answer DECIDE with KIND: TECHNICAL and ANSWER one of:');
+  if (send.kind === 'start') {
+    lines.push(
+      'FOUND <thread id>: the thread was started and holds its first message.',
+      'FIRST <thread id>: the thread was started but holds no first message; it is sent once.',
+      'NOT FOUND: no thread was started; the step can be started again.',
+    );
+  } else {
+    lines.push(
+      `DELIVERED ${send.target}: the message is in the thread.`,
+      'NOT FOUND: the message is not in the thread; it is sent once more.',
+    );
+  }
+  lines.push('Or answer AIDEN when you cannot tell.');
   return lines;
 }
 

@@ -129,3 +129,14 @@ export function intendedSends(db: DB): LeadSend[] {
 export function setSendBody(db: DB, id: number, body: string): void {
   db.prepare("UPDATE lead_sends SET body = ? WHERE id = ? AND state = 'intended'").run(body, id);
 }
+
+/** The result an intended send holds while it is tried: written just before the action, so a restart knows it may have gone. */
+export const SEND_TRYING = 'trying';
+
+/**
+ * Marks an intended send as being tried (result 'trying'), or, with `trying` false, as never tried (result cleared), in the
+ * sender's own write. Returns whether the row changed.
+ */
+export function markTrying(db: DB, id: number, trying: boolean): boolean {
+  return db.prepare("UPDATE lead_sends SET result = ? WHERE id = ? AND state = 'intended'").run(trying ? SEND_TRYING : null, id).changes > 0;
+}
