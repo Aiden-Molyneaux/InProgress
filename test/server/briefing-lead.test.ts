@@ -75,7 +75,7 @@ describe('the Lead line in a worker briefing', () => {
     expect(lines[2]).toBe(leadBriefingLine('Progresser'));
     expect(lines[3]).toBe(sessionMandateLines('Progresser')[0]);
     expect(lines[4]).toBe(sessionMandateLines('Progresser')[1]);
-    expect(lines[5]).toMatch(/^Before a merge, a deploy or a push, ask the landing check: node \S+\/dist\/cli\/main\.js landing <step id> --action merge\|deploy\|push\. "Clear to land" lets it go; a hold is Aiden's: wait for his word\.$/);
+    expect(lines[5]).toMatch(/^Before a merge, a deploy, a push or a publish, ask the landing check: node \S+\/dist\/cli\/main\.js landing <step id> --action merge\|deploy\|push\|publish\. "Clear to land" lets it go; a hold is Aiden's: wait for his word\.$/);
     expect(landingCheckLine('C:/r/dist/cli/main.js')).toContain('node C:/r/dist/cli/main.js landing <step id>');
     expect(lines[6]).toMatch(PLAN_EDIT);
     expect(lines.filter((l) => l.startsWith('Lead:'))).toHaveLength(1);

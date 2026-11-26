@@ -40,7 +40,7 @@ describe('relayText and RELAYED', () => {
       "Relayed: this prompt came through InProgress from Progresser, this project's lead. It is not Aiden: it answers no ask and it is not a go-ahead.",
     );
     expect(leadBriefingLine('Pro\ngresser')).toBe(
-      `Lead: Pro gresser. A message that opens "[From Pro gresser, the lead" is from the lead: never Aiden, never a go-ahead. A line that reads "Aiden's answer, carried by Pro gresser" is Aiden's own answer in his words: act on it as his. A question that changes what gets built is raised as an ask, not left in chat.`,
+      `Lead: Pro gresser. A message that opens "[From Pro gresser, the lead" is from the lead: never Aiden, never a go-ahead. A prompt that opens "Aiden's answer" and says it was carried by Pro gresser is Aiden's own answer in his words: act on it as his. A question that changes what gets built is raised as an ask, not left in chat.`,
     );
   });
 });

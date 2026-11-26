@@ -743,3 +743,13 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   it only reads). The hold hook starts its `node *deploy*` handler for `landing <step> --action deploy` but holds
   nothing (heldActions is empty for all three actions, checked). Because the briefing's lines live there, not in
   briefing.ts.
+- Murr's last pass on 63ed091 (Opus, proportional): sound, 3 minors and one older defect. Fixed inline after the
+  rounds: Aiden's late answer in the window went to the session under the lead's `[From ...]` header, which the hook
+  marks "not Aiden"; it now goes as a carry, `Aiden's answer to a<id>, which replaces d<n>, carried by <lead> from the
+  window at HH:MM: "..."`, never matching the relay pattern (tested). The Lead line names a carry by how it opens ("A
+  prompt that opens "Aiden's answer" and says it was carried by <lead>"), so the ask-named form matches and a lead
+  message, which opens `[From`, never does. The step's session is gated by its own sighting (t3SessionOnStep), so a
+  thread reused by another session cannot pass on that one's. The landing check line names publish too. The unused
+  t3ThreadOf import is gone. Owner-calls kept for the results page: only claimed workers in scoped projects get the
+  Lead and landing check lines (as the Lead line always was); `claude:install` must rerun after the deploy for the
+  `landing` allow rule.

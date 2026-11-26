@@ -5,7 +5,7 @@ import { conflict, notFound } from '../errors';
 import { carriedLine, requireAnswerLead, workProject, WORK_PROJECT, type CarriedYes, type YesAction } from '../lead-commands';
 import { logLeadEvent } from '../lead';
 import { getDeskItem, moveDeskItem, type DeskItem } from '../repo/desk';
-import { askOf, DECISION_LINE_CUT, reachableThread, t3ThreadOnStep } from '../repo/deskBring';
+import { askOf, DECISION_LINE_CUT, reachableThread, t3SessionOnStep } from '../repo/deskBring';
 import { addDecision } from '../repo/leadDecisions';
 import { getSend, intendSend, sendByRetryKey, type LeadSend } from '../repo/leadSends';
 import { addLogInWrite } from '../repo/logs';
@@ -154,7 +154,7 @@ export function leadAnswerItem(ctx: Ctx, ref: string, as: string, instructions: 
         ? reachableThread(ctx.db, { sessionId: held.sessionId }, ctx.now())
         : item.nodeId === null
           ? null
-          : reachableThread(ctx.db, { threadId: t3ThreadOnStep(ctx, item.nodeId) }, ctx.now());
+          : reachableThread(ctx.db, { sessionId: t3SessionOnStep(ctx, item.nodeId) }, ctx.now());
     const retryKey = `carry:i${item.id}`;
     const said = carriedLine(name, where, saidAt, input.aidenWords);
     let carried = false;

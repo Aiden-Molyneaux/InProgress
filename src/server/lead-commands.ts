@@ -10,7 +10,7 @@ import { LEAD_NAME, LEAD_NAME_RULE } from '../core/lead';
 import { resolveProject } from './repo/projects';
 import { intentHeadlines } from './lead-text';
 import { aidensAskSql, clearInWrite, markAnswersDelivered, raiseAskInWrite, requireAsk } from './repo/asks';
-import { DECISION_LINE_CUT, reachableThread, t3ThreadOf } from './repo/deskBring';
+import { DECISION_LINE_CUT, reachableThread } from './repo/deskBring';
 import { addDeskItem, getDeskItem } from './repo/desk';
 import { intendSend, sendByRetryKey } from './repo/leadSends';
 import { SETTING_KEYS } from './lead/settings';
@@ -583,7 +583,8 @@ export function lateAnswer(ctx: Ctx, askId: number, words: string, actor: string
     const thread = reachableThread(ctx.db, { sessionId: ask.sessionId }, ctx.now());
     const retryKey = `late:${askTag(ask.id)}`;
     if (thread !== null && sendByRetryKey(ctx.db, retryKey) === undefined) {
-      intendSend(ctx.db, { projectId: project.id, kind: 'relay', target: thread, retryKey, body: leadLine(project.lead, `Aiden's answer, which replaces ${tag}: "${words.trim()}"`) }, ctx.now());
+      // His own words, so not under the lead's [From ...] header, which a session reads as not Aiden.
+      intendSend(ctx.db, { projectId: project.id, kind: 'carry', target: thread, retryKey, body: `Aiden's answer to ${askTag(ask.id)}, which replaces ${tag}, carried by ${project.lead} from the window at ${hhmmOf(ctx.now())}: "${words.trim()}"` }, ctx.now());
     }
     // The ask's answer is his now, Aiden's own (answered_via NULL), so the window shows it and no line calls it the lead's.
     // A session not in T3 Code gets no relay: the answer is marked not yet delivered, and its next prompt reads it as it

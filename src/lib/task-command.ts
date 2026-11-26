@@ -56,7 +56,7 @@ export function claimCommand(sessionId: string, o: { cli?: string } = {}): strin
 
 /** `node <cli> landing <step id> --action merge|deploy|push`: the landing check a session asks before it lands (lead stage 1). */
 export function landingCommand(o: { cli?: string } = {}): string {
-  return `${cliPrefix(o.cli ?? cliBesideServer(), 'landing')} <step id> --action merge|deploy|push`;
+  return `${cliPrefix(o.cli ?? cliBesideServer(), 'landing')} <step id> --action merge|deploy|push|publish`;
 }
 
 /**

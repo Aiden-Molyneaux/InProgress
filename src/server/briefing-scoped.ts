@@ -97,7 +97,7 @@ export function leadLines(lead: string | null, landing: boolean, cli?: string): 
 
 /** Every session in a project with a lead asks the landing check before it lands (lead stage 1): a hold is Aiden's. */
 export const landingCheckLine = (cli?: string): string =>
-  `Before a merge, a deploy or a push, ask the landing check: ${landingCommand(cli === undefined ? {} : { cli })}. "Clear to land" lets it go; a hold is Aiden's: wait for his word.`;
+  `Before a merge, a deploy, a push or a publish, ask the landing check: ${landingCommand(cli === undefined ? {} : { cli })}. "Clear to land" lets it go; a hold is Aiden's: wait for his word.`;
 
 /** A worker's briefing in a scoped project, once it has claimed a step. */
 export function renderWorkerBriefing(snapshot: ProjectSnapshot, session: Session, now: number, cli?: string, landing = false): string {

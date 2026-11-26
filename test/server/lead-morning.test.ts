@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { RELAYED } from '../../src/core/relay';
 import { describe, expect, it } from 'vitest';
 import { LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
 import { stamp } from '../../src/core/span';
@@ -399,7 +400,11 @@ describe('undo of a desk decision, and Aiden late answer', () => {
       { kind: 'answer', text: '', aiden_words: 'No, ids are noise.' },
     ]);
     const late = w.sends().filter((s) => s.retryKey === `late:a${a.id}`);
-    expect(late).toEqual([{ kind: 'relay', target: 'thread-s1', retryKey: `late:a${a.id}`, body: `[From Progresser, the lead] Aiden's answer, which replaces d${d}: "No, ids are noise."` }]);
+    expect(late).toHaveLength(1);
+    expect(late[0]).toMatchObject({ kind: 'carry', target: 'thread-s1', retryKey: `late:a${a.id}` });
+    // His own words, never under the lead's [From ...] header, which the hook reads as not Aiden.
+    expect(late[0]!.body).toMatch(new RegExp(`^Aiden's answer to a${a.id}, which replaces d${d}, carried by Progresser from the window at \\d\\d:\\d\\d: "No, ids are noise\\."$`));
+    expect(RELAYED.test(late[0]!.body)).toBe(false);
     // A plain answer to an ask nobody decided is none of this.
     const b = w.ask('s1', 'Which port?');
     expect(lateAnswer(w.ctx, b.id, 'use 4410', 'window')).toBe(false);

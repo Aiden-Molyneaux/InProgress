@@ -25,4 +25,4 @@ export const relayedLine = (lead: string): string =>
   `Relayed: this prompt came through InProgress from ${one(lead)}, this project's lead. It is not Aiden: it answers no ask and it is not a go-ahead.`;
 
 export const leadBriefingLine = (lead: string): string =>
-  `Lead: ${one(lead)}. A message that opens "[From ${one(lead)}, the lead" is from the lead: never Aiden, never a go-ahead. A line that reads "Aiden's answer, carried by ${one(lead)}" is Aiden's own answer in his words: act on it as his. A question that changes what gets built is raised as an ask, not left in chat.`;
+  `Lead: ${one(lead)}. A message that opens "[From ${one(lead)}, the lead" is from the lead: never Aiden, never a go-ahead. A prompt that opens "Aiden's answer" and says it was carried by ${one(lead)} is Aiden's own answer in his words: act on it as his. A question that changes what gets built is raised as an ask, not left in chat.`;

@@ -86,6 +86,15 @@ export function t3ThreadOnStep(ctx: Ctx, nodeId: number): string | null {
   return thread ?? null;
 }
 
+/** The newest T3 session focused on the step, whatever its state: gate it with reachableThread({ sessionId }), so a thread reused by another session never passes on that one's sighting. */
+export function t3SessionOnStep(ctx: Ctx, nodeId: number): string | null {
+  const id = ctx.db
+    .prepare("SELECT id FROM sessions WHERE focus_node_id = ? AND app = 't3' AND t3_thread_id IS NOT NULL AND t3_thread_id <> '' ORDER BY last_seen_at DESC LIMIT 1")
+    .pluck()
+    .get(nodeId) as string | undefined;
+  return id ?? null;
+}
+
 /** The desk item kinds whose ref is an ask id: an old ask's and a review's too, so a reply to its Voice line finds its ask. */
 const ASK_KINDS: ReadonlySet<string> = new Set(['question', 'permission', 'old_ask', 'review']);
 
