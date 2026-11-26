@@ -689,6 +689,14 @@ async function scene6() {
     return;
   }
   noQuiet();
+  // The other projects have no lead to run `lead set`, and their default quiet hours (00:00-09:00) would hold their lines at night: each
+  // gets a quiet setting row six to seven hours ahead, written as `lead set` writes it (a 'setting' lead_events row, text `quiet <HH:MM-HH:MM>`).
+  const quiet = `${hm(Date.now() + 6 * 60 * MIN)}-${hm(Date.now() + 7 * 60 * MIN)}`;
+  const withAsks = readDb("SELECT DISTINCT p.id, p.slug FROM asks a JOIN projects p ON p.id = a.project_id WHERE a.cleared_at IS NULL AND a.owner = 'aiden' AND p.slug <> ? AND p.status = 'active' AND p.deleted_at IS NULL", SLUG);
+  writeDb((db) => {
+    for (const p of withAsks) db.prepare("INSERT INTO lead_events (project_id, at, lead, instructions, kind, text) VALUES (?, ?, ?, ?, 'setting', ?)").run(p.id, iso(), LEAD, INSTRUCTIONS, `quiet ${quiet}`);
+  });
+  s.back(`a quiet setting \`${quiet}\` written on the copy for ${withAsks.map((p) => p.slug).join(', ') || '(no other project)'} (they have no lead to run lead set; their default quiet hours 00:00-09:00 would hold the lines at night)`);
   for (const other of readDb("SELECT DISTINCT p.slug FROM asks a JOIN projects p ON p.id = a.project_id WHERE a.cleared_at IS NULL AND a.owner = 'aiden' AND p.slug <> ? AND p.status = 'active' AND p.deleted_at IS NULL", SLUG)) {
     const r = lead('old-asks', other.slug);
     s.act(`lead old-asks ${other.slug} -> ${clip(aiden(r), 160)}`);

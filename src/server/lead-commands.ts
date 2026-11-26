@@ -587,11 +587,9 @@ export function lateAnswer(ctx: Ctx, askId: number, words: string, actor: string
       intendSend(ctx.db, { projectId: project.id, kind: 'carry', target: thread, retryKey, body: `Aiden's answer to ${askTag(ask.id)}, which replaces ${tag}, carried by ${project.lead} from the window at ${hhmmOf(ctx.now())}: "${words.trim()}"` }, ctx.now());
     }
     // The ask's answer is his now, Aiden's own (answered_via NULL), so the window shows it and no line calls it the lead's.
-    // A session not in T3 Code gets no relay: the answer is marked not yet delivered, and its next prompt reads it as it
-    // reads any answered ask. A T3 session has the relay, so its delivery mark stays.
-    ctx.db
-      .prepare(`UPDATE asks SET answer = ?, answered_via = NULL${thread === null ? ', answer_delivered_at = NULL' : ''} WHERE id = ?`)
-      .run(words.trim(), ask.id);
+    // It is marked not yet delivered: a session with no reachable thread reads it on its next prompt, as any answered ask;
+    // a reachable one has the carry, which stamps it delivered when tried and takes that back when it is cleared unsent.
+    ctx.db.prepare('UPDATE asks SET answer = ?, answered_via = NULL, answer_delivered_at = NULL WHERE id = ?').run(words.trim(), ask.id);
     record({ projectId: project.id, type: 'ask.cleared', entity: 'ask', entityId: ask.id, data: { ask: requireAsk(ctx, ask.id) } });
     return true;
   });

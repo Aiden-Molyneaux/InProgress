@@ -206,7 +206,8 @@ function noteRefusedInWrite(ctx: Ctx, send: LeadSend, reason: string): void {
 
 /** The ask a carry send carries the answer of (retry key `carry:a<ask id>`), or undefined. */
 const carriedAsk = (send: LeadSend): number | undefined => {
-  const m = send.kind === 'carry' ? /^carry:a(\d+)$/.exec(send.retryKey ?? '') : null;
+  // A carried answer and a late answer (lateAnswer's `late:a<id>`) alike: stamped when tried, taken back when cleared unsent.
+  const m = send.kind === 'carry' ? /^(?:carry|late):a(\d+)$/.exec(send.retryKey ?? '') : null;
   return m === null ? undefined : Number(m[1]);
 };
 

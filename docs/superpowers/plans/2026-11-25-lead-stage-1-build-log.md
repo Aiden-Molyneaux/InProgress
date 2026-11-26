@@ -753,3 +753,13 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   t3ThreadOf import is gone. Owner-calls kept for the results page: only claimed workers in scoped projects get the
   Lead and landing check lines (as the Lead line always was); `claude:install` must rerun after the deploy for the
   `landing` allow rule.
+- Murr's look at e9f5cd8 (Sonnet, proportional): sound; cleanups queued (the dead t3ThreadOnStep removed, a late
+  answer's carry stamps delivery like a carry, a test that tells the new gate from the old).
+- The scenes on 63ed091 (third real run, 0.77 dollars): scenes 1 to 5 shown (30 PASS, 10 DIFFERS on wording, 0 FAIL),
+  done when 3 PASS on all four counts. Scene 6 not shown on this run: it ran at 00:15 local, and the other projects'
+  default quiet hours (00:00 to 09:00) rightly held their old-ask lines for the morning. The harness now gives those
+  projects a quiet window away from the run's time on the copy.
+- The cleanups (the task 17 Sev): t3ThreadOnStep deleted; a late answer's carry stamps delivery when tried and takes it
+  back when cleared unsent. Deviation accepted: a late answer is marked undelivered until its carry is tried (as any
+  carry), so a refused carry can never leave the session without his words. `landing --action publish` is accepted
+  (LANDING_ACTIONS). 2958 unit tests green.

@@ -368,9 +368,10 @@ describe('undo of a desk decision, and Aiden late answer', () => {
     t3.w.ctx.bus.on('event', (e: { type: string }) => void events.push(e.type));
     t3.w.ctx.db.prepare('UPDATE asks SET answer_delivered_at = ? WHERE id = ?').run(t3.w.ctx.now(), t3.a.id);
     expect(lateAnswer(t3.w.ctx, t3.a.id, 'No, ids are noise.', 'window')).toBe(true);
-    // The window shows his answer (an event, and the row), and the T3 session has its relay, not a second delivery.
+    // The window shows his answer (an event, and the row), and the T3 session has its carry. As with any carried answer, it
+    // is undelivered until the carry is tried (which stamps it), so a cleared carry leaves it for the next prompt.
     expect(t3.w.ctx.db.prepare('SELECT answer, answered_via AS via FROM asks WHERE id = ?').get(t3.a.id)).toEqual({ answer: 'No, ids are noise.', via: null });
-    expect(undeliveredAnswers(t3.w.ctx, 's1')).toHaveLength(0);
+    expect(undeliveredAnswers(t3.w.ctx, 's1').map((x) => x.id)).toEqual([t3.a.id]);
     expect(events).toContain('ask.cleared');
     expect(t3.w.sends().filter((s) => s.retryKey === `late:a${t3.a.id}`)).toHaveLength(1);
   });

@@ -5,6 +5,7 @@ import { carriedLine, leadAnswer, leadDeskAdd, readYeses, WORK_PROJECT } from '.
 import { checkLanding, realGit, type LandingDeps } from '../../src/server/lead/landing';
 import { deskUserMessage } from '../../src/server/lead/prompt';
 import { createSender, type SenderT3 } from '../../src/server/lead/sends';
+import { T3ArgumentRefused } from '../../src/server/t3';
 import { raiseAsk, requireAsk, undeliveredAnswers } from '../../src/server/repo/asks';
 import { applyVerdict } from '../../src/server/lead/apply';
 import { leadAnswerItem } from '../../src/server/lead/carry';
@@ -145,8 +146,33 @@ describe("the guard on Aiden's go-ahead", () => {
       expect(lateAnswer(t.ctx, q.id, '4411', 'window')).toBe(true);
       const late = t.ctx.db.prepare("SELECT target FROM lead_sends WHERE retry_key = ?").pluck().all(`late:a${q.id}`);
       expect(late).toEqual(relayed ? ['th_1'] : []);
-      // Not relayed, his answer waits for the next prompt: it is marked not yet delivered.
-      expect(t.ctx.db.prepare('SELECT answer_delivered_at FROM asks WHERE id = ?').pluck().get(q.id) === null).toBe(!relayed);
+      // Either way his answer is marked not yet delivered: the carry stamps it when tried; with none, the next prompt reads it.
+      expect(t.ctx.db.prepare('SELECT answer_delivered_at FROM asks WHERE id = ?').pluck().get(q.id)).toBeNull();
+    }
+  });
+
+  it("a late answer's carry stamps it delivered when tried, and a carry cleared unsent takes the stamp back", async () => {
+    for (const refuse of [false, true]) {
+      const t = setup();
+      const q = raiseAsk(t.ctx, 'session:s1', { nodeId: t.step.id, kind: 'question', text: 'Which port?', sessionId: 's1' });
+      leadDecide(t.ctx, t.project.slug, 'Progresser', V, { askId: q.id, answer: '4410', reason: 'free' });
+      t.ctx.db.prepare('UPDATE asks SET answer_delivered_at = ? WHERE id = ?').run(t.ctx.now(), q.id);
+      const seen: boolean[] = [];
+      const t3: SenderT3 = {
+        list: async () => [],
+        show: async () => ({ thread: {} as never, messages: [] }),
+        start: async () => ({ threadId: 'x' }),
+        send: async () => {
+          // While it is tried, the next prompt would not repeat it.
+          seen.push(undeliveredAnswers(t.ctx, 's1').some((a) => a.id === q.id));
+          if (refuse) throw new T3ArgumentRefused('bad thread');
+        },
+      };
+      const sender = createSender(t.ctx, { t3 }, { log: { info: () => undefined, error: () => undefined } });
+      expect(lateAnswer(t.ctx, q.id, '4411', 'window')).toBe(true);
+      await sender.wake();
+      expect(seen).toEqual([false]);
+      expect(undeliveredAnswers(t.ctx, 's1').some((a) => a.id === q.id)).toBe(refuse);
     }
   });
 
@@ -284,6 +310,19 @@ describe('the round on what Aiden left to the lead', () => {
     const { itemId } = leadDeskAdd(t.ctx, t.project.slug, 'Progresser', V, { stepId: t.step.id, aidenWords: 'you decide the colours' });
     expect(leadAnswerItem(t.ctx, t.project.slug, 'Progresser', V, itemId, { aidenWords: 'blue' }).carried).toBe(true);
     expect(t.ctx.db.prepare("SELECT target FROM lead_sends WHERE retry_key = ?").pluck().all(`carry:i${itemId}`)).toEqual(['th_1']);
+  });
+
+  it("a stale session on the step does not pass on a fresh session's sighting of the same thread: no relay, no carry", () => {
+    const t = setup();
+    t.ctx.db.prepare("UPDATE sessions SET focus_node_id = ?, last_seen_at = ? WHERE id = 's1'").run(t.step.id, hoursAgo(t, 72));
+    handleHookEvent(t.ctx, 's2', { event: 'start', source: 'startup', cwd: repo.main });
+    t.ctx.db.prepare("UPDATE sessions SET app = 't3', t3_thread_id = 'th_1', focus_node_id = NULL, last_seen_at = ? WHERE id = 's2'").run(t.ctx.now());
+    const effect = decided(t, 'DECIDE', 'Alphabetical');
+    expect(relays(t)).toEqual([]);
+    expect(t.ctx.db.prepare('SELECT text FROM log_entries WHERE node_id = ?').pluck().all(t.step.id)).toEqual([expect.stringContaining(`Progresser decided ${effect.outcome.slice(7)}: Alphabetical`)]);
+    const { itemId } = leadDeskAdd(t.ctx, t.project.slug, 'Progresser', V, { stepId: t.step.id, aidenWords: 'you decide the colours' });
+    expect(leadAnswerItem(t.ctx, t.project.slug, 'Progresser', V, itemId, { aidenWords: 'blue' }).carried).toBe(false);
+    expect(t.ctx.db.prepare("SELECT COUNT(*) FROM lead_sends WHERE kind = 'carry'").pluck().get()).toBe(0);
   });
 
   it('DECIDE with the T3 Code session on the step last seen 3 days ago relays nothing: a line on the step', () => {

@@ -73,19 +73,6 @@ export function reachableThread(db: DB, ref: { sessionId: string | null } | { th
   return seen ? ref.threadId : null;
 }
 
-/**
- * The T3 Code thread of the newest session focused on the step, whatever its state; null when there is none. Its callers
- * (the aiden_said relay and carry) relay only when reachableThread accepts it: a session marked ended after a quiet night
- * still gets his words, a weeks-old one does not. It does not mean "a live session works on the step".
- */
-export function t3ThreadOnStep(ctx: Ctx, nodeId: number): string | null {
-  const thread = ctx.db
-    .prepare("SELECT t3_thread_id FROM sessions WHERE focus_node_id = ? AND app = 't3' AND t3_thread_id IS NOT NULL AND t3_thread_id <> '' ORDER BY last_seen_at DESC LIMIT 1")
-    .pluck()
-    .get(nodeId) as string | undefined;
-  return thread ?? null;
-}
-
 /** The newest T3 session focused on the step, whatever its state: gate it with reachableThread({ sessionId }), so a thread reused by another session never passes on that one's sighting. */
 export function t3SessionOnStep(ctx: Ctx, nodeId: number): string | null {
   const id = ctx.db
