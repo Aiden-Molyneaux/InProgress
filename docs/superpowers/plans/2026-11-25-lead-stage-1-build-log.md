@@ -810,3 +810,20 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
 - The real scenes on 2238e57: 38 PASS, 9 DIFFERS, 0 FAIL, and done when 3 clean on all four counts (the five retries
   to an unknown thread are gone with C9). Kept as scenes-after-check-1 beside the page; the 9572cdd run is
   scenes-before-check-1. Check 2, a fresh agent with check 1's brief and no sight of check 1, runs on dcbf5c0.
+
+## The four fixes Aiden accepted (2026-11-26, on a356)
+
+- Plan: `2026-11-26-lead-stage-1-four-fixes.md`. A to C in 60a4892 and cf08e1b (Murr: sound, three minors fixed:
+  the publish flags an allowlist, package.json read without blocking, a playbook hold named once). D in c5291a0.
+- Plan said (C): word the whats as verbs. Did: they stay nouns; the Voice and morning list read `#<step> wants
+  <what>.`. Because: the rule list in src/core/hold.ts and the hook reasons pinned on it would have changed too.
+- Plan said (D): a held card beside the ask cards. Did: held items get their own Needs me tiles, or go inside their
+  step's tile after its ask cards. Because: a held command's step is mostly in Now with no open ask, so it had no
+  tile to sit beside.
+- Found in D: a yes could not cover a publish (YES_ACTIONS was merge, deploy, push), so a held publish could never be
+  released by his word, in the window or by the Voice; scene 3's "publish it" had no way to work. Did: publish added,
+  its yes keyed on the branch head's tree as the landing check reads a publish; Progresser's rules say so. A public
+  push stays his own act.
+- Calls: the window's answer is carried "from the window"; a held command on no step reads `A session wants <what>.`;
+  C:\work projects are left out of the old asks' other-lead lines; a publish with a path, tarball, workspace or
+  version-bump flag keeps the branch wording.
