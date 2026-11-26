@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
 import { SESSION_LANDING_LINE, landingOffLine, sessionMandateLines } from '../../src/core/lead-mandate';
 import { leadBriefingLine } from '../../src/core/relay';
+import { landingCheckLine } from '../../src/server/briefing-scoped';
 import { stamp } from '../../src/server/digest';
 import { leadSwitches } from '../../src/server/lead';
 import { leadAllow, leadDisallow } from '../../src/server/lead-commands';
@@ -20,7 +21,7 @@ function setup(lead: string | null = 'Progresser') {
   addBinding(ctx, 'test', project.slug, BOUND);
   const [step] = addNodes(ctx, 'test', { parentId: project.rootNodeId, nodes: [{ title: 'Build tabs' }] });
   if (lead !== null) setProjectLead(ctx, 'window', project.slug, lead);
-  const on = (sw: 'starts' | 'landing') => leadAllow(ctx, project.slug, 'Progresser', V, { switch: sw, aidenWords: 'yes' });
+  const on = (sw: 'starts' | 'landing' | 'round') => leadAllow(ctx, project.slug, 'Progresser', V, { switch: sw, aidenWords: 'yes' });
   const off = (sw: 'starts' | 'landing') => leadDisallow(ctx, project.slug, 'Progresser', V, { switch: sw });
   const start = (id: string) => handleHookEvent(ctx, id, { event: 'start', source: 'startup', cwd: BOUND });
   const prompt = (id: string) => String(handleHookEvent(ctx, id, { event: 'prompt' }).context ?? '');
@@ -73,14 +74,16 @@ describe('switches do not survive a change of lead', () => {
       const t = setup();
       t.on('starts');
       t.on('landing');
+      t.on('round');
       t.start('s1');
       const before = (t.events() as unknown[]).length;
       setProjectLead(t.ctx, 'window', t.project.slug, next);
       expect((t.events() as unknown[]).slice(before)).toEqual([
         { lead: 'Progresser', instructions: V, kind: 'disallow', text: 'starts', aiden_words: null },
         { lead: 'Progresser', instructions: V, kind: 'disallow', text: 'landing', aiden_words: null },
+        { lead: 'Progresser', instructions: V, kind: 'disallow', text: 'round', aiden_words: null },
       ]);
-      expect(leadSwitches(t.ctx, t.project.id)).toEqual({ starts: { on: false, at: null, words: null }, landing: { on: false, at: null, words: null } });
+      expect(leadSwitches(t.ctx, t.project.id)).toEqual({ starts: { on: false, at: null, words: null }, landing: { on: false, at: null, words: null }, round: { on: false, at: null, words: null } });
       // The session that held the Landing line is told on its next prompt.
       expect(t.prompt('s1')).toContain(landingOffLine(t.newest('landing')));
     }
@@ -120,12 +123,13 @@ describe('the claim carries the lead lines', () => {
   it('adds the Lead line and the two mandate lines after the step block in a led project, and the Landing line only when Landing is on', () => {
     const t = setup();
     const block = claim(t);
-    expect(block.slice(-3)).toEqual([leadBriefingLine('Progresser'), ...sessionMandateLines('Progresser')]);
+    // The landing check's line closes the lead lines in every led project, Landing on or off.
+    expect(block.slice(-4)).toEqual([leadBriefingLine('Progresser'), ...sessionMandateLines('Progresser'), landingCheckLine()]);
     expect(block.findIndex((l) => l.startsWith('Your step:'))).toBe(0);
     expect(block).not.toContain(SESSION_LANDING_LINE);
     t.on('landing');
     const landing = claim(t, 's2');
-    expect(landing.slice(-4)).toEqual([leadBriefingLine('Progresser'), ...sessionMandateLines('Progresser'), SESSION_LANDING_LINE]);
+    expect(landing.slice(-5)).toEqual([leadBriefingLine('Progresser'), ...sessionMandateLines('Progresser'), SESSION_LANDING_LINE, landingCheckLine()]);
   });
 
   it('adds none with no lead, even with Landing on in the log', () => {

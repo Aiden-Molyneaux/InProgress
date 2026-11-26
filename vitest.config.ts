@@ -15,7 +15,14 @@ export default defineConfig({
     pool: 'threads',
     testTimeout: 20_000,
     hookTimeout: 30_000,
-    // Keep every test out of the real ~/.inprogress and ~/.claude, and every git it runs away from the user's hooks.
-    env: { INPROGRESS_HOME: '.test-home', INPROGRESS_CLAUDE_DIR: '.test-claude', ...NO_GIT_HOOKS },
+    // Keep every test out of the real ~/.inprogress and ~/.claude, and every git it runs away from the user's hooks. The
+    // real t3 CLI and the real claude are never run: a test that forgets its stand-in reaches a program that is not there.
+    env: {
+      INPROGRESS_HOME: '.test-home',
+      INPROGRESS_CLAUDE_DIR: '.test-claude',
+      T3CODE_CLI_PATH: '.test-no-t3/t3',
+      INPROGRESS_LEAD_CLAUDE: '.test-no-claude/claude',
+      ...NO_GIT_HOOKS,
+    },
   },
 });

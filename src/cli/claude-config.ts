@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { HOOK_NAMES, type HookName } from '../hooks/handlers';
 import { homeDir } from '../lib/home';
 import { normalizePath } from '../lib/paths';
+import { heldLineWatched, holdFamilies } from '../core/hold';
+import { readHeldLines } from '../hooks/hold';
 import { CLI_SUBCOMMANDS, cliAllowRules, cliPrefix, isCliAllowRule, repoCli, taskPrefix } from '../lib/task-command';
 
 /** The allow rules that are the same for every repo: the scribe's tools and its resource snapshots, and the desktop app's session-title tool. */
@@ -23,7 +25,23 @@ export interface HookDef {
   timeout: number;
   /** Written as `"async": true`: Claude Code runs the hook in the background, so the tool call never waits on it. */
   async?: boolean;
+  /**
+   * Written as the handler's `"if"` field, one permission rule (`Bash(git push*)`): Claude Code tests it before it starts the
+   * hook, so a command outside it starts no process at all.
+   */
+  if?: string;
 }
+
+/**
+ * The hold hook's handlers: one per watched family of each shell (src/core/hold.ts HOLD_RULES), with its `if` rule. Each
+ * carries its rule as a third argument, so no two are the same command for Claude Code to merge. Never async: the
+ * command waits on it.
+ */
+const HOLD_DEFS: HookDef[] = (['Bash', 'PowerShell'] as const).flatMap((tool) =>
+  holdFamilies(tool).map((family): HookDef => ({ event: 'PreToolUse', name: 'hold', matcher: `^${tool}$`, timeout: 30, if: `${tool}(${family})` })),
+);
+/** Prompts that are Aiden's own interaction with the session, never the desk's: the permission hook is not started for them. */
+export const PERMISSION_MATCHER = '^(?!(ExitPlanMode|AskUserQuestion)$).*';
 
 export const HOOK_DEFS: HookDef[] = [
   { event: 'SessionStart', name: 'session-start', timeout: 10 },
@@ -40,9 +58,13 @@ export const HOOK_DEFS: HookDef[] = [
   // never wait on a Node start. The hook posts a command's start, its stop, a stopped agent and a message to one
   // (buildToolHookBody), and also copies these inputs to the capture folder (src/hooks/capture.ts).
   { event: 'PostToolUse', name: 'post-tool', matcher: '^(Bash|PowerShell|Monitor|SendMessage|TaskStop)$', timeout: 5, async: true },
+  // What is Aiden's is held before it runs (lead stage 1, task 7): beside pre-tool, whose matcher never meets these.
+  ...HOLD_DEFS,
+  // A permission prompt goes to the lead's desk first; the hook waits up to 175 s for his verdict.
+  { event: 'PermissionRequest', name: 'permission', matcher: PERMISSION_MATCHER, timeout: 180 },
 ];
 
-type HookEntry = { type?: string; command?: string; args?: string[]; timeout?: number; async?: boolean };
+export type HookEntry = { type?: string; command?: string; args?: string[]; timeout?: number; async?: boolean; if?: string };
 type HookGroup = { matcher?: string; hooks?: HookEntry[] };
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Settings = Record<string, any>;
@@ -68,9 +90,23 @@ export function nodeBinary(execPath: string = process.execPath): string {
   return realpathSync(execPath).replace(/\\/g, '/');
 }
 
-export function hookEntry(repo: string, name: HookName, timeout: number, async = false): HookEntry {
-  return { type: 'command', command: nodeBinary(), args: [`${repo}${HOOK_SCRIPT_SUFFIX}`, name], timeout, ...(async ? { async: true } : {}) };
+/**
+ * A handler as install writes it. One with an `if` rule carries the rule as a third argument (the hook ignores it), so no
+ * two handlers are the same command for Claude Code to run once for both.
+ */
+export function hookEntry(repo: string, name: HookName, timeout: number, async = false, ifRule?: string): HookEntry {
+  return {
+    type: 'command',
+    command: nodeBinary(),
+    args: [`${repo}${HOOK_SCRIPT_SUFFIX}`, name, ...(ifRule === undefined ? [] : [ifRule])],
+    timeout,
+    ...(async ? { async: true } : {}),
+    ...(ifRule ? { if: ifRule } : {}),
+  };
 }
+
+/** The settings entry for one HOOK_DEFS definition. */
+export const defEntry = (repo: string, d: HookDef): HookEntry => hookEntry(repo, d.name, d.timeout, d.async, d.if);
 
 /**
  * Only an exec-form entry running `<...>/dist/hooks/hook.js <InProgress hook name>` is ours. Shell-form
@@ -100,7 +136,7 @@ export function addInProgressHooks(settings: Settings, repo: string): Settings {
   stripInProgressHooks(settings);
   settings.hooks ??= {};
   for (const d of HOOK_DEFS) {
-    const group: HookGroup = { ...(d.matcher ? { matcher: d.matcher } : {}), hooks: [hookEntry(repo, d.name, d.timeout, d.async)] };
+    const group: HookGroup = { ...(d.matcher ? { matcher: d.matcher } : {}), hooks: [defEntry(repo, d)] };
     (settings.hooks[d.event] ??= []).push(group);
   }
   return settings;
@@ -287,7 +323,12 @@ export function kitStatus(o: { repo: string; claudeDir: string }): { installed: 
   return { installed, differs };
 }
 
-export function install(o: { repo: string; claudeDir: string; stamp: string }): { log: string[]; agentsDirCreated: boolean } {
+/** The playbooks' Held lines (in `<home>/lead/held.json`) that no hold handler is started for: the hook never sees them. */
+export function unwatchedHeldLines(home: string): string[] {
+  return readHeldLines(home).filter((line) => !heldLineWatched(line));
+}
+
+export function install(o: { repo: string; claudeDir: string; stamp: string; home?: string }): { log: string[]; agentsDirCreated: boolean } {
   // One spelling of the repo everywhere (forward slashes, upper-case drive): the tasks rules must match, byte for byte,
   // the command the server prints from its own path.
   const repo = normalizePath(o.repo);
@@ -325,6 +366,7 @@ export function install(o: { repo: string; claudeDir: string; stamp: string }): 
     log.push(`Skill: ${skillDst}`);
   }
 
+  for (const line of unwatchedHeldLines(o.home ?? homeDir())) log.push(`not watched: ${line}`);
   if (agentsDirCreated) log.push('The agents folder is new: restart any open Claude sessions so they can see the scribe.');
   return { log, agentsDirCreated };
 }

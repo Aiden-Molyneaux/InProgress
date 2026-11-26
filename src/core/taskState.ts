@@ -64,6 +64,15 @@ export function sinceFallback(node: Pick<TreeNode, 'updatedAt' | 'completedAt'>,
   return node.updatedAt;
 }
 
+/** When a box began to wait on Aiden: its oldest open ask or permission wait (Infinity when it has none). Needs me is ordered by it. */
+export function needTime(b: TaskBox): number {
+  const row = b.row;
+  if (!row) return Date.parse(b.session!.lastSeenAt);
+  const times = row.waiting.map((a) => Date.parse(a.raisedAt));
+  for (const s of row.sessions) if (s.state === 'permission') times.push(Date.parse(s.lastSeenAt));
+  return Math.min(...times);
+}
+
 /** Every box on the Board by cell, in each cell's order. A task is in exactly one cell. */
 export function taskBoxes(board: Board, input: BoardInput, now: number): Record<TaskCell, TaskBox[]> {
   const out: Record<TaskCell, TaskBox[]> = { needs: [], next: [], now: [], done: [], backlog: [] };
@@ -75,13 +84,6 @@ export function taskBoxes(board: Board, input: BoardInput, now: number): Record<
   const boxes = new Map<number, TaskBox>();
   for (const row of board.byId.values()) boxes.set(row.node.id, boxOf(row));
 
-  const needTime = (b: TaskBox): number => {
-    const row = b.row;
-    if (!row) return Date.parse(b.session!.lastSeenAt);
-    const times = row.waiting.map((a) => Date.parse(a.raisedAt));
-    for (const s of row.sessions) if (s.state === 'permission') times.push(Date.parse(s.lastSeenAt));
-    return Math.min(...times);
-  };
   const needs = [...boxes.values()].filter((b) => b.cell === 'needs');
   for (const s of input.sessions) {
     // A step with no row (the root, or one set aside) holds no box, so a wait on it would be lost.

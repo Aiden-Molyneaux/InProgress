@@ -599,6 +599,42 @@ export interface EventRow {
   data: unknown;
 }
 
+/**
+ * A desk item that may be "The lead is behind" (lead stage 1): not done, not waiting on Aiden, with a limit or given up on.
+ * The window shows those past their `dueAt` by its own clock, and every one in state `behind`.
+ */
+export interface LeadBehindItem {
+  id: number;
+  kind: string;
+  state: 'open' | 'behind';
+  createdAt: string;
+  dueAt: string | null;
+  stepId: number | null;
+  stepTitle: string | null;
+  /** The ask's text, or what the item is ("a stopped session", "a permission prompt"). */
+  what: string;
+  /** The open ask Aiden can answer himself, for a question or permission item. */
+  askId: number | null;
+  /** The session Aiden can open, for a stopped item. */
+  sessionId: string | null;
+  /** For a `behind` item: whether the lead gave up after failed turns or after runner faults; null otherwise. */
+  behindWhy: 'failures' | 'faults' | null;
+}
+
+/** A command the hold check held for Aiden (lead stage 1, task D): a held desk item still waiting on him. */
+export interface HeldCard {
+  /** The desk item's id, which the window's Go ahead and Not yet post to. */
+  id: number;
+  stepId: number | null;
+  createdAt: string;
+  /** What the command does, in plain words (`a push of feature to origin`), or the command for an item held before that was stored. */
+  what: string;
+  /** The command as the session ran it, clipped to 2,000 characters; empty when its held line cannot be found. */
+  command: string;
+  /** Whether Go ahead is offered: a yes of his can release the command. Else the card has only Not yet, and says why. */
+  goAhead: boolean;
+}
+
 export interface ProjectSnapshot {
   project: Project;
   nodes: TreeNode[];
@@ -615,6 +651,12 @@ export interface ProjectSnapshot {
   /** The last session and ask times of the open steps in a band, however old, for the Backlog's Stale view. */
   stepTouches: StepTouch[];
   stateNote: StateNote | null;
+  /** The desk items that may be behind, by the lead's round (see LeadBehindItem); absent in older fixtures. */
+  leadBehind?: LeadBehindItem[];
+  /** The commands held for Aiden, oldest first and at most 100 (see HeldCard); absent in older fixtures. */
+  held?: HeldCard[];
+  /** How many commands are held for Aiden, past the cap of `held`; absent in older fixtures. */
+  heldTotal?: number;
   lastEventId: number;
   lastEvent: EventRow | null;
 }

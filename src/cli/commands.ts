@@ -11,6 +11,7 @@ import { claudeDir, install, kitStatus, repoRoot, uninstall } from './claude-con
 import { runAsk, runClaim, runOrchestrate } from './claim';
 import { runDigest, runUsage } from './digest';
 import { doctor } from './doctor';
+import { runLanding } from './landing';
 import { runLead } from './lead';
 import { openAppWindow } from './open';
 import { runRestore } from './restore';
@@ -18,7 +19,7 @@ import { runTasks } from './tasks';
 import { BACKUP_BUSY } from '../core/backups';
 
 const USAGE =
-  'Usage: inprogress <start | stop | open | status | outline <project> [--full] | tasks [<step id>] --session <session id> [--done|--doing|--todo "<subject>"]... | claim <step id> --session <session id> | ask <step id> --session <session id> --question|--permission|--review "<text>" | orchestrate --session <session id> [--status] | digest <project> [--since <iso>] [--all] | lead brief <project> --as <name> --instructions <n> [--mark] [--json] | usage <project> [--days <n>] | backup [--push | --drill | --init <remote url>] | restore [--from <backup>] | doctor | claude-install | claude-uninstall | claude-check>';
+  'Usage: inprogress <start | stop | open | status | outline <project> [--full] | tasks [<step id>] --session <session id> [--done|--doing|--todo "<subject>"]... | claim <step id> --session <session id> | ask <step id> --session <session id> --question|--permission|--review "<text>" | orchestrate --session <session id> [--status] | digest <project> [--since <iso>] [--all] | landing <step id> --action merge|deploy|push|publish|push-public [--branch <branch>] | lead brief <project> --as <name> --instructions <n> [--mark] [--json] | usage <project> [--days <n>] | backup [--push | --drill | --init <remote url>] | restore [--from <backup>] | doctor | claude-install | claude-uninstall | claude-check>';
 /**
  * The first health check of a CLI run. A fresh process's first request is slow on a busy machine (fetch sets up its
  * HTTP parser), and 300 ms has called a running server down. Nothing listening still fails at once.
@@ -169,6 +170,9 @@ export async function runCli(args: string[], out: (line: string) => void = conso
         token: readToken(),
         bringUp: async () => ((await isServerUp(url, FIRST_PROBE_MS)) || (await ensure({ baseUrl: url, waitMs: 5000 })) ? null : notStarted()),
       });
+    case 'landing':
+      // Run by a session from its own folder; it never starts the server.
+      return runLanding(rest, out, { baseUrl: url, token: readToken() });
     case 'usage':
       return runUsage(rest, out, { baseUrl: url, probeMs: FIRST_PROBE_MS });
     case 'tasks':

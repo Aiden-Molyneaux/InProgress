@@ -119,13 +119,15 @@ export function App() {
   const app = useRef<HTMLDivElement>(null);
   /** Whatever had focus when the viewer opened. It gets focus back when the viewer closes. */
   const opener = useRef<HTMLElement | null>(null);
-  /** Open asks plus live sessions waiting on a permission: the title's count, as a tab's is (spec 2.1). */
+  /** Open asks, live sessions waiting on a permission and commands held for Aiden: the title's count, as a tab's is (spec 2.1). */
   const waiting = useMemo(
     () => {
       if (!snapshot) return 0;
       // An ask on a shelved step (parked, or under a parked one) is not waiting on Aiden: the Board's Needs me leaves it out too.
       const shelved = shelvedIds(buildIndex(snapshot.nodes));
-      return snapshot.asks.filter((a) => a.clearedAt === null && isAidens(a) && !shelved.has(a.nodeId)).length + snapshot.sessions.filter((s) => s.state === 'permission' && isLive(s, now)).length;
+      // Held commands: every one waiting (heldTotal, past the cards' cap); the server leaves out those on a shelved step.
+      const held = snapshot.heldTotal ?? snapshot.held?.length ?? 0;
+      return snapshot.asks.filter((a) => a.clearedAt === null && isAidens(a) && !shelved.has(a.nodeId)).length + snapshot.sessions.filter((s) => s.state === 'permission' && isLive(s, now)).length + held;
     },
     [snapshot, now],
   );

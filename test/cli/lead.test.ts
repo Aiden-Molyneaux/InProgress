@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { runCli } from '../../src/cli/commands';
 import { LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
+import { stamp } from '../../src/core/span';
 import { LEAD_TIMEOUT, LEAD_USAGE, RELAY_NO_ANSWER, RELAY_TIMEOUT_MS, START_NO_ANSWER, runLead } from '../../src/cli/lead';
 import { TASKS_NOT_RUNNING_HINT } from '../../src/cli/tasks';
 import { ApiClientError } from '../../src/lib/client';
@@ -14,6 +15,7 @@ import { openDb, type DB } from '../../src/server/db/connection';
 import { createCtx } from '../../src/server/db/tx';
 import { noLeadNamed } from '../../src/server/lead';
 import { raiseAsk } from '../../src/server/repo/asks';
+import { addDeskItem, moveDeskItem } from '../../src/server/repo/desk';
 import { addNodes } from '../../src/server/repo/nodes';
 import { createProject, setProjectLead } from '../../src/server/repo/projects';
 
@@ -75,7 +77,7 @@ describe('inprogress lead brief', () => {
     const text = capture();
     expect(await runLead(['brief', 'ingame', '--as', 'Progresser', '--instructions', String(LEAD_INSTRUCTIONS_VERSION)], text.out, conn)).toBe(0);
     expect(text.lines).toHaveLength(1);
-    expect(text.lines[0].split('\n')[0]).toMatch(/^Lead brief · InGame · .* · instructions v6 \(yours: v6\)$/);
+    expect(text.lines[0].split('\n')[0]).toMatch(/^Lead brief · InGame · .* · instructions v7 \(yours: v7\)$/);
     expect(text.lines[0]).toContain('In flight (0 of 3):');
 
     const json = capture();
@@ -169,17 +171,43 @@ describe('inprogress lead brief', () => {
   });
 });
 
+describe('inprogress lead desk', () => {
+  it('lists the open items oldest first with their limits, needs no --as, and says when the desk is empty', async () => {
+    const project = createProject(createCtx(db), 'test', { name: 'Desk check' });
+    const empty = capture();
+    expect(await runLead(['desk', project.slug], empty.out, conn)).toBe(0);
+    expect(empty.lines).toEqual(['The desk is empty.']);
+    const now = Date.now();
+    const iso = (ms: number) => new Date(now + ms).toISOString();
+    const late = addDeskItem(db, { projectId: project.id, kind: 'question', ref: '41', nodeId: 7, dueAt: iso(30 * 60_000) }, iso(-60_000)).item;
+    const early = addDeskItem(db, { projectId: project.id, kind: 'stopped', ref: 's1@x', nodeId: 8, dueAt: iso(-20 * 60_000) }, iso(-25 * 60_000)).item;
+    const done = addDeskItem(db, { projectId: project.id, kind: 'permission', ref: '42', nodeId: 9, dueAt: iso(60_000) }, iso(-30 * 60_000)).item;
+    moveDeskItem(db, done.id, ['open'], 'done', { outcome: 'cleared by window', now: iso(0) });
+    const listed = capture();
+    expect(await runLead(['desk', project.slug], listed.out, conn)).toBe(0);
+    expect(listed.lines).toEqual([
+      [
+        `#${early.id} stopped s1@x step #8 due ${stamp(iso(-20 * 60_000)).slice(11)} (20 min over) open`,
+        `#${late.id} question 41 step #7 due ${stamp(iso(30 * 60_000)).slice(11)} (30 min left) open`,
+      ].join('\n'),
+    ]);
+    const json = capture();
+    expect(await runLead(['desk', project.slug, '--json'], json.out, conn)).toBe(0);
+    expect((JSON.parse(json.lines[0]) as { id: number }[]).map((i) => i.id)).toEqual([early.id, late.id]);
+  });
+});
+
 describe('inprogress lead rules', () => {
   it('GETs the rules for the named lead and prints the text, with no --instructions', async () => {
     const c = capture();
     expect(await runLead(['rules', 'ingame', '--as', 'Progresser'], c.out, conn)).toBe(0);
     expect(c.lines).toHaveLength(1);
-    expect(c.lines[0].split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 6.');
+    expect(c.lines[0].split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 7.');
     expect(c.lines[0]).toContain(`lead brief ingame --as Progresser --instructions ${LEAD_INSTRUCTIONS_VERSION}`);
     // --instructions, when given, is ignored.
     const given = capture();
     expect(await runLead(['rules', 'ingame', '--as', 'progresser', '--instructions', '1'], given.out, conn)).toBe(0);
-    expect(given.lines[0].split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 6.');
+    expect(given.lines[0].split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 7.');
   });
 
   it('prints the three lines to paste with --bootstrap', async () => {
@@ -238,13 +266,13 @@ describe("inprogress lead's commands", () => {
   it("answer: reads Aiden's words from stdin with --aiden -, prints the sentence and exits 0", async () => {
     const stdin = io('Use the release keystore.\n');
     const res = await run(['answer', 'ingame', `a${asks.stdin}`, '--aiden', '-', ...WHO], stdin.io);
-    expect(res).toEqual({ code: 0, lines: [`Answered a${asks.stdin} with Aiden's words.`] });
+    expect(res).toEqual({ code: 0, lines: [expect.stringMatching(new RegExp(`^Answered a${asks.stdin} with Aiden's words: decision d[0-9]+[.]$`))] });
     expect(stdin.reads.stdin).toBe(1);
     expect(row('SELECT answer, answered_via FROM asks WHERE id = ?', asks.stdin)).toEqual({ answer: 'Use the release keystore.', answered_via: 'lead' });
   });
 
   it('answer: 7 and a7 name the same ask, and a refusal prints its sentence and exits 1', async () => {
-    expect(await run(['answer', 'ingame', String(asks.plain), '--aiden', 'Netlify.', ...WHO])).toEqual({ code: 0, lines: [`Answered a${asks.plain} with Aiden's words.`] });
+    expect(await run(['answer', 'ingame', String(asks.plain), '--aiden', 'Netlify.', ...WHO])).toEqual({ code: 0, lines: [expect.stringMatching(new RegExp(`^Answered a${asks.plain} with Aiden's words: decision d[0-9]+[.]$`))] });
     expect(await run(['answer', 'ingame', `a${asks.plain}`, '--aiden', 'Vercel.', ...WHO])).toEqual({ code: 1, lines: ['Already answered: "Netlify.".'] });
   });
 
@@ -265,7 +293,7 @@ describe("inprogress lead's commands", () => {
 
   it('answer --says: stores the answer his words accepted beside his words', async () => {
     const ask = raiseAsk(createCtx(db), 'test', { nodeId: steps.fourth, kind: 'question', text: 'Which region?' });
-    expect(await run(['answer', 'ingame', String(ask.id), '--aiden', 'yes', '--says', 'eu-west', ...WHO])).toEqual({ code: 0, lines: [`Answered a${ask.id} with Aiden's words.`] });
+    expect(await run(['answer', 'ingame', String(ask.id), '--aiden', 'yes', '--says', 'eu-west', ...WHO])).toEqual({ code: 0, lines: [expect.stringMatching(new RegExp(`^Answered a${ask.id} with Aiden's words: decision d[0-9]+[.]$`))] });
     expect(row('SELECT answer FROM asks WHERE id = ?', ask.id)).toEqual({ answer: 'eu-west (Aiden said: "yes")' });
   });
 
@@ -281,6 +309,16 @@ describe("inprogress lead's commands", () => {
     expect(undone.code).toBe(0);
     expect(undone.lines[0]).toMatch(/^Undid d\d+: the question is Aiden's again as a\d+\. Your answer was: "Inter"\.$/);
     expect(await run(['undo', 'ingame', m![2], '--aiden', 'again', ...WHO])).toEqual({ code: 1, lines: [`d${m![2]} is already undone.`] });
+    // Every decision has its row: technical unless --kind product, said in the lead's thread.
+    expect(row('SELECT kind, product_ruling, said_where, line FROM lead_decisions WHERE event_id = ?', Number(m![2]))).toEqual({ kind: 'technical', product_ruling: 0, said_where: 'thread', line: 'Which font? -> Inter' });
+    const other = raiseAsk(createCtx(db), 'test', { nodeId: steps.fourth, kind: 'question', text: 'Which colour?' });
+    const product = await run(['decide', 'ingame', `a${other.id}`, '--answer', 'Blue', '--reason', 'The brand', '--kind', 'product', ...WHO]);
+    const d = Number(/decision d(\d+)/.exec(product.lines[0])![1]);
+    expect(row('SELECT kind, product_ruling, said_where FROM lead_decisions WHERE event_id = ?', d)).toEqual({ kind: 'product', product_ruling: 1, said_where: 'thread' });
+    const third = raiseAsk(createCtx(db), 'test', { nodeId: steps.fourth, kind: 'question', text: 'Which size?' });
+    const bad = await run(['decide', 'ingame', `a${third.id}`, '--answer', 'Big', '--reason', 'Room', '--kind', 'taste', ...WHO]);
+    expect(bad.code).toBe(1);
+    expect(bad.lines[0]).toBe('--kind is product or technical, not "taste"');
   });
 
   it('promise and kept: 7 and a7 name the same ask', async () => {
@@ -396,19 +434,27 @@ describe("inprogress lead's commands", () => {
 
   it('lists the reads and the commands in the usage, one line each (intent has a read and a write form)', () => {
     const lines = LEAD_USAGE.split('\n');
-    expect(lines).toHaveLength(18);
-    expect(lines.slice(1).map((l) => l.trim().split(' ')[2])).toEqual(['rules', 'brief', 'step', 'resource', 'answer', 'decide', 'undo', 'park', 'drop', 'promise', 'kept', 'intent', 'intent', 'relay', 'start', 'allow', 'disallow']);
-    expect(lines[15]).toBe('  inprogress lead start <project> <step id> [--aiden <words>] --as <name> --instructions <n>');
-    expect(lines[16]).toBe('  inprogress lead allow <project> starts|landing --aiden <words> --as <name> --instructions <n>');
-    expect(lines[17]).toBe('  inprogress lead disallow <project> starts|landing [--aiden <words>] --as <name> --instructions <n>');
+    expect(lines).toHaveLength(29);
+    expect(lines.slice(1).map((l) => l.trim().split(' ')[2])).toEqual(['rules', 'brief', 'step', 'resource', 'answer', 'seen', 'desk-add', 'old-asks', 'old-asks', 'old-asks', 'decide', 'undo', 'set', 'park', 'drop', 'promise', 'kept', 'intent', 'intent', 'relay', 'start', 'allow', 'disallow', 'desk', 'morning', 'week', 'counts', 'import-usage']);
+    expect(lines[21]).toBe('  inprogress lead start <project> <step id> [--aiden <words>] --as <name> --instructions <n>');
+    expect(lines[22]).toBe('  inprogress lead allow <project> starts|landing|round --aiden <words> --as <name> --instructions <n>');
+    expect(lines[23]).toBe('  inprogress lead disallow <project> starts|landing|round [--aiden <words>] --as <name> --instructions <n>');
+    expect(lines[24]).toBe('  inprogress lead desk <project> [--json]');
     expect(lines[3]).toBe('  inprogress lead step <project> <step id> --as <name> --instructions <n>');
     expect(lines[4]).toBe('  inprogress lead resource <project> <document id> --as <name> --instructions <n>');
-    expect(lines[5]).toBe('  inprogress lead answer <project> <ask id> --aiden <words> [--says <text>] --as <name> --instructions <n>');
-    expect(lines[6]).toBe('  inprogress lead decide <project> <ask id> --answer <text> --reason <text> [--aiden <words>] --as <name> --instructions <n>');
-    expect(lines[7]).toBe('  inprogress lead undo <project> <decision> --aiden <words> --as <name> --instructions <n>');
-    expect(lines[12]).toBe('  inprogress lead intent <project> --as <name> --instructions <n>');
-    expect(lines[13]).toBe('  inprogress lead intent <project> <file | -> --as <name> --instructions <n>');
-    expect(lines[14]).toBe('  inprogress lead relay <project> <step id> <message | -> --as <name> --instructions <n>');
+    expect(lines[5]).toBe(
+      '  inprogress lead answer <project> <ask id> | --send <send id> --aiden <words> [--says <text>] [--where voice|thread] [--said-at <iso time>] [--shown r12,r13] [--yes merge|deploy|push|publish ...] --as <name> --instructions <n>',
+    );
+    expect(lines[6]).toBe('  inprogress lead seen <project> <send id> --as <name> --instructions <n>');
+    expect(lines[7]).toBe('  inprogress lead desk-add <project> --step <step id> --words <his words> --as <name> --instructions <n>');
+    expect(lines[8]).toBe('  inprogress lead old-asks <project> | --all --as <name> --instructions <n>');
+    expect(lines[9]).toBe('  inprogress lead old-asks next [count, 1 to 5] --as <name> --instructions <n>');
+    expect(lines[10]).toBe('  inprogress lead old-asks reading <project> <ask id> <text | -> --as <name> --instructions <n>');
+    expect(lines[11]).toBe('  inprogress lead decide <project> <ask id> --answer <text> --reason <text> [--kind product|technical] [--aiden <words>] --as <name> --instructions <n>');
+    expect(lines[12]).toBe('  inprogress lead undo <project> <decision> --aiden <words> [--reason <text>] --as <name> --instructions <n>');
+    expect(lines[18]).toBe('  inprogress lead intent <project> --as <name> --instructions <n>');
+    expect(lines[19]).toBe('  inprogress lead intent <project> <file | -> --as <name> --instructions <n>');
+    expect(lines[20]).toBe('  inprogress lead relay <project> <step id> <message | -> --as <name> --instructions <n>');
   });
 });
 
@@ -513,8 +559,9 @@ describe('inprogress lead relay', () => {
       expect(await run(['allow', 'inprogress', 'starts', '--aiden', 'yes, go', ...WHO])).toEqual({ code: 0, lines: ['Starts is on for InGame.'], reads: 0 });
       expect(await run(['disallow', 'inprogress', 'landing', ...WHO])).toMatchObject({ code: 0 });
       expect(await run(['disallow', 'inprogress', 'landing', '--aiden', 'stop it', ...WHO])).toMatchObject({ code: 0 });
+      expect(await run(['allow', 'inprogress', 'round', '--aiden', 'run the round', ...WHO])).toMatchObject({ code: 0 });
       const bad = await run(['allow', 'inprogress', 'deploys', '--aiden', 'go', ...WHO]);
-      expect(bad).toEqual({ code: 1, lines: ['deploys is not a switch: give starts or landing', LEAD_USAGE], reads: 0 });
+      expect(bad).toEqual({ code: 1, lines: ['deploys is not a switch: give starts, landing or round', LEAD_USAGE], reads: 0 });
       const noWords = await run(['allow', 'inprogress', 'starts', ...WHO]);
       expect(noWords).toEqual({ code: 1, lines: ['Missing --aiden', LEAD_USAGE], reads: 0 });
     } finally {
@@ -526,6 +573,69 @@ describe('inprogress lead relay', () => {
       ['/api/lead/inprogress/allow', { ...who, switch: 'starts', aidenWords: 'yes, go' }],
       ['/api/lead/inprogress/disallow', { ...who, switch: 'landing' }],
       ['/api/lead/inprogress/disallow', { ...who, switch: 'landing', aidenWords: 'stop it' }],
+      ['/api/lead/inprogress/allow', { ...who, switch: 'round', aidenWords: 'run the round' }],
+    ]);
+  });
+
+  it("posts seen to the stamp route, desk-add with his words, and answer with where, when, what he was shown and what his yes covers", async () => {
+    const sent = stubbed(async () => new Response(JSON.stringify({ text: 'Seen s42.' }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    try {
+      expect(await run(['seen', 'inprogress', 's42', ...WHO])).toEqual({ code: 0, lines: ['Seen s42.'], reads: 0 });
+      expect(await run(['seen', 'inprogress', '7', ...WHO])).toMatchObject({ code: 0 });
+      expect(await run(['seen', 'inprogress', 'sx', ...WHO])).toEqual({ code: 1, lines: ['sx is not a send: give it as s42 or 42', LEAD_USAGE], reads: 0 });
+      expect(await run(['desk-add', 'inprogress', '--step', '#12', '--words', 'you decide', ...WHO])).toMatchObject({ code: 0 });
+      expect(await run(['desk-add', 'inprogress', '--words', 'you decide', ...WHO])).toEqual({ code: 1, lines: ['Missing --step', LEAD_USAGE], reads: 0 });
+      const answer = ['answer', 'inprogress', 'a5', '--aiden', 'ship it', '--where', 'voice', '--said-at', '2026-11-25T14:02:00Z', '--shown', 'r12,13', '--yes', 'merge,push', ...WHO];
+      expect(await run(answer)).toMatchObject({ code: 0 });
+      expect((await run(['answer', 'inprogress', 'a5', '--aiden', 'x', '--where', 'phone', ...WHO])).code).toBe(1);
+      // A public push is never a yes; a publish is.
+      expect((await run(['answer', 'inprogress', 'a5', '--aiden', 'x', '--yes', 'push-public', ...WHO])).code).toBe(1);
+      expect(await run(['answer', 'inprogress', '--send', 's9', '--aiden', 'go ahead', '--yes', 'publish', ...WHO])).toMatchObject({ code: 0 });
+      // His reply to a line from the Voice, by its send; --yes once per action.
+      expect(await run(['answer', 'inprogress', '--send', 's9', '--aiden', 'go ahead', '--yes', 'push', '--yes', 'merge', ...WHO])).toMatchObject({ code: 0 });
+      expect((await run(['answer', 'inprogress', 'a5', '--send', 's9', '--aiden', 'x', ...WHO])).code).toBe(1);
+      expect((await run(['answer', 'inprogress', '--aiden', 'x', ...WHO])).code).toBe(1);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+    const who = { as: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION };
+    expect(sent.map((s) => [s.url.replace(conn.baseUrl, ''), s.body])).toEqual([
+      ['/api/lead/inprogress/stamp', { ...who, sendId: 42 }],
+      ['/api/lead/inprogress/stamp', { ...who, sendId: 7 }],
+      ['/api/lead/inprogress/desk-add', { ...who, stepId: 12, aidenWords: 'you decide' }],
+      ['/api/lead/inprogress/answer', { ...who, askId: 5, aidenWords: 'ship it', where: 'voice', saidAt: '2026-11-25T14:02:00.000Z', shown: [12, 13], yes: ['merge', 'push'] }],
+      ['/api/lead/inprogress/answer', { ...who, sendId: 9, aidenWords: 'go ahead', yes: ['publish'] }],
+      ['/api/lead/inprogress/answer', { ...who, sendId: 9, aidenWords: 'go ahead', yes: ['push', 'merge'] }],
+    ]);
+    // An answer reads git on the server: it waits as long as a relay.
+    expect(sent.filter((s) => s.url.endsWith('/answer')).map((s) => s.timeoutMs)).toEqual([RELAY_TIMEOUT_MS, RELAY_TIMEOUT_MS, RELAY_TIMEOUT_MS]);
+  });
+
+  it('posts old-asks to its project, next with no project and an optional count, and reading with the ask and its text', async () => {
+    const sent = stubbed(async () => new Response(JSON.stringify({ text: 'Queued 5 old asks for the Voice; 2 remain.' }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    try {
+      expect(await run(['old-asks', 'glimpse', ...WHO])).toMatchObject({ code: 0 });
+      expect(await run(['old-asks', '--all', ...WHO])).toMatchObject({ code: 0 });
+      expect(await run(['old-asks', 'glimpse', '--all', ...WHO])).toEqual({ code: 1, lines: ['--all takes no project: glimpse', LEAD_USAGE], reads: 0 });
+      expect(await run(['old-asks', ...WHO])).toEqual({ code: 1, lines: ['Missing <project>', LEAD_USAGE], reads: 0 });
+      expect(await run(['old-asks', 'next', ...WHO])).toEqual({ code: 0, lines: ['Queued 5 old asks for the Voice; 2 remain.'], reads: 0 });
+      expect(await run(['old-asks', 'next', '3', ...WHO])).toMatchObject({ code: 0 });
+      expect(await run(['old-asks', 'reading', 'glimpse', 'a12', '-', ...WHO], 'The lead would close it.')).toMatchObject({ code: 0, reads: 1 });
+      expect(await run(['old-asks', 'next', '6', ...WHO])).toEqual({ code: 1, lines: ['The count is a whole number from 1 to 5, not "6"', LEAD_USAGE], reads: 0 });
+      expect(await run(['old-asks', 'glimpse', 'extra', ...WHO])).toEqual({ code: 1, lines: ['Unexpected extra', LEAD_USAGE], reads: 0 });
+      expect(await run(['old-asks', 'reading', 'glimpse', 'a12', ...WHO])).toEqual({ code: 1, lines: ['old-asks reading needs <project> <ask id> <text>', LEAD_USAGE], reads: 0 });
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+    const who = { as: 'Progresser', instructions: LEAD_INSTRUCTIONS_VERSION };
+    expect(sent.map((s) => [s.url.replace(conn.baseUrl, ''), s.body])).toEqual([
+      ['/api/lead/glimpse/old-asks', who],
+      ['/api/lead/old-asks/all', who],
+      ['/api/lead/old-asks/next', who],
+      ['/api/lead/old-asks/next', { ...who, count: 3 }],
+      ['/api/lead/glimpse/old-asks/reading', { ...who, askId: 12, text: 'The lead would close it.' }],
     ]);
   });
 

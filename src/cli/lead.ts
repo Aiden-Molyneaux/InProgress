@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { LEAD_SWITCHES, type LeadBrief } from '../core/lead';
 import { ApiClientError, createClient } from '../lib/client';
 import { TASKS_NOT_RUNNING_HINT } from './tasks';
@@ -10,9 +11,15 @@ export const LEAD_USAGE = [
   `  inprogress lead brief <project> ${WHO} [--mark] [--json]`,
   `  inprogress lead step <project> <step id> ${WHO}`,
   `  inprogress lead resource <project> <document id> ${WHO}`,
-  `  inprogress lead answer <project> <ask id> --aiden <words> [--says <text>] ${WHO}`,
-  `  inprogress lead decide <project> <ask id> --answer <text> --reason <text> [--aiden <words>] ${WHO}`,
-  `  inprogress lead undo <project> <decision> --aiden <words> ${WHO}`,
+  `  inprogress lead answer <project> <ask id> | --send <send id> --aiden <words> [--says <text>] [--where voice|thread] [--said-at <iso time>] [--shown r12,r13] [--yes merge|deploy|push|publish ...] ${WHO}`,
+  `  inprogress lead seen <project> <send id> ${WHO}`,
+  `  inprogress lead desk-add <project> --step <step id> --words <his words> ${WHO}`,
+  `  inprogress lead old-asks <project> | --all ${WHO}`,
+  `  inprogress lead old-asks next [count, 1 to 5] ${WHO}`,
+  `  inprogress lead old-asks reading <project> <ask id> <text | -> ${WHO}`,
+  `  inprogress lead decide <project> <ask id> --answer <text> --reason <text> [--kind product|technical] [--aiden <words>] ${WHO}`,
+  `  inprogress lead undo <project> <decision> --aiden <words> [--reason <text>] ${WHO}`,
+  `  inprogress lead set <project> quiet|voice-cap <value> [--aiden <words>] ${WHO}`,
   `  inprogress lead park <project> <step id> [--reason <text>] [--aiden <words>] ${WHO}`,
   `  inprogress lead drop <project> <step id> --reason <text> [--aiden <words>] ${WHO}`,
   `  inprogress lead promise <project> <text> --due <iso time> [--step <step id>] ${WHO}`,
@@ -21,8 +28,13 @@ export const LEAD_USAGE = [
   `  inprogress lead intent <project> <file | -> ${WHO}`,
   `  inprogress lead relay <project> <step id> <message | -> ${WHO}`,
   `  inprogress lead start <project> <step id> [--aiden <words>] ${WHO}`,
-  `  inprogress lead allow <project> starts|landing --aiden <words> ${WHO}`,
-  `  inprogress lead disallow <project> starts|landing [--aiden <words>] ${WHO}`,
+  `  inprogress lead allow <project> starts|landing|round --aiden <words> ${WHO}`,
+  `  inprogress lead disallow <project> starts|landing|round [--aiden <words>] ${WHO}`,
+  '  inprogress lead desk <project> [--json]',
+  '  inprogress lead morning <project>',
+  '  inprogress lead week <project>',
+  '  inprogress lead counts <project> --since <iso time>',
+  '  inprogress lead import-usage <file>',
 ].join('\n');
 
 /** What a write command prints when the server did not answer in time: it may have been applied all the same. */
@@ -64,6 +76,10 @@ interface CommandSpec {
   bools?: readonly string[];
   /** The command can be run without --instructions (the lead does not know the version until it has read the rules). */
   noInstructions?: boolean;
+  /** The command needs neither --as nor --instructions: a read with no lead check. */
+  noWho?: boolean;
+  /** A bare flag that makes the project optional: with it the command names none. */
+  noProjectWith?: string;
 }
 
 const COMMANDS: Record<string, CommandSpec> = {
@@ -71,9 +87,14 @@ const COMMANDS: Record<string, CommandSpec> = {
   brief: { positionals: 0, flags: [], bools: ['--mark', '--json'] },
   step: { positionals: 1, flags: [] },
   resource: { positionals: 1, flags: [] },
-  answer: { positionals: 1, flags: ['--aiden', '--says'] },
-  decide: { positionals: 1, flags: ['--answer', '--reason', '--aiden'] },
-  undo: { positionals: 1, flags: ['--aiden'] },
+  answer: { positionals: 1, minPositionals: 0, flags: ['--aiden', '--says', '--where', '--said-at', '--shown', '--yes', '--send'] },
+  seen: { positionals: 1, flags: [] },
+  'desk-add': { positionals: 0, flags: ['--step', '--words'] },
+  // `old-asks <project>`, `old-asks next [count]` (no project), `old-asks reading <project> <ask> <text>`: the first word decides.
+  'old-asks': { positionals: 3, minPositionals: 0, flags: [], bools: ['--all'], noProjectWith: '--all' },
+  decide: { positionals: 1, flags: ['--answer', '--reason', '--kind', '--aiden'] },
+  undo: { positionals: 1, flags: ['--aiden', '--reason'] },
+  set: { positionals: 2, flags: ['--aiden'] },
   park: { positionals: 1, flags: ['--reason', '--aiden'] },
   drop: { positionals: 1, flags: ['--reason', '--aiden'] },
   promise: { positionals: 1, flags: ['--due', '--step'] },
@@ -83,6 +104,10 @@ const COMMANDS: Record<string, CommandSpec> = {
   start: { positionals: 1, flags: ['--aiden'] },
   allow: { positionals: 1, flags: ['--aiden'] },
   disallow: { positionals: 1, flags: ['--aiden'] },
+  desk: { positionals: 0, flags: [], bools: ['--json'], noWho: true },
+  morning: { positionals: 0, flags: [], noWho: true },
+  week: { positionals: 0, flags: [], noWho: true },
+  counts: { positionals: 0, flags: ['--since'], noWho: true },
 };
 
 interface Parsed {
@@ -112,17 +137,20 @@ function parseArgs(args: string[], spec: CommandSpec): Parsed | { error: string 
       else if (arg === '--instructions') {
         if (!/^\d+$/.test(next.trim())) return { error: `--instructions needs a whole number, not ${next}` };
         instructions = Number(next.trim());
-      } else flags.set(arg, next);
+      } else if (arg === '--yes' && flags.has(arg)) flags.set(arg, `${flags.get(arg)},${next}`);
+      // --yes may be given once per action; every other flag keeps its last value.
+      else flags.set(arg, next);
     } else if (arg.startsWith('--')) return { error: `Unknown flag ${arg}` };
     else positionals.push(arg);
   }
   const [project, ...rest] = positionals;
-  if (project === undefined) return { error: 'Missing <project>' };
+  const projectless = spec.noProjectWith !== undefined && bools.has(spec.noProjectWith);
+  if (project === undefined && !projectless) return { error: 'Missing <project>' };
   if (rest.length < (spec.minPositionals ?? spec.positionals)) return { error: 'Missing a value after <project>' };
   if (rest.length > spec.positionals) return { error: `Unexpected ${rest[spec.positionals]}` };
-  if (as === undefined) return { error: 'Missing --as <name>' };
-  if (instructions === undefined && !spec.noInstructions) return { error: 'Missing --instructions <n>' };
-  return { project, positionals: rest, flags, bools, as, instructions: instructions ?? 0 };
+  if (as === undefined && !spec.noWho) return { error: 'Missing --as <name>' };
+  if (instructions === undefined && !spec.noInstructions && !spec.noWho) return { error: 'Missing --instructions <n>' };
+  return { project: project ?? '', positionals: rest, flags, bools, as: as ?? '', instructions: instructions ?? 0 };
 }
 
 /** An ask as the brief names it, `a7`, or as a bare number, `7`. */
@@ -155,25 +183,52 @@ const valueOf = (text: string | undefined): Value | undefined => (text === undef
  * A command's body, with `-` values still to read: the fields as the route takes them, each a Value or a plain number; or
  * what is wrong with the arguments. `file` is the intent file to read, when it is not `-`.
  */
-type Draft = { fields: Record<string, Value | number>; file?: string } | { error: string };
+type Draft = { fields: Record<string, Value | number | (string | number)[]>; file?: string; route?: string } | { error: string };
 
 function draft(command: string, p: Parsed): Draft {
   const [first] = p.positionals;
   const flag = (name: string) => valueOf(p.flags.get(name));
   const needed = (name: string): Value | { error: string } => flag(name) ?? { error: `Missing ${name}` };
-  const fields: Record<string, Value | number> = {};
+  const fields: Record<string, Value | number | (string | number)[]> = {};
   const put = (key: string, value: Value | undefined) => {
     if (value !== undefined) fields[key] = value;
   };
   switch (command) {
     case 'answer': {
-      const id = askId(first);
-      if (id === undefined) return { error: `${first} is not an ask: give it as a7 or 7` };
+      // The ask, or with --send the line to the Voice he replied to: one of the two.
+      const send = p.flags.get('--send');
+      if ((first === undefined) === (send === undefined)) return { error: 'Give the ask (a7) or --send s<id>, one of the two' };
+      if (send !== undefined) {
+        const m = /^s?(\d+)$/i.exec(send.trim());
+        if (m === null || Number(m[1]) === 0) return { error: `${send} is not a send: give it as s42 or 42` };
+        fields.sendId = Number(m[1]);
+      } else {
+        const id = askId(first as string);
+        if (id === undefined) return { error: `${first} is not an ask: give it as a7 or 7` };
+        fields.askId = id;
+      }
       const words = needed('--aiden');
       if ('error' in words) return words;
-      fields.askId = id;
       fields.aidenWords = words;
       put('says', flag('--says'));
+      const where = p.flags.get('--where');
+      if (where !== undefined && where !== 'voice' && where !== 'thread') return { error: `--where is voice or thread, not ${JSON.stringify(where)}` };
+      if (where !== undefined) fields.where = { text: where };
+      const saidAt = p.flags.get('--said-at');
+      if (saidAt !== undefined && Number.isNaN(Date.parse(saidAt))) return { error: `--said-at needs an iso time, not ${JSON.stringify(saidAt)}` };
+      if (saidAt !== undefined) fields.saidAt = { text: new Date(saidAt).toISOString() };
+      const shown = p.flags.get('--shown');
+      if (shown !== undefined) {
+        const ids = shown.split(',').map((t) => resourceId(t));
+        if (ids.some((n) => n === undefined)) return { error: `--shown takes documents as r12,r13, not ${JSON.stringify(shown)}` };
+        fields.shown = ids as number[];
+      }
+      const yes = p.flags.get('--yes');
+      if (yes !== undefined) {
+        const actions = yes.split(',').map((t) => t.trim());
+        if (actions.some((a) => a !== 'merge' && a !== 'deploy' && a !== 'push' && a !== 'publish')) return { error: `--yes takes merge, deploy, push and publish, not ${JSON.stringify(yes)}` };
+        fields.yes = [...new Set(actions)];
+      }
       return { fields };
     }
     case 'decide': {
@@ -183,9 +238,13 @@ function draft(command: string, p: Parsed): Draft {
       if ('error' in answer) return answer;
       const reason = needed('--reason');
       if ('error' in reason) return reason;
+      // Technical unless named: sent only when given, so the body stays what an older server accepts.
+      const kind = p.flags.get('--kind');
+      if (kind !== undefined && kind !== 'product' && kind !== 'technical') return { error: `--kind is product or technical, not ${JSON.stringify(kind)}` };
       fields.askId = id;
       fields.answer = answer;
       fields.reason = reason;
+      if (kind !== undefined) fields.kind = { text: kind };
       put('aidenWords', flag('--aiden'));
       return { fields };
     }
@@ -196,6 +255,7 @@ function draft(command: string, p: Parsed): Draft {
       if ('error' in words) return words;
       fields.eventId = id;
       fields.aidenWords = words;
+      put('reason', flag('--reason'));
       return { fields };
     }
     case 'park':
@@ -241,9 +301,51 @@ function draft(command: string, p: Parsed): Draft {
       put('aidenWords', flag('--aiden'));
       return { fields };
     }
+    case 'seen': {
+      const m = /^s?(\d+)$/i.exec(first.trim());
+      if (m === null || Number(m[1]) === 0) return { error: `${first} is not a send: give it as s42 or 42` };
+      return { fields: { sendId: Number(m[1]) } };
+    }
+    case 'old-asks': {
+      // `--all` names no project: every personal project the lead may carry his answers in.
+      if (p.bools.has('--all')) {
+        if (p.project !== '') return { error: `--all takes no project: ${p.project}` };
+        return { fields: {}, route: '/api/lead/old-asks/all' };
+      }
+      // `next` takes no project: it reads the old asks of all of Aiden's personal projects.
+      if (p.project === 'next') {
+        if (p.positionals.length > 1) return { error: `Unexpected ${p.positionals[1]}` };
+        if (first === undefined) return { fields: {}, route: '/api/lead/old-asks/next' };
+        if (!/^[1-5]$/.test(first.trim())) return { error: `The count is a whole number from 1 to 5, not ${JSON.stringify(first)}` };
+        return { fields: { count: Number(first.trim()) }, route: '/api/lead/old-asks/next' };
+      }
+      if (p.project === 'reading') {
+        const [slug, ask, text] = p.positionals;
+        if (slug === undefined || ask === undefined || text === undefined) return { error: 'old-asks reading needs <project> <ask id> <text>' };
+        const id = askId(ask);
+        if (id === undefined) return { error: `${ask} is not an ask: give it as a7 or 7` };
+        return { fields: { askId: id, text: valueOf(text)! }, route: `/api/lead/${encodeURIComponent(slug)}/old-asks/reading` };
+      }
+      if (first !== undefined) return { error: `Unexpected ${first}` };
+      return { fields: {} };
+    }
+    case 'desk-add': {
+      const step = p.flags.get('--step');
+      const id = step === undefined ? undefined : stepId(step);
+      if (id === undefined) return { error: step === undefined ? 'Missing --step' : `${step} is not a step: give it as #42 or 42` };
+      const words = needed('--words');
+      if ('error' in words) return words;
+      return { fields: { stepId: id, aidenWords: words } };
+    }
+    case 'set': {
+      fields.key = { text: first };
+      fields.value = { text: p.positionals[1]! };
+      put('aidenWords', flag('--aiden'));
+      return { fields };
+    }
     case 'allow':
     case 'disallow': {
-      if (!(LEAD_SWITCHES as readonly string[]).includes(first)) return { error: `${first} is not a switch: give starts or landing` };
+      if (!(LEAD_SWITCHES as readonly string[]).includes(first)) return { error: `${first} is not a switch: give starts, landing or round` };
       fields.switch = { text: first };
       if (command === 'allow') {
         const words = needed('--aiden');
@@ -259,7 +361,8 @@ function draft(command: string, p: Parsed): Draft {
 
 /**
  * `inprogress lead <command>`. `rules` prints the lead's rules (or with --bootstrap the three lines to paste) and needs no
- * --instructions. `brief` prints the server's text, or with --json the brief. `rules`, `brief`, `step`, `resource` and `intent`
+ * --instructions. `brief` prints the server's text, or with --json the brief. `desk` prints the open desk items, or with
+ * --json the items, and needs neither --as nor --instructions. `rules`, `brief`, `step`, `resource`, `desk` and `intent`
  * with no file are the reads: GETs that print the route's text. The nine commands (answer, decide, undo, park, drop, promise, kept, intent with a file or
  * `-`, relay) each post to their route and print its sentence. No command, an unknown one, or
  * arguments it cannot use print the usage and exit 1, before anything is read from stdin; a refusal from the server prints
@@ -275,19 +378,39 @@ export async function runLead(args: string[], out: (line: string) => void, o: Co
     return 1;
   };
   const [command, ...rest] = args;
+  // `import-usage` names a file, not a project: it asks the server to read stage 0's readings from it.
+  if (command === 'import-usage') {
+    if (rest.length !== 1) return usage('import-usage takes one file');
+    const down = o.bringUp ? await o.bringUp() : null;
+    if (down !== null) {
+      out(down);
+      return 1;
+    }
+    try {
+      out((await createClient(o).post<{ text: string }>('/api/lead/usage/import', { file: resolve(rest[0]!) })).text);
+      return 0;
+    } catch (err) {
+      if (err instanceof ApiClientError && err.status === 0) throw new ApiClientError(0, err.message, TASKS_NOT_RUNNING_HINT, err.code);
+      if (err instanceof ApiClientError) {
+        out(err.message);
+        return 1;
+      }
+      throw err;
+    }
+  }
   if (command === undefined || !Object.hasOwn(COMMANDS, command)) return usage();
   const p = parseArgs(rest, COMMANDS[command]);
   if ('error' in p) return usage(p.error);
-  // The reads: brief, rules, step, resource, and intent with no file. They are GETs and send nothing.
+  // The reads: brief, rules, step, resource, desk, and intent with no file. They are GETs and send nothing.
   const [first] = p.positionals;
-  const reads = command === 'brief' || command === 'rules' || command === 'step' || command === 'resource' || (command === 'intent' && first === undefined);
+  const reads = command === 'brief' || command === 'rules' || command === 'step' || command === 'resource' || command === 'desk' || command === 'morning' || command === 'week' || command === 'counts' || (command === 'intent' && first === undefined);
   const readId = command === 'step' ? stepId(first) : command === 'resource' ? resourceId(first) : undefined;
   if ((command === 'step' || command === 'resource') && readId === undefined) {
     return usage(command === 'step' ? `${first} is not a step: give it as #42 or 42` : `${first} is not a document: give it as r42 or 42`);
   }
   const body = reads ? undefined : draft(command, p);
   if (body !== undefined && 'error' in body) return usage(body.error);
-  if (body !== undefined && Object.values(body.fields).filter((v) => typeof v === 'object' && 'stdin' in v).length > 1) {
+  if (body !== undefined && Object.values(body.fields).filter((v) => typeof v === 'object' && !Array.isArray(v) && 'stdin' in v).length > 1) {
     return usage('Only one value can be read from stdin (-)');
   }
 
@@ -295,7 +418,7 @@ export async function runLead(args: string[], out: (line: string) => void, o: Co
   let payload: Record<string, unknown> | undefined;
   if (body !== undefined) {
     payload = { as: p.as, instructions: p.instructions };
-    for (const [key, value] of Object.entries(body.fields)) payload[key] = typeof value === 'number' ? value : 'stdin' in value ? await io.stdin() : value.text;
+    for (const [key, value] of Object.entries(body.fields)) payload[key] = typeof value === 'number' || Array.isArray(value) ? value : 'stdin' in value ? await io.stdin() : value.text;
     if (body.file !== undefined) {
       try {
         payload.intent = io.readFile(body.file);
@@ -315,7 +438,8 @@ export async function runLead(args: string[], out: (line: string) => void, o: Co
   const path = `/api/lead/${encodeURIComponent(p.project)}`;
   try {
     if (payload !== undefined) {
-      const res = await client.post<{ text: string }>(`${path}/${command}`, payload, command === 'relay' || command === 'start' ? { timeoutMs: RELAY_TIMEOUT_MS } : {});
+      const route = body !== undefined && !('error' in body) && body.route !== undefined ? body.route : `${path}/${command === 'seen' ? 'stamp' : command}`;
+      const res = await client.post<{ text: string }>(route, payload, command === 'relay' || command === 'start' || command === 'answer' ? { timeoutMs: RELAY_TIMEOUT_MS } : {});
       out(res.text);
       return 0;
     }
@@ -326,6 +450,21 @@ export async function runLead(args: string[], out: (line: string) => void, o: Co
     }
     if (command === 'intent') {
       out((await client.get<{ text: string }>(`${path}/intent?${asked}`)).text);
+      return 0;
+    }
+    if (command === 'desk') {
+      const desk = await client.get<{ items: unknown[]; text: string }>(`${path}/desk`);
+      out(p.bools.has('--json') ? JSON.stringify(desk.items, null, 2) : desk.text);
+      return 0;
+    }
+    if (command === 'morning' || command === 'week') {
+      out((await client.get<{ text: string }>(`${path}/${command}`)).text);
+      return 0;
+    }
+    if (command === 'counts') {
+      const since = p.flags.get('--since');
+      if (since === undefined || Number.isNaN(Date.parse(since))) return usage('counts needs --since <iso time>');
+      out((await client.get<{ text: string }>(`${path}/counts?since=${encodeURIComponent(new Date(since).toISOString())}`)).text);
       return 0;
     }
     if (command === 'rules') {

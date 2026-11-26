@@ -1,4 +1,5 @@
 import { commandLabel, sessionActivity } from '../core/activity';
+import { isLeadFolder } from './lead/folder';
 import type { SessionApp } from '../core/session-app';
 import { relayedLine } from '../core/relay';
 import { clipLine, stepRef } from '../core/step-ref';
@@ -123,6 +124,9 @@ const clean = (text: string | undefined): string | null => text?.trim() || null;
 const landingOn = (ctx: Ctx, projectId: number): boolean => leadSwitches(ctx, projectId).landing.on;
 
 export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInput): HookEventResult {
+  // The lead's own folder (and its thread in T3 Code) is the lead's: no session, no briefing, no nudge, as for an untracked folder.
+  // Only for a session not yet known: one already tracked whose cwd strays under the lead's folder still gets its events, so it ends.
+  if (isLeadFolder(ctx, input.cwd) && !findSession(ctx, sessionId)) return input.event === 'prompt' && input.mentionsInProgress ? { tracked: false, context: untrackedHint(sessionId) } : { tracked: false };
   let created = false;
   /**
    * The session owed the full briefing (its "briefing due" marker was set) and this response carries it: a start, a
@@ -378,7 +382,7 @@ export function handleHookEvent(ctx: Ctx, sessionId: string, input: HookEventInp
     // record of Aiden's words, not the lead's claim.
     const lines: string[] = relayedBy === null ? [] : [relayedLine(relayedBy)];
     if (answers.length) {
-      lines.push(...answers.map((a) => (a.answeredVia === 'lead_decided' ? `Decided by this project's lead, not Aiden: ${askTag(a.id)} "${oneLine(a.answer)}" (yours: act on it; Aiden may still undo it)` : a.answer ? `Answered: ${askTag(a.id)} "${oneLine(a.answer)}" (yours: act on it, or add it to your tasks)` : `Cleared: ${askTag(a.id)}, no answer`)));
+      lines.push(...answers.map((a) => (a.answeredVia === 'lead_decided' ? `Decided by this project's lead, not Aiden: ${askTag(a.id)} "${oneLine(a.answer)}" (yours: act on it; Aiden may still undo it)` : a.answeredVia === 'lead_card' ? `The lead answered ${askTag(a.id)} with the landing check's rule, not a decision: "${oneLine(a.answer)}"` : a.answer ?`Answered: ${askTag(a.id)} "${oneLine(a.answer)}" (yours: act on it, or add it to your tasks)` : `Cleared: ${askTag(a.id)}, no answer`)));
       markAnswersDelivered(ctx, answers.map((a) => a.id));
     }
     // Landing went off after this session started: its briefing may hold the Landing line, so every prompt says it no longer stands.

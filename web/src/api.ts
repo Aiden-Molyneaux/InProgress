@@ -181,6 +181,13 @@ export async function openDesktop(sessionId: string): Promise<OpenDesktopResult>
 /** Clears an ask, with an answer when Aiden typed one. */
 export const clearAsk = (askId: number, answer?: string): Promise<UiResult> => postUi(`/api/ui/asks/${askId}/clear`, answer === undefined ? {} : { answer });
 
+/** Go ahead or Not yet on a command held for Aiden (lead stage 1): one answer per held command, a second is refused. */
+export const answerHeld = (itemId: number, answer: 'go' | 'not-yet'): Promise<UiResult> => postUi(`/api/ui/held/${itemId}`, { answer });
+
+/** Turns one of the lead's switches on or off from the window; the log records it as the window's, in the words "switched in the window". */
+export const leadSwitch = (projectId: number, slug: string, name: 'starts' | 'landing' | 'round', on: boolean): Promise<UiResult> =>
+  postUi(`/api/ui/projects/${projectId}/lead-switch`, { slug, switch: name, on });
+
 /** A measurement: fire and forget, so a failure never reaches the user. */
 export function postEvent(name: WindowEventName, projectId: number | null, data?: Record<string, string | number | boolean | null>): void {
   void postUi('/api/ui/events', { name, projectId, ...(data ? { data } : {}) });

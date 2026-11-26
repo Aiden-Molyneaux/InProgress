@@ -1,5 +1,5 @@
 import type { EventRow } from '../../core/types';
-import type { Ctx, EventInput } from '../db/tx';
+import { NOT_DESK_ONLY_SQL, type Ctx, type EventInput } from '../db/tx';
 
 interface EventDbRow {
   id: number;
@@ -40,7 +40,8 @@ export function maxEventId(ctx: Ctx): number {
 }
 
 export function lastProjectEvent(ctx: Ctx, projectId: number): EventRow | null {
-  const row = ctx.db.prepare("SELECT * FROM events WHERE project_id = ? AND type NOT LIKE 'window.%' ORDER BY id DESC LIMIT 1").get(projectId) as EventDbRow | undefined;
+  // A desk-only project.updated (tx.ts) is no activity: the footer never shows it as the last event.
+  const row = ctx.db.prepare(`SELECT * FROM events e WHERE e.project_id = ? AND e.type NOT LIKE 'window.%' AND ${NOT_DESK_ONLY_SQL} ORDER BY e.id DESC LIMIT 1`).get(projectId) as EventDbRow | undefined;
   return row ? toEvent(row) : null;
 }
 

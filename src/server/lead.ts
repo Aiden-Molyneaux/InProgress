@@ -1,5 +1,5 @@
 import { deriveBoard, type BoardRow, type Mark } from '../core/board';
-import { LEAD_IDLE_MARKS, LEAD_INSTRUCTIONS_VERSION, LEAD_LOOK_BACK_DAYS, LEAD_STALE_MARKS, isAidens, type LeadBrief, type LeadEventKind, type LeadEventOut, type LeadSwitch, type LeadSwitchState } from '../core/lead';
+import { LEAD_IDLE_MARKS, LEAD_INSTRUCTIONS_VERSION, LEAD_LOOK_BACK_DAYS, LEAD_STALE_MARKS, LEAD_SWITCHES, isAidens, type LeadBrief, type LeadEventKind, type LeadEventOut, type LeadSwitch, type LeadSwitchState } from '../core/lead';
 import { decisionText, isDecisionLog } from '../core/lead-mandate';
 import { leadBootstrap, leadRules } from '../core/lead-rules';
 import { buildIndex, dfsOrder, shelvedIds } from '../core/tree';
@@ -10,6 +10,8 @@ import { conflict } from './errors';
 import { intentHeadlines, intentParagraphs } from './lead-text';
 import { listBindings, listProjectSummaries, resolveProject } from './repo/projects';
 import { readProjectSessions } from './repo/sessions';
+import { switchLine } from './repo/switches';
+import { insertLeadEvent, type LeadEventInput } from './repo/leadEvents';
 import { getProjectSnapshot } from './repo/snapshot';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -76,21 +78,27 @@ interface LeadEventRow {
   kind: string;
   ask_id: number | null;
   node_id: number | null;
+  text: string | null;
   aiden_words: string;
 }
 
+/** The switch an allow or disallow line names; '' for any other line, or a name that is no switch. */
+const switchNamed = (kind: string, text: string | null): string =>
+  (kind === 'allow' || kind === 'disallow') && text !== null && (LEAD_SWITCHES as readonly string[]).includes(text) ? text : '';
+
 /**
  * Where Aiden's words are cited from: the project's lead_events with his words, `at` or after `since`, newest first. The
- * ref is the ask (`a7`) when the line names one, else the step (`#42`).
+ * ref is the ask (`a7`) when the line names one, else the step (`#42`), else the switch it turned on or off (`starts`);
+ * '' when the line names none of them.
  */
 function saidSince(ctx: Ctx, projectId: number, since: string): LeadBrief['saidInAidensName'] {
   const rows = ctx.db
-    .prepare('SELECT at, kind, ask_id, node_id, aiden_words FROM lead_events WHERE project_id = ? AND aiden_words IS NOT NULL AND at >= ? ORDER BY at DESC, id DESC')
+    .prepare('SELECT at, kind, ask_id, node_id, text, aiden_words FROM lead_events WHERE project_id = ? AND aiden_words IS NOT NULL AND at >= ? ORDER BY at DESC, id DESC')
     .all(projectId, since) as LeadEventRow[];
   return rows.map((r) => ({
     at: r.at,
     kind: r.kind as LeadEventKind,
-    ref: r.ask_id !== null ? `a${r.ask_id}` : `#${r.node_id}`,
+    ref: r.ask_id !== null ? `a${r.ask_id}` : r.node_id !== null ? `#${r.node_id}` : switchNamed(r.kind, r.text),
     words: r.aiden_words,
   }));
 }
@@ -105,15 +113,16 @@ function decidedSince(ctx: Ctx, projectId: number, cutoff: string, lastSeen: str
   const isNew = (at: string): boolean => lastSeen === null || at >= lastSeen;
   const events = ctx.db
     .prepare(
-      `SELECT e.id, e.at, e.lead, e.kind, e.node_id, e.text, a.answer AS answer, e.ask_id
+      `SELECT e.id, e.at, e.lead, e.kind, e.node_id, e.text, a.answer AS answer, e.ask_id, ld.aiden_answer AS left_answer
          FROM lead_events e LEFT JOIN asks a ON a.id = e.ask_id LEFT JOIN nodes n ON n.id = e.node_id
+         LEFT JOIN lead_decisions ld ON ld.event_id = e.id
         WHERE e.project_id = ? AND e.at >= ?
           AND (e.kind = 'decide' OR (e.aiden_words IS NULL AND ((e.kind = 'park' AND n.status = 'parked') OR (e.kind = 'drop' AND n.status = 'dropped'))))
           -- An undo line's text is the decision's tag: decisionTag (lead-commands.ts) names the other site.
           AND NOT EXISTS (SELECT 1 FROM lead_events u WHERE u.project_id = e.project_id AND u.kind = 'undo' AND u.text = 'd' || e.id)
         ORDER BY e.at DESC, e.id DESC`,
     )
-    .all(projectId, cutoff) as { id: number; at: string; lead: string; kind: string; node_id: number | null; text: string; answer: string | null; ask_id: number | null }[];
+    .all(projectId, cutoff) as { id: number; at: string; lead: string; kind: string; node_id: number | null; text: string; answer: string | null; ask_id: number | null; left_answer: string | null }[];
   const logs = ctx.db
     .prepare(
       `SELECT l.id, l.created_at AS at, l.node_id, l.text
@@ -128,7 +137,8 @@ function decidedSince(ctx: Ctx, projectId: number, cutoff: string, lastSeen: str
     by: e.lead,
     stepId: e.node_id,
     stepTitle: e.node_id === null ? '' : titleOf(e.node_id),
-    what: e.kind === 'decide' ? `answered ${askTag(e.ask_id as number)}: "${e.answer ?? ''}"` : e.kind === 'park' ? 'parked' : 'dropped',
+    // A decision with no ask is on what Aiden left to the lead (an aiden_said item).
+    what: e.kind === 'decide' ? (e.ask_id === null ? `decided what Aiden left to the lead: "${e.left_answer ?? ''}"` : `answered ${askTag(e.ask_id)}: "${e.answer ?? ''}"`) : e.kind === 'park' ? 'parked' : 'dropped',
     why: e.text,
     isNew: isNew(e.at),
   }));
@@ -178,6 +188,19 @@ export function staleReasons(
 }
 
 /**
+ * Aiden's open asks, from one read of the project summaries: `project` is this project's (whatever its status; 0 when it
+ * is not listed), `all` the sum over active projects. The start gate and the brief both read it, so the line the lead reads
+ * and the refusal he meets cannot disagree.
+ */
+export function aidenOpenAsks(ctx: Ctx, projectId: number): { project: number; all: number } {
+  const summaries = listProjectSummaries(ctx);
+  return {
+    project: summaries.find((p) => p.id === projectId)?.openAsks ?? 0,
+    all: summaries.filter((p) => p.status === 'active').reduce((sum, p) => sum + p.openAsks, 0),
+  };
+}
+
+/**
  * Where the project stands, built from the record: every row, uncut (only renderLeadBrief cuts a list). `yours` is the
  * instructions version the reader holds, null for the window. Never call it inside a write(): the snapshot read may expire
  * stale sessions.
@@ -206,9 +229,7 @@ export function readLeadBrief(ctx: Ctx, ref: string, yours: number | null, now: 
   const waitingOnAiden = open
     .filter((a) => isAidens(a) && !shelved.has(a.nodeId))
     .map((a) => ({ askId: a.id, kind: a.kind, stepId: a.nodeId, stepTitle: titleOf(a.nodeId), text: a.text, raisedAt: a.raisedAt }));
-  const aidenOpenAcrossProjects = listProjectSummaries(ctx)
-    .filter((p) => p.status === 'active')
-    .reduce((sum, p) => sum + p.openAsks, 0);
+  const { project: aidenOpenInProject, all: aidenOpenAcrossProjects } = aidenOpenAsks(ctx, project.id);
 
   const forTheLead = open
     .filter((a) => a.owner === 'lead')
@@ -251,8 +272,10 @@ export function readLeadBrief(ctx: Ctx, ref: string, yours: number | null, now: 
     inFlight,
     waitingOnAiden,
     aidensOwn,
+    aidenOpenInProject,
     aidenOpenAcrossProjects,
     forTheLead,
+    brought: broughtWaiting(ctx, project.id, titleOf),
     nextUp,
     backlog,
     stale,
@@ -263,6 +286,27 @@ export function readLeadBrief(ctx: Ctx, ref: string, yours: number | null, now: 
     started: startedSince(ctx, project.id, new Date(nowMs - DEFAULT_LOOK_BACK_MS).toISOString(), titleOf),
     links: { ...lastRelay(ctx, project.id), lastSeenAt: project.leadSeenAt },
   };
+}
+
+/** What the desk brought to Aiden that still waits on him, oldest first: its bring line, decision and would-have. */
+function broughtWaiting(ctx: Ctx, projectId: number, titleOf: (id: number) => string): LeadBrief['brought'] {
+  const rows = ctx.db
+    .prepare(
+      `SELECT e.id, e.at, e.ask_id, e.node_id, ld.line, ld.would_have
+         FROM lead_decisions ld JOIN lead_events e ON e.id = ld.event_id JOIN desk_items d ON d.id = ld.item_id
+        WHERE ld.project_id = ? AND e.kind = 'bring' AND d.state = 'waiting_aiden'
+        ORDER BY e.at, e.id`,
+    )
+    .all(projectId) as { id: number; at: string; ask_id: number | null; node_id: number | null; line: string; would_have: string | null }[];
+  return rows.map((r) => ({
+    tag: `d${r.id}`,
+    at: r.at,
+    askId: r.ask_id,
+    stepId: r.node_id,
+    stepTitle: r.node_id === null ? '' : titleOf(r.node_id),
+    line: r.line,
+    wouldHave: r.would_have ?? '',
+  }));
 }
 
 /**
@@ -307,14 +351,8 @@ export function markLeadSeen(ctx: Ctx, ref: string, at: Date): string {
 }
 
 /** One line in the lead's log, answering its id. A plain insert: a command that changes something calls it inside its own write. */
-export function logLeadEvent(
-  ctx: Ctx,
-  e: { projectId: number; lead: string; instructions: number; kind: LeadEventKind; nodeId?: number; askId?: number; sessionId?: string; text?: string; aidenWords?: string },
-): number {
-  const info = ctx.db
-    .prepare('INSERT INTO lead_events (project_id, at, lead, instructions, kind, node_id, ask_id, session_id, text, aiden_words) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(e.projectId, ctx.now(), e.lead, e.instructions, e.kind, e.nodeId ?? null, e.askId ?? null, e.sessionId ?? null, e.text ?? '', e.aidenWords ?? null);
-  return Number(info.lastInsertRowid);
+export function logLeadEvent(ctx: Ctx, e: LeadEventInput): number {
+  return insertLeadEvent(ctx.db, e, ctx.now());
 }
 
 /**
@@ -323,21 +361,17 @@ export function logLeadEvent(
  */
 export function leadSwitches(ctx: Ctx, projectId: number): Record<LeadSwitch, LeadSwitchState> {
   const read = (name: LeadSwitch): LeadSwitchState => {
-    const row = ctx.db
-      .prepare("SELECT kind, at, aiden_words FROM lead_events WHERE project_id = ? AND kind IN ('allow', 'disallow') AND text = ? ORDER BY at DESC, id DESC LIMIT 1")
-      .get(projectId, name) as { kind: string; at: string; aiden_words: string | null } | undefined;
-    if (row === undefined || row.kind !== 'allow') return { on: false, at: null, words: null };
-    return { on: true, at: row.at, words: row.aiden_words };
+    const line = switchLine(ctx.db, projectId, name);
+    if (line === undefined || line.kind !== 'allow') return { on: false, at: null, words: null };
+    return { on: true, at: line.at, words: line.aidenWords };
   };
-  return { starts: read('starts'), landing: read('landing') };
+  return { starts: read('starts'), landing: read('landing'), round: read('round') };
 }
 
 /** When Landing was turned off, if the newest allow or disallow line for it is a disallow; null when it is on or never was. */
 export function landingOffAt(ctx: Ctx, projectId: number): string | null {
-  const row = ctx.db
-    .prepare("SELECT kind, at FROM lead_events WHERE project_id = ? AND kind IN ('allow', 'disallow') AND text = 'landing' ORDER BY at DESC, id DESC LIMIT 1")
-    .get(projectId) as { kind: string; at: string } | undefined;
-  return row !== undefined && row.kind === 'disallow' ? row.at : null;
+  const line = switchLine(ctx.db, projectId, 'landing');
+  return line?.kind === 'disallow' ? line.at : null;
 }
 
 /** The last `limit` lines of the project's log, newest first. */

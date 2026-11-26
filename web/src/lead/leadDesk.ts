@@ -1,5 +1,6 @@
 import { AIDEN_OPEN_LIMIT, IN_FLIGHT_LIMIT, LEAD_LOOK_BACK_DAYS, intentLine, type LeadBrief, type LeadEventOut } from '../../../src/core/lead';
 import { spanAgo, stamp } from '../../../src/core/span';
+import type { LeadBehindItem } from '../../../src/core/types';
 
 /** What the view says for a project with no lead. */
 export const NO_LEAD = 'No lead. Give this project one from its actions.';
@@ -73,7 +74,7 @@ export function deskHead(b: LeadBrief, now: number): DeskHead {
 
 export function deskGroups(b: LeadBrief, now: number): DeskGroup[] {
   const span = b.links.lastSeenAt === null ? `in the last ${LEAD_LOOK_BACK_DAYS} days` : "since the lead's last look";
-  const over = b.aidenOpenAcrossProjects - AIDEN_OPEN_LIMIT;
+  const over = b.aidenOpenInProject - AIDEN_OPEN_LIMIT;
   const needsRows: DeskRow[] = [
     ...b.aidensOwn.map((s) => ({
       key: `own-${s.stepId}`,
@@ -94,7 +95,7 @@ export function deskGroups(b: LeadBrief, now: number): DeskGroup[] {
       id: 'needs',
       title: 'Needs you',
       count: needsRows.length,
-      note: `Open asks across all projects: ${b.aidenOpenAcrossProjects} of ${AIDEN_OPEN_LIMIT}${over > 0 ? `, ${over} over the limit` : ''}`,
+      note: `Open asks in this project: ${b.aidenOpenInProject} of ${AIDEN_OPEN_LIMIT}${over > 0 ? `, ${over} over the limit` : ''} · across all projects: ${b.aidenOpenAcrossProjects}`,
       rows: needsRows,
     },
     {
@@ -145,7 +146,7 @@ export function deskGroups(b: LeadBrief, now: number): DeskGroup[] {
       id: 'said',
       title: `Said in your name ${span}`,
       count: b.saidInAidensName.length,
-      rows: b.saidInAidensName.map((e, i) => ({ key: String(i), text: `${stamp(e.at)} ${e.kind} ${e.ref}`, detail: `"${flat(e.words)}"` })),
+      rows: b.saidInAidensName.map((e, i) => ({ key: String(i), text: `${stamp(e.at)} ${e.kind}${e.ref === '' ? '' : ` ${e.ref}`}`, detail: `"${flat(e.words)}"` })),
     },
   ];
 }
@@ -166,16 +167,48 @@ export function deskDecided(b: LeadBrief, now: number): DeskDecided[] {
   });
 }
 
-/** The two switches, Starts then Landing: off, or on since when and on which words of Aiden's. */
-export function deskSwitches(b: LeadBrief, now: number): { key: 'starts' | 'landing'; line: string }[] {
-  return (['starts', 'landing'] as const).map((key) => {
+/** The switches, Starts, Landing then the round: off, or on since when and on which words of Aiden's. `on` says which way the button turns it. */
+export function deskSwitches(b: LeadBrief, now: number): { key: 'starts' | 'landing' | 'round'; line: string; on: boolean }[] {
+  return (['starts', 'landing', 'round'] as const).map((key) => {
     const s = b.switches[key];
-    const name = key === 'starts' ? 'Starts' : 'Landing';
-    if (!s.on) return { key, line: `${name}: off` };
+    const name = key === 'starts' ? 'Starts' : key === 'landing' ? 'Landing' : 'Round';
+    if (!s.on) return { key, line: `${name}: off`, on: false };
     const since = s.at === null ? '' : `, since ${spanAgo(s.at, now)} ago`;
     const words = s.words === null ? '' : `, on Aiden's words "${flat(s.words)}"`;
-    return { key, line: `${name}: on${since}${words}` };
+    return { key, line: `${name}: on${since}${words}`, on: true };
   });
+}
+
+/** A row of "The lead is behind": what it is, how late, and what Aiden can do himself. */
+export interface BehindRow {
+  key: number;
+  text: string;
+  late: string;
+  askId: number | null;
+  askText: string;
+  sessionId: string | null;
+}
+
+/**
+ * The desk items past their limit that are not done or waiting on Aiden, and every item given up on, oldest first. The
+ * clock is the window's, so an item shows within a minute of its limit with no event to say so.
+ */
+export function deskBehind(items: readonly LeadBehindItem[], now: number): BehindRow[] {
+  return items
+    .filter((i) => i.state === 'behind' || (i.dueAt !== null && Date.parse(i.dueAt) < now))
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id - b.id)
+    .map((i) => {
+      const step = i.stepId === null ? '' : `#${i.stepId} ${flat(i.stepTitle ?? '')}: `;
+      const mins = i.dueAt === null ? 0 : Math.max(1, Math.floor((now - Date.parse(i.dueAt)) / 60_000));
+      return {
+        key: i.id,
+        text: `${step}${flat(i.what)}`,
+        late: i.state === 'behind' ? (i.behindWhy === 'faults' ? 'given up after three runner faults' : 'given up after two tries') : `${mins} min late`,
+        askId: i.askId,
+        askText: i.what,
+        sessionId: i.sessionId,
+      };
+    });
 }
 
 /** What the lead started in the last days, newest first as the brief gives it. */

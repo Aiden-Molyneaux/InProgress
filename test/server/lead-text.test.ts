@@ -18,15 +18,17 @@ const empty: LeadBrief = {
   inFlight: [],
   waitingOnAiden: [],
   aidensOwn: [],
+  aidenOpenInProject: 0,
   aidenOpenAcrossProjects: 0,
   forTheLead: [],
+  brought: [],
   nextUp: [],
   backlog: 0,
   stale: [],
   landedSince: [],
   saidInAidensName: [],
   decided: [],
-  switches: { starts: { on: false, at: null, words: null }, landing: { on: false, at: null, words: null } },
+  switches: { starts: { on: false, at: null, words: null }, landing: { on: false, at: null, words: null }, round: { on: false, at: null, words: null } },
   started: [],
   links: { t3: 'not checked', t3At: null, lastSeenAt: null },
 };
@@ -40,12 +42,14 @@ const full: LeadBrief = {
   ],
   waitingOnAiden: [{ askId: 7, kind: 'question', stepId: 12, stepTitle: 'Play app signing', text: 'Which keystore?', raisedAt: ago(3 * DAY) }],
   aidensOwn: [{ stepId: 18, title: 'Buy the domain', updatedAt: ago(2 * HOUR) }],
-  aidenOpenAcrossProjects: 4,
+  aidenOpenInProject: 4,
+  aidenOpenAcrossProjects: 9,
   backlog: 12,
   forTheLead: [
     { askId: 9, stepId: 14, stepTitle: 'Release notes', text: 'Send Aiden the draft', dueAt: ago(HOUR), overdue: true },
     { askId: 10, stepId: 14, stepTitle: 'Release notes', text: 'Check the store listing', dueAt: new Date(Date.parse(AT) + DAY).toISOString(), overdue: false },
   ],
+  brought: [{ tag: 'd40', at: ago(HOUR), askId: 11, stepId: 12, stepTitle: 'Play app signing', line: 'Find or Search on the button?', wouldHave: 'Search: the window says it everywhere else.' }],
   nextUp: [{ stepId: 15, title: 'Add the privacy page', status: 'todo' }],
   stale: [{ stepId: 16, title: 'Old spike', marks: ['no_session', 'stale_ask'], reasons: ['active with no session on it, last changed 9d ago', 'a8 has waited 9d'] }],
   landedSince: [{ stepId: 11, title: 'Upload the key', outcome: 'Key uploaded to the vault.', completedAt: ago(DAY) }],
@@ -55,7 +59,7 @@ const full: LeadBrief = {
     { tag: 'd9', at: ago(3 * DAY), by: 'Progresser', stepId: 16, stepTitle: 'Old spike', what: 'parked', why: '', isNew: false },
     { tag: '', at: ago(HOUR), by: 'a session', stepId: 12, stepTitle: 'Play app signing', what: 'rename the helper · clearer', why: '', isNew: true },
   ],
-  switches: { starts: { on: true, at: ago(DAY), words: 'start them' }, landing: { on: false, at: null, words: null } },
+  switches: { starts: { on: true, at: ago(DAY), words: 'start them' }, landing: { on: false, at: null, words: null }, round: { on: false, at: null, words: null } },
   started: [
     { at: ago(HOUR), stepId: 15, stepTitle: 'Add the privacy page', threadId: 'mcp:t1', onAidensWord: true, claimed: true },
     { at: ago(5 * MIN), stepId: 16, stepTitle: 'Old spike', threadId: 'mcp:t2', onAidensWord: false, claimed: false },
@@ -76,10 +80,12 @@ describe('renderLeadBrief', () => {
       'Waiting on Aiden (2):',
       "  #18 Buy the domain · Aiden's own step, active, last changed 2h ago",
       '  a7 question on #12 Play app signing: "Which keystore?" · 3d',
-      "Aiden's open asks across all projects: 4 of 5",
+      "Aiden's open asks in this project: 4 of 5 · across all projects: 9",
       'For the lead (2):',
       `  a9 on #14 Release notes: "Send Aiden the draft" · due ${stamp(ago(HOUR))} · OVERDUE`,
       `  a10 on #14 Release notes: "Check the store listing" · due ${stamp(new Date(Date.parse(AT) + DAY).toISOString())}`,
+      'Brought to Aiden by the desk, waiting (1 of 5):',
+      `  d40 ${stamp(ago(HOUR))} a11 on #12 Play app signing: "Find or Search on the button?" · you would: "Search: the window says it everywhere else."`,
       'Next up (1):',
       '  #15 Add the privacy page · todo',
       'Backlog: 12 steps not started and not in the queue',
@@ -96,7 +102,7 @@ describe('renderLeadBrief', () => {
       'Started in the last 7 days (2):',
       `  ${stamp(ago(HOUR))} · #15 Add the privacy page · thread mcp:t1 · on Aiden's word · claimed`,
       `  ${stamp(ago(5 * MIN))} · #16 Old spike · thread mcp:t2 · on your own judgment · not claimed yet`,
-      `Switches: starts on since ${stamp(ago(DAY))} ("start them") · landing off`,
+      `Switches: starts on since ${stamp(ago(DAY))} ("start them") · landing off · round off`,
       'Links: T3 Code ok, last relay 1m ago · your last look 2d ago',
     ]);
   });
@@ -124,11 +130,11 @@ describe('renderLeadBrief', () => {
 
   it('prints a switch that is on with since when and the words, and leaves the parenthesis out with no words', () => {
     const sw = (starts: LeadBrief['switches']['starts'], landing: LeadBrief['switches']['landing']) =>
-      renderLeadBrief({ ...empty, switches: { starts, landing } }).split('\n').find((l) => l.startsWith('Switches:'));
+      renderLeadBrief({ ...empty, switches: { starts, landing, round: { on: false, at: null, words: null } } }).split('\n').find((l) => l.startsWith('Switches:'));
     const off = { on: false, at: null, words: null };
-    expect(sw(off, { on: true, at: ago(HOUR), words: 'land it' })).toBe(`Switches: starts off · landing on since ${stamp(ago(HOUR))} ("land it")`);
-    expect(sw({ on: true, at: ago(HOUR), words: null }, off)).toBe(`Switches: starts on since ${stamp(ago(HOUR))} · landing off`);
-    expect(sw({ on: true, at: ago(HOUR), words: 'a\nb' }, off)).toBe(`Switches: starts on since ${stamp(ago(HOUR))} ("a b") · landing off`);
+    expect(sw(off, { on: true, at: ago(HOUR), words: 'land it' })).toBe(`Switches: starts off · landing on since ${stamp(ago(HOUR))} ("land it") · round off`);
+    expect(sw({ on: true, at: ago(HOUR), words: null }, off)).toBe(`Switches: starts on since ${stamp(ago(HOUR))} · landing off · round off`);
+    expect(sw({ on: true, at: ago(HOUR), words: 'a\nb' }, off)).toBe(`Switches: starts on since ${stamp(ago(HOUR))} ("a b") · landing off · round off`);
   });
 
   it('renders the same text twice for the same brief, whatever the clock says', () => {
@@ -146,8 +152,10 @@ describe('renderLeadBrief', () => {
       '  none',
       'Waiting on Aiden (0):',
       '  none',
-      "Aiden's open asks across all projects: 0 of 5",
+      "Aiden's open asks in this project: 0 of 5 · across all projects: 0",
       'For the lead (0):',
+      '  none',
+      'Brought to Aiden by the desk, waiting (0 of 5):',
       '  none',
       'Next up (0):',
       '  none',
@@ -163,7 +171,7 @@ describe('renderLeadBrief', () => {
       '  none',
       'Started in the last 7 days (0):',
       '  none',
-      'Switches: starts off · landing off',
+      'Switches: starts off · landing off · round off',
       'Links: T3 Code not checked · your last look never',
     ]);
   });
@@ -177,11 +185,21 @@ describe('renderLeadBrief', () => {
   });
 
   it('gives the limit on Aiden\'s open asks a line of its own, and says how far over it is', () => {
-    const limit = (n: number) => renderLeadBrief({ ...empty, aidenOpenAcrossProjects: n }).split('\n').find((l) => l.startsWith("Aiden's open asks"));
-    expect(limit(41)).toBe("Aiden's open asks across all projects: 41 of 5, 36 over the limit");
-    expect(limit(5)).toBe("Aiden's open asks across all projects: 5 of 5");
+    const limit = (own: number, all: number) =>
+      renderLeadBrief({ ...empty, aidenOpenInProject: own, aidenOpenAcrossProjects: all }).split('\n').find((l) => l.startsWith("Aiden's open asks"));
+    expect(limit(6, 42)).toBe("Aiden's open asks in this project: 6 of 5, 1 over the limit · across all projects: 42");
+    expect(limit(5, 5)).toBe("Aiden's open asks in this project: 5 of 5 · across all projects: 5");
     // No heading carries the count: a heading is the line a reader skips.
     expect(renderLeadBrief({ ...empty, aidenOpenAcrossProjects: 41 })).not.toMatch(/\(.*41.*\):/);
+  });
+
+  it('names a switch said in his name, and leaves a line with no ref without one', () => {
+    const said = (ref: string) =>
+      renderLeadBrief({ ...empty, saidInAidensName: [{ at: ago(HOUR), kind: 'allow', ref, words: 'Turn on the switches' }] })
+        .split('\n')
+        .find((l) => l.includes('Turn on the switches'));
+    expect(said('starts')).toBe(`  ${stamp(ago(HOUR))} allow starts: "Turn on the switches"`);
+    expect(said('')).toBe(`  ${stamp(ago(HOUR))} allow: "Turn on the switches"`);
   });
 
   it('counts one step in the backlog as one step, and prints no mark name under Stale', () => {

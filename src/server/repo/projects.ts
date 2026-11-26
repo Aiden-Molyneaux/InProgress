@@ -3,12 +3,13 @@ import { LEAD_INSTRUCTIONS_VERSION, LEAD_NAME, LEAD_NAME_RULE, LEAD_SWITCHES } f
 import { BRIEFING_MODES, DELETED_RETENTION_MS, STALE_SESSION_MS, TITLE_CHANNELS, type Binding, type BriefingMode, type Project, type ProjectSummary, type QueueEntry, type QueueOp, type TitleChannel } from '../../core/types';
 import { globMatch } from '../../lib/glob';
 import { isUnder, normalizePath } from '../../lib/paths';
-import { msAgo, write, type Ctx, type RecordEvent } from '../db/tx';
+import { msAgo, NOT_DESK_ONLY_SQL, write, type Ctx, type RecordEvent } from '../db/tx';
 import { ApiError, badRequest, conflict, notFound } from '../errors';
 import { aidensAskSql } from './asks';
 import { countsAsWorkSql, endSessionCommands } from './commands';
 import { shelvedAmong } from './shelved';
 import { endSubagents, NOT_READER_SQL } from './subagents';
+import { switchLine } from './switches';
 
 interface ProjectRow {
   id: number;
@@ -430,15 +431,12 @@ export function setProjectLead(ctx: Ctx, actor: string, ref: string | number, na
     if (before.lead !== lead) {
       ctx.db.prepare('UPDATE projects SET lead = ?, updated_at = ? WHERE id = ?').run(lead, ctx.now(), before.id);
       // What Aiden switched on was switched on for the lead he had: each switch still on is turned off in this write, under
-      // the outgoing lead's name, so a new lead (or none) starts with both off. Read as leadSwitches (server/lead.ts) does.
+      // the outgoing lead's name, so a new lead (or none) starts with all off. Read through switchLine, as leadSwitches
+      // (server/lead.ts) reads it.
       // A new spelling of the same name (requireLead matches ignoring case) is the same lead: the switches stay.
       if (before.lead !== null && before.lead.toLowerCase() !== lead?.toLowerCase()) {
         for (const name of LEAD_SWITCHES) {
-          const newest = ctx.db
-            .prepare("SELECT kind FROM lead_events WHERE project_id = ? AND kind IN ('allow', 'disallow') AND text = ? ORDER BY at DESC, id DESC LIMIT 1")
-            .pluck()
-            .get(before.id, name) as string | undefined;
-          if (newest !== 'allow') continue;
+          if (switchLine(ctx.db, before.id, name)?.kind !== 'allow') continue;
           ctx.db
             .prepare("INSERT INTO lead_events (project_id, at, lead, instructions, kind, text, aiden_words) VALUES (?, ?, ?, ?, 'disallow', ?, NULL)")
             .run(before.id, ctx.now(), before.lead, LEAD_INSTRUCTIONS_VERSION, name);
@@ -596,7 +594,7 @@ export function listProjectSummaries(ctx: Ctx): ProjectSummary[] {
         (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.state != 'ended' AND s.last_seen_at >= ? AND (s.state = 'working'
           OR EXISTS (SELECT 1 FROM session_subagents a WHERE a.session_id = s.id AND a.ended_at IS NULL AND ${NOT_READER_SQL})
           OR EXISTS (SELECT 1 FROM session_commands c WHERE c.session_id = s.id AND ${countsAsWorkSql('c')}))) AS busy_sessions,
-        (SELECT ts FROM events e WHERE e.project_id = p.id AND e.type NOT LIKE 'window.%' ORDER BY e.id DESC LIMIT 1) AS last_event_at
+        (SELECT ts FROM events e WHERE e.project_id = p.id AND e.type NOT LIKE 'window.%' AND ${NOT_DESK_ONLY_SQL} ORDER BY e.id DESC LIMIT 1) AS last_event_at
        FROM projects p WHERE p.deleted_at IS NULL`,
     )
     .all(liveSince, liveSince, liveSince, liveSince, msAgo(ctx, COMMAND_WORK_MS)) as (ProjectRow & { open_asks: number; permission_waits: number; active_sessions: number; working_sessions: number; busy_sessions: number; last_event_at: string | null })[];

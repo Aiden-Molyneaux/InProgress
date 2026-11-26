@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 /** The tested build: `npm run test:smoke` builds into .build, so the live dist/ is never touched. */
 const BUILD = process.env.INPROGRESS_BUILD_ROOT ?? '.build';
-const ENTRIES = ['server/main.js', 'mcp/main.js', 'cli/main.js', 'hooks/hook.js', 'desktop/main.js'];
+const ENTRIES = ['server/main.js', 'mcp/main.js', 'lead/tools.js', 'cli/main.js', 'hooks/hook.js', 'desktop/main.js'];
 /** better-sqlite3 loads a native binding from its own folder, so it must stay outside the bundles; electron is the desktop app's built-in module. */
 const EXTERNAL = new Set(['better-sqlite3', 'electron']);
 const builtins = new Set(builtinModules);

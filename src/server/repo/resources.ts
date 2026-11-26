@@ -1,3 +1,6 @@
+import { PICTURE_FILE } from '../../core/pictures';
+import { copyFileSync, existsSync, mkdirSync, rmSync, statSync } from 'node:fs';
+import { basename, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { RESOURCE_PURPOSES, type Resource, type ResourceKind, type ResourceMeta, type ResourcePurpose, type StateNote } from '../../core/types';
 import { write, type Ctx, type RecordEvent } from '../db/tx';
 import { badRequest, conflict, notFound } from '../errors';
@@ -136,32 +139,92 @@ export function listNodeResources(ctx: Ctx, nodeId: number): ResourceMeta[] {
   return (ctx.db.prepare(`SELECT ${META} FROM resources WHERE node_id = ? ORDER BY id`).all(nodeId) as ResourceRow[]).map(toMeta);
 }
 
-export function addResource(ctx: Ctx, actor: string, input: ResourceInput): Resource {
-  return write(ctx, actor, (record) => {
-    checkPurpose(input.purpose);
-    const node = requireNode(ctx, input.nodeId);
-    const content = input.content ?? null;
-    const path = clean(input.path);
-    const url = clean(input.url);
-    if (content === null && !path && !url) throw badRequest('A resource needs content, a path, or a url');
-    const title = input.title.trim();
-    if (!title) throw badRequest('Resource title is empty');
-    const purpose = input.purpose ?? null;
-    if (purpose === 'state') claimStateNote(ctx, record, node.projectId, node.id, node.parentId, null);
-    const page = isPage({ purpose });
-    if (page) {
-      checkPageRules(ctx, node.projectId, { kind: input.kind, content, path });
-      if (!input.confirmedSha) throw badRequest('A page is registered with its repo HEAD', 'POST /api/resources inspects the file first.');
-    }
-    const ts = ctx.now();
-    const confirmedSha = page ? input.confirmedSha! : null;
-    const info = ctx.db
-      .prepare('INSERT INTO resources (project_id, node_id, kind, title, content, path, url, session_id, created_at, updated_at, purpose, confirmed_sha, confirmed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
-      .run(node.projectId, node.id, input.kind, title, content, path, url, input.sessionId ?? null, ts, ts, purpose, confirmedSha, page ? ts : null);
-    const resource = requireResource(ctx, Number(info.lastInsertRowid));
-    record({ projectId: node.projectId, type: 'resource.created', entity: 'resource', entityId: resource.id, data: { nodeId: node.id, title, kind: input.kind } });
-    return resource;
-  });
+/**
+ * Whether a path names one file whatever the server's own folder and drive: on Windows a drive with a root (`C:\x`) or a
+ * UNC path (`\\host\share\x`); a drive-relative one (`\x`, `C:x`) is not, though Node calls `\x` absolute.
+ */
+export const fullPath = (path: string, platform: string = process.platform): boolean =>
+  platform === 'win32' ? /^([A-Za-z]:[\\/]|[\\/]{2}[^\\/])/.test(path) : isAbsolute(path);
+
+/** The project's documents folder: `<home>/resources/<slug>`. */
+export const documentsFolder = (home: string, slug: string): string => join(home, 'resources', slug);
+
+/** A name free in `dir`: the file's own, then `<name>-2<ext>`, `-3` and on. */
+function freeName(dir: string, name: string): string {
+  const ext = extname(name);
+  const stem = name.slice(0, name.length - ext.length);
+  for (let n = 1; ; n++) {
+    const candidate = join(dir, n === 1 ? name : `${stem}-${n}${ext}`);
+    if (!existsSync(candidate)) return candidate;
+  }
+}
+
+/**
+ * A picture attached from anywhere is copied into the project's documents folder (lead stage 1, #743, task 15), so the
+ * lead can show it: the input then points at the copy, and its stored text is left empty. One already in that folder
+ * stays where it is, its text empty too. Anything else, and a page, is the input as given. `copied` is the new file.
+ * A copy that fails is a 400 with the reason, before anything is stored.
+ */
+export function homePicture(ctx: Ctx, home: string, input: ResourceInput): { input: ResourceInput; copied?: string } {
+  const path = clean(input.path);
+  if (!path || !PICTURE_FILE.test(path) || isPage({ purpose: input.purpose ?? null })) return { input };
+  // Never resolved against the server's own folder: a relative path names nothing the caller meant.
+  if (!fullPath(path)) throw badRequest(`${path} is not a full path: give the full path of the picture.`);
+  const node = requireNode(ctx, input.nodeId);
+  const slug = ctx.db.prepare('SELECT slug FROM projects WHERE id = ?').pluck().get(node.projectId) as string;
+  const dir = resolve(documentsFolder(home, slug));
+  const from = resolve(path);
+  const rel = relative(dir, from);
+  if (rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)) return { input: { ...input, path: from, content: null } };
+  let to: string;
+  try {
+    if (!statSync(from).isFile()) throw new Error('it is not a file');
+    mkdirSync(dir, { recursive: true });
+    to = freeName(dir, basename(from));
+    copyFileSync(from, to);
+  } catch (err) {
+    throw badRequest(`Could not copy the picture ${path} into ${dir}: ${(err as Error).message}`);
+  }
+  return { input: { ...input, path: to, content: null }, copied: to };
+}
+
+/** Adds a resource. With `opts.home`, a picture is first copied into the project's documents folder (homePicture). */
+export function addResource(ctx: Ctx, actor: string, input: ResourceInput, opts: { home?: string } = {}): Resource {
+  const placed = opts.home === undefined ? { input } : homePicture(ctx, opts.home, input);
+  try {
+    return write(ctx, actor, (record) => addResourceInWrite(ctx, record, placed.input));
+  } catch (err) {
+    // Nothing was stored: the copy made for it goes too.
+    if (placed.copied !== undefined) rmSync(placed.copied, { force: true });
+    throw err;
+  }
+}
+
+/** addResource inside a write the caller holds (the lead's apply), recording resource.created with that write's `record`. */
+export function addResourceInWrite(ctx: Ctx, record: RecordEvent, input: ResourceInput): Resource {
+  checkPurpose(input.purpose);
+  const node = requireNode(ctx, input.nodeId);
+  const content = input.content ?? null;
+  const path = clean(input.path);
+  const url = clean(input.url);
+  if (content === null && !path && !url) throw badRequest('A resource needs content, a path, or a url');
+  const title = input.title.trim();
+  if (!title) throw badRequest('Resource title is empty');
+  const purpose = input.purpose ?? null;
+  if (purpose === 'state') claimStateNote(ctx, record, node.projectId, node.id, node.parentId, null);
+  const page = isPage({ purpose });
+  if (page) {
+    checkPageRules(ctx, node.projectId, { kind: input.kind, content, path });
+    if (!input.confirmedSha) throw badRequest('A page is registered with its repo HEAD', 'POST /api/resources inspects the file first.');
+  }
+  const ts = ctx.now();
+  const confirmedSha = page ? input.confirmedSha! : null;
+  const info = ctx.db
+    .prepare('INSERT INTO resources (project_id, node_id, kind, title, content, path, url, session_id, created_at, updated_at, purpose, confirmed_sha, confirmed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
+    .run(node.projectId, node.id, input.kind, title, content, path, url, input.sessionId ?? null, ts, ts, purpose, confirmedSha, page ? ts : null);
+  const resource = requireResource(ctx, Number(info.lastInsertRowid));
+  record({ projectId: node.projectId, type: 'resource.created', entity: 'resource', entityId: resource.id, data: { nodeId: node.id, title, kind: input.kind } });
+  return resource;
 }
 
 export function updateResource(ctx: Ctx, actor: string, id: number, patch: ResourcePatch): Resource {

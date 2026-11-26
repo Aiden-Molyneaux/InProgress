@@ -68,7 +68,7 @@ describe('requireLead', () => {
     setLead('Progresser');
     expect(requireLead(ctx, project.slug, 'Progresser', LEAD_INSTRUCTIONS_VERSION - 1, false).lead).toBe('Progresser');
     expect(() => requireLead(ctx, project.slug, 'Progresser', LEAD_INSTRUCTIONS_VERSION - 1, true)).toThrow(outOfDate(LEAD_INSTRUCTIONS_VERSION - 1, project.slug, 'Progresser'));
-    expect(outOfDate(1, 'ingame', 'Progresser')).toBe('Your rules are version 1; version 6 is current. Run "lead rules ingame --as Progresser" again and follow what it prints.');
+    expect(outOfDate(1, 'ingame', 'Progresser')).toBe('Your rules are version 1; version 7 is current. Run "lead rules ingame --as Progresser" again and follow what it prints.');
   });
 });
 
@@ -139,6 +139,17 @@ describe('readLeadBrief', () => {
     expect(r.forTheLead[0]).toMatchObject({ stepId: b.id, stepTitle: 'Privacy page', overdue: true });
     expect(listProjectSummaries(ctx).find((p) => p.id === project.id)!.openAsks).toBe(1);
     expect(r.aidenOpenAcrossProjects).toBe(1);
+    expect(r.aidenOpenInProject).toBe(1);
+  });
+
+  it("counts Aiden's open asks in this project apart from those across all projects", () => {
+    const { ctx, brief } = setup();
+    const other = createProject(ctx, 'test', { name: 'Elsewhere' });
+    const [q] = addNodes(ctx, 'test', { parentId: other.rootNodeId, nodes: [{ title: 'Asker' }] });
+    raiseAsk(ctx, 'test', { nodeId: q!.id, kind: 'question', text: 'Which one?' });
+    const r = brief();
+    expect(r.aidenOpenAcrossProjects).toBe(2);
+    expect(r.aidenOpenInProject).toBe(1);
   });
 
   it('reads in flight, next up and the project from what is there', () => {
@@ -232,6 +243,20 @@ describe('readLeadBrief', () => {
     expect(brief().saidInAidensName.map((e) => [e.kind, e.ref, e.words])).toEqual([
       ['park', `#${a.id}`, 'Park it.'],
       ['answer', `a${aidenAsk.id}`, 'Use the release keystore.'],
+    ]);
+  });
+
+  it('cites a switch turned on in his name by the switch, never as a step with no number', () => {
+    const { ctx, project, brief } = setup();
+    const V = LEAD_INSTRUCTIONS_VERSION;
+    logLeadEvent(ctx, { projectId: project.id, lead: 'Progresser', instructions: V, kind: 'allow', text: 'starts', aidenWords: 'Turn on the switches' });
+    logLeadEvent(ctx, { projectId: project.id, lead: 'Progresser', instructions: V, kind: 'disallow', text: 'landing', aidenWords: 'Landing off.' });
+    // A line with his words that names no ask, step or switch has an empty ref.
+    logLeadEvent(ctx, { projectId: project.id, lead: 'Progresser', instructions: V, kind: 'allow', text: 'no such switch', aidenWords: 'Odd.' });
+    expect(brief().saidInAidensName.map((e) => [e.kind, e.ref, e.words])).toEqual([
+      ['allow', '', 'Odd.'],
+      ['disallow', 'landing', 'Landing off.'],
+      ['allow', 'starts', 'Turn on the switches'],
     ]);
   });
 
@@ -366,7 +391,7 @@ describe('the brief route', () => {
     const ok = await app.inject({ url: `/api/lead/${project.slug}/brief?as=progresser&instructions=${LEAD_INSTRUCTIONS_VERSION}` });
     expect(ok.statusCode).toBe(200);
     expect(ok.json().brief.project).toEqual({ slug: 'ingame', name: 'InGame', lead: 'Progresser' });
-    expect(ok.json().text.split('\n')[0]).toMatch(/^Lead brief · InGame · .* · instructions v6 \(yours: v6\)$/);
+    expect(ok.json().text.split('\n')[0]).toMatch(/^Lead brief · InGame · .* · instructions v7 \(yours: v7\)$/);
   });
 
   it('answers the window without `as`: no lead check, yours null, and never marks, whatever the query says', async () => {
@@ -538,16 +563,16 @@ describe('the window route that sets a lead', () => {
 describe('the rules route', () => {
   const CLI = 'node C:/x/dist/cli/main.js';
 
-  it('answers version 6 and the text for the stored lead name, whatever case `as` is given in', async () => {
+  it('answers version 7 and the text for the stored lead name, whatever case `as` is given in', async () => {
     const { app, project, setLead } = setup();
     setLead('Progresser');
     for (const as of ['Progresser', 'progresser', 'PROGRESSER']) {
       const res = await app.inject({ url: `/api/lead/${project.slug}/rules?as=${as}` });
       expect(res.statusCode).toBe(200);
       const body = res.json() as { version: number; text: string; bootstrap: string };
-      expect(body.version).toBe(6);
-      expect(body.text.split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 6.');
-      expect(body.text).toContain('lead brief ingame --as Progresser --instructions 6');
+      expect(body.version).toBe(7);
+      expect(body.text.split('\n')[0]).toBe('Rules for Progresser, the lead for InGame. Version 7.');
+      expect(body.text).toContain('lead brief ingame --as Progresser --instructions 7');
       expect(body.bootstrap.split('\n')).toHaveLength(3);
       expect(body.bootstrap).toContain('lead rules ingame --as Progresser');
     }
@@ -593,7 +618,7 @@ describe('a lead on older rules', () => {
       payload: { as: 'Progresser', instructions: 1, askId: 1 },
     });
     expect(res.statusCode).toBe(409);
-    expect(res.json().error).toBe('Your rules are version 1; version 6 is current. Run "lead rules ingame --as Progresser" again and follow what it prints.');
+    expect(res.json().error).toBe('Your rules are version 1; version 7 is current. Run "lead rules ingame --as Progresser" again and follow what it prints.');
     const read = await app.inject({ url: `/api/lead/${project.slug}/brief?as=Progresser&instructions=1` });
     expect(read.statusCode).toBe(200);
     expect(read.json().text.split('\n')[1]).toBe('Your rules are out of date: you can read, you cannot change anything. Run the rules command again.');

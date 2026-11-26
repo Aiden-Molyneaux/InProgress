@@ -9,6 +9,19 @@ import { buildApp } from './app';
 import { truncateIfLarge } from './backup';
 import { openDb } from './db/connection';
 import { createCtx } from './db/tx';
+import { watchDesk } from './lead/desk';
+import { applyVerdict } from './lead/apply';
+import { stoppedHoldBack } from './lead/stopped';
+import { watchHeldLines } from './lead/hold';
+import { createRunner, headlessWay, threadWay, LEAD_MODEL, leadToolsEntry, type Runner } from './lead/runner';
+import { createSender, type Sender } from './lead/sends';
+import { createVoice } from './lead/voice';
+/** The Voice as the sender takes it: the webhook, and the readiness asked before anything is written. */
+const voiceDeps = (v: ReturnType<typeof createVoice>) => ({ webhook: v.webhook, voiceReady: v.ready });
+import { dayThreadOf, noteWake, watchMorning } from './lead/morning';
+import { probeUsage } from './lead/usage';
+import { defaultStart } from './lead-start';
+import { t3List, t3Send, t3Show } from './t3';
 import { createBackupRunner } from './backup-runner';
 import { runMaintenance } from './project-lifecycle';
 import { reconcileProjects } from './repo/taskState';
@@ -34,6 +47,7 @@ async function main(): Promise<void> {
   const token = ensureToken(home);
   const db = openDb(join(home, 'inprogress.db'));
   const ctx = createCtx(db);
+  ctx.home = home;
   // The Board reconcile runs inside every write; set here, not in createCtx, so tests opt in.
   ctx.reconcile = reconcileProjects;
   // The runner serializes the timer's tick, the startup run and the window's Back up now. It logs through the app's logger,
@@ -43,7 +57,21 @@ async function main(): Promise<void> {
   let closing = false;
   let maintenance: NodeJS.Timeout | undefined;
   let watchTimer: NodeJS.Timeout | undefined;
+  let leadRunner: Runner | undefined;
+  // The lead's sender (src/server/lead/sends.ts), beside the runner: every start, relay and desk message happens once. With
+  // the runner off the app makes its own, which carries out lead start and relay and has no minute check.
+  const senderLog = { info: (message: string) => app.log.info(message), error: (message: string) => app.log.error(message) };
+  const sender: Sender | undefined =
+    process.env.INPROGRESS_LEAD_RUNNER === 'off'
+      ? undefined
+      : createSender(
+          ctx,
+          // The Voice's lines go by its webhook, read from <home>/lead/voice.json (task 11); without the file they wait.
+          { t3: { list: (p) => t3List(p), show: (id) => t3Show(id), start: defaultStart(), send: (id, text) => t3Send(id, text) }, ...voiceDeps(createVoice(ctx, { home })) },
+          { log: senderLog },
+        );
   const app = buildApp({
+    ...(sender === undefined ? {} : { sender }),
     ctx,
     home,
     backups: runner,
@@ -60,6 +88,9 @@ async function main(): Promise<void> {
     closing = true;
     clearInterval(maintenance);
     clearInterval(watchTimer);
+    // Its running turns are stopped and abandoned before the database closes under them.
+    sender?.stop();
+    await leadRunner?.stop().catch((err: unknown) => app.log.error(`Could not stop the lead's turn runner: ${(err as Error).message}`));
     await app.close().catch(() => undefined);
     db.close();
     rmSync(join(home, 'server.pid'), { force: true });
@@ -88,10 +119,13 @@ async function main(): Promise<void> {
   // the drill, in the background (a slow push never delays the server's first answer), and again on a timer, since the
   // server can run for weeks. runMaintenance never throws.
   runner.startup();
+  // The playbooks' Held lines, for the hold hook to read: written now and after each change to a playbook or a lead.
+  watchHeldLines(ctx, home, { error: (message) => app.log.error(message) });
   maintenance = setInterval(() => void runner.tick(), MAINTENANCE_MS);
   maintenance.unref();
-  // The transcript watcher: once now, so subagents that died while the server was down end at once, then on a timer that
-  // never keeps the process alive. A failed tick is logged and the next one tries again.
+  // The transcript watcher, and the lead's desk (src/server/lead/desk.ts): once now, so subagents that died while the
+  // server was down end at once, then on a timer that never keeps the process alive. A failed tick is logged and the next
+  // one tries again.
   const watchState = createWatchState();
   const watch = () => {
     try {
@@ -108,10 +142,68 @@ async function main(): Promise<void> {
     } catch (err) {
       app.log.error(`Could not watch command ends: ${(err as Error).message}`);
     }
+    try {
+      const { stopped, asked, promiseDue, swept } = watchDesk(ctx);
+      if (stopped + asked + promiseDue + swept > 0) app.log.info(`Desk: ${stopped} stopped, ${asked} asked, ${promiseDue} promise due, ${swept} swept`);
+      // The asks are sends, carried out after the watch's write commits.
+      if (asked > 0 && sender !== undefined) setImmediate(() => void sender.wake());
+    } catch (err) {
+      app.log.error(`Could not watch the lead's desk: ${(err as Error).message}`);
+    }
+    // The morning list (src/server/lead/morning.ts): a laptop that slept is noted first, so the list can say so.
+    try {
+      noteWake(ctx);
+      const made = watchMorning(ctx, { error: (message) => app.log.error(message) });
+      if (made > 0) {
+        app.log.info(`Morning: ${made} list${made === 1 ? '' : 's'} written`);
+        if (sender !== undefined) setImmediate(() => void sender.wake());
+      }
+    } catch (err) {
+      app.log.error(`Could not write the morning list: ${(err as Error).message}`);
+    }
+    // The usage probe: when nothing has been read for an hour and a round is on, one small run reads the gauges.
+    if (process.env.INPROGRESS_LEAD_RUNNER !== 'off') {
+      void probeUsage(ctx, {
+        way: headlessWay({ claudePath: process.env.INPROGRESS_LEAD_CLAUDE || 'claude', leadDir: (slug) => join(home, 'lead', slug), toolsEntry: leadToolsEntry() }),
+        home,
+        log: { error: (message) => app.log.error(message) },
+      }).catch((err: unknown) => app.log.error(`Could not run the usage probe: ${(err as Error).message}`));
+    }
+    // Recovery of sends that may have happened, then the rest carried out. tick() logs its own failures.
+    if (sender !== undefined) void sender.tick().catch((err: unknown) => app.log.error(`Could not check the lead's sends: ${(err as Error).message}`));
   };
   watch();
   watchTimer = setInterval(watch, watchInterval(process.env));
   watchTimer.unref();
+  // The lead's turn runner (src/server/lead/runner.ts): it runs turns only on a project whose round is on.
+  // INPROGRESS_LEAD_RUNNER=off keeps it from starting; INPROGRESS_LEAD_CLAUDE names the program a turn runs.
+  if (process.env.INPROGRESS_LEAD_RUNNER !== 'off') {
+    try {
+      leadRunner = createRunner(ctx, {
+        way: headlessWay({ claudePath: process.env.INPROGRESS_LEAD_CLAUDE || 'claude', leadDir: (slug) => join(home, 'lead', slug), toolsEntry: leadToolsEntry() }),
+        threadWay: threadWay({
+          send: (threadId, message) => t3Send(threadId, message),
+          show: (threadId) => t3Show(threadId),
+          dayThread: (projectId) => dayThreadOf(ctx, projectId, ctx.now()),
+        }),
+        model: LEAD_MODEL,
+        home,
+        port,
+        // The sends a verdict intends are carried out after its write commits.
+        apply: (c, turn, item, record) => {
+          const effect = applyVerdict(c, turn, item, record, sender);
+          if (sender !== undefined) setImmediate(() => void sender.wake());
+          return effect;
+        },
+        // A stopped session is asked by the minute watch; until its wait is over its item is held back from a lease.
+        holdBack: (item) => stoppedHoldBack(ctx, item),
+        log: { info: (message) => app.log.info(message), error: (message) => app.log.error(message) },
+      });
+      leadRunner.start();
+    } catch (err) {
+      app.log.error(`Could not start the lead's turn runner: ${(err as Error).message}`);
+    }
+  }
   // A hidden, detached server on Windows never receives these signals; POST /api/admin/shutdown is the clean way to stop it.
   process.on('SIGINT', () => void shutdown());
   process.on('SIGTERM', () => void shutdown());

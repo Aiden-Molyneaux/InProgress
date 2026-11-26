@@ -733,7 +733,7 @@ describe('runHandler', () => {
     for (const name of HOOK_NAMES) got[name] = await runHandler(name, { session_id: 's' }, stub);
     expect(got).toStrictEqual({
       'session-start': { context: 'x' }, 'prompt-submit': { context: 'x' }, stop: undefined, notification: undefined, 'subagent-start': undefined, 'subagent-stop': undefined, 'session-end': undefined,
-      'pre-tool': undefined, 'post-tool': undefined,
+      'pre-tool': undefined, 'post-tool': undefined, hold: undefined, permission: undefined,
     });
     const empty: Parameters<typeof runHandler>[2] = { post: async () => ({ tracked: true, context: '' }), ensureServer: async () => true };
     expect(await runHandler('prompt-submit', { session_id: 's' }, empty)).toBeUndefined();

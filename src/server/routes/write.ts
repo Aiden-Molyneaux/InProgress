@@ -11,7 +11,7 @@ import {
   resourceBody, resourcePatchBody, updateNodeBody, updateProjectBody,
 } from '../schemas';
 
-export function registerWriteRoutes(app: FastifyInstance, ctx: Ctx, requireToken: Guard): void {
+export function registerWriteRoutes(app: FastifyInstance, ctx: Ctx, requireToken: Guard, home?: string): void {
   const guarded = { preHandler: requireToken };
   const ref = (params: unknown) => (params as { ref: string }).ref;
 
@@ -39,7 +39,8 @@ export function registerWriteRoutes(app: FastifyInstance, ctx: Ctx, requireToken
   // A page is checked against its row rules before the disk is touched, then its file and repo; the write checks the rows again.
   app.post('/api/resources', guarded, async (req, reply) => {
     const body = resourceBody.parse(req.body);
-    if (!isPage(body)) return reply.code(201).send(addResource(ctx, actorOf(req), body));
+    // A picture is copied into the project's documents folder under the home (task 15).
+    if (!isPage(body)) return reply.code(201).send(addResource(ctx, actorOf(req), body, home === undefined ? {} : { home }));
     const projectId = requireNode(ctx, body.nodeId).projectId;
     checkPageRules(ctx, projectId, body);
     const { confirmedSha } = await inspectNewPage(ctx, projectId, body.path!.trim());

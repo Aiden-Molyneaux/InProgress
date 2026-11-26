@@ -4,6 +4,7 @@ export default defineConfig({
   entry: {
     'server/main': 'src/server/main.ts',
     'mcp/main': 'src/mcp/main.ts',
+    'lead/tools': 'src/server/lead/tools-main.ts',
     'cli/main': 'src/cli/main.ts',
     'hooks/hook': 'src/hooks/main.ts',
     'desktop/main': 'src/desktop/main.ts',

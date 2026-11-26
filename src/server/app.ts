@@ -7,6 +7,8 @@ import type { BackupRunner } from './backup-runner';
 import { ApiError } from './errors';
 import type { RelaySend } from './lead-relay';
 import type { StartThread } from './lead-start';
+import type { Sender } from './lead/sends';
+import type { LandingDeps } from './lead/landing';
 import type { DesktopSession, OpenDesktopResult } from './open-desktop';
 import { registerAskRoutes } from './routes/asks';
 import { registerBackupRoutes } from './routes/backups';
@@ -41,6 +43,10 @@ export interface AppOptions {
   t3Send?: RelaySend;
   /** Starts a T3 Code thread. Replaceable so tests never run the t3 CLI. */
   t3Start?: StartThread;
+  /** The server's sender (src/server/lead/sends.ts), shared with its minute check. Without it the app makes its own. */
+  sender?: Sender;
+  /** How the hold route's landing check reads git and a remote's visibility. Replaceable so tests never run gh. */
+  landing?: LandingDeps;
 }
 
 export type Guard = (req: FastifyRequest, reply: FastifyReply) => Promise<unknown>;
@@ -120,12 +126,12 @@ export function buildApp(opts: AppOptions): FastifyInstance {
   };
 
   registerReadRoutes(app, opts.ctx, opts.version, opts.build ?? null);
-  registerWriteRoutes(app, opts.ctx, requireToken);
+  registerWriteRoutes(app, opts.ctx, requireToken, opts.home);
   registerSessionRoutes(app, opts.ctx, requireToken);
   registerAskRoutes(app, opts.ctx, requireToken);
-  registerLeadRoutes(app, opts.ctx, requireToken, opts.t3Send, opts.t3Start);
+  registerLeadRoutes(app, opts.ctx, requireToken, opts.t3Send, opts.t3Start, opts.landing, opts.sender, opts.home);
   registerSse(app, opts.ctx);
-  registerWindowRoutes(app, opts.ctx, requireUi, opts.openDesktop);
+  registerWindowRoutes(app, opts.ctx, requireUi, opts.openDesktop, { ...(opts.landing === undefined ? {} : { landing: opts.landing }), ...(opts.sender === undefined ? {} : { sender: opts.sender }) });
   registerUi(app, opts, requireToken, requireUi);
   if (opts.home && opts.backups) registerBackupRoutes(app, { ...opts, home: opts.home, backups: opts.backups }, requireUi);
   return app;

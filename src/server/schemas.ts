@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { SESSION_APPS } from '../core/session-app';
 import { LEAD_NAME_MAX, LEAD_SWITCHES } from '../core/lead';
+import { LANDING_ACTIONS } from '../core/landing';
 import { ID_MAX } from '../core/notices';
 import { ASK_KINDS, ASSIGNEES, BRIEFING_MODES, COMMAND_KINDS, COMMAND_OUTCOMES, HOOK_EVENTS, NODE_KINDS, NODE_LABELS, NODE_STATUSES, ORIGINS, PROJECT_NAME_MAX, RANK_BANDS, RESOURCE_KINDS, RESOURCE_PURPOSES, TITLE_CHANNELS, WHAT_WHY_MAX, WORK_STATUSES, unknownLabel, type NodeInput } from '../core/types';
 
@@ -172,6 +173,8 @@ export const openUrlBody = z.object({ url: z.string().min(1).max(2048) }).strict
  * id). Not max 60: a slug made from a 120-character name is longer.
  */
 export const windowProjectBody = z.object({ slug: z.string().min(1).max(200) }).strict();
+/** The window's switch of the lead's round, starts or landing: the slug it shows, the switch, and on or off. */
+export const windowLeadSwitchBody = z.object({ slug: windowProjectBody.shape.slug, switch: z.enum(LEAD_SWITCHES), on: z.boolean() }).strict();
 /** The window's rename: the slug it shows, as windowProjectBody, and the new name under the project name rule. */
 export const windowRenameBody = z.object({ slug: windowProjectBody.shape.slug, name: projectName }).strict();
 /** The window's queue change (spec 2.5): one operation, applied to the queue as stored. */
@@ -248,13 +251,56 @@ export const leadSeenBody = z.object({ as: z.string().min(1).max(200), instructi
 const leadWho = { as: z.string().min(1).max(200), instructions: z.number().int().min(0) };
 const leadId = z.number().int().positive();
 /** `lead answer`: Aiden's words, carried as the answer to a question of his. */
-export const leadAnswerBody = z.object({ ...leadWho, askId: leadId, aidenWords: z.string().trim().min(1).max(2_000), says: z.string().trim().min(1).max(2_000).optional() }).strict();
-/** `lead decide`: the question, the lead's answer and why, and Aiden's words when he told the lead to decide. */
+export const leadAnswerBody = z
+  .object({
+    ...leadWho,
+    /** The ask he answered; or `sendId`, the line to the Voice he replied to. Exactly one of the two. */
+    askId: leadId.optional(),
+    sendId: leadId.optional(),
+    aidenWords: z.string().trim().min(1).max(2_000),
+    says: z.string().trim().min(1).max(2_000).optional(),
+    /** Where he said it: to the Voice or in the lead's thread. */
+    where: z.enum(['voice', 'thread']).optional(),
+    /** When he said it; now when absent. */
+    saidAt: z.string().datetime({ offset: true }).optional(),
+    /** The documents he was shown. */
+    shown: z.array(leadId).max(50).optional(),
+    /** The actions his words okayed, for a review or a held action; absent, no yes is recorded. */
+    yes: z.array(z.enum(['merge', 'deploy', 'push', 'publish'])).min(1).max(4).optional(),
+  })
+  .strict()
+  .refine((b) => (b.askId === undefined) !== (b.sendId === undefined), { message: 'give the ask (askId) or the line to the Voice (sendId), not both', path: ['askId'] });
+/** `lead seen`: the send of a line to the Voice that Aiden answered. */
+export const leadStampBody = z.object({ ...leadWho, sendId: leadId }).strict();
+/** `lead desk-add`: Aiden's "you decide" on a step, for the round. */
+export const leadDeskAddBody = z.object({ ...leadWho, stepId: leadId, aidenWords: z.string().trim().min(1).max(2_000) }).strict();
+/** `lead old-asks <project>`: the project's old asks onto the desk. */
+export const leadOldAsksBody = z.object({ ...leadWho }).strict();
+/** `lead old-asks next [count]`: the next old asks waiting on Aiden, to the Voice; five unless fewer are named. */
+export const leadOldAsksNextBody = z.object({ ...leadWho, count: z.number().int().min(1).max(5).optional() }).strict();
+/** `lead old-asks reading <project> <ask> <text>`: the lead's reading of an old ask, shown in its Voice line. */
+export const leadOldAsksReadingBody = z.object({ ...leadWho, askId: leadId, text: z.string().trim().min(1).max(2_000) }).strict();
+/** `lead decide`: the question, the lead's answer and why, Aiden's words when he told the lead to decide, and the decision's kind (technical unless named). */
 export const leadDecideBody = z
-  .object({ ...leadWho, askId: leadId, answer: z.string().trim().min(1).max(2_000), reason: z.string().trim().min(1).max(2_000), aidenWords: z.string().trim().min(1).max(2_000).optional() })
+  .object({
+    ...leadWho,
+    askId: leadId,
+    answer: z.string().trim().min(1).max(2_000),
+    reason: z.string().trim().min(1).max(2_000),
+    aidenWords: z.string().trim().min(1).max(2_000).optional(),
+    kind: z.enum(['product', 'technical']).optional(),
+  })
   .strict();
 /** `lead undo`: the decision (a lead_events id) and Aiden's words. */
-export const leadUndoBody = z.object({ ...leadWho, eventId: leadId, aidenWords: z.string().trim().min(1).max(2_000) }).strict();
+export const leadUndoBody = z
+  .object({ ...leadWho, eventId: leadId, aidenWords: z.string().trim().min(1).max(2_000), reason: z.string().trim().min(1).max(2_000).optional() })
+  .strict();
+/** `lead set`: a setting of the project (quiet, voice-cap), its value, and Aiden's words when he gave them. */
+export const leadSetBody = z.object({ ...leadWho, key: z.string().trim().min(1).max(40), value: z.string().trim().min(1).max(200), aidenWords: z.string().trim().min(1).max(2_000).optional() }).strict();
+/** `lead import-usage`: the file of stage 0's readings, on this machine. */
+export const leadImportUsageBody = z.object({ file: z.string().min(1).max(1_000) }).strict();
+/** `lead counts`: the time to count from. */
+export const leadCountsQuery = z.object({ since: z.string().datetime({ offset: true }) }).strict();
 /** `lead park`: the step, why (optional), and Aiden's words (needed for a step of his). */
 export const leadParkBody = z
   .object({ ...leadWho, stepId: leadId, reason: z.string().trim().min(1).max(500).optional(), aidenWords: z.string().trim().min(1).max(2_000).optional() })
@@ -275,6 +321,14 @@ export const leadRelayBody = z.object({ ...leadWho, stepId: leadId, message: z.s
 export const leadAllowBody = z.object({ ...leadWho, switch: z.enum(LEAD_SWITCHES), aidenWords: z.string().trim().min(1).max(2_000) }).strict();
 /** `lead disallow`: the switch, and Aiden's words when he gave them. */
 export const leadDisallowBody = z.object({ ...leadWho, switch: z.enum(LEAD_SWITCHES), aidenWords: z.string().trim().min(1).max(2_000).optional() }).strict();
+/** The landing check: the step asked about, the action, the session's folder (a git checkout) and, for a branch other than the one checked out, its name. */
+export const leadLandingBody = z
+  .object({ stepId: leadId, action: z.enum(LANDING_ACTIONS, { errorMap: (_issue, ctx) => ({ message: `${String(ctx.data)} is not an action: give merge, deploy, push, publish or push-public` }) }), folder: z.string().min(1).max(1_000), branch: z.string().min(1).max(200).optional() })
+  .strict();
+/** The permission hook's call: the session, its folder, and the tool and input it asks permission for. */
+export const leadStuckBody = z
+  .object({ sessionId: z.string().max(ID_MAX).nullable().optional(), cwd: z.string().max(1_000), toolName: z.string().max(200), toolInput: z.unknown() })
+  .strict();
 /** `lead start`: the step to start a thread for, and Aiden's words when he told the lead to. */
 export const leadStartBody = z.object({ ...leadWho, stepId: leadId, aidenWords: z.string().trim().min(1).max(2_000).optional() }).strict();
 /** The window's change of a project's lead: the slug it shows, and a name (trimmed, 1 to 40 characters) or null for none. */

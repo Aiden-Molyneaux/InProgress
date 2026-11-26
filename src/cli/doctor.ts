@@ -29,7 +29,7 @@ export interface DoctorOptions {
 }
 
 type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
-type HookGroup = { hooks?: { command?: string; args?: string[] }[] };
+type HookGroup = { matcher?: string; hooks?: { command?: string; args?: string[]; if?: string }[] };
 
 /**
  * settings.json's contents, read as install reads them (a leading BOM is ignored, an empty file is {}): no value when
@@ -127,7 +127,12 @@ function hooksCheck(file: string, settings: { value?: Json; error?: string }): C
   const fail = (detail: string): Check => ({ name: 'Hooks', ok: false, detail });
   if (settings.error) return fail(invalidSettings(file, settings.error));
   const hooks: Record<string, HookGroup[]> = settings.value?.hooks ?? {};
-  const missing = [...new Set(HOOK_DEFS.filter((d) => !(hooks[d.event] ?? []).some((g) => (g.hooks ?? []).some((h) => isInProgressHook(h)))).map((d) => d.event))];
+  // Each definition by its event, matcher, name and `if` rule: a hold family dropped from settings is missing too.
+  const has = (d: (typeof HOOK_DEFS)[number]) =>
+    (hooks[d.event] ?? []).some((g) => g.matcher === d.matcher && (g.hooks ?? []).some((h) => isInProgressHook(h) && h.args?.[1] === d.name && h.if === d.if));
+  const absent = HOOK_DEFS.filter((d) => !has(d));
+  // A whole event gone is named by the event; one entry of an event that is partly there, by its name and rule.
+  const missing = [...new Set(absent.map((d) => (HOOK_DEFS.filter((x) => x.event === d.event).every((x) => absent.includes(x)) ? d.event : `${d.event} ${d.name}${d.if ? ` ${d.if}` : ''}`)))];
   if (missing.length) return fail(`missing: ${missing.join(', ')}: run npm run claude:install`);
   const ours = Object.values(hooks)
     .flat()

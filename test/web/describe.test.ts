@@ -31,6 +31,9 @@ describe('describeEvent', () => {
     expect(describeEvent(ev('node.updated', '58', { changes: { driverSessionId: { from: null, to: 'gone' } } }), snapshot)).toBe('a session drives #58 Run signing tests');
     expect(stripSkips(set)).toBe(false);
     expect(stripSkips(ev('node.updated', '58', { changes: { driverSessionId: { from: 's1', to: null } } }))).toBe(true);
+    // Y10: a desk-only project.updated says nothing in the strip; one with other changes still does.
+    expect(stripSkips(ev('project.updated', '1', { changes: { desk: true } }))).toBe(true);
+    expect(stripSkips(ev('project.updated', '1', { changes: { desk: true, queue: true } }))).toBe(false);
     // Not driver-only: a status change that also clears the driver reads as the status change, and stays on the strip.
     const done = ev('node.updated', '58', { changes: { status: { from: 'active', to: 'done' }, driverSessionId: { from: 's1', to: null } } });
     expect(stripSkips(done)).toBe(false);

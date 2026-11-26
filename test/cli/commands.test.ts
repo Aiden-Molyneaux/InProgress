@@ -529,7 +529,15 @@ describe('doctor checks', () => {
     expect(named(await checksFor(repo, claude), 'Skill')).toMatchObject({ ok: false, detail: expect.stringContaining(join('mip-orc', 'SKILL.md')) });
   });
 
-  it('fails Hooks for an install from before the tool hooks, until install runs again', async () => {
+  it('fails Hooks for one hold handler gone, named by its rule, while the rest of its event is there', async () => {
+    const { repo, claude, settingsFile } = installedClaudeDir();
+    const settings = JSON.parse(readFileSync(settingsFile, 'utf8'));
+    settings.hooks.PreToolUse = settings.hooks.PreToolUse.filter((g: { hooks: { if?: string }[] }) => g.hooks[0]?.if !== 'PowerShell(rd *)');
+    writeFileSync(settingsFile, JSON.stringify(settings, null, 2));
+    expect(named(await checksFor(repo, claude), 'Hooks')).toEqual({ name: 'Hooks', ok: false, detail: 'missing: PreToolUse hold PowerShell(rd *): run npm run claude:install' });
+  });
+
+    it('fails Hooks for an install from before the tool hooks, until install runs again', async () => {
     const { repo, claude, settingsFile } = installedClaudeDir();
     const settings = JSON.parse(readFileSync(settingsFile, 'utf8'));
     delete settings.hooks.PreToolUse;

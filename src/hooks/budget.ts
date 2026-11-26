@@ -1,10 +1,12 @@
 import type { HookName } from './handlers';
+import { HOLD_POST_MS } from './hold';
+import { STUCK_POST_MS } from './permission';
 
 export interface HookBudget {
   /** How long the hook waits for a server it had to start (0: the hook never starts one). */
   serverWaitMs: number;
-  /** The timeout of the hook's POST to the server. */
-  postTimeoutMs: number;
+  /** The timeout of the hook's POST to the server; none for the hold and permission hooks, which time each POST themselves. */
+  postTimeoutMs?: number;
   /** The hook's own ceiling, counted from its start: past it the hook logs a timeout and exits 0. */
   limitMs: number;
 }
@@ -22,10 +24,20 @@ const POST_MS = 500;
 const GRACE_MS = 250;
 
 /**
+ * On top of a lead hook's POST: its own timeout must fire first, so the hook prints its fail-closed refusal rather than
+ * being cut off with nothing printed (which would let a held command run).
+ */
+const LEAD_GRACE_MS = 1000;
+
+/**
  * session-start: up to 5 s for a server it starts, then 2 s for the POST, so 7.25 s at most. That stays inside the
- * 10 s timeout Claude gives the hook (HOOK_DEFS), with room for Node's own start. Every other hook: 500 ms.
+ * 10 s timeout Claude gives the hook (HOOK_DEFS), with room for Node's own start. hold: 21 s, room for two 10 s POSTs
+ * inside its 30 s; a line with more held commands than that is cut off and prints the fallback refusal, so it is held.
+ * permission: the 175 s wait for the lead's verdict, inside its 180 s. Every other hook: one 500 ms POST.
  */
 export function hookBudget(name: HookName): HookBudget {
   if (name === 'session-start') return { serverWaitMs: SERVER_WAIT_MS, postTimeoutMs: START_POST_MS, limitMs: SERVER_WAIT_MS + START_POST_MS + GRACE_MS };
+  if (name === 'hold') return { serverWaitMs: 0, limitMs: 2 * HOLD_POST_MS + LEAD_GRACE_MS };
+  if (name === 'permission') return { serverWaitMs: 0, limitMs: STUCK_POST_MS + LEAD_GRACE_MS };
   return { serverWaitMs: 0, postTimeoutMs: POST_MS, limitMs: POST_MS + GRACE_MS };
 }

@@ -18,6 +18,8 @@
 .ip-lead-note { margin: 0; font-family: var(--font-mono); font-size: var(--t-detail-sm); letter-spacing: 0.04em; color: var(--text-dim); }
 .ip-lead-switches { display: grid; gap: var(--sp-1); min-width: 0; }
 .ip-lead-switches p { overflow-wrap: anywhere; }
+/* The line, then its Turn on / Turn off button in a column of one width, so the three buttons line up whatever the line says. */
+.ip-lead-switches p[data-switch] { display: grid; grid-template-columns: minmax(0, 1fr) 6rem; align-items: center; gap: var(--sp-3); }
 .ip-lead-none { margin: 0; padding: var(--sp-3); border: 1px dashed var(--line-soft); font-size: var(--t-detail-sm); color: var(--text-muted); }
 .ip-lead-list { margin: 0; padding: 0; list-style: none; display: grid; }
 .ip-lead-row { border-bottom: 1px solid var(--line-soft); min-width: 0; }
@@ -35,3 +37,7 @@ button.ip-lead-open:hover, button.ip-lead-open:focus-visible { background: var(-
   .ip-lead-cols { grid-template-columns: minmax(0, 3fr) minmax(280px, 2fr); }
 }
 }
+
+/* The Board's "The lead is behind" group, under the asks: the asks' own panel and buttons, set apart by a gap. */
+.ip-lead-behind { display: grid; gap: var(--sp-3); margin-top: var(--sp-4); min-width: 0; }
+.ip-lead-behind-row { list-style: none; }

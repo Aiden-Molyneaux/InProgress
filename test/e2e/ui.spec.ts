@@ -1,3 +1,4 @@
+import Database from 'better-sqlite3';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -1937,6 +1938,152 @@ test('The Lead view shows the switches and what was started', async ({ page, api
   await expect(switches).toContainText('Starts: on');
   await expect(switches).toContainText('turn starts on');
   await expect(switches).toContainText('Landing: off');
+});
+
+test('The lead is behind appears with a late desk item and leaves when it is handled; the round switches in the window', async ({ page, api }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const name = unique('Lead behind');
+  const made = await bare(api, name);
+  const session = `e2e-${randomUUID()}`;
+  const [step] = await write<{ id: number }[]>(api, session, 'post', '/api/nodes', { parentId: made.rootNodeId, nodes: [{ title: 'Pick a port' }] });
+  await page.goto(`/#/p/${made.slug}`);
+  const tab = railRow(page, name);
+  await expect(tab).toHaveAttribute('aria-current', 'page');
+  await tab.click({ button: 'right' });
+  await tabMenu(page, name).getByRole('menuitem', { name: 'Lead…', exact: true }).click();
+  const field = page.getByRole('textbox', { name: `Lead of ${name}`, exact: true });
+  await field.fill('Progresser');
+  await page.keyboard.press('Enter');
+  await expect(field).toBeHidden();
+  // The round is switched in the window, beside Starts and Landing.
+  await viewButton(page, 'Lead').click();
+  const switches = page.getByLabel('Switches', { exact: true });
+  await expect(switches).toContainText('Round: off');
+  await switches.locator('[data-switch="round"]').getByRole('button', { name: 'Turn on' }).click();
+  await expect(switches).toContainText('Round: on');
+  await expect(switches).toContainText('switched in the window');
+  // The three Turn buttons stand in one column at 1440.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const lefts = await Promise.all([0, 1, 2].map(async (i) => Math.round((await switches.getByRole('button').nth(i).boundingBox())!.x)));
+  expect(lefts).toHaveLength(3);
+  expect(new Set(lefts).size).toBe(1);
+  // Two questions, and the desk items the round makes of them, due 12 and 11 minutes ago (written straight in: the limit is
+  // minutes away and the window's own clock is what is under test).
+  const [step2] = await write<{ id: number }[]>(api, session, 'post', '/api/nodes', { parentId: made.rootNodeId, nodes: [{ title: 'Pick a store' }] });
+  const first = await write<{ id: number }>(api, session, 'post', `/api/nodes/${step.id}/asks`, { kind: 'question', text: 'Which port do the tests use?', sessionId: session });
+  const second = await write<{ id: number }>(api, session, 'post', `/api/nodes/${step2.id}/asks`, { kind: 'question', text: 'Which store account?', sessionId: session });
+  const db = new Database('.e2e-home/inprogress.db');
+  try {
+    db.pragma('busy_timeout = 5000');
+    const insert = db.prepare("INSERT INTO desk_items (project_id, kind, ref, node_id, created_at, due_at, state) VALUES (?, 'question', ?, ?, ?, ?, 'open')");
+    insert.run(made.id, String(first.id), step.id, new Date(Date.now() - 15 * 60_000).toISOString(), new Date(Date.now() - 12 * 60_000).toISOString());
+    insert.run(made.id, String(second.id), step2.id, new Date(Date.now() - 14 * 60_000).toISOString(), new Date(Date.now() - 11 * 60_000).toISOString());
+  } finally {
+    db.close();
+  }
+  await page.reload();
+  await viewButton(page, 'Board').click();
+  const group = page.getByRole('region', { name: 'The lead is behind', exact: true });
+  await expect(group).toBeVisible();
+  const rows = group.locator('[data-behind]');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.first()).toContainText(`#${step.id} Pick a port: Which port do the tests use?`);
+  await expect(rows.first()).toContainText('min late');
+  // Answering the last behind row: its Needs me card goes too, and focus lands on the other behind row, not the page.
+  await rows.last().getByRole('button', { name: 'Answer…' }).click();
+  await rows.last().getByRole('textbox').fill('main account');
+  await page.keyboard.press('Enter');
+  await expect(rows).toHaveCount(1);
+  await expect(group.getByRole('button', { name: 'Answer…' })).toBeFocused();
+  await expect(rows.first()).toContainText('Which port do the tests use?');
+  await group.getByRole('button', { name: 'Answer…' }).click();
+  await group.getByRole('textbox').fill('4410');
+  await page.keyboard.press('Enter');
+  await expect(group).toHaveCount(0);
+});
+
+test('a held command shows as a card in Needs me, and Go ahead clears the landing check for it, once; one no yes can release has only Not yet', async ({ page, api }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const name = unique('Held card');
+  const made = await bare(api, name);
+  const session = `e2e-${randomUUID()}`;
+  const [step] = await write<{ id: number }[]>(api, session, 'post', '/api/nodes', { parentId: made.rootNodeId, nodes: [{ title: 'Ship the package' }] });
+  const ui = await uiHeaders(api);
+  for (const [path, data] of [
+    [`/api/ui/projects/${made.id}/lead`, { slug: made.slug, name: 'Progresser' }],
+    [`/api/ui/projects/${made.id}/lead-switch`, { slug: made.slug, switch: 'round', on: true }],
+  ] as const) {
+    const res = await api.post(path, { headers: ui, data });
+    expect(res.ok(), `${path} answered ${res.status()}: ${await res.text()}`).toBe(true);
+  }
+  // A package on a feature branch, in a repository of its own (no hooks: the user's global ones would slow every commit).
+  const dir = mkdtempSync(join(tmpdir(), 'ip-e2e-held-'));
+  pageDirs.push(dir);
+  const git = (...args: string[]) => execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', '-c', `core.hooksPath=${join(dir, '.git', 'no-hooks')}`, ...args], { stdio: 'ignore' });
+  git('init', '-q', '-b', 'main');
+  writeFileSync(join(dir, 'README.md'), 'x\n');
+  git('add', '.');
+  git('commit', '-q', '-m', 'start');
+  git('checkout', '-q', '-b', 'feature');
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x', version: '1.2.0' }));
+  git('add', '.');
+  git('commit', '-q', '-m', 'package');
+  // The session that runs the publish: on the step, in that folder, on that branch (written straight in, as the hooks would).
+  await write(api, session, 'post', `/api/sessions/${session}/enroll`, { project: made.slug, title: 'Held session' });
+  await write(api, session, 'post', `/api/sessions/${session}/focus`, { nodeId: step.id });
+  const db = new Database('.e2e-home/inprogress.db');
+  try {
+    db.pragma('busy_timeout = 5000');
+    db.prepare("UPDATE sessions SET cwd = ?, branch = 'feature' WHERE id = ?").run(dir, session);
+    // A playbook line that holds a command for Aiden with no check: no yes of his can release it.
+    db.prepare('UPDATE projects SET playbook = ? WHERE id = ?').run('Held: make release', made.id);
+  } finally {
+    db.close();
+  }
+  await page.goto(`/#/p/${made.slug}`);
+  await viewButton(page, 'Board').click();
+  const needs = page.locator('.ip-band-needs');
+  await expect(needs).toContainText('Nothing needs you');
+  const auth = { authorization: `Bearer ${readFileSync('.e2e-home/token', 'utf8').trim()}` };
+  const landing = async () => {
+    const res = await api.post(`/api/lead/${made.slug}/landing`, { headers: auth, data: { stepId: step.id, action: 'publish', folder: dir, branch: 'feature' } });
+    expect(res.ok(), `landing answered ${res.status()}: ${await res.text()}`).toBe(true);
+    return (await res.json()) as { clear: boolean; why?: string };
+  };
+  // The hold hook's call.
+  const held = await api.post('/api/lead/hold', { headers: auth, data: { sessionId: session, cwd: dir, command: 'npm publish', action: 'publish', index: 0, folder: dir } });
+  expect(await held.json()).toEqual({ held: true, text: 'a publish of x 1.2.0 to npm' });
+  expect((await landing()).clear).toBe(false);
+  // Within two seconds, by the stream: no reload.
+  const card = needs.locator('[data-held]');
+  await expect(card).toHaveCount(1, { timeout: 2_000 });
+  await expect(card).toContainText('HELD');
+  await expect(card.locator('.ip-ask-text')).toHaveText(`#${step.id} wants a publish of x 1.2.0 to npm.`);
+  await expect(card.locator('code')).toHaveText('npm publish');
+  // The band counts the held tile.
+  await expect(needs.locator('.p-count-figure').first()).toHaveText('1');
+  const itemId = Number(await card.getAttribute('data-held'));
+  // A playbook-held command on the same step: its card has only Not yet, and says why.
+  const release = await api.post('/api/lead/hold', { headers: auth, data: { sessionId: session, cwd: dir, command: 'make release', action: 'playbook', index: 0, folder: dir } });
+  expect((await release.json()).held).toBe(true);
+  await expect(needs.locator('[data-held]')).toHaveCount(2, { timeout: 2_000 });
+  const only = needs.locator(`[data-held="${await needs.locator('[data-held]').nth(1).getAttribute('data-held')}"]`);
+  await expect(only.getByRole('button', { name: 'Go ahead', exact: true })).toHaveCount(0);
+  await expect(only.getByRole('button', { name: 'Not yet', exact: true })).toBeVisible();
+  await expect(only).toContainText('Only you can run this one: run it yourself, or turn the round off.');
+  await expect(needs.locator('.p-count-figure').first()).toHaveText('1');
+  // Go ahead on the publish: focus moves to the next card's Not yet, never a Go ahead.
+  await card.first().getByRole('button', { name: 'Go ahead', exact: true }).click();
+  await expect(only.getByRole('button', { name: 'Not yet', exact: true })).toBeFocused();
+  await expect(needs.locator('[data-held]')).toHaveCount(1);
+  expect(await landing()).toMatchObject({ clear: true, why: 'his yes' });
+  await only.getByRole('button', { name: 'Not yet', exact: true }).click();
+  await expect(needs.locator('[data-held]')).toHaveCount(0);
+  await expect(needs).toContainText('Nothing needs you');
+  // A second answer to the same card is refused and changes nothing.
+  const again = await api.post(`/api/ui/held/${itemId}`, { headers: ui, data: { answer: 'not-yet' } });
+  expect(again.status()).toBe(409);
+  expect(await landing()).toMatchObject({ clear: true, why: 'his yes' });
 });
 
 test('the open archived project can be renamed from its tab, and ⋯ shows the new name', async ({ page, api }) => {

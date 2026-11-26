@@ -1,20 +1,40 @@
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import type { Guard } from '../app';
 import type { Ctx } from '../db/tx';
+import { LEAD_INSTRUCTIONS_VERSION } from '../../core/lead';
 import { STALE_SESSION_MS, type TreeNode } from '../../core/types';
 import { badRequest, conflict, notFound } from '../errors';
 import { openInDesktop, resumeCommand, usableCwd, type DesktopSession, type OpenDesktopResult } from '../open-desktop';
 import { findSession, liveDriver } from '../repo/sessions';
 import { deleteProject, listDeletedProjects, restoreProject } from '../project-lifecycle';
 import { clearAsk } from '../repo/asks';
+import { lateAnswer, requireAnswerLead, workProject, WORK_PROJECT, type CarriedYes } from '../lead-commands';
+import { ONLY_YOU } from '../../core/landing';
+import { heldGoAhead, heldLineOf, leadAnswerItem, readHeldYeses } from '../lead/carry';
+import { heldKeysOf } from '../lead/hold';
+import type { LandingDeps } from '../lead/landing';
+import type { Sender } from '../lead/sends';
+import { getDeskItem } from '../repo/desk';
+import { windowLeadSwitch } from '../lead/window';
 import { recordQuiet } from '../repo/events';
 import { addNodes, applyRankOp, deleteNode, finishNode, labelNode, moveNode, parkNode, unparkNode } from '../repo/nodes';
 import { applyQueueOp, changeProject, getProjectById, isQueued, resolveProject, setProjectLead } from '../repo/projects';
 import { shelvedAmong } from '../repo/shelved';
-import { idParam, sessionIdParam, windowClearBody, windowDoneBody, windowEventBody, windowLabelBody, windowLeadBody, windowMoveBody, windowNodeBody, windowParkBody, windowProjectBody, windowQueueBody, windowNodeParams, windowRankBody, windowRenameBody, windowUnparkBody, WINDOW_EVENT_KEYS } from '../schemas';
+import { idParam, sessionIdParam, windowClearBody, windowDoneBody, windowEventBody, windowLabelBody, windowLeadBody, windowLeadSwitchBody, windowMoveBody, windowNodeBody, windowParkBody, windowProjectBody, windowQueueBody, windowNodeParams, windowRankBody, windowRenameBody, windowUnparkBody, WINDOW_EVENT_KEYS } from '../schemas';
 
 /** Who the window's writes are recorded as: fixed here, never taken from a header. */
 const ACTOR = 'window';
+
+/** Go ahead or Not yet on a held card, and the words each is recorded as: Aiden's own, said in the window. */
+const windowHeldBody = z.object({ answer: z.enum(['go', 'not-yet']) }).strict();
+const HELD_WORDS = { go: 'go ahead (window)', 'not-yet': 'not yet (window)' } as const;
+
+/** What the held route reads git with and wakes to carry his words: the app's landing deps and sender, when it has them. */
+export interface WindowLeadDeps {
+  landing?: LandingDeps;
+  sender?: Sender;
+}
 
 /**
  * Why a step is not one the Backlog shows, or null when it is: done or dropped, worked on (a live session's focus, or
@@ -38,7 +58,7 @@ function notInBacklog(ctx: Ctx, projectId: number, n: TreeNode): string | null {
  * active project or an archived one (an active one is archived in the same write); delete and restore answer 409 on the
  * wrong state: already deleted, or not deleted.
  */
-export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: Guard, openDesktop: (session: DesktopSession) => Promise<OpenDesktopResult> = openInDesktop): void {
+export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: Guard, openDesktop: (session: DesktopSession) => Promise<OpenDesktopResult> = openInDesktop, lead: WindowLeadDeps = {}): void {
   const guarded = { onRequest: requireUi };
 
   // "Open session" on the Board: the Claude desktop app opens the session. When it cannot, the answer carries the command
@@ -91,6 +111,11 @@ export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: 
   app.post('/api/ui/projects/:id/lead', guarded, async (req) => {
     const { slug, name } = windowLeadBody.parse(req.body);
     return { project: setProjectLead(ctx, ACTOR, targetBySlug(req.params, slug), name) };
+  });
+  // A lead's switch on or off from the window: an allow or disallow line with the window as the actor and its words as Aiden's.
+  app.post('/api/ui/projects/:id/lead-switch', guarded, async (req) => {
+    const { slug, switch: name, on } = windowLeadSwitchBody.parse(req.body);
+    return windowLeadSwitch(ctx, targetBySlug(req.params, slug), name, on);
   });
   // One queue operation applied to the stored queue (spec 2.5), never the list the window last saw.
   app.post('/api/ui/projects/:id/queue', guarded, async (req) => {
@@ -230,7 +255,50 @@ export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: 
   app.post('/api/ui/asks/:id/clear', guarded, async (req) => {
     const { id } = idParam.parse(req.params);
     const { answer } = windowClearBody.parse(req.body ?? {});
+    // An answer to an ask the lead already decided is not dropped: it undoes that decision and carries his words.
+    if (answer !== undefined && answer.trim() !== '') lateAnswer(ctx, id, answer.trim(), ACTOR);
     return { ask: clearAsk(ctx, ACTOR, id, answer) };
+  });
+  // A held card's Go ahead or Not yet (lead stage 1, task D): answered as `lead answer --send` answers a held line, in the
+  // project lead's name but recorded as the window's, with his words said now in the window. Go ahead records a yes for
+  // exactly what was held: each command's key read now in the folder the hold stored, on the branch it read, equal to the
+  // key the hold computed (readHeldYeses). It is refused (409, nothing changed) where no yes can release the command
+  // (heldGoAhead), and where any yes cannot be recorded (it changed after it was held, a target that cannot be read). Not
+  // yet records none. Only a held item still waiting on him is answered: anything else, a second click too, is a 409.
+  app.post('/api/ui/held/:id', guarded, async (req) => {
+    const { id } = idParam.parse(req.params);
+    const { answer } = windowHeldBody.parse(req.body);
+    const item = getDeskItem(ctx.db, id);
+    if (item === undefined) throw notFound(`Desk item #${id} not found.`, 'Reload the window.');
+    // Checked before any git: a refused answer reads nothing.
+    if (item.kind !== 'held' || item.state !== 'waiting_aiden') throw conflict(`Desk item #${id} is not a held command waiting on you.`, 'Reload the window.');
+    const project = getProjectById(ctx, item.projectId);
+    if (project === undefined) throw notFound(`Desk item #${id} has no project.`, 'Reload the window.');
+    const leadName = project.lead?.trim() ?? '';
+    if (leadName === '') throw conflict(`${project.name} has no lead to answer this held command.`, 'Answer it in the session.');
+    // The lead and the C:\work refusal, as leadAnswerItem checks them, before any git.
+    requireAnswerLead(ctx, project.slug, leadName, LEAD_INSTRUCTIONS_VERSION);
+    if (workProject(ctx, project.id)) throw conflict(WORK_PROJECT);
+    let yeses: CarriedYes[] | undefined;
+    if (answer === 'go') {
+      const line = heldLineOf(ctx, item);
+      if (!heldGoAhead(ctx, project, item, line)) throw conflict(ONLY_YOU);
+      yeses = await readHeldYeses(ctx, project, line, heldKeysOf(item.outcome), undefined, lead.landing);
+      const missing = yeses.filter((y) => y.patchId === null && !y.needless);
+      if (missing.length) throw conflict(`No yes recorded, nothing answered: ${missing.map((y) => `${y.action}: ${y.why ?? 'the change could not be read'}`).join('; ')}.`);
+    }
+    const res = leadAnswerItem(ctx, project.slug, leadName, LEAD_INSTRUCTIONS_VERSION, item.id, {
+      aidenWords: HELD_WORDS[answer],
+      where: 'window',
+      saidAt: ctx.now(),
+      heldWaiting: true,
+      actor: ACTOR,
+      ...(yeses === undefined ? {} : { yeses }),
+    });
+    // The carried line is a send: carried out after the write commits (wake never throws). Without the server's sender, its
+    // minute check carries it.
+    if (res.carried && lead.sender !== undefined) setImmediate(() => void lead.sender!.wake());
+    return res;
   });
   // The window's measurements (spec 2.6): stored quietly, only the named keys, and strings cut short: never content.
   app.post('/api/ui/events', guarded, async (req, reply) => {

@@ -8,7 +8,8 @@ import { badGateway, conflict } from './errors';
 import { logLeadEvent, requireLead } from './lead';
 import { requireNode } from './repo/nodes';
 import { readProjectSessions } from './repo/sessions';
-import { T3Unavailable, t3Send } from './t3';
+import type { Sender } from './lead/sends';
+import { intendSend } from './repo/leadSends';
 
 /** Sends a message to a T3 Code thread. Injected, so no test runs the t3 CLI. */
 export type RelaySend = (threadId: string, message: string) => Promise<void>;
@@ -37,7 +38,7 @@ export async function leadRelay(
   as: string,
   instructions: number,
   input: { stepId: number; message: string },
-  send: RelaySend = t3Send,
+  sender: Sender,
 ): Promise<{ text: string; sessionId: string }> {
   const project = requireLead(ctx, ref, as, instructions, true);
   // requireLead has matched `as` against the stored name, so it is set.
@@ -54,23 +55,26 @@ export async function leadRelay(
 
   let kind: LeadEventKind;
   let reason = '';
-  try {
-    await send(session.t3ThreadId, relayText(name, project.name, input.message));
-    kind = 'relay';
-  } catch (err) {
-    if (err instanceof T3Unavailable && err.outcomeUnknown) kind = 'relay_unknown';
-    else {
-      kind = 'relay_failed';
-      reason = reasonOf(err);
-      console.error(`InProgress: a relay to session ${session.id} was not delivered: ${reason}`);
-    }
-  }
+  // Written as intended before the send, and carried out by the sender: a relay that may have reached the thread is only
+  // ever looked up by its text there, never sent again.
+  const intended = write(ctx, actor, () =>
+    intendSend(ctx.db, { projectId: project.id, kind: 'relay', target: session.t3ThreadId as string, body: relayText(name, project.name, input.message) }, ctx.now()),
+  );
+  const outcome = await sender.perform(intended.id, { clearIfNotSent: true });
+  if (outcome.state === 'done') kind = 'relay';
+  else if (outcome.state === 'cleared' || outcome.state === 'waiting') {
+    kind = 'relay_failed';
+    reason = reasonOf(outcome.reason);
+    console.error(`InProgress: a relay to session ${session.id} was not delivered: ${reason}`);
+  } else kind = 'relay_unknown';
   try {
     write(ctx, actor, () => logLeadEvent(ctx, { projectId: project.id, lead: name, instructions, kind, nodeId: node.id, sessionId: session.id, text: input.message }));
   } catch (err) {
     // The send has happened (or not) whatever the log says: the lead is still told which.
     console.error(`InProgress: a relay to session ${session.id} (${kind}) could not be logged: ${reasonOf(err)}`);
   }
+  // After the commit: the sender carries out what waits behind this relay (its wake never throws).
+  void sender.wake();
   if (kind === 'relay_unknown') throw badGateway(RELAY_UNKNOWN);
   if (kind === 'relay_failed') throw badGateway(`Not delivered: ${reason}.`);
   return { text: `Delivered to "${clipLine(sessionDisplayTitle(session), 60)}".`, sessionId: session.id };

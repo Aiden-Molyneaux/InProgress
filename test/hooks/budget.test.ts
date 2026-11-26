@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { HOOK_DEFS } from '../../src/cli/claude-config';
 import { hookBudget } from '../../src/hooks/budget';
 import { HOOK_NAMES } from '../../src/hooks/handlers';
+import { HOLD_POST_MS } from '../../src/hooks/hold';
+import { STUCK_POST_MS } from '../../src/hooks/permission';
 
 describe('hookBudget', () => {
   it('gives session-start 5 s for a server it had to start and 2 s for the briefing POST', () => {
@@ -9,8 +11,13 @@ describe('hookBudget', () => {
     expect(hookBudget('session-start')).toEqual({ serverWaitMs: 5000, postTimeoutMs: 2000, limitMs: 7250 });
   });
 
+  it('gives the hold hook room for two 10 s POSTs and the permission hook its 175 s wait; each times its own POSTs, so neither has postTimeoutMs', () => {
+    expect(hookBudget('hold')).toEqual({ serverWaitMs: 0, limitMs: 2 * HOLD_POST_MS + 1000 });
+    expect(hookBudget('permission')).toEqual({ serverWaitMs: 0, limitMs: STUCK_POST_MS + 1000 });
+  });
+
   it('keeps every other hook to one 500 ms POST', () => {
-    for (const name of HOOK_NAMES.filter((n) => n !== 'session-start')) {
+    for (const name of HOOK_NAMES.filter((n) => n !== 'session-start' && n !== 'hold' && n !== 'permission')) {
       expect(hookBudget(name), name).toEqual({ serverWaitMs: 0, postTimeoutMs: 500, limitMs: 750 });
     }
   });
