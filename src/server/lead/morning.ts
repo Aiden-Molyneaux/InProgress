@@ -10,7 +10,7 @@ import { liveProjectsWithRound, roundFirstOn } from '../repo/switches';
 import { heldRef } from './hold';
 import { startProviderModel } from '../lead-start';
 import { leadFolderOf } from './folder';
-import { parseStartBody } from './sends';
+import { parseStartBody, THREAD_GONE } from './sends';
 import { leadThreadOn, quietHours } from './settings';
 import { weekSentence } from './usage';
 
@@ -68,10 +68,14 @@ const SEND_WHAT: Record<string, string> = { voice_line: 'A Voice line', carry: '
 /** How much of a send's first line the Not delivered line keeps. */
 const SEND_GIST_CUT = 80;
 
-/** A send's gist: its body's first line (a start's first message), after any `[From ...]` prefix, on one line and clipped. */
+/**
+ * A send's gist: the first non-empty line of its body (a start's first message) after any leading `[From ...]` header,
+ * whether the header stands alone on line 1 (relayText) or opens the line (leadLine), on one line and clipped.
+ */
 export function sendGist(kind: string, body: string): string {
   const text = kind === 'start' ? (parseStartBody(body)?.message ?? body) : body;
-  const first = (text.trim().split(/\r?\n/)[0] ?? '').replace(/^\[From [^\]]*\]\s*/, '');
+  const rest = text.trim().replace(/^\[From [^\]]*\]\s*/, '');
+  const first = rest.split(/\r?\n/).find((l) => l.trim() !== '') ?? '';
   return clipLine(first, SEND_GIST_CUT);
 }
 
@@ -134,10 +138,10 @@ export function morningList(ctx: Ctx, projectId: number, since: string, now: str
        JOIN lead_events e ON e.id = d.event_id LEFT JOIN nodes n ON n.id = e.node_id
        WHERE d.project_id = ? AND d.said_at > ? AND e.kind NOT IN ('bring', 'answer')
          AND NOT EXISTS (SELECT 1 FROM lead_events u WHERE u.project_id = e.project_id AND u.kind = 'undo' AND u.text = 'd' || e.id)
-         AND NOT EXISTS (SELECT 1 FROM desk_items si WHERE si.id = d.item_id AND si.kind = 'stopped')
+         AND NOT EXISTS (SELECT 1 FROM desk_items si WHERE si.id = d.item_id AND si.kind = 'stopped' AND si.created_at > ?)
        ORDER BY d.product_ruling DESC, d.said_at, d.id`,
     )
-    .all(projectId, since) as (Titled & { event_id: number; event_kind: string; line: string; product_ruling: number })[];
+    .all(projectId, since, since) as (Titled & { event_id: number; event_kind: string; line: string; product_ruling: number })[];
   if (decidedRows.length) {
     const lines = decidedRows.map((r) => {
       const undoable = r.event_kind === 'decide' || r.event_kind === 'park' || r.event_kind === 'drop';
@@ -201,14 +205,20 @@ export function morningList(ctx: Ctx, projectId: number, since: string, now: str
               : o.startsWith('DONE')
                 ? `noted done at ${at}`
                 : 'asked, no answer yet';
-      wrong.push(`${step} stopped at ${stopped}; ${what}.`);
+      // A park carries the word that undoes it: its decision's event id is in the outcome (`PARK d<n>`).
+      const parkedBy = skipped ? null : /^PARK d(\d+)/.exec(o);
+      wrong.push(`${step} stopped at ${stopped}; ${what}.${parkedBy === null ? '' : ` "undo d${parkedBy[1]}"`}`);
     }
   }
   // A send T3 Code refused, or one that could not be read: cleared, and named here (sends.ts's `send_refused` line).
   const refusedSends = db
     .prepare("SELECT node_id, text, at FROM lead_events WHERE project_id = ? AND kind = 'send_refused' AND at > ? ORDER BY at, id")
     .all(projectId, since) as { node_id: number | null; text: string; at: string }[];
-  for (const r of refusedSends) wrong.push(`${r.node_id === null ? 'A send' : `#${r.node_id}`}: a send was refused at ${hhmm(r.at)} and cleared (${r.text}).`);
+  // One whose thread T3 Code no longer has was not refused: it could not go.
+  for (const r of refusedSends) {
+    const gone = r.text.includes(THREAD_GONE);
+    wrong.push(`${r.node_id === null ? 'A send' : `#${r.node_id}`}: a send ${gone ? `could not go at ${hhmm(r.at)} and was cleared` : `was refused at ${hhmm(r.at)} and cleared`} (${r.text}).`);
+  }
   if (wrong.length) parts.push({ name: 'Went wrong', count: wrong.length, lines: wrong });
 
   // Not delivered.

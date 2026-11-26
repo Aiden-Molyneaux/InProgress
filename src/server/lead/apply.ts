@@ -2,7 +2,7 @@ import { AIDEN_BROUGHT_LIMIT, LEAD_INSTRUCTIONS_VERSION } from '../../core/lead'
 import { leadLine } from '../../core/relay';
 import { askTag } from '../../core/types';
 import type { Ctx, RecordEvent } from '../db/tx';
-import { decideInWrite, DECIDE_QUESTION_ONLY } from '../lead-commands';
+import { decideInWrite, DECIDE_QUESTION_ONLY, isOldAsk } from '../lead-commands';
 import { logLeadEvent } from '../lead';
 import { clearInWrite, requireAsk } from '../repo/asks';
 import type { DeskItem } from '../repo/desk';
@@ -73,10 +73,16 @@ export function applyVerdict(ctx: Ctx, turn: LeadTurn, item: DeskItem, record: R
   const answer = turn.answer ?? '';
   const why = turn.why ?? '';
   const now = ctx.now();
-  /** The session's message, when it runs in T3 Code: a send intended now, made after the commit. */
-  const tell = (retryKey: string, body: string): void => {
+  /**
+   * The session's message, when it runs in T3 Code: a send intended now, made after the commit. An old ask's session
+   * (isOldAsk: an undone old question raised again too) may be weeks old: only a reachable one is told, else the step's log
+   * gets `logLine`.
+   */
+  const old = isOldAsk(ctx.db, ask);
+  const tell = (retryKey: string, body: string, logLine: string): void => {
     const thread = reachableThread(ctx.db, { sessionId: ask.sessionId }, now);
     if (thread !== null) intendSend(ctx.db, { projectId: project.id, itemId: item.id, kind: 'relay', target: thread, retryKey, body }, now);
+    else if (old) addLogInWrite(ctx, record, ask.nodeId, logLine);
   };
   if (verdict === 'DECIDE') {
     const id = decideInWrite(ctx, record, {
@@ -96,13 +102,7 @@ export function applyVerdict(ctx: Ctx, turn: LeadTurn, item: DeskItem, record: R
       },
     });
     const said = `d${id}: ${answer}\nWhy: ${sentence(why)} Aiden can undo this with "undo d${id}".`;
-    if (item.kind !== 'old_ask') tell(`relay:d${id}`, leadLine(name, said));
-    else {
-      // An old ask's session may be weeks old: only a reachable one is told; else the step's log says it.
-      const thread = reachableThread(ctx.db, { sessionId: ask.sessionId }, now);
-      if (thread !== null) intendSend(ctx.db, { projectId: project.id, itemId: item.id, kind: 'relay', target: thread, retryKey: `relay:d${id}`, body: leadLine(name, said) }, now);
-      else addLogInWrite(ctx, record, ask.nodeId, `${name} decided ${said.replace('\n', ' ')}`);
-    }
+    tell(`relay:d${id}`, leadLine(name, said), `${name} decided ${said.replace('\n', ' ')}`);
     return { itemState: 'done', outcome: `DECIDE d${id}` };
   }
   if (verdict === 'AIDEN') {
@@ -120,7 +120,7 @@ export function applyVerdict(ctx: Ctx, turn: LeadTurn, item: DeskItem, record: R
     // Not a decision: its session reads the landing check's rule, with no undo word (session-flow's answers line).
     clearInWrite(ctx, record, actor, ask, said, true, 'lead_card');
     logLeadEvent(ctx, { projectId: project.id, lead: name, instructions: LEAD_INSTRUCTIONS_VERSION, kind: 'card', askId: ask.id, nodeId: ask.nodeId, text: answer });
-    tell(`card:${askTag(ask.id)}`, leadLine(name, `${askTag(ask.id)}: ${said}`));
+    tell(`card:${askTag(ask.id)}`, leadLine(name, `${askTag(ask.id)}: ${said}`), `${name}: ${askTag(ask.id)}: ${said}`);
     return { itemState: 'done', outcome: 'CARD' };
   }
   return { itemState: 'done', outcome: `${verdict} (no action in this task)` };

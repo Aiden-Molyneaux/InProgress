@@ -3,7 +3,7 @@ import { LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
 import { buildApp } from '../../src/server/app';
 import { openDb } from '../../src/server/db/connection';
 import { createCtx, type Ctx } from '../../src/server/db/tx';
-import { DECIDE_QUESTION_ONLY, leadAllow, leadAnswer, leadUndo, WORK_PROJECT } from '../../src/server/lead-commands';
+import { DECIDE_QUESTION_ONLY, isOldAsk, lateAnswer, leadAllow, leadAnswer, leadDecide, leadUndo, WORK_PROJECT } from '../../src/server/lead-commands';
 import { applyVerdict } from '../../src/server/lead/apply';
 import { write as dbWrite } from '../../src/server/db/tx';
 import { bringItem } from '../../src/server/repo/deskBring';
@@ -13,7 +13,8 @@ import { leadOldAskReading, leadOldAsks, leadOldAsksAll, leadOldAsksNext, leadsN
 import { createRunner, type TurnInput, type TurnOutput, type TurnWay } from '../../src/server/lead/runner';
 import { createSender, type SenderT3 } from '../../src/server/lead/sends';
 import { OLD_ASKS_DONE_LINE, voiceReadiness } from '../../src/server/lead/voice';
-import { handleHookEvent } from '../../src/server/session-flow';
+import { claimStep, handleHookEvent } from '../../src/server/session-flow';
+import { leadAnswerItem } from '../../src/server/lead/carry';
 import { clearAsk, raiseAsk, requireAsk } from '../../src/server/repo/asks';
 import { addDeskItem, getDeskItem, type DeskItem } from '../../src/server/repo/desk';
 import { addNodes } from '../../src/server/repo/nodes';
@@ -531,5 +532,59 @@ describe("an old ask's answer is recorded, never carried (C9)", () => {
     // An ask that is not an old ask is carried as before.
     expect(leadAnswer(w.ctx, w.glimpse.project.slug, 'Progresser', V, { askId: fresh.id, aidenWords: 'serif', where: 'voice' }).carried).toBe(true);
     expect(sends()).toEqual([`carry:a${fresh.id}`]);
+  });
+});
+
+describe('isOldAsk, and the C9 rule in every answer path (m2, m3)', () => {
+  /** A live T3 Code session s1 in `folder`, reachable: a carry would go to th_1. */
+  const live = (w: ReturnType<typeof world>, folder: string) => {
+    handleHookEvent(w.ctx, 's1', { event: 'start', source: 'startup', cwd: folder });
+    w.ctx.db.prepare("UPDATE sessions SET app = 't3', t3_thread_id = 'th_1', state = 'idle' WHERE id = 's1'").run();
+  };
+  const carries = (w: ReturnType<typeof world>) => w.ctx.db.prepare("SELECT retry_key FROM lead_sends WHERE kind = 'carry'").pluck().all() as string[];
+  const logs = (w: ReturnType<typeof world>, nodeId: number) => w.ctx.db.prepare('SELECT text FROM log_entries WHERE node_id = ? ORDER BY id').pluck().all(nodeId) as string[];
+
+  it('is true for an ask with an old_ask item, and for an ask raised again with its text on its step; false otherwise', () => {
+    const w = world();
+    live(w, 'C:/personal/Glimpse');
+    const old = raiseAsk(w.ctx, 'test', { nodeId: w.glimpse.step.id, kind: 'question', text: 'Keep the old login?', sessionId: 's1' });
+    leadOldAsks(w.ctx, w.glimpse.project.slug, 'Progresser', V);
+    clearAsk(w.ctx, 'test', old.id, 'keep');
+    // An undo raises it again: the same text on the same step, a new id with no old_ask item of its own.
+    const again = raiseAsk(w.ctx, 'test', { nodeId: w.glimpse.step.id, kind: 'question', text: 'Keep the old login?', sessionId: 's1' });
+    const other = raiseAsk(w.ctx, 'test', { nodeId: w.glimpse.step.id, kind: 'question', text: 'Which font?', sessionId: 's1' });
+    expect(w.item(again.id)).toEqual([]);
+    expect([old, again, other].map((a) => isOldAsk(w.ctx.db, a))).toEqual([true, true, false]);
+    // leadAnswer on the one raised again: recorded, never carried.
+    const res = leadAnswer(w.ctx, w.glimpse.project.slug, 'Progresser', V, { askId: again.id, aidenWords: 'drop it' });
+    expect(res.carried).toBe(false);
+    expect(carries(w)).toEqual([]);
+    expect(logs(w, w.glimpse.step.id)).toContain(`Aiden's answer to a${again.id} (an old ask), in his words: "drop it"`);
+  });
+
+  it("lateAnswer on an old ask the lead decided: no late carry, the step's log line instead", () => {
+    const w = world();
+    live(w, 'C:/personal/InProgress');
+    const a = raiseAsk(w.ctx, 'test', { nodeId: w.ip.step.id, kind: 'question', text: 'Which port?', sessionId: 's1' });
+    leadOldAsks(w.ctx, w.ip.project.slug, 'Progresser', V);
+    leadDecide(w.ctx, w.ip.project.slug, 'Progresser', V, { askId: a.id, answer: 'use 4410', reason: 'it is free' });
+    expect(requireAsk(w.ctx, a.id).answeredVia).toBe('lead_decided');
+    expect(lateAnswer(w.ctx, a.id, 'use 4411', 'window')).toBe(true);
+    expect(carries(w)).toEqual([]);
+    expect(logs(w, w.ip.step.id)).toContain(`Aiden's answer to a${a.id} (an old ask), in his words: "use 4411"`);
+    expect(requireAsk(w.ctx, a.id)).toMatchObject({ answer: 'use 4411', answerDeliveredAt: null });
+  });
+
+  it("leadAnswerItem on an old ask's item: no carry, the step's log line instead", () => {
+    const w = world();
+    live(w, 'C:/personal/Glimpse');
+    const a = raiseAsk(w.ctx, 'test', { nodeId: w.glimpse.step.id, kind: 'question', text: 'Keep the old login?', sessionId: 's1' });
+    claimStep(w.ctx, 'test', 's1', w.glimpse.step.id);
+    leadOldAsks(w.ctx, w.glimpse.project.slug, 'Progresser', V);
+    const itemId = w.item(a.id)[0]!.id;
+    const res = leadAnswerItem(w.ctx, w.glimpse.project.slug, 'Progresser', V, itemId, { aidenWords: 'drop it' });
+    expect(res.carried).toBe(false);
+    expect(carries(w)).toEqual([]);
+    expect(logs(w, w.glimpse.step.id)).toContain(`Aiden's answer to a${a.id} (an old ask), in his words: "drop it"`);
   });
 });

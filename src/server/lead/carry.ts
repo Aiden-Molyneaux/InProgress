@@ -2,7 +2,7 @@ import { clipLine } from '../../core/step-ref';
 import type { Project } from '../../core/types';
 import { write, type Ctx } from '../db/tx';
 import { conflict, notFound } from '../errors';
-import { carriedLine, requireAnswerLead, workProject, WORK_PROJECT, type CarriedYes, type YesAction } from '../lead-commands';
+import { carriedLine, isOldAsk, oldAskAnswerLine, requireAnswerLead, workProject, WORK_PROJECT, type CarriedYes, type YesAction } from '../lead-commands';
 import { logLeadEvent } from '../lead';
 import { getDeskItem, moveDeskItem, type DeskItem } from '../repo/desk';
 import { askOf, DECISION_LINE_CUT, reachableThread, t3SessionOnStep } from '../repo/deskBring';
@@ -148,9 +148,13 @@ export function leadAnswerItem(ctx: Ctx, ref: string, as: string, instructions: 
       saidAt,
     });
     moveDeskItem(ctx.db, item.id, ['open', 'leased', 'behind', 'waiting_aiden'], 'done', { outcome: `ANSWERED d${eventId}`, now: ctx.now() });
-    // His words reach only a reachable thread (reachableThread): the held command's session, or the step's session now.
-    const thread =
-      held !== undefined
+    // His words reach only a reachable thread (reachableThread): the held command's session, or the step's session now. An
+    // item about an old ask (isOldAsk) is never carried: the step's log records his words.
+    const asked = item.kind === 'held' || item.kind === 'aiden_said' ? undefined : askOf(ctx, item);
+    const oldAsk = item.kind === 'old_ask' || (asked !== undefined && isOldAsk(ctx.db, asked));
+    const thread = oldAsk
+      ? null
+      : held !== undefined
         ? reachableThread(ctx.db, { sessionId: held.sessionId }, ctx.now())
         : item.nodeId === null
           ? null
@@ -165,7 +169,7 @@ export function leadAnswerItem(ctx: Ctx, ref: string, as: string, instructions: 
         lines.push('Its session is told in its thread.');
       }
     } else if (item.nodeId !== null) {
-      addLogInWrite(ctx, record, item.nodeId, said);
+      addLogInWrite(ctx, record, item.nodeId, oldAsk && asked !== undefined ? oldAskAnswerLine(asked.id, input.aidenWords) : said);
       lines.push("His words are in the step's log.");
     }
     return { text: [`Answered desk item #${item.id} with Aiden's words: decision d${eventId}.`, ...lines].join(' '), carried, decision: eventId };

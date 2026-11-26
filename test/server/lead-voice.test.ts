@@ -129,6 +129,11 @@ describe('the Voice: what makes a line', () => {
     for (const own of ["I'd recommend: the board tab.", 'I would pick the board tab.', "i'd pick: the board tab.", 'I recommend the board tab.', 'I WOULD RECOMMEND: the board tab.']) {
       expect(tail(own)).toBe('I would pick: The board tab. Say "yes" to that, or give your own answer.');
     }
+    // "Suggest" and "My pick is" too: the real run's `I'd suggest "Search", because...`.
+    expect(tail(`I'd suggest "Search", because the window says it.`)).toBe(`I would pick: "Search", because the window says it. Say "yes" to that, or give your own answer.`);
+    for (const own of ['I suggest the board tab.', 'i would suggest: the board tab.', 'My pick is the board tab.', 'MY PICK IS: the board tab.']) {
+      expect(tail(own)).toBe('I would pick: The board tab. Say "yes" to that, or give your own answer.');
+    }
     // A pick that only mentions recommending further in is kept whole.
     expect(tail('The board tab, as I recommend.')).toBe('I would pick: The board tab, as I recommend. Say "yes" to that, or give your own answer.');  });
 
@@ -136,6 +141,10 @@ describe('the Voice: what makes a line', () => {
     const base = { projectName: 'InGame', stepId: 7, stepTitle: 'Tabs', askText: 'Which tab first?', wouldHave: 'The board.' };
     expect(bringVoiceLine({ ...base, undid: { tag: 'd18', words: 'ids are noise' } })).toBe('Yours, InGame: #7 Tabs. Which tab first?\nYou undid d18: "ids are noise". Give your answer.');
     expect(bringVoiceLine({ ...base, undid: { tag: 'd18', words: '  ' } })).toBe('Yours, InGame: #7 Tabs. Which tab first?\nYou undid d18. Give your answer.');
+    // His words on one line, clipped as the ask is (m7).
+    const long = `ids\nare ${'noise '.repeat(60)}`;
+    expect(bringVoiceLine({ ...base, undid: { tag: 'd18', words: long } }).split('\n')[1]).toBe(`You undid d18: "${clipLine(long, VOICE_ASK_CUT)}". Give your answer.`);
+    expect(clipLine(long, VOICE_ASK_CUT).startsWith('ids are noise')).toBe(true);
   });
 
   it('an old ask names what was asked, and says "Say" once (C3)', () => {

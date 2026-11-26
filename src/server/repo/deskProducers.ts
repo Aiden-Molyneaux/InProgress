@@ -72,10 +72,11 @@ function stuckSince(db: DB, projectId: number, sessionId: string, since: string)
   );
 }
 
-/** An ask raised again by an undo: it is Aiden's at once, brought with the undone decision's kind and the lead's withdrawn answer. */
+/**
+ * An ask raised again by an undo: it is Aiden's at once, brought with the undone decision's kind and no would-have (the
+ * answer he withdrew is never offered back); its line says what he undid.
+ */
 export interface UndoneAsk {
-  /** The lead's answer the undo withdrew: the bring's would-have. */
-  wouldHave: string;
   kind: DecisionKind;
   productRuling: boolean;
   /** The undo's tag and his words: the line says what he undid instead of a pick. */
@@ -109,7 +110,7 @@ export function deskOnAskRaised(ctx: Ctx, ask: Ask, undone?: UndoneAsk): void {
   if (undone !== undefined) {
     const { item, created } = addDeskItem(db, { ...input, state: 'waiting_aiden' }, now);
     if (!created) return;
-    const eventId = bringItem(ctx, item, { id: null, kind: null, answer: undone.wouldHave }, { tell: false, decision: { kind: undone.kind, productRuling: undone.productRuling }, ...(undone.undid === undefined ? {} : { undid: undone.undid }) });
+    const eventId = bringItem(ctx, item, { id: null, kind: null, answer: '' }, { tell: false, decision: { kind: undone.kind, productRuling: undone.productRuling }, ...(undone.undid === undefined ? {} : { undid: undone.undid }) });
     if (eventId !== undefined) moveDeskItem(db, item.id, ['waiting_aiden'], 'waiting_aiden', { outcome: `AIDEN d${eventId}`, now });
     return;
   }

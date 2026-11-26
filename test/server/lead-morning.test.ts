@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { RELAYED } from '../../src/core/relay';
+import { RELAYED, relayText } from '../../src/core/relay';
 import { describe, expect, it } from 'vitest';
 import { LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
 import { stamp } from '../../src/core/span';
@@ -115,6 +115,39 @@ describe('the morning list', () => {
       col('The week', '41 percent used, the line says 44. Window 12 percent.'),
     ]);
     expect(list.parts.map((p) => p.name)).toEqual(['Yours', 'Decided for you', 'Held for you', 'Went wrong', 'Not delivered', 'The lead', 'The week']);
+  });
+
+  it('M1, O1, O2, m4: a stop from before the last list is decided for you; a park says its undo word; a send that could not go; a relay header line', () => {
+    const w = world();
+    // A stop made before `since` and decided after it: Went wrong does not list it, so Decided for you does (M1).
+    w.at(local(0, 8));
+    const early = addDeskItem(w.ctx.db, { projectId: w.project.id, kind: 'stopped', ref: `s1@${w.ctx.now()}`, nodeId: w.step.id }, w.ctx.now()).item;
+    w.at(local(0, 23));
+    const restart = insertLeadEvent(w.ctx.db, { projectId: w.project.id, lead: 'Progresser', instructions: V, kind: 'decide', nodeId: w.step.id, text: 'restart' }, w.ctx.now());
+    addDecision(w.ctx.db, { eventId: restart, itemId: early.id, kind: 'technical', line: 'Restarted the export', saidWhere: 'desk', saidAt: w.ctx.now() });
+    moveDeskItem(w.ctx.db, early.id, ['open'], 'done', { outcome: `RESTART d${restart}`, now: w.ctx.now() });
+    // A stop in the night the lead parked: its line carries the park's undo word (O1).
+    w.at(local(1, 2, 10));
+    const parked = addDeskItem(w.ctx.db, { projectId: w.project.id, kind: 'stopped', ref: `s2@${w.ctx.now()}`, nodeId: w.step.id }, w.ctx.now()).item;
+    w.at(local(1, 2, 51));
+    const park = insertLeadEvent(w.ctx.db, { projectId: w.project.id, lead: 'Progresser', instructions: V, kind: 'park', nodeId: w.step.id, text: 'no way on' }, w.ctx.now());
+    addDecision(w.ctx.db, { eventId: park, itemId: parked.id, kind: 'technical', line: 'Parked the step', saidWhere: 'desk', saidAt: w.ctx.now() });
+    moveDeskItem(w.ctx.db, parked.id, ['open'], 'done', { outcome: `PARK d${park}`, now: w.ctx.now() });
+    // A carry whose thread is gone, and one T3 Code refused (O2).
+    w.at(local(1, 3));
+    insertLeadEvent(w.ctx.db, { projectId: w.project.id, lead: 'Progresser', instructions: V, kind: 'send_refused', nodeId: w.step.id, text: 's7 (carry): its thread th_1 is not in T3 Code' }, w.ctx.now());
+    insertLeadEvent(w.ctx.db, { projectId: w.project.id, lead: 'Progresser', instructions: V, kind: 'send_refused', nodeId: w.step.id, text: 's8 for item #3: a bad title' }, w.ctx.now());
+    // A relay whose header stands alone on its first line (m4).
+    const relayed = intendSend(w.ctx.db, { projectId: w.project.id, kind: 'relay', target: 'thread-s1', body: relayText('Progresser', 'InProgress', 'Where does the work stand?') }, local(1, 3, 5));
+    const list = morningList(w.ctx, w.project.id, local(0, 9), local(1, 9, 30));
+    const part = (name: string) => list.parts.find((p) => p.name === name)?.lines ?? [];
+    expect(part('Decided for you')).toEqual([`d${restart} #${w.step.id} Board search: Restarted the export. "undo d${restart}"`]);
+    expect(part('Went wrong')).toEqual([
+      `#${w.step.id} stopped at 02:10; parked at 02:51. "undo d${park}"`,
+      `#${w.step.id}: a send could not go at 03:00 and was cleared (s7 (carry): its thread th_1 is not in T3 Code).`,
+      `#${w.step.id}: a send was refused at 03:00 and cleared (s8 for item #3: a bad title).`,
+    ]);
+    expect(part('Not delivered')).toEqual([`A message to a session "Where does the work stand?" (s${relayed.id}), not sent since 03:05.`]);
   });
 
   it('leaves out a part with nothing, and a day with nothing has no list', () => {

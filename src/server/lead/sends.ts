@@ -23,6 +23,10 @@ export const TITLE_MAX = 120;
 export const LOOKUP_AFTER_MS = 60 * 1000;
 /** How far apart the two looks that find nothing must be. */
 export const LOOKS_APART_MS = 60 * 1000;
+/** How long a relay or carry target found in T3 Code is not read again. */
+export const THREAD_FOUND_MS = 5 * 60 * 1000;
+/** The words a `send_refused` line uses for a send whose thread T3 Code no longer has (the morning list reads them). */
+export const THREAD_GONE = 'is not in T3 Code';
 /** The actor of the sender's own writes. */
 const ACTOR = 'inprogress:sender';
 
@@ -247,6 +251,9 @@ export function createSender(ctx: Ctx, deps: SenderDeps, opts: SenderOptions = {
   const inFlight = new Map<number, Promise<PerformOutcome>>();
   /** When each looked-up send was first not found (ms). */
   const misses = new Map<number, number>();
+  /** When each relay or carry target was first read as gone (ms), and when each was last found (ms). */
+  const threadMissedAt = new Map<string, number>();
+  const threadFound = new Map<string, number>();
   const listedThreads = new Map<string, Set<string>>();
   let stopped = false;
   let draining: Promise<void> | undefined;
@@ -324,7 +331,7 @@ export function createSender(ctx: Ctx, deps: SenderDeps, opts: SenderOptions = {
         // A carry or relay to a thread T3 Code no longer has can never go: cleared as a refused one is (a carried answer is
         // read on the session's next prompt), and named once. When T3 Code does not answer the read, it waits as any.
         if ((send.kind === 'relay' || send.kind === 'carry') && (await threadGone(send))) {
-          const gone = `its thread ${send.target} is not in T3 Code`;
+          const gone = `its thread ${send.target} ${THREAD_GONE}`;
           write(ctx, ACTOR, () => {
             if (!moveSend(ctx.db, id, ['intended'], 'cleared', { now: ctx.now() })) return;
             uncarriedInWrite(ctx, send);
@@ -362,26 +369,51 @@ export function createSender(ctx: Ctx, deps: SenderDeps, opts: SenderOptions = {
     return p;
   };
 
-  /**
-   * Whether T3 Code answers and the send's thread is not there: a show of it fails and the lists of the project's folders,
-   * which answer, do not name it. A read, never a send. False when the show finds it, or when T3 Code answers neither (it waits).
-   */
-  const threadGone = async (send: LeadSend): Promise<boolean> => {
+  /** Whether one read finds the thread missing while T3 Code answers (see threadGone); found ones are remembered. */
+  const threadMissing = async (send: LeadSend, nowMs: number): Promise<boolean> => {
+    const found = (): false => {
+      threadFound.set(send.target, nowMs);
+      return false;
+    };
     try {
       await deps.t3.show(send.target);
-      return false;
+      return found();
     } catch {
       // The show failing says nothing alone: the project's list tells a thread that is gone from T3 Code not answering.
     }
     const folders = leadFolders(ctx, send.projectId);
     if (folders.length === 0) return false;
     try {
-      for (const folder of folders) if ((await threads(folder)).some((t) => t.threadId === send.target)) return false;
+      for (const folder of folders) if ((await threads(folder)).some((t) => t.threadId === send.target)) return found();
       return true;
     } catch {
       // T3 Code answers neither: the send waits for the next try, as any not sent.
       return false;
     }
+  };
+
+  /**
+   * Whether the send's thread is gone from T3 Code: on two reads at least LOOKS_APART_MS apart, as a lookup's two looks,
+   * T3 Code answers and the thread is not there (a show of it fails and the lists of the project's folders do not name it).
+   * The first read only records when it was first missed. A thread found is not read again for THREAD_FOUND_MS. Reads only,
+   * never a send.
+   */
+  const threadGone = async (send: LeadSend): Promise<boolean> => {
+    const nowMs = Date.parse(ctx.now());
+    const seen = threadFound.get(send.target);
+    if (seen !== undefined && nowMs - seen < THREAD_FOUND_MS) return false;
+    if (!(await threadMissing(send, nowMs))) {
+      threadMissedAt.delete(send.target);
+      return false;
+    }
+    const first = threadMissedAt.get(send.target);
+    if (first === undefined) {
+      threadMissedAt.set(send.target, nowMs);
+      return false;
+    }
+    if (nowMs - first < LOOKS_APART_MS) return false;
+    threadMissedAt.delete(send.target);
+    return true;
   };
 
   /**

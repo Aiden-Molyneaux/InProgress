@@ -220,8 +220,8 @@ function intendLine(db: DB, input: { projectId: number; itemId?: number | null; 
   intendSend(db, { projectId: input.projectId, itemId: input.itemId ?? null, kind: 'voice_line', target: 'webhook', retryKey: input.retryKey, body: input.body }, now);
 }
 
-/** A pick's own leading "I would pick", "I'd pick", "I'd recommend", "I recommend" or "I would recommend", with its colon or space. */
-const OWN_PICK = /^(?:i would pick|i'd pick|i'd recommend|i recommend|i would recommend)(?::\s*|\s+)/i;
+/** A pick's own leading "I would pick", "I'd recommend", "I'd suggest", "My pick is" and the like, with its colon or space. */
+const OWN_PICK = /^(?:i would pick|i'd pick|i'd recommend|i recommend|i would recommend|i'd suggest|i suggest|i would suggest|my pick is)(?::\s*|\s+)/i;
 
 /** The pick as the line says it after `I would pick: `: its own leading "I would pick" (OWN_PICK) dropped, the rest capitalised. */
 export function pickText(wouldHave: string): string {
@@ -235,7 +235,8 @@ export function pickText(wouldHave: string): string {
  */
 export function bringVoiceLine(input: { projectName: string; stepId: number | null; stepTitle: string | null; askText: string; wouldHave: string; undid?: { tag: string; words: string } }): string {
   const step = input.stepId === null ? '' : `${stepRef(input.stepId, input.stepTitle ?? undefined)}. `;
-  const words = input.undid?.words.trim() ?? '';
+  // His words on one line, clipped as the ask is.
+  const words = clipLine(input.undid?.words ?? '', VOICE_ASK_CUT);
   const pick =
     input.undid !== undefined
       ? `You undid ${input.undid.tag}${words === '' ? '' : `: "${words}"`}. Give your answer.`

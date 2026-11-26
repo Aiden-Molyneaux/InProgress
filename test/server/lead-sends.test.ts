@@ -12,7 +12,7 @@ import { leadRelay, RELAY_UNKNOWN } from '../../src/server/lead-relay';
 import { START_UNDER_WAY, START_UNKNOWN, leadStart, ownStartsToday } from '../../src/server/lead-start';
 import { applyVerdict } from '../../src/server/lead/apply';
 import { deskUserMessage } from '../../src/server/lead/prompt';
-import { createSender, markedTitle, sendMarker, TITLE_MAX, type Sender, type SenderT3 } from '../../src/server/lead/sends';
+import { createSender, markedTitle, sendMarker, THREAD_FOUND_MS, TITLE_MAX, type Sender, type SenderT3 } from '../../src/server/lead/sends';
 import { createLeadToolsServer } from '../../src/server/lead/tools';
 import { raiseAsk } from '../../src/server/repo/asks';
 import { askOf, bringNext } from '../../src/server/repo/deskBring';
@@ -645,15 +645,17 @@ describe('the day thread start (Y8)', () => {
 });
 
 describe('a carry or relay to a thread T3 Code no longer has (C8)', () => {
-  /** A T3 Code whose send fails not-sent; its show and list as the case gives them. A read, never a second send. */
-  const t3Of = (o: { show: 'fails' | 'finds'; list: 'answers' | 'down' | 'lists it' }): SenderT3 & { sends: number } => {
+  /** A T3 Code whose send fails not-sent; its show and list as the case gives them, each read counted. */
+  const t3Of = (o: { show: 'fails' | 'finds'; list: 'answers' | 'down' | 'lists it' }): SenderT3 & { sends: number; shows: number } => {
     const t = {
       sends: 0,
+      shows: 0,
       list: async () => {
         if (o.list === 'down') throw new T3Unavailable('t3 did not answer');
         return o.list === 'lists it' ? [{ threadId: 'th_gone' } as never] : [];
       },
       show: async () => {
+        t.shows++;
         if (o.show === 'fails') throw new T3Unavailable('no such thread');
         return { thread: {} as never, messages: [] };
       },
@@ -665,31 +667,57 @@ describe('a carry or relay to a thread T3 Code no longer has (C8)', () => {
     };
     return t;
   };
-  const intend = (s: ReturnType<typeof setup>, kind: 'carry' | 'relay') =>
-    write(s.ctx, 'test', () => intendSend(s.ctx.db, { projectId: s.project.id, kind, target: 'th_gone', retryKey: `${kind}:x`, body: 'his answer' }, s.ctx.now())).id;
+  const quiet = { log: { info: () => undefined, error: () => undefined } };
+  /** A real answered ask on step 0, and a send of `kind` carrying it to th_gone (carry:a<id>, as leadAnswer keys it). */
+  const intend = (s: ReturnType<typeof setup>, kind: 'carry' | 'relay') => {
+    const ask = raiseAsk(s.ctx, 'test', { nodeId: s.steps[0].id, kind: 'question', text: 'Which port?' });
+    s.ctx.db.prepare("UPDATE asks SET cleared_at = ?, answer = 'use 4410', answer_delivered_at = NULL WHERE id = ?").run(s.ctx.now(), ask.id);
+    const id = write(s.ctx, 'test', () => intendSend(s.ctx.db, { projectId: s.project.id, kind, target: 'th_gone', retryKey: kind === 'carry' ? `carry:a${ask.id}` : `relay:x${ask.id}`, body: 'his answer' }, s.ctx.now())).id;
+    return { id, askId: ask.id };
+  };
+  const delivered = (s: ReturnType<typeof setup>, askId: number) => s.ctx.db.prepare('SELECT answer_delivered_at FROM asks WHERE id = ?').pluck().get(askId) as string | null;
   const refusedLines = (s: ReturnType<typeof setup>) => s.ctx.db.prepare("SELECT text FROM lead_events WHERE kind = 'send_refused'").pluck().all() as string[];
 
-  it('T3 Code answers and the thread is not there: cleared, and one send_refused line names it', async () => {
+  it('T3 Code answers and the thread is not there on two reads a minute apart: cleared, his answer back for the next prompt, one send_refused line', async () => {
     for (const kind of ['carry', 'relay'] as const) {
       const s = setup();
       const t3 = t3Of({ show: 'fails', list: 'answers' });
-      const id = intend(s, kind);
-      const out = await createSender(s.ctx, { t3 }, { log: { info: () => undefined, error: () => undefined } }).perform(id);
-      expect(out).toEqual({ state: 'cleared', reason: 'its thread th_gone is not in T3 Code' });
+      const sender = createSender(s.ctx, { t3 }, quiet);
+      const { id, askId } = intend(s, kind);
+      // The first read only notes when it was first missed: the send waits.
+      expect((await sender.perform(id)).state).toBe('waiting');
+      if (kind === 'carry') expect(delivered(s, askId)).not.toBeNull();
+      expect(refusedLines(s)).toEqual([]);
+      // A second read too soon still waits.
+      s.advance(30 * 1000);
+      expect((await sender.perform(id)).state).toBe('waiting');
+      s.advance(31 * 1000);
+      expect(await sender.perform(id)).toEqual({ state: 'cleared', reason: 'its thread th_gone is not in T3 Code' });
       expect(getSend(s.ctx.db, id)!.state).toBe('cleared');
+      // The carry's own stamp is taken back, so the session reads his answer on its next prompt.
+      expect(delivered(s, askId)).toBeNull();
       expect(refusedLines(s)).toEqual([`s${id} (${kind}): its thread th_gone is not in T3 Code`]);
-      expect(t3.sends).toBe(1);
+      expect(t3.sends).toBe(3);
     }
   });
 
-  it('T3 Code does not answer, or still has the thread: it waits as before', async () => {
+  it('T3 Code does not answer, or still has the thread: it waits as before, and a thread found is not read again for five minutes', async () => {
     for (const o of [{ show: 'fails', list: 'down' }, { show: 'finds', list: 'answers' }, { show: 'fails', list: 'lists it' }] as const) {
       const s = setup();
-      const id = intend(s, 'carry');
-      const out = await createSender(s.ctx, { t3: t3Of(o) }, { log: { info: () => undefined, error: () => undefined } }).perform(id);
-      expect(out.state).toBe('waiting');
+      const t3 = t3Of(o);
+      const sender = createSender(s.ctx, { t3 }, quiet);
+      const { id } = intend(s, 'carry');
+      for (let i = 0; i < 3; i++) {
+        expect((await sender.perform(id)).state).toBe('waiting');
+        s.advance(2 * MINUTE);
+      }
       expect(getSend(s.ctx.db, id)).toMatchObject({ state: 'intended', result: null });
       expect(refusedLines(s)).toEqual([]);
+      // Found on the first read: the next two, inside five minutes, do not read again. Not answering: read each time.
+      expect(t3.shows).toBe(o.list === 'down' ? 3 : 1);
+      s.advance(THREAD_FOUND_MS);
+      await sender.perform(id);
+      expect(t3.shows).toBe(o.list === 'down' ? 4 : 2);
     }
   });
 });

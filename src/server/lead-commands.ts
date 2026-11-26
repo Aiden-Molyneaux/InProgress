@@ -2,6 +2,7 @@ import { isAidens, LEAD_INSTRUCTIONS_VERSION, type LeadSwitch } from '../core/le
 import { leadLine } from '../core/relay';
 import { clipLine, stepRef } from '../core/step-ref';
 import { askTag, type Ask, type Project, type TreeNode } from '../core/types';
+import type { DB } from './db/connection';
 import { write, type Ctx, type RecordEvent } from './db/tx';
 import { clip, stamp } from './digest';
 import { badRequest, conflict, notFound } from './errors';
@@ -130,6 +131,24 @@ const hhmmOf = (iso: string): string => {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 };
 
+/**
+ * Whether an ask is an old ask (task 17): a desk item of kind old_ask names it, or names another ask on the same step with
+ * the same text (an undo raises an old question again, with its old text on its old step, under a new id). An old ask's
+ * answer is recorded, never carried: its session may have ended long ago.
+ */
+export function isOldAsk(db: DB, ask: { id: number; nodeId: number; text: string }): boolean {
+  return (
+    db
+      .prepare(
+        `SELECT 1 FROM desk_items d WHERE d.kind = 'old_ask' AND (d.ref = ? OR d.ref IN (SELECT CAST(a.id AS TEXT) FROM asks a WHERE a.node_id = ? AND a.text = ? AND a.id <> ?)) LIMIT 1`,
+      )
+      .get(String(ask.id), ask.nodeId, ask.text, ask.id) !== undefined
+  );
+}
+
+/** The step-log line that records Aiden's answer to an old ask, in place of a carry. */
+export const oldAskAnswerLine = (askId: number, words: string): string => `Aiden's answer to ${askTag(askId)} (an old ask), in his words: "${words.trim()}"`;
+
 /** The line a T3 Code session reads in its thread when the lead carries Aiden's answer. */
 export const carriedLine = (lead: string, where: 'voice' | 'thread', saidAt: string, words: string, askId?: number): string =>
   // The ask is named, so a session with several asks knows which one he answered (a held or "you decide" item has none).
@@ -247,8 +266,8 @@ export function leadAnswer(ctx: Ctx, ref: string, as: string, instructions: numb
     // stale step. Any other reads the answer on its next prompt, if it ever resumes.
     // An old ask's answer is recorded, never carried: its session may have ended long ago. The step's log says it, and the
     // session reads it on its next prompt, as any answer not delivered.
-    const oldAsk = ctx.db.prepare("SELECT 1 FROM desk_items WHERE kind = 'old_ask' AND ref = ?").get(String(ask.id)) !== undefined;
-    if (oldAsk) addLogInWrite(ctx, record, ask.nodeId, `Aiden's answer to ${tag} (an old ask), in his words: "${input.aidenWords.trim()}"`);
+    const oldAsk = isOldAsk(ctx.db, ask);
+    if (oldAsk) addLogInWrite(ctx, record, ask.nodeId, oldAskAnswerLine(ask.id, input.aidenWords));
     const thread = oldAsk ? null : reachableThread(ctx.db, { sessionId: ask.sessionId }, ctx.now());
     const retryKey = `carry:${askTag(ask.id)}`;
     let carried = false;
@@ -516,7 +535,7 @@ export function leadUndo(ctx: Ctx, ref: string, as: string, instructions: number
       // once and brought, never back on the lead's desk to be decided again.
       const was = decisionByEvent(ctx.db, event.id);
       // It carries no pick: the answer he just withdrew is not offered back to him.
-      const undone = { wouldHave: '', kind: was?.kind ?? (old.kind === 'permission' ? 'permission' : 'technical'), productRuling: was?.productRuling ?? false, undid: { tag, words: input.aidenWords } };
+      const undone = { kind: was?.kind ?? (old.kind === 'permission' ? 'permission' : 'technical'), productRuling: was?.productRuling ?? false, undid: { tag, words: input.aidenWords } };
       const raised = raiseAskInWrite(ctx, record, actor, { nodeId: old.nodeId, kind: old.kind, text: old.text, ...(old.sessionId === null ? {} : { sessionId: old.sessionId }) }, undone);
       const oldAsk = was?.itemId != null && getDeskItem(ctx.db, was.itemId)?.kind === 'old_ask';
       // An old ask's question raised again is his, carried by lead old-asks next, unless the desk already brings it.
@@ -586,7 +605,10 @@ export function lateAnswer(ctx: Ctx, askId: number, words: string, actor: string
     logLeadEvent(ctx, { ...base, kind: 'undo', text: tag });
     logLeadEvent(ctx, { ...base, kind: 'answer' });
     // His words reach only a reachable session; any other reads them on its next prompt (the thread === null branch below).
-    const thread = reachableThread(ctx.db, { sessionId: ask.sessionId }, ctx.now());
+    // An old ask's are never carried: the step's log records them, and its session reads them on its next prompt.
+    const oldAsk = isOldAsk(ctx.db, ask);
+    if (oldAsk) addLogInWrite(ctx, record, ask.nodeId, oldAskAnswerLine(ask.id, words));
+    const thread = oldAsk ? null : reachableThread(ctx.db, { sessionId: ask.sessionId }, ctx.now());
     const retryKey = `late:${askTag(ask.id)}`;
     if (thread !== null && sendByRetryKey(ctx.db, retryKey) === undefined) {
       // His own words, so not under the lead's [From ...] header, which a session reads as not Aiden.
