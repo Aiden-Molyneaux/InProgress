@@ -827,3 +827,28 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
 - Calls: the window's answer is carried "from the window"; a held command on no step reads `A session wants <what>.`;
   C:\work projects are left out of the old asks' other-lead lines; a publish with a path, tarball, workspace or
   version-bump flag keeps the branch wording.
+- Held cards after Murr (Opus): three majors (a publish yes keyed too wide; a click anchored at the click; push and
+  deploy keyed unlike the landing check) fixed in 2d27b9f; his re-check found three more (the click read the session's
+  cwd now; the publish key blind to its flags; commit dates trusted), fixed in 9232719 by storing at the hold the
+  folder, branch and each action's key, and recording a yes only when the key read now equals it. His last look
+  (proportional, owner-calls only): sound, three minors.
+- Check 3 (fresh, on 9232719): scenes 2 shown, 4 differ, as check 2; fixes C1 to C3 shown, C4 differs: a yes on a
+  plain publish also cleared an env-prefixed publish to another registry or tag (`NPM_CONFIG_REGISTRY=... npm
+  publish`), `--ignore-scripts`, and a publish from a dirty folder offered a Go ahead that always failed. Report kept
+  unedited as check-3.md beside the results page.
+- Fixed inline after the review cap, in 9e3f13a, no reviewer has read these lines: a publish with npm's settings set
+  by the environment (in front of it, or anywhere in the command) takes no yes and no yes clears it; `--ignore-scripts`
+  is part of the publish key; Go ahead needs a key for every action, each action once (a failed read keeps no key; a
+  dirty-folder publish offers Not yet alone; a push with nothing to send stays yes-able). 3026 unit, 35 smoke and the
+  held-card e2e pass. Taken as built, named for Aiden: a yes covers that exact publish whichever session or step runs
+  it, and `pnpm publish` of the same package to the same place is the same publish; a gitignored `.npmrc` can still
+  change where a publish goes; `pnpm -r publish` and `pnpm --filter x publish` are not held at all (outside this
+  stage).
+
+## Where this stands (2026-11-26, paused for a restart)
+
+Code at 9e3f13a, branch `lead-stage-1-desk`, nothing landed. Next, in order: rewrite the results page against check 3
+(append check-3.md unedited; the four fixes' status; the lines no reviewer has read; the calls above); update the
+scribe (r811 snapshot, a356's text); then Aiden's word: "ship it" on the six, "add web" or "leave it". Evidence for the
+last runs is in the results folder (scenes-after-four-fixes, check-3-evidence); the scratchpad may not survive the
+restart.
