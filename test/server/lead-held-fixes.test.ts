@@ -4,7 +4,7 @@ import { LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
 import { ONLY_YOU } from '../../src/core/landing';
 import { buildApp } from '../../src/server/app';
 import { write as dbWrite } from '../../src/server/db/tx';
-import { CHANGED_SINCE_HELD, heldCards } from '../../src/server/lead/carry';
+import { CHANGED_SINCE_HELD, HELD_ONLY_AIDEN, heldCards } from '../../src/server/lead/carry';
 import { heldKeysOf, heldOutcome, heldRef } from '../../src/server/lead/hold';
 import { checkLanding, publishDestination, PUBLISH_NO_YES, realGit, type LandingDeps } from '../../src/server/lead/landing';
 import { createSender, type SenderT3 } from '../../src/server/lead/sends';
@@ -137,10 +137,12 @@ describe('M1: a publish yes is keyed on what goes out', () => {
       expect(res.statusCode).toBe(409);
       expect(res.json().error).toBe(ONLY_YOU);
       expect(state(t, h.item.id)).toBe('waiting_aiden');
-      // By the Voice, his yes is not recorded either, and the answer says why.
+      // A6: by the Voice, his yes is not recorded either, it says so, and nothing is answered.
       const voice = await t.answer({ sendId: h.send, aidenWords: 'go ahead', saidAt: new Date(Date.now() + 1000).toISOString(), yes: ['publish'] });
-      expect(voice.json().text).toContain(`No yes recorded for publish: ${PUBLISH_NO_YES}.`);
+      expect(voice.json().text).toBe(HELD_ONLY_AIDEN);
+      expect(state(t, h.item.id)).toBe('waiting_aiden');
     }
+    expect(t.answers()).toBe(0);
     expect(t.yesCount()).toBe(0);
   });
 
@@ -219,10 +221,10 @@ describe('M3: push and deploy yeses are keyed as the landing check keys them', (
     expect(await t.check('push')).toMatchObject({ clear: true, why: 'his yes' });
   });
 
-  it('a push with nothing to send needs no yes', async () => {
+  it('a push held, then pushed by other means before the click, needs no yes', async () => {
     const t = setup();
-    git(repo.wt, 'update-ref', 'refs/remotes/origin/feature', git(repo.wt, 'rev-parse', 'HEAD'));
     const h = await held(t, 'git push');
+    git(repo.wt, 'update-ref', 'refs/remotes/origin/feature', git(repo.wt, 'rev-parse', 'HEAD'));
     const res = await t.click(h.item.id, 'go');
     expect(res.statusCode, res.body).toBe(200);
     expect(res.json().text).toContain('No yes needed for push: nothing to push.');

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { LEAD_INSTRUCTIONS_VERSION } from '../../core/lead';
+import { words } from '../../core/hold';
 import { landingVerdict, riskGlobsOf, type LandingAction, type LandingVerdict } from '../../core/landing';
 import type { Ctx } from '../db/tx';
 import { badRequest, conflict, notFound } from '../errors';
@@ -42,7 +43,10 @@ export interface LandingAsk {
   folder: string;
   /** The branch the change is on; the folder's current one when absent. */
   branch?: string;
-  /** For a publish, the held command itself: where it goes (publishDestination) is part of its key. */
+  /**
+   * The held command itself, when a held command is checked: for a publish where it goes (publishDestination), for a push
+   * whether it forces (forcePush), and for a deploy which script runs (deployScript) are part of its key.
+   */
   segment?: string;
 }
 
@@ -233,6 +237,94 @@ export async function publishKey(deps: LandingDeps, folder: string, segment?: st
   return { key: `${tree.stdout.trim()}:${prefix.stdout.trim()}:${pkg.name}@${pkg.version}${to.length === 0 ? '' : ` ${to.join(' ')}`}` };
 }
 
+/** Why a force push is held whatever the change: what was on the remote is gone. */
+export const FORCE_WHY = 'a force push overwrites history';
+/** Why a merge of a name that is a tag too takes no key: git merges the tag, the check read the branch. */
+export const TAG_TOO_WHY = 'the name is a tag as well as a branch: run it yourself';
+/** Why a deploy takes no key (and Landing does not clear it) outside the main checkout, on main, with nothing uncommitted. */
+export const DEPLOY_WHERE_WHY = 'a deploy runs from the main checkout, on main, with nothing uncommitted';
+/** Why a rollback is held whatever the change. */
+export const ROLLBACK_WHY = "a rollback is Aiden's";
+/** Why a deploy whose script cannot be read takes no key. */
+export const DEPLOY_SCRIPT_WHY = 'could not tell which script this deploy runs: run it yourself';
+
+/** The program a command's first word runs, lower case, without a folder or `.exe`, `.cmd`, `.bat` or `.ps1`. */
+export const programOf = (word: string | undefined): string => (word ?? '').replace(/^.*[\\/]/, '').replace(/\.(?:exe|cmd|bat|ps1)$/i, '').toLowerCase();
+
+/** Whether a word is git, or a path to it. */
+export const isGitWord = (word: string): boolean => /^(?:.*[\\/])?git(?:\.exe)?$/i.test(word);
+
+/**
+ * Whether a `git push` forces: `-f` (alone or among other short flags), `--force`, `--force-with-lease` or `--force-if-includes`
+ * in any form (git takes a long option cut short, so any `--fo...`), or a refspec that starts with `+`.
+ */
+export function forcePush(segment: string): boolean {
+  const w = words(segment);
+  const git = w.findIndex(isGitWord);
+  if (git < 0) return false;
+  let i = git + 1;
+  for (; i < w.length; i++) {
+    if (w[i] === '-C' || w[i] === '-c') i++;
+    else if (!w[i]!.startsWith('-')) break;
+  }
+  if ((w[i] ?? '').toLowerCase() !== 'push') return false;
+  for (let j = i + 1; j < w.length; j++) {
+    const a = w[j]!;
+    // These take the next word as their value: it is not a flag or a refspec.
+    if (a === '-o' || a === '--push-option' || a === '--repo' || a === '--receive-pack' || a === '--exec') {
+      j++;
+      continue;
+    }
+    if (a.startsWith('--')) {
+      if (/^--fo/i.test(a)) return true;
+    } else if (a.startsWith('-')) {
+      if (a.slice(1).includes('f')) return true;
+    } else if (a.startsWith('+')) return true;
+  }
+  return false;
+}
+
+/**
+ * The script a deploy runs, read exactly: `deploy` or `rollback`, from `npm run <name>` or `pnpm run <name>` (or
+ * `run-script`), `yarn [run] <name>`, or `node <path>/deploy.mjs` (with `--rollback` alone after it, a rollback). Null for
+ * anything else (another script, words after the name, anything before the tool): what it does cannot be read. A check
+ * asked with no command (the lead's own landing check) is of the deploy script.
+ */
+export function deployScript(segment: string | undefined): 'deploy' | 'rollback' | null {
+  if (segment === undefined) return 'deploy';
+  const w = words(segment);
+  const prog = programOf(w[0]);
+  let name: string | undefined;
+  if ((prog === 'npm' || prog === 'pnpm') && (w[1] === 'run' || w[1] === 'run-script') && w.length === 3) name = w[2];
+  else if (prog === 'yarn' && w[1] === 'run' && w.length === 3) name = w[2];
+  else if (prog === 'yarn' && w.length === 2) name = w[1];
+  else if (prog === 'node' && /(?:^|[\\/])deploy\.m?js$/i.test(w[1] ?? '')) {
+    if (w.length === 2) name = 'deploy';
+    else if (w.length === 3 && w[2] === '--rollback') name = 'rollback';
+  }
+  return name === 'deploy' || name === 'rollback' ? name : null;
+}
+
+/**
+ * Whether `folder` is the repository's main checkout, on main, with nothing uncommitted: its top level is the folder that
+ * holds the common git dir, HEAD is refs/heads/main, and `status --porcelain` says nothing. A git that fails is a 409.
+ */
+async function deploysFromMain(deps: LandingDeps, folder: string): Promise<boolean> {
+  const dirs = await deps.git(folder, ['rev-parse', '--path-format=absolute', '--show-toplevel', '--git-common-dir']);
+  if (dirs.code !== 0) throw conflict(couldNotTell('where the main checkout is', dirs));
+  const [top = '', common = ''] = dirs.stdout.split(/\r?\n/).map((l) => l.trim());
+  const same = (a: string, b: string) => a.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() === b.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  if (top === '' || common === '' || !same(top, dirname(common))) return false;
+  const head = await deps.git(folder, ['symbolic-ref', '-q', 'HEAD']);
+  // Exit 1 with no output is a detached HEAD: not on main.
+  if (head.code !== 0 && !(head.code === 1 && head.stderr.trim() === '')) throw conflict(couldNotTell('which branch this is', head));
+  if (head.code !== 0 || head.stdout.trim() !== 'refs/heads/main') return false;
+  // No optional locks: a read must not take the index lock a session's own git may be waiting on.
+  const status = await deps.git(folder, ['--no-optional-locks', 'status', '--porcelain']);
+  if (status.code !== 0) throw conflict(couldNotTell(`whether ${folder} has changes not committed`, status));
+  return status.stdout.trim() === '';
+}
+
 /** What a landing check reads of the change for one action: the range, the files, and the key a yes is recorded on. */
 interface ChangeRead {
   range: string;
@@ -248,8 +340,10 @@ interface ChangeRead {
  * The landing check's key for one action, read from git in `folder` (the check's own read, without judging it): a merge on
  * main...branch, a push on what it would push (origin/branch..branch once pushed, else main...branch), a deploy on
  * live..main, each as the patch id of that range's diff; a publish on what goes out and where (publishKey, with the held
- * command `segment`). The carried yes for a held command reads it here too (landingKey), so his yes is keyed as the check
- * keys it.
+ * command `segment`). A force push (forcePush) is held always and keyed `force:<patch id>`, so a yes on a plain push never
+ * covers it. A deploy is keyed `<script>:<patch id>` (deployScript), and only from the main checkout, on main, with nothing
+ * uncommitted; a rollback is held always. A merge of a name that is a tag at another commit too takes no key. The carried
+ * yes for a held command reads it here too (landingKey), so his yes is keyed as the check keys it.
  */
 async function readChange(deps: LandingDeps, folder: string, action: LandingAction, askBranch: string | undefined, segment?: string): Promise<ChangeRead> {
   const git = (args: string[], input?: string) => deps.git(folder, args, input);
@@ -270,14 +364,33 @@ async function readChange(deps: LandingDeps, folder: string, action: LandingActi
 
   let range: string;
   let holdBecause: string | null = null;
-  if (action === 'merge') range = `refs/heads/main...refs/heads/${branch}`;
-  else if (action === 'deploy') {
+  /** The key a yes is recorded on goes in front of the patch id (force:, deploy:, rollback:); null when there is none. */
+  let keyPrefix: string | null = '';
+  const force = action === 'push' && segment !== undefined && forcePush(segment);
+  if (action === 'merge') {
+    range = `refs/heads/main...refs/heads/${branch}`;
+    // git merges what the name resolves to, a tag before a branch: the key is the branch's only when they are one commit.
+    const named = await git(['rev-parse', '--verify', '--quiet', `${branch}^{commit}`]);
+    const head = await git(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}^{commit}`]);
+    if (named.code !== 0 || head.code !== 0 || named.stdout.trim() !== head.stdout.trim()) {
+      holdBecause = TAG_TOO_WHY;
+      keyPrefix = null;
+    }
+  } else if (action === 'deploy') {
     const live = await liveBuild(deps, folder);
     range = `${live.sha}..refs/heads/main`;
     const behind = await git(['merge-base', '--is-ancestor', live.sha, 'refs/heads/main']);
     if (behind.code === 1) holdBecause = 'the live build is not behind main';
     else if (behind.code !== 0) throw conflict(couldNotTell('whether the live build is behind main', behind));
     else if (live.dirty) holdBecause = 'the live build was made from uncommitted work';
+    const script = deployScript(segment);
+    if (script === 'rollback') holdBecause = ROLLBACK_WHY;
+    keyPrefix = script === null ? null : `${script}:`;
+    if (script === null) holdBecause = DEPLOY_SCRIPT_WHY;
+    else if (!(await deploysFromMain(deps, folder))) {
+      holdBecause = DEPLOY_WHERE_WHY;
+      keyPrefix = null;
+    }
   } else {
     // push, push-public and publish: what the remote's branch lacks; a branch never pushed is read against main.
     const pushed = await git(['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${branch}^{commit}`]);
@@ -294,7 +407,11 @@ async function readChange(deps: LandingDeps, folder: string, action: LandingActi
   if (diff.code !== 0) throw conflict(couldNotTell(`what ${range} changes`, diff));
   const empty = files.length === 0 && diff.stdout === '';
   if (empty && action === 'merge') throw conflict(`Nothing to compare: ${branch} has no change against main.`);
-  if (action === 'push') {
+  if (force) {
+    // A force push with no new commits can still take commits off the remote: it is never nothing to push.
+    holdBecause = FORCE_WHY;
+    keyPrefix = 'force:';
+  } else if (action === 'push') {
     // Nothing to push means no commits, not no change: a commit and its revert change nothing and still go out.
     const commits = await git(['rev-list', '--count', range.replace('...', '..'), '--']);
     if (commits.code !== 0) throw conflict(couldNotTell(`what ${range} adds`, commits));
@@ -306,11 +423,12 @@ async function readChange(deps: LandingDeps, folder: string, action: LandingActi
     // A publish is keyed on what goes out, so a yes on a head that is already pushed (an empty range) still counts.
     const key = await publishKey(deps, folder, segment);
     patchId = 'key' in key ? key.key : null;
-  } else if (diff.stdout !== '') {
+  } else if (diff.stdout !== '' && keyPrefix !== null) {
     // --verbatim: whitespace counts, so a yes does not survive an indentation-only change.
     const pid = await git(['patch-id', '--verbatim'], diff.stdout);
     if (pid.code !== 0) throw conflict(couldNotTell('the patch id of the change', pid));
-    patchId = pid.stdout.trim().split(/\s+/)[0] || null;
+    const id = pid.stdout.trim().split(/\s+/)[0];
+    patchId = id ? `${keyPrefix}${id}` : null;
   }
   return { range, files, patchId, nothingToPush: false, holdBecause };
 }

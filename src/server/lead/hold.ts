@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
-import { CHECKED_ACTIONS, HELD_ACTIONS, heldActions, isUpstreamOfMain, mergeTargets, playbookHeldLines, pushTarget, type HeldMatch } from '../../core/hold';
+import { CHECKED_ACTIONS, HELD_ACTIONS, heldActions, isUpstreamOfMain, mergeTargets, playbookHeldLines, pushTarget, splitCommand, words, type HeldMatch } from '../../core/hold';
 import { ID_MAX } from '../../core/notices';
 import { LEAD_INSTRUCTIONS_VERSION } from '../../core/lead';
 import { clipLine } from '../../core/step-ref';
@@ -19,7 +19,7 @@ import { getProjectById, listBindings, resolveBinding } from '../repo/projects';
 import { findSession } from '../repo/sessions';
 import { isLiveWithRound } from '../repo/switches';
 import { isLeadFolder } from './folder';
-import { checkLanding, ghVisibility, PUBLISH_NO_YES, realGit, type LandingDeps } from './landing';
+import { checkLanding, deployScript, ghVisibility, isGitWord, programOf, PUBLISH_NO_YES, realGit, type LandingDeps } from './landing';
 import { intendHeldLine } from './voice';
 
 /** What the hold and stuck routes answer when the lead has nothing to say: the hook prints nothing. */
@@ -73,6 +73,56 @@ export interface HeldLine {
 
 /** A command that sets one of npm's settings by the environment (npm_config_*, in any case and any shell's form). */
 export const SETS_NPM_CONFIG = /npm_config_/i;
+/**
+ * A command that sets one of git's environment variables, in any case and any shell's form: `GIT_X=`, `export GIT_X`,
+ * `set GIT_X`, `$env:GIT_X` (and `Set-Item env:GIT_X`), `declare`, `typeset`, `readonly`, `local`, SetEnvironmentVariable.
+ */
+export const SETS_GIT_ENV = /\bGIT_\w*\s*=|\b(?:export|set|declare|typeset|readonly|local)\s+(?:-\w+\s+)*["']?GIT_|env:GIT_|SetEnvironmentVariable\s*\(\s*["']GIT_/i;
+
+/** Why a publish takes no key when npm's settings are changed in its command. */
+export const NPM_CONFIG_WHY = "npm's settings are changed in this command: run it yourself";
+/** Why a publish takes no key when its command does more than the publish and folder changes. */
+export const PUBLISH_MORE_WHY = 'this command does more than the publish: run it yourself';
+/** Why a push or merge takes no key when its command changes how git runs. */
+export const GIT_CHANGED_WHY = 'this command changes how git runs: run it yourself';
+
+/** The folder changes a publish's command may hold besides the publish (as their program, lower case). */
+const FOLDER_CHANGES = new Set(['cd', 'set-location', 'pushd', 'push-location', 'popd']);
+/** git's global options a push or merge may carry and still be read exactly (`-C <dir>` is read for its folder). */
+const GIT_GLOBALS_READ = new Set(['--no-pager', '-P', '-p']);
+
+/**
+ * Whether a git command runs git as InProgress reads it: git is its first word, and the only global options before the
+ * subcommand are `-C <dir>`, `--no-pager`, `-P` and `-p`. Anything in front of git (an environment setting, `env`, `sudo`)
+ * or another global option (`-c`, `--git-dir`, `--work-tree`, `--exec-path`) can change where it goes or what it reads.
+ */
+export function gitAsRead(segment: string): boolean {
+  const w = words(segment);
+  if (w.length === 0 || !isGitWord(w[0]!)) return false;
+  for (let i = 1; i < w.length; i++) {
+    const x = w[i]!;
+    if (x === '-C') i++;
+    else if (GIT_GLOBALS_READ.has(x)) continue;
+    else return !x.startsWith('-');
+  }
+  return true;
+}
+
+/**
+ * Why one command of a held line takes no key, so no yes can match it and Landing cannot clear it, read from the words
+ * alone; undefined when nothing stops a key. A publish whose command changes npm's settings (NPM_CONFIG_WHY), or holds
+ * anything but folder changes besides it (PUBLISH_MORE_WHY); a push or merge with git's options or environment changed
+ * (GIT_CHANGED_WHY), whatever it touches.
+ */
+export function keylessWhy(command: string, match: Pick<HeldMatch, 'action' | 'index' | 'segment'>): string | undefined {
+  if (match.action === 'publish') {
+    if (SETS_NPM_CONFIG.test(command)) return NPM_CONFIG_WHY;
+    const rest = splitCommand(command).filter((_, i) => i !== match.index);
+    if (rest.some((seg) => !FOLDER_CHANGES.has(programOf(words(seg.raw)[0])))) return PUBLISH_MORE_WHY;
+  }
+  if ((match.action === 'push' || match.action === 'merge') && (!gitAsRead(match.segment) || SETS_GIT_ENV.test(command))) return GIT_CHANGED_WHY;
+  return undefined;
+}
 
 /**
  * The project's held lines by the ref of the held item each made, read once (the window's cards, the morning list and an
@@ -135,19 +185,23 @@ const SAFE_FLAGS = new Set(['--dry-run', '--provenance', '--no-git-checks', '--i
 /**
  * Whether the publish sends the folder's own package.json as it stands: an npm, pnpm or yarn publish whose flags are all
  * known not to change the package or its version. A path or tarball after it, a workspace or prefix flag, a version bump
- * (yarn's --minor, --new-version) or any flag not known: false, and the publish is named as before, by its branch.
+ * (yarn's --minor, --new-version), a value flag given twice (`--tag a --tag b`: which one counts is not read) or any flag
+ * not known: false, and the publish is named as before, by its branch.
  */
 export function publishesFolderPackage(segment: string): boolean {
   // Nothing may come before the tool: an environment setting in front (NPM_CONFIG_REGISTRY=... npm publish) can change
   // where it goes without a word after it, so such a publish takes no yes.
   const m = /^\s*(?:npm|pnpm|yarn)\s+publish\b(.*)$/i.exec(segment);
   if (m === null) return false;
-  const words = m[1]!.trim().split(/\s+/).filter((w) => w !== '');
-  for (let i = 0; i < words.length; i++) {
-    const w = words[i]!.toLowerCase();
+  const parts = m[1]!.trim().split(/\s+/).filter((w) => w !== '');
+  const given = new Set<string>();
+  for (let i = 0; i < parts.length; i++) {
+    const w = parts[i]!.toLowerCase();
     const eq = w.indexOf('=');
     const name = eq < 0 ? w : w.slice(0, eq);
     if (SAFE_VALUE_FLAGS.has(name)) {
+      if (given.has(name)) return false;
+      given.add(name);
       if (eq < 0) i++;
       continue;
     }
@@ -283,7 +337,14 @@ export async function heldLandingAsk(match: HeldMatch, deps: LandingDeps = REAL_
     read = pushed;
     what = pushed === null ? 'a push to origin' : `a push of ${pushed} to origin`;
   } else if (match.action === 'deploy') {
-    what = 'a deploy of main to the live build';
+    // The card names the script it runs.
+    const script = deployScript(match.segment);
+    what =
+      script === 'deploy'
+        ? 'a deploy of main to the live build (the deploy script)'
+        : script === 'rollback'
+          ? 'a rollback of the live build (the rollback script)'
+          : `a deploy by a script InProgress cannot read (${clipLine(match.segment, 120)})`;
   } else if (match.action === 'publish') {
     const pkg = publishesFolderPackage(match.segment) ? await packageOf(folder) : undefined;
     read = await currentBranch(deps, folder);
@@ -309,7 +370,7 @@ async function judge(ctx: Ctx, scope: LeadScope, match: HeldMatch, deps: Landing
   try {
     const answer = await checkLanding(
       ctx,
-      { ref: scope.project.slug, stepId: scope.stepId, action: asked.action, folder, ...(branch === undefined ? {} : { branch }), ...(asked.action === 'publish' ? { segment: match.segment } : {}) },
+      { ref: scope.project.slug, stepId: scope.stepId, action: asked.action, folder, ...(branch === undefined ? {} : { branch }), segment: match.segment },
       deps,
     );
     return answer.clear ? { clear: true } : { clear: false, what, why: answer.text, keys: keys(answer.patchId) };
@@ -324,7 +385,7 @@ async function judge(ctx: Ctx, scope: LeadScope, match: HeldMatch, deps: Landing
  * project has no lead or its round is off, or the command at the place the hook names is not on this project's list (its
  * Held lines first); else names the action and runs the landing check for a merge, deploy, push or publish in the folder
  * that command runs in (the rest are Aiden's without one). A command that reads differently here than the hook sent it is
- * held. Clear: nothing. Held: a `held` desk item waiting on Aiden (one per session and command while it is not done), with
+ * held, and so is one InProgress cannot read exactly (keylessWhy), before any check and with no key. Clear: nothing. Held: a `held` desk item waiting on Aiden (one per session and command while it is not done), with
  * what the check resolved when it ran (HeldKeys, in its outcome), a `held` line in the lead's log, and what the command
  * does, in plain words.
  */
@@ -333,12 +394,13 @@ export async function holdCheck(ctx: Ctx, ask: HoldAsk, deps: LandingDeps = REAL
   if (scope === undefined) return SAY_NOTHING;
   const match = heldActions(ask.command, playbookHeldLines(scope.project.playbook), ask.cwd || null).find((m) => m.index === ask.index);
   if (match === undefined) return SAY_NOTHING;
+  // A command InProgress cannot read exactly (keylessWhy) is held before any check, with no key: no yes or Landing clears it.
+  const keyless = keylessWhy(ask.command, match);
   const judged: Judged =
     ask.segment !== undefined && ask.segment !== match.segment
       ? { clear: false, what: match.what, why: 'the hook and InProgress read the command differently' }
-      : match.action === 'publish' && SETS_NPM_CONFIG.test(ask.command)
-        ? // npm's settings changed anywhere in the command (export, set, $env:) can send the publish elsewhere: no yes clears it.
-          { clear: false, what: match.what, why: PUBLISH_NO_YES }
+      : keyless !== undefined
+        ? { clear: false, what: match.what, why: keyless }
         : await judge(ctx, scope, match, deps);
   if (judged.clear) return SAY_NOTHING;
   const now = ctx.now();

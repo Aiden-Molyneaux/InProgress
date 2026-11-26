@@ -153,11 +153,11 @@ describe('deploy', () => {
     t.landingOn();
     write(repo.main, 'src/hooks/x.ts', lines(6, 'main'));
     const head = commit(repo.main, 'hooks on main');
-    const held = await t.check('deploy');
+    const held = await t.check('deploy', { folder: repo.main });
     expect(held).toMatchObject({ clear: false, range: `${repo.base}..refs/heads/main`, files: 1, text: `${HELD} (it touches src/hooks/x.ts)` });
 
     writeFileSync(join(repo.main, 'dist', 'build.json'), JSON.stringify({ sha: head, dirty: false, builtAt: '2026-11-25T01:00:00.000Z' }));
-    expect(await t.check('deploy')).toMatchObject({ clear: true, range: `${head}..refs/heads/main`, files: 0, patchId: null });
+    expect(await t.check('deploy', { folder: repo.main })).toMatchObject({ clear: true, range: `${head}..refs/heads/main`, files: 0, patchId: null });
   });
 
   it('reads a 7-character sha as build-to.mjs writes it, and holds a live build that is not behind main', async () => {
@@ -166,13 +166,13 @@ describe('deploy', () => {
     write(repo.main, 'web/app.ts', lines(6, 'main'));
     const head = commit(repo.main, 'web on main');
     writeFileSync(join(repo.main, 'dist', 'build.json'), JSON.stringify({ sha: repo.base.slice(0, 7), dirty: false, builtAt: '2026-11-25T01:00:00.000Z' }));
-    expect(await t.check('deploy')).toMatchObject({ clear: true, range: `${repo.base.slice(0, 7)}..refs/heads/main`, files: 1 });
+    expect(await t.check('deploy', { folder: repo.main })).toMatchObject({ clear: true, range: `${repo.base.slice(0, 7)}..refs/heads/main`, files: 1 });
 
     // A build made from a commit main does not hold (a feature branch built and deployed).
     write(repo.wt, 'web/app.ts', lines(9, 'feature'));
     const off = commit(repo.wt, 'feature');
     writeFileSync(join(repo.main, 'dist', 'build.json'), JSON.stringify({ sha: off.slice(0, 7), dirty: false, builtAt: '2026-11-25T02:00:00.000Z' }));
-    expect(await t.check('deploy')).toMatchObject({ clear: false, text: `${HELD} (the live build is not behind main)` });
+    expect(await t.check('deploy', { folder: repo.main })).toMatchObject({ clear: false, text: `${HELD} (the live build is not behind main)` });
     expect(head).not.toBe(off);
   });
 
@@ -180,14 +180,14 @@ describe('deploy', () => {
     const t = setup();
     t.landingOn();
     writeFileSync(join(repo.main, 'dist', 'build.json'), JSON.stringify({ sha: repo.base.slice(0, 7), dirty: true, builtAt: '2026-11-25T01:00:00.000Z' }));
-    expect(await t.check('deploy')).toMatchObject({ clear: false, text: `${HELD} (the live build was made from uncommitted work)` });
+    expect(await t.check('deploy', { folder: repo.main })).toMatchObject({ clear: false, text: `${HELD} (the live build was made from uncommitted work)` });
   });
 
   it('is refused with a plain line when there is no live build to compare with', async () => {
     const t = setup();
     t.landingOn();
     write(repo.main, 'dist/build.json', '{}');
-    await expect(t.check('deploy')).rejects.toMatchObject({ status: 409 });
+    await expect(t.check('deploy', { folder: repo.main })).rejects.toMatchObject({ status: 409 });
   });
 });
 

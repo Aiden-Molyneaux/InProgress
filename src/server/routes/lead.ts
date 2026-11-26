@@ -21,7 +21,7 @@ import { renderLeadBrief } from '../lead-text';
 import { leadAllowBody, leadDisallowBody, leadAnswerBody, leadBriefQuery, leadStuckBody, leadDecideBody, leadUndoBody, leadSetBody, leadImportUsageBody, leadCountsQuery, leadDropBody, leadIntentBody, leadKeptBody, leadLandingBody, leadParkBody, leadPromiseBody, leadReadQuery, leadRelayBody, leadStartBody, leadRulesQuery, leadSeenBody, leadStampBody, leadDeskAddBody, leadOldAsksBody, leadOldAsksNextBody, leadOldAsksReadingBody } from '../schemas';
 import { leadOldAskReading, leadOldAsks, leadOldAsksAll, leadOldAsksNext } from '../lead/oldAsks';
 import { VOICE_NOT_SET_UP, voiceSetUp } from '../lead/voice';
-import { heldLineOf, heldScope, heldYesActions, leadAnswerItem, readHeldYeses, SAID_AT_NEEDED, voiceTarget } from '../lead/carry';
+import { heldGoAhead, heldLineOf, heldScope, heldYesActions, HELD_ONLY_AIDEN, leadAnswerItem, readHeldYeses, SAID_AT_NEEDED, voiceTarget } from '../lead/carry';
 
 /** How many of a project's threads, newest first, the threads read lists. */
 const THREADS_LISTED = 20;
@@ -202,8 +202,11 @@ export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken:
           if (target.item.nodeId === null) {
             if (kept.length) notes.push('No yes recorded: the held command is on no step.');
           } else if (kept.length) {
+            const line = heldLineOf(ctx, target.item);
+            // The card's rule: where no yes can release the command, none is recorded and nothing is answered (the item stays).
+            if (!heldGoAhead(ctx, project, target.item, line)) return { text: HELD_ONLY_AIDEN, carried: false };
             // Keyed on what was held, not on when he said it: no time of his is needed (readHeldYeses).
-            yeses = await readHeldYeses(ctx, project, heldLineOf(ctx, target.item), heldKeysOf(target.item.outcome), kept, landing);
+            yeses = await readHeldYeses(ctx, project, line, heldKeysOf(target.item.outcome), kept, landing);
           }
         } else if (yes !== undefined) notes.push('--yes was ignored: what he left to the lead takes no go-ahead.');
         const { says: _says, ...rest } = input;

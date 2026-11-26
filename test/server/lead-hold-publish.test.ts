@@ -28,6 +28,10 @@ describe('publishesFolderPackage', () => {
       'NPM_CONFIG_REGISTRY=https://x.invalid npm publish',
       'npm_config_dry_run=true npm publish',
       'npm run build',
+      // A value flag given twice: which one counts is not read.
+      'npm publish --tag a --tag b',
+      'npm publish --registry=https://a.example/ --registry https://b.example/',
+      'npm publish --tag=a --TAG=b',
     ]) {
       expect(publishesFolderPackage(c), c).toBe(false);
     }

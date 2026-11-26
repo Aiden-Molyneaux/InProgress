@@ -40,7 +40,7 @@ function setup() {
   expect(ctx.db.prepare("UPDATE sessions SET cwd = ?, branch = 'feature', app = 't3', t3_thread_id = 'th_1' WHERE id = 's1'").run(repo.wt).changes).toBe(1);
   const review = raiseAsk(ctx, 'session:s1', { nodeId: step.id, kind: 'review', text: 'Ship the tabs?', sessionId: 's1' });
   const permission = raiseAsk(ctx, 'session:s1', { nodeId: step.id, kind: 'permission', text: 'May I delete the old tabs?', sessionId: 's1' });
-  const check = (action: 'merge' | 'deploy' | 'push') => checkLanding(ctx, { ref: project.slug, stepId: step.id, action, folder: repo.wt, ...(action === 'deploy' ? {} : { branch: 'feature' }) }, deps);
+  const check = (action: 'merge' | 'deploy' | 'push') => checkLanding(ctx, { ref: project.slug, stepId: step.id, action, ...(action === 'deploy' ? { folder: repo.main } : { folder: repo.wt, branch: 'feature' }) }, deps);
   return { ctx, project, step, review, permission, check };
 }
 
@@ -61,7 +61,7 @@ describe("the guard on Aiden's go-ahead", () => {
     expect(merge).toMatch(/^[0-9a-f]{40}$/);
     expect(yeses).toEqual([
       { action: 'merge', patchId: merge },
-      { action: 'deploy', patchId: merge },
+      { action: 'deploy', patchId: `deploy:${merge}` },
       { action: 'push', patchId: merge },
     ]);
     // The two checks above held and logged; the read logs nothing.

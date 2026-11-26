@@ -14,7 +14,7 @@ import { addLogInWrite } from '../repo/logs';
 import { shelvedAmong } from '../repo/shelved';
 import { checkLanding, landingKey, PUBLISH_NO_YES, realGit, recordYes, type LandingDeps } from './landing';
 import { aidenSaidWords } from './aidenSaid';
-import { heldKeysOf, heldLandingAsk, heldLines, heldWhatOf, publishesFolderPackage, SETS_NPM_CONFIG, type HeldKeys, type HeldLine } from './hold';
+import { heldKeysOf, heldLandingAsk, heldLines, heldWhatOf, keylessWhy, publishesFolderPackage, type HeldKeys, type HeldLine } from './hold';
 
 /*
  * Carrying Aiden's answer (lead stage 1, #743, task 11 and its fixes): what his yes covers, read from git, and his reply to
@@ -27,6 +27,8 @@ export const CHANGED_AFTER = 'the work changed after his word';
 export const CHANGED_SINCE_HELD = 'it changed after it was held';
 /** Why a held command's yes is not recorded when the hold kept no key for it. */
 export const NOT_KEYED = 'it was not checked when it was held: run it yourself';
+/** What a yes by the Voice on a held line says where no yes can release the command (heldGoAhead): nothing is answered. */
+export const HELD_ONLY_AIDEN = 'No yes recorded: only Aiden can run this one.';
 /** The line an answer prints for a review's yes given with no time of his (W8a). */
 export const SAID_AT_NEEDED = 'give --said-at with a yes';
 
@@ -42,7 +44,8 @@ async function changedAfter(folder: string, tip: string, asOf: string, deps?: La
  * The yes for each action of a review, read now in the session's folder on its branch (nothing logged): a merge, deploy or
  * push on the change of the branch (main...branch, as a merge reads it). A publish takes none on a review (PUBLISH_NO_YES:
  * its key is what goes out, which only a held publish names). No yes when the change cannot be read, or when the branch's
- * newest commit is after his words (`saidAt`): what he said yes to is not what is there now.
+ * newest commit is after his words (`saidAt`): what he said yes to is not what is there now. A deploy's yes is keyed on the
+ * deploy script (`deploy:<patch id>`), as the landing check keys a deploy.
  */
 export async function readSessionYeses(
   ctx: Ctx,
@@ -76,7 +79,9 @@ export async function readSessionYeses(
   return actions.map((action) => {
     if (action === 'publish') return { action, patchId: null, why: PUBLISH_NO_YES };
     const key = change!;
-    return 'patchId' in key ? { action, patchId: key.patchId } : { action, patchId: null, why: key.why };
+    // A deploy is keyed with the script it runs (readChange): his "ship it" on a review is a yes to the deploy script.
+    if ('patchId' in key) return { action, patchId: action === 'deploy' ? `deploy:${key.patchId}` : key.patchId };
+    return { action, patchId: null, why: key.why };
   });
 }
 
@@ -108,29 +113,33 @@ function yesCanRelease(m: HeldMatch): boolean {
 }
 
 /**
- * Whether Go ahead is offered on a held item: it is on a step, its held line is found, the hold stored what it checked
- * (heldKeysOf) with a key for every action of it, and a yes can release every command of it on the list (yesCanRelease); a
- * push held as public is never released by a yes. Read without git: a yes that cannot be recorded when he clicks (it changed
- * after the hold, a folder with changes not committed) is the route's 409.
- */
-/**
- * Whether the hold kept a key a yes can match for `action`: a string, or null for a push (nothing to send, so no yes is
- * needed). A publish or merge with a null key (its folder had changes not committed), or an action whose read failed at
- * the hold (no key kept), can never be released by a yes.
+ * Whether the hold kept a key a yes can match for `action`: a string. A null key (a folder with changes not committed, a
+ * merge of a name that is a tag too, a deploy outside the main checkout), or an action whose read failed at the hold (no key
+ * kept), can never be released by a yes. A held push always has something to send: one with nothing is clear, never held.
  */
 function keyedForYes(stored: HeldKeys, action: string): boolean {
-  const keys = stored.keys as Record<string, string | null | undefined>;
-  return typeof keys[action] === 'string' || (action === 'push' && action in keys && keys[action] === null);
+  return typeof (stored.keys as Record<string, string | null | undefined>)[action] === 'string';
 }
 
+/**
+ * Whether Go ahead is offered on a held item, the window's card and the Voice alike: one yes of his must be able to release
+ * the whole command. Read without git, from the item and its held line; every rule must hold:
+ * - the item is on a step, and its held line is found;
+ * - it was not held as a push to a public place (a push-public is never released by a yes);
+ * - the hold stored what it checked (heldKeysOf);
+ * - no command of the line takes no key by its words (keylessWhy: npm's settings changed with a publish among them, a
+ *   publish with more than folder changes beside it, a push or merge with git's options or environment changed);
+ * - at least one command of it is on the list, each action once (two pushes cannot be released by one yes);
+ * - a yes can release each of them (yesCanRelease), and the hold kept a key for each (keyedForYes).
+ * A yes that cannot be recorded when he clicks (it changed after the hold) is the route's 409.
+ */
 export function heldGoAhead(ctx: Ctx, project: Project, item: Pick<DeskItem, 'nodeId' | 'outcome'>, line: HeldLine | undefined): boolean {
   if (item.nodeId === null || line === undefined) return false;
   if (line.why.includes(goesOutWhy('push-public'))) return false;
   const stored = heldKeysOf(item.outcome);
   if (stored === undefined) return false;
-  // npm's settings changed by the environment can send a publish elsewhere: the hold took no key for it.
-  if (SETS_NPM_CONFIG.test(line.command)) return false;
   const matches = heldMatches(ctx, project, line);
+  if (matches.some((m) => keylessWhy(line.command, m) !== undefined)) return false;
   // Each action once, with a key the hold computed: two pushes in one command, or a hold whose read failed (a null key),
   // could never be released by one yes, so they offer Not yet alone.
   const once = new Set(matches.map((m) => m.action)).size === matches.length;
@@ -141,7 +150,8 @@ export function heldGoAhead(ctx: Ctx, project: Project, item: Pick<DeskItem, 'no
  * The yes for each command of a held line his go-ahead covers (`actions`, every one when absent): exactly what the hold
  * checked (`stored`, heldKeysOf). Each command's key is read now as the landing check reads it (heldLandingAsk, then
  * landingKey) in the folder the hold stored, never the session's own, and a yes is recorded only when the checkout still
- * reads the branch the hold read and the key is the one the hold computed. Else no yes: CHANGED_SINCE_HELD, NOT_KEYED for an
+ * reads the branch the hold read and the key is the one the hold computed. Else no yes: keylessWhy for a command that takes
+ * no key by its words, CHANGED_SINCE_HELD, NOT_KEYED for an
  * action the hold kept no key for (or an item with none), PUBLISH_NO_YES for a publish that does not send its folder's
  * package as committed, or why its target cannot be read. A push with nothing to send needs none. Nothing logged.
  */
@@ -159,6 +169,11 @@ export async function readHeldYeses(
   for (const m of heldMatches(ctx, project, line)) {
     const action = m.action;
     if (!wanted(action)) continue;
+    const keyless = keylessWhy(line.command, m);
+    if (keyless !== undefined) {
+      out.push({ action, patchId: null, why: keyless });
+      continue;
+    }
     if (action === 'publish' && !publishesFolderPackage(m.segment)) {
       out.push({ action, patchId: null, why: PUBLISH_NO_YES });
       continue;
@@ -179,7 +194,7 @@ export async function readHeldYeses(
         out.push({ action, patchId: null, why: CHANGED_SINCE_HELD });
         continue;
       }
-      const key = await landingKey(stored.folder, asked.action, asked.branch, action === 'publish' ? m.segment : undefined, deps);
+      const key = await landingKey(stored.folder, asked.action, asked.branch, m.segment, deps);
       if (key.nothingToPush) {
         out.push({ action, patchId: null, why: 'nothing to push', needless: true });
         continue;

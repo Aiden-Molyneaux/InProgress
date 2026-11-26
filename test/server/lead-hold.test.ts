@@ -9,7 +9,7 @@ import { createCtx, deskOnly, write } from '../../src/server/db/tx';
 import { heldActions, playbookHeldLines } from '../../src/core/hold';
 import { leadAllow, leadDisallow } from '../../src/server/lead-commands';
 import { applyVerdict } from '../../src/server/lead/apply';
-import { heldKeysOf, heldOutcome, heldWhatOf, STUCK_POLL_MS, STUCK_WAIT_MS, stuckWait, watchHeldLines, writeHeldLines } from '../../src/server/lead/hold';
+import { heldKeysOf, heldOutcome, heldWhatOf, NPM_CONFIG_WHY, STUCK_POLL_MS, STUCK_WAIT_MS, stuckWait, watchHeldLines, writeHeldLines } from '../../src/server/lead/hold';
 import { PUBLISH_NO_YES } from '../../src/server/lead/landing';
 import { realGit, type LandingDeps } from '../../src/server/lead/landing';
 import { deskUserMessage } from '../../src/server/lead/prompt';
@@ -170,7 +170,7 @@ describe('POST /api/lead/hold', () => {
       expect((await w.hold(command)).held, command).toBe(true);
     }
     const why = (w.events('held') as { text: string }[]).map((e) => e.text.slice(e.text.lastIndexOf(' -> ') + 4));
-    expect(why).toEqual([PUBLISH_NO_YES, PUBLISH_NO_YES]);
+    expect(why).toEqual([NPM_CONFIG_WHY, NPM_CONFIG_WHY]);
   });
 
   it('heldWhatOf reads the what back from the outcome, and nothing from an item held before it was stored', () => {
