@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import { CHECKED_ACTIONS, HELD_ACTIONS, heldActions, isUpstreamOfMain, mergeTargets, playbookHeldLines, pushTarget, type HeldMatch } from '../../core/hold';
@@ -97,34 +98,40 @@ async function currentBranch(deps: LandingDeps, folder: string): Promise<string 
   }
 }
 
-/** Flags of a publish that take a value: the next word is that value, not a path. */
-const VALUE_FLAGS = new Set(['--tag', '--access', '--otp', '--registry', '--provenance-file', '--publish-branch']);
+/** Flags of a publish that take a value: the next word, or the part after "=", is that value. */
+const SAFE_VALUE_FLAGS = new Set(['--tag', '--access', '--otp', '--registry', '--publish-branch']);
+/** Flags of a publish that change neither which package goes out nor its version. */
+const SAFE_FLAGS = new Set(['--dry-run', '--provenance', '--no-git-checks', '--ignore-scripts', '--force']);
 
 /**
- * Whether the publish sends the folder's own package.json: an npm, pnpm or yarn publish with flags only. A path or
- * tarball after it, or a workspace flag, sends another package: the publish is then named as before, by its branch.
+ * Whether the publish sends the folder's own package.json as it stands: an npm, pnpm or yarn publish whose flags are all
+ * known not to change the package or its version. A path or tarball after it, a workspace or prefix flag, a version bump
+ * (yarn's --minor, --new-version) or any flag not known: false, and the publish is named as before, by its branch.
  */
 export function publishesFolderPackage(segment: string): boolean {
   const m = /\b(?:npm|pnpm|yarn)\s+publish\b(.*)$/i.exec(segment);
   if (m === null) return false;
   const words = m[1]!.trim().split(/\s+/).filter((w) => w !== '');
   for (let i = 0; i < words.length; i++) {
-    const w = words[i]!;
-    if (/^(?:-w|--workspaces?|--filter|-r|--recursive)(?:=|$)/i.test(w)) return false;
-    if (w.startsWith('-')) {
-      if (!w.includes('=') && VALUE_FLAGS.has(w.toLowerCase())) i++;
+    const w = words[i]!.toLowerCase();
+    const eq = w.indexOf('=');
+    const name = eq < 0 ? w : w.slice(0, eq);
+    if (SAFE_VALUE_FLAGS.has(name)) {
+      if (eq < 0) i++;
       continue;
     }
+    if (eq < 0 && SAFE_FLAGS.has(name)) continue;
     return false;
   }
   return true;
 }
 
 /** The name and version in `<folder>/package.json`, both strings; undefined when it cannot be read or lacks either. */
-function packageOf(folder: string): { name: string; version: string } | undefined {
+async function packageOf(folder: string): Promise<{ name: string; version: string } | undefined> {
   let pkg: unknown;
   try {
-    pkg = JSON.parse(readFileSync(join(folder, 'package.json'), 'utf8'));
+    // Read without blocking the server: the folder may be on a slow share.
+    pkg = JSON.parse(await readFile(join(folder, 'package.json'), 'utf8'));
   } catch {
     // No package.json, or one that is not JSON: the publish is named as before, by its branch.
     return undefined;
@@ -138,8 +145,8 @@ function packageOf(folder: string): { name: string; version: string } | undefine
  * A held item's outcome: why it is held, then what the command does on a line of its own (`what` is one line, so the last
  * `\nwhat: ` is always its own). heldWhatOf reads it back.
  */
-export const heldOutcome = (why: string, what: string): string => `held: ${why}${HELD_WHAT}${clipLine(what, 1_000)}`;
 const HELD_WHAT = '\nwhat: ';
+export const heldOutcome = (why: string, what: string): string => `held: ${why}${HELD_WHAT}${clipLine(what, 1_000)}`;
 
 /** What a held item's command does, from its outcome (heldOutcome); undefined for an item held before it was stored. */
 export function heldWhatOf(outcome: string | null): string | undefined {
@@ -155,7 +162,11 @@ type Judged = { clear: true } | { clear: false; what: string; why: string };
 
 /** Runs the landing check for a held command, read from its words, in the folder it runs in; any refusal of the check holds it. */
 async function judge(ctx: Ctx, scope: LeadScope, match: HeldMatch, deps: LandingDeps): Promise<Judged> {
-  if (!CHECKED_ACTIONS.includes(match.action)) return { clear: false, what: `${match.what} (${clipLine(match.segment, 120)})`, why: "this is Aiden's without a check" };
+  if (!CHECKED_ACTIONS.includes(match.action)) {
+    // A playbook line names its command in its what already; any other action names the command here.
+    const what = match.action === 'playbook' ? match.what : `${match.what} (${clipLine(match.segment, 120)})`;
+    return { clear: false, what, why: "this is Aiden's without a check" };
+  }
   const folder = match.folder;
   if (folder === null) return { clear: false, what: match.what, why: 'could not tell which folder it runs in' };
   let branch: string | undefined;
@@ -181,7 +192,7 @@ async function judge(ctx: Ctx, scope: LeadScope, match: HeldMatch, deps: Landing
   } else if (match.action === 'deploy') {
     what = 'a deploy of main to the live build';
   } else if (match.action === 'publish') {
-    const pkg = publishesFolderPackage(match.segment) ? packageOf(folder) : undefined;
+    const pkg = publishesFolderPackage(match.segment) ? await packageOf(folder) : undefined;
     if (pkg !== undefined) {
       what = `a publish of ${pkg.name} ${pkg.version} to npm`;
     } else {

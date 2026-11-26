@@ -121,7 +121,7 @@ describe('POST /api/lead/hold', () => {
     const w = world();
     expect(await w.hold('npm run seed-prod')).toEqual({ say: 'nothing' });
     updateProject(w.ctx, 'test', w.project.slug, { playbook: 'Held: npm run seed-prod' });
-    expect(await w.hold('npm run seed-prod')).toEqual({ held: true, text: 'a command the playbook holds for Aiden (npm run seed-prod) (npm run seed-prod)' });
+    expect(await w.hold('npm run seed-prod')).toEqual({ held: true, text: 'a command the playbook holds for Aiden (npm run seed-prod)' });
   });
 
   it('a session with no focus step is held: the check needs one', async () => {
