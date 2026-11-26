@@ -2,9 +2,9 @@ import { sessionActivity } from '../../core/activity';
 import { STALE_SESSION_MS } from '../../core/types';
 import { stamp } from '../../core/span';
 import { write, type Ctx } from '../db/tx';
-import { aidensAskSql } from '../repo/asks';
+import { aidensAskSql, requireAsk } from '../repo/asks';
 import { getDeskItem, openDeskItems, type DeskItem } from '../repo/desk';
-import { DESK_ASK_DUE_MS, itemEverMade, plusMs, produceDeskItem } from '../repo/deskProducers';
+import { DESK_ASK_DUE_MS, deskOnReviewRaised, itemEverMade, plusMs, produceDeskItem } from '../repo/deskProducers';
 import { resolveProject } from '../repo/projects';
 import { findSession } from '../repo/sessions';
 import { liveProjectsWithRound, roundBound } from '../repo/switches';
@@ -121,14 +121,19 @@ function sweepPass(ctx: Ctx, projectId: number): number {
   const missing = ctx.db
     .prepare(
       `SELECT a.id, a.kind, a.node_id, a.raised_at FROM asks a
-       WHERE a.project_id = ? AND ${aidensAskSql('a.')} AND a.kind IN ('question', 'permission') AND a.cleared_at IS NULL
+       WHERE a.project_id = ? AND ${aidensAskSql('a.')} AND a.kind IN ('question', 'permission', 'review') AND a.cleared_at IS NULL
          AND a.session_id IS NOT NULL AND a.raised_at >= ?
-         AND NOT EXISTS (SELECT 1 FROM desk_items d WHERE d.kind = a.kind AND d.ref = CAST(a.id AS TEXT))
+         AND NOT EXISTS (SELECT 1 FROM desk_items d WHERE d.kind IN (a.kind, 'old_ask') AND d.ref = CAST(a.id AS TEXT))
        ORDER BY a.raised_at, a.id`,
     )
-    .all(projectId, bound) as { id: number; kind: 'question' | 'permission'; node_id: number; raised_at: string }[];
+    .all(projectId, bound) as { id: number; kind: 'question' | 'permission' | 'review'; node_id: number; raised_at: string }[];
   let made = 0;
   for (const a of missing) {
+    // A review is never the round's: it waits on Aiden and is brought, as when it is raised with the round on.
+    if (a.kind === 'review') {
+      if (deskOnReviewRaised(ctx, requireAsk(ctx, a.id))) made++;
+      continue;
+    }
     if (produceDeskItem(ctx.db, { projectId, kind: a.kind, ref: String(a.id), nodeId: a.node_id, dueAt: plusMs(a.raised_at, DESK_ASK_DUE_MS) }, now).created) made++;
   }
   return made;

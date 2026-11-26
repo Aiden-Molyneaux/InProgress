@@ -111,7 +111,7 @@ export function renderLeadBrief(b: LeadBrief): string {
     ),
     ...section(
       `Brought to Aiden by the desk, waiting (${b.brought.length} of ${AIDEN_BROUGHT_LIMIT}):`,
-      b.brought.map((d) => `${d.tag} ${stamp(d.at)}${d.askId === null ? '' : ` ${askTag(d.askId)}`}${d.stepId === null ? '' : ` on ${step(d.stepId, d.stepTitle)}`}: "${line(d.line, TEXT_CUT)}" · you would: "${line(d.wouldHave, TEXT_CUT)}"`),
+      b.brought.map((d) => `${d.tag} ${stamp(d.at)}${d.askId === null ? '' : ` ${askTag(d.askId)}`}${d.stepId === null ? '' : ` on ${step(d.stepId, d.stepTitle)}`}: "${line(d.line, TEXT_CUT)}"${line(d.wouldHave, TEXT_CUT) === '' ? '' : ` · you would: "${line(d.wouldHave, TEXT_CUT)}"`}`),
     ),
     ...section(`Next up (${b.nextUp.length}):`, b.nextUp.map((n) => `${step(n.stepId, n.title)} · ${n.status}`)),
     `Backlog: ${b.backlog} ${b.backlog === 1 ? 'step' : 'steps'} not started and not in the queue`,

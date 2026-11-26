@@ -679,3 +679,46 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
 - A finding for Aiden, not a fix: the plain-code landing check holds a change only when it touches the risk list or
   a `Risk:` line of the playbook. It cannot read whether a step's bar shows on a screen, so a screen change that skips
   its review would land on green. Recommendation for his word: add `Risk: web/**` to InProgress's playbook.
+
+## The scenes on a copy, with the real claude (first run, c6d3335's build)
+
+- 14 Opus turns, 0.76 dollars list, on a fresh copy of the live data (port 4424, a recording T3, a voice receiver).
+- Scene 1: shown. The session's question was answered in 9 seconds with `[From Progresser, the lead] d18: ...` and its
+  Why line with "undo d18"; nothing reached the phone; the next morning's list carried it.
+- Scene 2: shown, with wording that differs. The bring line reached the Voice; "search" was carried to the thread; the
+  picture was copied into the project's resources folder and `lead resource` named the copy; the review reached the
+  Voice as its own line (`... a review waits on you. ... Say "ship it", "not yet", or "show me 745". It has a picture:
+  r811.`); the landing check held the merge before his yes and cleared it after his "ship it" by its send.
+- Scene 3: not shown on this run. The minute watch asked the stopped session; the turn answered PARK, rightly: the
+  harness had not made the stopped session's branch in the scratch repo, so there was nothing to restart from. The
+  publish was held before it ran and the morning list said `Went wrong (1) #746 stopped at 22:41; parked at 23:21.`
+  and listed the held publish. Rerun with the branch made.
+- Scene 4: shown, wording differs. The morning list went as one message to the day's thread and one voice line; d18
+  was undone with "ids are noise", the session told once, and the next turn's prompt carried the standing ruling. The
+  week line printed the newest reading (44 percent, read from the real turns' own gauges), not the imported one.
+- Scene 5: shown. Round off: a new question got no item and no turn, a held command passed; round on: what waited
+  went oldest first; with the receiver answering 503 the round still answered, the morning list listed the lines as
+  not delivered, and once open each line went once.
+- Scene 6: shown, wording differs (no reading was stored, so the lines read `Glimpse, 1 of 14: #609 ..., 25 days old.
+  Say your answer.`). InProgress's six went on the desk for the round; 35 others came five at a time and were answered;
+  the Voice said the old asks are done.
+- Done when 3, read from the record: no desk item with more than one applied turn, no retry key with two sends, no
+  voice line sent twice. The recorder shows the day's thread started twice, once per faked day, which is right.
+- Two defects found, fixed next: a carried answer was relayed to the ask's session even when it had ended (8, 7 and
+  4 relays to three long-ended threads in scene 6; live, that would wake them); a carry line did not say which ask it
+  answered, so a session with several could not tell. My calls: a carry goes only to a live session; the line names
+  the ask (`Aiden's answer to a<id>, carried by ...`), which differs from scene 2's text for that reason.
+- The harness's own check misses, corrected by reading the record: the review line's pattern had lost its
+  backslashes (fixed in run.mjs), the week check wanted the imported figures, scene 5's "lines wait" looked after they
+  had already gone.
+- Why scene 3 parked, corrected: the branch did exist in the scratch repo, but the lead's tools read the project's
+  first bound folder, which on the copy is the live repo C:/personal/InProgress, so `branch_exists` said no. Those
+  tools only read (`git branch --list`, `git diff --shortstat`, `git merge-base --is-ancestor`); nothing was written
+  there. The harness now binds only its scratch repo and worktree on the copy.
+- Murr on R1 (Opus): needs fixes, 1 major: a review raised while the round was off never reached the desk when it came
+  back on (the sweep took only questions and permissions). Fixed as R2 to R7 with the two carry fixes as C1 and C2: the
+  sweep brings reviews; no item beside an old ask's; "show me 745" is no answer (the rules say to show the picture and
+  wait); the brief leaves out an empty "you would"; undoing a carried review answer raises the review again for the
+  Voice; a carry and its undo go only to a live session; the carry line names the ask. Deviations accepted: a held or
+  "you decide" item's carry keeps the old line (no ask to name); a held item's carry is gated too. 2950 unit tests and
+  35 smoke tests green.

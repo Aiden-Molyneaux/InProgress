@@ -131,8 +131,9 @@ const hhmmOf = (iso: string): string => {
 };
 
 /** The line a T3 Code session reads in its thread when the lead carries Aiden's answer. */
-export const carriedLine = (lead: string, where: 'voice' | 'thread', saidAt: string, words: string): string =>
-  `Aiden's answer, carried by ${lead} from ${where === 'voice' ? 'Grok' : "the lead's thread"} at ${hhmmOf(saidAt)}: "${words.trim()}"`;
+export const carriedLine = (lead: string, where: 'voice' | 'thread', saidAt: string, words: string, askId?: number): string =>
+  // The ask is named, so a session with several asks knows which one he answered (a held or "you decide" item has none).
+  `Aiden's answer${askId === undefined ? '' : ` to ${askTag(askId)}`}, carried by ${lead} from ${where === 'voice' ? 'Grok' : "the lead's thread"} at ${hhmmOf(saidAt)}: "${words.trim()}"`;
 
 /**
  * For a review: the patch id of the change of the ask's step, read now in its session's folder on the branch it is on
@@ -242,11 +243,13 @@ export function leadAnswer(ctx: Ctx, ref: string, as: string, instructions: numb
       saidAt,
     });
     const lines = [`Answered ${tag} with Aiden's words: decision ${decisionTag(eventId)}.`, ...yesLines];
-    const thread = t3ThreadOf(ctx.db, ask.sessionId);
+    // Only a session that has not ended is told in its thread: a relay would wake a long-ended one on a stale step. An
+    // ended one reads the answer on its next prompt, if it ever resumes.
+    const thread = liveT3ThreadOf(ctx.db, ask.sessionId);
     const retryKey = `carry:${askTag(ask.id)}`;
     let carried = false;
     if (thread !== null && sendByRetryKey(ctx.db, retryKey) === undefined) {
-      intendSend(ctx.db, { projectId: project.id, kind: 'carry', target: thread, retryKey, body: carriedLine(name, where, saidAt, input.aidenWords) }, ctx.now());
+      intendSend(ctx.db, { projectId: project.id, kind: 'carry', target: thread, retryKey, body: carriedLine(name, where, saidAt, input.aidenWords, ask.id) }, ctx.now());
       carried = true;
       lines.push('Its session is told in its thread.');
     }
@@ -469,6 +472,13 @@ export function leadUndo(ctx: Ctx, ref: string, as: string, instructions: number
           .run(`Aiden's answer ${tag} is withdrawn by ${name}: ${why}`, event.ask_id);
       }
       text = `Undid ${tag}: Aiden's answer is withdrawn${yeses.length ? `, with his yes for ${andList(yeses.map((y) => y.text.split(' ')[0]!))}` : ''}.`;
+      // A review's answer withdrawn: the review is raised again, as an undone question is, so his corrected word has a line
+      // to answer (with the round on it is brought through the Voice).
+      const answered = event.ask_id === null ? undefined : ctx.db.prepare('SELECT id FROM asks WHERE id = ?').pluck().get(event.ask_id) === undefined ? undefined : requireAsk(ctx, event.ask_id);
+      if (answered !== undefined && answered.kind === 'review') {
+        const again = raiseAskInWrite(ctx, record, actor, { nodeId: answered.nodeId, kind: 'review', text: answered.text, ...(answered.sessionId === null ? {} : { sessionId: answered.sessionId }) });
+        text += ` The review is Aiden's again as ${askTag(again.ask.id)}.`;
+      }
     } else if (event.kind === 'decide' && event.ask_id === null) {
       // A decision on what Aiden left to the lead (an aiden_said item): there is no question to raise again. The session its
       // relay went to is told once that it is withdrawn; with no relay, the step's log says so.

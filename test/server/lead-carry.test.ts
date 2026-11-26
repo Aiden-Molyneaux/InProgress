@@ -244,7 +244,10 @@ describe('W9: the undo of a carried answer', () => {
     const d = Number(/decision d([0-9]+)/.exec(res.json().text as string)![1]);
     expect(await t.check('merge')).toMatchObject({ clear: true });
     const undo = leadUndo(t.ctx, t.project.slug, 'Progresser', V, { eventId: d, aidenWords: 'take that back' });
-    expect(undo.text).toBe(`Undid d${d}: Aiden's answer is withdrawn, with his yes for merge and push.`);
+    // R6: the review is raised again, so his corrected word has an ask to answer.
+    const again = t.ctx.db.prepare("SELECT id FROM asks WHERE kind = 'review' AND cleared_at IS NULL").pluck().get() as number;
+    expect(again).not.toBe(t.review.id);
+    expect(undo.text).toBe(`Undid d${d}: Aiden's answer is withdrawn, with his yes for merge and push. The review is Aiden's again as a${again}.`);
     expect(await t.check('merge')).toMatchObject({ clear: false });
     expect(await t.check('push')).toMatchObject({ clear: false });
     expect(t.sends('relay').map((s) => [s.target, s.retryKey])).toEqual([['th_1', `undo:d${d}`]]);
@@ -373,6 +376,29 @@ describe('R1: a review raised with the round on reaches the Voice, and "ship it"
     expect(requireAsk(t.ctx, review.id).answer).toBe('ship it');
     expect(getDeskItem(t.ctx.db, item)!.state).toBe('done');
     expect(await t.check('merge')).toMatchObject({ clear: true, why: 'his yes' });
+    // R6: his answer undone, the review is his again, with a line to answer.
+    const d = Number(/decision d(\d+)/.exec(res.json().text)![1]);
+    const undo = leadUndo(t.ctx, t.project.slug, 'Progresser', V, { eventId: d, aidenWords: 'not that one' });
+    const again = t.ctx.db.prepare("SELECT id FROM asks WHERE kind = 'review' AND text = 'Ship the second tabs?' AND cleared_at IS NULL").pluck().get() as number;
+    expect(undo.text).toContain(`The review is Aiden's again as a${again}.`);
+    const againItem = t.ctx.db.prepare("SELECT id, state FROM desk_items WHERE kind = 'review' AND ref = ?").get(String(again)) as { id: number; state: string };
+    expect(againItem.state).toBe('waiting_aiden');
+    expect(t.ctx.db.prepare("SELECT COUNT(*) FROM lead_sends WHERE kind = 'voice_line' AND item_id = ?").pluck().get(againItem.id)).toBe(1);
+    expect(await t.check('merge')).toMatchObject({ clear: false });
+  });
+
+  it('"not yet" by its send records his words and no yes, and closes the item', async () => {
+    const t = setup();
+    leadAllow(t.ctx, t.project.slug, 'Progresser', V, { switch: 'round', aidenWords: 'run the round' });
+    const review = raiseAsk(t.ctx, 'session:s1', { nodeId: t.step.id, kind: 'review', text: 'Ship the second tabs?', sessionId: 's1' });
+    const item = t.ctx.db.prepare("SELECT id FROM desk_items WHERE kind = 'review' AND ref = ?").pluck().get(String(review.id)) as number;
+    const send = t.ctx.db.prepare("SELECT id FROM lead_sends WHERE kind = 'voice_line' AND item_id = ?").pluck().get(item) as number;
+    reached(t, send, new Date(Date.now() + 2000).toISOString());
+    expect((await t.answer({ sendId: send, aidenWords: 'not yet' })).statusCode).toBe(200);
+    expect(t.yesCount()).toBe(0);
+    expect(requireAsk(t.ctx, review.id).answer).toBe('not yet');
+    expect(getDeskItem(t.ctx.db, item)!.state).toBe('done');
+    expect(await t.check('merge')).toMatchObject({ clear: false });
   });
 });
 

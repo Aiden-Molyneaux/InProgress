@@ -101,6 +101,8 @@ export function deskOnAskRaised(ctx: Ctx, ask: Ask, undone?: UndoneAsk): void {
   if (db.prepare('SELECT status FROM projects WHERE id = ?').pluck().get(ask.projectId) !== 'active') return;
   const bound = roundBound(db, ask.projectId);
   if (bound === null || ask.raisedAt < bound) return;
+  // An ask that is an old ask on the desk already (an undone old question, task 17) is carried by the old asks' list.
+  if (oldAskOpen(db, ask.id)) return;
   const input: AddDeskItemInput = { projectId: ask.projectId, kind: ask.kind, ref: String(ask.id), nodeId: ask.nodeId, dueAt: plusMs(ask.raisedAt, DESK_ASK_DUE_MS) };
   if (undone !== undefined) {
     const { item, created } = addDeskItem(db, { ...input, state: 'waiting_aiden' }, now);
@@ -118,21 +120,28 @@ export function deskOnAskRaised(ctx: Ctx, ask: Ask, undone?: UndoneAsk): void {
  * on, raised since the round was first switched on, it goes on the desk as a `review` item straight to waiting_aiden, with
  * no turn (the lead never judges a review; a landing is the landing check's), and is brought at once, whatever the
  * project's count of brought items (it counts toward it): a `bring` line with no would-have, its decisions row, and its
- * line to the Voice. Raised again after its session's prompt, it finds its item and brings nothing more.
+ * line to the Voice. Raised again after its session's prompt, it finds its item and brings nothing more. The minute's sweep
+ * (lead/desk.ts) calls it too, for a review raised while the round was off. Answers whether it made the item.
  */
-function deskOnReviewRaised(ctx: Ctx, ask: Ask): void {
+export function deskOnReviewRaised(ctx: Ctx, ask: Ask): boolean {
   const db = ctx.db;
-  if (ask.owner !== 'aiden' || ask.sessionId === null) return;
+  if (ask.owner !== 'aiden' || ask.sessionId === null) return false;
   const project = db.prepare('SELECT status, lead FROM projects WHERE id = ?').get(ask.projectId) as { status: string; lead: string | null } | undefined;
-  if (project === undefined || project.status !== 'active' || project.lead === null || project.lead.trim() === '') return;
+  if (project === undefined || project.status !== 'active' || project.lead === null || project.lead.trim() === '') return false;
   const bound = roundBound(db, ask.projectId);
-  if (bound === null || ask.raisedAt < bound) return;
+  if (bound === null || ask.raisedAt < bound) return false;
+  // An old review on the desk already is carried by the old asks' list: no review item beside it.
+  if (oldAskOpen(db, ask.id)) return false;
   const now = ctx.now();
   const { item, created } = addDeskItem(db, { projectId: ask.projectId, kind: 'review', ref: String(ask.id), nodeId: ask.nodeId, state: 'waiting_aiden' }, now);
-  if (!created) return;
+  if (!created) return false;
   const eventId = bringItem(ctx, item, { id: null, kind: null, answer: null }, { tell: false, decision: { kind: 'technical', productRuling: false } });
   if (eventId !== undefined) moveDeskItem(db, item.id, ['waiting_aiden'], 'waiting_aiden', { outcome: `AIDEN d${eventId}`, now });
+  return true;
 }
+
+/** Whether the ask has an old_ask desk item not done. */
+const oldAskOpen = (db: DB, askId: number): boolean => db.prepare("SELECT 1 FROM desk_items WHERE kind = 'old_ask' AND ref = ? AND state <> 'done'").get(String(askId)) !== undefined;
 
 /**
  * Moves every not-done desk item about one of these asks to done, with `outcome`. Their lines to the Voice not yet tried

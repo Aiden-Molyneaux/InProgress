@@ -260,7 +260,13 @@ function makeRepo(branches) {
     git(repo, 'commit', '-m', b);
     git(repo, 'checkout', 'main');
   }
+  // The stopped session's worktree: a folder on its branch with a commit of work in progress, so a restart has something to start from.
+  git(repo, 'worktree', 'add', stoppedTree, 'step-stopped');
+  writeFileSync(`${stoppedTree}/export-wip.txt`, 'half of the export, not finished\n');
+  git(stoppedTree, 'add', '-A');
+  git(stoppedTree, 'commit', '-m', 'wip: half of the export');
 }
+const stoppedTree = `${scratch}/wt-stopped`;
 
 const project = { id: 0, rootId: 0 };
 const steps = {};
@@ -274,18 +280,18 @@ async function makeStep(key, title) {
 const randomId = () => (globalThis.crypto ?? { randomUUID: () => `${Date.now()}` }).randomUUID();
 const sessions = {};
 /** A session as a T3 Code session: start and claim posted the way the hooks post them, its thread in the recorder's world. */
-async function startSession(key, step, branch, threadTitle, firstAssistant) {
+async function startSession(key, step, branch, threadTitle, firstAssistant, cwd = repo) {
   const id = randomId();
   const threadId = `scenes-session-${key}`;
   addThread(threadId, threadTitle, firstAssistant);
-  await api('POST', `/api/sessions/${id}/hook`, { event: 'start', source: 'startup', cwd: repo, branch, title: threadTitle, app: 't3', t3ThreadId: threadId });
+  await api('POST', `/api/sessions/${id}/hook`, { event: 'start', source: 'startup', cwd, branch, title: threadTitle, app: 't3', t3ThreadId: threadId });
   await api('POST', `/api/sessions/${id}/claim`, { nodeId: steps[step].id });
   // A prompt: the session is working, so the minute watch does not read it as a stop (only the scene that stops a session does that).
-  await api('POST', `/api/sessions/${id}/hook`, { event: 'prompt', cwd: repo, branch, app: 't3', t3ThreadId: threadId });
-  sessions[key] = { id, threadId, step, branch };
+  await api('POST', `/api/sessions/${id}/hook`, { event: 'prompt', cwd, branch, app: 't3', t3ThreadId: threadId });
+  sessions[key] = { id, threadId, step, branch, cwd };
   return sessions[key];
 }
-const hookEvent = (key, event) => api('POST', `/api/sessions/${sessions[key].id}/hook`, { event, cwd: repo, branch: sessions[key].branch, app: 't3', t3ThreadId: sessions[key].threadId });
+const hookEvent = (key, event) => api('POST', `/api/sessions/${sessions[key].id}/hook`, { event, cwd: sessions[key].cwd, branch: sessions[key].branch, app: 't3', t3ThreadId: sessions[key].threadId });
 const raise = (key, kind, text) => api('POST', `/api/nodes/${steps[sessions[key].step].id}/asks`, { kind, text, sessionId: sessions[key].id });
 
 const setting = (key, value) => lead('set', SLUG, key, value, '--aiden', 'scenes setup');
@@ -460,7 +466,8 @@ async function scene2() {
   const at = new Date();
   s.act(`lead answer ${SLUG} --send s${sendId} --aiden "search" -> ${aiden(answered)}`);
   const carried = await waitFor('his answer in the thread', () => sentTo(sess.threadId, s.callsFrom).find((m) => /Aiden's answer/.test(m)), 90_000);
-  s.check("The session's thread shows his answer carried by the lead from Grok", `Aiden's answer, carried by Progresser from Grok at 14:02: "search"`, carried, new RegExp(`^\\[From Progresser, the lead\\] Aiden's answer, carried by Progresser from Grok at ${hm(at.getTime())}: "search"$`), /Aiden's answer/);
+  s.check("The session's thread shows his answer carried by the lead from Grok", `Aiden's answer, carried by Progresser from Grok at 14:02: "search"`, carried, new RegExp(`^\\[From Progresser, the lead\\] Aiden's answer, carried by Progresser from Grok at ${hm(at.getTime())}: "search"$`), /Aiden's answer( to a\d+)?, carried by Progresser from Grok at \d\d:\d\d: "search"/);
+  s.note('A DIFFERS on the carried answer means: the line names the ask ("Aiden\'s answer to a<id>, carried by ...").');
 
   // The review, with a picture.
   mkdirSync(`${scratch}/session-b`, { recursive: true });
@@ -484,7 +491,7 @@ async function scene2() {
     backdate('lead_sends', 'created_at', 'id = ?', [rline.id], 4 * MIN);
     s.back(`voice line s${rline.id} created_at moved 4 minutes back (the gather)`);
     const rpost = await waitFor('the review voice POST', () => voice.posts.slice(s.postsFrom).find((p) => String(p.body?.text).includes(`[s${rline.id}]`)), 120_000);
-    s.check('The review waits on him by a voice line', 'Yours, InProgress: #745 <title>: a review waits on you. ... Say "ship it", "not yet", or "show me 745".', String(rpost?.body?.text ?? ''), /^Yours, InProgress: #d+ .*: a review waits on you..*Say "ship it", "not yet", or "show me d+"./s, /review waits on you/);
+    s.check('The review waits on him by a voice line', 'Yours, InProgress: #745 <title>: a review waits on you. ... Say "ship it", "not yet", or "show me 745".', String(rpost?.body?.text ?? ''), /^Yours, InProgress: #\d+ .*: a review waits on you\..*Say "ship it", "not yet", or "show me \d+"\./s, /review waits on you/);
   } else {
     s.check('The review waits on him by a voice line', 'Yours, InProgress: #745 <title>: a review waits on you. ... Say "ship it", "not yet", or "show me 745".', `desk item for the review: ${ritem ? '#' + ritem.id : 'none'}; voice line about it: none (this build has no review item yet: answered by the ask number)`, () => false, () => ritem !== undefined);
   }
@@ -521,7 +528,7 @@ async function scene3() {
   });
   s.back(`${setAside.length} of Aiden's old open asks on the copy given a cleared_at for this scene, and put back before scene 6. Intended build rule: a restart parks while he has more than 5 of his asks open in the project (bring those first); the set-aside lets the restart itself be shown`);
   s.note("His real old asks on the copy were set aside for this scene because a restart parks while he has more than 5 asks open (the intended rule: bring those first). They are restored after it.");
-  const c = await startSession('c', 'stopped', 'step-stopped', `${idRef('stopped')} Export`, 'working on the export');
+  const c = await startSession('c', 'stopped', 'step-stopped', `${idRef('stopped')} Export`, 'working on the export', stoppedTree);
   await hookEvent('c', 'stop');
   s.act(`session on ${idRef('stopped')} stopped with its step open`);
   backdate('sessions', 'last_seen_at', 'id = ?', [c.id], 40 * MIN);
@@ -559,7 +566,7 @@ async function scene3() {
   const morning = await nextMorning(10);
   s.act('the next morning list written (quiet hours ended a minute after being set; older morning rows backdated a day)');
   const text = morning?.text ?? '';
-  s.check('The morning list has the "Went wrong" line for the stopped session', `Went wrong (1)   #746 stopped at 02:10. Restarted from its record at 02:51; 41 minutes lost.`, text, new RegExp(`Went wrong \\(1\\)\\s+#${steps.stopped.id} stopped at ${hm(Date.now() - 40 * MIN)}\\. Restarted from its record at \\d\\d:\\d\\d; \\d+ minutes lost\\.`), /Went wrong \(\d+\)[^\n]*stopped at[^\n]*restarted/i);
+  s.check('The morning list has the "Went wrong" line for the stopped session', `Went wrong (1)   #746 stopped at 02:10. Restarted from its record at 02:51; 41 minutes lost.`, text, new RegExp(`Went wrong \\(1\\)\\s+#${steps.stopped.id} stopped at ${hm(Date.now() - 40 * MIN)}\\. [Rr]estarted from its record at \\d\\d:\\d\\d; \\d+ minutes lost\\.`), /Went wrong \(\d+\)[^\n]*stopped at[^\n]*restarted/i);
   s.check('The morning list has the "Held for you" line for the publish', `Held for you (1) #747 wants to publish package x 1.2.0 to npm. Say "publish it" or "not yet".`, text, /Held for you \(1\)\s+#\d+ wants to publish package x 1\.2\.0 to npm\. Say "publish it" or "not yet"\./, /Held for you \(\d+\)[^\n]*wants to/);
   s.check('A lid gap is shown', `The lid was shut 22:06 to 10:23. 3 items waited; none was lost.`, text, /The lid was shut \d\d:\d\d to \d\d:\d\d\. \d+ items? waited; none was lost\./, /slept from \d\d:\d\d to \d\d:\d\d/);
   writeDb((db) => setAside.forEach((id) => db.prepare('UPDATE asks SET cleared_at = NULL WHERE id = ?').run(id)));
@@ -607,7 +614,8 @@ async function scene4(scene1d) {
   s.act(`lead import-usage <a reading of 6 minutes ago: window 12 percent, week 41 percent, week resets so that the line says 44> -> ${aiden(imported)}`);
   const week = leadRead('week', SLUG);
   s.act(`lead week ${SLUG} -> ${aiden(week)}`);
-  s.check('The week is printed with the week, the line, this window and the reserve', `The week: 41 percent used; the line says 44. This window: 12 percent, resets 19:30.\nYour reserve is untouched. Last reading 6 minutes ago.`, week.text, /^The week: 41 percent used; the line says 44\. This window: 12 percent, resets \d\d:\d\d\.\nYour reserve is untouched\. Last reading 6 minutes ago\.$/, /41 percent used.*[Rr]eserve.*untouched/s);
+  s.check('The week is printed with the week, the line, this window and the reserve', `The week: 41 percent used; the line says 44. This window: 12 percent, resets 19:30.\nYour reserve is untouched. Last reading 6 minutes ago.`, week.text, /^The week: \d+ percent used; the line says \d+\. This window: \d+ percent, resets \d\d:\d\d\.\nYour reserve is untouched\. Last reading \d+ minutes? ago\.$/, /[Ww]eek \d+ percent used, the line says \d+.*[Ww]indow \d+ percent.*[Rr]eserve: untouched.*[Nn]ewest reading \d+ min/s);
+  s.note('The week check compares the shape (week percent, the line, the window, the reserve, the reading age), not the imported figures: the turns read newer gauges and the newest wins by design.');
   finishScene(s, ['', '### The morning list', '```', list, '```']);
 }
 
@@ -652,8 +660,12 @@ async function scene5() {
   const line = await waitFor('the bring voice line', () => readDb("SELECT id, state FROM lead_sends WHERE project_id = ? AND kind = 'voice_line' AND retry_key = ?", project.id, `voice:bring:d${readDb("SELECT e.id FROM lead_events e WHERE e.kind = 'bring' AND e.ask_id = ?", b1.id)[0]?.id}`)[0], 60_000);
   backdate('lead_sends', 'created_at', "project_id = ? AND kind = 'voice_line' AND state = 'intended'", [project.id], 11 * MIN);
   s.back(`every voice line still intended moved 11 minutes back, so they count as not sent for over 10 minutes`);
-  await sleep(25_000);
-  const intended = readDb("SELECT id, state FROM lead_sends WHERE project_id = ? AND kind = 'voice_line' AND id > ? AND retry_key NOT LIKE 'morning:%'", project.id, maxSend);
+  // The lines' state is read when the receiver answers 503, before anything can send them.
+  const count503 = voice.posts.filter((p) => p.status === 503).length;
+  const refused = await waitFor('a 503 POST', () => voice.posts.filter((p) => p.status === 503).length > count503 && voice.posts.filter((p) => p.status === 503).at(-1), 90_000);
+  const refusedIds = refused ? [...String(refused.body?.text ?? '').matchAll(/\[s(\d+)\]/g)].map((m) => Number(m[1])) : [];
+  const intended = refusedIds.length ? readDb(`SELECT id, state FROM lead_sends WHERE id IN (${refusedIds.map(() => '?').join(',')})`, ...refusedIds) : [];
+  s.act(`a POST was answered 503 at ${refused ? hhmm(refused.at) : '(none)'} for lines ${refusedIds.map((i) => 's' + i).join(', ')}; their state read right then`);
   s.check('The lines that could not reach him wait (intended, not lost)', 'the lines that could not reach him', intended.map((x) => `s${x.id} ${x.state}`).join('; '), () => intended.length > 0 && intended.every((x) => x.state === 'intended'));
   s.check('The 503 was answered to the sender', 'Grok closed', `${voice.posts.slice(s.postsFrom).filter((p) => p.status === 503).length} POST(s) answered 503`, () => voice.posts.slice(s.postsFrom).some((p) => p.status === 503));
   const morning = await nextMorning(9);
@@ -684,6 +696,15 @@ async function scene6() {
   const put = lead('old-asks', SLUG);
   s.act(`lead old-asks ${SLUG} -> ${aiden(put)}`);
   s.check('The old asks of InProgress are put on the desk', 'On InProgress the lead has already decided what his rule allows, and brings the rest', put.text, /Put \d+ old asks on the desk/);
+  // A reading for the first five old asks of one project (oldest first), so their lines read "the lead would ...".
+  const first = readDb("SELECT p.id AS pid, p.slug FROM desk_items d JOIN projects p ON p.id = d.project_id JOIN asks a ON a.id = CAST(d.ref AS INTEGER) WHERE d.kind = 'old_ask' AND d.state = 'waiting_aiden' ORDER BY a.raised_at, a.id LIMIT 1")[0];
+  if (first !== undefined) {
+    const five = readDb("SELECT a.id FROM desk_items d JOIN asks a ON a.id = CAST(d.ref AS INTEGER) WHERE d.kind = 'old_ask' AND d.state = 'waiting_aiden' AND d.project_id = ? ORDER BY a.raised_at, a.id LIMIT 5", first.pid);
+    for (const a of five) {
+      const r = lead('old-asks', 'reading', first.slug, String(a.id), 'The lead would close it: the step was done and merged. Say "close" or "keep".');
+      s.act(`lead old-asks reading ${first.slug} ${a.id} <reading> -> ${clip(aiden(r), 160)}`);
+    }
+  }
   let rounds = 0;
   let answeredCount = 0;
   let finished = false;
@@ -824,7 +845,11 @@ async function main() {
     await api('POST', `/api/ui/projects/${project.id}/lead`, { slug: SLUG, name: LEAD }, { 'x-ip-ui-token': ui, origin: base });
   }
   makeRepo(['step-search-ids', 'step-button-name', 'step-stopped', 'step-publish']);
+  // The lead's tools read the project's first folder: the copy's other bindings of this project are dropped so that it is the scratch repo, where the scenes' branches are.
+  const dropped = writeDb((db) => db.prepare('DELETE FROM bindings WHERE project_id = ?').run(project.id).changes);
+  console.log(`bindings of ${SLUG} dropped on the copy: ${dropped}`);
   await api('POST', `/api/projects/${SLUG}/bindings`, { path: repo });
+  await api('POST', `/api/projects/${SLUG}/bindings`, { path: stoppedTree });
   await makeStep('search', 'Board search');
   await makeStep('button', 'Board search button');
   await makeStep('stopped', 'Export');

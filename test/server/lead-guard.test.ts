@@ -112,11 +112,38 @@ describe("the guard on Aiden's go-ahead", () => {
     expect(undeliveredAnswers(t.ctx, 's1').map((a) => a.id)).toContain(t.permission.id);
     await sender.wake();
     await sender.tick();
-    expect(sent).toEqual([{ thread: 'th_1', text: carriedLine('Progresser', 'voice', saidAt, 'go ahead') }]);
+    expect(sent).toEqual([{ thread: 'th_1', text: carriedLine('Progresser', 'voice', saidAt, 'go ahead', t.permission.id) }]);
     expect(undeliveredAnswers(t.ctx, 's1').map((a) => a.id)).not.toContain(t.permission.id);
-    expect(sent[0].text).toMatch(/^Aiden's answer, carried by Progresser from Grok at \d\d:02: "go ahead"$/);
+    // C2: the line names the ask, so a session with several asks knows which one he answered.
+    expect(sent[0].text).toMatch(new RegExp(`^Aiden's answer to a${t.permission.id}, carried by Progresser from Grok at [0-9]{2}:02: "go ahead"$`));
     expect(t.ctx.db.prepare('SELECT kind, said_where, said_at FROM lead_decisions').get()).toEqual({ kind: 'permission', said_where: 'voice', said_at: saidAt });
     expect(carriedLine('Progresser', 'thread', saidAt, 'yes')).toContain("from the lead's thread at");
+    expect(carriedLine('Progresser', 'thread', saidAt, 'yes')).toMatch(/^Aiden's answer, carried by/);
+  });
+
+  it('C1: carries nothing to an ended session: the ask is answered and waits for its next prompt; its undo relays nothing', () => {
+    const t = setup();
+    t.ctx.db.prepare("UPDATE sessions SET state = 'ended' WHERE id = 's1'").run();
+    const res = leadAnswer(t.ctx, t.project.slug, 'Progresser', V, { askId: t.permission.id, aidenWords: 'go ahead', where: 'voice' });
+    expect(res.carried).toBe(false);
+    expect(res.text).not.toContain('Its session is told in its thread.');
+    expect(requireAsk(t.ctx, t.permission.id).answer).toBe('go ahead');
+    expect(undeliveredAnswers(t.ctx, 's1').map((a) => a.id)).toContain(t.permission.id);
+    expect(t.ctx.db.prepare("SELECT COUNT(*) FROM lead_sends WHERE kind IN ('carry', 'relay')").pluck().get()).toBe(0);
+    const d = Number(/decision d(\d+)/.exec(res.text)![1]);
+    leadUndo(t.ctx, t.project.slug, 'Progresser', V, { eventId: d, aidenWords: 'take that back' });
+    expect(t.ctx.db.prepare("SELECT COUNT(*) FROM lead_sends WHERE kind IN ('carry', 'relay')").pluck().get()).toBe(0);
+  });
+
+  it("C1: a carry made while the session was live, undone after it ended, relays no withdrawal: the ask's answer says it", () => {
+    const t = setup();
+    const res = leadAnswer(t.ctx, t.project.slug, 'Progresser', V, { askId: t.permission.id, aidenWords: 'go ahead', where: 'voice' });
+    expect(res.carried).toBe(true);
+    t.ctx.db.prepare("UPDATE sessions SET state = 'ended' WHERE id = 's1'").run();
+    const d = Number(/decision d(\d+)/.exec(res.text)![1]);
+    leadUndo(t.ctx, t.project.slug, 'Progresser', V, { eventId: d, aidenWords: 'take that back' });
+    expect(t.ctx.db.prepare("SELECT retry_key FROM lead_sends WHERE kind IN ('carry', 'relay') ORDER BY id").pluck().all()).toEqual([`carry:a${t.permission.id}`]);
+    expect(requireAsk(t.ctx, t.permission.id).answer).toMatch(/is withdrawn by Progresser/);
   });
 
   it("refuses an old ask of a project under C:\\work, and a lead on version 6", () => {

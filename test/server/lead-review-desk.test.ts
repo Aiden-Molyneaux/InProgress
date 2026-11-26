@@ -1,12 +1,16 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AIDEN_BROUGHT_LIMIT, LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
 import { openDb } from '../../src/server/db/connection';
 import { createCtx, write } from '../../src/server/db/tx';
-import { leadAllow } from '../../src/server/lead-commands';
+import { leadAllow, leadDisallow } from '../../src/server/lead-commands';
+import { readLeadBrief } from '../../src/server/lead';
+import { renderLeadBrief } from '../../src/server/lead-text';
+import { watchDesk } from '../../src/server/lead/desk';
+import { leadOldAsks } from '../../src/server/lead/oldAsks';
 import { morningList } from '../../src/server/lead/morning';
 import { createRunner, type TurnWay } from '../../src/server/lead/runner';
 import { clearAsk, raiseAsk } from '../../src/server/repo/asks';
-import { getDeskItem } from '../../src/server/repo/desk';
+import { addDeskItem, getDeskItem } from '../../src/server/repo/desk';
 import { bringItem, broughtOpen } from '../../src/server/repo/deskBring';
 import { produceDeskItem } from '../../src/server/repo/deskProducers';
 import { getSend } from '../../src/server/repo/leadSends';
@@ -110,17 +114,73 @@ describe('R1: a review raised with the round on', () => {
     expect(yours!.lines[0]).not.toContain('I would');
   });
 
-  it('the runner never leases one', async () => {
+  it('the runner never leases one: it takes the open question beside it and leaves the review waiting', async () => {
     const w = world();
     const ask = w.review();
-    let runs = 0;
-    const way: TurnWay = { name: 'headless', run: async () => (runs++, Promise.reject(new Error('never'))) };
+    const q = raiseAsk(w.ctx, 'test', { nodeId: w.step.id, kind: 'question', text: 'Which port?' });
+    const { item: question } = addDeskItem(w.ctx.db, { projectId: w.project.id, kind: 'question', ref: String(q.id), nodeId: w.step.id }, w.ctx.now());
+    const leased: number[] = [];
+    const way: TurnWay = {
+      name: 'headless',
+      run: async (input) => {
+        leased.push(input.item.id);
+        return { text: 'DECIDE\nKIND: TECHNICAL\nANSWER: 4410.\nWHY: free.', costUsd: 0, durationMs: 1, tokensIn: 1, tokensOut: 1, refusedTools: [], rateLimits: [], model: 'claude-opus-5-5' };
+      },
+    };
     const r = createRunner(w.ctx, { way, model: 'claude-opus-5-5', home: 'C:/home', port: 4410, tickMs: 60 * 60 * 1000, apply: () => ({ itemState: 'done', outcome: 'x' }), log: { info: () => undefined, error: () => undefined } });
     cleanups.push(() => r.stop());
     r.kick(w.project.id);
+    await vi.waitFor(() => expect(getDeskItem(w.ctx.db, question.id)!.state).toBe('done'));
     r.tick();
-    await new Promise((resolve) => setImmediate(resolve));
-    expect(runs).toBe(0);
+    await vi.waitFor(() => expect(leased).toEqual([question.id]));
     expect(w.itemOf(ask.id)[0]!.state).toBe('waiting_aiden');
+  });
+
+  it('raised again after a prompt (bumped) makes no second item or line', () => {
+    const w = world();
+    const ask = w.review();
+    w.ctx.db.prepare('UPDATE sessions SET last_prompt_at = ? WHERE id = ?').run(w.ctx.now(), 's1');
+    const again = w.review();
+    expect(again.id).toBe(ask.id);
+    expect(w.ctx.db.prepare('SELECT raised_at FROM asks WHERE id = ?').pluck().get(ask.id)).not.toBe(ask.raisedAt);
+    expect(w.itemOf(ask.id)).toHaveLength(1);
+    expect(w.lines()).toHaveLength(1);
+  });
+
+  it('raised while the round was off, it is brought when the round comes back on (R2: on, off, raise, on)', () => {
+    const w = world();
+    leadDisallow(w.ctx, w.project.slug, 'Progresser', V, { switch: 'round', aidenWords: 'stop the round' });
+    const ask = w.review();
+    expect(w.itemOf(ask.id)).toEqual([]);
+    leadAllow(w.ctx, w.project.slug, 'Progresser', V, { switch: 'round', aidenWords: 'run the round' });
+    expect(watchDesk(w.ctx).swept).toBe(1);
+    expect(w.itemOf(ask.id)).toEqual([expect.objectContaining({ state: 'waiting_aiden', outcome: expect.stringMatching(/^AIDEN d\d+$/) })]);
+    expect(w.lines()).toHaveLength(1);
+    // Once: the next sweep takes nothing.
+    expect(watchDesk(w.ctx).swept).toBe(0);
+  });
+
+  it('an old ask on the desk gets no review or question item beside it when it is raised again (R3)', () => {
+    const w = world(false);
+    const review = w.review();
+    const question = raiseAsk(w.ctx, 'session:s1', { nodeId: w.step.id, kind: 'question', text: 'Which port?', sessionId: 's1' });
+    leadAllow(w.ctx, w.project.slug, 'Progresser', V, { switch: 'round', aidenWords: 'run the round' });
+    leadOldAsks(w.ctx, w.project.slug, 'Progresser', V);
+    w.ctx.db.prepare('UPDATE sessions SET last_prompt_at = ? WHERE id = ?').run(w.ctx.now(), 's1');
+    w.review();
+    raiseAsk(w.ctx, 'session:s1', { nodeId: w.step.id, kind: 'question', text: 'Which port?', sessionId: 's1' });
+    const kinds = (id: number) => w.ctx.db.prepare('SELECT kind FROM desk_items WHERE ref = ? ORDER BY id').pluck().all(String(id));
+    expect([kinds(review.id), kinds(question.id)]).toEqual([['old_ask'], ['old_ask']]);
+    expect(watchDesk(w.ctx).swept).toBe(0);
+    expect(w.lines()).toEqual([]);
+  });
+
+  it("the brief lists it as brought, with no 'you would' (R5)", () => {
+    const w = world();
+    w.review();
+    const text = renderLeadBrief(readLeadBrief(w.ctx, w.project.slug, V, new Date(w.ctx.now())));
+    const row = text.split('\n').find((l) => l.includes('"Ship the desk?"'))!;
+    expect(row).toBeDefined();
+    expect(row).not.toContain('you would');
   });
 });

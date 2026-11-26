@@ -5,7 +5,7 @@ import { conflict, notFound } from '../errors';
 import { carriedLine, requireAnswerLead, workProject, WORK_PROJECT, type CarriedYes, type YesAction } from '../lead-commands';
 import { logLeadEvent } from '../lead';
 import { getDeskItem, moveDeskItem, type DeskItem } from '../repo/desk';
-import { askOf, DECISION_LINE_CUT, t3ThreadOf, t3ThreadOnStep } from '../repo/deskBring';
+import { askOf, DECISION_LINE_CUT, liveT3ThreadOf, t3ThreadOnStep } from '../repo/deskBring';
 import { addDecision } from '../repo/leadDecisions';
 import { getSend, intendSend, sendByRetryKey, type LeadSend } from '../repo/leadSends';
 import { addLogInWrite } from '../repo/logs';
@@ -148,7 +148,8 @@ export function leadAnswerItem(ctx: Ctx, ref: string, as: string, instructions: 
       saidAt,
     });
     moveDeskItem(ctx.db, item.id, ['open', 'leased', 'behind', 'waiting_aiden'], 'done', { outcome: `ANSWERED d${eventId}`, now: ctx.now() });
-    const thread = held !== undefined ? t3ThreadOf(ctx.db, held.sessionId) : item.nodeId === null ? null : t3ThreadOnStep(ctx, item.nodeId);
+    // A held command's session is told only while it has not ended (t3ThreadOnStep takes a live one already).
+    const thread = held !== undefined ? liveT3ThreadOf(ctx.db, held.sessionId) : item.nodeId === null ? null : t3ThreadOnStep(ctx, item.nodeId);
     const retryKey = `carry:i${item.id}`;
     const said = carriedLine(name, where, saidAt, input.aidenWords);
     let carried = false;
@@ -172,11 +173,17 @@ export function liveTarget(ctx: Ctx, retryKey: string): string | undefined {
   return send === undefined || send.state === 'cleared' ? undefined : send.target;
 }
 
-/** The relay target a carried answer went to, for its undo: the carry send of the ask or of the item. */
+/**
+ * The relay target a carried answer went to, for its undo: the carry send of the ask or of the item, while a session on
+ * that thread has not ended. An ended one gets no withdrawal relay: the undo's log line and the ask's answer say it.
+ */
 export function carryTarget(ctx: Ctx, answer: { askId: number | null; text: string }): string | undefined {
   const item = /; item (\d+)/.exec(answer.text);
   const key = answer.askId !== null ? `carry:a${answer.askId}` : item !== null ? `carry:i${item[1]}` : undefined;
-  return key === undefined ? undefined : liveTarget(ctx, key);
+  const target = key === undefined ? undefined : liveTarget(ctx, key);
+  if (target === undefined) return undefined;
+  const live = ctx.db.prepare("SELECT 1 FROM sessions WHERE app = 't3' AND t3_thread_id = ? AND state <> 'ended'").get(target) !== undefined;
+  return live ? target : undefined;
 }
 
 /** The yes rows an answer recorded, from its line's `yes e12,e13`. */
