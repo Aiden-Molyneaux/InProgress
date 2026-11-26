@@ -648,3 +648,34 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   answer frees its place (the plan's "left open": the ask stays his, in the window); an ask gets at most two lines;
   the round's AIDEN or CARD answer becomes the ask's reading when none is stored. 2935 unit tests green. Kept as
   built: "The old asks are done" means none remain for the Voice; any left open are in the window.
+- Murr's last look at P1 and P3 (Opus, proportional): sound. Owner-calls kept for the results page: "live" means only
+  "not ended", so an idle session whose window closed without an end hook still counts as live, the same signal the
+  desk uses everywhere.
+
+## The scenes harness, dry run
+
+- scripts/lead-scenes/ (a Sonnet Sev): the copy, a recording T3 stand-in, a voice receiver, the build's server on
+  4424, sessions by hook events, backdated stamps for the night, screenshots. Dry run on a stand-in claude: 31 PASS,
+  13 DIFFERS, 0 FAIL of 44 lines; no item acted on twice (applied turns, sends per key, T3 calls, voice lines).
+- The DIFFERS are mostly wording already decided in the briefs: the bring line ends `Say "yes" to that, or give your
+  own answer.` (task 11's call) where scene 2 has `Say "search" or "find"`; every relay opens `[From Progresser, the
+  lead]` (task 5's claim line) where scene 2's carried answer has none; the morning, week and lid lines are worded as
+  built. Plan said the scenes are frozen text. Did: the results page reports each as differs, with the actual line.
+  Because the claim line and the bring line's shape are calls made for the sessions' safety and for every bring.
+- A real gap the dry run found: a review ask made no desk item and no voice line, so scene 2's "ship it" to the Voice
+  could not happen. My call: a review is always Aiden's; on a raise it becomes a 'review' item waiting on him at once
+  (no turn), brought with its own line, answered by its send. Being built as R1.
+- Calls by the harness Sev, accepted: a stand-in that answers by rules matched on the turn's message and records each
+  turn's prompt; the minute watch every 10 seconds on the copy; a quiet window placed per scene and a faked next day by
+  backdating morning rows; the round's first switch-on moved back two hours on the copy; Aiden's real old asks set
+  aside on the copy for scene 3 (a restart parks while more than five of his asks are open, as intended) and put back
+  for scene 6.
+- R1 (the Opus task 17 Sev): a review raised in a project with a lead and the round on becomes a 'review' desk item,
+  waiting on Aiden at once with no turn, brought with `Yours, <Project>: #<step> <title>: a review waits on you. <ask>`
+  and `Say "ship it", "not yet", or "show me <step>".` (and its newest picture's resource), answered by its send.
+  Deviations accepted: the line's key uses the bring event's id (item and event ids overlap); a review raised before
+  the round's first switch-on is an old ask, not a review item. I changed "show me #745" to "show me 745", the words
+  scene 2 has him say. 2943 unit tests and 35 smoke tests green.
+- A finding for Aiden, not a fix: the plain-code landing check holds a change only when it touches the risk list or
+  a `Risk:` line of the playbook. It cannot read whether a step's bar shows on a screen, so a screen change that skips
+  its review would land on green. Recommendation for his word: add `Risk: web/**` to InProgress's playbook.

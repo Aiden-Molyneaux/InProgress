@@ -94,6 +94,7 @@ const KIND_WORDS: Record<DeskItem['kind'], string> = {
   aiden_said: 'Aiden said something to be dealt with.',
   old_ask: 'An ask of Aiden\'s has waited since before the round began.',
   promise_due: 'A promise of yours is past its time.',
+  review: "A session's review waits on Aiden.",
 };
 
 /** An unknown send in plain words, and how to answer it: what was sent, where, its marker, its text and its time. */

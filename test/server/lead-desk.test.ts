@@ -119,7 +119,7 @@ describe('a session raises a question or a permission', () => {
     expect(s.items().map((i) => i.kind)).toEqual(['question', 'permission']);
   });
 
-  it('makes none with the round off, with no session, for a review, or for a lead promise', () => {
+  it('makes none with the round off, with no session, or for a lead promise; a review makes only its own review item (R1)', () => {
     const s = setup();
     s.hook('s1', { event: 'start', source: 'startup', cwd: BOUND });
     s.ask('s1');
@@ -128,7 +128,7 @@ describe('a session raises a question or a permission', () => {
     s.ask(null, 'question', 'From the window');
     s.ask('s1', 'review', 'Look at the tabs');
     leadPromise(s.ctx, s.project.slug, 'Progresser', V, { text: 'Check the tabs', dueAt: new Date(Date.parse(s.now()) + 10 * MIN).toISOString(), stepId: s.step.id });
-    expect(s.items()).toEqual([]);
+    expect(s.items().map((i) => [i.kind, i.state])).toEqual([['review', 'waiting_aiden']]);
   });
 
   it('makes none for an ask raised before the round was first switched on and joined after it', () => {

@@ -227,6 +227,24 @@ export function bringVoiceLine(input: { projectName: string; stepId: number | nu
   return `Yours, ${clipLine(input.projectName, 80)}: ${step}${clipLine(input.askText, VOICE_ASK_CUT)}\n${pick}`;
 }
 
+/**
+ * A review's line (#743, R1): the project, the step, that a review waits on him, the ask, and the words that answer it; and
+ * its newest picture, when the step has one. Retry key `voice:bring:d<id>`, as a bring's.
+ */
+export function reviewVoiceLine(input: { projectName: string; stepId: number; stepTitle: string | null; askText: string; pictureId: number | null }): string {
+  const picture = input.pictureId === null ? '' : ` It has a picture: r${input.pictureId}.`;
+  return `Yours, ${clipLine(input.projectName, 80)}: ${stepRef(input.stepId, input.stepTitle ?? undefined)}: a review waits on you. ${clipLine(input.askText, VOICE_ASK_CUT)}\nSay "ship it", "not yet", or "show me ${input.stepId}".${picture}`;
+}
+
+/** Intends a review's voice line, inside the caller's write. */
+export function intendReviewLine(
+  db: DB,
+  input: { projectId: number; itemId: number; eventId: number; projectName: string; stepId: number; stepTitle: string | null; askText: string; pictureId: number | null },
+  now: string,
+): void {
+  intendLine(db, { projectId: input.projectId, itemId: input.itemId, retryKey: `voice:bring:d${input.eventId}`, body: reviewVoiceLine(input) }, now);
+}
+
 /** A held action's line. Retry key `voice:held:<item id>`. */
 export function heldVoiceLine(input: { projectName: string; stepId: number | null; what: string }): string {
   const who = input.stepId === null ? 'a session' : `#${input.stepId}`;

@@ -96,7 +96,8 @@ export function morningList(ctx: Ctx, projectId: number, since: string, now: str
        WHERE e.project_id = ? AND e.kind = 'bring' AND a.cleared_at IS NULL ORDER BY e.at, e.id`,
     )
     .all(projectId) as (Titled & { ask_text: string; would_have: string })[]).map(
-    (r) => `${stepWords(r.node_id, r.title)}: ${noStop(clipLine(r.ask_text, ASK_CUT))}. I would: ${noStop(r.would_have)}.`,
+    // A review is brought with no would-have: the lead never judges one.
+    (r) => `${stepWords(r.node_id, r.title)}: ${noStop(clipLine(r.ask_text, ASK_CUT))}.${r.would_have.trim() === '' ? '' : ` I would: ${noStop(r.would_have)}.`}`,
   );
   // What he left to the lead and the round brought back to him (an aiden_said item, task 11), while it waits on him.
   yours.push(

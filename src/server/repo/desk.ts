@@ -10,7 +10,9 @@ export type DeskItemKind =
   | 'unknown_send'
   | 'aiden_said'
   | 'old_ask'
-  | 'promise_due';
+  | 'promise_due'
+  /** A session's review of Aiden's (#743, R1): his at once, brought with no turn; the round never leases one. */
+  | 'review';
 
 export type DeskItemState = 'open' | 'leased' | 'done' | 'behind' | 'waiting_aiden';
 

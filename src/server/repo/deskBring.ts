@@ -12,7 +12,8 @@ import { intendSend, sendByRetryKey } from './leadSends';
 import { getProjectById } from './projects';
 import { shelvedAmong } from './shelved';
 import { roundSince } from './switches';
-import { intendBringLine } from '../lead/voice';
+import { intendBringLine, intendReviewLine } from '../lead/voice';
+import { PICTURE_FILE } from '../../core/pictures';
 
 /** How much of an ask's text, and of an answer, a decision's line keeps. */
 export const DECISION_LINE_CUT = 80;
@@ -37,7 +38,7 @@ export function broughtOpen(ctx: Ctx, projectId: number): number {
 /** The projects of the items about ask `askId` that were brought and still wait: a clear of it frees a place. */
 export function broughtProjectsOfAsk(db: DB, askId: number): number[] {
   return db
-    .prepare(`SELECT DISTINCT d.project_id FROM desk_items d WHERE d.state = 'waiting_aiden' AND d.kind IN ('question', 'permission') AND d.ref = ? AND ${BROUGHT_SQL}`)
+    .prepare(`SELECT DISTINCT d.project_id FROM desk_items d WHERE d.state = 'waiting_aiden' AND d.kind IN ('question', 'permission', 'review') AND d.ref = ? AND ${BROUGHT_SQL}`)
     .pluck()
     .all(String(askId)) as number[];
 }
@@ -68,12 +69,12 @@ export function t3ThreadOnStep(ctx: Ctx, nodeId: number): string | null {
   return thread ?? null;
 }
 
-/** The desk item kinds whose ref is an ask id: an old ask's too (task 17), so a reply to its Voice line finds its ask. */
-const ASK_KINDS: ReadonlySet<string> = new Set(['question', 'permission', 'old_ask']);
+/** The desk item kinds whose ref is an ask id: an old ask's and a review's too, so a reply to its Voice line finds its ask. */
+const ASK_KINDS: ReadonlySet<string> = new Set(['question', 'permission', 'old_ask', 'review']);
 
-/** The ask a question, permission or old_ask item is about, read in this write; undefined when it is gone (its project deleted, or the row). */
+/** The ask a question, permission, old_ask or review item is about, read in this write; undefined when it is gone (its project deleted, or the row). */
 export function askOf(ctx: Ctx, item: DeskItem): Ask | undefined {
-  // Only a question, permission or old_ask item's ref is an ask id: an unknown_send's is a send id, a stopped item's a session.
+  // Only a question, permission, old_ask or review item's ref is an ask id: an unknown_send's is a send id, a stopped item's a session.
   if (!ASK_KINDS.has(item.kind)) return undefined;
   if (!/^\d+$/.test(item.ref)) return undefined;
   const id = Number(item.ref);
@@ -162,6 +163,18 @@ export function bringItem(ctx: Ctx, item: DeskItem, turn: BringTurn, opts: Bring
   if (opts.tell) tellAidens(ctx.db, { projectId: item.projectId, itemId: item.id, lead, ask, kind: turn.kind }, now);
   // Every bring reaches the Voice as one line (task 11), gathered with the project's others by the sender.
   const stepTitle = ctx.db.prepare('SELECT title FROM nodes WHERE id = ?').pluck().get(ask.nodeId) as string | undefined;
+  if (item.kind === 'review') {
+    // A review's line names its newest picture, when the step has one, so he can say "show me".
+    const picture = (ctx.db.prepare('SELECT id, path FROM resources WHERE node_id = ? AND path IS NOT NULL ORDER BY id DESC').all(ask.nodeId) as { id: number; path: string }[]).find((r) =>
+      PICTURE_FILE.test(r.path),
+    );
+    intendReviewLine(
+      ctx.db,
+      { projectId: item.projectId, itemId: item.id, eventId, projectName: project!.name, stepId: ask.nodeId, stepTitle: stepTitle ?? null, askText: ask.text, pictureId: picture?.id ?? null },
+      now,
+    );
+    return eventId;
+  }
   intendBringLine(
     ctx.db,
     { projectId: item.projectId, itemId: item.id, eventId, projectName: project!.name, stepId: ask.nodeId, stepTitle: stepTitle ?? null, askText: ask.text, wouldHave },

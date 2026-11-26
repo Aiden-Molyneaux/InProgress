@@ -10,7 +10,7 @@ import { roundBound } from './switches';
 export const DESK_ASK_DUE_MS = 3 * 60 * 1000;
 
 /** The kinds of desk item that are about an ask, and close when it clears or goes. */
-export const ASK_ITEM_KINDS: readonly DeskItemKind[] = ['question', 'permission', 'old_ask', 'promise_due'];
+export const ASK_ITEM_KINDS: readonly DeskItemKind[] = ['question', 'permission', 'old_ask', 'promise_due', 'review'];
 
 const listeners = new Set<(projectId: number) => void>();
 
@@ -90,6 +90,11 @@ export interface UndoneAsk {
  * whatever the limit, with nothing sent: it is Aiden's now, not the lead's to decide again.
  */
 export function deskOnAskRaised(ctx: Ctx, ask: Ask, undone?: UndoneAsk): void {
+  // A review reads the clock only when it makes an item (a test clock ticks on every read).
+  if (ask.kind === 'review') {
+    deskOnReviewRaised(ctx, ask);
+    return;
+  }
   const db = ctx.db;
   const now = ctx.now();
   if (ask.owner !== 'aiden' || (ask.kind !== 'question' && ask.kind !== 'permission') || ask.sessionId === null) return;
@@ -106,6 +111,27 @@ export function deskOnAskRaised(ctx: Ctx, ask: Ask, undone?: UndoneAsk): void {
   }
   if (ask.kind === 'permission' && stuckSince(db, ask.projectId, ask.sessionId, plusMs(now, -STUCK_COVERS_ASK_MS))) return;
   produceDeskItem(db, input, now);
+}
+
+/**
+ * Inside the write that raised `ask`, a session's review of Aiden's (#743, R1): in an active project with a lead and its round
+ * on, raised since the round was first switched on, it goes on the desk as a `review` item straight to waiting_aiden, with
+ * no turn (the lead never judges a review; a landing is the landing check's), and is brought at once, whatever the
+ * project's count of brought items (it counts toward it): a `bring` line with no would-have, its decisions row, and its
+ * line to the Voice. Raised again after its session's prompt, it finds its item and brings nothing more.
+ */
+function deskOnReviewRaised(ctx: Ctx, ask: Ask): void {
+  const db = ctx.db;
+  if (ask.owner !== 'aiden' || ask.sessionId === null) return;
+  const project = db.prepare('SELECT status, lead FROM projects WHERE id = ?').get(ask.projectId) as { status: string; lead: string | null } | undefined;
+  if (project === undefined || project.status !== 'active' || project.lead === null || project.lead.trim() === '') return;
+  const bound = roundBound(db, ask.projectId);
+  if (bound === null || ask.raisedAt < bound) return;
+  const now = ctx.now();
+  const { item, created } = addDeskItem(db, { projectId: ask.projectId, kind: 'review', ref: String(ask.id), nodeId: ask.nodeId, state: 'waiting_aiden' }, now);
+  if (!created) return;
+  const eventId = bringItem(ctx, item, { id: null, kind: null, answer: null }, { tell: false, decision: { kind: 'technical', productRuling: false } });
+  if (eventId !== undefined) moveDeskItem(db, item.id, ['waiting_aiden'], 'waiting_aiden', { outcome: `AIDEN d${eventId}`, now });
 }
 
 /**

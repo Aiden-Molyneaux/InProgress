@@ -133,7 +133,7 @@ export function raiseAskInWrite(ctx: Ctx, record: RecordEvent, actor: string, in
     }
   }
   const ask = toAsk(row);
-  // A session's question or permission on a project whose round is on goes on the lead's desk, in this same write: when
+  // A session's question, permission or review on a project whose round is on goes on the lead's desk, in this same write: when
   // it is new, or asked anew (bumped), as ask.raised is recorded. A plain join never queues an ask whose item is done.
   if (info.changes || bumped) deskOnAskRaised(ctx, ask, undone);
   if (info.changes || bumped) record({ projectId: node.projectId, type: 'ask.raised', entity: 'ask', entityId: ask.id, data: { ask } });

@@ -27,6 +27,7 @@ const WHAT: Record<string, string> = {
   promise_due: 'a promise that is due',
   question: 'a question',
   permission: 'a permission ask',
+  review: 'a review',
 };
 
 /** Why the lead gave up on an item: its last turns were all runner faults, or it failed twice. */

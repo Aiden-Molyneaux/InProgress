@@ -6,7 +6,7 @@ import { LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
 import { leadRules } from '../../src/core/lead-rules';
 import { buildApp } from '../../src/server/app';
 import { write as dbWrite } from '../../src/server/db/tx';
-import { leadAnswer, leadDeskAdd, leadUndo, readYeses } from '../../src/server/lead-commands';
+import { leadAllow, leadAnswer, leadDeskAdd, leadUndo, readYeses } from '../../src/server/lead-commands';
 import { applyVerdict } from '../../src/server/lead/apply';
 import { CHANGED_AFTER, heldScope, SAID_AT_NEEDED } from '../../src/server/lead/carry';
 import { fullPath } from '../../src/server/repo/resources';
@@ -356,6 +356,23 @@ describe('W8a: a yes is checked against when he could have said it', () => {
     const byAsk = await t.answer({ askId: t.review.id, aidenWords: 'ship it', yes: ['merge'] });
     expect(byAsk.json().text).toContain(`No yes recorded for merge: ${SAID_AT_NEEDED}.`);
     expect(t.yesCount()).toBe(1);
+  });
+});
+
+describe('R1: a review raised with the round on reaches the Voice, and "ship it" by its send', () => {
+  it('records his yes for the actions his words name, anchored on the line reaching him, and closes the item', async () => {
+    const t = setup();
+    leadAllow(t.ctx, t.project.slug, 'Progresser', V, { switch: 'round', aidenWords: 'run the round' });
+    const review = raiseAsk(t.ctx, 'session:s1', { nodeId: t.step.id, kind: 'review', text: 'Ship the second tabs?', sessionId: 's1' });
+    const item = t.ctx.db.prepare("SELECT id FROM desk_items WHERE kind = 'review' AND ref = ?").pluck().get(String(review.id)) as number;
+    const send = t.ctx.db.prepare("SELECT id FROM lead_sends WHERE kind = 'voice_line' AND item_id = ?").pluck().get(item) as number;
+    reached(t, send, new Date(Date.now() + 2000).toISOString());
+    const res = await t.answer({ sendId: send, aidenWords: 'ship it', yes: ['merge', 'deploy', 'push'] });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().text).toContain('His yes covers merge, deploy and push');
+    expect(requireAsk(t.ctx, review.id).answer).toBe('ship it');
+    expect(getDeskItem(t.ctx.db, item)!.state).toBe('done');
+    expect(await t.check('merge')).toMatchObject({ clear: true, why: 'his yes' });
   });
 });
 
