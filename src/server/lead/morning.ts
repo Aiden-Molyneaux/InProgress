@@ -7,7 +7,7 @@ import { insertLeadEvent } from '../repo/leadEvents';
 import { intendSend } from '../repo/leadSends';
 import { getProjectById } from '../repo/projects';
 import { liveProjectsWithRound, roundFirstOn } from '../repo/switches';
-import { heldRef } from './hold';
+import { heldRef, heldWhatOf } from './hold';
 import { startProviderModel } from '../lead-start';
 import { leadFolderOf } from './folder';
 import { parseStartBody, THREAD_GONE } from './sends';
@@ -153,8 +153,8 @@ export function morningList(ctx: Ctx, projectId: number, since: string, now: str
 
   // Held for you: held desk items not done, each joined to its `held` line by the session and command its ref hashes.
   const heldRows = db
-    .prepare("SELECT node_id, ref FROM desk_items WHERE project_id = ? AND kind = 'held' AND state <> 'done' ORDER BY created_at, id")
-    .all(projectId) as { node_id: number | null; ref: string }[];
+    .prepare("SELECT node_id, ref, outcome FROM desk_items WHERE project_id = ? AND kind = 'held' AND state <> 'done' ORDER BY created_at, id")
+    .all(projectId) as { node_id: number | null; ref: string; outcome: string | null }[];
   const heldEvents = db
     .prepare("SELECT session_id, text FROM lead_events WHERE project_id = ? AND kind = 'held'")
     .all(projectId) as { session_id: string | null; text: string }[];
@@ -168,7 +168,13 @@ export function morningList(ctx: Ctx, projectId: number, since: string, now: str
     }
     return undefined;
   };
-  const held = heldRows.map((r) => `${r.node_id === null ? 'A session' : `#${r.node_id}`} wants to ${noStop(commandOf(r.ref) ?? 'run a held command')}. Say "go ahead" or "not yet".`);
+  // What the command does, as the hold stored it (heldOutcome); an item held before it was stored names its command.
+  const held = heldRows.map((r) => {
+    const who = r.node_id === null ? 'A session' : `#${r.node_id}`;
+    const what = heldWhatOf(r.outcome);
+    const wants = what !== undefined ? `wants ${noStop(what)}` : `wants to ${noStop(commandOf(r.ref) ?? 'run a held command')}`;
+    return `${who} ${wants}. Say "go ahead" or "not yet".`;
+  });
   if (held.length) parts.push({ name: 'Held for you', count: held.length, lines: held });
 
   // Went wrong.

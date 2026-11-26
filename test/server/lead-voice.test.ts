@@ -165,8 +165,9 @@ describe('the Voice: what makes a line', () => {
       intendHeldLine(s.ctx.db, { projectId: s.project.id, itemId: item.id, projectName: 'InGame', stepId: s.step.id, what: 'a merge into main' }, s.ctx.now());
       return item.id;
     });
-    expect(s.lines().map((l) => [l.retryKey, l.body])).toEqual([[`voice:held:${itemId}`, `Held, InGame: #${s.step.id} wants to do a merge into main. Say "go ahead" or "not yet".`]]);
-    expect(heldVoiceLine({ projectName: 'InGame', stepId: null, what: 'A deploy' })).toBe('Held, InGame: a session wants to do a deploy. Say "go ahead" or "not yet".');
+    expect(s.lines().map((l) => [l.retryKey, l.body])).toEqual([[`voice:held:${itemId}`, `Held, InGame: #${s.step.id} wants a merge into main. Say "go ahead" or "not yet".`]]);
+    expect(heldVoiceLine({ projectName: 'InGame', stepId: null, what: 'A deploy' })).toBe('Held, InGame: a session wants a deploy. Say "go ahead" or "not yet".');
+    expect(heldVoiceLine({ projectName: 'InGame', stepId: 747, what: 'a publish of x 1.2.0 to npm' })).toBe('Held, InGame: #747 wants a publish of x 1.2.0 to npm. Say "go ahead" or "not yet".');
   });
 });
 

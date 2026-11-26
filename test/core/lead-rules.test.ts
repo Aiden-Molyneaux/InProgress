@@ -141,7 +141,7 @@ const EXPECTED = [
   "Run lead old-asks --all once. Before each batch, when he has given you the stage 0 list, store your reading of each ask in it with lead old-asks reading. Then run lead old-asks next 5: each ask reaches him as a line from the Voice. Carry each answer in his words with lead answer <the line's project> --send s<the send number at the end of its line>. When those five are answered, run lead old-asks next 5 again, until it says no old asks remain.",
   '',
   'When Aiden says undo',
-  "Run lead undo with the decision's number and his words, and tell him what InProgress answered. If it was a question you had answered, relay to its session that the answer was withdrawn and the question is Aiden's again. If he says why, add his reason under Standing rulings in the intent record (read the record, add the line, send the whole record back), and do not make that call again.",
+  "Run lead undo with the decision's number and his words, and tell him what InProgress answered. If it was a question you had answered, relay to its session that the answer was withdrawn and the question is Aiden's again. If he says why, add his reason under Standing rulings in the intent record as one line that names what it is about: On \"<the question, short>\" (#<step>): <his reason, in his words>. Read the record, add the line, send the whole record back, and do not make that call again.",
   '',
   'After you change the record, say in one line what InProgress answered, word for word.',
 ];

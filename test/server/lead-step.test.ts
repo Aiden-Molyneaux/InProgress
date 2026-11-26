@@ -3,6 +3,7 @@ import { LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
 import { stamp } from '../../src/core/span';
 import { buildApp } from '../../src/server/app';
 import { noLeadNamed } from '../../src/server/lead';
+import { lateAnswer, leadDecide, leadUndo } from '../../src/server/lead-commands';
 import { LEAD_RESOURCE_CUT, LEAD_STEP_LOG_CAP, LEAD_STEP_TEXT_CUT, readLeadResource, readLeadStep } from '../../src/server/lead-step';
 import { clearAsk, raiseAsk } from '../../src/server/repo/asks';
 import { addLog } from '../../src/server/repo/logs';
@@ -79,6 +80,21 @@ describe('readLeadStep', () => {
     const at = order.map((h) => lines.findIndex((l) => l.startsWith(h)));
     expect(at).toEqual([...at].sort((a, b) => a - b));
     expect(at.every((i) => i > 0)).toBe(true);
+  });
+
+  it("shows the lead's answer Aiden undid as withdrawn, with his words, and his late answer as his own", () => {
+    const { ctx, project, step, read } = setup();
+    const undone = raiseAsk(ctx, 'session:abc', { nodeId: step.id, kind: 'question', text: 'Which disk?' });
+    const d = leadDecide(ctx, project.slug, ...W, { askId: undone.id, answer: 'The big one', reason: 'room' }).decision;
+    expect(read().split('\n')).toContain(`  a${undone.id} question · answered 27d ago: "Which disk?" -> "The big one"`);
+    leadUndo(ctx, project.slug, ...W, { eventId: d, aidenWords: 'undo that, the small one' });
+    expect(read()).toContain(`  a${undone.id} question · answered 27d ago: "Which disk?" -> "The big one" (withdrawn: Aiden undid d${d}: "undo that, the small one")`);
+    // His late answer replaces a decision: the answer printed is his, and nothing is withdrawn.
+    const late = raiseAsk(ctx, 'session:abc', { nodeId: step.id, kind: 'question', text: 'Which day?' });
+    leadDecide(ctx, project.slug, ...W, { askId: late.id, answer: 'Monday', reason: 'quiet' });
+    expect(lateAnswer(ctx, late.id, 'Friday', 'window')).toBe(true);
+    const line = read().split('\n').find((l) => l.startsWith(`  a${late.id} `));
+    expect(line).toBe(`  a${late.id} question · answered 27d ago: "Which day?" -> "Friday"`);
   });
 
   it('prints the open working tasks, and says how many are done', () => {

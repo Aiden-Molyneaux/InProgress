@@ -130,11 +130,14 @@ describe('lead old-asks <project>: the old asks onto the desk', () => {
     const { post } = appOf(w.ctx);
     const res = await post('/api/lead/old-asks/all', {});
     expect(res.statusCode).toBe(200);
-    expect(res.json().text).toBe(['InProgress: 1 old asks, 0 for the round, 1 for the Voice.', 'Glimpse: 2 old asks, 0 for the round, 2 for the Voice.', 'Put 3 old asks on the desk: 0 for the round, 3 for the Voice.'].join('\n'));
+    expect(res.json().text).toBe(['InProgress: 1 old asks, 0 for the round, 1 for the Voice.', 'Glimpse: 2 old asks, 0 for the round, 2 for the Voice.', 'Put 3 old asks on the desk: 0 for the round, 3 for the Voice.', 'Left for its own lead: Notes, 1 old ask (Other).'].join('\n'));
     expect([...g, own].map((a) => w.item(a.id).map((i) => i.state))).toEqual([['waiting_aiden'], ['waiting_aiden'], ['waiting_aiden']]);
     expect(w.item(work.id)).toEqual([]);
     expect(w.item(other.id)).toEqual([]);
-    // Once each: a second run puts nothing, and names no project.
+    // Once each: a second run puts nothing and names no project it put; the one left for its own lead is named again.
+    expect(leadOldAsksAll(w.ctx, 'Progresser', V).text).toBe(['Put 0 old asks on the desk: 0 for the round, 0 for the Voice.', 'Left for its own lead: Notes, 1 old ask (Other).'].join('\n'));
+    // Answered, it is no longer named.
+    clearAsk(w.ctx, 'window', other.id, 'yes');
     expect(leadOldAsksAll(w.ctx, 'Progresser', V).text).toBe('Put 0 old asks on the desk: 0 for the round, 0 for the Voice.');
   });
 
@@ -217,6 +220,31 @@ describe('lead old-asks next: the old asks waiting on Aiden, to the Voice', () =
     const done = w.lines().filter((l) => l.body === OLD_ASKS_DONE_LINE);
     expect(done).toHaveLength(1);
     expect(done[0]!.retryKey).toMatch(/^voice:old:done:\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("the done line names each project of another lead's that still has open old asks, counted by the rule that picks them", () => {
+    const w = world();
+    const g = w.ask(w.glimpse, 'Login screen review?', 2);
+    setProjectLead(w.ctx, 'window', w.notes.project.slug, 'InThinker');
+    for (let i = 0; i < 6; i++) w.ask(w.notes, `Sync ${i}?`, 1);
+    // Raised after its round was first switched on: not an old ask, so not counted.
+    leadAllow(w.ctx, w.notes.project.slug, 'InThinker', V, { switch: 'round', aidenWords: 'run the round' });
+    w.ask(w.notes, 'Sync later?');
+    // Another lead's project under C:\work is never named.
+    setProjectLead(w.ctx, 'window', w.work.project.slug, 'Payer');
+    w.ask(w.work, 'Which format?', 1);
+    const shop = createProject(w.ctx, 'test', { name: 'Shop' });
+    addBinding(w.ctx, 'test', shop.slug, 'C:/personal/Shop');
+    const [cart] = addNodes(w.ctx, 'test', { parentId: shop.rootNodeId, nodes: [{ title: 'Cart' }] });
+    setProjectLead(w.ctx, 'window', shop.slug, 'Shopper');
+    w.ask({ step: cart! }, 'Which currency?', 1);
+    expect(leadOldAsksAll(w.ctx, 'Progresser', V).text.split('\n').slice(-2)).toEqual(['Left for its own lead: Notes, 6 old asks (InThinker).', 'Left for its own lead: Shop, 1 old ask (Shopper).']);
+    leadOldAsksNext(w.ctx, 'Progresser', V);
+    expect(w.lines()).toHaveLength(1);
+    clearAsk(w.ctx, 'window', g.id, 'yes');
+    w.ctx.db.prepare("UPDATE desk_items SET state = 'done' WHERE kind = 'old_ask'").run();
+    expect(leadOldAsksNext(w.ctx, 'Progresser', V).text).toBe(NO_OLD_ASKS);
+    expect(w.lines().at(-1)!.body).toBe(`${OLD_ASKS_DONE_LINE} Still open for another lead: Notes 6 (InThinker), Shop 1 (Shopper).`);
   });
 
   it("leaves out an item in a C:\\work project or one another lead leads, and an open (round's) item", () => {

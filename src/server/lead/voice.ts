@@ -264,11 +264,11 @@ export function intendReviewLine(
   intendLine(db, { projectId: input.projectId, itemId: input.itemId, retryKey: `voice:bring:d${input.eventId}`, body: reviewVoiceLine(input) }, now);
 }
 
-/** A held action's line. Retry key `voice:held:<item id>`. */
+/** A held action's line: `Held, <project>: #<step> wants <what>.` Retry key `voice:held:<item id>`. */
 export function heldVoiceLine(input: { projectName: string; stepId: number | null; what: string }): string {
   const who = input.stepId === null ? 'a session' : `#${input.stepId}`;
   const what = input.what.trim().replace(/\.+$/, '');
-  return `Held, ${clipLine(input.projectName, 80)}: ${who} wants to do ${what.charAt(0).toLowerCase()}${what.slice(1)}. Say "go ahead" or "not yet".`;
+  return `Held, ${clipLine(input.projectName, 80)}: ${who} wants ${what.charAt(0).toLowerCase()}${what.slice(1)}. Say "go ahead" or "not yet".`;
 }
 
 /** Intends a bring's voice line, inside the caller's write. */
@@ -326,7 +326,24 @@ export function intendOldAskLine(db: DB, input: { projectId: number; itemId: num
   intendLine(db, { projectId: input.projectId, itemId: input.itemId, retryKey: oldLineKey(input.itemId, input.n), body: input.body }, now);
 }
 
-/** Intends the line that the old asks are done, once a day (oldDoneKey), inside the caller's write. */
-export function intendOldAsksDoneLine(db: DB, input: { projectId: number; date: string }, now: string): void {
-  intendLine(db, { projectId: input.projectId, retryKey: oldDoneKey(input.date), body: OLD_ASKS_DONE_LINE }, now);
+/** A project of another lead's that still has open old asks: its name, how many, and its lead. */
+export interface OldAsksElsewhere {
+  projectName: string;
+  count: number;
+  lead: string;
+}
+
+/**
+ * The done line: OLD_ASKS_DONE_LINE, then, when other leads' projects still have open old asks, each of them as
+ * `<project> <count> (<lead>)`: `The old asks are done. Still open for another lead: InThink 6 (InThinker).`
+ */
+export function oldAsksDoneLine(elsewhere: readonly OldAsksElsewhere[] = []): string {
+  if (elsewhere.length === 0) return OLD_ASKS_DONE_LINE;
+  const each = elsewhere.map((p) => `${clipLine(p.projectName, 80)} ${p.count} (${clipLine(p.lead, 40)})`);
+  return `${OLD_ASKS_DONE_LINE} Still open for another lead: ${each.join(', ')}.`;
+}
+
+/** Intends the line that the old asks are done (oldAsksDoneLine), once a day (oldDoneKey), inside the caller's write. */
+export function intendOldAsksDoneLine(db: DB, input: { projectId: number; date: string; elsewhere?: readonly OldAsksElsewhere[] }, now: string): void {
+  intendLine(db, { projectId: input.projectId, retryKey: oldDoneKey(input.date), body: oldAsksDoneLine(input.elsewhere) }, now);
 }

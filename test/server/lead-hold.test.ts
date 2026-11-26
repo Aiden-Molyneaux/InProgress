@@ -9,7 +9,7 @@ import { createCtx, deskOnly, write } from '../../src/server/db/tx';
 import { heldActions, playbookHeldLines } from '../../src/core/hold';
 import { leadAllow, leadDisallow } from '../../src/server/lead-commands';
 import { applyVerdict } from '../../src/server/lead/apply';
-import { STUCK_POLL_MS, STUCK_WAIT_MS, stuckWait, watchHeldLines, writeHeldLines } from '../../src/server/lead/hold';
+import { heldOutcome, heldWhatOf, STUCK_POLL_MS, STUCK_WAIT_MS, stuckWait, watchHeldLines, writeHeldLines } from '../../src/server/lead/hold';
 import { realGit, type LandingDeps } from '../../src/server/lead/landing';
 import { deskUserMessage } from '../../src/server/lead/prompt';
 import { getDeskItem } from '../../src/server/repo/desk';
@@ -94,7 +94,7 @@ describe('POST /api/lead/hold', () => {
     expect(await w.hold('npm test && git push')).toEqual({ held: true, text: 'a push of feature to origin' });
     // Y13: the held item is made in a transaction of its own, and the window hears of it at once.
     expect(desk).toHaveLength(1);
-    expect(w.items('held')).toEqual([expect.objectContaining({ state: 'waiting_aiden', node_id: w.step.id, outcome: "held: hold: this is Aiden's (it touches src/hooks/x.ts)" })]);
+    expect(w.items('held')).toEqual([expect.objectContaining({ state: 'waiting_aiden', node_id: w.step.id, outcome: "held: hold: this is Aiden's (it touches src/hooks/x.ts)\nwhat: a push of feature to origin" })]);
     expect(w.events('held')).toEqual([{ text: "npm test && git push -> hold: this is Aiden's (it touches src/hooks/x.ts)", node_id: w.step.id, session_id: 's1' }]);
     expect(await w.hold('npm test && git push')).toEqual({ held: true, text: 'a push of feature to origin' });
     expect(w.items('held')).toHaveLength(1);
@@ -130,7 +130,30 @@ describe('POST /api/lead/hold', () => {
     writeFile(repo.wt, 'web/app.ts', lines(9, 'feature'));
     commit(repo.wt, 'web');
     expect(await w.hold('git push')).toEqual({ held: true, text: 'a push of feature to origin' });
-    expect(w.items('held')[0]!.outcome).toBe('held: could not tell which step this is for');
+    expect(w.items('held')[0]!.outcome).toBe('held: could not tell which step this is for\nwhat: a push of feature to origin');
+  });
+
+  it("an npm, pnpm or yarn publish names the folder's package and version; with no readable name and version, or another publish, it names the branch", async () => {
+    const w = world();
+    // No focus step: every publish is held, so each one's what is seen.
+    w.ctx.db.prepare("UPDATE sessions SET focus_node_id = NULL WHERE id = 's1'").run();
+    writeFile(repo.wt, 'package.json', JSON.stringify({ name: 'x', version: '1.2.0' }));
+    expect(await w.hold('npm publish')).toEqual({ held: true, text: 'a publish of x 1.2.0 to npm' });
+    expect(await w.hold('pnpm publish --access public')).toEqual({ held: true, text: 'a publish of x 1.2.0 to npm' });
+    expect(await w.hold('yarn publish', { sessionId: null })).toEqual({ held: true, text: 'a publish of x 1.2.0 to npm' });
+    expect(await w.hold('cargo publish')).toEqual({ held: true, text: 'a publish of feature' });
+    expect(heldWhatOf(w.items('held')[0]!.outcome)).toBe('a publish of x 1.2.0 to npm');
+    writeFile(repo.wt, 'package.json', JSON.stringify({ name: 'x' }));
+    expect(await w.hold('npm publish --tag beta')).toEqual({ held: true, text: 'a publish of feature' });
+    writeFile(repo.wt, 'package.json', '{ not json');
+    expect(await w.hold('npm publish --dry-run')).toEqual({ held: true, text: 'a publish of feature' });
+  });
+
+  it('heldWhatOf reads the what back from the outcome, and nothing from an item held before it was stored', () => {
+    expect(heldWhatOf(heldOutcome('why\nwhat: not this', 'a deploy of main to the live build'))).toBe('a deploy of main to the live build');
+    expect(heldWhatOf("held: hold: this is Aiden's")).toBeUndefined();
+    expect(heldWhatOf(null)).toBeUndefined();
+    expect(heldWhatOf('ANSWERED d4\nwhat: x')).toBeUndefined();
   });
 
   it('judges the merge in the folder a cd moved to, not the session\'s: from a worktree, a merge in the main checkout is held', async () => {
@@ -140,7 +163,7 @@ describe('POST /api/lead/hold', () => {
     expect(await w.hold('git merge --ff-only feature')).toEqual({ say: 'nothing' });
     expect(await w.hold(`cd ${repo.main.replace(/\\/g, '/')} && git merge --ff-only feature`)).toEqual({ held: true, text: 'a merge of feature into main' });
     expect(await w.hold('cd $MAIN && git merge --ff-only feature')).toEqual({ held: true, text: 'a merge into main' });
-    expect(w.items('held').map((i) => i.outcome)).toEqual(["held: hold: this is Aiden's (it touches src/hooks/x.ts)", 'held: could not tell which folder it runs in']);
+    expect(w.items('held').map((i) => i.outcome)).toEqual(["held: hold: this is Aiden's (it touches src/hooks/x.ts)\nwhat: a merge of feature into main", 'held: could not tell which folder it runs in\nwhat: a merge into main']);
   });
 
   it('judges the command at the place the hook names: a second push of the line is judged on its own', async () => {
@@ -158,7 +181,7 @@ describe('POST /api/lead/hold', () => {
   it("on main, an octopus merge is held, and updating main from origin is not a landing; gh pr merge is held without a check", async () => {
     const w = world();
     expect(await w.hold('git merge a b', { cwd: repo.main })).toEqual({ held: true, text: 'a merge into main' });
-    expect(w.items('held')[0]!.outcome).toBe('held: a merge of several branches at once');
+    expect(w.items('held')[0]!.outcome).toBe('held: a merge of several branches at once\nwhat: a merge into main');
     expect(await w.hold('git merge origin/main', { cwd: repo.main })).toEqual({ say: 'nothing' });
     expect(await w.hold('git merge --ff-only @{u}', { cwd: repo.main })).toEqual({ say: 'nothing' });
     expect(await w.hold('gh pr merge 12 --squash')).toEqual({ held: true, text: 'a merge of a pull request into main (gh pr merge 12 --squash)' });

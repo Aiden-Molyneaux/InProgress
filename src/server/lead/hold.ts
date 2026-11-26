@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import { CHECKED_ACTIONS, HELD_ACTIONS, heldActions, isUpstreamOfMain, mergeTargets, playbookHeldLines, pushTarget, type HeldMatch } from '../../core/hold';
 import { ID_MAX } from '../../core/notices';
@@ -97,6 +97,59 @@ async function currentBranch(deps: LandingDeps, folder: string): Promise<string 
   }
 }
 
+/** Flags of a publish that take a value: the next word is that value, not a path. */
+const VALUE_FLAGS = new Set(['--tag', '--access', '--otp', '--registry', '--provenance-file', '--publish-branch']);
+
+/**
+ * Whether the publish sends the folder's own package.json: an npm, pnpm or yarn publish with flags only. A path or
+ * tarball after it, or a workspace flag, sends another package: the publish is then named as before, by its branch.
+ */
+export function publishesFolderPackage(segment: string): boolean {
+  const m = /\b(?:npm|pnpm|yarn)\s+publish\b(.*)$/i.exec(segment);
+  if (m === null) return false;
+  const words = m[1]!.trim().split(/\s+/).filter((w) => w !== '');
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i]!;
+    if (/^(?:-w|--workspaces?|--filter|-r|--recursive)(?:=|$)/i.test(w)) return false;
+    if (w.startsWith('-')) {
+      if (!w.includes('=') && VALUE_FLAGS.has(w.toLowerCase())) i++;
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+/** The name and version in `<folder>/package.json`, both strings; undefined when it cannot be read or lacks either. */
+function packageOf(folder: string): { name: string; version: string } | undefined {
+  let pkg: unknown;
+  try {
+    pkg = JSON.parse(readFileSync(join(folder, 'package.json'), 'utf8'));
+  } catch {
+    // No package.json, or one that is not JSON: the publish is named as before, by its branch.
+    return undefined;
+  }
+  const { name, version } = (pkg ?? {}) as { name?: unknown; version?: unknown };
+  if (typeof name !== 'string' || typeof version !== 'string' || name.trim() === '' || version.trim() === '') return undefined;
+  return { name: clipLine(name, 120), version: clipLine(version, 40) };
+}
+
+/**
+ * A held item's outcome: why it is held, then what the command does on a line of its own (`what` is one line, so the last
+ * `\nwhat: ` is always its own). heldWhatOf reads it back.
+ */
+export const heldOutcome = (why: string, what: string): string => `held: ${why}${HELD_WHAT}${clipLine(what, 1_000)}`;
+const HELD_WHAT = '\nwhat: ';
+
+/** What a held item's command does, from its outcome (heldOutcome); undefined for an item held before it was stored. */
+export function heldWhatOf(outcome: string | null): string | undefined {
+  if (outcome === null || !outcome.startsWith('held: ')) return undefined;
+  const at = outcome.lastIndexOf(HELD_WHAT);
+  if (at < 0) return undefined;
+  const what = outcome.slice(at + HELD_WHAT.length).trim();
+  return what === '' ? undefined : what;
+}
+
 /** A held answer, as the route works it out: what the command does, and why it is held (for the log). */
 type Judged = { clear: true } | { clear: false; what: string; why: string };
 
@@ -128,8 +181,13 @@ async function judge(ctx: Ctx, scope: LeadScope, match: HeldMatch, deps: Landing
   } else if (match.action === 'deploy') {
     what = 'a deploy of main to the live build';
   } else if (match.action === 'publish') {
-    const on = await currentBranch(deps, folder);
-    what = on === null ? match.what : `a publish of ${on}`;
+    const pkg = publishesFolderPackage(match.segment) ? packageOf(folder) : undefined;
+    if (pkg !== undefined) {
+      what = `a publish of ${pkg.name} ${pkg.version} to npm`;
+    } else {
+      const on = await currentBranch(deps, folder);
+      what = on === null ? match.what : `a publish of ${on}`;
+    }
   }
   if (scope.stepId === null) return { clear: false, what, why: 'could not tell which step this is for' };
   try {
@@ -170,7 +228,7 @@ export async function holdCheck(ctx: Ctx, ask: HoldAsk, deps: LandingDeps = REAL
       const { item, created } = produceDeskItem(ctx.db, { projectId: scope.project.id, kind: 'held', ref: heldRef(scope.sessionId, ask.command), nodeId: scope.stepId }, now);
       if (!created) return;
       // Aiden's by the check: the runner never leases it; the Voice and the morning list bring it.
-      moveDeskItem(ctx.db, item.id, ['open'], 'waiting_aiden', { outcome: `held: ${judged.why}`, now });
+      moveDeskItem(ctx.db, item.id, ['open'], 'waiting_aiden', { outcome: heldOutcome(judged.why, judged.what), now });
       insertLeadEvent(
         ctx.db,
         {

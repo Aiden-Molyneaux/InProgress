@@ -38,11 +38,31 @@ const notInProject = (prefix: string, id: number): never => {
   throw conflict(`${prefix}${id} is not in this project.`);
 };
 
-function askLine(a: Ask, now: number): string {
+/**
+ * The undo of the lead's decision on an ask, when Aiden undid it: the decision's id and his words. Only while the ask's
+ * answer is still the lead's (answered_via `lead_decided`): his late answer (lateAnswer) replaces it and is not withdrawn.
+ */
+function undoneDecision(ctx: Ctx, a: Ask): { eventId: number; words: string } | undefined {
+  if (a.clearedAt === null || a.answeredVia !== 'lead_decided') return undefined;
+  const row = ctx.db
+    .prepare(
+      `SELECT d.id AS eventId, u.aiden_words AS words FROM lead_events d
+         JOIN lead_events u ON u.project_id = d.project_id AND u.kind = 'undo' AND u.text = 'd' || d.id
+        WHERE d.kind = 'decide' AND d.ask_id = ? ORDER BY d.id DESC LIMIT 1`,
+    )
+    .get(a.id) as { eventId: number; words: string | null } | undefined;
+  return row === undefined ? undefined : { eventId: row.eventId, words: row.words ?? '' };
+}
+
+function askLine(ctx: Ctx, a: Ask, now: number): string {
   const tag = `a${a.id} ${a.owner === 'lead' ? 'promise' : a.kind}`;
   const text = `"${cutText(a.text, LEAD_STEP_TEXT_CUT)}"`;
   if (a.clearedAt === null) return `${tag} · open, raised ${spanAgo(a.raisedAt, now)} ago: ${text}`;
-  if (a.answer.trim()) return `${tag} · answered ${spanAgo(a.clearedAt, now)} ago: ${text} -> "${cutText(a.answer, LEAD_STEP_TEXT_CUT)}"`;
+  if (a.answer.trim()) {
+    const undone = undoneDecision(ctx, a);
+    const withdrawn = undone === undefined ? '' : ` (withdrawn: Aiden undid d${undone.eventId}: "${cutText(undone.words, LEAD_STEP_TEXT_CUT)}")`;
+    return `${tag} · answered ${spanAgo(a.clearedAt, now)} ago: ${text} -> "${cutText(a.answer, LEAD_STEP_TEXT_CUT)}"${withdrawn}`;
+  }
   return `${tag} · cleared ${spanAgo(a.clearedAt, now)} ago with no answer: ${text}`;
 }
 
@@ -90,7 +110,7 @@ export function readLeadStep(ctx: Ctx, ref: string, as: string, instructions: nu
     );
     const kept = cleared.filter((a) => last.has(a.id));
     const shown = [...asks.filter((a) => a.clearedAt === null), ...kept];
-    out.push(`Asks (${asks.length}):`, ...shown.map((a) => `  ${askLine(a, nowMs)}`));
+    out.push(`Asks (${asks.length}):`, ...shown.map((a) => `  ${askLine(ctx, a, nowMs)}`));
     if (cleared.length > kept.length) out.push(`  and ${cleared.length - kept.length} more, cleared earlier`);
   }
 

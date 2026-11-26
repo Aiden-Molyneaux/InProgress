@@ -10,7 +10,7 @@ import { itemEverMade, produceDeskItem } from '../repo/deskProducers';
 import { insertLeadEvent } from '../repo/leadEvents';
 import { roundFirstOn, roundSince } from '../repo/switches';
 import { dateKey } from './morning';
-import { intendOldAskLine, intendOldAsksDoneLine, OLD_DONE_KEY_LIKE, OLD_KEY_LIKE, oldAskVoiceLine } from './voice';
+import { intendOldAskLine, intendOldAsksDoneLine, OLD_DONE_KEY_LIKE, OLD_KEY_LIKE, oldAskVoiceLine, type OldAsksElsewhere } from './voice';
 
 /*
  * The old asks (lead stage 1, #743, task 17): Aiden's asks raised before the round was first switched on in their project.
@@ -50,16 +50,39 @@ export function leadOldAsks(ctx: Ctx, ref: string, as: string, instructions: num
 const putLine = (k: number, m: number): string => `Put ${k + m} old asks on the desk: ${k} for the round, ${m} for the Voice.`;
 
 /**
+ * The project's old asks still open, oldest first: Aiden's open asks raised before the round's first switch-on there (every
+ * open ask of his when the round has never been on). The one rule that picks old asks, for putting them and for counting.
+ */
+function openOldAsks(db: Ctx['db'], projectId: number): { id: number; nodeId: number }[] {
+  const first = roundFirstOn(db, projectId);
+  return db
+    .prepare(`SELECT id, node_id AS nodeId FROM asks WHERE project_id = ? AND cleared_at IS NULL AND ${aidensAskSql()}${first === null ? '' : ' AND raised_at < ?'} ORDER BY raised_at, id`)
+    .all(...(first === null ? [projectId] : [projectId, first])) as { id: number; nodeId: number }[];
+}
+
+/**
+ * The projects led by another lead than `name` (not archived or deleted, not under C:\work) that still have open old asks
+ * (openOldAsks), by id: what `--all` leaves for their own lead, and what the done line says is still open.
+ */
+function othersOldAsks(ctx: Ctx, name: string): OldAsksElsewhere[] {
+  const led = ctx.db
+    .prepare("SELECT id, name, lead FROM projects WHERE status <> 'archived' AND deleted_at IS NULL AND lead IS NOT NULL AND trim(lead) <> '' ORDER BY id")
+    .all() as { id: number; name: string; lead: string }[];
+  return led
+    // A project under C:\work is never the old asks' (as lead old-asks refuses it): it is not named either.
+    .filter((p) => p.lead.trim().toLowerCase() !== name.toLowerCase() && !workProject(ctx, p.id))
+    .map((p) => ({ projectName: p.name, count: openOldAsks(ctx.db, p.id).length, lead: p.lead.trim() }))
+    .filter((p) => p.count > 0);
+}
+
+/**
  * Inside the caller's write: the project's old asks onto the desk, each once. A project with a lead (it is this lead's: the
  * caller checked) and its round on takes them open, for the round; any other waits on Aiden. Answers how many of each.
  */
 function putOldAsks(ctx: Ctx, project: { id: number; lead: string | null }): { forRound: number; forVoice: number } {
   const db = ctx.db;
   const now = ctx.now();
-  const first = roundFirstOn(db, project.id);
-  const asks = db
-    .prepare(`SELECT id, node_id AS nodeId FROM asks WHERE project_id = ? AND cleared_at IS NULL AND ${aidensAskSql()}${first === null ? '' : ' AND raised_at < ?'} ORDER BY raised_at, id`)
-    .all(...(first === null ? [project.id] : [project.id, first])) as { id: number; nodeId: number }[];
+  const asks = openOldAsks(db, project.id);
   const led = project.lead !== null && project.lead.trim() !== '';
   const forRound = led && roundSince(db, project.id) !== null;
   let made = 0;
@@ -107,7 +130,8 @@ function personalProjects(ctx: Ctx, name: string): { id: number; name: string; l
 
 /**
  * `lead old-asks --all`: `lead old-asks <project>` for every personal project `next` serves (personalProjects), in one
- * write. Answers one line for each project that had an old ask put on the desk, then the total.
+ * write. Answers one line for each project that had an old ask put on the desk, then the total, then one line for each
+ * project another lead leads that still has open old asks (othersOldAsks): those are left for its own lead.
  */
 export function leadOldAsksAll(ctx: Ctx, as: string, instructions: number): { text: string; forRound: number; forVoice: number } {
   const name = requireLeadName(ctx, as, instructions);
@@ -122,7 +146,9 @@ export function leadOldAsksAll(ctx: Ctx, as: string, instructions: number): { te
       k += put.forRound;
       m += put.forVoice;
     }
-    return { text: [...lines, putLine(k, m)].join('\n'), forRound: k, forVoice: m };
+    // The projects another lead leads are not this lead's to put: each one with open old asks is named, and why.
+    const left = othersOldAsks(ctx, name).map((p) => `Left for its own lead: ${p.projectName}, ${p.count} old ask${p.count === 1 ? '' : 's'} (${p.lead}).`);
+    return { text: [...lines, putLine(k, m), ...left].join('\n'), forRound: k, forVoice: m };
   });
 }
 
@@ -142,7 +168,8 @@ export const OLD_LINES_PER_ASK = 2;
  * it is intended or done and its item is not done; one that ended unknown (a refused webhook) or cleared does not, and its
  * item is queued again under the next key (oldLineKey). Only items of those projects count. Refused while OLD_ASKS_AT_ONCE
  * lines wait. With none to queue it answers NO_OLD_ASKS, and once no line waits either, queues the line that says they
- * are done, once a day, in the project of the newest old-ask line.
+ * are done, once a day, in the project of the newest old-ask line, naming the projects of other leads that still have open
+ * old asks (oldAsksDoneLine).
  */
 export function leadOldAsksNext(ctx: Ctx, as: string, instructions: number, count = OLD_ASKS_AT_ONCE): { text: string; queued: number; remain: number } {
   const name = requireLeadName(ctx, as, instructions);
@@ -176,7 +203,7 @@ export function leadOldAsksNext(ctx: Ctx, as: string, instructions: number, coun
     if (waiting.length === 0) {
       if (pending === 0) {
         const last = (db.prepare(`SELECT s.project_id FROM lead_sends s WHERE ${OLD_LINE_SQL} ORDER BY s.id DESC`).pluck().all() as number[]).find(served);
-        if (last !== undefined) intendOldAsksDoneLine(db, { projectId: last, date: dateKey(now) }, now);
+        if (last !== undefined) intendOldAsksDoneLine(db, { projectId: last, date: dateKey(now), elsewhere: othersOldAsks(ctx, name) }, now);
       }
       return { text: NO_OLD_ASKS, queued: 0, remain: 0 };
     }

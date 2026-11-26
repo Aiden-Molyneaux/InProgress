@@ -7,9 +7,9 @@ import { openDb } from '../../src/server/db/connection';
 import { createCtx } from '../../src/server/db/tx';
 import { leadAllow, leadDecide, leadSet, leadUndo, lateAnswer } from '../../src/server/lead-commands';
 import { applyVerdict } from '../../src/server/lead/apply';
-import { heldRef } from '../../src/server/lead/hold';
+import { heldOutcome, heldRef } from '../../src/server/lead/hold';
 import { dateKey, dayWords, morningList, noteWake, readMorning, watchMorning, WAKE_GAP_MS } from '../../src/server/lead/morning';
-import { standingRulings } from '../../src/server/lead/prompt';
+import { deskSystemPrompt, standingRulings, undoneByAiden } from '../../src/server/lead/prompt';
 import { quietHours } from '../../src/server/lead/settings';
 import { raiseAskDetailed, undeliveredAnswers } from '../../src/server/repo/asks';
 import { addDeskItem, moveDeskItem } from '../../src/server/repo/desk';
@@ -335,6 +335,20 @@ describe('the morning list, once a day', () => {
     ]);
   });
 
+  it('a held item with its what stored reads the what, as the Voice does; one held before it was stored reads its command', () => {
+    const w = world();
+    w.session('s1');
+    w.at(local(1, 1));
+    const old = addDeskItem(w.ctx.db, { projectId: w.project.id, kind: 'held', ref: heldRef('s1', 'npm run deploy'), nodeId: w.step.id, state: 'waiting_aiden' }, w.ctx.now()).item;
+    moveDeskItem(w.ctx.db, old.id, ['waiting_aiden'], 'waiting_aiden', { outcome: 'held: for Aiden', now: w.ctx.now() });
+    insertLeadEvent(w.ctx.db, { projectId: w.project.id, lead: 'Progresser', instructions: V, kind: 'held', nodeId: w.step.id, sessionId: 's1', text: 'npm run deploy -> for Aiden' }, old.createdAt);
+    const pub = addDeskItem(w.ctx.db, { projectId: w.project.id, kind: 'held', ref: heldRef('s1', 'npm publish'), nodeId: w.step.id, state: 'waiting_aiden' }, w.ctx.now()).item;
+    moveDeskItem(w.ctx.db, pub.id, ['waiting_aiden'], 'waiting_aiden', { outcome: heldOutcome('could not tell which step this is for', 'a publish of x 1.2.0 to npm'), now: w.ctx.now() });
+    insertLeadEvent(w.ctx.db, { projectId: w.project.id, lead: 'Progresser', instructions: V, kind: 'held', nodeId: w.step.id, sessionId: 's1', text: 'npm publish -> could not tell which step this is for' }, pub.createdAt);
+    const lines = morningList(w.ctx, w.project.id, local(0, 9), local(1, 9)).parts.find((x) => x.name === 'Held for you')!.lines;
+    expect(lines).toEqual([`#${w.step.id} wants to npm run deploy. Say "go ahead" or "not yet".`, `#${w.step.id} wants a publish of x 1.2.0 to npm. Say "go ahead" or "not yet".`]);
+  });
+
   it('lead morning prints today written list, then what is new since it', () => {
     const w = world();
     w.session('s1');
@@ -383,6 +397,39 @@ describe('undo of a desk decision, and Aiden late answer', () => {
     // Undone once: a second undo is refused and tells nothing more.
     expect(() => leadUndo(w.ctx, w.project.slug, 'Progresser', V, { eventId: d, aidenWords: 'again' })).toThrow(/already undone/);
     expect(w.sends().filter((s) => s.retryKey === `undo:d${d}`)).toHaveLength(1);
+  });
+
+  it("names the undone decision, its question, the answer he withdrew and his words in the next turn's prompt", () => {
+    const { w, d } = decided();
+    expect(undoneByAiden(w.ctx, w.project.id)).toBe('');
+    expect(deskSystemPrompt(w.ctx, w.project)).not.toContain('Undone by Aiden');
+    leadUndo(w.ctx, w.project.slug, 'Progresser', V, { eventId: d, aidenWords: `undo d${d}, ids are noise`, reason: 'ids are noise' });
+    const line = `- d${d} on #${w.step.id} "Should search match step ids?": he withdrew "yes". His words: "undo d${d}, ids are noise". Do not give that answer again; it is his now.`;
+    expect(undoneByAiden(w.ctx, w.project.id)).toBe(line);
+    // After the standing rulings, as the prompt's last section.
+    expect(deskSystemPrompt(w.ctx, w.project).endsWith(`(from undo d${d}, ${dateKey(w.ctx.now())})\n\nUndone by Aiden\n${line}\n`)).toBe(true);
+    // Thirty days on it is no longer read.
+    w.at(new Date(Date.parse(w.ctx.now()) + 31 * 24 * 60 * MIN).toISOString());
+    expect(undoneByAiden(w.ctx, w.project.id)).toBe('');
+  });
+
+  it('names the answer the lead gave, not his late answer that replaced it, and reads the newest 10 first', () => {
+    const { w, a, d } = decided();
+    expect(lateAnswer(w.ctx, a.id, 'No, ids are noise.', 'window')).toBe(true);
+    expect(undoneByAiden(w.ctx, w.project.id)).toBe(`- d${d} on #${w.step.id} "Should search match step ids?": he withdrew "yes". His words: "No, ids are noise.". Do not give that answer again; it is his now.`);
+    // Eleven more undone decisions: the newest ten are read, newest first.
+    const ds: number[] = [];
+    for (let i = 0; i < 11; i++) {
+      w.at(new Date(Date.parse(w.ctx.now()) + MIN).toISOString());
+      const ask = w.ask('s1', `Question ${i}?`);
+      const id = leadDecide(w.ctx, w.project.slug, 'Progresser', V, { askId: ask.id, answer: `answer ${i}`, reason: 'r' }).decision;
+      leadUndo(w.ctx, w.project.slug, 'Progresser', V, { eventId: id, aidenWords: `no ${i}` });
+      ds.push(id);
+    }
+    const lines = undoneByAiden(w.ctx, w.project.id).split('\n');
+    expect(lines).toHaveLength(10);
+    expect(lines[0]).toBe(`- d${ds[10]} on #${w.step.id} "Question 10?": he withdrew "answer 10". His words: "no 10". Do not give that answer again; it is his now.`);
+    expect(lines[9]).toContain(`- d${ds[1]} on `);
   });
 
   it('an undo with no reason stores no ruling', () => {

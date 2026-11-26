@@ -16,7 +16,7 @@ module's existing ones; a test must fail with its change removed.
   last Voice line says `The old asks are done. Still open for another lead: InThink 6 (InThinker).`; `lead old-asks
   --all` names each project it left out and why.
 - C3. `npm publish` held in a folder whose package.json says `x` `1.2.0`: the hook's reason, the Voice line and the
-  morning list all say `publish x 1.2.0 to npm`.
+  morning list all say `publish of x 1.2.0 to npm`.
 - C4. A held command shows as a card in the window's Needs me band within two seconds of the hold, with what it does and
   two buttons; "Go ahead" records his yes for exactly that command and the session may run it; "Not yet" tells the
   session it waits; either takes the card away and clears a Voice line not yet sent. Clicking twice does one thing.
@@ -59,6 +59,8 @@ module's existing ones; a test must fail with its change removed.
 3. The Voice's held line reads the same `what` (it already uses `what`: check it now says `wants to publish x 1.2.0 to
    npm`, not `wants to do a publish of`). Drop the doubled "do a" wording for every `what`: `wants to <what>` reads
    `wants to publish ...`, `wants to deploy main to the live build`, and so on (word the `what`s as verbs).
+
+Built as decided on 2026-11-26 (plan said: word the whats as verbs; did: they stay nouns, because the rule list in src/core/hold.ts and the hook reasons pinned on it would change too). The Voice and the morning list read `#<step> wants <what>.`, e.g. `#747 wants a publish of x 1.2.0 to npm.`; the hook text is unchanged. The package is named only when the publish sends the folder's own package.json: a path, a tarball or a workspace flag keeps the branch wording. Projects under C:\work are left out of the old asks' other-lead lines.
 
 ## Task D: held commands as cards in the window (C4), after A to C
 

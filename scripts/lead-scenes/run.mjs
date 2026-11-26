@@ -585,6 +585,10 @@ async function scene3() {
   s.act(`held desk item #${heldItem?.id} (${heldItem?.state})`);
   const heldWhy = readDb("SELECT text FROM lead_events WHERE project_id = ? AND kind = 'held' AND at >= ? ORDER BY id DESC LIMIT 1", project.id, s.startAt)[0]?.text;
   s.check('The hold records the publish rule as its reason', 'npm publish -> ... a publish goes out in his name', heldWhy, /a publish goes out in his name/, (t) => !/origin\/main is not known/.test(t) && t !== '');
+  // C3: the hook's reason and the Voice line name the package from the folder's package.json.
+  s.check("The hook's reason names the package", 'Held for Aiden before it runs: a publish of x 1.2.0 to npm.', held.stdout, /Held for Aiden before it runs: a publish of x 1\.2\.0 to npm\./, /a publish of/);
+  const heldLine = heldItem === undefined ? undefined : readDb("SELECT body FROM lead_sends WHERE kind = 'voice_line' AND retry_key = ?", `voice:held:${heldItem.id}`)[0]?.body;
+  s.check('The Voice line names the package', `Held, InProgress: #747 wants a publish of x 1.2.0 to npm. Say "go ahead" or "not yet".`, heldLine, new RegExp(`^Held, [^:]+: #${steps.publish.id} wants a publish of x 1\\.2\\.0 to npm\\. Say "go ahead" or "not yet"\\.`), /wants a publish of/);
   // The lid: a slept note across the quiet hours.
   writeDb((db) => db.prepare("INSERT INTO lead_events (project_id, at, lead, instructions, kind, text) VALUES (?, ?, ?, ?, 'slept', ?)").run(project.id, iso(), LEAD, INSTRUCTIONS, JSON.stringify({ from: iso(Date.now() - 8 * 60 * MIN), to: iso(Date.now() - 30 * MIN) })));
   s.back(`a slept note written by hand with from ${hm(Date.now() - 8 * 60 * MIN)} to ${hm(Date.now() - 30 * MIN)} (the minute watch writes one when a tick finds a gap over 3 minutes; waiting for a real sleep is not possible)`);
@@ -592,7 +596,7 @@ async function scene3() {
   s.act('the next morning list written (quiet hours ended a minute after being set; older morning rows backdated a day)');
   const text = morning?.text ?? '';
   s.check('The morning list has the "Went wrong" line for the stopped session', `Went wrong (1)   #746 stopped at 02:10; restarted at 02:51, 41 minutes lost.`, text, new RegExp(`Went wrong \\(1\\)\\s+#${steps.stopped.id} stopped at \\d\\d:\\d\\d; restarted at \\d\\d:\\d\\d, \\d+ minutes? lost\\.`), /Went wrong \(\d+\)[^\n]*stopped at[^\n]*restarted/i);
-  s.check('The morning list has the "Held for you" line for the publish', `Held for you (1) #747 wants to publish package x 1.2.0 to npm. Say "publish it" or "not yet".`, text, /Held for you \(1\)\s+#\d+ wants to publish package x 1\.2\.0 to npm\. Say "publish it" or "not yet"\./, /Held for you \(\d+\)[^\n]*wants to/);
+  s.check('The morning list has the "Held for you" line for the publish', `Held for you (1) #747 wants a publish of x 1.2.0 to npm. Say "go ahead" or "not yet".`, text, /Held for you \(1\)\s+#\d+ wants a publish of x 1\.2\.0 to npm\. Say "go ahead" or "not yet"\./, /Held for you \(\d+\)[^\n]*wants/);
   s.check('A lid gap is shown', `The laptop slept from 22:06 to 10:23. 3 items waited; none was lost.`, text, /The laptop slept from \d\d:\d\d to \d\d:\d\d\. \d+ items? waited; (none was lost|\d+ fell behind)\./, /slept from \d\d:\d\d to \d\d:\d\d/);
   writeDb((db) => setAside.forEach((id) => db.prepare('UPDATE asks SET cleared_at = NULL WHERE id = ?').run(id)));
   finishScene(s, ['', '### The morning list', '```', text, '```']);
@@ -613,8 +617,12 @@ async function scene4(scene1d) {
   const start = await waitFor("the day's thread start", () => calls().slice(s.callsFrom).find((c) => c.args[1] === 'start' && / lead /.test(c.args.join(' '))), 60_000);
   s.check("The lead's thread in T3 Code gets the list as one message", "the lead's thread in T3 Code gets one message", start?.stdin, (t) => t.includes(list.split('\n')[0] ?? '#'), /morning list|decided/i);
   s.check('Rulings on what the product does come first, each with the word that undoes it', 'Rulings on what the product does come first, each with the word that undoes it.', list, new RegExp(`Product rulings first:[\\s\\S]*d${scene1d} .*"undo d${scene1d}"`), /undo d\d+/);
-  const undo = lead('undo', SLUG, `d${scene1d}`, '--aiden', `undo d${scene1d}, ids are noise`, '--reason', 'ids are noise');
-  s.act(`lead undo ${SLUG} d${scene1d} --aiden "undo d${scene1d}, ids are noise" --reason "ids are noise" -> ${aiden(undo)}`);
+  // His reason as Progresser's rules have him write it: one line that names what it is about.
+  const undoneQ = readDb('SELECT a.text FROM asks a JOIN lead_events e ON e.ask_id = a.id WHERE e.id = ?', Number(scene1d))[0]?.text ?? '?';
+  // The undo and its date are added by the prompt's Standing rulings (from undo d<n>, <date>), so the line leaves them out.
+  const ruling = `On "${clip(undoneQ, 60)}" (${idRef('search')}): ids are noise`;
+  const undo = lead('undo', SLUG, `d${scene1d}`, '--aiden', `undo d${scene1d}, ids are noise`, '--reason', ruling);
+  s.act(`lead undo ${SLUG} d${scene1d} --aiden "undo d${scene1d}, ids are noise" --reason '${ruling}' -> ${aiden(undo)}`);
   s.check('The answer is withdrawn', 'the answer is withdrawn', undo.text, /withdr|undone|Undid|Undone/i);
   // The question raised again is his: its line says what he undid, and offers no pick (the answer he withdrew).
   const again = /as a(\d+)/.exec(undo.text)?.[1];
@@ -640,7 +648,17 @@ async function scene4(scene1d) {
   const prompts = files.map((f) => JSON.parse(readFileSync(`${work}/turns/${f}`, 'utf8'))).filter((t) => t.message.includes(q));
   const prompt = prompts[0]?.systemPrompt ?? '';
   s.act(`read the system prompt file the runner wrote for that turn (copied by claude-scenes.mjs): ${prompts.length} turn(s) found, ${prompt.length} characters`);
-  s.check("The next turn's prompt shows the standing ruling", 'his reason stored as a standing ruling the lead reads before the next call of that kind', prompt.split('\n').filter((l) => /ids are noise/.test(l)).join('\n'), /Standing rulings[\s\S]*ids are noise/, (t) => /ids are noise/.test(prompt));
+  s.check("The next turn's prompt shows the standing ruling", 'his reason stored as a standing ruling the lead reads before the next call of that kind', prompt, /Standing rulings\n(?:- .*\n)*- On "[^\n]+" \(#\d+\): ids are noise \(from undo d\d+, \d{4}-\d\d-\d\d\)\n/, (t) => /ids are noise/.test(t));
+  // C1: the prompt names the undone decision, its question and his words, and says not to give that answer again.
+  const undoneLine = prompt.split('\n').filter((l) => l.startsWith(`- d${scene1d} on `)).join('\n');
+  const undoneRe = new RegExp(`\\nUndone by Aiden\\n(?:- .*\\n)*- d${scene1d} on ${idRef('search')} "[^\\n]+": he withdrew "[^\\n]+"\\. His words: "undo d${scene1d}, ids are noise"\\. Do not give that answer again; it is his now\\.`);
+  s.check(
+    "The next turn's prompt names the undone decision under Undone by Aiden",
+    `Undone by Aiden\n- d${scene1d} on ${idRef('search')} "<the question>": he withdrew "<the answer>". His words: "undo d${scene1d}, ids are noise". Do not give that answer again; it is his now.`,
+    undoneLine,
+    () => undoneRe.test(prompt),
+    (t) => t !== '',
+  );
   // The week.
   const readingAt = Date.now() - 6 * MIN;
   const weekResets = Date.now() + Math.round(7 * 24 * 60 * MIN * 0.555);

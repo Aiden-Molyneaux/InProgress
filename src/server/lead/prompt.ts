@@ -1,8 +1,10 @@
 import { stamp } from '../../core/span';
+import { clipLine } from '../../core/step-ref';
 import type { Project } from '../../core/types';
 import type { Ctx } from '../db/tx';
 import type { DeskItem } from '../repo/desk';
 import { getSend } from '../repo/leadSends';
+import { DECISION_LINE_CUT } from '../repo/deskBring';
 import { stuckRequestOf } from './hold';
 import { markedTitle, parseStartBody, sendMarker } from './sends';
 import { aidenSaidWords } from './aidenSaid';
@@ -29,12 +31,65 @@ export function standingRulings(ctx: Ctx, projectId: number): string {
     .join('\n');
 }
 
+/** How far back the desk turn reads Aiden's undos of its answers, and how many it reads: the newest. */
+export const UNDONE_READ_MS = 30 * 24 * 60 * 60 * 1000;
+export const UNDONE_READ = 10;
+
+interface UndoneRow {
+  eventId: number;
+  nodeId: number | null;
+  question: string;
+  answer: string;
+  answeredVia: string | null;
+  line: string | null;
+  words: string | null;
+}
+
+/**
+ * The answer a decided ask was given: the ask's own answer while it is still the lead's (answered_via `lead_decided`);
+ * once his late answer replaced it (lateAnswer), the answer half of the decision's line `<question> -> <answer>`.
+ */
+function decidedAnswer(r: UndoneRow): string {
+  if (r.answeredVia === 'lead_decided' || r.line === null) return r.answer;
+  const head = `${clipLine(r.question, DECISION_LINE_CUT)} -> `;
+  return r.line.startsWith(head) ? r.line.slice(head.length) : r.answer;
+}
+
+/**
+ * The answers of the lead's that Aiden undid in the last 30 days (an `undo` line naming a `decide` with an ask), newest
+ * first, at most 10, one line each: the decision, its step and question, the answer he withdrew and his words. Read from
+ * the record, not from what Progresser writes; '' when none.
+ */
+export function undoneByAiden(ctx: Ctx, projectId: number): string {
+  const since = new Date(Date.parse(ctx.now()) - UNDONE_READ_MS).toISOString();
+  const rows = ctx.db
+    .prepare(
+      `SELECT d.id AS eventId, COALESCE(d.node_id, a.node_id) AS nodeId, a.text AS question, a.answer, a.answered_via AS answeredVia,
+              l.line, u.aiden_words AS words
+         FROM lead_events u
+         JOIN lead_events d ON d.project_id = u.project_id AND u.text = 'd' || d.id AND d.kind = 'decide' AND d.ask_id IS NOT NULL
+         JOIN asks a ON a.id = d.ask_id
+         LEFT JOIN lead_decisions l ON l.event_id = d.id
+        WHERE u.project_id = ? AND u.kind = 'undo' AND u.at >= ?
+        ORDER BY u.at DESC, u.id DESC LIMIT ?`,
+    )
+    .all(projectId, since, UNDONE_READ) as UndoneRow[];
+  return rows
+    .map(
+      (r) =>
+        `- d${r.eventId} on #${r.nodeId ?? '?'} "${clipLine(r.question, 120)}": he withdrew "${clipLine(decidedAnswer(r), 120)}". His words: "${clipLine(r.words ?? '', 160)}". Do not give that answer again; it is his now.`,
+    )
+    .join('\n');
+}
+
 /**
  * The desk turn's system prompt: stage 0's lead-wide-v2.md, word for word where it still holds, with the lead's MCP tools
- * in place of the record commands, a KIND for every verdict, and the project's standing rulings last.
+ * in place of the record commands, a KIND for every verdict, the project's standing rulings, and last the
+ * answers Aiden undid (undoneByAiden), when there are any.
  */
 export function deskSystemPrompt(ctx: Ctx, project: Project): string {
   const rulings = standingRulings(ctx, project.id).trim();
+  const undone = undoneByAiden(ctx, project.id);
   return `You are the lead for one software project. Aiden owns the project and is your boss. Claude sessions do the building. A session has raised something that was addressed to Aiden: a question, a request for permission, or a request that he review finished work. You see it first.
 
 Your rule. Aiden wants to have ideas, let them be built, and hold the result. He trusts you with every call that is not his. Only three kinds of thing are his:
@@ -72,7 +127,7 @@ WHY: <one sentence>
 
 Standing rulings
 ${rulings === '' ? 'None yet.' : rulings}
-`;
+${undone === '' ? '' : `\nUndone by Aiden\n${undone}\n`}`;
 }
 
 interface AskLine {
