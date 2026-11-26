@@ -22,7 +22,7 @@ import { listBindings } from './repo/projects';
 import { produceDeskItem } from './repo/deskProducers';
 import { getSend, stampSeen } from './repo/leadSends';
 import { recordYes, type LandingDeps } from './lead/landing';
-import { answerYesIds, carryTarget, readSessionYeses } from './lead/carry';
+import { answerYesIds, carryTarget, liveTarget, readSessionYeses } from './lead/carry';
 import { addLogInWrite } from './repo/logs';
 
 /**
@@ -448,13 +448,22 @@ export function leadUndo(ctx: Ctx, ref: string, as: string, instructions: number
       const yeses = answerYesIds(event.text)
         .map((id) => ctx.db.prepare("SELECT id, node_id, text FROM lead_events WHERE id = ? AND project_id = ? AND kind = 'yes'").get(id, project.id) as { id: number; node_id: number | null; text: string } | undefined)
         .filter((y) => y !== undefined);
-      for (const y of yeses) logLeadEvent(ctx, { projectId: project.id, lead: name, instructions, kind: 'yes_withdrawn', ...(y.node_id === null ? {} : { nodeId: y.node_id }), text: y.text, aidenWords: input.aidenWords });
-      withdraw(carryTarget(ctx, { askId: event.ask_id, text: event.text }), `${tag} is withdrawn: Aiden's answer no longer stands${yeses.length ? ', and neither does his go-ahead' : ''}.`);
+      for (const y of yeses) logLeadEvent(ctx, { projectId: project.id, lead: name, instructions, kind: 'yes_withdrawn', ...(y.node_id === null ? {} : { nodeId: y.node_id }), text: `e${y.id}`, aidenWords: input.aidenWords });
+      const target = carryTarget(ctx, { askId: event.ask_id, text: event.text });
+      withdraw(target, `${tag} is withdrawn: Aiden's answer no longer stands${yeses.length ? ', and neither does his go-ahead' : ''}.`);
+      // A session not reached in its thread reads the withdrawal as its ask's answer on its next prompt (the log line stays).
+      if (target === undefined && event.ask_id !== null) {
+        const why = input.reason?.trim() || `"${input.aidenWords.trim()}"`;
+        ctx.db
+          .prepare('UPDATE asks SET answer = ?, answered_via = NULL, answer_delivered_at = NULL WHERE id = ?')
+          .run(`Aiden's answer ${tag} is withdrawn by ${name}: ${why}`, event.ask_id);
+      }
       text = `Undid ${tag}: Aiden's answer is withdrawn${yeses.length ? `, with his yes for ${andList(yeses.map((y) => y.text.split(' ')[0]!))}` : ''}.`;
     } else if (event.kind === 'decide' && event.ask_id === null) {
       // A decision on what Aiden left to the lead (an aiden_said item): there is no question to raise again. The session its
       // relay went to is told once that it is withdrawn; with no relay, the step's log says so.
-      withdraw(sendByRetryKey(ctx.db, `aiden-said:${tag}`)?.target, `${tag} is withdrawn: Aiden takes it back.`);
+      // A relay cleared unsent went to a dead thread: the withdrawal goes to the step's log instead.
+      withdraw(liveTarget(ctx, `aiden-said:${tag}`), `${tag} is withdrawn: Aiden takes it back.`);
       text = `Undid ${tag}: the decision is withdrawn.`;
     } else if (event.kind === 'decide') {
       const old = requireAsk(ctx, event.ask_id as number);

@@ -1,9 +1,13 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { DESK_ONLY_DATA, write } from '../../src/server/db/tx';
+import { lastProjectEvent } from '../../src/server/repo/events';
+import { createProject, listProjectSummaries } from '../../src/server/repo/projects';
+import { makeCtx } from '../helpers';
 import { openDb, type DB } from '../../src/server/db/connection';
 import { addDeskItem, getDeskItem, moveDeskItem, openDeskItems } from '../../src/server/repo/desk';
 import { addDecision, decisionByEvent, decisionsSince } from '../../src/server/repo/leadDecisions';
 import { getSend, intendSend, moveSend, sendByRetryKey, sendsInState, stampSeen } from '../../src/server/repo/leadSends';
-import { getTurn, insertTurn, liveTurn, moveTurn } from '../../src/server/repo/leadTurns';
+import { getTurn, insertTurn, leaseItem, liveTurn, moveTurn } from '../../src/server/repo/leadTurns';
 import { addReading, latestReading } from '../../src/server/repo/usageReadings';
 
 const T0 = '2026-11-25T10:00:00.000Z';
@@ -182,5 +186,36 @@ describe('usage readings', () => {
     expect(latestReading(db)).toMatchObject({ at: T2, model: 'sonnet' });
     expect(latestReading(db, 'opus')).toMatchObject({ at: T1, windowUsed: 10 });
     expect(latestReading(db, 'haiku')).toBeUndefined();
+  });
+});
+
+describe('desk-only events (Y10, Y12)', () => {
+  it('a desk-only project.updated is not the last event, and does not move last_event_at', () => {
+    const ctx = makeCtx();
+    const project = createProject(ctx, 'test', { name: 'Desky' });
+    const before = lastProjectEvent(ctx, project.id)!;
+    const at = listProjectSummaries(ctx).find((p) => p.id === project.id)!.lastEventAt;
+    write(ctx, 'system', () => addDeskItem(ctx.db, { projectId: project.id, kind: 'stuck', ref: 'x1' }, ctx.now()));
+    expect(ctx.db.prepare("SELECT COUNT(*) FROM events WHERE type = 'project.updated' AND data = ?").pluck().get(JSON.stringify(DESK_ONLY_DATA))).toBe(1);
+    expect(lastProjectEvent(ctx, project.id)!.id).toBe(before.id);
+    expect(listProjectSummaries(ctx).find((p) => p.id === project.id)!.lastEventAt).toBe(at);
+  });
+
+  it('a lease whose window event cannot be written still answers its turn, and says why in the log', () => {
+    let fail = false;
+    const base = makeCtx();
+    const ctx = { ...base };
+    const project = createProject(base, 'test', { name: 'Desky' });
+    const item = write(base, 'system', () => addDeskItem(base.db, { projectId: project.id, kind: 'stuck', ref: 'x2' }, base.now()).item);
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const now = base.now();
+    base.now = () => {
+      if (fail) throw new Error('clock gone');
+      return now;
+    };
+    fail = true;
+    expect(leaseItem(ctx.db, item.id, { way: 'headless', leaseMs: 60_000 }, now)).toBeDefined();
+    expect(logged.mock.calls.some((c) => String(c[0]).includes('could not tell the window of a desk change: clock gone'))).toBe(true);
+    logged.mockRestore();
   });
 });

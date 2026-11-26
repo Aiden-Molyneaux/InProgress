@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LEAD_INSTRUCTIONS_VERSION } from '../../src/core/lead';
 import { buildApp } from '../../src/server/app';
 import { openDb } from '../../src/server/db/connection';
-import { createCtx, write } from '../../src/server/db/tx';
+import { createCtx, deskOnly, write } from '../../src/server/db/tx';
 import { heldActions, playbookHeldLines } from '../../src/core/hold';
 import { leadAllow, leadDisallow } from '../../src/server/lead-commands';
 import { applyVerdict } from '../../src/server/lead/apply';
@@ -89,7 +89,11 @@ describe('POST /api/lead/hold', () => {
     const w = world();
     writeFile(repo.wt, 'src/hooks/x.ts', lines(9, 'feature'));
     commit(repo.wt, 'hooks');
+    const desk: unknown[] = [];
+    w.ctx.bus.on('event', (e: { type: string; data: unknown }) => void (deskOnly(e) && desk.push(e)));
     expect(await w.hold('npm test && git push')).toEqual({ held: true, text: 'a push of feature to origin' });
+    // Y13: the held item is made in a transaction of its own, and the window hears of it at once.
+    expect(desk).toHaveLength(1);
     expect(w.items('held')).toEqual([expect.objectContaining({ state: 'waiting_aiden', node_id: w.step.id, outcome: "held: hold: this is Aiden's (it touches src/hooks/x.ts)" })]);
     expect(w.events('held')).toEqual([{ text: "npm test && git push -> hold: this is Aiden's (it touches src/hooks/x.ts)", node_id: w.step.id, session_id: 's1' }]);
     expect(await w.hold('npm test && git push')).toEqual({ held: true, text: 'a push of feature to origin' });
@@ -262,6 +266,23 @@ describe('held.json', () => {
       };
       expect(() => writeHeldLines(w.ctx, home, never)).toThrow('denied');
       expect(readdirSync(join(home, 'lead'))).toEqual(['held.json']);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('Y11: a desk-only change does not rewrite held.json; a real project change does', () => {
+    const home = mkdtempSync(join(tmpdir(), 'ip-held-'));
+    try {
+      const w = world();
+      const stop = watchHeldLines(w.ctx, home, { error: () => undefined });
+      const file = join(home, 'lead', 'held.json');
+      rmSync(file);
+      w.ctx.bus.emit('event', { type: 'project.updated', projectId: w.project.id, data: { changes: { desk: true } } });
+      expect(existsSync(file)).toBe(false);
+      w.ctx.bus.emit('event', { type: 'project.updated', projectId: w.project.id, data: { changes: { playbook: true } } });
+      expect(existsSync(file)).toBe(true);
+      stop();
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

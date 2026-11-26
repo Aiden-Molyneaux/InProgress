@@ -1,10 +1,11 @@
-import { execSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, existsSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { execSync, spawn, spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { countAfter, cutAt, pointFoldersAway, REOPENED_STATUS } from '../../scripts/lead-exam/cut.mjs';
 import { refuseLiveHome } from '../../scripts/lead-exam/guard.mjs';
+import { killTreeOf } from '../../scripts/lead-exam/tree.mjs';
 import { openDb } from '../../src/server/db/connection';
 
 const BEFORE = '2026-11-10T12:00:00.000Z';
@@ -141,6 +142,48 @@ describe('the exam guard on the live home', () => {
   });
 });
 
+describe('the guard on a name that starts with two dots, and its command line', () => {
+  const made: string[] = [];
+  afterEach(() => {
+    for (const d of made.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+  const stand = () => {
+    const d = mkdtempSync(join(tmpdir(), 'exam-live-'));
+    made.push(d);
+    return d;
+  };
+  const cli = (...args: string[]) => spawnSync(process.execPath, ['scripts/lead-exam/guard-cli.mjs', ...args], { encoding: 'utf8' });
+
+  it('refuses a folder named ..x under the live home, and still lets a real parent step out', () => {
+    const live = stand();
+    expect(() => refuseLiveHome([join(live, '..x')], live)).toThrow(/live InProgress home/);
+    expect(() => refuseLiveHome([join(live, '..x', 'deeper')], live)).toThrow(/live InProgress home/);
+    expect(() => refuseLiveHome([join(live, '..', 'beside')], live)).not.toThrow();
+  });
+
+  it('exits 2 naming the path for one under the live home, and 0 for others, making nothing', () => {
+    const live = stand();
+    const other = stand();
+    const under = join(live, 'out');
+    const refused = cli('--live', live, other, under);
+    expect(refused.status).toBe(2);
+    expect(refused.stderr).toContain(under);
+    expect(existsSync(under)).toBe(false);
+    expect(cli('--live', live, other).status).toBe(0);
+    expect(cli('--live', live).status).toBe(2);
+  });
+});
+
+describe('the watchdog kill', () => {
+  it('ends a process and what it started', async () => {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+    const ended = new Promise((r) => child.on('exit', r));
+    killTreeOf(child.pid as number);
+    await ended;
+    expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
+  });
+});
+
 describe('run-case skipping', () => {
   const run = (out: string, program: string | undefined) =>
     spawnSync(process.execPath, ['scripts/lead-exam/run-case.mjs', join(out, 'build'), join(out, 'missing.db'), out, 'r', '5', '4410'], {
@@ -152,14 +195,43 @@ describe('run-case skipping', () => {
   it("skips a case its own program and build wrote, and runs again one a stand-in wrote", () => {
     const out = mkdtempSync(join(tmpdir(), 'exam-skip-'));
     try {
-      written(out, { program: 'claude', build: join(out, 'build') });
+      mkdirSync(join(out, 'build', 'dist'), { recursive: true });
+      const buildJson = (builtAt: string) => writeFileSync(join(out, 'build', 'dist', 'build.json'), JSON.stringify({ sha: 'abc1234', dirty: false, builtAt }));
+      buildJson('2026-11-25T10:00:00.000Z');
+      const key = 'abc1234@2026-11-25T10:00:00.000Z';
+      written(out, { program: 'claude', build: join(out, 'build'), buildKey: key });
       expect(run(out, undefined).stdout).toContain('skipped');
-      written(out, { program: 'C:/stand-in.mjs', build: join(out, 'build') });
+      // A rebuild into the same folder is another build: every case runs again.
+      buildJson('2026-11-25T11:00:00.000Z');
+      expect(run(out, undefined).stdout).not.toContain('skipped');
+      buildJson('2026-11-25T10:00:00.000Z');
+      written(out, { program: 'C:/stand-in.mjs', build: join(out, 'build'), buildKey: key });
       const again = run(out, undefined);
       expect(again.stdout).not.toContain('skipped');
       expect(again.status).toBe(1);
-      written(out, { program: 'claude', build: 'another build' });
+      written(out, { program: 'claude', build: 'another build', buildKey: key });
       expect(run(out, undefined).stdout).not.toContain('skipped');
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('score.mjs and a stand-in lead', () => {
+  it('leaves out a lead result whose program is a stand-in, or names none, and counts it', () => {
+    const out = mkdtempSync(join(tmpdir(), 'exam-score-'));
+    try {
+      writeFileSync(join(out, 'half.txt'), 'r 1 1 x\nr 2 1 x\nr 3 1 x\n');
+      const lead = (id: number, program: string | undefined) =>
+        writeFileSync(join(out, `lead-r-${id}.json`), JSON.stringify({ ...(program === undefined ? {} : { program }), error: null, verdict: 'AIDEN', answer: 'a', cost: 0.1 }));
+      lead(1, 'claude');
+      lead(2, 'C:/x/claude-standin.mjs');
+      lead(3, undefined);
+      const r = spawnSync(process.execPath, ['scripts/lead-exam/score.mjs', out, join(out, 'half.txt')], { encoding: 'utf8' });
+      expect(r.stdout).toContain('cases: 1\n');
+      expect(r.stdout).toContain('not real (the lead ran a stand-in), left out: 2');
+      expect(r.stdout).toContain('total list cost: $0.10');
+      expect(readFileSync(join(out, 'summary.json'), 'utf8')).toContain('"cases"');
     } finally {
       rmSync(out, { recursive: true, force: true });
     }

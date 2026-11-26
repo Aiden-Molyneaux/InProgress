@@ -3,7 +3,7 @@ import { LEAD_INSTRUCTIONS_VERSION, LEAD_NAME, LEAD_NAME_RULE, LEAD_SWITCHES } f
 import { BRIEFING_MODES, DELETED_RETENTION_MS, STALE_SESSION_MS, TITLE_CHANNELS, type Binding, type BriefingMode, type Project, type ProjectSummary, type QueueEntry, type QueueOp, type TitleChannel } from '../../core/types';
 import { globMatch } from '../../lib/glob';
 import { isUnder, normalizePath } from '../../lib/paths';
-import { msAgo, write, type Ctx, type RecordEvent } from '../db/tx';
+import { msAgo, NOT_DESK_ONLY_SQL, write, type Ctx, type RecordEvent } from '../db/tx';
 import { ApiError, badRequest, conflict, notFound } from '../errors';
 import { aidensAskSql } from './asks';
 import { countsAsWorkSql, endSessionCommands } from './commands';
@@ -594,7 +594,7 @@ export function listProjectSummaries(ctx: Ctx): ProjectSummary[] {
         (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.state != 'ended' AND s.last_seen_at >= ? AND (s.state = 'working'
           OR EXISTS (SELECT 1 FROM session_subagents a WHERE a.session_id = s.id AND a.ended_at IS NULL AND ${NOT_READER_SQL})
           OR EXISTS (SELECT 1 FROM session_commands c WHERE c.session_id = s.id AND ${countsAsWorkSql('c')}))) AS busy_sessions,
-        (SELECT ts FROM events e WHERE e.project_id = p.id AND e.type NOT LIKE 'window.%' ORDER BY e.id DESC LIMIT 1) AS last_event_at
+        (SELECT ts FROM events e WHERE e.project_id = p.id AND e.type NOT LIKE 'window.%' AND ${NOT_DESK_ONLY_SQL} ORDER BY e.id DESC LIMIT 1) AS last_event_at
        FROM projects p WHERE p.deleted_at IS NULL`,
     )
     .all(liveSince, liveSince, liveSince, liveSince, msAgo(ctx, COMMAND_WORK_MS)) as (ProjectRow & { open_asks: number; permission_waits: number; active_sessions: number; working_sessions: number; busy_sessions: number; last_event_at: string | null })[];

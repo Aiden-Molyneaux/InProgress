@@ -22,6 +22,8 @@ if [ "$N" -lt 1 ] || [ "$N" -gt 10 ]; then N=4; fi
 BUILD="$(cd "${EXAM_BUILD:-$REPO/.build/exam}" 2>/dev/null && pwd)" || { echo "the build dir ${EXAM_BUILD:-$REPO/.build/exam} is not a folder" >&2; exit 2; }
 [ -n "$EXAM_COPY" ] && [ -f "$EXAM_COPY" ] || { echo "set EXAM_COPY to the copy of the data (a file)" >&2; exit 2; }
 EXAM_COPY="$(cd "$(dirname "$EXAM_COPY")" && pwd)/$(basename "$EXAM_COPY")"
+# Before anything is made: neither the out dir nor the copy may lie under the live home (exit 2).
+node "$P/guard-cli.mjs" "$O" "$EXAM_COPY" || exit 2
 LABEL="${LABEL_FILE:-label-v2.md}"
 unset CLAUDECODE CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_SESSION_ID CLAUDE_PID CLAUDE_EFFORT CLAUDE_CODE_MESSAGING_SOCKET
 unset CLAUDE_AGENT_SDK_VERSION CLAUDE_CODE_SESSION_ATTENDED CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_EXECPATH CLAUDE_CODE_MESSAGING_TOKEN

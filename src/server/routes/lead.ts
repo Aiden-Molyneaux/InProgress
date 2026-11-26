@@ -4,7 +4,7 @@ import type { Ctx } from '../db/tx';
 import { badGateway, badRequest, conflict, notFound } from '../errors';
 import { cliBesideServer, nodeCli } from '../../lib/task-command';
 import { leadFolders, listLeadEvents, markLeadSeen, readLeadBrief, readLeadIntent, readLeadRules, requireLead } from '../lead';
-import { leadAllow, leadDisallow, leadAnswer, leadDeskAdd, leadSeen, readYeses, requireAnswerLead, workProject, WORK_PROJECT, leadDecide, leadUndo, leadDrop, leadIntent, leadKept, leadPark, leadPromise, leadSet } from '../lead-commands';
+import { leadAllow, leadDisallow, leadAnswer, leadDeskAdd, leadSeen, readYeses, requireAnswerLead, type CarriedYes, workProject, WORK_PROJECT, leadDecide, leadUndo, leadDrop, leadIntent, leadKept, leadPark, leadPromise, leadSet } from '../lead-commands';
 import { readMorning } from '../lead/morning';
 import { reserveAllowsStart } from '../lead/reserve';
 import { importUsage, leadCounts, weekText } from '../lead/usage';
@@ -20,7 +20,8 @@ import { readLeadResource, readLeadStep } from '../lead-step';
 import { renderLeadBrief } from '../lead-text';
 import { leadAllowBody, leadDisallowBody, leadAnswerBody, leadBriefQuery, leadStuckBody, leadDecideBody, leadUndoBody, leadSetBody, leadImportUsageBody, leadCountsQuery, leadDropBody, leadIntentBody, leadKeptBody, leadLandingBody, leadParkBody, leadPromiseBody, leadReadQuery, leadRelayBody, leadStartBody, leadRulesQuery, leadSeenBody, leadStampBody, leadDeskAddBody } from '../schemas';
 import { VOICE_NOT_SET_UP, voiceSetUp } from '../lead/voice';
-import { heldScope, leadAnswerItem, readSessionYeses, voiceTarget } from '../lead/carry';
+import { heldScope, leadAnswerItem, readSessionYeses, SAID_AT_NEEDED, voiceTarget } from '../lead/carry';
+import { heldActions, playbookHeldLines } from '../../core/hold';
 
 /** How many of a project's threads, newest first, the threads read lists. */
 const THREADS_LISTED = 20;
@@ -165,28 +166,59 @@ export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken:
   // what its command returns, `text` being the sentence the CLI prints.
   const ref = (req: { params: unknown }): string => (req.params as { ref: string }).ref;
   app.post('/api/lead/:ref/answer', { onRequest: requireToken }, async (req) => {
-    const { as, instructions, yes, sendId, askId: givenAsk, ...input } = leadAnswerBody.parse(req.body);
+    const { as, instructions, yes, sendId, askId: givenAsk, ...body } = leadAnswerBody.parse(req.body);
     // The lead and the C:\work refusal are checked first, so a refused answer starts no git.
     const { project } = requireAnswerLead(ctx, ref(req), as, instructions);
     if (workProject(ctx, project.id)) throw conflict(WORK_PROJECT);
-    const saidAt = input.saidAt ?? ctx.now();
+    const now = ctx.now();
+    // When he said it, as given, never after now.
+    const given = body.saidAt === undefined ? undefined : new Date(Math.min(Date.parse(body.saidAt), Date.parse(now))).toISOString();
+    const saidAt = given ?? now;
     let askId = givenAsk;
+    // The time a yes is checked against: the work must have no commit after it (W8a). With no time of his, the line to
+    // the Voice he replied to gives one: he cannot have said yes before it reached him.
+    let anchor: string | undefined = given;
+    // His reply to a line to the Voice is heard on the Voice unless the lead says otherwise.
+    const input = sendId !== undefined && body.where === undefined ? { ...body, where: 'voice' as const } : body;
     if (sendId !== undefined) {
       // His reply to a line to the Voice: the line's send says what it was about.
       const target = voiceTarget(ctx, project, sendId);
+      const reached = target.send.doneAt ?? undefined;
+      if (reached !== undefined && (anchor === undefined || reached < anchor)) anchor = reached;
+      anchor ??= now;
       if (target.kind === 'ask') askId = target.askId;
       else {
-        const held = target.kind === 'held' ? heldScope(ctx, target.item) : undefined;
-        const yeses =
-          held !== undefined && yes !== undefined && target.item.nodeId !== null ? await readSessionYeses(ctx, ref(req), target.item.nodeId, held.sessionId, yes, saidAt, landing) : undefined;
-        const res = leadAnswerItem(ctx, ref(req), as, instructions, target.item.id, { ...input, saidAt, ...(yeses === undefined ? {} : { yeses }) });
+        // A closed item runs no git.
+        if (target.item.state === 'done') throw conflict(`Desk item #${target.item.id} is already closed.`);
+        const notes: string[] = [];
+        if (input.says !== undefined) notes.push('--says was ignored: a reply to this line is his words alone.');
+        let yeses: CarriedYes[] | undefined;
+        if (target.kind === 'held' && yes !== undefined) {
+          const held = heldScope(ctx, target.item);
+          // His yes covers only what the held command does.
+          const cwd = held.sessionId === null ? null : ((ctx.db.prepare('SELECT cwd FROM sessions WHERE id = ?').pluck().get(held.sessionId) as string | null | undefined) ?? null);
+          const own = new Set(heldActions(held.command, playbookHeldLines(project.playbook), cwd).map((m) => m.action as string));
+          const kept = yes.filter((a) => own.has(a));
+          for (const a of yes.filter((a) => !own.has(a))) notes.push(`--yes ${a} was ignored: the held command is not a ${a}.`);
+          if (target.item.nodeId === null) {
+            if (kept.length) notes.push('No yes recorded: the held command is on no step.');
+          } else if (kept.length) yeses = await readSessionYeses(ctx, ref(req), target.item.nodeId, held.sessionId, kept, anchor, landing);
+        } else if (yes !== undefined) notes.push('--yes was ignored: what he left to the lead takes no go-ahead.');
+        const { says: _says, ...rest } = input;
+        const res = leadAnswerItem(ctx, ref(req), as, instructions, target.item.id, { ...rest, saidAt, notes, ...(yeses === undefined ? {} : { yeses }) });
         if (res.carried) setImmediate(() => void sender.wake());
         return res;
       }
     }
     // A review's yes, only for the actions his words okayed (`yes`): keyed on the change's patch id, read now in its
-    // session's folder, before the write. No `yes`, no yes.
-    const yeses = yes === undefined ? undefined : await readYeses(ctx, ref(req), project.id, askId as number, yes, saidAt, landing);
+    // session's folder, before the write. No `yes`, no yes; a `yes` with no time of his records none.
+    let yeses: CarriedYes[] | undefined;
+    if (yes !== undefined) {
+      if (anchor !== undefined) yeses = await readYeses(ctx, ref(req), project.id, askId as number, yes, anchor, landing);
+      else if (ctx.db.prepare("SELECT 1 FROM asks WHERE id = ? AND project_id = ? AND kind = 'review'").get(askId, project.id) !== undefined) {
+        yeses = yes.map((action) => ({ action, patchId: null, why: SAID_AT_NEEDED }));
+      }
+    }
     const res = leadAnswer(ctx, ref(req), as, instructions, { ...input, askId: askId as number, saidAt, ...(yeses === undefined ? {} : { yeses }) });
     // The carried line is a send: carried out after the write commits (wake never throws).
     if (res.carried) setImmediate(() => void sender.wake());

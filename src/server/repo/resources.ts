@@ -139,6 +139,13 @@ export function listNodeResources(ctx: Ctx, nodeId: number): ResourceMeta[] {
   return (ctx.db.prepare(`SELECT ${META} FROM resources WHERE node_id = ? ORDER BY id`).all(nodeId) as ResourceRow[]).map(toMeta);
 }
 
+/**
+ * Whether a path names one file whatever the server's own folder and drive: on Windows a drive with a root (`C:\x`) or a
+ * UNC path (`\\host\share\x`); a drive-relative one (`\x`, `C:x`) is not, though Node calls `\x` absolute.
+ */
+export const fullPath = (path: string, platform: string = process.platform): boolean =>
+  platform === 'win32' ? /^([A-Za-z]:[\\/]|[\\/]{2}[^\\/])/.test(path) : isAbsolute(path);
+
 /** The project's documents folder: `<home>/resources/<slug>`. */
 export const documentsFolder = (home: string, slug: string): string => join(home, 'resources', slug);
 
@@ -162,7 +169,7 @@ export function homePicture(ctx: Ctx, home: string, input: ResourceInput): { inp
   const path = clean(input.path);
   if (!path || !PICTURE_FILE.test(path) || isPage({ purpose: input.purpose ?? null })) return { input };
   // Never resolved against the server's own folder: a relative path names nothing the caller meant.
-  if (!isAbsolute(path)) throw badRequest(`${path} is not a full path: give the full path of the picture.`);
+  if (!fullPath(path)) throw badRequest(`${path} is not a full path: give the full path of the picture.`);
   const node = requireNode(ctx, input.nodeId);
   const slug = ctx.db.prepare('SELECT slug FROM projects WHERE id = ?').pluck().get(node.projectId) as string;
   const dir = resolve(documentsFolder(home, slug));

@@ -31,12 +31,20 @@ function driverOnlyChange(e: EventRow): { to: string | null } | undefined {
   return { to: typeof to === 'string' ? to : null };
 }
 
+/** Whether the event is a desk-only project.updated (`{ changes: { desk: true } }`): it reloads the desk and says nothing. */
+function deskOnlyChange(e: EventRow): boolean {
+  if (e.type !== 'project.updated') return false;
+  const d = (e.data ?? {}) as { changes?: Record<string, unknown> };
+  const keys = Object.keys(d);
+  return keys.length === 1 && keys[0] === 'changes' && d.changes !== undefined && Object.keys(d.changes).length === 1 && d.changes.desk === true;
+}
+
 /**
  * Events the activity strip leaves out: a driver cleared, which says nothing on its own (the focus change recorded in
- * the same write says it).
+ * the same write says it), and a desk-only change, which only tells the window to reload its desk.
  */
 export function stripSkips(e: EventRow): boolean {
-  return driverOnlyChange(e)?.to === null;
+  return driverOnlyChange(e)?.to === null || deskOnlyChange(e);
 }
 
 export function describeEvent(e: EventRow, snapshot: ProjectSnapshot | null): string {

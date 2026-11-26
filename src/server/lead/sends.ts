@@ -6,7 +6,6 @@ import { insertLeadEvent } from '../repo/leadEvents';
 import { leadFolders } from '../lead';
 import { getSend, intendedSends, markTrying, moveSend, SEND_TRYING, type LeadSend } from '../repo/leadSends';
 import { getProjectById } from '../repo/projects';
-import { markAnswersDelivered } from '../repo/asks';
 import { T3ArgumentRefused, T3Unavailable, type T3Message, type T3Thread } from '../t3';
 
 /*
@@ -205,19 +204,36 @@ function noteRefusedInWrite(ctx: Ctx, send: LeadSend, reason: string): void {
   );
 }
 
+/** The ask a carry send carries the answer of (retry key `carry:a<ask id>`), or undefined. */
+const carriedAsk = (send: LeadSend): number | undefined => {
+  const m = send.kind === 'carry' ? /^carry:a(\d+)$/.exec(send.retryKey ?? '') : null;
+  return m === null ? undefined : Number(m[1]);
+};
+
 /**
- * A carried answer about to go to its T3 Code session (a `carry` send, retry key `carry:a<ask id>`): the ask's answer is
- * stamped delivered when the send is marked trying, so the prompt hook never repeats a carry in flight.
+ * A carried answer about to go to its T3 Code session: the ask's answer is stamped delivered when the send is marked
+ * trying, so the prompt hook never repeats a carry in flight. Only an answer not delivered yet is stamped, and the send
+ * keeps when it stamped it (its done_at, unused while it is intended), so a clear takes back only its own stamp.
  */
 function carriedInWrite(ctx: Ctx, send: LeadSend): void {
-  const m = send.kind === 'carry' ? /^carry:a(\d+)$/.exec(send.retryKey ?? '') : null;
-  if (m !== null) markAnswersDelivered(ctx, [Number(m[1])]);
+  const askId = carriedAsk(send);
+  if (askId === undefined) return;
+  const now = ctx.now();
+  if (ctx.db.prepare('UPDATE asks SET answer_delivered_at = ? WHERE id = ? AND answer_delivered_at IS NULL').run(now, askId).changes > 0) {
+    ctx.db.prepare("UPDATE lead_sends SET done_at = ? WHERE id = ? AND state = 'intended'").run(now, send.id);
+  }
 }
 
-/** A carry cleared unsent: the ask's answer is not delivered after all, so the next prompt gives it. */
+/**
+ * A carry cleared unsent: when this send stamped the answer delivered (it was tried, and the stamp is its own, at or after
+ * its trying time), the stamp is taken back, so the next prompt gives the answer. A stamp the prompt hook made stays.
+ */
 function uncarriedInWrite(ctx: Ctx, send: LeadSend): void {
-  const m = send.kind === 'carry' ? /^carry:a(\d+)$/.exec(send.retryKey ?? '') : null;
-  if (m !== null) ctx.db.prepare('UPDATE asks SET answer_delivered_at = NULL WHERE id = ?').run(Number(m[1]));
+  const askId = carriedAsk(send);
+  if (askId === undefined) return;
+  const stampedAt = (ctx.db.prepare('SELECT done_at FROM lead_sends WHERE id = ?').pluck().get(send.id) as string | null | undefined) ?? null;
+  if (stampedAt === null) return;
+  ctx.db.prepare('UPDATE asks SET answer_delivered_at = NULL WHERE id = ? AND answer_delivered_at >= ?').run(askId, stampedAt);
 }
 
 const key = (project: string): string => project.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();

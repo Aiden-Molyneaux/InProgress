@@ -6,7 +6,9 @@
 import Database from 'better-sqlite3';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { refuseLiveHome } from './guard.mjs';
 
 const [dbPath, out, manifest121 = process.env.EXAM_121] = process.argv.slice(2);
 if (!dbPath || !out) throw new Error('usage: cases.mjs <copy> <out dir> [manifest of the 121]');
@@ -17,6 +19,7 @@ const seen = new Set(
   readFileSync(manifest121, 'utf8').split('\n').filter((l) => l.trim() !== '').map((l) => Number(l.split(' ')[1])),
 );
 const db = new Database(dbPath, { readonly: true });
+refuseLiveHome([out, dbPath], join(homedir(), '.inprogress'));
 // Half files once written are never regenerated: a half is the exam, and the other is kept back.
 if (existsSync(join(out, 'half-a.txt')) || existsSync(join(out, 'half-b.txt'))) throw new Error(`${out} already has half files: use a new out dir`);
 mkdirSync(out, { recursive: true });
@@ -30,7 +33,8 @@ const rows = db
   .filter((r) => !WORK.test(r.slug) && !seen.has(r.id))
   .filter((r) => r.kind === 'review' || ((r.kind === 'question' || r.kind === 'permission') && r.cleared_at >= SINCE));
 const SEED = 743;
-// The draw is a hash of the seed and the ask's id, so a case falls in the same half from any copy of the data.
+// The draw is a hash of the seed and the ask's id, so for one copy of the data a case falls in the same half every time. The half files are frozen once written (see below); a
+// different copy has other asks, so it needs its own out dir and its own split, not this one's.
 const draw = (id) => createHash('sha256').update(`${SEED}:${id}`).digest().readUIntBE(0, 6);
 // Each kind is split on its own: sorted by the draw, its first half is A (an odd one goes
 // to A), the rest B; so each half holds its share of the questions and permissions.

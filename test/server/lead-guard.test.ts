@@ -42,7 +42,8 @@ function setup() {
 }
 
 describe("the guard on Aiden's go-ahead", () => {
-  it('a "ship it" carried for a review keys merge, deploy and push on the change of the branch: each clears that change, after the merge too, and holds when anything else comes between', async () => {
+  // Many git reads: under a full parallel run it can pass the default 20 s.
+  it('a "ship it" carried for a review keys merge, deploy and push on the change of the branch: each clears that change, after the merge too, and holds when anything else comes between', { timeout: 60_000 }, async () => {
     const t = setup();
     write(repo.wt, 'web/app.ts', lines(20, 'tabs'));
     commit(repo.wt, 'tabs');

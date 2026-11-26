@@ -16,7 +16,9 @@ export function realOfNearest(p) {
 /** Whether `child` is `parent` or under it, compared case-insensitively as Windows does. */
 const under = (child, parent) => {
   const rel = relative(parent.toLowerCase(), child.toLowerCase());
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+  // Only a real parent step leaves the parent: a name that merely starts with two dots (..x) is under it.
+  const leaves = rel === '..' || rel.startsWith('..\\') || rel.startsWith('../');
+  return rel === '' || (!leaves && !isAbsolute(rel));
 };
 
 /** Throws when any of `paths` is, by real path, the live home or under it. Makes nothing. */

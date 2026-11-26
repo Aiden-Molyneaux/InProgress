@@ -7,10 +7,11 @@ import { logLeadEvent } from '../lead';
 import { getDeskItem, moveDeskItem, type DeskItem } from '../repo/desk';
 import { askOf, DECISION_LINE_CUT, t3ThreadOf, t3ThreadOnStep } from '../repo/deskBring';
 import { addDecision } from '../repo/leadDecisions';
-import { getSend, intendSend, sendByRetryKey } from '../repo/leadSends';
+import { getSend, intendSend, sendByRetryKey, type LeadSend } from '../repo/leadSends';
 import { addLogInWrite } from '../repo/logs';
 import { checkLanding, realGit, recordYes, type LandingDeps } from './landing';
 import { aidenSaidWords } from './aidenSaid';
+import { heldRef } from './hold';
 
 /*
  * Carrying Aiden's answer (lead stage 1, #743, task 11 and its fixes): what his yes covers, read from git, and his reply to
@@ -19,6 +20,8 @@ import { aidenSaidWords } from './aidenSaid';
 
 /** The line an answer prints when the work moved after his word (W8). */
 export const CHANGED_AFTER = 'the work changed after his word';
+/** The line an answer prints for a review's yes given with no time of his (W8a). */
+export const SAID_AT_NEEDED = 'give --said-at with a yes';
 
 /**
  * The yes for each action, keyed on the change of the session's branch (main...branch, as the landing check reads a merge,
@@ -55,7 +58,7 @@ export async function readSessionYeses(
 }
 
 /** What a line to the Voice is about, for his reply: an ask (a bring line), a held action, or what he left to the lead. */
-export type VoiceTarget = { kind: 'ask'; askId: number } | { kind: 'held' | 'aiden_said'; item: DeskItem };
+export type VoiceTarget = ({ kind: 'ask'; askId: number } | { kind: 'held' | 'aiden_said'; item: DeskItem }) & { send: LeadSend };
 
 /** The thing a line to the Voice is about. A send that is not a voice line, of another project, or about nothing he can answer is a 409. */
 export function voiceTarget(ctx: Ctx, project: Project, sendId: number): VoiceTarget {
@@ -65,18 +68,25 @@ export function voiceTarget(ctx: Ctx, project: Project, sendId: number): VoiceTa
   if (send.kind !== 'voice_line') throw conflict(`s${send.id} is not a line to the Voice.`);
   const item = send.itemId === null ? undefined : getDeskItem(ctx.db, send.itemId);
   if (item === undefined) throw conflict(`s${send.id} is not about anything Aiden answers: pass the ask number instead.`);
-  if (item.kind === 'held' || item.kind === 'aiden_said') return { kind: item.kind, item };
+  if (item.kind === 'held' || item.kind === 'aiden_said') return { kind: item.kind, item, send };
   const ask = askOf(ctx, item);
   if (ask === undefined) throw conflict(`s${send.id} is about an ask that is gone.`);
-  return { kind: 'ask', askId: ask.id };
+  return { kind: 'ask', askId: ask.id, send };
 }
 
-/** The session and step a held item is about, from its `held` line (written with the item, at its time). */
+/**
+ * The session and command a held item is about: the `held` line whose session and command make the item's ref (heldRef),
+ * as morning.ts finds it. The line is `<command> -> <why>`, and either part may hold an arrow, so each cut is tried.
+ */
 export function heldScope(ctx: Ctx, item: DeskItem): { sessionId: string | null; command: string } {
-  const row = ctx.db
-    .prepare("SELECT session_id, text FROM lead_events WHERE project_id = ? AND kind = 'held' AND at = ? ORDER BY id LIMIT 1")
-    .get(item.projectId, item.createdAt) as { session_id: string | null; text: string } | undefined;
-  return { sessionId: row?.session_id ?? null, command: (row?.text ?? '').split(' -> ')[0] ?? '' };
+  const rows = ctx.db.prepare("SELECT session_id, text FROM lead_events WHERE project_id = ? AND kind = 'held' ORDER BY id").all(item.projectId) as { session_id: string | null; text: string }[];
+  for (const r of rows) {
+    for (let at = r.text.indexOf(' -> '); at >= 0; at = r.text.indexOf(' -> ', at + 1)) {
+      const command = r.text.slice(0, at);
+      if (heldRef(r.session_id, command) === item.ref) return { sessionId: r.session_id, command };
+    }
+  }
+  return { sessionId: null, command: '' };
 }
 
 export interface ItemAnswerInput {
@@ -86,6 +96,8 @@ export interface ItemAnswerInput {
   shown?: number[];
   /** For a held action, the yes for each action he okayed, read before the write (readSessionYeses). */
   yeses?: CarriedYes[];
+  /** Lines the route adds to the answer: what of --yes or --says was not used, and why. */
+  notes?: string[];
 }
 
 /**
@@ -111,8 +123,8 @@ export function leadAnswerItem(ctx: Ctx, ref: string, as: string, instructions: 
       for (const y of got) yesIds.push(recordYes(ctx, project.id, { action: y.action, patchId: y.patchId as string, stepId: item.nodeId as number, aidenWords: input.aidenWords, said: saidAt }));
       if (got.length) lines.push(`His yes covers ${got.map((y) => y.action).join(', ')} of the change as it is now.`);
       for (const y of yeses.filter((y) => y.patchId === null)) lines.push(`No yes recorded for ${y.action}: ${y.why ?? 'the change could not be read'}.`);
-      if (item.nodeId === null && yeses.length) lines.push('No yes recorded: the held command is on no step.');
     }
+    lines.push(...(input.notes ?? []));
     const shown = (input.shown ?? []).map((id) => `r${id}`).join(',');
     const eventId = logLeadEvent(ctx, {
       projectId: project.id,
@@ -154,11 +166,17 @@ export function leadAnswerItem(ctx: Ctx, ref: string, as: string, instructions: 
   });
 }
 
+/** The thread a relay or carry went to, for an undo; undefined when there was none, or it was cleared unsent (a dead thread). */
+export function liveTarget(ctx: Ctx, retryKey: string): string | undefined {
+  const send = sendByRetryKey(ctx.db, retryKey);
+  return send === undefined || send.state === 'cleared' ? undefined : send.target;
+}
+
 /** The relay target a carried answer went to, for its undo: the carry send of the ask or of the item. */
 export function carryTarget(ctx: Ctx, answer: { askId: number | null; text: string }): string | undefined {
   const item = /; item (\d+)/.exec(answer.text);
   const key = answer.askId !== null ? `carry:a${answer.askId}` : item !== null ? `carry:i${item[1]}` : undefined;
-  return key === undefined ? undefined : sendByRetryKey(ctx.db, key)?.target;
+  return key === undefined ? undefined : liveTarget(ctx, key);
 }
 
 /** The yes rows an answer recorded, from its line's `yes e12,e13`. */

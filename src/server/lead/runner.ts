@@ -419,7 +419,7 @@ const sleepOrAbort = (ms: number, signal: AbortSignal): Promise<void> =>
 /**
  * The thread way: the item's user message goes to the day's thread in T3 Code, after a first line naming the item and the
  * turn, and the thread is read every THREAD_POLL_MS until the thread's agent answers after it with a message that starts
- * `Desk item <id>:` (another item's reply is not this item's). What follows that is the turn's text. No day's thread, T3
+ * `Desk item <id>, turn <turn>:` (another item's reply, or another turn's, is not this one's). What follows that is the turn's text. No day's thread, T3
  * Code not answering, or no reply before the lease's abort, is a runner fault. The abort stops the poll. It reports no cost or usage: the output's fields are null.
  */
 export function threadWay(opts: ThreadOptions): TurnWay {

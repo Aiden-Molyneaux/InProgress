@@ -7,7 +7,7 @@ import { ID_MAX } from '../../core/notices';
 import { LEAD_INSTRUCTIONS_VERSION } from '../../core/lead';
 import { clipLine } from '../../core/step-ref';
 import { heldFile } from '../../hooks/hold';
-import type { Ctx } from '../db/tx';
+import { deskOnly, flushDesk, type Ctx } from '../db/tx';
 import { getDeskItem, moveDeskItem } from '../repo/desk';
 import { DESK_ASK_DUE_MS, plusMs, produceDeskItem } from '../repo/deskProducers';
 import { insertLeadEvent } from '../repo/leadEvents';
@@ -188,6 +188,8 @@ export async function holdCheck(ctx: Ctx, ask: HoldAsk, deps: LandingDeps = REAL
       intendHeldLine(ctx.db, { projectId: scope.project.id, itemId: item.id, projectName: scope.project.name, stepId: scope.stepId, what: judged.what }, now);
     })
     .immediate();
+  // Made in a transaction of its own: the window hears of the new held item now.
+  flushDesk(ctx.db);
   return { held: true, text: judged.what };
 }
 
@@ -358,8 +360,9 @@ export function watchHeldLines(ctx: Ctx, home: string, log: { error: (message: s
     }
   };
   rewrite();
-  const listener = (e: { type: string }) => {
-    if (HELD_EVENTS.has(e.type)) rewrite();
+  const listener = (e: { type: string; data?: unknown }) => {
+    // A desk-only change (tx.ts) changes nothing held.json says.
+    if (HELD_EVENTS.has(e.type) && !deskOnly(e)) rewrite();
   };
   ctx.bus.on('event', listener);
   return () => {

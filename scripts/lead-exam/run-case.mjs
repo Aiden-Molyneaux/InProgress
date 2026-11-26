@@ -10,6 +10,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { countAfter, cutAt, pointFoldersAway } from './cut.mjs';
 import { refuseLiveHome } from './guard.mjs';
+import { killTreeOf } from './tree.mjs';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const [buildArg, copyArg, outArg, kind, idArg, portArg] = process.argv.slice(2);
@@ -25,12 +26,22 @@ if (!['q', 'r', 'm'].includes(kind) || !Number.isInteger(askId)) throw new Error
 // Before anything is made or written: neither the out dir nor the copy may lie under the live home, by real path.
 refuseLiveHome([out, copy], join(homedir(), '.inprogress'));
 const program = process.env.INPROGRESS_LEAD_CLAUDE || 'claude';
+// What the build is: its build.json (sha, dirty, built-at), so a rebuild into the same folder is another build.
+const buildKey = (() => {
+  try {
+    const b = JSON.parse(readFileSync(join(build, 'dist', 'build.json'), 'utf8'));
+    return `${b.sha}${b.dirty ? '+dirty' : ''}@${b.builtAt}`;
+  } catch {
+    // No build.json: the build names no sha, so no result matches it and every case runs.
+    return null;
+  }
+})();
 const resultFile = join(out, `lead-${kind}-${askId}.json`);
 if (existsSync(resultFile)) {
   try {
     const done = JSON.parse(readFileSync(resultFile, 'utf8'));
     // Skipped only when the same program and build wrote it: a stand-in's result is never a real run's.
-    if (done.error === null && done.program === program && done.build === build) {
+    if (done.error === null && done.program === program && done.build === build && buildKey !== null && done.buildKey === buildKey) {
       console.log(`case ${kind}-${askId} is already written: skipped`);
       process.exit(0);
     }
@@ -51,7 +62,7 @@ rmSync(join(caseDir, 'voice.json'), { force: true });
 
 const TIMEOUT_MS = 8 * 60 * 1000;
 const log = (m) => console.log(`[${kind}-${askId}] ${m}`);
-const write = (o) => writeFileSync(resultFile, JSON.stringify({ program, build, verdict: null, answer: null, reason: null, outcome: null, state: null, text: null, cost: null, error: null, ...o }, null, 1));
+const write = (o) => writeFileSync(resultFile, JSON.stringify({ program, build, buildKey, verdict: null, answer: null, reason: null, outcome: null, state: null, text: null, cost: null, error: null, ...o }, null, 1));
 
 let db;
 let app;
@@ -139,7 +150,11 @@ try {
     await new Promise((r) => setTimeout(r, 500));
   }
   // The stop sequence below may hang on a run that will not end: the watchdog ends the process, non-zero, with no result file, so the case is run again.
-  setTimeout(() => process.exit(1), 60_000).unref();
+  setTimeout(() => {
+    // The lane's child processes (the turn's claude and what it started) go first, so none outlives the exam.
+    killTreeOf(process.pid);
+    process.exit(1);
+  }, 60_000).unref();
   const ended = turn !== undefined && ENDED.includes(turn.state);
   await runner.stop();
   sender.stop();

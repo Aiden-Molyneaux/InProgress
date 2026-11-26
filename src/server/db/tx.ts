@@ -76,9 +76,30 @@ function drainDesk(db: DB): number[] {
 export function flushDesk(db: DB): void {
   const ctx = ctxByDb.get(db);
   if (ctx === undefined || db.inTransaction || !deskWatched.has(db)) return;
-  if (db.prepare('SELECT 1 FROM temp.desk_touched LIMIT 1').get() === undefined) return;
-  write(ctx, 'system', () => undefined);
+  try {
+    if (db.prepare('SELECT 1 FROM temp.desk_touched LIMIT 1').get() === undefined) return;
+    write(ctx, 'system', () => undefined);
+  } catch (err) {
+    // The desk change has committed: telling the window never undoes what the caller learns. The next write tells it.
+    console.error(`InProgress: could not tell the window of a desk change: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
+
+/** A desk-only change's data, as write() records it: `{ changes: { desk: true } }`. */
+export const DESK_ONLY_DATA = { changes: { desk: true } } as const;
+
+/** Whether an event is a desk-only `project.updated`: it tells the window to reload its desk, and says nothing else. */
+export function deskOnly(e: { type: string; data?: unknown }): boolean {
+  if (e.type !== 'project.updated' || e.data === null || typeof e.data !== 'object') return false;
+  const d = e.data as { changes?: unknown };
+  const keys = Object.keys(d);
+  if (keys.length !== 1 || keys[0] !== 'changes' || d.changes === null || typeof d.changes !== 'object') return false;
+  const changes = d.changes as Record<string, unknown>;
+  return Object.keys(changes).length === 1 && changes.desk === true;
+}
+
+/** SQL (events alias `e`) true for a row that is not a desk-only `project.updated`: what the last-event reads count. */
+export const NOT_DESK_ONLY_SQL = `NOT (e.type = 'project.updated' AND e.data = '${JSON.stringify(DESK_ONLY_DATA)}')`;
 
 /** The ISO time `ms` before the context's clock: the cutoff for "stopped less than this long ago". */
 export const msAgo = (ctx: Ctx, ms: number): string => new Date(Date.parse(ctx.now()) - ms).toISOString();
@@ -118,7 +139,7 @@ export function write<T>(ctx: Ctx, actor: string, fn: (record: RecordEvent) => T
     };
     const result = fn(record);
     // Every project whose desk this write changed (an item made, moved, or given a new due time): one event each.
-    for (const projectId of drainDesk(ctx.db)) record({ projectId, type: 'project.updated', entity: 'project', entityId: projectId, data: { changes: { desk: true } } });
+    for (const projectId of drainDesk(ctx.db)) record({ projectId, type: 'project.updated', entity: 'project', entityId: projectId, data: DESK_ONLY_DATA });
     const projectIds = [...new Set(pending.map((e) => e.projectId).filter((id): id is number => id !== null))];
     if (projectIds.length && ctx.reconcile) {
       const reconcile = ctx.reconcile;

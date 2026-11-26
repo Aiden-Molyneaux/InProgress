@@ -8,11 +8,14 @@ import { buildApp } from '../../src/server/app';
 import { write as dbWrite } from '../../src/server/db/tx';
 import { leadAnswer, leadDeskAdd, leadUndo, readYeses } from '../../src/server/lead-commands';
 import { applyVerdict } from '../../src/server/lead/apply';
-import { CHANGED_AFTER } from '../../src/server/lead/carry';
+import { CHANGED_AFTER, heldScope, SAID_AT_NEEDED } from '../../src/server/lead/carry';
+import { fullPath } from '../../src/server/repo/resources';
+import { markAnswersDelivered } from '../../src/server/repo/asks';
 import { checkLanding, realGit, type LandingDeps } from '../../src/server/lead/landing';
 import { morningList } from '../../src/server/lead/morning';
 import { createSender, type SenderT3 } from '../../src/server/lead/sends';
 import { createVoice, intendHeldLine, voiceDayStart, voiceFile } from '../../src/server/lead/voice';
+import { heldRef } from '../../src/server/lead/hold';
 import { raiseAsk, requireAsk, undeliveredAnswers } from '../../src/server/repo/asks';
 import { getDeskItem, moveDeskItem } from '../../src/server/repo/desk';
 import { bringItem } from '../../src/server/repo/deskBring';
@@ -39,7 +42,8 @@ const saidNow = (): string => new Date(Date.now() + 1000).toISOString();
 
 /** A project led by Progresser bound to the test repo, a T3 Code session on its feature worktree focused on the step, its review, and the app. */
 function setup(gitCalls: string[][] = []) {
-  const ctx = makeCtx();
+  // The ctx clock runs a minute ahead of the real one, which git's commits keep: his word is never clamped before them.
+  const ctx = makeCtx(new Date(Date.now() + 60_000).toISOString());
   const project = createProject(ctx, 'test', { name: 'InGame' });
   addBinding(ctx, 'test', project.slug, repo.main);
   setProjectLead(ctx, 'window', project.slug, 'Progresser');
@@ -54,7 +58,11 @@ function setup(gitCalls: string[][] = []) {
     },
     visibility: async () => false,
   };
-  const app = buildApp({ ctx, token: 't', uiToken: 'ui', version: 'test', landing: deps });
+  // The app's sender reaches a T3 Code that records and answers nothing: no test reaches the real t3 CLI.
+  const t3Sent: { thread: string; text: string }[] = [];
+  const fakeT3: SenderT3 = { list: async () => [], show: async () => ({ thread: {} as never, messages: [] }), start: async () => ({ threadId: 'x' }), send: async (thread, text) => void t3Sent.push({ thread, text }) };
+  const sender = createSender(ctx, { t3: fakeT3 }, { log: { info: () => undefined, error: () => undefined } });
+  const app = buildApp({ ctx, token: 't', uiToken: 'ui', version: 'test', landing: deps, sender });
   const answer = (payload: Record<string, unknown>, slug = project.slug) =>
     app.inject({ method: 'POST', url: `/api/lead/${slug}/answer`, headers: { authorization: 'Bearer t' }, payload: { as: 'Progresser', instructions: V, ...payload } });
   const check = (action: 'merge' | 'push') => checkLanding(ctx, { ref: project.slug, stepId: step.id, action, folder: repo.wt, branch: 'feature' }, deps);
@@ -110,23 +118,23 @@ describe('W2: his reply to a line from the Voice, by its send', () => {
 
   it("a held line: with --yes a yes for that action on the session's change and the item closes; without, his words go to the session and the item closes", async () => {
     const t = setup();
-    const held = (ref: string) =>
+    const held = (command: string) =>
       dbWrite(t.ctx, 'test', () => {
         const now = t.ctx.now();
-        const { item } = produceDeskItem(t.ctx.db, { projectId: t.project.id, kind: 'held', ref, nodeId: t.step.id }, now);
-        insertLeadEvent(t.ctx.db, { projectId: t.project.id, lead: 'Progresser', instructions: V, kind: 'held', nodeId: t.step.id, sessionId: 's1', text: 'git push -> it touches src/hooks' }, now);
+        const { item } = produceDeskItem(t.ctx.db, { projectId: t.project.id, kind: 'held', ref: heldRef('s1', command), nodeId: t.step.id }, now);
+        insertLeadEvent(t.ctx.db, { projectId: t.project.id, lead: 'Progresser', instructions: V, kind: 'held', nodeId: t.step.id, sessionId: 's1', text: `${command} -> it touches src/hooks` }, now);
         intendHeldLine(t.ctx.db, { projectId: t.project.id, itemId: item.id, projectName: 'InGame', stepId: t.step.id, what: 'a push to a remote' }, now);
         const send = t.ctx.db.prepare("SELECT id FROM lead_sends WHERE kind = 'voice_line' AND item_id = ?").pluck().get(item.id) as number;
         return { item, send };
       });
-    const a = held('h1');
+    const a = held('git push');
     const yes = await t.answer({ sendId: a.send, aidenWords: 'go ahead', where: 'voice', saidAt: saidNow(), yes: ['push'] });
     expect(yes.statusCode).toBe(200);
     expect(t.ctx.db.prepare("SELECT text, node_id FROM lead_events WHERE kind = 'yes'").all()).toEqual([{ text: expect.stringMatching(/^push [0-9a-f]{40}$/), node_id: t.step.id }]);
     expect(getDeskItem(t.ctx.db, a.item.id)).toMatchObject({ state: 'done', outcome: expect.stringMatching(/^ANSWERED d[0-9]+$/) });
     expect(await t.check('push')).toMatchObject({ clear: true, why: 'his yes' });
 
-    const b = held('h2');
+    const b = held('git push origin feature');
     expect((await t.answer({ sendId: b.send, aidenWords: 'not yet', where: 'voice' })).statusCode).toBe(200);
     expect(t.yesCount()).toBe(1);
     expect(getDeskItem(t.ctx.db, b.item.id)!.state).toBe('done');
@@ -312,5 +320,162 @@ describe('W5: a picture path must be whole', () => {
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
+  });
+});
+
+/** A held item for `command` by session s1 on the step (or on none), with its held line and its line to the Voice. */
+function heldItem(t: ReturnType<typeof setup>, command: string, nodeId: number | null = t.step.id) {
+  return dbWrite(t.ctx, 'test', () => {
+    const now = t.ctx.now();
+    const { item } = produceDeskItem(t.ctx.db, { projectId: t.project.id, kind: 'held', ref: heldRef('s1', command), nodeId }, now);
+    insertLeadEvent(t.ctx.db, { projectId: t.project.id, lead: 'Progresser', instructions: V, kind: 'held', ...(nodeId === null ? {} : { nodeId }), sessionId: 's1', text: `${command} -> held` }, now);
+    intendHeldLine(t.ctx.db, { projectId: t.project.id, itemId: item.id, projectName: 'InGame', stepId: nodeId, what: 'a push' }, now);
+    const send = t.ctx.db.prepare("SELECT id FROM lead_sends WHERE kind = 'voice_line' AND item_id = ?").pluck().get(item.id) as number;
+    return { item, send };
+  });
+}
+/** Marks a line to the Voice sent at `at`. */
+const reached = (t: ReturnType<typeof setup>, send: number, at: string) => t.ctx.db.prepare("UPDATE lead_sends SET state = 'done', done_at = ? WHERE id = ?").run(at, send);
+
+describe('W8a: a yes is checked against when he could have said it', () => {
+  it('with no --said-at, a reply by --send is checked against the time the line reached him; by ask id, a yes needs --said-at', async () => {
+    const t = setup();
+    // The line reached him a minute before the work last changed: his yes cannot cover that change.
+    const early = heldItem(t, 'git push');
+    reached(t, early.send, new Date(Date.now() - 60_000).toISOString());
+    const res = await t.answer({ sendId: early.send, aidenWords: 'go ahead', yes: ['push'] });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().text).toContain(`No yes recorded for push: ${CHANGED_AFTER}.`);
+    expect(t.yesCount()).toBe(0);
+    // A line that reached him after the last commit: the yes holds.
+    const late = heldItem(t, 'git push origin feature');
+    reached(t, late.send, new Date(Date.now() + 2000).toISOString());
+    expect((await t.answer({ sendId: late.send, aidenWords: 'go ahead', yes: ['push'] })).json().text).toContain('His yes covers push');
+    expect(t.yesCount()).toBe(1);
+    // By ask id with no time of his: no yes, and it says what is missing.
+    const byAsk = await t.answer({ askId: t.review.id, aidenWords: 'ship it', yes: ['merge'] });
+    expect(byAsk.json().text).toContain(`No yes recorded for merge: ${SAID_AT_NEEDED}.`);
+    expect(t.yesCount()).toBe(1);
+  });
+});
+
+describe('W13: a held item is matched to its own held line', () => {
+  it('by its ref, not by its time', () => {
+    const t = setup();
+    const { item } = heldItem(t, 'git push origin other');
+    // Another held line at the very same time, written first.
+    t.ctx.db.prepare("UPDATE lead_events SET at = (SELECT created_at FROM desk_items WHERE id = ?) WHERE kind = 'held'").run(item.id);
+    insertLeadEvent(t.ctx.db, { projectId: t.project.id, lead: 'Progresser', instructions: V, kind: 'held', sessionId: 's2', text: 'npm run deploy -> held' }, item.createdAt);
+    expect(heldScope(t.ctx, item)).toEqual({ sessionId: 's1', command: 'git push origin other' });
+  });
+});
+
+describe('W14: undoing one answer takes back only its own yes', () => {
+  it("leaves another answer's yes on the same change", async () => {
+    const t = setup();
+    const second = raiseAsk(t.ctx, 'session:s1', { nodeId: t.step.id, kind: 'review', text: 'Merge?', sessionId: 's1' });
+    const first = await t.answer({ askId: t.review.id, aidenWords: 'merge it', saidAt: saidNow(), yes: ['merge'] });
+    await t.answer({ askId: second.id, aidenWords: 'yes, merge', saidAt: saidNow(), yes: ['merge'] });
+    const d = Number(/decision d([0-9]+)/.exec(first.json().text as string)![1]);
+    leadUndo(t.ctx, t.project.slug, 'Progresser', V, { eventId: d, aidenWords: 'not that one' });
+    expect(t.ctx.db.prepare("SELECT text FROM lead_events WHERE kind = 'yes_withdrawn'").pluck().all()).toEqual([expect.stringMatching(/^e[0-9]+$/)]);
+    expect(await t.check('merge')).toMatchObject({ clear: true, why: 'his yes' });
+  });
+});
+
+describe('W15, W17, W18: a reply to a held line', () => {
+  it("records a yes only for the held command's own action, says what was ignored, and is heard on the Voice", async () => {
+    const t = setup();
+    const h = heldItem(t, 'git push');
+    const res = await t.answer({ sendId: h.send, aidenWords: 'go', saidAt: saidNow(), says: 'push it', yes: ['merge', 'push'] });
+    const text = res.json().text as string;
+    expect(text).toContain('--yes merge was ignored: the held command is not a merge.');
+    expect(text).toContain('--says was ignored');
+    expect(t.ctx.db.prepare("SELECT text FROM lead_events WHERE kind = 'yes'").pluck().all()).toEqual([expect.stringMatching(/^push /)]);
+    expect(t.ctx.db.prepare("SELECT text FROM lead_events WHERE kind = 'answer'").pluck().get()).toMatch(/^where voice; /);
+  });
+
+  it('a held command on no step says so and runs no git; a closed item is refused before any git', async () => {
+    const calls: string[][] = [];
+    const t = setup(calls);
+    const loose = heldItem(t, 'git push', null);
+    const res = await t.answer({ sendId: loose.send, aidenWords: 'go', saidAt: saidNow(), yes: ['push'] });
+    expect(res.json().text).toContain('No yes recorded: the held command is on no step.');
+    expect(calls).toEqual([]);
+    const done = heldItem(t, 'git push origin feature');
+    t.ctx.db.prepare("UPDATE desk_items SET state = 'done' WHERE id = ?").run(done.item.id);
+    expect((await t.answer({ sendId: done.send, aidenWords: 'go', saidAt: saidNow(), yes: ['push'] })).statusCode).toBe(409);
+    expect(calls).toEqual([]);
+  });
+});
+
+describe('W16: a cleared carry takes back only its own stamp', () => {
+  it('leaves a stamp the prompt made', async () => {
+    const t = setup();
+    const question = raiseAsk(t.ctx, 'session:s1', { nodeId: t.step.id, kind: 'question', text: 'Which?', sessionId: 's1' });
+    const t3: SenderT3 = {
+      list: async () => [],
+      show: async () => ({ thread: {} as never, messages: [] }),
+      start: async () => ({ threadId: 'x' }),
+      send: async () => {
+        throw new T3ArgumentRefused('bad thread');
+      },
+    };
+    const sender = createSender(t.ctx, { t3 }, { log: { info: () => undefined, error: () => undefined } });
+    leadAnswer(t.ctx, t.project.slug, 'Progresser', V, { askId: question.id, aidenWords: 'that one' });
+    // The prompt hook gives the answer before the carry is tried.
+    markAnswersDelivered(t.ctx, [question.id]);
+    await sender.wake();
+    expect(t.sends('carry')).toHaveLength(1);
+    expect(undeliveredAnswers(t.ctx, 's1').map((a) => a.id)).not.toContain(question.id);
+  });
+});
+
+describe('W19: undoing an answer carried to a session outside T3 Code', () => {
+  it('sets the ask to the withdrawal, so the session reads it on its next prompt, and the log line stays', async () => {
+    const t = setup();
+    t.ctx.db.prepare("UPDATE sessions SET app = 'cli', t3_thread_id = NULL WHERE id = 's1'").run();
+    const question = raiseAsk(t.ctx, 'session:s1', { nodeId: t.step.id, kind: 'question', text: 'Which?', sessionId: 's1' });
+    const res = leadAnswer(t.ctx, t.project.slug, 'Progresser', V, { askId: question.id, aidenWords: 'that one' });
+    markAnswersDelivered(t.ctx, [question.id]);
+    const d = Number(/decision d([0-9]+)/.exec(res.text)![1]);
+    leadUndo(t.ctx, t.project.slug, 'Progresser', V, { eventId: d, aidenWords: 'wait', reason: 'he has not seen the mock' });
+    expect(t.ctx.db.prepare('SELECT answer, answered_via, answer_delivered_at FROM asks WHERE id = ?').get(question.id)).toEqual({
+      answer: `Aiden's answer d${d} is withdrawn by Progresser: he has not seen the mock`,
+      answered_via: null,
+      answer_delivered_at: null,
+    });
+    expect(undeliveredAnswers(t.ctx, 's1').map((a) => a.id)).toContain(question.id);
+    expect(t.ctx.db.prepare('SELECT text FROM log_entries WHERE node_id = ?').pluck().all(t.step.id)).toContain(`Progresser: d${d} is withdrawn: Aiden's answer no longer stands.`);
+  });
+});
+
+describe('W20: a drive-relative picture path', () => {
+  it('is not a full path on Windows', async () => {
+    expect([fullPath('\\pic.png', 'win32'), fullPath('C:pic.png', 'win32'), fullPath('/pic.png', 'win32')]).toEqual([false, false, false]);
+    expect([fullPath('C:\\x\\pic.png', 'win32'), fullPath('C:/x/pic.png', 'win32'), fullPath('\\\\host\\share\\pic.png', 'win32'), fullPath('/x/pic.png', 'linux')]).toEqual([true, true, true, true]);
+    const t = setup();
+    const home = mkdtempSync(join(tmpdir(), 'ip-home-'));
+    try {
+      const app = buildApp({ ctx: t.ctx, home, token: 't', uiToken: 'ui', version: 'test' });
+      const res = await app.inject({ method: 'POST', url: '/api/resources', headers: { authorization: 'Bearer t' }, payload: { nodeId: t.step.id, kind: 'doc', title: 'Mock', path: 'C:pic.png' } });
+      if (process.platform === 'win32') expect(res.statusCode).toBe(400);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('W21: the undo of a decision whose relay was cleared unsent', () => {
+  it("goes to the step's log, not the dead thread", () => {
+    const t = setup();
+    const { itemId } = leadDeskAdd(t.ctx, t.project.slug, 'Progresser', V, { stepId: t.step.id, aidenWords: 'you decide' });
+    const turn = { id: null, verdict: 'DECIDE', answer: 'Alphabetical', why: 'reads best', kind: 'TECHNICAL' } as unknown as LeadTurn;
+    const effect = dbWrite(t.ctx, 'lead:Progresser', (record) => applyVerdict(t.ctx, turn, getDeskItem(t.ctx.db, itemId)!, record));
+    const d = Number(/^DECIDE d([0-9]+)$/.exec(effect.outcome)![1]);
+    t.ctx.db.prepare("UPDATE lead_sends SET state = 'cleared' WHERE retry_key = ?").run(`aiden-said:d${d}`);
+    leadUndo(t.ctx, t.project.slug, 'Progresser', V, { eventId: d, aidenWords: 'undo it' });
+    expect(t.sends('relay').map((r) => r.retryKey)).toEqual([`aiden-said:d${d}`]);
+    expect(t.ctx.db.prepare('SELECT text FROM log_entries WHERE node_id = ?').pluck().all(t.step.id)).toContain(`Progresser: d${d} is withdrawn: Aiden takes it back.`);
   });
 });
