@@ -2,6 +2,7 @@ import { Fragment, useLayoutEffect, useRef, useState, type ReactNode } from 'rea
 import type { AskKind, Ask, HeldCard, Session } from '../../../src/core/types';
 import type { TaskBox as BoxData } from '../../../src/core/taskState';
 import { sessionActivity } from '../../../src/core/activity';
+import { ONLY_YOU } from '../../../src/core/landing';
 import { commandLabel, WORDS } from '../live';
 import { Button } from '../parts/Button';
 import { Chip } from '../parts/Chip';
@@ -28,7 +29,7 @@ export function needsKeys(tiles: readonly NeedsTile[]): string[] {
   return tiles.map((t) => t.key);
 }
 
-/** A held command's card (lead stage 1, task D): what it does, the command itself, and Go ahead and Not yet. */
+/** A held command's card (lead stage 1, task D): what it does, the command itself, and Go ahead and Not yet (Not yet alone, and why, where no yes of his can release it). */
 function HeldPanel({ held, now }: { held: HeldCard; now: number }) {
   return (
     <div className="ip-ask-panel ip-held-panel" data-held={held.id}>
@@ -39,7 +40,8 @@ function HeldPanel({ held, now }: { held: HeldCard; now: number }) {
       <p className="ip-ask-text">{heldText(held)}</p>
       {/* data-act: selecting the command by hand must not open Details. */}
       {held.command !== '' && <code className="ip-term" data-act>{held.command}</code>}
-      <HeldActions itemId={held.id} area="needs_me" />
+      {!held.goAhead && <p className="ip-sys">{ONLY_YOU}</p>}
+      <HeldActions itemId={held.id} goAhead={held.goAhead} area="needs_me" />
     </div>
   );
 }
@@ -97,7 +99,8 @@ export function NeedsMe({ snapshot, tiles, now, selectedNode, onOpenNode, onOpen
   /** The stagger place a tile key (`needs:<key>`) rises with. */
   rise: (key: string) => number | undefined;
 }) {
-  if (tiles.length === 0) return <EmptyState>Nothing needs you</EmptyState>;
+  // Held cards count past the cap the snapshot sends (heldTotal): the band is empty only when nothing at all waits.
+  if (tiles.length === 0 && (snapshot.heldTotal ?? 0) === 0) return <EmptyState>Nothing needs you</EmptyState>;
   /** The session an ask was raised from, live or past; one that is gone still names its id. */
   const raiser = (ask: Ask): SessionRef | null => {
     if (ask.sessionId === null) return null;

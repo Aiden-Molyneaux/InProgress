@@ -93,7 +93,9 @@ export function Board(props: ViewProps) {
     next: <NextColumn {...band} queue={queue} cursor={cursorOf('next')} rise={rise} />,
     done: <DoneColumn {...band} view={done} lastLook={lastLook} cursor={cursorOf('done')} rise={rise} />,
   };
-  const counts: Record<Band, number> = { needs: needs.length, next: queue.next.length, now: boxes.now.length, done: board.done.length };
+  // Needs me counts its tiles, and the held commands past the cap the snapshot sends (heldTotal).
+  const heldUnsent = Math.max(0, (snapshot.heldTotal ?? 0) - (snapshot.held?.length ?? 0));
+  const counts: Record<Band, number> = { needs: needs.length + heldUnsent, next: queue.next.length, now: boxes.now.length, done: board.done.length };
   const hints: Record<Band, string> = {
     needs: 'Oldest wait first',
     next: 'Queue order, drag or Alt+arrows',

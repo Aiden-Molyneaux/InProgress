@@ -2002,7 +2002,7 @@ test('The lead is behind appears with a late desk item and leaves when it is han
   await expect(group).toHaveCount(0);
 });
 
-test('a held command shows as a card in Needs me, and Go ahead clears the landing check for it, once', async ({ page, api }) => {
+test('a held command shows as a card in Needs me, and Go ahead clears the landing check for it, once; one no yes can release has only Not yet', async ({ page, api }) => {
   await page.setViewportSize({ width: 1600, height: 900 });
   const name = unique('Held card');
   const made = await bare(api, name);
@@ -2035,6 +2035,8 @@ test('a held command shows as a card in Needs me, and Go ahead clears the landin
   try {
     db.pragma('busy_timeout = 5000');
     db.prepare("UPDATE sessions SET cwd = ?, branch = 'feature' WHERE id = ?").run(dir, session);
+    // A playbook line that holds a command for Aiden with no check: no yes of his can release it.
+    db.prepare('UPDATE projects SET playbook = ? WHERE id = ?').run('Held: make release', made.id);
   } finally {
     db.close();
   }
@@ -2061,10 +2063,23 @@ test('a held command shows as a card in Needs me, and Go ahead clears the landin
   // The band counts the held tile.
   await expect(needs.locator('.p-count-figure').first()).toHaveText('1');
   const itemId = Number(await card.getAttribute('data-held'));
-  await card.getByRole('button', { name: 'Go ahead', exact: true }).click();
+  // A playbook-held command on the same step: its card has only Not yet, and says why.
+  const release = await api.post('/api/lead/hold', { headers: auth, data: { sessionId: session, cwd: dir, command: 'make release', action: 'playbook', index: 0, folder: dir } });
+  expect((await release.json()).held).toBe(true);
+  await expect(needs.locator('[data-held]')).toHaveCount(2, { timeout: 2_000 });
+  const only = needs.locator(`[data-held="${await needs.locator('[data-held]').nth(1).getAttribute('data-held')}"]`);
+  await expect(only.getByRole('button', { name: 'Go ahead', exact: true })).toHaveCount(0);
+  await expect(only.getByRole('button', { name: 'Not yet', exact: true })).toBeVisible();
+  await expect(only).toContainText('Only you can run this one: run it yourself, or turn the round off.');
+  await expect(needs.locator('.p-count-figure').first()).toHaveText('1');
+  // Go ahead on the publish: focus moves to the next card's Not yet, never a Go ahead.
+  await card.first().getByRole('button', { name: 'Go ahead', exact: true }).click();
+  await expect(only.getByRole('button', { name: 'Not yet', exact: true })).toBeFocused();
+  await expect(needs.locator('[data-held]')).toHaveCount(1);
+  expect(await landing()).toMatchObject({ clear: true, why: 'his yes' });
+  await only.getByRole('button', { name: 'Not yet', exact: true }).click();
   await expect(needs.locator('[data-held]')).toHaveCount(0);
   await expect(needs).toContainText('Nothing needs you');
-  expect(await landing()).toMatchObject({ clear: true, why: 'his yes' });
   // A second answer to the same card is refused and changes nothing.
   const again = await api.post(`/api/ui/held/${itemId}`, { headers: ui, data: { answer: 'not-yet' } });
   expect(again.status()).toBe(409);

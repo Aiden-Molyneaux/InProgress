@@ -70,6 +70,12 @@ export function filesOnRiskList(files: readonly string[], globs: readonly string
 
 const held = (why: string): LandingVerdict => ({ clear: false, text: `hold: this is Aiden's (${why})`, why });
 
+/** What a held card says, and the window's Go ahead answers, when no yes of his can release the held command. */
+export const ONLY_YOU = 'Only you can run this one: run it yourself, or turn the round off.';
+
+/** Why a publish or a public push is held whatever the change: it goes out in his name. */
+export const goesOutWhy = (action: 'publish' | 'push-public'): string => `a ${action} goes out in his name`;
+
 /**
  * Whether the change may land without Aiden, in plain code with no model. Publish and a push to a public place are his
  * whatever the change, and a push to a place that could not be read is held too; so is a change that touches the risk list,
@@ -83,7 +89,7 @@ export function landingVerdict(input: LandingInput): LandingVerdict {
   const yes = input.patchId !== null && forAction.some((y) => y.patchId === input.patchId);
 
   let why: string | null = null;
-  if (action === 'publish' || action === 'push-public') why = `a ${action} goes out in his name`;
+  if (action === 'publish' || action === 'push-public') why = goesOutWhy(action);
   else if (unread) why = `could not tell whether ${input.remote ?? 'the remote'} is public`;
   else if (input.holdBecause) why = input.holdBecause;
   else {

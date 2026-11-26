@@ -8,10 +8,11 @@ import { focusTargetAfter } from './focus';
 /**
  * Go ahead and Not yet for one held command (lead stage 1, task D), as AskActions answers an ask: a click sends the answer
  * once (both buttons are inert while it goes and after), a refusal shows under the buttons and focus returns to the button
- * pressed. On success the card strikes through until the stream brings a snapshot without it; focus moves to the next open
- * card in the tile, else to the next row, else to the band's heading.
+ * pressed. Go ahead only where a yes of his can release the command (`goAhead`). On success the card strikes through until
+ * the stream brings a snapshot without it; focus moves to the next open card in the tile (its Not yet, or an ask's
+ * Answer…, never a Go ahead), else to the next row, else to the band's heading.
  */
-export function HeldActions({ itemId, area }: { itemId: number; area: MeasureArea }) {
+export function HeldActions({ itemId, goAhead, area }: { itemId: number; goAhead: boolean; area: MeasureArea }) {
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   /** The answer went out and the snapshot has not dropped the card yet: its buttons are inert (aria-disabled, clicks do nothing). */
@@ -27,7 +28,8 @@ export function HeldActions({ itemId, area }: { itemId: number; area: MeasureAre
     /** Where focus goes once this card is answered: another open card in the tile, else the walk to the next row, else the band's heading. */
     const handoff = (): HTMLElement | null => {
       const sibling = row?.isConnected ? [...row.querySelectorAll<HTMLElement>('[data-ask], [data-held]')].find((b) => b !== own && !b.hasAttribute('data-sent')) : undefined;
-      const next = sibling?.querySelector<HTMLElement>('[data-answer]');
+      // data-answer is a held card's Not yet and an ask's Answer…: focus never lands on a Go ahead.
+      const next = sibling?.querySelector<HTMLElement>('[data-answer]') ?? sibling?.querySelector<HTMLElement>('input');
       if (next) return next;
       if (row?.isConnected) return focusTargetAfter(row);
       return home?.querySelector<HTMLElement>('h2') ?? null;
@@ -55,10 +57,12 @@ export function HeldActions({ itemId, area }: { itemId: number; area: MeasureAre
   return (
     <>
       <div className="ip-ask-actions">
-        <Button ref={go} variant="primary" size="sm" data-act data-answer aria-disabled={busy || sent} onClick={() => void send('go')}>
-          Go ahead
-        </Button>
-        <Button ref={wait} variant="ghost" size="sm" data-act aria-disabled={busy || sent} onClick={() => void send('not-yet')}>
+        {goAhead && (
+          <Button ref={go} variant="primary" size="sm" data-act aria-disabled={busy || sent} onClick={() => void send('go')}>
+            Go ahead
+          </Button>
+        )}
+        <Button ref={wait} variant="ghost" size="sm" data-act data-answer aria-disabled={busy || sent} onClick={() => void send('not-yet')}>
           Not yet
         </Button>
       </div>

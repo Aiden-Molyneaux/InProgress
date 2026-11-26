@@ -1,4 +1,5 @@
-import { heldActions, playbookHeldLines } from '../../core/hold';
+import { heldActions, isUpstreamOfMain, mergeTargets, playbookHeldLines, pushTarget, type HeldMatch } from '../../core/hold';
+import { goesOutWhy, ONLY_YOU } from '../../core/landing';
 import { clipLine } from '../../core/step-ref';
 import type { HeldCard, Project } from '../../core/types';
 import { write, type Ctx } from '../db/tx';
@@ -8,11 +9,12 @@ import { logLeadEvent } from '../lead';
 import { getDeskItem, moveDeskItem, type DeskItem } from '../repo/desk';
 import { askOf, DECISION_LINE_CUT, reachableThread, t3SessionOnStep } from '../repo/deskBring';
 import { addDecision } from '../repo/leadDecisions';
-import { getSend, intendSend, sendByRetryKey, type LeadSend } from '../repo/leadSends';
+import { clearUntriedVoiceLines, getSend, intendSend, sendByRetryKey, type LeadSend } from '../repo/leadSends';
 import { addLogInWrite } from '../repo/logs';
-import { checkLanding, realGit, recordYes, type LandingDeps } from './landing';
+import { shelvedAmong } from '../repo/shelved';
+import { checkLanding, landingKey, PUBLISH_NO_YES, realGit, recordYes, type LandingDeps } from './landing';
 import { aidenSaidWords } from './aidenSaid';
-import { heldRef, heldWhatOf } from './hold';
+import { heldLandingAsk, heldLines, heldWhatOf, publishesFolderPackage, type HeldLine } from './hold';
 
 /*
  * Carrying Aiden's answer (lead stage 1, #743, task 11 and its fixes): what his yes covers, read from git, and his reply to
@@ -24,11 +26,19 @@ export const CHANGED_AFTER = 'the work changed after his word';
 /** The line an answer prints for a review's yes given with no time of his (W8a). */
 export const SAID_AT_NEEDED = 'give --said-at with a yes';
 
+/** Whether the newest commit at `tip` in `folder` is after `asOf` (git gives whole seconds: one in the same second counts as before). */
+async function changedAfter(folder: string, tip: string, asOf: string, deps?: LandingDeps): Promise<boolean | { why: string }> {
+  const log = await (deps?.git ?? realGit)(folder, ['log', '-1', '--format=%cI', tip, '--']);
+  const newest = log.code === 0 ? Date.parse(log.stdout.trim()) : NaN;
+  if (Number.isNaN(newest)) return { why: `could not tell when ${tip.replace('refs/heads/', '')} last changed` };
+  return newest > Math.floor(Date.parse(asOf) / 1000) * 1000;
+}
+
 /**
- * The yes for each action, read now in the session's folder on its branch, as the landing check keys it (nothing logged):
- * a merge, deploy or push on the change of the branch (main...branch, as a merge reads it), a publish on the tree of the
- * branch's head (what a publish sends). No yes when the change cannot be read, or when the branch's newest commit is after
- * his words (`saidAt`): what he said yes to is not what is there now.
+ * The yes for each action of a review, read now in the session's folder on its branch (nothing logged): a merge, deploy or
+ * push on the change of the branch (main...branch, as a merge reads it). A publish takes none on a review (PUBLISH_NO_YES:
+ * its key is what goes out, which only a held publish names). No yes when the change cannot be read, or when the branch's
+ * newest commit is after his words (`saidAt`): what he said yes to is not what is there now.
  */
 export async function readSessionYeses(
   ctx: Ctx,
@@ -39,34 +49,122 @@ export async function readSessionYeses(
   saidAt: string,
   deps?: LandingDeps,
 ): Promise<CarriedYes[]> {
-  const none = (why: string): CarriedYes[] => actions.map((action) => ({ action, patchId: null, why }));
+  const none = (why: string): CarriedYes[] => actions.map((action) => ({ action, patchId: null, why: action === 'publish' ? PUBLISH_NO_YES : why }));
   const session = sessionId === null ? undefined : (ctx.db.prepare('SELECT cwd, branch FROM sessions WHERE id = ?').get(sessionId) as { cwd: string | null; branch: string | null } | undefined);
   const folder = session?.cwd ?? null;
   if (folder === null || folder.trim() === '') return none('its session has no folder on record');
   const branch = session?.branch ? session.branch : undefined;
-  /** One read of the landing check: the key a yes is recorded on for `action`, or why there is none. */
-  const keyOf = async (action: 'merge' | 'publish'): Promise<{ patchId: string } | { why: string }> => {
-    try {
-      const read = await checkLanding(ctx, { ref, stepId, action, folder, ...(branch === undefined ? {} : { branch }) }, deps, { record: false });
-      if (read.patchId === null) return { why: 'there is no change to read' };
-      // The range ends at the branch read: main...branch, or origin/branch..branch for a publish of a pushed branch.
-      const tip = read.range.split(/\.{2,3}/)[1] ?? 'HEAD';
-      const log = await (deps?.git ?? realGit)(folder, ['log', '-1', '--format=%cI', tip, '--']);
-      const newest = log.code === 0 ? Date.parse(log.stdout.trim()) : NaN;
-      if (Number.isNaN(newest)) return { why: `could not tell when ${tip.replace('refs/heads/', '')} last changed` };
-      // git gives whole seconds: a commit in the same second as his word counts as before it.
-      if (newest > Math.floor(Date.parse(saidAt) / 1000) * 1000) return { why: CHANGED_AFTER };
-      return { patchId: read.patchId };
-    } catch (err) {
-      return { why: (err as Error).message.replace(/\.+$/, '') };
-    }
-  };
-  const change = actions.some((a) => a !== 'publish') ? await keyOf('merge') : undefined;
-  const tree = actions.includes('publish') ? await keyOf('publish') : undefined;
+  /** One read of the landing check for a merge: the key a yes is recorded on, or why there is none. */
+  const change = actions.some((a) => a !== 'publish')
+    ? await (async (): Promise<{ patchId: string } | { why: string }> => {
+        try {
+          const read = await checkLanding(ctx, { ref, stepId, action: 'merge', folder, ...(branch === undefined ? {} : { branch }) }, deps, { record: false });
+          if (read.patchId === null) return { why: 'there is no change to read' };
+          // The range is main...branch: its end is the branch read.
+          const after = await changedAfter(folder, read.range.split(/\.{2,3}/)[1] ?? 'HEAD', saidAt, deps);
+          if (after !== false) return { why: after === true ? CHANGED_AFTER : after.why };
+          return { patchId: read.patchId };
+        } catch (err) {
+          return { why: (err as Error).message.replace(/\.+$/, '') };
+        }
+      })()
+    : undefined;
   return actions.map((action) => {
-    const key = (action === 'publish' ? tree : change)!;
+    if (action === 'publish') return { action, patchId: null, why: PUBLISH_NO_YES };
+    const key = change!;
     return 'patchId' in key ? { action, patchId: key.patchId } : { action, patchId: null, why: key.why };
   });
+}
+
+/** The folder a session ran in, as recorded; null when it has none. */
+const sessionCwd = (ctx: Ctx, sessionId: string | null): string | null =>
+  sessionId === null ? null : ((ctx.db.prepare('SELECT cwd FROM sessions WHERE id = ?').pluck().get(sessionId) as string | null | undefined) ?? null);
+
+/** The commands of a held line on the list, each with the folder it runs in, read from the line's own session's folder. */
+const heldMatches = (ctx: Ctx, project: Project, line: Pick<HeldLine, 'sessionId' | 'command'>): HeldMatch[] =>
+  heldActions(line.command, playbookHeldLines(project.playbook), sessionCwd(ctx, line.sessionId));
+
+/**
+ * Whether a yes can release one command of a held line, read from its words alone: a merge, deploy, push or publish the
+ * landing check reads (a playbook line, a pull request's merge, a delete or a repository change never is), in a folder that
+ * can be read, a push to origin and a merge of one branch, and a publish of its folder's own package (publishesFolderPackage).
+ */
+function yesCanRelease(m: HeldMatch): boolean {
+  if (!(YES_ACTIONS as readonly string[]).includes(m.action) || m.folder === null) return false;
+  if (m.action === 'publish') return publishesFolderPackage(m.segment);
+  if (m.action === 'push') {
+    const target = pushTarget(m.segment);
+    return target.ok && target.remote === 'origin';
+  }
+  if (m.action === 'merge') {
+    const targets = mergeTargets(m.segment);
+    return targets.length === 1 && !isUpstreamOfMain(targets[0]!);
+  }
+  return true;
+}
+
+/**
+ * Whether Go ahead is offered on a held item: it is on a step, its held line is found, and a yes can release every command
+ * of it on the list (yesCanRelease); a push held as public is never released by a yes. Read without git: a yes that cannot
+ * be read when he clicks (the work changed after the hold, a folder with changes not committed) is the route's 409.
+ */
+export function heldGoAhead(ctx: Ctx, project: Project, item: Pick<DeskItem, 'nodeId'>, line: HeldLine | undefined): boolean {
+  if (item.nodeId === null || line === undefined) return false;
+  if (line.why.includes(goesOutWhy('push-public'))) return false;
+  const matches = heldMatches(ctx, project, line);
+  return matches.length > 0 && matches.every(yesCanRelease);
+}
+
+/**
+ * The yes for each command of a held line his go-ahead covers (`actions`, every one when absent), keyed as the landing check
+ * keys that command (heldLandingAsk, then landingKey): in the folder the command runs in, never the session's own, a merge on
+ * main...branch, a push on what it would push, a deploy on live..main, a publish on what goes out. No yes when the command's
+ * target cannot be read, a publish that does not send its folder's package as committed (PUBLISH_NO_YES), or when the work
+ * changed after `asOf` (the time he could first see it). A push with nothing to send needs none. Nothing logged.
+ */
+export async function readHeldYeses(
+  ctx: Ctx,
+  project: Project,
+  line: HeldLine | undefined,
+  actions: readonly YesAction[] | undefined,
+  asOf: string,
+  deps?: LandingDeps,
+): Promise<CarriedYes[]> {
+  const wanted = (a: string): a is YesAction => (YES_ACTIONS as readonly string[]).includes(a) && (actions === undefined || actions.includes(a as YesAction));
+  if (line === undefined) return (actions ?? []).map((action) => ({ action, patchId: null, why: 'its held line is not found' }));
+  const out: CarriedYes[] = [];
+  for (const m of heldMatches(ctx, project, line)) {
+    const action = m.action;
+    if (!wanted(action)) continue;
+    if (action === 'publish' && !publishesFolderPackage(m.segment)) {
+      out.push({ action, patchId: null, why: PUBLISH_NO_YES });
+      continue;
+    }
+    try {
+      const asked = await heldLandingAsk(m, deps);
+      if (!('check' in asked)) {
+        out.push(asked.clear ? { action, patchId: null, why: 'the landing check clears it as it is', needless: true } : { action, patchId: null, why: asked.why });
+        continue;
+      }
+      const key = await landingKey(asked.folder, asked.action, asked.branch, deps);
+      if (key.nothingToPush) {
+        out.push({ action, patchId: null, why: 'nothing to push', needless: true });
+        continue;
+      }
+      if (key.patchId === null) {
+        out.push({ action, patchId: null, why: action === 'publish' ? PUBLISH_NO_YES : 'there is no change to read' });
+        continue;
+      }
+      // A publish sends HEAD; any other range ends at the branch it reads.
+      const tip = action === 'publish' ? 'HEAD' : (key.range.split(/\.{2,3}/)[1] ?? 'HEAD');
+      const after = await changedAfter(asked.folder, tip, asOf, deps);
+      if (after !== false) out.push({ action, patchId: null, why: after === true ? CHANGED_AFTER : after.why });
+      else if (!out.some((y) => y.action === action && y.patchId === key.patchId)) out.push({ action, patchId: key.patchId });
+    } catch (err) {
+      out.push({ action, patchId: null, why: (err as Error).message.replace(/\.+$/, '') });
+    }
+  }
+  return out;
 }
 
 /** What a line to the Voice is about, for his reply: an ask (a bring line), a held action, or what he left to the lead. */
@@ -86,19 +184,13 @@ export function voiceTarget(ctx: Ctx, project: Project, sendId: number): VoiceTa
   return { kind: 'ask', askId: ask.id, send };
 }
 
-/**
- * The session and command a held item is about: the `held` line whose session and command make the item's ref (heldRef),
- * as morning.ts finds it. The line is `<command> -> <why>`, and either part may hold an arrow, so each cut is tried.
- */
-export function heldScope(ctx: Ctx, item: DeskItem): { sessionId: string | null; command: string } {
-  const rows = ctx.db.prepare("SELECT session_id, text FROM lead_events WHERE project_id = ? AND kind = 'held' ORDER BY id").all(item.projectId) as { session_id: string | null; text: string }[];
-  for (const r of rows) {
-    for (let at = r.text.indexOf(' -> '); at >= 0; at = r.text.indexOf(' -> ', at + 1)) {
-      const command = r.text.slice(0, at);
-      if (heldRef(r.session_id, command) === item.ref) return { sessionId: r.session_id, command };
-    }
-  }
-  return { sessionId: null, command: '' };
+/** The held line a held item was made from (heldLines), or undefined when it is not found. */
+export const heldLineOf = (ctx: Ctx, item: Pick<DeskItem, 'projectId' | 'ref'>): HeldLine | undefined => heldLines(ctx.db, item.projectId).get(item.ref);
+
+/** The session and command a held item is about: its held line's (heldLineOf), or no session and no command when none is found. */
+export function heldScope(ctx: Ctx, item: Pick<DeskItem, 'projectId' | 'ref'>): { sessionId: string | null; command: string } {
+  const line = heldLineOf(ctx, item);
+  return line === undefined ? { sessionId: null, command: '' } : { sessionId: line.sessionId, command: line.command };
 }
 
 /**
@@ -106,29 +198,49 @@ export function heldScope(ctx: Ctx, item: DeskItem): { sessionId: string | null;
  * it, in its session's folder: a yes for a held command covers only what that command does.
  */
 export function heldYesActions(ctx: Ctx, project: Project, held: { sessionId: string | null; command: string }): YesAction[] {
-  const cwd = held.sessionId === null ? null : ((ctx.db.prepare('SELECT cwd FROM sessions WHERE id = ?').pluck().get(held.sessionId) as string | null | undefined) ?? null);
-  const own = new Set(heldActions(held.command, playbookHeldLines(project.playbook), cwd).map((m) => m.action as string));
+  const own = new Set(heldMatches(ctx, project, held).map((m) => m.action as string));
   return YES_ACTIONS.filter((a) => own.has(a));
 }
 
 /** How many held cards the window is sent for one project at most. */
 const HELD_CARDS_MAX = 100;
+/** How much of a held command a card carries. */
+const HELD_COMMAND_MAX = 2_000;
 
 /**
  * The project's held items waiting on Aiden, oldest first, for the window's Needs me (lead stage 1, task D): what each
- * command does (heldWhatOf, or the command for an item held before that was stored) and the command itself.
+ * command does (heldWhatOf, or the command for an item held before that was stored), the command itself (clipped), and
+ * whether Go ahead is offered (heldGoAhead). `total` counts every one waiting, past the cap. A project under C:\work shows
+ * none, and neither does a step that is parked or under a parked one (as its asks are hidden).
  */
-export function heldCards(ctx: Ctx, projectId: number): HeldCard[] {
+export function heldCards(ctx: Ctx, projectId: number): { cards: HeldCard[]; total: number } {
+  if (workProject(ctx, projectId)) return { cards: [], total: 0 };
+  const project = ctx.db.prepare('SELECT playbook FROM projects WHERE id = ?').get(projectId) as Pick<Project, 'playbook'> | undefined;
+  if (project === undefined) return { cards: [], total: 0 };
   const rows = ctx.db
-    .prepare("SELECT id FROM desk_items WHERE project_id = ? AND kind = 'held' AND state = 'waiting_aiden' ORDER BY created_at, id LIMIT ?")
-    .pluck()
-    .all(projectId, HELD_CARDS_MAX) as number[];
-  return rows.flatMap((id) => {
-    const item = getDeskItem(ctx.db, id);
+    .prepare("SELECT id, node_id FROM desk_items WHERE project_id = ? AND kind = 'held' AND state = 'waiting_aiden' ORDER BY created_at, id")
+    .all(projectId) as { id: number; node_id: number | null }[];
+  const shelved = shelvedAmong(ctx, [...new Set(rows.flatMap((r) => (r.node_id === null ? [] : [r.node_id])))]);
+  const shown = rows.filter((r) => r.node_id === null || !shelved.has(r.node_id));
+  if (shown.length === 0) return { cards: [], total: 0 };
+  const lines = heldLines(ctx.db, projectId);
+  const cards = shown.slice(0, HELD_CARDS_MAX).flatMap((r) => {
+    const item = getDeskItem(ctx.db, r.id);
     if (item === undefined) return [];
-    const { command } = heldScope(ctx, item);
-    return [{ id: item.id, stepId: item.nodeId, createdAt: item.createdAt, what: heldWhatOf(item.outcome) ?? command, command }];
+    const line = lines.get(item.ref);
+    const command = line?.command ?? '';
+    return [
+      {
+        id: item.id,
+        stepId: item.nodeId,
+        createdAt: item.createdAt,
+        what: heldWhatOf(item.outcome) ?? clipLine(command, HELD_COMMAND_MAX),
+        command: command.length > HELD_COMMAND_MAX ? `${command.slice(0, HELD_COMMAND_MAX - 1)}…` : command,
+        goAhead: heldGoAhead(ctx, project as Project, item, line),
+      },
+    ];
   });
+  return { cards, total: shown.length };
 }
 
 export interface ItemAnswerInput {
@@ -136,12 +248,14 @@ export interface ItemAnswerInput {
   where?: AnswerWhere;
   saidAt?: string;
   shown?: number[];
-  /** For a held action, the yes for each action he okayed, read before the write (readSessionYeses). */
+  /** For a held action, the yes for each action he okayed, read before the write (readHeldYeses). */
   yeses?: CarriedYes[];
   /** Lines the route adds to the answer: what of --yes or --says was not used, and why. */
   notes?: string[];
   /** The window's answer to a held card: the item must be a held one still waiting on Aiden, else a 409 and nothing changes. */
   heldWaiting?: boolean;
+  /** Who the write is recorded as, when not the lead (the window's answer is the window's). */
+  actor?: string;
 }
 
 /**
@@ -154,7 +268,7 @@ export function leadAnswerItem(ctx: Ctx, ref: string, as: string, instructions: 
   if (workProject(ctx, project.id)) throw conflict(WORK_PROJECT);
   const where = input.where ?? 'voice';
   const saidAt = input.saidAt ?? ctx.now();
-  return write(ctx, actor, (record) => {
+  return write(ctx, input.actor ?? actor, (record) => {
     const item = getDeskItem(ctx.db, itemId);
     if (item === undefined || item.projectId !== project.id) throw notFound(`Desk item #${itemId} not found.`);
     if (item.state === 'done') throw conflict(`Desk item #${item.id} is already closed.`);
@@ -166,8 +280,10 @@ export function leadAnswerItem(ctx: Ctx, ref: string, as: string, instructions: 
       const yeses = input.yeses ?? [];
       const got = item.nodeId === null ? [] : yeses.filter((y) => y.patchId !== null);
       for (const y of got) yesIds.push(recordYes(ctx, project.id, { action: y.action, patchId: y.patchId as string, stepId: item.nodeId as number, aidenWords: input.aidenWords, said: saidAt }));
-      if (got.length) lines.push(`His yes covers ${got.map((y) => y.action).join(', ')} of the change as it is now.`);
-      for (const y of yeses.filter((y) => y.patchId === null)) lines.push(`No yes recorded for ${y.action}: ${y.why ?? 'the change could not be read'}.`);
+      if (got.length) lines.push(`His yes covers ${[...new Set(got.map((y) => y.action))].join(', ')} of the change as it is now.`);
+      for (const y of yeses.filter((y) => y.patchId === null)) {
+        lines.push(y.needless ? `No yes needed for ${y.action}: ${y.why ?? 'the landing check clears it'}.` : `No yes recorded for ${y.action}: ${y.why ?? 'the change could not be read'}.`);
+      }
     }
     lines.push(...(input.notes ?? []));
     const shown = (input.shown ?? []).map((id) => `r${id}`).join(',');
@@ -194,9 +310,7 @@ export function leadAnswerItem(ctx: Ctx, ref: string, as: string, instructions: 
     });
     moveDeskItem(ctx.db, item.id, ['open', 'leased', 'behind', 'waiting_aiden'], 'done', { outcome: `ANSWERED d${eventId}`, now: ctx.now() });
     // A held item's line to the Voice not yet tried is never spoken once he has answered it (the window answers before it goes).
-    if (held !== undefined) {
-      ctx.db.prepare("UPDATE lead_sends SET state = 'cleared' WHERE item_id = ? AND kind = 'voice_line' AND state = 'intended' AND result IS NULL").run(item.id);
-    }
+    if (held !== undefined) clearUntriedVoiceLines(ctx.db, [item.id]);
     // His words reach only a reachable thread (reachableThread): the held command's session, or the step's session now. An
     // item about an old ask (isOldAsk) is never carried: the step's log records his words.
     const asked = item.kind === 'held' || item.kind === 'aiden_said' ? undefined : askOf(ctx, item);

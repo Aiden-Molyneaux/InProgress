@@ -74,6 +74,12 @@ function held(t: ReturnType<typeof setup>, command: string, what: string | null 
   });
 }
 
+/** A package.json for `name` at `version` in `dir`, committed, its commit stamped a second back so a hold made now comes after it. */
+function pkg(dir: string, name: string, version: string, sub = ''): void {
+  write(dir, `${sub}${sub === '' ? '' : '/'}package.json`, JSON.stringify({ name, version }));
+  commit(dir, `package ${name}`);
+}
+
 const sendState = (t: ReturnType<typeof setup>, id: number) => t.ctx.db.prepare('SELECT state FROM lead_sends WHERE id = ?').pluck().get(id) as string;
 
 describe('D1: the snapshot carries the held items waiting on Aiden', () => {
@@ -84,12 +90,13 @@ describe('D1: the snapshot carries the held items waiting on Aiden', () => {
     const c = held(t, 'npm run deploy', 'a deploy of main to the live build');
     t.ctx.db.prepare("UPDATE desk_items SET state = 'done' WHERE id = ?").run(c.item.id);
     expect(getProjectSnapshot(t.ctx, t.project.id).held).toEqual([
-      { id: a.item.id, stepId: t.step.id, createdAt: a.item.createdAt, what: 'a push of feature to origin', command: 'git push' },
-      { id: b.item.id, stepId: t.step.id, createdAt: b.item.createdAt, what: 'git push origin feature', command: 'git push origin feature' },
+      { id: a.item.id, stepId: t.step.id, createdAt: a.item.createdAt, what: 'a push of feature to origin', command: 'git push', goAhead: true },
+      { id: b.item.id, stepId: t.step.id, createdAt: b.item.createdAt, what: 'git push origin feature', command: 'git push origin feature', goAhead: true },
     ]);
+    expect(getProjectSnapshot(t.ctx, t.project.id).heldTotal).toBe(2);
     // A held item not yet waiting on Aiden (still open) is not a card.
     dbWrite(t.ctx, 'test', () => produceDeskItem(t.ctx.db, { projectId: t.project.id, kind: 'held', ref: heldRef('s2', 'git push'), nodeId: null }, t.ctx.now()));
-    expect(heldCards(t.ctx, t.project.id).map((h) => h.id)).toEqual([a.item.id, b.item.id]);
+    expect(heldCards(t.ctx, t.project.id).cards.map((h) => h.id)).toEqual([a.item.id, b.item.id]);
   });
 });
 
@@ -108,7 +115,7 @@ describe('D3: POST /api/ui/held/:id', () => {
     expect(await t.check('push')).toMatchObject({ clear: true, why: 'his yes' });
     // A merge was not held: his yes does not cover it.
     expect((await t.check('merge')).clear).toBe(false);
-    expect(heldCards(t.ctx, t.project.id)).toEqual([]);
+    expect(heldCards(t.ctx, t.project.id)).toEqual({ cards: [], total: 0 });
   });
 
   it('a second click is a 409 and changes nothing, before any git', async () => {
@@ -184,15 +191,16 @@ describe('D3: POST /api/ui/held/:id', () => {
 });
 
 describe('D3: a yes for a publish', () => {
-  it('Go ahead on a held npm publish clears the landing check for publish on that tree, and a later commit holds it again', async () => {
+  it('Go ahead on a held npm publish clears the landing check for publish on what goes out, and a later commit holds it again', async () => {
     const t = setup();
+    pkg(repo.wt, 'x', '1.2.0');
     const h = held(t, 'npm publish', 'a publish of x 1.2.0 to npm');
     expect((await t.check('publish')).clear).toBe(false);
     const res = await t.click(h.item.id, 'go');
     expect(res.statusCode).toBe(200);
     expect(res.json().text).toContain('His yes covers publish of the change as it is now.');
-    const tree = (await realGit(repo.wt, ['rev-parse', 'refs/heads/feature^{tree}'])).stdout.trim();
-    expect(t.ctx.db.prepare("SELECT text FROM lead_events WHERE kind = 'yes'").pluck().all()).toEqual([`publish ${tree}`]);
+    const tree = (await realGit(repo.wt, ['rev-parse', 'HEAD^{tree}'])).stdout.trim();
+    expect(t.ctx.db.prepare("SELECT text FROM lead_events WHERE kind = 'yes'").pluck().all()).toEqual([`publish ${tree}::x@1.2.0`]);
     expect(await t.check('publish')).toMatchObject({ clear: true, why: 'his yes' });
     // His yes covers a publish only: a push of the same change is still held.
     expect((await t.check('push')).clear).toBe(false);
@@ -203,6 +211,7 @@ describe('D3: a yes for a publish', () => {
 
   it('a reply to the held line by --send with --yes publish records the same yes', async () => {
     const t = setup();
+    pkg(repo.wt, 'x', '1.2.0');
     const h = held(t, 'npm publish', 'a publish of x 1.2.0 to npm');
     const res = await t.answer({ sendId: h.send, aidenWords: 'go ahead', saidAt: new Date(Date.now() + 1000).toISOString(), yes: ['publish'] });
     expect(res.statusCode).toBe(200);

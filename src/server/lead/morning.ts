@@ -7,7 +7,7 @@ import { insertLeadEvent } from '../repo/leadEvents';
 import { intendSend } from '../repo/leadSends';
 import { getProjectById } from '../repo/projects';
 import { liveProjectsWithRound, roundFirstOn } from '../repo/switches';
-import { heldRef, heldWhatOf } from './hold';
+import { heldLines, heldWhatOf } from './hold';
 import { startProviderModel } from '../lead-start';
 import { leadFolderOf } from './folder';
 import { parseStartBody, THREAD_GONE } from './sends';
@@ -155,19 +155,9 @@ export function morningList(ctx: Ctx, projectId: number, since: string, now: str
   const heldRows = db
     .prepare("SELECT node_id, ref, outcome FROM desk_items WHERE project_id = ? AND kind = 'held' AND state <> 'done' ORDER BY created_at, id")
     .all(projectId) as { node_id: number | null; ref: string; outcome: string | null }[];
-  const heldEvents = db
-    .prepare("SELECT session_id, text FROM lead_events WHERE project_id = ? AND kind = 'held'")
-    .all(projectId) as { session_id: string | null; text: string }[];
-  /** The command a held item's ref was made from: the line is `<command> -> <why>`, and either part may hold an arrow. */
-  const commandOf = (ref: string): string | undefined => {
-    for (const e of heldEvents) {
-      for (let at = e.text.indexOf(' -> '); at >= 0; at = e.text.indexOf(' -> ', at + 1)) {
-        const command = e.text.slice(0, at);
-        if (heldRef(e.session_id, command) === ref) return command;
-      }
-    }
-    return undefined;
-  };
+  // The command a held item's ref was made from: the project's held lines, read once (heldLines).
+  const heldByRef = heldLines(db, projectId);
+  const commandOf = (ref: string): string | undefined => heldByRef.get(ref)?.command;
   // What the command does, as the hold stored it (heldOutcome); an item held before it was stored names its command.
   const held = heldRows.map((r) => {
     const who = r.node_id === null ? 'A session' : `#${r.node_id}`;

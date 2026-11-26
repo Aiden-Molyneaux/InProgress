@@ -49,7 +49,7 @@ export interface LandingAnswer extends LandingVerdict {
   range: string;
   /** How many files the change touches. */
   files: number;
-  /** What a yes is keyed on: the change's patch id, or for a publish the head's tree. */
+  /** What a yes is keyed on: the change's patch id, or for a publish what goes out (publishKey). */
   patchId: string | null;
 }
 
@@ -156,8 +156,8 @@ function yesesOf(ctx: Ctx, projectId: number): { action: string; patchId: string
 }
 
 /**
- * Aiden's yes to an action on a change: stored as a log line with the action and the change's patch id (for a publish, the
- * head's tree) and the step, so a later check of the same action on the same change clears. `said` is when he said it (now
+ * Aiden's yes to an action on a change: stored as a log line with the action and the change's patch id (for a publish, what
+ * goes out: publishKey) and the step, so a later check of the same action on the same change clears. `said` is when he said it (now
  * when absent). Task 11 writes these from his "ship it"; the tests write them here.
  */
 export function recordYes(ctx: Ctx, projectId: number, y: { action: LandingAction; patchId: string; stepId: number; aidenWords: string; said?: string }): number {
@@ -168,26 +168,58 @@ export function recordYes(ctx: Ctx, projectId: number, y: { action: LandingActio
   return Number(info.lastInsertRowid);
 }
 
-/**
- * Whether the change may land without Aiden, read from git itself in the session's folder and judged in plain code with no
- * model. A held answer is written as a `landing_check` line in the project's log, so the morning list can show what was held;
- * with `opts.record` false nothing is written (the carried "ship it" reads the change's patch id this way).
- */
-export async function checkLanding(ctx: Ctx, ask: LandingAsk, deps: LandingDeps = REAL_DEPS, opts: { record?: boolean } = {}): Promise<LandingAnswer> {
-  const project = resolveProject(ctx, ask.ref);
-  const node = findNode(ctx, ask.stepId);
-  if (!node) throw notFound(`#${ask.stepId} not found.`, `Run "outline ${project.slug}" to see this project's steps.`);
-  if (node.projectId !== project.id) throw conflict(`#${ask.stepId} is not in this project.`);
-  if (!isAbsolute(ask.folder)) throw badRequest(`${ask.folder} is not a full path to a folder.`);
-  if (ask.branch !== undefined && !BRANCH.test(ask.branch)) throw badRequest(`${ask.branch} is not a branch name.`);
+/** Why a publish takes no yes: it does not send its folder's package as committed (the route and the card say it). */
+export const PUBLISH_NO_YES = 'this publish names another package, or the folder has changes not committed: run it yourself';
 
-  const folder = ask.folder;
+/**
+ * What a yes for a publish in `folder` is keyed on, what goes out: the tree of HEAD, the folder's path inside the repository
+ * (`git rev-parse --show-prefix`) and the name and version in its package.json, as `<tree>:<prefix>:<name>@<version>`. No
+ * key (`why`) when the folder has changes not committed or files not tracked (not ignored), or its package.json names no
+ * package: what would go out is not what is committed. A git that fails is a 409.
+ */
+export async function publishKey(deps: LandingDeps, folder: string): Promise<{ key: string } | { why: string }> {
+  const status = await deps.git(folder, ['status', '--porcelain', '--', '.']);
+  if (status.code !== 0) throw conflict(couldNotTell(`whether ${folder} has changes not committed`, status));
+  if (status.stdout.trim() !== '') return { why: PUBLISH_NO_YES };
+  const tree = await deps.git(folder, ['rev-parse', '--verify', 'HEAD^{tree}']);
+  if (tree.code !== 0) throw conflict(couldNotTell('the tree of HEAD', tree));
+  const prefix = await deps.git(folder, ['rev-parse', '--show-prefix']);
+  if (prefix.code !== 0) throw conflict(couldNotTell(`where ${folder} is in its repository`, prefix));
+  let pkg: { name?: unknown; version?: unknown };
+  try {
+    pkg = (JSON.parse(readFileSync(join(folder, 'package.json'), 'utf8')) ?? {}) as { name?: unknown; version?: unknown };
+  } catch {
+    // No package.json, or one that is not JSON: there is no package of this folder for a yes to cover.
+    return { why: PUBLISH_NO_YES };
+  }
+  if (typeof pkg.name !== 'string' || typeof pkg.version !== 'string' || pkg.name.trim() === '' || pkg.version.trim() === '') return { why: PUBLISH_NO_YES };
+  return { key: `${tree.stdout.trim()}:${prefix.stdout.trim()}:${pkg.name}@${pkg.version}` };
+}
+
+/** What a landing check reads of the change for one action: the range, the files, and the key a yes is recorded on. */
+interface ChangeRead {
+  range: string;
+  files: string[];
+  /** What a yes is keyed on (LandingAnswer.patchId); null when there is none. */
+  patchId: string | null;
+  /** A push with no commits to send: clear, and it needs no yes. */
+  nothingToPush: boolean;
+  holdBecause: string | null;
+}
+
+/**
+ * The landing check's key for one action, read from git in `folder` (the check's own read, without judging it): a merge on
+ * main...branch, a push on what it would push (origin/branch..branch once pushed, else main...branch), a deploy on
+ * live..main, each as the patch id of that range's diff; a publish on what goes out (publishKey). The carried yes for a held
+ * command reads it here too (landingKey), so his yes is keyed as the check keys it.
+ */
+async function readChange(deps: LandingDeps, folder: string, action: LandingAction, askBranch: string | undefined): Promise<ChangeRead> {
   const git = (args: string[], input?: string) => deps.git(folder, args, input);
   const inside = await git(['rev-parse', '--is-inside-work-tree']);
   if (inside.code !== 0 || inside.stdout.trim() !== 'true') throw badRequest(`${folder} is not a git checkout.`);
 
-  let branch = ask.branch;
-  if (branch === undefined && ask.action !== 'deploy') {
+  let branch = askBranch;
+  if (branch === undefined && action !== 'deploy') {
     const head = await git(['symbolic-ref', '-q', '--short', 'HEAD']);
     // Exit 1 with no output is a detached HEAD; anything else that fails is a real failure.
     if (head.code === 1 && head.stderr.trim() === '') throw conflict('This checkout is on no branch: say which with --branch.');
@@ -195,13 +227,13 @@ export async function checkLanding(ctx: Ctx, ask: LandingAsk, deps: LandingDeps 
     branch = head.stdout.trim();
     if (!BRANCH.test(branch)) throw conflict('This checkout is on no branch: say which with --branch.');
   }
-  if (ask.action === 'merge' && branch === 'main') throw conflict('Name the branch being merged: --branch <name>');
+  if (action === 'merge' && branch === 'main') throw conflict('Name the branch being merged: --branch <name>');
   if (branch !== undefined && !(await hasBranch(deps, folder, branch))) throw conflict(`There is no branch ${branch} in ${folder}.`);
 
   let range: string;
   let holdBecause: string | null = null;
-  if (ask.action === 'merge') range = `refs/heads/main...refs/heads/${branch}`;
-  else if (ask.action === 'deploy') {
+  if (action === 'merge') range = `refs/heads/main...refs/heads/${branch}`;
+  else if (action === 'deploy') {
     const live = await liveBuild(deps, folder);
     range = `${live.sha}..refs/heads/main`;
     const behind = await git(['merge-base', '--is-ancestor', live.sha, 'refs/heads/main']);
@@ -223,26 +255,61 @@ export async function checkLanding(ctx: Ctx, ask: LandingAsk, deps: LandingDeps 
   const diff = await git([...DIFF, '--binary', range, '--']);
   if (diff.code !== 0) throw conflict(couldNotTell(`what ${range} changes`, diff));
   const empty = files.length === 0 && diff.stdout === '';
-  if (empty && ask.action === 'merge') throw conflict(`Nothing to compare: ${branch} has no change against main.`);
-  if (ask.action === 'push') {
+  if (empty && action === 'merge') throw conflict(`Nothing to compare: ${branch} has no change against main.`);
+  if (action === 'push') {
     // Nothing to push means no commits, not no change: a commit and its revert change nothing and still go out.
     const commits = await git(['rev-list', '--count', range.replace('...', '..'), '--']);
     if (commits.code !== 0) throw conflict(couldNotTell(`what ${range} adds`, commits));
-    if (Number(commits.stdout.trim()) === 0) return { clear: true, text: 'Clear to land', why: 'nothing to push', action: ask.action, range, files: 0, patchId: null };
+    if (Number(commits.stdout.trim()) === 0) return { range, files: [], patchId: null, nothingToPush: true, holdBecause };
   }
 
   let patchId: string | null = null;
-  if (ask.action === 'publish') {
-    // A publish is keyed on what is published, the head's tree, so a yes on a head that is already pushed (an empty range) still counts.
-    const tree = await git(['rev-parse', '--verify', `refs/heads/${branch}^{tree}`]);
-    if (tree.code !== 0) throw conflict(couldNotTell(`the tree of ${branch}`, tree));
-    patchId = tree.stdout.trim();
+  if (action === 'publish') {
+    // A publish is keyed on what goes out, so a yes on a head that is already pushed (an empty range) still counts.
+    const key = await publishKey(deps, folder);
+    patchId = 'key' in key ? key.key : null;
   } else if (diff.stdout !== '') {
     // --verbatim: whitespace counts, so a yes does not survive an indentation-only change.
     const pid = await git(['patch-id', '--verbatim'], diff.stdout);
     if (pid.code !== 0) throw conflict(couldNotTell('the patch id of the change', pid));
     patchId = pid.stdout.trim().split(/\s+/)[0] || null;
   }
+  return { range, files, patchId, nothingToPush: false, holdBecause };
+}
+
+/**
+ * The key a landing check of `action` in `folder` reads now (readChange), with the range it read, or that a push has nothing
+ * to send. Nothing logged, nothing judged: a held command's yes is read through it.
+ */
+export async function landingKey(
+  folder: string,
+  action: 'merge' | 'deploy' | 'push' | 'publish',
+  branch: string | undefined,
+  deps: LandingDeps = REAL_DEPS,
+): Promise<{ range: string; patchId: string | null; nothingToPush: boolean }> {
+  if (!isAbsolute(folder)) throw badRequest(`${folder} is not a full path to a folder.`);
+  if (branch !== undefined && !BRANCH.test(branch)) throw badRequest(`${branch} is not a branch name.`);
+  const read = await readChange(deps, folder, action, branch);
+  return { range: read.range, patchId: read.patchId, nothingToPush: read.nothingToPush };
+}
+
+/**
+ * Whether the change may land without Aiden, read from git itself in the session's folder and judged in plain code with no
+ * model. A held answer is written as a `landing_check` line in the project's log, so the morning list can show what was held;
+ * with `opts.record` false nothing is written (the carried "ship it" reads the change's patch id this way).
+ */
+export async function checkLanding(ctx: Ctx, ask: LandingAsk, deps: LandingDeps = REAL_DEPS, opts: { record?: boolean } = {}): Promise<LandingAnswer> {
+  const project = resolveProject(ctx, ask.ref);
+  const node = findNode(ctx, ask.stepId);
+  if (!node) throw notFound(`#${ask.stepId} not found.`, `Run "outline ${project.slug}" to see this project's steps.`);
+  if (node.projectId !== project.id) throw conflict(`#${ask.stepId} is not in this project.`);
+  if (!isAbsolute(ask.folder)) throw badRequest(`${ask.folder} is not a full path to a folder.`);
+  if (ask.branch !== undefined && !BRANCH.test(ask.branch)) throw badRequest(`${ask.branch} is not a branch name.`);
+
+  const folder = ask.folder;
+  const git = (args: string[], input?: string) => deps.git(folder, args, input);
+  const { range, files, patchId, nothingToPush, holdBecause } = await readChange(deps, folder, ask.action, ask.branch);
+  if (nothingToPush) return { clear: true, text: 'Clear to land', why: 'nothing to push', action: ask.action, range, files: 0, patchId: null };
 
   // Only a push is judged by where it goes: a publish is Aiden's whatever the remote. Where it goes is the push URL.
   let remotePublic: boolean | null = null;

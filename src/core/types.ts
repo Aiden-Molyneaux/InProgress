@@ -629,8 +629,10 @@ export interface HeldCard {
   createdAt: string;
   /** What the command does, in plain words (`a push of feature to origin`), or the command for an item held before that was stored. */
   what: string;
-  /** The command as the session ran it; empty when its held line cannot be found. */
+  /** The command as the session ran it, clipped to 2,000 characters; empty when its held line cannot be found. */
   command: string;
+  /** Whether Go ahead is offered: a yes of his can release the command. Else the card has only Not yet, and says why. */
+  goAhead: boolean;
 }
 
 export interface ProjectSnapshot {
@@ -651,8 +653,10 @@ export interface ProjectSnapshot {
   stateNote: StateNote | null;
   /** The desk items that may be behind, by the lead's round (see LeadBehindItem); absent in older fixtures. */
   leadBehind?: LeadBehindItem[];
-  /** The commands held for Aiden, oldest first (see HeldCard); absent in older fixtures. */
+  /** The commands held for Aiden, oldest first and at most 100 (see HeldCard); absent in older fixtures. */
   held?: HeldCard[];
+  /** How many commands are held for Aiden, past the cap of `held`; absent in older fixtures. */
+  heldTotal?: number;
   lastEventId: number;
   lastEvent: EventRow | null;
 }

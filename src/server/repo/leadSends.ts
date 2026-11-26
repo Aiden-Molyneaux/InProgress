@@ -140,3 +140,14 @@ export const SEND_TRYING = 'trying';
 export function markTrying(db: DB, id: number, trying: boolean): boolean {
   return db.prepare("UPDATE lead_sends SET result = ? WHERE id = ? AND state = 'intended'").run(trying ? SEND_TRYING : null, id).changes > 0;
 }
+
+/**
+ * Moves the lines to the Voice about these desk items not yet tried to cleared: an item Aiden answered elsewhere (the
+ * window, a thread) is never spoken after. A line being tried (result set) is left to the sender, which may have sent it.
+ */
+export function clearUntriedVoiceLines(db: DB, itemIds: readonly number[]): void {
+  if (itemIds.length === 0) return;
+  db.prepare(
+    `UPDATE lead_sends SET state = 'cleared' WHERE kind = 'voice_line' AND state = 'intended' AND result IS NULL AND item_id IN (${itemIds.map(() => '?').join(', ')})`,
+  ).run(...itemIds);
+}

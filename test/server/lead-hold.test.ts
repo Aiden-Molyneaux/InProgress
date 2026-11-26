@@ -10,6 +10,7 @@ import { heldActions, playbookHeldLines } from '../../src/core/hold';
 import { leadAllow, leadDisallow } from '../../src/server/lead-commands';
 import { applyVerdict } from '../../src/server/lead/apply';
 import { heldOutcome, heldWhatOf, STUCK_POLL_MS, STUCK_WAIT_MS, stuckWait, watchHeldLines, writeHeldLines } from '../../src/server/lead/hold';
+import { PUBLISH_NO_YES } from '../../src/server/lead/landing';
 import { realGit, type LandingDeps } from '../../src/server/lead/landing';
 import { deskUserMessage } from '../../src/server/lead/prompt';
 import { getDeskItem } from '../../src/server/repo/desk';
@@ -147,6 +148,16 @@ describe('POST /api/lead/hold', () => {
     expect(await w.hold('npm publish --tag beta')).toEqual({ held: true, text: 'a publish of feature' });
     writeFile(repo.wt, 'package.json', '{ not json');
     expect(await w.hold('npm publish --dry-run')).toEqual({ held: true, text: 'a publish of feature' });
+  });
+
+  it('a publish of a tarball, a path or a workspace is held before the landing check, so no yes can clear it', async () => {
+    const w = world();
+    writeFile(repo.wt, 'package.json', JSON.stringify({ name: 'x', version: '1.2.0' }));
+    for (const command of ['npm publish ./x-1.2.0.tgz', 'npm publish --workspace a', 'pnpm publish -r']) {
+      expect((await w.hold(command)).held, command).toBe(true);
+    }
+    const why = (w.events('held') as { text: string }[]).map((e) => e.text.slice(e.text.lastIndexOf(' -> ') + 4));
+    expect(why).toEqual([PUBLISH_NO_YES, PUBLISH_NO_YES, PUBLISH_NO_YES]);
   });
 
   it('heldWhatOf reads the what back from the outcome, and nothing from an item held before it was stored', () => {

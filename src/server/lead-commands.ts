@@ -96,11 +96,13 @@ function requireQuiet(ctx: Ctx, node: TreeNode, session: string): void {
 export const YES_ACTIONS = ['merge', 'deploy', 'push', 'publish'] as const;
 export type YesAction = (typeof YES_ACTIONS)[number];
 
-/** One action of a review's go-ahead, read before the write: the change's patch id, or why it could not be read. */
+/** One action of a go-ahead, read before the write: the key his yes is recorded on, or why there is none. */
 export interface CarriedYes {
   action: YesAction;
   patchId: string | null;
   why?: string;
+  /** No yes is needed: the landing check clears this action as it stands (a push with nothing to send). */
+  needless?: boolean;
 }
 
 /** What `lead answer` carries: Aiden's words, where and when he said them, what he was shown, and for a review what his yes covers. */
@@ -161,11 +163,13 @@ export const carriedLine = (lead: string, where: AnswerWhere, saidAt: string, wo
 
 /**
  * For a review: the patch id of the change of the ask's step, read now in its session's folder on the branch it is on
- * (main...branch, as the landing check reads a merge, nothing logged). Every action the yes covers is keyed on that one
- * change: after the merge, a deploy reads main against the live build and a push the branch against origin, which is the
- * same change when nothing else came between, and is held when something did. A change that cannot be read carries the
- * reason for every action, and so does a change with a commit after his words (`saidAt`). A read, outside any write;
- * undefined for an ask that is not a review of this project.
+ * (main...branch, as the landing check reads a merge, nothing logged). A merge, deploy or push the yes covers is keyed on
+ * that one change: after the merge, a deploy reads main against the live build and a push the branch against origin, which
+ * is the same change when nothing else came between, and is held when something did. A publish is keyed on what goes out
+ * (the tree, the folder and the package's name and version: publishKey), which only a held publish names: a review takes
+ * no yes for it (the answer route refuses --yes publish on one). A change that cannot be read carries the reason for every
+ * action, and so does a change with a commit after his words (`saidAt`). A read, outside any write; undefined for an ask
+ * that is not a review of this project.
  */
 export async function readYeses(
   ctx: Ctx,

@@ -42,6 +42,7 @@ export function getProjectSnapshot(ctx: Ctx, ref: string | number): ProjectSnaps
   // trail reads below find them ended.
   expireStaleSessions(ctx);
   const { project, nodes, resources, sessions, pastSessions, asks } = readBoardInput(ctx, id)!;
+  const held = heldCards(ctx, project.id);
   return {
     project,
     nodes,
@@ -54,7 +55,8 @@ export function getProjectSnapshot(ctx: Ctx, ref: string | number): ProjectSnaps
     stepTouches: listStepTouches(ctx, project.id),
     stateNote: readStateNote(ctx, project.id),
     leadBehind: leadBehindWatch(ctx, project.id),
-    held: heldCards(ctx, project.id),
+    held: held.cards,
+    heldTotal: held.total,
     lastEventId: maxEventId(ctx),
     lastEvent: lastProjectEvent(ctx, project.id),
   };

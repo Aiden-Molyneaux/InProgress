@@ -1,4 +1,4 @@
-import type { TaskBox, TaskCell } from '../../../src/core/taskState';
+import { needTime, type TaskBox, type TaskCell } from '../../../src/core/taskState';
 import type { HeldCard } from '../../../src/core/types';
 
 /**
@@ -12,14 +12,6 @@ export type NeedsTile =
 
 /** The key of a task's tile: its step, or its session when the wait is on no step. The grid's cursor and the rise follow it. */
 export const boxKey = (box: TaskBox): string => (box.row ? `n${box.row.node.id}` : `s${box.session!.id}`);
-
-/** When a box began to wait on Aiden: its oldest open ask or permission wait (as taskBoxes orders Needs me). */
-function needTime(box: TaskBox): number {
-  if (!box.row) return Date.parse(box.session!.lastSeenAt);
-  const times = box.row.waiting.map((a) => Date.parse(a.raisedAt));
-  for (const s of box.row.sessions) if (s.state === 'permission') times.push(Date.parse(s.lastSeenAt));
-  return times.length ? Math.min(...times) : Infinity;
-}
 
 const oldest = (held: readonly HeldCard[]): number => Math.min(...held.map((h) => Date.parse(h.createdAt)));
 const byTime = (a: HeldCard, b: HeldCard): number => a.createdAt.localeCompare(b.createdAt) || a.id - b.id;

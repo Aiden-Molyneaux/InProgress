@@ -287,6 +287,7 @@ describe('push, push-public and publish', () => {
     const t = setup(true);
     t.landingOn();
     write(repo.wt, 'web/app.ts', lines(7, 'feature'));
+    write(repo.wt, 'package.json', JSON.stringify({ name: 'x', version: '1.0.0' }));
     commit(repo.wt, 'feature');
     const held = await t.check('publish');
     expect(held).toMatchObject({ clear: false, text: `${HELD} (a publish goes out in his name)` });
@@ -295,12 +296,15 @@ describe('push, push-public and publish', () => {
     expect((await t.check('publish')).clear).toBe(true);
   });
 
-  it('a publish of a head that is already pushed (an empty range) is keyed on its tree, and a yes on it clears', async () => {
+  it('a publish of a head that is already pushed (an empty range) is keyed on what goes out, and a yes on it clears', async () => {
     const t = setup(false);
     t.landingOn();
+    write(repo.wt, 'package.json', JSON.stringify({ name: 'x', version: '1.0.0' }));
+    commit(repo.wt, 'package');
+    git(repo.wt, 'update-ref', 'refs/remotes/origin/feature', 'HEAD');
     const held = await t.check('publish');
     expect(held).toMatchObject({ clear: false, files: 0 });
-    expect(held.patchId).toBe(git(repo.wt, 'rev-parse', 'refs/heads/feature^{tree}'));
+    expect(held.patchId).toBe(`${git(repo.wt, 'rev-parse', 'HEAD^{tree}')}::x@1.0.0`);
     recordYes(t.ctx, t.project.id, { action: 'publish', patchId: held.patchId!, stepId: t.step.id, aidenWords: 'publish it' });
     expect((await t.check('publish')).clear).toBe(true);
     write(repo.wt, 'web/app.ts', lines(7, 'later'));

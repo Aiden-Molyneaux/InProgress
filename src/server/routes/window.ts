@@ -9,8 +9,9 @@ import { openInDesktop, resumeCommand, usableCwd, type DesktopSession, type Open
 import { findSession, liveDriver } from '../repo/sessions';
 import { deleteProject, listDeletedProjects, restoreProject } from '../project-lifecycle';
 import { clearAsk } from '../repo/asks';
-import { lateAnswer, type CarriedYes } from '../lead-commands';
-import { heldScope, heldYesActions, leadAnswerItem, readSessionYeses } from '../lead/carry';
+import { lateAnswer, requireAnswerLead, workProject, WORK_PROJECT, type CarriedYes } from '../lead-commands';
+import { ONLY_YOU } from '../../core/landing';
+import { heldGoAhead, heldLineOf, leadAnswerItem, readHeldYeses } from '../lead/carry';
 import type { LandingDeps } from '../lead/landing';
 import type { Sender } from '../lead/sends';
 import { getDeskItem } from '../repo/desk';
@@ -258,7 +259,10 @@ export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: 
     return { ask: clearAsk(ctx, ACTOR, id, answer) };
   });
   // A held card's Go ahead or Not yet (lead stage 1, task D): answered as `lead answer --send` answers a held line, in the
-  // project lead's name, with his words said now in the window. Go ahead records a yes for exactly the actions of that held command; Not
+  // project lead's name but recorded as the window's, with his words said now in the window. Go ahead records a yes for
+  // exactly the commands of that held command, keyed as the landing check keys each and read against the hold's own time
+  // (the earliest he could see the card): it is refused (409, nothing changed) where no yes can release the command
+  // (heldGoAhead), and where any yes cannot be recorded (the work changed after the hold, a target that cannot be read). Not
   // yet records none. Only a held item still waiting on him is answered: anything else, a second click too, is a 409.
   app.post('/api/ui/held/:id', guarded, async (req) => {
     const { id } = idParam.parse(req.params);
@@ -271,24 +275,23 @@ export function registerWindowRoutes(app: FastifyInstance, ctx: Ctx, requireUi: 
     if (project === undefined) throw notFound(`Desk item #${id} has no project.`, 'Reload the window.');
     const leadName = project.lead?.trim() ?? '';
     if (leadName === '') throw conflict(`${project.name} has no lead to answer this held command.`, 'Answer it in the session.');
-    const saidAt = ctx.now();
+    // The lead and the C:\work refusal, as leadAnswerItem checks them, before any git.
+    requireAnswerLead(ctx, project.slug, leadName, LEAD_INSTRUCTIONS_VERSION);
+    if (workProject(ctx, project.id)) throw conflict(WORK_PROJECT);
     let yeses: CarriedYes[] | undefined;
-    const notes: string[] = [];
     if (answer === 'go') {
-      const held = heldScope(ctx, item);
-      const actions = heldYesActions(ctx, project, held);
-      if (item.nodeId === null) {
-        if (actions.length) notes.push('No yes recorded: the held command is on no step.');
-      } else if (actions.length) {
-        yeses = await readSessionYeses(ctx, project.slug, item.nodeId, held.sessionId, actions, saidAt, lead.landing);
-      }
+      const line = heldLineOf(ctx, item);
+      if (!heldGoAhead(ctx, project, item, line)) throw conflict(ONLY_YOU);
+      yeses = await readHeldYeses(ctx, project, line, undefined, item.createdAt, lead.landing);
+      const missing = yeses.filter((y) => y.patchId === null && !y.needless);
+      if (missing.length) throw conflict(`No yes recorded, nothing answered: ${missing.map((y) => `${y.action}: ${y.why ?? 'the change could not be read'}`).join('; ')}.`);
     }
     const res = leadAnswerItem(ctx, project.slug, leadName, LEAD_INSTRUCTIONS_VERSION, item.id, {
       aidenWords: HELD_WORDS[answer],
       where: 'window',
-      saidAt,
-      notes,
+      saidAt: ctx.now(),
       heldWaiting: true,
+      actor: ACTOR,
       ...(yeses === undefined ? {} : { yeses }),
     });
     // The carried line is a send: carried out after the write commits (wake never throws). Without the server's sender, its

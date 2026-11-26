@@ -1,9 +1,9 @@
 /** The rows a band or a panel lists, as a focus walk sees them. A pending box (a Backlog delete waiting for its answer) is about to leave too, and a confirming one keeps its title out of the Tab order (a walk's script focus would still reach it), so both are passed over. */
 const ROWS = 'li.ip-card:not(.pending):not(.confirming), article.ip-tile:not([data-pending]), .ip-backlog-row:not(.pending):not(.confirming), li.ip-dask:not(.cleared), li.ip-lead-behind-row';
 
-/** A tile whose every ask has gone out (data-sent) is about to leave too: a walk passes it over. */
+/** A tile whose every ask and held card has gone out (data-sent) is about to leave too: a walk passes it over. */
 const allSent = (li: Element) => {
-  const asks = li.querySelectorAll('[data-ask]');
+  const asks = li.querySelectorAll('[data-ask], [data-held]');
   return asks.length > 0 && [...asks].every((a) => a.hasAttribute('data-sent'));
 };
 

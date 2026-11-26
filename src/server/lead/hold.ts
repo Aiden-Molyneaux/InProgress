@@ -8,6 +8,7 @@ import { ID_MAX } from '../../core/notices';
 import { LEAD_INSTRUCTIONS_VERSION } from '../../core/lead';
 import { clipLine } from '../../core/step-ref';
 import { heldFile } from '../../hooks/hold';
+import type { DB } from '../db/connection';
 import { deskOnly, flushDesk, type Ctx } from '../db/tx';
 import { getDeskItem, moveDeskItem } from '../repo/desk';
 import { DESK_ASK_DUE_MS, plusMs, produceDeskItem } from '../repo/deskProducers';
@@ -18,7 +19,7 @@ import { getProjectById, listBindings, resolveBinding } from '../repo/projects';
 import { findSession } from '../repo/sessions';
 import { isLiveWithRound } from '../repo/switches';
 import { isLeadFolder } from './folder';
-import { checkLanding, ghVisibility, realGit, type LandingDeps } from './landing';
+import { checkLanding, ghVisibility, PUBLISH_NO_YES, realGit, type LandingDeps } from './landing';
 import { intendHeldLine } from './voice';
 
 /** What the hold and stuck routes answer when the lead has nothing to say: the hook prints nothing. */
@@ -62,6 +63,31 @@ export function leadScopeOf(ctx: Ctx, sessionId: string | null | undefined, cwd:
 
 /** The desk item's ref for a held command: the same command retried by the same session is one item while it is not done. */
 export const heldRef = (sessionId: string | null, command: string): string => createHash('sha1').update(`${sessionId ?? ''}\n${command}`).digest('hex');
+
+/** A `held` line of the lead's log: the session and command a held item's ref is made from (heldRef), and why it was held. */
+export interface HeldLine {
+  sessionId: string | null;
+  command: string;
+  why: string;
+}
+
+/**
+ * The project's held lines by the ref of the held item each made, read once (the window's cards, the morning list and an
+ * answer to one item all find an item's line here). The line is `<command> -> <why>`, and either part may hold an arrow,
+ * so each cut is tried; the oldest line for a ref wins.
+ */
+export function heldLines(db: DB, projectId: number): Map<string, HeldLine> {
+  const rows = db.prepare("SELECT session_id, text FROM lead_events WHERE project_id = ? AND kind = 'held' ORDER BY id").all(projectId) as { session_id: string | null; text: string }[];
+  const out = new Map<string, HeldLine>();
+  for (const r of rows) {
+    for (let at = r.text.indexOf(' -> '); at >= 0; at = r.text.indexOf(' -> ', at + 1)) {
+      const command = r.text.slice(0, at);
+      const ref = heldRef(r.session_id, command);
+      if (!out.has(ref)) out.set(ref, { sessionId: r.session_id, command, why: r.text.slice(at + 4) });
+    }
+  }
+  return out;
+}
 
 /** The desk item's ref for a stuck permission request: its session, tool and input. */
 export const stuckRef = (sessionId: string | null, toolName: string, toolInput: unknown): string =>
@@ -160,8 +186,21 @@ export function heldWhatOf(outcome: string | null): string | undefined {
 /** A held answer, as the route works it out: what the command does, and why it is held (for the log). */
 type Judged = { clear: true } | { clear: false; what: string; why: string };
 
-/** Runs the landing check for a held command, read from its words, in the folder it runs in; any refusal of the check holds it. */
-async function judge(ctx: Ctx, scope: LeadScope, match: HeldMatch, deps: LandingDeps): Promise<Judged> {
+/** What the landing check is asked for a held command: its action, the folder it runs in and the branch it names (the folder's own when absent). */
+export interface HeldLandingAsk {
+  check: true;
+  action: 'merge' | 'deploy' | 'push' | 'publish';
+  what: string;
+  folder: string;
+  branch?: string;
+}
+
+/**
+ * How a held command is judged, read from its words: clear, held with no check (an action that is Aiden's without one, or
+ * one whose folder, branch or target cannot be read), or the landing check to run (HeldLandingAsk). The hold runs that check;
+ * the carried yes for the command reads its key with the same ask, so his yes is keyed as the check keys it.
+ */
+export async function heldLandingAsk(match: HeldMatch, deps: LandingDeps = REAL_DEPS): Promise<Judged | HeldLandingAsk> {
   if (!CHECKED_ACTIONS.includes(match.action)) {
     // A playbook line names its command in its what already; any other action names the command here.
     const what = match.action === 'playbook' ? match.what : `${match.what} (${clipLine(match.segment, 120)})`;
@@ -200,11 +239,22 @@ async function judge(ctx: Ctx, scope: LeadScope, match: HeldMatch, deps: Landing
       what = on === null ? match.what : `a publish of ${on}`;
     }
   }
+  return { check: true, action: match.action as HeldLandingAsk['action'], what, folder, ...(branch === undefined ? {} : { branch }) };
+}
+
+/** Runs the landing check for a held command, read from its words (heldLandingAsk), in the folder it runs in; any refusal of the check holds it. */
+async function judge(ctx: Ctx, scope: LeadScope, match: HeldMatch, deps: LandingDeps): Promise<Judged> {
+  const asked = await heldLandingAsk(match, deps);
+  if (!('check' in asked)) return asked;
+  const { what, folder, branch } = asked;
   if (scope.stepId === null) return { clear: false, what, why: 'could not tell which step this is for' };
+  // A publish of anything but the folder's own package (a tarball, a path, a workspace) takes no yes, so no yes may
+  // clear it: a yes given for the folder's package would otherwise release it at the same commit.
+  if (asked.action === 'publish' && !publishesFolderPackage(match.segment)) return { clear: false, what, why: PUBLISH_NO_YES };
   try {
     const answer = await checkLanding(
       ctx,
-      { ref: scope.project.slug, stepId: scope.stepId, action: match.action as 'merge' | 'deploy' | 'push' | 'publish', folder, ...(branch === undefined ? {} : { branch }) },
+      { ref: scope.project.slug, stepId: scope.stepId, action: asked.action, folder, ...(branch === undefined ? {} : { branch }) },
       deps,
     );
     return answer.clear ? { clear: true } : { clear: false, what, why: answer.text };

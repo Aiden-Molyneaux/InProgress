@@ -11,7 +11,7 @@ const cells = (all: TaskBox[]): Record<TaskCell, TaskBox[]> => {
   for (const b of all) out[b.cell].push(b);
   return out;
 };
-const held = (id: number, stepId: number | null, at: string): HeldCard => ({ id, stepId, createdAt: at, what: 'a push of feature to origin', command: 'git push' });
+const held = (id: number, stepId: number | null, at: string): HeldCard => ({ id, stepId, createdAt: at, what: 'a push of feature to origin', command: 'git push', goAhead: true });
 
 describe('needsTiles', () => {
   it('with nothing held, is the needs boxes in their order', () => {

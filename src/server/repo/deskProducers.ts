@@ -4,6 +4,7 @@ import type { Ctx } from '../db/tx';
 import { addDeskItem, moveDeskItem, type AddDeskItemInput, type DeskItem, type DeskItemKind } from './desk';
 import { bringItem, bringNext, broughtProjectsOfAsk } from './deskBring';
 import type { DecisionKind } from './leadDecisions';
+import { clearUntriedVoiceLines } from './leadSends';
 import { roundBound } from './switches';
 
 /** How long after it is raised a session's question or permission ask is due on the desk. */
@@ -155,10 +156,11 @@ function closeAskItems(db: DB, askIds: readonly number[], outcome: string, now: 
   if (askIds.length === 0) return;
   const kinds = ASK_ITEM_KINDS.map(() => '?').join(', ');
   const refs = askIds.map(() => '?').join(', ');
-  db.prepare(
-    `UPDATE lead_sends SET state = 'cleared' WHERE kind = 'voice_line' AND state = 'intended' AND result IS NULL` +
-      ` AND item_id IN (SELECT id FROM desk_items WHERE state <> 'done' AND kind IN (${kinds}) AND ref IN (${refs}))`,
-  ).run(...ASK_ITEM_KINDS, ...askIds.map(String));
+  const itemIds = db
+    .prepare(`SELECT id FROM desk_items WHERE state <> 'done' AND kind IN (${kinds}) AND ref IN (${refs})`)
+    .pluck()
+    .all(...ASK_ITEM_KINDS, ...askIds.map(String)) as number[];
+  clearUntriedVoiceLines(db, itemIds);
   db.prepare(
     `UPDATE desk_items SET state = 'done', done_at = ?, outcome = ? WHERE state <> 'done'` +
       ` AND kind IN (${ASK_ITEM_KINDS.map(() => '?').join(', ')}) AND ref IN (${askIds.map(() => '?').join(', ')})`,

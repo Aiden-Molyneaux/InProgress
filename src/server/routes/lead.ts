@@ -11,7 +11,7 @@ import { importUsage, leadCounts, weekText } from '../lead/usage';
 import { resolveProject } from '../repo/projects';
 import { readDesk } from '../lead/desk';
 import { holdBody, holdCheck, stuckWait } from '../lead/hold';
-import { checkLanding, type LandingDeps } from '../lead/landing';
+import { checkLanding, PUBLISH_NO_YES, type LandingDeps } from '../lead/landing';
 import { leadRelay, reasonOf, type RelaySend } from '../lead-relay';
 import { defaultStart, leadStart, type StartThread } from '../lead-start';
 import { createSender, type Sender } from '../lead/sends';
@@ -21,8 +21,7 @@ import { renderLeadBrief } from '../lead-text';
 import { leadAllowBody, leadDisallowBody, leadAnswerBody, leadBriefQuery, leadStuckBody, leadDecideBody, leadUndoBody, leadSetBody, leadImportUsageBody, leadCountsQuery, leadDropBody, leadIntentBody, leadKeptBody, leadLandingBody, leadParkBody, leadPromiseBody, leadReadQuery, leadRelayBody, leadStartBody, leadRulesQuery, leadSeenBody, leadStampBody, leadDeskAddBody, leadOldAsksBody, leadOldAsksNextBody, leadOldAsksReadingBody } from '../schemas';
 import { leadOldAskReading, leadOldAsks, leadOldAsksAll, leadOldAsksNext } from '../lead/oldAsks';
 import { VOICE_NOT_SET_UP, voiceSetUp } from '../lead/voice';
-import { heldScope, leadAnswerItem, readSessionYeses, SAID_AT_NEEDED, voiceTarget } from '../lead/carry';
-import { heldActions, playbookHeldLines } from '../../core/hold';
+import { heldLineOf, heldScope, heldYesActions, leadAnswerItem, readHeldYeses, SAID_AT_NEEDED, voiceTarget } from '../lead/carry';
 
 /** How many of a project's threads, newest first, the threads read lists. */
 const THREADS_LISTED = 20;
@@ -195,18 +194,16 @@ export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken:
         if (input.says !== undefined) notes.push('--says was ignored: a reply to this line is his words alone.');
         let yeses: CarriedYes[] | undefined;
         if (target.kind === 'held' && yes !== undefined) {
-          const held = heldScope(ctx, target.item);
           // His yes covers only what the held command does.
-          const cwd = held.sessionId === null ? null : ((ctx.db.prepare('SELECT cwd FROM sessions WHERE id = ?').pluck().get(held.sessionId) as string | null | undefined) ?? null);
-          const own = new Set(heldActions(held.command, playbookHeldLines(project.playbook), cwd).map((m) => m.action as string));
-          const kept = yes.filter((a) => own.has(a));
-          for (const a of yes.filter((a) => !own.has(a))) notes.push(`--yes ${a} was ignored: the held command is not a ${a}.`);
+          const own: string[] = heldYesActions(ctx, project, heldScope(ctx, target.item));
+          const kept = yes.filter((a) => own.includes(a));
+          for (const a of yes.filter((a) => !own.includes(a))) notes.push(`--yes ${a} was ignored: the held command is not a ${a}.`);
           if (target.item.nodeId === null) {
             if (kept.length) notes.push('No yes recorded: the held command is on no step.');
           } else if (kept.length) {
             yeses = anchor === undefined
               ? kept.map((action) => ({ action, patchId: null, why: SAID_AT_NEEDED }))
-              : await readSessionYeses(ctx, ref(req), target.item.nodeId, held.sessionId, kept, anchor, landing);
+              : await readHeldYeses(ctx, project, heldLineOf(ctx, target.item), kept, anchor, landing);
           }
         } else if (yes !== undefined) notes.push('--yes was ignored: what he left to the lead takes no go-ahead.');
         const { says: _says, ...rest } = input;
@@ -218,6 +215,10 @@ export function registerLeadRoutes(app: FastifyInstance, ctx: Ctx, requireToken:
     // A review's yes, only for the actions his words okayed (`yes`): keyed on the change's patch id, read now in its
     // session's folder, before the write. No `yes`, no yes; a `yes` with no time of his records none.
     let yeses: CarriedYes[] | undefined;
+    // A yes for a publish is keyed on what goes out, which only a held publish names: a review takes none, before any git.
+    if (yes?.includes('publish') && ctx.db.prepare("SELECT 1 FROM asks WHERE id = ? AND project_id = ? AND kind = 'review'").get(askId, project.id) !== undefined) {
+      throw conflict(`--yes publish is taken only on a held publish, never on a review: ${PUBLISH_NO_YES}.`);
+    }
     if (yes !== undefined) {
       if (anchor !== undefined) yeses = await readYeses(ctx, ref(req), project.id, askId as number, yes, anchor, landing);
       else if (ctx.db.prepare("SELECT 1 FROM asks WHERE id = ? AND project_id = ? AND kind = 'review'").get(askId, project.id) !== undefined) {
