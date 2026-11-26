@@ -772,3 +772,23 @@ happen. A deviation reads "Plan said A. Did B. Because C." The results page copi
   judge from the raw records (Voice POSTs, T3 calls, turns, the copy's database) and to treat the harness's own
   PASS lines as claims. Because: Murr is read-only and serves nothing, Parvati reviews screens, and the scenes are
   mostly lines and records. It does not see this log, the results page or the earlier runs.
+- Check 1, the independent check on 38c5348 (the code of 9572cdd), its own run with the real claude: 0 shown, 6
+  differ, and parts of scenes 2, 3, 5 and 6 not shown. Its report is kept unedited beside the results page
+  (check-1.md). It counted against the frozen text where my harness had counted a wording change as DIFFERS beside a
+  PASS; its count is the one the page leads with.
+- The fix round after check 1, decided and sent to a Sev on Opus (the send state machine is in it, where a wrong move
+  sends twice): an undo's re-ask carries no withdrawn pick and the session gets his words (C1); an old ask the lead may
+  not decide keeps its answer as the reading (C2); an old-ask line says what was asked and says "Say" once (C3); a
+  pick is not doubled (C4); Not delivered says what the line was (C5); a restart says the minutes lost and is listed
+  once (C6); the lid line says none was lost (C7); a carry to a thread T3 no longer has is cleared, not retried every
+  tick (C8); `lead resource` says a copied picture is in InProgress (C10). The harness: one answer typed in the lead's
+  thread (H1), a bare origin so the hold runs the publish rule (H2), the stage 0 readings loaded for scene 6 (H3).
+- Plan (task 17) said each old-ask answer is recorded in his words, and carried as any answer. Did: recorded and
+  logged on its step, never carried into a thread (C9). Because: the asking session has mostly ended; a carry wakes
+  its thread for a one-word close. To undo: let old_ask answers carry again.
+- Not fixed after check 1, named on the page for Aiden: the bring line's generic `Say "yes"`; the held line names no
+  package and asks "go ahead"; a held command has no card in the window (a screen change he sees first: proposed); a
+  restart parks while more than five of his asks are open (InProgress has six today, so the old asks go first after
+  landing); lead-thread is off by default and starts a new thread each morning; the sleep detection is not exercised
+  (a real sleep cannot be waited for, and the laptop's power settings are not touched); "show me" through Grok rests
+  on the live run.
