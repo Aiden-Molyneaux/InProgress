@@ -255,8 +255,11 @@ export const GoTo = forwardRef<GoToHandle, GoToProps>(function GoTo({ onGo, curr
         onKeyDown={onKeyDown}
         // Escape is ours (keydown above); the dialog's own cancel would close it without returning focus.
         onCancel={(e) => e.preventDefault()}
-        // Guard: however the dialog closes, the state follows.
-        onClose={() => setOpen(false)}
+        // Guard: however the dialog closes, the state follows. The close event comes a task later, so a bar opened again
+        // in between (Escape, then Enter on the button at once) is still open when it arrives: that one is ignored.
+        onClose={() => {
+          if (!dialog.current?.open) setOpen(false);
+        }}
         // A press on the backdrop is a press on the dialog itself. Elsewhere in the bar a press keeps focus in the field.
         onMouseDown={(e) => {
           if (e.target === e.currentTarget) {

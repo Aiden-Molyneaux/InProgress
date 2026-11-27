@@ -2355,6 +2355,10 @@ test.describe('Go to', () => {
     await expect(goToButton(page)).toBeFocused();
     await page.keyboard.press('Enter');
     await expect(field(page)).toBeFocused();
+    // The close event of the bar closed just before comes a task later: arriving while the bar is open again, it leaves it open.
+    await page.locator('dialog.ip-cmdbar').dispatchEvent('close');
+    await expect(field(page)).toBeFocused();
+    await expect(goToButton(page)).toHaveAttribute('aria-expanded', 'true');
     await page.keyboard.press('Tab');
     await page.keyboard.press('Shift+Tab');
     await expect(field(page)).toBeFocused();
@@ -3335,6 +3339,8 @@ test.describe('Board', () => {
     await parkedRow.locator('.ip-bl-why').click();
     await parkedRow.getByRole('button', { name: 'Open Details ›' }).click();
     await expect(page.getByRole('complementary')).toHaveCount(1);
+    // Details takes focus once the step has loaded: wait for it, or the Escape below reaches the row first.
+    await expect(page.getByRole('complementary').locator('h2.ip-dtitle')).toBeFocused();
     // Details took focus, so Escape closes Details and leaves the inspector open; Escape on the row would close the inspector instead.
     await page.keyboard.press('Escape');
     await expect(page.getByRole('complementary')).toHaveCount(0);
