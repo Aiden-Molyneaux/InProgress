@@ -2628,6 +2628,7 @@ test.describe('Board', () => {
     // Four at 1160: the page is exactly 1160 wide.
     await page.setViewportSize({ width: 1160 + offset, height: 900 });
     await expect.poll(pageWidth).toBe(1160);
+    await expect(board).toHaveAttribute('data-layout', 'four');
     [needs, next, now, done] = await boxes();
     expect(new Set([needs.y, next.y, now.y, done.y]).size, 'one row at 1160').toBe(1);
     expect(needs.x).toBeLessThan(next.x);
@@ -2636,6 +2637,8 @@ test.describe('Board', () => {
     // Two by two at a page of 720 to 1159: needs and now on top, next and done under them.
     await page.setViewportSize({ width: 900 + offset, height: 900 });
     await expect.poll(async () => (await pageWidth()) >= 720 && (await pageWidth()) < 1160).toBe(true);
+    // The layout follows the width a render later: wait for it before measuring.
+    await expect(board).toHaveAttribute('data-layout', 'two');
     [needs, next, now, done] = await boxes();
     expect(needs.y).toBe(now.y);
     expect(next.y).toBeGreaterThan(needs.y);
@@ -2646,6 +2649,7 @@ test.describe('Board', () => {
     // One column at 400: stacked, needs, now, next, done.
     await page.setViewportSize({ width: 400, height: 900 });
     await expect.poll(pageWidth).toBeLessThan(720);
+    await expect(board).toHaveAttribute('data-layout', 'one');
     [needs, next, now, done] = await boxes();
     expect(new Set([needs.x, next.x, now.x, done.x]).size, 'one left edge').toBe(1);
     expect(needs.y).toBeLessThan(now.y);
@@ -4556,9 +4560,12 @@ test.describe('v3 Details, viewer and command bar (#505)', () => {
     await page.getByRole('button', { name: /^Archived · / }).click();
     const item = page.getByRole('menu').getByRole('menuitem', { name: shelvedName, exact: true });
     await expect(item).toBeVisible();
-    const box = (await item.boundingBox())!;
-    const hit = await page.evaluate<boolean>(`(() => { const item = [...document.querySelectorAll('[role="menuitem"]')].find((e) => e.textContent.includes(${JSON.stringify(shelvedName)})); const at = document.elementFromPoint(${box.x + box.width / 2}, ${box.y + box.height / 2}); return item === at || item.contains(at); })()`);
-    expect(hit, 'the menu item is the top element at its centre').toBe(true);
+    // The menu may still be settling into place when it first shows: measure and hit-test together until it rests.
+    const hit = async () => {
+      const box = (await item.boundingBox())!;
+      return page.evaluate<boolean>(`(() => { const item = [...document.querySelectorAll('[role="menuitem"]')].find((e) => e.textContent.includes(${JSON.stringify(shelvedName)})); const at = document.elementFromPoint(${box.x + box.width / 2}, ${box.y + box.height / 2}); return item === at || item.contains(at); })()`);
+    };
+    await expect.poll(hit, { message: 'the menu item is the top element at its centre' }).toBe(true);
   });
 
   test('a press on the scrim closes the command bar and returns focus to the tile', async ({ page, fresh }) => {
